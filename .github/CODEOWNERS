@@ -1,0 +1,26 @@
+# Code Owners for Alertmanager++
+#
+# These owners will be requested for review when someone opens a pull request.
+#
+# Learn more: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+* @ipiton
+
+# Core interfaces - require careful review
+/pkg/core/ @ipiton
+
+# Examples - encourage community contributions
+/examples/ @ipiton
+
+# Documentation - open to contributions
+/docs/ @ipiton
+*.md @ipiton
+
+# CI/CD - require maintainer approval
+/.github/ @ipiton
+
+# Security-sensitive files
+/SECURITY.md @ipiton
+/CODE_OF_CONDUCT.md @ipiton
+

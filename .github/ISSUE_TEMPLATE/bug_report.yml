@@ -1,0 +1,136 @@
+name: 🐛 Bug Report
+description: Report a bug to help us improve Alertmanager++
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! 🙏
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Deploy Alertmanager++ with config...
+        2. Send alert via Prometheus...
+        3. Observe error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: The alert should be...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: Instead, the alert...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Alertmanager++ Version
+      description: Which version are you using?
+      placeholder: v1.0.0-preview
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Method
+      description: How are you running Alertmanager++?
+      options:
+        - Docker
+        - Kubernetes (Helm)
+        - Binary (from source)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Deployment Profile
+      description: Which profile are you using?
+      options:
+        - Lite (SQLite)
+        - Standard (PostgreSQL + Redis)
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: |
+        OS, Go version, Kubernetes version, etc.
+      placeholder: |
+        - OS: Ubuntu 22.04
+        - Go version: 1.22.5
+        - Kubernetes: 1.28.0
+        - PostgreSQL: 15.4
+        - Redis: 7.2.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output (please use code blocks)
+      render: shell
+      placeholder: |
+        Paste logs here...
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Relevant configuration (remove sensitive data!)
+      render: yaml
+      placeholder: |
+        server:
+          port: 9093
+        profile: lite
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context about the problem
+      placeholder: This happens only when...
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have provided all required information
+          required: true
+        - label: I have removed sensitive data from logs and config
+          required: true
+

@@ -109,7 +109,7 @@ func main() {
 	inhibitionManager := inhibition.NewInhibitionManager(pool)
 
 	routeEvaluator := routing.NewRouteEvaluator()
-	
+
 	publisherFactory := publishing.NewPublisherFactory()
 	targetDiscovery := publishinginfra.NewTargetDiscoveryManager()
 
@@ -194,7 +194,7 @@ func main() {
 		slog.Info("📍 Alertmanager API: http://localhost:%d/api/v2", cfg.Server.Port)
 		slog.Info("📊 Metrics: http://localhost:%d/metrics", cfg.Server.Port)
 		slog.Info("💚 Health: http://localhost:%d/healthz", cfg.Server.Port)
-		
+
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("HTTP server failed", "error", err)
 			os.Exit(1)
@@ -218,4 +218,3 @@ func main() {
 
 	slog.Info("✅ Server stopped gracefully")
 }
-

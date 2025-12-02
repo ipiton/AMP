@@ -4,6 +4,25 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ipiton/AMP)](https://goreportcard.com/report/github.com/ipiton/AMP)
+[![Release](https://img.shields.io/github/v/release/ipiton/AMP?include_prereleases)](https://github.com/ipiton/AMP/releases)
+[![GitHub issues](https://img.shields.io/github/issues/ipiton/AMP)](https://github.com/ipiton/AMP/issues)
+[![GitHub stars](https://img.shields.io/github/stars/ipiton/AMP)](https://github.com/ipiton/AMP/stargazers)
+[![CI Status](https://github.com/ipiton/AMP/workflows/CI/badge.svg)](https://github.com/ipiton/AMP/actions)
+
+---
+
+## 📢 **Status: v1.0.0-preview Released!**
+
+First public release of Alertmanager++ is now available! 🎉
+
+- ✅ Production-ready core features
+- ✅ 100% Alertmanager compatible
+- ✅ Zero proprietary code
+- ✅ Apache 2.0 licensed
+
+**[Get Started](docs/MIGRATION_QUICK_START.md)** | **[View Release](https://github.com/ipiton/AMP/releases/tag/v1.0.0-preview)** | **[Documentation](docs/)**
+
+---
 
 ## ✨ Features
 
@@ -67,6 +86,8 @@ profile: lite  # or standard
 - **[Migration from Alertmanager](docs/MIGRATION_QUICK_START.md)** - 5-minute migration guide
 - **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Full compatibility matrix
 - **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
+- **[Roadmap](ROADMAP.md)** - Feature roadmap and plans
+- **[Changelog](CHANGELOG.md)** - Release history
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
 
 ## 🏗️ Architecture
