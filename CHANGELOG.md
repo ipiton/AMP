@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2025-12-02
+
+### Added
+- LLM BYOK (Bring Your Own Key) integration (1,381 LOC)
+- Support for OpenAI (GPT-4, GPT-3.5)
+- Support for Anthropic (Claude 3)
+- Support for Azure OpenAI
+- Support for custom LLM proxies
+- Circuit breaker with fail-fast protection
+- 7 Prometheus metrics for LLM observability
+- Comprehensive BYOK documentation
+
+### Changed
+- Version bumped from 0.0.1 to 0.1.0 (LLM feature added)
+
 ## [0.0.1] - 2025-12-02
 
 ### Added
