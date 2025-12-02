@@ -1,0 +1,50 @@
+# Git
+.git/
+.gitignore
+.github/
+
+# Documentation
+*.md
+docs/
+examples/
+tasks/
+
+# Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+testdata/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+
+# Coverage
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+

@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # Alertmanager++ application
+  amp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: alertmanager-plus-plus
+    ports:
+      - "9093:9093"
+    environment:
+      # Server configuration
+      SERVER_PORT: 9093
+      LOG_LEVEL: info
+      
+      # Deployment profile
+      PROFILE: standard
+      
+      # Database configuration
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: alerthistory
+      DATABASE_PASSWORD: changeme
+      DATABASE_NAME: alerthistory
+      
+      # Redis configuration
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+      
+      # LLM configuration (optional)
+      LLM_ENABLED: false
+      # LLM_PROVIDER: openai
+      # LLM_API_KEY: ${LLM_API_KEY}
+      # LLM_MODEL: gpt-4o
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - amp-network
+    healthcheck:
+      test: ["CMD", "/app/amp", "healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: amp-postgres
+    environment:
+      POSTGRES_USER: alerthistory
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: alerthistory
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - amp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alerthistory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    container_name: amp-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - amp-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Prometheus (optional, for testing)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: amp-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    volumes:
+      - ./examples/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - amp-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  prometheus-data:
+
+networks:
+  amp-network:
+    driver: bridge
+

@@ -1,8 +1,8 @@
 # 🎊 Final OSS Release Summary
 
-**Project:** Alertmanager++ (AMP)  
-**Date:** 2025-12-02  
-**Status:** ✅ **100% READY FOR COMMUNITY!**  
+**Project:** Alertmanager++ (AMP)
+**Date:** 2025-12-02
+**Status:** ✅ **100% READY FOR COMMUNITY!**
 
 ---
 
@@ -370,10 +370,9 @@ helm install alertmanager-plus-plus amp/amp
 
 ---
 
-**Date:** 2025-12-02  
-**Version:** v1.0.0-preview  
-**Status:** ✅ READY FOR COMMUNITY  
-**Next:** v1.1.0 with BYK LLM (Q1 2025)  
+**Date:** 2025-12-02
+**Version:** v1.0.0-preview
+**Status:** ✅ READY FOR COMMUNITY
+**Next:** v1.1.0 with BYK LLM (Q1 2025)
 
 🚀 **Let's Go!** 🚀
-

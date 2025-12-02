@@ -1,0 +1,41 @@
+# Prometheus configuration for Alertmanager++
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'docker-compose'
+
+# Alertmanager++ configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - amp:9093
+
+# Scrape configuration
+scrape_configs:
+  # Scrape Alertmanager++ metrics
+  - job_name: 'alertmanager-plus-plus'
+    static_configs:
+      - targets: ['amp:9093']
+    metrics_path: '/metrics'
+
+  # Scrape Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Scrape PostgreSQL metrics (if postgres_exporter is available)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  # Scrape Redis metrics (if redis_exporter is available)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+# Alert rules (example)
+rule_files:
+  - '/etc/prometheus/alerts/*.yml'
+

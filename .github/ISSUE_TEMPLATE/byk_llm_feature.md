@@ -199,8 +199,7 @@ Please use this issue to:
 
 ---
 
-**Status:** 🚧 Ready for implementation  
-**Priority:** 🔴 TOP PRIORITY for v1.1.0  
-**Estimated Effort:** 7-9 hours  
+**Status:** 🚧 Ready for implementation
+**Priority:** 🔴 TOP PRIORITY for v1.1.0
+**Estimated Effort:** 7-9 hours
 **Target Release:** v1.1.0 (Q1 2025)
-

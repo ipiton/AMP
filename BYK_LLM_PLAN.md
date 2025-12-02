@@ -1,7 +1,7 @@
 # BYK (Bring Your own Key) LLM Integration Plan
 
-**Date:** 2025-12-02  
-**Status:** 🚧 **NEEDS IMPLEMENTATION**  
+**Date:** 2025-12-02
+**Status:** 🚧 **NEEDS IMPLEMENTATION**
 
 ---
 
@@ -78,7 +78,7 @@ LLM_BASE_URL=https://api.openai.com/v1  # Optional override
 ✅ Создать pkg/llm/
 ├── client.go         - LLMClient interface
 ├── openai.go         - OpenAI implementation
-├── anthropic.go      - Anthropic implementation  
+├── anthropic.go      - Anthropic implementation
 ├── local.go          - Local LLM (Ollama)
 └── errors.go         - Error types
 ```
@@ -251,7 +251,6 @@ llm:
 
 ---
 
-**Status:** READY FOR IMPLEMENTATION  
-**Priority:** P0 (Should be in v1.0.0 or v1.1.0)  
+**Status:** READY FOR IMPLEMENTATION
+**Priority:** P0 (Should be in v1.0.0 or v1.1.0)
 **Estimated Effort:** 7-9 hours
-

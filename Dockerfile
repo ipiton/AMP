@@ -1,45 +1,67 @@
-FROM python:3.11-slim AS builder
+# Multi-stage build for Alertmanager++ (Go)
+# Produces minimal production image (~50MB)
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# Stage 1: Builder
+FROM golang:1.22-alpine AS builder
 
+# Install build dependencies
+RUN apk add --no-cache git make ca-certificates tzdata
+
+# Set working directory
+WORKDIR /build
+
+# Copy go.mod and go.sum first (better caching)
+COPY go-app/go.mod go-app/go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY go-app/ ./
+
+# Build binary
+# CGO_ENABLED=0 for static binary (no C dependencies)
+# -ldflags="-s -w" to strip debug info and reduce size
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.version=$(git describe --tags --always --dirty)" \
+    -o /build/amp \
+    ./cmd/server
+
+# Stage 2: Runtime
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 10001 -S appuser && \
+    adduser -u 10001 -S -G appuser -h /app appuser
+
+# Set working directory
 WORKDIR /app
 
-# Системные зависимости для сборки бинарных wheels (только в builder-слое)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Copy binary from builder
+COPY --from=builder /build/amp /app/amp
 
-# Устанавливаем зависимости в изолированный venv внутри builder-слоя
-COPY requirements.txt ./
-RUN python -m venv /opt/venv \
-    && . /opt/venv/bin/activate \
-    && pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Copy migrations (if needed)
+COPY --from=builder /build/migrations /app/migrations
 
-FROM python:3.11-slim
+# Set ownership
+RUN chown -R appuser:appuser /app
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH" \
-    UVICORN_WORKERS=1 \
-    LOG_LEVEL=info
-
-WORKDIR /app
-
-# Копируем только готовое окружение из builder-слоя
-COPY --from=builder /opt/venv /opt/venv
-
-# Копируем исходники приложения и шаблоны
-COPY src ./src
-COPY templates ./templates
-
-# Безопасность: non-root пользователь
-RUN useradd -r -u 10001 appuser && chown -R appuser:appuser /app
+# Switch to non-root user
 USER appuser
 
-# Экспонируем порт сервиса
-EXPOSE 8080
+# Expose port
+EXPOSE 9093
 
-# Запуск приложения
-CMD ["sh", "-c", "uvicorn src.alert_history.main:app --host 0.0.0.0 --port 8080 --proxy-headers --log-level ${LOG_LEVEL} --workers ${UVICORN_WORKERS}"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/app/amp", "healthz"] || exit 1
+
+# Environment variables (can be overridden)
+ENV SERVER_PORT=9093 \
+    LOG_LEVEL=info \
+    PROFILE=lite
+
+# Run application
+CMD ["/app/amp"]
+
