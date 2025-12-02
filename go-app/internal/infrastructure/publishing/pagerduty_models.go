@@ -1,0 +1,179 @@
+package publishing
+
+// PagerDuty Events API v2 Data Models
+// https://developer.pagerduty.com/docs/ZG9jOjExMDI5NTgw-events-api-v2-overview
+
+// TriggerEventRequest represents a trigger event request to PagerDuty Events API v2
+type TriggerEventRequest struct {
+	// RoutingKey is the integration key for PagerDuty service (required)
+	RoutingKey string `json:"routing_key"`
+
+	// EventAction must be "trigger" for this request type
+	EventAction string `json:"event_action"`
+
+	// DedupKey is used for deduplication (typically alert fingerprint)
+	// Subsequent events with the same dedup_key will update the existing incident
+	DedupKey string `json:"dedup_key,omitempty"`
+
+	// Payload contains the event details (required)
+	Payload TriggerEventPayload `json:"payload"`
+
+	// Links are URLs to include in the event for additional context
+	Links []EventLink `json:"links,omitempty"`
+
+	// Images are images to include in the event for additional context
+	Images []EventImage `json:"images,omitempty"`
+}
+
+// TriggerEventPayload contains the core event data
+type TriggerEventPayload struct {
+	// Summary is a brief description of the event (required, max 1024 chars)
+	Summary string `json:"summary"`
+
+	// Source is the unique identifier for the source of the event (required)
+	// Typically the hostname or service name
+	Source string `json:"source"`
+
+	// Severity is the perceived severity of the event
+	// Valid values: critical, warning, error, info
+	Severity string `json:"severity"`
+
+	// Timestamp is when the event occurred (ISO 8601 format)
+	Timestamp string `json:"timestamp,omitempty"`
+
+	// Component is the component of the source that is affected
+	Component string `json:"component,omitempty"`
+
+	// Group is a cluster or grouping of sources
+	Group string `json:"group,omitempty"`
+
+	// Class is the class/type of the event
+	Class string `json:"class,omitempty"`
+
+	// CustomDetails contains additional details about the event
+	// Can include alert labels, AI classification, etc.
+	CustomDetails map[string]interface{} `json:"custom_details,omitempty"`
+}
+
+// AcknowledgeEventRequest represents an acknowledge event request
+type AcknowledgeEventRequest struct {
+	// RoutingKey is the integration key for PagerDuty service (required)
+	RoutingKey string `json:"routing_key"`
+
+	// EventAction must be "acknowledge" for this request type
+	EventAction string `json:"event_action"`
+
+	// DedupKey identifies the event to acknowledge (required)
+	DedupKey string `json:"dedup_key"`
+}
+
+// ResolveEventRequest represents a resolve event request
+type ResolveEventRequest struct {
+	// RoutingKey is the integration key for PagerDuty service (required)
+	RoutingKey string `json:"routing_key"`
+
+	// EventAction must be "resolve" for this request type
+	EventAction string `json:"event_action"`
+
+	// DedupKey identifies the event to resolve (required)
+	DedupKey string `json:"dedup_key"`
+}
+
+// ChangeEventRequest represents a change event request to PagerDuty Change Events API
+// Change events represent deployments, configuration changes, etc.
+type ChangeEventRequest struct {
+	// RoutingKey is the integration key for PagerDuty service (required)
+	RoutingKey string `json:"routing_key"`
+
+	// Payload contains the change event details (required)
+	Payload ChangeEventPayload `json:"payload"`
+
+	// Links are URLs to include in the change event
+	Links []EventLink `json:"links,omitempty"`
+}
+
+// ChangeEventPayload contains change event data
+type ChangeEventPayload struct {
+	// Summary is a brief description of the change (required, max 1024 chars)
+	Summary string `json:"summary"`
+
+	// Source is the unique identifier for the source of the change (required)
+	Source string `json:"source"`
+
+	// Timestamp is when the change occurred (ISO 8601 format)
+	Timestamp string `json:"timestamp,omitempty"`
+
+	// CustomDetails contains additional details about the change
+	CustomDetails map[string]interface{} `json:"custom_details,omitempty"`
+}
+
+// EventLink represents a URL to include in an event for additional context
+type EventLink struct {
+	// Href is the URL to link to (required)
+	Href string `json:"href"`
+
+	// Text is the display text for the link
+	Text string `json:"text,omitempty"`
+}
+
+// EventImage represents an image to include in an event
+type EventImage struct {
+	// Src is the URL of the image (required)
+	Src string `json:"src"`
+
+	// Href is an optional URL to link the image to
+	Href string `json:"href,omitempty"`
+
+	// Alt is the alt text for the image
+	Alt string `json:"alt,omitempty"`
+}
+
+// EventResponse represents the standard response from PagerDuty Events API v2
+type EventResponse struct {
+	// Status indicates the result of the request
+	// Typically "success" for 202 Accepted responses
+	Status string `json:"status"`
+
+	// Message provides additional information about the response
+	Message string `json:"message"`
+
+	// DedupKey is echoed back from the request, or generated by PagerDuty
+	// Used for tracking and updating events
+	DedupKey string `json:"dedup_key"`
+}
+
+// ChangeEventResponse represents the response from Change Events API
+type ChangeEventResponse struct {
+	// Status indicates the result of the request
+	Status string `json:"status"`
+
+	// Message provides additional information about the response
+	Message string `json:"message"`
+}
+
+// Constants for event actions
+const (
+	// EventActionTrigger creates a new incident or updates an existing one
+	EventActionTrigger = "trigger"
+
+	// EventActionAcknowledge acknowledges an existing incident
+	EventActionAcknowledge = "acknowledge"
+
+	// EventActionResolve resolves an existing incident
+	EventActionResolve = "resolve"
+)
+
+// Constants for severity levels (PagerDuty Events API v2)
+const (
+	// SeverityCritical represents a critical severity event
+	SeverityCritical = "critical"
+
+	// SeverityWarning represents a warning severity event
+	SeverityWarning = "warning"
+
+	// SeverityError represents an error severity event
+	SeverityError = "error"
+
+	// SeverityInfo represents an info severity event
+	SeverityInfo = "info"
+)

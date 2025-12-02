@@ -1,0 +1,8 @@
+route:
+  receiver: default
+  group_by: [alertname]
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
