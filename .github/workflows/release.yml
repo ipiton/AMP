@@ -31,11 +31,11 @@ jobs:
           # Linux
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/amp-linux-amd64 ./cmd/server
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../dist/amp-linux-arm64 ./cmd/server
-          
+
           # macOS
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/amp-darwin-amd64 ./cmd/server
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o ../dist/amp-darwin-arm64 ./cmd/server
-          
+
           # Windows
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/amp-windows-amd64.exe ./cmd/server
 
@@ -54,4 +54,3 @@ jobs:
             dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

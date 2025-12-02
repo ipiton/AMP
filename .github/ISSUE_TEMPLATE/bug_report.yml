@@ -133,4 +133,3 @@ body:
           required: true
         - label: I have removed sensitive data from logs and config
           required: true
-

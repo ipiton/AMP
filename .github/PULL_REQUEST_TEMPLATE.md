@@ -24,9 +24,9 @@ Fixes #
 
 <!-- List the main changes -->
 
-- 
-- 
-- 
+-
+-
+-
 
 ## Testing
 
@@ -86,4 +86,3 @@ make build
 ## Additional Context
 
 <!-- Add any other context about the PR here -->
-

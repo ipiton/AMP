@@ -21,8 +21,18 @@ This document outlines the planned features and improvements for Alertmanager++.
 
 ### v1.1.0 (Q1 2025) - Planned
 
-**Focus:** Community feedback and improvements
+**Focus:** BYK LLM & Community improvements
 
+#### 🎯 Priority Features:
+- [ ] **BYK (Bring Your own Key) LLM Integration** ⭐ **TOP PRIORITY**
+  - Direct OpenAI/Anthropic API integration
+  - User provides their own API keys (free feature!)
+  - AI-powered alert classification
+  - Smart enrichment modes (transparent/enriched)
+  - Local LLM support (Ollama)
+  - Expected: 7-9 hours implementation
+
+#### 📦 Other Features:
 - [ ] Enhanced Helm charts (Standard profile with PostgreSQL StatefulSet)
 - [ ] Improved monitoring and observability
 - [ ] Additional publisher examples (Discord, Telegram)
@@ -92,4 +102,3 @@ We follow [Semantic Versioning](https://semver.org/):
 ---
 
 **Last updated:** 2025-12-02
-

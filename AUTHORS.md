@@ -27,4 +27,3 @@ We use the [All Contributors](https://allcontributors.org/) specification to rec
 ---
 
 **Want your name here?** Submit a PR! Even documentation improvements count! 🚀
-

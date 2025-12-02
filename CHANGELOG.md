@@ -138,4 +138,3 @@ Apache 2.0 - See [LICENSE](LICENSE)
 See [README.md](README.md) for quick start guide.
 
 For migration from Alertmanager, see [docs/MIGRATION_QUICK_START.md](docs/MIGRATION_QUICK_START.md).
-
