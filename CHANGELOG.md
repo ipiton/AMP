@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0-preview] - 2025-12-02
+## [0.0.1] - 2025-12-02
 
 ### Added
 - Initial open source release
@@ -29,5 +29,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 50MB memory footprint (4x less)
 - 100m CPU usage (5x less)
 
-[Unreleased]: https://github.com/ipiton/AMP/compare/v1.0.0-preview...HEAD
-[1.0.0-preview]: https://github.com/ipiton/AMP/releases/tag/v1.0.0-preview
+[Unreleased]: https://github.com/ipiton/AMP/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/ipiton/AMP/releases/tag/v0.0.1
