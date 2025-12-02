@@ -1,0 +1,63 @@
+global:
+  resolve_timeout: 5m
+  http_config:
+    proxy_url: http://proxy.corp:8080
+    tls_config:
+      insecure_skip_verify: false
+
+route:
+  receiver: default
+  group_by: [alertname, cluster, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: pagerduty-critical
+      match:
+        severity: critical
+      group_wait: 10s
+      repeat_interval: 30m
+    - receiver: slack-warnings
+      match:
+        severity: warning
+      group_wait: 1m
+    - receiver: email-team-database
+      match_re:
+        service: "^(postgres|mysql|redis).*"
+      group_by: [alertname, instance]
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://webhook.example.com/alerts
+        http_method: POST
+        send_resolved: true
+        max_alerts: 10
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: "${PAGERDUTY_ROUTING_KEY_CRITICAL}"
+        severity: critical
+        description: "Critical Alert: {{ .GroupLabels.alertname }}"
+        details:
+          environment: "{{ .CommonLabels.environment }}"
+          cluster: "{{ .CommonLabels.cluster }}"
+
+  - name: slack-warnings
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#alerts-warnings"
+        username: "Alertmanager"
+        icon_emoji: ":warning:"
+        title: "Warning: {{ .GroupLabels.alertname }}"
+        text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
+        color: warning
+        send_resolved: true
+
+  - name: email-team-database
+    email_configs:
+      - to: "database-team@example.com"
+        from: "alerts@example.com"
+        subject: "Database Alert: {{ .GroupLabels.alertname }}"
+        html: "<h2>Alerts</h2><ul>{{ range .Alerts }}<li>{{ .Annotations.description }}</li>{{ end }}</ul>"
+        send_resolved: true
