@@ -1,8 +1,8 @@
 # LLM Client - BYOK (Bring Your Own Key)
 
-**Status:** ✅ Production-Ready  
-**Type:** Optional OSS Feature  
-**License:** Apache 2.0  
+**Status:** ✅ Production-Ready
+**Type:** Optional OSS Feature
+**License:** Apache 2.0
 
 ---
 
@@ -107,7 +107,7 @@ func main() {
             Timeout:           60 * time.Second,
         },
     }
-    
+
     // Create client
     client := llm.NewHTTPLLMClient(config, slog.Default())
 
@@ -121,14 +121,14 @@ func main() {
             "summary": "CPU usage above 90%",
         },
     }
-    
+
     result, err := client.ClassifyAlert(context.Background(), alert)
     if err != nil {
         log.Printf("Classification failed: %v", err)
         // Fallback to rule-based classifier
             return
     }
-    
+
     log.Printf("Classification: %+v", result)
 }
 ```
@@ -186,11 +186,11 @@ llm_circuit_breaker_transitions_total{from="*",to="*"}
 
 ```promql
 # Success rate
-rate(llm_client_requests_total{status="success"}[5m]) 
+rate(llm_client_requests_total{status="success"}[5m])
   / rate(llm_client_requests_total[5m])
 
 # P95 latency
-histogram_quantile(0.95, 
+histogram_quantile(0.95,
   rate(llm_client_request_duration_seconds_bucket[5m]))
 
 # Circuit breaker is open
@@ -233,7 +233,7 @@ if err != nil {
             // Check your API key/config
         }
     }
-    
+
     // Fallback to rule-based classifier
     return fallbackClassifier.Classify(ctx, alert)
 }
@@ -247,24 +247,24 @@ if err != nil {
 type Config struct {
     // API endpoint (REQUIRED - your own endpoint)
     BaseURL string
-    
+
     // API key (REQUIRED - your own key)
     APIKey string
-    
+
     // Model name (e.g., "gpt-4o", "claude-3-opus")
     Model string
-    
+
     // Request timeout
     Timeout time.Duration
-    
+
     // Retry configuration
     MaxRetries   int
     RetryDelay   time.Duration
     RetryBackoff float64  // 2.0 = exponential
-    
+
     // Circuit breaker (optional)
     CircuitBreaker CircuitBreakerConfig
-    
+
     // Metrics (optional)
     EnableMetrics bool
 }

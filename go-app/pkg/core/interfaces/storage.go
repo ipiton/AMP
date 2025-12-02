@@ -99,8 +99,7 @@ type TrendData struct {
 // Classification Storage
 // ================================================================================
 
-// ClassificationResult represents alert classification (defined in domain)
-type ClassificationResult interface{}
+// ClassificationResult is defined in classifier.go - no need to redeclare here
 
 // ClassificationStorage stores classification results
 type ClassificationStorage interface {
