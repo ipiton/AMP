@@ -243,3 +243,5 @@ PR: https://github.com/ipiton/AMP/pull/new/feature/community-infrastructure
 **Philosophy:** Simplicity first, infrastructure when needed  
 **Status:** ✅ IMPLEMENTED
 
+
+

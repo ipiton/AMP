@@ -15,7 +15,6 @@ import (
 
 	"github.com/ipiton/AMP/cmd/server/handlers"
 	"github.com/ipiton/AMP/internal/application"
-	"github.com/ipiton/AMP/internal/business/grouping"
 	"github.com/ipiton/AMP/internal/business/publishing"
 	"github.com/ipiton/AMP/internal/business/routing"
 	"github.com/ipiton/AMP/internal/business/silencing"
@@ -23,7 +22,7 @@ import (
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/database/postgres"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
-	groupinginfra "github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	publishinginfra "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	"github.com/ipiton/AMP/internal/infrastructure/repository"
@@ -99,11 +98,14 @@ func main() {
 	dedupService := services.NewDeduplicationService()
 	filterEngine := services.NewSimpleFilterEngine()
 
-	// Initialize business services
-	groupManager := grouping.NewAlertGroupManager(
-		groupinginfra.NewInMemoryGroupRepository(),
-		cfg.Grouping,
-	)
+	// Initialize business services  
+	groupManager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
+		// Configuration can be added here if needed
+	})
+	if err != nil {
+		slog.Error("Failed to initialize group manager", "error", err)
+		os.Exit(1)
+	}
 
 	silenceManager := silencing.NewSilenceManager(silenceRepo)
 	inhibitionManager := inhibition.NewInhibitionManager(pool)
