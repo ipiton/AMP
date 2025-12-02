@@ -8,11 +8,11 @@
 
 ## 📚 Overview
 
-This package contains the **pure OSS core** of Alert History Service - domain models, interfaces, and core services that are 100% open source with no dependencies on paid features.
+This package contains the **pure OSS core** of Alertmanager++ - domain models, interfaces, and core services that are 100% open source.
 
 ### Design Principles
 
-1. **Zero Paid Dependencies** - Core has NO knowledge of paid/enterprise features
+1. **Zero External Dependencies** - Core uses only stdlib, no third-party packages
 2. **Extension Points** - Clean interfaces for plugins/extensions
 3. **Alertmanager Compatible** - 100% API v2 compatibility
 4. **Production Ready** - Battle-tested in production environments
@@ -71,7 +71,7 @@ type StorageBackend interface {
     Query(ctx context.Context, filters Filters) ([]*Alert, error)
 }
 
-// Classifier - How alerts are classified (OSS: rules, Paid: LLM)
+// Classifier - How alerts are classified (Built-in: rules, Optional: LLM with BYOK)
 type AlertClassifier interface {
     Classify(ctx context.Context, alert *Alert) (*Classification, error)
 }

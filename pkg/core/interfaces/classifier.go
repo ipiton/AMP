@@ -47,9 +47,9 @@ type ClassificationResult struct {
 	ClassifiedAt   int64  // Unix timestamp
 	ModelVersion   string // model/rule version used
 
-	// Cost tracking (for paid classifiers like LLM)
-	TokensUsed    int     // for LLM APIs
-	CostUSD       float64 // estimated cost
+	// Cost tracking (for API-based classifiers like LLM)
+	TokensUsed    int     // for API-based classifiers
+	CostUSD       float64 // estimated API cost
 }
 
 // ClassifierConfig holds classifier configuration

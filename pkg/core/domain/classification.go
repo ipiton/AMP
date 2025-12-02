@@ -90,12 +90,12 @@ type ClassificationResult struct {
 	// ProcessingTime is how long classification took (seconds).
 	ProcessingTime float64 `json:"processing_time"`
 
-	// TokensUsed tracks API token usage (for LLM classifiers).
-	// Useful for cost tracking.
+	// TokensUsed tracks API token usage (for API-based classifiers like LLM).
+	// Useful for monitoring API usage.
 	TokensUsed int `json:"tokens_used,omitempty"`
 
-	// CostUSD is the estimated cost of this classification (for LLM).
-	// Useful for budget tracking.
+	// CostUSD is the estimated API cost of this classification.
+	// Useful for budget tracking when using external APIs.
 	CostUSD float64 `json:"cost_usd,omitempty"`
 
 	// Metadata contains additional classifier-specific data.
