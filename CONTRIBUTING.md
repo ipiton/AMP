@@ -161,4 +161,3 @@ By contributing, you agree that your contributions will be licensed under the Ap
 - [GitHub Issues](https://github.com/ipiton/AMP/issues)
 
 Thank you for contributing! 🙌
-
