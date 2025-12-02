@@ -158,4 +158,3 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 ---
 
 **Made with ❤️ by the Alertmanager++ team**
-
