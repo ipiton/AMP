@@ -1,0 +1,450 @@
+{{template "base" .}}
+
+{{define "title"}}Edit Silence{{end}}
+
+{{define "content"}}
+<div class="form-page">
+    <header class="form-header">
+        <h1>Edit Silence</h1>
+        <a href="/ui/silences/{{.Silence.ID}}" class="btn btn-link">← Back to Details</a>
+    </header>
+
+    {{if .Error}}
+    <div class="alert alert-error" role="alert">
+        <strong>Error:</strong> {{.Error}}
+    </div>
+    {{end}}
+
+    <form method="POST" action="/api/v2/silences/{{.Silence.ID}}" class="silence-form" id="edit-form" novalidate>
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <input type="hidden" name="_method" value="PUT">
+
+        <!-- Read-only Fields -->
+        <div class="readonly-section">
+            <h3>Read-Only Information</h3>
+            <div class="readonly-grid">
+                <div class="readonly-item">
+                    <span class="readonly-label">ID</span>
+                    <code>{{.Silence.ID}}</code>
+                </div>
+                <div class="readonly-item">
+                    <span class="readonly-label">Creator</span>
+                    <span>{{.Silence.CreatedBy}}</span>
+                </div>
+                <div class="readonly-item">
+                    <span class="readonly-label">Start Time</span>
+                    <time>{{formatDateTime .Silence.StartsAt}}</time>
+                </div>
+                <div class="readonly-item">
+                    <span class="readonly-label">Created</span>
+                    <time>{{timeAgo .Silence.CreatedAt}}</time>
+                </div>
+            </div>
+        </div>
+
+        <!-- Editable: Comment -->
+        <div class="form-group">
+            <label for="comment">Comment <span class="required">*</span></label>
+            <textarea id="comment" name="comment" required rows="3"
+                      maxlength="1024"
+                      aria-required="true"
+                      aria-describedby="comment-help">{{.Silence.Comment}}</textarea>
+            <small id="comment-help" class="form-help">
+                <span id="comment-counter">{{len .Silence.Comment}}</span>/1024 characters
+            </small>
+            {{if index .ErrorFields "comment"}}
+            <div class="field-error" role="alert">{{index .ErrorFields "comment"}}</div>
+            {{end}}
+        </div>
+
+        <!-- Editable: End Time -->
+        <div class="form-group">
+            <label for="ends_at">End Time <span class="required">*</span></label>
+            <input type="datetime-local" id="ends_at" name="ends_at" required
+                   value="{{formatTime .Silence.EndsAt}}"
+                   aria-required="true"
+                   aria-describedby="ends-help">
+            <small id="ends-help" class="form-help">
+                Must be after start time ({{formatDateTime .Silence.StartsAt}})
+            </small>
+            {{if index .ErrorFields "ends_at"}}
+            <div class="field-error" role="alert">{{index .ErrorFields "ends_at"}}</div>
+            {{end}}
+        </div>
+
+        <!-- Time Presets (extend) -->
+        <div class="time-presets">
+            <label>Extend Duration:</label>
+            <div class="preset-buttons">
+                {{range .TimePresets}}
+                <button type="button" class="btn btn-preset" data-duration="{{.Duration}}">
+                    + {{.Label}}
+                </button>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- Editable: Matchers -->
+        <div class="form-group">
+            <label>Matchers <span class="required">*</span></label>
+            <div id="matchers-container">
+                {{range $index, $matcher := .Silence.Matchers}}
+                <div class="matcher-row" data-index="{{$index}}">
+                    <input type="text" name="matchers[{{$index}}][name]" placeholder="Label name"
+                           value="{{$matcher.Name}}" required aria-label="Matcher name">
+
+                    <select name="matchers[{{$index}}][operator]" aria-label="Matcher operator">
+                        <option value="=" {{if eq $matcher.Type "="}}selected{{end}}>=</option>
+                        <option value="!=" {{if eq $matcher.Type "!="}}selected{{end}}>!=</option>
+                        <option value="=~" {{if eq $matcher.Type "=~"}}selected{{end}}>=~ (regex)</option>
+                        <option value="!~" {{if eq $matcher.Type "!~"}}selected{{end}}>!~ (regex)</option>
+                    </select>
+
+                    <input type="text" name="matchers[{{$index}}][value]" placeholder="Value"
+                           value="{{$matcher.Value}}" required aria-label="Matcher value">
+
+                    <button type="button" class="btn-icon btn-remove-matcher" aria-label="Remove matcher">
+                        🗑️
+                    </button>
+                </div>
+                {{end}}
+            </div>
+
+            <button type="button" id="add-matcher" class="btn btn-secondary">
+                + Add Matcher
+            </button>
+            <small class="form-help">At least one matcher is required. Maximum 100 matchers.</small>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="form-actions">
+            <button type="button" id="cancel-btn" class="btn btn-secondary">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+    </form>
+</div>
+
+<style>
+    .form-page {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    .form-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 32px;
+    }
+    .form-header h1 {
+        font-size: 32px;
+        font-weight: 600;
+    }
+    .alert {
+        padding: 16px;
+        border-radius: 4px;
+        margin-bottom: 24px;
+    }
+    .alert-error {
+        background-color: #fee;
+        border: 1px solid var(--color-danger);
+        color: var(--color-danger);
+    }
+    .silence-form {
+        background-color: white;
+        padding: 32px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .readonly-section {
+        padding: 16px;
+        background-color: var(--color-bg-secondary);
+        border-radius: 4px;
+        margin-bottom: 24px;
+    }
+    .readonly-section h3 {
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+        margin-bottom: 12px;
+    }
+    .readonly-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    .readonly-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .readonly-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+    }
+    .readonly-item code {
+        font-family: monospace;
+        font-size: 12px;
+        background-color: white;
+        padding: 4px 6px;
+        border-radius: 3px;
+    }
+    .form-group {
+        margin-bottom: 24px;
+    }
+    .form-group label {
+        display: block;
+        font-weight: 500;
+        margin-bottom: 8px;
+    }
+    .required {
+        color: var(--color-danger);
+    }
+    .form-group input[type="datetime-local"],
+    .form-group textarea,
+    .form-group select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        font-size: 14px;
+        font-family: inherit;
+    }
+    .form-group textarea {
+        resize: vertical;
+    }
+    .form-help {
+        display: block;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        margin-top: 4px;
+    }
+    .field-error {
+        color: var(--color-danger);
+        font-size: 12px;
+        margin-top: 4px;
+    }
+    .time-presets {
+        margin-bottom: 24px;
+    }
+    .time-presets label {
+        display: block;
+        font-weight: 500;
+        margin-bottom: 8px;
+    }
+    .preset-buttons {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .btn-preset {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+    .matcher-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 2fr auto;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .btn-remove-matcher {
+        padding: 8px;
+        background: transparent;
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+    .btn-remove-matcher:hover {
+        background-color: var(--color-bg-secondary);
+    }
+    .form-actions {
+        display: flex;
+        gap: 16px;
+        justify-content: flex-end;
+        margin-top: 32px;
+        padding-top: 24px;
+        border-top: 1px solid var(--color-border);
+    }
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+    .btn-primary {
+        background-color: var(--color-primary);
+        color: white;
+    }
+    .btn-primary:hover {
+        background-color: var(--color-primary-dark);
+    }
+    .btn-secondary {
+        background-color: var(--color-bg-secondary);
+        color: var(--color-text);
+    }
+    .btn-secondary:hover {
+        background-color: var(--color-border);
+    }
+    .btn-link {
+        background: transparent;
+        color: var(--color-primary);
+    }
+    .btn-link:hover {
+        text-decoration: underline;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .matcher-row {
+            grid-template-columns: 1fr;
+        }
+        .readonly-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<script>
+    // Character counter
+    const commentField = document.getElementById('comment');
+    const commentCounter = document.getElementById('comment-counter');
+    commentField.addEventListener('input', () => {
+        commentCounter.textContent = commentField.value.length;
+    });
+
+    // Time presets (extend current end time)
+    document.querySelectorAll('.btn-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const duration = parseInt(btn.dataset.duration);
+            const currentEnd = new Date(document.getElementById('ends_at').value);
+            const newEnd = new Date(currentEnd.getTime() + duration);
+
+            document.getElementById('ends_at').value = formatDateTimeLocal(newEnd);
+        });
+    });
+
+    function formatDateTimeLocal(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+
+    // Matchers management
+    let matcherIndex = {{len .Silence.Matchers}};
+
+    document.getElementById('add-matcher').addEventListener('click', () => {
+        if (matcherIndex >= 100) {
+            alert('Maximum 100 matchers allowed');
+            return;
+        }
+
+        const container = document.getElementById('matchers-container');
+        const row = document.createElement('div');
+        row.className = 'matcher-row';
+        row.dataset.index = matcherIndex;
+        row.innerHTML = `
+            <input type="text" name="matchers[${matcherIndex}][name]" placeholder="Label name" required aria-label="Matcher name">
+            <select name="matchers[${matcherIndex}][operator]" aria-label="Matcher operator">
+                <option value="=">=</option>
+                <option value="!=">!=</option>
+                <option value="=~">=~ (regex)</option>
+                <option value="!~">!~ (regex)</option>
+            </select>
+            <input type="text" name="matchers[${matcherIndex}][value]" placeholder="Value" required aria-label="Matcher value">
+            <button type="button" class="btn-icon btn-remove-matcher" aria-label="Remove matcher">🗑️</button>
+        `;
+        container.appendChild(row);
+        matcherIndex++;
+
+        // Add remove listener
+        row.querySelector('.btn-remove-matcher').addEventListener('click', () => {
+            row.remove();
+        });
+    });
+
+    // Remove matcher
+    document.querySelectorAll('.btn-remove-matcher').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.target.closest('.matcher-row').remove();
+        });
+    });
+
+    // Form submission
+    document.getElementById('edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const form = e.target;
+        const formData = new FormData(form);
+
+        // Convert to JSON
+        const data = {
+            comment: formData.get('comment'),
+            endsAt: new Date(formData.get('ends_at')).toISOString(),
+            matchers: []
+        };
+
+        // Parse matchers
+        const matcherRows = document.querySelectorAll('.matcher-row');
+        matcherRows.forEach(row => {
+            const index = row.dataset.index;
+            data.matchers.push({
+                name: formData.get(`matchers[${index}][name]`),
+                type: formData.get(`matchers[${index}][operator]`),
+                value: formData.get(`matchers[${index}][value]`),
+                isRegex: formData.get(`matchers[${index}][operator]`).includes('~')
+            });
+        });
+
+        // Validate
+        if (!data.comment || !data.endsAt) {
+            alert('Please fill in all required fields');
+            return;
+        }
+
+        if (data.matchers.length === 0) {
+            alert('At least one matcher is required');
+            return;
+        }
+
+        // Submit
+        try {
+            const response = await fetch('/api/v2/silences/{{.Silence.ID}}', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            });
+
+            if (response.ok) {
+                window.showToast('Silence updated successfully', 'success');
+                setTimeout(() => {
+                    window.location.href = '/ui/silences/{{.Silence.ID}}';
+                }, 500);
+            } else {
+                const error = await response.json();
+                alert(`Failed to update silence: ${error.message || response.statusText}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    });
+
+    // Cancel button
+    document.getElementById('cancel-btn').addEventListener('click', () => {
+        if (confirm('Discard changes?')) {
+            window.location.href = '/ui/silences/{{.Silence.ID}}';
+        }
+    });
+</script>
+{{end}}

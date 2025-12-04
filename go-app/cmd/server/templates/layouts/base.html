@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Alertmanager++ OSS Dashboard">
+    <title>{{ block "title" . }}Alertmanager++{{ end }}</title>
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    {{ block "extra_css" . }}{{ end }}
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+</head>
+<body class="dashboard-layout">
+    <!-- Skip Navigation Link (WCAG 2.1 AA - 2.4.1 Bypass Blocks) -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Header -->
+    {{ template "partials/header" . }}
+
+    <!-- Main Content -->
+    <div class="container">
+        <!-- Sidebar Navigation -->
+        {{ template "partials/sidebar" . }}
+
+        <!-- Content Area -->
+        <main id="main-content" class="content" role="main" aria-label="Main content">
+            <!-- Breadcrumbs -->
+            {{ if .Breadcrumbs }}
+            {{ template "partials/breadcrumbs" . }}
+            {{ end }}
+
+            <!-- Flash Messages -->
+            {{ if .Flash }}
+            {{ template "partials/flash" . }}
+            {{ end }}
+
+            <!-- Page Content -->
+            {{ block "content" . }}
+            <p>No content defined.</p>
+            {{ end }}
+        </main>
+    </div>
+
+    <!-- Footer -->
+    {{ template "partials/footer" . }}
+
+    <!-- JavaScript -->
+    <script src="/static/js/main.js"></script>
+    {{ block "extra_js" . }}{{ end }}
+</body>
+</html>

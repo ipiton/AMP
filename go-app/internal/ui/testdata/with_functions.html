@@ -1,0 +1,38 @@
+{{ define "test-functions" }}
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>{{ .Title }}</title>
+</head>
+
+<body>
+	<h1>{{ .Title }}</h1>
+
+	<!-- Time functions -->
+	<p>Created: {{ formatTime .CreatedAt }}</p>
+	<p>Updated: {{ timeAgo .UpdatedAt }}</p>
+
+	<!-- CSS helpers -->
+	<span class="{{ severity .Severity }}">{{ .Severity }}</span>
+	<div class="{{ statusClass .Status }}">{{ .Status }}</div>
+
+	<!-- Formatting -->
+	<p>{{ truncate .Description 50 }}</p>
+	<p>{{ upper .Name }}</p>
+	<p>{{ lower .Type }}</p>
+
+	<!-- Utilities -->
+	<p>{{ defaultVal "N/A" .OptionalField }}</p>
+	<p>{{ join .Tags ", " }}</p>
+
+	<!-- Math -->
+	<p>Count: {{ add .Count 1 }}</p>
+	<p>Remaining: {{ sub .Total .Used }}</p>
+
+	<!-- String helpers -->
+	<p>{{ .Count }} alert{{ plural .Count }}</p>
+</body>
+
+</html>
+{{ end }}

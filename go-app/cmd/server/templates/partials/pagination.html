@@ -1,0 +1,119 @@
+{{/* TN-79: Pagination Partial */}}
+{{ define "partials/pagination" }}
+<div class="pagination" role="navigation" aria-label="Pagination">
+  <div class="pagination-info">
+    Showing {{ if gt .Total 0 }}{{ add (mul (sub .Page 1) .PerPage) 1 }}{{ else }}0{{ end }}-{{ if gt (mul .Page .PerPage) .Total }}{{ .Total }}{{ else }}{{ mul .Page .PerPage }}{{ end }} of {{ .Total }} alerts
+  </div>
+
+  <div class="pagination-controls">
+    <!-- First Page -->
+    {{ if gt .Page 1 }}
+    <a href="javascript:void(0)" onclick="goToPage(1)" class="pagination-btn" aria-label="First page">
+      ««
+    </a>
+    {{ else }}
+    <span class="pagination-btn disabled" aria-disabled="true">««</span>
+    {{ end }}
+
+    <!-- Previous Page -->
+    {{ if .HasPrev }}
+    <a href="javascript:void(0)" onclick="goToPage({{ sub .Page 1 }})" class="pagination-btn" aria-label="Previous page">
+      «
+    </a>
+    {{ else }}
+    <span class="pagination-btn disabled" aria-disabled="true">«</span>
+    {{ end }}
+
+    <!-- Page Numbers (generated via JavaScript) -->
+    <span id="pagination-pages" data-current-page="{{ .Page }}" data-total-pages="{{ .TotalPages }}"></span>
+
+    <!-- Next Page -->
+    {{ if .HasNext }}
+    <a href="javascript:void(0)" onclick="goToPage({{ add .Page 1 }})" class="pagination-btn" aria-label="Next page">
+      »
+    </a>
+    {{ else }}
+    <span class="pagination-btn disabled" aria-disabled="true">»</span>
+    {{ end }}
+
+    <!-- Last Page -->
+    {{ if lt .Page .TotalPages }}
+    <a href="javascript:void(0)" onclick="goToPage({{ .TotalPages }})" class="pagination-btn" aria-label="Last page">
+      »»
+    </a>
+    {{ else }}
+    <span class="pagination-btn disabled" aria-disabled="true">»»</span>
+    {{ end }}
+  </div>
+
+  <!-- Page Size Selector -->
+  <div class="pagination-size">
+    <label for="page-size-select" class="sr-only">Items per page</label>
+    <select id="page-size-select" onchange="changePageSize(this.value)" aria-label="Items per page">
+      <option value="10" {{ if eq .PerPage 10 }}selected{{ end }}>10</option>
+      <option value="25" {{ if eq .PerPage 25 }}selected{{ end }}>25</option>
+      <option value="50" {{ if eq .PerPage 50 }}selected{{ end }}>50</option>
+      <option value="100" {{ if eq .PerPage 100 }}selected{{ end }}>100</option>
+    </select>
+    <span>per page</span>
+  </div>
+</div>
+
+<script>
+// Generate Page Numbers
+(function() {
+  const container = document.getElementById('pagination-pages');
+  if (!container) return;
+
+  const currentPage = parseInt(container.getAttribute('data-current-page')) || 1;
+  const totalPages = parseInt(container.getAttribute('data-total-pages')) || 1;
+
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, currentPage + 2);
+
+  let html = '';
+
+  // First page
+  if (startPage > 1) {
+    html += '<a href="javascript:void(0)" onclick="goToPage(1)" class="pagination-btn">1</a>';
+    if (startPage > 2) {
+      html += '<span class="pagination-ellipsis">...</span>';
+    }
+  }
+
+  // Page range
+  for (let i = startPage; i <= endPage; i++) {
+    if (i === currentPage) {
+      html += `<span class="pagination-btn active" aria-current="page">${i}</span>`;
+    } else {
+      html += `<a href="javascript:void(0)" onclick="goToPage(${i})" class="pagination-btn">${i}</a>`;
+    }
+  }
+
+  // Last page
+  if (endPage < totalPages) {
+    if (endPage < totalPages - 1) {
+      html += '<span class="pagination-ellipsis">...</span>';
+    }
+    html += `<a href="javascript:void(0)" onclick="goToPage(${totalPages})" class="pagination-btn">${totalPages}</a>`;
+  }
+
+  container.innerHTML = html;
+})();
+
+// Go to Page
+function goToPage(page) {
+  const url = new URL(window.location);
+  url.searchParams.set('page', page);
+  window.location.href = url.toString();
+}
+
+// Change Page Size
+function changePageSize(size) {
+  const url = new URL(window.location);
+  url.searchParams.set('per_page', size);
+  url.searchParams.set('page', '1'); // Reset to first page
+  window.location.href = url.toString();
+}
+</script>
+{{ end }}

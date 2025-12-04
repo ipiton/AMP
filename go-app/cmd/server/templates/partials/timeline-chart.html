@@ -1,0 +1,64 @@
+{{/* Timeline Chart Partial (Server-Side SVG) - TN-77 Modern Dashboard */}}
+{{ define "partials/timeline-chart" }}
+<div class="timeline-chart">
+  <svg viewBox="0 0 800 300" aria-label="Alert timeline chart showing counts by severity over 24 hours" role="img">
+    <title>Alert Timeline (24 hours)</title>
+    <desc>Stacked bar chart showing critical, warning, and info alerts over the past 24 hours</desc>
+
+    <!-- Grid lines -->
+    <g class="grid">
+      <line x1="50" y1="50" x2="750" y2="50" stroke="#e0e0e0" stroke-width="1" />
+      <line x1="50" y1="100" x2="750" y2="100" stroke="#e0e0e0" stroke-width="1" />
+      <line x1="50" y1="150" x2="750" y2="150" stroke="#e0e0e0" stroke-width="1" />
+      <line x1="50" y1="200" x2="750" y2="200" stroke="#e0e0e0" stroke-width="1" />
+      <line x1="50" y1="250" x2="750" y2="250" stroke="#e0e0e0" stroke-width="1" />
+    </g>
+
+    <!-- Y-axis -->
+    <g class="y-axis">
+      <text x="40" y="55" text-anchor="end" font-size="12" fill="#757575">100</text>
+      <text x="40" y="105" text-anchor="end" font-size="12" fill="#757575">80</text>
+      <text x="40" y="155" text-anchor="end" font-size="12" fill="#757575">60</text>
+      <text x="40" y="205" text-anchor="end" font-size="12" fill="#757575">40</text>
+      <text x="40" y="255" text-anchor="end" font-size="12" fill="#757575">20</text>
+    </g>
+
+    <!-- Sample bars (static for now - will be dynamic with real data) -->
+    <g class="bars">
+      {{ $barWidth := 25 }}
+      {{ $spacing := 30 }}
+      {{ range $i := until 24 }}
+      <g transform="translate({{ add 60 (mul $i $spacing) }}, 0)">
+        <!-- Critical (red) -->
+        <rect x="0" y="{{ sub 250 (mul 2 (add $i 1)) }}" width="{{ $barWidth }}" height="{{ mul 2 (add $i 1) }}" fill="#f44336" />
+        <!-- Warning (orange) -->
+        <rect x="0" y="{{ sub (sub 250 (mul 2 (add $i 1))) (mul 3 (add $i 1)) }}" width="{{ $barWidth }}" height="{{ mul 3 (add $i 1) }}" fill="#ff9800" />
+        <!-- Info (blue) -->
+        <rect x="0" y="{{ sub (sub (sub 250 (mul 2 (add $i 1))) (mul 3 (add $i 1))) (mul 4 (add $i 1)) }}" width="{{ $barWidth }}" height="{{ mul 4 (add $i 1) }}" fill="#2196f3" />
+      </g>
+      {{ end }}
+    </g>
+
+    <!-- X-axis labels -->
+    <g class="x-axis">
+      <text x="65" y="270" text-anchor="middle" font-size="10" fill="#757575">00:00</text>
+      <text x="245" y="270" text-anchor="middle" font-size="10" fill="#757575">06:00</text>
+      <text x="425" y="270" text-anchor="middle" font-size="10" fill="#757575">12:00</text>
+      <text x="605" y="270" text-anchor="middle" font-size="10" fill="#757575">18:00</text>
+      <text x="740" y="270" text-anchor="middle" font-size="10" fill="#757575">24:00</text>
+    </g>
+
+    <!-- Legend -->
+    <g class="legend" transform="translate(600, 15)">
+      <rect x="0" y="0" width="15" height="15" fill="#f44336" />
+      <text x="20" y="12" font-size="12" fill="#212121">Critical</text>
+
+      <rect x="80" y="0" width="15" height="15" fill="#ff9800" />
+      <text x="100" y="12" font-size="12" fill="#212121">Warning</text>
+
+      <rect x="0" y="20" width="15" height="15" fill="#2196f3" />
+      <text x="20" y="32" font-size="12" fill="#212121">Info</text>
+    </g>
+  </svg>
+</div>
+{{ end }}

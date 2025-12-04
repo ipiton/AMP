@@ -1,0 +1,16 @@
+{{ define "partials/breadcrumbs" }}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol class="breadcrumb-list">
+        {{ range $index, $crumb := .Breadcrumbs }}
+        <li class="breadcrumb-item">
+            {{ if eq $index (sub (len $.Breadcrumbs) 1) }}
+            <span class="breadcrumb-current">{{ $crumb.Name }}</span>
+            {{ else }}
+            <a href="{{ $crumb.URL }}" class="breadcrumb-link">{{ $crumb.Name }}</a>
+            <span class="breadcrumb-separator">/</span>
+            {{ end }}
+        </li>
+        {{ end }}
+    </ol>
+</nav>
+{{ end }}

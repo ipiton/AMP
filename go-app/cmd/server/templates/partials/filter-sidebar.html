@@ -1,0 +1,201 @@
+{{/* TN-79: Filter Sidebar Partial */}}
+{{ define "partials/filter-sidebar" }}
+{{ $filters := . }}
+<div class="filter-content">
+  <!-- Status Filter -->
+  <div class="filter-group">
+    <label for="filter-status" class="filter-label">Status</label>
+    <select id="filter-status" name="status" onchange="applyFilter('status', this.value)" aria-label="Filter by status">
+      <option value="">All</option>
+      <option value="firing" {{ if and $filters.Status (eq (printf "%s" $filters.Status) "firing") }}selected{{ end }}>Firing</option>
+      <option value="resolved" {{ if and $filters.Status (eq (printf "%s" $filters.Status) "resolved") }}selected{{ end }}>Resolved</option>
+    </select>
+  </div>
+
+  <!-- Severity Filter -->
+  <div class="filter-group">
+    <label for="filter-severity" class="filter-label">Severity</label>
+    <select id="filter-severity" name="severity" onchange="applyFilter('severity', this.value)" aria-label="Filter by severity">
+      <option value="">All</option>
+      <option value="critical" {{ if and $filters.Severity (eq $filters.Severity "critical") }}selected{{ end }}>Critical</option>
+      <option value="warning" {{ if and $filters.Severity (eq $filters.Severity "warning") }}selected{{ end }}>Warning</option>
+      <option value="info" {{ if and $filters.Severity (eq $filters.Severity "info") }}selected{{ end }}>Info</option>
+      <option value="noise" {{ if and $filters.Severity (eq $filters.Severity "noise") }}selected{{ end }}>Noise</option>
+    </select>
+  </div>
+
+  <!-- Namespace Filter -->
+  <div class="filter-group">
+    <label for="filter-namespace" class="filter-label">Namespace</label>
+    <input type="text" id="filter-namespace" name="namespace" value="{{ if $filters.Namespace }}{{ $filters.Namespace }}{{ end }}"
+           placeholder="Enter namespace..."
+           onchange="applyFilter('namespace', this.value)"
+           aria-label="Filter by namespace">
+  </div>
+
+  <!-- Time Range Filter -->
+  <div class="filter-group">
+    <label class="filter-label">Time Range</label>
+    <div class="time-range-inputs">
+      <label for="filter-from" class="sr-only">From</label>
+      <input type="datetime-local" id="filter-from" name="from"
+             value="{{ if $filters.TimeRange }}{{ if $filters.TimeRange.From }}{{ formatDateTime $filters.TimeRange.From }}{{ end }}{{ end }}"
+             onchange="applyTimeFilter()"
+             aria-label="Filter from date">
+      <label for="filter-to" class="sr-only">To</label>
+      <input type="datetime-local" id="filter-to" name="to"
+             value="{{ if $filters.TimeRange }}{{ if $filters.TimeRange.To }}{{ formatDateTime $filters.TimeRange.To }}{{ end }}{{ end }}"
+             onchange="applyTimeFilter()"
+             aria-label="Filter to date">
+    </div>
+  </div>
+
+  <!-- Filter Presets -->
+  <div class="filter-group">
+    <label class="filter-label">Quick Filters</label>
+    <div class="filter-presets">
+      <button class="btn-preset" onclick="applyPreset('last-1h')" aria-label="Last 1 hour">Last 1h</button>
+      <button class="btn-preset" onclick="applyPreset('last-24h')" aria-label="Last 24 hours">Last 24h</button>
+      <button class="btn-preset" onclick="applyPreset('last-7d')" aria-label="Last 7 days">Last 7d</button>
+      <button class="btn-preset" onclick="applyPreset('critical-only')" aria-label="Critical only">Critical Only</button>
+    </div>
+  </div>
+
+  <!-- Search Filter -->
+  <div class="filter-group">
+    <label for="filter-search" class="filter-label">Search</label>
+    <input type="text" id="filter-search" name="search"
+           value="{{ if $filters.Search }}{{ $filters.Search }}{{ end }}"
+           placeholder="Search alerts..."
+           onchange="applyFilter('search', this.value)"
+           aria-label="Search alerts">
+  </div>
+
+  <!-- TN-80: Classification Filters -->
+  <div class="filter-group filter-group-divider">
+    <h3 class="filter-section-title">Classification</h3>
+  </div>
+
+  <!-- Classification Severity Filter -->
+  <div class="filter-group">
+    <label for="filter-classification-severity" class="filter-label">Classification Severity</label>
+    <select id="filter-classification-severity" name="classification_severity" onchange="applyFilter('classification_severity', this.value)" aria-label="Filter by classification severity">
+      <option value="">All</option>
+      <option value="critical" {{ if and $filters.ClassificationSeverity (eq $filters.ClassificationSeverity "critical") }}selected{{ end }}>Critical</option>
+      <option value="warning" {{ if and $filters.ClassificationSeverity (eq $filters.ClassificationSeverity "warning") }}selected{{ end }}>Warning</option>
+      <option value="info" {{ if and $filters.ClassificationSeverity (eq $filters.ClassificationSeverity "info") }}selected{{ end }}>Info</option>
+      <option value="noise" {{ if and $filters.ClassificationSeverity (eq $filters.ClassificationSeverity "noise") }}selected{{ end }}>Noise</option>
+    </select>
+  </div>
+
+  <!-- Confidence Range Filter -->
+  <div class="filter-group">
+    <label for="filter-min-confidence" class="filter-label">Min Confidence</label>
+    <input type="range" id="filter-min-confidence" name="min_confidence" min="0" max="100" step="5"
+           value="{{ if $filters.MinConfidence }}{{ mul $filters.MinConfidence 100 }}{{ else }}0{{ end }}"
+           oninput="updateConfidenceDisplay('min', this.value)"
+           onchange="applyFilter('min_confidence', (this.value / 100).toFixed(2))"
+           aria-label="Minimum confidence">
+    <span class="confidence-display" id="min-confidence-display">{{ if $filters.MinConfidence }}{{ mul $filters.MinConfidence 100 }}{{ else }}0{{ end }}%</span>
+  </div>
+
+  <div class="filter-group">
+    <label for="filter-max-confidence" class="filter-label">Max Confidence</label>
+    <input type="range" id="filter-max-confidence" name="max_confidence" min="0" max="100" step="5"
+           value="{{ if $filters.MaxConfidence }}{{ mul $filters.MaxConfidence 100 }}{{ else }}100{{ end }}"
+           oninput="updateConfidenceDisplay('max', this.value)"
+           onchange="applyFilter('max_confidence', (this.value / 100).toFixed(2))"
+           aria-label="Maximum confidence">
+    <span class="confidence-display" id="max-confidence-display">{{ if $filters.MaxConfidence }}{{ mul $filters.MaxConfidence 100 }}{{ else }}100{{ end }}%</span>
+  </div>
+
+  <!-- Has Classification Filter -->
+  <div class="filter-group">
+    <label class="filter-label">
+      <input type="checkbox" id="filter-has-classification" name="has_classification"
+             {{ if $filters.HasClassification }}{{ if $filters.HasClassification }}checked{{ end }}{{ end }}
+             onchange="applyFilter('has_classification', this.checked ? 'true' : '')"
+             aria-label="Filter alerts with classification">
+      Has Classification
+    </label>
+  </div>
+
+  <!-- Classification Source Filter -->
+  <div class="filter-group">
+    <label for="filter-classification-source" class="filter-label">Classification Source</label>
+    <select id="filter-classification-source" name="classification_source" onchange="applyFilter('classification_source', this.value)" aria-label="Filter by classification source">
+      <option value="">All</option>
+      <option value="llm" {{ if and $filters.ClassificationSource (eq $filters.ClassificationSource "llm") }}selected{{ end }}>LLM</option>
+      <option value="fallback" {{ if and $filters.ClassificationSource (eq $filters.ClassificationSource "fallback") }}selected{{ end }}>Fallback</option>
+      <option value="cache" {{ if and $filters.ClassificationSource (eq $filters.ClassificationSource "cache") }}selected{{ end }}>Cache</option>
+    </select>
+  </div>
+</div>
+
+<script>
+// TN-80: Update confidence display
+function updateConfidenceDisplay(type, value) {
+  const display = document.getElementById(type + '-confidence-display');
+  if (display) {
+    display.textContent = value + '%';
+  }
+}
+</script>
+
+<script>
+// Apply Filter
+function applyFilter(name, value) {
+  const url = new URL(window.location);
+  if (value) {
+    url.searchParams.set(name, value);
+  } else {
+    url.searchParams.delete(name);
+  }
+  window.location.href = url.toString();
+}
+
+// Apply Time Filter
+function applyTimeFilter() {
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+  const url = new URL(window.location);
+
+  if (from) {
+    url.searchParams.set('from', new Date(from).toISOString());
+  } else {
+    url.searchParams.delete('from');
+  }
+
+  if (to) {
+    url.searchParams.set('to', new Date(to).toISOString());
+  } else {
+    url.searchParams.delete('to');
+  }
+
+  window.location.href = url.toString();
+}
+
+// Apply Preset
+function applyPreset(preset) {
+  const url = new URL(window.location);
+  const now = new Date();
+
+  switch(preset) {
+    case 'last-1h':
+      url.searchParams.set('from', new Date(now.getTime() - 60*60*1000).toISOString());
+      break;
+    case 'last-24h':
+      url.searchParams.set('from', new Date(now.getTime() - 24*60*60*1000).toISOString());
+      break;
+    case 'last-7d':
+      url.searchParams.set('from', new Date(now.getTime() - 7*24*60*60*1000).toISOString());
+      break;
+    case 'critical-only':
+      url.searchParams.set('severity', 'critical');
+      break;
+  }
+
+  window.location.href = url.toString();
+}
+</script>
+{{ end }}

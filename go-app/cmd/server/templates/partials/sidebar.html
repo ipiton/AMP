@@ -1,0 +1,33 @@
+{{ define "partials/sidebar" }}
+<aside class="sidebar">
+    <nav class="sidebar-nav">
+        <a href="/dashboard" class="sidebar-link">
+            <span class="sidebar-icon">📊</span>
+            <span class="sidebar-text">Dashboard</span>
+        </a>
+        <a href="/alerts" class="sidebar-link">
+            <span class="sidebar-icon">🚨</span>
+            <span class="sidebar-text">Alerts</span>
+        </a>
+        <a href="/silences" class="sidebar-link">
+            <span class="sidebar-icon">🔕</span>
+            <span class="sidebar-text">Silences</span>
+        </a>
+        <a href="/groups" class="sidebar-link">
+            <span class="sidebar-icon">📦</span>
+            <span class="sidebar-text">Groups</span>
+        </a>
+        <a href="/receivers" class="sidebar-link">
+            <span class="sidebar-icon">📡</span>
+            <span class="sidebar-text">Receivers</span>
+        </a>
+
+        <hr class="sidebar-divider">
+
+        <a href="/settings" class="sidebar-link">
+            <span class="sidebar-icon">⚙️</span>
+            <span class="sidebar-text">Settings</span>
+        </a>
+    </nav>
+</aside>
+{{ end }}

@@ -1,0 +1,72 @@
+{{/* Alert Card Partial - TN-77 Modern Dashboard, TN-80 Classification Display */}}
+{{ define "partials/alert-card" }}
+<div class="alert-card severity-{{ default "info" .Severity }}" role="listitem">
+  <div class="alert-header">
+    <span class="alert-status {{ .Status }}">{{ .Status }}</span>
+    <span class="alert-severity">{{ default "info" .Severity }}</span>
+    {{ if .Classification }}
+    <!-- TN-80: Classification Badge with expandable details -->
+    <div class="classification-badge"
+         role="button"
+         aria-label="Classification details"
+         aria-expanded="false"
+         aria-controls="classification-{{ .Fingerprint }}"
+         data-classification-toggle
+         data-fingerprint="{{ .Fingerprint }}"
+         tabindex="0">
+      <span class="classification-severity severity-{{ .Classification.Severity }}">
+        {{ .Classification.Severity }}
+      </span>
+      <span class="classification-confidence">
+        {{ .Classification.ConfidencePercent }}%
+      </span>
+      <span class="ai-icon" aria-hidden="true">🤖</span>
+    </div>
+    {{ else if .AIClassification }}
+    <!-- Legacy AI badge support (backward compatibility) -->
+    <span class="ai-badge" title="AI Confidence: {{ printf "%.0f%%" (mul .AIClassification.Confidence 100) }}">
+      🤖 AI
+    </span>
+    {{ end }}
+  </div>
+  <div class="alert-name">{{ .AlertName }}</div>
+  <div class="alert-summary">{{ truncate (default "No summary" .Summary) 120 }}</div>
+
+  <!-- TN-80: Classification Details (Expandable) -->
+  {{ if .Classification }}
+  <div class="classification-details"
+       id="classification-{{ .Fingerprint }}"
+       aria-hidden="true"
+       style="display: none;">
+    <div class="classification-reasoning">
+      <h4>Reasoning</h4>
+      <p>{{ .Classification.Reasoning }}</p>
+    </div>
+    {{ if .Classification.HasRecommendations }}
+    <div class="classification-recommendations">
+      <h4>Recommendations</h4>
+      <ul>
+        {{ range .Classification.Recommendations }}
+        <li>{{ . }}</li>
+        {{ end }}
+      </ul>
+    </div>
+    {{ end }}
+    <div class="classification-meta">
+      <span>Confidence: {{ .Classification.ConfidencePercent }}%</span>
+      {{ if gt .Classification.ProcessingTimeMs 0 }}
+      <span>Processing Time: {{ .Classification.ProcessingTimeMs }}ms</span>
+      {{ end }}
+      {{ if .Classification.Source }}
+      <span>Source: {{ .Classification.Source }}</span>
+      {{ end }}
+    </div>
+  </div>
+  {{ end }}
+
+  <div class="alert-footer">
+    <span class="alert-time">{{ timeAgo .StartsAt }}</span>
+    <a href="/ui/alerts/{{ .Fingerprint }}" class="alert-link">Details →</a>
+  </div>
+</div>
+{{ end }}

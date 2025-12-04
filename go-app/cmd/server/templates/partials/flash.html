@@ -1,0 +1,12 @@
+{{ define "partials/flash" }}
+<div class="flash-message flash-{{ .Flash.Type }}" role="alert">
+    <div class="flash-icon">
+        {{ if eq .Flash.Type "success" }}✅{{ end }}
+        {{ if eq .Flash.Type "error" }}❌{{ end }}
+        {{ if eq .Flash.Type "warning" }}⚠️{{ end }}
+        {{ if eq .Flash.Type "info" }}ℹ️{{ end }}
+    </div>
+    <div class="flash-content">{{ .Flash.Message }}</div>
+    <button class="flash-close" onclick="this.parentElement.remove()">×</button>
+</div>
+{{ end }}
