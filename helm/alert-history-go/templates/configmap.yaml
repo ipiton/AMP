@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alert-history-go.fullname" . }}-config
+  labels:
+    {{- include "alert-history-go.labels" . | nindent 4 }}
+data:
+  # Server configuration
+  SERVER_HOST: {{ .Values.server.host | quote }}
+  SERVER_PORT: {{ .Values.server.port | quote }}
+  SERVER_READ_TIMEOUT: {{ .Values.server.readTimeout | quote }}
+  SERVER_WRITE_TIMEOUT: {{ .Values.server.writeTimeout | quote }}
+  SERVER_IDLE_TIMEOUT: {{ .Values.server.idleTimeout | quote }}
+
+  # Database configuration
+  DATABASE_DRIVER: {{ .Values.database.driver | quote }}
+  DATABASE_HOST: {{ .Values.database.host | quote }}
+  DATABASE_PORT: {{ .Values.database.port | quote }}
+  DATABASE_NAME: {{ .Values.database.database | quote }}
+  DATABASE_USERNAME: {{ .Values.database.username | quote }}
+  DATABASE_SSL_MODE: {{ .Values.database.sslMode | quote }}
+
+  # Logging configuration
+  LOG_LEVEL: {{ .Values.log.level | quote }}
+  LOG_FORMAT: {{ .Values.log.format | quote }}
+
+  # Metrics configuration
+  METRICS_ENABLED: {{ .Values.metrics.enabled | quote }}
+  METRICS_PATH: {{ .Values.metrics.path | quote }}
+
+  # LLM configuration (non-sensitive values only)
+  {{- if .Values.llm.enabled }}
+  LLM_ENABLED: {{ .Values.llm.enabled | quote }}
+  LLM_BASE_URL: {{ .Values.llm.baseUrl | quote }}
+  LLM_MODEL: {{ .Values.llm.model | quote }}
+  LLM_TIMEOUT: {{ .Values.llm.timeout | quote }}
+  {{- end }}
+
+  # Application configuration
+  APP_NAME: {{ .Values.app.name | quote }}
+  APP_VERSION: {{ .Values.app.version | quote }}
+  APP_ENVIRONMENT: {{ .Values.app.environment | quote }}

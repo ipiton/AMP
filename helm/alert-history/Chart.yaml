@@ -1,0 +1,29 @@
+apiVersion: v2
+name: alert-history
+description: A Helm chart for Alert History Service with LLM Intelligence and Horizontal Scaling
+type: application
+version: 1.1.0
+appVersion: "1.1.0"
+home: https://github.com/your-org/alert-history
+sources:
+  - https://github.com/your-org/alert-history
+maintainers:
+  - name: Alert History Team
+    email: team@yourcompany.com
+keywords:
+  - alertmanager
+  - monitoring
+  - llm
+  - artificial-intelligence
+  - kubernetes
+  - prometheus
+dependencies:
+  - name: valkey
+    version: "2.1.3"
+    repository: "https://groundhog2k.github.io/helm-charts"
+    condition: cache.enabled
+    tags:
+      - cache
+annotations:
+  category: Monitoring
+  licenses: MIT

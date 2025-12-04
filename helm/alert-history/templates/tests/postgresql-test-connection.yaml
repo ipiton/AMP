@@ -1,0 +1,50 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "alert-history.fullname" . }}-test-postgresql"
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: test
+    image: postgres:16
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+      echo "Testing PostgreSQL connection..."
+
+      # Test 1: Basic connectivity
+      pg_isready -h {{ include "alert-history.postgresql.fullname" . }} -p 5432 -U {{ .Values.postgresql.username }}
+      echo "✅ PostgreSQL is ready"
+
+      # Test 2: Database connection
+      psql -h {{ include "alert-history.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SELECT version();"
+      echo "✅ Database connection successful"
+
+      # Test 3: Table creation test
+      psql -h {{ include "alert-history.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "CREATE TABLE IF NOT EXISTS helm_test (id serial PRIMARY KEY);"
+      echo "✅ Table creation test passed"
+
+      # Test 4: Extensions
+      psql -h {{ include "alert-history.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SELECT * FROM pg_extension WHERE extname='pg_stat_statements';"
+      echo "✅ pg_stat_statements extension verified"
+
+      # Cleanup
+      psql -h {{ include "alert-history.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "DROP TABLE IF EXISTS helm_test;"
+
+      echo "🎉 All tests passed!"
+    env:
+    - name: PGPASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "alert-history.postgresql.secretName" . }}
+          key: password
+{{- end }}

@@ -1,0 +1,135 @@
+Thank you for installing {{ .Chart.Name }} ({{ .Chart.Version }})!
+
+Your release "{{ .Release.Name }}" has been deployed to namespace "{{ .Release.Namespace }}".
+
+=============================================================================
+  Profile: {{ .Values.profile | upper }}
+=============================================================================
+
+{{- if eq .Values.profile "lite" }}
+
+🪶 LITE PROFILE (Single-Node, Embedded Storage)
+────────────────────────────────────────────────
+✅ SQLite embedded storage (PVC-based)
+✅ Memory-only cache (L1)
+✅ Zero external dependencies
+✅ Single replica (no autoscaling)
+
+Resources: 250m CPU, 256Mi RAM
+Use Case: Dev, test, small deployments (<1K alerts/day)
+
+{{- else if eq .Values.profile "standard" }}
+
+⚡ STANDARD PROFILE (HA-Ready, Distributed)
+────────────────────────────────────────────────
+✅ PostgreSQL external storage (HA)
+✅ Redis L2 + Memory L1 cache
+{{- if .Values.autoscaling.enabled }}
+✅ HPA autoscaling ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas)
+{{- else }}
+⚠️  HPA disabled (fixed {{ .Values.replicaCount }} replica(s))
+{{- end }}
+
+Resources: 500m CPU, 512Mi RAM (per pod)
+Use Case: Production, HA, high-volume (>1K alerts/day)
+
+{{- if .Values.autoscaling.enabled }}
+
+🚨 CRITICAL: Database Connection Pool
+────────────────────────────────────────────────
+Your HPA is configured for {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas.
+
+Connection calculation:
+  {{ .Values.autoscaling.maxReplicas }} replicas × 20 conns/pod = {{ mul .Values.autoscaling.maxReplicas 20 }} connections
+
+{{- if .Values.postgresql.config }}
+{{- if ge (int .Values.postgresql.config.maxConnections) 250 }}
+✅ PostgreSQL max_connections: {{ .Values.postgresql.config.maxConnections }} (OK)
+   Utilization at max scale: {{ div (mul (mul .Values.autoscaling.maxReplicas 20) 100) (int .Values.postgresql.config.maxConnections) }}%
+{{- else }}
+⚠️  PostgreSQL max_connections: {{ .Values.postgresql.config.maxConnections }}
+   WARNING: May exhaust connections at {{ div (int .Values.postgresql.config.maxConnections) 20 }}+ replicas!
+   Recommend: Increase to 250+ or deploy PgBouncer
+{{- end }}
+{{- else }}
+⚠️  PostgreSQL using default max_connections (100)
+   WARNING: Will exhaust connections at 6+ replicas!
+   CRITICAL: Update values.yaml postgresql.config.maxConnections to 250+
+{{- end }}
+
+See: tasks/TN-97-hpa-configuration/DATABASE_CONNECTIONS_ANALYSIS.md
+{{- end }}
+{{- end }}
+
+=============================================================================
+  Getting Started
+=============================================================================
+
+1. Check deployment status:
+
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "alert-history.name" . }}
+
+{{- if .Values.autoscaling.enabled }}
+
+2. Check HPA status:
+
+   kubectl get hpa {{ include "alert-history.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- end }}
+
+{{- if eq .Values.profile "standard" }}
+
+3. Check PostgreSQL:
+
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database
+
+{{- if .Values.postgresql.config }}
+{{- if .Values.postgresql.config.maxConnections }}
+
+4. Verify PostgreSQL configuration:
+
+   kubectl exec -it $(kubectl get pod -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ .Release.Namespace }} -- \
+     psql -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SHOW max_connections;"
+
+   Expected: {{ .Values.postgresql.config.maxConnections }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+5. Access the application:
+
+{{- if contains "NodePort" .Values.service.type }}
+
+   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "alert-history.fullname" . }})
+   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+   echo "URL: http://$NODE_IP:$NODE_PORT"
+
+{{- else if contains "LoadBalancer" .Values.service.type }}
+
+   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "alert-history.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   echo "URL: http://$SERVICE_IP:{{ .Values.service.port }}"
+
+{{- else if contains "ClusterIP" .Values.service.type }}
+
+   kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "alert-history.fullname" . }} 8080:{{ .Values.service.port }}
+   echo "URL: http://localhost:8080"
+
+{{- end }}
+
+=============================================================================
+  Documentation
+=============================================================================
+
+📖 Helm Chart: helm/alert-history/README.md
+📖 HPA Configuration: tasks/TN-97-hpa-configuration/README.md
+📖 Database Connections: tasks/TN-97-hpa-configuration/DATABASE_CONNECTIONS_ANALYSIS.md
+📖 API Documentation: docs/API.md
+
+=============================================================================
+  Support & Issues
+=============================================================================
+
+GitHub: https://github.com/helpfull/alertmanager-plus-plus
+Docs: https://docs.alert-history.io
+
+=============================================================================

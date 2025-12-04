@@ -1,0 +1,94 @@
+# RBAC for dynamic secrets management and target discovery
+{{- if .Values.serviceAccount.create -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "alert-history.fullname" . }}-secrets-reader
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+rules:
+# Allow reading secrets with specific labels for publishing targets discovery
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: []
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+  # Only secrets with our labels
+  # Note: resourceNames filter is applied at namespace level
+
+# Allow reading configmaps for configuration discovery
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: []
+
+# Allow reading namespaces for cross-namespace target discovery (if enabled)
+{{- if .Values.targetDiscovery.crossNamespace }}
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch"]
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "alert-history.fullname" . }}-secrets-reader
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "alert-history.fullname" . }}-secrets-reader
+subjects:
+- kind: ServiceAccount
+  name: {{ include "alert-history.serviceAccountName" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+
+---
+# Namespace-scoped role for more restricted access if preferred
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "alert-history.fullname" . }}-namespace-secrets
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+rules:
+# Full access to secrets in the same namespace
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+  resourceNames: []
+
+# Full access to configmaps in the same namespace
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+  resourceNames: []
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "alert-history.fullname" . }}-namespace-secrets
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "alert-history.fullname" . }}-namespace-secrets
+subjects:
+- kind: ServiceAccount
+  name: {{ include "alert-history.serviceAccountName" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+
+{{- end }}

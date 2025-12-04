@@ -1,0 +1,25 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    description: "Pod Disruption Budget for PostgreSQL - ensures availability during voluntary disruptions"
+    tn-98: "Production hardening (150% quality)"
+spec:
+  selector:
+    matchLabels:
+      {{- include "alert-history.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: database
+  {{- if .Values.postgresql.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.postgresql.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.postgresql.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.postgresql.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+{{- end }}

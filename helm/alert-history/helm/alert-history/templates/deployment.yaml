@@ -1,0 +1,224 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "alert-history.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "alert-history.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.strategy.maxUnavailable | default "25%" }}
+      maxSurge: {{ .Values.strategy.maxSurge | default "25%" }}
+  template:
+    metadata:
+      labels:
+        {{- include "alert-history.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "alert-history.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 30 }}
+      containers:
+        - name: alert-history
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort | default 9090 }}
+              protocol: TCP
+          env:
+            # Application Configuration
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: SERVICE_NAME
+              value: {{ include "alert-history.fullname" . }}
+            - name: SERVICE_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+
+            # Database Configuration
+            {{- if .Values.postgresql.enabled }}
+            - name: POSTGRES_HOST
+              value: {{ include "alert-history.postgresql.fullname" . }}-rw
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DATABASE
+              value: {{ .Values.postgresql.cluster.bootstrap.initdb.database | quote }}
+            - name: POSTGRES_USERNAME
+              value: {{ .Values.postgresql.cluster.bootstrap.initdb.owner | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.cluster.bootstrap.initdb.secret.name | quote }}
+                  key: password
+            - name: DATABASE_URL
+              value: {{ include "alert-history.databaseUrl" . | quote }}
+            {{- else }}
+            # Fallback to SQLite for backward compatibility
+            - name: ALERT_HISTORY_DB
+              value: "/data/alert_history.sqlite3"
+            - name: DATABASE_URL
+              value: "sqlite:///data/alert_history.sqlite3"
+            {{- end }}
+
+            # KeyDB Configuration (Redis-compatible)
+            {{- if .Values.cache.enabled }}
+            - name: REDIS_HOST
+              value: {{ include "alert-history.keydb.fullname" . }}
+            - name: REDIS_PORT
+              value: {{ .Values.keydb.keydb.port | quote }}
+            {{- if .Values.keydb.auth.enabled }}
+            - name: REDIS_PASSWORD
+              value: {{ .Values.keydb.auth.password | quote }}
+            {{- end }}
+            - name: REDIS_URL
+              value: {{ include "alert-history.keydbUrl" . | quote }}
+            {{- else }}
+            # Fallback to localhost for development
+            - name: REDIS_HOST
+              value: "localhost"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_URL
+              value: "redis://localhost:6379/0"
+            {{- end }}
+
+            # LLM Configuration
+            {{- if .Values.llm.enabled }}
+            - name: LLM_PROXY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "alert-history.fullname" . }}-config
+                  key: llm-proxy-url
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "alert-history.fullname" . }}-secrets
+                  key: llm-api-key
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "alert-history.fullname" . }}-config
+                  key: llm-model
+            {{- end }}
+
+            # Alert Processing Configuration
+            - name: RETENTION_DAYS
+              value: {{ .Values.alerts.retentionDays | quote }}
+            - name: ENABLE_CLASSIFICATION
+              value: {{ .Values.alerts.enableClassification | quote }}
+            - name: ALERT_BATCH_SIZE
+              value: {{ .Values.alerts.batchSize | quote }}
+
+            # Migration Configuration
+            {{- if .Values.migration.enabled }}
+            - name: MIGRATION_ENABLED
+              value: "true"
+            - name: AUTO_MIGRATE
+              value: {{ .Values.migration.autoMigrate | quote }}
+            {{- end }}
+
+            # Server Configuration
+            - name: SERVER_HOST
+              value: "0.0.0.0"
+            - name: SERVER_PORT
+              value: {{ .Values.service.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+
+          envFrom:
+            - configMapRef:
+                name: {{ include "alert-history.fullname" . }}-config
+                optional: true
+
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path | default "/healthz" }}
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds | default 10 }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds | default 5 }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold | default 3 }}
+            successThreshold: 1
+
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path | default "/readyz" }}
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds | default 5 }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds | default 10 }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold | default 3 }}
+            successThreshold: 1
+
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.startup.path | default "/healthz" }}
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds | default 10 }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds | default 5 }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold | default 30 }}
+            successThreshold: 1
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+          # Graceful shutdown: rely on SIGTERM handling in application
+          # No preStop hook needed - our app handles SIGTERM properly
+
+          {{- if not .Values.postgresql.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+
+      {{- if not .Values.postgresql.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "alert-history.fullname" . }}-pvc
+      {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
