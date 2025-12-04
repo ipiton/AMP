@@ -113,4 +113,4 @@ helm uninstall amp
 
 ## License
 
-Apache-2.0 License - see [LICENSE](https://github.com/ipiton/AMP/blob/main/LICENSE)
+AGPL-3.0 License - see [LICENSE](https://github.com/ipiton/AMP/blob/main/LICENSE)
