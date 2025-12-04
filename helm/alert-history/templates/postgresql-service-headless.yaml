@@ -1,0 +1,25 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}-headless
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    description: "Headless service for PostgreSQL StatefulSet - enables direct pod access"
+    tn-98: "Production hardening (150% quality)"
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service
+  publishNotReadyAddresses: true  # DNS records for not-ready pods
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: postgres
+    protocol: TCP
+  selector:
+    {{- include "alert-history.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+{{- end }}

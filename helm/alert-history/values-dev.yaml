@@ -1,0 +1,126 @@
+# Development values for Alert History Service with LLM integration
+# Usage: helm install alert-history ./helm/alert-history -f values-dev.yaml
+
+# ===============================
+# Application Configuration
+# ===============================
+replicaCount: 1
+environment: development
+logLevel: debug
+
+# ===============================
+# Container Image Configuration
+# ===============================
+image:
+  repository: ipiton/alert-history-llm
+  tag: "latest"
+  pullPolicy: Always
+
+# ===============================
+# Resource Configuration (Development)
+# ===============================
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+# ===============================
+# Database Configuration (SQLite for development)
+# ===============================
+postgresql:
+  enabled: false
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+# ===============================
+# Cache Configuration (Local Redis)
+# ===============================
+cache:
+  enabled: false
+
+# ===============================
+# LLM Configuration (Development)
+# ===============================
+llm:
+  enabled: true
+  proxyUrl: "https://llm-proxy.b2broker.tech"
+  apiKey: "sk-eEyKBRlxsrWB81yZT5Mc1w"  # Development API key
+  model: "openai/gpt-4o"
+  timeout: 30
+  maxRetries: 3
+  retryDelay: 1.0
+  cacheTtl: 3600
+  batchSize: 5
+
+# ===============================
+# Alert Processing Configuration
+# ===============================
+alerts:
+  retentionDays: 7
+  batchSize: 50
+  maxConcurrentAlerts: 10
+  enableClassification: true
+
+# ===============================
+# Autoscaling Configuration (Disabled for development)
+# ===============================
+autoscaling:
+  enabled: false
+
+# ===============================
+# Publishing Targets (Development)
+# ===============================
+publishingTargets:
+  # Test webhook target
+  - name: test-webhook
+    type: webhook
+    format: alertmanager
+    url: "http://localhost:8081/test-webhook"
+    enabled: false
+    secret:
+      apiKey: "test-api-key"
+    filterConfig:
+      severity: ["critical", "warning", "info"]
+      excludeNoise: false
+
+# ===============================
+# Monitoring Configuration
+# ===============================
+monitoring:
+  prometheusEnabled: true
+  healthCheckInterval: 30
+
+# ===============================
+# Ingress Configuration (Disabled for development)
+# ===============================
+ingress:
+  enabled: false
+
+# ===============================
+# Service Configuration (NodePort for development)
+# ===============================
+service:
+  type: NodePort
+  port: 8080
+  nodePort: 30080
+
+# ===============================
+# Security Configuration (Relaxed for development)
+# ===============================
+podSecurityContext:
+  fsGroup: 65534
+  runAsNonRoot: false
+  runAsUser: 0
+
+securityContext:
+  allowPrivilegeEscalation: true
+  capabilities:
+    drop: []
+  readOnlyRootFilesystem: false
+  runAsNonRoot: false
+  runAsUser: 0

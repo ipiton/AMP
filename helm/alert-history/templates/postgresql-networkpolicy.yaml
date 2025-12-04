@@ -1,0 +1,65 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "alert-history.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: database
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow connections from Alert History application pods
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- include "alert-history.selectorLabels" . | nindent 10 }}
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow connections from postgres-exporter sidecar (localhost)
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- include "alert-history.selectorLabels" . | nindent 10 }}
+          app.kubernetes.io/component: database
+    ports:
+    - protocol: TCP
+      port: 9187  # Exporter metrics port
+  # Allow connections from Prometheus (for scraping metrics)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 9187
+  egress:
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow outbound connections for backup archiving (if offsite)
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for S3/GCS/Azure
+{{- end }}

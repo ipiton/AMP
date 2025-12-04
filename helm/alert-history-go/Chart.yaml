@@ -1,0 +1,22 @@
+apiVersion: v2
+name: alert-history-go
+description: A Helm chart for Alert History Service (Go version) - Minimal deployment for development and testing
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/your-org/alert-history
+sources:
+  - https://github.com/your-org/alert-history
+maintainers:
+  - name: Alert History Team
+    email: team@yourcompany.com
+keywords:
+  - alertmanager
+  - monitoring
+  - golang
+  - kubernetes
+  - prometheus
+  - webhook
+annotations:
+  category: Monitoring
+  licenses: MIT

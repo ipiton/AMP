@@ -1,0 +1,52 @@
+{{- if and (eq .Values.profile "standard") .Values.monitoring.prometheusEnabled }}
+{{/*
+ServiceMonitor CRD for Prometheus Operator
+Enables auto-discovery and scraping of Redis metrics from redis-exporter sidecar
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "alert-history.fullname" . }}-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-monitoring
+spec:
+  # Selector to match the metrics Service
+  selector:
+    matchLabels:
+      {{- include "alert-history.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis-metrics
+
+  # Endpoint configuration
+  endpoints:
+  - port: metrics  # Must match Service port name
+    interval: 30s  # Scrape every 30 seconds
+    scrapeTimeout: 10s  # Timeout for each scrape attempt
+    path: /metrics  # Metrics endpoint path
+    scheme: http  # HTTP scheme (not HTTPS)
+
+    # Relabeling configurations
+    # These add useful metadata to scraped metrics
+    relabelings:
+    # Add pod name label
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+
+    # Add node name label
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+
+    # Add pod IP label
+    - sourceLabels: [__meta_kubernetes_pod_ip]
+      targetLabel: pod_ip
+
+    # Add pod phase label
+    - sourceLabels: [__meta_kubernetes_pod_phase]
+      targetLabel: pod_phase
+
+  # Namespace selector (same namespace as release)
+  namespaceSelector:
+    matchNames:
+    - {{ .Release.Namespace }}
+{{- end }}

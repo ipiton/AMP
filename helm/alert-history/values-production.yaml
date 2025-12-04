@@ -1,0 +1,206 @@
+# Production values for Alert History Service with LLM integration
+# Usage: helm install alert-history ./helm/alert-history -f values-production.yaml
+
+# ===============================
+# Application Configuration
+# ===============================
+replicaCount: 3
+environment: production
+logLevel: info
+
+# ===============================
+# Container Image Configuration
+# ===============================
+image:
+  repository: ipiton/alert-history-llm
+  tag: "1.0.0"
+  pullPolicy: Always
+
+# ===============================
+# Resource Configuration
+# ===============================
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 1000m
+    memory: 1Gi
+
+# ===============================
+# PostgreSQL Database (Production)
+# ===============================
+postgresql:
+  enabled: true
+  cluster:
+    instances: 3
+    storage:
+      size: 50Gi
+    postgresql:
+      parameters:
+        max_connections: "500"
+        shared_buffers: "1GB"
+        effective_cache_size: "4GB"
+
+# ===============================
+# Cache Configuration (DragonflyDB)
+# ===============================
+cache:
+  enabled: true
+
+dragonfly:
+  enabled: true
+  host: "dragonfly"
+  port: 6379
+  auth:
+    enabled: true
+    password: ""  # Set via secret
+
+# ===============================
+# LLM Configuration (Production)
+# ===============================
+llm:
+  enabled: true
+  proxyUrl: "https://llm-proxy.b2broker.tech"
+  apiKey: ""  # Set via secret or external secrets
+  model: "openai/gpt-4o"
+  timeout: 30
+  maxRetries: 3
+  retryDelay: 1.0
+  cacheTtl: 3600
+  batchSize: 10
+
+  # Use external secrets for production
+  externalSecrets:
+    enabled: true
+    secretStore: "vault-backend"
+    secretName: "alert-history-llm-api-key"
+    secretKey: "api-key"
+
+# ===============================
+# Alert Processing Configuration
+# ===============================
+alerts:
+  retentionDays: 90
+  batchSize: 200
+  maxConcurrentAlerts: 100
+  enableClassification: true
+
+# ===============================
+# Autoscaling Configuration
+# ===============================
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ===============================
+# Publishing Targets (Production)
+# ===============================
+publishingTargets:
+  # Rootly integration for production
+  - name: rootly-production
+    type: webhook
+    format: rootly
+    url: "https://api.rootly.com/webhooks/your-webhook-id"
+    enabled: true
+    secret:
+      apiKey: ""  # Set via external secrets
+    filterConfig:
+      severity: ["critical", "warning"]
+      excludeNoise: true
+      minConfidence: 0.8
+      namespaces: ["production", "staging"]
+
+  # PagerDuty integration
+  - name: pagerduty-oncall
+    type: webhook
+    format: pagerduty
+    url: "https://events.pagerduty.com/v2/enqueue"
+    enabled: true
+    secret:
+      routingKey: ""  # Set via external secrets
+    filterConfig:
+      severity: ["critical"]
+      excludeNoise: true
+      minConfidence: 0.9
+
+  # Slack notifications
+  - name: slack-alerts
+    type: webhook
+    format: slack
+    url: "https://hooks.slack.com/your-webhook-url"
+    enabled: true
+    secret:
+      token: ""  # Set via external secrets
+    filterConfig:
+      severity: ["critical", "warning"]
+      namespaces: ["production"]
+
+# ===============================
+# Monitoring Configuration
+# ===============================
+monitoring:
+  prometheusEnabled: true
+  healthCheckInterval: 30
+
+# ===============================
+# Ingress Configuration (Production)
+# ===============================
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: alert-history.your-domain.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: alert-history-tls
+      hosts:
+        - alert-history.your-domain.com
+
+# ===============================
+# Security Configuration
+# ===============================
+podSecurityContext:
+  fsGroup: 65534
+  runAsNonRoot: true
+  runAsUser: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+
+# ===============================
+# Node Affinity (Production)
+# ===============================
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - alert-history
+      topologyKey: kubernetes.io/hostname
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/production
+          operator: In
+          values:
+          - "true"

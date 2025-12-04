@@ -1,0 +1,124 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}-backup
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-backup
+  annotations:
+    description: "PostgreSQL base backup CronJob for disaster recovery (TN-98)"
+spec:
+  schedule: {{ .Values.postgresql.backup.schedule | quote }}
+  concurrencyPolicy: Forbid  # Don't run concurrent backups
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "alert-history.labels" . | nindent 8 }}
+        app.kubernetes.io/component: database-backup
+    spec:
+      ttlSecondsAfterFinished: 86400  # Cleanup jobs after 24h
+      template:
+        metadata:
+          labels:
+            {{- include "alert-history.labels" . | nindent 12 }}
+            app.kubernetes.io/component: database-backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "alert-history.serviceAccountName" . }}
+          securityContext:
+            fsGroup: 999
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: backup
+            image: postgres:16
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "==================================="
+              echo "PostgreSQL Base Backup - TN-98"
+              echo "==================================="
+              echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+              echo "Target: {{ include "alert-history.postgresql.fullname" . }}:5432"
+              echo "Database: {{ .Values.postgresql.database }}"
+              echo "==================================="
+
+              # Create backup directory with timestamp
+              BACKUP_DIR="/backup/base/$(date -u +"%Y%m%d_%H%M%S")"
+              mkdir -p "$BACKUP_DIR"
+
+              # Create WAL archive directory if not exists
+              mkdir -p /backup/wal_archive
+
+              echo "Backup directory: $BACKUP_DIR"
+              echo "Starting pg_basebackup..."
+
+              # Run pg_basebackup
+              pg_basebackup \
+                --host={{ include "alert-history.postgresql.fullname" . }} \
+                --port=5432 \
+                --username={{ .Values.postgresql.username }} \
+                --pgdata="$BACKUP_DIR" \
+                --format=tar \
+                --gzip \
+                --wal-method=stream \
+                --checkpoint=fast \
+                --progress \
+                --verbose \
+                2>&1 | tee "$BACKUP_DIR/backup.log"
+
+              echo "Backup completed successfully!"
+              echo "Backup size: $(du -sh "$BACKUP_DIR" | cut -f1)"
+
+              # Cleanup old backups (keep last {{ .Values.postgresql.backup.retention }} days)
+              echo "Cleaning up backups older than {{ .Values.postgresql.backup.retention }} days..."
+              find /backup/base -type d -name "2*" -mtime +{{ .Values.postgresql.backup.retention }} -exec rm -rf {} \; || true
+
+              # Cleanup old WAL archives (keep last {{ .Values.postgresql.backup.walRetention }} days)
+              echo "Cleaning up WAL archives older than {{ .Values.postgresql.backup.walRetention }} days..."
+              find /backup/wal_archive -type f -mtime +{{ .Values.postgresql.backup.walRetention }} -delete || true
+
+              echo "Backup job completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+              echo "==================================="
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "alert-history.postgresql.secretName" . }}
+                  key: password
+            - name: PGHOST
+              value: {{ include "alert-history.postgresql.fullname" . }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGUSER
+              value: {{ .Values.postgresql.username | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.database | quote }}
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+            resources:
+              {{- toYaml .Values.postgresql.backup.resources | nindent 14 }}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+              readOnlyRootFilesystem: false
+              runAsNonRoot: true
+              runAsUser: 999
+              runAsGroup: 999
+          volumes:
+          - name: backup
+            persistentVolumeClaim:
+              claimName: {{ include "alert-history.postgresql.fullname" . }}-backup
+{{- end }}

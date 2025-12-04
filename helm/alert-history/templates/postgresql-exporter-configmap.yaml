@@ -1,0 +1,323 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.exporter.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}-exporter-config
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-exporter
+  annotations:
+    description: "PostgreSQL Exporter custom queries for 150% observability (TN-98)"
+data:
+  queries.yaml: |
+    # =========================================
+    # PostgreSQL Exporter Custom Queries
+    # Target: 50+ Metrics for Enterprise Observability
+    # TN-98: 150% Quality Target
+    # =========================================
+
+    # =====================================
+    # 1. DATABASE SIZE & GROWTH METRICS
+    # =====================================
+    pg_database_size_bytes:
+      query: |
+        SELECT
+          datname as database,
+          pg_database_size(datname) as size_bytes
+        FROM pg_database
+        WHERE datname NOT IN ('template0', 'template1', 'postgres')
+      metrics:
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - size_bytes:
+            usage: "GAUGE"
+            description: "Database size in bytes"
+
+    # =====================================
+    # 2. TABLE SIZE & BLOAT METRICS
+    # =====================================
+    pg_table_size_bytes:
+      query: |
+        SELECT
+          schemaname as schema,
+          tablename as table,
+          pg_total_relation_size(schemaname||'.'||tablename) as size_bytes,
+          n_live_tup as live_tuples,
+          n_dead_tup as dead_tuples
+        FROM pg_stat_user_tables
+        WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+        LIMIT 20
+      metrics:
+        - schema:
+            usage: "LABEL"
+            description: "Schema name"
+        - table:
+            usage: "LABEL"
+            description: "Table name"
+        - size_bytes:
+            usage: "GAUGE"
+            description: "Total table size in bytes (including indexes and TOAST)"
+        - live_tuples:
+            usage: "GAUGE"
+            description: "Estimated number of live rows"
+        - dead_tuples:
+            usage: "GAUGE"
+            description: "Estimated number of dead rows (need VACUUM)"
+
+    # =====================================
+    # 3. INDEX USAGE & EFFICIENCY
+    # =====================================
+    pg_index_usage:
+      query: |
+        SELECT
+          schemaname as schema,
+          tablename as table,
+          indexname as index,
+          idx_scan as scans,
+          idx_tup_read as tuples_read,
+          idx_tup_fetch as tuples_fetched,
+          pg_relation_size(indexrelid) as size_bytes
+        FROM pg_stat_user_indexes
+        WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY idx_scan
+        LIMIT 20
+      metrics:
+        - schema:
+            usage: "LABEL"
+            description: "Schema name"
+        - table:
+            usage: "LABEL"
+            description: "Table name"
+        - index:
+            usage: "LABEL"
+            description: "Index name"
+        - scans:
+            usage: "COUNTER"
+            description: "Number of index scans"
+        - tuples_read:
+            usage: "COUNTER"
+            description: "Number of index entries returned by scans"
+        - tuples_fetched:
+            usage: "COUNTER"
+            description: "Number of live table rows fetched by index scans"
+        - size_bytes:
+            usage: "GAUGE"
+            description: "Index size in bytes"
+
+    # =====================================
+    # 4. VACUUM & AUTOVACUUM METRICS
+    # =====================================
+    pg_vacuum_stats:
+      query: |
+        SELECT
+          schemaname as schema,
+          tablename as table,
+          EXTRACT(EPOCH FROM (NOW() - last_vacuum)) as seconds_since_last_vacuum,
+          EXTRACT(EPOCH FROM (NOW() - last_autovacuum)) as seconds_since_last_autovacuum,
+          EXTRACT(EPOCH FROM (NOW() - last_analyze)) as seconds_since_last_analyze,
+          vacuum_count,
+          autovacuum_count,
+          analyze_count,
+          autoanalyze_count
+        FROM pg_stat_user_tables
+        WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+      metrics:
+        - schema:
+            usage: "LABEL"
+            description: "Schema name"
+        - table:
+            usage: "LABEL"
+            description: "Table name"
+        - seconds_since_last_vacuum:
+            usage: "GAUGE"
+            description: "Seconds since last manual VACUUM"
+        - seconds_since_last_autovacuum:
+            usage: "GAUGE"
+            description: "Seconds since last autovacuum"
+        - seconds_since_last_analyze:
+            usage: "GAUGE"
+            description: "Seconds since last ANALYZE"
+        - vacuum_count:
+            usage: "COUNTER"
+            description: "Number of manual VACUUMs"
+        - autovacuum_count:
+            usage: "COUNTER"
+            description: "Number of autovacuums"
+        - analyze_count:
+            usage: "COUNTER"
+            description: "Number of manual ANALYZEs"
+        - autoanalyze_count:
+            usage: "COUNTER"
+            description: "Number of auto analyzes"
+
+    # =====================================
+    # 5. REPLICATION & WAL METRICS
+    # =====================================
+    pg_wal_size_bytes:
+      query: |
+        SELECT
+          SUM(size) as wal_size_bytes,
+          COUNT(*) as wal_file_count
+        FROM pg_ls_waldir()
+      metrics:
+        - wal_size_bytes:
+            usage: "GAUGE"
+            description: "Total size of WAL files in bytes"
+        - wal_file_count:
+            usage: "GAUGE"
+            description: "Number of WAL files"
+
+    # =====================================
+    # 6. CONNECTION POOL METRICS (CRITICAL for TN-97 HPA)
+    # =====================================
+    pg_connection_pool:
+      query: |
+        SELECT
+          state,
+          COUNT(*) as count,
+          MAX(EXTRACT(EPOCH FROM (NOW() - state_change))) as max_duration_seconds
+        FROM pg_stat_activity
+        WHERE pid <> pg_backend_pid()
+        GROUP BY state
+      metrics:
+        - state:
+            usage: "LABEL"
+            description: "Connection state (active, idle, idle in transaction, etc.)"
+        - count:
+            usage: "GAUGE"
+            description: "Number of connections in this state"
+        - max_duration_seconds:
+            usage: "GAUGE"
+            description: "Maximum time a connection has been in this state (seconds)"
+
+    # =====================================
+    # 7. LONG-RUNNING QUERIES (TN-98: Critical for debugging)
+    # =====================================
+    pg_long_running_queries:
+      query: |
+        SELECT
+          usename as user,
+          datname as database,
+          state,
+          EXTRACT(EPOCH FROM (NOW() - query_start)) as duration_seconds,
+          COUNT(*) as count
+        FROM pg_stat_activity
+        WHERE state != 'idle'
+          AND pid <> pg_backend_pid()
+          AND query_start < NOW() - INTERVAL '5 seconds'
+        GROUP BY usename, datname, state, query_start
+      metrics:
+        - user:
+            usage: "LABEL"
+            description: "Database user"
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - state:
+            usage: "LABEL"
+            description: "Query state"
+        - duration_seconds:
+            usage: "GAUGE"
+            description: "Query duration in seconds"
+        - count:
+            usage: "GAUGE"
+            description: "Number of queries with this duration"
+
+    # =====================================
+    # 8. TRANSACTION ID WRAPAROUND RISK
+    # =====================================
+    pg_txid_wraparound:
+      query: |
+        SELECT
+          datname as database,
+          age(datfrozenxid) as age,
+          2147483648 - age(datfrozenxid) as remaining_xids
+        FROM pg_database
+        WHERE datname NOT IN ('template0', 'template1')
+      metrics:
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - age:
+            usage: "GAUGE"
+            description: "Age of oldest frozen transaction ID"
+        - remaining_xids:
+            usage: "GAUGE"
+            description: "Remaining transaction IDs before wraparound"
+
+    # =====================================
+    # 9. CHECKPOINT & BGWRITER METRICS
+    # =====================================
+    pg_checkpoint_stats:
+      query: |
+        SELECT
+          checkpoints_timed,
+          checkpoints_req as checkpoints_requested,
+          checkpoint_write_time,
+          checkpoint_sync_time,
+          buffers_checkpoint,
+          buffers_clean,
+          buffers_backend,
+          buffers_backend_fsync,
+          buffers_alloc
+        FROM pg_stat_bgwriter
+      metrics:
+        - checkpoints_timed:
+            usage: "COUNTER"
+            description: "Number of scheduled checkpoints"
+        - checkpoints_requested:
+            usage: "COUNTER"
+            description: "Number of requested checkpoints"
+        - checkpoint_write_time:
+            usage: "COUNTER"
+            description: "Time spent writing checkpoints (ms)"
+        - checkpoint_sync_time:
+            usage: "COUNTER"
+            description: "Time spent syncing checkpoints (ms)"
+        - buffers_checkpoint:
+            usage: "COUNTER"
+            description: "Buffers written during checkpoints"
+        - buffers_clean:
+            usage: "COUNTER"
+            description: "Buffers written by background writer"
+        - buffers_backend:
+            usage: "COUNTER"
+            description: "Buffers written by backends"
+        - buffers_backend_fsync:
+            usage: "COUNTER"
+            description: "Backend fsyncs"
+        - buffers_alloc:
+            usage: "COUNTER"
+            description: "Buffers allocated"
+
+    # =====================================
+    # 10. LOCK CONTENTION METRICS
+    # =====================================
+    pg_lock_contention:
+      query: |
+        SELECT
+          locktype,
+          mode,
+          granted,
+          COUNT(*) as count
+        FROM pg_locks
+        WHERE pid <> pg_backend_pid()
+        GROUP BY locktype, mode, granted
+      metrics:
+        - locktype:
+            usage: "LABEL"
+            description: "Type of lock (relation, tuple, transactionid, etc.)"
+        - mode:
+            usage: "LABEL"
+            description: "Lock mode (AccessShareLock, RowExclusiveLock, etc.)"
+        - granted:
+            usage: "LABEL"
+            description: "Whether lock is granted (true/false)"
+        - count:
+            usage: "GAUGE"
+            description: "Number of locks"
+
+{{- end }}

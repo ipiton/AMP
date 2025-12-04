@@ -1,0 +1,113 @@
+{{- if .Values.prometheus.recordingRules.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "alert-history-go.fullname" . }}-prometheus-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "alert-history-go.labels" . | nindent 4 }}
+    prometheus: kube-prometheus
+data:
+  alert-history-legacy-metrics.yml: |
+    groups:
+      - name: alert_history_legacy_metrics
+        interval: {{ .Values.prometheus.recordingRules.interval | default "10s" }}
+        rules:
+          # ============================================================
+          # Repository Metrics - Backwards Compatibility (TN-181)
+          # ============================================================
+          # Old metric names without subsystem → New names with subsystem
+          # Transition period: 30 days (remove after 2025-11-10)
+
+          - record: alert_history_query_duration_seconds
+            expr: alert_history_infra_repository_query_duration_seconds
+            labels:
+              migration: "TN-181"
+              deprecated: "true"
+              removal_date: "2025-11-10"
+
+          - record: alert_history_query_errors_total
+            expr: alert_history_infra_repository_query_errors_total
+            labels:
+              migration: "TN-181"
+              deprecated: "true"
+              removal_date: "2025-11-10"
+
+          - record: alert_history_query_results_total
+            expr: alert_history_infra_repository_query_results_total
+            labels:
+              migration: "TN-181"
+              deprecated: "true"
+              removal_date: "2025-11-10"
+
+          # Cache hits metric moved from generic namespace to infra_cache subsystem
+          - record: alert_history_cache_hits_total
+            expr: alert_history_infra_cache_hits_total
+            labels:
+              migration: "TN-181"
+              deprecated: "true"
+              removal_date: "2025-11-10"
+
+          # ============================================================
+          # Circuit Breaker Metrics - Backwards Compatibility (Future)
+          # ============================================================
+          # To be added when Circuit Breaker metrics are renamed from
+          # llm_circuit_breaker → technical_llm_cb
+          # Currently commented out as CB metrics not yet migrated
+
+          # - record: alert_history_llm_circuit_breaker_state
+          #   expr: alert_history_technical_llm_cb_state
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_failures_total
+          #   expr: alert_history_technical_llm_cb_failures_total
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_successes_total
+          #   expr: alert_history_technical_llm_cb_successes_total
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_state_changes_total
+          #   expr: alert_history_technical_llm_cb_state_changes_total
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_requests_blocked_total
+          #   expr: alert_history_technical_llm_cb_requests_blocked_total
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_half_open_requests_total
+          #   expr: alert_history_technical_llm_cb_half_open_requests_total
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_slow_calls_total
+          #   expr: alert_history_technical_llm_cb_slow_calls_total
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+
+          # - record: alert_history_llm_circuit_breaker_call_duration_seconds
+          #   expr: alert_history_technical_llm_cb_call_duration_seconds
+          #   labels:
+          #     migration: "TN-181"
+          #     deprecated: "true"
+          #     removal_date: "2025-11-10"
+{{- end }}

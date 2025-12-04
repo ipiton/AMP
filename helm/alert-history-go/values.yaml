@@ -1,0 +1,251 @@
+# ===============================
+# Application Configuration
+# ===============================
+replicaCount: 1
+environment: development
+logLevel: debug
+namespace: ""
+
+# ===============================
+# Container Image Configuration
+# ===============================
+image:
+  repository: alert-history-go
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ===============================
+# Service Account Configuration
+# ===============================
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ===============================
+# Pod Security and Resource Configuration
+# ===============================
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 65534
+  runAsNonRoot: true
+  runAsUser: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# ===============================
+# Service Configuration
+# ===============================
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+  annotations: {}
+
+# ===============================
+# Ingress Configuration
+# ===============================
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: alert-history-go.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: alert-history-go-tls
+  #    hosts:
+  #      - alert-history-go.local
+
+# ===============================
+# Health Probes Configuration
+# ===============================
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+
+# ===============================
+# Autoscaling Configuration
+# ===============================
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# ===============================
+# Deployment Strategy
+# ===============================
+strategy:
+  type: RollingUpdate
+  maxUnavailable: 25%
+  maxSurge: 25%
+
+# ===============================
+# Graceful Shutdown Configuration
+# ===============================
+gracefulShutdown:
+  terminationGracePeriodSeconds: 30
+
+# ===============================
+# Database Configuration
+# ===============================
+database:
+  driver: postgres
+  host: localhost
+  port: 5432
+  database: alerthistory
+  username: dev
+  password: dev
+  sslMode: disable
+  maxConnections: 25
+  minConnections: 5
+  maxConnLifetime: "1h"
+  maxConnIdleTime: "30m"
+  connectTimeout: "10s"
+  queryTimeout: "30s"
+
+# ===============================
+# Redis Configuration
+# ===============================
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+  poolSize: 10
+  minIdleConns: 5
+  dialTimeout: "5s"
+  readTimeout: "3s"
+  writeTimeout: "3s"
+  maxRetries: 3
+  minRetryBackoff: "100ms"
+  maxRetryBackoff: "500ms"
+
+# ===============================
+# LLM Configuration
+# ===============================
+llm:
+  enabled: false
+  provider: openai
+  apiKey: ""
+  baseUrl: "https://api.openai.com/v1"
+  model: "gpt-3.5-turbo"
+  maxTokens: 1000
+  temperature: 0.7
+  timeout: "30s"
+  maxRetries: 3
+
+# ===============================
+# Logging Configuration
+# ===============================
+log:
+  level: debug
+  format: json
+  output: stdout
+  filename: ""
+  maxSize: 100
+  maxBackups: 3
+  maxAge: 28
+  compress: true
+
+# ===============================
+# Cache Configuration
+# ===============================
+cache:
+  defaultTtl: "1h"
+  maxTtl: "24h"
+  cleanupInterval: "10m"
+  maxKeys: 10000
+  enableMetrics: true
+
+# ===============================
+# Lock Configuration
+# ===============================
+lock:
+  ttl: "30s"
+  maxRetries: 3
+  retryInterval: "100ms"
+  acquireTimeout: "5s"
+  releaseTimeout: "2s"
+  valuePrefix: "lock"
+
+# ===============================
+# Metrics Configuration
+# ===============================
+metrics:
+  enabled: true
+  path: /metrics
+
+# ===============================
+# Server Configuration
+# ===============================
+server:
+  port: 8080
+  host: "0.0.0.0"
+  readTimeout: "30s"
+  writeTimeout: "30s"
+  idleTimeout: "120s"
+  gracefulShutdownTimeout: "30s"
+
+# ===============================
+# Application Configuration
+# ===============================
+app:
+  name: "alert-history"
+  version: "1.0.0"
+  environment: "development"
+  debug: true
+  timezone: "UTC"
+  maxWorkers: 10
+  workerTimeout: "5m"
+
+# ===============================
+# Scheduling Configuration
+# ===============================
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

@@ -1,0 +1,25 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.exporter.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}-exporter
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+    description: "PostgreSQL Exporter Service for Prometheus scraping (TN-98)"
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "alert-history.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  ports:
+  - name: metrics
+    port: 9187
+    targetPort: metrics
+    protocol: TCP
+{{- end }}

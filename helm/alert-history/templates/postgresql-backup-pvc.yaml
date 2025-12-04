@@ -1,0 +1,21 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "alert-history.postgresql.fullname" . }}-backup
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "alert-history.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-backup
+  annotations:
+    description: "PostgreSQL WAL archive and base backups storage (TN-98: PITR)"
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.backup.storage.size | quote }}
+  {{- if .Values.postgresql.backup.storage.storageClass }}
+  storageClassName: {{ .Values.postgresql.backup.storage.storageClass | quote }}
+  {{- end }}
+{{- end }}
