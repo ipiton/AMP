@@ -1,0 +1,463 @@
+{{/* TN-79: Alert List with Filtering (150% Quality Target) */}}
+{{ define "title" }}Alert List - Alertmanager++{{ end }}
+
+{{ define "content" }}
+<div class="alert-list-page">
+  <!-- ARIA Live Region for Dynamic Updates (WCAG 2.1 AA - 3.2.1) -->
+  <div id="alert-list-updates" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <h1>Alert List</h1>
+    <div class="header-actions">
+      <button class="btn btn-secondary" onclick="location.reload()" aria-label="Refresh alert list" data-shortcut="r">
+        🔄 Refresh
+      </button>
+      <a href="/ui/silences/create" class="btn btn-primary" aria-label="Create new silence" data-shortcut="shift+s">
+        🔕 Create Silence
+      </a>
+    </div>
+  </div>
+
+  <!-- Main Content Layout -->
+  <div class="alert-list-layout">
+    <!-- Filter Sidebar (collapsible on mobile) -->
+    <aside class="filter-sidebar" id="filter-sidebar" aria-label="Filter alerts">
+      <div class="filter-sidebar-header">
+        <h2>Filters</h2>
+        <button class="btn-icon" onclick="toggleFilterSidebar()" aria-label="Toggle filter sidebar" aria-expanded="true">
+          <span class="icon">✕</span>
+        </button>
+      </div>
+
+      {{ template "partials/filter-sidebar" .Data.Filters }}
+    </aside>
+
+    <!-- Alert List Content -->
+    <main class="alert-list-content" id="main-content">
+      <!-- Active Filters Display -->
+      <div class="active-filters" id="active-filters" aria-label="Active filters">
+        {{ if .Data.Filters }}
+        {{ $filters := .Data.Filters }}
+        <div class="filter-chips">
+          {{ if $filters.Status }}
+          <span class="filter-chip">
+            Status: {{ printf "%s" $filters.Status }}
+            <button class="chip-remove" onclick="removeFilter('status')" aria-label="Remove status filter">×</button>
+          </span>
+          {{ end }}
+          {{ if $filters.Severity }}
+          <span class="filter-chip">
+            Severity: {{ $filters.Severity }}
+            <button class="chip-remove" onclick="removeFilter('severity')" aria-label="Remove severity filter">×</button>
+          </span>
+          {{ end }}
+          {{ if $filters.Namespace }}
+          <span class="filter-chip">
+            Namespace: {{ $filters.Namespace }}
+            <button class="chip-remove" onclick="removeFilter('namespace')" aria-label="Remove namespace filter">×</button>
+          </span>
+          {{ end }}
+          <!-- TN-80: Classification Filter Chips -->
+          {{ if $filters.ClassificationSeverity }}
+          <span class="filter-chip">
+            Classification Severity: {{ $filters.ClassificationSeverity }}
+            <button class="chip-remove" onclick="removeFilter('classification_severity')" aria-label="Remove classification severity filter">×</button>
+          </span>
+          {{ end }}
+          {{ if or $filters.MinConfidence $filters.MaxConfidence }}
+          <span class="filter-chip">
+            Confidence: {{ if $filters.MinConfidence }}{{ mul $filters.MinConfidence 100 }}%{{ end }}{{ if and $filters.MinConfidence $filters.MaxConfidence }}-{{ end }}{{ if $filters.MaxConfidence }}{{ mul $filters.MaxConfidence 100 }}%{{ end }}
+            <button class="chip-remove" onclick="removeFilter('min_confidence'); removeFilter('max_confidence')" aria-label="Remove confidence filter">×</button>
+          </span>
+          {{ end }}
+          {{ if $filters.HasClassification }}
+          <span class="filter-chip">
+            Has Classification: {{ if $filters.HasClassification }}Yes{{ else }}No{{ end }}
+            <button class="chip-remove" onclick="removeFilter('has_classification')" aria-label="Remove has classification filter">×</button>
+          </span>
+          {{ end }}
+          {{ if $filters.ClassificationSource }}
+          <span class="filter-chip">
+            Classification Source: {{ $filters.ClassificationSource }}
+            <button class="chip-remove" onclick="removeFilter('classification_source')" aria-label="Remove classification source filter">×</button>
+          </span>
+          {{ end }}
+        </div>
+        <button class="btn-link" onclick="clearAllFilters()" aria-label="Clear all filters">Clear All</button>
+        {{ end }}
+      </div>
+
+      <!-- Alert List -->
+      <section class="alert-list-section" aria-labelledby="alerts-heading">
+        <div class="section-header">
+          <h2 id="alerts-heading">
+            Alerts
+            {{ if .Data.Total }}
+            <span class="count-badge">({{ .Data.Total }})</span>
+            {{ end }}
+          </h2>
+          <div class="section-actions">
+            <!-- Sorting Dropdown -->
+            <select id="sort-select" onchange="applySorting()" aria-label="Sort alerts">
+              <option value="starts_at:desc" {{ if eq .Data.Sorting.Field "starts_at" }}{{ if eq .Data.Sorting.Order "desc" }}selected{{ end }}{{ end }}>Newest First</option>
+              <option value="starts_at:asc" {{ if eq .Data.Sorting.Field "starts_at" }}{{ if eq .Data.Sorting.Order "asc" }}selected{{ end }}{{ end }}>Oldest First</option>
+              <option value="severity:desc" {{ if eq .Data.Sorting.Field "severity" }}{{ if eq .Data.Sorting.Order "desc" }}selected{{ end }}{{ end }}>Severity (High to Low)</option>
+              <option value="severity:asc" {{ if eq .Data.Sorting.Field "severity" }}{{ if eq .Data.Sorting.Order "asc" }}selected{{ end }}{{ end }}>Severity (Low to High)</option>
+              <!-- TN-80: Classification Sorting -->
+              <option value="classification_confidence:desc" {{ if eq .Data.Sorting.Field "classification_confidence" }}{{ if eq .Data.Sorting.Order "desc" }}selected{{ end }}{{ end }}>Confidence (High to Low)</option>
+              <option value="classification_confidence:asc" {{ if eq .Data.Sorting.Field "classification_confidence" }}{{ if eq .Data.Sorting.Order "asc" }}selected{{ end }}{{ end }}>Confidence (Low to High)</option>
+              <option value="classification_severity:desc" {{ if eq .Data.Sorting.Field "classification_severity" }}{{ if eq .Data.Sorting.Order "desc" }}selected{{ end }}{{ end }}>Classification Severity (High to Low)</option>
+              <option value="classification_severity:asc" {{ if eq .Data.Sorting.Field "classification_severity" }}{{ if eq .Data.Sorting.Order "asc" }}selected{{ end }}{{ end }}>Classification Severity (Low to High)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Loading Skeleton (150% Quality Enhancement) -->
+        <div class="loading-skeleton" id="loading-skeleton" style="display: none;" aria-label="Loading alerts" aria-live="polite">
+          <!-- Skeleton cards will be generated via JavaScript -->
+        </div>
+
+        {{ if .Data.Alerts }}
+        <div class="alert-list" role="list" aria-label="Alert list" id="alert-list-container">
+          {{ range .Data.Alerts }}
+            <div data-fingerprint="{{ .Fingerprint }}">
+              {{ template "partials/alert-card" . }}
+            </div>
+          {{ end }}
+        </div>
+        {{ else }}
+        <div class="empty-state" role="status" aria-live="polite">
+          <div class="empty-icon">📭</div>
+          <p>No alerts found</p>
+          <p class="empty-hint">Try adjusting your filters or check back later.</p>
+          <button class="btn btn-secondary" onclick="clearAllFilters()">Clear Filters</button>
+        </div>
+        {{ end }}
+      </section>
+
+      <!-- Pagination -->
+      {{ if .Data.TotalPages }}
+      {{ template "partials/pagination" .Data }}
+      {{ end }}
+    </main>
+  </div>
+</div>
+{{ end }}
+
+{{ define "extra_css" }}
+<link rel="stylesheet" href="/static/css/alert-list.css">
+<link rel="stylesheet" href="/static/css/components/alert-card.css">
+<link rel="stylesheet" href="/static/css/components/filter-sidebar.css">
+<link rel="stylesheet" href="/static/css/components/pagination.css">
+{{ end }}
+
+{{ define "extra_js" }}
+<!-- TN-78: Real-time Updates Client -->
+<script src="/static/js/realtime-client.js"></script>
+<script>
+// TN-79: Alert List JavaScript (150% Quality Target)
+
+// Loading Skeleton Management (150% Quality Enhancement)
+function showLoadingSkeleton() {
+  const skeleton = document.getElementById('loading-skeleton');
+  const container = document.getElementById('alert-list-container');
+  const emptyState = document.querySelector('.empty-state');
+
+  if (skeleton && container) {
+    // Generate skeleton cards
+    const skeletonHTML = Array.from({ length: 3 }, () => `
+      <div class="skeleton-card">
+        <div class="skeleton-header">
+          <div class="skeleton-line short"></div>
+          <div class="skeleton-badge skeleton-line"></div>
+        </div>
+        <div class="skeleton-line long"></div>
+        <div class="skeleton-line medium"></div>
+        <div class="skeleton-line short"></div>
+      </div>
+    `).join('');
+
+    skeleton.innerHTML = skeletonHTML;
+    skeleton.style.display = 'flex';
+    container.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'none';
+    announceUpdate('Loading alerts...');
+  }
+}
+
+function hideLoadingSkeleton() {
+  const skeleton = document.getElementById('loading-skeleton');
+  const container = document.getElementById('alert-list-container');
+  const emptyState = document.querySelector('.empty-state');
+
+  if (skeleton) skeleton.style.display = 'none';
+  if (container) container.style.display = 'flex';
+  if (emptyState) emptyState.style.display = 'block';
+}
+
+// Filter Sidebar Toggle (Mobile)
+function toggleFilterSidebar() {
+  const sidebar = document.getElementById('filter-sidebar');
+  const isExpanded = sidebar.getAttribute('aria-expanded') === 'true';
+  sidebar.setAttribute('aria-expanded', !isExpanded);
+  sidebar.classList.toggle('collapsed');
+}
+
+// Remove Filter
+function removeFilter(filterName) {
+  showLoadingSkeleton();
+  const url = new URL(window.location);
+  url.searchParams.delete(filterName);
+  window.location.href = url.toString();
+}
+
+// Clear All Filters
+function clearAllFilters() {
+  window.location.href = '/ui/alerts';
+}
+
+// Apply Sorting
+function applySorting() {
+  showLoadingSkeleton();
+  const select = document.getElementById('sort-select');
+  const [field, order] = select.value.split(':');
+  const url = new URL(window.location);
+  url.searchParams.set('sort_field', field);
+  url.searchParams.set('sort_order', order);
+  window.location.href = url.toString();
+}
+
+// Keyboard Shortcuts (WCAG 2.1 AA - 2.1.1 Keyboard Accessible)
+document.addEventListener('keydown', function(e) {
+  // Refresh: R key
+  if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const refreshBtn = document.querySelector('[data-shortcut="r"]');
+    if (refreshBtn && document.activeElement !== refreshBtn) {
+      e.preventDefault();
+      refreshBtn.click();
+    }
+  }
+
+  // Toggle Filters: F key
+  if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    toggleFilterSidebar();
+  }
+});
+
+// ARIA Live Region Updates
+function announceUpdate(message) {
+  const liveRegion = document.getElementById('alert-list-updates');
+  if (liveRegion) {
+    liveRegion.textContent = message;
+    setTimeout(() => {
+      liveRegion.textContent = '';
+    }, 1000);
+  }
+}
+
+// TN-80: Classification Toggle Handler
+function initClassificationToggles() {
+  const toggles = document.querySelectorAll('[data-classification-toggle]');
+  toggles.forEach(toggle => {
+    // Click handler
+    toggle.addEventListener('click', function() {
+      toggleClassificationDetails(this);
+    });
+
+    // Keyboard handler (Enter/Space)
+    toggle.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleClassificationDetails(this);
+      }
+    });
+  });
+}
+
+function toggleClassificationDetails(toggle) {
+  const fingerprint = toggle.getAttribute('data-fingerprint');
+  if (!fingerprint) return;
+
+  const details = document.getElementById(`classification-${fingerprint}`);
+  if (!details) return;
+
+  const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+
+  if (isExpanded) {
+    // Collapse
+    details.style.display = 'none';
+    toggle.setAttribute('aria-expanded', 'false');
+    announceUpdate(`Classification details collapsed for alert ${fingerprint}`);
+  } else {
+    // Expand
+    details.style.display = 'block';
+    toggle.setAttribute('aria-expanded', 'true');
+    announceUpdate(`Classification details expanded for alert ${fingerprint}`);
+  }
+}
+
+// Announce page load to screen readers
+document.addEventListener('DOMContentLoaded', function() {
+  const alertCount = {{ .Data.Total }};
+  announceUpdate(`Alert list loaded. ${alertCount} alerts found.`);
+
+  // TN-80: Initialize classification toggles
+  initClassificationToggles();
+
+  // TN-78: Initialize Real-time Updates Client
+  if (window.RealtimeClient) {
+    const realtimeClient = new RealtimeClient({
+      sseEndpoint: '/api/v2/events/stream',
+      wsEndpoint: '/ws/dashboard',
+    });
+
+    // Handle alert events
+    realtimeClient.eventBus.addEventListener('alert_created', function(e) {
+      handleAlertCreated(e.detail);
+    });
+
+    realtimeClient.eventBus.addEventListener('alert_resolved', function(e) {
+      handleAlertResolved(e.detail);
+    });
+
+    realtimeClient.eventBus.addEventListener('alert_firing', function(e) {
+      handleAlertFiring(e.detail);
+    });
+
+    realtimeClient.eventBus.addEventListener('stats_updated', function(e) {
+      handleStatsUpdated(e.detail);
+    });
+
+    // Connect to real-time stream
+    realtimeClient.connect();
+
+    // Store client globally for debugging
+    window.alertListRealtimeClient = realtimeClient;
+  }
+});
+
+// Handle alert created event
+function handleAlertCreated(event) {
+  const alert = event.data;
+  const alertList = document.querySelector('.alert-list');
+  if (!alertList) return;
+
+  // Check if alert matches current filters (simplified - could be enhanced)
+  if (matchesCurrentFilters(alert)) {
+    // Create alert card HTML (simplified - should use template)
+    const alertCard = createAlertCard(alert);
+    alertList.insertBefore(alertCard, alertList.firstChild);
+    announceUpdate(`New alert: ${alert.alertname || alert.labels?.alertname || 'Unknown'}`);
+  }
+
+  // Update total count
+  updateTotalCount(1);
+}
+
+// Handle alert resolved event
+function handleAlertResolved(event) {
+  const alert = event.data;
+  const fingerprint = alert.fingerprint || alert.labels?.fingerprint;
+  if (!fingerprint) return;
+
+  const alertCard = document.querySelector(`[data-fingerprint="${fingerprint}"]`);
+  if (alertCard) {
+    // Update status to resolved
+    const statusBadge = alertCard.querySelector('.alert-status');
+    if (statusBadge) {
+      statusBadge.textContent = 'resolved';
+      statusBadge.className = 'alert-status resolved';
+    }
+    announceUpdate(`Alert resolved: ${alert.alertname || 'Unknown'}`);
+  }
+}
+
+// Handle alert firing event
+function handleAlertFiring(event) {
+  const alert = event.data;
+  const fingerprint = alert.fingerprint || alert.labels?.fingerprint;
+  if (!fingerprint) return;
+
+  const alertCard = document.querySelector(`[data-fingerprint="${fingerprint}"]`);
+  if (alertCard) {
+    // Update status to firing
+    const statusBadge = alertCard.querySelector('.alert-status');
+    if (statusBadge) {
+      statusBadge.textContent = 'firing';
+      statusBadge.className = 'alert-status firing';
+    }
+    // Highlight updated card
+    alertCard.classList.add('updated');
+    setTimeout(() => alertCard.classList.remove('updated'), 2000);
+    announceUpdate(`Alert firing: ${alert.alertname || 'Unknown'}`);
+  }
+}
+
+// Handle stats updated event
+function handleStatsUpdated(event) {
+  const stats = event.data;
+  const countBadge = document.querySelector('.count-badge');
+  if (countBadge && stats.total_alerts !== undefined) {
+    countBadge.textContent = `(${stats.total_alerts})`;
+  }
+}
+
+// Check if alert matches current filters (simplified)
+function matchesCurrentFilters(alert) {
+  // Get current filters from URL
+  const url = new URL(window.location);
+  const status = url.searchParams.get('status');
+  const severity = url.searchParams.get('severity');
+  const namespace = url.searchParams.get('namespace');
+
+  // Check status
+  if (status && alert.status !== status) {
+    return false;
+  }
+
+  // Check severity
+  if (severity && alert.labels?.severity !== severity) {
+    return false;
+  }
+
+  // Check namespace
+  if (namespace && alert.labels?.namespace !== namespace) {
+    return false;
+  }
+
+  return true;
+}
+
+// Create alert card HTML (simplified - should use template)
+function createAlertCard(alert) {
+  const div = document.createElement('div');
+  div.className = 'alert-card';
+  div.setAttribute('data-fingerprint', alert.fingerprint || alert.labels?.fingerprint || '');
+  div.innerHTML = `
+    <div class="alert-header">
+      <span class="alert-status ${alert.status || 'firing'}">${alert.status || 'firing'}</span>
+      <span class="alert-severity">${alert.labels?.severity || 'info'}</span>
+    </div>
+    <div class="alert-name">${alert.alertname || alert.labels?.alertname || 'Unknown Alert'}</div>
+    <div class="alert-summary">${alert.summary || alert.annotations?.summary || 'No summary'}</div>
+    <div class="alert-footer">
+      <span class="alert-time">${new Date(alert.startsAt || Date.now()).toLocaleString()}</span>
+      <a href="/ui/alerts/${alert.fingerprint || ''}" class="alert-link">Details →</a>
+    </div>
+  `;
+  return div;
+}
+
+// Update total count
+function updateTotalCount(delta) {
+  const countBadge = document.querySelector('.count-badge');
+  if (countBadge) {
+    const current = parseInt(countBadge.textContent.match(/\d+/)?.[0] || '0');
+    const newTotal = Math.max(0, current + delta);
+    countBadge.textContent = `(${newTotal})`;
+  }
+}
+</script>
+{{ end }}

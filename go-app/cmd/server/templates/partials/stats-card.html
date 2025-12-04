@@ -1,0 +1,16 @@
+{{/* Stats Card Partial - TN-77 Modern Dashboard */}}
+{{ define "partials/stats-card" }}
+<div class="stat-card {{ if .Severity }}severity-{{ .Severity }}{{ end }}" role="article">
+  <div class="stat-icon" aria-hidden="true">{{ .Icon }}</div>
+  <div class="stat-content">
+    <div class="stat-value">{{ .Value }}</div>
+    <div class="stat-label">{{ .Label }}</div>
+    {{ if .Trend }}
+    <div class="stat-trend {{ if gt .Trend 0.0 }}positive{{ else }}negative{{ end }}">
+      {{ if gt .Trend 0.0 }}↑{{ else }}↓{{ end }}
+      {{ printf "%.1f%%" (mul .Trend 100) }}
+    </div>
+    {{ end }}
+  </div>
+</div>
+{{ end }}

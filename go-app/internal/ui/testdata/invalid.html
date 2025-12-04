@@ -1,0 +1,14 @@
+{{ define "test-invalid" }}
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>{{ .Title }}</title>
+</head>
+
+<body>
+	<h1>{{ .UndefinedVariable | invalidFunction }}</h1>
+	{{ range .NonExistentSlice }}
+	<p>{{ . }}</p>
+	{{ end
+	{{ end }}

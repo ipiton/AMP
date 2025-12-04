@@ -1,0 +1,242 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Alert History - Silence Management Dashboard">
+    <title>{{block "title" .}}Silence Management{{end}} - Alert History</title>
+
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="/api">
+    <link rel="dns-prefetch" href="/api">
+
+    <!-- Critical CSS (inlined for First Contentful Paint) -->
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --color-primary: #1976d2;
+            --color-primary-dark: #1565c0;
+            --color-success: #4caf50;
+            --color-danger: #f44336;
+            --color-warning: #ff9800;
+            --color-info: #2196f3;
+            --color-bg: #ffffff;
+            --color-bg-secondary: #f5f5f5;
+            --color-text: #212121;
+            --color-text-secondary: #757575;
+            --color-border: #e0e0e0;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            color: var(--color-text);
+            background-color: var(--color-bg);
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: var(--spacing-md); }
+        .header { background-color: var(--color-primary); color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .navbar { display: flex; align-items: center; justify-content: space-between; padding: var(--spacing-md) 0; }
+        .logo { font-size: 24px; font-weight: bold; color: white; text-decoration: none; }
+        .nav-links { display: flex; gap: var(--spacing-lg); list-style: none; }
+        .nav-links a { color: white; text-decoration: none; transition: opacity 0.15s; }
+        .nav-links a:hover { opacity: 0.8; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 14px; font-weight: bold; }
+        .badge-success { background-color: var(--color-success); color: white; }
+        .badge-info { background-color: var(--color-info); color: white; }
+        .badge-secondary { background-color: var(--color-text-secondary); color: white; }
+        .main-content { min-height: calc(100vh - 200px); padding: var(--spacing-lg) 0; }
+        .footer { background-color: var(--color-bg-secondary); padding: var(--spacing-md); text-align: center; color: var(--color-text-secondary); }
+        .toast { position: fixed; top: 20px; right: 20px; padding: var(--spacing-md); border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; opacity: 0; transition: opacity 0.3s; }
+        .toast.show { opacity: 1; }
+        .toast-success { background-color: var(--color-success); color: white; }
+        .toast-error { background-color: var(--color-danger); color: white; }
+    </style>
+
+    <!-- Load full CSS async -->
+    <link rel="stylesheet" href="/static/css/main.css" media="print" onload="this.media='all'">
+
+    <!-- PWA manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#1976d2">
+
+    <!-- Favicon -->
+    <link rel="icon" href="/static/images/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+    <!-- Skip to content link (accessibility) -->
+    <a href="#main-content" class="skip-link sr-only">Skip to main content</a>
+
+    <header class="header">
+        <div class="container">
+            <nav class="navbar">
+                <a href="/ui/silences" class="logo">🔕 Silence Management</a>
+                <ul class="nav-links" role="navigation">
+                    <li><a href="/ui/silences">Dashboard</a></li>
+                    <li><a href="/ui/silences/create">Create</a></li>
+                    <li><a href="/ui/silences/templates">Templates</a></li>
+                    <li><a href="/ui/silences/analytics">Analytics</a></li>
+                    <li><a href="/metrics" target="_blank">Metrics</a></li>
+                </ul>
+                <div class="badge badge-info" id="active-silences-badge" aria-live="polite" aria-label="Active silences count">0</div>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main-content" id="main-content">
+        <div class="container">
+            {{block "content" .}}{{end}}
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 Alert History Service. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- Toast container -->
+    <div id="toast-container"></div>
+
+    <!-- Load JavaScript async -->
+    <script src="/static/js/main.js" defer></script>
+
+    <!-- WebSocket connection script -->
+    <script>
+        // WebSocket for real-time updates
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/silences`;
+        let ws;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+
+        function connectWebSocket() {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                console.error('Max WebSocket reconnect attempts reached');
+                return;
+            }
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                updateBadge();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketEvent(data);
+                } catch (error) {
+                    console.error('Failed to parse WebSocket message:', error);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                reconnectAttempts++;
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            };
+        }
+
+        function handleWebSocketEvent(event) {
+            console.log('WebSocket event received:', event.type);
+
+            switch(event.type) {
+                case 'silence_created':
+                    showToast(`Silence created by ${event.data.creator}`, 'success');
+                    refreshDashboard();
+                    updateBadge();
+                    break;
+                case 'silence_updated':
+                    showToast(`Silence ${event.data.id} updated`, 'success');
+                    refreshDashboard();
+                    break;
+                case 'silence_deleted':
+                    showToast(`Silence deleted`, 'success');
+                    refreshDashboard();
+                    updateBadge();
+                    break;
+                case 'silence_expired':
+                    showToast(`Silence expired`, 'info');
+                    refreshDashboard();
+                    updateBadge();
+                    break;
+                default:
+                    console.log('Unknown event type:', event.type);
+            }
+        }
+
+        // Toast notification function
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            toast.setAttribute('role', 'alert');
+            toast.setAttribute('aria-live', 'polite');
+
+            container.appendChild(toast);
+
+            // Fade in
+            setTimeout(() => toast.classList.add('show'), 10);
+
+            // Remove after 5s
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => container.removeChild(toast), 300);
+            }, 5000);
+        }
+
+        // Update active silences badge
+        async function updateBadge() {
+            try {
+                const resp = await fetch('/api/v2/silences?status=active&limit=0');
+                const data = await resp.json();
+                const badge = document.getElementById('active-silences-badge');
+                if (badge) {
+                    badge.textContent = data.total || 0;
+                }
+            } catch (error) {
+                console.error('Failed to update badge:', error);
+            }
+        }
+
+        // Refresh dashboard (if on dashboard page)
+        function refreshDashboard() {
+            if (window.location.pathname === '/ui/silences') {
+                // Reload page or update table via AJAX
+                // For MVP, just reload the page
+                setTimeout(() => window.location.reload(), 500);
+            }
+        }
+
+        // Connect on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            updateBadge();
+
+            // Update badge every 30 seconds (fallback)
+            setInterval(updateBadge, 30000);
+        });
+
+        // Close WebSocket on page unload
+        window.addEventListener('beforeunload', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>
+{{end}}

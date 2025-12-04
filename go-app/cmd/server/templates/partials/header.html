@@ -1,0 +1,38 @@
+{{ define "partials/header" }}
+<header class="site-header">
+    <div class="header-container">
+        <!-- Logo -->
+        <div class="header-logo">
+            <a href="/">
+                <span class="logo-icon">🚨</span>
+                <span class="logo-text">Alertmanager++</span>
+            </a>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="header-nav">
+            <a href="/dashboard" class="nav-link">Dashboard</a>
+            <a href="/alerts" class="nav-link">Alerts</a>
+            <a href="/silences" class="nav-link">Silences</a>
+            <a href="/groups" class="nav-link">Groups</a>
+            <a href="/receivers" class="nav-link">Receivers</a>
+        </nav>
+
+        <!-- User Menu -->
+        <div class="header-user">
+            {{ if .User }}
+            <div class="user-menu">
+                {{ if .User.Avatar }}
+                <img src="{{ .User.Avatar }}" alt="{{ .User.Name }}" class="user-avatar">
+                {{ else }}
+                <div class="user-avatar-default">{{ .User.Name | truncate 2 | upper }}</div>
+                {{ end }}
+                <span class="user-name">{{ .User.Name }}</span>
+            </div>
+            {{ else }}
+            <a href="/login" class="btn-login">Login</a>
+            {{ end }}
+        </div>
+    </div>
+</header>
+{{ end }}

@@ -1,0 +1,414 @@
+{{template "base" .}}
+
+{{define "title"}}Silence Templates{{end}}
+
+{{define "content"}}
+<div class="templates-page">
+    <header class="page-header">
+        <div>
+            <h1>Silence Templates</h1>
+            <p class="page-description">Pre-configured silence templates for common scenarios</p>
+        </div>
+        <a href="/ui/silences/create" class="btn btn-primary">+ Create Custom Silence</a>
+    </header>
+
+    <div class="templates-grid">
+        {{range .Templates}}
+        <div class="template-card" data-template-id="{{.ID}}">
+            <div class="template-icon">{{.Icon}}</div>
+            <h3 class="template-title">{{.Name}}</h3>
+            <p class="template-description">{{.Description}}</p>
+
+            <div class="template-details">
+                <div class="template-detail">
+                    <span class="detail-label">Duration:</span>
+                    <span class="detail-value">{{humanDuration .Duration}}</span>
+                </div>
+                <div class="template-detail">
+                    <span class="detail-label">Matchers:</span>
+                    <span class="detail-value">{{len .Matchers}}</span>
+                </div>
+            </div>
+
+            <div class="template-matchers">
+                {{range .Matchers}}
+                <div class="matcher-preview">
+                    <code>{{.Name}} {{.Operator}} {{.Value}}</code>
+                    {{if .IsRegex}}
+                    <span class="regex-badge">regex</span>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+
+            <div class="template-actions">
+                <a href="/ui/silences/create?template={{.ID}}" class="btn btn-primary btn-block">
+                    Use Template
+                </a>
+                <button type="button" class="btn btn-secondary btn-block btn-preview" data-template-id="{{.ID}}">
+                    Preview
+                </button>
+            </div>
+        </div>
+        {{end}}
+    </div>
+
+    <!-- Empty State (if no templates) -->
+    {{if eq (len .Templates) 0}}
+    <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <p>No templates available</p>
+        <p class="empty-description">Create custom silence templates to save time on repetitive tasks</p>
+        <a href="/ui/silences/create" class="btn btn-primary">Create First Template</a>
+    </div>
+    {{end}}
+</div>
+
+<!-- Preview Modal -->
+<div class="modal" id="preview-modal" style="display: none;" role="dialog" aria-labelledby="preview-title">
+    <div class="modal-overlay"></div>
+    <div class="modal-content modal-lg">
+        <div class="modal-header">
+            <h2 id="preview-title">Template Preview</h2>
+            <button type="button" class="modal-close" aria-label="Close modal">×</button>
+        </div>
+        <div class="modal-body" id="preview-content">
+            <!-- Dynamic content -->
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('preview-modal').style.display='none'">Close</button>
+            <a href="#" id="use-template-btn" class="btn btn-primary">Use Template</a>
+        </div>
+    </div>
+</div>
+
+<style>
+    .templates-page {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 32px;
+        gap: 16px;
+    }
+    .page-header h1 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    .page-description {
+        color: var(--color-text-secondary);
+        font-size: 16px;
+    }
+    .templates-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 24px;
+    }
+    .template-card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 24px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        transition: all 0.2s;
+        display: flex;
+        flex-direction: column;
+    }
+    .template-card:hover {
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+    }
+    .template-icon {
+        font-size: 48px;
+        text-align: center;
+        margin-bottom: 16px;
+    }
+    .template-title {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 8px;
+        text-align: center;
+    }
+    .template-description {
+        font-size: 14px;
+        color: var(--color-text-secondary);
+        text-align: center;
+        margin-bottom: 16px;
+        flex-grow: 1;
+    }
+    .template-details {
+        display: flex;
+        justify-content: space-around;
+        padding: 12px 0;
+        border-top: 1px solid var(--color-border);
+        border-bottom: 1px solid var(--color-border);
+        margin-bottom: 16px;
+    }
+    .template-detail {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+    }
+    .detail-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+        font-weight: 500;
+    }
+    .detail-value {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--color-primary);
+    }
+    .template-matchers {
+        margin-bottom: 16px;
+    }
+    .matcher-preview {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        background-color: var(--color-bg-secondary);
+        border-radius: 4px;
+        margin-bottom: 4px;
+        font-size: 13px;
+    }
+    .matcher-preview code {
+        font-family: monospace;
+        flex-grow: 1;
+    }
+    .regex-badge {
+        padding: 2px 6px;
+        background-color: var(--color-info);
+        color: white;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 500;
+    }
+    .template-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .btn-block {
+        width: 100%;
+        text-align: center;
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 64px 32px;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .empty-icon {
+        font-size: 64px;
+        margin-bottom: 16px;
+    }
+    .empty-state p {
+        font-size: 18px;
+        color: var(--color-text-secondary);
+        margin-bottom: 8px;
+    }
+    .empty-description {
+        font-size: 14px !important;
+        margin-bottom: 24px !important;
+    }
+
+    /* Modal */
+    .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-overlay {
+        position: absolute;
+        inset: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+    .modal-content {
+        position: relative;
+        background-color: white;
+        border-radius: 8px;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+    }
+    .modal-lg {
+        max-width: 800px;
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 24px;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .modal-header h2 {
+        font-size: 24px;
+        font-weight: 600;
+    }
+    .modal-close {
+        font-size: 32px;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        color: var(--color-text-secondary);
+        line-height: 1;
+    }
+    .modal-close:hover {
+        color: var(--color-text);
+    }
+    .modal-body {
+        padding: 24px;
+        overflow-y: auto;
+    }
+    .modal-footer {
+        display: flex;
+        gap: 16px;
+        justify-content: flex-end;
+        padding: 16px 24px;
+        border-top: 1px solid var(--color-border);
+    }
+
+    /* Buttons */
+    .btn {
+        display: inline-block;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+    .btn-primary {
+        background-color: var(--color-primary);
+        color: white;
+    }
+    .btn-primary:hover {
+        background-color: var(--color-primary-dark);
+    }
+    .btn-secondary {
+        background-color: var(--color-bg-secondary);
+        color: var(--color-text);
+    }
+    .btn-secondary:hover {
+        background-color: var(--color-border);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .page-header {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .templates-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<script>
+    // Template data (embedded from Go)
+    const templates = {
+        {{range .Templates}}
+        "{{.ID}}": {
+            id: "{{.ID}}",
+            name: "{{.Name}}",
+            description: "{{.Description}}",
+            icon: "{{.Icon}}",
+            duration: "{{humanDuration .Duration}}",
+            matchers: [
+                {{range .Matchers}}
+                {
+                    name: "{{.Name}}",
+                    operator: "{{.Operator}}",
+                    value: "{{.Value}}",
+                    isRegex: {{.IsRegex}}
+                },
+                {{end}}
+            ]
+        },
+        {{end}}
+    };
+
+    // Preview button handlers
+    document.querySelectorAll('.btn-preview').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const templateId = btn.dataset.templateId;
+            const template = templates[templateId];
+
+            if (!template) return;
+
+            // Populate modal content
+            const content = document.getElementById('preview-content');
+            content.innerHTML = `
+                <div class="preview-section">
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <div style="font-size: 64px; margin-bottom: 16px;">${template.icon}</div>
+                        <h3 style="font-size: 24px; margin-bottom: 8px;">${template.name}</h3>
+                        <p style="color: var(--color-text-secondary);">${template.description}</p>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; padding: 16px; background-color: var(--color-bg-secondary); border-radius: 4px;">
+                        <div>
+                            <div style="font-size: 11px; color: var(--color-text-secondary); text-transform: uppercase; margin-bottom: 4px;">Duration</div>
+                            <div style="font-size: 18px; font-weight: 600; color: var(--color-primary);">${template.duration}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 11px; color: var(--color-text-secondary); text-transform: uppercase; margin-bottom: 4px;">Matchers</div>
+                            <div style="font-size: 18px; font-weight: 600; color: var(--color-primary);">${template.matchers.length}</div>
+                        </div>
+                    </div>
+
+                    <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">Matchers</h4>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        ${template.matchers.map(m => `
+                            <div style="padding: 12px; background-color: var(--color-bg-secondary); border-radius: 4px; font-family: monospace; font-size: 14px;">
+                                <strong>${m.name}</strong> ${m.operator} <code style="background-color: white; padding: 2px 6px; border-radius: 3px;">${m.value}</code>
+                                ${m.isRegex ? '<span style="margin-left: 8px; padding: 2px 6px; background-color: var(--color-info); color: white; border-radius: 3px; font-size: 11px;">regex</span>' : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            // Update "Use Template" button link
+            document.getElementById('use-template-btn').href = `/ui/silences/create?template=${templateId}`;
+
+            // Show modal
+            document.getElementById('preview-modal').style.display = 'flex';
+        });
+    });
+
+    // Close modal
+    document.querySelector('.modal-close').addEventListener('click', () => {
+        document.getElementById('preview-modal').style.display = 'none';
+    });
+
+    document.querySelector('.modal-overlay').addEventListener('click', () => {
+        document.getElementById('preview-modal').style.display = 'none';
+    });
+
+    // Keyboard shortcut (Escape to close modal)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.getElementById('preview-modal').style.display = 'none';
+        }
+    });
+</script>
+{{end}}

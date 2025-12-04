@@ -1,0 +1,15 @@
+{{/* Silence Card Partial - TN-77 Modern Dashboard */}}
+{{ define "partials/silence-card" }}
+<div class="silence-card" role="listitem">
+  <div class="silence-header">
+    <span class="silence-creator">{{ .Creator }}</span>
+    <span class="silence-expires">Expires {{ timeAgo .EndsAt }}</span>
+  </div>
+  <div class="silence-comment">{{ truncate (default "No comment" .Comment) 150 }}</div>
+  <div class="silence-matchers">
+    {{ range .Matchers }}
+    <span class="matcher-badge">{{ .Name }}{{ .Operator }}{{ .Value }}</span>
+    {{ end }}
+  </div>
+</div>
+{{ end }}

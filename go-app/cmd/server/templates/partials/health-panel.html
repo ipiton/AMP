@@ -1,0 +1,30 @@
+{{/* Health Panel Partial - TN-77 Modern Dashboard */}}
+{{ define "partials/health-panel" }}
+<div class="health-panel">
+  <div class="health-overall status-{{ .Overall }}">
+    <span class="health-icon">
+      {{ if eq .Overall "healthy" }}✅{{ else if eq .Overall "degraded" }}⚠️{{ else }}❌{{ end }}
+    </span>
+    <span class="health-label">Overall: {{ .Overall }}</span>
+  </div>
+
+  <div class="health-components">
+    {{ range .Components }}
+    <div class="health-component status-{{ .Status }}">
+      <div class="component-header">
+        <span class="component-name">{{ .Name }}</span>
+        <span class="component-status">
+          {{ if eq .Status "healthy" }}🟢{{ else if eq .Status "degraded" }}🟡{{ else }}🔴{{ end }}
+        </span>
+      </div>
+      <div class="component-details">
+        <span class="component-latency">{{ printf "%.1fms" .Latency }}</span>
+        {{ if .Message }}
+        <span class="component-message">{{ .Message }}</span>
+        {{ end }}
+      </div>
+    </div>
+    {{ end }}
+  </div>
+</div>
+{{ end }}

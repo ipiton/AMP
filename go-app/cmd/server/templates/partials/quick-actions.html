@@ -1,0 +1,27 @@
+{{/* Quick Actions Partial - TN-77 Modern Dashboard (150% Quality) */}}
+{{ define "partials/quick-actions" }}
+<div class="quick-actions" role="group" aria-label="Quick actions">
+  <a href="/ui/silences/create" class="action-button" data-shortcut="shift+s" aria-label="Create silence (Shift+S)">
+    <span class="action-icon" aria-hidden="true">🔕</span>
+    <span class="action-label">Create Silence</span>
+    <span class="action-shortcut" aria-label="Keyboard shortcut: Shift+S">Shift+S</span>
+  </a>
+
+  <a href="/ui/alerts" class="action-button" data-shortcut="shift+a" aria-label="Search alerts (Shift+A)">
+    <span class="action-icon" aria-hidden="true">🔍</span>
+    <span class="action-label">Search Alerts</span>
+    <span class="action-shortcut" aria-label="Keyboard shortcut: Shift+A">Shift+A</span>
+  </a>
+
+  <a href="/ui/settings" class="action-button" data-shortcut="shift+comma" aria-label="Open settings (Shift+,)">
+    <span class="action-icon" aria-hidden="true">⚙️</span>
+    <span class="action-label">Settings</span>
+    <span class="action-shortcut" aria-label="Keyboard shortcut: Shift+Comma">Shift+,</span>
+  </a>
+
+  <a href="/metrics" class="action-button" target="_blank" rel="noopener noreferrer" aria-label="View metrics (opens in new tab)">
+    <span class="action-icon" aria-hidden="true">📊</span>
+    <span class="action-label">Metrics</span>
+  </a>
+</div>
+{{ end }}

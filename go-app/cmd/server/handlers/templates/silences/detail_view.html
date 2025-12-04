@@ -1,0 +1,527 @@
+{{template "base" .}}
+
+{{define "title"}}Silence Details{{end}}
+
+{{define "content"}}
+<div class="detail-page">
+    <header class="detail-header">
+        <div class="detail-title">
+            <h1>Silence Details</h1>
+            <div class="detail-id">
+                <span class="label">ID:</span>
+                <code>{{.Silence.ID}}</code>
+            </div>
+        </div>
+        <div class="detail-actions">
+            <a href="/ui/silences/{{.Silence.ID}}/edit" class="btn btn-secondary">✏️ Edit</a>
+            <button type="button" id="delete-btn" class="btn btn-danger">🗑️ Delete</button>
+            <a href="/ui/silences" class="btn btn-link">← Back</a>
+        </div>
+    </header>
+
+    <!-- Status Badge -->
+    <div class="detail-status">
+        {{statusBadge .Silence.Status}}
+        {{if eq .Silence.Status "active"}}
+        <span class="status-indicator">Currently Active</span>
+        {{else if eq .Silence.Status "pending"}}
+        <span class="status-indicator">Will activate at {{formatTime .Silence.StartsAt}}</span>
+        {{else}}
+        <span class="status-indicator">Expired</span>
+        {{end}}
+    </div>
+
+    <!-- Basic Info Section -->
+    <section class="detail-section">
+        <h2>Basic Information</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Creator</span>
+                <span class="info-value">{{.Silence.CreatedBy}}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Created At</span>
+                <span class="info-value">
+                    <time datetime="{{.Silence.CreatedAt}}">{{formatDateTime .Silence.CreatedAt}}</time>
+                    <small>({{timeAgo .Silence.CreatedAt}})</small>
+                </span>
+            </div>
+            {{if not .Silence.UpdatedAt.IsZero}}
+            <div class="info-item">
+                <span class="info-label">Updated At</span>
+                <span class="info-value">
+                    <time datetime="{{.Silence.UpdatedAt}}">{{formatDateTime .Silence.UpdatedAt}}</time>
+                    <small>({{timeAgo .Silence.UpdatedAt}})</small>
+                </span>
+            </div>
+            {{end}}
+        </div>
+    </section>
+
+    <!-- Time Range Section -->
+    <section class="detail-section">
+        <h2>Time Range</h2>
+        <div class="time-range-visual">
+            <div class="time-point">
+                <span class="time-label">Starts</span>
+                <time datetime="{{.Silence.StartsAt}}">{{formatDateTime .Silence.StartsAt}}</time>
+            </div>
+            <div class="time-arrow">→</div>
+            <div class="time-point">
+                <span class="time-label">Ends</span>
+                <time datetime="{{.Silence.EndsAt}}">{{formatDateTime .Silence.EndsAt}}</time>
+            </div>
+            <div class="time-duration">
+                <span class="duration-label">Duration:</span>
+                <span class="duration-value">{{humanDuration (sub .Silence.EndsAt .Silence.StartsAt)}}</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Comment Section -->
+    <section class="detail-section">
+        <h2>Comment</h2>
+        <div class="comment-box">
+            {{.Silence.Comment}}
+        </div>
+    </section>
+
+    <!-- Matchers Section -->
+    <section class="detail-section">
+        <h2>Matchers ({{len .Silence.Matchers}})</h2>
+        <div class="matchers-list">
+            {{range .Silence.Matchers}}
+            <div class="matcher-card">
+                <span class="matcher-name">{{.Name}}</span>
+                <span class="matcher-operator">{{.Type}}</span>
+                <span class="matcher-value">{{.Value}}</span>
+                {{if .IsRegex}}
+                <span class="matcher-badge">Regex</span>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+    </section>
+
+    <!-- Matched Alerts Section -->
+    <section class="detail-section">
+        <h2>Matched Alerts</h2>
+        <div class="matched-alerts" id="matched-alerts">
+            <div class="alert-count">
+                <span class="count-number">{{.MatchedCount}}</span>
+                <span class="count-label">alerts currently silenced</span>
+            </div>
+            {{if gt .MatchedCount 0}}
+            <a href="/ui/silences?silence_id={{.Silence.ID}}" class="btn btn-secondary">
+                View Silenced Alerts
+            </a>
+            {{end}}
+        </div>
+    </section>
+
+    <!-- Quick Actions -->
+    <section class="detail-section">
+        <h2>Quick Actions</h2>
+        <div class="quick-actions">
+            <button type="button" id="extend-btn" class="action-card">
+                <span class="action-icon">⏰</span>
+                <span class="action-title">Extend Duration</span>
+                <span class="action-desc">Add more time to this silence</span>
+            </button>
+            <button type="button" id="clone-btn" class="action-card">
+                <span class="action-icon">📋</span>
+                <span class="action-title">Clone Silence</span>
+                <span class="action-desc">Create a copy with same matchers</span>
+            </button>
+        </div>
+    </section>
+</div>
+
+<!-- Extend Modal -->
+<div class="modal" id="extend-modal" style="display: none;" role="dialog" aria-labelledby="extend-modal-title">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+        <h2 id="extend-modal-title">Extend Silence</h2>
+        <form id="extend-form">
+            <div class="form-group">
+                <label for="extend-duration">Add Duration</label>
+                <select id="extend-duration" class="form-control">
+                    <option value="3600">1 hour</option>
+                    <option value="14400">4 hours</option>
+                    <option value="28800">8 hours</option>
+                    <option value="86400">24 hours</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('extend-modal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Extend</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .detail-page {
+        max-width: 1000px;
+        margin: 0 auto;
+    }
+    .detail-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 24px;
+        gap: 16px;
+    }
+    .detail-title h1 {
+        font-size: 32px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    .detail-id {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 14px;
+        color: var(--color-text-secondary);
+    }
+    .detail-id code {
+        background-color: var(--color-bg-secondary);
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: monospace;
+        font-size: 12px;
+    }
+    .detail-actions {
+        display: flex;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+    .detail-status {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        padding: 16px;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 24px;
+    }
+    .status-indicator {
+        font-size: 14px;
+        color: var(--color-text-secondary);
+    }
+    .detail-section {
+        background-color: white;
+        padding: 24px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 24px;
+    }
+    .detail-section h2 {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 16px;
+    }
+    .info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .info-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .info-value {
+        font-size: 14px;
+    }
+    .info-value small {
+        color: var(--color-text-secondary);
+        margin-left: 8px;
+    }
+    .time-range-visual {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 16px;
+        background-color: var(--color-bg-secondary);
+        border-radius: 4px;
+    }
+    .time-point {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .time-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+    }
+    .time-arrow {
+        font-size: 24px;
+        color: var(--color-text-secondary);
+    }
+    .time-duration {
+        margin-left: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        text-align: right;
+    }
+    .duration-label {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+    }
+    .duration-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--color-primary);
+    }
+    .comment-box {
+        padding: 16px;
+        background-color: var(--color-bg-secondary);
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .matchers-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 12px;
+    }
+    .matcher-card {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+        background-color: var(--color-bg-secondary);
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    .matcher-name {
+        font-weight: 500;
+    }
+    .matcher-operator {
+        color: var(--color-primary);
+        font-weight: 600;
+    }
+    .matcher-value {
+        font-family: monospace;
+        background-color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+    }
+    .matcher-badge {
+        margin-left: auto;
+        padding: 2px 6px;
+        background-color: var(--color-info);
+        color: white;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+    .matched-alerts {
+        text-align: center;
+        padding: 32px;
+    }
+    .alert-count {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+    .count-number {
+        font-size: 48px;
+        font-weight: 600;
+        color: var(--color-primary);
+    }
+    .count-label {
+        font-size: 14px;
+        color: var(--color-text-secondary);
+    }
+    .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    .action-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 24px;
+        background-color: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .action-card:hover {
+        background-color: white;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .action-icon {
+        font-size: 32px;
+    }
+    .action-title {
+        font-weight: 600;
+    }
+    .action-desc {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        text-align: center;
+    }
+
+    /* Modal */
+    .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-overlay {
+        position: absolute;
+        inset: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+    .modal-content {
+        position: relative;
+        background-color: white;
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+    }
+    .form-group {
+        margin-bottom: 16px;
+    }
+    .form-group label {
+        display: block;
+        font-weight: 500;
+        margin-bottom: 8px;
+    }
+    .form-control {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+    }
+    .modal-actions {
+        display: flex;
+        gap: 16px;
+        justify-content: flex-end;
+        margin-top: 24px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .detail-header {
+            flex-direction: column;
+        }
+        .time-range-visual {
+            flex-direction: column;
+            text-align: center;
+        }
+        .time-duration {
+            margin-left: 0;
+            text-align: center;
+        }
+    }
+</style>
+
+<script>
+    // Delete button
+    document.getElementById('delete-btn').addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete this silence? This action cannot be undone.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/v2/silences/{{.Silence.ID}}', {
+                method: 'DELETE',
+            });
+
+            if (response.ok) {
+                window.showToast('Silence deleted successfully', 'success');
+                setTimeout(() => {
+                    window.location.href = '/ui/silences';
+                }, 500);
+            } else {
+                const error = await response.text();
+                alert(`Failed to delete: ${error}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    });
+
+    // Extend button
+    document.getElementById('extend-btn').addEventListener('click', () => {
+        document.getElementById('extend-modal').style.display = 'flex';
+    });
+
+    document.getElementById('extend-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const duration = parseInt(document.getElementById('extend-duration').value);
+        const currentEnd = new Date('{{.Silence.EndsAt}}');
+        const newEnd = new Date(currentEnd.getTime() + duration * 1000);
+
+        try {
+            const response = await fetch('/api/v2/silences/{{.Silence.ID}}', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    endsAt: newEnd.toISOString(),
+                }),
+            });
+
+            if (response.ok) {
+                window.showToast('Silence extended successfully', 'success');
+                setTimeout(() => window.location.reload(), 500);
+            } else {
+                const error = await response.json();
+                alert(`Failed to extend: ${error.message || response.statusText}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+
+        document.getElementById('extend-modal').style.display = 'none';
+    });
+
+    // Clone button
+    document.getElementById('clone-btn').addEventListener('click', () => {
+        window.location.href = '/ui/silences/create?clone={{.Silence.ID}}';
+    });
+
+    // Auto-refresh matched alerts count every 10 seconds
+    setInterval(async () => {
+        try {
+            const response = await fetch('/api/v2/silences/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ silenceId: '{{.Silence.ID}}' }),
+            });
+            const data = await response.json();
+            if (data.matchedCount !== undefined) {
+                document.querySelector('.count-number').textContent = data.matchedCount;
+            }
+        } catch (error) {
+            console.error('Failed to refresh matched count:', error);
+        }
+    }, {{mul .RefreshRate 1000}});
+</script>
+{{end}}

@@ -1,0 +1,200 @@
+{{/* TN-77: Modern Dashboard Page (150% Quality Target) */}}
+{{ define "title" }}Dashboard - Alertmanager++{{ end }}
+
+{{ define "content" }}
+<div class="dashboard-page">
+  <!-- ARIA Live Region for Dynamic Updates (WCAG 2.1 AA - 3.2.1) -->
+  <div id="dashboard-updates" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <h1>Dashboard</h1>
+    <div class="header-actions">
+      <button class="btn btn-secondary" onclick="location.reload()" aria-label="Refresh dashboard" data-shortcut="r">
+        🔄 Refresh
+      </button>
+      <a href="/ui/silences/create" class="btn btn-primary" aria-label="Create new silence" data-shortcut="shift+s">
+        🔕 Create Silence
+      </a>
+    </div>
+  </div>
+
+  <!-- Dashboard Grid (CSS Grid Layout) -->
+  <div class="dashboard-grid">
+
+    <!-- Section 1: Stats Overview (Row 1, Full Width) -->
+    <section class="stats-section" aria-labelledby="stats-heading">
+      <h2 id="stats-heading" class="sr-only">Alert Statistics</h2>
+      <div class="stats-grid">
+        {{ template "partials/stats-card" (dict "Icon" "🔥" "Value" (default 0 .Data.FiringAlerts) "Label" "Firing Alerts" "Severity" "critical") }}
+        {{ template "partials/stats-card" (dict "Icon" "✅" "Value" (default 0 .Data.ResolvedAlerts) "Label" "Resolved Today") }}
+        {{ template "partials/stats-card" (dict "Icon" "🔕" "Value" (default 0 .Data.ActiveSilences) "Label" "Active Silences") }}
+        {{ template "partials/stats-card" (dict "Icon" "🎯" "Value" (default 0 .Data.InhibitedAlerts) "Label" "Inhibited Alerts") }}
+      </div>
+    </section>
+
+    <!-- Section 2: Recent Alerts (Row 2, Left 60% on desktop) -->
+    <section class="alerts-section" aria-labelledby="alerts-heading">
+      <div class="section-header">
+        <h2 id="alerts-heading">Recent Alerts</h2>
+        <a href="/ui/alerts" class="view-all-link">View All →</a>
+      </div>
+      {{ if .Data.RecentAlerts }}
+      <div class="alert-feed" role="list">
+        {{ range .Data.RecentAlerts }}
+          {{ template "partials/alert-card" . }}
+        {{ end }}
+      </div>
+      {{ else }}
+      <div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <p>No recent alerts</p>
+      </div>
+      {{ end }}
+    </section>
+
+    <!-- Section 3: Active Silences (Row 2, Right 40% on desktop) -->
+    <section class="silences-section" aria-labelledby="silences-heading">
+      <div class="section-header">
+        <h2 id="silences-heading">Active Silences</h2>
+        <a href="/ui/silences" class="view-all-link">View All →</a>
+      </div>
+      {{ if .Data.ActiveSilencesList }}
+      <div class="silence-feed" role="list">
+        {{ range .Data.ActiveSilencesList }}
+          {{ template "partials/silence-card" . }}
+        {{ end }}
+      </div>
+      {{ else }}
+      <div class="empty-state">
+        <div class="empty-icon">🔕</div>
+        <p>No active silences</p>
+      </div>
+      {{ end }}
+    </section>
+
+    <!-- Section 4: Alert Timeline (Row 3, Full Width) -->
+    <section class="timeline-section" aria-labelledby="timeline-heading">
+      <div class="section-header">
+        <h2 id="timeline-heading">Alert Timeline (24h)</h2>
+      </div>
+      {{ if .Data.AlertTimeline }}
+        {{ template "partials/timeline-chart" .Data.AlertTimeline }}
+      {{ else }}
+      <div class="empty-state">
+        <div class="empty-icon">📊</div>
+        <p>Timeline data unavailable</p>
+      </div>
+      {{ end }}
+    </section>
+
+    <!-- Section 5: System Health (Row 4, Left 50% on desktop) -->
+    <section class="health-section" aria-labelledby="health-heading">
+      <div class="section-header">
+        <h2 id="health-heading">System Health</h2>
+      </div>
+      {{ if .Data.Health }}
+        {{ template "partials/health-panel" .Data.Health }}
+      {{ else }}
+      <div class="empty-state">
+        <div class="empty-icon">🏥</div>
+        <p>Health data unavailable</p>
+      </div>
+      {{ end }}
+    </section>
+
+    <!-- Section 6: Quick Actions (Row 4, Right 50% on desktop) -->
+    <section class="actions-section" aria-labelledby="actions-heading">
+      <div class="section-header">
+        <h2 id="actions-heading">Quick Actions</h2>
+      </div>
+      {{ template "partials/quick-actions" . }}
+    </section>
+
+  </div>
+</div>
+{{ end }}
+
+{{ define "extra_css" }}
+<link rel="stylesheet" href="/static/css/dashboard.css">
+<link rel="stylesheet" href="/static/css/components/stats-card.css">
+<link rel="stylesheet" href="/static/css/components/alert-card.css">
+<link rel="stylesheet" href="/static/css/components/silence-card.css">
+{{ end }}
+
+{{ define "extra_js" }}
+<!-- TN-78: Real-time Updates Client -->
+<script src="/static/js/realtime-client.js"></script>
+<script>
+// TN-77: Enhanced Dashboard JavaScript (150% Quality Target)
+// TN-78: Real-time Updates Integration
+
+// Keyboard Shortcuts (WCAG 2.1 AA - 2.1.1 Keyboard Accessible)
+document.addEventListener('keydown', function(e) {
+  // Refresh: R key
+  if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const refreshBtn = document.querySelector('[data-shortcut="r"]');
+    if (refreshBtn && document.activeElement !== refreshBtn) {
+      e.preventDefault();
+      refreshBtn.click();
+    }
+  }
+
+  // Create Silence: Shift+S
+  if (e.key === 'S' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    const createBtn = document.querySelector('[data-shortcut="shift+s"]');
+    if (createBtn) {
+      e.preventDefault();
+      createBtn.click();
+    }
+  }
+
+  // Search Alerts: Shift+A
+  if (e.key === 'A' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    const searchLink = document.querySelector('[data-shortcut="shift+a"]');
+    if (searchLink) {
+      e.preventDefault();
+      searchLink.click();
+    }
+  }
+});
+
+// ARIA Live Region Updates (WCAG 2.1 AA - 3.2.1 Change on Request)
+function announceUpdate(message) {
+  const liveRegion = document.getElementById('dashboard-updates');
+  if (liveRegion) {
+    liveRegion.textContent = message;
+    // Clear after announcement
+    setTimeout(() => {
+      liveRegion.textContent = '';
+    }, 1000);
+  }
+}
+
+// TN-78: Progressive Enhancement: Auto-refresh dashboard every 30s (fallback if real-time unavailable)
+// Auto-refresh is disabled when real-time updates are available
+if ('requestIdleCallback' in window) {
+  // Check if real-time client is connected (will be set by realtime-client.js)
+  setTimeout(() => {
+    if (!window.realtimeClient || !window.realtimeClient.isConnected) {
+      // Fallback: Use auto-refresh if real-time is not available
+      setInterval(() => {
+        requestIdleCallback(() => {
+          console.log('[Dashboard] Auto-refresh triggered (fallback, real-time unavailable)');
+          announceUpdate('Dashboard refreshing...');
+          location.reload();
+        });
+      }, 30000); // 30 seconds
+    } else {
+      console.log('[Dashboard] Real-time updates enabled, auto-refresh disabled');
+    }
+  }, 1000); // Wait 1s for real-time client to connect
+}
+
+// Announce page load to screen readers
+document.addEventListener('DOMContentLoaded', function() {
+  announceUpdate('Dashboard loaded. ' +
+    document.querySelector('.stats-section')?.textContent?.trim().substring(0, 100) || '');
+});
+</script>
+{{ end }}
