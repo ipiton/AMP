@@ -13,11 +13,11 @@
 #### Kubernetes (Helm)
 ```bash
 # Add repo
-helm repo add alertmanager-plusplus https://github.com/ipiton/alert-history-service
+helm repo add alertmanager-plusplus https://github.com/ipiton/AMP-service
 helm repo update
 
 # Install (same config as Alertmanager!)
-helm install alert-history alertmanager-plusplus/alert-history \
+helm install AMP alertmanager-plusplus/AMP \
   --set profile=standard \
   --set-file config=alertmanager.yml \
   --namespace monitoring
@@ -27,8 +27,8 @@ helm install alert-history alertmanager-plusplus/alert-history \
 ```bash
 docker run -d \
   -p 8080:8080 \
-  -v $(pwd)/alertmanager.yml:/etc/alert-history/config.yml \
-  --name alert-history \
+  -v $(pwd)/alertmanager.yml:/etc/AMP/config.yml \
+  --name AMP \
   yourusername/alertmanager-plusplus:latest
 ```
 
@@ -43,7 +43,7 @@ alerting:
     - static_configs:
         - targets:
           # OLD: - 'alertmanager:9093'
-          - 'alert-history:8080'  # NEW: Just change the port!
+          - 'AMP:8080'  # NEW: Just change the port!
 ```
 
 Apply:
@@ -90,7 +90,7 @@ curl http://localhost:8080/api/v2/alerts
 
 ```bash
 # Stop Alert History
-kubectl delete deployment alert-history -n monitoring
+kubectl delete deployment AMP -n monitoring
 
 # Redeploy Alertmanager
 helm install alertmanager prometheus-community/alertmanager
@@ -113,19 +113,19 @@ helm install alertmanager prometheus-community/alertmanager
 **Alerts not showing up?**
 ```bash
 # Check Prometheus is sending to correct endpoint
-kubectl logs -n monitoring prometheus-0 | grep alert-history
+kubectl logs -n monitoring prometheus-0 | grep AMP
 
 # Check Alert History is receiving
-kubectl logs -n monitoring alert-history-0 | grep "POST /api/v2/alerts"
+kubectl logs -n monitoring AMP-0 | grep "POST /api/v2/alerts"
 ```
 
 **Grafana dashboard broken?**
 - Verify dashboard uses `/api/v2/alerts` endpoint (should work automatically)
-- Check datasource URL points to `alert-history:8080`
+- Check datasource URL points to `AMP:8080`
 
 **Need help?**
-- [GitHub Issues](https://github.com/ipiton/alert-history-service/issues)
-- [Documentation](https://github.com/ipiton/alert-history-service/docs)
+- [GitHub Issues](https://github.com/ipiton/AMP-service/issues)
+- [Documentation](https://github.com/ipiton/AMP-service/docs)
 
 ---
 

@@ -21,7 +21,7 @@ The **Refresh Manager** automatically and manually refreshes publishing targets 
 
 ```go
 import (
-    "github.com/vitaliisemenov/alert-history/internal/business/publishing"
+    "github.com/ipiton/AMP/internal/business/publishing"
     "log/slog"
 )
 

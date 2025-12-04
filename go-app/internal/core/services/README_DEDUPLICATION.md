@@ -45,7 +45,7 @@ Incoming Alert
 ### Basic Usage
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/core/services"
+import "github.com/ipiton/AMP/internal/core/services"
 
 // Initialize
 fingerprintGen := services.NewFingerprintGenerator(&services.FingerprintConfig{

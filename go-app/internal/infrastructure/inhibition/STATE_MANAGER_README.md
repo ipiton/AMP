@@ -115,9 +115,9 @@ import (
     "context"
     "log/slog"
 
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/cache"
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/inhibition"
-    "github.com/vitaliisemenov/alert-history/pkg/metrics"
+    "github.com/ipiton/AMP/internal/infrastructure/cache"
+    "github.com/ipiton/AMP/internal/infrastructure/inhibition"
+    "github.com/ipiton/AMP/pkg/metrics"
 )
 
 func main() {

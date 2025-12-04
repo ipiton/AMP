@@ -268,9 +268,9 @@ package main
 import (
     "log/slog"
     "github.com/jackc/pgx/v5/pgxpool"
-    "github.com/vitaliisemenov/alert-history/internal/core"
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure"
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/repository"
+    "github.com/ipiton/AMP/internal/core"
+    "github.com/ipiton/AMP/internal/infrastructure"
+    "github.com/ipiton/AMP/internal/infrastructure/repository"
 )
 
 func main() {
@@ -296,7 +296,7 @@ package main
 
 import (
     "net/http"
-    "github.com/vitaliisemenov/alert-history/cmd/server/handlers"
+    "github.com/ipiton/AMP/cmd/server/handlers"
 )
 
 func setupRoutes(historyRepo core.AlertHistoryRepository, logger *slog.Logger) {

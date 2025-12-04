@@ -106,7 +106,7 @@ Production-ready: 100%
 ## 🎯 **What Was Done Today:**
 
 ### Phase 1: Repository Creation (1h)
-- ✅ Created `/Users/vitaliisemenov/Documents/Helpfull/AMP-OSS`
+- ✅ Created `/Users/ipiton/Documents/Helpfull/AMP-OSS`
 - ✅ Created GitHub `https://github.com/ipiton/AMP`
 - ✅ Copied core OSS code
 - ✅ Fixed import paths

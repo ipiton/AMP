@@ -130,7 +130,7 @@ unknown  → firing   // Conservative: default to firing
 
 ```go
 import (
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/webhook"
+    "github.com/ipiton/AMP/internal/infrastructure/webhook"
 )
 ```
 

@@ -26,7 +26,7 @@ Production-grade template engine for processing Go `text/template` in notificati
 ### 1. Create Engine
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/notification/template"
+import "github.com/ipiton/AMP/internal/notification/template"
 
 // Production mode (default settings)
 engine, err := template.NewNotificationTemplateEngine(

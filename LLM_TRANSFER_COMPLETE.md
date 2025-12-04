@@ -42,7 +42,7 @@ go-app/internal/infrastructure/llm/
 
 ### 1. Import Paths ✅
 ```diff
-- github.com/vitaliisemenov/alert-history
+- github.com/ipiton/AMP
 + github.com/ipiton/AMP
 ```
 

@@ -40,10 +40,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vitaliisemenov/alert-history/internal/business/silencing"
-	"github.com/vitaliisemenov/alert-history/internal/core/silencing" as coresilencing
-	infrasilencing "github.com/vitaliisemenov/alert-history/internal/infrastructure/silencing"
-	"github.com/vitaliisemenov/alert-history/internal/database/postgres"
+	"github.com/ipiton/AMP/internal/business/silencing"
+	"github.com/ipiton/AMP/internal/core/silencing" as coresilencing
+	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
+	"github.com/ipiton/AMP/internal/database/postgres"
 )
 
 func main() {
@@ -136,8 +136,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/vitaliisemenov/alert-history/internal/business/silencing"
-	coresilencing "github.com/vitaliisemenov/alert-history/internal/core/silencing"
+	"github.com/ipiton/AMP/internal/business/silencing"
+	coresilencing "github.com/ipiton/AMP/internal/core/silencing"
 )
 
 type AlertProcessor struct {
@@ -233,7 +233,7 @@ export SILENCE_SHUTDOWN_TIMEOUT="30s"     # Max time for graceful shutdown
 ### Custom Configuration
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/business/silencing"
+import "github.com/ipiton/AMP/internal/business/silencing"
 
 // Create custom config
 config := silencing.SilenceManagerConfig{

@@ -5,7 +5,7 @@ High-performance alert matching engine for the Silencing System. Supports all 4 
 ## Quick Start
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/core/silencing"
+import "github.com/ipiton/AMP/internal/core/silencing"
 
 // Create matcher
 matcher := silencing.NewSilenceMatcher()

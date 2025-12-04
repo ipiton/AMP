@@ -15,7 +15,7 @@
 ### 1. Импорт пакета
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/database/postgres"
+import "github.com/ipiton/AMP/internal/database/postgres"
 ```
 
 ### 2. Создание connection pool

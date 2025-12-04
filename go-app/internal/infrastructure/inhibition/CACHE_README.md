@@ -69,7 +69,7 @@
 ```go
 import (
     "context"
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/inhibition"
+    "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 )
 
 // Create cache with defaults (L1-only, no Redis)

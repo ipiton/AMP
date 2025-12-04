@@ -181,7 +181,6 @@ helm install amp ./helm/amp \
 
 ---
 
-**Repository**: https://github.com/ipiton/AMP  
-**License**: MIT  
+**Repository**: https://github.com/ipiton/AMP
+**License**: MIT
 **Status**: ✅ Production-Ready (v0.0.1)
-

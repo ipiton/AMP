@@ -32,7 +32,7 @@ The Inhibition Rules Engine provides a powerful mechanism for suppressing (inhib
 
 ```go
 import (
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/inhibition"
+    "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 )
 ```
 
