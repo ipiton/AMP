@@ -1,7 +1,7 @@
 # ✅ pkg/core Validation Complete
 
 **Date:** 2025-12-02
-**Package:** `/Users/vitaliisemenov/Documents/Helpfull/AMP-OSS/pkg/core`
+**Package:** `/Users/ipiton/Documents/Helpfull/AMP-OSS/pkg/core`
 **Status:** ✅ **CLEAN & INDEPENDENT**
 
 ---

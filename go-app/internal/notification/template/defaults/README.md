@@ -1,6 +1,6 @@
 # Default Notification Templates
 
-**Package**: `github.com/vitaliisemenov/alert-history/internal/notification/template/defaults`
+**Package**: `github.com/ipiton/AMP/internal/notification/template/defaults`
 **Task**: TN-154
 **Quality**: 150% (Grade A+ EXCEPTIONAL)
 **Date**: 2025-11-22
@@ -31,7 +31,7 @@ Production-ready default templates for Slack, PagerDuty, and Email notification 
 package main
 
 import (
-    "github.com/vitaliisemenov/alert-history/internal/notification/template/defaults"
+    "github.com/ipiton/AMP/internal/notification/template/defaults"
 )
 
 func main() {
@@ -370,8 +370,8 @@ BenchmarkGetPagerDutySeverity-8       5000000    0.3 ns/op
 
 ```go
 import (
-    "github.com/vitaliisemenov/alert-history/internal/notification/template"
-    "github.com/vitaliisemenov/alert-history/internal/notification/template/defaults"
+    "github.com/ipiton/AMP/internal/notification/template"
+    "github.com/ipiton/AMP/internal/notification/template/defaults"
 )
 
 // Get default templates

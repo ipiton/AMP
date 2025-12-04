@@ -36,7 +36,7 @@ The **RouteMatcher** evaluates if alerts match routing rules with support for 4 
 package main
 
 import (
-    "github.com/vitaliisemenov/alert-history/internal/business/routing"
+    "github.com/ipiton/AMP/internal/business/routing"
 )
 
 func main() {

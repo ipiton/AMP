@@ -1,6 +1,6 @@
 # Silence Repository (PostgreSQL)
 
-**Package:** `github.com/vitaliisemenov/alert-history/internal/infrastructure/silencing`
+**Package:** `github.com/ipiton/AMP/internal/infrastructure/silencing`
 
 Production-grade PostgreSQL implementation of the Silence Storage system, providing CRUD operations, advanced filtering, TTL management, and analytics for alerting silence periods.
 
@@ -18,7 +18,7 @@ Production-grade PostgreSQL implementation of the Silence Storage system, provid
 ## Installation
 
 ```bash
-go get github.com/vitaliisemenov/alert-history/internal/infrastructure/silencing
+go get github.com/ipiton/AMP/internal/infrastructure/silencing
 ```
 
 ## Quick Start
@@ -30,7 +30,7 @@ import (
     "log/slog"
 
     "github.com/jackc/pgx/v5/pgxpool"
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/silencing"
+    "github.com/ipiton/AMP/internal/infrastructure/silencing"
 )
 
 // Create database connection pool
@@ -55,7 +55,7 @@ repo := silencing.NewPostgresSilenceRepository(
 ```go
 import (
     "time"
-    "github.com/vitaliisemenov/alert-history/internal/core/silencing"
+    "github.com/ipiton/AMP/internal/core/silencing"
 )
 
 // Create silence
@@ -536,8 +536,8 @@ MIT License - see [LICENSE](../../../../LICENSE) for details.
 
 ## Support
 
-- **Documentation**: https://github.com/vitaliisemenov/alert-history/docs
-- **Issues**: https://github.com/vitaliisemenov/alert-history/issues
+- **Documentation**: https://github.com/ipiton/AMP/docs
+- **Issues**: https://github.com/ipiton/AMP/issues
 - **Slack**: #alert-history channel
 
 ---

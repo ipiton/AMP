@@ -35,7 +35,7 @@ import (
     "context"
     "log"
 
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/k8s"
+    "github.com/ipiton/AMP/internal/infrastructure/k8s"
 )
 
 func main() {
@@ -84,7 +84,7 @@ import (
     "log/slog"
     "time"
 
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/k8s"
+    "github.com/ipiton/AMP/internal/infrastructure/k8s"
 )
 
 func main() {

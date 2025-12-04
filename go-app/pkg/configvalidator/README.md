@@ -41,12 +41,12 @@
 
 ### As Library
 ```bash
-go get github.com/vitaliisemenov/alert-history/pkg/configvalidator
+go get github.com/ipiton/AMP/pkg/configvalidator
 ```
 
 ### As CLI Tool
 ```bash
-go install github.com/vitaliisemenov/alert-history/cmd/configvalidator@latest
+go install github.com/ipiton/AMP/cmd/configvalidator@latest
 ```
 
 ---
@@ -81,7 +81,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/vitaliisemenov/alert-history/pkg/configvalidator"
+    "github.com/ipiton/AMP/pkg/configvalidator"
 )
 
 func main() {
@@ -362,7 +362,7 @@ go tool cover -html=coverage.out
 
 - [ERROR_CODES.md](ERROR_CODES.md) - Complete error code reference
 - [EXAMPLES.md](../../examples/configvalidator/) - Usage examples
-- [API Reference](https://pkg.go.dev/github.com/vitaliisemenov/alert-history/pkg/configvalidator)
+- [API Reference](https://pkg.go.dev/github.com/ipiton/AMP/pkg/configvalidator)
 
 ---
 

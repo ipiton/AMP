@@ -47,7 +47,7 @@ cd cmd/template-validator
 go build -o template-validator
 
 # Install to PATH
-go install github.com/vitaliisemenov/alert-history/cmd/template-validator@latest
+go install github.com/ipiton/AMP/cmd/template-validator@latest
 ```
 
 ### Basic Usage
@@ -113,8 +113,8 @@ import (
     "fmt"
     "log"
 
-    "github.com/vitaliisemenov/alert-history/pkg/templatevalidator"
-    template "github.com/vitaliisemenov/alert-history/internal/notification/template"
+    "github.com/ipiton/AMP/pkg/templatevalidator"
+    template "github.com/ipiton/AMP/internal/notification/template"
 )
 
 func main() {

@@ -10,8 +10,8 @@ This document describes how to integrate `PostgresSilenceRepository` into the Al
 import (
     // ... existing imports ...
 
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/silencing"
-    "github.com/vitaliisemenov/alert-history/internal/core/silencing as coresilencing"
+    "github.com/ipiton/AMP/internal/infrastructure/silencing"
+    "github.com/ipiton/AMP/internal/core/silencing as coresilencing"
 )
 ```
 
@@ -169,7 +169,7 @@ import (
 
     "github.com/jackc/pgx/v5/pgxpool"
 
-    "github.com/vitaliisemenov/alert-history/internal/infrastructure/silencing"
+    "github.com/ipiton/AMP/internal/infrastructure/silencing"
 )
 
 func main() {
@@ -420,7 +420,7 @@ import (
     "testing"
     "time"
 
-    "github.com/vitaliisemenov/alert-history/internal/core/silencing"
+    "github.com/ipiton/AMP/internal/core/silencing"
 )
 
 func TestSilenceRepositoryIntegration(t *testing.T) {

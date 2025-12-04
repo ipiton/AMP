@@ -56,9 +56,9 @@ Data Layer (PostgreSQL / SQLite)
 ```go
 // In main.go
 import (
-    "github.com/vitaliisemenov/alert-history/internal/business/template"
-    templateInfra "github.com/vitaliisemenov/alert-history/internal/infrastructure/template"
-    templateEngine "github.com/vitaliisemenov/alert-history/internal/notification/template"
+    "github.com/ipiton/AMP/internal/business/template"
+    templateInfra "github.com/ipiton/AMP/internal/infrastructure/template"
+    templateEngine "github.com/ipiton/AMP/internal/notification/template"
 )
 
 // Repository (dual-database support)

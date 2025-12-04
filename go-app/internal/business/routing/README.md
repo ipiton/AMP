@@ -1,6 +1,6 @@
 # Route Tree Builder (TN-138)
 
-**Package**: `github.com/vitaliisemenov/alert-history/internal/business/routing`
+**Package**: `github.com/ipiton/AMP/internal/business/routing`
 **Version**: 1.0
 **Quality**: 152%+ (Grade A+ Production)
 **Status**: ✅ PRODUCTION-READY
@@ -26,7 +26,7 @@ The Route Tree Builder provides an optimized routing tree for fast alert routing
 ### Build Tree from Config
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/business/routing"
+import "github.com/ipiton/AMP/internal/business/routing"
 
 // Create parser and parse config
 config := &routing.RouteConfig{

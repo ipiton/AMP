@@ -1,6 +1,6 @@
 # Alert Group Manager
 
-**Package**: `github.com/vitaliisemenov/alert-history/internal/infrastructure/grouping`
+**Package**: `github.com/ipiton/AMP/internal/infrastructure/grouping`
 **Version**: 1.0.0
 **Status**: ✅ Production-Ready (150% Quality)
 
@@ -25,7 +25,7 @@ The **Alert Group Manager** is a high-performance, thread-safe component for man
 ### Installation
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/infrastructure/grouping"
+import "github.com/ipiton/AMP/internal/infrastructure/grouping"
 ```
 
 ### Basic Usage

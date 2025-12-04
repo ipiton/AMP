@@ -24,7 +24,7 @@ Production-grade template engine built on Go's `html/template` with:
 ### 1. Initialize Engine
 
 ```go
-import "github.com/vitaliisemenov/alert-history/internal/ui"
+import "github.com/ipiton/AMP/internal/ui"
 
 // Production mode (cached templates)
 opts := ui.DefaultTemplateOptions()

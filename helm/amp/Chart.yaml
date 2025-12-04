@@ -1,7 +1,7 @@
 apiVersion: v2
 name: amp
 description: |
-  Alertmanager++ (AMP) - Enhanced Alertmanager with LLM classification, 
+  Alertmanager++ (AMP) - Enhanced Alertmanager with LLM classification,
   advanced grouping, and intelligent routing. 100% Alertmanager API compatible.
 
 type: application

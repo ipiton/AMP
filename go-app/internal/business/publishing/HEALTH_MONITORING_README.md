@@ -81,7 +81,7 @@
 
 ```go
 import (
-	"github.com/vitaliisemenov/alert-history/internal/business/publishing"
+	"github.com/ipiton/AMP/internal/business/publishing"
 )
 
 // Initialize Health Monitor
@@ -850,4 +850,4 @@ A: Health monitor gracefully handles empty target lists. It logs a warning and w
 
 **Status**: ✅ PRODUCTION-READY
 **Quality**: 150%+ (Grade A+)
-**Maintainer**: Vitalii Semenov (@vitaliisemenov)
+**Maintainer**: Vitalii Semenov (@ipiton)
