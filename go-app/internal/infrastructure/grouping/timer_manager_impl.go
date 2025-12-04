@@ -319,9 +319,9 @@ func (tm *DefaultTimerManager) StartTimer(
 	// Update metrics
 	if tm.metrics != nil {
 		tm.metrics.RecordTimerStarted(timerType.String())
-		tm.metrics.IncActiveTimers(timerType.String())
-		tm.metrics.RecordTimerDuration(timerType.String(), duration)
-		tm.metrics.RecordTimerOperationDuration("start", time.Since(startTime))
+		tm.metrics.IncActiveTimers()
+		tm.metrics.RecordTimerDuration(timerType.String(), float64(duration))
+		tm.metrics.RecordTimerOperationDuration("start", float64(time.Since(startTime)))
 	}
 
 	tm.logger.Info("Started timer",
@@ -329,7 +329,7 @@ func (tm *DefaultTimerManager) StartTimer(
 		"timer_type", timerType,
 		"duration", duration,
 		"expires_at", timer.ExpiresAt,
-		"latency", time.Since(startTime))
+		"latency", float64(time.Since(startTime)))
 
 	return timer, nil
 }
@@ -381,14 +381,14 @@ func (tm *DefaultTimerManager) CancelTimer(ctx context.Context, groupKey GroupKe
 	// Update metrics
 	if tm.metrics != nil {
 		tm.metrics.RecordTimerCancelled(handle.timerType.String())
-		tm.metrics.DecActiveTimers(handle.timerType.String())
-		tm.metrics.RecordTimerOperationDuration("cancel", time.Since(startTime))
+		tm.metrics.DecActiveTimers()
+		tm.metrics.RecordTimerOperationDuration("cancel", float64(time.Since(startTime)))
 	}
 
 	tm.logger.Info("Cancelled timer",
 		"group_key", groupKey,
 		"timer_type", handle.timerType,
-		"latency", time.Since(startTime))
+		"latency", float64(time.Since(startTime)))
 
 	return true, nil
 }
@@ -454,14 +454,14 @@ func (tm *DefaultTimerManager) ResetTimer(
 	// Update metrics
 	if tm.metrics != nil {
 		tm.metrics.RecordTimerReset(timerType.String())
-		tm.metrics.RecordTimerOperationDuration("reset", time.Since(startTime))
+		tm.metrics.RecordTimerOperationDuration("reset", float64(time.Since(startTime)))
 	}
 
 	tm.logger.Info("Reset timer",
 		"group_key", groupKey,
 		"timer_type", timerType,
 		"reset_count", resetCount,
-		"latency", time.Since(startTime))
+		"latency", float64(time.Since(startTime)))
 
 	return timer, nil
 }
@@ -644,7 +644,7 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 	// Update metrics
 	if tm.metrics != nil {
 		tm.metrics.RecordTimerExpired(timerType.String())
-		tm.metrics.DecActiveTimers(timerType.String())
+		tm.metrics.DecActiveTimers()
 	}
 
 	tm.logger.Info("Timer expiration processed",
@@ -719,7 +719,7 @@ func (tm *DefaultTimerManager) RestoreTimers(ctx context.Context) (restored int,
 
 			// Update metrics
 			if tm.metrics != nil {
-				tm.metrics.IncActiveTimers(timer.TimerType.String())
+				tm.metrics.IncActiveTimers()
 			}
 		}
 	}
@@ -739,7 +739,7 @@ func (tm *DefaultTimerManager) RestoreTimers(ctx context.Context) (restored int,
 		"restored", restored,
 		"missed", missed,
 		"total", len(timers),
-		"duration", time.Since(startTime))
+		"duration", float64(time.Since(startTime)))
 
 	return restored, missed, nil
 }
@@ -819,13 +819,13 @@ func (tm *DefaultTimerManager) Shutdown(ctx context.Context) error {
 	case <-done:
 		tm.logger.Info("Timer manager shutdown completed",
 			"cancelled_timers", timerCount,
-			"duration", time.Since(startTime))
+			"duration", float64(time.Since(startTime)))
 		return nil
 
 	case <-ctx.Done():
 		tm.logger.Warn("Timer manager shutdown timed out",
 			"cancelled_timers", timerCount,
-			"duration", time.Since(startTime))
+			"duration", float64(time.Since(startTime)))
 		return fmt.Errorf("shutdown timeout: %w", ctx.Err())
 	}
 }

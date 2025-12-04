@@ -56,7 +56,7 @@ func (f *SimpleFilterEngine) ShouldBlock(alert *core.Alert, classification *core
 			f.metrics.RecordBlockedAlert(reason)
 		}
 		f.metrics.RecordAlertFiltered(result)
-		f.metrics.RecordFilterDuration(duration, result)
+		f.metrics.RecordFilterDuration(duration)
 	}
 
 	return blocked, reason

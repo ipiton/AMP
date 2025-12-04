@@ -204,12 +204,12 @@ func (app *Application) startServer() error {
 
 	// Create HTTP server
 	port := app.config.Server.Port
-	if port == "" {
-		port = "8080"
+	if port == 0 {
+		port = 8080
 	}
 
 	app.server = &http.Server{
-		Addr:         ":" + port,
+		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

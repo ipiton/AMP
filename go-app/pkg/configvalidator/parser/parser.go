@@ -4,7 +4,7 @@ import (
 	"bytes"
 
 	"github.com/ipiton/AMP/internal/alertmanager/config"
-	validatorpkg "github.com/ipiton/AMP/pkg/configvalidator"
+	"github.com/ipiton/AMP/pkg/configvalidator/types"
 )
 
 // ================================================================================
@@ -32,8 +32,8 @@ type Parser interface {
 	//
 	// Returns:
 	//   - *config.AlertmanagerConfig: Parsed configuration
-	//   - []validatorpkg.Error: List of parse errors (empty if success)
-	Parse(data []byte) (*config.AlertmanagerConfig, []validatorpkg.Error)
+	//   - []types.Error: List of parse errors (empty if success)
+	Parse(data []byte) (*config.AlertmanagerConfig, []types.Error)
 
 	// SupportsFormat checks if parser supports given format
 	SupportsFormat(format string) bool
@@ -75,10 +75,10 @@ func NewMultiFormatParser(strict bool) *MultiFormatParser {
 //
 // Returns:
 //   - *config.AlertmanagerConfig: Parsed configuration
-//   - []validatorpkg.Error: Parse errors (empty if success)
+//   - []types.Error: Parse errors (empty if success)
 //
 // Performance: < 10ms p95 (YAML attempt + JSON fallback)
-func (p *MultiFormatParser) Parse(data []byte) (*config.AlertmanagerConfig, []validatorpkg.Error) {
+func (p *MultiFormatParser) Parse(data []byte) (*config.AlertmanagerConfig, []types.Error) {
 	// Quick format detection hint
 	format := p.detectFormat(data)
 
@@ -124,13 +124,13 @@ func (p *MultiFormatParser) Parse(data []byte) (*config.AlertmanagerConfig, []va
 //
 // Returns:
 //   - *config.AlertmanagerConfig: Parsed configuration
-//   - []validatorpkg.Error: Parse errors
+//   - []types.Error: Parse errors
 //
 // Performance: < 10ms p95 (no format detection overhead)
 func (p *MultiFormatParser) ParseWithFormat(
 	data []byte,
 	format string,
-) (*config.AlertmanagerConfig, []validatorpkg.Error) {
+) (*config.AlertmanagerConfig, []types.Error) {
 	switch format {
 	case "yaml", "yml":
 		return p.yamlParser.Parse(data)

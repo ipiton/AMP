@@ -691,7 +691,7 @@ func (m *DefaultGroupManager) updateGroupStateUnsafe(group *AlertGroup) {
 // recordAddMetrics records Prometheus metrics for AddAlertToGroup operation.
 func (m *DefaultGroupManager) recordAddMetrics(groupKey GroupKey, isNew bool, duration time.Duration) {
 	m.metrics.RecordGroupOperation("add", "success")
-	m.metrics.RecordGroupOperationDuration("add", duration)
+	m.metrics.RecordGroupOperationDuration("add", float64(duration))
 
 	// Record group size histogram (async to avoid lock contention)
 	// Note: This is a simplified version. Real implementation would be in pkg/metrics/business.go
@@ -700,13 +700,13 @@ func (m *DefaultGroupManager) recordAddMetrics(groupKey GroupKey, isNew bool, du
 // recordRemoveMetrics records Prometheus metrics for RemoveAlertFromGroup operation.
 func (m *DefaultGroupManager) recordRemoveMetrics(groupKey GroupKey, duration time.Duration) {
 	m.metrics.RecordGroupOperation("remove", "success")
-	m.metrics.RecordGroupOperationDuration("remove", duration)
+	m.metrics.RecordGroupOperationDuration("remove", float64(duration))
 }
 
 // recordCleanupMetrics records Prometheus metrics for CleanupExpiredGroups operation.
 func (m *DefaultGroupManager) recordCleanupMetrics(deletedCount int, duration time.Duration) {
 	m.metrics.RecordGroupOperation("cleanup", "success")
-	m.metrics.RecordGroupOperationDuration("cleanup", duration)
+	m.metrics.RecordGroupOperationDuration("cleanup", float64(duration))
 	m.metrics.RecordGroupsCleanedUp(deletedCount)
 }
 

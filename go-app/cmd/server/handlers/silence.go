@@ -602,5 +602,5 @@ func (h *SilenceHandler) recordMetrics(method, endpoint, status string, start ti
 	}
 
 	duration := time.Since(start)
-	h.metrics.RecordSilenceRequest(method, endpoint, status, duration)
+	h.metrics.RecordSilenceRequest(method, endpoint, status, float64(duration))
 }

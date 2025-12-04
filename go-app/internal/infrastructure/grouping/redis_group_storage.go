@@ -122,7 +122,7 @@ func NewRedisGroupStorage(ctx context.Context, config *RedisGroupStorageConfig) 
 
 	// Initialize health metric
 	if storage.metrics != nil {
-		storage.metrics.SetStorageHealth("redis", true)
+		storage.metrics.SetStorageHealth(true)
 	}
 
 	logger.Info("Initialized Redis group storage",
@@ -152,7 +152,7 @@ func (r *RedisGroupStorage) Store(ctx context.Context, group *AlertGroup) error 
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("store", time.Since(start))
+			r.metrics.RecordStorageDuration("store", float64(time.Since(start)))
 		}
 	}()
 
@@ -291,7 +291,7 @@ func (r *RedisGroupStorage) Load(ctx context.Context, groupKey GroupKey) (*Alert
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("load", time.Since(start))
+			r.metrics.RecordStorageDuration("load", float64(time.Since(start)))
 		}
 	}()
 
@@ -355,7 +355,7 @@ func (r *RedisGroupStorage) Delete(ctx context.Context, groupKey GroupKey) error
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("delete", time.Since(start))
+			r.metrics.RecordStorageDuration("delete", float64(time.Since(start)))
 		}
 	}()
 
@@ -402,7 +402,7 @@ func (r *RedisGroupStorage) ListKeys(ctx context.Context) ([]GroupKey, error) {
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("list_keys", time.Since(start))
+			r.metrics.RecordStorageDuration("list_keys", float64(time.Since(start)))
 		}
 	}()
 
@@ -443,7 +443,7 @@ func (r *RedisGroupStorage) Size(ctx context.Context) (int, error) {
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("size", time.Since(start))
+			r.metrics.RecordStorageDuration("size", float64(time.Since(start)))
 		}
 	}()
 
@@ -484,7 +484,7 @@ func (r *RedisGroupStorage) LoadAll(ctx context.Context) ([]*AlertGroup, error) 
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("load_all", time.Since(start))
+			r.metrics.RecordStorageDuration("load_all", float64(time.Since(start)))
 		}
 	}()
 
@@ -574,7 +574,7 @@ func (r *RedisGroupStorage) StoreAll(ctx context.Context, groups []*AlertGroup) 
 	start := time.Now()
 	defer func() {
 		if r.metrics != nil {
-			r.metrics.RecordStorageDuration("store_all", time.Since(start))
+			r.metrics.RecordStorageDuration("store_all", float64(time.Since(start)))
 		}
 	}()
 
@@ -652,13 +652,13 @@ func (r *RedisGroupStorage) Ping(ctx context.Context) error {
 	err := r.client.Ping(ctx).Err()
 	if err != nil {
 		if r.metrics != nil {
-			r.metrics.SetStorageHealth("redis", false)
+			r.metrics.SetStorageHealth(false)
 		}
 		return fmt.Errorf("redis ping failed: %w", err)
 	}
 
 	if r.metrics != nil {
-		r.metrics.SetStorageHealth("redis", true)
+		r.metrics.SetStorageHealth(true)
 	}
 
 	return nil
