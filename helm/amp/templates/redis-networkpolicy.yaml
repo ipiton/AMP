@@ -1,0 +1,84 @@
+{{- if and (eq .Values.profile "standard") .Values.valkey.networkPolicy.enabled }}
+{{/*
+NetworkPolicy for Redis Pod Isolation
+Security hardening: Allow only app pods and Prometheus to connect
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "amp.fullname" . }}-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-network-policy
+spec:
+  # Apply to Redis pods
+  podSelector:
+    matchLabels:
+      {{- include "amp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+
+  # Policy types
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # ==================
+  # INGRESS RULES
+  # ==================
+  ingress:
+  # Rule 1: Allow traffic from application pods to Redis port 6379
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- include "amp.selectorLabels" . | nindent 10 }}
+          app.kubernetes.io/component: application
+    ports:
+    - protocol: TCP
+      port: 6379
+
+  # Rule 2: Allow Prometheus scraping of redis-exporter metrics
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    ports:
+    - protocol: TCP
+      port: 9121
+
+  # ==================
+  # EGRESS RULES
+  # ==================
+  egress:
+  # Rule 1: Allow DNS resolution (required for service discovery)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Rule 2: Allow egress to API server (required for future Sentinel HA)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 6443
+
+  # Rule 3: Allow egress to other Redis pods (future Sentinel replication)
+  - to:
+    - podSelector:
+        matchLabels:
+          {{- include "amp.selectorLabels" . | nindent 10 }}
+          app.kubernetes.io/component: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+{{- end }}

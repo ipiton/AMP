@@ -1,0 +1,158 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.monitoring.prometheusRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "amp.postgresql.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-monitoring
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: postgresql.rules
+    interval: 30s
+    rules:
+    # ========================================
+    # CRITICAL ALERTS (Page immediately)
+    # ========================================
+    - alert: PostgreSQLDown
+      expr: pg_up == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "PostgreSQL instance is down (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} has been down for more than 1 minute."
+
+    - alert: PostgreSQLTooManyConnections
+      expr: sum by (instance) (pg_stat_activity_count) > (pg_settings_max_connections * 0.9)
+      for: 5m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "PostgreSQL connection pool near capacity (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value {{ "}}" }} connections (>90% of max_connections)."
+
+    - alert: PostgreSQLReplicationLag
+      expr: pg_replication_lag > 300
+      for: 5m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "PostgreSQL replication lag is high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "PostgreSQL replication lag on {{ "{{" }} $labels.instance {{ "}}" }} is {{ "{{" }} $value {{ "}}" }} seconds."
+
+    - alert: PostgreSQLTxidExhaustionRisk
+      expr: (2147483648 - pg_database_age_seconds) / 2147483648 < 0.1
+      for: 5m
+      labels:
+        severity: critical
+        component: database
+      annotations:
+        summary: "PostgreSQL transaction ID wraparound risk (database {{ "{{" }} $labels.datname {{ "}}" }})"
+        description: "Database {{ "{{" }} $labels.datname {{ "}}" }} has less than 10% transaction IDs remaining before wraparound."
+
+    # ========================================
+    # WARNING ALERTS (Investigate soon)
+    # ========================================
+    - alert: PostgreSQLHighConnections
+      expr: sum by (instance) (pg_stat_activity_count) > (pg_settings_max_connections * 0.8)
+      for: 10m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL connection usage is high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value {{ "}}" }} connections (>80% of max_connections)."
+
+    - alert: PostgreSQLSlowQueries
+      expr: rate(pg_stat_statements_mean_exec_time_seconds[5m]) > 1
+      for: 10m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL slow queries detected (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} has slow queries (mean execution time {{ "{{" }} $value {{ "}}" }}s)."
+
+    - alert: PostgreSQLHighCacheHitRatio
+      expr: rate(pg_stat_database_blks_hit[5m]) / (rate(pg_stat_database_blks_hit[5m]) + rate(pg_stat_database_blks_read[5m])) < 0.9
+      for: 10m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL cache hit ratio is low (database {{ "{{" }} $labels.datname {{ "}}" }})"
+        description: "Database {{ "{{" }} $labels.datname {{ "}}" }} has cache hit ratio of {{ "{{" }} $value {{ "}}" }} (<90%)."
+
+    - alert: PostgreSQLDeadTuplesHigh
+      expr: pg_stat_user_tables_n_dead_tup > 10000
+      for: 30m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL dead tuples are high (table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }})"
+        description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} dead tuples. Consider manual VACUUM."
+
+    - alert: PostgreSQLVacuumOld
+      expr: (now() - pg_stat_user_tables_last_autovacuum) > 86400
+      for: 1h
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL table not vacuumed recently (table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }})"
+        description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has not been vacuumed for {{ "{{" }} $value {{ "}}" }} seconds."
+
+    # ========================================
+    # BACKUP ALERTS (TN-98: Disaster Recovery)
+    # ========================================
+    - alert: PostgreSQLWALArchivingFailed
+      expr: rate(pg_stat_archiver_failed_count[5m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: database-backup
+      annotations:
+        summary: "PostgreSQL WAL archiving is failing (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "WAL archiving has failed {{ "{{" }} $value {{ "}}" }} times in the last 5 minutes. PITR capability at risk!"
+
+    - alert: PostgreSQLBackupOld
+      expr: (now() - postgresql_backup_last_success_timestamp_seconds) > 172800
+      for: 1h
+      labels:
+        severity: warning
+        component: database-backup
+      annotations:
+        summary: "PostgreSQL backup is old (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "Last successful backup was {{ "{{" }} $value {{ "}}" }} seconds ago (>48 hours). RTO at risk!"
+
+    # ========================================
+    # PERFORMANCE ALERTS
+    # ========================================
+    - alert: PostgreSQLHighCheckpointRate
+      expr: rate(pg_stat_bgwriter_checkpoints_req[5m]) / rate(pg_stat_bgwriter_checkpoints_timed[5m]) > 0.5
+      for: 10m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL checkpoint rate is high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "More than 50% of checkpoints are being requested (not timed). Consider increasing checkpoint_timeout or max_wal_size."
+
+    - alert: PostgreSQLHighBufferBackendWrites
+      expr: rate(pg_stat_bgwriter_buffers_backend[5m]) > rate(pg_stat_bgwriter_buffers_checkpoint[5m]) * 0.3
+      for: 10m
+      labels:
+        severity: warning
+        component: database
+      annotations:
+        summary: "PostgreSQL backend writes are high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        description: "Backends are writing {{ "{{" }} $value {{ "}}" }} buffers directly. Consider increasing shared_buffers."
+
+{{- end }}

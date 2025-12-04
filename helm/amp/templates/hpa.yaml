@@ -1,0 +1,124 @@
+{{- if and .Values.autoscaling.enabled (eq .Values.profile "standard") }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "amp.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+  annotations:
+    description: "Horizontal Pod Autoscaler for Alertmanager++ OSS Core - Standard Profile"
+    managed-by: {{ .Release.Service }}
+    helm.sh/resource-policy: keep
+    profile: {{ .Values.profile | quote }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "amp.fullname" . }}
+
+  minReplicas: {{ .Values.autoscaling.minReplicas | default 2 }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas | default 10 }}
+
+  # Resource-based metrics (CPU and Memory utilization)
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+
+    # Custom metrics (business metrics via Prometheus Adapter)
+    # These metrics require Prometheus Adapter to be installed in the cluster
+    # If adapter is not available, HPA will gracefully ignore these and use CPU/Memory only
+    {{- if .Values.autoscaling.customMetrics.enabled }}
+    {{- if .Values.autoscaling.customMetrics.requestsPerSecond }}
+    - type: Pods
+      pods:
+        metric:
+          name: alert_history_api_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.autoscaling.customMetrics.requestsPerSecond | quote }}
+    {{- end }}
+
+    {{- if .Values.autoscaling.customMetrics.classificationQueueSize }}
+    - type: Pods
+      pods:
+        metric:
+          name: alert_history_business_classification_queue_size
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.autoscaling.customMetrics.classificationQueueSize | quote }}
+    {{- end }}
+
+    {{- if .Values.autoscaling.customMetrics.publishingQueueSize }}
+    - type: Pods
+      pods:
+        metric:
+          name: alert_history_business_publishing_queue_size
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.autoscaling.customMetrics.publishingQueueSize | quote }}
+    {{- end }}
+    {{- end }}
+
+  # Advanced scaling behavior policies
+  # These policies control how aggressively HPA scales up and down to prevent flapping
+  {{- with .Values.autoscaling.behavior }}
+  behavior:
+    {{- if .scaleDown }}
+    scaleDown:
+      # Wait 5 minutes before scaling down to ensure load decrease is sustained
+      stabilizationWindowSeconds: {{ .scaleDown.stabilizationWindowSeconds | default 300 }}
+      policies:
+        {{- if .scaleDown.percentPolicy }}
+        # Scale down by at most 50% of current replicas per minute
+        - type: Percent
+          value: {{ .scaleDown.percentPolicy }}
+          periodSeconds: {{ .scaleDown.periodSeconds | default 60 }}
+        {{- end }}
+        {{- if .scaleDown.podsPolicy }}
+        # Scale down by at most 2 pods per minute
+        - type: Pods
+          value: {{ .scaleDown.podsPolicy }}
+          periodSeconds: {{ .scaleDown.periodSeconds | default 60 }}
+        {{- end }}
+      # Use the minimum of the two policies (most conservative)
+      selectPolicy: Min
+    {{- end }}
+
+    {{- if .scaleUp }}
+    scaleUp:
+      # Wait 1 minute before scaling up to confirm sustained high load
+      stabilizationWindowSeconds: {{ .scaleUp.stabilizationWindowSeconds | default 60 }}
+      policies:
+        {{- if .scaleUp.percentPolicy }}
+        # Scale up by at most 100% (double) of current replicas per 30 seconds
+        - type: Percent
+          value: {{ .scaleUp.percentPolicy }}
+          periodSeconds: {{ .scaleUp.periodSeconds | default 30 }}
+        {{- end }}
+        {{- if .scaleUp.podsPolicy }}
+        # Scale up by at most 4 pods per 30 seconds
+        - type: Pods
+          value: {{ .scaleUp.podsPolicy }}
+          periodSeconds: {{ .scaleUp.periodSeconds | default 30 }}
+        {{- end }}
+      # Use the maximum of the two policies (most aggressive)
+      selectPolicy: Max
+    {{- end }}
+  {{- end }}
+{{- end }}

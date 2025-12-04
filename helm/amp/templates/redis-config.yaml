@@ -1,0 +1,277 @@
+{{- if eq .Values.profile "standard" }}
+{{/*
+Redis Configuration ConfigMap for Standard Profile
+Comprehensive redis.conf with production-grade settings
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "amp.fullname" . }}-redis-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-config
+data:
+  redis.conf: |
+    # ===========================================
+    # Redis Configuration for Alertmanager++ OSS
+    # Profile: Standard (HA-Ready)
+    # Generated: {{ now | date "2006-01-02" }}
+    # Chart Version: {{ .Chart.Version }}
+    # ===========================================
+
+    # NETWORK CONFIGURATION
+    # ---------------------
+    # Bind to all interfaces (within pod)
+    bind 0.0.0.0
+
+    # Redis port
+    port 6379
+
+    # Protected mode (reject external connections without password)
+    protected-mode yes
+
+    # TCP listen backlog (max queued connections)
+    tcp-backlog 511
+
+    # Close connection after client idle for N seconds (0 = disabled)
+    timeout 0
+
+    # TCP keepalive interval in seconds
+    tcp-keepalive 300
+
+    # GENERAL CONFIGURATION
+    # ---------------------
+    # Run in foreground (required for containers)
+    daemonize no
+
+    # PID file location (not used in containers, but required by Redis)
+    pidfile /var/run/redis.pid
+
+    # Log level: debug, verbose, notice, warning
+    loglevel {{ .Values.valkey.settings.loglevel | default "notice" }}
+
+    # Log file (empty = stdout, required for containers)
+    logfile ""
+
+    # Number of databases (0-15, Standard Profile uses DB 0 only)
+    databases 1
+
+    # SNAPSHOTTING (RDB)
+    # ------------------
+    # Save the DB on disk:
+    #   save <seconds> <changes>
+    #
+    # RDB snapshots are created in background (BGSAVE) at these intervals:
+    # - After 900 sec (15 min) if at least 1 key changed
+    # - After 300 sec (5 min) if at least 10 keys changed
+    # - After 60 sec if at least 10000 keys changed
+    save 900 1
+    save 300 10
+    save 60 10000
+
+    # Stop accepting writes if last BGSAVE failed
+    stop-writes-on-bgsave-error yes
+
+    # Compress RDB snapshots (LZF algorithm)
+    rdbcompression yes
+
+    # Checksum RDB files (CRC64)
+    rdbchecksum yes
+
+    # RDB snapshot filename
+    dbfilename dump.rdb
+
+    # Working directory (RDB and AOF files location)
+    dir /data
+
+    # REPLICATION (Future HA Mode)
+    # ----------------------------
+    # Uncomment these settings when enabling Sentinel HA (3 replicas)
+    #
+    # slave-serve-stale-data yes
+    # slave-read-only yes
+    # repl-diskless-sync no
+    # repl-diskless-sync-delay 5
+    # repl-disable-tcp-nodelay no
+    # slave-priority 100
+
+    # SECURITY
+    # --------
+    # Password authentication (requirepass)
+    # NOTE: Password is injected by init container from Secret
+    # DO NOT set requirepass here, it will be appended during init
+    #
+    # requirepass <password>
+
+    # Rename dangerous commands (security hardening)
+    # CONFIG command disabled to prevent runtime config changes
+    rename-command CONFIG ""
+
+    # Optionally disable FLUSHDB/FLUSHALL (uncomment for production)
+    # rename-command FLUSHDB ""
+    # rename-command FLUSHALL ""
+
+    # MEMORY MANAGEMENT
+    # -----------------
+    # Maximum memory limit (384MB = 75% of 512Mi container limit)
+    # Leaves headroom for Redis overhead (metadata, buffers, fragmentation)
+    maxmemory {{ .Values.valkey.settings.maxmemory | default "384mb" }}
+
+    # Eviction policy when maxmemory reached
+    # allkeys-lru: Evict least recently used keys (recommended for cache)
+    maxmemory-policy {{ .Values.valkey.settings.maxmemoryPolicy | default "allkeys-lru" }}
+
+    # LRU/LFU sample size for eviction algorithm
+    maxmemory-samples 5
+
+    # LAZY FREEING
+    # ------------
+    # Free memory asynchronously (non-blocking)
+    # Recommended for large datasets to prevent blocking operations
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    lazyfree-lazy-server-del yes
+    replica-lazy-flush yes
+
+    # APPEND ONLY FILE (AOF)
+    # ----------------------
+    # Enable AOF persistence (write-ahead log)
+    appendonly {{ .Values.valkey.settings.appendonly | default "yes" }}
+
+    # AOF filename
+    appendfilename "appendonly.aof"
+
+    # AOF fsync policy:
+    # - always: Fsync on every write (slow, safe)
+    # - everysec: Fsync every second (fast, <1s data loss)
+    # - no: Never fsync (fastest, OS-dependent data loss)
+    appendfsync {{ .Values.valkey.settings.appendfsync | default "everysec" }}
+
+    # Disable fsync during BGSAVE/BGREWRITEAOF (prevent conflicts)
+    no-appendfsync-on-rewrite no
+
+    # Trigger AOF rewrite when file grows 100% (2x size)
+    auto-aof-rewrite-percentage 100
+
+    # Minimum AOF size before automatic rewrite (64MB)
+    auto-aof-rewrite-min-size 64mb
+
+    # Load truncated AOF on startup (best effort)
+    aof-load-truncated yes
+
+    # Use RDB preamble in AOF (hybrid persistence, faster load)
+    aof-use-rdb-preamble yes
+
+    # LUA SCRIPTING
+    # -------------
+    # Maximum execution time for Lua scripts (milliseconds)
+    lua-time-limit 5000
+
+    # SLOW LOG
+    # --------
+    # Log queries slower than N microseconds
+    # 10000 µs = 10 ms (queries >10ms logged)
+    slowlog-log-slower-than {{ .Values.valkey.settings.slowlogThreshold | default "10000" }}
+
+    # Maximum slow log length (entries)
+    slowlog-max-len 128
+
+    # LATENCY MONITOR
+    # ---------------
+    # Track latency events (milliseconds threshold)
+    # 100 ms = log events taking >100ms
+    latency-monitor-threshold 100
+
+    # EVENT NOTIFICATION
+    # ------------------
+    # Keyspace notifications (disabled by default)
+    # Enable only if needed for pub/sub functionality
+    notify-keyspace-events ""
+
+    # ADVANCED CONFIG
+    # ---------------
+    # Hash data structure optimization
+    hash-max-ziplist-entries 512
+    hash-max-ziplist-value 64
+
+    # List data structure optimization
+    list-max-ziplist-size -2
+    list-compress-depth 0
+
+    # Set data structure optimization
+    set-max-intset-entries 512
+
+    # Sorted set data structure optimization
+    zset-max-ziplist-entries 128
+    zset-max-ziplist-value 64
+
+    # HyperLogLog sparse representation
+    hll-sparse-max-bytes 3000
+
+    # Stream data structure optimization
+    stream-node-max-bytes 4096
+    stream-node-max-entries 100
+
+    # Active rehashing (yes = smoother performance, no = lower latency spikes)
+    activerehashing yes
+
+    # Client output buffer limits
+    # Format: <class> <hard limit> <soft limit> <soft seconds>
+    #
+    # Normal clients (default)
+    client-output-buffer-limit normal 0 0 0
+
+    # Replica clients (replication)
+    client-output-buffer-limit replica 256mb 64mb 60
+
+    # Pub/Sub clients
+    client-output-buffer-limit pubsub 32mb 8mb 60
+
+    # Server event loop frequency (1-500 Hz)
+    # Higher = more CPU, lower latency
+    hz 10
+
+    # Dynamic hz adjustment based on connected clients
+    dynamic-hz yes
+
+    # Incremental fsync for AOF rewrite (prevent I/O spikes)
+    aof-rewrite-incremental-fsync yes
+
+    # Incremental fsync for RDB save (prevent I/O spikes)
+    rdb-save-incremental-fsync yes
+
+    # CLUSTER MODE (Future HA Mode)
+    # -----------------------------
+    # Uncomment these settings when enabling Redis Cluster
+    #
+    # cluster-enabled no
+    # cluster-config-file nodes.conf
+    # cluster-node-timeout 15000
+
+    # TLS/SSL (Future Security Enhancement)
+    # -------------------------------------
+    # Uncomment these settings when enabling TLS
+    #
+    # tls-port 6379
+    # tls-cert-file /path/to/redis.crt
+    # tls-key-file /path/to/redis.key
+    # tls-ca-cert-file /path/to/ca.crt
+
+    # ACL (Access Control List) - Redis 6+
+    # ------------------------------------
+    # Future enhancement: Fine-grained user permissions
+    # aclfile /data/users.acl
+
+    # PERFORMANCE TUNING
+    # ------------------
+    # Disable transparent huge pages warning (handled by init container)
+    # sysctl vm.overcommit_memory=1
+
+    # MONITORING HOOKS
+    # ----------------
+    # No built-in hooks, use redis-exporter sidecar for Prometheus metrics
+
+    # END OF CONFIGURATION
+    # --------------------
+{{- end }}

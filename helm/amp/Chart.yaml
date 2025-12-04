@@ -1,0 +1,48 @@
+apiVersion: v2
+name: amp
+description: |
+  Alertmanager++ (AMP) - Enhanced Alertmanager with LLM classification, 
+  advanced grouping, and intelligent routing. 100% Alertmanager API compatible.
+
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+
+home: https://github.com/ipiton/AMP
+sources:
+  - https://github.com/ipiton/AMP
+
+maintainers:
+  - name: AMP Team
+    url: https://github.com/ipiton/AMP
+
+keywords:
+  - alertmanager
+  - alertmanager-plus-plus
+  - amp
+  - monitoring
+  - llm
+  - ai
+  - classification
+  - kubernetes
+  - prometheus
+  - webhook
+  - alerting
+
+annotations:
+  category: Monitoring
+  license: MIT
+  artifacthub.io/changes: |
+    - Initial OSS release
+    - 100% Alertmanager API compatible
+    - LLM classification (BYOK - Bring Your Own Key)
+    - Advanced grouping and routing
+    - Web dashboard included
+
+dependencies:
+  - name: valkey
+    version: "2.1.3"
+    repository: "https://groundhog2k.github.io/helm-charts"
+    condition: cache.enabled
+    tags:
+      - cache

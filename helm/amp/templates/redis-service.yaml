@@ -1,0 +1,99 @@
+{{- if eq .Values.profile "standard" }}
+{{/*
+Redis Services for Standard Profile
+Three services:
+1. Headless Service - StatefulSet DNS discovery
+2. ClusterIP Service - Application connections (primary only)
+3. Metrics Service - Prometheus scraping
+*/}}
+---
+# 1. Headless Service for StatefulSet DNS Discovery
+# Creates DNS records for each pod:
+# - alerthistory-redis-0.alerthistory-redis-headless.default.svc.cluster.local
+# - alerthistory-redis-1.alerthistory-redis-headless.default.svc.cluster.local (future HA)
+# - alerthistory-redis-2.alerthistory-redis-headless.default.svc.cluster.local (future HA)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "amp.fullname" . }}-redis-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-headless
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service (no ClusterIP assigned)
+  selector:
+    {{- include "amp.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+    protocol: TCP
+  # Include not-ready pods in DNS (required for StatefulSet)
+  publishNotReadyAddresses: true
+
+---
+# 2. ClusterIP Service for Application Connections
+# Routes traffic to primary replica (pod-0) only
+# Application connection string: redis://alerthistory-redis:6379
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "amp.fullname" . }}-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  annotations:
+    # Service description
+    service.alpha.kubernetes.io/description: "Redis primary service for L2 cache"
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "amp.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+    # Route to primary pod only (pod-0)
+    # Future HA: Remove this selector to load-balance reads across all replicas
+    statefulset.kubernetes.io/pod-name: {{ include "amp.fullname" . }}-redis-0
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+    protocol: TCP
+  # No session affinity (stateless operations)
+  sessionAffinity: None
+
+---
+# 3. Metrics Service for Prometheus Scraping
+# Exposes redis-exporter sidecar metrics on port 9121
+# Prometheus auto-discovery via ServiceMonitor (separate manifest)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "amp.fullname" . }}-redis-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-metrics
+  annotations:
+    # Prometheus scraping annotations (fallback if ServiceMonitor not used)
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
+    prometheus.io/path: "/metrics"
+    # Service description
+    service.alpha.kubernetes.io/description: "Redis metrics for Prometheus"
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "amp.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+  - name: metrics
+    port: 9121
+    targetPort: 9121
+    protocol: TCP
+  # No session affinity
+  sessionAffinity: None
+{{- end }}
