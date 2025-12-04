@@ -218,10 +218,7 @@ func (s *classificationService) ClassifyAlert(ctx context.Context, alert *core.A
 			s.incrementLLMSuccess()
 
 			if s.businessMetrics != nil {
-				s.businessMetrics.LLMClassificationsTotal.WithLabelValues(
-					string(result.Severity),
-					"llm",
-				).Inc()
+				s.businessMetrics.LLMClassificationsTotal("llm_" + string(result.Severity))
 				s.businessMetrics.RecordClassificationDuration("llm", time.Since(startTime).Seconds())
 			}
 
@@ -246,10 +243,7 @@ func (s *classificationService) ClassifyAlert(ctx context.Context, alert *core.A
 		s.saveToCache(ctx, alert.Fingerprint, result)
 
 		if s.businessMetrics != nil {
-			s.businessMetrics.LLMClassificationsTotal.WithLabelValues(
-				string(result.Severity),
-				"fallback",
-			).Inc()
+			s.businessMetrics.LLMClassificationsTotal("fallback_" + string(result.Severity))
 			s.businessMetrics.RecordClassificationDuration("fallback", time.Since(startTime).Seconds())
 		}
 

@@ -415,23 +415,21 @@ func (s *deduplicationService) recordMetrics(action ProcessAction, duration time
 
 	// Record processing duration histogram
 	actionLabel := action.String()
-	s.businessMetrics.DeduplicationDurationSeconds.WithLabelValues(actionLabel).Observe(duration.Seconds())
+	s.businessMetrics.DeduplicationDurationSeconds(actionLabel, duration.Seconds())
 
 	// Record action-specific counter metrics
 	switch action {
 	case ProcessActionCreated:
 		// New alert created (not a duplicate)
-		s.businessMetrics.DeduplicationCreatedTotal.WithLabelValues("webhook").Inc()
+		s.businessMetrics.DeduplicationCreatedTotal()
 
 	case ProcessActionUpdated:
 		// Existing alert updated (status or endsAt changed)
-		statusFromLabel := string(statusFrom)
-		statusToLabel := string(statusTo)
-		s.businessMetrics.DeduplicationUpdatedTotal.WithLabelValues(statusFromLabel, statusToLabel).Inc()
+		s.businessMetrics.DeduplicationUpdatedTotal()
 
 	case ProcessActionIgnored:
 		// Duplicate alert ignored (exact match)
-		s.businessMetrics.DeduplicationIgnoredTotal.WithLabelValues("duplicate").Inc()
+		s.businessMetrics.DeduplicationIgnoredTotal()
 	}
 
 	s.logger.Debug("Metrics recorded",

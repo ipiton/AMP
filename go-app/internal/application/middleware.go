@@ -74,10 +74,10 @@ func (s *MiddlewareStack) buildStack() {
 	// 3. Metrics collection
 	s.middlewares = append(s.middlewares, s.metricsMiddleware())
 
-	// 4. CORS (if enabled)
-	if s.config.Server.CORS.Enabled {
-		s.middlewares = append(s.middlewares, s.corsMiddleware())
-	}
+	// 4. CORS (if enabled) - TODO: Add CORS config to ServerConfig
+	// if s.config.Server.CORS.Enabled {
+	//     s.middlewares = append(s.middlewares, s.corsMiddleware())
+	// }
 
 	// TODO: Add more middleware
 	// - Authentication

@@ -220,7 +220,7 @@ func (h *SilenceHandler) BulkDelete(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, "At most 100 silence IDs are allowed per request", http.StatusBadRequest)
 		h.recordMetrics("POST", "/silences/bulk/delete", "400", start)
 		if h.metrics != nil {
-			h.metrics.SilenceRateLimitExceeded.WithLabelValues("/silences/bulk/delete").Inc()
+			h.metrics.SilenceRateLimitExceeded()
 		}
 		return
 	}

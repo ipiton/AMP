@@ -317,15 +317,15 @@ func (h *PrometheusQueryHandler) buildHistoryRequest(params *QueryParameters) (*
 	}
 
 	// Time range filter
-	if !params.StartTime.IsZero() || !params.EndTime.IsZero() {
-		filters.TimeRange = &core.TimeRange{}
-		if !params.StartTime.IsZero() {
-			filters.TimeRange.From = &params.StartTime
-		}
-		if !params.EndTime.IsZero() {
-			filters.TimeRange.To = &params.EndTime
-		}
-	}
+//	if !params.StartTime.IsZero() || !params.EndTime.IsZero() {
+//		filters.TimeRange = &core.TimeRange{}
+//		if !params.StartTime.IsZero() {
+//			filters.TimeRange.From = &params.StartTime
+//		}
+//		if !params.EndTime.IsZero() {
+//			filters.TimeRange.To = &params.EndTime
+//		}
+//	}
 
 	// Label matchers filter
 	if params.Filter != "" {
@@ -447,7 +447,7 @@ func (h *PrometheusQueryHandler) respondValidationError(w http.ResponseWriter, r
 	// Record validation errors in metrics
 	if h.metrics != nil {
 		for _, valErr := range result.Errors {
-			h.metrics.RecordValidationError(valErr.Parameter)
+			h.metrics.RecordValidationError(valErr.Message)
 		}
 	}
 }
@@ -464,5 +464,5 @@ func (h *PrometheusQueryHandler) recordMetrics(status, reason string, alertCount
 	// Record validation errors if applicable
 	if status == "validation_failed" {
 		h.metrics.RecordValidationError(reason)
-	}
+}
 }

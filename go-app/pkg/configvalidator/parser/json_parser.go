@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/ipiton/AMP/internal/alertmanager/config"
-	validatorpkg "github.com/ipiton/AMP/pkg/configvalidator"
+	"github.com/ipiton/AMP/pkg/configvalidator/types"
 )
 
 // ================================================================================
@@ -47,18 +47,18 @@ func NewJSONParser(strict bool) *JSONParser {
 //
 // Returns:
 //   - *config.AlertmanagerConfig: Parsed configuration (nil if parse errors)
-//   - []validatorpkg.Error: List of parse errors (empty if success)
+//   - []types.Error: List of parse errors (empty if success)
 //
 // Performance: < 5ms p95 for typical configs
-func (p *JSONParser) Parse(data []byte) (*config.AlertmanagerConfig, []validatorpkg.Error) {
+func (p *JSONParser) Parse(data []byte) (*config.AlertmanagerConfig, []types.Error) {
 	// Protection: Check max size (10MB)
 	maxSize := 10 * 1024 * 1024 // 10MB
 	if len(data) > maxSize {
-		return nil, []validatorpkg.Error{{
+		return nil, []types.Error{{
 			Type:    "syntax",
 			Code:    "E002",
 			Message: fmt.Sprintf("Configuration file too large: %d bytes (max: %d bytes)", len(data), maxSize),
-			Location: validatorpkg.Location{
+			Location: types.Location{
 				Line: 1,
 			},
 			Suggestion: "Split configuration into multiple files or reduce size",
@@ -75,14 +75,14 @@ func (p *JSONParser) Parse(data []byte) (*config.AlertmanagerConfig, []validator
 
 	if err := decoder.Decode(&cfg); err != nil {
 		// Convert JSON error to validation error
-		return nil, []validatorpkg.Error{p.convertJSONError(err, data)}
+		return nil, []types.Error{p.convertJSONError(err, data)}
 	}
 
 	return &cfg, nil
 }
 
 // convertJSONError converts JSON parsing error to validation error with detailed info.
-func (p *JSONParser) convertJSONError(err error, data []byte) validatorpkg.Error {
+func (p *JSONParser) convertJSONError(err error, data []byte) types.Error {
 	// Extract location from error
 	location := p.extractLocation(err, data)
 
@@ -95,7 +95,7 @@ func (p *JSONParser) convertJSONError(err error, data []byte) validatorpkg.Error
 	// Generate suggestion
 	suggestion := p.generateSuggestion(err)
 
-	return validatorpkg.Error{
+	return types.Error{
 		Type:       "syntax",
 		Code:       "E002",
 		Message:    message,
@@ -109,9 +109,9 @@ func (p *JSONParser) convertJSONError(err error, data []byte) validatorpkg.Error
 // extractLocation extracts location from JSON error.
 //
 // JSON errors often include offset, which we convert to line:column.
-func (p *JSONParser) extractLocation(err error, data []byte) validatorpkg.Location {
+func (p *JSONParser) extractLocation(err error, data []byte) types.Location {
 	errStr := err.Error()
-	location := validatorpkg.Location{}
+	location := types.Location{}
 
 	// Check for SyntaxError (has Offset field)
 	if syntaxErr, ok := err.(*json.SyntaxError); ok {

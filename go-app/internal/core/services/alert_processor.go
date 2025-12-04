@@ -58,9 +58,7 @@ type AlertProcessorConfig struct {
 
 // NewAlertProcessor creates a new alert processor
 func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
-	if config.EnrichmentManager == nil {
-		return nil, fmt.Errorf("enrichment manager is required")
-	}
+	// EnrichmentManager can be nil for basic mode
 	if config.FilterEngine == nil {
 		return nil, fmt.Errorf("filter engine is required")
 	}
@@ -150,9 +148,9 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 
 			// Record inhibition metrics
 			if p.businessMetrics != nil {
-				p.businessMetrics.InhibitionChecksTotal.WithLabelValues("inhibited").Inc()
-				p.businessMetrics.InhibitionMatchesTotal.WithLabelValues(inhibitionResult.Rule.Name).Inc()
-				p.businessMetrics.InhibitionDurationSeconds.WithLabelValues("check").Observe(inhibitionResult.MatchDuration.Seconds())
+				p.businessMetrics.RecordInhibitionCheck("inhibited")
+				p.businessMetrics.RecordInhibitionMatch(inhibitionResult.Rule.Name)
+				p.businessMetrics.RecordInhibitionDuration("check", inhibitionResult.MatchDuration.Seconds())
 			}
 
 			// Skip publishing - alert is inhibited
@@ -165,7 +163,7 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 
 			// Record allowed metric
 			if p.businessMetrics != nil {
-				p.businessMetrics.InhibitionChecksTotal.WithLabelValues("allowed").Inc()
+				p.businessMetrics.RecordInhibitionCheck("allowed")
 			}
 		}
 	}

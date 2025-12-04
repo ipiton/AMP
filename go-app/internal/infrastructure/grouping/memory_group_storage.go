@@ -105,7 +105,7 @@ func NewMemoryGroupStorage(config *MemoryGroupStorageConfig) *MemoryGroupStorage
 
 	// Initialize health metric
 	if storage.metrics != nil {
-		storage.metrics.SetStorageHealth("memory", true)
+		storage.metrics.SetStorageHealth(true)
 	}
 
 	logger.Info("Initialized in-memory group storage (volatile, no persistence)")
@@ -127,7 +127,7 @@ func (m *MemoryGroupStorage) Store(ctx context.Context, group *AlertGroup) error
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("store", time.Since(start))
+			m.metrics.RecordStorageDuration("store", float64(time.Since(start)))
 		}
 	}()
 
@@ -219,7 +219,7 @@ func (m *MemoryGroupStorage) Load(ctx context.Context, groupKey GroupKey) (*Aler
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("load", time.Since(start))
+			m.metrics.RecordStorageDuration("load", float64(time.Since(start)))
 		}
 	}()
 
@@ -255,7 +255,7 @@ func (m *MemoryGroupStorage) Delete(ctx context.Context, groupKey GroupKey) erro
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("delete", time.Since(start))
+			m.metrics.RecordStorageDuration("delete", float64(time.Since(start)))
 		}
 	}()
 
@@ -284,7 +284,7 @@ func (m *MemoryGroupStorage) ListKeys(ctx context.Context) ([]GroupKey, error) {
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("list_keys", time.Since(start))
+			m.metrics.RecordStorageDuration("list_keys", float64(time.Since(start)))
 		}
 	}()
 
@@ -314,7 +314,7 @@ func (m *MemoryGroupStorage) Size(ctx context.Context) (int, error) {
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("size", time.Since(start))
+			m.metrics.RecordStorageDuration("size", float64(time.Since(start)))
 		}
 	}()
 
@@ -343,7 +343,7 @@ func (m *MemoryGroupStorage) LoadAll(ctx context.Context) ([]*AlertGroup, error)
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("load_all", time.Since(start))
+			m.metrics.RecordStorageDuration("load_all", float64(time.Since(start)))
 		}
 	}()
 
@@ -376,7 +376,7 @@ func (m *MemoryGroupStorage) StoreAll(ctx context.Context, groups []*AlertGroup)
 	start := time.Now()
 	defer func() {
 		if m.metrics != nil {
-			m.metrics.RecordStorageDuration("store_all", time.Since(start))
+			m.metrics.RecordStorageDuration("store_all", float64(time.Since(start)))
 		}
 	}()
 
@@ -416,7 +416,7 @@ func (m *MemoryGroupStorage) StoreAll(ctx context.Context, groups []*AlertGroup)
 func (m *MemoryGroupStorage) Ping(ctx context.Context) error {
 	// In-memory storage is always healthy
 	if m.metrics != nil {
-		m.metrics.SetStorageHealth("memory", true)
+		m.metrics.SetStorageHealth(true)
 	}
 
 	return nil

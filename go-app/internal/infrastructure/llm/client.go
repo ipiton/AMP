@@ -14,7 +14,6 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/resilience"
-	"github.com/ipiton/AMP/pkg/metrics"
 )
 
 // ClassificationRequest represents the request payload to LLM API.
@@ -152,7 +151,7 @@ func (c *HTTPLLMClient) classifyAlertWithRetry(ctx context.Context, alert *core.
 		Jitter:       true,
 		ErrorChecker: &llmErrorChecker{},
 		Logger:       c.logger,
-		Metrics:      metrics.DefaultRegistry().Technical().Retry,
+		Metrics:      nil, // Stub - metrics registry not fully implemented
 		OperationName: "llm_classify_alert",
 	}
 

@@ -764,7 +764,7 @@ func (h *PrometheusAlertsHandler) recordMetrics(
 	}
 
 	// Record request metrics
-	h.metrics.RecordRequest(status, alertCount, duration)
+	h.metrics.RecordRequest("POST", float64(duration))
 
 	// Record validation errors if applicable
 	if status == "validation_failed" {

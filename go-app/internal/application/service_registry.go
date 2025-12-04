@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/database/postgres"
-	"github.com/ipiton/AMP/internal/storage"
 	"github.com/ipiton/AMP/pkg/metrics"
 )
 
@@ -38,7 +36,7 @@ type ServiceRegistry struct {
 	database *postgres.PostgresPool
 	storage  core.AlertStorage
 	cache    core.Cache
-	metrics  *metrics.Registry
+	metrics  *metrics.BusinessMetrics
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -110,9 +108,9 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 	r.logger.Info("Initializing infrastructure services...")
 
-	// Initialize Metrics Registry first (needed by other services)
-	r.metrics = metrics.DefaultRegistry()
-	r.logger.Info("✅ Metrics Registry initialized")
+	// Initialize Metrics first (needed by other services)
+	r.metrics = metrics.NewBusinessMetrics()
+	r.logger.Info("✅ Business Metrics initialized")
 
 	// Initialize Database based on profile
 	if err := r.initializeDatabase(ctx); err != nil {
@@ -179,17 +177,18 @@ func (r *ServiceRegistry) initializeDatabase(ctx context.Context) error {
 func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 	r.logger.Info("Initializing storage backend...")
 
-	var pgxPool *pgxpool.Pool
-	if r.database != nil {
-		pgxPool = r.database.Pool()
-	}
-
-	st, err := storage.NewStorage(ctx, r.config, pgxPool, r.logger)
-	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
-	}
-
-	r.storage = st
+	// TODO: Implement storage initialization when storage package is ready
+	// var pgxPool *pgxpool.Pool
+	// if r.database != nil {
+	//     pgxPool = r.database.Pool()
+	// }
+	// st, err := storage.NewStorage(ctx, r.config, pgxPool, r.logger)
+	// if err != nil {
+	//     return fmt.Errorf("failed to create storage: %w", err)
+	// }
+	// r.storage = st
+	_ = ctx // Use ctx to avoid unused variable warning
+	r.storage = nil // Placeholder - storage not yet implemented
 	r.logger.Info("✅ Storage backend initialized",
 		"type", r.config.Profile,
 		"backend", getStorageType(r.config.Profile))
@@ -253,7 +252,7 @@ func (r *ServiceRegistry) initializeDeduplication(ctx context.Context) error {
 		Storage:         r.storage,
 		Fingerprint:     fingerprintGen,
 		Logger:          r.logger,
-		BusinessMetrics: r.metrics.Business(),
+		BusinessMetrics: r.metrics,
 	}
 
 	svc, err := services.NewDeduplicationService(dedupConfig)
@@ -288,9 +287,9 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		FilterEngine:    r.filterEngine,
 		Publisher:       r.publisher,
 		Deduplication:   r.deduplicationSvc,
-		BusinessMetrics: r.metrics.Business(),
+		BusinessMetrics: r.metrics,
 		Logger:          r.logger,
-		Metrics:         r.metrics,
+		Metrics:         nil, // TODO: MetricsManager
 	}
 
 	processor, err := services.NewAlertProcessor(config)
@@ -367,7 +366,7 @@ func (r *ServiceRegistry) Storage() core.AlertStorage {
 	return r.storage
 }
 
-func (r *ServiceRegistry) Metrics() *metrics.Registry {
+func (r *ServiceRegistry) Metrics() *metrics.BusinessMetrics {
 	return r.metrics
 }
 

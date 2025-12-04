@@ -116,7 +116,7 @@ func NewDefaultStateManager(redisStore cache.Cache, logger *slog.Logger, metrics
 
 // RecordInhibition records a new inhibition relationship in both memory and Redis.
 func (sm *DefaultStateManager) RecordInhibition(ctx context.Context, state *InhibitionState) error {
-	start := time.Now()
+// 	start := time.Now()
 
 	if state == nil {
 		return fmt.Errorf("state cannot be nil")
@@ -155,12 +155,12 @@ func (sm *DefaultStateManager) RecordInhibition(ctx context.Context, state *Inhi
 	}
 
 	// Record metrics
-	duration := time.Since(start)
+// 	duration := time.Since(start)
 	if sm.metrics != nil {
-		sm.metrics.RecordInhibitionStateRecord(state.RuleName, duration)
+		sm.metrics.RecordInhibitionStateRecord(state.RuleName)
 		// Update active gauge
 		count := sm.countActiveStates()
-		sm.metrics.SetInhibitionStateActive(count)
+		sm.metrics.SetInhibitionStateActive(float64(count))
 	}
 
 	return nil
@@ -168,7 +168,7 @@ func (sm *DefaultStateManager) RecordInhibition(ctx context.Context, state *Inhi
 
 // RemoveInhibition removes an inhibition relationship from both memory and Redis.
 func (sm *DefaultStateManager) RemoveInhibition(ctx context.Context, targetFingerprint string) error {
-	start := time.Now()
+// 	start := time.Now()
 
 	if targetFingerprint == "" {
 		return fmt.Errorf("target fingerprint cannot be empty")
@@ -198,12 +198,12 @@ func (sm *DefaultStateManager) RemoveInhibition(ctx context.Context, targetFinge
 	}
 
 	// Record metrics
-	duration := time.Since(start)
+// 	duration := time.Since(start)
 	if sm.metrics != nil {
-		sm.metrics.RecordInhibitionStateRemoval("manual", duration)
+		sm.metrics.RecordInhibitionStateRemoval("manual")
 		// Update active gauge
 		count := sm.countActiveStates()
-		sm.metrics.SetInhibitionStateActive(count)
+		sm.metrics.SetInhibitionStateActive(float64(count))
 	}
 
 	return nil
@@ -211,7 +211,7 @@ func (sm *DefaultStateManager) RemoveInhibition(ctx context.Context, targetFinge
 
 // GetActiveInhibitions returns all currently active inhibition relationships.
 func (sm *DefaultStateManager) GetActiveInhibitions(ctx context.Context) ([]*InhibitionState, error) {
-	start := time.Now()
+// 	start := time.Now()
 	states := make([]*InhibitionState, 0)
 
 	sm.states.Range(func(key, value interface{}) bool {
@@ -229,8 +229,8 @@ func (sm *DefaultStateManager) GetActiveInhibitions(ctx context.Context) ([]*Inh
 
 	// Record metrics
 	if sm.metrics != nil {
-		duration := time.Since(start)
-		sm.metrics.RecordInhibitionStateOperation("get", duration)
+// 		duration := time.Since(start)
+		sm.metrics.RecordInhibitionStateOperation("get", "success")
 	}
 
 	return states, nil
@@ -257,7 +257,7 @@ func (sm *DefaultStateManager) GetInhibitedAlerts(ctx context.Context) ([]string
 
 // IsInhibited checks if a specific alert is currently inhibited.
 func (sm *DefaultStateManager) IsInhibited(ctx context.Context, targetFingerprint string) (bool, error) {
-	start := time.Now()
+// 	start := time.Now()
 
 	if targetFingerprint == "" {
 		return false, fmt.Errorf("target fingerprint cannot be empty")
@@ -267,8 +267,8 @@ func (sm *DefaultStateManager) IsInhibited(ctx context.Context, targetFingerprin
 	if !ok {
 		// Record metrics for fast path (not found)
 		if sm.metrics != nil {
-			duration := time.Since(start)
-			sm.metrics.RecordInhibitionStateOperation("check", duration)
+// 			duration := time.Since(start)
+			sm.metrics.RecordInhibitionStateOperation("check", "success")
 		}
 		return false, nil
 	}
@@ -285,16 +285,16 @@ func (sm *DefaultStateManager) IsInhibited(ctx context.Context, targetFingerprin
 
 		// Record metrics
 		if sm.metrics != nil {
-			duration := time.Since(start)
-			sm.metrics.RecordInhibitionStateOperation("check", duration)
+// 			duration := time.Since(start)
+			sm.metrics.RecordInhibitionStateOperation("check", "success")
 		}
 		return false, nil
 	}
 
 	// Record metrics for successful check
 	if sm.metrics != nil {
-		duration := time.Since(start)
-		sm.metrics.RecordInhibitionStateOperation("check", duration)
+// 		duration := time.Since(start)
+		sm.metrics.RecordInhibitionStateOperation("check", "success")
 	}
 
 	return true, nil
@@ -442,7 +442,7 @@ func (sm *DefaultStateManager) cleanupWorker(ctx context.Context) {
 // cleanupExpiredStates removes all expired inhibition states from memory.
 // This is called periodically by the cleanup worker.
 func (sm *DefaultStateManager) cleanupExpiredStates(ctx context.Context) {
-	start := time.Now()
+// 	start := time.Now()
 	cleanedCount := 0
 	now := time.Now()
 
@@ -468,6 +468,7 @@ func (sm *DefaultStateManager) cleanupExpiredStates(ctx context.Context) {
 		return true
 	})
 
+start := time.Now()
 	// Delete expired states
 	for _, fp := range expiredFingerprints {
 		sm.states.Delete(fp)
@@ -475,7 +476,7 @@ func (sm *DefaultStateManager) cleanupExpiredStates(ctx context.Context) {
 
 		// Record metrics
 		if sm.metrics != nil {
-			sm.metrics.RecordInhibitionStateExpired()
+			sm.metrics.RecordInhibitionStateExpired("expired")
 		}
 
 		sm.logger.Debug("Cleaned up expired inhibition state",
@@ -485,13 +486,13 @@ func (sm *DefaultStateManager) cleanupExpiredStates(ctx context.Context) {
 
 	// Record cleanup duration
 	if sm.metrics != nil {
-		duration := time.Since(start)
-		sm.metrics.RecordInhibitionStateOperation("cleanup", duration)
+// 		duration := time.Since(start)
+		sm.metrics.RecordInhibitionStateOperation("cleanup", "success")
 
 		// Update active gauge
 		if cleanedCount > 0 {
 			count := sm.countActiveStates()
-			sm.metrics.SetInhibitionStateActive(count)
+			sm.metrics.SetInhibitionStateActive(float64(count))
 		}
 	}
 

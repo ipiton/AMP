@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ipiton/AMP/internal/alertmanager/config"
-	validatorpkg "github.com/ipiton/AMP/pkg/configvalidator"
+	types "github.com/ipiton/AMP/pkg/configvalidator/types"
 )
 
 // ================================================================================
@@ -48,18 +48,18 @@ func NewYAMLParser(strict bool) *YAMLParser {
 //
 // Returns:
 //   - *config.AlertmanagerConfig: Parsed configuration (nil if parse errors)
-//   - []validatorpkg.Error: List of parse errors (empty if success)
+//   - []types.Error: List of parse errors (empty if success)
 //
 // Performance: < 10ms p95 for typical configs
-func (p *YAMLParser) Parse(data []byte) (*config.AlertmanagerConfig, []validatorpkg.Error) {
+func (p *YAMLParser) Parse(data []byte) (*config.AlertmanagerConfig, []types.Error) {
 	// Protection: Check max size (10MB)
 	maxSize := 10 * 1024 * 1024 // 10MB
 	if len(data) > maxSize {
-		return nil, []validatorpkg.Error{{
+		return nil, []types.Error{{
 			Type:    "syntax",
 			Code:    "E001",
 			Message: fmt.Sprintf("Configuration file too large: %d bytes (max: %d bytes)", len(data), maxSize),
-			Location: validatorpkg.Location{
+			Location: types.Location{
 				Line: 1,
 			},
 			Suggestion: "Split configuration into multiple files or reduce size",
@@ -73,14 +73,14 @@ func (p *YAMLParser) Parse(data []byte) (*config.AlertmanagerConfig, []validator
 
 	if err := decoder.Decode(&cfg); err != nil {
 		// Convert YAML error to validation error
-		return nil, []validatorpkg.Error{p.convertYAMLError(err, data)}
+		return nil, []types.Error{p.convertYAMLError(err, data)}
 	}
 
 	return &cfg, nil
 }
 
 // convertYAMLError converts YAML parsing error to validation error with detailed info.
-func (p *YAMLParser) convertYAMLError(err error, data []byte) validatorpkg.Error {
+func (p *YAMLParser) convertYAMLError(err error, data []byte) types.Error {
 	// Extract line and column from YAML error
 	location := p.extractLocation(err)
 
@@ -93,7 +93,7 @@ func (p *YAMLParser) convertYAMLError(err error, data []byte) validatorpkg.Error
 	// Generate suggestion
 	suggestion := p.generateSuggestion(err)
 
-	return validatorpkg.Error{
+	return types.Error{
 		Type:       "syntax",
 		Code:       "E001",
 		Message:    message,
@@ -107,7 +107,7 @@ func (p *YAMLParser) convertYAMLError(err error, data []byte) validatorpkg.Error
 // extractLocation extracts line and column from YAML error.
 //
 // YAML errors have format: "yaml: line X: column Y: message"
-func (p *YAMLParser) extractLocation(err error) validatorpkg.Location {
+func (p *YAMLParser) extractLocation(err error) types.Location {
 	errStr := err.Error()
 
 	// Regex to extract line and column
@@ -115,7 +115,7 @@ func (p *YAMLParser) extractLocation(err error) validatorpkg.Location {
 	lineColRegex := regexp.MustCompile(`line\s+(\d+)(?::\s*column\s+(\d+))?`)
 	matches := lineColRegex.FindStringSubmatch(errStr)
 
-	location := validatorpkg.Location{}
+	location := types.Location{}
 
 	if len(matches) >= 2 {
 		if line, err := strconv.Atoi(matches[1]); err == nil {

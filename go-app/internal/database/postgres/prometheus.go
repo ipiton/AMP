@@ -163,7 +163,7 @@ func (e *PrometheusExporter) exportMetrics() {
 // Parameters:
 //   - duration: The wait duration
 func (e *PrometheusExporter) RecordConnectionWait(duration time.Duration) {
-	e.dbMetrics.ConnectionWaitDurationSeconds.Observe(duration.Seconds())
+	e.dbMetrics.ConnectionWaitDurationSeconds.WithLabelValues("default").Observe(duration.Seconds())
 }
 
 // RecordQuery records a database query execution.
