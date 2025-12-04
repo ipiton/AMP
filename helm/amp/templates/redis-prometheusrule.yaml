@@ -1,0 +1,158 @@
+{{- if and (eq .Values.profile "standard") .Values.monitoring.prometheusEnabled }}
+{{/*
+PrometheusRule CRD for Redis Alerting
+10 alerting rules: 5 critical + 5 warning
+*/}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "amp.fullname" . }}-redis-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-alerts
+    prometheus: kube-prometheus  # Prometheus Operator selector
+spec:
+  groups:
+  # =======================
+  # CRITICAL ALERTS (5)
+  # =======================
+  - name: redis.critical
+    interval: 30s
+    rules:
+    # CRITICAL ALERT 1: Redis Down
+    - alert: RedisDown
+      expr: redis_up{job="alerthistory-redis"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        component: redis
+      annotations:
+        summary: "Redis instance is down"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is not responding to PING for 1 minute"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-down"
+
+    # CRITICAL ALERT 2: Redis Out of Memory
+    - alert: RedisOutOfMemory
+      expr: |
+        redis_memory_used_bytes{job="alerthistory-redis"}
+        / redis_memory_max_bytes{job="alerthistory-redis"} > 0.9
+      for: 5m
+      labels:
+        severity: critical
+        component: redis
+      annotations:
+        summary: "Redis memory usage critical (>90%)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of maxmemory (384MB limit)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-oom"
+
+    # CRITICAL ALERT 3: Too Many Connections
+    - alert: RedisTooManyConnections
+      expr: redis_connected_clients{job="alerthistory-redis"} > 8000
+      for: 5m
+      labels:
+        severity: critical
+        component: redis
+      annotations:
+        summary: "Redis has too many connections (>8000)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} connections (maxclients: 10000, 80% threshold)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-connections"
+
+    # CRITICAL ALERT 4: Rejected Connections
+    - alert: RedisRejectedConnections
+      expr: |
+        increase(redis_rejected_connections_total{job="alerthistory-redis"}[5m]) > 0
+      labels:
+        severity: critical
+        component: redis
+      annotations:
+        summary: "Redis rejected connections detected"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} rejected {{ "{{" }} $value {{ "}}" }} connections in last 5 minutes (maxclients limit reached)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-rejected"
+
+    # CRITICAL ALERT 5: Persistence Failure
+    - alert: RedisPersistenceFailure
+      expr: redis_rdb_last_bgsave_status{job="alerthistory-redis"} == 0
+      for: 10m
+      labels:
+        severity: critical
+        component: redis
+      annotations:
+        summary: "Redis RDB persistence failed"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} RDB save failed (last BGSAVE returned error)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-persistence"
+
+  # =======================
+  # WARNING ALERTS (5)
+  # =======================
+  - name: redis.warning
+    interval: 30s
+    rules:
+    # WARNING ALERT 6: High Memory Usage
+    - alert: RedisHighMemoryUsage
+      expr: |
+        redis_memory_used_bytes{job="alerthistory-redis"}
+        / redis_memory_max_bytes{job="alerthistory-redis"} > 0.75
+      for: 10m
+      labels:
+        severity: warning
+        component: redis
+      annotations:
+        summary: "Redis memory usage high (>75%)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of maxmemory (384MB limit)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-memory"
+
+    # WARNING ALERT 7: High Connection Usage
+    - alert: RedisHighConnectionUsage
+      expr: redis_connected_clients{job="alerthistory-redis"} > 6000
+      for: 10m
+      labels:
+        severity: warning
+        component: redis
+      annotations:
+        summary: "Redis connection usage high (>60%)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} connections (maxclients: 10000, 60% threshold)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-connections"
+
+    # WARNING ALERT 8: Slow Queries
+    - alert: RedisSlowQueries
+      expr: redis_slowlog_length{job="alerthistory-redis"} > 10
+      for: 5m
+      labels:
+        severity: warning
+        component: redis
+      annotations:
+        summary: "Redis slow queries detected"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} slow queries in log (threshold: >10ms)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-slow-queries"
+
+    # WARNING ALERT 9: Replication Lag (Future HA)
+    - alert: RedisReplicationLag
+      expr: |
+        (redis_connected_slaves > 0)
+        and on(instance)
+        (redis_master_repl_offset{job="alerthistory-redis"} - redis_slave_repl_offset{job="alerthistory-redis"} > 1000)
+      for: 5m
+      labels:
+        severity: warning
+        component: redis
+      annotations:
+        summary: "Redis replication lag high"
+        description: "Redis replica {{ "{{" }} $labels.instance {{ "}}" }} is lagging by {{ "{{" }} $value {{ "}}" }} bytes (>1KB threshold)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-replication"
+
+    # WARNING ALERT 10: Low Cache Hit Rate
+    - alert: RedisLowHitRate
+      expr: |
+        rate(redis_keyspace_hits_total{job="alerthistory-redis"}[5m])
+        / (rate(redis_keyspace_hits_total{job="alerthistory-redis"}[5m])
+           + rate(redis_keyspace_misses_total{job="alerthistory-redis"}[5m])) < 0.8
+      for: 15m
+      labels:
+        severity: warning
+        component: redis
+      annotations:
+        summary: "Redis cache hit rate low (<80%)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} has {{ "{{" }} $value | humanizePercentage {{ "}}" }} hit rate (target: >90%)"
+        runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-cache-hit-rate"
+{{- end }}
