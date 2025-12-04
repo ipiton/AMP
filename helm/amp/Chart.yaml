@@ -31,7 +31,7 @@ keywords:
 
 annotations:
   category: Monitoring
-  license: MIT
+  license: Apache-2.0
   artifacthub.io/changes: |
     - Initial OSS release
     - 100% Alertmanager API compatible
