@@ -113,4 +113,4 @@ helm uninstall amp
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/ipiton/AMP/blob/main/LICENSE)
+Apache-2.0 License - see [LICENSE](https://github.com/ipiton/AMP/blob/main/LICENSE)
