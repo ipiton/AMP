@@ -9,9 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -74,7 +74,7 @@ type pagerDutyEventsClientImpl struct {
 	baseURL     string
 	rateLimiter *rate.Limiter
 	logger      *slog.Logger
-	metrics     *PagerDutyMetrics
+	metrics     *v2.PublishingMetrics
 	retryConfig PagerDutyRetryConfig
 }
 
@@ -113,7 +113,7 @@ func NewPagerDutyEventsClient(config PagerDutyClientConfig, logger *slog.Logger)
 		baseURL:     config.BaseURL,
 		rateLimiter: rateLimiter,
 		logger:      logger,
-		metrics:     NewPagerDutyMetrics(),
+		metrics:     nil, // Metrics are recorded in EnhancedPagerDutyPublisher
 		retryConfig: PagerDutyRetryConfig{
 			MaxRetries:  config.MaxRetries,
 			BaseBackoff: 100 * time.Millisecond,
@@ -303,7 +303,9 @@ func (c *pagerDutyEventsClientImpl) Health(ctx context.Context) error {
 func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string, endpoint string, body interface{}) (*http.Response, error) {
 	// Wait for rate limiter
 	if err := c.rateLimiter.Wait(ctx); err != nil {
-		c.metrics.RateLimitHits.Inc()
+		if c.metrics != nil {
+			c.metrics.RecordRateLimitHit(v2.ProviderPagerDuty)
+		}
 		c.logger.Warn("Rate limiter triggered", "error", err)
 		return nil, ErrRateLimitExceeded
 	}
@@ -347,8 +349,9 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 		if resp != nil {
 			statusCode = resp.StatusCode
 		}
-		c.metrics.APIRequests.WithLabelValues(endpoint, strconv.Itoa(statusCode)).Inc()
-		c.metrics.APIDuration.WithLabelValues(endpoint).Observe(duration.Seconds())
+		if c.metrics != nil {
+			c.metrics.RecordAPIRequest(v2.ProviderPagerDuty, endpoint, method, statusCode, duration)
+		}
 
 		// Check error
 		if err != nil {
@@ -359,14 +362,19 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 				"error", err,
 			)
 
-			// Retry on network errors
-			if attempt < c.retryConfig.MaxRetries {
-				backoff := c.calculateBackoff(attempt)
+		// Retry on network errors
+		if attempt < c.retryConfig.MaxRetries {
+			backoff := c.calculateBackoff(attempt)
+			// Level guard: avoid expensive logging in production
+			if c.logger.Enabled(ctx, slog.LevelDebug) {
 				c.logger.Debug("Retrying after backoff", "backoff", backoff, "attempt", attempt+1)
-				time.Sleep(backoff)
-				continue
 			}
-			c.metrics.APIErrors.WithLabelValues("network_error").Inc()
+			time.Sleep(backoff)
+			continue
+		}
+			if c.metrics != nil {
+				c.metrics.RecordAPIError(v2.ProviderPagerDuty, endpoint, "network_error")
+			}
 			return nil, lastErr
 		}
 
@@ -387,17 +395,22 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 				"status", resp.StatusCode,
 				"error", apiErr,
 			)
-			resp.Body.Close()
+		resp.Body.Close()
 
-			backoff := c.calculateBackoff(attempt)
+		backoff := c.calculateBackoff(attempt)
+		// Level guard: avoid expensive logging in production
+		if c.logger.Enabled(ctx, slog.LevelDebug) {
 			c.logger.Debug("Retrying after backoff", "backoff", backoff, "attempt", attempt+1)
-			time.Sleep(backoff)
-			continue
+		}
+		time.Sleep(backoff)
+		continue
 		}
 
 		// Permanent error - no retry
 		resp.Body.Close()
-		c.metrics.APIErrors.WithLabelValues(apiErr.Type()).Inc()
+		if c.metrics != nil {
+			c.metrics.RecordAPIError(v2.ProviderPagerDuty, endpoint, apiErr.Type())
+		}
 		return nil, apiErr
 	}
 
@@ -460,11 +473,7 @@ func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *PagerDutyAP
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return &PagerDutyAPIError{
-			StatusCode: resp.StatusCode,
-			Message:    "failed to read error response",
-			Errors:     []string{err.Error()},
-		}
+		return NewPagerDutyAPIError(resp.StatusCode, "failed to read error response", []string{err.Error()})
 	}
 
 	// Try to parse JSON error
@@ -476,16 +485,8 @@ func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *PagerDutyAP
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse JSON, return raw body
-		return &PagerDutyAPIError{
-			StatusCode: resp.StatusCode,
-			Message:    string(body),
-			Errors:     nil,
-		}
+		return NewPagerDutyAPIError(resp.StatusCode, string(body), nil)
 	}
 
-	return &PagerDutyAPIError{
-		StatusCode: resp.StatusCode,
-		Message:    errorResp.Message,
-		Errors:     errorResp.Errors,
-	}
+	return NewPagerDutyAPIError(resp.StatusCode, errorResp.Message, errorResp.Errors)
 }

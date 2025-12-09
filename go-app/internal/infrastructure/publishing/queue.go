@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
-	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/ipiton/AMP/pkg/retry"
 )
 
 // Priority levels for job processing order
@@ -119,7 +119,7 @@ type PublishingQueue struct {
 	retryInterval     time.Duration
 	workerCount       int
 	logger            *slog.Logger
-	metrics           *PublishingMetrics
+	metrics           *v2.PublishingMetrics // v2 metrics for queue operations
 	wg                sync.WaitGroup
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -136,6 +136,8 @@ type PublishingQueueConfig struct {
 	MaxRetries              int
 	RetryInterval           time.Duration
 	CircuitTimeout          time.Duration
+	Metrics                 *v2.PublishingMetrics // v2 metrics (optional, will create if nil)
+	Workers                 int                   // Deprecated: use WorkerCount
 }
 
 // DefaultPublishingQueueConfig returns default configuration
@@ -152,7 +154,14 @@ func DefaultPublishingQueueConfig() PublishingQueueConfig {
 }
 
 // NewPublishingQueue creates a new publishing queue
-func NewPublishingQueue(factory *PublisherFactory, dlqRepository DLQRepository, jobTrackingStore JobTrackingStore, config PublishingQueueConfig, metrics *PublishingMetrics, modeManager ModeManager, logger *slog.Logger) *PublishingQueue {
+func NewPublishingQueue(factory *PublisherFactory, dlqRepository DLQRepository, jobTrackingStore JobTrackingStore, config PublishingQueueConfig, modeManager ModeManager, logger *slog.Logger) *PublishingQueue {
+	// Use v2.PublishingMetrics from config (no stub needed)
+	metrics := config.Metrics
+	if metrics == nil {
+		// Fallback: create default metrics if not provided
+		metrics = v2.NewRegistry().Publishing
+	}
+
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -270,12 +279,15 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 			q.jobTrackingStore.Add(job)
 		}
 
+	// Level guard: avoid expensive string formatting in production
+	if q.logger.Enabled(q.ctx, slog.LevelDebug) {
 		q.logger.Debug("Job submitted",
 			"job_id", jobID,
 			"priority", priority,
 			"target", target.Name,
 			"fingerprint", enrichedAlert.Alert.Fingerprint,
 		)
+	}
 		return nil
 	case <-q.ctx.Done():
 		if q.metrics != nil {
@@ -294,7 +306,10 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 func (q *PublishingQueue) worker(id int) {
 	defer q.wg.Done()
 
-	q.logger.Debug("Worker started", "worker_id", id)
+	// Level guard: avoid expensive logging in production
+	if q.logger.Enabled(q.ctx, slog.LevelDebug) {
+		q.logger.Debug("Worker started", "worker_id", id)
+	}
 
 	for {
 		var job *PublishingJob
@@ -342,27 +357,30 @@ func (q *PublishingQueue) worker(id int) {
 		if job != nil {
 			// TN-060: Check mode before processing (metrics-only mode fallback)
 			if q.modeManager != nil && q.modeManager.IsMetricsOnly() {
-				q.logger.Debug("Job skipped (metrics-only mode)",
-					"job_id", job.ID,
-					"target", job.Target.Name,
-					"worker_id", id,
-				)
+				// Level guard: avoid expensive logging in production
+				if q.logger.Enabled(q.ctx, slog.LevelDebug) {
+					q.logger.Debug("Job skipped (metrics-only mode)",
+						"job_id", job.ID,
+						"target", job.Target.Name,
+						"worker_id", id,
+					)
+				}
 				// Skip processing, continue to next job
 				continue
 			}
 
-			// Update worker metrics
-			if q.metrics != nil {
-				q.metrics.RecordWorkerActive(id, true)
-			}
+		// Update worker metrics (v2 API uses Inc/Dec pattern)
+		if q.metrics != nil {
+			q.metrics.RecordWorkerActive()
+		}
 
 			// Process job
 			q.processJob(job)
 
-			// Update worker metrics
-			if q.metrics != nil {
-				q.metrics.RecordWorkerActive(id, false)
-			}
+		// Update worker metrics (v2 API uses Inc/Dec pattern)
+		if q.metrics != nil {
+			q.metrics.RecordWorkerIdle()
+		}
 
 			// Update queue size metric
 			if q.metrics != nil {
@@ -425,10 +443,11 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 			"fingerprint", job.EnrichedAlert.Alert.Fingerprint,
 			"error", err,
 		)
-		cb.RecordFailure()
-		if q.metrics != nil {
-			q.metrics.RecordJobFailure(job.Target.Name, job.Priority.String(), "retry_exhausted")
-		}
+	cb.RecordFailure()
+	if q.metrics != nil {
+		// v2 API: RecordJobFailure(target string)
+		q.metrics.RecordJobFailure(job.Target.Name)
+	}
 
 		// Send to Dead Letter Queue
 		if q.dlqRepository != nil {
@@ -460,10 +479,11 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 			"fingerprint", job.EnrichedAlert.Alert.Fingerprint,
 			"queue_time", time.Since(job.SubmittedAt),
 		)
-		cb.RecordSuccess()
-		if q.metrics != nil {
-			q.metrics.RecordJobSuccess(job.Target.Name, job.Priority.String(), duration)
-		}
+	cb.RecordSuccess()
+	if q.metrics != nil {
+		// v2 API: RecordJobSuccess(target, priority string, duration time.Duration)
+		q.metrics.RecordJobSuccess(job.Target.Name, job.Priority.String(), time.Duration(duration*float64(time.Second)))
+	}
 
 		// Track success state (updated in retryPublish)
 		if q.jobTrackingStore != nil {
@@ -491,18 +511,21 @@ func (q *PublishingQueue) getCircuitBreaker(targetName string) *CircuitBreaker {
 		return cb
 	}
 
-	cb = NewCircuitBreakerWithMetrics(
+	cb = NewCircuitBreakerWithName(
 		CircuitBreakerConfig{
 			FailureThreshold: 5,
 			SuccessThreshold: 2,
 			Timeout:          30 * time.Second,
 		},
 		targetName,
-		q.metrics,
 	)
 
 	q.circuitBreakers[targetName] = cb
-	q.logger.Debug("Created circuit breaker", "target", targetName)
+
+	// Level guard: avoid expensive logging in production
+	if q.logger.Enabled(q.ctx, slog.LevelDebug) {
+		q.logger.Debug("Created circuit breaker", "target", targetName)
+	}
 
 	return cb
 }
@@ -547,6 +570,15 @@ type QueueStats struct {
 
 // GetStats returns detailed queue statistics
 func (q *PublishingQueue) GetStats() QueueStats {
+	// Count active jobs from job tracking store
+	activeJobs := 0
+	if q.jobTrackingStore != nil {
+		// Count jobs in "processing" or "retrying" state
+		processingJobs := q.jobTrackingStore.List(JobFilters{State: "processing", Limit: 10000})
+		retryingJobs := q.jobTrackingStore.List(JobFilters{State: "retrying", Limit: 10000})
+		activeJobs = len(processingJobs) + len(retryingJobs)
+	}
+
 	stats := QueueStats{
 		TotalSize:    q.GetQueueSize(),
 		HighPriority: q.GetQueueSizeByPriority(PriorityHigh),
@@ -554,7 +586,7 @@ func (q *PublishingQueue) GetStats() QueueStats {
 		LowPriority:  q.GetQueueSizeByPriority(PriorityLow),
 		Capacity:     q.GetQueueCapacity(),
 		WorkerCount:  q.workerCount,
-		ActiveJobs:   0, // TODO: track active jobs in progress
+		ActiveJobs:   activeJobs, // Now tracked via JobTrackingStore
 	}
 
 	// Get metrics if available
@@ -570,90 +602,93 @@ func (q *PublishingQueue) GetStats() QueueStats {
 }
 
 // retryPublish attempts to publish with exponential backoff retry and error classification
+// retryPublish executes publisher with unified retry strategy from pkg/retry.
+//
+// This replaces the old 87-line custom retry implementation with a standardized approach.
+// Benefits:
+//   - Consistent retry behavior across the application
+//   - Optimized backoff calculation (bit shift instead of math.Pow)
+//   - Better jitter algorithm (±15% instead of hardcoded 0-1000ms)
+//   - Configurable via Strategy pattern
+//
+// Migration note: This is part of Sprint 5 (Retry Unification).
+// See: tasks/code-quality-refactoring/ACTION_ITEMS.md#1
 func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *PublishingJob) error {
-	var lastErr error
-
-	for attempt := 0; attempt <= q.maxRetries; attempt++ {
-		// Try publish
-		err := publisher.Publish(q.ctx, job.EnrichedAlert, job.Target)
-		if err == nil {
-			// Success
-			job.State = JobStateSucceeded
-			now := time.Now()
-			job.CompletedAt = &now
-			return nil
-		}
-
-		// Classify error
-		errorType := classifyPublishingError(err)
-		lastErr = err
-		job.LastError = err
-		job.ErrorType = errorType
-
-		// Update job state
-		if attempt < q.maxRetries {
-			job.State = JobStateRetrying
-		}
-
-		// Record retry attempt in metrics
-		willRetry := errorType != QueueErrorTypePermanent && attempt < q.maxRetries
-		if q.metrics != nil {
-			q.metrics.RecordRetryAttempt(job.Target.Name, errorType.String(), willRetry)
-		}
-
-		q.logger.Warn("Publish failed",
-			"job_id", job.ID,
-			"attempt", attempt+1,
-			"max_retries", q.maxRetries,
-			"error", err,
-			"error_type", errorType,
-			"target", job.Target.Name,
-		)
-
-		// Check if error is permanent (no retry)
-		if errorType == QueueErrorTypePermanent {
-			job.State = JobStateFailed
-			q.logger.Error("Permanent error detected, skipping retries",
-				"job_id", job.ID,
-				"target", job.Target.Name,
-				"error", err,
-			)
-			return fmt.Errorf("permanent error (no retry): %w", err)
-		}
-
-		// Don't sleep after last attempt
-		if attempt < q.maxRetries {
-			// Exponential backoff with jitter: interval * 2^attempt + random(0-1s)
-			baseBackoff := time.Duration(math.Pow(2, float64(attempt))) * q.retryInterval
-			if baseBackoff > 30*time.Second {
-				baseBackoff = 30 * time.Second
-			}
-
-			// Add jitter (0-1000ms) to prevent thundering herd
-			jitter := time.Duration(rand.Intn(1000)) * time.Millisecond
-			backoff := baseBackoff + jitter
-
-			q.logger.Debug("Retrying publish",
-				"job_id", job.ID,
-				"attempt", attempt+1,
-				"max_retries", q.maxRetries,
-				"backoff", backoff,
-				"error_type", errorType,
-			)
-
-			select {
-			case <-time.After(backoff):
-				// Continue to next attempt
-			case <-q.ctx.Done():
-				return q.ctx.Err()
-			}
-		}
+	// Create retry strategy with queue configuration
+	// Note: Uses queue-specific config (maxRetries, retryInterval) which can be
+	// overridden by global retry config if needed
+	strategy := retry.Strategy{
+		MaxAttempts:     q.maxRetries + 1, // maxRetries is retry count, not total attempts
+		BaseDelay:       q.retryInterval,
+		MaxDelay:        30 * time.Second, // TODO: Make configurable via config.Retry.MaxDelay
+		Multiplier:      2.0,              // TODO: Make configurable via config.Retry.Multiplier
+		JitterRatio:     0.15,             // TODO: Make configurable via config.Retry.JitterRatio
+		ErrorClassifier: &PublishingErrorClassifier{},
+		Logger:          q.logger,
+		OperationName:   fmt.Sprintf("publish_%s", job.Target.Name),
 	}
 
-	// Max retries exhausted
-	job.State = JobStateFailed
-	now := time.Now()
-	job.CompletedAt = &now
+	// Track attempt count for job state updates
+	attemptCount := 0
 
-	return fmt.Errorf("failed after %d retries (error_type=%s): %w", q.maxRetries, job.ErrorType, lastErr)
+	// Execute publish with retry
+	err := retry.DoSimple(q.ctx, strategy, func() error {
+		attemptCount++
+
+		// Try publish
+		publishErr := publisher.Publish(q.ctx, job.EnrichedAlert, job.Target)
+
+		if publishErr != nil {
+			// Classify error for job tracking
+			errorType := classifyPublishingError(publishErr)
+			job.LastError = publishErr
+			job.ErrorType = errorType
+
+			// Update job state
+			if attemptCount < strategy.MaxAttempts {
+				job.State = JobStateRetrying
+			}
+
+			// Record metrics
+		if q.metrics != nil {
+			// v2 API: RecordRetryAttempt(target, errorType string)
+			q.metrics.RecordRetryAttempt(job.Target.Name, errorType.String())
+		}
+
+			return publishErr
+		}
+
+		// Success!
+		job.State = JobStateSucceeded
+		now := time.Now()
+		job.CompletedAt = &now
+		return nil
+	})
+
+	// Handle final result
+	if err != nil {
+		job.State = JobStateFailed
+		now := time.Now()
+		job.CompletedAt = &now
+		return fmt.Errorf("publish failed after %d attempts: %w", attemptCount, err)
+	}
+
+	return nil
+}
+
+// PublishingErrorClassifier classifies publishing errors for retry decisions.
+// This implements retry.ErrorClassifier interface.
+type PublishingErrorClassifier struct{}
+
+// IsRetryable determines if a publishing error should trigger a retry.
+func (c *PublishingErrorClassifier) IsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Use queue's error classification
+	errorType := classifyPublishingError(err)
+
+	// Only retry transient errors (not permanent)
+	return errorType == QueueErrorTypeTransient
 }

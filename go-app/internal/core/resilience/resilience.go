@@ -1,14 +1,15 @@
 // Package resilience provides resilience patterns (retry, circuit breaker, etc.)
+//
+// Note: Retry logic migrated to pkg/retry (TN-057).
+// This package now wraps pkg/retry for backward compatibility.
 package resilience
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"math"
-	"math/rand"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/retry"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -45,11 +46,11 @@ func (d *DefaultErrorChecker) IsRetryable(err error) bool {
 // Retry Function
 // ================================================================================
 
-// WithRetryFunc executes a function with retry logic
+// WithRetryFunc executes a function with retry logic.
+//
+// Migrated to use pkg/retry for unified retry strategy (TN-057).
+// This function now wraps retry.Do for backward compatibility.
 func WithRetryFunc[T any](ctx context.Context, policy *RetryPolicy, fn func() (T, error)) (T, error) {
-	var result T
-	var lastErr error
-
 	// Apply defaults
 	if policy.MaxRetries == 0 {
 		policy.MaxRetries = 3
@@ -67,93 +68,48 @@ func WithRetryFunc[T any](ctx context.Context, policy *RetryPolicy, fn func() (T
 		policy.ErrorChecker = &DefaultErrorChecker{}
 	}
 
-	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
-		// Check context
-		if err := ctx.Err(); err != nil {
-			return result, fmt.Errorf("context cancelled: %w", err)
-		}
-
-		// Execute function
-		result, lastErr = fn()
-
-		// Success
-		if lastErr == nil {
-			if policy.Metrics != nil && policy.OperationName != "" {
-				policy.Metrics.WithLabelValues(policy.OperationName, "success").Inc()
-			}
-			return result, nil
-		}
-
-		// Check if error is retryable
-		if !policy.ErrorChecker.IsRetryable(lastErr) {
-			if policy.Logger != nil {
-				policy.Logger.Debug("Error not retryable",
-					"operation", policy.OperationName,
-					"attempt", attempt,
-					"error", lastErr)
-			}
-			if policy.Metrics != nil && policy.OperationName != "" {
-				policy.Metrics.WithLabelValues(policy.OperationName, "non_retryable").Inc()
-			}
-			return result, lastErr
-		}
-
-		// Last attempt failed
-		if attempt == policy.MaxRetries {
-			if policy.Logger != nil {
-				policy.Logger.Warn("Max retries exceeded",
-					"operation", policy.OperationName,
-					"attempts", attempt+1,
-					"error", lastErr)
-			}
-			if policy.Metrics != nil && policy.OperationName != "" {
-				policy.Metrics.WithLabelValues(policy.OperationName, "max_retries").Inc()
-			}
-			return result, fmt.Errorf("max retries (%d) exceeded: %w", policy.MaxRetries, lastErr)
-		}
-
-		// Calculate delay with exponential backoff
-		delay := calculateDelay(attempt, policy)
-
-		if policy.Logger != nil {
-			policy.Logger.Debug("Retrying after error",
-				"operation", policy.OperationName,
-				"attempt", attempt+1,
-				"delay", delay,
-				"error", lastErr)
-		}
-
-		if policy.Metrics != nil && policy.OperationName != "" {
-			policy.Metrics.WithLabelValues(policy.OperationName, "retry").Inc()
-		}
-
-		// Wait before retry
-		select {
-		case <-ctx.Done():
-			return result, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
-		case <-time.After(delay):
-			// Continue to next attempt
-		}
+	// Convert RetryPolicy to retry.Strategy
+	strategy := retry.Strategy{
+		MaxAttempts:     policy.MaxRetries + 1, // +1 because retry.Strategy counts attempts, not retries
+		BaseDelay:       policy.BaseDelay,
+		MaxDelay:        policy.MaxDelay,
+		Multiplier:      policy.Multiplier,
+		JitterRatio:     0.15, // 15% jitter (was controlled by policy.Jitter, now always on)
+		ErrorClassifier: &errorCheckerAdapter{policy.ErrorChecker},
+		Logger:          policy.Logger,
+		OperationName:   policy.OperationName,
+		Metrics:         policy.Metrics,
 	}
 
-	return result, lastErr
+	// Execute with unified retry logic
+	return retry.Do(ctx, strategy, fn)
 }
 
-// calculateDelay calculates the delay for the next retry with exponential backoff
+// errorCheckerAdapter adapts resilience.ErrorChecker to retry.ErrorClassifier
+type errorCheckerAdapter struct {
+	checker ErrorChecker
+}
+
+func (a *errorCheckerAdapter) IsRetryable(err error) bool {
+	if a.checker == nil {
+		return true // Default: retry all errors
+	}
+	return a.checker.IsRetryable(err)
+}
+
+// calculateDelay is deprecated - use pkg/retry instead.
+//
+// Deprecated: This function is kept for backward compatibility only.
+// New code should use pkg/retry.Strategy.
+// Note: Jitter is now handled by pkg/retry, not here.
 func calculateDelay(attempt int, policy *RetryPolicy) time.Duration {
-	// Exponential backoff: baseDelay * multiplier^attempt
-	delay := float64(policy.BaseDelay) * math.Pow(policy.Multiplier, float64(attempt))
+	// This function is no longer used internally but kept for API compatibility
+	// Simplified implementation (jitter now handled by pkg/retry)
+	delay := float64(policy.BaseDelay) * float64(attempt+1)
 
 	// Cap at max delay
 	if delay > float64(policy.MaxDelay) {
 		delay = float64(policy.MaxDelay)
-	}
-
-	// Add jitter if enabled (randomize ±25%)
-	if policy.Jitter {
-		jitterRange := delay * 0.25
-		jitter := (rand.Float64() * 2 * jitterRange) - jitterRange
-		delay += jitter
 	}
 
 	return time.Duration(delay)

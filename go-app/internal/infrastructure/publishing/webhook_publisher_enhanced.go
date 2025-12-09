@@ -3,21 +3,19 @@ package publishing
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // EnhancedWebhookPublisher implements AlertPublisher with advanced features
 type EnhancedWebhookPublisher struct {
-	client    *WebhookHTTPClient
-	validator *WebhookValidator
-	formatter AlertFormatter
-	metrics   *WebhookMetrics
-	logger    *slog.Logger
+	*BaseEnhancedPublisher                 // Embedded base publisher for common functionality
+	client                 *WebhookHTTPClient // Generic HTTP client for webhooks
+	validator              *WebhookValidator  // Webhook-specific validator
 }
 
 // NewEnhancedWebhookPublisher creates a new enhanced webhook publisher
@@ -25,15 +23,17 @@ func NewEnhancedWebhookPublisher(
 	client *WebhookHTTPClient,
 	validator *WebhookValidator,
 	formatter AlertFormatter,
-	metrics *WebhookMetrics,
+	metrics *v2.PublishingMetrics,
 	logger *slog.Logger,
 ) *EnhancedWebhookPublisher {
 	return &EnhancedWebhookPublisher{
+		BaseEnhancedPublisher: NewBaseEnhancedPublisher(
+			metrics,
+			formatter,
+			logger.With("component", "webhook_publisher"),
+		),
 		client:    client,
 		validator: validator,
-		formatter: formatter,
-		metrics:   metrics,
-		logger:    logger,
 	}
 }
 
@@ -41,24 +41,26 @@ func NewEnhancedWebhookPublisher(
 func (p *EnhancedWebhookPublisher) Publish(ctx context.Context, enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) error {
 	startTime := time.Now()
 
-	p.logger.InfoContext(ctx, "Publishing alert to webhook",
+	p.GetLogger().InfoContext(ctx, "Publishing alert to webhook",
 		slog.String("target", target.Name),
 		slog.String("url", maskURL(target.URL)),
 		slog.String("fingerprint", enrichedAlert.Alert.Fingerprint))
 
 	// Validate target configuration
 	if err := p.validator.ValidateTarget(target); err != nil {
-		p.logger.ErrorContext(ctx, "Target validation failed",
+		p.GetLogger().ErrorContext(ctx, "Target validation failed",
 			slog.String("target", target.Name),
 			slog.String("error", err.Error()))
-		p.metrics.RecordValidationError(target.Name, "target")
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish", "validation_error")
+		}
 		return fmt.Errorf("target validation failed: %w", err)
 	}
 
 	// Format alert for webhook (generic JSON format)
 	payload, err := p.formatter.FormatAlert(ctx, enrichedAlert, core.FormatWebhook)
 	if err != nil {
-		p.logger.ErrorContext(ctx, "Failed to format alert",
+		p.GetLogger().ErrorContext(ctx, "Failed to format alert",
 			slog.String("target", target.Name),
 			slog.String("error", err.Error()))
 		return fmt.Errorf("failed to format alert: %w", err)
@@ -66,10 +68,12 @@ func (p *EnhancedWebhookPublisher) Publish(ctx context.Context, enrichedAlert *c
 
 	// Validate payload format
 	if err := p.validator.ValidateFormat(payload); err != nil {
-		p.logger.ErrorContext(ctx, "Payload format validation failed",
+		p.GetLogger().ErrorContext(ctx, "Payload format validation failed",
 			slog.String("target", target.Name),
 			slog.String("error", err.Error()))
-		p.metrics.RecordValidationError(target.Name, "format")
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish", "format_validation_error")
+		}
 		return fmt.Errorf("payload format validation failed: %w", err)
 	}
 
@@ -81,16 +85,20 @@ func (p *EnhancedWebhookPublisher) Publish(ctx context.Context, enrichedAlert *c
 
 	// Validate payload size
 	if err := p.validator.ValidatePayloadSize(payloadBytes); err != nil {
-		p.logger.ErrorContext(ctx, "Payload size validation failed",
+		p.GetLogger().ErrorContext(ctx, "Payload size validation failed",
 			slog.String("target", target.Name),
 			slog.Int("size", len(payloadBytes)),
 			slog.String("error", err.Error()))
-		p.metrics.RecordValidationError(target.Name, "payload_size")
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish", "payload_size_error")
+		}
 		return fmt.Errorf("payload size validation failed: %w", err)
 	}
 
 	// Record payload size metric
-	p.metrics.RecordPayloadSize(target.Name, len(payloadBytes))
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordPayloadSize(v2.ProviderWebhook, len(payloadBytes))
+	}
 
 	// Parse authentication config from target headers
 	authConfig := p.extractAuthConfig(target)
@@ -103,30 +111,21 @@ func (p *EnhancedWebhookPublisher) Publish(ctx context.Context, enrichedAlert *c
 	duration := time.Since(startTime)
 
 	if err != nil {
-		// Record error metrics
-		var webhookErr *WebhookError
-		if errors.As(err, &webhookErr) {
-			p.metrics.RecordError(target.Name, webhookErr.Type.String())
+		// Record error metrics using unified classification
+		errorType := GetPublishingErrorType(err)
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish", errorType)
+			p.metrics.RecordAPIDuration(v2.ProviderWebhook, "publish", "POST", duration)
 
 			// Record specific error types
-			switch webhookErr.Type {
-			case ErrorTypeAuth:
-				authType := "unknown"
-				if authConfig != nil {
-					authType = string(authConfig.Type)
-				}
-				p.metrics.RecordAuthFailure(target.Name, authType)
-			case ErrorTypeTimeout:
-				p.metrics.RecordTimeoutError(target.Name)
+			if IsPublishingAuthError(err) {
+				p.metrics.RecordAPIError(v2.ProviderWebhook, "publish", "auth_error")
+			} else if IsPublishingTimeout(err) {
+				p.metrics.RecordAPIError(v2.ProviderWebhook, "publish", "timeout")
 			}
-		} else {
-			p.metrics.RecordError(target.Name, "unknown")
 		}
 
-		p.metrics.RecordRequest(target.Name, "error", "POST")
-		p.metrics.RecordDuration(target.Name, "error", duration.Seconds())
-
-		p.logger.ErrorContext(ctx, "Failed to publish alert",
+		p.GetLogger().ErrorContext(ctx, "Failed to publish alert",
 			slog.String("target", target.Name),
 			slog.String("url", maskURL(target.URL)),
 			slog.Duration("duration", duration),
@@ -135,10 +134,12 @@ func (p *EnhancedWebhookPublisher) Publish(ctx context.Context, enrichedAlert *c
 	}
 
 	// Record success metrics
-	p.metrics.RecordRequest(target.Name, "success", "POST")
-	p.metrics.RecordDuration(target.Name, "success", duration.Seconds())
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordMessage(v2.ProviderWebhook, "success")
+		p.metrics.RecordAPIDuration(v2.ProviderWebhook, "publish", "POST", duration)
+	}
 
-	p.logger.InfoContext(ctx, "Alert published successfully",
+	p.GetLogger().InfoContext(ctx, "Alert published successfully",
 		slog.String("target", target.Name),
 		slog.String("url", maskURL(target.URL)),
 		slog.Int("status_code", resp.StatusCode),
@@ -214,13 +215,13 @@ func (p *EnhancedWebhookPublisher) extractAuthConfig(target *core.PublishingTarg
 // isStandardHeader checks if header is a standard HTTP header
 func isStandardHeader(key string) bool {
 	standardHeaders := map[string]bool{
-		"Content-Type":   true,
-		"User-Agent":     true,
-		"Accept":         true,
+		"Content-Type":    true,
+		"User-Agent":      true,
+		"Accept":          true,
 		"Accept-Encoding": true,
-		"Connection":     true,
-		"Host":           true,
-		"Content-Length": true,
+		"Connection":      true,
+		"Host":            true,
+		"Content-Length":  true,
 	}
 	return standardHeaders[key]
 }
@@ -228,7 +229,7 @@ func isStandardHeader(key string) bool {
 // ==================== FACTORY METHODS ====================
 
 // NewEnhancedWebhookPublisherWithDefaults creates publisher with default configuration
-func NewEnhancedWebhookPublisherWithDefaults(formatter AlertFormatter, metrics *WebhookMetrics, logger *slog.Logger) *EnhancedWebhookPublisher {
+func NewEnhancedWebhookPublisherWithDefaults(formatter AlertFormatter, metrics *v2.PublishingMetrics, logger *slog.Logger) *EnhancedWebhookPublisher {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, logger)
 	validator := NewWebhookValidator(logger)
 
@@ -239,7 +240,7 @@ func NewEnhancedWebhookPublisherWithDefaults(formatter AlertFormatter, metrics *
 func NewEnhancedWebhookPublisherWithRetry(
 	retryConfig WebhookRetryConfig,
 	formatter AlertFormatter,
-	metrics *WebhookMetrics,
+	metrics *v2.PublishingMetrics,
 	logger *slog.Logger,
 ) *EnhancedWebhookPublisher {
 	client := NewWebhookHTTPClient(retryConfig, logger)
@@ -252,7 +253,7 @@ func NewEnhancedWebhookPublisherWithRetry(
 func NewEnhancedWebhookPublisherWithValidation(
 	validationConfig ValidationConfig,
 	formatter AlertFormatter,
-	metrics *WebhookMetrics,
+	metrics *v2.PublishingMetrics,
 	logger *slog.Logger,
 ) *EnhancedWebhookPublisher {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, logger)

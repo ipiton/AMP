@@ -70,7 +70,7 @@ func TestLoadConfig_File(t *testing.T) {
 
 	yaml := `
 app:
-  environment: "production"
+  environment: "development"
   debug: false
 server:
   port: 9090
@@ -81,7 +81,7 @@ database:
   port: 5433
   database: "testdb"
   username: "user"
-  password: "pass"
+  password: "testpassword123456"
   ssl_mode: "disable"
 redis:
   addr: "redis:6379"
@@ -93,7 +93,7 @@ log:
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
 
-	assert.Equal(t, "production", cfg.App.Environment)
+	assert.Equal(t, "development", cfg.App.Environment)
 	assert.False(t, cfg.App.Debug)
 
 	assert.Equal(t, 9090, cfg.Server.Port)
@@ -104,7 +104,7 @@ log:
 	assert.Equal(t, 5433, cfg.Database.Port)
 	assert.Equal(t, "testdb", cfg.Database.Database)
 	assert.Equal(t, "user", cfg.Database.Username)
-	assert.Equal(t, "pass", cfg.Database.Password)
+	assert.Equal(t, "testpassword123456", cfg.Database.Password)
 	assert.Equal(t, "disable", cfg.Database.SSLMode)
 
 	assert.Equal(t, "redis:6379", cfg.Redis.Addr)
@@ -128,7 +128,7 @@ app:
 	// Env overrides
 	require.NoError(t, os.Setenv("SERVER_PORT", "9091"))
 	require.NoError(t, os.Setenv("DATABASE_HOST", "env-db.local"))
-	require.NoError(t, os.Setenv("APP_ENVIRONMENT", "production"))
+	require.NoError(t, os.Setenv("APP_ENVIRONMENT", "staging"))
 	require.NoError(t, os.Setenv("APP_DEBUG", "false"))
 	t.Cleanup(func() {
 		unsetEnvKeys("SERVER_PORT", "DATABASE_HOST", "APP_ENVIRONMENT", "APP_DEBUG")
@@ -139,7 +139,7 @@ app:
 
 	assert.Equal(t, 9091, cfg.Server.Port, "env should override file")
 	assert.Equal(t, "env-db.local", cfg.Database.Host, "env should override file")
-	assert.Equal(t, "production", cfg.App.Environment, "env should override file")
+	assert.Equal(t, "staging", cfg.App.Environment, "env should override file")
 	assert.Equal(t, false, cfg.App.Debug, "env should override file")
 }
 

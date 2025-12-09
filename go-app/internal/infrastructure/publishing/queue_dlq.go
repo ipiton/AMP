@@ -76,23 +76,21 @@ type DLQRepository interface {
 
 // PostgreSQLDLQRepository implements DLQRepository using PostgreSQL
 type PostgreSQLDLQRepository struct {
-	db      *pgxpool.Pool
-	queue   *PublishingQueue
-	logger  *slog.Logger
-	metrics *PublishingMetrics
+	db     *pgxpool.Pool
+	queue  *PublishingQueue
+	logger *slog.Logger
 }
 
 // NewPostgreSQLDLQRepository creates a new PostgreSQL DLQ repository
 // Note: queue can be nil initially and set later via SetQueue() to avoid circular dependency
-func NewPostgreSQLDLQRepository(db *pgxpool.Pool, queue *PublishingQueue, metrics *PublishingMetrics, logger *slog.Logger) *PostgreSQLDLQRepository {
+func NewPostgreSQLDLQRepository(db *pgxpool.Pool, queue *PublishingQueue, logger *slog.Logger) *PostgreSQLDLQRepository {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &PostgreSQLDLQRepository{
-		db:      db,
-		queue:   queue,
-		logger:  logger,
-		metrics: metrics,
+		db:     db,
+		queue:  queue,
+		logger: logger,
 	}
 }
 
@@ -166,10 +164,6 @@ func (r *PostgreSQLDLQRepository) Write(ctx context.Context, job *PublishingJob)
 		"error_type", job.ErrorType,
 	)
 
-	// Update metrics
-	if r.metrics != nil {
-		r.metrics.RecordDLQWrite(job.Target.Name, job.ErrorType.String())
-	}
 
 	return nil
 }
@@ -340,10 +334,6 @@ func (r *PostgreSQLDLQRepository) Replay(ctx context.Context, id uuid.UUID) erro
 
 	r.logger.Info("DLQ entry replayed successfully", "dlq_id", id)
 
-	// Update metrics
-	if r.metrics != nil {
-		r.metrics.RecordDLQReplay(entry.TargetName, replayResult)
-	}
 
 	return nil
 }
