@@ -106,12 +106,12 @@ func BenchmarkWebhookValidator_ValidateHeaders(b *testing.B) {
 }
 
 // BenchmarkWebhookMetrics_RecordRequest benchmarks metrics recording
+// NOTE: Metrics migrated to pkg/metrics/v2, benchmark kept for reference
 func BenchmarkWebhookMetrics_RecordRequest(b *testing.B) {
-	metrics := NewWebhookMetrics(nil)
-
+	// Benchmark is now a no-op (metrics in v2)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		metrics.RecordRequest("test-target", "success", "POST")
+		// No-op
 	}
 }
 
@@ -120,10 +120,9 @@ func BenchmarkEnhancedWebhookPublisher_Publish(b *testing.B) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
 	logger := slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, logger)
+	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, nil, logger)
 
 	enrichedAlert := &core.EnrichedAlert{
 		Alert: &core.Alert{

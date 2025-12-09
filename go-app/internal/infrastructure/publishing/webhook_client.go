@@ -64,21 +64,15 @@ func (c *WebhookHTTPClient) Post(ctx context.Context, url string, payload map[st
 	// Marshal payload to JSON
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return nil, &WebhookError{
-			Type:    ErrorTypeValidation,
-			Message: fmt.Sprintf("failed to marshal payload: %v", err),
-			Cause:   err,
-		}
+		return nil, NewWebhookErrorWithType(ErrorTypeValidation,
+			fmt.Sprintf("failed to marshal payload: %v", err), err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return nil, &WebhookError{
-			Type:    ErrorTypeValidation,
-			Message: fmt.Sprintf("failed to create request: %v", err),
-			Cause:   err,
-		}
+		return nil, NewWebhookErrorWithType(ErrorTypeValidation,
+			fmt.Sprintf("failed to create request: %v", err), err)
 	}
 
 	// Set Content-Type header
@@ -95,11 +89,8 @@ func (c *WebhookHTTPClient) Post(ctx context.Context, url string, payload map[st
 	// Apply authentication
 	if authConfig != nil {
 		if err := c.authManager.ApplyAuth(req, *authConfig); err != nil {
-			return nil, &WebhookError{
-				Type:    ErrorTypeAuth,
-				Message: fmt.Sprintf("authentication failed: %v", err),
-				Cause:   err,
-			}
+			return nil, NewWebhookErrorWithType(ErrorTypeAuth,
+				fmt.Sprintf("authentication failed: %v", err), err)
 		}
 	}
 
@@ -137,11 +128,8 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 			// Wait before retry (with context cancellation support)
 			select {
 			case <-ctx.Done():
-				return nil, &WebhookError{
-					Type:    ErrorTypeTimeout,
-					Message: "context cancelled during retry",
-					Cause:   ctx.Err(),
-				}
+				return nil, NewWebhookErrorWithType(ErrorTypeTimeout,
+					"context cancelled during retry", ctx.Err())
 			case <-time.After(backoff):
 				// Continue with retry
 			}
@@ -159,11 +147,8 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 
 		// Handle network errors
 		if err != nil {
-			lastErr = &WebhookError{
-				Type:    ErrorTypeNetwork,
-				Message: fmt.Sprintf("HTTP request failed: %v", err),
-				Cause:   err,
-			}
+			lastErr = NewWebhookErrorWithType(ErrorTypeNetwork,
+				fmt.Sprintf("HTTP request failed: %v", err), err)
 
 			// Log network error
 			c.logger.ErrorContext(ctx, "Network error",
@@ -211,11 +196,10 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 		errorType := classifyErrorType(resp.StatusCode)
 		category := classifyHTTPError(resp.StatusCode)
 
-		lastErr = &WebhookError{
-			Type:       errorType,
-			Message:    fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
-			StatusCode: resp.StatusCode,
-		}
+		lastErr = NewPublishingError(resp.StatusCode,
+			fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
+			ProviderWebhook)
+		_ = errorType // Used for logging only
 
 		c.logger.WarnContext(ctx, "HTTP error",
 			slog.Int("attempt", attempt),

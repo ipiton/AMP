@@ -107,8 +107,12 @@ func (m *DefaultRefreshManager) executeRefresh(isManual bool) {
 	startTime := time.Now()
 
 	// Update metrics (in_progress=1)
-	m.metrics.InProgress.Set(1)
-	defer m.metrics.InProgress.Set(0)
+	if m.metrics != nil {
+		m.metrics.RecordRefreshStart()
+		defer func() {
+			// Will be recorded in RecordRefreshComplete below
+		}()
+	}
 
 	// Log refresh start
 	refreshType := "periodic"
@@ -147,12 +151,13 @@ func (m *DefaultRefreshManager) executeRefresh(isManual bool) {
 		)
 
 		// Record metrics
-		m.metrics.Total.WithLabelValues("failed").Inc()
-		m.metrics.Duration.WithLabelValues("failed").Observe(duration.Seconds())
+		if m.metrics != nil {
+			m.metrics.RecordRefreshComplete("discovery", "failure", duration)
 
-		// Classify error for metrics
-		errorType, _ := classifyError(err)
-		m.metrics.ErrorsTotal.WithLabelValues(errorType).Inc()
+			// Classify error for metrics
+			errorType, _ := classifyError(err)
+			m.metrics.RecordRefreshError("discovery", errorType)
+		}
 
 	} else {
 		// Refresh succeeded
@@ -183,8 +188,8 @@ func (m *DefaultRefreshManager) executeRefresh(isManual bool) {
 		)
 
 		// Record metrics
-		m.metrics.Total.WithLabelValues("success").Inc()
-		m.metrics.Duration.WithLabelValues("success").Observe(duration.Seconds())
-		m.metrics.LastSuccessTimestamp.Set(float64(time.Now().Unix()))
+		if m.metrics != nil {
+			m.metrics.RecordRefreshComplete("discovery", "success", duration)
+		}
 	}
 }

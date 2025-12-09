@@ -212,8 +212,12 @@ func (r *ServiceRegistry) initializeCoreServices(ctx context.Context) error {
 	r.logger.Info("✅ Filter Engine initialized")
 
 	// Initialize Publisher
-	r.publisher = services.NewSimplePublisher(r.logger)
-	r.logger.Info("✅ Publisher initialized")
+	// NOTE: SimplePublisher is a STUB for development only.
+	// In production, use PublisherFactory from infrastructure/publishing package.
+	r.publisher = services.NewSimplePublisher(r.logger,
+		services.WithEnvironment(r.config.App.Environment),
+	)
+	r.logger.Info("✅ Publisher initialized (STUB - development only)")
 
 	// Initialize Deduplication Service
 	if err := r.initializeDeduplication(ctx); err != nil {

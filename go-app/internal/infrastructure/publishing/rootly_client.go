@@ -374,29 +374,16 @@ func (c *defaultRootlyIncidentsClient) parseError(resp *http.Response) error {
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse error JSON, return generic error
-		return &RootlyAPIError{
-			StatusCode: resp.StatusCode,
-			Title:      "Unknown Error",
-			Detail:     string(body),
-		}
+		return NewRootlyAPIError(resp.StatusCode, "Unknown Error", string(body), "")
 	}
 
 	if len(errorResp.Errors) == 0 {
-		return &RootlyAPIError{
-			StatusCode: resp.StatusCode,
-			Title:      "Unknown Error",
-			Detail:     string(body),
-		}
+		return NewRootlyAPIError(resp.StatusCode, "Unknown Error", string(body), "")
 	}
 
 	// Return first error
 	firstError := errorResp.Errors[0]
-	return &RootlyAPIError{
-		StatusCode: resp.StatusCode,
-		Title:      firstError.Title,
-		Detail:     firstError.Detail,
-		Source:     firstError.Source.Pointer,
-	}
+	return NewRootlyAPIError(resp.StatusCode, firstError.Title, firstError.Detail, firstError.Source.Pointer)
 }
 
 // Helper functions

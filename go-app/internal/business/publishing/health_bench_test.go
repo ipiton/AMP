@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // BenchmarkHealthMonitor_Start tests Start performance.
@@ -274,19 +275,16 @@ func BenchmarkSanitizeErrorMessage(b *testing.B) {
 // Helper functions for benchmarks
 
 var (
-	benchMetrics     *HealthMetrics
+	benchMetrics     *v2.PublishingMetrics
 	benchMetricsOnce sync.Once
 )
 
-func getBenchMetrics(b *testing.B) *HealthMetrics {
+func getBenchMetrics(b *testing.B) *v2.PublishingMetrics {
 	b.Helper()
 
 	benchMetricsOnce.Do(func() {
-		var err error
-		benchMetrics, err = NewHealthMetrics()
-		if err != nil {
-			b.Fatalf("Failed to create bench metrics: %v", err)
-		}
+		registry := v2.NewRegistry()
+		benchMetrics = registry.Publishing
 	})
 
 	return benchMetrics

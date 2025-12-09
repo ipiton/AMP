@@ -17,15 +17,8 @@ import (
 // slack_publisher_test.go - Comprehensive tests for EnhancedSlackPublisher
 // Coverage target: 90%+, 20+ tests
 
-var (
-	// Shared metrics instance to avoid duplicate registration
-	sharedSlackMetrics *SlackMetrics
-)
-
-func init() {
-	// Create metrics once for all tests
-	sharedSlackMetrics = NewSlackMetrics()
-}
+// Metrics are now in pkg/metrics/v2.PublishingMetrics
+// Tests use nil metrics to simplify testing
 
 // mockSlackWebhookClient is a mock implementation of SlackWebhookClient (Slack-specific)
 type mockSlackWebhookClient struct {
@@ -105,8 +98,8 @@ func setupSlackPublisher(t *testing.T) (*EnhancedSlackPublisher, *mockSlackWebho
 	formatter := new(mockSlackAlertFormatter)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	// Use shared metrics to avoid duplicate registration
-	publisher := NewEnhancedSlackPublisher(client, cache, sharedSlackMetrics, formatter, logger).(*EnhancedSlackPublisher)
+	// Use nil metrics in tests
+	publisher := NewEnhancedSlackPublisher(client, cache, nil, formatter, logger).(*EnhancedSlackPublisher)
 
 	return publisher, client, cache, formatter
 }
@@ -486,22 +479,22 @@ func TestClassifySlackError(t *testing.T) {
 		},
 		{
 			name:     "rate limit error",
-			err:      &SlackAPIError{StatusCode: 429, ErrorMessage: "rate_limited"},
+			err:      NewSlackAPIError(429, "rate_limited", 0),
 			expected: "rate_limit",
 		},
 		{
 			name:     "server error",
-			err:      &SlackAPIError{StatusCode: 503, ErrorMessage: "service_unavailable"},
+			err:      NewSlackAPIError(503, "service_unavailable", 0),
 			expected: "server_error",
 		},
 		{
 			name:     "auth error",
-			err:      &SlackAPIError{StatusCode: 403, ErrorMessage: "forbidden"},
+			err:      NewSlackAPIError(403, "forbidden", 0),
 			expected: "auth_error",
 		},
 		{
 			name:     "bad request error",
-			err:      &SlackAPIError{StatusCode: 400, ErrorMessage: "invalid_payload"},
+			err:      NewSlackAPIError(400, "invalid_payload", 0),
 			expected: "bad_request",
 		},
 		{

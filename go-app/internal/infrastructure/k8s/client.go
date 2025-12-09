@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/retry"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -256,55 +257,30 @@ func (c *DefaultK8sClient) Close() error {
 }
 
 // retryWithBackoff executes operation with exponential backoff retry logic.
+//
+// Migrated to use pkg/retry for unified retry strategy (TN-057).
 func (c *DefaultK8sClient) retryWithBackoff(ctx context.Context, operation func() error) error {
-	backoff := c.config.RetryBackoff
-
-	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
-		// Check context cancellation before attempt
-		select {
-		case <-ctx.Done():
-			return NewTimeoutError("operation cancelled", ctx.Err())
-		default:
-		}
-
-		err := operation()
-		if err == nil {
-			return nil // Success
-		}
-
-		// Check if error is retryable
-		if !isRetryableError(err) {
-			return err // Permanent error, no retry
-		}
-
-		// Last attempt - return error
-		if attempt == c.config.MaxRetries {
-			return err
-		}
-
-		// Log retry
-		c.logger.Warn("Retrying K8s operation",
-			"attempt", attempt+1,
-			"max_retries", c.config.MaxRetries,
-			"backoff", backoff,
-			"error", err,
-		)
-
-		// Wait with backoff
-		select {
-		case <-time.After(backoff):
-		case <-ctx.Done():
-			return NewTimeoutError("operation cancelled during backoff", ctx.Err())
-		}
-
-		// Exponential backoff
-		backoff *= 2
-		if backoff > c.config.MaxRetryBackoff {
-			backoff = c.config.MaxRetryBackoff
-		}
+	// Create retry strategy with K8s-specific settings
+	strategy := retry.Strategy{
+		MaxAttempts:     c.config.MaxRetries + 1, // +1 because pkg/retry counts attempts, not retries
+		BaseDelay:       c.config.RetryBackoff,
+		MaxDelay:        c.config.MaxRetryBackoff,
+		Multiplier:      2.0, // Exponential backoff
+		JitterRatio:     0.1, // 10% jitter
+		ErrorClassifier: &k8sErrorClassifier{}, // K8s-specific error classifier
+		Logger:          c.logger,
+		OperationName:   "k8s_operation",
 	}
 
-	return fmt.Errorf("operation failed after %d retries", c.config.MaxRetries)
+	// Execute with unified retry logic
+	return retry.DoSimple(ctx, strategy, operation)
+}
+
+// k8sErrorClassifier implements retry.ErrorClassifier for K8s errors.
+type k8sErrorClassifier struct{}
+
+func (c *k8sErrorClassifier) IsRetryable(err error) bool {
+	return isRetryableError(err)
 }
 
 // isNotFoundErr checks if error is a NotFound error.

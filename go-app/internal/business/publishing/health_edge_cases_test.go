@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // health_edge_cases_test.go - Edge case tests for Health Monitor
@@ -18,10 +20,8 @@ import (
 // TestHealthMonitor_NetworkTimeouts tests various timeout scenarios
 func TestHealthMonitor_NetworkTimeouts(t *testing.T) {
 	// Create shared metrics instance for all subtests
-	metrics, err := NewHealthMetrics()
-	if err != nil {
-		t.Fatalf("Failed to create metrics: %v", err)
-	}
+	registry := v2.NewRegistry()
+	metrics := registry.Publishing
 
 	tests := []struct {
 		name            string
@@ -109,7 +109,7 @@ func TestHealthMonitor_NetworkTimeouts(t *testing.T) {
 
 // TestHealthMonitor_TLSErrors tests TLS certificate validation
 func TestHealthMonitor_TLSErrors(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 
 	tests := []struct {
 		name        string
@@ -185,7 +185,7 @@ func TestHealthMonitor_TLSErrors(t *testing.T) {
 
 // TestHealthMonitor_DNSFailures tests DNS resolution errors
 func TestHealthMonitor_DNSFailures(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 
 	tests := []struct {
 		name        string
@@ -248,7 +248,7 @@ func TestHealthMonitor_DNSFailures(t *testing.T) {
 
 // TestHealthMonitor_StateTransitions tests degraded → unhealthy transitions
 func TestHealthMonitor_StateTransitions(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	failureCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		failureCount++
@@ -322,7 +322,7 @@ func TestHealthMonitor_StateTransitions(t *testing.T) {
 
 // TestHealthMonitor_ConcurrentStarts tests concurrent Start() calls
 func TestHealthMonitor_ConcurrentStarts(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	discovery := NewTestHealthDiscoveryManager()
 	monitor, err := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 	if err != nil {
@@ -363,7 +363,7 @@ func TestHealthMonitor_ConcurrentStarts(t *testing.T) {
 
 // TestHealthMonitor_StopDuringCheck tests Stop() during active checks
 func TestHealthMonitor_StopDuringCheck(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	// Create slow server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(5 * time.Second) // Long delay
@@ -413,7 +413,7 @@ func TestHealthMonitor_StopDuringCheck(t *testing.T) {
 
 // TestHealthMonitor_ConnectionRefused tests connection refused errors
 func TestHealthMonitor_ConnectionRefused(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	// Use a port that's not listening
 	discovery := createTestDiscoveryManager(t, map[string]*core.PublishingTarget{
 		"refused-target": {
@@ -447,7 +447,7 @@ func TestHealthMonitor_ConnectionRefused(t *testing.T) {
 
 // TestHealthMonitor_ContextCancellation tests context cancellation during check
 func TestHealthMonitor_ContextCancellation(t *testing.T) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	// Create slow server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(10 * time.Second)

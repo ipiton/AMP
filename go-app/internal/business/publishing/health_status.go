@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // processHealthCheckResult updates health status based on check result.
@@ -34,7 +36,7 @@ import (
 //	processHealthCheckResult(cache, metrics, logger, config, result)
 func processHealthCheckResult(
 	cache *healthStatusCache,
-	metrics *HealthMetrics,
+	metrics *v2.PublishingMetrics,
 	logger *slog.Logger,
 	config HealthConfig,
 	result HealthCheckResult,
@@ -109,9 +111,24 @@ func processHealthCheckResult(
 	})
 
 	// Update Prometheus metrics (outside lock for better performance)
-	metrics.SetTargetHealthStatus(result.TargetName, updatedStatus.TargetType, updatedStatus.Status)
-	metrics.SetConsecutiveFailures(result.TargetName, updatedStatus.ConsecutiveFailures)
-	metrics.SetSuccessRate(result.TargetName, updatedStatus.SuccessRate)
+	if metrics != nil {
+		// Convert HealthStatus string to v2.HealthStatus int
+		var v2Status v2.HealthStatus
+		switch updatedStatus.Status {
+		case HealthStatusHealthy:
+			v2Status = v2.HealthStatusHealthy
+		case HealthStatusDegraded:
+			v2Status = v2.HealthStatusDegraded
+		case HealthStatusUnhealthy:
+			v2Status = v2.HealthStatusUnhealthy
+		default:
+			v2Status = v2.HealthStatusUnknown
+		}
+
+		metrics.SetTargetHealthStatus(result.TargetName, updatedStatus.TargetType, v2Status)
+		metrics.SetConsecutiveFailures(result.TargetName, updatedStatus.ConsecutiveFailures)
+		metrics.SetSuccessRate(result.TargetName, updatedStatus.SuccessRate)
+	}
 }
 
 // transitionStatus transitions health status with logging.
