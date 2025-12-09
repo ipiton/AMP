@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // DefaultHealthMonitor is production implementation of HealthMonitor.
@@ -62,7 +64,7 @@ type DefaultHealthMonitor struct {
 
 	// Observability
 	logger  *slog.Logger
-	metrics *HealthMetrics
+	metrics *v2.PublishingMetrics
 }
 
 // NewHealthMonitor creates DefaultHealthMonitor.
@@ -102,7 +104,7 @@ func NewHealthMonitor(
 	discoveryMgr TargetDiscoveryManager,
 	config HealthConfig,
 	logger *slog.Logger,
-	metrics *HealthMetrics,
+	metrics *v2.PublishingMetrics,
 ) (*DefaultHealthMonitor, error) {
 	// Validation
 	if discoveryMgr == nil {

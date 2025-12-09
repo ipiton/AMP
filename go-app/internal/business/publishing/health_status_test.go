@@ -5,21 +5,20 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // Shared test metrics to avoid duplicate registration
 var (
-	statusTestMetrics     *HealthMetrics
+	statusTestMetrics     *v2.PublishingMetrics
 	statusTestMetricsOnce sync.Once
 )
 
-func getStatusTestMetrics() *HealthMetrics {
+func getStatusTestMetrics() *v2.PublishingMetrics {
 	statusTestMetricsOnce.Do(func() {
-		var err error
-		statusTestMetrics, err = NewHealthMetrics()
-		if err != nil {
-			panic(err)
-		}
+		statusTestMetrics = v2.NewPublishingMetrics(prometheus.NewRegistry())
 	})
 	return statusTestMetrics
 }

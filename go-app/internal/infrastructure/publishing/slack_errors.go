@@ -3,38 +3,23 @@ package publishing
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net"
 	"net/http"
 	"strconv"
+
+	"github.com/ipiton/AMP/pkg/httperror"
 )
 
 // slack_errors.go - Slack webhook API error types and classification helpers
+//
+// NOTE: This file is being migrated to use pkg/httperror.
+// New code should use httperror.HTTPAPIError and the unified error
+// functions from errors.go.
 
-// SlackAPIError represents a Slack webhook API error
-// Contains HTTP status code, error message, and optional Retry-After header
-type SlackAPIError struct {
-	// StatusCode is the HTTP status code (429, 503, 400, 403, 404, 500, etc.)
-	StatusCode int
-
-	// ErrorMessage is the Slack error message
-	// Examples: "invalid_payload", "channel_not_found", etc.
-	ErrorMessage string
-
-	// RetryAfter is the value from Retry-After header (in seconds)
-	// Used for 429 (rate limit) responses
-	// If 0, no Retry-After header was present
-	RetryAfter int
-}
-
-// Error implements the error interface
-// Returns formatted error message with status code and optional Retry-After
-func (e *SlackAPIError) Error() string {
-	if e.RetryAfter > 0 {
-		return fmt.Sprintf("slack API error %d: %s (retry after %ds)", e.StatusCode, e.ErrorMessage, e.RetryAfter)
-	}
-	return fmt.Sprintf("slack API error %d: %s", e.StatusCode, e.ErrorMessage)
-}
+// SlackAPIError represents a Slack webhook API error.
+//
+// Deprecated: Use httperror.HTTPAPIError with ProviderSlack instead.
+// This type is kept for backward compatibility.
+type SlackAPIError = httperror.HTTPAPIError
 
 // Sentinel errors for common failure scenarios
 var (
@@ -50,10 +35,24 @@ var (
 	ErrMessageTooLarge = errors.New("message payload exceeds Slack size limits")
 )
 
-// IsSlackRetryableError checks if Slack error is retryable (transient failure)
-// Retryable errors: 429 (rate limit), 503 (service unavailable), network errors
-// Non-retryable errors: 400 (bad request), 403 (forbidden), 404 (not found), 500 (internal error)
+// IsSlackRetryableError checks if Slack error is retryable (transient failure).
+//
+// MIGRATED: This function now uses pkg/httperror.PublishingClassifier for consistent error classification.
+//
+// Deprecated: Use httperror.PublishingClassifier directly in retry strategies instead.
 func IsSlackRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Use unified classifier
+	classifier := &httperror.PublishingClassifier{}
+	return classifier.IsRetryable(err)
+}
+
+// isSlackRetryableErrorOld is the old implementation (kept for reference, can be removed)
+// nolint:unused,deadcode
+func isSlackRetryableErrorOld(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -148,20 +147,22 @@ func IsSlackServerError(err error) bool {
 	return false
 }
 
-// parseSlackError parses Slack API error from HTTP response
-// Extracts status code, error message, and Retry-After header
-func parseSlackError(resp *http.Response, body []byte) *SlackAPIError {
-	apiErr := &SlackAPIError{
+// parseSlackError parses Slack API error from HTTP response.
+// Extracts status code, error message, and Retry-After header.
+// Returns httperror.HTTPAPIError with provider set to "slack".
+func parseSlackError(resp *http.Response, body []byte) *httperror.HTTPAPIError {
+	apiErr := &httperror.HTTPAPIError{
 		StatusCode: resp.StatusCode,
+		Provider:   ProviderSlack,
 	}
 
 	// Parse error from response body (JSON format: {"ok": false, "error": "..."})
 	var slackResp SlackResponse
 	if err := unmarshalJSON(body, &slackResp); err == nil && !slackResp.OK {
-		apiErr.ErrorMessage = slackResp.Error
+		apiErr.Message = slackResp.Error
 	} else {
 		// Fallback: use raw body as error message
-		apiErr.ErrorMessage = string(body)
+		apiErr.Message = string(body)
 	}
 
 	// Extract Retry-After header (for 429 responses)
@@ -174,28 +175,12 @@ func parseSlackError(resp *http.Response, body []byte) *SlackAPIError {
 	return apiErr
 }
 
-// isRetryableNetworkError checks if network error is retryable
-// Retryable: timeout, connection refused, DNS errors
-// Non-retryable: other errors (e.g., TLS handshake failure)
+// isRetryableNetworkError checks if network error is retryable.
+//
+// Deprecated: Use httperror.IsRetryableNetworkError instead.
+// This function delegates to the centralized implementation in pkg/httperror.
 func isRetryableNetworkError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for net.Error (timeout, temporary)
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		// Retry if timeout or temporary error
-		return netErr.Timeout() || netErr.Temporary()
-	}
-
-	// Check for connection refused (server not available)
-	// This is retryable (server might come back online)
-	if errors.Is(err, errors.New("connection refused")) {
-		return true
-	}
-
-	return false
+	return httperror.IsRetryableNetworkError(err)
 }
 
 // unmarshalJSON is a helper to unmarshal JSON

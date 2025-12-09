@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // AlertPublisher interface for publishing alerts to external systems
@@ -187,20 +188,17 @@ type PublisherFactory struct {
 	formatter           AlertFormatter
 	logger              *slog.Logger
 	rootlyCache         IncidentIDCache                  // Shared Rootly incident cache
-	rootlyMetrics       *RootlyMetrics                   // Shared Rootly metrics
 	rootlyClientMap     map[string]RootlyIncidentsClient // Cache of Rootly clients by API key
 	pagerDutyCache      EventKeyCache                    // Shared PagerDuty event key cache
-	pagerDutyMetrics    *PagerDutyMetrics                // Shared PagerDuty metrics
 	pagerDutyClientMap  map[string]PagerDutyEventsClient // Cache of PagerDuty clients by routing key
 	slackCache          MessageIDCache                   // Shared Slack message cache (for threading)
-	slackMetrics        *SlackMetrics                    // Shared Slack metrics
 	slackClientMap      map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL
 	slackCleanupWorker  func()                           // Slack cache cleanup worker cancel function
-	webhookMetrics      *WebhookMetrics                  // Shared Webhook metrics
+	metrics             *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
-// NewPublisherFactory creates a new publisher factory
-func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger) *PublisherFactory {
+// NewPublisherFactory creates a new publisher factory with unified v2 metrics
+func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics *v2.PublishingMetrics) *PublisherFactory {
 	// Create Slack cache and start background cleanup worker
 	slackCache := NewMessageCache()
 	slackCleanupWorker := StartCleanupWorker(slackCache, 5*time.Minute, 24*time.Hour)
@@ -208,17 +206,14 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger) *Publish
 	return &PublisherFactory{
 		formatter:          formatter,
 		logger:             logger,
-		rootlyCache:        NewIncidentIDCache(24 * time.Hour),        // 24h TTL for Rootly incident tracking
-		rootlyMetrics:      NewRootlyMetrics(),
+		rootlyCache:        NewIncidentIDCache(24 * time.Hour), // 24h TTL for Rootly incident tracking
 		rootlyClientMap:    make(map[string]RootlyIncidentsClient),
-		pagerDutyCache:     NewEventKeyCache(24 * time.Hour),          // 24h TTL for PagerDuty event tracking
-		pagerDutyMetrics:   NewPagerDutyMetrics(),
+		pagerDutyCache:     NewEventKeyCache(24 * time.Hour), // 24h TTL for PagerDuty event tracking
 		pagerDutyClientMap: make(map[string]PagerDutyEventsClient),
-		slackCache:         slackCache,                                // Slack message cache for threading
-		slackMetrics:       NewSlackMetrics(),
+		slackCache:         slackCache, // Slack message cache for threading
 		slackClientMap:     make(map[string]SlackWebhookClient),
 		slackCleanupWorker: slackCleanupWorker,
-		webhookMetrics:     NewWebhookMetrics(nil),                    // Webhook metrics (no registry, will use default)
+		metrics:            metrics, // Unified v2 metrics
 	}
 }
 
@@ -281,11 +276,11 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		f.rootlyClientMap[apiKey] = client
 	}
 
-	// Create EnhancedRootlyPublisher with shared cache and metrics
+	// Create EnhancedRootlyPublisher with shared cache and unified metrics
 	return NewEnhancedRootlyPublisher(
 		client,
 		f.rootlyCache,
-		f.rootlyMetrics,
+		f.metrics,
 		f.formatter,
 		f.logger,
 	), nil
@@ -332,11 +327,11 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		f.pagerDutyClientMap[routingKey] = client
 	}
 
-	// Create EnhancedPagerDutyPublisher with shared cache and metrics
+	// Create EnhancedPagerDutyPublisher with shared cache and unified metrics
 	return NewEnhancedPagerDutyPublisher(
 		client,
 		f.pagerDutyCache,
-		f.pagerDutyMetrics,
+		f.metrics,
 		f.formatter,
 		f.logger,
 	), nil
@@ -359,11 +354,11 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 		f.slackClientMap[webhookURL] = client
 	}
 
-	// Create EnhancedSlackPublisher with shared cache and metrics
+	// Create EnhancedSlackPublisher with shared cache and unified metrics
 	return NewEnhancedSlackPublisher(
 		client,
 		f.slackCache,
-		f.slackMetrics,
+		f.metrics,
 		f.formatter,
 		f.logger,
 	), nil
@@ -381,12 +376,12 @@ func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.Publishin
 	// Create validator with default config
 	validator := NewWebhookValidator(f.logger)
 
-	// Create enhanced webhook publisher with shared metrics
+	// Create enhanced webhook publisher with unified metrics
 	publisher := NewEnhancedWebhookPublisher(
 		client,
 		validator,
 		f.formatter,
-		f.webhookMetrics, // Shared metrics instance
+		f.metrics, // Unified v2 metrics instance
 		f.logger,
 	)
 

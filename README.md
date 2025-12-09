@@ -49,17 +49,84 @@ make build
 
 ### Configuration
 
-Create `config/config.yaml`:
+Alertmanager++ uses **two configuration files** (like Prometheus + Alertmanager):
+
+#### 1. Application Config (`config.yaml`)
+
+Infrastructure settings (database, Redis, server, etc.):
 
 ```yaml
+# config.yaml - Application infrastructure
+profile: standard  # lite or standard
+
 server:
-  port: 9093
+  port: 8080
+  host: 0.0.0.0
 
 database:
-  type: sqlite  # or postgres
-  path: /data/alertmanager.db
+  host: localhost
+  port: 5432
+  database: alerthistory
+  username: postgres
+  password: ${DATABASE_PASSWORD}
 
-profile: lite  # or standard
+redis:
+  addr: localhost:6379
+  password: ${REDIS_PASSWORD}
+
+log:
+  level: info
+  format: json
+```
+
+See `config.yaml.example` for all options.
+
+#### 2. Alertmanager Config (`alertmanager.yaml`)
+
+Routing and receivers (100% Alertmanager-compatible):
+
+```yaml
+# alertmanager.yaml - Routing configuration
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: [alertname]
+  routes:
+    - receiver: pagerduty-critical
+      match:
+        severity: critical
+    - receiver: slack-warnings
+      match:
+        severity: warning
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://webhook.example.com/alerts
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: ${PAGERDUTY_KEY}
+
+  - name: slack-warnings
+    slack_configs:
+      - api_url: ${SLACK_WEBHOOK}
+        channel: "#alerts"
+```
+
+See `go-app/internal/infrastructure/routing/testdata/production.yaml` for full example.
+
+**Load alerting config:**
+```bash
+# Via API (hot reload without restart!)
+curl -X POST http://localhost:8080/api/v2/config \
+  --data-binary @alertmanager.yaml
+
+# Or via Kubernetes ConfigMap
+kubectl create configmap alertmanager-config \
+  --from-file=alertmanager.yaml
 ```
 
 ## 📚 Documentation

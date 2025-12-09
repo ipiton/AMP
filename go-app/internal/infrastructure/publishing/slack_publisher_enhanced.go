@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // slack_publisher_enhanced.go - Enhanced Slack publisher with full lifecycle management
@@ -15,11 +16,9 @@ import (
 // EnhancedSlackPublisher implements AlertPublisher with full Slack webhook support
 // Provides message lifecycle management (post, thread reply) and message tracking
 type EnhancedSlackPublisher struct {
-	client    SlackWebhookClient
-	cache     MessageIDCache // For tracking message timestamps (threading)
-	metrics   *SlackMetrics
-	formatter AlertFormatter
-	logger    *slog.Logger
+	*BaseEnhancedPublisher                     // Embedded base publisher for common functionality
+	client                 SlackWebhookClient  // Slack-specific webhook client
+	cache                  MessageIDCache      // For tracking message timestamps (threading)
 }
 
 // NewEnhancedSlackPublisher creates a new enhanced Slack publisher
@@ -29,16 +28,18 @@ type EnhancedSlackPublisher struct {
 func NewEnhancedSlackPublisher(
 	client SlackWebhookClient,
 	cache MessageIDCache,
-	metrics *SlackMetrics,
+	metrics *v2.PublishingMetrics,
 	formatter AlertFormatter,
 	logger *slog.Logger,
 ) AlertPublisher {
 	return &EnhancedSlackPublisher{
-		client:    client,
-		cache:     cache,
-		metrics:   metrics,
-		formatter: formatter,
-		logger:    logger.With("component", "slack_publisher"),
+		BaseEnhancedPublisher: NewBaseEnhancedPublisher(
+			metrics,
+			formatter,
+			logger.With("component", "slack_publisher"),
+		),
+		client: client,
+		cache:  cache,
 	}
 }
 
@@ -48,10 +49,7 @@ func (p *EnhancedSlackPublisher) Publish(ctx context.Context, enrichedAlert *cor
 	alert := enrichedAlert.Alert
 	fingerprint := alert.Fingerprint
 
-	p.logger.InfoContext(ctx, "Publishing alert to Slack",
-		slog.String("fingerprint", fingerprint),
-		slog.String("alert_name", alert.AlertName),
-		slog.String("status", string(alert.Status)))
+	p.LogPublishStart(ctx, v2.ProviderSlack, enrichedAlert)
 
 	// Check cache for existing message
 	entry, found := p.cache.Get(fingerprint)
@@ -61,23 +59,23 @@ func (p *EnhancedSlackPublisher) Publish(ctx context.Context, enrichedAlert *cor
 	case core.StatusFiring:
 		if found {
 			// Alert still firing - reply in thread
-			p.metrics.CacheHits.Inc()
+			p.RecordCacheHit(v2.ProviderSlack)
 			return p.replyInThread(ctx, entry.ThreadTS, enrichedAlert, "🔴 Still firing")
 		}
 		// New firing alert - post new message
-		p.metrics.CacheMisses.Inc()
+		p.RecordCacheMiss(v2.ProviderSlack)
 		return p.postMessage(ctx, enrichedAlert, fingerprint)
 
 	case core.StatusResolved:
 		if found {
 			// Alert resolved - reply in thread
-			p.metrics.CacheHits.Inc()
+			p.RecordCacheHit(v2.ProviderSlack)
 			return p.replyInThread(ctx, entry.ThreadTS, enrichedAlert, "🟢 Resolved")
 		}
 		// Resolved alert without firing message (cache miss) - post new message with resolved status
-		p.logger.WarnContext(ctx, "Resolved alert without firing message (cache miss), posting new message",
+		p.GetLogger().WarnContext(ctx, "Resolved alert without firing message (cache miss), posting new message",
 			slog.String("fingerprint", fingerprint))
-		p.metrics.CacheMisses.Inc()
+		p.RecordCacheMiss(v2.ProviderSlack)
 		return p.postMessage(ctx, enrichedAlert, fingerprint)
 
 	default:
@@ -96,9 +94,11 @@ func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert 
 	startTime := time.Now()
 
 	// Format alert using TN-051 formatter
-	formattedPayload, err := p.formatter.FormatAlert(ctx, enrichedAlert, core.FormatSlack)
+	formattedPayload, err := p.GetFormatter().FormatAlert(ctx, enrichedAlert, core.FormatSlack)
 	if err != nil {
-		p.metrics.MessageErrors.WithLabelValues("format_error").Inc()
+		if p.GetMetrics() != nil {
+			p.GetMetrics().RecordAPIError(v2.ProviderSlack, "post_message", "format_error")
+		}
 		return fmt.Errorf("failed to format alert: %w", err)
 	}
 
@@ -108,8 +108,10 @@ func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert 
 	// Post message to Slack
 	resp, err := p.client.PostMessage(ctx, message)
 	if err != nil {
-		p.metrics.MessageErrors.WithLabelValues(classifySlackError(err)).Inc()
-		p.metrics.APIDuration.WithLabelValues("post_message", "error").Observe(time.Since(startTime).Seconds())
+		if p.GetMetrics() != nil {
+			p.GetMetrics().RecordAPIError(v2.ProviderSlack, "post_message", classifySlackError(err))
+			p.GetMetrics().RecordAPIDuration(v2.ProviderSlack, "post_message", "POST", time.Since(startTime))
+		}
 		return fmt.Errorf("failed to post message: %w", err)
 	}
 
@@ -122,10 +124,12 @@ func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert 
 	p.cache.Store(fingerprint, entry)
 
 	// Record metrics
-	p.metrics.MessagesPosted.WithLabelValues("success").Inc()
-	p.metrics.APIDuration.WithLabelValues("post_message", "success").Observe(time.Since(startTime).Seconds())
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordMessage(v2.ProviderSlack, "success")
+		p.GetMetrics().RecordAPIDuration(v2.ProviderSlack, "post_message", "POST", time.Since(startTime))
+	}
 
-	p.logger.InfoContext(ctx, "Message posted successfully",
+	p.GetLogger().InfoContext(ctx, "Message posted successfully",
 		slog.String("fingerprint", fingerprint),
 		slog.String("message_ts", resp.TS))
 
@@ -167,16 +171,20 @@ func (p *EnhancedSlackPublisher) replyInThread(ctx context.Context, threadTS str
 	// Reply in thread
 	_, err := p.client.ReplyInThread(ctx, threadTS, message)
 	if err != nil {
-		p.metrics.MessageErrors.WithLabelValues(classifySlackError(err)).Inc()
-		p.metrics.APIDuration.WithLabelValues("thread_reply", "error").Observe(time.Since(startTime).Seconds())
+		if p.GetMetrics() != nil {
+			p.GetMetrics().RecordAPIError(v2.ProviderSlack, "thread_reply", classifySlackError(err))
+			p.GetMetrics().RecordAPIDuration(v2.ProviderSlack, "thread_reply", "POST", time.Since(startTime))
+		}
 		return fmt.Errorf("failed to reply in thread: %w", err)
 	}
 
 	// Record metrics
-	p.metrics.ThreadReplies.Inc()
-	p.metrics.APIDuration.WithLabelValues("thread_reply", "success").Observe(time.Since(startTime).Seconds())
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordThreadReply("success")
+		p.GetMetrics().RecordAPIDuration(v2.ProviderSlack, "thread_reply", "POST", time.Since(startTime))
+	}
 
-	p.logger.InfoContext(ctx, "Thread reply posted successfully",
+	p.GetLogger().InfoContext(ctx, "Thread reply posted successfully",
 		slog.String("thread_ts", threadTS),
 		slog.String("status", statusText))
 

@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // comprehensive_bench_test.go - Comprehensive benchmarks for all publishing components
@@ -32,7 +34,7 @@ func BenchmarkHealthCheck_SingleTarget(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	ctx := context.Background()
@@ -74,7 +76,7 @@ func benchmarkHealthCheckParallel(b *testing.B, targetCount int) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	config := DefaultHealthConfig()
 	config.MaxConcurrentChecks = 50
 
@@ -104,7 +106,7 @@ func BenchmarkGetHealth_ConcurrentReads(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	ctx := context.Background()
@@ -134,7 +136,7 @@ func BenchmarkHealthStatusCache_Lookup(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 	monitor.Start()
 	time.Sleep(200 * time.Millisecond) // Let initial checks complete
@@ -225,7 +227,7 @@ func BenchmarkMetricsCollection_HealthOnly(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	collector := NewHealthMetricsCollector(monitor)
@@ -251,7 +253,7 @@ func BenchmarkMetricsCollection_AllSources(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	aggregator := NewPublishingMetricsCollector()
@@ -267,7 +269,7 @@ func BenchmarkMetricsCollection_AllSources(b *testing.B) {
 
 // BenchmarkPrometheusMetrics_RecordHealthCheck benchmarks Prometheus metric recording
 func BenchmarkPrometheusMetrics_RecordHealthCheck(b *testing.B) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -277,11 +279,11 @@ func BenchmarkPrometheusMetrics_RecordHealthCheck(b *testing.B) {
 
 // BenchmarkPrometheusMetrics_SetHealthStatus benchmarks status gauge updates
 func BenchmarkPrometheusMetrics_SetHealthStatus(b *testing.B) {
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		metrics.SetTargetHealthStatus("test-target", "webhook", HealthStatusHealthy)
+		metrics.SetTargetHealthStatus("test-target", "webhook", v2.HealthStatusHealthy)
 	}
 }
 
@@ -306,7 +308,7 @@ func BenchmarkConcurrent_HealthChecks(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	ctx := context.Background()
@@ -334,7 +336,7 @@ func BenchmarkConcurrent_MetricsCollection(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	collector := NewHealthMetricsCollector(monitor)
@@ -361,7 +363,7 @@ func BenchmarkMemory_HealthStatusAllocation(b *testing.B) {
 		_ = &TargetHealthStatus{
 			TargetName:          "test-target",
 			TargetType:          "webhook",
-			Status:              HealthStatusHealthy,
+			Status: HealthStatusHealthy,
 			LastCheck:           now,
 			LastSuccess:         &now,
 			ConsecutiveFailures: 0,
@@ -403,7 +405,7 @@ func BenchmarkLatency_HealthCheck_Fast(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
 
 	ctx := context.Background()
@@ -429,7 +431,7 @@ func BenchmarkLatency_HealthCheck_Slow(b *testing.B) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	config := DefaultHealthConfig()
 	config.HTTPTimeout = 5 * time.Second
 
@@ -483,7 +485,7 @@ func benchmarkScalability(b *testing.B, targetCount int) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	metrics, _ := NewHealthMetrics()
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	config := DefaultHealthConfig()
 	config.MaxConcurrentChecks = 100
 

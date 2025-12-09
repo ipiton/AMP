@@ -183,10 +183,7 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 
 			if !slackResp.OK {
 				// Slack returned ok=false (error in response body)
-				return nil, &SlackAPIError{
-					StatusCode:   httpResp.StatusCode,
-					ErrorMessage: slackResp.Error,
-				}
+				return nil, NewSlackAPIError(httpResp.StatusCode, slackResp.Error, 0)
 			}
 
 			return &slackResp, nil

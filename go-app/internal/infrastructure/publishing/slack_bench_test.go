@@ -18,7 +18,7 @@ func setupSlackBenchmark() *EnhancedSlackPublisher {
 	formatter := NewAlertFormatter()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	return NewEnhancedSlackPublisher(client, cache, sharedSlackMetrics, formatter, logger).(*EnhancedSlackPublisher)
+	return NewEnhancedSlackPublisher(client, cache, nil, formatter, logger).(*EnhancedSlackPublisher)
 }
 
 // BenchmarkCache_Store benchmarks Store operation
@@ -184,7 +184,7 @@ func BenchmarkPublisher_Name(b *testing.B) {
 // BenchmarkClassifySlackError benchmarks error classification
 // Target: <100ns per operation
 func BenchmarkClassifySlackError(b *testing.B) {
-	err := &SlackAPIError{StatusCode: 429, ErrorMessage: "rate_limited"}
+	err := NewSlackAPIError(429, "rate_limited", 0)
 
 	b.ResetTimer()
 	b.ReportAllocs()

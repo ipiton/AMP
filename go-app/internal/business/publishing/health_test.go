@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // TestHealthMonitor_Lifecycle tests Start/Stop operations.
@@ -555,19 +557,15 @@ func TestHealthMonitor_ConcurrentChecks(t *testing.T) {
 // Helper functions
 
 var (
-	testMetrics     *HealthMetrics
+	testMetrics     *v2.PublishingMetrics
 	testMetricsOnce sync.Once
 )
 
-func getTestMetrics(t *testing.T) *HealthMetrics {
+func getTestMetrics(t *testing.T) *v2.PublishingMetrics {
 	t.Helper()
 
 	testMetricsOnce.Do(func() {
-		var err error
-		testMetrics, err = NewHealthMetrics()
-		if err != nil {
-			t.Fatalf("Failed to create test metrics: %v", err)
-		}
+		testMetrics = v2.NewPublishingMetrics(prometheus.NewRegistry())
 	})
 
 	return testMetrics
@@ -625,9 +623,7 @@ func createTestDiscoveryManager(t *testing.T, targets map[string]*core.Publishin
 // createTestHealthMonitorWith creates health monitor with custom discovery and config.
 func createTestHealthMonitorWith(discoveryMgr TargetDiscoveryManager, config HealthConfig) (HealthMonitor, error) {
 	// Create metrics manually to avoid nil pointer
-	metrics, err := NewHealthMetrics()
-	if err != nil {
-		return nil, err
-	}
+	registry := v2.NewRegistry()
+	metrics := registry.Publishing
 	return NewHealthMonitor(discoveryMgr, config, slog.Default(), metrics)
 }

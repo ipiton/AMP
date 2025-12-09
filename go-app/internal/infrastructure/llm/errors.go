@@ -6,18 +6,21 @@ import (
 	"net"
 	"strings"
 	"syscall"
+
+	"github.com/ipiton/AMP/pkg/httperror"
 )
 
 // Common errors for LLM client operations
+// NOTE: These error variables are re-exported from pkg/httperror for backward compatibility.
 var (
 	// ErrCircuitBreakerOpen is returned when circuit breaker is open
-	ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
+	ErrCircuitBreakerOpen = httperror.ErrCircuitBreakerOpen
 
 	// ErrInvalidRequest is returned when request format is invalid
-	ErrInvalidRequest = errors.New("invalid request format")
+	ErrInvalidRequest = httperror.ErrInvalidRequest
 
 	// ErrInvalidResponse is returned when response cannot be parsed
-	ErrInvalidResponse = errors.New("invalid response format")
+	ErrInvalidResponse = httperror.ErrInvalidResponse
 )
 
 // HTTPError represents an HTTP error with status code
@@ -31,35 +34,14 @@ func (e *HTTPError) Error() string {
 }
 
 // IsRetryableError determines if an error should be retried by retry logic.
-// 150% Enhancement: Sophisticated error classification
+//
+// MIGRATED: This function now uses pkg/httperror.LLMClassifier for consistent error classification.
+// The logic remains the same but is now unified across the codebase.
+//
+// Deprecated: Use httperror.LLMClassifier directly in retry strategies instead.
 func IsRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Circuit breaker open - not retryable (fail-fast)
-	if errors.Is(err, ErrCircuitBreakerOpen) {
-		return false
-	}
-
-	// Invalid request/response - not retryable
-	if errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrInvalidResponse) {
-		return false
-	}
-
-	// HTTP errors
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
-		// 4xx errors (except 429 rate limit) - not retryable
-		if httpErr.StatusCode >= 400 && httpErr.StatusCode < 500 {
-			return httpErr.StatusCode == 429 // Only retry rate limits
-		}
-		// 5xx errors - retryable (transient server errors)
-		return httpErr.StatusCode >= 500
-	}
-
-	// Network errors - classify transient vs permanent
-	return isTransientNetworkError(err)
+	classifier := &httperror.LLMClassifier{}
+	return classifier.IsRetryable(err)
 }
 
 // isTransientNetworkError determines if network error is transient and retryable.

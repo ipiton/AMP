@@ -3,24 +3,20 @@ package publishing
 import (
 	"context"
 	"time"
+
+	"github.com/ipiton/AMP/pkg/retry"
 )
 
 // refreshWithRetry executes refresh with exponential backoff retry.
 //
+// Migrated to use pkg/retry for unified retry strategy (TN-057).
+//
 // This method:
 //   1. Attempts refresh (m.discovery.DiscoverTargets)
 //   2. On failure, classifies error (transient vs permanent)
-//   3. If transient, retries with exponential backoff
+//   3. If transient, retries with exponential backoff (via pkg/retry)
 //   4. If permanent, fails immediately (no retry)
 //   5. Returns after maxRetries or success
-//
-// Backoff Schedule (default config):
-//   - Attempt 1: 0s (immediate)
-//   - Attempt 2: 30s (baseBackoff)
-//   - Attempt 3: 1m (2x)
-//   - Attempt 4: 2m (2x)
-//   - Attempt 5: 4m (2x)
-//   - Attempt 6: 5m (maxBackoff, capped)
 //
 // Error Classification:
 //   - Transient: Network timeout, connection refused, 503
@@ -37,107 +33,60 @@ import (
 //
 // Thread-Safe: Yes (no shared state modifications)
 func (m *DefaultRefreshManager) refreshWithRetry(ctx context.Context) error {
-	var lastErr error
-	backoff := m.config.BaseBackoff
-	totalStartTime := time.Now()
+	startTime := time.Now()
 
-	for attempt := 0; attempt < m.config.MaxRetries; attempt++ {
-		// Attempt refresh
-		attemptStartTime := time.Now()
-		err := m.discovery.DiscoverTargets(ctx)
-		attemptDuration := time.Since(attemptStartTime)
+	// Create retry strategy with refresh-specific settings
+	strategy := retry.Strategy{
+		MaxAttempts:     m.config.MaxRetries,
+		BaseDelay:       m.config.BaseBackoff,
+		MaxDelay:        m.config.MaxBackoff,
+		Multiplier:      2.0, // Exponential backoff (30s → 1m → 2m → 4m → 5m)
+		JitterRatio:     0.1, // 10% jitter to prevent thundering herd
+		ErrorClassifier: &refreshErrorClassifier{}, // Classify transient vs permanent
+		Logger:          m.logger,
+		OperationName:   "refresh_targets",
+	}
 
-		if err == nil {
-			// Success!
-			totalDuration := time.Since(totalStartTime)
-			m.logger.Info("Refresh succeeded",
-				"attempt", attempt+1,
-				"attempt_duration", attemptDuration,
-				"total_duration", totalDuration)
-			return nil
-		}
+	// Execute with unified retry logic
+	err := retry.DoSimple(ctx, strategy, func() error {
+		return m.discovery.DiscoverTargets(ctx)
+	})
 
-		// Failure - classify error
+	// Wrap error in RefreshError for backward compatibility
+	if err != nil {
+		duration := time.Since(startTime)
 		errorType, transient := classifyError(err)
-		lastErr = err
 
-		m.logger.Warn("Refresh attempt failed",
-			"attempt", attempt+1,
-			"max_retries", m.config.MaxRetries,
+		m.logger.Error("Refresh failed",
 			"error", err,
 			"error_type", errorType,
 			"transient", transient,
-			"attempt_duration", attemptDuration)
+			"duration", duration)
 
-		// Permanent error - no retry
-		if !transient {
-			totalDuration := time.Since(totalStartTime)
-			m.logger.Error("Permanent error detected, no retry",
-				"error", err,
-				"error_type", errorType,
-				"total_duration", totalDuration)
-
-			return &RefreshError{
-				Op:        "discover_targets",
-				Err:       err,
-				Retries:   attempt,
-				Duration:  totalDuration,
-				Transient: false,
-			}
-		}
-
-		// Transient error - retry with backoff (if not last attempt)
-		if attempt < m.config.MaxRetries-1 {
-			// Calculate next backoff (exponential)
-			nextBackoff := backoff * 2
-			if nextBackoff > m.config.MaxBackoff {
-				nextBackoff = m.config.MaxBackoff
-			}
-
-			m.logger.Info("Retrying refresh after backoff",
-				"next_attempt", attempt+2,
-				"backoff", backoff,
-				"next_backoff", nextBackoff)
-
-			// Wait for backoff (respecting context)
-			select {
-			case <-time.After(backoff):
-				// Continue to next attempt
-				m.logger.Debug("Backoff completed, retrying",
-					"attempt", attempt+2)
-			case <-ctx.Done():
-				// Context cancelled/timeout during backoff
-				totalDuration := time.Since(totalStartTime)
-				m.logger.Warn("Context cancelled during backoff",
-					"error", ctx.Err(),
-					"total_duration", totalDuration)
-
-				return &RefreshError{
-					Op:        "discover_targets",
-					Err:       ctx.Err(),
-					Retries:   attempt + 1,
-					Duration:  totalDuration,
-					Transient: false, // Context cancellation is permanent
-				}
-			}
-
-			// Update backoff for next iteration
-			backoff = nextBackoff
+		return &RefreshError{
+			Op:        "discover_targets",
+			Err:       err,
+			Retries:   m.config.MaxRetries,
+			Duration:  duration,
+			Transient: transient,
 		}
 	}
 
-	// Max retries exceeded
-	totalDuration := time.Since(totalStartTime)
-	m.logger.Error("Max retries exceeded",
-		"max_retries", m.config.MaxRetries,
-		"last_error", lastErr,
-		"total_duration", totalDuration)
+	duration := time.Since(startTime)
+	m.logger.Info("Refresh succeeded",
+		"duration", duration)
 
-	return &RefreshError{
-		Op:        "discover_targets",
-		Err:       lastErr,
-		Retries:   m.config.MaxRetries,
-		Duration:  totalDuration,
-		Transient: true, // Still transient, just exhausted retries
+	return nil
+}
+
+// refreshErrorClassifier implements retry.ErrorClassifier for refresh operations.
+type refreshErrorClassifier struct{}
+
+func (c *refreshErrorClassifier) IsRetryable(err error) bool {
+	if err == nil {
+		return false
 	}
+	// Use existing classifyError to determine if error is transient
+	_, transient := classifyError(err)
+	return transient
 }

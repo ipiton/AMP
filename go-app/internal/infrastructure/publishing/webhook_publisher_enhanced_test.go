@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // ==================== Test Helpers ====================
@@ -47,7 +48,7 @@ func TestEnhancedWebhookPublisher_Name(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
 
@@ -64,7 +65,7 @@ func TestEnhancedWebhookPublisher_Publish_Success(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
 
@@ -99,7 +100,7 @@ func TestEnhancedWebhookPublisher_Publish_ValidationError(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
 
@@ -134,7 +135,7 @@ func TestEnhancedWebhookPublisher_Publish_WithBearerAuth(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
 
@@ -171,7 +172,7 @@ func TestEnhancedWebhookPublisher_Publish_WithCustomHeaders(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
 
@@ -204,7 +205,7 @@ func TestEnhancedWebhookPublisher_Publish_WithCustomHeaders(t *testing.T) {
 
 func TestNewEnhancedWebhookPublisherWithDefaults(t *testing.T) {
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 	logger := slog.Default()
 
 	publisher := NewEnhancedWebhookPublisherWithDefaults(formatter, metrics, logger)
@@ -225,7 +226,7 @@ func TestNewEnhancedWebhookPublisherWithRetry(t *testing.T) {
 		Multiplier:  3.0,
 	}
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 	logger := slog.Default()
 
 	publisher := NewEnhancedWebhookPublisherWithRetry(retryConfig, formatter, metrics, logger)
@@ -242,7 +243,7 @@ func TestNewEnhancedWebhookPublisherWithValidation(t *testing.T) {
 		MaxHeaderSize:  2 * 1024,
 	}
 	formatter := NewAlertFormatter()
-	metrics := NewWebhookMetrics(nil)
+	var metrics *v2.PublishingMetrics
 	logger := slog.Default()
 
 	publisher := NewEnhancedWebhookPublisherWithValidation(validationConfig, formatter, metrics, logger)

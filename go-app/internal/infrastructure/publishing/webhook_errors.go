@@ -1,41 +1,26 @@
 package publishing
 
 import (
-	"context"
 	"errors"
-	"fmt"
-	"net"
+
+	"github.com/ipiton/AMP/pkg/httperror"
 )
 
-// WebhookError represents a webhook operation error
-type WebhookError struct {
-	// Type is the error type for classification
-	Type ErrorType
+// Webhook Error Types
+//
+// NOTE: This file is being migrated to use pkg/httperror.
+// New code should use httperror.HTTPAPIError and the unified error
+// functions from errors.go.
 
-	// Message is the human-readable error message
-	Message string
+// WebhookError represents a webhook operation error.
+//
+// Deprecated: Use httperror.HTTPAPIError with ProviderWebhook instead.
+// This type is kept for backward compatibility.
+type WebhookError = httperror.HTTPAPIError
 
-	// StatusCode is the HTTP status code (if applicable)
-	StatusCode int
-
-	// Cause is the underlying error
-	Cause error
-}
-
-// Error implements the error interface
-func (e *WebhookError) Error() string {
-	if e.StatusCode > 0 {
-		return fmt.Sprintf("[%s] HTTP %d: %s", e.Type, e.StatusCode, e.Message)
-	}
-	return fmt.Sprintf("[%s] %s", e.Type, e.Message)
-}
-
-// Unwrap implements errors unwrapping for error chains
-func (e *WebhookError) Unwrap() error {
-	return e.Cause
-}
-
-// ErrorType categorizes webhook errors for retry decision and metrics
+// ErrorType categorizes webhook errors for retry decision and metrics.
+//
+// Deprecated: Use httperror.HTTPAPIError.Type() method instead.
 type ErrorType int
 
 const (
@@ -58,7 +43,7 @@ const (
 	ErrorTypeServer
 )
 
-// String returns the string representation of ErrorType
+// String returns the string representation of ErrorType.
 func (t ErrorType) String() string {
 	switch t {
 	case ErrorTypeValidation:
@@ -106,38 +91,18 @@ var (
 	ErrNoCustomHeaders             = errors.New("no custom headers provided")
 )
 
-// IsWebhookRetryableError checks if a webhook error should be retried
+// IsWebhookRetryableError checks if a webhook error should be retried.
+//
+// Deprecated: Use httperror.IsRetryable or IsPublishingRetryable instead.
 func IsWebhookRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for WebhookError type
-	var webhookErr *WebhookError
-	if errors.As(err, &webhookErr) {
-		return webhookErr.Type == ErrorTypeNetwork ||
-			webhookErr.Type == ErrorTypeTimeout ||
-			webhookErr.Type == ErrorTypeRateLimit ||
-			webhookErr.Type == ErrorTypeServer
-	}
-
-	// Check for network errors (timeout, temporary)
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return netErr.Timeout() || netErr.Temporary()
-	}
-
-	// Check for context deadline exceeded (timeout)
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-
-	return false
+	return httperror.IsRetryable(err)
 }
 
-// IsWebhookPermanentError checks if an error is permanent (not retryable)
+// IsWebhookPermanentError checks if an error is permanent (not retryable).
+//
+// Deprecated: Use !httperror.IsRetryable instead.
 func IsWebhookPermanentError(err error) bool {
-	return !IsWebhookRetryableError(err)
+	return !httperror.IsRetryable(err)
 }
 
 // classifyHTTPError classifies HTTP status code to error category

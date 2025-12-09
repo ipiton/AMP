@@ -17,16 +17,19 @@ type Config struct {
 	// Storage backend configuration (TN-201)
 	Storage StorageConfig `mapstructure:"storage"`
 
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	LLM      LLMConfig      `mapstructure:"llm"`
-	Log      LogConfig      `mapstructure:"log"`
-	Cache    CacheConfig    `mapstructure:"cache"`
-	Lock     LockConfig     `mapstructure:"lock"`
-	App      AppConfig      `mapstructure:"app"`
-	Metrics  MetricsConfig  `mapstructure:"metrics"`
-	Webhook  WebhookConfig  `mapstructure:"webhook"`
+	Server     ServerConfig       `mapstructure:"server"`
+	Database   DatabaseConfig     `mapstructure:"database"`
+	Redis      RedisConfig        `mapstructure:"redis"`
+	LLM        LLMConfig          `mapstructure:"llm"`
+	Log        LogConfig          `mapstructure:"log"`
+	Cache      CacheConfig        `mapstructure:"cache"`
+	Lock       LockConfig         `mapstructure:"lock"`
+	App        AppConfig          `mapstructure:"app"`
+	Metrics    MetricsConfig      `mapstructure:"metrics"`
+	Webhook    WebhookConfig      `mapstructure:"webhook"`
+	HTTPClient HTTPClientConfig   `mapstructure:"http_client"`
+	Retry      RetryConfig        `mapstructure:"retry"`
+	Telemetry  TelemetryConfig    `mapstructure:"telemetry"`
 }
 
 // DeploymentProfile represents the deployment profile type
@@ -202,6 +205,47 @@ type CORSWebhookConfig struct {
 	AllowedHeaders string `mapstructure:"allowed_headers"`
 }
 
+// RetryConfig holds global retry configuration
+type RetryConfig struct {
+	// MaxAttempts is the maximum number of retry attempts (default: 4, which is 3 retries + 1 initial attempt)
+	MaxAttempts int `mapstructure:"max_attempts"`
+
+	// BaseDelay is the base delay for exponential backoff (default: 100ms)
+	BaseDelay time.Duration `mapstructure:"base_delay"`
+
+	// MaxDelay is the maximum delay between retries (default: 30s)
+	MaxDelay time.Duration `mapstructure:"max_delay"`
+
+	// Multiplier is the backoff multiplier (default: 2.0 for exponential backoff)
+	Multiplier float64 `mapstructure:"multiplier"`
+
+	// JitterRatio is the jitter ratio (0.0-1.0, default: 0.15 = 15% jitter)
+	JitterRatio float64 `mapstructure:"jitter_ratio"`
+}
+
+// DefaultRetryConfig returns default retry configuration
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxAttempts: 4,                      // 3 retries + 1 initial attempt
+		BaseDelay:   100 * time.Millisecond, // 100ms
+		MaxDelay:    30 * time.Second,       // 30s
+		Multiplier:  2.0,                    // Exponential backoff
+		JitterRatio: 0.15,                   // 15% jitter
+	}
+}
+
+// TelemetryConfig holds OpenTelemetry configuration
+type TelemetryConfig struct {
+	// Enabled controls whether tracing is enabled
+	Enabled bool `mapstructure:"enabled"`
+
+	// Endpoint is the OTLP collector endpoint (e.g., "localhost:4317")
+	Endpoint string `mapstructure:"endpoint"`
+
+	// SamplingRatio is the sampling ratio (0.0 to 1.0)
+	SamplingRatio float64 `mapstructure:"sampling_ratio"`
+}
+
 // StorageBackend represents the storage implementation
 type StorageBackend string
 
@@ -293,9 +337,9 @@ func setDefaults() {
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 5432)
 	viper.SetDefault("database.database", "alerthistory")
-	viper.SetDefault("database.username", "dev")
-	viper.SetDefault("database.password", "dev")
-	viper.SetDefault("database.ssl_mode", "disable")
+	viper.SetDefault("database.username", "")
+	viper.SetDefault("database.password", "")
+	viper.SetDefault("database.ssl_mode", "require") // Secure by default
 	viper.SetDefault("database.max_connections", 25)
 	viper.SetDefault("database.min_connections", 5)
 	viper.SetDefault("database.max_conn_lifetime", "1h")
@@ -391,6 +435,21 @@ func setDefaults() {
 	viper.SetDefault("webhook.cors.allowed_origins", "*")
 	viper.SetDefault("webhook.cors.allowed_methods", "POST, OPTIONS")
 	viper.SetDefault("webhook.cors.allowed_headers", "Content-Type, X-Request-ID, X-API-Key, Authorization")
+
+	// HTTP Client defaults (TN-204: Configurable Timeouts)
+	viper.SetDefault("http_client.timeout", "30s")
+	viper.SetDefault("http_client.dial_timeout", "5s")
+	viper.SetDefault("http_client.tls_handshake_timeout", "5s")
+	viper.SetDefault("http_client.response_header_timeout", "10s")
+	viper.SetDefault("http_client.expect_continue_timeout", "1s")
+	viper.SetDefault("http_client.keep_alive", "30s")
+	viper.SetDefault("http_client.idle_conn_timeout", "90s")
+	viper.SetDefault("http_client.max_idle_conns", 100)
+	viper.SetDefault("http_client.max_idle_conns_per_host", 10)
+	viper.SetDefault("http_client.max_conns_per_host", 0) // 0 = unlimited
+	viper.SetDefault("http_client.min_tls_version", "1.2")
+	viper.SetDefault("http_client.disable_http2", false)
+	viper.SetDefault("http_client.insecure_skip_verify", false)
 }
 
 // Validate validates the configuration
@@ -420,6 +479,11 @@ func (c *Config) Validate() error {
 
 		if c.Database.Database == "" {
 			return fmt.Errorf("database name cannot be empty (required for standard profile)")
+		}
+
+		// TN-205: Validate database credentials for production
+		if err := c.validateDatabaseCredentials(); err != nil {
+			return fmt.Errorf("database credentials validation failed: %w", err)
 		}
 	}
 
@@ -481,6 +545,49 @@ func (c *Config) validateProfile() error {
 		}
 
 		// Postgres configuration is required (validated in main Validate())
+	}
+
+	return nil
+}
+
+// validateDatabaseCredentials validates database credentials for production (TN-205)
+func (c *Config) validateDatabaseCredentials() error {
+	// Check if credentials are provided
+	if c.Database.Username == "" || c.Database.Password == "" {
+		// Check environment
+		if c.App.Environment == "production" {
+			return fmt.Errorf("database credentials (username/password) are required in production environment")
+		}
+
+		// Development/testing: warn but allow
+		if c.Database.Username == "" && c.Database.Password == "" {
+			// Both empty - likely intentional for local development
+			// Log warning (caller should log this)
+			return nil
+		}
+
+		// One is set but not the other - likely misconfiguration
+		return fmt.Errorf("database username and password must both be set or both be empty")
+	}
+
+	// Validate weak credentials in production
+	if c.App.Environment == "production" {
+		weakPasswords := []string{"password", "admin", "root", "dev", "test", "123456", "postgres"}
+		for _, weak := range weakPasswords {
+			if c.Database.Password == weak {
+				return fmt.Errorf("weak database password detected: '%s' is not allowed in production", weak)
+			}
+		}
+
+		// Check password length
+		if len(c.Database.Password) < 12 {
+			return fmt.Errorf("database password must be at least 12 characters in production (got %d)", len(c.Database.Password))
+		}
+	}
+
+	// Validate SSL mode for production
+	if c.App.Environment == "production" && c.Database.SSLMode == "disable" {
+		return fmt.Errorf("database SSL mode 'disable' is not allowed in production (use 'require' or 'verify-full')")
 	}
 
 	return nil

@@ -2,50 +2,21 @@ package publishing
 
 import (
 	"errors"
-	"fmt"
+
+	"github.com/ipiton/AMP/pkg/httperror"
 )
 
 // PagerDuty API Error Types
+//
+// NOTE: This file is being migrated to use pkg/httperror.
+// New code should use httperror.HTTPAPIError and the unified error
+// functions from errors.go.
 
-// PagerDutyAPIError represents an error from PagerDuty Events API v2
-type PagerDutyAPIError struct {
-	// StatusCode is the HTTP status code from the API response
-	StatusCode int
-
-	// Message is the error message from the API
-	Message string
-
-	// Errors is a list of detailed error messages from the API
-	Errors []string
-}
-
-// Error implements the error interface
-func (e *PagerDutyAPIError) Error() string {
-	if len(e.Errors) > 0 {
-		return fmt.Sprintf("PagerDuty API error %d: %s (details: %v)", e.StatusCode, e.Message, e.Errors)
-	}
-	return fmt.Sprintf("PagerDuty API error %d: %s", e.StatusCode, e.Message)
-}
-
-// Type returns the error type classification based on HTTP status code
-func (e *PagerDutyAPIError) Type() string {
-	switch e.StatusCode {
-	case 400:
-		return "bad_request"
-	case 401:
-		return "unauthorized"
-	case 403:
-		return "forbidden"
-	case 404:
-		return "not_found"
-	case 429:
-		return "rate_limit"
-	case 500, 502, 503, 504:
-		return "server_error"
-	default:
-		return "unknown"
-	}
-}
+// PagerDutyAPIError represents an error from PagerDuty Events API v2.
+//
+// Deprecated: Use httperror.HTTPAPIError with ProviderPagerDuty instead.
+// This type is kept for backward compatibility.
+type PagerDutyAPIError = httperror.HTTPAPIError
 
 // Sentinel errors for common PagerDuty integration issues
 var (
@@ -72,141 +43,112 @@ var (
 )
 
 // Error Helper Functions
+//
+// NOTE: These functions are deprecated. Use the unified functions from
+// pkg/httperror or the IsPublishing* functions from errors.go.
 
-// IsRetryable returns true if the error is retryable (transient)
-// Retryable errors: rate limits (429), server errors (5xx), timeouts
-func IsRetryable(err error) bool {
+// IsPagerDutyRetryable returns true if the error is retryable (transient).
+// Retryable errors: rate limits (429), server errors (5xx), timeouts.
+//
+// Deprecated: Use httperror.IsRetryable or IsPublishingRetryable instead.
+func IsPagerDutyRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check for rate limit error
-	if errors.Is(err, ErrRateLimitExceeded) {
+	// Check for PagerDuty-specific sentinel errors
+	if errors.Is(err, ErrRateLimitExceeded) ||
+		errors.Is(err, ErrAPITimeout) ||
+		errors.Is(err, ErrAPIConnection) {
 		return true
 	}
 
-	// Check for timeout error
-	if errors.Is(err, ErrAPITimeout) {
-		return true
-	}
-
-	// Check for connection error
-	if errors.Is(err, ErrAPIConnection) {
-		return true
-	}
-
-	// Check for PagerDuty API error
-	var apiErr *PagerDutyAPIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.StatusCode {
-		case 429: // Rate limit
-			return true
-		case 500, 502, 503, 504: // Server errors
-			return true
-		default:
-			return false
-		}
-	}
-
-	return false
+	// Delegate to unified implementation
+	return httperror.IsRetryable(err)
 }
 
-// IsRateLimit returns true if the error is a rate limit error (429)
-func IsRateLimit(err error) bool {
+// IsPagerDutyRateLimit returns true if the error is a rate limit error (429).
+//
+// Deprecated: Use httperror.IsRateLimit or IsPublishingRateLimit instead.
+func IsPagerDutyRateLimit(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check sentinel error
 	if errors.Is(err, ErrRateLimitExceeded) {
 		return true
 	}
 
-	// Check API error
-	var apiErr *PagerDutyAPIError
-	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 429
-	}
-
-	return false
+	return httperror.IsRateLimit(err)
 }
 
-// IsPagerDutyAuthError returns true if the error is an authentication error (401, 403)
+// IsPagerDutyAuthError returns true if the error is an authentication error (401, 403).
+//
+// Deprecated: Use httperror.IsAuthError or IsPublishingAuthError instead.
 func IsPagerDutyAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var apiErr *PagerDutyAPIError
-	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 401 || apiErr.StatusCode == 403
-	}
-
-	return false
+	return httperror.IsAuthError(err)
 }
 
-// IsBadRequest returns true if the error is a bad request error (400)
-func IsBadRequest(err error) bool {
+// IsPagerDutyBadRequest returns true if the error is a bad request error (400).
+//
+// Deprecated: Use AsPublishingError and check StatusCode instead.
+func IsPagerDutyBadRequest(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check sentinel error
 	if errors.Is(err, ErrInvalidRequest) {
 		return true
 	}
 
-	// Check API error
-	var apiErr *PagerDutyAPIError
-	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 400
+	var httpErr *httperror.HTTPAPIError
+	if errors.As(err, &httpErr) {
+		return httpErr.IsBadRequest()
 	}
 
 	return false
 }
 
-// IsNotFound returns true if the error is a not found error (404)
-func IsNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var apiErr *PagerDutyAPIError
-	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == 404
-	}
-
-	return false
+// IsPagerDutyNotFound returns true if the error is a not found error (404).
+//
+// Deprecated: Use httperror.IsNotFound or IsPublishingNotFound instead.
+func IsPagerDutyNotFound(err error) bool {
+	return httperror.IsNotFound(err)
 }
 
-// IsServerError returns true if the error is a server error (5xx)
-func IsServerError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var apiErr *PagerDutyAPIError
-	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode >= 500 && apiErr.StatusCode < 600
-	}
-
-	return false
+// IsPagerDutyServerError returns true if the error is a server error (5xx).
+//
+// Deprecated: Use httperror.IsServerError or IsPublishingServerError instead.
+func IsPagerDutyServerError(err error) bool {
+	return httperror.IsServerError(err)
 }
 
-// IsTimeout returns true if the error is a timeout error
-func IsTimeout(err error) bool {
+// IsPagerDutyTimeout returns true if the error is a timeout error.
+//
+// Deprecated: Use httperror.IsTimeout or IsPublishingTimeout instead.
+func IsPagerDutyTimeout(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	return errors.Is(err, ErrAPITimeout)
+	if errors.Is(err, ErrAPITimeout) {
+		return true
+	}
+
+	return httperror.IsTimeout(err)
 }
 
-// IsConnectionError returns true if the error is a connection error
-func IsConnectionError(err error) bool {
+// IsPagerDutyConnectionError returns true if the error is a connection error.
+//
+// Deprecated: Use httperror.IsRetryableNetworkError instead.
+func IsPagerDutyConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	return errors.Is(err, ErrAPIConnection)
+	if errors.Is(err, ErrAPIConnection) {
+		return true
+	}
+
+	return httperror.IsRetryableNetworkError(err)
 }

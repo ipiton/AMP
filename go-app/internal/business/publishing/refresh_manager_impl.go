@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // DefaultRefreshManager is production implementation of RefreshManager.
@@ -59,7 +60,7 @@ type DefaultRefreshManager struct {
 	// Dependencies
 	discovery TargetDiscoveryManager // TN-047 (actual discovery logic)
 	logger    *slog.Logger
-	metrics   *RefreshMetrics
+	metrics   *v2.PublishingMetrics
 
 	// Configuration
 	config RefreshConfig
@@ -142,8 +143,11 @@ func NewRefreshManager(
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Create metrics
-	metrics := NewRefreshMetrics(metricsReg)
+	// Create metrics using v2
+	var metrics *v2.PublishingMetrics
+	if metricsReg != nil {
+		metrics = v2.NewPublishingMetrics(metricsReg)
+	}
 
 	// Create manager
 	m := &DefaultRefreshManager{

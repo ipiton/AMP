@@ -7,32 +7,33 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // EnhancedPagerDutyPublisher implements AlertPublisher with full PagerDuty Events API v2 support
 // Provides incident lifecycle management (trigger, acknowledge, resolve) and change events
 type EnhancedPagerDutyPublisher struct {
-	client    PagerDutyEventsClient
-	cache     EventKeyCache
-	metrics   *PagerDutyMetrics
-	formatter AlertFormatter
-	logger    *slog.Logger
+	*BaseEnhancedPublisher                      // Embedded base publisher for common functionality
+	client                 PagerDutyEventsClient // PagerDuty-specific events client
+	cache                  EventKeyCache         // For tracking event keys (incident lifecycle)
 }
 
 // NewEnhancedPagerDutyPublisher creates a new enhanced PagerDuty publisher
 func NewEnhancedPagerDutyPublisher(
 	client PagerDutyEventsClient,
 	cache EventKeyCache,
-	metrics *PagerDutyMetrics,
+	metrics *v2.PublishingMetrics,
 	formatter AlertFormatter,
 	logger *slog.Logger,
 ) AlertPublisher {
 	return &EnhancedPagerDutyPublisher{
-		client:    client,
-		cache:     cache,
-		metrics:   metrics,
-		formatter: formatter,
-		logger:    logger,
+		BaseEnhancedPublisher: NewBaseEnhancedPublisher(
+			metrics,
+			formatter,
+			logger.With("component", "pagerduty_publisher"),
+		),
+		client: client,
+		cache:  cache,
 	}
 }
 
@@ -102,9 +103,11 @@ func (p *EnhancedPagerDutyPublisher) triggerEvent(ctx context.Context, enrichedA
 
 	// Record metrics
 	severity := getSeverity(enrichedAlert)
-	p.metrics.EventsTriggered.WithLabelValues(routingKey, severity).Inc()
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordEventTriggered(severity)
+	}
 
-	p.logger.Info("PagerDuty event triggered",
+	p.GetLogger().Info("PagerDuty event triggered",
 		"fingerprint", alert.Fingerprint,
 		"dedup_key", resp.DedupKey,
 		"routing_key", routingKey,
@@ -122,7 +125,7 @@ func (p *EnhancedPagerDutyPublisher) acknowledgeEvent(ctx context.Context, enric
 	// Lookup dedup key from cache
 	dedupKey, found := p.cache.Get(alert.Fingerprint)
 	if !found {
-		p.logger.Warn("Cannot acknowledge event: not tracked in cache",
+		p.GetLogger().Warn("Cannot acknowledge event: not tracked in cache",
 			"fingerprint", alert.Fingerprint,
 			"alert_name", alert.AlertName,
 		)
@@ -143,9 +146,11 @@ func (p *EnhancedPagerDutyPublisher) acknowledgeEvent(ctx context.Context, enric
 	}
 
 	// Record metrics
-	p.metrics.EventsAcknowledged.WithLabelValues(routingKey).Inc()
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordEventAcknowledged()
+	}
 
-	p.logger.Info("PagerDuty event acknowledged",
+	p.GetLogger().Info("PagerDuty event acknowledged",
 		"fingerprint", alert.Fingerprint,
 		"dedup_key", dedupKey,
 		"routing_key", routingKey,
@@ -162,7 +167,7 @@ func (p *EnhancedPagerDutyPublisher) resolveEvent(ctx context.Context, enrichedA
 	// Lookup dedup key from cache
 	dedupKey, found := p.cache.Get(alert.Fingerprint)
 	if !found {
-		p.logger.Warn("Cannot resolve event: not tracked in cache",
+		p.GetLogger().Warn("Cannot resolve event: not tracked in cache",
 			"fingerprint", alert.Fingerprint,
 			"alert_name", alert.AlertName,
 		)
@@ -186,9 +191,11 @@ func (p *EnhancedPagerDutyPublisher) resolveEvent(ctx context.Context, enrichedA
 	p.cache.Delete(alert.Fingerprint)
 
 	// Record metrics
-	p.metrics.EventsResolved.WithLabelValues(routingKey).Inc()
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordEventResolved()
+	}
 
-	p.logger.Info("PagerDuty event resolved",
+	p.GetLogger().Info("PagerDuty event resolved",
 		"fingerprint", alert.Fingerprint,
 		"dedup_key", dedupKey,
 		"routing_key", routingKey,
@@ -225,10 +232,12 @@ func (p *EnhancedPagerDutyPublisher) sendChangeEvent(ctx context.Context, enrich
 		return fmt.Errorf("failed to send change event: %w", err)
 	}
 
-	// Record metrics
-	p.metrics.ChangeEvents.WithLabelValues(routingKey).Inc()
+	// Record metrics (use message counter for change events)
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordMessage(v2.ProviderPagerDuty, "success")
+	}
 
-	p.logger.Info("PagerDuty change event sent",
+	p.GetLogger().Info("PagerDuty change event sent",
 		"fingerprint", alert.Fingerprint,
 		"routing_key", routingKey,
 		"alert_name", alert.AlertName,

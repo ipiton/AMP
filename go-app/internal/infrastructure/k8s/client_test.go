@@ -459,10 +459,10 @@ func TestRetryLogic_ContextCancellation(t *testing.T) {
 		return fmt.Errorf("retryable error")
 	})
 
-	// Should fail with timeout error due to cancellation
-	assert.Error(t, err)
-	var timeoutErr *TimeoutError
-	assert.ErrorAs(t, err, &timeoutErr)
+	// After migration to pkg/retry: error is context.Canceled (not wrapped in TimeoutError)
+	// This is expected behavior - pkg/retry returns context errors as-is
+	assert.Error(t, err, "Should return error")
+	assert.ErrorIs(t, err, context.Canceled, "Should be context.Canceled")
 	assert.LessOrEqual(t, attemptCount, 2, "should stop retrying after context cancellation")
 }
 

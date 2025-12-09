@@ -198,13 +198,12 @@ type ParallelPublisher interface {
 //	    DefaultParallelPublishOptions(),
 //	)
 type DefaultParallelPublisher struct {
-	factory       *PublisherFactory       // Creates publishers by type
-	healthMonitor HealthMonitor           // Health status checks (optional, can be nil)
-	discoveryMgr  TargetDiscoveryManager  // Target enumeration
-	modeManager   ModeManager             // TN-060: Mode manager for metrics-only fallback
-	metrics       *ParallelPublishMetrics // Prometheus metrics (optional, can be nil)
-	logger        *slog.Logger            // Structured logging
-	options       ParallelPublishOptions  // Configuration options
+	factory       *PublisherFactory      // Creates publishers by type
+	healthMonitor HealthMonitor          // Health status checks (optional, can be nil)
+	discoveryMgr  TargetDiscoveryManager // Target enumeration
+	modeManager   ModeManager            // TN-060: Mode manager for metrics-only fallback
+	logger        *slog.Logger           // Structured logging
+	options       ParallelPublishOptions // Configuration options
 }
 
 // Note: TargetDiscoveryManager interface is already defined in discovery_manager.go
@@ -259,7 +258,6 @@ func NewDefaultParallelPublisher(
 	healthMonitor HealthMonitor,
 	discoveryMgr TargetDiscoveryManager,
 	modeManager ModeManager,
-	metrics *ParallelPublishMetrics,
 	logger *slog.Logger,
 	options ParallelPublishOptions,
 ) (*DefaultParallelPublisher, error) {
@@ -286,7 +284,6 @@ func NewDefaultParallelPublisher(
 		healthMonitor: healthMonitor,
 		discoveryMgr:  discoveryMgr,
 		modeManager:   modeManager,
-		metrics:       metrics,
 		logger:        logger,
 		options:       options,
 	}, nil
@@ -379,10 +376,7 @@ func (p *DefaultParallelPublisher) PublishToMultiple(
 	// 6. Aggregate results
 	aggregateResult := p.aggregateResults(results, time.Since(startTime))
 
-	// 7. Update metrics
-	p.updateMetrics(aggregateResult)
-
-	// 8. Log results
+	// 7. Log results
 	p.logResults(alert, aggregateResult)
 
 	// 9. Return result
@@ -673,16 +667,6 @@ func (p *DefaultParallelPublisher) aggregateResults(
 	aggregate.IsPartialSuccess = aggregate.SuccessCount > 0 && aggregate.FailureCount > 0
 
 	return aggregate
-}
-
-// updateMetrics updates Prometheus metrics.
-func (p *DefaultParallelPublisher) updateMetrics(result *ParallelPublishResult) {
-	if p.metrics == nil {
-		return // Metrics disabled
-	}
-
-	// Record publish result
-	p.metrics.RecordPublish(result)
 }
 
 // logResults logs the aggregate result.
