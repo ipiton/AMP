@@ -42,6 +42,10 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 30 }}
+      {{- if .Values.configReloader.enabled }}
+      # Enable shared process namespace for config-reloader sidecar (required for SIGHUP)
+      shareProcessNamespace: true
+      {{- end }}
       containers:
         - name: amp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -215,12 +219,55 @@ spec:
             - name: data
               mountPath: {{ .Values.liteProfile.persistence.mountPath }}
           {{- end }}
+          {{- if .Values.configReloader.enabled }}
+            - name: app-config
+              mountPath: /etc/amp
+              readOnly: true
+          {{- end }}
 
-      {{- if eq .Values.profile "lite" }}
+        {{- if .Values.configReloader.enabled }}
+        # Config Reloader Sidecar (Hot Reload Support)
+        - name: config-reloader
+          image: "{{ .Values.configReloader.image.repository }}:{{ .Values.configReloader.image.tag | default "latest" }}"
+          imagePullPolicy: {{ .Values.configReloader.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - --config-file=/etc/amp/config.yaml
+            - --reload-url=http://localhost:{{ .Values.service.port }}/health/reload
+            - --interval={{ .Values.configReloader.interval | default "5s" }}
+            - --log-level={{ .Values.configReloader.logLevel | default "info" }}
+            - --metrics-port={{ .Values.configReloader.metricsPort | default 9091 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.configReloader.metricsPort | default 9091 }}
+              protocol: TCP
+          volumeMounts:
+            - name: app-config
+              mountPath: /etc/amp
+              readOnly: true
+          resources:
+            {{- toYaml .Values.configReloader.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - KILL  # Required for sending SIGHUP
+        {{- end }}
+
       volumes:
+      {{- if eq .Values.profile "lite" }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "amp.fullname" . }}-pvc
+      {{- end }}
+      {{- if .Values.configReloader.enabled }}
+        - name: app-config
+          configMap:
+            name: {{ include "amp.fullname" . }}-app-config
       {{- end }}
 
       {{- with .Values.nodeSelector }}
