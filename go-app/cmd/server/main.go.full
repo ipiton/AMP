@@ -172,17 +172,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Configure structured logging from config
-	appLogger := logger.NewLogger(logger.Config{
-		Level:      cfg.Log.Level,
-		Format:     cfg.Log.Format,
-		Output:     cfg.Log.Output,
-		Filename:   cfg.Log.Filename,
-		MaxSize:    cfg.Log.MaxSize,
-		MaxBackups: cfg.Log.MaxBackups,
-		MaxAge:     cfg.Log.MaxAge,
-		Compress:   cfg.Log.Compress,
-	})
+	// Configure structured logging from config (with hot reload support)
+	reloadableLogger, err := logger.NewReloadableLogger(&cfg.Log)
+	if err != nil {
+		slog.Error("Failed to create reloadable logger", "error", err)
+		os.Exit(1)
+	}
+	appLogger := reloadableLogger.Logger()
 	slog.SetDefault(appLogger)
 
 	// TN-203: Startup banner with profile information
@@ -383,8 +379,8 @@ func main() {
 			MetricsEnabled:        cfg.Metrics.Enabled,
 		}
 
-		var err error
-		redisCache, err = cache.NewRedisCache(&cacheConfig, appLogger)
+		// Create reloadable Redis cache (hot reload support)
+		reloadableRedis, err := cache.NewReloadableRedisCache(&cfg.Redis, appLogger)
 		if err != nil {
 			slog.Warn("Failed to initialize Redis cache, enrichment mode will fallback to memory-only",
 				"error", err)
@@ -393,12 +389,13 @@ func main() {
 			// Test connection
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := redisCache.Ping(ctx); err != nil {
+			if err := reloadableRedis.Ping(ctx); err != nil {
 				slog.Warn("Redis ping failed, enrichment mode will fallback to memory-only",
 					"error", err)
 				redisCache = nil
 			} else {
-				slog.Info("✅ Redis cache initialized successfully (Standard profile)")
+				redisCache = reloadableRedis.Cache()
+				slog.Info("✅ Redis cache initialized successfully (Standard profile, hot reload enabled)")
 			}
 		}
 	} else {
@@ -2192,12 +2189,28 @@ func main() {
 	// Initialize reloader
 	configReloader := appconfig.NewConfigReloader(appLogger)
 
-	// Register reloadable components (placeholder - will be populated as components implement Reloadable interface)
-	// TODO: Register actual components when they implement Reloadable interface
-	// Examples:
-	// - configReloader.Register(databaseComponent)
-	// - configReloader.Register(redisComponent)
-	// - configReloader.Register(llmComponent)
+	// ================================================================================
+	// Register Reloadable Components for Hot Reload
+	// ================================================================================
+	
+	// Register Logger (non-critical)
+	if reloadableLogger != nil {
+		configReloader.Register(reloadableLogger)
+		slog.Info("✅ Logger registered for hot reload", "critical", false)
+	}
+
+	// Register Redis Cache (critical, if available)
+	if reloadableRedis != nil {
+		configReloader.Register(reloadableRedis)
+		slog.Info("✅ Redis cache registered for hot reload", "critical", true)
+	}
+
+	// Note: Database, Metrics, and LLM components will be registered after initialization
+	
+	slog.Info("✅ Hot reload components registered (initial)",
+		"total_components", len(configReloader.GetRegisteredComponents()),
+		"components", configReloader.GetRegisteredComponents(),
+	)
 
 	// Initialize storage (PostgreSQL-based)
 	var configStorage appconfig.ConfigStorage
