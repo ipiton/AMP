@@ -1,7 +1,7 @@
 # E2E Tests for Hot Reload
 
-**Version:** 1.0.0  
-**Purpose:** End-to-end testing of hot reload functionality in Kubernetes  
+**Version:** 1.0.0
+**Purpose:** End-to-end testing of hot reload functionality in Kubernetes
 **Status:** ✅ Ready
 
 ---
@@ -54,7 +54,7 @@ helm install amp ./helm/amp \
 # [INFO] ✅ Prerequisites OK
 # [INFO] ✅ Pod is running
 # [INFO] ✅ Config-reloader sidecar found
-# 
+#
 # ==> Test 1: Change log level (info -> debug)
 # [INFO] Current log level: info
 # [INFO] Changing log level to: debug
@@ -62,21 +62,21 @@ helm install amp ./helm/amp \
 # [INFO] Waiting for config reload (max 60s)...
 # [INFO] ✅ Log level changed successfully (info -> debug)
 # [INFO] Reload took 7s
-# 
+#
 # ==> Test 2: Check config-reloader metrics
 # [INFO] Reload attempts: 5
 # [INFO] Reload successes: 5
 # [INFO] Reload failures: 0
 # [INFO] ✅ Config-reloader metrics OK
-# 
+#
 # ==> Test 3: Check reload health endpoint
 # [INFO] ✅ Reload endpoint is healthy
 # [INFO] Last reload: 2024-12-10T15:30:45Z
 # [INFO] Last version: 42
-# 
+#
 # ==> Test 4: Check SIGHUP signal handler
 # [INFO] ✅ SIGHUP handler is registered
-# 
+#
 # ===============================================
 # [INFO] ✅ All tests passed!
 # ===============================================
@@ -231,16 +231,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Kubernetes
         uses: helm/kind-action@v1
-      
+
       - name: Install AMP
         run: |
           helm install amp ./helm/amp \
             --set configReloader.enabled=true \
             --wait --timeout=5m
-      
+
       - name: Run E2E Tests
         run: |
           ./helm/amp/tests/e2e/test-hot-reload.sh default
@@ -289,6 +289,5 @@ test:hot-reload:
 
 ## 📝 License
 
-Copyright © 2024 AMP Team  
+Copyright © 2024 AMP Team
 Licensed under Apache 2.0
-

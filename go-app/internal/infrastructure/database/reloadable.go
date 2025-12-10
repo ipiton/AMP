@@ -264,4 +264,3 @@ func createPool(cfg *config.DatabaseConfig, logger *slog.Logger) (*pgxpool.Pool,
 
 	return pool, nil
 }
-

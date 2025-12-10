@@ -218,4 +218,3 @@ func (rl *ReloadableLogger) WithGroup(name string) *slog.Logger {
 	rl.mu.RUnlock()
 	return logger.WithGroup(name)
 }
-

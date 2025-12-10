@@ -13,17 +13,17 @@ data:
     # ============================================================================
     # This ConfigMap is watched by config-reloader sidecar for hot reload
     # Changes trigger SIGHUP signal to main container (zero-downtime reload)
-    
+
     # Deployment Profile
     profile: {{ .Values.profile | quote }}
-    
+
     # Storage Backend
     storage:
       backend: {{ .Values.storage.backend | quote }}
       {{- if eq .Values.storage.backend "filesystem" }}
       filesystem_path: {{ .Values.storage.filesystemPath | quote }}
       {{- end }}
-    
+
     # Server Configuration
     server:
       port: {{ .Values.server.port }}
@@ -32,7 +32,7 @@ data:
       write_timeout: {{ .Values.server.writeTimeout | quote }}
       idle_timeout: {{ .Values.server.idleTimeout | quote }}
       graceful_shutdown_timeout: {{ .Values.server.gracefulShutdownTimeout | quote }}
-    
+
     # Database Configuration (PostgreSQL)
     {{- if eq .Values.profile "standard" }}
     database:
@@ -48,7 +48,7 @@ data:
       max_conn_idle_time: {{ .Values.database.maxConnIdleTime | quote }}
       health_check_period: {{ .Values.database.healthCheckPeriod | quote }}
     {{- end }}
-    
+
     # Redis Configuration
     {{- if and (eq .Values.profile "standard") .Values.cache.enabled }}
     redis:
@@ -63,7 +63,7 @@ data:
       min_retry_backoff: {{ .Values.cache.minRetryBackoff | quote }}
       max_retry_backoff: {{ .Values.cache.maxRetryBackoff | quote }}
     {{- end }}
-    
+
     # Logging Configuration
     log:
       level: {{ .Values.log.level | quote }}
@@ -76,7 +76,7 @@ data:
       max_age: {{ .Values.log.maxAge }}
       compress: {{ .Values.log.compress }}
       {{- end }}
-    
+
     # LLM Configuration
     {{- if .Values.llm.enabled }}
     llm:
@@ -90,31 +90,31 @@ data:
     llm:
       enabled: false
     {{- end }}
-    
+
     # Metrics Configuration
     metrics:
       enabled: {{ .Values.metrics.enabled }}
       port: {{ .Values.metrics.port }}
       path: {{ .Values.metrics.path | quote }}
-    
+
     # Cache Configuration
     cache:
       enabled: {{ .Values.cache.enabled }}
       ttl: {{ .Values.cache.ttl | quote }}
-    
+
     # Application Configuration
     app:
       environment: {{ .Values.app.environment | quote }}
       debug: {{ .Values.app.debug }}
       retention_days: {{ .Values.app.retentionDays }}
-    
+
     # HTTP Client Configuration
     http_client:
       timeout: {{ .Values.httpClient.timeout | quote }}
       max_idle_conns: {{ .Values.httpClient.maxIdleConns }}
       max_conns_per_host: {{ .Values.httpClient.maxConnsPerHost }}
       idle_conn_timeout: {{ .Values.httpClient.idleConnTimeout | quote }}
-    
+
     # Retry Configuration
     retry:
       max_attempts: {{ .Values.retry.maxAttempts }}
@@ -122,4 +122,3 @@ data:
       max_delay: {{ .Values.retry.maxDelay | quote }}
       multiplier: {{ .Values.retry.multiplier }}
 {{- end }}
-

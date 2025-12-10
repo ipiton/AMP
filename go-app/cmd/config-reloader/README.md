@@ -1,7 +1,7 @@
 # Config Reloader Sidecar
 
-**Version:** 1.0.0  
-**Purpose:** Watch config file changes and trigger hot reload via SIGHUP signal  
+**Version:** 1.0.0
+**Purpose:** Watch config file changes and trigger hot reload via SIGHUP signal
 **Status:** ✅ Production Ready
 
 ---
@@ -34,7 +34,7 @@ spec:
     spec:
       # Enable shared process namespace (required for SIGHUP)
       shareProcessNamespace: true
-      
+
       containers:
       # Main application
       - name: amp
@@ -43,7 +43,7 @@ spec:
         - name: config
           mountPath: /etc/amp
           readOnly: true
-      
+
       # Config reloader sidecar
       - name: config-reloader
         image: ghcr.io/ipiton/amp-config-reloader:latest
@@ -63,7 +63,7 @@ spec:
           limits:
             cpu: 50m
             memory: 50Mi
-      
+
       volumes:
       - name: config
         configMap:
@@ -295,6 +295,5 @@ kubectl logs -f amp-0 -c config-reloader
 
 ## 📝 License
 
-Copyright © 2024 AMP Team  
+Copyright © 2024 AMP Team
 Licensed under Apache 2.0
-

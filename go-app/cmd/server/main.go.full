@@ -2192,7 +2192,7 @@ func main() {
 	// ================================================================================
 	// Register Reloadable Components for Hot Reload
 	// ================================================================================
-	
+
 	// Register Logger (non-critical)
 	if reloadableLogger != nil {
 		configReloader.Register(reloadableLogger)
@@ -2206,7 +2206,7 @@ func main() {
 	}
 
 	// Note: Database, Metrics, and LLM components will be registered after initialization
-	
+
 	slog.Info("✅ Hot reload components registered (initial)",
 		"total_components", len(configReloader.GetRegisteredComponents()),
 		"components", configReloader.GetRegisteredComponents(),

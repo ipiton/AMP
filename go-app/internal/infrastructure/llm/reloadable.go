@@ -171,4 +171,3 @@ func (lc *ReloadableLLMClient) Health(ctx context.Context) error {
 	lc.mu.RUnlock()
 	return client.Health(ctx)
 }
-

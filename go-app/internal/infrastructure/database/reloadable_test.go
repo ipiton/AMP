@@ -304,4 +304,3 @@ func BenchmarkReloadableDatabasePool_Pool(b *testing.B) {
 		_ = pool.Pool()
 	}
 }
-

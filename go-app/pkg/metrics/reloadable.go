@@ -159,4 +159,3 @@ func (rm *ReloadableMetricsManager) IsEnabled() bool {
 	defer rm.mu.RUnlock()
 	return rm.config.Enabled
 }
-

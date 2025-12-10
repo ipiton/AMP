@@ -290,4 +290,3 @@ func (rc *ReloadableRedisCache) GetClient() *redis.Client {
 	defer rc.mu.RUnlock()
 	return rc.cache.GetClient()
 }
-

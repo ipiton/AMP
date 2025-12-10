@@ -106,7 +106,7 @@ func main() {
 			// Check if file changed
 			if currentHash != lastHash {
 				log.Printf("Config change detected (hash: %s -> %s)", lastHash[:16], currentHash[:16])
-				
+
 				// Trigger reload
 				if err := triggerReload(); err != nil {
 					log.Printf("❌ Reload failed: %v", err)
@@ -215,9 +215,8 @@ func startMetricsServer() {
 
 	addr := fmt.Sprintf(":%d", *metricsPort)
 	log.Printf("Metrics server listening on %s", addr)
-	
+
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Printf("Metrics server error: %v", err)
 	}
 }
-

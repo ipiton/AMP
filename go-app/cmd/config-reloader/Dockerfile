@@ -71,4 +71,3 @@ ENTRYPOINT ["/usr/local/bin/config-reloader"]
 
 # Default args
 CMD ["--config-file=/etc/amp/config.yaml", "--reload-url=http://localhost:8080/health/reload", "--interval=5s"]
-
