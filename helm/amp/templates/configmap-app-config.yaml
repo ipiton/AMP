@@ -1,0 +1,124 @@
+{{- if .Values.configReloader.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "amp.fullname" . }}-app-config
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+data:
+  config.yaml: |
+    # ============================================================================
+    # AMP Application Configuration
+    # ============================================================================
+    # This ConfigMap is watched by config-reloader sidecar for hot reload
+    # Changes trigger SIGHUP signal to main container (zero-downtime reload)
+
+    # Deployment Profile
+    profile: {{ .Values.profile | quote }}
+
+    # Storage Backend
+    storage:
+      backend: {{ .Values.storage.backend | quote }}
+      {{- if eq .Values.storage.backend "filesystem" }}
+      filesystem_path: {{ .Values.storage.filesystemPath | quote }}
+      {{- end }}
+
+    # Server Configuration
+    server:
+      port: {{ .Values.server.port }}
+      host: {{ .Values.server.host | quote }}
+      read_timeout: {{ .Values.server.readTimeout | quote }}
+      write_timeout: {{ .Values.server.writeTimeout | quote }}
+      idle_timeout: {{ .Values.server.idleTimeout | quote }}
+      graceful_shutdown_timeout: {{ .Values.server.gracefulShutdownTimeout | quote }}
+
+    # Database Configuration (PostgreSQL)
+    {{- if eq .Values.profile "standard" }}
+    database:
+      host: {{ .Values.database.host | quote }}
+      port: {{ .Values.database.port }}
+      database: {{ .Values.database.name | quote }}
+      user: {{ .Values.database.user | quote }}
+      # Password from secret (not in ConfigMap)
+      sslmode: {{ .Values.database.sslMode | quote }}
+      max_conns: {{ .Values.database.maxConnections }}
+      min_conns: {{ .Values.database.minConnections }}
+      max_conn_lifetime: {{ .Values.database.maxConnLifetime | quote }}
+      max_conn_idle_time: {{ .Values.database.maxConnIdleTime | quote }}
+      health_check_period: {{ .Values.database.healthCheckPeriod | quote }}
+    {{- end }}
+
+    # Redis Configuration
+    {{- if and (eq .Values.profile "standard") .Values.cache.enabled }}
+    redis:
+      addr: {{ printf "%s:%d" .Values.cache.host (.Values.cache.port | int) | quote }}
+      db: {{ .Values.cache.db }}
+      pool_size: {{ .Values.cache.poolSize }}
+      min_idle_conns: {{ .Values.cache.minIdleConns }}
+      dial_timeout: {{ .Values.cache.dialTimeout | quote }}
+      read_timeout: {{ .Values.cache.readTimeout | quote }}
+      write_timeout: {{ .Values.cache.writeTimeout | quote }}
+      max_retries: {{ .Values.cache.maxRetries }}
+      min_retry_backoff: {{ .Values.cache.minRetryBackoff | quote }}
+      max_retry_backoff: {{ .Values.cache.maxRetryBackoff | quote }}
+    {{- end }}
+
+    # Logging Configuration
+    log:
+      level: {{ .Values.log.level | quote }}
+      format: {{ .Values.log.format | quote }}
+      output: {{ .Values.log.output | quote }}
+      {{- if .Values.log.filename }}
+      filename: {{ .Values.log.filename | quote }}
+      max_size: {{ .Values.log.maxSize }}
+      max_backups: {{ .Values.log.maxBackups }}
+      max_age: {{ .Values.log.maxAge }}
+      compress: {{ .Values.log.compress }}
+      {{- end }}
+
+    # LLM Configuration
+    {{- if .Values.llm.enabled }}
+    llm:
+      enabled: true
+      proxy_url: {{ .Values.llm.proxyUrl | quote }}
+      model: {{ .Values.llm.model | quote }}
+      timeout: {{ .Values.llm.timeout | quote }}
+      max_retries: {{ .Values.llm.maxRetries }}
+      retry_delay: {{ .Values.llm.retryDelay | quote }}
+    {{- else }}
+    llm:
+      enabled: false
+    {{- end }}
+
+    # Metrics Configuration
+    metrics:
+      enabled: {{ .Values.metrics.enabled }}
+      port: {{ .Values.metrics.port }}
+      path: {{ .Values.metrics.path | quote }}
+
+    # Cache Configuration
+    cache:
+      enabled: {{ .Values.cache.enabled }}
+      ttl: {{ .Values.cache.ttl | quote }}
+
+    # Application Configuration
+    app:
+      environment: {{ .Values.app.environment | quote }}
+      debug: {{ .Values.app.debug }}
+      retention_days: {{ .Values.app.retentionDays }}
+
+    # HTTP Client Configuration
+    http_client:
+      timeout: {{ .Values.httpClient.timeout | quote }}
+      max_idle_conns: {{ .Values.httpClient.maxIdleConns }}
+      max_conns_per_host: {{ .Values.httpClient.maxConnsPerHost }}
+      idle_conn_timeout: {{ .Values.httpClient.idleConnTimeout | quote }}
+
+    # Retry Configuration
+    retry:
+      max_attempts: {{ .Values.retry.maxAttempts }}
+      initial_delay: {{ .Values.retry.initialDelay | quote }}
+      max_delay: {{ .Values.retry.maxDelay | quote }}
+      multiplier: {{ .Values.retry.multiplier }}
+{{- end }}

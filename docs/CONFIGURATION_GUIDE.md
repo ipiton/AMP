@@ -371,7 +371,39 @@ app:
 
 ## 🔄 Hot Reload
 
-### How It Works
+### Overview
+
+AMP supports **zero-downtime configuration reload** for both application and alerting configs.
+
+**Two Reload Methods:**
+1. **SIGHUP Signal** - Unix signal (Kubernetes-native)
+2. **API Endpoint** - HTTP POST (programmatic)
+
+---
+
+### Method 1: SIGHUP Signal (Recommended)
+
+**Kubernetes (with config-reloader sidecar):**
+```bash
+# Edit ConfigMap (automatic reload)
+kubectl edit cm amp-app-config
+
+# Or manual SIGHUP
+kubectl exec -it amp-0 -- kill -HUP 1
+```
+
+**Local Development:**
+```bash
+# Find process ID
+ps aux | grep amp
+
+# Send SIGHUP
+kill -HUP <PID>
+```
+
+---
+
+### Method 2: API Endpoint
 
 ```bash
 # 1. Edit alertmanager.yaml
@@ -387,6 +419,55 @@ curl http://localhost:8080/api/v2/config/status
 # Application continues running! ✨
 ```
 
+---
+
+### What Can Be Reloaded (Zero Downtime)
+
+**✅ Application Config (`config.yaml`):**
+- `log.level` - Log level (info → debug)
+- `database.max_conns` - Database pool size
+- `redis.pool_size` - Redis connection pool
+- `llm.model` - LLM model switching
+- `metrics.enabled` - Enable/disable metrics
+
+**✅ Alerting Config (`alertmanager.yaml`):**
+- Routes and receivers
+- Inhibition rules
+- Silences
+- Templates
+
+**❌ Requires Restart:**
+- `server.port` - HTTP server port
+- `profile` - Deployment profile
+- `storage.backend` - Storage backend
+
+---
+
+### Kubernetes Config-Reloader Sidecar
+
+**Enable in Helm:**
+```yaml
+# values.yaml
+configReloader:
+  enabled: true
+  interval: "5s"
+```
+
+**How It Works:**
+1. Watches ConfigMap for changes (SHA256 hash)
+2. Sends SIGHUP to main container
+3. Verifies reload success
+4. Exports Prometheus metrics
+
+**Metrics:**
+```
+config_reload_attempts_total 42
+config_reload_successes_total 40
+config_reload_failures_total 2
+```
+
+---
+
 ### Rollback Support
 
 ```bash
@@ -396,6 +477,11 @@ curl -X POST http://localhost:8080/api/v2/config/rollback
 # View config history
 curl http://localhost:8080/api/v2/config/history
 ```
+
+**Automatic Rollback:**
+- Triggered on critical component failure
+- Restores previous config version
+- Logs rollback event
 
 ---
 

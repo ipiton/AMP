@@ -468,6 +468,72 @@ migration:
   backupBeforeMigration: true
 
 # ===============================
+# Config Reloader (Hot Reload Support)
+# ===============================
+# Sidecar container that watches config changes and triggers hot reload
+# Requires shareProcessNamespace: true for SIGHUP signal
+configReloader:
+  enabled: true
+  image:
+    repository: ghcr.io/ipiton/amp-config-reloader
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  # Check interval for config file changes
+  interval: "5s"
+  # Log level (debug, info, warn, error)
+  logLevel: "info"
+  # Metrics port (Prometheus)
+  metricsPort: 9091
+  # Resource limits
+  resources:
+    requests:
+      cpu: 10m
+      memory: 20Mi
+    limits:
+      cpu: 50m
+      memory: 50Mi
+
+# ===============================
+# Application Configuration
+# ===============================
+# These values are used to generate ConfigMap for hot reload
+app:
+  environment: "production"
+  debug: false
+  retentionDays: 90
+
+log:
+  level: "info"
+  format: "json"
+  output: "stdout"
+  filename: ""
+  maxSize: 100
+  maxBackups: 3
+  maxAge: 28
+  compress: true
+
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+
+httpClient:
+  timeout: "30s"
+  maxIdleConns: 100
+  maxConnsPerHost: 10
+  idleConnTimeout: "90s"
+
+retry:
+  maxAttempts: 3
+  initialDelay: "1s"
+  maxDelay: "30s"
+  multiplier: 2.0
+
+storage:
+  backend: "postgres"  # "filesystem" for lite, "postgres" for standard
+  filesystemPath: "/data/alerthistory.db"
+
+# ===============================
 # Monitoring Configuration
 # ===============================
 monitoring:

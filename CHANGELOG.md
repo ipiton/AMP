@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Hot Reload Infrastructure** - Zero-downtime configuration reload for all components (2024-12-10)
+  - 5 Reloadable components: Database, Redis, LLM, Logger, Metrics
+  - Config-reloader sidecar for Kubernetes (< 10MB)
+  - SIGHUP signal support with automatic rollback
+  - Reload latency: < 500ms (p95)
+  - E2E test suite for Kubernetes
+  - Full documentation: `tasks/hot-reload-full/`
+  - PR: #11
+
 ### Changed
 - **Metrics System v2 Migration** - Complete migration of Health and Refresh metrics to unified `pkg/metrics/v2` (2024-12-08)
   - Added 8 new Prometheus metrics for health and refresh monitoring
