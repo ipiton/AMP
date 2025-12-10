@@ -1,4 +1,4 @@
-# Release Notes - AMP v1.2.0
+# Release Notes - AMP v0.0.3
 
 **Release Date:** TBD (После merge PR #11)  
 **Type:** Feature Release  
@@ -230,7 +230,7 @@ Application Config (`config.yaml`):
 
 ## 🚀 Migration Guide
 
-### Upgrading from v1.1.x
+### Upgrading from v0.0.2
 
 **Step 1: Update Helm Chart**
 ```bash
@@ -330,12 +330,12 @@ No bug fixes in this release (feature-only).
 
 ## 📅 Roadmap
 
-### v1.2.1 (Next Patch)
+### v0.0.4 (Next Patch)
 - Additional component hot reload support
 - Improved error messages
 - Performance optimizations
 
-### v1.3.0 (Future)
+### v0.1.0 (Future)
 - Web UI for config management
 - Config diff visualization
 - Rollback history UI
@@ -363,4 +363,3 @@ No bug fixes in this release (feature-only).
 **Thank you for using AMP! 🎉**
 
 For issues or questions, please open a GitHub issue or contact the team.
-
