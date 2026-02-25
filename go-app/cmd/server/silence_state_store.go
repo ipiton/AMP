@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type silenceMatcherInput struct {
@@ -349,6 +349,10 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate silence id: %w", err)
 		}
+	} else if !allowPastEndsAt {
+		if _, err := uuid.Parse(id); err != nil {
+			return nil, fmt.Errorf("invalid silence id")
+		}
 	}
 
 	createdBy := strings.TrimSpace(in.CreatedBy)
@@ -419,11 +423,11 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 }
 
 func generateSilenceID() (string, error) {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	uid, err := uuid.NewRandom()
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(buf), nil
+	return uid.String(), nil
 }
 
 func toAPISilence(in *storedSilence, now time.Time) apiSilence {
