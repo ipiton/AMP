@@ -438,6 +438,16 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("alerts get invalid receiver regex contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?receiver=[", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid receiver regex expected 400, got %d", rec.Code)
+		}
+	})
+
 	t.Run("alerts post contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
 		rec := httptest.NewRecorder()
@@ -855,6 +865,73 @@ func TestPhase0AlertsV1AliasUsesSameIngestPath(t *testing.T) {
 	}
 	if len(payload) != 1 {
 		t.Fatalf("expected v1 alias to ingest one alert, got %d", len(payload))
+	}
+}
+
+func TestPhase0AlertsReceiverFilterSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"CPUOps","service":"api","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"CPUApp","service":"api","receiver":"team-app"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"CPUNoReceiver","service":"api"},
+			"startsAt": "2026-02-25T00:02:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	opsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?receiver=^team-ops$", nil)
+	opsRec := httptest.NewRecorder()
+	mux.ServeHTTP(opsRec, opsReq)
+	if opsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with receiver filter expected 200, got %d", opsRec.Code)
+	}
+
+	var opsAlerts []map[string]any
+	if err := json.Unmarshal(opsRec.Body.Bytes(), &opsAlerts); err != nil {
+		t.Fatalf("failed to decode filtered alerts response: %v", err)
+	}
+	if len(opsAlerts) != 1 {
+		t.Fatalf("expected 1 alert for receiver team-ops, got %d", len(opsAlerts))
+	}
+	labels, ok := opsAlerts[0]["labels"].(map[string]any)
+	if !ok || labels["receiver"] != "team-ops" {
+		t.Fatalf("expected filtered alert labels.receiver=team-ops, got %v", opsAlerts[0]["labels"])
+	}
+
+	defaultReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?receiver=^default$", nil)
+	defaultRec := httptest.NewRecorder()
+	mux.ServeHTTP(defaultRec, defaultReq)
+	if defaultRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with default receiver filter expected 200, got %d", defaultRec.Code)
+	}
+
+	var defaultAlerts []map[string]any
+	if err := json.Unmarshal(defaultRec.Body.Bytes(), &defaultAlerts); err != nil {
+		t.Fatalf("failed to decode default receiver alerts response: %v", err)
+	}
+	if len(defaultAlerts) != 1 {
+		t.Fatalf("expected 1 alert for default receiver, got %d", len(defaultAlerts))
+	}
+	defaultLabels, ok := defaultAlerts[0]["labels"].(map[string]any)
+	if !ok || defaultLabels["alertname"] != "CPUNoReceiver" {
+		t.Fatalf("expected default receiver alert CPUNoReceiver, got %v", defaultAlerts[0]["labels"])
 	}
 }
 

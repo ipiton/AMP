@@ -652,7 +652,26 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		includeResolved = true
 	}
 
-	writeJSON(w, http.StatusOK, store.list(status, includeResolved))
+	receiverRegex, err := parseRegexQuery(r.URL.Query().Get("receiver"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	alerts := store.list(status, includeResolved)
+	if receiverRegex != nil {
+		filtered := make([]apiAlert, 0, len(alerts))
+		for _, alert := range alerts {
+			if receiverRegex.MatchString(alertReceiverName(alert)) {
+				filtered = append(filtered, alert)
+			}
+		}
+		alerts = filtered
+	}
+
+	writeJSON(w, http.StatusOK, alerts)
 }
 
 func handleAlertsPost(store *alertStore, silences *silenceStore, w http.ResponseWriter, r *http.Request) {
@@ -859,10 +878,7 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 				"service":   alert.Labels["service"],
 				"namespace": alert.Labels["namespace"],
 			}
-			receiver := strings.TrimSpace(alert.Labels["receiver"])
-			if receiver == "" {
-				receiver = "default"
-			}
+			receiver := alertReceiverName(alert)
 			if receiverRegex != nil && !receiverRegex.MatchString(receiver) {
 				continue
 			}
@@ -1039,6 +1055,14 @@ func parseRegexQuery(raw string) (*regexp.Regexp, error) {
 		return nil, fmt.Errorf("invalid regex query value")
 	}
 	return re, nil
+}
+
+func alertReceiverName(alert apiAlert) string {
+	receiver := strings.TrimSpace(alert.Labels["receiver"])
+	if receiver == "" {
+		return "default"
+	}
+	return receiver
 }
 
 func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {
