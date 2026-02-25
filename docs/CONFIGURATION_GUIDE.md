@@ -61,7 +61,7 @@ Infrastructure and application settings.
 ### Location
 
 ```
-/Users/vitaliisemenov/Documents/Helpfull/AMP-OSS/
+AMP/
 ├── config.yaml.example  ← Template
 └── config.yaml          ← Your config (create from example)
 ```
@@ -85,7 +85,7 @@ storage:
 # Server Configuration
 # ============================================================================
 server:
-  port: 8080
+  port: 9093
   host: 0.0.0.0
   read_timeout: 30s
   write_timeout: 30s
@@ -175,7 +175,7 @@ retry:
 telemetry:
   enabled: false  # Set to true to enable distributed tracing
   endpoint: localhost:4317
-  service_name: alert-history-service
+  service_name: amp-service
   sampling_ratio: 1.0
 ```
 
@@ -328,15 +328,15 @@ inhibit_rules:
 **Option 1: Load via API (Hot Reload)**
 ```bash
 # Load configuration
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   -H "Content-Type: application/yaml" \
   --data-binary @alertmanager.yaml
 
 # Verify
-curl http://localhost:8080/api/v2/config
+curl http://localhost:9093/api/v2/config
 
 # Update without restart!
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @alertmanager-updated.yaml
 ```
 
@@ -345,7 +345,7 @@ curl -X POST http://localhost:8080/api/v2/config \
 # Create ConfigMap
 kubectl create configmap alertmanager-config \
   --from-file=alertmanager.yaml \
-  -n alert-history
+  -n monitoring
 
 # Application loads it automatically on startup
 ```
@@ -378,11 +378,11 @@ app:
 vi alertmanager.yaml
 
 # 2. Reload via API
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @alertmanager.yaml
 
 # 3. Verify
-curl http://localhost:8080/api/v2/config/status
+curl http://localhost:9093/api/v2/config/status
 
 # Application continues running! ✨
 ```
@@ -391,10 +391,10 @@ curl http://localhost:8080/api/v2/config/status
 
 ```bash
 # Rollback to previous version
-curl -X POST http://localhost:8080/api/v2/config/rollback
+curl -X POST http://localhost:9093/api/v2/config/rollback
 
 # View config history
-curl http://localhost:8080/api/v2/config/history
+curl http://localhost:9093/api/v2/config/history
 ```
 
 ---
@@ -454,7 +454,7 @@ storage:
   filesystem_path: /tmp/alerthistory.db
 
 server:
-  port: 8080
+  port: 9093
 
 log:
   level: debug
@@ -475,7 +475,7 @@ receivers:
 **Start:**
 ```bash
 ./amp-server --config config.yaml
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @alertmanager.yaml
 ```
 
@@ -503,7 +503,7 @@ redis:
   pool_size: 20
 
 server:
-  port: 8080
+  port: 9093
 
 log:
   level: info
@@ -736,7 +736,7 @@ spec:
 **Load alertmanager.yaml:**
 ```bash
 # Via init container or API call
-kubectl exec -it amp-0 -- curl -X POST http://localhost:8080/api/v2/config \
+kubectl exec -it amp-0 -- curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @/etc/alertmanager/alertmanager.yaml
 ```
 
@@ -760,7 +760,7 @@ export REDIS_PASSWORD=secret
 /usr/local/bin/amp-server --config /etc/amp/config.yaml
 
 # 4. Load alerting config
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @/etc/amp/alertmanager.yaml
 ```
 
