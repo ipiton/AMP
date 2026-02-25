@@ -1814,6 +1814,72 @@ func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
 	}
 }
 
+func TestPhase0SilencesListOrderSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+	now := time.Now().UTC()
+
+	payloads := []string{
+		fmt.Sprintf(`{
+			"matchers": [{"name":"alertname","value":"PendingOrder","isRegex":false}],
+			"startsAt": %q,
+			"endsAt": %q,
+			"createdBy": "phase0-test",
+			"comment": "pending-order"
+		}`, now.Add(20*time.Minute).Format(time.RFC3339), now.Add(40*time.Minute).Format(time.RFC3339)),
+		fmt.Sprintf(`{
+			"matchers": [{"name":"alertname","value":"ActiveLateOrder","isRegex":false}],
+			"startsAt": %q,
+			"endsAt": %q,
+			"createdBy": "phase0-test",
+			"comment": "active-late-order"
+		}`, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(50*time.Minute).Format(time.RFC3339)),
+		fmt.Sprintf(`{
+			"matchers": [{"name":"alertname","value":"ActiveSoonOrder","isRegex":false}],
+			"startsAt": %q,
+			"endsAt": %q,
+			"createdBy": "phase0-test",
+			"comment": "active-soon-order"
+		}`, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(10*time.Minute).Format(time.RFC3339)),
+	}
+
+	for i, payload := range payloads {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/silences order payload #%d expected 200, got %d", i, rec.Code)
+		}
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences expected 200, got %d", listRec.Code)
+	}
+
+	var silences []map[string]any
+	if err := json.Unmarshal(listRec.Body.Bytes(), &silences); err != nil {
+		t.Fatalf("failed to decode silences list: %v", err)
+	}
+	if len(silences) != 3 {
+		t.Fatalf("expected 3 silences, got %d", len(silences))
+	}
+
+	comments := make([]string, 0, len(silences))
+	for _, silence := range silences {
+		comment, _ := silence["comment"].(string)
+		comments = append(comments, comment)
+	}
+
+	expected := []string{"active-soon-order", "active-late-order", "pending-order"}
+	for i := range expected {
+		if comments[i] != expected[i] {
+			t.Fatalf("unexpected silences order at index %d: got %q, want %q (full=%v)", i, comments[i], expected[i], comments)
+		}
+	}
+}
+
 func TestPhase0RuntimeStatePersistsAcrossRestart(t *testing.T) {
 	stateFile := filepath.Join(t.TempDir(), "runtime-state.json")
 	mux1 := newPhase0TestMuxWithStateFile(t, stateFile)
