@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -299,7 +300,7 @@ type runtimeStatusContext struct {
 
 type apiAlertGroup struct {
 	Labels   map[string]string `json:"labels"`
-	Receiver string            `json:"receiver"`
+	Receiver apiReceiver       `json:"receiver"`
 	Alerts   []apiAlert        `json:"alerts"`
 }
 
@@ -833,7 +834,22 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			return
 		}
 
-		includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), false)
+		includeResolved, err := parseBoolQuery(r.URL.Query().Get("resolved"), false)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		receiverRegex, err := parseRegexQuery(r.URL.Query().Get("receiver"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
 		alerts := store.list("", includeResolved)
 
 		groupsMap := make(map[string]*apiAlertGroup)
@@ -847,13 +863,16 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			if receiver == "" {
 				receiver = "default"
 			}
+			if receiverRegex != nil && !receiverRegex.MatchString(receiver) {
+				continue
+			}
 
 			key := groupLabels["alertname"] + "|" + groupLabels["service"] + "|" + groupLabels["namespace"] + "|" + receiver
 			group, ok := groupsMap[key]
 			if !ok {
 				group = &apiAlertGroup{
 					Labels:   groupLabels,
-					Receiver: receiver,
+					Receiver: apiReceiver{Name: receiver},
 					Alerts:   make([]apiAlert, 0, 1),
 				}
 				groupsMap[key] = group
@@ -866,8 +885,8 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			groups = append(groups, *group)
 		}
 		sort.Slice(groups, func(i, j int) bool {
-			a := groups[i].Labels["alertname"] + "|" + groups[i].Labels["service"] + "|" + groups[i].Labels["namespace"] + "|" + groups[i].Receiver
-			b := groups[j].Labels["alertname"] + "|" + groups[j].Labels["service"] + "|" + groups[j].Labels["namespace"] + "|" + groups[j].Receiver
+			a := groups[i].Labels["alertname"] + "|" + groups[i].Labels["service"] + "|" + groups[i].Labels["namespace"] + "|" + groups[i].Receiver.Name
+			b := groups[j].Labels["alertname"] + "|" + groups[j].Labels["service"] + "|" + groups[j].Labels["namespace"] + "|" + groups[j].Receiver.Name
 			return a < b
 		})
 
@@ -1007,6 +1026,19 @@ func parseBoolQuery(raw string, def bool) (bool, error) {
 		return false, fmt.Errorf("invalid boolean query value")
 	}
 	return v, nil
+}
+
+func parseRegexQuery(raw string) (*regexp.Regexp, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	re, err := regexp.Compile(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid regex query value")
+	}
+	return re, nil
 }
 
 func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {

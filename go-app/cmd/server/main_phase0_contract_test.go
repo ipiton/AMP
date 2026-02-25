@@ -547,12 +547,38 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", rec.Code)
 		}
 
-		var payload []any
+		var payload []map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("alert groups response is not valid json: %v", err)
 		}
 		if payload == nil {
 			t.Fatalf("alert groups get expected array payload")
+		}
+		if len(payload) > 0 {
+			receiver, ok := payload[0]["receiver"].(map[string]any)
+			if !ok {
+				t.Fatalf("alert groups response expected receiver object, got %T", payload[0]["receiver"])
+			}
+			name, ok := receiver["name"].(string)
+			if !ok || name == "" {
+				t.Fatalf("alert groups response expected receiver.name string, got %v", receiver["name"])
+			}
+		}
+	})
+
+	t.Run("alert groups invalid query filters contract", func(t *testing.T) {
+		reqResolved := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?resolved=not-bool", nil)
+		recResolved := httptest.NewRecorder()
+		mux.ServeHTTP(recResolved, reqResolved)
+		if recResolved.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 400, got %d", recResolved.Code)
+		}
+
+		reqReceiver := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=[", nil)
+		recReceiver := httptest.NewRecorder()
+		mux.ServeHTTP(recReceiver, reqReceiver)
+		if recReceiver.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 400, got %d", recReceiver.Code)
 		}
 	})
 
@@ -873,6 +899,35 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	}
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	for _, group := range groups {
+		receiver, ok := group["receiver"].(map[string]any)
+		if !ok {
+			t.Fatalf("group receiver expected object, got %T", group["receiver"])
+		}
+		name, ok := receiver["name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("group receiver.name expected non-empty string, got %v", receiver["name"])
+		}
+	}
+
+	filteredReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=^team-ops$", nil)
+	filteredRec := httptest.NewRecorder()
+	mux.ServeHTTP(filteredRec, filteredReq)
+	if filteredRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups with receiver filter expected 200, got %d", filteredRec.Code)
+	}
+
+	var filteredGroups []map[string]any
+	if err := json.Unmarshal(filteredRec.Body.Bytes(), &filteredGroups); err != nil {
+		t.Fatalf("failed to decode filtered groups response: %v", err)
+	}
+	if len(filteredGroups) != 1 {
+		t.Fatalf("expected 1 filtered group for team-ops receiver, got %d", len(filteredGroups))
+	}
+	filteredReceiver, ok := filteredGroups[0]["receiver"].(map[string]any)
+	if !ok || filteredReceiver["name"] != "team-ops" {
+		t.Fatalf("expected filtered group receiver.name=team-ops, got %v", filteredGroups[0]["receiver"])
 	}
 
 	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
