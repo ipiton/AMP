@@ -1121,6 +1121,55 @@ func TestPhase0AlertsReceiverFilterSemantics(t *testing.T) {
 	}
 }
 
+func TestPhase0AlertsResponseShapeIncludesReceiversAndUpdatedAt(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", getRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert in response, got %d", len(alerts))
+	}
+
+	updatedAt, ok := alerts[0]["updatedAt"].(string)
+	if !ok || strings.TrimSpace(updatedAt) == "" {
+		t.Fatalf("alert updatedAt expected non-empty string, got %v", alerts[0]["updatedAt"])
+	}
+	if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
+		t.Fatalf("alert updatedAt expected RFC3339 timestamp, got %q: %v", updatedAt, err)
+	}
+
+	receivers, ok := alerts[0]["receivers"].([]any)
+	if !ok {
+		t.Fatalf("alert receivers expected array, got %T", alerts[0]["receivers"])
+	}
+	if len(receivers) != 1 {
+		t.Fatalf("expected exactly one receiver, got %d", len(receivers))
+	}
+	receiver, ok := receivers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("receiver expected object, got %T", receivers[0])
+	}
+	if receiver["name"] != "default" {
+		t.Fatalf("expected default receiver name, got %v", receiver["name"])
+	}
+}
+
 func TestPhase0AlertsFilterMatcherSemantics(t *testing.T) {
 	mux := newPhase0TestMux(t)
 

@@ -38,7 +38,9 @@ type storedAlert struct {
 type apiAlert struct {
 	Labels       map[string]string `json:"labels"`
 	Annotations  map[string]string `json:"annotations,omitempty"`
+	Receivers    []apiReceiver     `json:"receivers,omitempty"`
 	StartsAt     string            `json:"startsAt"`
+	UpdatedAt    string            `json:"updatedAt,omitempty"`
 	EndsAt       *string           `json:"endsAt,omitempty"`
 	GeneratorURL string            `json:"generatorURL,omitempty"`
 	Fingerprint  string            `json:"fingerprint,omitempty"`
@@ -380,10 +382,16 @@ func toAPIAlert(a *storedAlert) apiAlert {
 		s := a.EndsAt.UTC().Format(time.RFC3339)
 		endsAt = &s
 	}
+	receiverName := strings.TrimSpace(a.Labels["receiver"])
+	if receiverName == "" {
+		receiverName = "default"
+	}
 	return apiAlert{
 		Labels:       cloneStringMap(a.Labels),
 		Annotations:  cloneStringMap(a.Annotations),
+		Receivers:    []apiReceiver{{Name: receiverName}},
 		StartsAt:     a.StartsAt.UTC().Format(time.RFC3339),
+		UpdatedAt:    a.UpdatedAt.UTC().Format(time.RFC3339),
 		EndsAt:       endsAt,
 		GeneratorURL: a.GeneratorURL,
 		Fingerprint:  a.BaseFingerprint,
