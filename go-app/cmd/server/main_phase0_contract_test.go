@@ -114,10 +114,10 @@ func TestPhase0RouteInventory(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		// Active runtime registers "/" as catch-all dashboard handler, so unknown routes
-		// currently resolve to dashboard rendering path.
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 for unknown route due catch-all handler, got %d", rec.Code)
+		// Active runtime registers "/" as catch-all dashboard handler but must not
+		// mask unknown paths.
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404 for unknown route, got %d", rec.Code)
 		}
 	})
 }
@@ -195,6 +195,24 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if _, ok := payload["runtime"]; !ok {
 			t.Fatalf("status response missing runtime field")
+		}
+	})
+
+	t.Run("unknown api path returns 404 json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/unknown-path", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET /api/v2/unknown-path expected 404, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unknown api response is not valid json: %v", err)
+		}
+		if payload["error"] != "not found" {
+			t.Fatalf("unknown api response expected error=not found, got %v", payload["error"])
 		}
 	})
 
