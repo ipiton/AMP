@@ -652,6 +652,14 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		includeResolved = true
 	}
 
+	stateFilters, err := parseAlertsStateFilters(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
 	receiverRegex, err := parseRegexQuery(r.URL.Query().Get("receiver"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -670,6 +678,7 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		}
 		alerts = filtered
 	}
+	alerts = filterAlertsByStateFilters(alerts, stateFilters)
 
 	writeJSON(w, http.StatusOK, alerts)
 }
@@ -1055,6 +1064,70 @@ func parseRegexQuery(raw string) (*regexp.Regexp, error) {
 		return nil, fmt.Errorf("invalid regex query value")
 	}
 	return re, nil
+}
+
+type alertsStateFilters struct {
+	active      bool
+	silenced    bool
+	inhibited   bool
+	unprocessed bool
+}
+
+func parseAlertsStateFilters(r *http.Request) (alertsStateFilters, error) {
+	active, err := parseBoolQuery(r.URL.Query().Get("active"), true)
+	if err != nil {
+		return alertsStateFilters{}, err
+	}
+	silenced, err := parseBoolQuery(r.URL.Query().Get("silenced"), true)
+	if err != nil {
+		return alertsStateFilters{}, err
+	}
+	inhibited, err := parseBoolQuery(r.URL.Query().Get("inhibited"), true)
+	if err != nil {
+		return alertsStateFilters{}, err
+	}
+	unprocessed, err := parseBoolQuery(r.URL.Query().Get("unprocessed"), true)
+	if err != nil {
+		return alertsStateFilters{}, err
+	}
+
+	return alertsStateFilters{
+		active:      active,
+		silenced:    silenced,
+		inhibited:   inhibited,
+		unprocessed: unprocessed,
+	}, nil
+}
+
+func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters) []apiAlert {
+	if len(in) == 0 {
+		return in
+	}
+
+	out := make([]apiAlert, 0, len(in))
+	for i := range in {
+		alert := in[i]
+
+		// Runtime currently models alert state as firing/resolved only.
+		// Keep resolved snapshots visible for existing history-like queries.
+		if alert.Status == "resolved" {
+			out = append(out, alert)
+			continue
+		}
+
+		isActive := alert.Status == "firing"
+		isSilenced := false
+		isInhibited := false
+		isUnprocessed := false
+		if (f.active && isActive) ||
+			(f.silenced && isSilenced) ||
+			(f.inhibited && isInhibited) ||
+			(f.unprocessed && isUnprocessed) {
+			out = append(out, alert)
+		}
+	}
+
+	return out
 }
 
 func alertReceiverName(alert apiAlert) string {
