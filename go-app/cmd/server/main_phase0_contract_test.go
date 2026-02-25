@@ -1716,6 +1716,150 @@ inhibit_rules:
 	}
 }
 
+func TestPhase0ReloadAppliesRuntimeConfigChanges(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "initial-receiver"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"RootCause","service":"api","severity":"critical"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"Symptom","service":"api","severity":"warning"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	inhibitedBeforeReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=false&inhibited=true&unprocessed=false",
+		nil,
+	)
+	inhibitedBeforeRec := httptest.NewRecorder()
+	mux.ServeHTTP(inhibitedBeforeRec, inhibitedBeforeReq)
+	if inhibitedBeforeRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts before reload expected 200, got %d", inhibitedBeforeRec.Code)
+	}
+
+	var inhibitedBefore []map[string]any
+	if err := json.Unmarshal(inhibitedBeforeRec.Body.Bytes(), &inhibitedBefore); err != nil {
+		t.Fatalf("failed to decode inhibited-before response: %v", err)
+	}
+	if len(inhibitedBefore) != 0 {
+		t.Fatalf("expected no inhibited alerts before reload, got %d", len(inhibitedBefore))
+	}
+
+	updatedConfig := `
+route:
+  receiver: "team-runtime"
+receivers:
+  - name: "team-runtime"
+inhibit_rules:
+  - name: "critical-inhibits-warning"
+    source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal:
+      - service
+`
+	if err := os.WriteFile(configPath, []byte(updatedConfig), 0o600); err != nil {
+		t.Fatalf("failed to update runtime config: %v", err)
+	}
+
+	reloadReq := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
+	reloadRec := httptest.NewRecorder()
+	mux.ServeHTTP(reloadRec, reloadReq)
+	if reloadRec.Code != http.StatusOK {
+		t.Fatalf("POST /-/reload expected 200, got %d", reloadRec.Code)
+	}
+
+	var reloadPayload map[string]any
+	if err := json.Unmarshal(reloadRec.Body.Bytes(), &reloadPayload); err != nil {
+		t.Fatalf("failed to decode reload response: %v", err)
+	}
+	if reloadPayload["status"] != "reloaded" {
+		t.Fatalf("reload status expected reloaded, got %v", reloadPayload["status"])
+	}
+	if reloadPayload["mode"] != "runtime" {
+		t.Fatalf("reload mode expected runtime, got %v", reloadPayload["mode"])
+	}
+
+	inhibitedAfterReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=false&inhibited=true&unprocessed=false",
+		nil,
+	)
+	inhibitedAfterRec := httptest.NewRecorder()
+	mux.ServeHTTP(inhibitedAfterRec, inhibitedAfterReq)
+	if inhibitedAfterRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts after reload expected 200, got %d", inhibitedAfterRec.Code)
+	}
+
+	var inhibitedAfter []map[string]any
+	if err := json.Unmarshal(inhibitedAfterRec.Body.Bytes(), &inhibitedAfter); err != nil {
+		t.Fatalf("failed to decode inhibited-after response: %v", err)
+	}
+	if len(inhibitedAfter) != 1 {
+		t.Fatalf("expected one inhibited alert after reload, got %d", len(inhibitedAfter))
+	}
+
+	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+	receiversRec := httptest.NewRecorder()
+	mux.ServeHTTP(receiversRec, receiversReq)
+	if receiversRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/receivers expected 200, got %d", receiversRec.Code)
+	}
+
+	var receivers []map[string]any
+	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
+		t.Fatalf("failed to decode receivers response: %v", err)
+	}
+	receiverSet := make(map[string]struct{}, len(receivers))
+	for _, receiver := range receivers {
+		name, _ := receiver["name"].(string)
+		receiverSet[name] = struct{}{}
+	}
+	if _, ok := receiverSet["team-runtime"]; !ok {
+		t.Fatalf("expected reloaded receiver team-runtime, got %v", receivers)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	statusRec := httptest.NewRecorder()
+	mux.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/status expected 200, got %d", statusRec.Code)
+	}
+
+	var statusPayload map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("failed to decode status response: %v", err)
+	}
+	configSection, ok := statusPayload["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("status config expected object, got %T", statusPayload["config"])
+	}
+	configOriginal, _ := configSection["original"].(string)
+	if !strings.Contains(configOriginal, "inhibit_rules") {
+		t.Fatalf("expected status config.original to be refreshed after reload")
+	}
+}
+
 func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
