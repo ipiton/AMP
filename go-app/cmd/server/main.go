@@ -120,13 +120,96 @@ func main() {
 func initTemplates() {
 	// Try to load from embedded FS, fallback to disk for development
 	var err error
-	templates, err = template.ParseFS(templatesFS, "templates/layouts/*.html", "templates/pages/*.html", "templates/partials/*.html")
+	funcMap := webTemplateFuncMap()
+	templates, err = template.New("").Funcs(funcMap).ParseFS(
+		templatesFS,
+		"templates/layouts/*.html",
+		"templates/pages/*.html",
+		"templates/partials/*.html",
+	)
 	if err != nil {
 		slog.Warn("Failed to load embedded templates, trying disk", "error", err)
-		templates, err = template.ParseGlob("templates/**/*.html")
+		templates, err = template.New("").Funcs(funcMap).ParseGlob("templates/**/*.html")
 		if err != nil {
 			slog.Warn("Templates not loaded, dashboard will use fallback", "error", err)
 		}
+	}
+}
+
+func webTemplateFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+		"sub": func(a, b int) int { return a - b },
+		"mul": func(a, b int) int { return a * b },
+		"default": func(def, val interface{}) interface{} {
+			if val == nil {
+				return def
+			}
+
+			switch v := val.(type) {
+			case string:
+				if v == "" {
+					return def
+				}
+			case int:
+				if v == 0 {
+					return def
+				}
+			}
+
+			return val
+		},
+		"truncate": func(s string, maxLen int) string {
+			if len(s) <= maxLen {
+				return s
+			}
+			if maxLen < 3 {
+				return s[:maxLen]
+			}
+			return s[:maxLen-3] + "..."
+		},
+		"timeAgo": func(t time.Time) string {
+			duration := time.Since(t)
+			switch {
+			case duration < time.Minute:
+				return "just now"
+			case duration < time.Hour:
+				return fmt.Sprintf("%d minutes ago", int(duration.Minutes()))
+			case duration < 24*time.Hour:
+				return fmt.Sprintf("%d hours ago", int(duration.Hours()))
+			default:
+				return fmt.Sprintf("%d days ago", int(duration.Hours()/24))
+			}
+		},
+		"formatDateTime": func(t time.Time) string {
+			return t.Format(time.RFC3339)
+		},
+		"dict": func(values ...interface{}) (map[string]interface{}, error) {
+			if len(values)%2 != 0 {
+				return nil, fmt.Errorf("dict requires an even number of arguments")
+			}
+
+			result := make(map[string]interface{}, len(values)/2)
+			for i := 0; i < len(values); i += 2 {
+				key, ok := values[i].(string)
+				if !ok {
+					return nil, fmt.Errorf("dict keys must be strings")
+				}
+				result[key] = values[i+1]
+			}
+			return result, nil
+		},
+		"until": func(n int) []int {
+			if n <= 0 {
+				return []int{}
+			}
+			result := make([]int, n)
+			for i := 0; i < n; i++ {
+				result[i] = i
+			}
+			return result
+		},
+		"upper": strings.ToUpper,
 	}
 }
 

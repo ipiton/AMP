@@ -115,9 +115,9 @@ func TestPhase0RouteInventory(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 
 		// Active runtime registers "/" as catch-all dashboard handler, so unknown routes
-		// currently resolve to dashboard rendering path and return 500 on template fallback.
-		if rec.Code != http.StatusInternalServerError {
-			t.Fatalf("expected 500 for unknown route due catch-all handler, got %d", rec.Code)
+		// currently resolve to dashboard rendering path.
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for unknown route due catch-all handler, got %d", rec.Code)
 		}
 	})
 }
