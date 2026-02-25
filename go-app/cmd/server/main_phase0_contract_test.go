@@ -1821,6 +1821,53 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	}
 }
 
+func TestPhase0ReceiversIncludeConfiguredNames(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-db"
+      routes:
+        - receiver: "team-nested"
+receivers:
+  - name: "team-default"
+  - name: "team-email"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+	receiversRec := httptest.NewRecorder()
+	mux.ServeHTTP(receiversRec, receiversReq)
+	if receiversRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/receivers expected 200, got %d", receiversRec.Code)
+	}
+
+	var receivers []map[string]any
+	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
+		t.Fatalf("failed to decode receivers response: %v", err)
+	}
+
+	receiverNames := make([]string, 0, len(receivers))
+	receiverSet := make(map[string]struct{}, len(receivers))
+	for _, receiver := range receivers {
+		name, ok := receiver["name"].(string)
+		if !ok {
+			t.Fatalf("receiver.name expected string, got %T", receiver["name"])
+		}
+		receiverNames = append(receiverNames, name)
+		receiverSet[name] = struct{}{}
+	}
+
+	required := []string{"default", "team-default", "team-db", "team-nested", "team-email"}
+	for _, name := range required {
+		if _, ok := receiverSet[name]; !ok {
+			t.Fatalf("expected configured receiver %q in /api/v2/receivers, got %v", name, receiverNames)
+		}
+	}
+}
+
 func TestPhase0AlertGroupsNestedAlertShape(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
