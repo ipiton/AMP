@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/ipiton/AMP/internal/config"
@@ -828,6 +829,12 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
+			if _, err := uuid.Parse(id); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "invalid silence id",
+				})
+				return
+			}
 			silence, ok := store.get(id, time.Now().UTC())
 			if !ok {
 				writeJSON(w, http.StatusNotFound, map[string]string{
@@ -837,6 +844,12 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 			}
 			writeJSON(w, http.StatusOK, silence)
 		case http.MethodDelete:
+			if _, err := uuid.Parse(id); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "invalid silence id",
+				})
+				return
+			}
 			if !store.delete(id) {
 				writeJSON(w, http.StatusNotFound, map[string]string{
 					"error": "silence not found",

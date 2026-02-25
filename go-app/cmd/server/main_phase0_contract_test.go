@@ -29,6 +29,8 @@ const validSilencePayload = `{
 	"comment": "maintenance window"
 }`
 
+const unknownSilenceUUID = "00000000-0000-0000-0000-000000000001"
+
 func activeSilencePayload(now time.Time) string {
 	return activeSilencePayloadForAlert(now, "TestAlert")
 }
@@ -98,8 +100,8 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "receivers get", method: http.MethodGet, path: "/api/v2/receivers", allowedStatus: []int{http.StatusOK}},
 		{name: "silences get", method: http.MethodGet, path: "/api/v2/silences", allowedStatus: []int{http.StatusOK}},
 		{name: "silences post", method: http.MethodPost, path: "/api/v2/silences", body: validSilencePayload, allowedStatus: []int{http.StatusOK}},
-		{name: "silence by id get", method: http.MethodGet, path: "/api/v2/silence/test-id", allowedStatus: []int{http.StatusNotFound}},
-		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/test-id", allowedStatus: []int{http.StatusNotFound}},
+		{name: "silence by id get", method: http.MethodGet, path: "/api/v2/silence/" + unknownSilenceUUID, allowedStatus: []int{http.StatusNotFound}},
+		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/" + unknownSilenceUUID, allowedStatus: []int{http.StatusNotFound}},
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
@@ -583,7 +585,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 	t.Run("silences post update unknown id contract", func(t *testing.T) {
 		payload := `{
-			"id": "ffffffffffffffffffffffffffffffff",
+			"id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
 			"matchers": [{"name":"alertname","value":"ContractUnknownID","isRegex":false}],
 			"startsAt": "2099-01-01T00:00:00Z",
 			"endsAt": "2099-01-01T01:00:00Z",
@@ -600,18 +602,34 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 	})
 
 	t.Run("silence by id contract", func(t *testing.T) {
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/non-existent-id", nil)
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+unknownSilenceUUID, nil)
 		getRec := httptest.NewRecorder()
 		mux.ServeHTTP(getRec, getReq)
 		if getRec.Code != http.StatusNotFound {
 			t.Fatalf("GET /api/v2/silence/{id} expected 404, got %d", getRec.Code)
 		}
 
-		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/non-existent-id", nil)
+		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+unknownSilenceUUID, nil)
 		delRec := httptest.NewRecorder()
 		mux.ServeHTTP(delRec, delReq)
 		if delRec.Code != http.StatusNotFound {
 			t.Fatalf("DELETE /api/v2/silence/{id} expected 404, got %d", delRec.Code)
+		}
+	})
+
+	t.Run("silence by id invalid id contract", func(t *testing.T) {
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/not-a-uuid", nil)
+		getRec := httptest.NewRecorder()
+		mux.ServeHTTP(getRec, getReq)
+		if getRec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/silence/{id} with invalid id expected 400, got %d", getRec.Code)
+		}
+
+		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/not-a-uuid", nil)
+		delRec := httptest.NewRecorder()
+		mux.ServeHTTP(delRec, delReq)
+		if delRec.Code != http.StatusBadRequest {
+			t.Fatalf("DELETE /api/v2/silence/{id} with invalid id expected 400, got %d", delRec.Code)
 		}
 	})
 
@@ -1688,7 +1706,7 @@ func TestPhase0SilencePostUpdateSemantics(t *testing.T) {
 		"endsAt": %q,
 		"createdBy": "phase0-test",
 		"comment": "unknown id update"
-	}`, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(59*time.Minute).Format(time.RFC3339))
+	}`, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(59*time.Minute).Format(time.RFC3339))
 
 	unknownReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(unknownUpdatePayload))
 	unknownRec := httptest.NewRecorder()
