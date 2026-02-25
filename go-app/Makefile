@@ -1,5 +1,5 @@
 # Makefile for Alert History Service (Go version)
-.PHONY: build test test-mvp test-all lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
+.PHONY: build test test-mvp test-all test-upstream-parity lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
 
 # Go parameters
 GOCMD=go
@@ -49,6 +49,10 @@ test-mvp:
 test-all:
 	@echo "Running full test suite..."
 	$(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
+
+test-upstream-parity:
+	@echo "Running upstream parity regression suite..."
+	$(GOTEST) -count=1 -v ./cmd/server -run UpstreamParity
 
 # Fast quality gates for local inner loop
 quality-gates-fast:
