@@ -248,17 +248,17 @@ func BenchmarkDLQEntry_Creation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = &DLQEntry{
-			Fingerprint:   job.EnrichedAlert.Alert.Fingerprint,
-			TargetName:    job.Target.Name,
-			TargetType:    job.Target.Type,
-			ErrorMessage:  job.LastError.Error(),
-			ErrorType:     job.ErrorType.String(),
-			RetryCount:    job.RetryCount,
-			Priority:      job.Priority.String(),
-			FailedAt:      time.Now(),
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
-			Replayed:      false,
+			Fingerprint:  job.EnrichedAlert.Alert.Fingerprint,
+			TargetName:   job.Target.Name,
+			TargetType:   job.Target.Type,
+			ErrorMessage: job.LastError.Error(),
+			ErrorType:    job.ErrorType.String(),
+			RetryCount:   job.RetryCount,
+			Priority:     job.Priority.String(),
+			FailedAt:     time.Now(),
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+			Replayed:     false,
 		}
 	}
 }

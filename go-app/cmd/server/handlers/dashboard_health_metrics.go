@@ -27,7 +27,7 @@ type DashboardHealthMetrics struct {
 
 var (
 	// dashboardHealthMetrics is the singleton instance of DashboardHealthMetrics.
-	dashboardHealthMetrics *DashboardHealthMetrics
+	dashboardHealthMetrics     *DashboardHealthMetrics
 	dashboardHealthMetricsOnce sync.Once
 )
 

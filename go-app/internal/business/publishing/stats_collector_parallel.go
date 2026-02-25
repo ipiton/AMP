@@ -17,10 +17,10 @@ import (
 //   - Duration statistics
 type ParallelPublishStats struct {
 	// Counts
-	TotalOperations       int64   `json:"total_operations"`        // Total parallel publish operations
-	SuccessfulOperations  int64   `json:"successful_operations"`   // Operations with at least one success
-	FailedOperations      int64   `json:"failed_operations"`       // Operations with all failures
-	PartialSuccessOps     int64   `json:"partial_success_ops"`     // Operations with partial success
+	TotalOperations      int64 `json:"total_operations"`      // Total parallel publish operations
+	SuccessfulOperations int64 `json:"successful_operations"` // Operations with at least one success
+	FailedOperations     int64 `json:"failed_operations"`     // Operations with all failures
+	PartialSuccessOps    int64 `json:"partial_success_ops"`   // Operations with partial success
 
 	// Targets
 	TotalTargetsAttempted int64   `json:"total_targets_attempted"` // Total targets attempted across all operations
@@ -30,20 +30,20 @@ type ParallelPublishStats struct {
 	AvgTargetsPerOp       float64 `json:"avg_targets_per_op"`      // Average targets per operation
 
 	// Success Rates
-	OperationSuccessRate  float64 `json:"operation_success_rate"`  // % of operations with at least one success
-	TargetSuccessRate     float64 `json:"target_success_rate"`     // % of targets that succeeded
+	OperationSuccessRate float64 `json:"operation_success_rate"` // % of operations with at least one success
+	TargetSuccessRate    float64 `json:"target_success_rate"`    // % of targets that succeeded
 
 	// Duration Statistics
-	AvgDurationMs         float64 `json:"avg_duration_ms"`         // Average duration per operation (ms)
-	MinDurationMs         float64 `json:"min_duration_ms"`         // Minimum duration (ms)
-	MaxDurationMs         float64 `json:"max_duration_ms"`         // Maximum duration (ms)
-	P50DurationMs         float64 `json:"p50_duration_ms"`         // 50th percentile (median)
-	P95DurationMs         float64 `json:"p95_duration_ms"`         // 95th percentile
-	P99DurationMs         float64 `json:"p99_duration_ms"`         // 99th percentile
+	AvgDurationMs float64 `json:"avg_duration_ms"` // Average duration per operation (ms)
+	MinDurationMs float64 `json:"min_duration_ms"` // Minimum duration (ms)
+	MaxDurationMs float64 `json:"max_duration_ms"` // Maximum duration (ms)
+	P50DurationMs float64 `json:"p50_duration_ms"` // 50th percentile (median)
+	P95DurationMs float64 `json:"p95_duration_ms"` // 95th percentile
+	P99DurationMs float64 `json:"p99_duration_ms"` // 99th percentile
 
 	// Time Range
-	FirstOperationAt      *time.Time `json:"first_operation_at,omitempty"`  // First operation timestamp
-	LastOperationAt       *time.Time `json:"last_operation_at,omitempty"`   // Last operation timestamp
+	FirstOperationAt *time.Time `json:"first_operation_at,omitempty"` // First operation timestamp
+	LastOperationAt  *time.Time `json:"last_operation_at,omitempty"`  // Last operation timestamp
 }
 
 // ParallelPublishStatsCollector collects statistics for parallel publishing operations.
@@ -54,19 +54,19 @@ type ParallelPublishStats struct {
 //   - Duration samples (for percentile calculation)
 //   - Time series data (optional, if TimeSeriesStorage is provided)
 type ParallelPublishStatsCollector struct {
-	mu               sync.RWMutex
-	totalOps         int64
-	successfulOps    int64
-	failedOps        int64
-	partialOps       int64
-	totalTargets     int64
-	successTargets   int64
-	failedTargets    int64
-	skippedTargets   int64
-	durationSamples  []float64 // Store duration samples for percentile calculation
-	maxSamples       int       // Maximum samples to keep (for memory bounds)
-	firstOpAt        *time.Time
-	lastOpAt         *time.Time
+	mu              sync.RWMutex
+	totalOps        int64
+	successfulOps   int64
+	failedOps       int64
+	partialOps      int64
+	totalTargets    int64
+	successTargets  int64
+	failedTargets   int64
+	skippedTargets  int64
+	durationSamples []float64 // Store duration samples for percentile calculation
+	maxSamples      int       // Maximum samples to keep (for memory bounds)
+	firstOpAt       *time.Time
+	lastOpAt        *time.Time
 }
 
 // NewParallelPublishStatsCollector creates a new parallel publish stats collector.

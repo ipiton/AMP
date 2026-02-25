@@ -15,18 +15,18 @@ func TestIntegration_EndToEnd_MetricsCollection(t *testing.T) {
 		name: "HealthCollector",
 		metrics: map[string]float64{
 			"health_status{target=\"test-target\"}":       1.0,
-			"health_success_rate{target=\"test-target\"}":  95.5,
+			"health_success_rate{target=\"test-target\"}": 95.5,
 		},
 	}
 
 	queueCollector := &IntegrationMockCollector{
 		name: "QueueCollector",
 		metrics: map[string]float64{
-			"queue_size":            50,
-			"queue_capacity":        1000,
-			"queue_jobs_submitted":  10000,
-			"queue_jobs_completed":  9500,
-			"queue_jobs_failed":     500,
+			"queue_size":           50,
+			"queue_capacity":       1000,
+			"queue_jobs_submitted": 10000,
+			"queue_jobs_completed": 9500,
+			"queue_jobs_failed":    500,
 		},
 	}
 
@@ -267,15 +267,15 @@ func TestIntegration_MultiCollectorAggregation(t *testing.T) {
 		name: "HealthCollector",
 		metrics: map[string]float64{
 			"health_status{target=\"rootly-prod\"}":       1.0,
-			"health_success_rate{target=\"rootly-prod\"}":  99.5,
+			"health_success_rate{target=\"rootly-prod\"}": 99.5,
 		},
 	}
 
 	refreshCollector := &IntegrationMockCollector{
 		name: "RefreshCollector",
 		metrics: map[string]float64{
-			"refresh_last_timestamp":       float64(time.Now().Unix()),
-			"refresh_targets_discovered":   10,
+			"refresh_last_timestamp":     float64(time.Now().Unix()),
+			"refresh_targets_discovered": 10,
 		},
 	}
 

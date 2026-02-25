@@ -26,13 +26,13 @@ type DashboardHealthHandler struct {
 	cache  cache.Cache // optional
 
 	// Optional dependencies
-	classificationService services.ClassificationService // optional
+	classificationService services.ClassificationService    // optional
 	targetDiscovery       publishing.TargetDiscoveryManager // optional
-	healthMonitor         publishing.HealthMonitor // optional
+	healthMonitor         publishing.HealthMonitor          // optional
 
 	// Observability
-	logger  *slog.Logger
-	metrics *metrics.MetricsRegistry
+	logger        *slog.Logger
+	metrics       *metrics.MetricsRegistry
 	healthMetrics *DashboardHealthMetrics
 
 	// Configuration

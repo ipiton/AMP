@@ -213,9 +213,9 @@ func TestIsBase64Char(t *testing.T) {
 
 func TestApplyDefaults(t *testing.T) {
 	tests := []struct {
-		name     string
-		target   *core.PublishingTarget
-		checkFn  func(*testing.T, *core.PublishingTarget)
+		name    string
+		target  *core.PublishingTarget
+		checkFn func(*testing.T, *core.PublishingTarget)
 	}{
 		{
 			name: "default enabled=true when all zero values",

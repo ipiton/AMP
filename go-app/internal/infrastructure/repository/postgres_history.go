@@ -8,10 +8,10 @@ import (
 	"math"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // PostgresHistoryRepository implements AlertHistoryRepository for PostgreSQL

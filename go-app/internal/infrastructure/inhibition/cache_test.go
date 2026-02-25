@@ -13,10 +13,10 @@ import (
 // --- Mock Redis Cache ---
 
 type mockRedisCache struct {
-	data  map[string]string
-	sets  map[string]map[string]struct{} // SET storage: key -> set of members
-	fail  bool
-	mu    sync.RWMutex // Thread-safe for concurrent tests
+	data map[string]string
+	sets map[string]map[string]struct{} // SET storage: key -> set of members
+	fail bool
+	mu   sync.RWMutex // Thread-safe for concurrent tests
 }
 
 func (m *mockRedisCache) Get(ctx context.Context, key string, dest interface{}) error {
@@ -361,7 +361,7 @@ func TestTwoTierAlertCache_Cleanup(t *testing.T) {
 		Fingerprint: "fp-expired",
 		Status:      "firing",
 		StartsAt:    now.Add(-10 * time.Minute), // Old
-		EndsAt:      &endsAt,                      // Ended
+		EndsAt:      &endsAt,                    // Ended
 		Labels:      map[string]string{"alertname": "ExpiredAlert"},
 	}
 

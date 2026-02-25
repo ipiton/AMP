@@ -11,12 +11,12 @@ import (
 // checkAllTargets checks health of all enabled targets (parallel execution).
 //
 // This function:
-//   1. Gets all targets from TargetDiscoveryManager
-//   2. Filters enabled targets only (skip disabled)
-//   3. Creates goroutine pool (max 10 concurrent checks)
-//   4. Performs health checks in parallel
-//   5. Processes results and updates cache
-//   6. Records Prometheus metrics
+//  1. Gets all targets from TargetDiscoveryManager
+//  2. Filters enabled targets only (skip disabled)
+//  3. Creates goroutine pool (max 10 concurrent checks)
+//  4. Performs health checks in parallel
+//  5. Processes results and updates cache
+//  6. Records Prometheus metrics
 //
 // Parallelism Strategy:
 //   - Semaphore pattern: Max 10 concurrent goroutines
@@ -76,7 +76,7 @@ func (m *DefaultHealthMonitor) checkAllTargets(ctx context.Context, checkType Ch
 	// Create goroutine pool for parallel checks
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, m.config.MaxConcurrentChecks) // Limit concurrency
-	results := make(chan HealthCheckResult, len(enabledTargets))    // Buffered channel
+	results := make(chan HealthCheckResult, len(enabledTargets))   // Buffered channel
 
 	// Launch health check goroutines
 	for _, target := range enabledTargets {
@@ -233,10 +233,10 @@ func shouldCheckTarget(target *core.PublishingTarget) (bool, string) {
 // getTargetsToCheck filters targets for health checking.
 //
 // This function:
-//   1. Gets all targets from discovery
-//   2. Filters enabled targets
-//   3. Validates target configuration
-//   4. Returns checkable targets
+//  1. Gets all targets from discovery
+//  2. Filters enabled targets
+//  3. Validates target configuration
+//  4. Returns checkable targets
 //
 // Parameters:
 //   - m: DefaultHealthMonitor instance

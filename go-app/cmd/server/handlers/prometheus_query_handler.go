@@ -22,7 +22,8 @@ import (
 //   - Silence/inhibition status (via TN-133/129)
 //
 // Architecture:
-//   HTTP Request → Parse Params → Query DB → Convert Format → JSON Response
+//
+//	HTTP Request → Parse Params → Query DB → Convert Format → JSON Response
 //
 // Supported Query Parameters:
 //   - filter: Label matcher expression (e.g., {alertname="HighCPU"})
@@ -51,8 +52,9 @@ import (
 //   - Compatible with amtool CLI
 //
 // Example Usage:
-//   handler := NewPrometheusQueryHandler(historyRepo, logger, nil)
-//   mux.HandleFunc("GET /api/v2/alerts", handler.HandlePrometheusQuery)
+//
+//	handler := NewPrometheusQueryHandler(historyRepo, logger, nil)
+//	mux.HandleFunc("GET /api/v2/alerts", handler.HandlePrometheusQuery)
 type PrometheusQueryHandler struct {
 	historyRepo AlertHistoryRepository  // TN-037: Alert history repository
 	converter   *ConverterDependencies  // Format converter dependencies
@@ -112,11 +114,12 @@ func DefaultPrometheusQueryConfig() *PrometheusQueryConfig {
 //   - error: Configuration error (historyRepo nil)
 //
 // Example:
-//   handler, err := NewPrometheusQueryHandler(historyRepo, logger, nil, nil)
-//   if err != nil {
-//       log.Fatal(err)
-//   }
-//   mux.HandleFunc("GET /api/v2/alerts", handler.HandlePrometheusQuery)
+//
+//	handler, err := NewPrometheusQueryHandler(historyRepo, logger, nil, nil)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	mux.HandleFunc("GET /api/v2/alerts", handler.HandlePrometheusQuery)
 func NewPrometheusQueryHandler(
 	historyRepo AlertHistoryRepository,
 	logger *slog.Logger,
@@ -157,14 +160,14 @@ func NewPrometheusQueryHandler(
 // HandlePrometheusQuery handles GET /api/v2/alerts requests.
 //
 // Request flow:
-//   1. Validate HTTP method (GET only)
-//   2. Parse query parameters
-//   3. Validate parameters
-//   4. Convert to HistoryRequest (core domain)
-//   5. Query database via historyRepo.GetHistory()
-//   6. Convert core.Alert → AlertmanagerAlert
-//   7. Build response with pagination metadata
-//   8. Record metrics and log results
+//  1. Validate HTTP method (GET only)
+//  2. Parse query parameters
+//  3. Validate parameters
+//  4. Convert to HistoryRequest (core domain)
+//  5. Query database via historyRepo.GetHistory()
+//  6. Convert core.Alert → AlertmanagerAlert
+//  7. Build response with pagination metadata
+//  8. Record metrics and log results
 //
 // HTTP Status Codes:
 //   - 200: Query successful
@@ -317,15 +320,15 @@ func (h *PrometheusQueryHandler) buildHistoryRequest(params *QueryParameters) (*
 	}
 
 	// Time range filter
-//	if !params.StartTime.IsZero() || !params.EndTime.IsZero() {
-//		filters.TimeRange = &core.TimeRange{}
-//		if !params.StartTime.IsZero() {
-//			filters.TimeRange.From = &params.StartTime
-//		}
-//		if !params.EndTime.IsZero() {
-//			filters.TimeRange.To = &params.EndTime
-//		}
-//	}
+	//	if !params.StartTime.IsZero() || !params.EndTime.IsZero() {
+	//		filters.TimeRange = &core.TimeRange{}
+	//		if !params.StartTime.IsZero() {
+	//			filters.TimeRange.From = &params.StartTime
+	//		}
+	//		if !params.EndTime.IsZero() {
+	//			filters.TimeRange.To = &params.EndTime
+	//		}
+	//	}
 
 	// Label matchers filter
 	if params.Filter != "" {
@@ -464,5 +467,5 @@ func (h *PrometheusQueryHandler) recordMetrics(status, reason string, alertCount
 	// Record validation errors if applicable
 	if status == "validation_failed" {
 		h.metrics.RecordValidationError(reason)
-}
+	}
 }

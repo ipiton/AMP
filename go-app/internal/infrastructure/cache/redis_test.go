@@ -18,10 +18,10 @@ func setupTestRedis(t *testing.T) (*RedisCache, *miniredis.Miniredis) {
 
 	// Создаем конфигурацию для тестового Redis
 	config := &CacheConfig{
-		Addr:       mr.Addr(),
-		Password:   "",
-		DB:         0,
-		PoolSize:   5,
+		Addr:        mr.Addr(),
+		Password:    "",
+		DB:          0,
+		PoolSize:    5,
 		DialTimeout: 1 * time.Second,
 		ReadTimeout: 1 * time.Second,
 	}
@@ -82,8 +82,8 @@ func TestRedisCache_Set(t *testing.T) {
 
 	t.Run("set complex value", func(t *testing.T) {
 		type TestStruct struct {
-			Name  string `json:"name"`
-			Value int    `json:"value"`
+			Name  string   `json:"name"`
+			Value int      `json:"value"`
 			Items []string `json:"items"`
 		}
 

@@ -17,19 +17,19 @@ type Config struct {
 	// Storage backend configuration (TN-201)
 	Storage StorageConfig `mapstructure:"storage"`
 
-	Server     ServerConfig       `mapstructure:"server"`
-	Database   DatabaseConfig     `mapstructure:"database"`
-	Redis      RedisConfig        `mapstructure:"redis"`
-	LLM        LLMConfig          `mapstructure:"llm"`
-	Log        LogConfig          `mapstructure:"log"`
-	Cache      CacheConfig        `mapstructure:"cache"`
-	Lock       LockConfig         `mapstructure:"lock"`
-	App        AppConfig          `mapstructure:"app"`
-	Metrics    MetricsConfig      `mapstructure:"metrics"`
-	Webhook    WebhookConfig      `mapstructure:"webhook"`
-	HTTPClient HTTPClientConfig   `mapstructure:"http_client"`
-	Retry      RetryConfig        `mapstructure:"retry"`
-	Telemetry  TelemetryConfig    `mapstructure:"telemetry"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+	LLM        LLMConfig        `mapstructure:"llm"`
+	Log        LogConfig        `mapstructure:"log"`
+	Cache      CacheConfig      `mapstructure:"cache"`
+	Lock       LockConfig       `mapstructure:"lock"`
+	App        AppConfig        `mapstructure:"app"`
+	Metrics    MetricsConfig    `mapstructure:"metrics"`
+	Webhook    WebhookConfig    `mapstructure:"webhook"`
+	HTTPClient HTTPClientConfig `mapstructure:"http_client"`
+	Retry      RetryConfig      `mapstructure:"retry"`
+	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 }
 
 // DeploymentProfile represents the deployment profile type
@@ -167,13 +167,13 @@ type MetricsConfig struct {
 
 // WebhookConfig holds webhook endpoint configuration
 type WebhookConfig struct {
-	MaxRequestSize  int64         `mapstructure:"max_request_size"`
-	RequestTimeout  time.Duration `mapstructure:"request_timeout"`
-	MaxAlertsPerReq int           `mapstructure:"max_alerts_per_request"`
-	RateLimiting    RateLimitingConfig `mapstructure:"rate_limiting"`
+	MaxRequestSize  int64                `mapstructure:"max_request_size"`
+	RequestTimeout  time.Duration        `mapstructure:"request_timeout"`
+	MaxAlertsPerReq int                  `mapstructure:"max_alerts_per_request"`
+	RateLimiting    RateLimitingConfig   `mapstructure:"rate_limiting"`
 	Authentication  AuthenticationConfig `mapstructure:"authentication"`
-	Signature       SignatureConfig `mapstructure:"signature"`
-	CORS            CORSWebhookConfig `mapstructure:"cors"`
+	Signature       SignatureConfig      `mapstructure:"signature"`
+	CORS            CORSWebhookConfig    `mapstructure:"cors"`
 }
 
 // RateLimitingConfig holds rate limiting configuration
@@ -320,8 +320,8 @@ func LoadConfigFromEnv() (*Config, error) {
 // setDefaults sets default configuration values
 func setDefaults() {
 	// Deployment profile defaults (TN-200)
-	viper.SetDefault("profile", "standard") // Default to standard profile
-	viper.SetDefault("storage.backend", "postgres") // Default to Postgres
+	viper.SetDefault("profile", "standard")                              // Default to standard profile
+	viper.SetDefault("storage.backend", "postgres")                      // Default to Postgres
 	viper.SetDefault("storage.filesystem_path", "/data/alerthistory.db") // SQLite path for Lite
 
 	// Server defaults

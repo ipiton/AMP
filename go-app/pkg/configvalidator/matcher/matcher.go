@@ -93,9 +93,10 @@ func (e *ParseError) Error() string {
 // Performance: < 1ms per matcher
 //
 // Examples:
-//   Parse("severity=critical")      → {Label: "severity", Type: "=", Value: "critical"}
-//   Parse("alertname!=test")        → {Label: "alertname", Type: "!=", Value: "test"}
-//   Parse("instance=~.*prod.*")     → {Label: "instance", Type: "=~", Value: ".*prod.*"}
+//
+//	Parse("severity=critical")      → {Label: "severity", Type: "=", Value: "critical"}
+//	Parse("alertname!=test")        → {Label: "alertname", Type: "!=", Value: "test"}
+//	Parse("instance=~.*prod.*")     → {Label: "instance", Type: "=~", Value: ".*prod.*"}
 func Parse(matcher string) (*Matcher, error) {
 	if matcher == "" {
 		return nil, &ParseError{

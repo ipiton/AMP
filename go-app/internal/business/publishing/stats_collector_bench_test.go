@@ -112,7 +112,6 @@ func BenchmarkRefreshMetricsCollector(b *testing.B) {
 	}
 }
 
-
 // ============================================================================
 // Mock Implementations for Benchmarks
 // ============================================================================
@@ -145,7 +144,7 @@ type MockHealthMonitor struct {
 	healthStatuses []TargetHealthStatus
 }
 
-func (m *MockHealthMonitor) Start() error { return nil }
+func (m *MockHealthMonitor) Start() error                     { return nil }
 func (m *MockHealthMonitor) Stop(timeout time.Duration) error { return nil }
 func (m *MockHealthMonitor) GetHealth(ctx context.Context) ([]TargetHealthStatus, error) {
 	return m.healthStatuses, nil
@@ -165,7 +164,7 @@ type MockRefreshManager struct {
 	status RefreshStatus
 }
 
-func (m *MockRefreshManager) Start() error { return nil }
+func (m *MockRefreshManager) Start() error                     { return nil }
 func (m *MockRefreshManager) Stop(timeout time.Duration) error { return nil }
-func (m *MockRefreshManager) RefreshNow() error { return nil }
-func (m *MockRefreshManager) GetStatus() RefreshStatus { return m.status }
+func (m *MockRefreshManager) RefreshNow() error                { return nil }
+func (m *MockRefreshManager) GetStatus() RefreshStatus         { return m.status }

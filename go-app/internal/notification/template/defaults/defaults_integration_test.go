@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/notification/template"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/notification/template"
 )
 
 // ================================================================================
@@ -40,10 +40,10 @@ func createTestTemplateData(status string, alertCount int) *template.TemplateDat
 	}
 
 	annotations := map[string]string{
-		"summary":        "CPU usage is 95%",
-		"description":    "CPU usage has been above 90% for 5 minutes",
-		"runbook_url":    "https://runbook.example.com/cpu",
-		"dashboard_url":  "https://grafana.example.com/d/cpu",
+		"summary":       "CPU usage is 95%",
+		"description":   "CPU usage has been above 90% for 5 minutes",
+		"runbook_url":   "https://runbook.example.com/cpu",
+		"dashboard_url": "https://grafana.example.com/d/cpu",
 	}
 
 	data := template.NewTemplateData(status, labels, annotations, time.Now())
@@ -332,10 +332,10 @@ func TestAllTemplatesWithEmptyData(t *testing.T) {
 
 	// Test all templates execute without error
 	templates := map[string]string{
-		"slack_title":            registry.Slack.Title,
-		"slack_text":             registry.Slack.Text,
-		"pagerduty_description":  registry.PagerDuty.Description,
-		"email_subject":          registry.Email.Subject,
+		"slack_title":           registry.Slack.Title,
+		"slack_text":            registry.Slack.Text,
+		"pagerduty_description": registry.PagerDuty.Description,
+		"email_subject":         registry.Email.Subject,
 	}
 
 	for name, tmpl := range templates {

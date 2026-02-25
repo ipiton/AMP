@@ -179,13 +179,15 @@ func SpanFromContext(ctx context.Context) Span {
 //   - Error recording
 //
 // Example span tree:
-//   FormatAlert (root)
-//     ├─ Validation
-//     ├─ CacheCheck
-//     └─ Format
+//
+//	FormatAlert (root)
+//	  ├─ Validation
+//	  ├─ CacheCheck
+//	  └─ Format
 //
 // Returns:
-//   AlertFormatter: Wrapped formatter with tracing
+//
+//	AlertFormatter: Wrapped formatter with tracing
 func TracingMiddleware(next AlertFormatter, tracer Tracer) AlertFormatter {
 	return &tracingFormatterMiddleware{
 		next:   next,
@@ -277,7 +279,8 @@ func (m *tracingFormatterMiddleware) FormatAlert(ctx context.Context, enrichedAl
 //   - cache_key attribute
 //
 // Returns:
-//   FormatterMiddleware: Tracing-aware caching middleware
+//
+//	FormatterMiddleware: Tracing-aware caching middleware
 func TracingCacheMiddleware(tracer Tracer, cache FormatterCache, ttl time.Duration, logger *slog.Logger) FormatterMiddleware {
 	return func(next formatFunc) formatFunc {
 		return func(enrichedAlert *core.EnrichedAlert) (map[string]any, error) {

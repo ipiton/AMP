@@ -4,9 +4,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // TestNewDefaultFormatRegistry_BuiltinFormats verifies all 5 built-in formats are registered
@@ -405,16 +405,16 @@ func TestIsValidFormatName(t *testing.T) {
 	}
 
 	invalidNames := []string{
-		"",               // empty
-		"Alertmanager",   // uppercase first letter
-		"1format",        // starts with digit
-		"format!",        // special character
-		"Format_Name",    // uppercase
-		"format space",   // space
-		"format.name",    // dot
-		"-format",        // starts with hyphen
-		"_format",        // starts with underscore
-		"format/name",    // slash
+		"",             // empty
+		"Alertmanager", // uppercase first letter
+		"1format",      // starts with digit
+		"format!",      // special character
+		"Format_Name",  // uppercase
+		"format space", // space
+		"format.name",  // dot
+		"-format",      // starts with hyphen
+		"_format",      // starts with underscore
+		"format/name",  // slash
 	}
 
 	for _, name := range validNames {

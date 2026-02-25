@@ -34,10 +34,10 @@ type AlertProcessor struct {
 	llmClient         LLMClient
 	filterEngine      FilterEngine
 	publisher         Publisher
-	deduplication     DeduplicationService                  // TN-036 Phase 3: Deduplication service
-	inhibitionMatcher inhibition.InhibitionMatcher          // TN-130 Phase 6: Inhibition checking
-	inhibitionState   inhibition.InhibitionStateManager     // TN-130 Phase 6: State tracking
-	businessMetrics   *metrics.BusinessMetrics              // TN-130 Phase 6: Business metrics for inhibition
+	deduplication     DeduplicationService              // TN-036 Phase 3: Deduplication service
+	inhibitionMatcher inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
+	inhibitionState   inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
+	businessMetrics   *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
 	logger            *slog.Logger
 	metrics           *metrics.MetricsManager
 }
@@ -48,10 +48,10 @@ type AlertProcessorConfig struct {
 	LLMClient         LLMClient // optional, required only for enriched mode
 	FilterEngine      FilterEngine
 	Publisher         Publisher
-	Deduplication     DeduplicationService                  // TN-036 Phase 3: optional, recommended for production
-	InhibitionMatcher inhibition.InhibitionMatcher          // TN-130 Phase 6: optional, recommended for inhibition
-	InhibitionState   inhibition.InhibitionStateManager     // TN-130 Phase 6: optional, for state tracking
-	BusinessMetrics   *metrics.BusinessMetrics              // TN-130 Phase 6: required if using inhibition
+	Deduplication     DeduplicationService              // TN-036 Phase 3: optional, recommended for production
+	InhibitionMatcher inhibition.InhibitionMatcher      // TN-130 Phase 6: optional, recommended for inhibition
+	InhibitionState   inhibition.InhibitionStateManager // TN-130 Phase 6: optional, for state tracking
+	BusinessMetrics   *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
 	Logger            *slog.Logger
 	Metrics           *metrics.MetricsManager
 }

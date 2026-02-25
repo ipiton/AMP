@@ -113,8 +113,8 @@ func BenchmarkFullRefresh(b *testing.B) {
 	b.Skip("Skipping slow benchmark (takes ~2s per iteration)")
 
 	mock := &MockTargetDiscoveryManager{
-		targetCount: 10,
-		shouldFail:  false,
+		targetCount:   10,
+		shouldFail:    false,
 		delayDuration: 100 * time.Millisecond, // Simulate K8s API latency
 	}
 

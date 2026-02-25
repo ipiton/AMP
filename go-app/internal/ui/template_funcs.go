@@ -20,8 +20,8 @@ import (
 func createTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		// Time functions
-		"formatTime":   formatTime,
-		"timeAgo":      timeAgo,
+		"formatTime":     formatTime,
+		"timeAgo":        timeAgo,
 		"formatDateTime": formatDateTime,
 
 		// CSS helper functions
@@ -57,9 +57,9 @@ func createTemplateFuncs() template.FuncMap {
 		"statusBadge": statusBadge,
 
 		// TN-80: Classification helper functions
-		"classificationSeverityClass": classificationSeverityClass,
+		"classificationSeverityClass":     classificationSeverityClass,
 		"classificationConfidencePercent": classificationConfidencePercent,
-		"classificationConfidenceColor": classificationConfidenceColor,
+		"classificationConfidenceColor":   classificationConfidenceColor,
 	}
 }
 

@@ -656,8 +656,8 @@ func TestMatchRuleFast_AllConditions(t *testing.T) {
 		Fingerprint: "fp-latency",
 		Labels: map[string]string{
 			"alertname":   "HighLatency",
-			"severity":    "warning",      // Matches warning|info
-			"component":   "api-gateway",  // Matches .*gateway
+			"severity":    "warning",     // Matches warning|info
+			"component":   "api-gateway", // Matches .*gateway
 			"environment": "production",
 			"cluster":     "prod-eu",
 		},

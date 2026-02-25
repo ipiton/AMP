@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/business/publishing"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
-	"github.com/ipiton/AMP/internal/business/publishing"
 )
 
 // mockAlertHistoryRepositoryForOverview is a mock implementation for overview tests.
@@ -89,10 +89,10 @@ func (m *mockClassificationServiceForOverview) Health(ctx context.Context) error
 
 // mockPublishingStatsProvider is a mock implementation of PublishingStatsProvider.
 type mockPublishingStatsProvider struct {
-	targetCount          int
-	mode                 string
-	successfulPublishes  int64
-	failedPublishes      int64
+	targetCount         int
+	mode                string
+	successfulPublishes int64
+	failedPublishes     int64
 }
 
 func (m *mockPublishingStatsProvider) GetTargetCount() int {
@@ -261,8 +261,8 @@ func TestDashboardOverviewHandler_GetOverview_WithClassification(t *testing.T) {
 	repo := &mockAlertHistoryRepositoryForOverview{historyResp: historyResp}
 	classificationService := &mockClassificationServiceForOverview{
 		stats: services.ClassificationStats{
-			TotalRequests:   100,
-			CacheHitRate:    0.85,
+			TotalRequests:  100,
+			CacheHitRate:   0.85,
 			LLMSuccessRate: 0.95,
 		},
 		health: nil, // LLM available

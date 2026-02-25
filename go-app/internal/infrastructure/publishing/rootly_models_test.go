@@ -97,8 +97,8 @@ func TestUpdateIncidentRequest_Validation(t *testing.T) {
 			wantError: false,
 		},
 		{
-			name: "Valid update - empty",
-			req: &UpdateIncidentRequest{},
+			name:      "Valid update - empty",
+			req:       &UpdateIncidentRequest{},
 			wantError: false,
 		},
 	}

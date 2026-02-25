@@ -67,43 +67,7 @@ func main() {
 
 	// Create HTTP mux
 	mux := http.NewServeMux()
-
-	// Static files
-	staticSub, _ := fs.Sub(staticFS, "static")
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
-
-	// Dashboard pages
-	mux.HandleFunc("/", dashboardHandler)
-	mux.HandleFunc("/dashboard", dashboardHandler)
-	mux.HandleFunc("/dashboard/alerts", alertsPageHandler)
-	mux.HandleFunc("/dashboard/silences", silencesPageHandler)
-	mux.HandleFunc("/dashboard/llm", llmPageHandler)
-	mux.HandleFunc("/dashboard/routing", routingPageHandler)
-
-	// Health endpoints
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/ready", readyHandler)
-
-	// Metrics endpoint
-	mux.Handle("/metrics", promhttp.Handler())
-
-	// API endpoints
-	mux.HandleFunc("/api/v2/alerts", alertsHandler)
-	mux.HandleFunc("/api/v2/silences", silencesHandler)
-	mux.HandleFunc("/api/v2/status", statusHandler)
-
-	// Dashboard API
-	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI)
-	mux.HandleFunc("/api/dashboard/alerts/recent", dashboardAlertsRecentAPI)
-
-	// Alertmanager-compatible webhook endpoint with rate limiting
-	rateLimiter := middleware.NewRateLimiter(middleware.RateLimiterConfig{
-		PerIPLimit:  100,  // 100 requests per second per IP
-		GlobalLimit: 1000, // 1000 requests per second globally
-		Logger:      slog.Default(),
-	})
-	webhookHandlerWithRateLimit := rateLimiter.Middleware(http.HandlerFunc(webhookHandler))
-	mux.Handle("/webhook", webhookHandlerWithRateLimit)
+	registerRoutes(mux)
 
 	// Start server
 	port := cfg.Server.Port
@@ -160,6 +124,53 @@ func initTemplates() {
 			slog.Warn("Templates not loaded, dashboard will use fallback", "error", err)
 		}
 	}
+}
+
+// registerRoutes configures all active HTTP routes for the current runtime.
+func registerRoutes(mux *http.ServeMux) {
+	// Static files
+	staticSub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		slog.Error("Failed to mount static files", "error", err)
+	} else {
+		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	}
+
+	// Dashboard pages
+	mux.HandleFunc("/", dashboardHandler)
+	mux.HandleFunc("/dashboard", dashboardHandler)
+	mux.HandleFunc("/dashboard/alerts", alertsPageHandler)
+	mux.HandleFunc("/dashboard/silences", silencesPageHandler)
+	mux.HandleFunc("/dashboard/llm", llmPageHandler)
+	mux.HandleFunc("/dashboard/routing", routingPageHandler)
+
+	// Health endpoints
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/ready", readyHandler)
+	// Common probe aliases for compatibility with existing deployments
+	mux.HandleFunc("/healthz", healthHandler)
+	mux.HandleFunc("/readyz", readyHandler)
+
+	// Metrics endpoint
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// API endpoints
+	mux.HandleFunc("/api/v2/alerts", alertsHandler)
+	mux.HandleFunc("/api/v2/silences", silencesHandler)
+	mux.HandleFunc("/api/v2/status", statusHandler)
+
+	// Dashboard API
+	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI)
+	mux.HandleFunc("/api/dashboard/alerts/recent", dashboardAlertsRecentAPI)
+
+	// Alertmanager-compatible webhook endpoint with rate limiting
+	rateLimiter := middleware.NewRateLimiter(middleware.RateLimiterConfig{
+		PerIPLimit:  100,  // 100 requests per second per IP
+		GlobalLimit: 1000, // 1000 requests per second globally
+		Logger:      slog.Default(),
+	})
+	webhookHandlerWithRateLimit := rateLimiter.Middleware(http.HandlerFunc(webhookHandler))
+	mux.Handle("/webhook", webhookHandlerWithRateLimit)
 }
 
 // Page data for templates

@@ -25,9 +25,9 @@ import (
 //   - Handle graceful degradation (fallback to memory storage, etc.)
 //
 // Services are initialized in dependency order:
-//   1. Infrastructure (database, cache, metrics)
-//   2. Core services (alert processor, classification)
-//   3. Business services (publishing, silencing, grouping)
+//  1. Infrastructure (database, cache, metrics)
+//  2. Core services (alert processor, classification)
+//  3. Business services (publishing, silencing, grouping)
 type ServiceRegistry struct {
 	config *appconfig.Config
 	logger *slog.Logger
@@ -187,7 +187,7 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 	//     return fmt.Errorf("failed to create storage: %w", err)
 	// }
 	// r.storage = st
-	_ = ctx // Use ctx to avoid unused variable warning
+	_ = ctx         // Use ctx to avoid unused variable warning
 	r.storage = nil // Placeholder - storage not yet implemented
 	r.logger.Info("✅ Storage backend initialized",
 		"type", r.config.Profile,

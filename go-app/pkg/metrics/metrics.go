@@ -75,14 +75,14 @@ func NewMetricsRegistry() *MetricsRegistry {
 
 // PrometheusAlertsMetrics holds metrics for incoming Prometheus alerts
 type PrometheusAlertsMetrics struct {
-	RequestsTotal       *prometheus.CounterVec
-	ReceivedTotal       *prometheus.CounterVec
-	ProcessedTotal      *prometheus.CounterVec
-	ProcessingErrors    *prometheus.CounterVec
-	ValidationErrors    *prometheus.CounterVec
-	DurationSeconds     *prometheus.HistogramVec
-	PayloadBytes        *prometheus.HistogramVec
-	ConcurrentRequests  prometheus.Gauge
+	RequestsTotal      *prometheus.CounterVec
+	ReceivedTotal      *prometheus.CounterVec
+	ProcessedTotal     *prometheus.CounterVec
+	ProcessingErrors   *prometheus.CounterVec
+	ValidationErrors   *prometheus.CounterVec
+	DurationSeconds    *prometheus.HistogramVec
+	PayloadBytes       *prometheus.HistogramVec
+	ConcurrentRequests prometheus.Gauge
 }
 
 // NewPrometheusAlertsMetrics creates new Prometheus alerts metrics
@@ -215,24 +215,24 @@ func (m *PrometheusAlertsMetrics) DecConcurrentRequests() {
 
 // ProxyMetrics holds metrics for the alert proxy pipeline
 type ProxyMetrics struct {
-	AlertsReceived       *prometheus.CounterVec
-	AlertsProcessed      *prometheus.CounterVec
-	BatchSize            *prometheus.HistogramVec
-	ConcurrentRequests   prometheus.Gauge
-	PipelineDuration     *prometheus.HistogramVec
+	AlertsReceived         *prometheus.CounterVec
+	AlertsProcessed        *prometheus.CounterVec
+	BatchSize              *prometheus.HistogramVec
+	ConcurrentRequests     prometheus.Gauge
+	PipelineDuration       *prometheus.HistogramVec
 	ClassificationDuration *prometheus.HistogramVec
-	ClassificationErrors *prometheus.CounterVec
-	FilteringDuration    *prometheus.HistogramVec
-	FilteringErrors      *prometheus.CounterVec
-	PublishingDuration   *prometheus.HistogramVec
-	PublishingErrors     *prometheus.CounterVec
-	PublishingTargets    prometheus.Gauge
-	HTTPRequestsTotal    *prometheus.CounterVec
-	HTTPRequestDuration  *prometheus.HistogramVec
-	HTTPRequestSize      *prometheus.HistogramVec
-	HTTPResponseSize     *prometheus.HistogramVec
-	HTTPRequestsInFlight prometheus.Gauge
-	HTTPErrors           *prometheus.CounterVec
+	ClassificationErrors   *prometheus.CounterVec
+	FilteringDuration      *prometheus.HistogramVec
+	FilteringErrors        *prometheus.CounterVec
+	PublishingDuration     *prometheus.HistogramVec
+	PublishingErrors       *prometheus.CounterVec
+	PublishingTargets      prometheus.Gauge
+	HTTPRequestsTotal      *prometheus.CounterVec
+	HTTPRequestDuration    *prometheus.HistogramVec
+	HTTPRequestSize        *prometheus.HistogramVec
+	HTTPResponseSize       *prometheus.HistogramVec
+	HTTPRequestsInFlight   prometheus.Gauge
+	HTTPErrors             *prometheus.CounterVec
 }
 
 // NewProxyMetrics creates new proxy metrics
@@ -586,10 +586,10 @@ func (m *APIConfigMetrics) RecordSize(format string, bytes int) {
 
 // DashboardMetrics holds metrics for technical dashboard
 type DashboardMetrics struct {
-	HealthChecksTotal    *prometheus.CounterVec
-	HealthCheckDuration  *prometheus.HistogramVec
-	HealthStatus         *prometheus.GaugeVec
-	OverallHealthStatus  prometheus.Gauge
+	HealthChecksTotal   *prometheus.CounterVec
+	HealthCheckDuration *prometheus.HistogramVec
+	HealthStatus        *prometheus.GaugeVec
+	OverallHealthStatus prometheus.Gauge
 }
 
 // NewDashboardMetrics creates new dashboard metrics
@@ -668,12 +668,12 @@ func (m *DashboardMetrics) SetOverallHealthStatus(healthy bool) {
 
 // GroupMetrics holds metrics for alert grouping
 type GroupMetrics struct {
-	ActiveGroups       prometheus.Gauge
-	OperationsTotal    *prometheus.CounterVec
-	OperationDuration  *prometheus.HistogramVec
-	GroupSize          *prometheus.HistogramVec
-	CleanedUpTotal     prometheus.Counter
-	RestoredTotal      prometheus.Counter
+	ActiveGroups      prometheus.Gauge
+	OperationsTotal   *prometheus.CounterVec
+	OperationDuration *prometheus.HistogramVec
+	GroupSize         *prometheus.HistogramVec
+	CleanedUpTotal    prometheus.Counter
+	RestoredTotal     prometheus.Counter
 }
 
 // NewGroupMetrics creates new group metrics
@@ -907,11 +907,11 @@ func NewStorageMetrics() *StorageMetrics {
 
 // ClassificationMetrics holds metrics for classification
 type ClassificationMetrics struct {
-	Duration       *prometheus.HistogramVec
-	Total          *prometheus.CounterVec
-	L1CacheHits    prometheus.Counter
-	L2CacheHits    prometheus.Counter
-	CacheMisses    prometheus.Counter
+	Duration    *prometheus.HistogramVec
+	Total       *prometheus.CounterVec
+	L1CacheHits prometheus.Counter
+	L2CacheHits prometheus.Counter
+	CacheMisses prometheus.Counter
 }
 
 // NewClassificationMetrics creates new classification metrics
@@ -1021,7 +1021,7 @@ func NewDeduplicationMetrics() *DeduplicationMetrics {
 
 // BusinessMetrics holds business-level metrics
 type BusinessMetrics struct {
-// Silence metrics
+	// Silence metrics
 	SilenceOperationsTotal  *prometheus.CounterVec
 	SilenceValidationErrors *prometheus.CounterVec
 	SilenceCacheHitsTotal   *prometheus.CounterVec
@@ -1439,9 +1439,9 @@ func (m *BusinessMetrics) SilenceRateLimitExceeded() {
 
 // FilterMetrics holds metrics for alert filtering
 type FilterMetrics struct {
-	BlockedTotal    *prometheus.CounterVec
-	FilteredTotal   *prometheus.CounterVec
-	FilterDuration  *prometheus.HistogramVec
+	BlockedTotal   *prometheus.CounterVec
+	FilteredTotal  *prometheus.CounterVec
+	FilterDuration *prometheus.HistogramVec
 }
 
 // NewFilterMetrics creates new filter metrics

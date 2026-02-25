@@ -31,20 +31,20 @@ type JSONOutput struct {
 
 // JSONResult is a single validation result
 type JSONResult struct {
-	Path        string                                `json:"path"`
-	Valid       bool                                  `json:"valid"`
-	Errors      []templatevalidator.ValidationError   `json:"errors"`
-	Warnings    []templatevalidator.ValidationWarning `json:"warnings"`
+	Path        string                                   `json:"path"`
+	Valid       bool                                     `json:"valid"`
+	Errors      []templatevalidator.ValidationError      `json:"errors"`
+	Warnings    []templatevalidator.ValidationWarning    `json:"warnings"`
 	Suggestions []templatevalidator.ValidationSuggestion `json:"suggestions"`
 }
 
 // JSONSummary is the overall summary
 type JSONSummary struct {
-	TotalTemplates  int `json:"total_templates"`
-	PassedTemplates int `json:"passed_templates"`
-	FailedTemplates int `json:"failed_templates"`
-	TotalErrors     int `json:"total_errors"`
-	TotalWarnings   int `json:"total_warnings"`
+	TotalTemplates   int `json:"total_templates"`
+	PassedTemplates  int `json:"passed_templates"`
+	FailedTemplates  int `json:"failed_templates"`
+	TotalErrors      int `json:"total_errors"`
+	TotalWarnings    int `json:"total_warnings"`
 	TotalSuggestions int `json:"total_suggestions"`
 }
 

@@ -452,39 +452,39 @@ func TestValidationErrors_ComplexScenarios(t *testing.T) {
 // TestErrorTypes tests error type assertions
 func TestErrorTypes(t *testing.T) {
 	tests := []struct {
-		name      string
-		err       error
-		isParseErr   bool
+		name            string
+		err             error
+		isParseErr      bool
 		isValidationErr bool
-		isConfigErr  bool
+		isConfigErr     bool
 	}{
 		{
-			name:      "ParseError",
-			err:       &ParseError{Field: "test"},
-			isParseErr:   true,
+			name:            "ParseError",
+			err:             &ParseError{Field: "test"},
+			isParseErr:      true,
 			isValidationErr: false,
-			isConfigErr:  false,
+			isConfigErr:     false,
 		},
 		{
-			name:      "ValidationErrors",
-			err:       ValidationErrors{{Field: "test"}},
-			isParseErr:   false,
+			name:            "ValidationErrors",
+			err:             ValidationErrors{{Field: "test"}},
+			isParseErr:      false,
 			isValidationErr: true,
-			isConfigErr:  false,
+			isConfigErr:     false,
 		},
 		{
-			name:      "ConfigError",
-			err:       &ConfigError{Message: "test"},
-			isParseErr:   false,
+			name:            "ConfigError",
+			err:             &ConfigError{Message: "test"},
+			isParseErr:      false,
 			isValidationErr: false,
-			isConfigErr:  true,
+			isConfigErr:     true,
 		},
 		{
-			name:      "generic error",
-			err:       errors.New("generic"),
-			isParseErr:   false,
+			name:            "generic error",
+			err:             errors.New("generic"),
+			isParseErr:      false,
 			isValidationErr: false,
-			isConfigErr:  false,
+			isConfigErr:     false,
 		},
 	}
 

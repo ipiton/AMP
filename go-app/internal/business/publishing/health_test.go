@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TestHealthMonitor_Lifecycle tests Start/Stop operations.

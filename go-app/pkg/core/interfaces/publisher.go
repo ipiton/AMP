@@ -45,10 +45,10 @@ type PublishingTarget struct {
 	Filters []PublishingFilter // only publish if filters pass
 
 	// Metadata
-	Enabled    bool
-	CreatedAt  int64
-	UpdatedAt  int64
-	CreatedBy  string
+	Enabled   bool
+	CreatedAt int64
+	UpdatedAt int64
+	CreatedBy string
 }
 
 // PublishingFilter defines publishing conditions
@@ -112,7 +112,7 @@ type SlackConfig struct {
 	ThreadTTL       int // seconds to keep thread ID cached
 
 	// Formatting
-	UseBlockKit  bool // modern Block Kit vs legacy attachments
+	UseBlockKit  bool     // modern Block Kit vs legacy attachments
 	MentionUsers []string // @user mentions for critical alerts
 }
 
@@ -122,9 +122,9 @@ type PagerDutyConfig struct {
 	Severity       string // critical, error, warning, info
 
 	// Incident management
-	DedupKey        string // deduplication key
-	Links           []string // links to runbooks, dashboards
-	CustomDetails   map[string]interface{} // additional context
+	DedupKey      string                 // deduplication key
+	Links         []string               // links to runbooks, dashboards
+	CustomDetails map[string]interface{} // additional context
 
 	// Change Events
 	EnableChangeEvents bool // track deployments
@@ -144,8 +144,8 @@ type EmailConfig struct {
 	Subject string
 
 	// Formatting
-	UseHTML   bool // HTML vs plain text
-	Template  string // template name
+	UseHTML  bool   // HTML vs plain text
+	Template string // template name
 }
 
 // WebhookPublisher configuration (generic HTTP POST)
@@ -155,13 +155,13 @@ type WebhookConfig struct {
 	Headers map[string]string
 
 	// Authentication
-	AuthType string // none, basic, bearer, apikey
+	AuthType  string // none, basic, bearer, apikey
 	AuthToken string
 
 	// Retry
-	MaxRetries  int
-	RetryDelay  int // seconds
-	Timeout     int // seconds
+	MaxRetries int
+	RetryDelay int // seconds
+	Timeout    int // seconds
 
 	// TLS
 	SkipTLSVerify bool
@@ -224,12 +224,12 @@ type PublishingStats struct {
 
 // TargetStats per-target statistics
 type TargetStats struct {
-	Name      string
-	Type      string
-	Published int64
-	Failed    int64
-	AvgLatency float64 // milliseconds
-	LastPublished int64 // Unix timestamp
+	Name          string
+	Type          string
+	Published     int64
+	Failed        int64
+	AvgLatency    float64 // milliseconds
+	LastPublished int64   // Unix timestamp
 	LastError     string
 }
 

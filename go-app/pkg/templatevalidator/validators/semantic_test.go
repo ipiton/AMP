@@ -17,9 +17,9 @@ func TestSemanticValidator_ValidFields(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name     string
-		content  string
-		wantErr  bool
+		name    string
+		content string
+		wantErr bool
 	}{
 		{
 			name:    "Valid Status field",

@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // MockTargetDiscoveryManager is a mock implementation of TargetDiscoveryManager for testing.
@@ -61,9 +61,9 @@ type MockTargetDiscoveryManager struct {
 	ctxCancelCheck bool          // If true, check ctx.Done() before returning
 
 	// State (protected by mu)
-	discoverCalled int                    // Number of DiscoverTargets calls
-	lastCtx        context.Context        // Last context passed to DiscoverTargets
-	lastError      error                  // Last error returned
+	discoverCalled int             // Number of DiscoverTargets calls
+	lastCtx        context.Context // Last context passed to DiscoverTargets
+	lastError      error           // Last error returned
 	mu             sync.Mutex
 
 	// Errors to return (for error classification testing)

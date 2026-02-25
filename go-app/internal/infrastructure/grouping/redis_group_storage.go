@@ -29,8 +29,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/redis/go-redis/v9"
 )
 
 // RedisGroupStorage provides Redis-backed persistent storage for AlertGroup.

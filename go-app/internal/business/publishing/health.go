@@ -298,13 +298,13 @@ type HealthMonitor interface {
 // TargetHealthStatus represents health status of a publishing target.
 type TargetHealthStatus struct {
 	// Target Info
-	TargetName string `json:"target_name"`            // Target name (e.g., "rootly-prod")
-	TargetType string `json:"target_type"`            // Target type (rootly/pagerduty/slack/webhook)
-	Enabled    bool   `json:"enabled"`                // Is target enabled?
+	TargetName string `json:"target_name"` // Target name (e.g., "rootly-prod")
+	TargetType string `json:"target_type"` // Target type (rootly/pagerduty/slack/webhook)
+	Enabled    bool   `json:"enabled"`     // Is target enabled?
 
 	// Health Status
-	Status       HealthStatus `json:"status"`                 // Health status (healthy/unhealthy/degraded/unknown)
-	LatencyMs    *int64       `json:"latency_ms,omitempty"`   // Response time in ms (null if error)
+	Status       HealthStatus `json:"status"`                  // Health status (healthy/unhealthy/degraded/unknown)
+	LatencyMs    *int64       `json:"latency_ms,omitempty"`    // Response time in ms (null if error)
 	ErrorMessage *string      `json:"error_message,omitempty"` // Error details (null if healthy)
 
 	// Timestamps
@@ -384,11 +384,11 @@ type HealthCheckResult struct {
 	TargetURL  string `json:"target_url"`
 
 	// Check Result
-	Success      bool       `json:"success"`                  // Did check succeed?
-	LatencyMs    *int64     `json:"latency_ms,omitempty"`     // Response time (null if error)
-	StatusCode   *int       `json:"status_code,omitempty"`    // HTTP status code (null if TCP error)
-	ErrorMessage *string    `json:"error_message,omitempty"`  // Error details (null if success)
-	ErrorType    *ErrorType `json:"error_type,omitempty"`     // Error classification
+	Success      bool       `json:"success"`                 // Did check succeed?
+	LatencyMs    *int64     `json:"latency_ms,omitempty"`    // Response time (null if error)
+	StatusCode   *int       `json:"status_code,omitempty"`   // HTTP status code (null if TCP error)
+	ErrorMessage *string    `json:"error_message,omitempty"` // Error details (null if success)
+	ErrorType    *ErrorType `json:"error_type,omitempty"`    // Error classification
 
 	// Metadata
 	CheckedAt time.Time `json:"checked_at"` // When check was performed

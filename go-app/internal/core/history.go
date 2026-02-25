@@ -137,23 +137,23 @@ const (
 
 // AggregatedStats represents statistical aggregations
 type AggregatedStats struct {
-	TimeRange         *TimeRange         `json:"time_range"`
-	TotalAlerts       int64              `json:"total_alerts"`
-	FiringAlerts      int64              `json:"firing_alerts"`
-	ResolvedAlerts    int64              `json:"resolved_alerts"`
-	AlertsByStatus    map[string]int64   `json:"alerts_by_status"`
-	AlertsBySeverity  map[string]int64   `json:"alerts_by_severity"`
-	AlertsByNamespace map[string]int64   `json:"alerts_by_namespace"`
-	UniqueFingerprints int64             `json:"unique_fingerprints"`
-	AvgResolutionTime *time.Duration     `json:"avg_resolution_time,omitempty"`
-	Trends            *TrendData         `json:"trends,omitempty"`
+	TimeRange          *TimeRange       `json:"time_range"`
+	TotalAlerts        int64            `json:"total_alerts"`
+	FiringAlerts       int64            `json:"firing_alerts"`
+	ResolvedAlerts     int64            `json:"resolved_alerts"`
+	AlertsByStatus     map[string]int64 `json:"alerts_by_status"`
+	AlertsBySeverity   map[string]int64 `json:"alerts_by_severity"`
+	AlertsByNamespace  map[string]int64 `json:"alerts_by_namespace"`
+	UniqueFingerprints int64            `json:"unique_fingerprints"`
+	AvgResolutionTime  *time.Duration   `json:"avg_resolution_time,omitempty"`
+	Trends             *TrendData       `json:"trends,omitempty"`
 }
 
 // TrendData represents time-series trend data
 type TrendData struct {
-	Hourly  []*DataPoint `json:"hourly,omitempty"`
-	Daily   []*DataPoint `json:"daily,omitempty"`
-	Weekly  []*DataPoint `json:"weekly,omitempty"`
+	Hourly []*DataPoint `json:"hourly,omitempty"`
+	Daily  []*DataPoint `json:"daily,omitempty"`
+	Weekly []*DataPoint `json:"weekly,omitempty"`
 }
 
 // DataPoint represents a single data point in a time series
@@ -165,12 +165,12 @@ type DataPoint struct {
 
 // TopAlert represents an alert with frequency statistics
 type TopAlert struct {
-	Fingerprint   string    `json:"fingerprint"`
-	AlertName     string    `json:"alert_name"`
-	Namespace     *string   `json:"namespace,omitempty"`
-	FireCount     int64     `json:"fire_count"`
-	LastFiredAt   time.Time `json:"last_fired_at"`
-	AvgDuration   *float64  `json:"avg_duration,omitempty"`
+	Fingerprint string    `json:"fingerprint"`
+	AlertName   string    `json:"alert_name"`
+	Namespace   *string   `json:"namespace,omitempty"`
+	FireCount   int64     `json:"fire_count"`
+	LastFiredAt time.Time `json:"last_fired_at"`
+	AvgDuration *float64  `json:"avg_duration,omitempty"`
 }
 
 // FlappingAlert represents an alert that frequently changes state
@@ -199,11 +199,11 @@ type ReportRequest struct {
 
 // ReportResponse represents the complete analytics report
 type ReportResponse struct {
-	Metadata       *ReportMetadata    `json:"metadata"`
-	Summary        *AggregatedStats   `json:"summary"`
-	TopAlerts      []*TopAlert        `json:"top_alerts"`
-	FlappingAlerts []*FlappingAlert   `json:"flapping_alerts"`
-	RecentAlerts   []*Alert           `json:"recent_alerts,omitempty"`
+	Metadata       *ReportMetadata  `json:"metadata"`
+	Summary        *AggregatedStats `json:"summary"`
+	TopAlerts      []*TopAlert      `json:"top_alerts"`
+	FlappingAlerts []*FlappingAlert `json:"flapping_alerts"`
+	RecentAlerts   []*Alert         `json:"recent_alerts,omitempty"`
 }
 
 // ReportMetadata contains report generation metadata

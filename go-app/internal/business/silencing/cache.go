@@ -324,7 +324,7 @@ func (c *silenceCache) Stats() CacheStats {
 //	    log.Warn("Cache sync is stale", "last_sync", stats.LastSync)
 //	}
 type CacheStats struct {
-	Size     int                                 // Number of silences in cache
-	LastSync time.Time                           // Last cache rebuild time
-	ByStatus map[silencing.SilenceStatus]int     // Count by status
+	Size     int                             // Number of silences in cache
+	LastSync time.Time                       // Last cache rebuild time
+	ByStatus map[silencing.SilenceStatus]int // Count by status
 }

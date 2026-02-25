@@ -246,11 +246,11 @@ func TestModernDashboardData_StructValidation(t *testing.T) {
 		{
 			name: "Empty recent alerts (valid)",
 			data: &ModernDashboardData{
-				FiringAlerts:    0,
-				ResolvedAlerts:  0,
-				ActiveSilences:  0,
-				InhibitedAlerts: 0,
-				RecentAlerts:     []AlertSummary{},
+				FiringAlerts:       0,
+				ResolvedAlerts:     0,
+				ActiveSilences:     0,
+				InhibitedAlerts:    0,
+				RecentAlerts:       []AlertSummary{},
 				ActiveSilencesList: []SilenceSummary{},
 				Health: &HealthStatus{
 					Overall:    "healthy",

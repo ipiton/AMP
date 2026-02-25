@@ -276,8 +276,9 @@ func (v *SyntaxValidator) extractVariables(content string) []string {
 // Checks:
 // 1. html/template functions (we use text/template)
 // 2. Type-specific missing variables:
-//    - Slack: should reference .Status or .Labels
-//    - Email: should reference .Annotations
+//   - Slack: should reference .Status or .Labels
+//   - Email: should reference .Annotations
+//
 // 3. Very long lines (>200 chars)
 //
 // Returns warnings for each issue found.

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // FormatterMetrics holds all Prometheus metrics for alert formatting
@@ -36,16 +36,17 @@ type FormatterMetrics struct {
 // NewFormatterMetrics creates and registers all formatter metrics
 //
 // Metrics:
-//   1. format_duration_seconds - Histogram (format, status)
-//   2. format_total - Counter (format, status)
-//   3. format_errors_total - Counter (format, error_type)
-//   4. cache_hits_total - Counter (format)
-//   5. cache_misses_total - Counter (format)
-//   6. validation_failures_total - Counter (rule)
-//   7. format_bytes - Histogram (format)
+//  1. format_duration_seconds - Histogram (format, status)
+//  2. format_total - Counter (format, status)
+//  3. format_errors_total - Counter (format, error_type)
+//  4. cache_hits_total - Counter (format)
+//  5. cache_misses_total - Counter (format)
+//  6. validation_failures_total - Counter (rule)
+//  7. format_bytes - Histogram (format)
 //
 // Returns:
-//   *FormatterMetrics: Registered metrics
+//
+//	*FormatterMetrics: Registered metrics
 func NewFormatterMetrics(namespace, subsystem string) *FormatterMetrics {
 	return &FormatterMetrics{
 		FormatDuration: promauto.NewHistogramVec(

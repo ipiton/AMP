@@ -70,11 +70,11 @@ type DefaultHealthMonitor struct {
 // NewHealthMonitor creates DefaultHealthMonitor.
 //
 // This function:
-//   1. Validates dependencies (discoveryMgr not nil)
-//   2. Creates HTTP client with timeout & connection pooling
-//   3. Initializes status cache
-//   4. Creates Prometheus metrics
-//   5. Returns DefaultHealthMonitor instance
+//  1. Validates dependencies (discoveryMgr not nil)
+//  2. Creates HTTP client with timeout & connection pooling
+//  3. Initializes status cache
+//  4. Creates Prometheus metrics
+//  5. Returns DefaultHealthMonitor instance
 //
 // Parameters:
 //   - discoveryMgr: Target discovery manager (required)
@@ -292,11 +292,11 @@ func (m *DefaultHealthMonitor) GetStats(ctx context.Context) (*HealthStats, erro
 // runHealthCheckWorker is background goroutine for periodic checks.
 //
 // This worker:
-//   1. Waits warmup period (10s)
-//   2. Performs initial health check
-//   3. Enters periodic loop (ticker 2m)
-//   4. Checks all enabled targets in parallel
-//   5. Continues until context cancelled
+//  1. Waits warmup period (10s)
+//  2. Performs initial health check
+//  3. Enters periodic loop (ticker 2m)
+//  4. Checks all enabled targets in parallel
+//  5. Continues until context cancelled
 func (m *DefaultHealthMonitor) runHealthCheckWorker(ctx context.Context) {
 	defer m.wg.Done()
 

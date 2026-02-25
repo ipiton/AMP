@@ -48,8 +48,8 @@ type ClassificationResult struct {
 	ModelVersion   string // model/rule version used
 
 	// Cost tracking (for API-based classifiers like LLM)
-	TokensUsed    int     // for API-based classifiers
-	CostUSD       float64 // estimated API cost
+	TokensUsed int     // for API-based classifiers
+	CostUSD    float64 // estimated API cost
 }
 
 // ClassifierConfig holds classifier configuration
@@ -164,8 +164,8 @@ type LLMConfig struct {
 	Provider string // "openai", "anthropic", "azure-openai", "custom"
 
 	// API credentials (user-provided)
-	APIKey  string
-	APIURL  string // custom endpoint (optional)
+	APIKey string
+	APIURL string // custom endpoint (optional)
 
 	// Model configuration
 	Model       string  // "gpt-4", "claude-3", etc.

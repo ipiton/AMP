@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestDefaultAlertValidator_ValidAlert tests valid alert passes all rules
@@ -308,9 +308,9 @@ func TestStartsAtReasonableRule(t *testing.T) {
 	rule := &StartsAtReasonableRule{}
 
 	testCases := []struct {
-		name      string
-		startsAt  time.Time
-		isValid   bool
+		name     string
+		startsAt time.Time
+		isValid  bool
 	}{
 		{"now", time.Now(), true},
 		{"1 hour ago", time.Now().Add(-1 * time.Hour), true},
@@ -466,12 +466,12 @@ func TestDefaultAlertValidator_MultipleErrors(t *testing.T) {
 	// Create alert with multiple errors
 	alert := &core.EnrichedAlert{
 		Alert: &core.Alert{
-			Fingerprint: "", // Empty fingerprint
-			AlertName:   "", // Empty alert name
+			Fingerprint: "",                          // Empty fingerprint
+			AlertName:   "",                          // Empty alert name
 			Status:      core.AlertStatus("invalid"), // Invalid status
-			StartsAt:    time.Time{}, // Zero time
-			Labels:      nil, // Nil labels
-			Annotations: nil, // Nil annotations
+			StartsAt:    time.Time{},                 // Zero time
+			Labels:      nil,                         // Nil labels
+			Annotations: nil,                         // Nil annotations
 		},
 	}
 
