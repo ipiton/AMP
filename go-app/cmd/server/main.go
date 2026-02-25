@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,13 @@ import (
 const (
 	appName    = "Alertmanager++"
 	appVersion = "0.0.1"
+)
+
+var (
+	buildRevision = "unknown"
+	buildBranch   = "unknown"
+	buildUser     = "unknown"
+	buildDate     = "unknown"
 )
 
 //go:embed templates/*
@@ -992,16 +1000,23 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"cluster": map[string]string{
+			"cluster": map[string]any{
+				"name":   appName,
 				"status": "ready",
+				"peers":  []map[string]string{},
 			},
 			"versionInfo": map[string]string{
-				"version": appVersion,
+				"version":   appVersion,
+				"revision":  buildRevision,
+				"branch":    buildBranch,
+				"buildUser": buildUser,
+				"buildDate": buildDate,
+				"goVersion": runtime.Version(),
 			},
 			"config": map[string]string{
 				"original": "",
 			},
-			"uptime": now.Sub(statusCtx.startedAt).String(),
+			"uptime": statusCtx.startedAt.Format(time.RFC3339),
 			"stats": map[string]any{
 				"alerts": map[string]int{
 					"total":    alertTotal,
