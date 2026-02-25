@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -233,17 +234,18 @@ func webTemplateFuncMap() template.FuncMap {
 
 // registerRoutes configures all active HTTP routes for the current runtime.
 func registerRoutes(mux *http.ServeMux) {
+	configPath := resolveRuntimeConfigPath()
 	alertStore := newAlertStore()
 	silenceStore := newSilenceStore()
-	inhibitionEngine := loadRuntimeInhibitionEngine(resolveRuntimeConfigPath())
-	receiverCatalog := loadRuntimeReceiverCatalog(resolveRuntimeConfigPath())
+	inhibitionEngine := loadRuntimeInhibitionEngine(configPath)
+	receiverCatalog := loadRuntimeReceiverCatalog(configPath)
 	setupRuntimeStatePersistence(alertStore, silenceStore)
 	persistencePath := resolveRuntimeStatePath()
-	statusCtx := runtimeStatusContext{
+	statusCtx := &runtimeStatusContext{
 		startedAt:          time.Now().UTC(),
 		persistenceEnabled: persistencePath != "",
 		persistencePath:    persistencePath,
-		configOriginal:     readRuntimeConfigOriginal(),
+		configOriginal:     readRuntimeConfigOriginalAt(configPath),
 	}
 
 	// Static files
@@ -271,7 +273,7 @@ func registerRoutes(mux *http.ServeMux) {
 	// Alertmanager-compatible probe endpoints
 	mux.HandleFunc("/-/healthy", alertmanagerHealthyHandler)
 	mux.HandleFunc("/-/ready", alertmanagerReadyHandler)
-	mux.HandleFunc("/-/reload", alertmanagerReloadHandler)
+	mux.HandleFunc("/-/reload", alertmanagerReloadHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/debug/", debugCompatHandler)
 
 	// Metrics endpoint
@@ -312,6 +314,7 @@ type PageData struct {
 }
 
 type runtimeStatusContext struct {
+	mu                 sync.RWMutex
 	startedAt          time.Time
 	persistenceEnabled bool
 	persistencePath    string
@@ -319,10 +322,12 @@ type runtimeStatusContext struct {
 }
 
 type runtimeInhibitionEngine struct {
+	mu    sync.RWMutex
 	rules []inhibition.InhibitionRule
 }
 
 type runtimeReceiverCatalog struct {
+	mu         sync.RWMutex
 	configured []string
 }
 
@@ -373,6 +378,66 @@ type apiGettableAlertGroup struct {
 
 type apiReceiver struct {
 	Name string `json:"name"`
+}
+
+func (c *runtimeStatusContext) getConfigOriginal() string {
+	if c == nil {
+		return ""
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.configOriginal
+}
+
+func (c *runtimeStatusContext) setConfigOriginal(configOriginal string) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.configOriginal = configOriginal
+	c.mu.Unlock()
+}
+
+func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
+	if e == nil {
+		return nil
+	}
+
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return append([]inhibition.InhibitionRule(nil), e.rules...)
+}
+
+func (e *runtimeInhibitionEngine) setRules(rules []inhibition.InhibitionRule) {
+	if e == nil {
+		return
+	}
+
+	e.mu.Lock()
+	e.rules = append([]inhibition.InhibitionRule(nil), rules...)
+	e.mu.Unlock()
+}
+
+func (c *runtimeReceiverCatalog) getConfigured() []string {
+	if c == nil {
+		return nil
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]string(nil), c.configured...)
+}
+
+func (c *runtimeReceiverCatalog) setConfigured(configured []string) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.configured = append([]string(nil), configured...)
+	c.mu.Unlock()
 }
 
 // Dashboard handlers
@@ -541,7 +606,7 @@ func renderTemplateError(w http.ResponseWriter, message string) {
 func dashboardOverviewAPI(
 	alertStore *alertStore,
 	silenceStore *silenceStore,
-	statusCtx runtimeStatusContext,
+	statusCtx *runtimeStatusContext,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -649,16 +714,35 @@ func alertmanagerReadyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func alertmanagerReloadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+func alertmanagerReloadHandler(
+	configPath string,
+	statusCtx *runtimeStatusContext,
+	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "reloaded",
-		"mode":   "noop",
-	})
+		reloadedInhibition := loadRuntimeInhibitionEngine(configPath)
+		reloadedReceivers := loadRuntimeReceiverCatalog(configPath)
+		if inhibitions != nil && reloadedInhibition != nil {
+			inhibitions.setRules(reloadedInhibition.getRules())
+		}
+		if receivers != nil && reloadedReceivers != nil {
+			receivers.setConfigured(reloadedReceivers.getConfigured())
+		}
+		if statusCtx != nil {
+			statusCtx.setConfigOriginal(readRuntimeConfigOriginalAt(configPath))
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status": "reloaded",
+			"mode":   "runtime",
+		})
+	}
 }
 
 func debugCompatHandler(w http.ResponseWriter, r *http.Request) {
@@ -955,7 +1039,7 @@ func receiversHandler(store *alertStore, catalog *runtimeReceiverCatalog) http.H
 			"default": {},
 		}
 		if catalog != nil {
-			for _, name := range catalog.configured {
+			for _, name := range catalog.getConfigured() {
 				trimmed := strings.TrimSpace(name)
 				if trimmed == "" {
 					continue
@@ -1076,7 +1160,7 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *
 	}
 }
 
-func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx runtimeStatusContext) http.HandlerFunc {
+func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx *runtimeStatusContext) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1102,7 +1186,7 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 				"goVersion": runtime.Version(),
 			},
 			"config": map[string]string{
-				"original": statusCtx.configOriginal,
+				"original": statusCtx.getConfigOriginal(),
 			},
 			"uptime": statusCtx.startedAt.Format(time.RFC3339),
 			"stats": map[string]any{
@@ -1733,6 +1817,7 @@ func buildAlertInhibitedByIndex(
 	if len(allAlerts) == 0 {
 		return index
 	}
+	rules := engine.getRules()
 
 	sources := make([]*core.Alert, 0, len(allAlerts))
 	for i := range allAlerts {
@@ -1747,11 +1832,11 @@ func buildAlertInhibitedByIndex(
 		sources = append(sources, toCoreAlert(allAlerts[i]))
 	}
 
-	if engine == nil || len(engine.rules) == 0 || len(sources) == 0 {
+	if len(rules) == 0 || len(sources) == 0 {
 		return index
 	}
 
-	matcher := inhibition.NewMatcher(nil, engine.rules, nil)
+	matcher := inhibition.NewMatcher(nil, rules, nil)
 	for i := range allAlerts {
 		target := allAlerts[i]
 		if target.Status != "firing" {
@@ -1770,8 +1855,8 @@ func buildAlertInhibitedByIndex(
 				continue
 			}
 
-			for ruleIdx := range engine.rules {
-				rule := &engine.rules[ruleIdx]
+			for ruleIdx := range rules {
+				rule := &rules[ruleIdx]
 				if matcher.MatchRule(rule, source, targetCore) {
 					acc = append(acc, source.Fingerprint)
 					break
@@ -1853,7 +1938,11 @@ func resolveRuntimeConfigPath() string {
 }
 
 func readRuntimeConfigOriginal() string {
-	content, err := os.ReadFile(resolveRuntimeConfigPath())
+	return readRuntimeConfigOriginalAt(resolveRuntimeConfigPath())
+}
+
+func readRuntimeConfigOriginalAt(configPath string) string {
+	content, err := os.ReadFile(configPath)
 	if err != nil {
 		return ""
 	}
@@ -1861,9 +1950,7 @@ func readRuntimeConfigOriginal() string {
 }
 
 func loadRuntimeInhibitionEngine(configPath string) *runtimeInhibitionEngine {
-	engine := &runtimeInhibitionEngine{
-		rules: make([]inhibition.InhibitionRule, 0),
-	}
+	engine := &runtimeInhibitionEngine{}
 
 	parser := inhibition.NewParser()
 	cfg, err := parser.ParseFile(configPath)
@@ -1879,9 +1966,10 @@ func loadRuntimeInhibitionEngine(configPath string) *runtimeInhibitionEngine {
 		return engine
 	}
 
-	engine.rules = append(engine.rules, cfg.Rules...)
+	engine.setRules(cfg.Rules)
+	loadedRules := engine.getRules()
 	slog.Info("Loaded runtime inhibition rules",
-		"count", len(engine.rules),
+		"count", len(loadedRules),
 		"config", configPath,
 	)
 	return engine
@@ -1897,9 +1985,7 @@ func isNoInhibitionRulesError(err error) bool {
 }
 
 func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
-	catalog := &runtimeReceiverCatalog{
-		configured: []string{},
-	}
+	catalog := &runtimeReceiverCatalog{}
 
 	content, err := os.ReadFile(configPath)
 	if err != nil {
@@ -1931,15 +2017,16 @@ func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
 		receiversSet[name] = struct{}{}
 	}
 
-	catalog.configured = make([]string, 0, len(receiversSet))
+	configured := make([]string, 0, len(receiversSet))
 	for name := range receiversSet {
-		catalog.configured = append(catalog.configured, name)
+		configured = append(configured, name)
 	}
-	sort.Strings(catalog.configured)
+	sort.Strings(configured)
+	catalog.setConfigured(configured)
 
-	if len(catalog.configured) > 0 {
+	if len(configured) > 0 {
 		slog.Info("Loaded runtime receivers from config",
-			"count", len(catalog.configured),
+			"count", len(configured),
 			"config", configPath,
 		)
 	}
