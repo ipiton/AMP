@@ -50,7 +50,7 @@ type storedSilence struct {
 type apiSilenceMatcher struct {
 	Name    string `json:"name"`
 	Value   string `json:"value"`
-	IsRegex bool   `json:"isRegex,omitempty"`
+	IsRegex bool   `json:"isRegex"`
 	IsEqual bool   `json:"isEqual"`
 }
 
