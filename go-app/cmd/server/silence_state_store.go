@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -73,6 +74,8 @@ type silenceStore struct {
 	onChange func()
 }
 
+var errSilenceNotFound = errors.New("silence not found")
+
 func newSilenceStore() *silenceStore {
 	return &silenceStore{
 		silences: make(map[string]*storedSilence),
@@ -80,20 +83,27 @@ func newSilenceStore() *silenceStore {
 }
 
 func (s *silenceStore) createOrUpdate(in *silenceInput, now time.Time) (string, error) {
-	return s.createOrUpdateInternal(in, now, true)
+	return s.createOrUpdateInternal(in, now, true, true)
 }
 
-func (s *silenceStore) createOrUpdateInternal(in *silenceInput, now time.Time, notify bool) (string, error) {
+func (s *silenceStore) createOrUpdateInternal(in *silenceInput, now time.Time, notify, enforceExistingID bool) (string, error) {
 	if in == nil {
 		return "", fmt.Errorf("silence payload is required")
 	}
 
+	updateRequested := strings.TrimSpace(in.ID) != ""
 	normalized, err := normalizeSilenceInput(in, now)
 	if err != nil {
 		return "", err
 	}
 
 	s.mu.Lock()
+	if enforceExistingID && updateRequested {
+		if _, ok := s.silences[normalized.ID]; !ok {
+			s.mu.Unlock()
+			return "", errSilenceNotFound
+		}
+	}
 	s.silences[normalized.ID] = normalized
 	s.mu.Unlock()
 
@@ -203,7 +213,7 @@ func (s *silenceStore) restoreFromPersistence(items []apiSilence, now time.Time)
 			CreatedBy: item.CreatedBy,
 			Comment:   item.Comment,
 		}
-		if _, err := s.createOrUpdateInternal(in, now, false); err != nil {
+		if _, err := s.createOrUpdateInternal(in, now, false, false); err != nil {
 			return fmt.Errorf("persisted silence[%d]: %w", i, err)
 		}
 	}
