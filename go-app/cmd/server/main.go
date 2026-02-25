@@ -236,6 +236,7 @@ func registerRoutes(mux *http.ServeMux) {
 		startedAt:          time.Now().UTC(),
 		persistenceEnabled: persistencePath != "",
 		persistencePath:    persistencePath,
+		configOriginal:     readRuntimeConfigOriginal(),
 	}
 
 	// Static files
@@ -307,6 +308,7 @@ type runtimeStatusContext struct {
 	startedAt          time.Time
 	persistenceEnabled bool
 	persistencePath    string
+	configOriginal     string
 }
 
 type apiAlertStatus struct {
@@ -1049,7 +1051,7 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 				"goVersion": runtime.Version(),
 			},
 			"config": map[string]string{
-				"original": "",
+				"original": statusCtx.configOriginal,
 			},
 			"uptime": statusCtx.startedAt.Format(time.RFC3339),
 			"stats": map[string]any{
@@ -1584,6 +1586,14 @@ func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {
 	}
 
 	return value, nil
+}
+
+func readRuntimeConfigOriginal() string {
+	content, err := os.ReadFile("config.yaml")
+	if err != nil {
+		return ""
+	}
+	return string(content)
 }
 
 func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
