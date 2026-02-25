@@ -757,7 +757,17 @@ func silencesHandler(store *silenceStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, store.list(time.Now().UTC()))
+			labelMatchers, err := parseAlertLabelMatchers(r)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": err.Error(),
+				})
+				return
+			}
+
+			silences := store.list(time.Now().UTC())
+			silences = filterSilencesByLabelMatchers(silences, labelMatchers)
+			writeJSON(w, http.StatusOK, silences)
 		case http.MethodPost:
 			handleSilencePost(store, w, r)
 		default:
@@ -1242,6 +1252,20 @@ func filterAlertsByLabelMatchers(in []apiAlert, matchers []*cfgmatcher.Matcher) 
 	return out
 }
 
+func filterSilencesByLabelMatchers(in []apiSilence, matchers []*cfgmatcher.Matcher) []apiSilence {
+	if len(in) == 0 || len(matchers) == 0 {
+		return in
+	}
+
+	out := make([]apiSilence, 0, len(in))
+	for i := range in {
+		if silenceMatchesLabelMatchers(in[i], matchers) {
+			out = append(out, in[i])
+		}
+	}
+	return out
+}
+
 func alertMatchesLabelMatchers(alert apiAlert, matchers []*cfgmatcher.Matcher) bool {
 	for _, matcher := range matchers {
 		labelValue, labelExists := alert.Labels[matcher.Label]
@@ -1268,6 +1292,46 @@ func alertMatchesLabelMatchers(alert apiAlert, matchers []*cfgmatcher.Matcher) b
 		}
 	}
 	return true
+}
+
+func silenceMatchesLabelMatchers(silence apiSilence, matchers []*cfgmatcher.Matcher) bool {
+	for _, filterMatcher := range matchers {
+		matched := false
+		for _, silenceMatcher := range silence.Matchers {
+			if !silenceMatcherMatchesFilter(silenceMatcher, filterMatcher) {
+				continue
+			}
+			matched = true
+			break
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func silenceMatcherMatchesFilter(silenceMatcher apiSilenceMatcher, filterMatcher *cfgmatcher.Matcher) bool {
+	if silenceMatcher.Name != filterMatcher.Label {
+		return false
+	}
+	if silenceMatcherType(silenceMatcher) != filterMatcher.Type {
+		return false
+	}
+	return silenceMatcher.Value == filterMatcher.Value
+}
+
+func silenceMatcherType(m apiSilenceMatcher) cfgmatcher.MatcherType {
+	if m.IsRegex {
+		if m.IsEqual {
+			return cfgmatcher.MatchRegexp
+		}
+		return cfgmatcher.MatchNotRegexp
+	}
+	if m.IsEqual {
+		return cfgmatcher.MatchEqual
+	}
+	return cfgmatcher.MatchNotEqual
 }
 
 func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error) {
