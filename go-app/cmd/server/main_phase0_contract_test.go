@@ -1161,6 +1161,21 @@ func TestPhase0AlertsResponseShapeIncludesReceiversAndUpdatedAt(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, updatedAt); err != nil {
 		t.Fatalf("alert updatedAt expected RFC3339 timestamp, got %q: %v", updatedAt, err)
 	}
+	endsAt, ok := alerts[0]["endsAt"].(string)
+	if !ok || strings.TrimSpace(endsAt) == "" {
+		t.Fatalf("alert endsAt expected non-empty string, got %v", alerts[0]["endsAt"])
+	}
+	if _, err := time.Parse(time.RFC3339, endsAt); err != nil {
+		t.Fatalf("alert endsAt expected RFC3339 timestamp, got %q: %v", endsAt, err)
+	}
+
+	annotations, ok := alerts[0]["annotations"].(map[string]any)
+	if !ok {
+		t.Fatalf("alert annotations expected object, got %T", alerts[0]["annotations"])
+	}
+	if annotations == nil {
+		t.Fatalf("alert annotations must not be nil")
+	}
 
 	receivers, ok := alerts[0]["receivers"].([]any)
 	if !ok {

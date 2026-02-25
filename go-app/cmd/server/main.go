@@ -318,13 +318,13 @@ type apiAlertStatus struct {
 
 type apiGettableAlert struct {
 	Labels       map[string]string `json:"labels"`
-	Annotations  map[string]string `json:"annotations,omitempty"`
-	Receivers    []apiReceiver     `json:"receivers,omitempty"`
+	Annotations  map[string]string `json:"annotations"`
+	Receivers    []apiReceiver     `json:"receivers"`
 	StartsAt     string            `json:"startsAt"`
-	UpdatedAt    string            `json:"updatedAt,omitempty"`
-	EndsAt       *string           `json:"endsAt,omitempty"`
+	UpdatedAt    string            `json:"updatedAt"`
+	EndsAt       string            `json:"endsAt"`
 	GeneratorURL string            `json:"generatorURL,omitempty"`
-	Fingerprint  string            `json:"fingerprint,omitempty"`
+	Fingerprint  string            `json:"fingerprint"`
 	Status       apiAlertStatus    `json:"status"`
 }
 
@@ -1341,13 +1341,23 @@ func toGettableAlert(alert apiAlert, silences *silenceStore, now time.Time) apiG
 		}
 	}
 
+	endsAt := alert.UpdatedAt
+	if alert.EndsAt != nil && strings.TrimSpace(*alert.EndsAt) != "" {
+		endsAt = *alert.EndsAt
+	}
+
+	annotations := cloneStringMap(alert.Annotations)
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
 	return apiGettableAlert{
 		Labels:       cloneStringMap(alert.Labels),
-		Annotations:  cloneStringMap(alert.Annotations),
+		Annotations:  annotations,
 		Receivers:    append([]apiReceiver(nil), alert.Receivers...),
 		StartsAt:     alert.StartsAt,
 		UpdatedAt:    alert.UpdatedAt,
-		EndsAt:       cloneStringPtr(alert.EndsAt),
+		EndsAt:       endsAt,
 		GeneratorURL: alert.GeneratorURL,
 		Fingerprint:  alert.Fingerprint,
 		Status: apiAlertStatus{
@@ -1549,14 +1559,6 @@ func alertReceiverName(alert apiAlert) string {
 		return "default"
 	}
 	return receiver
-}
-
-func cloneStringPtr(in *string) *string {
-	if in == nil {
-		return nil
-	}
-	v := *in
-	return &v
 }
 
 func copyStringSlice(in []string) []string {
