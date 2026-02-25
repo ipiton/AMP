@@ -564,6 +564,23 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("silences post invalid matcher name contract", func(t *testing.T) {
+		payload := `{
+			"matchers": [{"name":"123bad","value":"value","isRegex":false}],
+			"startsAt": "2099-01-01T00:00:00Z",
+			"endsAt": "2099-01-01T01:00:00Z",
+			"createdBy": "phase0-test",
+			"comment": "invalid matcher name"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/silences with invalid matcher name expected 400, got %d", rec.Code)
+		}
+	})
+
 	t.Run("silences post endsAt in past contract", func(t *testing.T) {
 		now := time.Now().UTC()
 		payload := fmt.Sprintf(`{

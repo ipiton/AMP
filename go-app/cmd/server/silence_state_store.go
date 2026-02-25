@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	prommodel "github.com/prometheus/common/model"
 )
 
 type silenceMatcherInput struct {
@@ -391,6 +392,9 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 		if name == "" {
 			return nil, fmt.Errorf("matcher[%d].name is required", i)
 		}
+		if !prommodel.LabelName(name).IsValidLegacy() {
+			return nil, fmt.Errorf("matcher[%d].name is invalid", i)
+		}
 
 		isEqual := true
 		if matcher.IsEqual != nil {
@@ -401,6 +405,8 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 			if _, err := regexp.Compile(value); err != nil {
 				return nil, fmt.Errorf("matcher[%d].value has invalid regex", i)
 			}
+		} else if !prommodel.LabelValue(value).IsValid() {
+			return nil, fmt.Errorf("matcher[%d].value is invalid", i)
 		}
 
 		matchers = append(matchers, storedSilenceMatcher{
