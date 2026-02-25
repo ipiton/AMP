@@ -25,6 +25,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/ipiton/AMP/internal/config"
+	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	cfgmatcher "github.com/ipiton/AMP/pkg/configvalidator/matcher"
 	"github.com/ipiton/AMP/pkg/metrics"
 	"github.com/ipiton/AMP/pkg/middleware"
@@ -34,6 +36,8 @@ const (
 	appName    = "Alertmanager++"
 	appVersion = "0.0.1"
 )
+
+const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
 
 var (
 	buildRevision = "unknown"
@@ -63,7 +67,7 @@ func main() {
 	)
 
 	// Load configuration
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.LoadConfig(resolveRuntimeConfigPath())
 	if err != nil {
 		slog.Warn("Config file not found, using defaults", "error", err)
 		cfg = &config.Config{
@@ -230,6 +234,7 @@ func webTemplateFuncMap() template.FuncMap {
 func registerRoutes(mux *http.ServeMux) {
 	alertStore := newAlertStore()
 	silenceStore := newSilenceStore()
+	inhibitionEngine := loadRuntimeInhibitionEngine(resolveRuntimeConfigPath())
 	setupRuntimeStatePersistence(alertStore, silenceStore)
 	persistencePath := resolveRuntimeStatePath()
 	statusCtx := runtimeStatusContext{
@@ -271,10 +276,10 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// API endpoints
-	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore))
+	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore, inhibitionEngine))
 	// Alertmanager v1 compatibility ingest endpoint (intentionally limited)
-	mux.HandleFunc("/api/v1/alerts", alertsV1Handler(alertStore, silenceStore))
-	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore))
+	mux.HandleFunc("/api/v1/alerts", alertsV1Handler(alertStore, silenceStore, inhibitionEngine))
+	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine))
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore))
@@ -309,6 +314,10 @@ type runtimeStatusContext struct {
 	persistenceEnabled bool
 	persistencePath    string
 	configOriginal     string
+}
+
+type runtimeInhibitionEngine struct {
+	rules []inhibition.InhibitionRule
 }
 
 type apiAlertStatus struct {
@@ -645,30 +654,36 @@ func debugCompatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // API handlers
-func alertsV1Handler(store *alertStore, silences *silenceStore) http.HandlerFunc {
+func alertsV1Handler(store *alertStore, silences *silenceStore, inhibitions *runtimeInhibitionEngine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		handleAlertsPost(store, silences, w, r)
+		handleAlertsPost(store, silences, inhibitions, w, r)
 	}
 }
 
-func alertsHandler(store *alertStore, silences *silenceStore) http.HandlerFunc {
+func alertsHandler(store *alertStore, silences *silenceStore, inhibitions *runtimeInhibitionEngine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handleAlertsGet(store, silences, w, r)
+			handleAlertsGet(store, silences, inhibitions, w, r)
 		case http.MethodPost:
-			handleAlertsPost(store, silences, w, r)
+			handleAlertsPost(store, silences, inhibitions, w, r)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	}
 }
 
-func handleAlertsGet(store *alertStore, silences *silenceStore, w http.ResponseWriter, r *http.Request) {
+func handleAlertsGet(
+	store *alertStore,
+	silences *silenceStore,
+	inhibitions *runtimeInhibitionEngine,
+	w http.ResponseWriter,
+	r *http.Request,
+) {
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
 	switch status {
 	case "", "firing", "resolved":
@@ -714,6 +729,8 @@ func handleAlertsGet(store *alertStore, silences *silenceStore, w http.ResponseW
 	}
 
 	now := time.Now().UTC()
+	allAlerts := store.list("", true)
+	inhibitedByIndex := buildAlertInhibitedByIndex(inhibitions, allAlerts)
 	alerts := store.list(status, includeResolved)
 	if receiverRegex != nil {
 		filtered := make([]apiAlert, 0, len(alerts))
@@ -725,12 +742,18 @@ func handleAlertsGet(store *alertStore, silences *silenceStore, w http.ResponseW
 		alerts = filtered
 	}
 	alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
-	alerts = filterAlertsByStateFilters(alerts, stateFilters, silences, now)
+	alerts = filterAlertsByStateFilters(alerts, stateFilters, silences, now, inhibitedByIndex)
 
-	writeJSON(w, http.StatusOK, toGettableAlerts(alerts, silences, now))
+	writeJSON(w, http.StatusOK, toGettableAlerts(alerts, silences, now, inhibitedByIndex))
 }
 
-func handleAlertsPost(store *alertStore, silences *silenceStore, w http.ResponseWriter, r *http.Request) {
+func handleAlertsPost(
+	store *alertStore,
+	silences *silenceStore,
+	_ *runtimeInhibitionEngine,
+	w http.ResponseWriter,
+	r *http.Request,
+) {
 	defer r.Body.Close()
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10*1024*1024))
@@ -931,7 +954,7 @@ func receiversHandler(store *alertStore) http.HandlerFunc {
 	}
 }
 
-func alertGroupsHandler(store *alertStore, silences *silenceStore) http.HandlerFunc {
+func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *runtimeInhibitionEngine) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -970,9 +993,11 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore) http.HandlerF
 		}
 
 		now := time.Now().UTC()
+		allAlerts := store.list("", true)
+		inhibitedByIndex := buildAlertInhibitedByIndex(inhibitions, allAlerts)
 		alerts := store.list("", includeResolved)
 		alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
-		alerts = filterAlertsByGroupStateFilters(alerts, stateFilters, silences, now)
+		alerts = filterAlertsByGroupStateFilters(alerts, stateFilters, silences, now, inhibitedByIndex)
 
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
@@ -1001,7 +1026,7 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore) http.HandlerF
 
 		groups := make([]apiAlertGroup, 0, len(groupsMap))
 		for _, group := range groupsMap {
-			if !stateFilters.muted && isMutedAlertGroup(group, silences, now) {
+			if !stateFilters.muted && isMutedAlertGroup(group, silences, now, inhibitedByIndex) {
 				continue
 			}
 			groups = append(groups, *group)
@@ -1017,7 +1042,7 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore) http.HandlerF
 			responseGroups = append(responseGroups, apiGettableAlertGroup{
 				Labels:   cloneStringMap(group.Labels),
 				Receiver: group.Receiver,
-				Alerts:   toGettableAlerts(group.Alerts, silences, now),
+				Alerts:   toGettableAlerts(group.Alerts, silences, now, inhibitedByIndex),
 			})
 		}
 
@@ -1281,7 +1306,13 @@ func parseAlertsStateFilters(r *http.Request) (alertsStateFilters, error) {
 	}, nil
 }
 
-func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters, silences *silenceStore, now time.Time) []apiAlert {
+func filterAlertsByStateFilters(
+	in []apiAlert,
+	f alertsStateFilters,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) []apiAlert {
 	if len(in) == 0 {
 		return in
 	}
@@ -1290,7 +1321,7 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters, silences *s
 	for i := range in {
 		alert := in[i]
 
-		state := alertRuntimeStateForFilters(alert, silences, now)
+		state := alertRuntimeStateForFilters(alert, silences, now, inhibitedByIndex)
 		if !f.active && state.active {
 			continue
 		}
@@ -1310,21 +1341,31 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters, silences *s
 	return out
 }
 
-func toGettableAlerts(in []apiAlert, silences *silenceStore, now time.Time) []apiGettableAlert {
+func toGettableAlerts(
+	in []apiAlert,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) []apiGettableAlert {
 	if len(in) == 0 {
 		return []apiGettableAlert{}
 	}
 
 	out := make([]apiGettableAlert, 0, len(in))
 	for i := range in {
-		out = append(out, toGettableAlert(in[i], silences, now))
+		out = append(out, toGettableAlert(in[i], silences, now, inhibitedByIndex))
 	}
 	return out
 }
 
-func toGettableAlert(alert apiAlert, silences *silenceStore, now time.Time) apiGettableAlert {
+func toGettableAlert(
+	alert apiAlert,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) apiGettableAlert {
 	silencedBy := make([]string, 0)
-	inhibitedBy := alertInhibitedByIDs(alert)
+	inhibitedBy := copyStringSlice(inhibitedByForAlert(alert, inhibitedByIndex))
 
 	if alert.Status == "firing" && silences != nil {
 		silencedBy = silences.activeMatchingSilenceIDs(alert.Labels, now)
@@ -1491,22 +1532,33 @@ func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error
 	}, nil
 }
 
-func filterAlertsByGroupStateFilters(in []apiAlert, f alertGroupStateFilters, silences *silenceStore, now time.Time) []apiAlert {
+func filterAlertsByGroupStateFilters(
+	in []apiAlert,
+	f alertGroupStateFilters,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) []apiAlert {
 	return filterAlertsByStateFilters(in, alertsStateFilters{
 		active:      f.active,
 		silenced:    f.silenced,
 		inhibited:   f.inhibited,
 		unprocessed: true,
-	}, silences, now)
+	}, silences, now, inhibitedByIndex)
 }
 
-func isMutedAlertGroup(group *apiAlertGroup, silences *silenceStore, now time.Time) bool {
+func isMutedAlertGroup(
+	group *apiAlertGroup,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) bool {
 	if group == nil || len(group.Alerts) == 0 {
 		return false
 	}
 
 	for _, alert := range group.Alerts {
-		if !isAlertMuted(alert, silences, now) {
+		if !isAlertMuted(alert, silences, now, inhibitedByIndex) {
 			return false
 		}
 	}
@@ -1520,7 +1572,12 @@ type alertRuntimeState struct {
 	unprocessed bool
 }
 
-func alertRuntimeStateForFilters(alert apiAlert, silences *silenceStore, now time.Time) alertRuntimeState {
+func alertRuntimeStateForFilters(
+	alert apiAlert,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) alertRuntimeState {
 	if alert.Status != "firing" {
 		// Resolved snapshots are treated as unprocessed in the compatibility runtime.
 		return alertRuntimeState{
@@ -1536,7 +1593,7 @@ func alertRuntimeStateForFilters(alert apiAlert, silences *silenceStore, now tim
 		silenced = silences.hasActiveMatch(alert.Labels, now)
 	}
 
-	inhibited := len(alertInhibitedByIDs(alert)) > 0
+	inhibited := len(inhibitedByForAlert(alert, inhibitedByIndex)) > 0
 	unprocessed := false
 	active := !silenced && !inhibited
 
@@ -1548,8 +1605,13 @@ func alertRuntimeStateForFilters(alert apiAlert, silences *silenceStore, now tim
 	}
 }
 
-func isAlertMuted(alert apiAlert, silences *silenceStore, now time.Time) bool {
-	state := alertRuntimeStateForFilters(alert, silences, now)
+func isAlertMuted(
+	alert apiAlert,
+	silences *silenceStore,
+	now time.Time,
+	inhibitedByIndex map[string][]string,
+) bool {
+	state := alertRuntimeStateForFilters(alert, silences, now, inhibitedByIndex)
 	return state.silenced || state.inhibited
 }
 
@@ -1622,6 +1684,124 @@ func alertInhibitedByIDs(alert apiAlert) []string {
 	return []string{}
 }
 
+func inhibitedByForAlert(alert apiAlert, index map[string][]string) []string {
+	if len(index) == 0 {
+		return alertInhibitedByIDs(alert)
+	}
+
+	if ids, ok := index[alertIdentityKey(alert)]; ok {
+		return ids
+	}
+	return alertInhibitedByIDs(alert)
+}
+
+func alertIdentityKey(alert apiAlert) string {
+	return strings.TrimSpace(alert.Fingerprint) + "|" + strings.TrimSpace(alert.StartsAt)
+}
+
+func buildAlertInhibitedByIndex(
+	engine *runtimeInhibitionEngine,
+	allAlerts []apiAlert,
+) map[string][]string {
+	index := make(map[string][]string, len(allAlerts))
+	if len(allAlerts) == 0 {
+		return index
+	}
+
+	sources := make([]*core.Alert, 0, len(allAlerts))
+	for i := range allAlerts {
+		metadataIDs := alertInhibitedByIDs(allAlerts[i])
+		if len(metadataIDs) > 0 {
+			index[alertIdentityKey(allAlerts[i])] = metadataIDs
+		}
+
+		if allAlerts[i].Status != "firing" {
+			continue
+		}
+		sources = append(sources, toCoreAlert(allAlerts[i]))
+	}
+
+	if engine == nil || len(engine.rules) == 0 || len(sources) == 0 {
+		return index
+	}
+
+	matcher := inhibition.NewMatcher(nil, engine.rules, nil)
+	for i := range allAlerts {
+		target := allAlerts[i]
+		if target.Status != "firing" {
+			continue
+		}
+
+		targetCore := toCoreAlert(target)
+		acc := copyStringSlice(index[alertIdentityKey(target)])
+
+		for _, source := range sources {
+			if source == nil || source.Fingerprint == "" {
+				continue
+			}
+			// Self-inhibition is not supported.
+			if source.Fingerprint == targetCore.Fingerprint {
+				continue
+			}
+
+			for ruleIdx := range engine.rules {
+				rule := &engine.rules[ruleIdx]
+				if matcher.MatchRule(rule, source, targetCore) {
+					acc = append(acc, source.Fingerprint)
+					break
+				}
+			}
+		}
+
+		if len(acc) > 0 {
+			index[alertIdentityKey(target)] = mergeUniqueStringSlices(acc)
+		}
+	}
+
+	return index
+}
+
+func toCoreAlert(alert apiAlert) *core.Alert {
+	startsAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(alert.StartsAt))
+	updatedAt, _ := time.Parse(time.RFC3339, strings.TrimSpace(alert.UpdatedAt))
+	if startsAt.IsZero() {
+		startsAt = updatedAt
+	}
+	if startsAt.IsZero() {
+		startsAt = time.Now().UTC()
+	}
+
+	var endsAt *time.Time
+	if alert.EndsAt != nil && strings.TrimSpace(*alert.EndsAt) != "" {
+		if parsedEndsAt, err := time.Parse(time.RFC3339, strings.TrimSpace(*alert.EndsAt)); err == nil {
+			parsedEndsAt = parsedEndsAt.UTC()
+			endsAt = &parsedEndsAt
+		}
+	}
+
+	status := core.StatusFiring
+	if alert.Status == "resolved" {
+		status = core.StatusResolved
+	}
+
+	var generatorURL *string
+	if strings.TrimSpace(alert.GeneratorURL) != "" {
+		urlValue := strings.TrimSpace(alert.GeneratorURL)
+		generatorURL = &urlValue
+	}
+
+	return &core.Alert{
+		Fingerprint:  strings.TrimSpace(alert.Fingerprint),
+		AlertName:    strings.TrimSpace(alert.Labels["alertname"]),
+		Status:       status,
+		Labels:       cloneStringMap(alert.Labels),
+		Annotations:  cloneStringMap(alert.Annotations),
+		StartsAt:     startsAt.UTC(),
+		EndsAt:       endsAt,
+		GeneratorURL: generatorURL,
+	}
+}
+
 func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {
 	if strings.TrimSpace(raw) == "" {
 		return def, nil
@@ -1638,12 +1818,56 @@ func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {
 	return value, nil
 }
 
+func resolveRuntimeConfigPath() string {
+	path := strings.TrimSpace(os.Getenv(runtimeConfigFileEnv))
+	if path != "" {
+		return path
+	}
+	return "config.yaml"
+}
+
 func readRuntimeConfigOriginal() string {
-	content, err := os.ReadFile("config.yaml")
+	content, err := os.ReadFile(resolveRuntimeConfigPath())
 	if err != nil {
 		return ""
 	}
 	return string(content)
+}
+
+func loadRuntimeInhibitionEngine(configPath string) *runtimeInhibitionEngine {
+	engine := &runtimeInhibitionEngine{
+		rules: make([]inhibition.InhibitionRule, 0),
+	}
+
+	parser := inhibition.NewParser()
+	cfg, err := parser.ParseFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || isNoInhibitionRulesError(err) {
+			return engine
+		}
+
+		slog.Warn("Failed to parse inhibition rules from config",
+			"config", configPath,
+			"error", err,
+		)
+		return engine
+	}
+
+	engine.rules = append(engine.rules, cfg.Rules...)
+	slog.Info("Loaded runtime inhibition rules",
+		"count", len(engine.rules),
+		"config", configPath,
+	)
+	return engine
+}
+
+func isNoInhibitionRulesError(err error) bool {
+	var cfgErr *inhibition.ConfigError
+	if !errors.As(err, &cfgErr) || cfgErr == nil {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(cfgErr.Message), "no inhibition rules found")
 }
 
 func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
