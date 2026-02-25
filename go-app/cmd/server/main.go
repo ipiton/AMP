@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"gopkg.in/yaml.v3"
 
 	"github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
@@ -235,6 +236,7 @@ func registerRoutes(mux *http.ServeMux) {
 	alertStore := newAlertStore()
 	silenceStore := newSilenceStore()
 	inhibitionEngine := loadRuntimeInhibitionEngine(resolveRuntimeConfigPath())
+	receiverCatalog := loadRuntimeReceiverCatalog(resolveRuntimeConfigPath())
 	setupRuntimeStatePersistence(alertStore, silenceStore)
 	persistencePath := resolveRuntimeStatePath()
 	statusCtx := runtimeStatusContext{
@@ -282,7 +284,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine))
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
-	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore))
+	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore, receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
@@ -318,6 +320,24 @@ type runtimeStatusContext struct {
 
 type runtimeInhibitionEngine struct {
 	rules []inhibition.InhibitionRule
+}
+
+type runtimeReceiverCatalog struct {
+	configured []string
+}
+
+type alertmanagerRuntimeConfig struct {
+	Route     alertmanagerRouteConfig      `yaml:"route"`
+	Receivers []alertmanagerReceiverConfig `yaml:"receivers"`
+}
+
+type alertmanagerRouteConfig struct {
+	Receiver string                    `yaml:"receiver"`
+	Routes   []alertmanagerRouteConfig `yaml:"routes"`
+}
+
+type alertmanagerReceiverConfig struct {
+	Name string `yaml:"name"`
 }
 
 type apiAlertStatus struct {
@@ -924,7 +944,7 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 	}
 }
 
-func receiversHandler(store *alertStore) http.HandlerFunc {
+func receiversHandler(store *alertStore, catalog *runtimeReceiverCatalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -934,11 +954,17 @@ func receiversHandler(store *alertStore) http.HandlerFunc {
 		receiversSet := map[string]struct{}{
 			"default": {},
 		}
-		for _, alert := range store.list("", true) {
-			receiver := strings.TrimSpace(alert.Labels["receiver"])
-			if receiver == "" {
-				continue
+		if catalog != nil {
+			for _, name := range catalog.configured {
+				trimmed := strings.TrimSpace(name)
+				if trimmed == "" {
+					continue
+				}
+				receiversSet[trimmed] = struct{}{}
 			}
+		}
+		for _, alert := range store.list("", true) {
+			receiver := alertReceiverName(alert)
 			receiversSet[receiver] = struct{}{}
 		}
 
@@ -1868,6 +1894,68 @@ func isNoInhibitionRulesError(err error) bool {
 	}
 
 	return strings.Contains(strings.ToLower(cfgErr.Message), "no inhibition rules found")
+}
+
+func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
+	catalog := &runtimeReceiverCatalog{
+		configured: []string{},
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("Failed to read config for runtime receivers",
+				"config", configPath,
+				"error", err,
+			)
+		}
+		return catalog
+	}
+
+	var cfg alertmanagerRuntimeConfig
+	if err := yaml.Unmarshal(content, &cfg); err != nil {
+		slog.Warn("Failed to parse runtime receivers from config",
+			"config", configPath,
+			"error", err,
+		)
+		return catalog
+	}
+
+	receiversSet := map[string]struct{}{}
+	collectConfiguredRouteReceivers(cfg.Route, receiversSet)
+	for _, receiver := range cfg.Receivers {
+		name := strings.TrimSpace(receiver.Name)
+		if name == "" {
+			continue
+		}
+		receiversSet[name] = struct{}{}
+	}
+
+	catalog.configured = make([]string, 0, len(receiversSet))
+	for name := range receiversSet {
+		catalog.configured = append(catalog.configured, name)
+	}
+	sort.Strings(catalog.configured)
+
+	if len(catalog.configured) > 0 {
+		slog.Info("Loaded runtime receivers from config",
+			"count", len(catalog.configured),
+			"config", configPath,
+		)
+	}
+
+	return catalog
+}
+
+func collectConfiguredRouteReceivers(route alertmanagerRouteConfig, out map[string]struct{}) {
+	name := strings.TrimSpace(route.Receiver)
+	if name != "" {
+		out[name] = struct{}{}
+	}
+
+	for i := range route.Routes {
+		collectConfiguredRouteReceivers(route.Routes[i], out)
+	}
 }
 
 func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
