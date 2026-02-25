@@ -448,6 +448,16 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("alerts get invalid state flag contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?active=not-bool", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid active expected 400, got %d", rec.Code)
+		}
+	})
+
 	t.Run("alerts post contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
 		rec := httptest.NewRecorder()
@@ -932,6 +942,72 @@ func TestPhase0AlertsReceiverFilterSemantics(t *testing.T) {
 	defaultLabels, ok := defaultAlerts[0]["labels"].(map[string]any)
 	if !ok || defaultLabels["alertname"] != "CPUNoReceiver" {
 		t.Fatalf("expected default receiver alert CPUNoReceiver, got %v", defaultAlerts[0]["labels"])
+	}
+}
+
+func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"FlagFiring","service":"api"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"FlagResolved","service":"api"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"endsAt": "2026-02-25T00:05:00Z",
+			"status": "resolved"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	noneReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=false&inhibited=false&unprocessed=false",
+		nil,
+	)
+	noneRec := httptest.NewRecorder()
+	mux.ServeHTTP(noneRec, noneReq)
+	if noneRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with all flags false expected 200, got %d", noneRec.Code)
+	}
+
+	var noneAlerts []map[string]any
+	if err := json.Unmarshal(noneRec.Body.Bytes(), &noneAlerts); err != nil {
+		t.Fatalf("failed to decode all-false flags response: %v", err)
+	}
+	if len(noneAlerts) != 0 {
+		t.Fatalf("expected no alerts when all state flags are false, got %d", len(noneAlerts))
+	}
+
+	resolvedReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?resolved=true&active=false&silenced=false&inhibited=false&unprocessed=false",
+		nil,
+	)
+	resolvedRec := httptest.NewRecorder()
+	mux.ServeHTTP(resolvedRec, resolvedReq)
+	if resolvedRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts resolved with all flags false expected 200, got %d", resolvedRec.Code)
+	}
+
+	var resolvedAlerts []map[string]any
+	if err := json.Unmarshal(resolvedRec.Body.Bytes(), &resolvedAlerts); err != nil {
+		t.Fatalf("failed to decode resolved+flags response: %v", err)
+	}
+	if len(resolvedAlerts) != 1 {
+		t.Fatalf("expected only resolved snapshot with all flags false, got %d", len(resolvedAlerts))
+	}
+	if resolvedAlerts[0]["status"] != "resolved" {
+		t.Fatalf("expected resolved status, got %v", resolvedAlerts[0]["status"])
 	}
 }
 
