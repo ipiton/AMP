@@ -278,6 +278,29 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("history invalid query filters contract", func(t *testing.T) {
+		reqResolved := httptest.NewRequest(http.MethodGet, "/history?resolved=not-bool", nil)
+		recResolved := httptest.NewRecorder()
+		mux.ServeHTTP(recResolved, reqResolved)
+		if recResolved.Code != http.StatusBadRequest {
+			t.Fatalf("GET /history with invalid resolved expected 400, got %d", recResolved.Code)
+		}
+
+		reqRecentResolved := httptest.NewRequest(http.MethodGet, "/history/recent?resolved=not-bool", nil)
+		recRecentResolved := httptest.NewRecorder()
+		mux.ServeHTTP(recRecentResolved, reqRecentResolved)
+		if recRecentResolved.Code != http.StatusBadRequest {
+			t.Fatalf("GET /history/recent with invalid resolved expected 400, got %d", recRecentResolved.Code)
+		}
+
+		reqRecentLimit := httptest.NewRequest(http.MethodGet, "/history/recent?limit=nan", nil)
+		recRecentLimit := httptest.NewRecorder()
+		mux.ServeHTTP(recRecentLimit, reqRecentLimit)
+		if recRecentLimit.Code != http.StatusBadRequest {
+			t.Fatalf("GET /history/recent with invalid limit expected 400, got %d", recRecentLimit.Code)
+		}
+	})
+
 	t.Run("dashboard overview reflects runtime state", func(t *testing.T) {
 		localMux := newPhase0TestMux(t)
 
@@ -371,6 +394,22 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("dashboard recent invalid query filters contract", func(t *testing.T) {
+		reqResolved := httptest.NewRequest(http.MethodGet, "/api/dashboard/alerts/recent?resolved=not-bool", nil)
+		recResolved := httptest.NewRecorder()
+		mux.ServeHTTP(recResolved, reqResolved)
+		if recResolved.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/dashboard/alerts/recent with invalid resolved expected 400, got %d", recResolved.Code)
+		}
+
+		reqLimit := httptest.NewRequest(http.MethodGet, "/api/dashboard/alerts/recent?limit=nan", nil)
+		recLimit := httptest.NewRecorder()
+		mux.ServeHTTP(recLimit, reqLimit)
+		if recLimit.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/dashboard/alerts/recent with invalid limit expected 400, got %d", recLimit.Code)
+		}
+	})
+
 	t.Run("alerts get contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
 		rec := httptest.NewRecorder()
@@ -386,6 +425,16 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if payload == nil {
 			t.Fatalf("alerts get expected array payload")
+		}
+	})
+
+	t.Run("alerts get invalid resolved filter contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?resolved=not-bool", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid resolved expected 400, got %d", rec.Code)
 		}
 	})
 

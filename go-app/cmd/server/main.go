@@ -640,7 +640,13 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), false)
+	includeResolved, err := parseBoolQuery(r.URL.Query().Get("resolved"), false)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
 	if status == "resolved" {
 		includeResolved = true
 	}
@@ -979,12 +985,28 @@ func parseHistoryFilters(r *http.Request, defaultIncludeResolved bool) (string, 
 		return "", false, fmt.Errorf("invalid status filter")
 	}
 
-	includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), defaultIncludeResolved)
+	includeResolved, err := parseBoolQuery(r.URL.Query().Get("resolved"), defaultIncludeResolved)
+	if err != nil {
+		return "", false, err
+	}
 	if status == "resolved" {
 		includeResolved = true
 	}
 
 	return status, includeResolved, nil
+}
+
+func parseBoolQuery(raw string, def bool) (bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, nil
+	}
+
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("invalid boolean query value")
+	}
+	return v, nil
 }
 
 func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {
