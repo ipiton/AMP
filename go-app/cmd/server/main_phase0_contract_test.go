@@ -23,8 +23,8 @@ const validAlertPayload = `[
 
 const validSilencePayload = `{
 	"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
-	"startsAt": "2026-02-25T00:00:00Z",
-	"endsAt": "2026-02-25T01:00:00Z",
+	"startsAt": "2099-01-01T00:00:00Z",
+	"endsAt": "2099-01-01T01:00:00Z",
 	"createdBy": "phase0-test",
 	"comment": "maintenance window"
 }`
@@ -542,6 +542,42 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("POST /api/v2/silences with invalid payload expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("silences post invalid regex matcher contract", func(t *testing.T) {
+		payload := `{
+			"matchers": [{"name":"alertname","value":"[","isRegex":true}],
+			"startsAt": "2099-01-01T00:00:00Z",
+			"endsAt": "2099-01-01T01:00:00Z",
+			"createdBy": "phase0-test",
+			"comment": "invalid regex matcher"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/silences with invalid regex matcher expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("silences post endsAt in past contract", func(t *testing.T) {
+		now := time.Now().UTC()
+		payload := fmt.Sprintf(`{
+			"matchers": [{"name":"alertname","value":"PastEndTime","isRegex":false}],
+			"startsAt": %q,
+			"endsAt": %q,
+			"createdBy": "phase0-test",
+			"comment": "past end time"
+		}`, now.Add(-2*time.Hour).Format(time.RFC3339), now.Add(-1*time.Hour).Format(time.RFC3339))
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/silences with endsAt in past expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -1668,22 +1704,22 @@ func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
 	posts := []string{
 		`{
 			"matchers": [{"name":"service","value":"api","isRegex":false}],
-			"startsAt": "2026-02-25T00:00:00Z",
-			"endsAt": "2026-02-25T01:00:00Z",
+			"startsAt": "2099-01-01T00:00:00Z",
+			"endsAt": "2099-01-01T01:00:00Z",
 			"createdBy": "phase0-test",
 			"comment": "silence-service-api"
 		}`,
 		`{
 			"matchers": [{"name":"alertname","value":"^High.*","isRegex":true}],
-			"startsAt": "2026-02-25T00:01:00Z",
-			"endsAt": "2026-02-25T01:01:00Z",
+			"startsAt": "2099-01-01T00:01:00Z",
+			"endsAt": "2099-01-01T01:01:00Z",
 			"createdBy": "phase0-test",
 			"comment": "silence-alertname-regex"
 		}`,
 		`{
 			"matchers": [{"name":"service","value":"api","isRegex":false,"isEqual":false}],
-			"startsAt": "2026-02-25T00:02:00Z",
-			"endsAt": "2026-02-25T01:02:00Z",
+			"startsAt": "2099-01-01T00:02:00Z",
+			"endsAt": "2099-01-01T01:02:00Z",
 			"createdBy": "phase0-test",
 			"comment": "silence-service-not-api"
 		}`,
@@ -1692,8 +1728,8 @@ func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
 				{"name":"service","value":"api","isRegex":false},
 				{"name":"alertname","value":"^High.*","isRegex":true}
 			],
-			"startsAt": "2026-02-25T00:03:00Z",
-			"endsAt": "2026-02-25T01:03:00Z",
+			"startsAt": "2099-01-01T00:03:00Z",
+			"endsAt": "2099-01-01T01:03:00Z",
 			"createdBy": "phase0-test",
 			"comment": "silence-service-api-and-regex"
 		}`,
