@@ -46,9 +46,9 @@ func (h *SimpleDashboardHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		Data: data,
 	}
 
-	// Render template
+	// Render base layout (page blocks are provided by parsed page templates).
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.templateEngine.Render(w, "pages/dashboard", pageData); err != nil {
+	if err := h.templateEngine.Render(w, "base.html", pageData); err != nil {
 		h.logger.Error("Failed to render dashboard template", "error", err)
 		http.Error(w, "Failed to render page", http.StatusInternalServerError)
 		return
@@ -86,6 +86,18 @@ func (h *SimpleDashboardHandler) getMockDashboardData() *ModernDashboardData {
 					"severity":  "critical",
 				},
 				StartsAt: now.Add(-30 * time.Minute),
+				Classification: &ClassificationDisplayData{
+					Severity:           "critical",
+					ConfidencePercent:  92,
+					Reasoning:          "Memory usage exceeds 90% threshold, pod restart imminent",
+					HasRecommendations: true,
+					Recommendations: []string{
+						"Scale horizontally to reduce load",
+						"Investigate potential memory leak",
+					},
+					ProcessingTimeMs: 125,
+					Source:           "mock-llm",
+				},
 				AIClassification: &AIClassification{
 					Severity:   "critical",
 					Confidence: 0.92,
@@ -108,6 +120,13 @@ func (h *SimpleDashboardHandler) getMockDashboardData() *ModernDashboardData {
 					"severity": "warning",
 				},
 				StartsAt: now.Add(-15 * time.Minute),
+				Classification: &ClassificationDisplayData{
+					Severity:          "warning",
+					ConfidencePercent: 85,
+					Reasoning:         "CPU load is elevated but not critical yet",
+					ProcessingTimeMs:  110,
+					Source:            "mock-llm",
+				},
 				AIClassification: &AIClassification{
 					Severity:   "warning",
 					Confidence: 0.85,

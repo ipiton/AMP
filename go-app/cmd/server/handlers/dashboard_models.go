@@ -21,16 +21,17 @@ type ModernDashboardData struct {
 
 // AlertSummary is a compact alert representation for dashboard.
 type AlertSummary struct {
-	Fingerprint      string            `json:"fingerprint"`
-	AlertName        string            `json:"alertname"`
-	Status           string            `json:"status"`   // firing, resolved
-	Severity         string            `json:"severity"` // critical, warning, info
-	Summary          string            `json:"summary"`
-	Description      string            `json:"description"`
-	Labels           map[string]string `json:"labels"`
-	StartsAt         time.Time         `json:"starts_at"`
-	EndsAt           *time.Time        `json:"ends_at,omitempty"`
-	AIClassification *AIClassification `json:"ai_classification,omitempty"`
+	Fingerprint      string                     `json:"fingerprint"`
+	AlertName        string                     `json:"alertname"`
+	Status           string                     `json:"status"`   // firing, resolved
+	Severity         string                     `json:"severity"` // critical, warning, info
+	Summary          string                     `json:"summary"`
+	Description      string                     `json:"description"`
+	Labels           map[string]string          `json:"labels"`
+	StartsAt         time.Time                  `json:"starts_at"`
+	EndsAt           *time.Time                 `json:"ends_at,omitempty"`
+	Classification   *ClassificationDisplayData `json:"classification,omitempty"`
+	AIClassification *AIClassification          `json:"ai_classification,omitempty"`
 }
 
 // AIClassification contains LLM-generated metadata.
@@ -39,6 +40,17 @@ type AIClassification struct {
 	Confidence  float64  `json:"confidence"` // 0.0-1.0
 	Reasoning   string   `json:"reasoning"`
 	ActionItems []string `json:"action_items,omitempty"`
+}
+
+// ClassificationDisplayData matches dashboard template classification fields.
+type ClassificationDisplayData struct {
+	Severity           string   `json:"severity"`
+	ConfidencePercent  int      `json:"confidence_percent"`
+	Reasoning          string   `json:"reasoning,omitempty"`
+	HasRecommendations bool     `json:"has_recommendations,omitempty"`
+	Recommendations    []string `json:"recommendations,omitempty"`
+	ProcessingTimeMs   int      `json:"processing_time_ms,omitempty"`
+	Source             string   `json:"source,omitempty"`
 }
 
 // SilenceSummary is a compact silence representation.

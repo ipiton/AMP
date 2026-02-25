@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 func createTestTemplateEngine() (*ui.TemplateEngine, error) {
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false // Disable hot reload for tests
-	// TemplateDir defaults to "templates/" which is correct when running from go-app/
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	return ui.NewTemplateEngine(opts)
 }
 
