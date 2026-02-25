@@ -307,6 +307,13 @@ type apiReceiver struct {
 
 // Dashboard handlers
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	// "/"" is a catch-all pattern in net/http ServeMux. Guard unknown paths here
+	// so unmatched API/ops routes return 404 instead of silently rendering dashboard.
+	if r.URL.Path != "/" && r.URL.Path != "/dashboard" {
+		handleNotFound(w, r)
+		return
+	}
+
 	if templates == nil {
 		renderTemplateError(w, "Templates not loaded")
 		return
@@ -328,6 +335,23 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Failed to render dashboard template", "error", err)
 		renderTemplateError(w, "Failed to render dashboard")
 	}
+}
+
+func handleNotFound(w http.ResponseWriter, r *http.Request) {
+	// API/ops style paths should keep machine-readable error responses.
+	if strings.HasPrefix(r.URL.Path, "/api/") ||
+		strings.HasPrefix(r.URL.Path, "/-/") ||
+		strings.HasPrefix(r.URL.Path, "/debug/") ||
+		strings.HasPrefix(r.URL.Path, "/history") ||
+		r.URL.Path == "/webhook" ||
+		r.URL.Path == "/metrics" {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "not found",
+		})
+		return
+	}
+
+	http.NotFound(w, r)
 }
 
 func alertsPageHandler(w http.ResponseWriter, r *http.Request) {
