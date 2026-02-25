@@ -85,6 +85,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/test-id", allowedStatus: []int{http.StatusNotFound}},
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
+		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard recent alerts api", method: http.MethodGet, path: "/api/dashboard/alerts/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "webhook post", method: http.MethodPost, path: "/webhook", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
@@ -237,6 +238,30 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("history recent contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/history/recent?limit=5", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /history/recent expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("history recent response is not valid json: %v", err)
+		}
+		if _, ok := payload["total"]; !ok {
+			t.Fatalf("history recent response missing total field")
+		}
+		if _, ok := payload["limit"]; !ok {
+			t.Fatalf("history recent response missing limit field")
+		}
+		if _, ok := payload["alerts"]; !ok {
+			t.Fatalf("history recent response missing alerts field")
+		}
+	})
+
 	t.Run("alerts get contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
 		rec := httptest.NewRecorder()
@@ -385,6 +410,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
 			{name: "silence by id post not allowed", method: http.MethodPost, path: "/api/v2/silence/any-id"},
 			{name: "history post not allowed", method: http.MethodPost, path: "/history"},
+			{name: "history recent post not allowed", method: http.MethodPost, path: "/history/recent"},
 		}
 
 		for _, tt := range tests {
