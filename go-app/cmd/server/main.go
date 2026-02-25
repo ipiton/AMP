@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -128,6 +132,16 @@ func initTemplates() {
 
 // registerRoutes configures all active HTTP routes for the current runtime.
 func registerRoutes(mux *http.ServeMux) {
+	alertStore := newAlertStore()
+	silenceStore := newSilenceStore()
+	setupRuntimeStatePersistence(alertStore, silenceStore)
+	persistencePath := resolveRuntimeStatePath()
+	statusCtx := runtimeStatusContext{
+		startedAt:          time.Now().UTC(),
+		persistenceEnabled: persistencePath != "",
+		persistencePath:    persistencePath,
+	}
+
 	// Static files
 	staticSub, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -150,14 +164,25 @@ func registerRoutes(mux *http.ServeMux) {
 	// Common probe aliases for compatibility with existing deployments
 	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/readyz", readyHandler)
+	// Alertmanager-compatible probe endpoints
+	mux.HandleFunc("/-/healthy", alertmanagerHealthyHandler)
+	mux.HandleFunc("/-/ready", alertmanagerReadyHandler)
+	mux.HandleFunc("/-/reload", alertmanagerReloadHandler)
+	mux.HandleFunc("/debug/", debugCompatHandler)
 
 	// Metrics endpoint
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// API endpoints
-	mux.HandleFunc("/api/v2/alerts", alertsHandler)
-	mux.HandleFunc("/api/v2/silences", silencesHandler)
-	mux.HandleFunc("/api/v2/status", statusHandler)
+	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore))
+	// Alertmanager v1 compatibility ingest endpoint (intentionally limited)
+	mux.HandleFunc("/api/v1/alerts", alertsV1Handler(alertStore, silenceStore))
+	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore))
+	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
+	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
+	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore))
+	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
+	mux.HandleFunc("/history", historyHandler(alertStore))
 
 	// Dashboard API
 	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI)
@@ -169,7 +194,7 @@ func registerRoutes(mux *http.ServeMux) {
 		GlobalLimit: 1000, // 1000 requests per second globally
 		Logger:      slog.Default(),
 	})
-	webhookHandlerWithRateLimit := rateLimiter.Middleware(http.HandlerFunc(webhookHandler))
+	webhookHandlerWithRateLimit := rateLimiter.Middleware(webhookHandler(alertStore, silenceStore))
 	mux.Handle("/webhook", webhookHandlerWithRateLimit)
 }
 
@@ -179,6 +204,22 @@ type PageData struct {
 	Version     string
 	CurrentPage string
 	Data        interface{}
+}
+
+type runtimeStatusContext struct {
+	startedAt          time.Time
+	persistenceEnabled bool
+	persistencePath    string
+}
+
+type apiAlertGroup struct {
+	Labels   map[string]string `json:"labels"`
+	Receiver string            `json:"receiver"`
+	Alerts   []apiAlert        `json:"alerts"`
+}
+
+type apiReceiver struct {
+	Name string `json:"name"`
 }
 
 // Dashboard handlers
@@ -358,42 +399,445 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"ready":true}`))
 }
 
-// API handlers
-func alertsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	switch r.Method {
-	case http.MethodGet:
-		w.Write([]byte(`{"status":"success","data":[]}`))
-	case http.MethodPost:
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"success"}`))
-	default:
+func alertmanagerHealthyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodGet {
+		w.Write([]byte("OK"))
 	}
 }
 
-func silencesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"success","data":[]}`))
+func alertmanagerReadyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodGet {
+		w.Write([]byte("OK"))
+	}
 }
 
-func statusHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{
-		"cluster": {"status": "ready"},
-		"versionInfo": {"version": "` + appVersion + `"},
-		"config": {"original": ""},
-		"uptime": "0s"
-	}`))
-}
-
-func webhookHandler(w http.ResponseWriter, r *http.Request) {
+func alertmanagerReloadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "reloaded",
+		"mode":   "noop",
+	})
+}
+
+func debugCompatHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "available",
+		"path":   r.URL.Path,
+	})
+}
+
+// API handlers
+func alertsV1Handler(store *alertStore, silences *silenceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		handleAlertsPost(store, silences, w, r)
+	}
+}
+
+func alertsHandler(store *alertStore, silences *silenceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleAlertsGet(store, w, r)
+		case http.MethodPost:
+			handleAlertsPost(store, silences, w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) {
+	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+	switch status {
+	case "", "firing", "resolved":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid status filter",
+		})
+		return
+	}
+
+	includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), false)
+	if status == "resolved" {
+		includeResolved = true
+	}
+
+	writeJSON(w, http.StatusOK, store.list(status, includeResolved))
+}
+
+func handleAlertsPost(store *alertStore, silences *silenceStore, w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10*1024*1024))
+	if err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": "request payload too large",
+		})
+		return
+	}
+
+	payload, err := parseAlertIngestPayload(body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	now := time.Now().UTC()
+	filteredPayload, silencedCount := filterSilencedAlerts(payload, silences, now)
+	if silencedCount > 0 {
+		slog.Info("Suppressed alerts by active silences", "count", silencedCount)
+	}
+
+	if err := store.ingestBatch(filteredPayload, now); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"received"}`))
+}
+
+func filterSilencedAlerts(in []alertIngestInput, silences *silenceStore, now time.Time) ([]alertIngestInput, int) {
+	if silences == nil || len(in) == 0 {
+		return in, 0
+	}
+
+	out := make([]alertIngestInput, 0, len(in))
+	silencedCount := 0
+
+	for i := range in {
+		normalizedStatus := strings.ToLower(strings.TrimSpace(in[i].Status))
+		if normalizedStatus == "resolved" {
+			out = append(out, in[i])
+			continue
+		}
+
+		if len(silences.activeMatchingSilenceIDs(in[i].Labels, now)) == 0 {
+			out = append(out, in[i])
+			continue
+		}
+
+		silencedCount++
+	}
+
+	return out, silencedCount
+}
+
+func silencesHandler(store *silenceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, store.list(time.Now().UTC()))
+		case http.MethodPost:
+			handleSilencePost(store, w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func handleSilencePost(store *silenceStore, w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024*1024))
+	if err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": "request payload too large",
+		})
+		return
+	}
+
+	payload, err := parseSilencePayload(body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	silenceID, err := store.createOrUpdate(payload, time.Now().UTC())
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"silenceID": silenceID,
+	})
+}
+
+func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/v2/silence/")
+		if id == "" || strings.Contains(id, "/") {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "silence not found",
+			})
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			silence, ok := store.get(id, time.Now().UTC())
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]string{
+					"error": "silence not found",
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, silence)
+		case http.MethodDelete:
+			if !store.delete(id) {
+				writeJSON(w, http.StatusNotFound, map[string]string{
+					"error": "silence not found",
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{
+				"status": "deleted",
+			})
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func receiversHandler(store *alertStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		receiversSet := map[string]struct{}{
+			"default": {},
+		}
+		for _, alert := range store.list("", true) {
+			receiver := strings.TrimSpace(alert.Labels["receiver"])
+			if receiver == "" {
+				continue
+			}
+			receiversSet[receiver] = struct{}{}
+		}
+
+		receivers := make([]apiReceiver, 0, len(receiversSet))
+		for name := range receiversSet {
+			receivers = append(receivers, apiReceiver{Name: name})
+		}
+		sort.Slice(receivers, func(i, j int) bool {
+			return receivers[i].Name < receivers[j].Name
+		})
+
+		writeJSON(w, http.StatusOK, receivers)
+	}
+}
+
+func alertGroupsHandler(store *alertStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), false)
+		alerts := store.list("", includeResolved)
+
+		groupsMap := make(map[string]*apiAlertGroup)
+		for _, alert := range alerts {
+			groupLabels := map[string]string{
+				"alertname": alert.Labels["alertname"],
+				"service":   alert.Labels["service"],
+				"namespace": alert.Labels["namespace"],
+			}
+			receiver := strings.TrimSpace(alert.Labels["receiver"])
+			if receiver == "" {
+				receiver = "default"
+			}
+
+			key := groupLabels["alertname"] + "|" + groupLabels["service"] + "|" + groupLabels["namespace"] + "|" + receiver
+			group, ok := groupsMap[key]
+			if !ok {
+				group = &apiAlertGroup{
+					Labels:   groupLabels,
+					Receiver: receiver,
+					Alerts:   make([]apiAlert, 0, 1),
+				}
+				groupsMap[key] = group
+			}
+			group.Alerts = append(group.Alerts, alert)
+		}
+
+		groups := make([]apiAlertGroup, 0, len(groupsMap))
+		for _, group := range groupsMap {
+			groups = append(groups, *group)
+		}
+		sort.Slice(groups, func(i, j int) bool {
+			a := groups[i].Labels["alertname"] + "|" + groups[i].Labels["service"] + "|" + groups[i].Labels["namespace"] + "|" + groups[i].Receiver
+			b := groups[j].Labels["alertname"] + "|" + groups[j].Labels["service"] + "|" + groups[j].Labels["namespace"] + "|" + groups[j].Receiver
+			return a < b
+		})
+
+		writeJSON(w, http.StatusOK, groups)
+	}
+}
+
+func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx runtimeStatusContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		now := time.Now().UTC()
+		alertTotal, alertFiring, alertResolved := alertStore.stats()
+		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"cluster": map[string]string{
+				"status": "ready",
+			},
+			"versionInfo": map[string]string{
+				"version": appVersion,
+			},
+			"config": map[string]string{
+				"original": "",
+			},
+			"uptime": now.Sub(statusCtx.startedAt).String(),
+			"stats": map[string]any{
+				"alerts": map[string]int{
+					"total":    alertTotal,
+					"firing":   alertFiring,
+					"resolved": alertResolved,
+				},
+				"silences": map[string]int{
+					"total":   silenceTotal,
+					"active":  silenceActive,
+					"pending": silencePending,
+					"expired": silenceExpired,
+				},
+			},
+			"runtime": map[string]any{
+				"persistenceEnabled": statusCtx.persistenceEnabled,
+				"persistencePath":    statusCtx.persistencePath,
+			},
+		})
+	}
+}
+
+func historyHandler(store *alertStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+		switch status {
+		case "", "firing", "resolved":
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid status filter",
+			})
+			return
+		}
+
+		// History endpoint includes resolved alerts by default.
+		includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), true)
+		if status == "resolved" {
+			includeResolved = true
+		}
+
+		alerts := store.list(status, includeResolved)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"total":  len(alerts),
+			"alerts": alerts,
+		})
+	}
+}
+
+func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		defer r.Body.Close()
+
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10*1024*1024))
+		if err != nil {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "request payload too large",
+			})
+			return
+		}
+
+		payload, err := parseAlertIngestPayload(body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		now := time.Now().UTC()
+		filteredPayload, silencedCount := filterSilencedAlerts(payload, silences, now)
+		if silencedCount > 0 {
+			slog.Info("Suppressed webhook alerts by active silences", "count", silencedCount)
+		}
+
+		if err := alertStore.ingestBatch(filteredPayload, now); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":    "received",
+			"alerts":    len(payload),
+			"processed": len(filteredPayload),
+			"silenced":  silencedCount,
+		})
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	if payload == nil {
+		return
+	}
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		slog.Error("Failed to encode JSON response", "error", err)
+	}
 }
