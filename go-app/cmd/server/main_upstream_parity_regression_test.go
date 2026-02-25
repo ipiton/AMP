@@ -333,6 +333,17 @@ func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	if filtered[0]["comment"] != "active-soon-parity" {
 		t.Fatalf("expected filtered silence comment active-soon-parity, got %v", filtered[0]["comment"])
 	}
+	filteredMatchers, ok := filtered[0]["matchers"].([]any)
+	if !ok || len(filteredMatchers) == 0 {
+		t.Fatalf("filtered silence expected non-empty matchers array, got %T", filtered[0]["matchers"])
+	}
+	firstFilteredMatcher, ok := filteredMatchers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("filtered silence matcher expected object, got %T", filteredMatchers[0])
+	}
+	if _, ok := firstFilteredMatcher["isRegex"]; !ok {
+		t.Fatalf("filtered silence matcher expected isRegex field to be present")
+	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
 	listRec := httptest.NewRecorder()

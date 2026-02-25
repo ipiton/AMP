@@ -2592,6 +2592,17 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	if gotID, _ := silence["id"].(string); gotID != silenceID {
 		t.Fatalf("expected silence id %q, got %q", silenceID, gotID)
 	}
+	matchers, ok := silence["matchers"].([]any)
+	if !ok || len(matchers) == 0 {
+		t.Fatalf("expected non-empty matchers array in silence response")
+	}
+	firstMatcher, ok := matchers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected matcher object, got %T", matchers[0])
+	}
+	if _, ok := firstMatcher["isRegex"]; !ok {
+		t.Fatalf("expected matcher.isRegex to be present even for false value")
+	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
 	listRec := httptest.NewRecorder()
