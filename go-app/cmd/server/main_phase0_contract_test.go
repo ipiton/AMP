@@ -507,6 +507,16 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("silences get invalid filter contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/silences?filter=broken-matcher", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/silences with invalid filter expected 400, got %d", rec.Code)
+		}
+	})
+
 	t.Run("silences post contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(validSilencePayload))
 		rec := httptest.NewRecorder()
@@ -1434,6 +1444,122 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	mux.ServeHTTP(getAfterDeleteRec, getAfterDeleteReq)
 	if getAfterDeleteRec.Code != http.StatusNotFound {
 		t.Fatalf("GET /api/v2/silence/{id} after delete expected 404, got %d", getAfterDeleteRec.Code)
+	}
+}
+
+func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	posts := []string{
+		`{
+			"matchers": [{"name":"service","value":"api","isRegex":false}],
+			"startsAt": "2026-02-25T00:00:00Z",
+			"endsAt": "2026-02-25T01:00:00Z",
+			"createdBy": "phase0-test",
+			"comment": "silence-service-api"
+		}`,
+		`{
+			"matchers": [{"name":"alertname","value":"^High.*","isRegex":true}],
+			"startsAt": "2026-02-25T00:01:00Z",
+			"endsAt": "2026-02-25T01:01:00Z",
+			"createdBy": "phase0-test",
+			"comment": "silence-alertname-regex"
+		}`,
+		`{
+			"matchers": [{"name":"service","value":"api","isRegex":false,"isEqual":false}],
+			"startsAt": "2026-02-25T00:02:00Z",
+			"endsAt": "2026-02-25T01:02:00Z",
+			"createdBy": "phase0-test",
+			"comment": "silence-service-not-api"
+		}`,
+		`{
+			"matchers": [
+				{"name":"service","value":"api","isRegex":false},
+				{"name":"alertname","value":"^High.*","isRegex":true}
+			],
+			"startsAt": "2026-02-25T00:03:00Z",
+			"endsAt": "2026-02-25T01:03:00Z",
+			"createdBy": "phase0-test",
+			"comment": "silence-service-api-and-regex"
+		}`,
+	}
+
+	for i, payload := range posts {
+		postReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		postRec := httptest.NewRecorder()
+		mux.ServeHTTP(postRec, postReq)
+		if postRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/silences #%d expected 200, got %d", i, postRec.Code)
+		}
+	}
+
+	queryService := url.Values{}
+	queryService.Add("filter", `service="api"`)
+	serviceReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryService.Encode(), nil)
+	serviceRec := httptest.NewRecorder()
+	mux.ServeHTTP(serviceRec, serviceReq)
+	if serviceRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences with service filter expected 200, got %d", serviceRec.Code)
+	}
+	var serviceSilences []map[string]any
+	if err := json.Unmarshal(serviceRec.Body.Bytes(), &serviceSilences); err != nil {
+		t.Fatalf("failed to decode service-filter silences: %v", err)
+	}
+	if len(serviceSilences) != 2 {
+		t.Fatalf("expected 2 silences for service=api, got %d", len(serviceSilences))
+	}
+
+	queryRegex := url.Values{}
+	queryRegex.Add("filter", `alertname=~"^High.*"`)
+	regexReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryRegex.Encode(), nil)
+	regexRec := httptest.NewRecorder()
+	mux.ServeHTTP(regexRec, regexReq)
+	if regexRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences with regex filter expected 200, got %d", regexRec.Code)
+	}
+	var regexSilences []map[string]any
+	if err := json.Unmarshal(regexRec.Body.Bytes(), &regexSilences); err != nil {
+		t.Fatalf("failed to decode regex-filter silences: %v", err)
+	}
+	if len(regexSilences) != 2 {
+		t.Fatalf("expected 2 silences for alertname=~^High.*, got %d", len(regexSilences))
+	}
+
+	queryNotEqual := url.Values{}
+	queryNotEqual.Add("filter", `service!="api"`)
+	notEqualReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryNotEqual.Encode(), nil)
+	notEqualRec := httptest.NewRecorder()
+	mux.ServeHTTP(notEqualRec, notEqualReq)
+	if notEqualRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences with not-equal filter expected 200, got %d", notEqualRec.Code)
+	}
+	var notEqualSilences []map[string]any
+	if err := json.Unmarshal(notEqualRec.Body.Bytes(), &notEqualSilences); err != nil {
+		t.Fatalf("failed to decode not-equal-filter silences: %v", err)
+	}
+	if len(notEqualSilences) != 1 {
+		t.Fatalf("expected 1 silence for service!=api, got %d", len(notEqualSilences))
+	}
+
+	queryMulti := url.Values{}
+	queryMulti.Add("filter", `service="api"`)
+	queryMulti.Add("filter", `alertname=~"^High.*"`)
+	multiReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryMulti.Encode(), nil)
+	multiRec := httptest.NewRecorder()
+	mux.ServeHTTP(multiRec, multiReq)
+	if multiRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences with multi-filter expected 200, got %d", multiRec.Code)
+	}
+	var multiSilences []map[string]any
+	if err := json.Unmarshal(multiRec.Body.Bytes(), &multiSilences); err != nil {
+		t.Fatalf("failed to decode multi-filter silences: %v", err)
+	}
+	if len(multiSilences) != 1 {
+		t.Fatalf("expected 1 silence for service=api AND alertname=~^High.*, got %d", len(multiSilences))
+	}
+	comment, _ := multiSilences[0]["comment"].(string)
+	if comment != "silence-service-api-and-regex" {
+		t.Fatalf("unexpected silence matched by multi-filter: %q", comment)
 	}
 }
 
