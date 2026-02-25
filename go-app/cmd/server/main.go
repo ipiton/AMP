@@ -726,16 +726,30 @@ func alertmanagerReloadHandler(
 			return
 		}
 
-		reloadedInhibition := loadRuntimeInhibitionEngine(configPath)
-		reloadedReceivers := loadRuntimeReceiverCatalog(configPath)
-		if inhibitions != nil && reloadedInhibition != nil {
-			inhibitions.setRules(reloadedInhibition.getRules())
+		reloadedRules, err := parseRuntimeInhibitionRules(configPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
+			return
 		}
-		if receivers != nil && reloadedReceivers != nil {
-			receivers.setConfigured(reloadedReceivers.getConfigured())
+		reloadedReceivers, err := parseRuntimeConfiguredReceivers(configPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
+			return
+		}
+		configOriginal, err := readRuntimeConfigOriginalForReload(configPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
+			return
+		}
+
+		if inhibitions != nil {
+			inhibitions.setRules(reloadedRules)
+		}
+		if receivers != nil {
+			receivers.setConfigured(reloadedReceivers)
 		}
 		if statusCtx != nil {
-			statusCtx.setConfigOriginal(readRuntimeConfigOriginalAt(configPath))
+			statusCtx.setConfigOriginal(configOriginal)
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{
@@ -1949,16 +1963,22 @@ func readRuntimeConfigOriginalAt(configPath string) string {
 	return string(content)
 }
 
+func readRuntimeConfigOriginalForReload(configPath string) (string, error) {
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(content), nil
+}
+
 func loadRuntimeInhibitionEngine(configPath string) *runtimeInhibitionEngine {
 	engine := &runtimeInhibitionEngine{}
 
-	parser := inhibition.NewParser()
-	cfg, err := parser.ParseFile(configPath)
+	rules, err := parseRuntimeInhibitionRules(configPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || isNoInhibitionRulesError(err) {
-			return engine
-		}
-
 		slog.Warn("Failed to parse inhibition rules from config",
 			"config", configPath,
 			"error", err,
@@ -1966,13 +1986,25 @@ func loadRuntimeInhibitionEngine(configPath string) *runtimeInhibitionEngine {
 		return engine
 	}
 
-	engine.setRules(cfg.Rules)
+	engine.setRules(rules)
 	loadedRules := engine.getRules()
 	slog.Info("Loaded runtime inhibition rules",
 		"count", len(loadedRules),
 		"config", configPath,
 	)
 	return engine
+}
+
+func parseRuntimeInhibitionRules(configPath string) ([]inhibition.InhibitionRule, error) {
+	parser := inhibition.NewParser()
+	cfg, err := parser.ParseFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || isNoInhibitionRulesError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return append([]inhibition.InhibitionRule(nil), cfg.Rules...), nil
 }
 
 func isNoInhibitionRulesError(err error) bool {
@@ -1987,24 +2019,38 @@ func isNoInhibitionRulesError(err error) bool {
 func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
 	catalog := &runtimeReceiverCatalog{}
 
-	content, err := os.ReadFile(configPath)
+	configured, err := parseRuntimeConfiguredReceivers(configPath)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			slog.Warn("Failed to read config for runtime receivers",
-				"config", configPath,
-				"error", err,
-			)
-		}
-		return catalog
-	}
-
-	var cfg alertmanagerRuntimeConfig
-	if err := yaml.Unmarshal(content, &cfg); err != nil {
 		slog.Warn("Failed to parse runtime receivers from config",
 			"config", configPath,
 			"error", err,
 		)
 		return catalog
+	}
+	catalog.setConfigured(configured)
+
+	if len(configured) > 0 {
+		slog.Info("Loaded runtime receivers from config",
+			"count", len(configured),
+			"config", configPath,
+		)
+	}
+
+	return catalog
+}
+
+func parseRuntimeConfiguredReceivers(configPath string) ([]string, error) {
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var cfg alertmanagerRuntimeConfig
+	if err := yaml.Unmarshal(content, &cfg); err != nil {
+		return nil, err
 	}
 
 	receiversSet := map[string]struct{}{}
@@ -2022,16 +2068,7 @@ func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
 		configured = append(configured, name)
 	}
 	sort.Strings(configured)
-	catalog.setConfigured(configured)
-
-	if len(configured) > 0 {
-		slog.Info("Loaded runtime receivers from config",
-			"count", len(configured),
-			"config", configPath,
-		)
-	}
-
-	return catalog
+	return configured, nil
 }
 
 func collectConfiguredRouteReceivers(route alertmanagerRouteConfig, out map[string]struct{}) {
