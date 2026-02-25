@@ -122,11 +122,64 @@ func (s *silenceStore) list(now time.Time) []apiSilence {
 		out = append(out, toAPISilence(silence, now))
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartsAt > out[j].StartsAt
-	})
+	sortSilencesForList(out)
 
 	return out
+}
+
+var silenceStateSortOrder = map[string]int{
+	"active":  1,
+	"pending": 2,
+	"expired": 3,
+}
+
+func sortSilencesForList(silences []apiSilence) {
+	sort.Slice(silences, func(i, j int) bool {
+		stateI := silences[i].Status.State
+		stateJ := silences[j].Status.State
+
+		if stateI != stateJ {
+			orderI := silenceStateSortOrder[stateI]
+			orderJ := silenceStateSortOrder[stateJ]
+			if orderI == 0 {
+				orderI = 99
+			}
+			if orderJ == 0 {
+				orderJ = 99
+			}
+			return orderI < orderJ
+		}
+
+		endsAtI := parseSilenceAPITime(silences[i].EndsAt)
+		endsAtJ := parseSilenceAPITime(silences[j].EndsAt)
+		startsAtI := parseSilenceAPITime(silences[i].StartsAt)
+		startsAtJ := parseSilenceAPITime(silences[j].StartsAt)
+
+		switch stateI {
+		case "active":
+			if !endsAtI.Equal(endsAtJ) {
+				return endsAtI.Before(endsAtJ)
+			}
+		case "pending":
+			if !startsAtI.Equal(startsAtJ) {
+				return startsAtI.Before(startsAtJ)
+			}
+		case "expired":
+			if !endsAtI.Equal(endsAtJ) {
+				return endsAtI.After(endsAtJ)
+			}
+		}
+
+		return silences[i].ID < silences[j].ID
+	})
+}
+
+func parseSilenceAPITime(raw string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 func (s *silenceStore) get(id string, now time.Time) (apiSilence, bool) {
