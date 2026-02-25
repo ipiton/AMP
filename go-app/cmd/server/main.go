@@ -1324,15 +1324,13 @@ func toGettableAlerts(in []apiAlert, silences *silenceStore, now time.Time) []ap
 
 func toGettableAlert(alert apiAlert, silences *silenceStore, now time.Time) apiGettableAlert {
 	silencedBy := make([]string, 0)
-	inhibitedBy := make([]string, 0)
+	inhibitedBy := alertInhibitedByIDs(alert)
 
 	if alert.Status == "firing" && silences != nil {
 		silencedBy = silences.activeMatchingSilenceIDs(alert.Labels, now)
 	}
 
-	mutedBy := make([]string, 0, len(silencedBy)+len(inhibitedBy))
-	mutedBy = append(mutedBy, silencedBy...)
-	mutedBy = append(mutedBy, inhibitedBy...)
+	mutedBy := mergeUniqueStringSlices(silencedBy, inhibitedBy)
 
 	state := "unprocessed"
 	if alert.Status == "firing" {
@@ -1538,7 +1536,7 @@ func alertRuntimeStateForFilters(alert apiAlert, silences *silenceStore, now tim
 		silenced = silences.hasActiveMatch(alert.Labels, now)
 	}
 
-	inhibited := false
+	inhibited := len(alertInhibitedByIDs(alert)) > 0
 	unprocessed := false
 	active := !silenced && !inhibited
 
@@ -1570,6 +1568,58 @@ func copyStringSlice(in []string) []string {
 	out := make([]string, len(in))
 	copy(out, in)
 	return out
+}
+
+func mergeUniqueStringSlices(parts ...[]string) []string {
+	if len(parts) == 0 {
+		return []string{}
+	}
+
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, part := range parts {
+		for _, raw := range part {
+			value := strings.TrimSpace(raw)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func alertInhibitedByIDs(alert apiAlert) []string {
+	if alert.Status != "firing" {
+		return []string{}
+	}
+
+	rawValues := []string{
+		alert.Annotations["inhibitedBy"],
+		alert.Annotations["amp_inhibited_by"],
+		alert.Annotations["amp.inhibited_by"],
+		alert.Labels["inhibitedBy"],
+		alert.Labels["amp_inhibited_by"],
+		alert.Labels["amp.inhibited_by"],
+	}
+
+	for _, raw := range rawValues {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+
+		parts := strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == ';'
+		})
+		return mergeUniqueStringSlices(parts)
+	}
+
+	return []string{}
 }
 
 func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {

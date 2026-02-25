@@ -1449,6 +1449,82 @@ func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
 	}
 }
 
+func TestPhase0AlertsInhibitedMetadataSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"FlagInhibited","service":"api"},
+			"annotations": {"inhibitedBy":"rule-a,rule-b"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	inhibitedOnlyReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=false&inhibited=true&unprocessed=false",
+		nil,
+	)
+	inhibitedOnlyRec := httptest.NewRecorder()
+	mux.ServeHTTP(inhibitedOnlyRec, inhibitedOnlyReq)
+	if inhibitedOnlyRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts inhibited-only expected 200, got %d", inhibitedOnlyRec.Code)
+	}
+
+	var inhibitedAlerts []map[string]any
+	if err := json.Unmarshal(inhibitedOnlyRec.Body.Bytes(), &inhibitedAlerts); err != nil {
+		t.Fatalf("failed to decode inhibited-only alerts response: %v", err)
+	}
+	if len(inhibitedAlerts) != 1 {
+		t.Fatalf("expected one inhibited alert, got %d", len(inhibitedAlerts))
+	}
+
+	status, ok := inhibitedAlerts[0]["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected inhibited alert status object, got %T", inhibitedAlerts[0]["status"])
+	}
+	if status["state"] != "suppressed" {
+		t.Fatalf("expected inhibited alert status.state=suppressed, got %v", status["state"])
+	}
+
+	inhibitedBy, ok := status["inhibitedBy"].([]any)
+	if !ok || len(inhibitedBy) != 2 {
+		t.Fatalf("expected two inhibitedBy entries, got %v", status["inhibitedBy"])
+	}
+
+	mutedBy, ok := status["mutedBy"].([]any)
+	if !ok || len(mutedBy) != 2 {
+		t.Fatalf("expected mutedBy to include inhibited entries, got %v", status["mutedBy"])
+	}
+
+	activeOnlyReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=true&silenced=false&inhibited=false&unprocessed=false",
+		nil,
+	)
+	activeOnlyRec := httptest.NewRecorder()
+	mux.ServeHTTP(activeOnlyRec, activeOnlyReq)
+	if activeOnlyRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts active-only expected 200, got %d", activeOnlyRec.Code)
+	}
+
+	var activeAlerts []map[string]any
+	if err := json.Unmarshal(activeOnlyRec.Body.Bytes(), &activeAlerts); err != nil {
+		t.Fatalf("failed to decode active-only alerts response: %v", err)
+	}
+	if len(activeAlerts) != 0 {
+		t.Fatalf("expected no active alerts when only inhibited alert exists, got %d", len(activeAlerts))
+	}
+}
+
 func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
@@ -1753,6 +1829,81 @@ func TestPhase0AlertGroupsSilencedAndMutedSemantics(t *testing.T) {
 	}
 	if len(notMutedGroups) != 0 {
 		t.Fatalf("expected no groups when muted=false and only muted group exists, got %d", len(notMutedGroups))
+	}
+}
+
+func TestPhase0AlertGroupsInhibitedAndMutedSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"InhibitedGroup","service":"api","namespace":"prod","receiver":"team-ops"},
+			"annotations": {"inhibitedBy":"rule-a"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	inhibitedGroupsReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts/groups?active=false&silenced=false&inhibited=true&muted=true",
+		nil,
+	)
+	inhibitedGroupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(inhibitedGroupsRec, inhibitedGroupsReq)
+	if inhibitedGroupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups inhibited-only expected 200, got %d", inhibitedGroupsRec.Code)
+	}
+
+	var inhibitedGroups []map[string]any
+	if err := json.Unmarshal(inhibitedGroupsRec.Body.Bytes(), &inhibitedGroups); err != nil {
+		t.Fatalf("failed to decode inhibited groups response: %v", err)
+	}
+	if len(inhibitedGroups) != 1 {
+		t.Fatalf("expected one inhibited group, got %d", len(inhibitedGroups))
+	}
+
+	alerts, ok := inhibitedGroups[0]["alerts"].([]any)
+	if !ok || len(alerts) != 1 {
+		t.Fatalf("inhibited group expected one alert, got %v", inhibitedGroups[0]["alerts"])
+	}
+	alert, ok := alerts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("inhibited group alert expected object, got %T", alerts[0])
+	}
+	status, ok := alert["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("inhibited group alert status expected object, got %T", alert["status"])
+	}
+	inhibitedBy, ok := status["inhibitedBy"].([]any)
+	if !ok || len(inhibitedBy) != 1 {
+		t.Fatalf("expected inhibited group alert to have inhibitedBy entry, got %v", status["inhibitedBy"])
+	}
+
+	notMutedReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts/groups?active=false&silenced=false&inhibited=true&muted=false",
+		nil,
+	)
+	notMutedRec := httptest.NewRecorder()
+	mux.ServeHTTP(notMutedRec, notMutedReq)
+	if notMutedRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups inhibited-only muted=false expected 200, got %d", notMutedRec.Code)
+	}
+
+	var notMutedGroups []map[string]any
+	if err := json.Unmarshal(notMutedRec.Body.Bytes(), &notMutedGroups); err != nil {
+		t.Fatalf("failed to decode inhibited muted=false groups response: %v", err)
+	}
+	if len(notMutedGroups) != 0 {
+		t.Fatalf("expected no groups when muted=false and only inhibited group exists, got %d", len(notMutedGroups))
 	}
 }
 
