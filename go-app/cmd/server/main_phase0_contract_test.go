@@ -1335,12 +1335,31 @@ func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
 	if err := json.Unmarshal(resolvedRec.Body.Bytes(), &resolvedAlerts); err != nil {
 		t.Fatalf("failed to decode resolved+flags response: %v", err)
 	}
-	if len(resolvedAlerts) != 1 {
-		t.Fatalf("expected only resolved snapshot with all flags false, got %d", len(resolvedAlerts))
+	if len(resolvedAlerts) != 0 {
+		t.Fatalf("expected no resolved snapshots when unprocessed=false, got %d", len(resolvedAlerts))
 	}
-	status, ok := resolvedAlerts[0]["status"].(map[string]any)
+
+	resolvedUnprocessedReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?resolved=true&active=false&silenced=false&inhibited=false&unprocessed=true",
+		nil,
+	)
+	resolvedUnprocessedRec := httptest.NewRecorder()
+	mux.ServeHTTP(resolvedUnprocessedRec, resolvedUnprocessedReq)
+	if resolvedUnprocessedRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts resolved with unprocessed=true expected 200, got %d", resolvedUnprocessedRec.Code)
+	}
+
+	var resolvedUnprocessedAlerts []map[string]any
+	if err := json.Unmarshal(resolvedUnprocessedRec.Body.Bytes(), &resolvedUnprocessedAlerts); err != nil {
+		t.Fatalf("failed to decode resolved+unprocessed response: %v", err)
+	}
+	if len(resolvedUnprocessedAlerts) != 1 {
+		t.Fatalf("expected one resolved snapshot when unprocessed=true, got %d", len(resolvedUnprocessedAlerts))
+	}
+	status, ok := resolvedUnprocessedAlerts[0]["status"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected resolved alert status object, got %T", resolvedAlerts[0]["status"])
+		t.Fatalf("expected resolved alert status object, got %T", resolvedUnprocessedAlerts[0]["status"])
 	}
 	if status["state"] != "unprocessed" {
 		t.Fatalf("expected resolved alert status.state=unprocessed, got %v", status["state"])
