@@ -83,16 +83,16 @@ func newSilenceStore() *silenceStore {
 }
 
 func (s *silenceStore) createOrUpdate(in *silenceInput, now time.Time) (string, error) {
-	return s.createOrUpdateInternal(in, now, true, true)
+	return s.createOrUpdateInternal(in, now, true, true, false)
 }
 
-func (s *silenceStore) createOrUpdateInternal(in *silenceInput, now time.Time, notify, enforceExistingID bool) (string, error) {
+func (s *silenceStore) createOrUpdateInternal(in *silenceInput, now time.Time, notify, enforceExistingID, allowPastEndsAt bool) (string, error) {
 	if in == nil {
 		return "", fmt.Errorf("silence payload is required")
 	}
 
 	updateRequested := strings.TrimSpace(in.ID) != ""
-	normalized, err := normalizeSilenceInput(in, now)
+	normalized, err := normalizeSilenceInput(in, now, allowPastEndsAt)
 	if err != nil {
 		return "", err
 	}
@@ -213,7 +213,7 @@ func (s *silenceStore) restoreFromPersistence(items []apiSilence, now time.Time)
 			CreatedBy: item.CreatedBy,
 			Comment:   item.Comment,
 		}
-		if _, err := s.createOrUpdateInternal(in, now, false, false); err != nil {
+		if _, err := s.createOrUpdateInternal(in, now, false, false, true); err != nil {
 			return fmt.Errorf("persisted silence[%d]: %w", i, err)
 		}
 	}
@@ -288,7 +288,7 @@ func silenceMatchesLabels(matchers []storedSilenceMatcher, labels map[string]str
 	return true
 }
 
-func normalizeSilenceInput(in *silenceInput, now time.Time) (*storedSilence, error) {
+func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool) (*storedSilence, error) {
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		var err error
@@ -320,6 +320,9 @@ func normalizeSilenceInput(in *silenceInput, now time.Time) (*storedSilence, err
 	if !endsAt.After(startsAt) {
 		return nil, fmt.Errorf("endsAt must be after startsAt")
 	}
+	if !allowPastEndsAt && endsAt.Before(now.UTC()) {
+		return nil, fmt.Errorf("endsAt can't be in the past")
+	}
 
 	if len(in.Matchers) == 0 {
 		return nil, fmt.Errorf("at least one matcher is required")
@@ -336,10 +339,16 @@ func normalizeSilenceInput(in *silenceInput, now time.Time) (*storedSilence, err
 		if matcher.IsEqual != nil {
 			isEqual = *matcher.IsEqual
 		}
+		value := matcher.Value
+		if matcher.IsRegex {
+			if _, err := regexp.Compile(value); err != nil {
+				return nil, fmt.Errorf("matcher[%d].value has invalid regex", i)
+			}
+		}
 
 		matchers = append(matchers, storedSilenceMatcher{
 			Name:    name,
-			Value:   matcher.Value,
+			Value:   value,
 			IsRegex: matcher.IsRegex,
 			IsEqual: isEqual,
 		})
