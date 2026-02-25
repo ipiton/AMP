@@ -29,15 +29,19 @@ const validSilencePayload = `{
 }`
 
 func activeSilencePayload(now time.Time) string {
+	return activeSilencePayloadForAlert(now, "TestAlert")
+}
+
+func activeSilencePayloadForAlert(now time.Time, alertName string) string {
 	startsAt := now.Add(-1 * time.Minute).UTC().Format(time.RFC3339)
 	endsAt := now.Add(59 * time.Minute).UTC().Format(time.RFC3339)
 	return fmt.Sprintf(`{
-		"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
+		"matchers": [{"name":"alertname","value":%q,"isRegex":false}],
 		"startsAt": %q,
 		"endsAt": %q,
 		"createdBy": "phase0-test",
 		"comment": "active maintenance window"
-	}`, startsAt, endsAt)
+	}`, alertName, startsAt, endsAt)
 }
 
 func newPhase0TestMux(t *testing.T) *http.ServeMux {
@@ -1092,5 +1096,87 @@ func TestPhase0WebhookProcessesAlertsIntoHistory(t *testing.T) {
 	}
 	if total < 1 {
 		t.Fatalf("expected history total >= 1 after webhook ingest, got %.0f", total)
+	}
+}
+
+func TestPhase0E2ESmoke_IngestSilenceAndHistoryRecent(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	silenceReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/silences",
+		bytes.NewBufferString(activeSilencePayloadForAlert(time.Now().UTC(), "MutedAlert")),
+	)
+	silenceRec := httptest.NewRecorder()
+	mux.ServeHTTP(silenceRec, silenceReq)
+	if silenceRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", silenceRec.Code)
+	}
+
+	mutedAlertPayload := `[
+		{
+			"labels": {"alertname":"MutedAlert","service":"amp"},
+			"annotations": {"summary":"muted"},
+			"startsAt": "2026-02-25T04:00:00Z",
+			"status": "firing"
+		}
+	]`
+	mutedAlertReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(mutedAlertPayload))
+	mutedAlertRec := httptest.NewRecorder()
+	mux.ServeHTTP(mutedAlertRec, mutedAlertReq)
+	if mutedAlertRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts muted expected 200, got %d", mutedAlertRec.Code)
+	}
+
+	controlAlertPayload := `[
+		{
+			"labels": {"alertname":"ControlAlert","service":"amp"},
+			"annotations": {"summary":"not muted"},
+			"startsAt": "2026-02-25T04:01:00Z",
+			"status": "firing"
+		}
+	]`
+	controlAlertReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(controlAlertPayload))
+	controlAlertRec := httptest.NewRecorder()
+	mux.ServeHTTP(controlAlertRec, controlAlertReq)
+	if controlAlertRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts control expected 200, got %d", controlAlertRec.Code)
+	}
+
+	recentReq := httptest.NewRequest(http.MethodGet, "/history/recent?status=firing&limit=10", nil)
+	recentRec := httptest.NewRecorder()
+	mux.ServeHTTP(recentRec, recentReq)
+	if recentRec.Code != http.StatusOK {
+		t.Fatalf("GET /history/recent expected 200, got %d", recentRec.Code)
+	}
+
+	var recentPayload map[string]any
+	if err := json.Unmarshal(recentRec.Body.Bytes(), &recentPayload); err != nil {
+		t.Fatalf("failed to decode history/recent response: %v", err)
+	}
+
+	total, ok := recentPayload["total"].(float64)
+	if !ok {
+		t.Fatalf("history/recent total has unexpected type: %T", recentPayload["total"])
+	}
+	if total != 1 {
+		t.Fatalf("expected only non-muted alert in history/recent, got total %.0f", total)
+	}
+
+	alerts, ok := recentPayload["alerts"].([]any)
+	if !ok || len(alerts) != 1 {
+		t.Fatalf("expected exactly one alert in history/recent, got %v", recentPayload["alerts"])
+	}
+
+	alertMap, ok := alerts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("history/recent alert has unexpected type: %T", alerts[0])
+	}
+	labels, ok := alertMap["labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("history/recent alert labels has unexpected type: %T", alertMap["labels"])
+	}
+	if labels["alertname"] != "ControlAlert" {
+		t.Fatalf("expected ControlAlert in history/recent, got %v", labels["alertname"])
 	}
 }
