@@ -264,7 +264,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore))
 	// Alertmanager v1 compatibility ingest endpoint (intentionally limited)
 	mux.HandleFunc("/api/v1/alerts", alertsV1Handler(alertStore, silenceStore))
-	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore))
+	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore))
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore))
@@ -623,7 +623,7 @@ func alertsHandler(store *alertStore, silences *silenceStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handleAlertsGet(store, w, r)
+			handleAlertsGet(store, silences, w, r)
 		case http.MethodPost:
 			handleAlertsPost(store, silences, w, r)
 		default:
@@ -632,7 +632,7 @@ func alertsHandler(store *alertStore, silences *silenceStore) http.HandlerFunc {
 	}
 }
 
-func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) {
+func handleAlertsGet(store *alertStore, silences *silenceStore, w http.ResponseWriter, r *http.Request) {
 	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
 	switch status {
 	case "", "firing", "resolved":
@@ -688,7 +688,7 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		alerts = filtered
 	}
 	alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
-	alerts = filterAlertsByStateFilters(alerts, stateFilters)
+	alerts = filterAlertsByStateFilters(alerts, stateFilters, silences, time.Now().UTC())
 
 	writeJSON(w, http.StatusOK, alerts)
 }
@@ -882,7 +882,7 @@ func receiversHandler(store *alertStore) http.HandlerFunc {
 	}
 }
 
-func alertGroupsHandler(store *alertStore) http.HandlerFunc {
+func alertGroupsHandler(store *alertStore, silences *silenceStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -920,9 +920,10 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			return
 		}
 
+		now := time.Now().UTC()
 		alerts := store.list("", includeResolved)
 		alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
-		alerts = filterAlertsByGroupStateFilters(alerts, stateFilters)
+		alerts = filterAlertsByGroupStateFilters(alerts, stateFilters, silences, now)
 
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
@@ -951,7 +952,7 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 
 		groups := make([]apiAlertGroup, 0, len(groupsMap))
 		for _, group := range groupsMap {
-			if !stateFilters.muted && isMutedAlertGroup(group) {
+			if !stateFilters.muted && isMutedAlertGroup(group, silences, now) {
 				continue
 			}
 			groups = append(groups, *group)
@@ -1215,7 +1216,7 @@ func parseAlertsStateFilters(r *http.Request) (alertsStateFilters, error) {
 	}, nil
 }
 
-func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters) []apiAlert {
+func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters, silences *silenceStore, now time.Time) []apiAlert {
 	if len(in) == 0 {
 		return in
 	}
@@ -1231,16 +1232,21 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters) []apiAlert 
 			continue
 		}
 
-		isActive := alert.Status == "firing"
-		isSilenced := false
-		isInhibited := false
-		isUnprocessed := false
-		if (f.active && isActive) ||
-			(f.silenced && isSilenced) ||
-			(f.inhibited && isInhibited) ||
-			(f.unprocessed && isUnprocessed) {
-			out = append(out, alert)
+		state := alertRuntimeStateForFilters(alert, silences, now)
+		if !f.active && state.active {
+			continue
 		}
+		if !f.silenced && state.silenced {
+			continue
+		}
+		if !f.inhibited && state.inhibited {
+			continue
+		}
+		if !f.unprocessed && state.unprocessed {
+			continue
+		}
+
+		out = append(out, alert)
 	}
 
 	return out
@@ -1368,32 +1374,60 @@ func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error
 	}, nil
 }
 
-func filterAlertsByGroupStateFilters(in []apiAlert, f alertGroupStateFilters) []apiAlert {
+func filterAlertsByGroupStateFilters(in []apiAlert, f alertGroupStateFilters, silences *silenceStore, now time.Time) []apiAlert {
 	return filterAlertsByStateFilters(in, alertsStateFilters{
 		active:      f.active,
 		silenced:    f.silenced,
 		inhibited:   f.inhibited,
-		unprocessed: false,
-	})
+		unprocessed: true,
+	}, silences, now)
 }
 
-func isMutedAlertGroup(group *apiAlertGroup) bool {
+func isMutedAlertGroup(group *apiAlertGroup, silences *silenceStore, now time.Time) bool {
 	if group == nil || len(group.Alerts) == 0 {
 		return false
 	}
 
 	for _, alert := range group.Alerts {
-		if !isAlertMuted(alert) {
+		if !isAlertMuted(alert, silences, now) {
 			return false
 		}
 	}
 	return true
 }
 
-func isAlertMuted(alert apiAlert) bool {
-	// Runtime does not yet materialize silenced/inhibited linkage per alert.
-	_ = alert
-	return false
+type alertRuntimeState struct {
+	active      bool
+	silenced    bool
+	inhibited   bool
+	unprocessed bool
+}
+
+func alertRuntimeStateForFilters(alert apiAlert, silences *silenceStore, now time.Time) alertRuntimeState {
+	if alert.Status != "firing" {
+		return alertRuntimeState{}
+	}
+
+	silenced := false
+	if silences != nil {
+		silenced = silences.hasActiveMatch(alert.Labels, now)
+	}
+
+	inhibited := false
+	unprocessed := false
+	active := !silenced && !inhibited
+
+	return alertRuntimeState{
+		active:      active,
+		silenced:    silenced,
+		inhibited:   inhibited,
+		unprocessed: unprocessed,
+	}
+}
+
+func isAlertMuted(alert apiAlert, silences *silenceStore, now time.Time) bool {
+	state := alertRuntimeStateForFilters(alert, silences, now)
+	return state.silenced || state.inhibited
 }
 
 func alertReceiverName(alert apiAlert) string {

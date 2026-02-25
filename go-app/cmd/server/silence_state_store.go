@@ -242,6 +242,25 @@ func (s *silenceStore) activeMatchingSilenceIDs(labels map[string]string, now ti
 	return out
 }
 
+func (s *silenceStore) hasActiveMatch(labels map[string]string, now time.Time) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(labels) == 0 || len(s.silences) == 0 {
+		return false
+	}
+
+	for _, silence := range s.silences {
+		if silenceState(silence, now) != "active" {
+			continue
+		}
+		if silenceMatchesLabels(silence.Matchers, labels) {
+			return true
+		}
+	}
+	return false
+}
+
 func silenceMatchesLabels(matchers []storedSilenceMatcher, labels map[string]string) bool {
 	for _, matcher := range matchers {
 		labelValue := labels[matcher.Name]
