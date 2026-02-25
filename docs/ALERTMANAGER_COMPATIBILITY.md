@@ -3,13 +3,13 @@
 **Date**: 2025-12-01
 **Status**: ✅ **100% COMPATIBLE** - Drop-in replacement ready
 **Alertmanager Version**: v0.27+ (API v2)
-**Alert History Version**: v1.0.0
+**Alertmanager++ Version**: v1.0.0
 
 ---
 
 ## 🎯 Executive Summary
 
-**Alertmanager++** (Alert History Service) is a **100% API-compatible drop-in replacement** for Prometheus Alertmanager with enhanced features.
+**Alertmanager++** (AMP Service) is a **100% API-compatible drop-in replacement** for Prometheus Alertmanager with enhanced features.
 
 ### Compatibility Guarantee
 
@@ -26,7 +26,7 @@
 
 ### Core Alertmanager API v2 Endpoints
 
-| Endpoint | Alertmanager | Alert History | Status | Notes |
+| Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
 |----------|--------------|---------------|---------|-------|
 | **Alert Management** | | | | |
 | `POST /api/v2/alerts` | ✅ | ✅ **COMPLETE** | 🟢 100% | Prometheus v1/v2 formats, 207 multi-status |
@@ -41,14 +41,14 @@
 | `GET /api/v2/config` | ✅ | ✅ **COMPLETE** | 🟢 100% | Get config (YAML/JSON), sanitization support |
 | `POST /api/v2/config` | ⚠️ Limited | ✅ **ENHANCED** | 🟢 120% | Update config + validation + hot reload |
 | **System Status** | | | | |
-| `GET /api/v2/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Basic /healthz exists, full status planned |
+| `GET /api/v2/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Basic /health exists, full status planned |
 | `GET /api/v1/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Legacy v1 status endpoint |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
 
 These endpoints provide additional functionality while maintaining backward compatibility:
 
-| Endpoint | Alert History | Purpose | Benefit |
+| Endpoint | Alertmanager++ | Purpose | Benefit |
 |----------|---------------|---------|---------|
 | `POST /api/v2/silences/check` | ✅ **COMPLETE** | Test if alert would be silenced | Debugging & validation |
 | `POST /api/v2/silences/bulk/delete` | ✅ **COMPLETE** | Bulk delete silences (up to 100) | Operational efficiency |
@@ -92,7 +92,7 @@ Content-Type: application/json
 Response: 200 OK
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same request format (Prometheus v1 array)
@@ -141,7 +141,7 @@ Response: 200 OK
 ]
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same query parameters (`filter`, `silenced`, `inhibited`, `active`)
@@ -183,7 +183,7 @@ Response: 200 OK
 }
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same request/response format
@@ -216,7 +216,7 @@ receivers:
   - name: 'default'
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same YAML configuration format
@@ -237,7 +237,7 @@ receivers:
 
 ### Core Alertmanager Features
 
-| Feature | Alertmanager | Alert History | Implementation | Notes |
+| Feature | Alertmanager | Alertmanager++ | Implementation | Notes |
 |---------|--------------|---------------|----------------|-------|
 | **Alert Ingestion** | | | | |
 | Prometheus v1 format | ✅ | ✅ | `prometheus_alerts.go` | Array of alerts |
@@ -305,7 +305,7 @@ receivers:
 
 ## 📈 Performance Comparison
 
-| Metric | Alertmanager | Alert History | Improvement |
+| Metric | Alertmanager | Alertmanager++ | Improvement |
 |--------|--------------|---------------|-------------|
 | **Alert Ingestion** | | | |
 | p50 latency | ~50ms | ~2ms | **25x faster** ⚡ |
@@ -364,13 +364,13 @@ Tested with popular Alertmanager dashboards:
 
 ```bash
 # Works with existing amtool without modifications
-amtool --alertmanager.url=http://localhost:8080 \
+amtool --alertmanager.url=http://localhost:9093 \
   alert add test severity=critical
 
-amtool --alertmanager.url=http://localhost:8080 \
+amtool --alertmanager.url=http://localhost:9093 \
   silence add alertname=test duration=1h
 
-amtool --alertmanager.url=http://localhost:8080 \
+amtool --alertmanager.url=http://localhost:9093 \
   config show
 ```
 
@@ -385,8 +385,8 @@ amtool --alertmanager.url=http://localhost:8080 \
 # Stop Alertmanager
 kubectl delete deployment alertmanager
 
-# Deploy Alert History
-helm install alert-history ./helm/alert-history \
+# Deploy Alertmanager++
+helm install amp ./helm/amp \
   --set profile=standard \
   --set image.tag=v1.0.0
 ```
@@ -398,7 +398,7 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - 'alert-history:8080'  # Changed from alertmanager:9093
+          - 'amp:9093'  # Changed from alertmanager:9093
 ```
 
 **Step 3**: Import existing state (optional)
@@ -406,8 +406,8 @@ alerting:
 # Export from Alertmanager
 amtool --alertmanager.url=http://alertmanager:9093 silence query -o json > silences.json
 
-# Import to Alert History
-curl -X POST http://alert-history:8080/api/v2/silences \
+# Import to Alertmanager++
+curl -X POST http://amp:9093/api/v2/silences \
   -H "Content-Type: application/json" \
   -d @silences.json
 ```
@@ -421,7 +421,7 @@ If needed, rollback is trivial:
 
 ```bash
 # Rollback Helm deployment
-helm rollback alert-history
+helm rollback amp
 
 # Or redeploy Alertmanager
 helm install alertmanager prometheus-community/alertmanager
@@ -431,11 +431,11 @@ helm install alertmanager prometheus-community/alertmanager
 
 ## ❓ FAQ
 
-### Q: Is Alert History 100% compatible with Alertmanager?
+### Q: Is Alertmanager++ 100% compatible with Alertmanager?
 **A**: Yes! All core API v2 endpoints are implemented with identical request/response formats. Existing Grafana dashboards, amtool commands, and Prometheus configurations work without modification.
 
 ### Q: What are the differences from Alertmanager?
-**A**: Alert History is a **superset** of Alertmanager:
+**A**: Alertmanager++ is a **superset** of Alertmanager:
 - ✅ **Same**: All core features (routing, silences, inhibition, grouping, templates)
 - ✅ **Enhanced**: Better performance (10-20x faster), extended history (PostgreSQL), hot reload, validation, bulk operations
 - ✅ **Optional**: LLM classification (BYOK), advanced analytics (can be disabled)
@@ -463,7 +463,7 @@ alertmanagers:
 # After
 alertmanagers:
   - static_configs:
-      - targets: ['alert-history:8080']
+      - targets: ['amp:9093']
 ```
 
 ### Q: Will my Grafana dashboards work?
@@ -472,11 +472,11 @@ alertmanagers:
 ### Q: Does amtool CLI work?
 **A**: Yes! Just change the URL:
 ```bash
-amtool --alertmanager.url=http://alert-history:8080 alert query
+amtool --alertmanager.url=http://amp:9093 alert query
 ```
 
 ### Q: What about high availability?
-**A**: Alert History supports:
+**A**: Alertmanager++ supports:
 - ✅ **Kubernetes-native HA**: Horizontal Pod Autoscaler (2-10 replicas)
 - ✅ **State replication**: Redis-backed (vs Alertmanager's gossip mesh)
 - ✅ **Load balancing**: Any K8s Service (vs Alertmanager's internal mesh)
@@ -493,26 +493,26 @@ amtool --alertmanager.url=http://alert-history:8080 alert query
 **A**: The OSS edition is 100% free (Apache 2.0). Commercial support and paid features (ML anomaly detection, multi-tenancy) available separately.
 
 ### Q: What's the roadmap?
-**A**: See [ROADMAP.md](ROADMAP.md) for upcoming features. We maintain backward compatibility in all releases.
+**A**: See [TECHNICAL_DECISIONS.md](TECHNICAL_DECISIONS.md) for upcoming features. We maintain backward compatibility in all releases.
 
 ---
 
 ## 📚 Additional Resources
 
 ### Documentation
-- **Migration Guide**: [MIGRATION_FROM_ALERTMANAGER.md](MIGRATION_FROM_ALERTMANAGER.md)
-- **API Reference**: [openapi.yaml](api/openapi.yaml)
-- **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Configuration**: [CONFIGURATION.md](CONFIGURATION.md)
+- **Migration Guide**: [MIGRATION_QUICK_START.md](MIGRATION_QUICK_START.md)
+- **Compatibility Matrix**: [ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md)
+- **Technical Decisions**: [TECHNICAL_DECISIONS.md](TECHNICAL_DECISIONS.md)
+- **Configuration**: [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)
 
 ### Examples
-- **Kubernetes Deployment**: [examples/k8s/](../examples/k8s/)
-- **Helm Charts**: [helm/alert-history/](../helm/alert-history/)
-- **Configuration Examples**: [examples/configs/](../go-app/examples/configs/)
+- **Extension Examples**: [examples/README.md](../examples/README.md)
+- **Helm Chart**: [helm/amp/README.md](../helm/amp/README.md)
+- **Routing Config Examples**: [go-app/internal/infrastructure/routing/testdata/](../go-app/internal/infrastructure/routing/testdata/)
 
 ### Community
-- **GitHub Issues**: [Report bugs or request features](https://github.com/ipiton/alert-history-service/issues)
-- **Discussions**: [Ask questions](https://github.com/ipiton/alert-history-service/discussions)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/ipiton/AMP/issues)
+- **Discussions**: [Ask questions](https://github.com/ipiton/AMP/discussions)
 - **Slack**: [Join community](https://join.slack.com/t/alertmanager-plusplus)
 
 ---

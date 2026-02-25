@@ -8,28 +8,27 @@
 
 ## 🚀 3-Step Migration
 
-### Step 1: Deploy Alert History (2 minutes)
+### Step 1: Deploy Alertmanager++ (2 minutes)
 
 #### Kubernetes (Helm)
 ```bash
 # Add repo
-helm repo add alertmanager-plusplus https://github.com/ipiton/AMP-service
+helm repo add amp https://ipiton.github.io/AMP
 helm repo update
 
-# Install (same config as Alertmanager!)
-helm install AMP alertmanager-plusplus/AMP \
+# Install (standard profile)
+helm install amp amp/amp \
   --set profile=standard \
-  --set-file config=alertmanager.yml \
   --namespace monitoring
 ```
 
 #### Docker
 ```bash
 docker run -d \
-  -p 8080:8080 \
-  -v $(pwd)/alertmanager.yml:/etc/AMP/config.yml \
-  --name AMP \
-  yourusername/alertmanager-plusplus:latest
+  -p 9093:9093 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  --name amp \
+  ghcr.io/ipiton/amp:latest
 ```
 
 ---
@@ -43,7 +42,7 @@ alerting:
     - static_configs:
         - targets:
           # OLD: - 'alertmanager:9093'
-          - 'AMP:8080'  # NEW: Just change the port!
+          - 'amp:9093'  # NEW: point to Alertmanager++
 ```
 
 Apply:
@@ -59,22 +58,22 @@ docker restart prometheus
 
 ```bash
 # Check health
-curl http://localhost:8080/healthz
+curl http://localhost:9093/health
 
 # Test alert ingestion
-curl -X POST http://localhost:8080/api/v2/alerts \
+curl -X POST http://localhost:9093/api/v2/alerts \
   -H "Content-Type: application/json" \
   -d '[{"labels":{"alertname":"test","severity":"info"}}]'
 
 # Query alerts (Alertmanager-compatible)
-curl http://localhost:8080/api/v2/alerts
+curl http://localhost:9093/api/v2/alerts
 ```
 
 ---
 
 ## ✅ Done!
 
-**That's it!** Your alerts are now flowing through Alert History.
+**That's it!** Your alerts are now flowing through Alertmanager++.
 
 ### What Just Happened?
 
@@ -89,8 +88,8 @@ curl http://localhost:8080/api/v2/alerts
 ## 🔄 Rollback (if needed)
 
 ```bash
-# Stop Alert History
-kubectl delete deployment AMP -n monitoring
+# Stop Alertmanager++
+kubectl delete deployment amp -n monitoring
 
 # Redeploy Alertmanager
 helm install alertmanager prometheus-community/alertmanager
@@ -102,9 +101,9 @@ helm install alertmanager prometheus-community/alertmanager
 
 ## 📚 Next Steps
 
-- **Production checklist**: See [MIGRATION_DETAILED.md](MIGRATION_DETAILED.md)
+- **Migration details**: See [MIGRATION_COMPARISON.md](MIGRATION_COMPARISON.md)
 - **Feature comparison**: See [MIGRATION_COMPARISON.md](MIGRATION_COMPARISON.md)
-- **Configuration**: Your `alertmanager.yml` works as-is, but check [CONFIGURATION.md](CONFIGURATION.md) for new features
+- **Configuration**: Your `alertmanager.yml` works as-is, but check [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for new features
 
 ---
 
@@ -113,19 +112,19 @@ helm install alertmanager prometheus-community/alertmanager
 **Alerts not showing up?**
 ```bash
 # Check Prometheus is sending to correct endpoint
-kubectl logs -n monitoring prometheus-0 | grep AMP
+kubectl logs -n monitoring prometheus-0 | grep amp
 
-# Check Alert History is receiving
-kubectl logs -n monitoring AMP-0 | grep "POST /api/v2/alerts"
+# Check Alertmanager++ is receiving
+kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 ```
 
 **Grafana dashboard broken?**
 - Verify dashboard uses `/api/v2/alerts` endpoint (should work automatically)
-- Check datasource URL points to `AMP:8080`
+- Check datasource URL points to `amp:9093`
 
 **Need help?**
-- [GitHub Issues](https://github.com/ipiton/AMP-service/issues)
-- [Documentation](https://github.com/ipiton/AMP-service/docs)
+- [GitHub Issues](https://github.com/ipiton/AMP/issues)
+- [Documentation](https://github.com/ipiton/AMP/tree/main/docs)
 
 ---
 
