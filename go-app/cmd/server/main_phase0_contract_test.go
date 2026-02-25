@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -215,6 +216,50 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if _, ok := payload["runtime"]; !ok {
 			t.Fatalf("status response missing runtime field")
+		}
+
+		cluster, ok := payload["cluster"].(map[string]any)
+		if !ok {
+			t.Fatalf("status cluster expected object, got %T", payload["cluster"])
+		}
+		clusterStatus, ok := cluster["status"].(string)
+		if !ok || clusterStatus == "" {
+			t.Fatalf("status cluster.status expected non-empty string, got %v", cluster["status"])
+		}
+		clusterPeers, ok := cluster["peers"].([]any)
+		if !ok {
+			t.Fatalf("status cluster.peers expected array, got %T", cluster["peers"])
+		}
+		if clusterPeers == nil {
+			t.Fatalf("status cluster.peers must not be nil")
+		}
+
+		versionInfo, ok := payload["versionInfo"].(map[string]any)
+		if !ok {
+			t.Fatalf("status versionInfo expected object, got %T", payload["versionInfo"])
+		}
+		requiredVersionFields := []string{"version", "revision", "branch", "buildUser", "buildDate", "goVersion"}
+		for _, field := range requiredVersionFields {
+			value, ok := versionInfo[field].(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				t.Fatalf("status versionInfo.%s expected non-empty string, got %v", field, versionInfo[field])
+			}
+		}
+
+		configValue, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("status config expected object, got %T", payload["config"])
+		}
+		if _, ok := configValue["original"].(string); !ok {
+			t.Fatalf("status config.original expected string, got %T", configValue["original"])
+		}
+
+		uptimeRaw, ok := payload["uptime"].(string)
+		if !ok {
+			t.Fatalf("status uptime expected string, got %T", payload["uptime"])
+		}
+		if _, err := time.Parse(time.RFC3339, uptimeRaw); err != nil {
+			t.Fatalf("status uptime expected RFC3339 timestamp, got %q: %v", uptimeRaw, err)
 		}
 	})
 
