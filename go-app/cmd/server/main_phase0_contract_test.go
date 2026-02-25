@@ -1554,6 +1554,64 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	}
 }
 
+func TestPhase0AlertGroupsNestedAlertShape(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"NestedShape","service":"api","namespace":"prod","receiver":"team-ops"},
+			"annotations": {"summary":"nested check"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", groupsRec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected exactly one group, got %d", len(groups))
+	}
+
+	alerts, ok := groups[0]["alerts"].([]any)
+	if !ok || len(alerts) != 1 {
+		t.Fatalf("group alerts expected one element, got %v", groups[0]["alerts"])
+	}
+	alert, ok := alerts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("nested alert expected object, got %T", alerts[0])
+	}
+
+	for _, field := range []string{"annotations", "receivers", "startsAt", "updatedAt", "endsAt", "fingerprint", "status"} {
+		if _, ok := alert[field]; !ok {
+			t.Fatalf("nested alert missing required field %q", field)
+		}
+	}
+
+	status, ok := alert["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested alert status expected object, got %T", alert["status"])
+	}
+	if status["state"] != "active" {
+		t.Fatalf("nested alert status.state expected active, got %v", status["state"])
+	}
+}
+
 func TestPhase0AlertGroupsStateFlagSemantics(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
