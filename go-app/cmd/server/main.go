@@ -878,7 +878,15 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			return
 		}
 
-		alerts := store.list("", includeResolved)
+		stateFilters, err := parseAlertGroupStateFilters(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		alerts := filterAlertsByGroupStateFilters(store.list("", includeResolved), stateFilters)
 
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
@@ -907,6 +915,9 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 
 		groups := make([]apiAlertGroup, 0, len(groupsMap))
 		for _, group := range groupsMap {
+			if !stateFilters.muted && isMutedAlertGroup(group) {
+				continue
+			}
 			groups = append(groups, *group)
 		}
 		sort.Slice(groups, func(i, j int) bool {
@@ -1073,6 +1084,13 @@ type alertsStateFilters struct {
 	unprocessed bool
 }
 
+type alertGroupStateFilters struct {
+	active    bool
+	silenced  bool
+	inhibited bool
+	muted     bool
+}
+
 func parseAlertsStateFilters(r *http.Request) (alertsStateFilters, error) {
 	active, err := parseBoolQuery(r.URL.Query().Get("active"), true)
 	if err != nil {
@@ -1128,6 +1146,60 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters) []apiAlert 
 	}
 
 	return out
+}
+
+func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error) {
+	active, err := parseBoolQuery(r.URL.Query().Get("active"), true)
+	if err != nil {
+		return alertGroupStateFilters{}, err
+	}
+	silenced, err := parseBoolQuery(r.URL.Query().Get("silenced"), true)
+	if err != nil {
+		return alertGroupStateFilters{}, err
+	}
+	inhibited, err := parseBoolQuery(r.URL.Query().Get("inhibited"), true)
+	if err != nil {
+		return alertGroupStateFilters{}, err
+	}
+	muted, err := parseBoolQuery(r.URL.Query().Get("muted"), true)
+	if err != nil {
+		return alertGroupStateFilters{}, err
+	}
+
+	return alertGroupStateFilters{
+		active:    active,
+		silenced:  silenced,
+		inhibited: inhibited,
+		muted:     muted,
+	}, nil
+}
+
+func filterAlertsByGroupStateFilters(in []apiAlert, f alertGroupStateFilters) []apiAlert {
+	return filterAlertsByStateFilters(in, alertsStateFilters{
+		active:      f.active,
+		silenced:    f.silenced,
+		inhibited:   f.inhibited,
+		unprocessed: false,
+	})
+}
+
+func isMutedAlertGroup(group *apiAlertGroup) bool {
+	if group == nil || len(group.Alerts) == 0 {
+		return false
+	}
+
+	for _, alert := range group.Alerts {
+		if !isAlertMuted(alert) {
+			return false
+		}
+	}
+	return true
+}
+
+func isAlertMuted(alert apiAlert) bool {
+	// Runtime does not yet materialize silenced/inhibited linkage per alert.
+	_ = alert
+	return false
 }
 
 func alertReceiverName(alert apiAlert) string {

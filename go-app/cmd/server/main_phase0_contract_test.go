@@ -600,6 +600,20 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		if recReceiver.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 400, got %d", recReceiver.Code)
 		}
+
+		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
+		recActive := httptest.NewRecorder()
+		mux.ServeHTTP(recActive, reqActive)
+		if recActive.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 400, got %d", recActive.Code)
+		}
+
+		reqMuted := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?muted=not-bool", nil)
+		recMuted := httptest.NewRecorder()
+		mux.ServeHTTP(recMuted, reqMuted)
+		if recMuted.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid muted expected 400, got %d", recMuted.Code)
+		}
 	})
 
 	t.Run("method contracts", func(t *testing.T) {
@@ -1096,6 +1110,78 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	}
 	if len(receivers) < 2 {
 		t.Fatalf("expected at least 2 receivers (default + custom), got %d", len(receivers))
+	}
+}
+
+func TestPhase0AlertGroupsStateFlagSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"GroupFiring","service":"api","namespace":"prod","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"GroupResolved","service":"api","namespace":"prod","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"endsAt": "2026-02-25T00:05:00Z",
+			"status": "resolved"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	noneReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts/groups?active=false&silenced=false&inhibited=false",
+		nil,
+	)
+	noneRec := httptest.NewRecorder()
+	mux.ServeHTTP(noneRec, noneReq)
+	if noneRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups with active/silenced/inhibited false expected 200, got %d", noneRec.Code)
+	}
+
+	var noneGroups []map[string]any
+	if err := json.Unmarshal(noneRec.Body.Bytes(), &noneGroups); err != nil {
+		t.Fatalf("failed to decode all-false groups response: %v", err)
+	}
+	if len(noneGroups) != 0 {
+		t.Fatalf("expected no groups when active/silenced/inhibited are false, got %d", len(noneGroups))
+	}
+
+	resolvedReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts/groups?resolved=true&active=false&silenced=false&inhibited=false&muted=false",
+		nil,
+	)
+	resolvedRec := httptest.NewRecorder()
+	mux.ServeHTTP(resolvedRec, resolvedReq)
+	if resolvedRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups resolved with state flags expected 200, got %d", resolvedRec.Code)
+	}
+
+	var resolvedGroups []map[string]any
+	if err := json.Unmarshal(resolvedRec.Body.Bytes(), &resolvedGroups); err != nil {
+		t.Fatalf("failed to decode resolved groups response: %v", err)
+	}
+	if len(resolvedGroups) != 1 {
+		t.Fatalf("expected exactly one resolved-only group, got %d", len(resolvedGroups))
+	}
+
+	alerts, ok := resolvedGroups[0]["alerts"].([]any)
+	if !ok || len(alerts) != 1 {
+		t.Fatalf("resolved group expected one alert, got %v", resolvedGroups[0]["alerts"])
+	}
+	alert, ok := alerts[0].(map[string]any)
+	if !ok || alert["status"] != "resolved" {
+		t.Fatalf("resolved group alert expected status=resolved, got %v", alerts[0])
 	}
 }
 
