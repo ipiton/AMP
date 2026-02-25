@@ -3,13 +3,39 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
+	"time"
 )
+
+const validAlertPayload = `[
+	{
+		"labels": {"alertname":"TestAlert","service":"amp"},
+		"annotations": {"summary":"test"},
+		"startsAt": "2026-02-25T00:00:00Z",
+		"status": "firing"
+	}
+]`
+
+const validSilencePayload = `{
+	"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
+	"startsAt": "2026-02-25T00:00:00Z",
+	"endsAt": "2026-02-25T01:00:00Z",
+	"createdBy": "phase0-test",
+	"comment": "maintenance window"
+}`
 
 func newPhase0TestMux(t *testing.T) *http.ServeMux {
 	t.Helper()
+	return newPhase0TestMuxWithStateFile(t, filepath.Join(t.TempDir(), "runtime-state.json"))
+}
+
+func newPhase0TestMuxWithStateFile(t *testing.T, stateFile string) *http.ServeMux {
+	t.Helper()
+	t.Setenv(runtimeStateFileEnv, stateFile)
 
 	initTemplates()
 
@@ -40,14 +66,28 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "ready", method: http.MethodGet, path: "/ready", allowedStatus: []int{http.StatusOK}},
 		{name: "healthz alias", method: http.MethodGet, path: "/healthz", allowedStatus: []int{http.StatusOK}},
 		{name: "readyz alias", method: http.MethodGet, path: "/readyz", allowedStatus: []int{http.StatusOK}},
+		{name: "alertmanager healthy get", method: http.MethodGet, path: "/-/healthy", allowedStatus: []int{http.StatusOK}},
+		{name: "alertmanager healthy head", method: http.MethodHead, path: "/-/healthy", allowedStatus: []int{http.StatusOK}},
+		{name: "alertmanager ready get", method: http.MethodGet, path: "/-/ready", allowedStatus: []int{http.StatusOK}},
+		{name: "alertmanager ready head", method: http.MethodHead, path: "/-/ready", allowedStatus: []int{http.StatusOK}},
+		{name: "alertmanager reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, allowedStatus: []int{http.StatusOK}},
+		{name: "debug get", method: http.MethodGet, path: "/debug/pprof", allowedStatus: []int{http.StatusOK}},
+		{name: "debug post", method: http.MethodPost, path: "/debug/pprof", body: `{}`, allowedStatus: []int{http.StatusOK}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
+		{name: "alerts v1 post", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", allowedStatus: []int{http.StatusOK}},
-		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: "{}", allowedStatus: []int{http.StatusOK}},
+		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
+		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", allowedStatus: []int{http.StatusOK}},
+		{name: "receivers get", method: http.MethodGet, path: "/api/v2/receivers", allowedStatus: []int{http.StatusOK}},
 		{name: "silences get", method: http.MethodGet, path: "/api/v2/silences", allowedStatus: []int{http.StatusOK}},
+		{name: "silences post", method: http.MethodPost, path: "/api/v2/silences", body: validSilencePayload, allowedStatus: []int{http.StatusOK}},
+		{name: "silence by id get", method: http.MethodGet, path: "/api/v2/silence/test-id", allowedStatus: []int{http.StatusNotFound}},
+		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/test-id", allowedStatus: []int{http.StatusNotFound}},
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", allowedStatus: []int{http.StatusOK}},
+		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard recent alerts api", method: http.MethodGet, path: "/api/dashboard/alerts/recent", allowedStatus: []int{http.StatusOK}},
-		{name: "webhook post", method: http.MethodPost, path: "/webhook", body: "{}", allowedStatus: []int{http.StatusOK}},
+		{name: "webhook post", method: http.MethodPost, path: "/webhook", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "static asset", method: http.MethodGet, path: "/static/css/dashboard.css", allowedStatus: []int{http.StatusOK}},
 	}
 
@@ -147,6 +187,36 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		if _, ok := payload["versionInfo"]; !ok {
 			t.Fatalf("status response missing versionInfo field")
 		}
+		if _, ok := payload["uptime"]; !ok {
+			t.Fatalf("status response missing uptime field")
+		}
+		if _, ok := payload["stats"]; !ok {
+			t.Fatalf("status response missing stats field")
+		}
+		if _, ok := payload["runtime"]; !ok {
+			t.Fatalf("status response missing runtime field")
+		}
+	})
+
+	t.Run("history contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/history", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /history expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("history response is not valid json: %v", err)
+		}
+		if _, ok := payload["total"]; !ok {
+			t.Fatalf("history response missing total field")
+		}
+		if _, ok := payload["alerts"]; !ok {
+			t.Fatalf("history response missing alerts field")
+		}
 	})
 
 	t.Run("alerts get contract", func(t *testing.T) {
@@ -158,22 +228,32 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("GET /api/v2/alerts expected 200, got %d", rec.Code)
 		}
 
-		var payload map[string]any
+		var payload []any
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("alerts get response is not valid json: %v", err)
 		}
-		if payload["status"] != "success" {
-			t.Fatalf("alerts get expected status=success, got %v", payload["status"])
+		if payload == nil {
+			t.Fatalf("alerts get expected array payload")
 		}
 	})
 
 	t.Run("alerts post contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`{}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("POST /api/v2/alerts expected 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("alerts post invalid payload contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`{}`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/alerts with invalid payload expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -186,17 +266,124 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("GET /api/v2/silences expected 200, got %d", rec.Code)
 		}
 
-		var payload map[string]any
+		var payload []any
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("silences response is not valid json: %v", err)
 		}
-		if payload["status"] != "success" {
-			t.Fatalf("silences get expected status=success, got %v", payload["status"])
+		if payload == nil {
+			t.Fatalf("silences get expected array payload")
+		}
+	})
+
+	t.Run("silences post contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(validSilencePayload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/silences expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("silences post response is not valid json: %v", err)
+		}
+		if _, ok := payload["silenceID"]; !ok {
+			t.Fatalf("silences post expected silenceID field")
+		}
+	})
+
+	t.Run("silences post invalid payload contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(`{}`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/silences with invalid payload expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("silence by id contract", func(t *testing.T) {
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/non-existent-id", nil)
+		getRec := httptest.NewRecorder()
+		mux.ServeHTTP(getRec, getReq)
+		if getRec.Code != http.StatusNotFound {
+			t.Fatalf("GET /api/v2/silence/{id} expected 404, got %d", getRec.Code)
+		}
+
+		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/non-existent-id", nil)
+		delRec := httptest.NewRecorder()
+		mux.ServeHTTP(delRec, delReq)
+		if delRec.Code != http.StatusNotFound {
+			t.Fatalf("DELETE /api/v2/silence/{id} expected 404, got %d", delRec.Code)
+		}
+	})
+
+	t.Run("receivers get contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/receivers expected 200, got %d", rec.Code)
+		}
+
+		var payload []any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("receivers response is not valid json: %v", err)
+		}
+		if payload == nil {
+			t.Fatalf("receivers get expected array payload")
+		}
+	})
+
+	t.Run("alert groups get contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", rec.Code)
+		}
+
+		var payload []any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alert groups response is not valid json: %v", err)
+		}
+		if payload == nil {
+			t.Fatalf("alert groups get expected array payload")
+		}
+	})
+
+	t.Run("method contracts", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			method string
+			path   string
+		}{
+			{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status"},
+			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
+			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
+			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
+			{name: "silence by id post not allowed", method: http.MethodPost, path: "/api/v2/silence/any-id"},
+			{name: "history post not allowed", method: http.MethodPost, path: "/history"},
+		}
+
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest(tt.method, tt.path, nil)
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+				if rec.Code != http.StatusMethodNotAllowed {
+					t.Fatalf("%s %s expected 405, got %d", tt.method, tt.path, rec.Code)
+				}
+			})
 		}
 	})
 
 	t.Run("webhook method contract", func(t *testing.T) {
-		postReq := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBufferString(`{}`))
+		postReq := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBufferString(validAlertPayload))
 		postRec := httptest.NewRecorder()
 		mux.ServeHTTP(postRec, postReq)
 
@@ -212,4 +399,547 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("GET /webhook expected 405, got %d", getRec.Code)
 		}
 	})
+
+	t.Run("webhook invalid payload contract", func(t *testing.T) {
+		postReq := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBufferString(`{}`))
+		postRec := httptest.NewRecorder()
+		mux.ServeHTTP(postRec, postReq)
+		if postRec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /webhook with invalid payload expected 400, got %d", postRec.Code)
+		}
+	})
+
+	t.Run("alertmanager compatibility probes contract", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			method string
+			path   string
+			body   string
+			status int
+			textOK bool
+		}{
+			{name: "healthy get", method: http.MethodGet, path: "/-/healthy", status: http.StatusOK, textOK: true},
+			{name: "healthy head", method: http.MethodHead, path: "/-/healthy", status: http.StatusOK},
+			{name: "ready get", method: http.MethodGet, path: "/-/ready", status: http.StatusOK, textOK: true},
+			{name: "ready head", method: http.MethodHead, path: "/-/ready", status: http.StatusOK},
+			{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed},
+			{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed},
+			{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK},
+			{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
+		}
+
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body))
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+
+				if rec.Code != tt.status {
+					t.Fatalf("%s %s expected %d, got %d", tt.method, tt.path, tt.status, rec.Code)
+				}
+
+				if tt.textOK && rec.Body.String() != "OK" {
+					t.Fatalf("%s %s expected body OK, got %q", tt.method, tt.path, rec.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("debug compatibility contract", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			method string
+			path   string
+			body   string
+			status int
+		}{
+			{name: "debug get", method: http.MethodGet, path: "/debug/pprof", status: http.StatusOK},
+			{name: "debug post", method: http.MethodPost, path: "/debug/pprof", body: `{}`, status: http.StatusOK},
+			{name: "debug put not allowed", method: http.MethodPut, path: "/debug/pprof", status: http.StatusMethodNotAllowed},
+		}
+
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body))
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+				if rec.Code != tt.status {
+					t.Fatalf("%s %s expected %d, got %d", tt.method, tt.path, tt.status, rec.Code)
+				}
+			})
+		}
+	})
+
+	t.Run("alerts v1 ingest compatibility contract", func(t *testing.T) {
+		postReq := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(`[]`))
+		postRec := httptest.NewRecorder()
+		mux.ServeHTTP(postRec, postReq)
+		if postRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v1/alerts expected 200, got %d", postRec.Code)
+		}
+
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+		getRec := httptest.NewRecorder()
+		mux.ServeHTTP(getRec, getReq)
+		if getRec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("GET /api/v1/alerts expected 405, got %d", getRec.Code)
+		}
+	})
+}
+
+func TestPhase0AlertsStateSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	post := func(payload string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	get := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("dedup keeps one firing alert", func(t *testing.T) {
+		first := post(validAlertPayload)
+		if first.Code != http.StatusOK {
+			t.Fatalf("first POST expected 200, got %d", first.Code)
+		}
+		second := post(validAlertPayload)
+		if second.Code != http.StatusOK {
+			t.Fatalf("second POST expected 200, got %d", second.Code)
+		}
+
+		rec := get("/api/v2/alerts")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts expected 200, got %d", rec.Code)
+		}
+
+		var payload []map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("failed to decode alerts list: %v", err)
+		}
+		if len(payload) != 1 {
+			t.Fatalf("expected exactly 1 deduplicated alert, got %d", len(payload))
+		}
+		if payload[0]["status"] != "firing" {
+			t.Fatalf("expected firing status, got %v", payload[0]["status"])
+		}
+	})
+
+	t.Run("resolved closes firing and appears via resolved filter", func(t *testing.T) {
+		resolvedPayload := `[
+			{
+				"labels": {"alertname":"TestAlert","service":"amp"},
+				"startsAt": "2026-02-25T00:00:00Z",
+				"endsAt": "2026-02-25T00:05:00Z",
+				"status": "resolved"
+			}
+		]`
+
+		resolvedResp := post(resolvedPayload)
+		if resolvedResp.Code != http.StatusOK {
+			t.Fatalf("resolved POST expected 200, got %d", resolvedResp.Code)
+		}
+
+		activeRec := get("/api/v2/alerts")
+		if activeRec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts expected 200, got %d", activeRec.Code)
+		}
+		var active []map[string]any
+		if err := json.Unmarshal(activeRec.Body.Bytes(), &active); err != nil {
+			t.Fatalf("failed to decode active alerts: %v", err)
+		}
+		if len(active) != 0 {
+			t.Fatalf("expected no firing alerts after resolve, got %d", len(active))
+		}
+
+		resolvedRec := get("/api/v2/alerts?status=resolved")
+		if resolvedRec.Code != http.StatusOK {
+			t.Fatalf("GET resolved alerts expected 200, got %d", resolvedRec.Code)
+		}
+		var resolved []map[string]any
+		if err := json.Unmarshal(resolvedRec.Body.Bytes(), &resolved); err != nil {
+			t.Fatalf("failed to decode resolved alerts: %v", err)
+		}
+		if len(resolved) != 1 {
+			t.Fatalf("expected 1 resolved alert, got %d", len(resolved))
+		}
+		if resolved[0]["status"] != "resolved" {
+			t.Fatalf("expected resolved status, got %v", resolved[0]["status"])
+		}
+
+		historyReq := httptest.NewRequest(http.MethodGet, "/history", nil)
+		historyRec := httptest.NewRecorder()
+		mux.ServeHTTP(historyRec, historyReq)
+		if historyRec.Code != http.StatusOK {
+			t.Fatalf("GET /history expected 200, got %d", historyRec.Code)
+		}
+
+		var historyPayload map[string]any
+		if err := json.Unmarshal(historyRec.Body.Bytes(), &historyPayload); err != nil {
+			t.Fatalf("failed to decode history payload: %v", err)
+		}
+		total, ok := historyPayload["total"].(float64)
+		if !ok {
+			t.Fatalf("history total has unexpected type: %T", historyPayload["total"])
+		}
+		if total < 1 {
+			t.Fatalf("history total expected >= 1, got %.0f", total)
+		}
+	})
+
+	t.Run("invalid status filter returns bad request", func(t *testing.T) {
+		rec := get("/api/v2/alerts?status=broken")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid status filter expected 400, got %d", rec.Code)
+		}
+	})
+}
+
+func TestPhase0AlertsV1AliasUsesSameIngestPath(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(validAlertPayload))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/alerts expected 200, got %d", rec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", getRec.Code)
+	}
+
+	var payload []map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode alerts list: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("expected v1 alias to ingest one alert, got %d", len(payload))
+	}
+}
+
+func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"HighCPU","service":"api","namespace":"prod","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"HighCPU","service":"api","namespace":"prod","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"HighMemory","service":"worker","namespace":"prod"},
+			"startsAt": "2026-02-25T00:02:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", groupsRec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+
+	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+	receiversRec := httptest.NewRecorder()
+	mux.ServeHTTP(receiversRec, receiversReq)
+	if receiversRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/receivers expected 200, got %d", receiversRec.Code)
+	}
+
+	var receivers []map[string]any
+	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
+		t.Fatalf("failed to decode receivers response: %v", err)
+	}
+	if len(receivers) < 2 {
+		t.Fatalf("expected at least 2 receivers (default + custom), got %d", len(receivers))
+	}
+}
+
+func TestPhase0SilenceAffectsAlertIngest(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	now := time.Now().UTC()
+	activeSilencePayload := fmt.Sprintf(`{
+		"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
+		"startsAt": %q,
+		"endsAt": %q,
+		"createdBy": "phase0-test",
+		"comment": "suppress test alert"
+	}`, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(1*time.Hour).Format(time.RFC3339))
+
+	silenceReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(activeSilencePayload))
+	silenceRec := httptest.NewRecorder()
+	mux.ServeHTTP(silenceRec, silenceReq)
+	if silenceRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", silenceRec.Code)
+	}
+
+	suppressedAlertReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
+	suppressedAlertRec := httptest.NewRecorder()
+	mux.ServeHTTP(suppressedAlertRec, suppressedAlertReq)
+	if suppressedAlertRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", suppressedAlertRec.Code)
+	}
+
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("expected silenced alert to be suppressed, got %d alerts", len(alerts))
+	}
+
+	unsilencedPayload := `[
+		{
+			"labels": {"alertname":"OtherAlert","service":"amp"},
+			"startsAt": "2026-02-25T00:10:00Z",
+			"status": "firing"
+		}
+	]`
+	unsilencedReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(unsilencedPayload))
+	unsilencedRec := httptest.NewRecorder()
+	mux.ServeHTTP(unsilencedRec, unsilencedReq)
+	if unsilencedRec.Code != http.StatusOK {
+		t.Fatalf("POST unsilenced alert expected 200, got %d", unsilencedRec.Code)
+	}
+
+	alertsAfterReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	alertsAfterRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsAfterRec, alertsAfterReq)
+	if alertsAfterRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsAfterRec.Code)
+	}
+
+	var alertsAfter []map[string]any
+	if err := json.Unmarshal(alertsAfterRec.Body.Bytes(), &alertsAfter); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alertsAfter) != 1 {
+		t.Fatalf("expected only unsilenced alert to be stored, got %d", len(alertsAfter))
+	}
+}
+
+func TestPhase0SilencesStateSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(validSilencePayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", postRec.Code)
+	}
+
+	var postPayload map[string]any
+	if err := json.Unmarshal(postRec.Body.Bytes(), &postPayload); err != nil {
+		t.Fatalf("failed to decode silence post response: %v", err)
+	}
+	silenceID, _ := postPayload["silenceID"].(string)
+	if silenceID == "" {
+		t.Fatalf("expected non-empty silenceID")
+	}
+
+	getByIDReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
+	getByIDRec := httptest.NewRecorder()
+	mux.ServeHTTP(getByIDRec, getByIDReq)
+	if getByIDRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silence/{id} expected 200, got %d", getByIDRec.Code)
+	}
+
+	var silence map[string]any
+	if err := json.Unmarshal(getByIDRec.Body.Bytes(), &silence); err != nil {
+		t.Fatalf("failed to decode silence by id response: %v", err)
+	}
+	if gotID, _ := silence["id"].(string); gotID != silenceID {
+		t.Fatalf("expected silence id %q, got %q", silenceID, gotID)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences expected 200, got %d", listRec.Code)
+	}
+
+	var silences []map[string]any
+	if err := json.Unmarshal(listRec.Body.Bytes(), &silences); err != nil {
+		t.Fatalf("failed to decode silences list: %v", err)
+	}
+	if len(silences) != 1 {
+		t.Fatalf("expected 1 silence in list, got %d", len(silences))
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+silenceID, nil)
+	deleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/v2/silence/{id} expected 200, got %d", deleteRec.Code)
+	}
+
+	getAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
+	getAfterDeleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(getAfterDeleteRec, getAfterDeleteReq)
+	if getAfterDeleteRec.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v2/silence/{id} after delete expected 404, got %d", getAfterDeleteRec.Code)
+	}
+}
+
+func TestPhase0RuntimeStatePersistsAcrossRestart(t *testing.T) {
+	stateFile := filepath.Join(t.TempDir(), "runtime-state.json")
+	mux1 := newPhase0TestMuxWithStateFile(t, stateFile)
+
+	alertPost := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
+	alertPostRec := httptest.NewRecorder()
+	mux1.ServeHTTP(alertPostRec, alertPost)
+	if alertPostRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", alertPostRec.Code)
+	}
+
+	silencePost := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(validSilencePayload))
+	silencePostRec := httptest.NewRecorder()
+	mux1.ServeHTTP(silencePostRec, silencePost)
+	if silencePostRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", silencePostRec.Code)
+	}
+
+	var silencePostPayload map[string]any
+	if err := json.Unmarshal(silencePostRec.Body.Bytes(), &silencePostPayload); err != nil {
+		t.Fatalf("failed to decode silence create response: %v", err)
+	}
+	silenceID, _ := silencePostPayload["silenceID"].(string)
+	if silenceID == "" {
+		t.Fatalf("expected non-empty silenceID")
+	}
+
+	// Simulate restart by creating a new mux with the same state file.
+	mux2 := newPhase0TestMuxWithStateFile(t, stateFile)
+
+	alertsGet := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	alertsGetRec := httptest.NewRecorder()
+	mux2.ServeHTTP(alertsGetRec, alertsGet)
+	if alertsGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsGetRec.Code)
+	}
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsGetRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode restored alerts: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 restored alert, got %d", len(alerts))
+	}
+
+	silencesGet := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
+	silencesGetRec := httptest.NewRecorder()
+	mux2.ServeHTTP(silencesGetRec, silencesGet)
+	if silencesGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences expected 200, got %d", silencesGetRec.Code)
+	}
+	var silences []map[string]any
+	if err := json.Unmarshal(silencesGetRec.Body.Bytes(), &silences); err != nil {
+		t.Fatalf("failed to decode restored silences: %v", err)
+	}
+	if len(silences) != 1 {
+		t.Fatalf("expected 1 restored silence, got %d", len(silences))
+	}
+
+	silenceGet := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
+	silenceGetRec := httptest.NewRecorder()
+	mux2.ServeHTTP(silenceGetRec, silenceGet)
+	if silenceGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silence/{id} expected 200 after restart, got %d", silenceGetRec.Code)
+	}
+}
+
+func TestPhase0WebhookProcessesAlertsIntoHistory(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	webhookPayload := `{
+		"alerts": [
+			{
+				"labels": {"alertname":"WebhookAlert","service":"amp"},
+				"annotations": {"summary":"from webhook"},
+				"startsAt": "2026-02-25T03:00:00Z",
+				"status": "firing"
+			}
+		]
+	}`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBufferString(webhookPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /webhook expected 200, got %d", postRec.Code)
+	}
+
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert ingested via webhook, got %d", len(alerts))
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/history", nil)
+	historyRec := httptest.NewRecorder()
+	mux.ServeHTTP(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("GET /history expected 200, got %d", historyRec.Code)
+	}
+
+	var historyPayload map[string]any
+	if err := json.Unmarshal(historyRec.Body.Bytes(), &historyPayload); err != nil {
+		t.Fatalf("failed to decode history response: %v", err)
+	}
+	total, ok := historyPayload["total"].(float64)
+	if !ok {
+		t.Fatalf("history total has unexpected type: %T", historyPayload["total"])
+	}
+	if total < 1 {
+		t.Fatalf("expected history total >= 1 after webhook ingest, got %.0f", total)
+	}
 }
