@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -458,6 +459,16 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("alerts get invalid filter matcher contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?filter=broken-matcher", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid filter expected 400, got %d", rec.Code)
+		}
+	})
+
 	t.Run("alerts post contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
 		rec := httptest.NewRecorder()
@@ -613,6 +624,13 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		mux.ServeHTTP(recMuted, reqMuted)
 		if recMuted.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/alerts/groups with invalid muted expected 400, got %d", recMuted.Code)
+		}
+
+		reqFilter := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?filter=broken-matcher", nil)
+		recFilter := httptest.NewRecorder()
+		mux.ServeHTTP(recFilter, reqFilter)
+		if recFilter.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid filter expected 400, got %d", recFilter.Code)
 		}
 	})
 
@@ -959,6 +977,88 @@ func TestPhase0AlertsReceiverFilterSemantics(t *testing.T) {
 	}
 }
 
+func TestPhase0AlertsFilterMatcherSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"CPUHigh","service":"api","severity":"critical"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"CPUMed","service":"api","severity":"warning"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"DiskHigh","service":"worker","severity":"critical"},
+			"startsAt": "2026-02-25T00:02:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	serviceQuery := url.Values{}
+	serviceQuery.Add("filter", `service="api"`)
+	serviceReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+serviceQuery.Encode(), nil)
+	serviceRec := httptest.NewRecorder()
+	mux.ServeHTTP(serviceRec, serviceReq)
+	if serviceRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with service filter expected 200, got %d", serviceRec.Code)
+	}
+	var serviceAlerts []map[string]any
+	if err := json.Unmarshal(serviceRec.Body.Bytes(), &serviceAlerts); err != nil {
+		t.Fatalf("failed to decode service filter response: %v", err)
+	}
+	if len(serviceAlerts) != 2 {
+		t.Fatalf("expected 2 alerts for service=api, got %d", len(serviceAlerts))
+	}
+
+	regexQuery := url.Values{}
+	regexQuery.Add("filter", `alertname=~"^CPU"`)
+	regexReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+regexQuery.Encode(), nil)
+	regexRec := httptest.NewRecorder()
+	mux.ServeHTTP(regexRec, regexReq)
+	if regexRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with regex filter expected 200, got %d", regexRec.Code)
+	}
+	var regexAlerts []map[string]any
+	if err := json.Unmarshal(regexRec.Body.Bytes(), &regexAlerts); err != nil {
+		t.Fatalf("failed to decode regex filter response: %v", err)
+	}
+	if len(regexAlerts) != 2 {
+		t.Fatalf("expected 2 alerts for alertname=~^CPU, got %d", len(regexAlerts))
+	}
+
+	multiQuery := url.Values{}
+	multiQuery.Add("filter", `service="api"`)
+	multiQuery.Add("filter", `severity="critical"`)
+	multiReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+multiQuery.Encode(), nil)
+	multiRec := httptest.NewRecorder()
+	mux.ServeHTTP(multiRec, multiReq)
+	if multiRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with multi-filter expected 200, got %d", multiRec.Code)
+	}
+	var multiAlerts []map[string]any
+	if err := json.Unmarshal(multiRec.Body.Bytes(), &multiAlerts); err != nil {
+		t.Fatalf("failed to decode multi-filter response: %v", err)
+	}
+	if len(multiAlerts) != 1 {
+		t.Fatalf("expected 1 alert for service=api AND severity=critical, got %d", len(multiAlerts))
+	}
+	labels, ok := multiAlerts[0]["labels"].(map[string]any)
+	if !ok || labels["alertname"] != "CPUHigh" {
+		t.Fatalf("expected CPUHigh for multi-filter, got %v", multiAlerts[0]["labels"])
+	}
+}
+
 func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
@@ -1095,6 +1195,23 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	filteredReceiver, ok := filteredGroups[0]["receiver"].(map[string]any)
 	if !ok || filteredReceiver["name"] != "team-ops" {
 		t.Fatalf("expected filtered group receiver.name=team-ops, got %v", filteredGroups[0]["receiver"])
+	}
+
+	filterQuery := url.Values{}
+	filterQuery.Add("filter", `alertname="HighCPU"`)
+	filterReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+filterQuery.Encode(), nil)
+	filterRec := httptest.NewRecorder()
+	mux.ServeHTTP(filterRec, filterReq)
+	if filterRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups with label filter expected 200, got %d", filterRec.Code)
+	}
+
+	var labelFilteredGroups []map[string]any
+	if err := json.Unmarshal(filterRec.Body.Bytes(), &labelFilteredGroups); err != nil {
+		t.Fatalf("failed to decode label-filtered groups response: %v", err)
+	}
+	if len(labelFilteredGroups) != 1 {
+		t.Fatalf("expected 1 group for alertname=HighCPU filter, got %d", len(labelFilteredGroups))
 	}
 
 	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)

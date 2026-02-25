@@ -22,6 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/ipiton/AMP/internal/config"
+	cfgmatcher "github.com/ipiton/AMP/pkg/configvalidator/matcher"
 	"github.com/ipiton/AMP/pkg/metrics"
 	"github.com/ipiton/AMP/pkg/middleware"
 )
@@ -667,6 +668,13 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	labelMatchers, err := parseAlertLabelMatchers(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	alerts := store.list(status, includeResolved)
 	if receiverRegex != nil {
@@ -678,6 +686,7 @@ func handleAlertsGet(store *alertStore, w http.ResponseWriter, r *http.Request) 
 		}
 		alerts = filtered
 	}
+	alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
 	alerts = filterAlertsByStateFilters(alerts, stateFilters)
 
 	writeJSON(w, http.StatusOK, alerts)
@@ -877,6 +886,13 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			})
 			return
 		}
+		labelMatchers, err := parseAlertLabelMatchers(r)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
 
 		stateFilters, err := parseAlertGroupStateFilters(r)
 		if err != nil {
@@ -886,7 +902,9 @@ func alertGroupsHandler(store *alertStore) http.HandlerFunc {
 			return
 		}
 
-		alerts := filterAlertsByGroupStateFilters(store.list("", includeResolved), stateFilters)
+		alerts := store.list("", includeResolved)
+		alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
+		alerts = filterAlertsByGroupStateFilters(alerts, stateFilters)
 
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
@@ -1077,6 +1095,68 @@ func parseRegexQuery(raw string) (*regexp.Regexp, error) {
 	return re, nil
 }
 
+func parseAlertLabelMatchers(r *http.Request) ([]*cfgmatcher.Matcher, error) {
+	rawMatchers := r.URL.Query()["filter"]
+	if len(rawMatchers) == 0 {
+		return nil, nil
+	}
+
+	parsed := make([]*cfgmatcher.Matcher, 0, len(rawMatchers))
+	for _, raw := range rawMatchers {
+		m, err := cfgmatcher.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, fmt.Errorf("invalid filter matcher")
+		}
+
+		value, err := parseAlertLabelMatcherValue(m.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid filter matcher")
+		}
+		m.Value = value
+
+		if m.IsRegex() {
+			re, err := regexp.Compile(value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid filter matcher")
+			}
+			m.CompiledRegex = re
+		}
+
+		parsed = append(parsed, m)
+	}
+	return parsed, nil
+}
+
+func parseAlertLabelMatcherValue(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("empty matcher value")
+	}
+	if len(value) < 2 {
+		return value, nil
+	}
+
+	first := value[0]
+	last := value[len(value)-1]
+	if first != '"' && first != '\'' {
+		return value, nil
+	}
+	if first != last {
+		return "", fmt.Errorf("invalid quoted matcher value")
+	}
+
+	if first == '"' {
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", fmt.Errorf("invalid quoted matcher value")
+		}
+		return unquoted, nil
+	}
+
+	// Support single-quoted API values.
+	return strings.ReplaceAll(value[1:len(value)-1], `\'`, `'`), nil
+}
+
 type alertsStateFilters struct {
 	active      bool
 	silenced    bool
@@ -1146,6 +1226,48 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters) []apiAlert 
 	}
 
 	return out
+}
+
+func filterAlertsByLabelMatchers(in []apiAlert, matchers []*cfgmatcher.Matcher) []apiAlert {
+	if len(in) == 0 || len(matchers) == 0 {
+		return in
+	}
+
+	out := make([]apiAlert, 0, len(in))
+	for i := range in {
+		if alertMatchesLabelMatchers(in[i], matchers) {
+			out = append(out, in[i])
+		}
+	}
+	return out
+}
+
+func alertMatchesLabelMatchers(alert apiAlert, matchers []*cfgmatcher.Matcher) bool {
+	for _, matcher := range matchers {
+		labelValue, labelExists := alert.Labels[matcher.Label]
+
+		switch matcher.Type {
+		case cfgmatcher.MatchEqual:
+			if !labelExists || labelValue != matcher.Value {
+				return false
+			}
+		case cfgmatcher.MatchNotEqual:
+			if labelExists && labelValue == matcher.Value {
+				return false
+			}
+		case cfgmatcher.MatchRegexp:
+			if !labelExists || matcher.CompiledRegex == nil || !matcher.CompiledRegex.MatchString(labelValue) {
+				return false
+			}
+		case cfgmatcher.MatchNotRegexp:
+			if labelExists && matcher.CompiledRegex != nil && matcher.CompiledRegex.MatchString(labelValue) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error) {
