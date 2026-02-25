@@ -545,6 +545,24 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("silences post update unknown id contract", func(t *testing.T) {
+		payload := `{
+			"id": "ffffffffffffffffffffffffffffffff",
+			"matchers": [{"name":"alertname","value":"ContractUnknownID","isRegex":false}],
+			"startsAt": "2099-01-01T00:00:00Z",
+			"endsAt": "2099-01-01T01:00:00Z",
+			"createdBy": "phase0-test",
+			"comment": "unknown id update"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("POST /api/v2/silences update with unknown id expected 404, got %d", rec.Code)
+		}
+	})
+
 	t.Run("silence by id contract", func(t *testing.T) {
 		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/non-existent-id", nil)
 		getRec := httptest.NewRecorder()
@@ -1444,6 +1462,82 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	mux.ServeHTTP(getAfterDeleteRec, getAfterDeleteReq)
 	if getAfterDeleteRec.Code != http.StatusNotFound {
 		t.Fatalf("GET /api/v2/silence/{id} after delete expected 404, got %d", getAfterDeleteRec.Code)
+	}
+}
+
+func TestPhase0SilencePostUpdateSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(validSilencePayload))
+	createRec := httptest.NewRecorder()
+	mux.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences create expected 200, got %d", createRec.Code)
+	}
+
+	var createPayload map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	silenceID, _ := createPayload["silenceID"].(string)
+	if silenceID == "" {
+		t.Fatalf("expected non-empty silenceID")
+	}
+
+	now := time.Now().UTC()
+	updatePayload := fmt.Sprintf(`{
+		"id": %q,
+		"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
+		"startsAt": %q,
+		"endsAt": %q,
+		"createdBy": "phase0-test",
+		"comment": "maintenance window updated"
+	}`, silenceID, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(59*time.Minute).Format(time.RFC3339))
+
+	updateReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(updatePayload))
+	updateRec := httptest.NewRecorder()
+	mux.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences update expected 200, got %d", updateRec.Code)
+	}
+
+	var updateResp map[string]any
+	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
+		t.Fatalf("failed to decode update response: %v", err)
+	}
+	if gotID, _ := updateResp["silenceID"].(string); gotID != silenceID {
+		t.Fatalf("expected updated silenceID %q, got %q", silenceID, gotID)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silence/{id} after update expected 200, got %d", getRec.Code)
+	}
+
+	var updatedSilence map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &updatedSilence); err != nil {
+		t.Fatalf("failed to decode silence after update: %v", err)
+	}
+	if comment, _ := updatedSilence["comment"].(string); comment != "maintenance window updated" {
+		t.Fatalf("expected updated comment, got %q", comment)
+	}
+
+	unknownUpdatePayload := fmt.Sprintf(`{
+		"id": %q,
+		"matchers": [{"name":"alertname","value":"UnknownAlert","isRegex":false}],
+		"startsAt": %q,
+		"endsAt": %q,
+		"createdBy": "phase0-test",
+		"comment": "unknown id update"
+	}`, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(59*time.Minute).Format(time.RFC3339))
+
+	unknownReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(unknownUpdatePayload))
+	unknownRec := httptest.NewRecorder()
+	mux.ServeHTTP(unknownRec, unknownReq)
+	if unknownRec.Code != http.StatusNotFound {
+		t.Fatalf("POST /api/v2/silences update for unknown id expected 404, got %d", unknownRec.Code)
 	}
 }
 

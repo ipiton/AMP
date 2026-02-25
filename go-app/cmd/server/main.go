@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -797,6 +798,13 @@ func handleSilencePost(store *silenceStore, w http.ResponseWriter, r *http.Reque
 
 	silenceID, err := store.createOrUpdate(payload, time.Now().UTC())
 	if err != nil {
+		if errors.Is(err, errSilenceNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": err.Error(),
 		})
