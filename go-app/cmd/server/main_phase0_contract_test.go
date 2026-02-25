@@ -1151,6 +1151,59 @@ func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
 	if resolvedAlerts[0]["status"] != "resolved" {
 		t.Fatalf("expected resolved status, got %v", resolvedAlerts[0]["status"])
 	}
+
+	silenceReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/silences",
+		bytes.NewBufferString(activeSilencePayloadForAlert(time.Now().UTC(), "FlagFiring")),
+	)
+	silenceRec := httptest.NewRecorder()
+	mux.ServeHTTP(silenceRec, silenceReq)
+	if silenceRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences for state-flag test expected 200, got %d", silenceRec.Code)
+	}
+
+	silencedOnlyReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=true&inhibited=false&unprocessed=false",
+		nil,
+	)
+	silencedOnlyRec := httptest.NewRecorder()
+	mux.ServeHTTP(silencedOnlyRec, silencedOnlyReq)
+	if silencedOnlyRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts silenced-only expected 200, got %d", silencedOnlyRec.Code)
+	}
+
+	var silencedOnlyAlerts []map[string]any
+	if err := json.Unmarshal(silencedOnlyRec.Body.Bytes(), &silencedOnlyAlerts); err != nil {
+		t.Fatalf("failed to decode silenced-only alerts response: %v", err)
+	}
+	if len(silencedOnlyAlerts) != 1 {
+		t.Fatalf("expected one silenced alert, got %d", len(silencedOnlyAlerts))
+	}
+	silencedLabels, ok := silencedOnlyAlerts[0]["labels"].(map[string]any)
+	if !ok || silencedLabels["alertname"] != "FlagFiring" {
+		t.Fatalf("expected FlagFiring in silenced-only response, got %v", silencedOnlyAlerts[0]["labels"])
+	}
+
+	activeOnlyReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=true&silenced=false&inhibited=true&unprocessed=true",
+		nil,
+	)
+	activeOnlyRec := httptest.NewRecorder()
+	mux.ServeHTTP(activeOnlyRec, activeOnlyReq)
+	if activeOnlyRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts active-only expected 200, got %d", activeOnlyRec.Code)
+	}
+
+	var activeOnlyAlerts []map[string]any
+	if err := json.Unmarshal(activeOnlyRec.Body.Bytes(), &activeOnlyAlerts); err != nil {
+		t.Fatalf("failed to decode active-only alerts response: %v", err)
+	}
+	if len(activeOnlyAlerts) != 0 {
+		t.Fatalf("expected no active alerts after silencing FlagFiring, got %d", len(activeOnlyAlerts))
+	}
 }
 
 func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
@@ -1327,6 +1380,74 @@ func TestPhase0AlertGroupsStateFlagSemantics(t *testing.T) {
 	alert, ok := alerts[0].(map[string]any)
 	if !ok || alert["status"] != "resolved" {
 		t.Fatalf("resolved group alert expected status=resolved, got %v", alerts[0])
+	}
+}
+
+func TestPhase0AlertGroupsSilencedAndMutedSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"SilencedGroup","service":"api","namespace":"prod","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	silenceReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/silences",
+		bytes.NewBufferString(activeSilencePayloadForAlert(time.Now().UTC(), "SilencedGroup")),
+	)
+	silenceRec := httptest.NewRecorder()
+	mux.ServeHTTP(silenceRec, silenceReq)
+	if silenceRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", silenceRec.Code)
+	}
+
+	silencedGroupsReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts/groups?active=false&silenced=true&inhibited=false&muted=true",
+		nil,
+	)
+	silencedGroupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(silencedGroupsRec, silencedGroupsReq)
+	if silencedGroupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups silenced-only expected 200, got %d", silencedGroupsRec.Code)
+	}
+
+	var silencedGroups []map[string]any
+	if err := json.Unmarshal(silencedGroupsRec.Body.Bytes(), &silencedGroups); err != nil {
+		t.Fatalf("failed to decode silenced groups response: %v", err)
+	}
+	if len(silencedGroups) != 1 {
+		t.Fatalf("expected one silenced group, got %d", len(silencedGroups))
+	}
+
+	notMutedGroupsReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts/groups?active=false&silenced=true&inhibited=false&muted=false",
+		nil,
+	)
+	notMutedGroupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(notMutedGroupsRec, notMutedGroupsReq)
+	if notMutedGroupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups silenced-only muted=false expected 200, got %d", notMutedGroupsRec.Code)
+	}
+
+	var notMutedGroups []map[string]any
+	if err := json.Unmarshal(notMutedGroupsRec.Body.Bytes(), &notMutedGroups); err != nil {
+		t.Fatalf("failed to decode not-muted groups response: %v", err)
+	}
+	if len(notMutedGroups) != 0 {
+		t.Fatalf("expected no groups when muted=false and only muted group exists, got %d", len(notMutedGroups))
 	}
 }
 
