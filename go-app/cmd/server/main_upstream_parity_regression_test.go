@@ -79,6 +79,24 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {
+	configPath := writeTestConfigFile(t, "route: [\n")
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("POST /-/reload expected 500 for invalid config, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "failed to reload config") {
+		t.Fatalf("reload failure response expected failure prefix, got %q", rec.Body.String())
+	}
+}
+
 func TestUpstreamParity_AlertsStateFiltersMatrix(t *testing.T) {
 	mux := newPhase0TestMux(t)
 

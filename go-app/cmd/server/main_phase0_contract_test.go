@@ -1860,6 +1860,24 @@ inhibit_rules:
 	}
 }
 
+func TestPhase0ReloadInvalidConfigReturns500(t *testing.T) {
+	configPath := writeTestConfigFile(t, "route: [\n")
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	reloadReq := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
+	reloadRec := httptest.NewRecorder()
+	mux.ServeHTTP(reloadRec, reloadReq)
+
+	if reloadRec.Code != http.StatusInternalServerError {
+		t.Fatalf("POST /-/reload with invalid config expected 500, got %d", reloadRec.Code)
+	}
+	if !strings.Contains(reloadRec.Body.String(), "failed to reload config") {
+		t.Fatalf("reload error response expected failure prefix, got %q", reloadRec.Body.String())
+	}
+}
+
 func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
