@@ -270,8 +270,8 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
 	// Dashboard API
-	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI)
-	mux.HandleFunc("/api/dashboard/alerts/recent", dashboardAlertsRecentAPI)
+	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI(alertStore, silenceStore, statusCtx))
+	mux.HandleFunc("/api/dashboard/alerts/recent", dashboardAlertsRecentAPI(alertStore))
 
 	// Alertmanager-compatible webhook endpoint with rate limiting
 	rateLimiter := middleware.NewRateLimiter(middleware.RateLimiterConfig{
@@ -470,29 +470,80 @@ func renderTemplateError(w http.ResponseWriter, message string) {
 }
 
 // API handlers
-func dashboardOverviewAPI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{
-		"status": "success",
-		"data": {
-			"alerts_total_24h": 0,
-			"active_alerts": 0,
-			"active_silences": 0,
-			"llm_classifications": 0,
-			"system_health": "healthy"
+func dashboardOverviewAPI(
+	alertStore *alertStore,
+	silenceStore *silenceStore,
+	statusCtx runtimeStatusContext,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
 		}
-	}`))
+
+		now := time.Now().UTC()
+		alertTotal, alertFiring, alertResolved := alertStore.stats()
+		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"alerts_total_24h":     alertTotal,
+				"active_alerts":        alertFiring,
+				"resolved_alerts":      alertResolved,
+				"active_silences":      silenceActive,
+				"silences_total":       silenceTotal,
+				"silences_pending":     silencePending,
+				"silences_expired":     silenceExpired,
+				"llm_classifications":  0,
+				"system_health":        "healthy",
+				"runtime_uptime":       now.Sub(statusCtx.startedAt).String(),
+				"persistence_enabled":  statusCtx.persistenceEnabled,
+				"persistence_location": statusCtx.persistencePath,
+			},
+		})
+	}
 }
 
-func dashboardAlertsRecentAPI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{
-		"status": "success",
-		"data": {
-			"alerts": [],
-			"total": 0
+func dashboardAlertsRecentAPI(alertStore *alertStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
 		}
-	}`))
+
+		status, includeResolved, err := parseHistoryFilters(r, false)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		limit, err := parsePositiveIntQuery(r.URL.Query().Get("limit"), 10, 1, 100)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		alerts := alertStore.list(status, includeResolved)
+		total := len(alerts)
+		if len(alerts) > limit {
+			alerts = alerts[:limit]
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"alerts":   alerts,
+				"total":    total,
+				"returned": len(alerts),
+				"limit":    limit,
+			},
+		})
+	}
 }
 
 // Health handlers

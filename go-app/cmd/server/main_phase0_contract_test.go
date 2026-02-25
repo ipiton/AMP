@@ -28,6 +28,18 @@ const validSilencePayload = `{
 	"comment": "maintenance window"
 }`
 
+func activeSilencePayload(now time.Time) string {
+	startsAt := now.Add(-1 * time.Minute).UTC().Format(time.RFC3339)
+	endsAt := now.Add(59 * time.Minute).UTC().Format(time.RFC3339)
+	return fmt.Sprintf(`{
+		"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
+		"startsAt": %q,
+		"endsAt": %q,
+		"createdBy": "phase0-test",
+		"comment": "active maintenance window"
+	}`, startsAt, endsAt)
+}
+
 func newPhase0TestMux(t *testing.T) *http.ServeMux {
 	t.Helper()
 	return newPhase0TestMuxWithStateFile(t, filepath.Join(t.TempDir(), "runtime-state.json"))
@@ -262,6 +274,99 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("dashboard overview reflects runtime state", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		alertReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
+		alertRec := httptest.NewRecorder()
+		localMux.ServeHTTP(alertRec, alertReq)
+		if alertRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/alerts expected 200, got %d", alertRec.Code)
+		}
+
+		silenceReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(activeSilencePayload(time.Now().UTC())))
+		silenceRec := httptest.NewRecorder()
+		localMux.ServeHTTP(silenceRec, silenceReq)
+		if silenceRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/silences expected 200, got %d", silenceRec.Code)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/dashboard/overview", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/dashboard/overview expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("overview response is not valid json: %v", err)
+		}
+
+		data, ok := payload["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("overview response missing data object")
+		}
+		activeAlerts, ok := data["active_alerts"].(float64)
+		if !ok || activeAlerts < 1 {
+			t.Fatalf("overview expected active_alerts >= 1, got %v", data["active_alerts"])
+		}
+		activeSilences, ok := data["active_silences"].(float64)
+		if !ok || activeSilences < 1 {
+			t.Fatalf("overview expected active_silences >= 1, got %v", data["active_silences"])
+		}
+	})
+
+	t.Run("dashboard recent endpoint supports limit", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		payload := `[
+			{
+				"labels": {"alertname":"TestAlertA","service":"amp"},
+				"annotations": {"summary":"test-a"},
+				"startsAt": "2026-02-25T00:00:00Z",
+				"status": "firing"
+			},
+			{
+				"labels": {"alertname":"TestAlertB","service":"amp"},
+				"annotations": {"summary":"test-b"},
+				"startsAt": "2026-02-25T00:01:00Z",
+				"status": "firing"
+			}
+		]`
+
+		postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+		postRec := httptest.NewRecorder()
+		localMux.ServeHTTP(postRec, postReq)
+		if postRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/dashboard/alerts/recent?limit=1", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/dashboard/alerts/recent expected 200, got %d", rec.Code)
+		}
+
+		var payloadResp map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payloadResp); err != nil {
+			t.Fatalf("dashboard recent response is not valid json: %v", err)
+		}
+		data, ok := payloadResp["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("dashboard recent response missing data object")
+		}
+		returned, ok := data["returned"].(float64)
+		if !ok || returned != 1 {
+			t.Fatalf("dashboard recent expected returned=1, got %v", data["returned"])
+		}
+		total, ok := data["total"].(float64)
+		if !ok || total < 2 {
+			t.Fatalf("dashboard recent expected total >= 2, got %v", data["total"])
+		}
+	})
+
 	t.Run("alerts get contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
 		rec := httptest.NewRecorder()
@@ -411,6 +516,8 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "silence by id post not allowed", method: http.MethodPost, path: "/api/v2/silence/any-id"},
 			{name: "history post not allowed", method: http.MethodPost, path: "/history"},
 			{name: "history recent post not allowed", method: http.MethodPost, path: "/history/recent"},
+			{name: "dashboard overview post not allowed", method: http.MethodPost, path: "/api/dashboard/overview"},
+			{name: "dashboard recent post not allowed", method: http.MethodPost, path: "/api/dashboard/alerts/recent"},
 		}
 
 		for _, tt := range tests {
