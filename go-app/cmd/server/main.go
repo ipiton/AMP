@@ -309,10 +309,35 @@ type runtimeStatusContext struct {
 	persistencePath    string
 }
 
+type apiAlertStatus struct {
+	State       string   `json:"state"`
+	SilencedBy  []string `json:"silencedBy"`
+	InhibitedBy []string `json:"inhibitedBy"`
+	MutedBy     []string `json:"mutedBy"`
+}
+
+type apiGettableAlert struct {
+	Labels       map[string]string `json:"labels"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
+	Receivers    []apiReceiver     `json:"receivers,omitempty"`
+	StartsAt     string            `json:"startsAt"`
+	UpdatedAt    string            `json:"updatedAt,omitempty"`
+	EndsAt       *string           `json:"endsAt,omitempty"`
+	GeneratorURL string            `json:"generatorURL,omitempty"`
+	Fingerprint  string            `json:"fingerprint,omitempty"`
+	Status       apiAlertStatus    `json:"status"`
+}
+
 type apiAlertGroup struct {
 	Labels   map[string]string `json:"labels"`
 	Receiver apiReceiver       `json:"receiver"`
 	Alerts   []apiAlert        `json:"alerts"`
+}
+
+type apiGettableAlertGroup struct {
+	Labels   map[string]string  `json:"labels"`
+	Receiver apiReceiver        `json:"receiver"`
+	Alerts   []apiGettableAlert `json:"alerts"`
 }
 
 type apiReceiver struct {
@@ -686,6 +711,7 @@ func handleAlertsGet(store *alertStore, silences *silenceStore, w http.ResponseW
 		return
 	}
 
+	now := time.Now().UTC()
 	alerts := store.list(status, includeResolved)
 	if receiverRegex != nil {
 		filtered := make([]apiAlert, 0, len(alerts))
@@ -697,9 +723,9 @@ func handleAlertsGet(store *alertStore, silences *silenceStore, w http.ResponseW
 		alerts = filtered
 	}
 	alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
-	alerts = filterAlertsByStateFilters(alerts, stateFilters, silences, time.Now().UTC())
+	alerts = filterAlertsByStateFilters(alerts, stateFilters, silences, now)
 
-	writeJSON(w, http.StatusOK, alerts)
+	writeJSON(w, http.StatusOK, toGettableAlerts(alerts, silences, now))
 }
 
 func handleAlertsPost(store *alertStore, silences *silenceStore, w http.ResponseWriter, r *http.Request) {
@@ -984,7 +1010,16 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore) http.HandlerF
 			return a < b
 		})
 
-		writeJSON(w, http.StatusOK, groups)
+		responseGroups := make([]apiGettableAlertGroup, 0, len(groups))
+		for _, group := range groups {
+			responseGroups = append(responseGroups, apiGettableAlertGroup{
+				Labels:   cloneStringMap(group.Labels),
+				Receiver: group.Receiver,
+				Alerts:   toGettableAlerts(group.Alerts, silences, now),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, responseGroups)
 	}
 }
 
@@ -1280,6 +1315,57 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters, silences *s
 	return out
 }
 
+func toGettableAlerts(in []apiAlert, silences *silenceStore, now time.Time) []apiGettableAlert {
+	if len(in) == 0 {
+		return []apiGettableAlert{}
+	}
+
+	out := make([]apiGettableAlert, 0, len(in))
+	for i := range in {
+		out = append(out, toGettableAlert(in[i], silences, now))
+	}
+	return out
+}
+
+func toGettableAlert(alert apiAlert, silences *silenceStore, now time.Time) apiGettableAlert {
+	silencedBy := make([]string, 0)
+	inhibitedBy := make([]string, 0)
+
+	if alert.Status == "firing" && silences != nil {
+		silencedBy = silences.activeMatchingSilenceIDs(alert.Labels, now)
+	}
+
+	mutedBy := make([]string, 0, len(silencedBy)+len(inhibitedBy))
+	mutedBy = append(mutedBy, silencedBy...)
+	mutedBy = append(mutedBy, inhibitedBy...)
+
+	state := "unprocessed"
+	if alert.Status == "firing" {
+		if len(mutedBy) > 0 {
+			state = "suppressed"
+		} else {
+			state = "active"
+		}
+	}
+
+	return apiGettableAlert{
+		Labels:       cloneStringMap(alert.Labels),
+		Annotations:  cloneStringMap(alert.Annotations),
+		Receivers:    append([]apiReceiver(nil), alert.Receivers...),
+		StartsAt:     alert.StartsAt,
+		UpdatedAt:    alert.UpdatedAt,
+		EndsAt:       cloneStringPtr(alert.EndsAt),
+		GeneratorURL: alert.GeneratorURL,
+		Fingerprint:  alert.Fingerprint,
+		Status: apiAlertStatus{
+			State:       state,
+			SilencedBy:  copyStringSlice(silencedBy),
+			InhibitedBy: copyStringSlice(inhibitedBy),
+			MutedBy:     copyStringSlice(mutedBy),
+		},
+	}
+}
+
 func filterAlertsByLabelMatchers(in []apiAlert, matchers []*cfgmatcher.Matcher) []apiAlert {
 	if len(in) == 0 || len(matchers) == 0 {
 		return in
@@ -1464,6 +1550,23 @@ func alertReceiverName(alert apiAlert) string {
 		return "default"
 	}
 	return receiver
+}
+
+func cloneStringPtr(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	v := *in
+	return &v
+}
+
+func copyStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }
 
 func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {

@@ -953,8 +953,12 @@ func TestPhase0AlertsStateSemantics(t *testing.T) {
 		if len(payload) != 1 {
 			t.Fatalf("expected exactly 1 deduplicated alert, got %d", len(payload))
 		}
-		if payload[0]["status"] != "firing" {
-			t.Fatalf("expected firing status, got %v", payload[0]["status"])
+		status, ok := payload[0]["status"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected alert status object, got %T", payload[0]["status"])
+		}
+		if status["state"] != "active" {
+			t.Fatalf("expected active status.state, got %v", status["state"])
 		}
 	})
 
@@ -996,8 +1000,12 @@ func TestPhase0AlertsStateSemantics(t *testing.T) {
 		if len(resolved) != 1 {
 			t.Fatalf("expected 1 resolved alert, got %d", len(resolved))
 		}
-		if resolved[0]["status"] != "resolved" {
-			t.Fatalf("expected resolved status, got %v", resolved[0]["status"])
+		status, ok := resolved[0]["status"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected alert status object, got %T", resolved[0]["status"])
+		}
+		if status["state"] != "unprocessed" {
+			t.Fatalf("expected unprocessed status.state for resolved alert, got %v", status["state"])
 		}
 
 		historyReq := httptest.NewRequest(http.MethodGet, "/history", nil)
@@ -1168,6 +1176,23 @@ func TestPhase0AlertsResponseShapeIncludesReceiversAndUpdatedAt(t *testing.T) {
 	if receiver["name"] != "default" {
 		t.Fatalf("expected default receiver name, got %v", receiver["name"])
 	}
+
+	status, ok := alerts[0]["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("alert status expected object, got %T", alerts[0]["status"])
+	}
+	if status["state"] != "active" {
+		t.Fatalf("expected alert status.state=active, got %v", status["state"])
+	}
+	for _, field := range []string{"silencedBy", "inhibitedBy", "mutedBy"} {
+		value, ok := status[field].([]any)
+		if !ok {
+			t.Fatalf("alert status.%s expected array, got %T", field, status[field])
+		}
+		if len(value) != 0 {
+			t.Fatalf("alert status.%s expected empty array, got %v", field, value)
+		}
+	}
 }
 
 func TestPhase0AlertsFilterMatcherSemantics(t *testing.T) {
@@ -1313,8 +1338,12 @@ func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
 	if len(resolvedAlerts) != 1 {
 		t.Fatalf("expected only resolved snapshot with all flags false, got %d", len(resolvedAlerts))
 	}
-	if resolvedAlerts[0]["status"] != "resolved" {
-		t.Fatalf("expected resolved status, got %v", resolvedAlerts[0]["status"])
+	status, ok := resolvedAlerts[0]["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected resolved alert status object, got %T", resolvedAlerts[0]["status"])
+	}
+	if status["state"] != "unprocessed" {
+		t.Fatalf("expected resolved alert status.state=unprocessed, got %v", status["state"])
 	}
 
 	silenceReq := httptest.NewRequest(
@@ -1349,6 +1378,21 @@ func TestPhase0AlertsStateFlagSemantics(t *testing.T) {
 	silencedLabels, ok := silencedOnlyAlerts[0]["labels"].(map[string]any)
 	if !ok || silencedLabels["alertname"] != "FlagFiring" {
 		t.Fatalf("expected FlagFiring in silenced-only response, got %v", silencedOnlyAlerts[0]["labels"])
+	}
+	silencedStatus, ok := silencedOnlyAlerts[0]["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected silenced alert status object, got %T", silencedOnlyAlerts[0]["status"])
+	}
+	if silencedStatus["state"] != "suppressed" {
+		t.Fatalf("expected silenced alert status.state=suppressed, got %v", silencedStatus["state"])
+	}
+	silencedBy, ok := silencedStatus["silencedBy"].([]any)
+	if !ok || len(silencedBy) == 0 {
+		t.Fatalf("expected silenced alert status.silencedBy to be non-empty, got %v", silencedStatus["silencedBy"])
+	}
+	mutedBy, ok := silencedStatus["mutedBy"].([]any)
+	if !ok || len(mutedBy) == 0 {
+		t.Fatalf("expected silenced alert status.mutedBy to be non-empty, got %v", silencedStatus["mutedBy"])
 	}
 
 	activeOnlyReq := httptest.NewRequest(
@@ -1543,8 +1587,12 @@ func TestPhase0AlertGroupsStateFlagSemantics(t *testing.T) {
 		t.Fatalf("resolved group expected one alert, got %v", resolvedGroups[0]["alerts"])
 	}
 	alert, ok := alerts[0].(map[string]any)
-	if !ok || alert["status"] != "resolved" {
-		t.Fatalf("resolved group alert expected status=resolved, got %v", alerts[0])
+	if !ok {
+		t.Fatalf("resolved group alert expected object, got %T", alerts[0])
+	}
+	alertStatus, ok := alert["status"].(map[string]any)
+	if !ok || alertStatus["state"] != "unprocessed" {
+		t.Fatalf("resolved group alert expected status.state=unprocessed, got %v", alert["status"])
 	}
 }
 
