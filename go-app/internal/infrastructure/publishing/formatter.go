@@ -40,10 +40,11 @@ func putBuilder(b *strings.Builder) {
 //   - Improvement: 50% faster, 100% less GC pressure
 //
 // Usage:
-//   result := getFormatterResult()
-//   defer releaseFormatterResult(result)
-//   // ... fill result
-//   return result, nil
+//
+//	result := getFormatterResult()
+//	defer releaseFormatterResult(result)
+//	// ... fill result
+//	return result, nil
 var formatterResultPool = sync.Pool{
 	New: func() interface{} {
 		return make(map[string]any, 30) // Pre-allocate typical size
@@ -123,11 +124,11 @@ func (f *DefaultAlertFormatter) formatAlertmanager(enrichedAlert *core.EnrichedA
 
 	// Build Alertmanager-compatible alert
 	amAlert := map[string]any{
-		"labels":       alert.Labels,
-		"annotations":  alert.Annotations,
-		"startsAt":     alert.StartsAt.Format(time.RFC3339),
-		"fingerprint":  alert.Fingerprint,
-		"status":       string(alert.Status),
+		"labels":      alert.Labels,
+		"annotations": alert.Annotations,
+		"startsAt":    alert.StartsAt.Format(time.RFC3339),
+		"fingerprint": alert.Fingerprint,
+		"status":      string(alert.Status),
 	}
 
 	if alert.EndsAt != nil {
@@ -469,7 +470,7 @@ func (f *DefaultAlertFormatter) formatSlack(enrichedAlert *core.EnrichedAlert) (
 	result["blocks"] = blocks
 	result["attachments"] = []map[string]any{
 		{
-			"color": color,
+			"color":  color,
 			"fields": fields,
 		},
 	}

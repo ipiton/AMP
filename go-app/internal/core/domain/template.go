@@ -44,7 +44,7 @@ const (
 func (t TemplateType) Valid() bool {
 	switch t {
 	case TemplateTypeSlack, TemplateTypePagerDuty, TemplateTypeEmail,
-		 TemplateTypeWebhook, TemplateTypeGeneric:
+		TemplateTypeWebhook, TemplateTypeGeneric:
 		return true
 	default:
 		return false
@@ -289,22 +289,22 @@ type TemplateList struct {
 
 // VersionList represents a paginated list of template versions
 type VersionList struct {
-	Versions   []TemplateVersion `json:"versions"`
-	Total      int               `json:"total"`
-	Limit      int               `json:"limit"`
-	Offset     int               `json:"offset"`
+	Versions []TemplateVersion `json:"versions"`
+	Total    int               `json:"total"`
+	Limit    int               `json:"limit"`
+	Offset   int               `json:"offset"`
 }
 
 // ================================================================================
 
 // TemplateDiff represents the difference between two template versions
 type TemplateDiff struct {
-	TemplateName string `json:"template_name"`
-	FromVersion  int    `json:"from_version"`
-	ToVersion    int    `json:"to_version"`
-	Diff         string `json:"diff"` // Unified diff format
+	TemplateName string    `json:"template_name"`
+	FromVersion  int       `json:"from_version"`
+	ToVersion    int       `json:"to_version"`
+	Diff         string    `json:"diff"` // Unified diff format
 	ChangedAt    time.Time `json:"changed_at"`
-	ChangedBy    string `json:"changed_by,omitempty"`
+	ChangedBy    string    `json:"changed_by,omitempty"`
 }
 
 // ================================================================================

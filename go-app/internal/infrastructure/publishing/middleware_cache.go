@@ -71,10 +71,12 @@ type CacheStats struct {
 // NewCachingMiddleware creates caching middleware.
 //
 // Parameters:
-//   cache: Cache implementation (LRU, Redis, etc.)
+//
+//	cache: Cache implementation (LRU, Redis, etc.)
 //
 // Returns:
-//   FormatterMiddleware: Caching middleware
+//
+//	FormatterMiddleware: Caching middleware
 func NewCachingMiddleware(cache FormatterCache) FormatterMiddleware {
 	return func(next formatFunc) formatFunc {
 		return func(alert *core.EnrichedAlert) (map[string]any, error) {
@@ -160,10 +162,12 @@ type formatterCacheEntry struct {
 // NewInMemoryCache creates an in-memory cache.
 //
 // Parameters:
-//   capacity: Maximum number of entries (LRU eviction when full)
+//
+//	capacity: Maximum number of entries (LRU eviction when full)
 //
 // Returns:
-//   FormatterCache: In-memory cache
+//
+//	FormatterCache: In-memory cache
 func NewInMemoryCache(capacity int) FormatterCache {
 	return &InMemoryCache{
 		entries:  make(map[string]*formatterCacheEntry, capacity),

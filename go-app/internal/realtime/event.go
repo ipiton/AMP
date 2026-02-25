@@ -34,8 +34,8 @@ const (
 	// Alert Events
 	EventTypeAlertCreated   = "alert_created"
 	EventTypeAlertResolved  = "alert_resolved"
-	EventTypeAlertFiring     = "alert_firing"
-	EventTypeAlertInhibited  = "alert_inhibited"
+	EventTypeAlertFiring    = "alert_firing"
+	EventTypeAlertInhibited = "alert_inhibited"
 
 	// Stats Events
 	EventTypeStatsUpdated = "stats_updated"
@@ -55,11 +55,11 @@ const (
 
 // EventSource constants.
 const (
-	EventSourceAlertProcessor  = "alert_processor"
-	EventSourceSilenceManager  = "silence_manager"
-	EventSourceStatsCollector   = "stats_collector"
-	EventSourceHealthMonitor    = "health_monitor"
-	EventSourceSystem           = "system"
+	EventSourceAlertProcessor = "alert_processor"
+	EventSourceSilenceManager = "silence_manager"
+	EventSourceStatsCollector = "stats_collector"
+	EventSourceHealthMonitor  = "health_monitor"
+	EventSourceSystem         = "system"
 )
 
 // NewEvent creates a new Event with the given type, data, and source.

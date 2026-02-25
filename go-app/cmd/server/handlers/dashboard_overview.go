@@ -139,19 +139,19 @@ func (p *publishingStatsProviderImpl) GetFailedPublishes() int64 {
 // DashboardOverviewHandler handles dashboard overview endpoint.
 // Aggregates statistics from multiple sources: alerts, classification, publishing, health.
 type DashboardOverviewHandler struct {
-	historyRepo          core.AlertHistoryRepository
+	historyRepo           core.AlertHistoryRepository
 	classificationService services.ClassificationService // optional
-	publishingStats      PublishingStatsProvider         // optional
-	cache                cache.Cache                     // optional
-	logger               *slog.Logger
+	publishingStats       PublishingStatsProvider        // optional
+	cache                 cache.Cache                    // optional
+	logger                *slog.Logger
 }
 
 // NewDashboardOverviewHandler creates a new dashboard overview handler.
 func NewDashboardOverviewHandler(
 	historyRepo core.AlertHistoryRepository,
 	classificationService services.ClassificationService, // optional, can be nil
-	publishingStats PublishingStatsProvider,              // optional, can be nil
-	cache cache.Cache,                                    // optional, can be nil
+	publishingStats PublishingStatsProvider, // optional, can be nil
+	cache cache.Cache, // optional, can be nil
 	logger *slog.Logger,
 ) *DashboardOverviewHandler {
 	if logger == nil {
@@ -159,11 +159,11 @@ func NewDashboardOverviewHandler(
 	}
 
 	return &DashboardOverviewHandler{
-		historyRepo:          historyRepo,
+		historyRepo:           historyRepo,
 		classificationService: classificationService,
-		publishingStats:      publishingStats,
-		cache:                cache,
-		logger:               logger,
+		publishingStats:       publishingStats,
+		cache:                 cache,
+		logger:                logger,
 	}
 }
 
@@ -179,16 +179,16 @@ type DashboardOverviewResponse struct {
 	ClassificationEnabled      bool    `json:"classification_enabled"`
 	ClassifiedAlerts           int64   `json:"classified_alerts"`
 	ClassificationCacheHitRate float64 `json:"classification_cache_hit_rate"`
-	LLMServiceAvailable       bool    `json:"llm_service_available"`
+	LLMServiceAvailable        bool    `json:"llm_service_available"`
 
 	// Publishing statistics
-	PublishingTargets  int    `json:"publishing_targets"`
+	PublishingTargets   int    `json:"publishing_targets"`
 	PublishingMode      string `json:"publishing_mode"`
 	SuccessfulPublishes int64  `json:"successful_publishes"`
 	FailedPublishes     int64  `json:"failed_publishes"`
 
 	// System health
-	SystemHealthy bool `json:"system_healthy"`
+	SystemHealthy  bool `json:"system_healthy"`
 	RedisConnected bool `json:"redis_connected"`
 
 	// Metadata
@@ -215,18 +215,18 @@ type classificationStats struct {
 
 // publishingStats represents publishing statistics.
 type publishingStats struct {
-	targets           int
-	mode              string
+	targets             int
+	mode                string
 	successfulPublishes int64
-	failedPublishes   int64
-	err               error
+	failedPublishes     int64
+	err                 error
 }
 
 // systemHealth represents system health status.
 type systemHealth struct {
-	healthy       bool
+	healthy        bool
 	redisConnected bool
-	err           error
+	err            error
 }
 
 // GetOverview handles GET /api/dashboard/overview
@@ -427,10 +427,10 @@ func (h *DashboardOverviewHandler) collectClassificationStats(ctx context.Contex
 // collectPublishingStats collects publishing statistics.
 func (h *DashboardOverviewHandler) collectPublishingStats(ctx context.Context) publishingStats {
 	stats := publishingStats{
-		targets:            0,
-		mode:               "unknown",
+		targets:             0,
+		mode:                "unknown",
 		successfulPublishes: 0,
-		failedPublishes:    0,
+		failedPublishes:     0,
 	}
 
 	if h.publishingStats == nil {
@@ -452,7 +452,7 @@ func (h *DashboardOverviewHandler) collectPublishingStats(ctx context.Context) p
 // collectSystemHealth collects system health status.
 func (h *DashboardOverviewHandler) collectSystemHealth(ctx context.Context) systemHealth {
 	health := systemHealth{
-		healthy:       true,
+		healthy:        true,
 		redisConnected: false,
 	}
 
@@ -505,16 +505,16 @@ func (h *DashboardOverviewHandler) aggregateStats(
 		ClassificationEnabled:      classificationStats.enabled,
 		ClassifiedAlerts:           classificationStats.classified,
 		ClassificationCacheHitRate: classificationStats.cacheHitRate,
-		LLMServiceAvailable:       classificationStats.llmAvailable,
+		LLMServiceAvailable:        classificationStats.llmAvailable,
 
 		// Publishing statistics
-		PublishingTargets:  publishingStats.targets,
+		PublishingTargets:   publishingStats.targets,
 		PublishingMode:      publishingStats.mode,
 		SuccessfulPublishes: publishingStats.successfulPublishes,
 		FailedPublishes:     publishingStats.failedPublishes,
 
 		// System health
-		SystemHealthy: systemHealthy,
+		SystemHealthy:  systemHealthy,
 		RedisConnected: health.redisConnected,
 
 		// Metadata

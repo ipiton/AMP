@@ -122,11 +122,11 @@ type SilenceRepository interface {
 
 // SilenceStats contains aggregate statistics about silences.
 type SilenceStats struct {
-	Total     int64            `json:"total"`              // Total number of silences
-	Active    int64            `json:"active"`             // Number of active silences
-	Pending   int64            `json:"pending"`            // Number of pending silences
-	Expired   int64            `json:"expired"`            // Number of expired silences
-	ByCreator map[string]int64 `json:"by_creator"`         // Top 10 creators by silence count
+	Total     int64            `json:"total"`      // Total number of silences
+	Active    int64            `json:"active"`     // Number of active silences
+	Pending   int64            `json:"pending"`    // Number of pending silences
+	Expired   int64            `json:"expired"`    // Number of expired silences
+	ByCreator map[string]int64 `json:"by_creator"` // Top 10 creators by silence count
 }
 
 // SilenceFilter defines filtering and pagination options for ListSilences.

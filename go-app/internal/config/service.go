@@ -31,11 +31,11 @@ type GetConfigOptions struct {
 
 // ConfigResponse contains exported configuration
 type ConfigResponse struct {
-	Version        string                 `json:"version"`                  // SHA256 hash of config
-	Source         ConfigSource           `json:"source"`                   // Configuration source
-	LoadedAt       time.Time              `json:"loaded_at"`                // When config was loaded
+	Version        string                 `json:"version"`                    // SHA256 hash of config
+	Source         ConfigSource           `json:"source"`                     // Configuration source
+	LoadedAt       time.Time              `json:"loaded_at"`                  // When config was loaded
 	ConfigFilePath string                 `json:"config_file_path,omitempty"` // Path if from file
-	Config         map[string]interface{} `json:"config"`                    // Actual config data
+	Config         map[string]interface{} `json:"config"`                     // Actual config data
 }
 
 // ConfigSource represents configuration source
@@ -44,7 +44,7 @@ type ConfigSource string
 const (
 	ConfigSourceFile     ConfigSource = "file"     // Loaded from YAML file
 	ConfigSourceEnv      ConfigSource = "env"      // Loaded from environment variables only
-	ConfigSourceDefaults ConfigSource = "defaults"  // Using default values only
+	ConfigSourceDefaults ConfigSource = "defaults" // Using default values only
 	ConfigSourceMixed    ConfigSource = "mixed"    // File + environment variables
 )
 

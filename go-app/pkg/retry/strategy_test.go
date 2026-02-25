@@ -220,9 +220,9 @@ func TestHTTPErrorClassifier(t *testing.T) {
 	classifier := &HTTPErrorClassifier{}
 
 	tests := []struct {
-		name       string
-		err        error
-		retryable  bool
+		name      string
+		err       error
+		retryable bool
 	}{
 		{
 			name:      "nil error",
@@ -329,9 +329,9 @@ func TestStrategyBuilders(t *testing.T) {
 // TestIsRetryableError tests sentinel error checking helper
 func TestIsRetryableError(t *testing.T) {
 	var (
-		ErrTransient  = errors.New("transient")
-		ErrPermanent  = errors.New("permanent")
-		ErrOther      = errors.New("other")
+		ErrTransient = errors.New("transient")
+		ErrPermanent = errors.New("permanent")
+		ErrOther     = errors.New("other")
 	)
 
 	tests := []struct {

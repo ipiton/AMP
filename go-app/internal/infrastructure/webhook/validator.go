@@ -11,16 +11,16 @@ import (
 
 // ValidationError represents a single validation error for a webhook field.
 type ValidationError struct {
-	Field   string      `json:"field"`             // Field name that failed validation
-	Message string      `json:"message"`           // Human-readable error message
-	Value   interface{} `json:"value,omitempty"`   // The value that failed validation (optional)
-	Tag     string      `json:"tag,omitempty"`     // Validation tag that failed (e.g., "required", "url")
+	Field   string      `json:"field"`           // Field name that failed validation
+	Message string      `json:"message"`         // Human-readable error message
+	Value   interface{} `json:"value,omitempty"` // The value that failed validation (optional)
+	Tag     string      `json:"tag,omitempty"`   // Validation tag that failed (e.g., "required", "url")
 }
 
 // ValidationResult contains the result of webhook validation.
 type ValidationResult struct {
-	Valid  bool               `json:"valid"`             // Whether validation passed
-	Errors []*ValidationError `json:"errors,omitempty"`  // List of validation errors (if any)
+	Valid  bool               `json:"valid"`            // Whether validation passed
+	Errors []*ValidationError `json:"errors,omitempty"` // List of validation errors (if any)
 }
 
 // WebhookValidator defines the interface for webhook validation.
@@ -569,16 +569,16 @@ func isValidWebhookStatus(status string) bool {
 // This is a minimal definition for validation purposes.
 // Full implementation will be in TN-041 (Alertmanager Parser).
 type AlertmanagerWebhook struct {
-	Version           string                 `json:"version" validate:"required"`
-	GroupKey          string                 `json:"groupKey" validate:"required"`
-	TruncatedAlerts   int                    `json:"truncatedAlerts"`
-	Status            string                 `json:"status" validate:"required,webhook_status"`
-	Receiver          string                 `json:"receiver"`
-	GroupLabels       map[string]string      `json:"groupLabels"`
-	CommonLabels      map[string]string      `json:"commonLabels"`
-	CommonAnnotations map[string]string      `json:"commonAnnotations"`
-	ExternalURL       string                 `json:"externalURL" validate:"omitempty,url"`
-	Alerts            []AlertmanagerAlert    `json:"alerts" validate:"required,min=1"`
+	Version           string              `json:"version" validate:"required"`
+	GroupKey          string              `json:"groupKey" validate:"required"`
+	TruncatedAlerts   int                 `json:"truncatedAlerts"`
+	Status            string              `json:"status" validate:"required,webhook_status"`
+	Receiver          string              `json:"receiver"`
+	GroupLabels       map[string]string   `json:"groupLabels"`
+	CommonLabels      map[string]string   `json:"commonLabels"`
+	CommonAnnotations map[string]string   `json:"commonAnnotations"`
+	ExternalURL       string              `json:"externalURL" validate:"omitempty,url"`
+	Alerts            []AlertmanagerAlert `json:"alerts" validate:"required,min=1"`
 }
 
 // AlertmanagerAlert represents a single alert in an Alertmanager webhook.

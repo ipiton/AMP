@@ -107,7 +107,8 @@ type DefaultFormatRegistry struct {
 // NewDefaultFormatRegistry creates a registry with built-in formats.
 //
 // Returns:
-//   FormatRegistry: Registry pre-loaded with 5 standard formats
+//
+//	FormatRegistry: Registry pre-loaded with 5 standard formats
 func NewDefaultFormatRegistry() FormatRegistry {
 	r := &DefaultFormatRegistry{
 		formats:   make(map[core.PublishingFormat]formatFunc, 10),

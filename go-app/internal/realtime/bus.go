@@ -62,10 +62,10 @@ func NewEventBus(logger *slog.Logger, metrics *RealtimeMetrics) *DefaultEventBus
 	return &DefaultEventBus{
 		subscribers: make(map[EventSubscriber]bool),
 		eventChan:   make(chan Event, 1000), // Buffered channel
-		sequence:   0,
-		logger:     logger.With("component", "event_bus"),
-		metrics:    metrics,
-		stopChan:   make(chan struct{}),
+		sequence:    0,
+		logger:      logger.With("component", "event_bus"),
+		metrics:     metrics,
+		stopChan:    make(chan struct{}),
 	}
 }
 

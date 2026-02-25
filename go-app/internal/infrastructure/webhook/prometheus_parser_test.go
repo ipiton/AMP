@@ -81,9 +81,9 @@ func TestParsePrometheusV1MultipleAlerts(t *testing.T) {
 	assert.Len(t, webhook.Alerts, 3)
 
 	// Verify state mapping
-	assert.Equal(t, "firing", webhook.Alerts[0].Status)     // firing → firing
-	assert.Equal(t, "firing", webhook.Alerts[1].Status)     // pending → firing
-	assert.Equal(t, "resolved", webhook.Alerts[2].Status)   // inactive → resolved
+	assert.Equal(t, "firing", webhook.Alerts[0].Status)   // firing → firing
+	assert.Equal(t, "firing", webhook.Alerts[1].Status)   // pending → firing
+	assert.Equal(t, "resolved", webhook.Alerts[2].Status) // inactive → resolved
 }
 
 // TestParsePrometheusV2Grouped tests parsing Prometheus v2 grouped format
@@ -317,8 +317,8 @@ func TestConvertStateMapping(t *testing.T) {
 	parser := NewPrometheusParser()
 
 	tests := []struct {
-		name          string
-		state         string
+		name           string
+		state          string
 		expectedStatus string
 	}{
 		{"firing maps to firing", "firing", "firing"},
@@ -448,10 +448,10 @@ func TestMapPrometheusState(t *testing.T) {
 		expected string
 	}{
 		{"firing", "firing"},
-		{"pending", "firing"},   // Mapped to firing
+		{"pending", "firing"}, // Mapped to firing
 		{"inactive", "resolved"},
-		{"unknown", "firing"},    // Default to firing
-		{"", "firing"},           // Empty defaults to firing
+		{"unknown", "firing"}, // Default to firing
+		{"", "firing"},        // Empty defaults to firing
 	}
 
 	for _, tt := range tests {

@@ -40,9 +40,9 @@ func TestFindClosest(t *testing.T) {
 		threshold int
 		expected  string
 	}{
-		{"toUpper", 0, "toUpper"},       // Exact match
-		{"toUpperCase", 5, "toUpper"},   // Close match
-		{"unknown", 10, "toUpper"},      // No match within threshold
+		{"toUpper", 0, "toUpper"},     // Exact match
+		{"toUpperCase", 5, "toUpper"}, // Close match
+		{"unknown", 10, "toUpper"},    // No match within threshold
 	}
 
 	for _, tt := range tests {

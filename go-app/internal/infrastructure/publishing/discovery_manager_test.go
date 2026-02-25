@@ -4,9 +4,9 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )

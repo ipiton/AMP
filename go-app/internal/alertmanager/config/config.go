@@ -5,11 +5,11 @@ import "time"
 
 // AlertmanagerConfig represents the top-level Alertmanager configuration
 type AlertmanagerConfig struct {
-	Global       *GlobalConfig   `yaml:"global,omitempty" json:"global,omitempty"`
-	Route        *Route          `yaml:"route,omitempty" json:"route,omitempty"`
-	InhibitRules []*InhibitRule  `yaml:"inhibit_rules,omitempty" json:"inhibit_rules,omitempty"`
-	Receivers    []*Receiver     `yaml:"receivers,omitempty" json:"receivers,omitempty"`
-	Templates    []string        `yaml:"templates,omitempty" json:"templates,omitempty"`
+	Global       *GlobalConfig  `yaml:"global,omitempty" json:"global,omitempty"`
+	Route        *Route         `yaml:"route,omitempty" json:"route,omitempty"`
+	InhibitRules []*InhibitRule `yaml:"inhibit_rules,omitempty" json:"inhibit_rules,omitempty"`
+	Receivers    []*Receiver    `yaml:"receivers,omitempty" json:"receivers,omitempty"`
+	Templates    []string       `yaml:"templates,omitempty" json:"templates,omitempty"`
 }
 
 // GlobalConfig contains global configuration options
@@ -68,34 +68,34 @@ type Route struct {
 
 // InhibitRule defines an inhibition rule
 type InhibitRule struct {
-	SourceMatch      map[string]string `yaml:"source_match,omitempty" json:"source_match,omitempty"`
-	SourceMatchRE    map[string]string `yaml:"source_match_re,omitempty" json:"source_match_re,omitempty"`
-	TargetMatch      map[string]string `yaml:"target_match,omitempty" json:"target_match,omitempty"`
-	TargetMatchRE    map[string]string `yaml:"target_match_re,omitempty" json:"target_match_re,omitempty"`
-	Equal            []string          `yaml:"equal,omitempty" json:"equal,omitempty"`
+	SourceMatch   map[string]string `yaml:"source_match,omitempty" json:"source_match,omitempty"`
+	SourceMatchRE map[string]string `yaml:"source_match_re,omitempty" json:"source_match_re,omitempty"`
+	TargetMatch   map[string]string `yaml:"target_match,omitempty" json:"target_match,omitempty"`
+	TargetMatchRE map[string]string `yaml:"target_match_re,omitempty" json:"target_match_re,omitempty"`
+	Equal         []string          `yaml:"equal,omitempty" json:"equal,omitempty"`
 }
 
 // Receiver defines a notification receiver
 type Receiver struct {
-	Name             string                 `yaml:"name" json:"name"`
-	EmailConfigs     []*EmailConfig         `yaml:"email_configs,omitempty" json:"email_configs,omitempty"`
-	PagerdutyConfigs []*PagerdutyConfig     `yaml:"pagerduty_configs,omitempty" json:"pagerduty_configs,omitempty"`
-	SlackConfigs     []*SlackConfig         `yaml:"slack_configs,omitempty" json:"slack_configs,omitempty"`
-	WebhookConfigs   []*WebhookConfig       `yaml:"webhook_configs,omitempty" json:"webhook_configs,omitempty"`
-	OpsGenieConfigs  []*OpsGenieConfig      `yaml:"opsgenie_configs,omitempty" json:"opsgenie_configs,omitempty"`
-	WeChatConfigs    []*WeChatConfig        `yaml:"wechat_configs,omitempty" json:"wechat_configs,omitempty"`
-	VictorOpsConfigs []*VictorOpsConfig     `yaml:"victorops_configs,omitempty" json:"victorops_configs,omitempty"`
+	Name             string             `yaml:"name" json:"name"`
+	EmailConfigs     []*EmailConfig     `yaml:"email_configs,omitempty" json:"email_configs,omitempty"`
+	PagerdutyConfigs []*PagerdutyConfig `yaml:"pagerduty_configs,omitempty" json:"pagerduty_configs,omitempty"`
+	SlackConfigs     []*SlackConfig     `yaml:"slack_configs,omitempty" json:"slack_configs,omitempty"`
+	WebhookConfigs   []*WebhookConfig   `yaml:"webhook_configs,omitempty" json:"webhook_configs,omitempty"`
+	OpsGenieConfigs  []*OpsGenieConfig  `yaml:"opsgenie_configs,omitempty" json:"opsgenie_configs,omitempty"`
+	WeChatConfigs    []*WeChatConfig    `yaml:"wechat_configs,omitempty" json:"wechat_configs,omitempty"`
+	VictorOpsConfigs []*VictorOpsConfig `yaml:"victorops_configs,omitempty" json:"victorops_configs,omitempty"`
 }
 
 // EmailConfig defines email notification configuration
 type EmailConfig struct {
-	To           string            `yaml:"to,omitempty" json:"to,omitempty"`
-	From         string            `yaml:"from,omitempty" json:"from,omitempty"`
-	Smarthost    string            `yaml:"smarthost,omitempty" json:"smarthost,omitempty"`
-	Headers      map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
-	HTML         string            `yaml:"html,omitempty" json:"html,omitempty"`
-	Text         string            `yaml:"text,omitempty" json:"text,omitempty"`
-	RequireTLS   *bool             `yaml:"require_tls,omitempty" json:"require_tls,omitempty"`
+	To         string            `yaml:"to,omitempty" json:"to,omitempty"`
+	From       string            `yaml:"from,omitempty" json:"from,omitempty"`
+	Smarthost  string            `yaml:"smarthost,omitempty" json:"smarthost,omitempty"`
+	Headers    map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	HTML       string            `yaml:"html,omitempty" json:"html,omitempty"`
+	Text       string            `yaml:"text,omitempty" json:"text,omitempty"`
+	RequireTLS *bool             `yaml:"require_tls,omitempty" json:"require_tls,omitempty"`
 }
 
 // PagerdutyConfig defines PagerDuty notification configuration
@@ -111,25 +111,25 @@ type PagerdutyConfig struct {
 
 // SlackConfig defines Slack notification configuration
 type SlackConfig struct {
-	APIURL      string            `yaml:"api_url,omitempty" json:"api_url,omitempty"`
-	Channel     string            `yaml:"channel,omitempty" json:"channel,omitempty"`
-	Username    string            `yaml:"username,omitempty" json:"username,omitempty"`
-	Color       string            `yaml:"color,omitempty" json:"color,omitempty"`
-	Title       string            `yaml:"title,omitempty" json:"title,omitempty"`
-	TitleLink   string            `yaml:"title_link,omitempty" json:"title_link,omitempty"`
-	Pretext     string            `yaml:"pretext,omitempty" json:"pretext,omitempty"`
-	Text        string            `yaml:"text,omitempty" json:"text,omitempty"`
-	Fields      []SlackField      `yaml:"fields,omitempty" json:"fields,omitempty"`
-	ShortFields bool              `yaml:"short_fields,omitempty" json:"short_fields,omitempty"`
-	Footer      string            `yaml:"footer,omitempty" json:"footer,omitempty"`
-	Fallback    string            `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	CallbackID  string            `yaml:"callback_id,omitempty" json:"callback_id,omitempty"`
-	IconEmoji   string            `yaml:"icon_emoji,omitempty" json:"icon_emoji,omitempty"`
-	IconURL     string            `yaml:"icon_url,omitempty" json:"icon_url,omitempty"`
-	ImageURL    string            `yaml:"image_url,omitempty" json:"image_url,omitempty"`
-	ThumbURL    string            `yaml:"thumb_url,omitempty" json:"thumb_url,omitempty"`
-	LinkNames   bool              `yaml:"link_names,omitempty" json:"link_names,omitempty"`
-	Actions     []SlackAction     `yaml:"actions,omitempty" json:"actions,omitempty"`
+	APIURL      string        `yaml:"api_url,omitempty" json:"api_url,omitempty"`
+	Channel     string        `yaml:"channel,omitempty" json:"channel,omitempty"`
+	Username    string        `yaml:"username,omitempty" json:"username,omitempty"`
+	Color       string        `yaml:"color,omitempty" json:"color,omitempty"`
+	Title       string        `yaml:"title,omitempty" json:"title,omitempty"`
+	TitleLink   string        `yaml:"title_link,omitempty" json:"title_link,omitempty"`
+	Pretext     string        `yaml:"pretext,omitempty" json:"pretext,omitempty"`
+	Text        string        `yaml:"text,omitempty" json:"text,omitempty"`
+	Fields      []SlackField  `yaml:"fields,omitempty" json:"fields,omitempty"`
+	ShortFields bool          `yaml:"short_fields,omitempty" json:"short_fields,omitempty"`
+	Footer      string        `yaml:"footer,omitempty" json:"footer,omitempty"`
+	Fallback    string        `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	CallbackID  string        `yaml:"callback_id,omitempty" json:"callback_id,omitempty"`
+	IconEmoji   string        `yaml:"icon_emoji,omitempty" json:"icon_emoji,omitempty"`
+	IconURL     string        `yaml:"icon_url,omitempty" json:"icon_url,omitempty"`
+	ImageURL    string        `yaml:"image_url,omitempty" json:"image_url,omitempty"`
+	ThumbURL    string        `yaml:"thumb_url,omitempty" json:"thumb_url,omitempty"`
+	LinkNames   bool          `yaml:"link_names,omitempty" json:"link_names,omitempty"`
+	Actions     []SlackAction `yaml:"actions,omitempty" json:"actions,omitempty"`
 }
 
 // SlackField defines a Slack message field
@@ -189,12 +189,12 @@ type WeChatConfig struct {
 
 // VictorOpsConfig defines VictorOps notification configuration
 type VictorOpsConfig struct {
-	APIURL          string            `yaml:"api_url,omitempty" json:"api_url,omitempty"`
-	APIKey          string            `yaml:"api_key,omitempty" json:"api_key,omitempty"`
-	RoutingKey      string            `yaml:"routing_key,omitempty" json:"routing_key,omitempty"`
-	MessageType     string            `yaml:"message_type,omitempty" json:"message_type,omitempty"`
-	EntityDisplayName string          `yaml:"entity_display_name,omitempty" json:"entity_display_name,omitempty"`
-	StateMessage    string            `yaml:"state_message,omitempty" json:"state_message,omitempty"`
-	MonitoringTool  string            `yaml:"monitoring_tool,omitempty" json:"monitoring_tool,omitempty"`
-	CustomFields    map[string]string `yaml:"custom_fields,omitempty" json:"custom_fields,omitempty"`
+	APIURL            string            `yaml:"api_url,omitempty" json:"api_url,omitempty"`
+	APIKey            string            `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	RoutingKey        string            `yaml:"routing_key,omitempty" json:"routing_key,omitempty"`
+	MessageType       string            `yaml:"message_type,omitempty" json:"message_type,omitempty"`
+	EntityDisplayName string            `yaml:"entity_display_name,omitempty" json:"entity_display_name,omitempty"`
+	StateMessage      string            `yaml:"state_message,omitempty" json:"state_message,omitempty"`
+	MonitoringTool    string            `yaml:"monitoring_tool,omitempty" json:"monitoring_tool,omitempty"`
+	CustomFields      map[string]string `yaml:"custom_fields,omitempty" json:"custom_fields,omitempty"`
 }

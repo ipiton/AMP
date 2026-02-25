@@ -18,11 +18,11 @@ type PublishingResult struct {
 
 // PublishingCoordinator manages concurrent publishing to multiple targets
 type PublishingCoordinator struct {
-	queue           *PublishingQueue
+	queue            *PublishingQueue
 	discoveryManager TargetDiscoveryManager
-	modeManager     ModeManager // TN-060: Mode manager for metrics-only fallback
-	semaphore       chan struct{}
-	logger          *slog.Logger
+	modeManager      ModeManager // TN-060: Mode manager for metrics-only fallback
+	semaphore        chan struct{}
+	logger           *slog.Logger
 }
 
 // CoordinatorConfig holds configuration for publishing coordinator
@@ -50,11 +50,11 @@ func NewPublishingCoordinator(
 	}
 
 	return &PublishingCoordinator{
-		queue:           queue,
+		queue:            queue,
 		discoveryManager: discoveryManager,
-		modeManager:     modeManager,
-		semaphore:       make(chan struct{}, config.MaxConcurrent),
-		logger:          logger,
+		modeManager:      modeManager,
+		semaphore:        make(chan struct{}, config.MaxConcurrent),
+		logger:           logger,
 	}
 }
 

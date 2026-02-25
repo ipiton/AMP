@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/cmd/server/handlers"
+	appconfig "github.com/ipiton/AMP/internal/config"
 )
 
 // HandlerRegistry manages all HTTP handlers.

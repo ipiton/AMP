@@ -32,11 +32,11 @@ func (p *EventPublisher) PublishAlertEvent(eventType string, alert *core.Alert) 
 
 	data := map[string]interface{}{
 		"fingerprint": alert.Fingerprint,
-		"alertname":  alert.AlertName,
-		"status":     string(alert.Status),
-		"severity":   alert.Labels["severity"], // Get severity from labels
-		"labels":     alert.Labels,
-		"starts_at":  alert.StartsAt.Format(time.RFC3339),
+		"alertname":   alert.AlertName,
+		"status":      string(alert.Status),
+		"severity":    alert.Labels["severity"], // Get severity from labels
+		"labels":      alert.Labels,
+		"starts_at":   alert.StartsAt.Format(time.RFC3339),
 	}
 
 	if alert.EndsAt != nil {

@@ -46,15 +46,15 @@ type Options struct {
 
 // Result represents comprehensive validation result
 type Result struct {
-	Valid        bool          `json:"valid"`
-	Errors       []Error       `json:"errors,omitempty"`
-	Warnings     []Warning     `json:"warnings,omitempty"`
-	Info         []Info        `json:"info,omitempty"`
-	Suggestions  []Suggestion  `json:"suggestions,omitempty"`
-	FilePath     string        `json:"file_path,omitempty"`
-	Duration     time.Duration `json:"-"`
-	DurationMS   int64         `json:"duration_ms"`
-	ValidatedAt  time.Time     `json:"validated_at"`
+	Valid       bool          `json:"valid"`
+	Errors      []Error       `json:"errors,omitempty"`
+	Warnings    []Warning     `json:"warnings,omitempty"`
+	Info        []Info        `json:"info,omitempty"`
+	Suggestions []Suggestion  `json:"suggestions,omitempty"`
+	FilePath    string        `json:"file_path,omitempty"`
+	Duration    time.Duration `json:"-"`
+	DurationMS  int64         `json:"duration_ms"`
+	ValidatedAt time.Time     `json:"validated_at"`
 }
 
 // Error represents a critical validation error

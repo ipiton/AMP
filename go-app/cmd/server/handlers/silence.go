@@ -14,8 +14,9 @@
 //   - POST /api/v2/silences/bulk/delete - Bulk delete silences (150% feature)
 //
 // Architecture:
-//   HTTP Request → SilenceHandler → SilenceManager → SilenceRepository → PostgreSQL
-//                                                  → Cache (Redis)
+//
+//	HTTP Request → SilenceHandler → SilenceManager → SilenceRepository → PostgreSQL
+//	                                               → Cache (Redis)
 //
 // Performance targets (p95):
 //   - GET (cached): <10ms

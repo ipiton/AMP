@@ -98,7 +98,7 @@ func TestExtractVariables(t *testing.T) {
 	variables := validator.extractVariables(content)
 
 	expectedVars := map[string]bool{
-		".Status":          true,
+		".Status":           true,
 		".Labels.alertname": true,
 	}
 

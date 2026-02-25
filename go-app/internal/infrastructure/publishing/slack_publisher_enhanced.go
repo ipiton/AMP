@@ -16,9 +16,9 @@ import (
 // EnhancedSlackPublisher implements AlertPublisher with full Slack webhook support
 // Provides message lifecycle management (post, thread reply) and message tracking
 type EnhancedSlackPublisher struct {
-	*BaseEnhancedPublisher                     // Embedded base publisher for common functionality
-	client                 SlackWebhookClient  // Slack-specific webhook client
-	cache                  MessageIDCache      // For tracking message timestamps (threading)
+	*BaseEnhancedPublisher                    // Embedded base publisher for common functionality
+	client                 SlackWebhookClient // Slack-specific webhook client
+	cache                  MessageIDCache     // For tracking message timestamps (threading)
 }
 
 // NewEnhancedSlackPublisher creates a new enhanced Slack publisher

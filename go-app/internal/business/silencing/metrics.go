@@ -79,77 +79,77 @@ type SilenceMetrics struct {
 func NewSilenceMetrics() *SilenceMetrics {
 	metricsOnce.Do(func() {
 		metricsInstance = &SilenceMetrics{
-		// 1. Operations counter
-		Operations: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "alert_history_business_silence_manager_operations_total",
-				Help: "Total number of silence manager operations by type and status",
-			},
-			[]string{"operation", "status"},
-		),
+			// 1. Operations counter
+			Operations: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "alert_history_business_silence_manager_operations_total",
+					Help: "Total number of silence manager operations by type and status",
+				},
+				[]string{"operation", "status"},
+			),
 
-		// 2. Operation duration histogram
-		OperationDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Name:    "alert_history_business_silence_manager_operation_duration_seconds",
-				Help:    "Duration of silence manager operations in seconds",
-				Buckets: prometheus.DefBuckets, // [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
-			},
-			[]string{"operation"},
-		),
+			// 2. Operation duration histogram
+			OperationDuration: promauto.NewHistogramVec(
+				prometheus.HistogramOpts{
+					Name:    "alert_history_business_silence_manager_operation_duration_seconds",
+					Help:    "Duration of silence manager operations in seconds",
+					Buckets: prometheus.DefBuckets, // [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+				},
+				[]string{"operation"},
+			),
 
-		// 3. Errors counter
-		Errors: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "alert_history_business_silence_manager_errors_total",
-				Help: "Total number of errors in silence manager by operation and type",
-			},
-			[]string{"operation", "type"},
-		),
+			// 3. Errors counter
+			Errors: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "alert_history_business_silence_manager_errors_total",
+					Help: "Total number of errors in silence manager by operation and type",
+				},
+				[]string{"operation", "type"},
+			),
 
-		// 4. Active silences gauge
-		ActiveSilences: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "alert_history_business_silence_manager_active_silences",
-				Help: "Current number of silences by status",
-			},
-			[]string{"status"},
-		),
+			// 4. Active silences gauge
+			ActiveSilences: promauto.NewGaugeVec(
+				prometheus.GaugeOpts{
+					Name: "alert_history_business_silence_manager_active_silences",
+					Help: "Current number of silences by status",
+				},
+				[]string{"status"},
+			),
 
-		// 5. Cache operations
-		CacheOperations: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "alert_history_business_silence_manager_cache_operations_total",
-				Help: "Total number of cache operations by type",
-			},
-			[]string{"type", "operation"},
-		),
+			// 5. Cache operations
+			CacheOperations: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "alert_history_business_silence_manager_cache_operations_total",
+					Help: "Total number of cache operations by type",
+				},
+				[]string{"type", "operation"},
+			),
 
-		// 6. GC runs
-		GCRuns: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "alert_history_business_silence_manager_gc_runs_total",
-				Help: "Total number of GC worker runs by phase",
-			},
-			[]string{"phase"},
-		),
+			// 6. GC runs
+			GCRuns: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "alert_history_business_silence_manager_gc_runs_total",
+					Help: "Total number of GC worker runs by phase",
+				},
+				[]string{"phase"},
+			),
 
-		// 7. GC cleaned
-		GCCleaned: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "alert_history_business_silence_manager_gc_cleaned_total",
-				Help: "Total number of silences cleaned by GC by phase",
-			},
-			[]string{"phase"},
-		),
+			// 7. GC cleaned
+			GCCleaned: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Name: "alert_history_business_silence_manager_gc_cleaned_total",
+					Help: "Total number of silences cleaned by GC by phase",
+				},
+				[]string{"phase"},
+			),
 
-		// 8. Sync runs
-		SyncRuns: promauto.NewCounter(
-			prometheus.CounterOpts{
-				Name: "alert_history_business_silence_manager_sync_runs_total",
-				Help: "Total number of sync worker runs",
-			},
-		),
+			// 8. Sync runs
+			SyncRuns: promauto.NewCounter(
+				prometheus.CounterOpts{
+					Name: "alert_history_business_silence_manager_sync_runs_total",
+					Help: "Total number of sync worker runs",
+				},
+			),
 
 			startTime: time.Now(),
 		}

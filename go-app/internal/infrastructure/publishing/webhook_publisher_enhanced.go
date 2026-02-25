@@ -13,7 +13,7 @@ import (
 
 // EnhancedWebhookPublisher implements AlertPublisher with advanced features
 type EnhancedWebhookPublisher struct {
-	*BaseEnhancedPublisher                 // Embedded base publisher for common functionality
+	*BaseEnhancedPublisher                    // Embedded base publisher for common functionality
 	client                 *WebhookHTTPClient // Generic HTTP client for webhooks
 	validator              *WebhookValidator  // Webhook-specific validator
 }

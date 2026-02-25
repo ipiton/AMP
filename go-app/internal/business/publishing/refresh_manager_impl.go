@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // DefaultRefreshManager is production implementation of RefreshManager.
@@ -164,10 +164,10 @@ func NewRefreshManager(
 // Start begins background refresh worker.
 //
 // This method:
-//   1. Validates manager not already started
-//   2. Creates context for lifecycle management
-//   3. Spawns background goroutine (runBackgroundWorker)
-//   4. Returns immediately (non-blocking)
+//  1. Validates manager not already started
+//  2. Creates context for lifecycle management
+//  3. Spawns background goroutine (runBackgroundWorker)
+//  4. Returns immediately (non-blocking)
 //
 // Returns:
 //   - nil on success
@@ -204,10 +204,10 @@ func (m *DefaultRefreshManager) Start() error {
 // Stop gracefully stops background refresh worker.
 //
 // This method:
-//   1. Validates manager is started
-//   2. Cancels context (stops new refreshes)
-//   3. Waits for goroutine to exit (max timeout)
-//   4. Cleans up resources
+//  1. Validates manager is started
+//  2. Cancels context (stops new refreshes)
+//  3. Waits for goroutine to exit (max timeout)
+//  4. Cleans up resources
 //
 // Returns:
 //   - nil if stopped cleanly
@@ -257,11 +257,11 @@ func (m *DefaultRefreshManager) Stop(timeout time.Duration) error {
 // RefreshNow triggers immediate refresh (async).
 //
 // This method:
-//   1. Validates manager is started
-//   2. Checks rate limit (max 1/min)
-//   3. Checks if refresh already in progress
-//   4. Spawns goroutine for async execution
-//   5. Returns immediately (202 Accepted behavior)
+//  1. Validates manager is started
+//  2. Checks rate limit (max 1/min)
+//  3. Checks if refresh already in progress
+//  4. Spawns goroutine for async execution
+//  5. Returns immediately (202 Accepted behavior)
 //
 // Returns:
 //   - nil if triggered successfully

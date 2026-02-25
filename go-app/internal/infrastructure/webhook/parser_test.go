@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 func TestNewAlertmanagerParser(t *testing.T) {
@@ -212,7 +212,7 @@ func TestConvertToDomain_DeterministicFingerprint(t *testing.T) {
 					Labels: map[string]string{
 						"alertname": "TestAlert",
 						"severity":  "warning",
-						"instance": "server1",
+						"instance":  "server1",
 					},
 					StartsAt: time.Date(2025, 1, 10, 10, 0, 0, 0, time.UTC),
 				},
@@ -290,8 +290,8 @@ func TestConvertToDomain_InvalidStatus(t *testing.T) {
 		Status:   "firing",
 		Alerts: []AlertmanagerAlert{
 			{
-				Status: "invalid_status",
-				Labels: map[string]string{"alertname": "test"},
+				Status:   "invalid_status",
+				Labels:   map[string]string{"alertname": "test"},
 				StartsAt: time.Now(),
 			},
 		},
@@ -397,7 +397,7 @@ func TestMapAlertStatus(t *testing.T) {
 
 func TestGenerateFingerprint_Deterministic(t *testing.T) {
 	labels := map[string]string{
-		"severity":  "critical",
+		"severity": "critical",
 		"instance": "server1",
 		"job":      "api",
 	}
@@ -598,8 +598,8 @@ func BenchmarkGenerateFingerprint(b *testing.B) {
 	labels := map[string]string{
 		"alertname": "TestAlert",
 		"severity":  "critical",
-		"instance": "server1",
-		"job":      "api",
+		"instance":  "server1",
+		"job":       "api",
 	}
 
 	b.ResetTimer()

@@ -13,7 +13,7 @@ import (
 // EnhancedPagerDutyPublisher implements AlertPublisher with full PagerDuty Events API v2 support
 // Provides incident lifecycle management (trigger, acknowledge, resolve) and change events
 type EnhancedPagerDutyPublisher struct {
-	*BaseEnhancedPublisher                      // Embedded base publisher for common functionality
+	*BaseEnhancedPublisher                       // Embedded base publisher for common functionality
 	client                 PagerDutyEventsClient // PagerDuty-specific events client
 	cache                  EventKeyCache         // For tracking event keys (incident lifecycle)
 }

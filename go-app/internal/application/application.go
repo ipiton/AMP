@@ -74,11 +74,11 @@ func New(config *appconfig.Config) *Application {
 // Run starts the application and blocks until shutdown signal is received.
 //
 // This is the main entry point that:
-//   1. Initializes all services
-//   2. Registers all handlers
-//   3. Starts the HTTP server
-//   4. Waits for shutdown signal (SIGINT, SIGTERM)
-//   5. Performs graceful shutdown
+//  1. Initializes all services
+//  2. Registers all handlers
+//  3. Starts the HTTP server
+//  4. Waits for shutdown signal (SIGINT, SIGTERM)
+//  5. Performs graceful shutdown
 //
 // Returns error if initialization or shutdown fails.
 func (app *Application) Run() error {
@@ -233,10 +233,10 @@ func (app *Application) startServer() error {
 // Shutdown signals: SIGINT (Ctrl+C), SIGTERM (Docker/Kubernetes stop)
 //
 // Graceful shutdown process:
-//   1. Stop accepting new requests
-//   2. Wait for in-flight requests to complete (30s timeout)
-//   3. Shutdown all services (database, cache, etc.)
-//   4. Exit cleanly
+//  1. Stop accepting new requests
+//  2. Wait for in-flight requests to complete (30s timeout)
+//  3. Shutdown all services (database, cache, etc.)
+//  4. Exit cleanly
 func (app *Application) waitForShutdown() error {
 	// Setup signal handling
 	sigChan := make(chan os.Signal, 1)

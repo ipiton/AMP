@@ -1,9 +1,9 @@
 package publishing
 
 import (
-	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"context"
 	"encoding/json"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -88,7 +88,8 @@ func TestE2E_FullPublishingFlow(t *testing.T) {
 	discovery.SetTargets(targets)
 
 	// Create health monitor
-	registry := v2.NewRegistry(); healthMetrics := registry.Publishing
+	registry := v2.NewRegistry()
+	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.WarmupDelay = 0 // Skip warmup for tests
 	healthMonitor, err := NewHealthMonitor(discovery, config, nil, healthMetrics)
@@ -189,7 +190,8 @@ func TestE2E_HealthAwareRouting(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	registry := v2.NewRegistry(); healthMetrics := registry.Publishing
+	registry := v2.NewRegistry()
+	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.FailureThreshold = 1 // Mark unhealthy after 1 failure
 	config.CheckInterval = 100 * time.Millisecond
@@ -269,7 +271,8 @@ func TestE2E_ParallelPublishing(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	registry := v2.NewRegistry(); healthMetrics := registry.Publishing
+	registry := v2.NewRegistry()
+	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.WarmupDelay = 0 // Skip warmup for tests
 	monitor, err := NewHealthMonitor(discovery, config, nil, healthMetrics)
@@ -331,7 +334,8 @@ func TestE2E_TargetRecovery(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	registry := v2.NewRegistry(); healthMetrics := registry.Publishing
+	registry := v2.NewRegistry()
+	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.CheckInterval = 200 * time.Millisecond
 	config.FailureThreshold = 3
@@ -383,7 +387,8 @@ func TestE2E_DynamicTargetDiscovery(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(initialTargets)
 
-	registry := v2.NewRegistry(); healthMetrics := registry.Publishing
+	registry := v2.NewRegistry()
+	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.WarmupDelay = 0 // Skip warmup for tests
 	monitor, err := NewHealthMonitor(discovery, config, nil, healthMetrics)

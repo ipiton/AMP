@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 func createTestEnrichedAlert() *core.EnrichedAlert {
@@ -212,8 +212,8 @@ func TestFormatAlert_Webhook(t *testing.T) {
 
 	classification, ok := result["classification"].(map[string]any)
 	require.True(t, ok)
-	assert.Contains(t, classification, "severity")     // lowercase after JSON marshal/unmarshal
-	assert.Contains(t, classification, "confidence")   // lowercase after JSON marshal/unmarshal
+	assert.Contains(t, classification, "severity")   // lowercase after JSON marshal/unmarshal
+	assert.Contains(t, classification, "confidence") // lowercase after JSON marshal/unmarshal
 	assert.Contains(t, classification, "reasoning")
 	assert.Contains(t, classification, "recommendations")
 }

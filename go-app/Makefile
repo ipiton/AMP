@@ -1,5 +1,5 @@
 # Makefile for Alert History Service (Go version)
-.PHONY: build test lint run clean help deps fmt vet mod-tidy
+.PHONY: build test lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-fast
 
 # Go parameters
 GOCMD=go
@@ -10,6 +10,12 @@ GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
+
+# Local Go caches (useful for sandboxed/offline development environments)
+GOLOCAL_GOCACHE ?= $(CURDIR)/.cache/go-build
+GOLOCAL_GOMODCACHE ?= $(CURDIR)/.cache/go-mod
+GOLOCAL_GOPATH ?= $(CURDIR)/.cache/go
+GO_LOCAL_ENV = GOCACHE=$(GOLOCAL_GOCACHE) GOMODCACHE=$(GOLOCAL_GOMODCACHE) GOPATH=$(GOLOCAL_GOPATH)
 
 # Main package path
 MAIN_PATH=./cmd/server
@@ -32,6 +38,23 @@ build-linux:
 test:
 	@echo "Running tests..."
 	$(GOTEST) -v ./...
+
+# Fast quality gates for local inner loop
+quality-gates-fast:
+	@echo "Running fast quality gates (fmt + vet)..."
+	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
+	$(GOFMT) ./...
+	$(GO_LOCAL_ENV) $(GOVET) ./...
+	@echo "Fast quality gates passed"
+
+# Full quality gates for pre-merge/pre-release checks
+quality-gates:
+	@echo "Running full quality gates (fmt + vet + test)..."
+	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
+	$(GOFMT) ./...
+	$(GO_LOCAL_ENV) $(GOVET) ./...
+	$(GO_LOCAL_ENV) $(GOTEST) -v ./...
+	@echo "Full quality gates passed"
 
 # Run tests with coverage
 test-coverage:
@@ -89,8 +112,8 @@ install-tools:
 	$(GOGET) -u github.com/cosmtrek/air
 	$(GOGET) -u github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
-# Include advanced migration commands from Makefile.migrations
-include Makefile.migrations
+# Include advanced migration commands from Makefile.migrations (optional)
+-include Makefile.migrations
 
 # Database URL for migrations (uses environment variables)
 DATABASE_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSL_MODE)
@@ -192,8 +215,8 @@ compose-build:
 	docker-compose build
 	@echo "Services built"
 
-# Include Docker Compose development commands
-include ../Makefile.docker
+# Include Docker Compose development commands (optional)
+-include ../Makefile.docker
 
 # Bake commands (advanced multi-arch builds)
 bake-build:
@@ -219,6 +242,8 @@ help:
 	@echo "  build           - Build the application"
 	@echo "  build-linux     - Build for Linux (Docker)"
 	@echo "  test            - Run tests"
+	@echo "  quality-gates-fast - fmt + vet (inner loop)"
+	@echo "  quality-gates   - fmt + vet + full test suite"
 	@echo "  test-coverage   - Run tests with coverage report"
 	@echo "  lint            - Run linter (requires golangci-lint)"
 	@echo "  fmt             - Format code"

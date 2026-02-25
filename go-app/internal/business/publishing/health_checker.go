@@ -14,11 +14,11 @@ import (
 // httpConnectivityTest performs TCP + HTTP connectivity test for target.
 //
 // This function implements comprehensive health check:
-//   1. Parse target URL (validate format)
-//   2. TCP handshake (fail fast if unreachable)
-//   3. HTTP GET request (validate response)
-//   4. Measure latency (full execution time)
-//   5. Classify errors (timeout/dns/tls/refused/http_error)
+//  1. Parse target URL (validate format)
+//  2. TCP handshake (fail fast if unreachable)
+//  3. HTTP GET request (validate response)
+//  4. Measure latency (full execution time)
+//  5. Classify errors (timeout/dns/tls/refused/http_error)
 //
 // Test Strategy:
 //   - TCP first: Fail fast if network unreachable (~50ms)
@@ -145,10 +145,10 @@ func httpConnectivityTest(
 // checkSingleTarget performs health check for single target.
 //
 // This function:
-//   1. Validates target (skip if disabled or invalid URL)
-//   2. Calls httpConnectivityTest
-//   3. Builds HealthCheckResult
-//   4. Returns result for processing
+//  1. Validates target (skip if disabled or invalid URL)
+//  2. Calls httpConnectivityTest
+//  3. Builds HealthCheckResult
+//  4. Returns result for processing
 //
 // Parameters:
 //   - ctx: Context (for cancellation)
@@ -225,9 +225,9 @@ func checkSingleTarget(
 // checkTargetWithRetry performs health check with retry on transient errors.
 //
 // This function:
-//   1. Performs initial health check
-//   2. If failure is transient (timeout/network), retries once
-//   3. Returns final result
+//  1. Performs initial health check
+//  2. If failure is transient (timeout/network), retries once
+//  3. Returns final result
 //
 // Note: Only 1 retry to keep check duration <1s total.
 //

@@ -426,7 +426,6 @@ func convertValidatorErrors(errs validator.ValidationErrors) error {
 	return NewConfigError("validation failed", errors)
 }
 
-
 // GetConfig returns the currently loaded configuration.
 func (p *DefaultInhibitionParser) GetConfig() *InhibitionConfig {
 	if p.currentConfig == nil {

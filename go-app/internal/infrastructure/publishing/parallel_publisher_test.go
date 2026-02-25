@@ -14,10 +14,10 @@ import (
 
 // mockPublisherFactory is a mock publisher factory for testing
 type mockPublisherFactory struct {
-	createErr     error
-	publishErr    error
-	publishDelay  time.Duration
-	callCount     int
+	createErr    error
+	publishErr   error
+	publishDelay time.Duration
+	callCount    int
 }
 
 func (m *mockPublisherFactory) CreatePublisherForTarget(target *core.PublishingTarget) (AlertPublisher, error) {
@@ -272,8 +272,8 @@ func TestParallelPublishOptions_Validate(t *testing.T) {
 		{
 			name: "invalid timeout",
 			options: ParallelPublishOptions{
-				Timeout:       0,
-				MaxConcurrent: 10,
+				Timeout:        0,
+				MaxConcurrent:  10,
 				HealthStrategy: SkipUnhealthy,
 			},
 			wantErr: true,
@@ -281,8 +281,8 @@ func TestParallelPublishOptions_Validate(t *testing.T) {
 		{
 			name: "invalid max concurrent",
 			options: ParallelPublishOptions{
-				Timeout:       30 * time.Second,
-				MaxConcurrent: 0,
+				Timeout:        30 * time.Second,
+				MaxConcurrent:  0,
 				HealthStrategy: SkipUnhealthy,
 			},
 			wantErr: true,

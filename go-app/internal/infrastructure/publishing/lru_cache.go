@@ -50,11 +50,13 @@ type lruEntry struct {
 // NewLRUCache creates a production-ready LRU cache.
 //
 // Parameters:
-//   capacity: Maximum number of entries
-//   defaultTTL: Default time-to-live (0 = no expiration)
+//
+//	capacity: Maximum number of entries
+//	defaultTTL: Default time-to-live (0 = no expiration)
 //
 // Returns:
-//   FormatterCache: Enterprise LRU cache
+//
+//	FormatterCache: Enterprise LRU cache
 func NewLRUCache(capacity int, defaultTTL time.Duration) FormatterCache {
 	return &LRUCache{
 		capacity:        capacity,

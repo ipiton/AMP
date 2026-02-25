@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // comprehensive_bench_test.go - Comprehensive benchmarks for all publishing components
@@ -363,7 +363,7 @@ func BenchmarkMemory_HealthStatusAllocation(b *testing.B) {
 		_ = &TargetHealthStatus{
 			TargetName:          "test-target",
 			TargetType:          "webhook",
-			Status: HealthStatusHealthy,
+			Status:              HealthStatusHealthy,
 			LastCheck:           now,
 			LastSuccess:         &now,
 			ConsecutiveFailures: 0,

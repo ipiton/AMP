@@ -214,12 +214,12 @@ func TestTrendDetector_StableTrends(t *testing.T) {
 		snapshot := &MetricsSnapshot{
 			Timestamp: now.Add(time.Duration(i-1440) * time.Minute),
 			Metrics: map[string]float64{
-				"jobs_submitted_total":                 100.0,
-				"jobs_completed_total":                 95.0, // 95% success (stable)
-				"publishing_duration_seconds_sum":      10.0,
-				"publishing_duration_seconds_count":    100.0, // 100ms latency (stable)
-				"jobs_failed_total":                    5.0,   // 5% error rate (stable)
-				"queue_size_total":                     100.0, // Queue size 100 (stable)
+				"jobs_submitted_total":              100.0,
+				"jobs_completed_total":              95.0, // 95% success (stable)
+				"publishing_duration_seconds_sum":   10.0,
+				"publishing_duration_seconds_count": 100.0, // 100ms latency (stable)
+				"jobs_failed_total":                 5.0,   // 5% error rate (stable)
+				"queue_size_total":                  100.0, // Queue size 100 (stable)
 			},
 		}
 		detector.RecordSnapshot(snapshot)
@@ -274,12 +274,12 @@ func TestTrendDetector_RecordSnapshot(t *testing.T) {
 // TestMetricExtractors tests metric extraction functions.
 func TestMetricExtractors(t *testing.T) {
 	metrics := map[string]float64{
-		"jobs_submitted_total":                 100.0,
-		"jobs_completed_total":                 90.0,
-		"jobs_failed_total":                    10.0,
-		"publishing_duration_seconds_sum":      10.0,
-		"publishing_duration_seconds_count":    100.0,
-		"queue_size_total":                     50.0,
+		"jobs_submitted_total":              100.0,
+		"jobs_completed_total":              90.0,
+		"jobs_failed_total":                 10.0,
+		"publishing_duration_seconds_sum":   10.0,
+		"publishing_duration_seconds_count": 100.0,
+		"queue_size_total":                  50.0,
 	}
 
 	// Test extractSuccessRate

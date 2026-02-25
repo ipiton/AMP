@@ -19,7 +19,7 @@ func TestToAlertCardData(t *testing.T) {
 	}
 
 	enriched := &EnrichedAlert{
-		Alert:            alert,
+		Alert:             alert,
 		HasClassification: false,
 	}
 
@@ -58,9 +58,9 @@ func TestToAlertCardData_WithClassification(t *testing.T) {
 	}
 
 	enriched := &EnrichedAlert{
-		Alert:            alert,
-		Classification:   classification,
-		HasClassification: true,
+		Alert:                alert,
+		Classification:       classification,
+		HasClassification:    true,
 		ClassificationSource: "llm",
 	}
 
@@ -99,7 +99,7 @@ func TestToAlertCardData_NilEnriched(t *testing.T) {
 
 func TestToAlertCardData_NilAlert(t *testing.T) {
 	enriched := &EnrichedAlert{
-		Alert:            nil,
+		Alert:             nil,
 		HasClassification: false,
 	}
 
@@ -154,14 +154,14 @@ func TestToClassificationDisplayData_Nil(t *testing.T) {
 func TestToAlertCardDataList(t *testing.T) {
 	alerts := []*EnrichedAlert{
 		{
-			Alert:            &core.Alert{Fingerprint: "fp1", AlertName: "Alert1", Status: core.StatusFiring, StartsAt: time.Now()},
+			Alert:             &core.Alert{Fingerprint: "fp1", AlertName: "Alert1", Status: core.StatusFiring, StartsAt: time.Now()},
 			HasClassification: false,
 		},
 		{
-			Alert:            &core.Alert{Fingerprint: "fp2", AlertName: "Alert2", Status: core.StatusFiring, StartsAt: time.Now()},
+			Alert:             &core.Alert{Fingerprint: "fp2", AlertName: "Alert2", Status: core.StatusFiring, StartsAt: time.Now()},
 			HasClassification: true,
 			Classification: &core.ClassificationResult{
-				Severity:  core.SeverityCritical,
+				Severity:   core.SeverityCritical,
 				Confidence: 0.9,
 			},
 		},

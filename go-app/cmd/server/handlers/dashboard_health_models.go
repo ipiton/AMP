@@ -140,11 +140,11 @@ type HealthCheckConfig struct {
 // System metrics are disabled by default for performance.
 func DefaultHealthCheckConfig() *HealthCheckConfig {
 	return &HealthCheckConfig{
-		DatabaseTimeout:    5 * time.Second,
-		RedisTimeout:      2 * time.Second,
-		LLMTimeout:        3 * time.Second,
-		PublishingTimeout: 5 * time.Second,
-		OverallTimeout:    10 * time.Second,
+		DatabaseTimeout:     5 * time.Second,
+		RedisTimeout:        2 * time.Second,
+		LLMTimeout:          3 * time.Second,
+		PublishingTimeout:   5 * time.Second,
+		OverallTimeout:      10 * time.Second,
 		EnableSystemMetrics: false,
 	}
 }

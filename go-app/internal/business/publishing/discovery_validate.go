@@ -259,10 +259,10 @@ func isValidURL(rawURL string) bool {
 //	isCompatibleTypeFormat("webhook", "alertmanager") // true (flexible)
 func isCompatibleTypeFormat(targetType, format string) bool {
 	compatibilityMap := map[string][]string{
-		"rootly":     {"rootly"},
-		"pagerduty":  {"pagerduty"},
-		"slack":      {"slack"},
-		"webhook":    {"alertmanager", "webhook"}, // webhooks are flexible
+		"rootly":    {"rootly"},
+		"pagerduty": {"pagerduty"},
+		"slack":     {"slack"},
+		"webhook":   {"alertmanager", "webhook"}, // webhooks are flexible
 	}
 
 	allowedFormats, ok := compatibilityMap[targetType]

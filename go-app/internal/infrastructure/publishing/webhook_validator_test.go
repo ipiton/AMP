@@ -17,13 +17,13 @@ func TestWebhookValidator_ValidateURL_HTTPS(t *testing.T) {
 	}{
 		{"https://api.example.com/webhook", false},
 		{"https://example.com:8443/webhook", false},
-		{"http://api.example.com/webhook", true},  // Not HTTPS
-		{"ftp://api.example.com/webhook", true},   // Not HTTPS
-		{"", true},                                 // Empty
-		{"not-a-url", true},                        // Invalid
-		{"https://localhost/webhook", true},        // Localhost blocked
-		{"https://127.0.0.1/webhook", true},        // Loopback blocked
-		{"https://192.168.1.1/webhook", true},      // Private IP blocked
+		{"http://api.example.com/webhook", true},    // Not HTTPS
+		{"ftp://api.example.com/webhook", true},     // Not HTTPS
+		{"", true},                                  // Empty
+		{"not-a-url", true},                         // Invalid
+		{"https://localhost/webhook", true},         // Localhost blocked
+		{"https://127.0.0.1/webhook", true},         // Loopback blocked
+		{"https://192.168.1.1/webhook", true},       // Private IP blocked
 		{"https://user:pass@api.com/webhook", true}, // Credentials in URL
 	}
 
@@ -46,11 +46,11 @@ func TestWebhookValidator_ValidatePayloadSize(t *testing.T) {
 		shouldErr bool
 	}{
 		{"empty", 0, false},
-		{"small", 1024, false},           // 1 KB
-		{"medium", 512 * 1024, false},    // 512 KB
-		{"max", 1024 * 1024, false},      // 1 MB (exactly at limit)
+		{"small", 1024, false},             // 1 KB
+		{"medium", 512 * 1024, false},      // 512 KB
+		{"max", 1024 * 1024, false},        // 1 MB (exactly at limit)
 		{"too_large", 1024*1024 + 1, true}, // 1 MB + 1 byte
-		{"huge", 10 * 1024 * 1024, true}, // 10 MB
+		{"huge", 10 * 1024 * 1024, true},   // 10 MB
 	}
 
 	for _, tt := range tests {
@@ -165,7 +165,7 @@ func TestWebhookValidator_ValidateFormat(t *testing.T) {
 		{
 			name: "valid_simple",
 			payload: map[string]interface{}{
-				"alert": "test",
+				"alert":    "test",
 				"severity": "critical",
 			},
 			shouldErr: false,
@@ -205,8 +205,8 @@ func TestWebhookValidator_ValidateFormat(t *testing.T) {
 func TestWebhookValidatorWithConfig_CustomLimits(t *testing.T) {
 	config := ValidationConfig{
 		MaxPayloadSize: 512 * 1024, // 512 KB (lower than default 1 MB)
-		MaxHeaders:     50,          // 50 (lower than default 100)
-		MaxHeaderSize:  2 * 1024,    // 2 KB (lower than default 4 KB)
+		MaxHeaders:     50,         // 50 (lower than default 100)
+		MaxHeaderSize:  2 * 1024,   // 2 KB (lower than default 4 KB)
 		AllowedSchemes: []string{"https"},
 		BlockedHosts:   []string{"localhost", "127.0.0.1"},
 		MinTimeout:     1000000000,  // 1s

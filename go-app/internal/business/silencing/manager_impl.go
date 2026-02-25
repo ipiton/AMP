@@ -773,7 +773,7 @@ func (sm *DefaultSilenceManager) GetStats(ctx context.Context) (*SilenceManagerS
 		// Worker statistics (from metrics)
 		GCLastRun:      time.Time{}, // TODO: Track last run time
 		GCTotalRuns:    int64(sm.metrics.GetGCTotalRuns()),
-		GCTotalCleaned: 0, // TODO: Track total cleaned
+		GCTotalCleaned: 0,           // TODO: Track total cleaned
 		SyncLastRun:    time.Time{}, // TODO: Track last run time
 		SyncTotalRuns:  int64(sm.metrics.GetSyncTotalRuns()),
 	}

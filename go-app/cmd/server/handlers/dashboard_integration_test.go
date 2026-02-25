@@ -1,5 +1,6 @@
 // Package handlers provides HTTP handlers for the dashboard.
 // TN-77: Modern Dashboard Page - Integration Tests (150% Quality Target)
+//go:build integration
 // +build integration
 
 package handlers

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // setupTestTimerManager creates a test timer manager
@@ -470,8 +470,8 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify counts
-	assert.Equal(t, 1, restored)  // active-group
-	assert.Equal(t, 1, missed)    // expired-group
+	assert.Equal(t, 1, restored) // active-group
+	assert.Equal(t, 1, missed)   // expired-group
 }
 
 // TestDefaultTimerManager_GetStats tests statistics

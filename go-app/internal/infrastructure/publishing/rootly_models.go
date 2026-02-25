@@ -7,11 +7,11 @@ import (
 
 // CreateIncidentRequest represents request to create Rootly incident
 type CreateIncidentRequest struct {
-	Title        string                 `json:"title"`                    // Required: Incident title
-	Description  string                 `json:"description"`              // Required: Incident description
-	Severity     string                 `json:"severity"`                 // Required: critical, major, minor, low
-	StartedAt    time.Time              `json:"started_at"`               // Required: Incident start time
-	Tags         []string               `json:"tags,omitempty"`           // Optional: Tags (key:value format)
+	Title        string                 `json:"title"`                   // Required: Incident title
+	Description  string                 `json:"description"`             // Required: Incident description
+	Severity     string                 `json:"severity"`                // Required: critical, major, minor, low
+	StartedAt    time.Time              `json:"started_at"`              // Required: Incident start time
+	Tags         []string               `json:"tags,omitempty"`          // Optional: Tags (key:value format)
 	CustomFields map[string]interface{} `json:"custom_fields,omitempty"` // Optional: Custom fields
 }
 
@@ -48,7 +48,7 @@ func isValidSeverity(s string) bool {
 
 // UpdateIncidentRequest represents request to update Rootly incident
 type UpdateIncidentRequest struct {
-	Description  string                 `json:"description,omitempty"`    // Optional: Updated description
+	Description  string                 `json:"description,omitempty"`   // Optional: Updated description
 	CustomFields map[string]interface{} `json:"custom_fields,omitempty"` // Optional: Updated custom fields
 }
 

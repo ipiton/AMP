@@ -40,15 +40,16 @@ const DefaultPagerDutyDescription = `{{ if eq .Status "resolved" }}[RESOLVED] {{
 // - .GeneratorURL: Source of the alert
 //
 // Example output:
-// {
-//   "severity": "critical",
-//   "environment": "production",
-//   "instance": "web-01.example.com",
-//   "description": "CPU usage is 95%",
-//   "runbook_url": "https://runbook.example.com/cpu",
-//   "dashboard_url": "https://grafana.example.com/d/cpu",
-//   "generator_url": "https://prometheus.example.com"
-// }
+//
+//	{
+//	  "severity": "critical",
+//	  "environment": "production",
+//	  "instance": "web-01.example.com",
+//	  "description": "CPU usage is 95%",
+//	  "runbook_url": "https://runbook.example.com/cpu",
+//	  "dashboard_url": "https://grafana.example.com/d/cpu",
+//	  "generator_url": "https://prometheus.example.com"
+//	}
 const DefaultPagerDutyDetailsSingle = `{
   "severity": "{{ .CommonLabels.severity }}",
   "environment": "{{ .CommonLabels.environment | default "unknown" }}",
@@ -69,13 +70,14 @@ const DefaultPagerDutyDetailsSingle = `{
 // - .GroupLabels.*: Grouping labels
 //
 // Example output:
-// {
-//   "alert_count": "5",
-//   "severity": "warning",
-//   "environment": "production",
-//   "grouped_by": "alertname, cluster",
-//   "status": "firing"
-// }
+//
+//	{
+//	  "alert_count": "5",
+//	  "severity": "warning",
+//	  "environment": "production",
+//	  "grouped_by": "alertname, cluster",
+//	  "status": "firing"
+//	}
 const DefaultPagerDutyDetailsMulti = `{
   "severity": "{{ .CommonLabels.severity }}",
   "alert_count": {{ len .Alerts }},

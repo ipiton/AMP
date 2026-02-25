@@ -144,14 +144,14 @@ func (c *HTTPLLMClient) ClassifyAlert(ctx context.Context, alert *core.Alert) (*
 func (c *HTTPLLMClient) classifyAlertWithRetry(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
 	// Create retry policy from config (maintains backward compatibility)
 	policy := &resilience.RetryPolicy{
-		MaxRetries:   c.config.MaxRetries,
-		BaseDelay:    c.config.RetryDelay,
-		MaxDelay:     c.config.RetryDelay * 10, // Max 10x base delay
-		Multiplier:   c.config.RetryBackoff,
-		Jitter:       true,
-		ErrorChecker: &llmErrorChecker{},
-		Logger:       c.logger,
-		Metrics:      nil, // Stub - metrics registry not fully implemented
+		MaxRetries:    c.config.MaxRetries,
+		BaseDelay:     c.config.RetryDelay,
+		MaxDelay:      c.config.RetryDelay * 10, // Max 10x base delay
+		Multiplier:    c.config.RetryBackoff,
+		Jitter:        true,
+		ErrorChecker:  &llmErrorChecker{},
+		Logger:        c.logger,
+		Metrics:       nil, // Stub - metrics registry not fully implemented
 		OperationName: "llm_classify_alert",
 	}
 

@@ -11,13 +11,13 @@ import (
 // MiddlewareStack manages HTTP middleware.
 //
 // Middleware is applied in order:
-//   1. Recovery (panic handler) - outermost
-//   2. Request logging
-//   3. Metrics collection
-//   4. CORS
-//   5. Authentication
-//   6. Rate limiting
-//   7. Compression - innermost
+//  1. Recovery (panic handler) - outermost
+//  2. Request logging
+//  3. Metrics collection
+//  4. CORS
+//  5. Authentication
+//  6. Rate limiting
+//  7. Compression - innermost
 //
 // The stack wraps the HTTP handler with all middleware layers.
 type MiddlewareStack struct {
