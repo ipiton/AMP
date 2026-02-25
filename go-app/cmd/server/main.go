@@ -1288,13 +1288,6 @@ func filterAlertsByStateFilters(in []apiAlert, f alertsStateFilters, silences *s
 	for i := range in {
 		alert := in[i]
 
-		// Runtime currently models alert state as firing/resolved only.
-		// Keep resolved snapshots visible for existing history-like queries.
-		if alert.Status == "resolved" {
-			out = append(out, alert)
-			continue
-		}
-
 		state := alertRuntimeStateForFilters(alert, silences, now)
 		if !f.active && state.active {
 			continue
@@ -1519,7 +1512,13 @@ type alertRuntimeState struct {
 
 func alertRuntimeStateForFilters(alert apiAlert, silences *silenceStore, now time.Time) alertRuntimeState {
 	if alert.Status != "firing" {
-		return alertRuntimeState{}
+		// Resolved snapshots are treated as unprocessed in the compatibility runtime.
+		return alertRuntimeState{
+			active:      false,
+			silenced:    false,
+			inhibited:   false,
+			unprocessed: true,
+		}
 	}
 
 	silenced := false
