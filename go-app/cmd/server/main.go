@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -266,6 +267,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
 	mux.HandleFunc("/history", historyHandler(alertStore))
+	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
 	// Dashboard API
 	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI)
@@ -866,20 +868,12 @@ func historyHandler(store *alertStore) http.HandlerFunc {
 			return
 		}
 
-		status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
-		switch status {
-		case "", "firing", "resolved":
-		default:
+		status, includeResolved, err := parseHistoryFilters(r, true)
+		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "invalid status filter",
+				"error": err.Error(),
 			})
 			return
-		}
-
-		// History endpoint includes resolved alerts by default.
-		includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), true)
-		if status == "resolved" {
-			includeResolved = true
 		}
 
 		alerts := store.list(status, includeResolved)
@@ -888,6 +882,74 @@ func historyHandler(store *alertStore) http.HandlerFunc {
 			"alerts": alerts,
 		})
 	}
+}
+
+func historyRecentHandler(store *alertStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		status, includeResolved, err := parseHistoryFilters(r, true)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		limit, err := parsePositiveIntQuery(r.URL.Query().Get("limit"), 20, 1, 200)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		alerts := store.list(status, includeResolved)
+		if len(alerts) > limit {
+			alerts = alerts[:limit]
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"total":  len(alerts),
+			"limit":  limit,
+			"alerts": alerts,
+		})
+	}
+}
+
+func parseHistoryFilters(r *http.Request, defaultIncludeResolved bool) (string, bool, error) {
+	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+	switch status {
+	case "", "firing", "resolved":
+	default:
+		return "", false, fmt.Errorf("invalid status filter")
+	}
+
+	includeResolved := parseBoolWithDefault(r.URL.Query().Get("resolved"), defaultIncludeResolved)
+	if status == "resolved" {
+		includeResolved = true
+	}
+
+	return status, includeResolved, nil
+}
+
+func parsePositiveIntQuery(raw string, def, min, max int) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return def, nil
+	}
+
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer query value")
+	}
+	if value < min || value > max {
+		return 0, fmt.Errorf("query value must be between %d and %d", min, max)
+	}
+
+	return value, nil
 }
 
 func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
