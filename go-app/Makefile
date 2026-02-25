@@ -1,5 +1,5 @@
 # Makefile for Alert History Service (Go version)
-.PHONY: build test lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-fast
+.PHONY: build test test-mvp test-all lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
 
 # Go parameters
 GOCMD=go
@@ -16,6 +16,10 @@ GOLOCAL_GOCACHE ?= $(CURDIR)/.cache/go-build
 GOLOCAL_GOMODCACHE ?= $(CURDIR)/.cache/go-mod
 GOLOCAL_GOPATH ?= $(CURDIR)/.cache/go
 GO_LOCAL_ENV = GOCACHE=$(GOLOCAL_GOCACHE) GOMODCACHE=$(GOLOCAL_GOMODCACHE) GOPATH=$(GOLOCAL_GOPATH)
+
+# Test matrices
+TEST_TARGETS_MVP ?= ./cmd/server/... ./internal/ui
+TEST_TARGETS_ALL ?= ./...
 
 # Main package path
 MAIN_PATH=./cmd/server
@@ -36,8 +40,15 @@ build-linux:
 
 # Run tests
 test:
-	@echo "Running tests..."
-	$(GOTEST) -v ./...
+	@$(MAKE) test-mvp
+
+test-mvp:
+	@echo "Running MVP test matrix..."
+	$(GOTEST) -count=1 -v $(TEST_TARGETS_MVP)
+
+test-all:
+	@echo "Running full test suite..."
+	$(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
 
 # Fast quality gates for local inner loop
 quality-gates-fast:
@@ -49,17 +60,30 @@ quality-gates-fast:
 
 # Full quality gates for pre-merge/pre-release checks
 quality-gates:
-	@echo "Running full quality gates (fmt + vet + test)..."
+	@echo "Running quality gates (fmt + vet + MVP test matrix)..."
 	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
 	$(GOFMT) ./...
 	$(GO_LOCAL_ENV) $(GOVET) ./...
-	$(GO_LOCAL_ENV) $(GOTEST) -v ./...
+	$(GO_LOCAL_ENV) $(GOTEST) -count=1 -v $(TEST_TARGETS_MVP)
+	@echo "Quality gates passed"
+
+quality-gates-all:
+	@echo "Running full quality gates (fmt + vet + full test suite)..."
+	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
+	$(GOFMT) ./...
+	$(GO_LOCAL_ENV) $(GOVET) ./...
+	$(GO_LOCAL_ENV) $(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
 	@echo "Full quality gates passed"
 
 # Run tests with coverage
 test-coverage:
-	@echo "Running tests with coverage..."
-	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic ./...
+	@echo "Running MVP test matrix with coverage..."
+	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic $(TEST_TARGETS_MVP)
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+
+test-coverage-all:
+	@echo "Running full test suite with coverage..."
+	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic $(TEST_TARGETS_ALL)
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
 # Run linter (requires golangci-lint to be installed)
@@ -241,10 +265,14 @@ help:
 	@echo "📦 Build & Development:"
 	@echo "  build           - Build the application"
 	@echo "  build-linux     - Build for Linux (Docker)"
-	@echo "  test            - Run tests"
+	@echo "  test            - Run MVP test matrix (default)"
+	@echo "  test-mvp        - Run MVP test matrix (cmd/server + internal/ui)"
+	@echo "  test-all        - Run full test suite"
 	@echo "  quality-gates-fast - fmt + vet (inner loop)"
-	@echo "  quality-gates   - fmt + vet + full test suite"
-	@echo "  test-coverage   - Run tests with coverage report"
+	@echo "  quality-gates   - fmt + vet + MVP test matrix"
+	@echo "  quality-gates-all - fmt + vet + full test suite"
+	@echo "  test-coverage   - Run MVP test matrix with coverage report"
+	@echo "  test-coverage-all - Run full test suite with coverage report"
 	@echo "  lint            - Run linter (requires golangci-lint)"
 	@echo "  fmt             - Format code"
 	@echo "  vet             - Run go vet"
