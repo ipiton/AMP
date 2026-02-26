@@ -1330,12 +1330,22 @@ func handleSilencePost(store *silenceStore, w http.ResponseWriter, r *http.Reque
 
 	payload, err := parseSilencePayload(body)
 	if err != nil {
+		var apiErr *silenceAPIError
+		if errors.As(err, &apiErr) {
+			writeJSON(w, apiErr.status, apiErr.payload)
+			return
+		}
 		writeJSONString(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	silenceID, err := store.createOrUpdate(payload, time.Now().UTC())
 	if err != nil {
+		var apiErr *silenceAPIError
+		if errors.As(err, &apiErr) {
+			writeJSON(w, apiErr.status, apiErr.payload)
+			return
+		}
 		if errors.Is(err, errSilenceNotFound) {
 			writeJSONString(w, http.StatusNotFound, err.Error())
 			return

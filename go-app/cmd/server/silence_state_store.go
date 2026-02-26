@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	prommodel "github.com/prometheus/common/model"
 )
 
 type silenceMatcherInput struct {
@@ -76,6 +76,41 @@ type silenceStore struct {
 }
 
 var errSilenceNotFound = errors.New("silence not found")
+
+type silenceAPIError struct {
+	status  int
+	payload any
+	message string
+}
+
+func (e *silenceAPIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.message) != "" {
+		return e.message
+	}
+	return fmt.Sprintf("silence api error status=%d", e.status)
+}
+
+func newSilenceAPIError(status int, payload any, message string) *silenceAPIError {
+	return &silenceAPIError{
+		status:  status,
+		payload: payload,
+		message: message,
+	}
+}
+
+func newSilenceCodeMessageError(status int, code int, message string) *silenceAPIError {
+	return newSilenceAPIError(status, map[string]any{
+		"code":    code,
+		"message": message,
+	}, message)
+}
+
+func newSilenceStringError(status int, message string) *silenceAPIError {
+	return newSilenceAPIError(status, message, message)
+}
 
 func newSilenceStore() *silenceStore {
 	return &silenceStore{
@@ -350,50 +385,49 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate silence id: %w", err)
 		}
-	} else if !allowPastEndsAt {
-		if _, err := uuid.Parse(id); err != nil {
-			return nil, fmt.Errorf("invalid silence id")
+	}
+
+	startsAt := now.UTC()
+	if startsAtRaw := strings.TrimSpace(in.StartsAt); startsAtRaw != "" {
+		parsedStartsAt, err := time.Parse(time.RFC3339, startsAtRaw)
+		if err != nil {
+			return nil, newSilenceCodeMessageError(
+				http.StatusBadRequest,
+				http.StatusBadRequest,
+				fmt.Sprintf("parsing silence body from \"\" failed, because %v", err),
+			)
 		}
+		startsAt = parsedStartsAt.UTC()
 	}
 
-	createdBy := strings.TrimSpace(in.CreatedBy)
-	if createdBy == "" {
-		return nil, fmt.Errorf("createdBy is required")
-	}
-
-	comment := strings.TrimSpace(in.Comment)
-	if comment == "" {
-		return nil, fmt.Errorf("comment is required")
-	}
-
-	startsAt, err := time.Parse(time.RFC3339, strings.TrimSpace(in.StartsAt))
-	if err != nil {
-		return nil, fmt.Errorf("invalid startsAt: %w", err)
-	}
-
-	endsAt, err := time.Parse(time.RFC3339, strings.TrimSpace(in.EndsAt))
-	if err != nil {
-		return nil, fmt.Errorf("invalid endsAt: %w", err)
+	var endsAt time.Time
+	if endsAtRaw := strings.TrimSpace(in.EndsAt); endsAtRaw != "" {
+		parsedEndsAt, err := time.Parse(time.RFC3339, endsAtRaw)
+		if err != nil {
+			return nil, newSilenceCodeMessageError(
+				http.StatusBadRequest,
+				http.StatusBadRequest,
+				fmt.Sprintf("parsing silence body from \"\" failed, because %v", err),
+			)
+		}
+		endsAt = parsedEndsAt.UTC()
 	}
 	if !endsAt.After(startsAt) {
-		return nil, fmt.Errorf("endsAt must be after startsAt")
+		return nil, newSilenceStringError(http.StatusBadRequest, "Failed to create silence: start time must be before end time")
 	}
 	if !allowPastEndsAt && endsAt.Before(now.UTC()) {
-		return nil, fmt.Errorf("endsAt can't be in the past")
+		return nil, newSilenceStringError(http.StatusBadRequest, "Failed to create silence: end time can't be in the past")
 	}
 
 	if len(in.Matchers) == 0 {
-		return nil, fmt.Errorf("at least one matcher is required")
+		return nil, newSilenceCodeMessageError(http.StatusUnprocessableEntity, 612, "matchers in body should have at least 1 items")
 	}
 
 	matchers := make([]storedSilenceMatcher, 0, len(in.Matchers))
 	for i, matcher := range in.Matchers {
 		name := strings.TrimSpace(matcher.Name)
 		if name == "" {
-			return nil, fmt.Errorf("matcher[%d].name is required", i)
-		}
-		if !prommodel.LabelName(name).IsValidLegacy() {
-			return nil, fmt.Errorf("matcher[%d].name is invalid", i)
+			return nil, newSilenceStringError(http.StatusBadRequest, fmt.Sprintf("invalid silence: invalid label matcher %d: invalid label name %q", i, matcher.Name))
 		}
 
 		isEqual := true
@@ -401,12 +435,15 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 			isEqual = *matcher.IsEqual
 		}
 		value := matcher.Value
+
+		if strings.TrimSpace(value) == "" {
+			return nil, newSilenceStringError(http.StatusBadRequest, "invalid silence: at least one matcher must not match the empty string")
+		}
+
 		if matcher.IsRegex {
 			if _, err := regexp.Compile(value); err != nil {
-				return nil, fmt.Errorf("matcher[%d].value has invalid regex", i)
+				return nil, newSilenceStringError(http.StatusBadRequest, fmt.Sprintf("invalid silence: invalid label matcher %d: invalid regular expression %q: %v", i, value, err))
 			}
-		} else if !prommodel.LabelValue(value).IsValid() {
-			return nil, fmt.Errorf("matcher[%d].value is invalid", i)
 		}
 
 		matchers = append(matchers, storedSilenceMatcher{
@@ -422,8 +459,8 @@ func normalizeSilenceInput(in *silenceInput, now time.Time, allowPastEndsAt bool
 		Matchers:  matchers,
 		StartsAt:  startsAt.UTC(),
 		EndsAt:    endsAt.UTC(),
-		CreatedBy: createdBy,
-		Comment:   comment,
+		CreatedBy: in.CreatedBy,
+		Comment:   in.Comment,
 		UpdatedAt: now.UTC(),
 	}, nil
 }
@@ -475,12 +512,62 @@ func silenceState(silence *storedSilence, now time.Time) string {
 func parseSilencePayload(body []byte) (*silenceInput, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return nil, fmt.Errorf("request body is empty")
+		return nil, newSilenceCodeMessageError(http.StatusUnprocessableEntity, 602, "silence in body is required")
+	}
+
+	var rawPayload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawPayload); err != nil {
+		return nil, newSilenceCodeMessageError(
+			http.StatusBadRequest,
+			http.StatusBadRequest,
+			fmt.Sprintf("parsing silence body from \"\" failed, because %v", err),
+		)
+	}
+
+	requiredFields := []string{"comment", "createdBy", "startsAt", "endsAt", "matchers"}
+	for _, field := range requiredFields {
+		if _, ok := rawPayload[field]; ok {
+			continue
+		}
+		return nil, newSilenceCodeMessageError(http.StatusUnprocessableEntity, 602, fmt.Sprintf("%s in body is required", field))
+	}
+
+	var rawMatchers []json.RawMessage
+	if err := json.Unmarshal(rawPayload["matchers"], &rawMatchers); err != nil {
+		return nil, newSilenceCodeMessageError(
+			http.StatusBadRequest,
+			http.StatusBadRequest,
+			fmt.Sprintf("parsing silence body from \"\" failed, because %v", err),
+		)
+	}
+	if len(rawMatchers) == 0 {
+		return nil, newSilenceCodeMessageError(http.StatusUnprocessableEntity, 612, "matchers in body should have at least 1 items")
+	}
+
+	for idx, rawMatcher := range rawMatchers {
+		var matcherPayload map[string]json.RawMessage
+		if err := json.Unmarshal(rawMatcher, &matcherPayload); err != nil {
+			return nil, newSilenceCodeMessageError(
+				http.StatusBadRequest,
+				http.StatusBadRequest,
+				fmt.Sprintf("parsing silence body from \"\" failed, because %v", err),
+			)
+		}
+		if _, ok := matcherPayload["name"]; !ok {
+			return nil, newSilenceCodeMessageError(http.StatusUnprocessableEntity, 602, fmt.Sprintf("matchers.%d.name in body is required", idx))
+		}
+		if _, ok := matcherPayload["value"]; !ok {
+			return nil, newSilenceCodeMessageError(http.StatusUnprocessableEntity, 602, fmt.Sprintf("matchers.%d.value in body is required", idx))
+		}
 	}
 
 	var payload silenceInput
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("invalid silence payload: %w", err)
+		return nil, newSilenceCodeMessageError(
+			http.StatusBadRequest,
+			http.StatusBadRequest,
+			fmt.Sprintf("parsing silence body from \"\" failed, because %v", err),
+		)
 	}
 
 	return &payload, nil

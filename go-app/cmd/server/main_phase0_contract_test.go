@@ -1354,15 +1354,42 @@ receivers:
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences with invalid payload expected 400, got %d", rec.Code)
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("POST /api/v2/silences with invalid payload expected 422, got %d", rec.Code)
 		}
-		var payload string
+		var payload map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("silences invalid payload expected json string error, got %q (%v)", rec.Body.String(), err)
+			t.Fatalf("silences invalid payload expected json object error, got %q (%v)", rec.Body.String(), err)
 		}
-		if strings.TrimSpace(payload) == "" {
+		if payload["code"] != float64(602) {
+			t.Fatalf("silences invalid payload expected code=602, got %v", payload["code"])
+		}
+		if message, _ := payload["message"].(string); strings.TrimSpace(message) == "" {
 			t.Fatalf("silences invalid payload expected non-empty error message")
+		}
+	})
+
+	t.Run("silences post no matchers contract", func(t *testing.T) {
+		payload := `{
+			"matchers": [],
+			"startsAt": "2099-01-01T00:00:00Z",
+			"endsAt": "2099-01-01T01:00:00Z",
+			"createdBy": "phase0-test",
+			"comment": "no matchers"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("POST /api/v2/silences with empty matchers expected 422, got %d", rec.Code)
+		}
+		var errorPayload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
+			t.Fatalf("silences empty matchers expected json object error, got %q (%v)", rec.Body.String(), err)
+		}
+		if errorPayload["code"] != float64(612) {
+			t.Fatalf("silences empty matchers expected code=612, got %v", errorPayload["code"])
 		}
 	})
 
@@ -1385,7 +1412,7 @@ receivers:
 
 	t.Run("silences post invalid matcher name contract", func(t *testing.T) {
 		payload := `{
-			"matchers": [{"name":"123bad","value":"value","isRegex":false}],
+			"matchers": [{"name":"","value":"value","isRegex":false}],
 			"startsAt": "2099-01-01T00:00:00Z",
 			"endsAt": "2099-01-01T01:00:00Z",
 			"createdBy": "phase0-test",
@@ -1397,6 +1424,13 @@ receivers:
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("POST /api/v2/silences with invalid matcher name expected 400, got %d", rec.Code)
+		}
+		var errorPayload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
+			t.Fatalf("silences invalid matcher name expected json string error, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(errorPayload) == "" {
+			t.Fatalf("silences invalid matcher name expected non-empty error message")
 		}
 	})
 
@@ -1441,6 +1475,31 @@ receivers:
 		}
 		if strings.TrimSpace(errorPayload) == "" {
 			t.Fatalf("silences unknown id expected non-empty error message")
+		}
+	})
+
+	t.Run("silences post update invalid id contract", func(t *testing.T) {
+		payload := `{
+			"id": "not-a-uuid",
+			"matchers": [{"name":"alertname","value":"ContractInvalidID","isRegex":false}],
+			"startsAt": "2099-01-01T00:00:00Z",
+			"endsAt": "2099-01-01T01:00:00Z",
+			"createdBy": "phase0-test",
+			"comment": "invalid id update"
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("POST /api/v2/silences update with invalid id expected 404, got %d", rec.Code)
+		}
+		var errorPayload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
+			t.Fatalf("silences invalid id expected json string error, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(errorPayload) == "" {
+			t.Fatalf("silences invalid id expected non-empty error message")
 		}
 	})
 

@@ -610,21 +610,41 @@ func TestUpstreamParity_DeleteSilenceReturnsEmptyBody(t *testing.T) {
 	}
 }
 
-func TestUpstreamParity_PostSilenceErrorPayloadIsJSONString(t *testing.T) {
+func TestUpstreamParity_PostSilenceErrorPayloadContracts(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
 	invalidReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(`{}`))
 	invalidRec := httptest.NewRecorder()
 	mux.ServeHTTP(invalidRec, invalidReq)
-	if invalidRec.Code != http.StatusBadRequest {
-		t.Fatalf("POST /api/v2/silences invalid payload expected 400, got %d", invalidRec.Code)
+	if invalidRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /api/v2/silences invalid payload expected 422, got %d", invalidRec.Code)
 	}
-	var invalidPayload string
+	var invalidPayload map[string]any
 	if err := json.Unmarshal(invalidRec.Body.Bytes(), &invalidPayload); err != nil {
-		t.Fatalf("invalid payload error expected JSON string body, got %q (%v)", invalidRec.Body.String(), err)
+		t.Fatalf("invalid payload error expected JSON object body, got %q (%v)", invalidRec.Body.String(), err)
 	}
-	if strings.TrimSpace(invalidPayload) == "" {
-		t.Fatalf("invalid payload error expected non-empty message")
+	if invalidPayload["code"] != float64(602) {
+		t.Fatalf("invalid payload error expected code=602, got %v", invalidPayload["code"])
+	}
+
+	noMatchersReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(`{
+		"matchers": [],
+		"startsAt": "2099-01-01T00:00:00Z",
+		"endsAt": "2099-01-01T01:00:00Z",
+		"createdBy": "parity-suite",
+		"comment": "no matchers"
+	}`))
+	noMatchersRec := httptest.NewRecorder()
+	mux.ServeHTTP(noMatchersRec, noMatchersReq)
+	if noMatchersRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /api/v2/silences empty matchers expected 422, got %d", noMatchersRec.Code)
+	}
+	var noMatchersPayload map[string]any
+	if err := json.Unmarshal(noMatchersRec.Body.Bytes(), &noMatchersPayload); err != nil {
+		t.Fatalf("empty matchers error expected JSON object body, got %q (%v)", noMatchersRec.Body.String(), err)
+	}
+	if noMatchersPayload["code"] != float64(612) {
+		t.Fatalf("empty matchers error expected code=612, got %v", noMatchersPayload["code"])
 	}
 
 	unknownIDPayload := `{
@@ -647,5 +667,27 @@ func TestUpstreamParity_PostSilenceErrorPayloadIsJSONString(t *testing.T) {
 	}
 	if strings.TrimSpace(notFoundPayload) == "" {
 		t.Fatalf("unknown id error expected non-empty message")
+	}
+
+	invalidIDPayload := `{
+		"id": "not-a-uuid",
+		"matchers": [{"name":"alertname","value":"ParityInvalidID","isRegex":false}],
+		"startsAt": "2099-01-01T00:00:00Z",
+		"endsAt": "2099-01-01T01:00:00Z",
+		"createdBy": "parity-suite",
+		"comment": "invalid id update"
+	}`
+	invalidIDReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(invalidIDPayload))
+	invalidIDRec := httptest.NewRecorder()
+	mux.ServeHTTP(invalidIDRec, invalidIDReq)
+	if invalidIDRec.Code != http.StatusNotFound {
+		t.Fatalf("POST /api/v2/silences invalid id expected 404, got %d", invalidIDRec.Code)
+	}
+	var invalidIDError string
+	if err := json.Unmarshal(invalidIDRec.Body.Bytes(), &invalidIDError); err != nil {
+		t.Fatalf("invalid id error expected JSON string body, got %q (%v)", invalidIDRec.Body.String(), err)
+	}
+	if strings.TrimSpace(invalidIDError) == "" {
+		t.Fatalf("invalid id error expected non-empty message")
 	}
 }
