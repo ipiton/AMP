@@ -312,6 +312,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/history", configHistoryHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/revisions", configRevisionsHandler(configPath, statusCtx))
+	mux.HandleFunc("/api/v2/config/revisions/prune", configRevisionsPruneHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
@@ -659,6 +660,69 @@ func (c *runtimeStatusContext) getConfigRevisions(limit int) []runtimeConfigRevi
 	}
 
 	return result
+}
+
+func (c *runtimeStatusContext) pruneConfigRevisions(keep int) (before, after int, currentHash string) {
+	if c == nil {
+		return 0, 0, ""
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	before = len(c.configRevisions)
+	currentHash = configSHA256(c.configOriginal)
+	if before == 0 {
+		return before, before, currentHash
+	}
+
+	if keep < 1 {
+		keep = 1
+	}
+	if keep > maxConfigRevisionEntries {
+		keep = maxConfigRevisionEntries
+	}
+
+	latestIndexByHash := make(map[string]int, before)
+	uniqueNewest := make([]string, 0, before)
+	seen := make(map[string]struct{}, before)
+	for i := before - 1; i >= 0; i-- {
+		hash := c.configRevisions[i].ConfigHash
+		if _, ok := latestIndexByHash[hash]; !ok {
+			latestIndexByHash[hash] = i
+		}
+		if _, ok := seen[hash]; ok {
+			continue
+		}
+		seen[hash] = struct{}{}
+		uniqueNewest = append(uniqueNewest, hash)
+	}
+
+	keepSet := make(map[string]struct{}, keep+1)
+	for i := 0; i < len(uniqueNewest) && i < keep; i++ {
+		keepSet[uniqueNewest[i]] = struct{}{}
+	}
+
+	// Always keep current active revision if it exists in revision history.
+	if _, ok := latestIndexByHash[currentHash]; ok {
+		keepSet[currentHash] = struct{}{}
+	}
+
+	compact := make([]runtimeConfigRevision, 0, len(keepSet))
+	for i := 0; i < before; i++ {
+		revision := c.configRevisions[i]
+		if _, ok := keepSet[revision.ConfigHash]; !ok {
+			continue
+		}
+		if latestIndexByHash[revision.ConfigHash] != i {
+			continue
+		}
+		compact = append(compact, revision)
+	}
+
+	c.configRevisions = compact
+	after = len(c.configRevisions)
+	return before, after, currentHash
 }
 
 func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
@@ -1700,6 +1764,40 @@ func configRevisionsHandler(configPath string, statusCtx *runtimeStatusContext) 
 			"currentConfigHash": configSHA256(statusCtx.getConfigOriginal()),
 			"configPath":        configPath,
 			"revisions":         revisions,
+		})
+	}
+}
+
+func configRevisionsPruneHandler(configPath string, statusCtx *runtimeStatusContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if statusCtx == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "runtime status context is unavailable",
+			})
+			return
+		}
+
+		keep, err := parsePositiveIntQuery(r.URL.Query().Get("keep"), 20, 1, maxConfigRevisionEntries)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		before, after, currentHash := statusCtx.pruneConfigRevisions(keep)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":            "pruned",
+			"keep":              keep,
+			"before":            before,
+			"after":             after,
+			"removed":           before - after,
+			"currentConfigHash": currentHash,
+			"configPath":        configPath,
 		})
 	}
 }
