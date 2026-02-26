@@ -479,6 +479,12 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		if _, ok := payload["limit"].(float64); !ok {
 			t.Fatalf("config history response expected limit number, got %T", payload["limit"])
 		}
+		if _, ok := payload["status"].(string); !ok {
+			t.Fatalf("config history response expected status string, got %T", payload["status"])
+		}
+		if _, ok := payload["source"].(string); !ok {
+			t.Fatalf("config history response expected source string, got %T", payload["source"])
+		}
 		if _, ok := payload["configPath"].(string); !ok {
 			t.Fatalf("config history response expected configPath string, got %T", payload["configPath"])
 		}
@@ -500,6 +506,86 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/config/history with invalid limit expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("config history status filter contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/history?status=ok", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/history with status filter expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config history status-filter response is not valid json: %v", err)
+		}
+		if payload["status"] != "ok" {
+			t.Fatalf("config history status-filter expected status=ok, got %v", payload["status"])
+		}
+
+		entries, ok := payload["entries"].([]any)
+		if !ok {
+			t.Fatalf("config history status-filter expected entries array, got %T", payload["entries"])
+		}
+		for _, raw := range entries {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("config history status-filter entry expected object, got %T", raw)
+			}
+			if entry["status"] != "ok" {
+				t.Fatalf("config history status-filter expected entry status=ok, got %v", entry["status"])
+			}
+		}
+	})
+
+	t.Run("config history source filter contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/history?source=startup", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/history with source filter expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config history source-filter response is not valid json: %v", err)
+		}
+		if payload["source"] != "startup" {
+			t.Fatalf("config history source-filter expected source=startup, got %v", payload["source"])
+		}
+
+		entries, ok := payload["entries"].([]any)
+		if !ok {
+			t.Fatalf("config history source-filter expected entries array, got %T", payload["entries"])
+		}
+		for _, raw := range entries {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("config history source-filter entry expected object, got %T", raw)
+			}
+			if entry["source"] != "startup" {
+				t.Fatalf("config history source-filter expected entry source=startup, got %v", entry["source"])
+			}
+		}
+	})
+
+	t.Run("config history invalid status filter contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/history?status=broken", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/config/history with invalid status expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -2413,9 +2499,13 @@ func TestPhase0ConfigStatusTracksApplySourceAndResult(t *testing.T) {
 		}
 		return payload
 	}
-	readHistory := func(limit int) []map[string]any {
+	readHistory := func(limit int, rawQuery string) []map[string]any {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v2/config/history?limit=%d", limit), nil)
+		path := fmt.Sprintf("/api/v2/config/history?limit=%d", limit)
+		if strings.TrimSpace(rawQuery) != "" {
+			path += "&" + strings.TrimPrefix(rawQuery, "&")
+		}
+		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -2452,7 +2542,7 @@ func TestPhase0ConfigStatusTracksApplySourceAndResult(t *testing.T) {
 	if !ok || strings.TrimSpace(appliedAt) == "" {
 		t.Fatalf("expected startup appliedAt to be set")
 	}
-	startupHistory := readHistory(3)
+	startupHistory := readHistory(3, "")
 	if len(startupHistory) == 0 {
 		t.Fatalf("expected startup history entry")
 	}
@@ -2506,7 +2596,7 @@ receivers:
 		t.Fatalf("expected failed config error message")
 	}
 
-	history := readHistory(5)
+	history := readHistory(5, "")
 	if len(history) < 3 {
 		t.Fatalf("expected at least 3 history entries, got %d", len(history))
 	}
@@ -2518,6 +2608,22 @@ receivers:
 	}
 	if history[2]["source"] != "startup" || history[2]["status"] != "ok" {
 		t.Fatalf("expected third history entry to be startup success, got %v", history[2])
+	}
+
+	failedHistory := readHistory(5, "status=failed")
+	if len(failedHistory) != 1 {
+		t.Fatalf("expected exactly one failed history entry, got %d", len(failedHistory))
+	}
+	if failedHistory[0]["source"] != "reload" || failedHistory[0]["status"] != "failed" {
+		t.Fatalf("expected failed history entry to be reload failure, got %v", failedHistory[0])
+	}
+
+	reloadHistory := readHistory(5, "source=reload")
+	if len(reloadHistory) != 1 {
+		t.Fatalf("expected exactly one reload history entry, got %d", len(reloadHistory))
+	}
+	if reloadHistory[0]["source"] != "reload" {
+		t.Fatalf("expected reload history entry source=reload, got %v", reloadHistory[0]["source"])
 	}
 }
 

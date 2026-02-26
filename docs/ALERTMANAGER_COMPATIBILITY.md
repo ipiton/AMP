@@ -65,7 +65,7 @@
 | `GET /api/v2/config` | ❌ | ✅ | 🟢 | Read-only runtime config snapshot (`json` default, `?format=yaml`) |
 | `POST /api/v2/config` | ❌ | ✅ | 🟡 | Minimal write-path in active runtime: validates payload, persists file, applies inhibition/receivers |
 | `GET /api/v2/config/status` | ❌ | ✅ | 🟡 | Runtime apply status (`status/source/appliedAt/error`) + current rule/receiver counters |
-| `GET /api/v2/config/history` | ❌ | ✅ | 🟡 | Runtime apply history (newest-first, `limit` query, includes source/status/error/hash) |
+| `GET /api/v2/config/history` | ❌ | ✅ | 🟡 | Runtime apply history (newest-first, supports `limit`, `status`, `source`; includes source/status/error/hash) |
 | `POST /api/v2/config/rollback` | ❌ | ✅ | 🟡 | Rolls back to previous successful revision or to `configHash`; returns `400/404/409` for invalid/not-found/conflict cases |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
@@ -77,7 +77,7 @@ These endpoints provide additional functionality while maintaining backward comp
 | `POST /api/v2/silences/check` | ✅ **COMPLETE** | Test if alert would be silenced | Debugging & validation |
 | `POST /api/v2/silences/bulk/delete` | ✅ **COMPLETE** | Bulk delete silences (up to 100) | Operational efficiency |
 | `POST /api/v2/config/rollback` | ✅ **ACTIVE (MVP)** | Rollback to previous/specific successful config | Supports `configHash` selection + runtime apply/status/history tracking |
-| `GET /api/v2/config/history` | ✅ **ACTIVE (MVP)** | Runtime config apply history | Tracks startup/api/reload apply timeline in active runtime |
+| `GET /api/v2/config/history` | ✅ **ACTIVE (MVP)** | Runtime config apply history | Tracks startup/api/reload/rollback timeline with filterable `status`/`source` |
 | `GET /api/v2/config/status` | ✅ **ACTIVE (MVP)** | Runtime config apply status | Tracks last apply/reload result in active runtime |
 | `GET /api/v2/inhibition/rules` | ✅ **COMPLETE** | List loaded inhibition rules | Debugging |
 | `GET /api/v2/inhibition/status` | ✅ **COMPLETE** | Active inhibition relationships | Operational insight |

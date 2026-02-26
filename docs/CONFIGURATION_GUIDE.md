@@ -398,10 +398,17 @@ curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>"
 
 # View config history
 curl http://localhost:9093/api/v2/config/history
+
+# View only failed apply attempts
+curl "http://localhost:9093/api/v2/config/history?status=failed"
+
+# View history for specific apply source
+curl "http://localhost:9093/api/v2/config/history?source=rollback"
 ```
 
 If there is no previous successful revision, rollback returns `409 Conflict`.
 Rollback by hash returns `400 Bad Request` for invalid hash and `404 Not Found` when the revision is absent.
+History supports filters: `status=ok|failed` and `source=<startup|api|reload|rollback>`.
 
 ---
 
