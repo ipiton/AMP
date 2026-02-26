@@ -132,6 +132,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "config status get", method: http.MethodGet, path: "/api/v2/config/status", allowedStatus: []int{http.StatusOK}},
 		{name: "config history get", method: http.MethodGet, path: "/api/v2/config/history", allowedStatus: []int{http.StatusOK}},
 		{name: "config revisions get", method: http.MethodGet, path: "/api/v2/config/revisions", allowedStatus: []int{http.StatusOK}},
+		{name: "config revisions prune delete", method: http.MethodDelete, path: "/api/v2/config/revisions/prune", allowedStatus: []int{http.StatusOK}},
 		{name: "config rollback post", method: http.MethodPost, path: "/api/v2/config/rollback", body: `{}`, allowedStatus: []int{http.StatusOK, http.StatusConflict}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
@@ -654,6 +655,81 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/config/revisions with invalid limit expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("config revisions prune contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		configA := `
+route:
+  receiver: "team-prune-a"
+receivers:
+  - name: "team-prune-a"
+`
+		configB := `
+route:
+  receiver: "team-prune-b"
+receivers:
+  - name: "team-prune-b"
+`
+		applyAReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configA))
+		applyARec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyARec, applyAReq)
+		if applyARec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for prune configA expected 200, got %d", applyARec.Code)
+		}
+		applyBReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configB))
+		applyBRec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyBRec, applyBReq)
+		if applyBRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for prune configB expected 200, got %d", applyBRec.Code)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v2/config/revisions/prune?keep=1", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("DELETE /api/v2/config/revisions/prune expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config revisions prune response is not valid json: %v", err)
+		}
+		if payload["status"] != "pruned" {
+			t.Fatalf("config revisions prune expected status=pruned, got %v", payload["status"])
+		}
+		if _, ok := payload["keep"].(float64); !ok {
+			t.Fatalf("config revisions prune expected keep number, got %T", payload["keep"])
+		}
+		if _, ok := payload["before"].(float64); !ok {
+			t.Fatalf("config revisions prune expected before number, got %T", payload["before"])
+		}
+		if _, ok := payload["after"].(float64); !ok {
+			t.Fatalf("config revisions prune expected after number, got %T", payload["after"])
+		}
+		if _, ok := payload["removed"].(float64); !ok {
+			t.Fatalf("config revisions prune expected removed number, got %T", payload["removed"])
+		}
+		if _, ok := payload["currentConfigHash"].(string); !ok {
+			t.Fatalf("config revisions prune expected currentConfigHash string, got %T", payload["currentConfigHash"])
+		}
+		if _, ok := payload["configPath"].(string); !ok {
+			t.Fatalf("config revisions prune expected configPath string, got %T", payload["configPath"])
+		}
+	})
+
+	t.Run("config revisions prune invalid keep contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v2/config/revisions/prune?keep=nan", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("DELETE /api/v2/config/revisions/prune with invalid keep expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -1327,6 +1403,7 @@ receivers:
 			{name: "config status post not allowed", method: http.MethodPost, path: "/api/v2/config/status"},
 			{name: "config history post not allowed", method: http.MethodPost, path: "/api/v2/config/history"},
 			{name: "config revisions post not allowed", method: http.MethodPost, path: "/api/v2/config/revisions"},
+			{name: "config revisions prune get not allowed", method: http.MethodGet, path: "/api/v2/config/revisions/prune"},
 			{name: "config rollback get not allowed", method: http.MethodGet, path: "/api/v2/config/rollback"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
@@ -2987,6 +3064,106 @@ receivers:
 	}
 	if currentCount != 1 {
 		t.Fatalf("config revisions expected exactly one current revision, got %d", currentCount)
+	}
+}
+
+func TestPhase0ConfigRevisionsPruneRemovesOldTargets(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	postConfig := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+	}
+
+	configA := `
+route:
+  receiver: "team-prune-sem-a"
+receivers:
+  - name: "team-prune-sem-a"
+`
+	configB := `
+route:
+  receiver: "team-prune-sem-b"
+receivers:
+  - name: "team-prune-sem-b"
+`
+	configC := `
+route:
+  receiver: "team-prune-sem-c"
+receivers:
+  - name: "team-prune-sem-c"
+`
+
+	postConfig(configA)
+	postConfig(configB)
+	postConfig(configC)
+
+	hashA := configSHA256(configA)
+	hashC := configSHA256(configC)
+
+	pruneReq := httptest.NewRequest(http.MethodDelete, "/api/v2/config/revisions/prune?keep=1", nil)
+	pruneRec := httptest.NewRecorder()
+	mux.ServeHTTP(pruneRec, pruneReq)
+	if pruneRec.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/v2/config/revisions/prune expected 200, got %d", pruneRec.Code)
+	}
+
+	var prunePayload map[string]any
+	if err := json.Unmarshal(pruneRec.Body.Bytes(), &prunePayload); err != nil {
+		t.Fatalf("failed to decode prune response: %v", err)
+	}
+	if prunePayload["status"] != "pruned" {
+		t.Fatalf("expected prune status=pruned, got %v", prunePayload["status"])
+	}
+
+	revisionsReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/revisions?limit=10", nil)
+	revisionsRec := httptest.NewRecorder()
+	mux.ServeHTTP(revisionsRec, revisionsReq)
+	if revisionsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/revisions expected 200, got %d", revisionsRec.Code)
+	}
+
+	var revisionsPayload map[string]any
+	if err := json.Unmarshal(revisionsRec.Body.Bytes(), &revisionsPayload); err != nil {
+		t.Fatalf("failed to decode revisions response: %v", err)
+	}
+	rawRevisions, ok := revisionsPayload["revisions"].([]any)
+	if !ok {
+		t.Fatalf("config revisions expected revisions array, got %T", revisionsPayload["revisions"])
+	}
+	if len(rawRevisions) != 1 {
+		t.Fatalf("config revisions after prune expected exactly 1 entry, got %d", len(rawRevisions))
+	}
+
+	revision, ok := rawRevisions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("config revisions entry expected object, got %T", rawRevisions[0])
+	}
+	hash, _ := revision["configHash"].(string)
+	if hash != hashC {
+		t.Fatalf("config revisions after prune expected current hash %s, got %s", hashC, hash)
+	}
+	if isCurrent, _ := revision["isCurrent"].(bool); !isCurrent {
+		t.Fatalf("config revisions after prune expected remaining revision to be current")
+	}
+
+	rollbackPrunedReq := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/v2/config/rollback?configHash=%s", hashA),
+		bytes.NewBufferString(`{}`),
+	)
+	rollbackPrunedRec := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackPrunedRec, rollbackPrunedReq)
+	if rollbackPrunedRec.Code != http.StatusNotFound {
+		t.Fatalf("rollback to pruned hash expected 404, got %d", rollbackPrunedRec.Code)
 	}
 }
 

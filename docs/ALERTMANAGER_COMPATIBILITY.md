@@ -23,7 +23,7 @@
 - ✅ **Prometheus/VMAlert ingest compatibility path is active** (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
 - ✅ **Ops probe compatibility is active** (`/-/healthy`, `/-/ready`, `/-/reload`)
 - 🟡 **Semantic parity is partial** (routing/inhibition behavior is a focused subset in Phase 0 runtime)
-- 🟡 **Advanced config API is partial** (`POST /api/v2/config`, `GET /api/v2/config/status`, `GET /api/v2/config/history`, `GET /api/v2/config/revisions`, `POST /api/v2/config/rollback` active; targeted rollback policies are planned)
+- 🟡 **Advanced config API is partial** (`POST /api/v2/config`, `GET /api/v2/config/status`, `GET /api/v2/config/history`, `GET /api/v2/config/revisions`, `DELETE /api/v2/config/revisions/prune`, `POST /api/v2/config/rollback` active; targeted rollback policies are planned)
 
 ---
 
@@ -67,6 +67,7 @@
 | `GET /api/v2/config/status` | ❌ | ✅ | 🟡 | Runtime apply status (`status/source/appliedAt/error`) + current rule/receiver counters |
 | `GET /api/v2/config/history` | ❌ | ✅ | 🟡 | Runtime apply history (newest-first, supports `limit`, `status`, `source`; includes source/status/error/hash) |
 | `GET /api/v2/config/revisions` | ❌ | ✅ | 🟡 | Unique successful revisions for rollback target selection (`configHash/source/appliedAt/isCurrent`) |
+| `DELETE /api/v2/config/revisions/prune` | ❌ | ✅ | 🟡 | Prunes older revision targets by keep policy (`keep` query, keeps current active revision) |
 | `POST /api/v2/config/rollback` | ❌ | ✅ | 🟡 | Rolls back to previous successful revision or to `configHash`; returns `400/404/409` for invalid/not-found/conflict cases |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
@@ -80,6 +81,7 @@ These endpoints provide additional functionality while maintaining backward comp
 | `POST /api/v2/config/rollback` | ✅ **ACTIVE (MVP)** | Rollback to previous/specific successful config | Supports `configHash` selection + runtime apply/status/history tracking |
 | `GET /api/v2/config/history` | ✅ **ACTIVE (MVP)** | Runtime config apply history | Tracks startup/api/reload/rollback timeline with filterable `status`/`source` |
 | `GET /api/v2/config/revisions` | ✅ **ACTIVE (MVP)** | Runtime config revisions catalog | Exposes unique successful hashes with current marker for rollback UX/API |
+| `DELETE /api/v2/config/revisions/prune` | ✅ **ACTIVE (MVP)** | Runtime revision pruning | Keeps newest unique revision targets and trims stale rollback hashes |
 | `GET /api/v2/config/status` | ✅ **ACTIVE (MVP)** | Runtime config apply status | Tracks last apply/reload result in active runtime |
 | `GET /api/v2/inhibition/rules` | ✅ **COMPLETE** | List loaded inhibition rules | Debugging |
 | `GET /api/v2/inhibition/status` | ✅ **COMPLETE** | Active inhibition relationships | Operational insight |

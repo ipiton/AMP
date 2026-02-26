@@ -142,6 +142,9 @@ curl "http://localhost:8080/api/v2/config/history?status=ok&source=rollback&limi
 # List unique successful config revisions for rollback target selection
 curl "http://localhost:8080/api/v2/config/revisions?limit=20"
 
+# Prune old revisions (keep N newest unique successful revisions)
+curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20"
+
 # Roll back to previous successful runtime config revision
 curl -X POST http://localhost:8080/api/v2/config/rollback
 
@@ -160,6 +163,7 @@ kubectl create configmap alertmanager-config \
 `POST /api/v2/config/rollback?configHash=...` returns `400` for invalid hash, `404` for unknown revision, `409` if the requested revision is already active.
 `GET /api/v2/config/history` supports `status=ok|failed` and `source=<startup|api|reload|rollback>` filters.
 `GET /api/v2/config/revisions` returns unique successful revisions (`configHash`, `source`, `appliedAt`, `isCurrent`) for targeted rollback selection.
+`DELETE /api/v2/config/revisions/prune?keep=...` prunes old revision targets and keeps newest unique successful revisions.
 
 ## 📚 Documentation
 
