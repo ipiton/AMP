@@ -393,11 +393,15 @@ curl http://localhost:9093/api/v2/config/status
 # Rollback to previous version
 curl -X POST http://localhost:9093/api/v2/config/rollback
 
+# Rollback to a specific successful revision from history
+curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>"
+
 # View config history
 curl http://localhost:9093/api/v2/config/history
 ```
 
 If there is no previous successful revision, rollback returns `409 Conflict`.
+Rollback by hash returns `400 Bad Request` for invalid hash and `404 Not Found` when the revision is absent.
 
 ---
 

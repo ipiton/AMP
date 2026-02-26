@@ -580,6 +580,28 @@ func (c *runtimeStatusContext) getPreviousConfigRevision() (runtimeConfigRevisio
 	return runtimeConfigRevision{}, false
 }
 
+func (c *runtimeStatusContext) getConfigRevisionByHash(configHash string) (runtimeConfigRevision, bool) {
+	if c == nil {
+		return runtimeConfigRevision{}, false
+	}
+
+	normalizedHash := strings.ToLower(strings.TrimSpace(configHash))
+	if normalizedHash == "" {
+		return runtimeConfigRevision{}, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for i := len(c.configRevisions) - 1; i >= 0; i-- {
+		if c.configRevisions[i].ConfigHash == normalizedHash {
+			return c.configRevisions[i], true
+		}
+	}
+
+	return runtimeConfigRevision{}, false
+}
+
 func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
 	if e == nil {
 		return nil
@@ -1598,14 +1620,6 @@ func configRollbackHandler(
 			return
 		}
 
-		targetRevision, ok := statusCtx.getPreviousConfigRevision()
-		if !ok {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "no previous config revision available for rollback",
-			})
-			return
-		}
-
 		currentConfig, err := readRuntimeConfigOriginalForReload(configPath)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -1614,6 +1628,42 @@ func configRollbackHandler(
 			return
 		}
 		fromConfigHash := configSHA256(currentConfig)
+
+		targetConfigHash, err := parseConfigHashQuery(r.URL.Query().Get("configHash"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		var targetRevision runtimeConfigRevision
+		if targetConfigHash == "" {
+			var ok bool
+			targetRevision, ok = statusCtx.getPreviousConfigRevision()
+			if !ok {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": "no previous config revision available for rollback",
+				})
+				return
+			}
+		} else {
+			if targetConfigHash == fromConfigHash {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": "requested config revision is already active",
+				})
+				return
+			}
+
+			var ok bool
+			targetRevision, ok = statusCtx.getConfigRevisionByHash(targetConfigHash)
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]string{
+					"error": "config revision not found",
+				})
+				return
+			}
+		}
 
 		if err := writeRuntimeConfig(configPath, []byte(targetRevision.ConfigContent)); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -1856,6 +1906,23 @@ func parseRegexQuery(raw string) (*regexp.Regexp, error) {
 		return nil, fmt.Errorf("invalid regex query value")
 	}
 	return re, nil
+}
+
+func parseConfigHashQuery(raw string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return "", nil
+	}
+	if len(value) != sha256.Size*2 {
+		return "", fmt.Errorf("invalid configHash query value")
+	}
+
+	decoded, err := hex.DecodeString(value)
+	if err != nil || len(decoded) != sha256.Size {
+		return "", fmt.Errorf("invalid configHash query value")
+	}
+
+	return value, nil
 }
 
 func parseAlertLabelMatchers(r *http.Request) ([]*cfgmatcher.Matcher, error) {

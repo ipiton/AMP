@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `GET /api/v2/config/status` (last apply/reload result + source + timestamp + error + runtime counters)
   - Added `GET /api/v2/config/history` (newest-first runtime apply timeline with `limit` and config hash)
   - Added `POST /api/v2/config/rollback` (rollback to previous successful runtime revision; `409` when no previous revision exists)
+  - Extended rollback with target hash selection: `POST /api/v2/config/rollback?configHash=<sha256>` (`400` invalid hash, `404` unknown hash, `409` when target already active)
   - `POST /api/v2/config` returns `400` for invalid payload, `413` for oversized payload, `405` for unsupported methods
   - Added Phase0 contract coverage for route inventory, format handling, method contracts and runtime-apply semantics
 
