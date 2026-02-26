@@ -249,6 +249,17 @@ func registerRoutes(mux *http.ServeMux) {
 		persistenceEnabled: persistencePath != "",
 		persistencePath:    persistencePath,
 		configOriginal:     readRuntimeConfigOriginalAt(configPath),
+		configApplyStatus:  "unknown",
+		configApplySource:  "startup",
+	}
+	if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitionEngine, receiverCatalog); err != nil {
+		slog.Warn("Initial runtime config apply failed",
+			"config", configPath,
+			"error", err,
+		)
+		statusCtx.setConfigApplyResult("startup", err)
+	} else {
+		statusCtx.setConfigApplyResult("startup", nil)
 	}
 
 	// Static files
@@ -293,6 +304,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore, receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
 	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
+	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -324,6 +336,10 @@ type runtimeStatusContext struct {
 	persistenceEnabled bool
 	persistencePath    string
 	configOriginal     string
+	configApplyStatus  string
+	configApplySource  string
+	configApplyError   string
+	configApplyAt      time.Time
 }
 
 type runtimeInhibitionEngine struct {
@@ -403,6 +419,47 @@ func (c *runtimeStatusContext) setConfigOriginal(configOriginal string) {
 	c.mu.Lock()
 	c.configOriginal = configOriginal
 	c.mu.Unlock()
+}
+
+func (c *runtimeStatusContext) setConfigApplyResult(source string, err error) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.configApplySource = strings.TrimSpace(source)
+	if c.configApplySource == "" {
+		c.configApplySource = "unknown"
+	}
+	c.configApplyAt = time.Now().UTC()
+	if err != nil {
+		c.configApplyStatus = "failed"
+		c.configApplyError = err.Error()
+	} else {
+		c.configApplyStatus = "ok"
+		c.configApplyError = ""
+	}
+	c.mu.Unlock()
+}
+
+func (c *runtimeStatusContext) getConfigApplyResult() (status, source, errorText string, at time.Time) {
+	if c == nil {
+		return "unknown", "unknown", "", time.Time{}
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if strings.TrimSpace(c.configApplyStatus) == "" {
+		status = "unknown"
+	} else {
+		status = c.configApplyStatus
+	}
+	if strings.TrimSpace(c.configApplySource) == "" {
+		source = "unknown"
+	} else {
+		source = c.configApplySource
+	}
+	return status, source, c.configApplyError, c.configApplyAt
 }
 
 func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
@@ -733,9 +790,11 @@ func alertmanagerReloadHandler(
 
 		err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
 		if err != nil {
+			statusCtx.setConfigApplyResult("reload", err)
 			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
 			return
 		}
+		statusCtx.setConfigApplyResult("reload", nil)
 
 		w.WriteHeader(http.StatusOK)
 	}
@@ -1331,11 +1390,13 @@ func configHandler(
 				if rollbackErr := writeRuntimeConfig(configPath, []byte(previousConfig)); rollbackErr == nil {
 					_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
 				}
+				statusCtx.setConfigApplyResult("api", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
 					"error": fmt.Sprintf("failed to apply config: %s", err),
 				})
 				return
 			}
+			statusCtx.setConfigApplyResult("api", nil)
 
 			writeJSON(w, http.StatusOK, map[string]string{
 				"status": "applied",
@@ -1343,6 +1404,36 @@ func configHandler(
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+	}
+}
+
+func configStatusHandler(
+	configPath string,
+	statusCtx *runtimeStatusContext,
+	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		status, source, errorText, appliedAt := statusCtx.getConfigApplyResult()
+		appliedAtStr := ""
+		if !appliedAt.IsZero() {
+			appliedAtStr = appliedAt.Format(time.RFC3339)
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":              status,
+			"source":              source,
+			"appliedAt":           appliedAtStr,
+			"error":               errorText,
+			"configPath":          configPath,
+			"inhibitionRuleCount": len(inhibitions.getRules()),
+			"receiverCount":       len(receivers.getConfigured()),
+		})
 	}
 }
 
