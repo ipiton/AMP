@@ -97,6 +97,48 @@ func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_ReloadSuccessHasEmptyBody(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "initial-receiver"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /-/reload expected 200 for valid config, got %d", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("reload success expected empty body, got %q", rec.Body.String())
+	}
+}
+
+func TestUpstreamParity_DebugPprofContract(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /debug/pprof/ expected 200, got %d", getRec.Code)
+	}
+	if !strings.Contains(getRec.Body.String(), "Types of profiles available") {
+		t.Fatalf("GET /debug/pprof/ expected pprof index body, got %q", getRec.Body.String())
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/debug/pprof/", bytes.NewBufferString(`{}`))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /debug/pprof/ expected 405, got %d", postRec.Code)
+	}
+}
+
 func TestUpstreamParity_AlertsStateFiltersMatrix(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
