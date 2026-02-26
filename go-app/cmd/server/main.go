@@ -1399,9 +1399,7 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 				})
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{
-				"status": "deleted",
-			})
+			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}

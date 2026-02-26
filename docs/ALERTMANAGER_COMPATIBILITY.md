@@ -41,7 +41,7 @@
 | `GET /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Matcher filters and ordering aligned for covered scenarios |
 | `POST /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Create/update via POST path with runtime validation |
 | `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + not-found contracts covered |
-| `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + delete/not-found contracts covered |
+| `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + delete/not-found contracts covered; success response is `200` with empty body (upstream-like) |
 
 ### Operational Compatibility Endpoints (Active Runtime)
 

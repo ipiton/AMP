@@ -487,3 +487,42 @@ func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestUpstreamParity_DeleteSilenceReturnsEmptyBody(t *testing.T) {
+	mux := newPhase0TestMux(t)
+	now := time.Now().UTC()
+
+	payload := fmt.Sprintf(`{
+		"matchers": [{"name":"alertname","value":"DeleteParity","isRegex":false}],
+		"startsAt": %q,
+		"endsAt": %q,
+		"createdBy": "parity-suite",
+		"comment": "delete-parity"
+	}`, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(30*time.Minute).Format(time.RFC3339))
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
+	createRec := httptest.NewRecorder()
+	mux.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", createRec.Code)
+	}
+
+	var createPayload map[string]any
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createPayload); err != nil {
+		t.Fatalf("failed to decode silence create response: %v", err)
+	}
+	silenceID, _ := createPayload["silenceID"].(string)
+	if strings.TrimSpace(silenceID) == "" {
+		t.Fatalf("expected non-empty silenceID in create response")
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+silenceID, nil)
+	deleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/v2/silence/{id} expected 200, got %d", deleteRec.Code)
+	}
+	if deleteRec.Body.Len() != 0 {
+		t.Fatalf("DELETE /api/v2/silence/{id} expected empty body, got %q", deleteRec.Body.String())
+	}
+}
