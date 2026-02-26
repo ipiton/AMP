@@ -130,6 +130,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "config get", method: http.MethodGet, path: "/api/v2/config", allowedStatus: []int{http.StatusOK}},
 		{name: "config post", method: http.MethodPost, path: "/api/v2/config", body: validConfigPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "config status get", method: http.MethodGet, path: "/api/v2/config/status", allowedStatus: []int{http.StatusOK}},
+		{name: "config history get", method: http.MethodGet, path: "/api/v2/config/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -450,6 +451,54 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if _, ok := payload["receiverCount"].(float64); !ok {
 			t.Fatalf("config status response expected receiverCount number, got %T", payload["receiverCount"])
+		}
+	})
+
+	t.Run("config history contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/history?limit=5", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/history expected 200, got %d", rec.Code)
+		}
+		if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("GET /api/v2/config/history expected json content type, got %q", rec.Header().Get("Content-Type"))
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config history response is not valid json: %v", err)
+		}
+		if _, ok := payload["total"].(float64); !ok {
+			t.Fatalf("config history response expected total number, got %T", payload["total"])
+		}
+		if _, ok := payload["limit"].(float64); !ok {
+			t.Fatalf("config history response expected limit number, got %T", payload["limit"])
+		}
+		if _, ok := payload["configPath"].(string); !ok {
+			t.Fatalf("config history response expected configPath string, got %T", payload["configPath"])
+		}
+		entries, ok := payload["entries"].([]any)
+		if !ok {
+			t.Fatalf("config history response expected entries array, got %T", payload["entries"])
+		}
+		if len(entries) == 0 {
+			t.Fatalf("config history response expected at least one entry")
+		}
+	})
+
+	t.Run("config history invalid limit contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/history?limit=nan", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/config/history with invalid limit expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -959,6 +1008,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status"},
 			{name: "config put not allowed", method: http.MethodPut, path: "/api/v2/config"},
 			{name: "config status post not allowed", method: http.MethodPost, path: "/api/v2/config/status"},
+			{name: "config history post not allowed", method: http.MethodPost, path: "/api/v2/config/history"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
@@ -2199,6 +2249,33 @@ func TestPhase0ConfigStatusTracksApplySourceAndResult(t *testing.T) {
 		}
 		return payload
 	}
+	readHistory := func(limit int) []map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v2/config/history?limit=%d", limit), nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/history expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("failed to decode config history response: %v", err)
+		}
+		rawEntries, ok := payload["entries"].([]any)
+		if !ok {
+			t.Fatalf("config history response expected entries array, got %T", payload["entries"])
+		}
+		entries := make([]map[string]any, 0, len(rawEntries))
+		for _, raw := range rawEntries {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("config history entry expected object, got %T", raw)
+			}
+			entries = append(entries, entry)
+		}
+		return entries
+	}
 
 	startupStatus := readStatus()
 	if startupStatus["status"] != "ok" {
@@ -2210,6 +2287,13 @@ func TestPhase0ConfigStatusTracksApplySourceAndResult(t *testing.T) {
 	appliedAt, ok := startupStatus["appliedAt"].(string)
 	if !ok || strings.TrimSpace(appliedAt) == "" {
 		t.Fatalf("expected startup appliedAt to be set")
+	}
+	startupHistory := readHistory(3)
+	if len(startupHistory) == 0 {
+		t.Fatalf("expected startup history entry")
+	}
+	if startupHistory[0]["source"] != "startup" || startupHistory[0]["status"] != "ok" {
+		t.Fatalf("expected latest startup history entry, got %v", startupHistory[0])
 	}
 
 	configPayload := `
@@ -2256,6 +2340,20 @@ receivers:
 	errText, _ := failedStatus["error"].(string)
 	if strings.TrimSpace(errText) == "" {
 		t.Fatalf("expected failed config error message")
+	}
+
+	history := readHistory(5)
+	if len(history) < 3 {
+		t.Fatalf("expected at least 3 history entries, got %d", len(history))
+	}
+	if history[0]["source"] != "reload" || history[0]["status"] != "failed" {
+		t.Fatalf("expected latest history entry to be reload failure, got %v", history[0])
+	}
+	if history[1]["source"] != "api" || history[1]["status"] != "ok" {
+		t.Fatalf("expected second history entry to be api success, got %v", history[1])
+	}
+	if history[2]["source"] != "startup" || history[2]["status"] != "ok" {
+		t.Fatalf("expected third history entry to be startup success, got %v", history[2])
 	}
 }
 

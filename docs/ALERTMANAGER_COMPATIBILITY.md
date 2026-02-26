@@ -23,7 +23,7 @@
 - ✅ **Prometheus/VMAlert ingest compatibility path is active** (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
 - ✅ **Ops probe compatibility is active** (`/-/healthy`, `/-/ready`, `/-/reload`)
 - 🟡 **Semantic parity is partial** (routing/inhibition behavior is a focused subset in Phase 0 runtime)
-- 🟡 **Advanced config API is partial** (`POST /api/v2/config` and `GET /api/v2/config/status` active; rollback/history still planned)
+- 🟡 **Advanced config API is partial** (`POST /api/v2/config`, `GET /api/v2/config/status`, `GET /api/v2/config/history` active; rollback still planned)
 
 ---
 
@@ -65,8 +65,8 @@
 | `GET /api/v2/config` | ❌ | ✅ | 🟢 | Read-only runtime config snapshot (`json` default, `?format=yaml`) |
 | `POST /api/v2/config` | ❌ | ✅ | 🟡 | Minimal write-path in active runtime: validates payload, persists file, applies inhibition/receivers |
 | `GET /api/v2/config/status` | ❌ | ✅ | 🟡 | Runtime apply status (`status/source/appliedAt/error`) + current rule/receiver counters |
+| `GET /api/v2/config/history` | ❌ | ✅ | 🟡 | Runtime apply history (newest-first, `limit` query, includes source/status/error/hash) |
 | `POST /api/v2/config/rollback` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
-| `GET /api/v2/config/history` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
 
@@ -77,7 +77,7 @@ These endpoints provide additional functionality while maintaining backward comp
 | `POST /api/v2/silences/check` | ✅ **COMPLETE** | Test if alert would be silenced | Debugging & validation |
 | `POST /api/v2/silences/bulk/delete` | ✅ **COMPLETE** | Bulk delete silences (up to 100) | Operational efficiency |
 | `POST /api/v2/config/rollback` | ⏳ **PLANNED** | Rollback to previous config | Planned for full config API phase |
-| `GET /api/v2/config/history` | ⏳ **PLANNED** | Config version history | Planned for full config API phase |
+| `GET /api/v2/config/history` | ✅ **ACTIVE (MVP)** | Runtime config apply history | Tracks startup/api/reload apply timeline in active runtime |
 | `GET /api/v2/config/status` | ✅ **ACTIVE (MVP)** | Runtime config apply status | Tracks last apply/reload result in active runtime |
 | `GET /api/v2/inhibition/rules` | ✅ **COMPLETE** | List loaded inhibition rules | Debugging |
 | `GET /api/v2/inhibition/status` | ✅ **COMPLETE** | Active inhibition relationships | Operational insight |
