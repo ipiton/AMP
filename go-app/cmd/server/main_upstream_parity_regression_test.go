@@ -325,6 +325,126 @@ func TestUpstreamParity_AlertsStateFiltersMatrix(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_InvalidStateFlagsAreIgnored(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"InvalidFlagsParity","service":"api","namespace":"prod"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?active=not-bool", nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with invalid active flag expected 200, got %d", alertsRec.Code)
+	}
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("invalid active flag expected upstream-like false fallback, got %d alerts", len(alerts))
+	}
+
+	silencedReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?silenced=not-bool", nil)
+	silencedRec := httptest.NewRecorder()
+	mux.ServeHTTP(silencedRec, silencedReq)
+	if silencedRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with invalid silenced flag expected 200, got %d", silencedRec.Code)
+	}
+	var silencedFiltered []map[string]any
+	if err := json.Unmarshal(silencedRec.Body.Bytes(), &silencedFiltered); err != nil {
+		t.Fatalf("failed to decode silenced-filter response: %v", err)
+	}
+	if len(silencedFiltered) != 1 {
+		t.Fatalf("invalid silenced flag should not hide active alerts, got %d", len(silencedFiltered))
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool&silenced=not-bool&inhibited=not-bool&muted=not-bool", nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups with invalid state flags expected 200, got %d", groupsRec.Code)
+	}
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Fatalf("all invalid group state flags expected upstream-like false fallback, got %d groups", len(groups))
+	}
+}
+
+func TestUpstreamParity_InvalidStatusAndResolvedAreIgnored(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"InvalidStatusParity","service":"api","namespace":"prod"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?status=broken", nil)
+	statusRec := httptest.NewRecorder()
+	mux.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with invalid status expected 200, got %d", statusRec.Code)
+	}
+	var statusFiltered []map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusFiltered); err != nil {
+		t.Fatalf("failed to decode status-filter response: %v", err)
+	}
+	if len(statusFiltered) != 1 {
+		t.Fatalf("invalid status should be ignored, got %d alerts", len(statusFiltered))
+	}
+
+	resolvedReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?resolved=not-bool", nil)
+	resolvedRec := httptest.NewRecorder()
+	mux.ServeHTTP(resolvedRec, resolvedReq)
+	if resolvedRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with invalid resolved expected 200, got %d", resolvedRec.Code)
+	}
+	var resolvedFiltered []map[string]any
+	if err := json.Unmarshal(resolvedRec.Body.Bytes(), &resolvedFiltered); err != nil {
+		t.Fatalf("failed to decode resolved-filter response: %v", err)
+	}
+	if len(resolvedFiltered) != 1 {
+		t.Fatalf("invalid resolved should fallback to false and keep firing alerts, got %d", len(resolvedFiltered))
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?resolved=not-bool", nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 200, got %d", groupsRec.Code)
+	}
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups resolved-filter response: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("invalid resolved on groups should be ignored, got %d groups", len(groups))
+	}
+}
+
 func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 	mux := newPhase0TestMux(t)
 

@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
   - `GET /api/v2/status` now reports `cluster.status=disabled` in single-node runtime (closer to upstream behavior when clustering is off)
   - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
+  - `GET /api/v2/alerts` and `GET /api/v2/alerts/groups` query parsing aligned closer to upstream runtime behavior:
+    - invalid state-flag bool values (`active/silenced/inhibited/unprocessed/muted`) now fall back to `false` when parameter is present
+    - invalid `status`/`resolved` query values no longer return `400` and are ignored (`200` response)
   - `DELETE /api/v2/silence/{id}` now returns `200` with empty body on success (upstream-like)
   - `POST /api/v2/silences` error contracts moved closer to upstream runtime behavior:
     - schema/required validation errors return `422` with `{code,message}` (for example `code=602/612`)
