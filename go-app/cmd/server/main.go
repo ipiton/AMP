@@ -669,13 +669,35 @@ func (c *runtimeStatusContext) pruneConfigRevisions(keep int) (before, after int
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	before = len(c.configRevisions)
+	currentHash = configSHA256(c.configOriginal)
+	compact := computePrunedConfigRevisions(c.configRevisions, currentHash, keep)
+	c.configRevisions = compact
+	return before, len(c.configRevisions), currentHash
+}
+
+func (c *runtimeStatusContext) previewConfigRevisionsPrune(keep int) (before, after int, currentHash string) {
+	if c == nil {
+		return 0, 0, ""
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	before = len(c.configRevisions)
 	currentHash = configSHA256(c.configOriginal)
-	if before == 0 {
-		return before, before, currentHash
-	}
+	compact := computePrunedConfigRevisions(c.configRevisions, currentHash, keep)
+	return before, len(compact), currentHash
+}
 
+func computePrunedConfigRevisions(
+	revisions []runtimeConfigRevision,
+	currentHash string,
+	keep int,
+) []runtimeConfigRevision {
+	if len(revisions) == 0 {
+		return nil
+	}
 	if keep < 1 {
 		keep = 1
 	}
@@ -683,11 +705,11 @@ func (c *runtimeStatusContext) pruneConfigRevisions(keep int) (before, after int
 		keep = maxConfigRevisionEntries
 	}
 
-	latestIndexByHash := make(map[string]int, before)
-	uniqueNewest := make([]string, 0, before)
-	seen := make(map[string]struct{}, before)
-	for i := before - 1; i >= 0; i-- {
-		hash := c.configRevisions[i].ConfigHash
+	latestIndexByHash := make(map[string]int, len(revisions))
+	uniqueNewest := make([]string, 0, len(revisions))
+	seen := make(map[string]struct{}, len(revisions))
+	for i := len(revisions) - 1; i >= 0; i-- {
+		hash := revisions[i].ConfigHash
 		if _, ok := latestIndexByHash[hash]; !ok {
 			latestIndexByHash[hash] = i
 		}
@@ -702,15 +724,14 @@ func (c *runtimeStatusContext) pruneConfigRevisions(keep int) (before, after int
 	for i := 0; i < len(uniqueNewest) && i < keep; i++ {
 		keepSet[uniqueNewest[i]] = struct{}{}
 	}
-
 	// Always keep current active revision if it exists in revision history.
 	if _, ok := latestIndexByHash[currentHash]; ok {
 		keepSet[currentHash] = struct{}{}
 	}
 
 	compact := make([]runtimeConfigRevision, 0, len(keepSet))
-	for i := 0; i < before; i++ {
-		revision := c.configRevisions[i]
+	for i := 0; i < len(revisions); i++ {
+		revision := revisions[i]
 		if _, ok := keepSet[revision.ConfigHash]; !ok {
 			continue
 		}
@@ -719,10 +740,7 @@ func (c *runtimeStatusContext) pruneConfigRevisions(keep int) (before, after int
 		}
 		compact = append(compact, revision)
 	}
-
-	c.configRevisions = compact
-	after = len(c.configRevisions)
-	return before, after, currentHash
+	return compact
 }
 
 func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
@@ -1789,9 +1807,28 @@ func configRevisionsPruneHandler(configPath string, statusCtx *runtimeStatusCont
 			return
 		}
 
-		before, after, currentHash := statusCtx.pruneConfigRevisions(keep)
+		dryRun, err := parseBoolQuery(r.URL.Query().Get("dryRun"), false)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		var before, after int
+		var currentHash string
+		status := "pruned"
+		if dryRun {
+			before, after, currentHash = statusCtx.previewConfigRevisionsPrune(keep)
+			status = "dry_run"
+		} else {
+			before, after, currentHash = statusCtx.pruneConfigRevisions(keep)
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":            "pruned",
+			"status":            status,
+			"action":            "prune_revisions",
+			"dryRun":            dryRun,
 			"keep":              keep,
 			"before":            before,
 			"after":             after,
@@ -1837,6 +1874,14 @@ func configRollbackHandler(
 			return
 		}
 
+		dryRun, err := parseBoolQuery(r.URL.Query().Get("dryRun"), false)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
 		var targetRevision runtimeConfigRevision
 		if targetConfigHash == "" {
 			var ok bool
@@ -1865,6 +1910,24 @@ func configRollbackHandler(
 			}
 		}
 
+		targetAppliedAt := ""
+		if !targetRevision.AppliedAt.IsZero() {
+			targetAppliedAt = targetRevision.AppliedAt.Format(time.RFC3339)
+		}
+		if dryRun {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":          "dry_run",
+				"action":          "rollback",
+				"dryRun":          true,
+				"fromConfigHash":  fromConfigHash,
+				"toConfigHash":    targetRevision.ConfigHash,
+				"targetSource":    targetRevision.Source,
+				"targetAppliedAt": targetAppliedAt,
+				"configPath":      configPath,
+			})
+			return
+		}
+
 		if err := writeRuntimeConfig(configPath, []byte(targetRevision.ConfigContent)); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": fmt.Sprintf("failed to persist rollback config: %s", err),
@@ -1885,11 +1948,15 @@ func configRollbackHandler(
 		}
 		statusCtx.setConfigApplyResult("rollback", nil)
 
-		writeJSON(w, http.StatusOK, map[string]string{
-			"status":         "rolled_back",
-			"fromConfigHash": fromConfigHash,
-			"toConfigHash":   targetRevision.ConfigHash,
-			"configPath":     configPath,
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":          "rolled_back",
+			"action":          "rollback",
+			"dryRun":          false,
+			"fromConfigHash":  fromConfigHash,
+			"toConfigHash":    targetRevision.ConfigHash,
+			"targetSource":    targetRevision.Source,
+			"targetAppliedAt": targetAppliedAt,
+			"configPath":      configPath,
 		})
 	}
 }

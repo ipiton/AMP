@@ -145,11 +145,17 @@ curl "http://localhost:8080/api/v2/config/revisions?limit=20"
 # Prune old revisions (keep N newest unique successful revisions)
 curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20"
 
+# Preview prune result without applying changes
+curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20&dryRun=true"
+
 # Roll back to previous successful runtime config revision
 curl -X POST http://localhost:8080/api/v2/config/rollback
 
 # Roll back to a specific successful revision by config hash
 curl -X POST "http://localhost:8080/api/v2/config/rollback?configHash=<sha256>"
+
+# Preview rollback result without applying changes
+curl -X POST "http://localhost:8080/api/v2/config/rollback?configHash=<sha256>&dryRun=true"
 
 # Apply config file changes and reload runtime metadata
 curl -X POST http://localhost:8080/-/reload
@@ -164,6 +170,7 @@ kubectl create configmap alertmanager-config \
 `GET /api/v2/config/history` supports `status=ok|failed` and `source=<startup|api|reload|rollback>` filters.
 `GET /api/v2/config/revisions` returns unique successful revisions (`configHash`, `source`, `appliedAt`, `isCurrent`) for targeted rollback selection.
 `DELETE /api/v2/config/revisions/prune?keep=...` prunes old revision targets and keeps newest unique successful revisions.
+Both rollback and prune support `dryRun=true` preview mode without mutating runtime/file state.
 
 ## 📚 Documentation
 

@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Extended config history with filters: `GET /api/v2/config/history?status=ok|failed&source=<...>` for targeted audit and rollback prep
   - Added `GET /api/v2/config/revisions` (unique successful revision catalog with `isCurrent` for rollback target selection)
   - Added `DELETE /api/v2/config/revisions/prune?keep=<n>` to trim stale revision targets while keeping current active revision
+  - Added non-mutating preview mode: `dryRun=true` for `POST /api/v2/config/rollback` and `DELETE /api/v2/config/revisions/prune`
   - `POST /api/v2/config` returns `400` for invalid payload, `413` for oversized payload, `405` for unsupported methods
   - Added Phase0 contract coverage for route inventory, format handling, method contracts and runtime-apply semantics
 
