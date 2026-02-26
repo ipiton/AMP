@@ -136,6 +136,9 @@ curl http://localhost:8080/api/v2/config/status
 # Check runtime config apply history
 curl "http://localhost:8080/api/v2/config/history?limit=20"
 
+# Filter history by apply status/source
+curl "http://localhost:8080/api/v2/config/history?status=ok&source=rollback&limit=20"
+
 # Roll back to previous successful runtime config revision
 curl -X POST http://localhost:8080/api/v2/config/rollback
 
@@ -152,6 +155,7 @@ kubectl create configmap alertmanager-config \
 
 `POST /api/v2/config/rollback` returns `409` if there is no previous successful revision to roll back to.
 `POST /api/v2/config/rollback?configHash=...` returns `400` for invalid hash, `404` for unknown revision, `409` if the requested revision is already active.
+`GET /api/v2/config/history` supports `status=ok|failed` and `source=<startup|api|reload|rollback>` filters.
 
 ## 📚 Documentation
 

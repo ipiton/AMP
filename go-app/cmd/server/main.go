@@ -525,7 +525,7 @@ func (c *runtimeStatusContext) getConfigApplyResult() (status, source, errorText
 	return status, source, c.configApplyError, c.configApplyAt
 }
 
-func (c *runtimeStatusContext) getConfigApplyHistory(limit int) []runtimeConfigApplyHistoryEntry {
+func (c *runtimeStatusContext) getConfigApplyHistory(limit int, statusFilter, sourceFilter string) []runtimeConfigApplyHistoryEntry {
 	if c == nil {
 		return nil
 	}
@@ -536,13 +536,23 @@ func (c *runtimeStatusContext) getConfigApplyHistory(limit int) []runtimeConfigA
 		return nil
 	}
 
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	sourceFilter = strings.ToLower(strings.TrimSpace(sourceFilter))
+
 	if limit <= 0 || limit > len(c.configApplyHistory) {
 		limit = len(c.configApplyHistory)
 	}
 
 	result := make([]runtimeConfigApplyHistoryEntry, 0, limit)
 	for i := len(c.configApplyHistory) - 1; i >= 0 && len(result) < limit; i-- {
-		result = append(result, c.configApplyHistory[i])
+		entry := c.configApplyHistory[i]
+		if statusFilter != "" && !strings.EqualFold(entry.Status, statusFilter) {
+			continue
+		}
+		if sourceFilter != "" && !strings.EqualFold(entry.Source, sourceFilter) {
+			continue
+		}
+		result = append(result, entry)
 	}
 	return result
 }
@@ -1592,10 +1602,21 @@ func configHistoryHandler(configPath string, statusCtx *runtimeStatusContext) ht
 			return
 		}
 
-		entries := statusCtx.getConfigApplyHistory(limit)
+		statusFilter, err := parseConfigApplyStatusQuery(r.URL.Query().Get("status"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		sourceFilter := parseConfigApplySourceQuery(r.URL.Query().Get("source"))
+		entries := statusCtx.getConfigApplyHistory(limit, statusFilter, sourceFilter)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"total":      len(entries),
 			"limit":      limit,
+			"status":     statusFilter,
+			"source":     sourceFilter,
 			"configPath": configPath,
 			"entries":    entries,
 		})
@@ -1923,6 +1944,20 @@ func parseConfigHashQuery(raw string) (string, error) {
 	}
 
 	return value, nil
+}
+
+func parseConfigApplyStatusQuery(raw string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "", "ok", "failed":
+		return value, nil
+	default:
+		return "", fmt.Errorf("invalid status query value")
+	}
+}
+
+func parseConfigApplySourceQuery(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 func parseAlertLabelMatchers(r *http.Request) ([]*cfgmatcher.Matcher, error) {
