@@ -11,8 +11,10 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"path"
 	"regexp"
 	"runtime"
 	"sort"
@@ -752,10 +754,7 @@ func alertmanagerReloadHandler(
 			statusCtx.setConfigOriginal(configOriginal)
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{
-			"status": "reloaded",
-			"mode":   "runtime",
-		})
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -765,10 +764,12 @@ func debugCompatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "available",
-		"path":   r.URL.Path,
-	})
+	subpath := strings.TrimPrefix(r.URL.Path, "/debug/")
+	r.URL.Path = path.Join("/debug", subpath)
+	if strings.HasSuffix(subpath, "/") && !strings.HasSuffix(r.URL.Path, "/") {
+		r.URL.Path += "/"
+	}
+	http.DefaultServeMux.ServeHTTP(w, r)
 }
 
 // API handlers

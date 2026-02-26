@@ -101,8 +101,8 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "alertmanager ready get", method: http.MethodGet, path: "/-/ready", allowedStatus: []int{http.StatusOK}},
 		{name: "alertmanager ready head", method: http.MethodHead, path: "/-/ready", allowedStatus: []int{http.StatusOK}},
 		{name: "alertmanager reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, allowedStatus: []int{http.StatusOK}},
-		{name: "debug get", method: http.MethodGet, path: "/debug/pprof", allowedStatus: []int{http.StatusOK}},
-		{name: "debug post", method: http.MethodPost, path: "/debug/pprof", body: `{}`, allowedStatus: []int{http.StatusOK}},
+		{name: "debug get", method: http.MethodGet, path: "/debug/pprof/", allowedStatus: []int{http.StatusOK}},
+		{name: "debug post", method: http.MethodPost, path: "/debug/pprof/", body: `{}`, allowedStatus: []int{http.StatusMethodNotAllowed}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts v1 post", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", allowedStatus: []int{http.StatusOK}},
@@ -853,6 +853,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			body   string
 			status int
 			textOK bool
+			empty  bool
 		}{
 			{name: "healthy get", method: http.MethodGet, path: "/-/healthy", status: http.StatusOK, textOK: true},
 			{name: "healthy head", method: http.MethodHead, path: "/-/healthy", status: http.StatusOK},
@@ -860,7 +861,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "ready head", method: http.MethodHead, path: "/-/ready", status: http.StatusOK},
 			{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed},
 			{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed},
-			{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK},
+			{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK, empty: true},
 			{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
 		}
 
@@ -878,21 +879,25 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 				if tt.textOK && rec.Body.String() != "OK" {
 					t.Fatalf("%s %s expected body OK, got %q", tt.method, tt.path, rec.Body.String())
 				}
+				if tt.empty && rec.Body.Len() != 0 {
+					t.Fatalf("%s %s expected empty body, got %q", tt.method, tt.path, rec.Body.String())
+				}
 			})
 		}
 	})
 
 	t.Run("debug compatibility contract", func(t *testing.T) {
 		tests := []struct {
-			name   string
-			method string
-			path   string
-			body   string
-			status int
+			name     string
+			method   string
+			path     string
+			body     string
+			status   int
+			contains string
 		}{
-			{name: "debug get", method: http.MethodGet, path: "/debug/pprof", status: http.StatusOK},
-			{name: "debug post", method: http.MethodPost, path: "/debug/pprof", body: `{}`, status: http.StatusOK},
-			{name: "debug put not allowed", method: http.MethodPut, path: "/debug/pprof", status: http.StatusMethodNotAllowed},
+			{name: "debug get", method: http.MethodGet, path: "/debug/pprof/", status: http.StatusOK, contains: "Types of profiles available"},
+			{name: "debug post", method: http.MethodPost, path: "/debug/pprof/", body: `{}`, status: http.StatusMethodNotAllowed},
+			{name: "debug put not allowed", method: http.MethodPut, path: "/debug/pprof/", status: http.StatusMethodNotAllowed},
 		}
 
 		for _, tt := range tests {
@@ -903,6 +908,9 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 				mux.ServeHTTP(rec, req)
 				if rec.Code != tt.status {
 					t.Fatalf("%s %s expected %d, got %d", tt.method, tt.path, tt.status, rec.Code)
+				}
+				if tt.contains != "" && !strings.Contains(rec.Body.String(), tt.contains) {
+					t.Fatalf("%s %s expected body to contain %q, got %q", tt.method, tt.path, tt.contains, rec.Body.String())
 				}
 			})
 		}
@@ -1788,16 +1796,8 @@ inhibit_rules:
 	if reloadRec.Code != http.StatusOK {
 		t.Fatalf("POST /-/reload expected 200, got %d", reloadRec.Code)
 	}
-
-	var reloadPayload map[string]any
-	if err := json.Unmarshal(reloadRec.Body.Bytes(), &reloadPayload); err != nil {
-		t.Fatalf("failed to decode reload response: %v", err)
-	}
-	if reloadPayload["status"] != "reloaded" {
-		t.Fatalf("reload status expected reloaded, got %v", reloadPayload["status"])
-	}
-	if reloadPayload["mode"] != "runtime" {
-		t.Fatalf("reload mode expected runtime, got %v", reloadPayload["mode"])
+	if reloadRec.Body.Len() != 0 {
+		t.Fatalf("POST /-/reload expected empty body on success, got %q", reloadRec.Body.String())
 	}
 
 	inhibitedAfterReq := httptest.NewRequest(
