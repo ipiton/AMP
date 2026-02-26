@@ -3612,8 +3612,11 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
 		t.Fatalf("failed to decode receivers response: %v", err)
 	}
-	if len(receivers) < 2 {
-		t.Fatalf("expected at least 2 receivers (default + custom), got %d", len(receivers))
+	if len(receivers) != 1 {
+		t.Fatalf("expected exactly one configured receiver from runtime config, got %d", len(receivers))
+	}
+	if receivers[0]["name"] != "default" {
+		t.Fatalf("expected configured receiver default, got %v", receivers[0]["name"])
 	}
 }
 
@@ -3656,10 +3659,15 @@ receivers:
 		receiverSet[name] = struct{}{}
 	}
 
-	required := []string{"default", "team-default", "team-db", "team-nested", "team-email"}
+	required := []string{"team-default", "team-email"}
 	for _, name := range required {
 		if _, ok := receiverSet[name]; !ok {
 			t.Fatalf("expected configured receiver %q in /api/v2/receivers, got %v", name, receiverNames)
+		}
+	}
+	for _, excluded := range []string{"default", "team-db", "team-nested"} {
+		if _, ok := receiverSet[excluded]; ok {
+			t.Fatalf("did not expect non-receiver-list value %q in /api/v2/receivers, got %v", excluded, receiverNames)
 		}
 	}
 }

@@ -34,7 +34,7 @@
 | Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
 |----------|--------------|---------------|---------|-------|
 | `GET /api/v2/status` | ✅ | ✅ **ACTIVE** | 🟢 | Runtime-backed status shape with `cluster`, `versionInfo`, `config`, `uptime`; single-node reports `cluster.status=disabled` |
-| `GET /api/v2/receivers` | ✅ | ✅ **ACTIVE** | 🟡 | Includes configured + discovered receivers; simplified runtime model |
+| `GET /api/v2/receivers` | ✅ | ✅ **ACTIVE** | 🟢 | Returns configured `receivers[*].name` list from runtime config (upstream-like behavior) |
 | `GET /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | State filters and matchers supported; full routing/inhibition parity pending |
 | `POST /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | Ingest + dedup + resolve semantics; no full upstream routing tree parity |
 | `GET /api/v2/alerts/groups` | ✅ | ✅ **ACTIVE** | 🟡 | Upstream-like shape and filters; runtime grouping subset |

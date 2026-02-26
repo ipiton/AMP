@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `/debug/*` switched from JSON stub to pprof-backed proxy behavior
   - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
   - `GET /api/v2/status` now reports `cluster.status=disabled` in single-node runtime (closer to upstream behavior when clustering is off)
+  - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
   - `GET /api/v2/silences` and `GET /api/v2/silence/{id}` now always include `matchers[].isRegex` (including `false`)
   - Added upstream parity regression coverage for reload/debug/static compatibility
 - **Runtime Config API Baseline** - Added minimal config read/write path in active runtime (2026-02-26)
