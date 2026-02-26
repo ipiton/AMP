@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Runtime Config API Baseline** - Added minimal config read/write path in active runtime (2026-02-26)
   - Added `GET /api/v2/config` (`format=json` default, `format=yaml`)
   - Added `POST /api/v2/config` (payload validation, atomic file write, runtime apply of inhibition/receivers)
+  - Added `GET /api/v2/config/status` (last apply/reload result + source + timestamp + error + runtime counters)
   - `POST /api/v2/config` returns `400` for invalid payload, `413` for oversized payload, `405` for unsupported methods
   - Added Phase0 contract coverage for route inventory, format handling, method contracts and runtime-apply semantics
 

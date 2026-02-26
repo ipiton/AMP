@@ -129,6 +129,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", allowedStatus: []int{http.StatusOK}},
 		{name: "config get", method: http.MethodGet, path: "/api/v2/config", allowedStatus: []int{http.StatusOK}},
 		{name: "config post", method: http.MethodPost, path: "/api/v2/config", body: validConfigPayload, allowedStatus: []int{http.StatusOK}},
+		{name: "config status get", method: http.MethodGet, path: "/api/v2/config/status", allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -408,6 +409,47 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		errMsg, _ := payload["error"].(string)
 		if !strings.Contains(errMsg, "invalid config payload") {
 			t.Fatalf("invalid config post response expected payload error, got %v", payload["error"])
+		}
+	})
+
+	t.Run("config status contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/status", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/status expected 200, got %d", rec.Code)
+		}
+		if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("GET /api/v2/config/status expected json content type, got %q", rec.Header().Get("Content-Type"))
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config status response is not valid json: %v", err)
+		}
+		if _, ok := payload["status"].(string); !ok {
+			t.Fatalf("config status response expected status string, got %T", payload["status"])
+		}
+		if _, ok := payload["source"].(string); !ok {
+			t.Fatalf("config status response expected source string, got %T", payload["source"])
+		}
+		if _, ok := payload["appliedAt"].(string); !ok {
+			t.Fatalf("config status response expected appliedAt string, got %T", payload["appliedAt"])
+		}
+		if _, ok := payload["error"].(string); !ok {
+			t.Fatalf("config status response expected error string, got %T", payload["error"])
+		}
+		if _, ok := payload["configPath"].(string); !ok {
+			t.Fatalf("config status response expected configPath string, got %T", payload["configPath"])
+		}
+		if _, ok := payload["inhibitionRuleCount"].(float64); !ok {
+			t.Fatalf("config status response expected inhibitionRuleCount number, got %T", payload["inhibitionRuleCount"])
+		}
+		if _, ok := payload["receiverCount"].(float64); !ok {
+			t.Fatalf("config status response expected receiverCount number, got %T", payload["receiverCount"])
 		}
 	})
 
@@ -916,6 +958,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}{
 			{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status"},
 			{name: "config put not allowed", method: http.MethodPut, path: "/api/v2/config"},
+			{name: "config status post not allowed", method: http.MethodPost, path: "/api/v2/config/status"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
@@ -2132,6 +2175,87 @@ inhibit_rules:
 	}
 	if _, ok := receiverSet["team-runtime"]; !ok {
 		t.Fatalf("expected runtime receiver team-runtime, got %v", receivers)
+	}
+}
+
+func TestPhase0ConfigStatusTracksApplySourceAndResult(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	readStatus := func() map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/status", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/status expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("failed to decode config status response: %v", err)
+		}
+		return payload
+	}
+
+	startupStatus := readStatus()
+	if startupStatus["status"] != "ok" {
+		t.Fatalf("expected startup config status=ok, got %v", startupStatus["status"])
+	}
+	if startupStatus["source"] != "startup" {
+		t.Fatalf("expected startup config source=startup, got %v", startupStatus["source"])
+	}
+	appliedAt, ok := startupStatus["appliedAt"].(string)
+	if !ok || strings.TrimSpace(appliedAt) == "" {
+		t.Fatalf("expected startup appliedAt to be set")
+	}
+
+	configPayload := `
+route:
+  receiver: "team-api"
+receivers:
+  - name: "team-api"
+`
+	configPostReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configPayload))
+	configPostRec := httptest.NewRecorder()
+	mux.ServeHTTP(configPostRec, configPostReq)
+	if configPostRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/config expected 200, got %d", configPostRec.Code)
+	}
+
+	apiStatus := readStatus()
+	if apiStatus["status"] != "ok" {
+		t.Fatalf("expected api config status=ok, got %v", apiStatus["status"])
+	}
+	if apiStatus["source"] != "api" {
+		t.Fatalf("expected api config source=api, got %v", apiStatus["source"])
+	}
+	if apiStatus["error"] != "" {
+		t.Fatalf("expected api config error empty, got %v", apiStatus["error"])
+	}
+
+	if err := os.WriteFile(configPath, []byte("route: [\n"), 0o600); err != nil {
+		t.Fatalf("failed to write invalid config: %v", err)
+	}
+	reloadReq := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
+	reloadRec := httptest.NewRecorder()
+	mux.ServeHTTP(reloadRec, reloadReq)
+	if reloadRec.Code != http.StatusInternalServerError {
+		t.Fatalf("POST /-/reload with invalid config expected 500, got %d", reloadRec.Code)
+	}
+
+	failedStatus := readStatus()
+	if failedStatus["status"] != "failed" {
+		t.Fatalf("expected failed config status=failed, got %v", failedStatus["status"])
+	}
+	if failedStatus["source"] != "reload" {
+		t.Fatalf("expected failed config source=reload, got %v", failedStatus["source"])
+	}
+	errText, _ := failedStatus["error"].(string)
+	if strings.TrimSpace(errText) == "" {
+		t.Fatalf("expected failed config error message")
 	}
 }
 
