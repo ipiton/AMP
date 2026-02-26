@@ -488,6 +488,25 @@ func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_SilencesInvalidFilterErrorPayloadIsJSONString(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/silences?filter=broken-matcher", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /api/v2/silences invalid filter expected 400, got %d", rec.Code)
+	}
+
+	var payload string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid filter error expected JSON string body, got %q (%v)", rec.Body.String(), err)
+	}
+	if strings.TrimSpace(payload) == "" {
+		t.Fatalf("invalid filter error expected non-empty message")
+	}
+}
+
 func TestUpstreamParity_DeleteSilenceReturnsEmptyBody(t *testing.T) {
 	mux := newPhase0TestMux(t)
 	now := time.Now().UTC()

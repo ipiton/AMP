@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
   - `DELETE /api/v2/silence/{id}` now returns `200` with empty body on success (upstream-like)
   - `POST /api/v2/silences` now returns upstream-like JSON string payloads for error responses (`400/404/413`)
+  - `GET /api/v2/silences?filter=...` now returns upstream-like JSON string payload for invalid matcher errors (`400`)
   - `GET /api/v2/silences` and `GET /api/v2/silence/{id}` now always include `matchers[].isRegex` (including `false`)
   - Added upstream parity regression coverage for reload/debug/static compatibility
 - **Runtime Config API Baseline** - Added minimal config read/write path in active runtime (2026-02-26)

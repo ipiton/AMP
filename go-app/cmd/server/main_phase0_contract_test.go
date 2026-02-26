@@ -1322,6 +1322,13 @@ receivers:
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/silences with invalid filter expected 400, got %d", rec.Code)
 		}
+		var payload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("silences invalid filter expected json string error, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(payload) == "" {
+			t.Fatalf("silences invalid filter expected non-empty error message")
+		}
 	})
 
 	t.Run("silences post contract", func(t *testing.T) {
