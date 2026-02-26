@@ -35,9 +35,9 @@
 |----------|--------------|---------------|---------|-------|
 | `GET /api/v2/status` | ✅ | ✅ **ACTIVE** | 🟢 | Runtime-backed status shape with `cluster`, `versionInfo`, `config`, `uptime`; single-node reports `cluster.status=disabled` |
 | `GET /api/v2/receivers` | ✅ | ✅ **ACTIVE** | 🟢 | Returns configured `receivers[*].name` list from runtime config (upstream-like behavior) |
-| `GET /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | State filters and matchers supported; invalid state-flag bool values fallback to `false` (upstream-like parse behavior), invalid `status`/`resolved` values are ignored with `200`; full routing/inhibition parity pending |
+| `GET /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | State filters and matchers supported; invalid state-flag bool values fallback to `false` (upstream-like parse behavior), invalid `status`/`resolved` values are ignored with `200`, invalid `receiver/filter` errors return JSON string payloads on `400`; full routing/inhibition parity pending |
 | `POST /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | Ingest + dedup + resolve semantics; no full upstream routing tree parity |
-| `GET /api/v2/alerts/groups` | ✅ | ✅ **ACTIVE** | 🟡 | Upstream-like shape and filters; invalid state-flag bool values fallback to `false` (upstream-like parse behavior), invalid `resolved` values are ignored with `200`; runtime grouping subset |
+| `GET /api/v2/alerts/groups` | ✅ | ✅ **ACTIVE** | 🟡 | Upstream-like shape and filters; invalid state-flag bool values fallback to `false` (upstream-like parse behavior), invalid `resolved` values are ignored with `200`, invalid `receiver/filter` errors return JSON string payloads on `400`; runtime grouping subset |
 | `GET /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Matcher filters and ordering aligned for covered scenarios; invalid matcher filter errors return upstream-like JSON string payload (`400`) |
 | `POST /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Create/update via POST path with runtime validation; error contracts follow upstream-like mixed shape (`422` `{code,message}` for schema/required, `404` JSON string for unknown/invalid `id`, `400` JSON string for semantic validation) |
 | `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |

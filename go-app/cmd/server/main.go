@@ -1184,16 +1184,12 @@ func handleAlertsGet(
 
 	receiverRegex, err := parseRegexQuery(r.URL.Query().Get("receiver"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
+		writeJSONString(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	labelMatchers, err := parseAlertLabelMatchers(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
+		writeJSONString(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1431,16 +1427,12 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *
 
 		receiverRegex, err := parseRegexQuery(r.URL.Query().Get("receiver"))
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": err.Error(),
-			})
+			writeJSONString(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		labelMatchers, err := parseAlertLabelMatchers(r)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": err.Error(),
-			})
+			writeJSONString(w, http.StatusBadRequest, err.Error())
 			return
 		}
 

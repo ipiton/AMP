@@ -512,6 +512,40 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_AlertsAndGroupsInvalidQueryErrorPayloadIsJSONString(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "alerts invalid receiver", path: "/api/v2/alerts?receiver=["},
+		{name: "alerts invalid filter", path: "/api/v2/alerts?filter=broken-matcher"},
+		{name: "groups invalid receiver", path: "/api/v2/alerts/groups?receiver=["},
+		{name: "groups invalid filter", path: "/api/v2/alerts/groups?filter=broken-matcher"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("GET %s expected 400, got %d", tc.path, rec.Code)
+			}
+
+			var payload string
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("GET %s expected JSON string body, got %q (%v)", tc.path, rec.Body.String(), err)
+			}
+			if strings.TrimSpace(payload) == "" {
+				t.Fatalf("GET %s expected non-empty error message", tc.path)
+			}
+		})
+	}
+}
+
 func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	mux := newPhase0TestMux(t)
 	now := time.Now().UTC()
