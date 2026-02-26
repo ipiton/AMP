@@ -569,6 +569,102 @@ receivers:
 		}
 	})
 
+	t.Run("config rollback invalid configHash contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config/rollback?configHash=bad", bytes.NewBufferString(`{}`))
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/config/rollback with invalid configHash expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("config rollback unknown configHash contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		updatedConfig := `
+route:
+  receiver: "team-rollback-notfound"
+receivers:
+  - name: "team-rollback-notfound"
+`
+		applyReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(updatedConfig))
+		applyRec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyRec, applyReq)
+		if applyRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config before unknown-hash rollback expected 200, got %d", applyRec.Code)
+		}
+
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v2/config/rollback?configHash=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			bytes.NewBufferString(`{}`),
+		)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("POST /api/v2/config/rollback with unknown configHash expected 404, got %d", rec.Code)
+		}
+	})
+
+	t.Run("config rollback by configHash contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		configA := `
+route:
+  receiver: "team-rollback-a"
+receivers:
+  - name: "team-rollback-a"
+`
+		configB := `
+route:
+  receiver: "team-rollback-b"
+receivers:
+  - name: "team-rollback-b"
+`
+
+		applyAReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configA))
+		applyARec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyARec, applyAReq)
+		if applyARec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for configA expected 200, got %d", applyARec.Code)
+		}
+
+		applyBReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configB))
+		applyBRec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyBRec, applyBReq)
+		if applyBRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for configB expected 200, got %d", applyBRec.Code)
+		}
+
+		targetHash := configSHA256(configA)
+		rollbackReq := httptest.NewRequest(
+			http.MethodPost,
+			fmt.Sprintf("/api/v2/config/rollback?configHash=%s", targetHash),
+			bytes.NewBufferString(`{}`),
+		)
+		rollbackRec := httptest.NewRecorder()
+		localMux.ServeHTTP(rollbackRec, rollbackReq)
+
+		if rollbackRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config/rollback by configHash expected 200, got %d", rollbackRec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rollbackRec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config rollback by hash response is not valid json: %v", err)
+		}
+		if payload["status"] != "rolled_back" {
+			t.Fatalf("config rollback by hash response expected status=rolled_back, got %v", payload["status"])
+		}
+		if payload["toConfigHash"] != targetHash {
+			t.Fatalf("config rollback by hash expected toConfigHash=%s, got %v", targetHash, payload["toConfigHash"])
+		}
+	})
+
 	t.Run("history contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/history", nil)
 		rec := httptest.NewRecorder()
@@ -2530,6 +2626,89 @@ receivers:
 	}
 	if _, ok := receiverSet["team-b"]; ok {
 		t.Fatalf("expected runtime receiver team-b to be removed after rollback, got %v", receivers)
+	}
+}
+
+func TestPhase0ConfigRollbackToSpecificHash(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	postConfig := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+	}
+
+	configA := `
+route:
+  receiver: "team-hash-a"
+receivers:
+  - name: "team-hash-a"
+`
+	configB := `
+route:
+  receiver: "team-hash-b"
+receivers:
+  - name: "team-hash-b"
+`
+
+	postConfig(configA)
+	postConfig(configB)
+
+	hashA := configSHA256(configA)
+	hashB := configSHA256(configB)
+
+	rollbackToHashReq := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/v2/config/rollback?configHash=%s", hashA),
+		bytes.NewBufferString(`{}`),
+	)
+	rollbackToHashRec := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackToHashRec, rollbackToHashReq)
+	if rollbackToHashRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/config/rollback by hash expected 200, got %d", rollbackToHashRec.Code)
+	}
+
+	var rollbackPayload map[string]any
+	if err := json.Unmarshal(rollbackToHashRec.Body.Bytes(), &rollbackPayload); err != nil {
+		t.Fatalf("failed to decode rollback by hash response: %v", err)
+	}
+	if rollbackPayload["status"] != "rolled_back" {
+		t.Fatalf("expected rollback by hash status=rolled_back, got %v", rollbackPayload["status"])
+	}
+	if rollbackPayload["fromConfigHash"] != hashB {
+		t.Fatalf("expected rollback by hash fromConfigHash=%s, got %v", hashB, rollbackPayload["fromConfigHash"])
+	}
+	if rollbackPayload["toConfigHash"] != hashA {
+		t.Fatalf("expected rollback by hash toConfigHash=%s, got %v", hashA, rollbackPayload["toConfigHash"])
+	}
+
+	configOnDiskAfterRollback, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config after hash rollback: %v", err)
+	}
+	if !strings.Contains(string(configOnDiskAfterRollback), "team-hash-a") {
+		t.Fatalf("expected config after hash rollback to contain team-hash-a receiver")
+	}
+	if strings.Contains(string(configOnDiskAfterRollback), "team-hash-b") {
+		t.Fatalf("expected config after hash rollback to exclude team-hash-b receiver")
+	}
+
+	rollbackToSameHashReq := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/v2/config/rollback?configHash=%s", hashA),
+		bytes.NewBufferString(`{}`),
+	)
+	rollbackToSameHashRec := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackToSameHashRec, rollbackToSameHashReq)
+	if rollbackToSameHashRec.Code != http.StatusConflict {
+		t.Fatalf("POST /api/v2/config/rollback to current hash expected 409, got %d", rollbackToSameHashRec.Code)
 	}
 }
 
