@@ -84,6 +84,49 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_ReceiversConfiguredListOnly(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-db"
+receivers:
+  - name: "team-default"
+  - name: "team-email"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/receivers expected 200, got %d", rec.Code)
+	}
+
+	var receivers []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &receivers); err != nil {
+		t.Fatalf("failed to decode receivers response: %v", err)
+	}
+	if len(receivers) != 2 {
+		t.Fatalf("expected exactly two configured receivers, got %d", len(receivers))
+	}
+
+	names := []string{}
+	for _, receiver := range receivers {
+		name, ok := receiver["name"].(string)
+		if !ok || strings.TrimSpace(name) == "" {
+			t.Fatalf("receiver.name expected non-empty string, got %v", receiver["name"])
+		}
+		names = append(names, name)
+	}
+
+	if names[0] != "team-default" || names[1] != "team-email" {
+		t.Fatalf("unexpected receiver list order/content: %v", names)
+	}
+}
+
 func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {
 	configPath := writeTestConfigFile(t, "route: [\n")
 	t.Setenv(runtimeConfigFileEnv, configPath)

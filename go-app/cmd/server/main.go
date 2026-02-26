@@ -306,7 +306,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine))
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
-	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore, receiverCatalog))
+	mux.HandleFunc("/api/v2/receivers", receiversHandler(receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
 	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
@@ -1408,16 +1408,14 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 	}
 }
 
-func receiversHandler(store *alertStore, catalog *runtimeReceiverCatalog) http.HandlerFunc {
+func receiversHandler(catalog *runtimeReceiverCatalog) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 
-		receiversSet := map[string]struct{}{
-			"default": {},
-		}
+		receiversSet := map[string]struct{}{}
 		if catalog != nil {
 			for _, name := range catalog.getConfigured() {
 				trimmed := strings.TrimSpace(name)
@@ -1426,10 +1424,6 @@ func receiversHandler(store *alertStore, catalog *runtimeReceiverCatalog) http.H
 				}
 				receiversSet[trimmed] = struct{}{}
 			}
-		}
-		for _, alert := range store.list("", true) {
-			receiver := alertReceiverName(alert)
-			receiversSet[receiver] = struct{}{}
 		}
 
 		receivers := make([]apiReceiver, 0, len(receiversSet))
@@ -2947,7 +2941,6 @@ func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
 	}
 
 	receiversSet := map[string]struct{}{}
-	collectConfiguredRouteReceivers(cfg.Route, receiversSet)
 	for _, receiver := range cfg.Receivers {
 		name := strings.TrimSpace(receiver.Name)
 		if name == "" {
@@ -2962,17 +2955,6 @@ func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
 	}
 	sort.Strings(configured)
 	return configured, nil
-}
-
-func collectConfiguredRouteReceivers(route alertmanagerRouteConfig, out map[string]struct{}) {
-	name := strings.TrimSpace(route.Receiver)
-	if name != "" {
-		out[name] = struct{}{}
-	}
-
-	for i := range route.Routes {
-		collectConfiguredRouteReceivers(route.Routes[i], out)
-	}
 }
 
 func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
