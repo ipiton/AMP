@@ -397,6 +397,8 @@ curl -X POST http://localhost:9093/api/v2/config/rollback
 curl http://localhost:9093/api/v2/config/history
 ```
 
+If there is no previous successful revision, rollback returns `409 Conflict`.
+
 ---
 
 ## 📊 Comparison with Other Systems

@@ -47,6 +47,7 @@ const (
 const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
 
 const maxConfigApplyHistoryEntries = 500
+const maxConfigRevisionEntries = 100
 
 var (
 	buildRevision = "unknown"
@@ -310,6 +311,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/history", configHistoryHandler(configPath, statusCtx))
+	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -346,6 +348,7 @@ type runtimeStatusContext struct {
 	configApplyError   string
 	configApplyAt      time.Time
 	configApplyHistory []runtimeConfigApplyHistoryEntry
+	configRevisions    []runtimeConfigRevision
 }
 
 type runtimeConfigApplyHistoryEntry struct {
@@ -354,6 +357,13 @@ type runtimeConfigApplyHistoryEntry struct {
 	AppliedAt  string `json:"appliedAt"`
 	Error      string `json:"error"`
 	ConfigHash string `json:"configHash"`
+}
+
+type runtimeConfigRevision struct {
+	ConfigHash    string
+	ConfigContent string
+	Source        string
+	AppliedAt     time.Time
 }
 
 type runtimeInhibitionEngine struct {
@@ -452,6 +462,7 @@ func (c *runtimeStatusContext) setConfigApplyResult(source string, err error) {
 	} else {
 		c.configApplyStatus = "ok"
 		c.configApplyError = ""
+		c.appendConfigRevisionLocked(c.configApplySource, c.configApplyAt)
 	}
 
 	c.configApplyHistory = append(c.configApplyHistory, runtimeConfigApplyHistoryEntry{
@@ -465,6 +476,33 @@ func (c *runtimeStatusContext) setConfigApplyResult(source string, err error) {
 		c.configApplyHistory = append([]runtimeConfigApplyHistoryEntry(nil), c.configApplyHistory[len(c.configApplyHistory)-maxConfigApplyHistoryEntries:]...)
 	}
 	c.mu.Unlock()
+}
+
+func (c *runtimeStatusContext) appendConfigRevisionLocked(source string, appliedAt time.Time) {
+	if c == nil {
+		return
+	}
+
+	configHash := configSHA256(c.configOriginal)
+	if len(c.configRevisions) > 0 {
+		last := c.configRevisions[len(c.configRevisions)-1]
+		if last.ConfigHash == configHash {
+			return
+		}
+	}
+
+	c.configRevisions = append(c.configRevisions, runtimeConfigRevision{
+		ConfigHash:    configHash,
+		ConfigContent: c.configOriginal,
+		Source:        source,
+		AppliedAt:     appliedAt,
+	})
+	if len(c.configRevisions) > maxConfigRevisionEntries {
+		c.configRevisions = append(
+			[]runtimeConfigRevision(nil),
+			c.configRevisions[len(c.configRevisions)-maxConfigRevisionEntries:]...,
+		)
+	}
 }
 
 func (c *runtimeStatusContext) getConfigApplyResult() (status, source, errorText string, at time.Time) {
@@ -507,6 +545,39 @@ func (c *runtimeStatusContext) getConfigApplyHistory(limit int) []runtimeConfigA
 		result = append(result, c.configApplyHistory[i])
 	}
 	return result
+}
+
+func (c *runtimeStatusContext) getPreviousConfigRevision() (runtimeConfigRevision, bool) {
+	if c == nil {
+		return runtimeConfigRevision{}, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.configRevisions) < 2 {
+		return runtimeConfigRevision{}, false
+	}
+
+	currentHash := configSHA256(c.configOriginal)
+	currentIndex := -1
+	for i := len(c.configRevisions) - 1; i >= 0; i-- {
+		if c.configRevisions[i].ConfigHash == currentHash {
+			currentIndex = i
+			break
+		}
+	}
+	if currentIndex == -1 {
+		currentIndex = len(c.configRevisions)
+	}
+
+	for i := currentIndex - 1; i >= 0; i-- {
+		if c.configRevisions[i].ConfigHash != currentHash {
+			return c.configRevisions[i], true
+		}
+	}
+
+	return runtimeConfigRevision{}, false
 }
 
 func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
@@ -1505,6 +1576,70 @@ func configHistoryHandler(configPath string, statusCtx *runtimeStatusContext) ht
 			"limit":      limit,
 			"configPath": configPath,
 			"entries":    entries,
+		})
+	}
+}
+
+func configRollbackHandler(
+	configPath string,
+	statusCtx *runtimeStatusContext,
+	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if statusCtx == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "runtime status context is unavailable",
+			})
+			return
+		}
+
+		targetRevision, ok := statusCtx.getPreviousConfigRevision()
+		if !ok {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "no previous config revision available for rollback",
+			})
+			return
+		}
+
+		currentConfig, err := readRuntimeConfigOriginalForReload(configPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to read current config: %s", err),
+			})
+			return
+		}
+		fromConfigHash := configSHA256(currentConfig)
+
+		if err := writeRuntimeConfig(configPath, []byte(targetRevision.ConfigContent)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to persist rollback config: %s", err),
+			})
+			return
+		}
+
+		if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers); err != nil {
+			// Best-effort rollback of rollback to keep runtime consistent.
+			if rollbackErr := writeRuntimeConfig(configPath, []byte(currentConfig)); rollbackErr == nil {
+				_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
+			}
+			statusCtx.setConfigApplyResult("rollback", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": fmt.Sprintf("failed to apply rollback config: %s", err),
+			})
+			return
+		}
+		statusCtx.setConfigApplyResult("rollback", nil)
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":         "rolled_back",
+			"fromConfigHash": fromConfigHash,
+			"toConfigHash":   targetRevision.ConfigHash,
+			"configPath":     configPath,
 		})
 	}
 }

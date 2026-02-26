@@ -131,6 +131,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "config post", method: http.MethodPost, path: "/api/v2/config", body: validConfigPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "config status get", method: http.MethodGet, path: "/api/v2/config/status", allowedStatus: []int{http.StatusOK}},
 		{name: "config history get", method: http.MethodGet, path: "/api/v2/config/history", allowedStatus: []int{http.StatusOK}},
+		{name: "config rollback post", method: http.MethodPost, path: "/api/v2/config/rollback", body: `{}`, allowedStatus: []int{http.StatusOK, http.StatusConflict}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -499,6 +500,72 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/config/history with invalid limit expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("config rollback requires previous revision contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config/rollback", bytes.NewBufferString(`{}`))
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("POST /api/v2/config/rollback without previous revision expected 409, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config rollback conflict response is not valid json: %v", err)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "no previous config revision") {
+			t.Fatalf("config rollback conflict expected previous revision error, got %v", payload["error"])
+		}
+	})
+
+	t.Run("config rollback contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		updatedConfig := `
+route:
+  receiver: "team-rollback"
+receivers:
+  - name: "team-rollback"
+`
+		applyReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(updatedConfig))
+		applyRec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyRec, applyReq)
+		if applyRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config before rollback expected 200, got %d", applyRec.Code)
+		}
+
+		rollbackReq := httptest.NewRequest(http.MethodPost, "/api/v2/config/rollback", bytes.NewBufferString(`{}`))
+		rollbackRec := httptest.NewRecorder()
+		localMux.ServeHTTP(rollbackRec, rollbackReq)
+
+		if rollbackRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config/rollback expected 200, got %d", rollbackRec.Code)
+		}
+		if !strings.HasPrefix(rollbackRec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("POST /api/v2/config/rollback expected json content type, got %q", rollbackRec.Header().Get("Content-Type"))
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rollbackRec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config rollback response is not valid json: %v", err)
+		}
+		if payload["status"] != "rolled_back" {
+			t.Fatalf("config rollback response expected status=rolled_back, got %v", payload["status"])
+		}
+		if _, ok := payload["fromConfigHash"].(string); !ok {
+			t.Fatalf("config rollback response expected fromConfigHash string, got %T", payload["fromConfigHash"])
+		}
+		if _, ok := payload["toConfigHash"].(string); !ok {
+			t.Fatalf("config rollback response expected toConfigHash string, got %T", payload["toConfigHash"])
+		}
+		if _, ok := payload["configPath"].(string); !ok {
+			t.Fatalf("config rollback response expected configPath string, got %T", payload["configPath"])
 		}
 	})
 
@@ -1009,6 +1076,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "config put not allowed", method: http.MethodPut, path: "/api/v2/config"},
 			{name: "config status post not allowed", method: http.MethodPost, path: "/api/v2/config/status"},
 			{name: "config history post not allowed", method: http.MethodPost, path: "/api/v2/config/history"},
+			{name: "config rollback get not allowed", method: http.MethodGet, path: "/api/v2/config/rollback"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
@@ -2354,6 +2422,114 @@ receivers:
 	}
 	if history[2]["source"] != "startup" || history[2]["status"] != "ok" {
 		t.Fatalf("expected third history entry to be startup success, got %v", history[2])
+	}
+}
+
+func TestPhase0ConfigRollbackRevertsPreviousRevision(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	postConfig := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+	}
+
+	configA := `
+route:
+  receiver: "team-a"
+receivers:
+  - name: "team-a"
+`
+	configB := `
+route:
+  receiver: "team-b"
+receivers:
+  - name: "team-b"
+`
+
+	postConfig(configA)
+	postConfig(configB)
+
+	configOnDiskBeforeRollback, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config before rollback: %v", err)
+	}
+	if !strings.Contains(string(configOnDiskBeforeRollback), "team-b") {
+		t.Fatalf("expected config before rollback to contain team-b receiver")
+	}
+
+	rollbackReq := httptest.NewRequest(http.MethodPost, "/api/v2/config/rollback", bytes.NewBufferString(`{}`))
+	rollbackRec := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackRec, rollbackReq)
+	if rollbackRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/config/rollback expected 200, got %d", rollbackRec.Code)
+	}
+
+	var rollbackPayload map[string]any
+	if err := json.Unmarshal(rollbackRec.Body.Bytes(), &rollbackPayload); err != nil {
+		t.Fatalf("failed to decode rollback response: %v", err)
+	}
+	if rollbackPayload["status"] != "rolled_back" {
+		t.Fatalf("expected rollback status=rolled_back, got %v", rollbackPayload["status"])
+	}
+
+	configOnDiskAfterRollback, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config after rollback: %v", err)
+	}
+	if !strings.Contains(string(configOnDiskAfterRollback), "team-a") {
+		t.Fatalf("expected config after rollback to contain team-a receiver")
+	}
+	if strings.Contains(string(configOnDiskAfterRollback), "team-b") {
+		t.Fatalf("expected config after rollback to exclude team-b receiver")
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/status", nil)
+	statusRec := httptest.NewRecorder()
+	mux.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/status expected 200, got %d", statusRec.Code)
+	}
+
+	var statusPayload map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("failed to decode config status response: %v", err)
+	}
+	if statusPayload["status"] != "ok" {
+		t.Fatalf("expected config status after rollback to be ok, got %v", statusPayload["status"])
+	}
+	if statusPayload["source"] != "rollback" {
+		t.Fatalf("expected config status source=rollback, got %v", statusPayload["source"])
+	}
+
+	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+	receiversRec := httptest.NewRecorder()
+	mux.ServeHTTP(receiversRec, receiversReq)
+	if receiversRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/receivers expected 200, got %d", receiversRec.Code)
+	}
+
+	var receivers []map[string]any
+	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
+		t.Fatalf("failed to decode receivers response: %v", err)
+	}
+	receiverSet := make(map[string]struct{}, len(receivers))
+	for _, receiver := range receivers {
+		name, _ := receiver["name"].(string)
+		receiverSet[name] = struct{}{}
+	}
+	if _, ok := receiverSet["team-a"]; !ok {
+		t.Fatalf("expected runtime receiver team-a after rollback, got %v", receivers)
+	}
+	if _, ok := receiverSet["team-b"]; ok {
+		t.Fatalf("expected runtime receiver team-b to be removed after rollback, got %v", receivers)
 	}
 }
 
