@@ -131,6 +131,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "config post", method: http.MethodPost, path: "/api/v2/config", body: validConfigPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "config status get", method: http.MethodGet, path: "/api/v2/config/status", allowedStatus: []int{http.StatusOK}},
 		{name: "config history get", method: http.MethodGet, path: "/api/v2/config/history", allowedStatus: []int{http.StatusOK}},
+		{name: "config revisions get", method: http.MethodGet, path: "/api/v2/config/revisions", allowedStatus: []int{http.StatusOK}},
 		{name: "config rollback post", method: http.MethodPost, path: "/api/v2/config/rollback", body: `{}`, allowedStatus: []int{http.StatusOK, http.StatusConflict}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
@@ -586,6 +587,73 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/config/history with invalid status expected 400, got %d", rec.Code)
+		}
+	})
+
+	t.Run("config revisions contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/revisions?limit=5", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config/revisions expected 200, got %d", rec.Code)
+		}
+		if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("GET /api/v2/config/revisions expected json content type, got %q", rec.Header().Get("Content-Type"))
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config revisions response is not valid json: %v", err)
+		}
+		if _, ok := payload["total"].(float64); !ok {
+			t.Fatalf("config revisions response expected total number, got %T", payload["total"])
+		}
+		if _, ok := payload["limit"].(float64); !ok {
+			t.Fatalf("config revisions response expected limit number, got %T", payload["limit"])
+		}
+		if _, ok := payload["currentConfigHash"].(string); !ok {
+			t.Fatalf("config revisions response expected currentConfigHash string, got %T", payload["currentConfigHash"])
+		}
+		if _, ok := payload["configPath"].(string); !ok {
+			t.Fatalf("config revisions response expected configPath string, got %T", payload["configPath"])
+		}
+		revisions, ok := payload["revisions"].([]any)
+		if !ok {
+			t.Fatalf("config revisions response expected revisions array, got %T", payload["revisions"])
+		}
+		if len(revisions) == 0 {
+			t.Fatalf("config revisions response expected at least one revision")
+		}
+		entry, ok := revisions[0].(map[string]any)
+		if !ok {
+			t.Fatalf("config revisions first entry expected object, got %T", revisions[0])
+		}
+		if _, ok := entry["configHash"].(string); !ok {
+			t.Fatalf("config revisions entry expected configHash string, got %T", entry["configHash"])
+		}
+		if _, ok := entry["source"].(string); !ok {
+			t.Fatalf("config revisions entry expected source string, got %T", entry["source"])
+		}
+		if _, ok := entry["appliedAt"].(string); !ok {
+			t.Fatalf("config revisions entry expected appliedAt string, got %T", entry["appliedAt"])
+		}
+		if _, ok := entry["isCurrent"].(bool); !ok {
+			t.Fatalf("config revisions entry expected isCurrent bool, got %T", entry["isCurrent"])
+		}
+	})
+
+	t.Run("config revisions invalid limit contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config/revisions?limit=nan", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/config/revisions with invalid limit expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -1258,6 +1326,7 @@ receivers:
 			{name: "config put not allowed", method: http.MethodPut, path: "/api/v2/config"},
 			{name: "config status post not allowed", method: http.MethodPost, path: "/api/v2/config/status"},
 			{name: "config history post not allowed", method: http.MethodPost, path: "/api/v2/config/history"},
+			{name: "config revisions post not allowed", method: http.MethodPost, path: "/api/v2/config/revisions"},
 			{name: "config rollback get not allowed", method: http.MethodGet, path: "/api/v2/config/rollback"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
@@ -2815,6 +2884,109 @@ receivers:
 	mux.ServeHTTP(rollbackToSameHashRec, rollbackToSameHashReq)
 	if rollbackToSameHashRec.Code != http.StatusConflict {
 		t.Fatalf("POST /api/v2/config/rollback to current hash expected 409, got %d", rollbackToSameHashRec.Code)
+	}
+}
+
+func TestPhase0ConfigRevisionsExposeUniqueHashesAndCurrentRevision(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	postConfig := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+	}
+
+	configA := `
+route:
+  receiver: "team-revisions-a"
+receivers:
+  - name: "team-revisions-a"
+`
+	configB := `
+route:
+  receiver: "team-revisions-b"
+receivers:
+  - name: "team-revisions-b"
+`
+
+	postConfig(configA)
+	postConfig(configB)
+
+	hashA := configSHA256(configA)
+	hashB := configSHA256(configB)
+
+	rollbackReq := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/v2/config/rollback?configHash=%s", hashA),
+		bytes.NewBufferString(`{}`),
+	)
+	rollbackRec := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackRec, rollbackReq)
+	if rollbackRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/config/rollback by hash expected 200, got %d", rollbackRec.Code)
+	}
+
+	revisionsReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/revisions?limit=10", nil)
+	revisionsRec := httptest.NewRecorder()
+	mux.ServeHTTP(revisionsRec, revisionsReq)
+	if revisionsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/revisions expected 200, got %d", revisionsRec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(revisionsRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("failed to decode config revisions response: %v", err)
+	}
+
+	currentHash, ok := payload["currentConfigHash"].(string)
+	if !ok {
+		t.Fatalf("config revisions expected currentConfigHash string, got %T", payload["currentConfigHash"])
+	}
+	if currentHash != hashA {
+		t.Fatalf("config revisions expected currentConfigHash=%s, got %s", hashA, currentHash)
+	}
+
+	rawRevisions, ok := payload["revisions"].([]any)
+	if !ok {
+		t.Fatalf("config revisions expected revisions array, got %T", payload["revisions"])
+	}
+	if len(rawRevisions) < 2 {
+		t.Fatalf("config revisions expected at least 2 entries, got %d", len(rawRevisions))
+	}
+
+	seen := make(map[string]int, len(rawRevisions))
+	var currentCount int
+	for _, raw := range rawRevisions {
+		revision, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("config revisions entry expected object, got %T", raw)
+		}
+		hash, _ := revision["configHash"].(string)
+		seen[hash]++
+		isCurrent, _ := revision["isCurrent"].(bool)
+		if isCurrent {
+			currentCount++
+			if hash != hashA {
+				t.Fatalf("config revisions expected current hash=%s, got %s", hashA, hash)
+			}
+		}
+	}
+
+	if seen[hashA] != 1 {
+		t.Fatalf("config revisions expected hashA to appear once, got %d", seen[hashA])
+	}
+	if seen[hashB] != 1 {
+		t.Fatalf("config revisions expected hashB to appear once, got %d", seen[hashB])
+	}
+	if currentCount != 1 {
+		t.Fatalf("config revisions expected exactly one current revision, got %d", currentCount)
 	}
 }
 
