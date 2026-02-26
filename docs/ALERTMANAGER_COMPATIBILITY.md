@@ -11,6 +11,9 @@
 
 **Alertmanager++** (AMP Service) is a **100% API-compatible drop-in replacement** for Prometheus Alertmanager with enhanced features.
 
+> Runtime note (2026-02-26): active compatibility behavior is enforced by `go-app/cmd/server/main_phase0_contract_test.go`
+> and `go-app/cmd/server/main_upstream_parity_regression_test.go` for the current `go-app/cmd/server/main.go` runtime.
+
 ### Compatibility Guarantee
 
 - ✅ **100% Alertmanager API v2 compatible** - All core endpoints implemented
@@ -43,6 +46,21 @@
 | **System Status** | | | | |
 | `GET /api/v2/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Basic /health exists, full status planned |
 | `GET /api/v1/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Legacy v1 status endpoint |
+
+### Operational Compatibility Endpoints (Active Runtime)
+
+| Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
+|----------|--------------|---------------|--------|-------|
+| `GET /-/healthy` | ✅ | ✅ | 🟢 | Returns `200` + `OK` |
+| `HEAD /-/healthy` | ✅ | ✅ | 🟢 | Returns `200` |
+| `GET /-/ready` | ✅ | ✅ | 🟢 | Returns `200` + `OK` |
+| `HEAD /-/ready` | ✅ | ✅ | 🟢 | Returns `200` |
+| `POST /-/reload` | ✅ | ✅ | 🟢 | `200` with empty body on success, `500` on config parse/reload error |
+| `GET /debug/*` | ✅ | ✅ | 🟢 | Proxied to Go `net/http/pprof` handlers |
+| `POST /debug/*` | ✅ | ✅ | 🟢 | Routed to pprof; status depends on underlying handler (e.g. `/debug/pprof/` -> `405`) |
+| `GET /script.js` | ✅ | ✅ | 🟢 | Compatibility alias to runtime static JS |
+| `GET /favicon.ico` | ✅ | ✅ | 🟡 | Route present; returns `404` if asset is absent |
+| `GET /lib/*` | ✅ | ✅ | 🟡 | Route present; returns `404` for missing assets |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
 

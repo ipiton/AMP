@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed deprecated stub metrics files
   - Unified API for all publishing metrics
   - Full documentation: `tasks/metrics-v2-full-migration/`
+- **Alertmanager Ops Compatibility Hardening** - Runtime contract aligned with upstream behavior (2026-02-26)
+  - `POST /-/reload` returns `200` with empty body on success
+  - `POST /-/reload` returns `500` on config reload/parse failures
+  - `/debug/*` switched from JSON stub to pprof-backed proxy behavior
+  - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
+  - `GET /api/v2/silences` and `GET /api/v2/silence/{id}` now always include `matchers[].isRegex` (including `false`)
+  - Added upstream parity regression coverage for reload/debug/static compatibility
 
 ### Improved
 - **Code Quality Refactoring** - Comprehensive refactoring achieving 160% quality target (2024-12-05)
