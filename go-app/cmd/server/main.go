@@ -291,6 +291,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore, receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
+	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -1266,6 +1267,53 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 			},
 		})
 	}
+}
+
+func configHandler(configPath string, statusCtx *runtimeStatusContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+		if format == "" {
+			format = "json"
+		}
+
+		switch format {
+		case "json":
+			writeJSON(w, http.StatusOK, map[string]string{
+				"original": runtimeConfigOriginalSnapshot(statusCtx, configPath),
+			})
+		case "yaml":
+			original := runtimeConfigOriginalSnapshot(statusCtx, configPath)
+			if strings.TrimSpace(original) == "" {
+				original = "{}\n"
+			} else if !strings.HasSuffix(original, "\n") {
+				original += "\n"
+			}
+
+			w.Header().Set("Content-Type", "application/yaml")
+			w.WriteHeader(http.StatusOK)
+			if _, err := io.WriteString(w, original); err != nil {
+				slog.Error("Failed to write config response", "error", err)
+			}
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid format query value",
+			})
+		}
+	}
+}
+
+func runtimeConfigOriginalSnapshot(statusCtx *runtimeStatusContext, configPath string) string {
+	if statusCtx != nil {
+		if original := statusCtx.getConfigOriginal(); original != "" {
+			return original
+		}
+	}
+	return readRuntimeConfigOriginalAt(configPath)
 }
 
 func historyHandler(store *alertStore) http.HandlerFunc {

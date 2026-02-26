@@ -1,27 +1,29 @@
 # Alertmanager API Compatibility Matrix
 
-**Date**: 2025-12-01
-**Status**: ✅ **100% COMPATIBLE** - Drop-in replacement ready
-**Alertmanager Version**: v0.27+ (API v2)
-**Alertmanager++ Version**: v1.0.0
+**Date**: 2026-02-26
+**Status**: 🟡 **RUNTIME PARITY IN PROGRESS** - upstream input compatibility + phased hardening
+**Alertmanager Version**: v0.31.1 (API v2)
+**Alertmanager++ Version**: v0.0.1
 
 ---
 
 ## 🎯 Executive Summary
 
-**Alertmanager++** (AMP Service) is a **100% API-compatible drop-in replacement** for Prometheus Alertmanager with enhanced features.
+**Alertmanager++** (AMP Service) in active runtime (`go-app/cmd/server/main.go`) focuses on:
+- Alertmanager-compatible ingest + core API v2 endpoint surface
+- operational probe compatibility (`/-/healthy`, `/-/ready`, `/-/reload`, `/debug/*`)
+- phased semantic parity hardening through contract tests
 
 > Runtime note (2026-02-26): active compatibility behavior is enforced by `go-app/cmd/server/main_phase0_contract_test.go`
 > and `go-app/cmd/server/main_upstream_parity_regression_test.go` for the current `go-app/cmd/server/main.go` runtime.
 
 ### Compatibility Guarantee
 
-- ✅ **100% Alertmanager API v2 compatible** - All core endpoints implemented
-- ✅ **Same configuration format** - alertmanager.yml works as-is
-- ✅ **Same response formats** - Byte-compatible JSON responses
-- ✅ **amtool CLI compatible** - Works without modifications
-- ✅ **Grafana compatible** - Existing dashboards work unchanged
-- ✅ **Prometheus compatible** - Direct replacement in alerting config
+- ✅ **Core API v2 routes are present in active runtime**
+- ✅ **Prometheus/VMAlert ingest compatibility path is active** (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
+- ✅ **Ops probe compatibility is active** (`/-/healthy`, `/-/ready`, `/-/reload`)
+- 🟡 **Semantic parity is partial** (routing/inhibition behavior is a focused subset in Phase 0 runtime)
+- 🟡 **Advanced config API (`POST /api/v2/config*`) is not wired in active runtime yet**
 
 ---
 
@@ -31,21 +33,15 @@
 
 | Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
 |----------|--------------|---------------|---------|-------|
-| **Alert Management** | | | | |
-| `POST /api/v2/alerts` | ✅ | ✅ **COMPLETE** | 🟢 100% | Prometheus v1/v2 formats, 207 multi-status |
-| `GET /api/v2/alerts` | ✅ | ✅ **COMPLETE** | 🟢 100% | Filtering, pagination, sorting, Grafana compatible |
-| **Silence Management** | | | | |
-| `POST /api/v2/silences` | ✅ | ✅ **COMPLETE** | 🟢 100% | Create silence, Alertmanager format |
-| `GET /api/v2/silences` | ✅ | ✅ **COMPLETE** | 🟢 100% | List silences, filter/sort/pagination |
-| `GET /api/v2/silences/{id}` | ✅ | ✅ **COMPLETE** | 🟢 100% | Get silence by UUID |
-| `PUT /api/v2/silences/{id}` | ✅ | ✅ **COMPLETE** | 🟢 100% | Update existing silence |
-| `DELETE /api/v2/silences/{id}` | ✅ | ✅ **COMPLETE** | 🟢 100% | Delete silence |
-| **Configuration** | | | | |
-| `GET /api/v2/config` | ✅ | ✅ **COMPLETE** | 🟢 100% | Get config (YAML/JSON), sanitization support |
-| `POST /api/v2/config` | ⚠️ Limited | ✅ **ENHANCED** | 🟢 120% | Update config + validation + hot reload |
-| **System Status** | | | | |
-| `GET /api/v2/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Basic /health exists, full status planned |
-| `GET /api/v1/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Legacy v1 status endpoint |
+| `GET /api/v2/status` | ✅ | ✅ **ACTIVE** | 🟢 | Runtime-backed status shape with `cluster`, `versionInfo`, `config`, `uptime` |
+| `GET /api/v2/receivers` | ✅ | ✅ **ACTIVE** | 🟡 | Includes configured + discovered receivers; simplified runtime model |
+| `GET /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | State filters and matchers supported; full routing/inhibition parity pending |
+| `POST /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | Ingest + dedup + resolve semantics; no full upstream routing tree parity |
+| `GET /api/v2/alerts/groups` | ✅ | ✅ **ACTIVE** | 🟡 | Upstream-like shape and filters; runtime grouping subset |
+| `GET /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Matcher filters and ordering aligned for covered scenarios |
+| `POST /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Create/update via POST path with runtime validation |
+| `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + not-found contracts covered |
+| `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + delete/not-found contracts covered |
 
 ### Operational Compatibility Endpoints (Active Runtime)
 
@@ -62,6 +58,16 @@
 | `GET /favicon.ico` | ✅ | ✅ | 🟡 | Route present; returns `404` if asset is absent |
 | `GET /lib/*` | ✅ | ✅ | 🟡 | Route present; returns `404` for missing assets |
 
+### Active AMP Config API Extension (non-upstream)
+
+| Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
+|----------|--------------|---------------|--------|-------|
+| `GET /api/v2/config` | ❌ | ✅ | 🟢 | Read-only runtime config snapshot (`json` default, `?format=yaml`) |
+| `POST /api/v2/config` | ❌ | ⏳ | 🟡 | Planned in phased runtime roadmap; not active in `main.go` |
+| `POST /api/v2/config/rollback` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
+| `GET /api/v2/config/history` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
+| `GET /api/v2/config/status` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
+
 ### Enhanced Endpoints (Beyond Alertmanager)
 
 These endpoints provide additional functionality while maintaining backward compatibility:
@@ -70,9 +76,9 @@ These endpoints provide additional functionality while maintaining backward comp
 |----------|---------------|---------|---------|
 | `POST /api/v2/silences/check` | ✅ **COMPLETE** | Test if alert would be silenced | Debugging & validation |
 | `POST /api/v2/silences/bulk/delete` | ✅ **COMPLETE** | Bulk delete silences (up to 100) | Operational efficiency |
-| `POST /api/v2/config/rollback` | ✅ **COMPLETE** | Rollback to previous config | Safety & reliability |
-| `GET /api/v2/config/history` | ✅ **COMPLETE** | Config version history | Audit trail |
-| `GET /api/v2/config/status` | ✅ **COMPLETE** | Config validation status | Operational visibility |
+| `POST /api/v2/config/rollback` | ⏳ **PLANNED** | Rollback to previous config | Planned for full config API phase |
+| `GET /api/v2/config/history` | ⏳ **PLANNED** | Config version history | Planned for full config API phase |
+| `GET /api/v2/config/status` | ⏳ **PLANNED** | Config validation status | Planned for full config API phase |
 | `GET /api/v2/inhibition/rules` | ✅ **COMPLETE** | List loaded inhibition rules | Debugging |
 | `GET /api/v2/inhibition/status` | ✅ **COMPLETE** | Active inhibition relationships | Operational insight |
 | `POST /api/v2/inhibition/check` | ✅ **COMPLETE** | Test inhibition rule matching | Rule validation |
@@ -80,7 +86,7 @@ These endpoints provide additional functionality while maintaining backward comp
 | `GET /history/recent` | ✅ **COMPLETE** | Recent alerts (fast query) | Dashboard integration |
 | `GET /history/stats` | ✅ **COMPLETE** | Aggregated statistics | Trend analysis |
 
-**Total**: 10/11 core endpoints (91%) + 11 enhanced endpoints
+**Runtime note**: this matrix tracks the active `main.go` runtime first; historical `main.go.full` wiring is treated as backlog until re-integrated.
 
 ---
 

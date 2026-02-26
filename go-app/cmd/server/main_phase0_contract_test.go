@@ -117,6 +117,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "silence by id get", method: http.MethodGet, path: "/api/v2/silence/" + unknownSilenceUUID, allowedStatus: []int{http.StatusNotFound}},
 		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/" + unknownSilenceUUID, allowedStatus: []int{http.StatusNotFound}},
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", allowedStatus: []int{http.StatusOK}},
+		{name: "config get", method: http.MethodGet, path: "/api/v2/config", allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -291,6 +292,61 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if payload["error"] != "not found" {
 			t.Fatalf("unknown api response expected error=not found, got %v", payload["error"])
+		}
+	})
+
+	t.Run("config contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config expected 200, got %d", rec.Code)
+		}
+		if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("GET /api/v2/config expected json content type, got %q", rec.Header().Get("Content-Type"))
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config response is not valid json: %v", err)
+		}
+		if _, ok := payload["original"].(string); !ok {
+			t.Fatalf("config response missing original string")
+		}
+	})
+
+	t.Run("config yaml format contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config?format=yaml", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/config?format=yaml expected 200, got %d", rec.Code)
+		}
+		if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/yaml") {
+			t.Fatalf("GET /api/v2/config?format=yaml expected yaml content type, got %q", rec.Header().Get("Content-Type"))
+		}
+		if strings.TrimSpace(rec.Body.String()) == "" {
+			t.Fatalf("config yaml response expected non-empty body")
+		}
+	})
+
+	t.Run("config invalid format contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/config?format=xml", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/config with invalid format expected 400, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid format response is not valid json: %v", err)
+		}
+		if payload["error"] != "invalid format query value" {
+			t.Fatalf("invalid format response expected error message, got %v", payload["error"])
 		}
 	})
 
@@ -798,6 +854,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			path   string
 		}{
 			{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status"},
+			{name: "config post not allowed", method: http.MethodPost, path: "/api/v2/config"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},

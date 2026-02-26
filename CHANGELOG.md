@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
   - `GET /api/v2/silences` and `GET /api/v2/silence/{id}` now always include `matchers[].isRegex` (including `false`)
   - Added upstream parity regression coverage for reload/debug/static compatibility
+- **Runtime Config Export Endpoint** - Added read-only config API in active runtime (2026-02-26)
+  - Added `GET /api/v2/config` in `go-app/cmd/server/main.go`
+  - Supports `format=json` (default) and `format=yaml`
+  - Returns `400` for unsupported format values and `405` for non-GET methods
+  - Added Phase0 contract coverage for route inventory, response shape, format handling and method contract
 
 ### Improved
 - **Code Quality Refactoring** - Comprehensive refactoring achieving 160% quality target (2024-12-05)

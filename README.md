@@ -2,12 +2,12 @@
 
 > A high-performance, Alertmanager-compatible alert management system with 10-20x better performance
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ipiton/AMP)](https://goreportcard.com/report/github.com/ipiton/AMP)
 
 ## ✨ Features
 
-- **100% Alertmanager API v2 Compatible** - Drop-in replacement for Prometheus Alertmanager
+- **Alertmanager API v2 Core Compatibility** - Active runtime covers core ingest/query/silence/status endpoints with phased parity hardening
 - **10-20x Faster Performance** - Optimized Go implementation with sub-5ms latency
 - **75% Less Resources** - 50MB memory footprint (vs 200MB Alertmanager)
 - **Extensible Architecture** - Plugin system for custom classifiers and publishers
@@ -118,11 +118,16 @@ receivers:
 
 See `go-app/internal/infrastructure/routing/testdata/production.yaml` for full example.
 
-**Load alerting config:**
+**Runtime config operations (active `main.go`):**
 ```bash
-# Via API (hot reload without restart!)
-curl -X POST http://localhost:8080/api/v2/config \
-  --data-binary @alertmanager.yaml
+# Read current runtime config snapshot (JSON)
+curl http://localhost:8080/api/v2/config
+
+# Read runtime config snapshot as YAML
+curl "http://localhost:8080/api/v2/config?format=yaml"
+
+# Apply config file changes and reload runtime metadata
+curl -X POST http://localhost:8080/-/reload
 
 # Or via Kubernetes ConfigMap
 kubectl create configmap alertmanager-config \
