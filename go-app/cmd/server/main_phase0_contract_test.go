@@ -92,6 +92,9 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "dashboard silences", method: http.MethodGet, path: "/dashboard/silences", allowedStatus: []int{http.StatusInternalServerError}},
 		{name: "dashboard llm", method: http.MethodGet, path: "/dashboard/llm", allowedStatus: []int{http.StatusInternalServerError}},
 		{name: "dashboard routing", method: http.MethodGet, path: "/dashboard/routing", allowedStatus: []int{http.StatusInternalServerError}},
+		{name: "script js compatibility", method: http.MethodGet, path: "/script.js", allowedStatus: []int{http.StatusOK}},
+		{name: "favicon compatibility", method: http.MethodGet, path: "/favicon.ico", allowedStatus: []int{http.StatusNotFound}},
+		{name: "lib compatibility", method: http.MethodGet, path: "/lib/nonexistent.js", allowedStatus: []int{http.StatusNotFound}},
 		{name: "health", method: http.MethodGet, path: "/health", allowedStatus: []int{http.StatusOK}},
 		{name: "ready", method: http.MethodGet, path: "/ready", allowedStatus: []int{http.StatusOK}},
 		{name: "healthz alias", method: http.MethodGet, path: "/healthz", allowedStatus: []int{http.StatusOK}},
@@ -911,6 +914,34 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 				}
 				if tt.contains != "" && !strings.Contains(rec.Body.String(), tt.contains) {
 					t.Fatalf("%s %s expected body to contain %q, got %q", tt.method, tt.path, tt.contains, rec.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("upstream static compatibility contract", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			method string
+			path   string
+			status int
+		}{
+			{name: "script js get", method: http.MethodGet, path: "/script.js", status: http.StatusOK},
+			{name: "script js post not allowed", method: http.MethodPost, path: "/script.js", status: http.StatusMethodNotAllowed},
+			{name: "favicon get missing", method: http.MethodGet, path: "/favicon.ico", status: http.StatusNotFound},
+			{name: "favicon post not allowed", method: http.MethodPost, path: "/favicon.ico", status: http.StatusMethodNotAllowed},
+			{name: "lib get missing", method: http.MethodGet, path: "/lib/nonexistent.js", status: http.StatusNotFound},
+			{name: "lib post not allowed", method: http.MethodPost, path: "/lib/nonexistent.js", status: http.StatusMethodNotAllowed},
+		}
+
+		for _, tt := range tests {
+			tt := tt
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest(tt.method, tt.path, nil)
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+				if rec.Code != tt.status {
+					t.Fatalf("%s %s expected %d, got %d", tt.method, tt.path, tt.status, rec.Code)
 				}
 			})
 		}

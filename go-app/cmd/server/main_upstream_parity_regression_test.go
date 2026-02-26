@@ -139,6 +139,31 @@ func TestUpstreamParity_DebugPprofContract(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_UpstreamStaticCompatibilityPaths(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	scriptReq := httptest.NewRequest(http.MethodGet, "/script.js", nil)
+	scriptRec := httptest.NewRecorder()
+	mux.ServeHTTP(scriptRec, scriptReq)
+	if scriptRec.Code != http.StatusOK {
+		t.Fatalf("GET /script.js expected 200, got %d", scriptRec.Code)
+	}
+
+	libReq := httptest.NewRequest(http.MethodGet, "/lib/nonexistent.js", nil)
+	libRec := httptest.NewRecorder()
+	mux.ServeHTTP(libRec, libReq)
+	if libRec.Code != http.StatusNotFound {
+		t.Fatalf("GET /lib/nonexistent.js expected 404 for missing asset, got %d", libRec.Code)
+	}
+
+	faviconReq := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	faviconRec := httptest.NewRecorder()
+	mux.ServeHTTP(faviconRec, faviconReq)
+	if faviconRec.Code != http.StatusNotFound {
+		t.Fatalf("GET /favicon.ico expected 404 for missing asset, got %d", faviconRec.Code)
+	}
+}
+
 func TestUpstreamParity_AlertsStateFiltersMatrix(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
