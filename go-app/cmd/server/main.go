@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -291,7 +292,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(alertStore, receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
-	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx))
+	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -730,30 +731,10 @@ func alertmanagerReloadHandler(
 			return
 		}
 
-		reloadedRules, err := parseRuntimeInhibitionRules(configPath)
+		err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
 			return
-		}
-		reloadedReceivers, err := parseRuntimeConfiguredReceivers(configPath)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
-			return
-		}
-		configOriginal, err := readRuntimeConfigOriginalForReload(configPath)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
-			return
-		}
-
-		if inhibitions != nil {
-			inhibitions.setRules(reloadedRules)
-		}
-		if receivers != nil {
-			receivers.setConfigured(reloadedReceivers)
-		}
-		if statusCtx != nil {
-			statusCtx.setConfigOriginal(configOriginal)
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -1269,40 +1250,98 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 	}
 }
 
-func configHandler(configPath string, statusCtx *runtimeStatusContext) http.HandlerFunc {
+func configHandler(
+	configPath string,
+	statusCtx *runtimeStatusContext,
+	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
+		switch r.Method {
+		case http.MethodGet:
+			format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+			if format == "" {
+				format = "json"
+			}
 
-		format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
-		if format == "" {
-			format = "json"
-		}
+			switch format {
+			case "json":
+				writeJSON(w, http.StatusOK, map[string]string{
+					"original": runtimeConfigOriginalSnapshot(statusCtx, configPath),
+				})
+			case "yaml":
+				original := runtimeConfigOriginalSnapshot(statusCtx, configPath)
+				if strings.TrimSpace(original) == "" {
+					original = "{}\n"
+				} else if !strings.HasSuffix(original, "\n") {
+					original += "\n"
+				}
 
-		switch format {
-		case "json":
+				w.Header().Set("Content-Type", "application/yaml")
+				w.WriteHeader(http.StatusOK)
+				if _, err := io.WriteString(w, original); err != nil {
+					slog.Error("Failed to write config response", "error", err)
+				}
+			default:
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "invalid format query value",
+				})
+			}
+		case http.MethodPost:
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 10*1024*1024))
+			if err != nil {
+				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+					"error": "request payload too large",
+				})
+				return
+			}
+			defer r.Body.Close()
+
+			if strings.TrimSpace(string(body)) == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "config payload is required",
+				})
+				return
+			}
+
+			if err := validateRuntimeConfigPayload(body); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": fmt.Sprintf("invalid config payload: %s", err),
+				})
+				return
+			}
+
+			previousConfig, err := readRuntimeConfigOriginalForReload(configPath)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": fmt.Sprintf("failed to read existing config: %s", err),
+				})
+				return
+			}
+
+			if err := writeRuntimeConfig(configPath, body); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": fmt.Sprintf("failed to persist config: %s", err),
+				})
+				return
+			}
+
+			if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers); err != nil {
+				// Best-effort rollback to keep runtime consistent if apply fails after write.
+				if rollbackErr := writeRuntimeConfig(configPath, []byte(previousConfig)); rollbackErr == nil {
+					_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error": fmt.Sprintf("failed to apply config: %s", err),
+				})
+				return
+			}
+
 			writeJSON(w, http.StatusOK, map[string]string{
-				"original": runtimeConfigOriginalSnapshot(statusCtx, configPath),
+				"status": "applied",
 			})
-		case "yaml":
-			original := runtimeConfigOriginalSnapshot(statusCtx, configPath)
-			if strings.TrimSpace(original) == "" {
-				original = "{}\n"
-			} else if !strings.HasSuffix(original, "\n") {
-				original += "\n"
-			}
-
-			w.Header().Set("Content-Type", "application/yaml")
-			w.WriteHeader(http.StatusOK)
-			if _, err := io.WriteString(w, original); err != nil {
-				slog.Error("Failed to write config response", "error", err)
-			}
 		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "invalid format query value",
-			})
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	}
 }
@@ -1314,6 +1353,88 @@ func runtimeConfigOriginalSnapshot(statusCtx *runtimeStatusContext, configPath s
 		}
 	}
 	return readRuntimeConfigOriginalAt(configPath)
+}
+
+func applyRuntimeConfigReload(
+	configPath string,
+	statusCtx *runtimeStatusContext,
+	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
+) error {
+	reloadedRules, err := parseRuntimeInhibitionRules(configPath)
+	if err != nil {
+		return err
+	}
+	reloadedReceivers, err := parseRuntimeConfiguredReceivers(configPath)
+	if err != nil {
+		return err
+	}
+	configOriginal, err := readRuntimeConfigOriginalForReload(configPath)
+	if err != nil {
+		return err
+	}
+
+	if inhibitions != nil {
+		inhibitions.setRules(reloadedRules)
+	}
+	if receivers != nil {
+		receivers.setConfigured(reloadedReceivers)
+	}
+	if statusCtx != nil {
+		statusCtx.setConfigOriginal(configOriginal)
+	}
+
+	return nil
+}
+
+func validateRuntimeConfigPayload(content []byte) error {
+	if _, err := parseRuntimeInhibitionRulesFromData(content); err != nil {
+		return err
+	}
+	if _, err := parseRuntimeConfiguredReceiversFromData(content); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeRuntimeConfig(configPath string, content []byte) error {
+	configDir := filepath.Dir(configPath)
+	if configDir == "" {
+		configDir = "."
+	}
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return err
+	}
+
+	tempFile, err := os.CreateTemp(configDir, filepath.Base(configPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+
+	cleanup := func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+	}
+
+	if _, err := tempFile.Write(content); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := os.Rename(tempPath, configPath); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+
+	return nil
 }
 
 func historyHandler(store *alertStore) http.HandlerFunc {
@@ -2088,10 +2209,21 @@ func loadRuntimeInhibitionEngine(configPath string) *runtimeInhibitionEngine {
 }
 
 func parseRuntimeInhibitionRules(configPath string) ([]inhibition.InhibitionRule, error) {
-	parser := inhibition.NewParser()
-	cfg, err := parser.ParseFile(configPath)
+	content, err := os.ReadFile(configPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || isNoInhibitionRulesError(err) {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parseRuntimeInhibitionRulesFromData(content)
+}
+
+func parseRuntimeInhibitionRulesFromData(content []byte) ([]inhibition.InhibitionRule, error) {
+	parser := inhibition.NewParser()
+	cfg, err := parser.Parse(content)
+	if err != nil {
+		if isNoInhibitionRulesError(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -2139,7 +2271,10 @@ func parseRuntimeConfiguredReceivers(configPath string) ([]string, error) {
 		}
 		return nil, err
 	}
+	return parseRuntimeConfiguredReceiversFromData(content)
+}
 
+func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
 	var cfg alertmanagerRuntimeConfig
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
 		return nil, err

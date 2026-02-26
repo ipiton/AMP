@@ -126,6 +126,10 @@ curl http://localhost:8080/api/v2/config
 # Read runtime config snapshot as YAML
 curl "http://localhost:8080/api/v2/config?format=yaml"
 
+# Update runtime config from file (applies inhibition/receivers immediately)
+curl -X POST http://localhost:8080/api/v2/config \
+  --data-binary @alertmanager.yaml
+
 # Apply config file changes and reload runtime metadata
 curl -X POST http://localhost:8080/-/reload
 
