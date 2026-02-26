@@ -1304,9 +1304,7 @@ func silencesHandler(store *silenceStore) http.HandlerFunc {
 		case http.MethodGet:
 			labelMatchers, err := parseAlertLabelMatchers(r)
 			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{
-					"error": err.Error(),
-				})
+				writeJSONString(w, http.StatusBadRequest, err.Error())
 				return
 			}
 
