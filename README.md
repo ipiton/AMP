@@ -136,6 +136,9 @@ curl http://localhost:8080/api/v2/config/status
 # Check runtime config apply history
 curl "http://localhost:8080/api/v2/config/history?limit=20"
 
+# Roll back to previous successful runtime config revision
+curl -X POST http://localhost:8080/api/v2/config/rollback
+
 # Apply config file changes and reload runtime metadata
 curl -X POST http://localhost:8080/-/reload
 
@@ -143,6 +146,8 @@ curl -X POST http://localhost:8080/-/reload
 kubectl create configmap alertmanager-config \
   --from-file=alertmanager.yaml
 ```
+
+`POST /api/v2/config/rollback` returns `409` if there is no previous successful revision to roll back to.
 
 ## 📚 Documentation
 
