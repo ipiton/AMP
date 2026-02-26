@@ -21,7 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET /api/v2/status` now reports `cluster.status=disabled` in single-node runtime (closer to upstream behavior when clustering is off)
   - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
   - `DELETE /api/v2/silence/{id}` now returns `200` with empty body on success (upstream-like)
-  - `POST /api/v2/silences` now returns upstream-like JSON string payloads for error responses (`400/404/413`)
+  - `POST /api/v2/silences` error contracts moved closer to upstream runtime behavior:
+    - schema/required validation errors return `422` with `{code,message}` (for example `code=602/612`)
+    - update with unknown/invalid `id` returns `404` with JSON string payload (`"silence not found"`)
+    - create-time semantic validation keeps upstream-like JSON string payloads on `400` (e.g. invalid matcher regex, invalid timing)
   - `GET /api/v2/silences?filter=...` now returns upstream-like JSON string payload for invalid matcher errors (`400`)
   - `GET|DELETE /api/v2/silence/{id}` now return `422` + `{code,message}` for invalid UUID path values and `404` with empty body for unknown valid UUID (closer to upstream runtime behavior)
   - `GET /api/v2/silences` and `GET /api/v2/silence/{id}` now always include `matchers[].isRegex` (including `false`)
