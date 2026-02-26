@@ -606,6 +606,47 @@ func TestUpstreamParity_PostAlertsErrorPayloadContracts(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_PostAlertsDateOnlyTimestampsAreAccepted(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	postReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v2/alerts",
+		bytes.NewBufferString(`[{"labels":{"alertname":"DateOnlyParity"},"startsAt":"2099-02-26","endsAt":"2099-03-01"}]`),
+	)
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts with date-only timestamps expected 200, got %d", postRec.Code)
+	}
+
+	query := url.Values{}
+	query.Add("filter", `alertname="DateOnlyParity"`)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode(), nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", getRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts payload: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected exactly one alert, got %d", len(alerts))
+	}
+
+	startsAt, _ := alerts[0]["startsAt"].(string)
+	endsAt, _ := alerts[0]["endsAt"].(string)
+	if !strings.HasPrefix(startsAt, "2099-02-26T00:00:00") {
+		t.Fatalf("expected normalized date-only startsAt, got %q", startsAt)
+	}
+	if !strings.HasPrefix(endsAt, "2099-03-01T00:00:00") {
+		t.Fatalf("expected normalized date-only endsAt, got %q", endsAt)
+	}
+}
+
 func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	mux := newPhase0TestMux(t)
 	now := time.Now().UTC()

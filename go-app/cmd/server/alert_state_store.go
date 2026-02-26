@@ -363,7 +363,17 @@ func parseAlertTime(raw string) (time.Time, error) {
 	if raw == "" {
 		return time.Time{}, nil
 	}
-	return time.Parse(time.RFC3339, raw)
+	t, err := time.Parse(time.RFC3339, raw)
+	if err == nil {
+		return t, nil
+	}
+
+	// Alertmanager accepts date-only timestamps (YYYY-MM-DD) in ingest payloads.
+	t, dateErr := time.Parse("2006-01-02", raw)
+	if dateErr != nil {
+		return time.Time{}, dateErr
+	}
+	return t, nil
 }
 
 func parseOptionalAlertTime(raw string) (*time.Time, error) {
@@ -578,7 +588,7 @@ func validateAlertIngestInputs(inputs []alertIngestInput) error {
 		}
 
 		if raw := strings.TrimSpace(in.StartsAt); raw != "" {
-			if _, err := time.Parse(time.RFC3339, raw); err != nil {
+			if _, err := parseAlertTime(raw); err != nil {
 				return newAlertCodeMessageError(
 					http.StatusBadRequest,
 					http.StatusBadRequest,
@@ -587,7 +597,7 @@ func validateAlertIngestInputs(inputs []alertIngestInput) error {
 			}
 		}
 		if raw := strings.TrimSpace(in.EndsAt); raw != "" {
-			if _, err := time.Parse(time.RFC3339, raw); err != nil {
+			if _, err := parseAlertTime(raw); err != nil {
 				return newAlertCodeMessageError(
 					http.StatusBadRequest,
 					http.StatusBadRequest,

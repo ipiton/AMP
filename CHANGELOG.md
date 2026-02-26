@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - missing `labels` returns `{code:602,message}` on `422`
     - invalid `generatorURL` returns `{code:601,message}` on `422`
     - empty `labels` returns upstream-like JSON string message on `400`
+    - date-only timestamps (`YYYY-MM-DD`) for `startsAt`/`endsAt` are now accepted (upstream-like ingest behavior)
   - `DELETE /api/v2/silence/{id}` now returns `200` with empty body on success (upstream-like)
   - `POST /api/v2/silences` error contracts moved closer to upstream runtime behavior:
     - schema/required validation errors return `422` with `{code,message}` (for example `code=602/612`)
