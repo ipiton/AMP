@@ -133,6 +133,9 @@ curl -X POST http://localhost:8080/api/v2/config \
 # Check runtime config apply status
 curl http://localhost:8080/api/v2/config/status
 
+# Check runtime config apply history
+curl "http://localhost:8080/api/v2/config/history?limit=20"
+
 # Apply config file changes and reload runtime metadata
 curl -X POST http://localhost:8080/-/reload
 

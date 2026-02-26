@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +45,8 @@ const (
 )
 
 const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
+
+const maxConfigApplyHistoryEntries = 500
 
 var (
 	buildRevision = "unknown"
@@ -305,6 +309,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
 	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
+	mux.HandleFunc("/api/v2/config/history", configHistoryHandler(configPath, statusCtx))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -340,6 +345,15 @@ type runtimeStatusContext struct {
 	configApplySource  string
 	configApplyError   string
 	configApplyAt      time.Time
+	configApplyHistory []runtimeConfigApplyHistoryEntry
+}
+
+type runtimeConfigApplyHistoryEntry struct {
+	Status     string `json:"status"`
+	Source     string `json:"source"`
+	AppliedAt  string `json:"appliedAt"`
+	Error      string `json:"error"`
+	ConfigHash string `json:"configHash"`
 }
 
 type runtimeInhibitionEngine struct {
@@ -439,6 +453,17 @@ func (c *runtimeStatusContext) setConfigApplyResult(source string, err error) {
 		c.configApplyStatus = "ok"
 		c.configApplyError = ""
 	}
+
+	c.configApplyHistory = append(c.configApplyHistory, runtimeConfigApplyHistoryEntry{
+		Status:     c.configApplyStatus,
+		Source:     c.configApplySource,
+		AppliedAt:  c.configApplyAt.Format(time.RFC3339),
+		Error:      c.configApplyError,
+		ConfigHash: configSHA256(c.configOriginal),
+	})
+	if len(c.configApplyHistory) > maxConfigApplyHistoryEntries {
+		c.configApplyHistory = append([]runtimeConfigApplyHistoryEntry(nil), c.configApplyHistory[len(c.configApplyHistory)-maxConfigApplyHistoryEntries:]...)
+	}
 	c.mu.Unlock()
 }
 
@@ -460,6 +485,28 @@ func (c *runtimeStatusContext) getConfigApplyResult() (status, source, errorText
 		source = c.configApplySource
 	}
 	return status, source, c.configApplyError, c.configApplyAt
+}
+
+func (c *runtimeStatusContext) getConfigApplyHistory(limit int) []runtimeConfigApplyHistoryEntry {
+	if c == nil {
+		return nil
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.configApplyHistory) == 0 {
+		return nil
+	}
+
+	if limit <= 0 || limit > len(c.configApplyHistory) {
+		limit = len(c.configApplyHistory)
+	}
+
+	result := make([]runtimeConfigApplyHistoryEntry, 0, limit)
+	for i := len(c.configApplyHistory) - 1; i >= 0 && len(result) < limit; i-- {
+		result = append(result, c.configApplyHistory[i])
+	}
+	return result
 }
 
 func (e *runtimeInhibitionEngine) getRules() []inhibition.InhibitionRule {
@@ -1431,8 +1478,33 @@ func configStatusHandler(
 			"appliedAt":           appliedAtStr,
 			"error":               errorText,
 			"configPath":          configPath,
-			"inhibitionRuleCount": len(inhibitions.getRules()),
-			"receiverCount":       len(receivers.getConfigured()),
+			"inhibitionRuleCount": runtimeInhibitionRuleCount(inhibitions),
+			"receiverCount":       runtimeReceiverCount(receivers),
+		})
+	}
+}
+
+func configHistoryHandler(configPath string, statusCtx *runtimeStatusContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		limit, err := parsePositiveIntQuery(r.URL.Query().Get("limit"), 20, 1, maxConfigApplyHistoryEntries)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		entries := statusCtx.getConfigApplyHistory(limit)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"total":      len(entries),
+			"limit":      limit,
+			"configPath": configPath,
+			"entries":    entries,
 		})
 	}
 }
@@ -1444,6 +1516,25 @@ func runtimeConfigOriginalSnapshot(statusCtx *runtimeStatusContext, configPath s
 		}
 	}
 	return readRuntimeConfigOriginalAt(configPath)
+}
+
+func runtimeInhibitionRuleCount(inhibitions *runtimeInhibitionEngine) int {
+	if inhibitions == nil {
+		return 0
+	}
+	return len(inhibitions.getRules())
+}
+
+func runtimeReceiverCount(receivers *runtimeReceiverCatalog) int {
+	if receivers == nil {
+		return 0
+	}
+	return len(receivers.getConfigured())
+}
+
+func configSHA256(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
 
 func applyRuntimeConfigReload(
