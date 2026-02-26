@@ -507,6 +507,70 @@ func TestUpstreamParity_SilencesInvalidFilterErrorPayloadIsJSONString(t *testing
 	}
 }
 
+func TestUpstreamParity_SilenceByIDInvalidUUIDReturns422WithCodeMessage(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/not-a-uuid", nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("GET /api/v2/silence/{id} invalid uuid expected 422, got %d", getRec.Code)
+	}
+	var getPayload map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &getPayload); err != nil {
+		t.Fatalf("GET invalid uuid expected JSON object payload, got %q (%v)", getRec.Body.String(), err)
+	}
+	if getPayload["code"] != float64(601) {
+		t.Fatalf("GET invalid uuid expected code=601, got %v", getPayload["code"])
+	}
+	if message, _ := getPayload["message"].(string); !strings.Contains(message, "silenceID in path must be of type uuid") {
+		t.Fatalf("GET invalid uuid expected upstream-like message, got %v", getPayload["message"])
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/not-a-uuid", nil)
+	deleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("DELETE /api/v2/silence/{id} invalid uuid expected 422, got %d", deleteRec.Code)
+	}
+	var deletePayload map[string]any
+	if err := json.Unmarshal(deleteRec.Body.Bytes(), &deletePayload); err != nil {
+		t.Fatalf("DELETE invalid uuid expected JSON object payload, got %q (%v)", deleteRec.Body.String(), err)
+	}
+	if deletePayload["code"] != float64(601) {
+		t.Fatalf("DELETE invalid uuid expected code=601, got %v", deletePayload["code"])
+	}
+	if message, _ := deletePayload["message"].(string); !strings.Contains(message, "silenceID in path must be of type uuid") {
+		t.Fatalf("DELETE invalid uuid expected upstream-like message, got %v", deletePayload["message"])
+	}
+}
+
+func TestUpstreamParity_SilenceByIDUnknownUUIDReturns404EmptyBody(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	const unknownUUID = "00000000-0000-0000-0000-000000000001"
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+unknownUUID, nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v2/silence/{id} unknown uuid expected 404, got %d", getRec.Code)
+	}
+	if getRec.Body.Len() != 0 {
+		t.Fatalf("GET /api/v2/silence/{id} unknown uuid expected empty body, got %q", getRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+unknownUUID, nil)
+	deleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusNotFound {
+		t.Fatalf("DELETE /api/v2/silence/{id} unknown uuid expected 404, got %d", deleteRec.Code)
+	}
+	if deleteRec.Body.Len() != 0 {
+		t.Fatalf("DELETE /api/v2/silence/{id} unknown uuid expected empty body, got %q", deleteRec.Body.String())
+	}
+}
+
 func TestUpstreamParity_DeleteSilenceReturnsEmptyBody(t *testing.T) {
 	mux := newPhase0TestMux(t)
 	now := time.Now().UTC()

@@ -1451,6 +1451,9 @@ receivers:
 		if getRec.Code != http.StatusNotFound {
 			t.Fatalf("GET /api/v2/silence/{id} expected 404, got %d", getRec.Code)
 		}
+		if getRec.Body.Len() != 0 {
+			t.Fatalf("GET /api/v2/silence/{id} expected empty body for unknown id, got %q", getRec.Body.String())
+		}
 
 		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+unknownSilenceUUID, nil)
 		delRec := httptest.NewRecorder()
@@ -1458,21 +1461,44 @@ receivers:
 		if delRec.Code != http.StatusNotFound {
 			t.Fatalf("DELETE /api/v2/silence/{id} expected 404, got %d", delRec.Code)
 		}
+		if delRec.Body.Len() != 0 {
+			t.Fatalf("DELETE /api/v2/silence/{id} expected empty body for unknown id, got %q", delRec.Body.String())
+		}
 	})
 
 	t.Run("silence by id invalid id contract", func(t *testing.T) {
 		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/not-a-uuid", nil)
 		getRec := httptest.NewRecorder()
 		mux.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/silence/{id} with invalid id expected 400, got %d", getRec.Code)
+		if getRec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("GET /api/v2/silence/{id} with invalid id expected 422, got %d", getRec.Code)
+		}
+		var getPayload map[string]any
+		if err := json.Unmarshal(getRec.Body.Bytes(), &getPayload); err != nil {
+			t.Fatalf("GET /api/v2/silence/{id} with invalid id expected json payload, got %q (%v)", getRec.Body.String(), err)
+		}
+		if getPayload["code"] != float64(601) {
+			t.Fatalf("GET /api/v2/silence/{id} invalid id expected code=601, got %v", getPayload["code"])
+		}
+		if message, _ := getPayload["message"].(string); !strings.Contains(message, "silenceID in path must be of type uuid") {
+			t.Fatalf("GET /api/v2/silence/{id} invalid id expected upstream-like message, got %v", getPayload["message"])
 		}
 
 		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/not-a-uuid", nil)
 		delRec := httptest.NewRecorder()
 		mux.ServeHTTP(delRec, delReq)
-		if delRec.Code != http.StatusBadRequest {
-			t.Fatalf("DELETE /api/v2/silence/{id} with invalid id expected 400, got %d", delRec.Code)
+		if delRec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("DELETE /api/v2/silence/{id} with invalid id expected 422, got %d", delRec.Code)
+		}
+		var delPayload map[string]any
+		if err := json.Unmarshal(delRec.Body.Bytes(), &delPayload); err != nil {
+			t.Fatalf("DELETE /api/v2/silence/{id} with invalid id expected json payload, got %q (%v)", delRec.Body.String(), err)
+		}
+		if delPayload["code"] != float64(601) {
+			t.Fatalf("DELETE /api/v2/silence/{id} invalid id expected code=601, got %v", delPayload["code"])
+		}
+		if message, _ := delPayload["message"].(string); !strings.Contains(message, "silenceID in path must be of type uuid") {
+			t.Fatalf("DELETE /api/v2/silence/{id} invalid id expected upstream-like message, got %v", delPayload["message"])
 		}
 	})
 
