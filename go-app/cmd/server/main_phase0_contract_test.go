@@ -31,6 +31,13 @@ const validSilencePayload = `{
 	"comment": "maintenance window"
 }`
 
+const validConfigPayload = `
+route:
+  receiver: "default"
+receivers:
+  - name: "default"
+`
+
 const unknownSilenceUUID = "00000000-0000-0000-0000-000000000001"
 
 func activeSilencePayload(now time.Time) string {
@@ -66,6 +73,9 @@ func newPhase0TestMux(t *testing.T) *http.ServeMux {
 func newPhase0TestMuxWithStateFile(t *testing.T, stateFile string) *http.ServeMux {
 	t.Helper()
 	t.Setenv(runtimeStateFileEnv, stateFile)
+	if strings.TrimSpace(os.Getenv(runtimeConfigFileEnv)) == "" {
+		t.Setenv(runtimeConfigFileEnv, writeTestConfigFile(t, validConfigPayload))
+	}
 
 	initTemplates()
 
@@ -118,6 +128,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/" + unknownSilenceUUID, allowedStatus: []int{http.StatusNotFound}},
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", allowedStatus: []int{http.StatusOK}},
 		{name: "config get", method: http.MethodGet, path: "/api/v2/config", allowedStatus: []int{http.StatusOK}},
+		{name: "config post", method: http.MethodPost, path: "/api/v2/config", body: validConfigPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -296,9 +307,11 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 	})
 
 	t.Run("config contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/config", nil)
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
+		localMux.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("GET /api/v2/config expected 200, got %d", rec.Code)
@@ -317,9 +330,11 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 	})
 
 	t.Run("config yaml format contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/config?format=yaml", nil)
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
+		localMux.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("GET /api/v2/config?format=yaml expected 200, got %d", rec.Code)
@@ -333,9 +348,11 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 	})
 
 	t.Run("config invalid format contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/config?format=xml", nil)
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
+		localMux.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/config with invalid format expected 400, got %d", rec.Code)
@@ -347,6 +364,50 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if payload["error"] != "invalid format query value" {
 			t.Fatalf("invalid format response expected error message, got %v", payload["error"])
+		}
+	})
+
+	t.Run("config post contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(validConfigPayload))
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+		if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("POST /api/v2/config expected json content type, got %q", rec.Header().Get("Content-Type"))
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config post response is not valid json: %v", err)
+		}
+		if payload["status"] != "applied" {
+			t.Fatalf("config post response expected status=applied, got %v", payload["status"])
+		}
+	})
+
+	t.Run("config post invalid payload contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString("route: [\n"))
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/config with invalid payload expected 400, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid config post response is not valid json: %v", err)
+		}
+		errMsg, _ := payload["error"].(string)
+		if !strings.Contains(errMsg, "invalid config payload") {
+			t.Fatalf("invalid config post response expected payload error, got %v", payload["error"])
 		}
 	})
 
@@ -854,7 +915,7 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			path   string
 		}{
 			{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status"},
-			{name: "config post not allowed", method: http.MethodPost, path: "/api/v2/config"},
+			{name: "config put not allowed", method: http.MethodPut, path: "/api/v2/config"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
@@ -1945,6 +2006,132 @@ inhibit_rules:
 	configOriginal, _ := configSection["original"].(string)
 	if !strings.Contains(configOriginal, "inhibit_rules") {
 		t.Fatalf("expected status config.original to be refreshed after reload")
+	}
+}
+
+func TestPhase0ConfigPostAppliesRuntimeConfigChanges(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "initial-receiver"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"RootCause","service":"api","severity":"critical"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"Symptom","service":"api","severity":"warning"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	inhibitedBeforeReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=false&inhibited=true&unprocessed=false",
+		nil,
+	)
+	inhibitedBeforeRec := httptest.NewRecorder()
+	mux.ServeHTTP(inhibitedBeforeRec, inhibitedBeforeReq)
+	if inhibitedBeforeRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts before config post expected 200, got %d", inhibitedBeforeRec.Code)
+	}
+
+	var inhibitedBefore []map[string]any
+	if err := json.Unmarshal(inhibitedBeforeRec.Body.Bytes(), &inhibitedBefore); err != nil {
+		t.Fatalf("failed to decode inhibited-before response: %v", err)
+	}
+	if len(inhibitedBefore) != 0 {
+		t.Fatalf("expected no inhibited alerts before config post, got %d", len(inhibitedBefore))
+	}
+
+	updatedConfig := `
+route:
+  receiver: "team-runtime"
+receivers:
+  - name: "team-runtime"
+inhibit_rules:
+  - name: "critical-inhibits-warning"
+    source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal:
+      - service
+`
+
+	configPostReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(updatedConfig))
+	configPostRec := httptest.NewRecorder()
+	mux.ServeHTTP(configPostRec, configPostReq)
+	if configPostRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/config expected 200, got %d", configPostRec.Code)
+	}
+
+	var configPostPayload map[string]any
+	if err := json.Unmarshal(configPostRec.Body.Bytes(), &configPostPayload); err != nil {
+		t.Fatalf("failed to decode config post response: %v", err)
+	}
+	if configPostPayload["status"] != "applied" {
+		t.Fatalf("expected config post status=applied, got %v", configPostPayload["status"])
+	}
+
+	configOnDisk, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+	if !strings.Contains(string(configOnDisk), "team-runtime") {
+		t.Fatalf("expected config file to be updated with team-runtime receiver")
+	}
+
+	inhibitedAfterReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/alerts?active=false&silenced=false&inhibited=true&unprocessed=false",
+		nil,
+	)
+	inhibitedAfterRec := httptest.NewRecorder()
+	mux.ServeHTTP(inhibitedAfterRec, inhibitedAfterReq)
+	if inhibitedAfterRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts after config post expected 200, got %d", inhibitedAfterRec.Code)
+	}
+
+	var inhibitedAfter []map[string]any
+	if err := json.Unmarshal(inhibitedAfterRec.Body.Bytes(), &inhibitedAfter); err != nil {
+		t.Fatalf("failed to decode inhibited-after response: %v", err)
+	}
+	if len(inhibitedAfter) != 1 {
+		t.Fatalf("expected one inhibited alert after config post, got %d", len(inhibitedAfter))
+	}
+
+	receiversReq := httptest.NewRequest(http.MethodGet, "/api/v2/receivers", nil)
+	receiversRec := httptest.NewRecorder()
+	mux.ServeHTTP(receiversRec, receiversReq)
+	if receiversRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/receivers expected 200, got %d", receiversRec.Code)
+	}
+
+	var receivers []map[string]any
+	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
+		t.Fatalf("failed to decode receivers response: %v", err)
+	}
+	receiverSet := make(map[string]struct{}, len(receivers))
+	for _, receiver := range receivers {
+		name, _ := receiver["name"].(string)
+		receiverSet[name] = struct{}{}
+	}
+	if _, ok := receiverSet["team-runtime"]; !ok {
+		t.Fatalf("expected runtime receiver team-runtime, got %v", receivers)
 	}
 }
 

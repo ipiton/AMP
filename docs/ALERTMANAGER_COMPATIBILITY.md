@@ -23,7 +23,7 @@
 - ✅ **Prometheus/VMAlert ingest compatibility path is active** (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
 - ✅ **Ops probe compatibility is active** (`/-/healthy`, `/-/ready`, `/-/reload`)
 - 🟡 **Semantic parity is partial** (routing/inhibition behavior is a focused subset in Phase 0 runtime)
-- 🟡 **Advanced config API (`POST /api/v2/config*`) is not wired in active runtime yet**
+- 🟡 **Advanced config API is partial** (`POST /api/v2/config` active; rollback/history/status still planned)
 
 ---
 
@@ -63,7 +63,7 @@
 | Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
 |----------|--------------|---------------|--------|-------|
 | `GET /api/v2/config` | ❌ | ✅ | 🟢 | Read-only runtime config snapshot (`json` default, `?format=yaml`) |
-| `POST /api/v2/config` | ❌ | ⏳ | 🟡 | Planned in phased runtime roadmap; not active in `main.go` |
+| `POST /api/v2/config` | ❌ | ✅ | 🟡 | Minimal write-path in active runtime: validates payload, persists file, applies inhibition/receivers |
 | `POST /api/v2/config/rollback` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
 | `GET /api/v2/config/history` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
 | `GET /api/v2/config/status` | ❌ | ⏳ | 🟡 | Planned; not active in `main.go` |
