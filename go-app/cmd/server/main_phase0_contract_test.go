@@ -4267,6 +4267,9 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("DELETE /api/v2/silence/{id} expected 200, got %d", deleteRec.Code)
 	}
+	if deleteRec.Body.Len() != 0 {
+		t.Fatalf("DELETE /api/v2/silence/{id} expected empty body, got %q", deleteRec.Body.String())
+	}
 
 	getAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
 	getAfterDeleteRec := httptest.NewRecorder()
