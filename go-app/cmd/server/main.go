@@ -1231,6 +1231,22 @@ func handleAlertsPost(
 
 	payload, err := parseAlertIngestPayload(body)
 	if err != nil {
+		var apiErr *alertAPIError
+		if errors.As(err, &apiErr) {
+			writeJSON(w, apiErr.status, apiErr.payload)
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err := validateAlertIngestInputs(payload); err != nil {
+		var apiErr *alertAPIError
+		if errors.As(err, &apiErr) {
+			writeJSON(w, apiErr.status, apiErr.payload)
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": err.Error(),
 		})

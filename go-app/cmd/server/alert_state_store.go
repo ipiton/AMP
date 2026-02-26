@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -54,6 +55,49 @@ type alertStore struct {
 	// activeByBase indexes currently firing alerts by base fingerprint.
 	activeByBase map[string]map[string]struct{}
 	onChange     func()
+}
+
+type alertAPIError struct {
+	status  int
+	payload any
+	message string
+}
+
+func (e *alertAPIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.message) != "" {
+		return e.message
+	}
+	switch p := e.payload.(type) {
+	case string:
+		return p
+	case map[string]any:
+		if msg, ok := p["message"].(string); ok && strings.TrimSpace(msg) != "" {
+			return msg
+		}
+	}
+	return "alert api error"
+}
+
+func newAlertAPIError(status int, payload any, message string) *alertAPIError {
+	return &alertAPIError{
+		status:  status,
+		payload: payload,
+		message: strings.TrimSpace(message),
+	}
+}
+
+func newAlertCodeMessageError(status int, code int, message string) *alertAPIError {
+	return newAlertAPIError(status, map[string]any{
+		"code":    code,
+		"message": message,
+	}, message)
+}
+
+func newAlertStringError(status int, message string) *alertAPIError {
+	return newAlertAPIError(status, message, message)
 }
 
 func newAlertStore() *alertStore {
@@ -474,14 +518,12 @@ func parseBoolWithDefault(raw string, def bool) bool {
 func parseAlertIngestPayload(body []byte) ([]alertIngestInput, error) {
 	trimmed := strings.TrimSpace(string(body))
 	if trimmed == "" {
-		return nil, fmt.Errorf("request body is empty")
+		return nil, newAlertCodeMessageError(http.StatusUnprocessableEntity, 602, "alerts in body is required")
 	}
 
-	if strings.HasPrefix(trimmed, "[") {
-		var direct []alertIngestInput
-		if err := json.Unmarshal(body, &direct); err != nil {
-			return nil, fmt.Errorf("invalid alerts array payload: %w", err)
-		}
+	var direct []alertIngestInput
+	directErr := json.Unmarshal(body, &direct)
+	if directErr == nil {
 		return direct, nil
 	}
 
@@ -494,7 +536,11 @@ func parseAlertIngestPayload(body []byte) ([]alertIngestInput, error) {
 		} `json:"groups"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("invalid alerts payload: %w", err)
+		return nil, newAlertCodeMessageError(
+			http.StatusBadRequest,
+			http.StatusBadRequest,
+			fmt.Sprintf("parsing alerts body from %q failed, because %v", "", directErr),
+		)
 	}
 
 	if len(envelope.Alerts) > 0 {
@@ -505,8 +551,62 @@ func parseAlertIngestPayload(body []byte) ([]alertIngestInput, error) {
 	for i := range envelope.Groups {
 		grouped = append(grouped, envelope.Groups[i].Alerts...)
 	}
-	if len(grouped) == 0 {
-		return nil, fmt.Errorf("no alerts found in payload")
+	if len(grouped) > 0 {
+		return grouped, nil
 	}
-	return grouped, nil
+
+	return nil, newAlertCodeMessageError(
+		http.StatusBadRequest,
+		http.StatusBadRequest,
+		fmt.Sprintf("parsing alerts body from %q failed, because %v", "", directErr),
+	)
+}
+
+func validateAlertIngestInputs(inputs []alertIngestInput) error {
+	for i := range inputs {
+		in := inputs[i]
+
+		if in.Labels == nil {
+			return newAlertCodeMessageError(
+				http.StatusUnprocessableEntity,
+				602,
+				fmt.Sprintf("%d.labels in body is required", i),
+			)
+		}
+		if len(in.Labels) == 0 {
+			return newAlertStringError(http.StatusBadRequest, "at least one label pair required")
+		}
+
+		if raw := strings.TrimSpace(in.StartsAt); raw != "" {
+			if _, err := time.Parse(time.RFC3339, raw); err != nil {
+				return newAlertCodeMessageError(
+					http.StatusBadRequest,
+					http.StatusBadRequest,
+					fmt.Sprintf("parsing alerts body from %q failed, because %v", "", err),
+				)
+			}
+		}
+		if raw := strings.TrimSpace(in.EndsAt); raw != "" {
+			if _, err := time.Parse(time.RFC3339, raw); err != nil {
+				return newAlertCodeMessageError(
+					http.StatusBadRequest,
+					http.StatusBadRequest,
+					fmt.Sprintf("parsing alerts body from %q failed, because %v", "", err),
+				)
+			}
+		}
+
+		generatorURL := strings.TrimSpace(in.GeneratorURL)
+		if generatorURL != "" {
+			if _, err := url.ParseRequestURI(generatorURL); err != nil {
+				return newAlertCodeMessageError(
+					http.StatusUnprocessableEntity,
+					601,
+					fmt.Sprintf("%d.generatorURL in body must be of type uri: %q", i, in.GeneratorURL),
+				)
+			}
+		}
+	}
+
+	return nil
 }

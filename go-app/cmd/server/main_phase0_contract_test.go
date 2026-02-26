@@ -1308,6 +1308,73 @@ receivers:
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("POST /api/v2/alerts with invalid payload expected 400, got %d", rec.Code)
 		}
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alerts invalid payload expected JSON object body, got %q (%v)", rec.Body.String(), err)
+		}
+		if payload["code"] != float64(http.StatusBadRequest) {
+			t.Fatalf("alerts invalid payload expected code=400, got %v", payload["code"])
+		}
+		if msg, _ := payload["message"].(string); strings.TrimSpace(msg) == "" {
+			t.Fatalf("alerts invalid payload expected non-empty message")
+		}
+	})
+
+	t.Run("alerts post missing labels contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{}]`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("POST /api/v2/alerts with missing labels expected 422, got %d", rec.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alerts missing labels expected JSON object body, got %q (%v)", rec.Body.String(), err)
+		}
+		if payload["code"] != float64(602) {
+			t.Fatalf("alerts missing labels expected code=602, got %v", payload["code"])
+		}
+		if msg, _ := payload["message"].(string); !strings.Contains(msg, "labels") {
+			t.Fatalf("alerts missing labels expected labels message, got %v", payload["message"])
+		}
+	})
+
+	t.Run("alerts post empty labels contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{}}]`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/alerts with empty labels expected 400, got %d", rec.Code)
+		}
+		var payload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alerts empty labels expected JSON string body, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(payload) == "" {
+			t.Fatalf("alerts empty labels expected non-empty message")
+		}
+	})
+
+	t.Run("alerts post invalid generatorURL contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{"alertname":"A"},"generatorURL":":bad"}]`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("POST /api/v2/alerts with invalid generatorURL expected 422, got %d", rec.Code)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alerts invalid generatorURL expected JSON object body, got %q (%v)", rec.Body.String(), err)
+		}
+		if payload["code"] != float64(601) {
+			t.Fatalf("alerts invalid generatorURL expected code=601, got %v", payload["code"])
+		}
+		if msg, _ := payload["message"].(string); !strings.Contains(msg, "generatorURL") {
+			t.Fatalf("alerts invalid generatorURL expected generatorURL message, got %v", payload["message"])
+		}
 	})
 
 	t.Run("silences get contract", func(t *testing.T) {

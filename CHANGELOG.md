@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - invalid state-flag bool values (`active/silenced/inhibited/unprocessed/muted`) now fall back to `false` when parameter is present
     - invalid `status`/`resolved` query values no longer return `400` and are ignored (`200` response)
     - invalid `receiver`/`filter` query errors now return upstream-like JSON string payloads on `400` (instead of object-wrapped errors)
+  - `POST /api/v2/alerts` error contracts aligned closer to upstream runtime behavior:
+    - invalid JSON/time payloads return `{code:400,message}` on `400`
+    - missing `labels` returns `{code:602,message}` on `422`
+    - invalid `generatorURL` returns `{code:601,message}` on `422`
+    - empty `labels` returns upstream-like JSON string message on `400`
   - `DELETE /api/v2/silence/{id}` now returns `200` with empty body on success (upstream-like)
   - `POST /api/v2/silences` error contracts moved closer to upstream runtime behavior:
     - schema/required validation errors return `422` with `{code,message}` (for example `code=602/612`)
