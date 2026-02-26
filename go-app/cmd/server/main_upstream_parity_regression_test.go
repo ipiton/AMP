@@ -44,11 +44,16 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	default:
 		t.Fatalf("status cluster.status unexpected value: %v", cluster["status"])
 	}
+	if clusterStatus != "disabled" {
+		t.Fatalf("status cluster.status expected disabled in single-node runtime, got %q", clusterStatus)
+	}
 	if _, ok := cluster["peers"].([]any); !ok {
 		t.Fatalf("status cluster.peers expected array, got %T", cluster["peers"])
 	}
-	if _, ok := cluster["name"].(string); !ok {
-		t.Fatalf("status cluster.name expected string, got %T", cluster["name"])
+	if clusterName, exists := cluster["name"]; exists {
+		if _, ok := clusterName.(string); !ok {
+			t.Fatalf("status cluster.name expected string when present, got %T", clusterName)
+		}
 	}
 
 	versionInfo, ok := payload["versionInfo"].(map[string]any)

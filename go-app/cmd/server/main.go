@@ -1551,12 +1551,13 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 		alertTotal, alertFiring, alertResolved := alertStore.stats()
 		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
 
+		cluster := map[string]any{
+			"status": "disabled",
+			"peers":  []map[string]string{},
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{
-			"cluster": map[string]any{
-				"name":   appName,
-				"status": "ready",
-				"peers":  []map[string]string{},
-			},
+			"cluster": cluster,
 			"versionInfo": map[string]string{
 				"version":   appVersion,
 				"revision":  buildRevision,

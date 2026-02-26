@@ -253,8 +253,13 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("status cluster expected object, got %T", payload["cluster"])
 		}
 		clusterStatus, ok := cluster["status"].(string)
-		if !ok || clusterStatus == "" {
-			t.Fatalf("status cluster.status expected non-empty string, got %v", cluster["status"])
+		if !ok {
+			t.Fatalf("status cluster.status expected string, got %T", cluster["status"])
+		}
+		switch clusterStatus {
+		case "ready", "settling", "disabled":
+		default:
+			t.Fatalf("status cluster.status unexpected value %q", clusterStatus)
 		}
 		clusterPeers, ok := cluster["peers"].([]any)
 		if !ok {
@@ -262,6 +267,11 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if clusterPeers == nil {
 			t.Fatalf("status cluster.peers must not be nil")
+		}
+		if clusterName, exists := cluster["name"]; exists {
+			if _, ok := clusterName.(string); !ok {
+				t.Fatalf("status cluster.name expected string when present, got %T", clusterName)
+			}
 		}
 
 		versionInfo, ok := payload["versionInfo"].(map[string]any)
