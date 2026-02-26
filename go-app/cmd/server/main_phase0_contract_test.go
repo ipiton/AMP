@@ -1241,8 +1241,8 @@ receivers:
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts with invalid resolved expected 400, got %d", rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts with invalid resolved expected 200, got %d", rec.Code)
 		}
 	})
 
@@ -1261,8 +1261,8 @@ receivers:
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts with invalid active expected 400, got %d", rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts with invalid active expected 200, got %d", rec.Code)
 		}
 	})
 
@@ -1611,8 +1611,8 @@ receivers:
 		reqResolved := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?resolved=not-bool", nil)
 		recResolved := httptest.NewRecorder()
 		mux.ServeHTTP(recResolved, reqResolved)
-		if recResolved.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 400, got %d", recResolved.Code)
+		if recResolved.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 200, got %d", recResolved.Code)
 		}
 
 		reqReceiver := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=[", nil)
@@ -1625,15 +1625,15 @@ receivers:
 		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
 		recActive := httptest.NewRecorder()
 		mux.ServeHTTP(recActive, reqActive)
-		if recActive.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 400, got %d", recActive.Code)
+		if recActive.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 200, got %d", recActive.Code)
 		}
 
 		reqMuted := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?muted=not-bool", nil)
 		recMuted := httptest.NewRecorder()
 		mux.ServeHTTP(recMuted, reqMuted)
-		if recMuted.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid muted expected 400, got %d", recMuted.Code)
+		if recMuted.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid muted expected 200, got %d", recMuted.Code)
 		}
 
 		reqFilter := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?filter=broken-matcher", nil)
@@ -1936,10 +1936,10 @@ func TestPhase0AlertsStateSemantics(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid status filter returns bad request", func(t *testing.T) {
+	t.Run("invalid status filter is ignored", func(t *testing.T) {
 		rec := get("/api/v2/alerts?status=broken")
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("invalid status filter expected 400, got %d", rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("invalid status filter expected 200, got %d", rec.Code)
 		}
 	})
 }

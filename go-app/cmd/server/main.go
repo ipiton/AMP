@@ -1168,23 +1168,8 @@ func handleAlertsGet(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
-	switch status {
-	case "", "firing", "resolved":
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "invalid status filter",
-		})
-		return
-	}
-
-	includeResolved, err := parseBoolQuery(r.URL.Query().Get("resolved"), false)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
+	status := parseAlertsStatusQuery(r.URL.Query().Get("status"))
+	includeResolved := parseBoolQueryLenient(r.URL.Query().Get("resolved"), false)
 	if status == "resolved" {
 		includeResolved = true
 	}
@@ -1442,13 +1427,7 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *
 			return
 		}
 
-		includeResolved, err := parseBoolQuery(r.URL.Query().Get("resolved"), false)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": err.Error(),
-			})
-			return
-		}
+		includeResolved := parseBoolQueryLenient(r.URL.Query().Get("resolved"), false)
 
 		receiverRegex, err := parseRegexQuery(r.URL.Query().Get("receiver"))
 		if err != nil {
@@ -2274,23 +2253,23 @@ type alertGroupStateFilters struct {
 	muted     bool
 }
 
+func parseAlertsStatusQuery(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "firing":
+		return "firing"
+	case "resolved":
+		return "resolved"
+	default:
+		// Upstream ignores unknown values for non-standard status query.
+		return ""
+	}
+}
+
 func parseAlertsStateFilters(r *http.Request) (alertsStateFilters, error) {
-	active, err := parseBoolQuery(r.URL.Query().Get("active"), true)
-	if err != nil {
-		return alertsStateFilters{}, err
-	}
-	silenced, err := parseBoolQuery(r.URL.Query().Get("silenced"), true)
-	if err != nil {
-		return alertsStateFilters{}, err
-	}
-	inhibited, err := parseBoolQuery(r.URL.Query().Get("inhibited"), true)
-	if err != nil {
-		return alertsStateFilters{}, err
-	}
-	unprocessed, err := parseBoolQuery(r.URL.Query().Get("unprocessed"), true)
-	if err != nil {
-		return alertsStateFilters{}, err
-	}
+	active := parseBoolQueryLenient(r.URL.Query().Get("active"), true)
+	silenced := parseBoolQueryLenient(r.URL.Query().Get("silenced"), true)
+	inhibited := parseBoolQueryLenient(r.URL.Query().Get("inhibited"), true)
+	unprocessed := parseBoolQueryLenient(r.URL.Query().Get("unprocessed"), true)
 
 	return alertsStateFilters{
 		active:      active,
@@ -2501,22 +2480,10 @@ func silenceMatcherType(m apiSilenceMatcher) cfgmatcher.MatcherType {
 }
 
 func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error) {
-	active, err := parseBoolQuery(r.URL.Query().Get("active"), true)
-	if err != nil {
-		return alertGroupStateFilters{}, err
-	}
-	silenced, err := parseBoolQuery(r.URL.Query().Get("silenced"), true)
-	if err != nil {
-		return alertGroupStateFilters{}, err
-	}
-	inhibited, err := parseBoolQuery(r.URL.Query().Get("inhibited"), true)
-	if err != nil {
-		return alertGroupStateFilters{}, err
-	}
-	muted, err := parseBoolQuery(r.URL.Query().Get("muted"), true)
-	if err != nil {
-		return alertGroupStateFilters{}, err
-	}
+	active := parseBoolQueryLenient(r.URL.Query().Get("active"), true)
+	silenced := parseBoolQueryLenient(r.URL.Query().Get("silenced"), true)
+	inhibited := parseBoolQueryLenient(r.URL.Query().Get("inhibited"), true)
+	muted := parseBoolQueryLenient(r.URL.Query().Get("muted"), true)
 
 	return alertGroupStateFilters{
 		active:    active,
@@ -2524,6 +2491,21 @@ func parseAlertGroupStateFilters(r *http.Request) (alertGroupStateFilters, error
 		inhibited: inhibited,
 		muted:     muted,
 	}, nil
+}
+
+func parseBoolQueryLenient(raw string, def bool) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		// Upstream ParseBool usage on explicit query values falls back to false on parse errors.
+		return false
+	}
+
+	return parsed
 }
 
 func filterAlertsByGroupStateFilters(
