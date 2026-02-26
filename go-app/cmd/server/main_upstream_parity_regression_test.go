@@ -526,3 +526,43 @@ func TestUpstreamParity_DeleteSilenceReturnsEmptyBody(t *testing.T) {
 		t.Fatalf("DELETE /api/v2/silence/{id} expected empty body, got %q", deleteRec.Body.String())
 	}
 }
+
+func TestUpstreamParity_PostSilenceErrorPayloadIsJSONString(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	invalidReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(`{}`))
+	invalidRec := httptest.NewRecorder()
+	mux.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v2/silences invalid payload expected 400, got %d", invalidRec.Code)
+	}
+	var invalidPayload string
+	if err := json.Unmarshal(invalidRec.Body.Bytes(), &invalidPayload); err != nil {
+		t.Fatalf("invalid payload error expected JSON string body, got %q (%v)", invalidRec.Body.String(), err)
+	}
+	if strings.TrimSpace(invalidPayload) == "" {
+		t.Fatalf("invalid payload error expected non-empty message")
+	}
+
+	unknownIDPayload := `{
+		"id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+		"matchers": [{"name":"alertname","value":"ParityUnknownID","isRegex":false}],
+		"startsAt": "2099-01-01T00:00:00Z",
+		"endsAt": "2099-01-01T01:00:00Z",
+		"createdBy": "parity-suite",
+		"comment": "unknown id update"
+	}`
+	notFoundReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(unknownIDPayload))
+	notFoundRec := httptest.NewRecorder()
+	mux.ServeHTTP(notFoundRec, notFoundReq)
+	if notFoundRec.Code != http.StatusNotFound {
+		t.Fatalf("POST /api/v2/silences unknown id expected 404, got %d", notFoundRec.Code)
+	}
+	var notFoundPayload string
+	if err := json.Unmarshal(notFoundRec.Body.Bytes(), &notFoundPayload); err != nil {
+		t.Fatalf("unknown id error expected JSON string body, got %q (%v)", notFoundRec.Body.String(), err)
+	}
+	if strings.TrimSpace(notFoundPayload) == "" {
+		t.Fatalf("unknown id error expected non-empty message")
+	}
+}

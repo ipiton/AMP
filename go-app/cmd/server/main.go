@@ -1326,32 +1326,24 @@ func handleSilencePost(store *silenceStore, w http.ResponseWriter, r *http.Reque
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024*1024))
 	if err != nil {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-			"error": "request payload too large",
-		})
+		writeJSONString(w, http.StatusRequestEntityTooLarge, "request payload too large")
 		return
 	}
 
 	payload, err := parseSilencePayload(body)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
+		writeJSONString(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	silenceID, err := store.createOrUpdate(payload, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, errSilenceNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{
-				"error": err.Error(),
-			})
+			writeJSONString(w, http.StatusNotFound, err.Error())
 			return
 		}
 
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
+		writeJSONString(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -3012,4 +3004,8 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		slog.Error("Failed to encode JSON response", "error", err)
 	}
+}
+
+func writeJSONString(w http.ResponseWriter, status int, payload string) {
+	writeJSON(w, status, payload)
 }

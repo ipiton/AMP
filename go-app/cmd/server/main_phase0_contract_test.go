@@ -1350,6 +1350,13 @@ receivers:
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("POST /api/v2/silences with invalid payload expected 400, got %d", rec.Code)
 		}
+		var payload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("silences invalid payload expected json string error, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(payload) == "" {
+			t.Fatalf("silences invalid payload expected non-empty error message")
+		}
 	})
 
 	t.Run("silences post invalid regex matcher contract", func(t *testing.T) {
@@ -1420,6 +1427,13 @@ receivers:
 
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("POST /api/v2/silences update with unknown id expected 404, got %d", rec.Code)
+		}
+		var errorPayload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
+			t.Fatalf("silences unknown id expected json string error, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(errorPayload) == "" {
+			t.Fatalf("silences unknown id expected non-empty error message")
 		}
 	})
 
