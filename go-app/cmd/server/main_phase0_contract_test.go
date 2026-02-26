@@ -1300,6 +1300,16 @@ receivers:
 		}
 	})
 
+	t.Run("alerts post date-only timestamps contract", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{"alertname":"DateOnly"},"startsAt":"2026-02-26","endsAt":"2026-03-01"}]`))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/alerts with date-only startsAt/endsAt expected 200, got %d", rec.Code)
+		}
+	})
+
 	t.Run("alerts post invalid payload contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`{}`))
 		rec := httptest.NewRecorder()
