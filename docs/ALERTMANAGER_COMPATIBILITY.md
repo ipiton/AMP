@@ -67,8 +67,8 @@
 | `GET /api/v2/config/status` | ❌ | ✅ | 🟡 | Runtime apply status (`status/source/appliedAt/error`) + current rule/receiver counters |
 | `GET /api/v2/config/history` | ❌ | ✅ | 🟡 | Runtime apply history (newest-first, supports `limit`, `status`, `source`; includes source/status/error/hash) |
 | `GET /api/v2/config/revisions` | ❌ | ✅ | 🟡 | Unique successful revisions for rollback target selection (`configHash/source/appliedAt/isCurrent`) |
-| `DELETE /api/v2/config/revisions/prune` | ❌ | ✅ | 🟡 | Prunes older revision targets by keep policy (`keep` query, keeps current active revision) |
-| `POST /api/v2/config/rollback` | ❌ | ✅ | 🟡 | Rolls back to previous successful revision or to `configHash`; returns `400/404/409` for invalid/not-found/conflict cases |
+| `DELETE /api/v2/config/revisions/prune` | ❌ | ✅ | 🟡 | Prunes older revision targets by keep policy (`keep` query, keeps current active revision); supports `dryRun=true` |
+| `POST /api/v2/config/rollback` | ❌ | ✅ | 🟡 | Rolls back to previous successful revision or to `configHash`; returns `400/404/409` for invalid/not-found/conflict cases; supports `dryRun=true` |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
 
@@ -78,10 +78,10 @@ These endpoints provide additional functionality while maintaining backward comp
 |----------|---------------|---------|---------|
 | `POST /api/v2/silences/check` | ✅ **COMPLETE** | Test if alert would be silenced | Debugging & validation |
 | `POST /api/v2/silences/bulk/delete` | ✅ **COMPLETE** | Bulk delete silences (up to 100) | Operational efficiency |
-| `POST /api/v2/config/rollback` | ✅ **ACTIVE (MVP)** | Rollback to previous/specific successful config | Supports `configHash` selection + runtime apply/status/history tracking |
+| `POST /api/v2/config/rollback` | ✅ **ACTIVE (MVP)** | Rollback to previous/specific successful config | Supports `configHash` selection + `dryRun` preview + runtime apply/status/history tracking |
 | `GET /api/v2/config/history` | ✅ **ACTIVE (MVP)** | Runtime config apply history | Tracks startup/api/reload/rollback timeline with filterable `status`/`source` |
 | `GET /api/v2/config/revisions` | ✅ **ACTIVE (MVP)** | Runtime config revisions catalog | Exposes unique successful hashes with current marker for rollback UX/API |
-| `DELETE /api/v2/config/revisions/prune` | ✅ **ACTIVE (MVP)** | Runtime revision pruning | Keeps newest unique revision targets and trims stale rollback hashes |
+| `DELETE /api/v2/config/revisions/prune` | ✅ **ACTIVE (MVP)** | Runtime revision pruning | Keeps newest unique revision targets, trims stale rollback hashes, supports `dryRun` preview |
 | `GET /api/v2/config/status` | ✅ **ACTIVE (MVP)** | Runtime config apply status | Tracks last apply/reload result in active runtime |
 | `GET /api/v2/inhibition/rules` | ✅ **COMPLETE** | List loaded inhibition rules | Debugging |
 | `GET /api/v2/inhibition/status` | ✅ **COMPLETE** | Active inhibition relationships | Operational insight |

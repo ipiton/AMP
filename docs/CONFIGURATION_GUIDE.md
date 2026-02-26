@@ -410,6 +410,12 @@ curl "http://localhost:9093/api/v2/config/revisions?limit=20"
 
 # Prune old revision targets (keep N newest unique successful revisions)
 curl -X DELETE "http://localhost:9093/api/v2/config/revisions/prune?keep=20"
+
+# Preview prune result without applying changes
+curl -X DELETE "http://localhost:9093/api/v2/config/revisions/prune?keep=20&dryRun=true"
+
+# Preview rollback result without applying changes
+curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>&dryRun=true"
 ```
 
 If there is no previous successful revision, rollback returns `409 Conflict`.
@@ -417,6 +423,7 @@ Rollback by hash returns `400 Bad Request` for invalid hash and `404 Not Found` 
 History supports filters: `status=ok|failed` and `source=<startup|api|reload|rollback>`.
 Revisions endpoint returns unique successful hashes with `isCurrent` marker.
 Revision prune endpoint keeps current active revision and trims older rollback targets.
+Rollback and prune support `dryRun=true` for non-mutating preview mode.
 
 ---
 

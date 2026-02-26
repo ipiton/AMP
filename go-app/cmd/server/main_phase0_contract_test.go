@@ -733,6 +733,69 @@ receivers:
 		}
 	})
 
+	t.Run("config revisions prune dry-run contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		configA := `
+route:
+  receiver: "team-prune-dry-a"
+receivers:
+  - name: "team-prune-dry-a"
+`
+		configB := `
+route:
+  receiver: "team-prune-dry-b"
+receivers:
+  - name: "team-prune-dry-b"
+`
+		applyAReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configA))
+		applyARec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyARec, applyAReq)
+		if applyARec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for prune dry-run configA expected 200, got %d", applyARec.Code)
+		}
+		applyBReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configB))
+		applyBRec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyBRec, applyBReq)
+		if applyBRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for prune dry-run configB expected 200, got %d", applyBRec.Code)
+		}
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v2/config/revisions/prune?keep=1&dryRun=true", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("DELETE /api/v2/config/revisions/prune dry-run expected 200, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config revisions prune dry-run response is not valid json: %v", err)
+		}
+		if payload["status"] != "dry_run" {
+			t.Fatalf("config revisions prune dry-run expected status=dry_run, got %v", payload["status"])
+		}
+		if payload["action"] != "prune_revisions" {
+			t.Fatalf("config revisions prune dry-run expected action=prune_revisions, got %v", payload["action"])
+		}
+		if dryRun, ok := payload["dryRun"].(bool); !ok || !dryRun {
+			t.Fatalf("config revisions prune dry-run expected dryRun=true, got %v", payload["dryRun"])
+		}
+	})
+
+	t.Run("config revisions prune invalid dry-run contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/v2/config/revisions/prune?dryRun=broken", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("DELETE /api/v2/config/revisions/prune with invalid dryRun expected 400, got %d", rec.Code)
+		}
+	})
+
 	t.Run("config rollback requires previous revision contract", func(t *testing.T) {
 		localMux := newPhase0TestMux(t)
 
@@ -892,6 +955,79 @@ receivers:
 		}
 		if payload["toConfigHash"] != targetHash {
 			t.Fatalf("config rollback by hash expected toConfigHash=%s, got %v", targetHash, payload["toConfigHash"])
+		}
+	})
+
+	t.Run("config rollback dry-run contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		configA := `
+route:
+  receiver: "team-rollback-dry-a"
+receivers:
+  - name: "team-rollback-dry-a"
+`
+		configB := `
+route:
+  receiver: "team-rollback-dry-b"
+receivers:
+  - name: "team-rollback-dry-b"
+`
+
+		applyAReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configA))
+		applyARec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyARec, applyAReq)
+		if applyARec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for rollback dry-run configA expected 200, got %d", applyARec.Code)
+		}
+
+		applyBReq := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(configB))
+		applyBRec := httptest.NewRecorder()
+		localMux.ServeHTTP(applyBRec, applyBReq)
+		if applyBRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config for rollback dry-run configB expected 200, got %d", applyBRec.Code)
+		}
+
+		targetHash := configSHA256(configA)
+		rollbackReq := httptest.NewRequest(
+			http.MethodPost,
+			fmt.Sprintf("/api/v2/config/rollback?configHash=%s&dryRun=true", targetHash),
+			bytes.NewBufferString(`{}`),
+		)
+		rollbackRec := httptest.NewRecorder()
+		localMux.ServeHTTP(rollbackRec, rollbackReq)
+
+		if rollbackRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config/rollback dry-run expected 200, got %d", rollbackRec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rollbackRec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("config rollback dry-run response is not valid json: %v", err)
+		}
+		if payload["status"] != "dry_run" {
+			t.Fatalf("config rollback dry-run expected status=dry_run, got %v", payload["status"])
+		}
+		if payload["action"] != "rollback" {
+			t.Fatalf("config rollback dry-run expected action=rollback, got %v", payload["action"])
+		}
+		if dryRun, ok := payload["dryRun"].(bool); !ok || !dryRun {
+			t.Fatalf("config rollback dry-run expected dryRun=true, got %v", payload["dryRun"])
+		}
+		if payload["toConfigHash"] != targetHash {
+			t.Fatalf("config rollback dry-run expected toConfigHash=%s, got %v", targetHash, payload["toConfigHash"])
+		}
+	})
+
+	t.Run("config rollback invalid dry-run contract", func(t *testing.T) {
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config/rollback?dryRun=broken", bytes.NewBufferString(`{}`))
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v2/config/rollback with invalid dryRun expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -3164,6 +3300,187 @@ receivers:
 	mux.ServeHTTP(rollbackPrunedRec, rollbackPrunedReq)
 	if rollbackPrunedRec.Code != http.StatusNotFound {
 		t.Fatalf("rollback to pruned hash expected 404, got %d", rollbackPrunedRec.Code)
+	}
+}
+
+func TestPhase0ConfigRollbackDryRunDoesNotMutate(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	postConfig := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+	}
+
+	configA := `
+route:
+  receiver: "team-dryrun-a"
+receivers:
+  - name: "team-dryrun-a"
+`
+	configB := `
+route:
+  receiver: "team-dryrun-b"
+receivers:
+  - name: "team-dryrun-b"
+`
+	postConfig(configA)
+	postConfig(configB)
+
+	hashA := configSHA256(configA)
+
+	beforeStatusReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/status", nil)
+	beforeStatusRec := httptest.NewRecorder()
+	mux.ServeHTTP(beforeStatusRec, beforeStatusReq)
+	if beforeStatusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/status before dry-run expected 200, got %d", beforeStatusRec.Code)
+	}
+
+	var beforeStatus map[string]any
+	if err := json.Unmarshal(beforeStatusRec.Body.Bytes(), &beforeStatus); err != nil {
+		t.Fatalf("failed to decode status before dry-run: %v", err)
+	}
+	beforeSource, _ := beforeStatus["source"].(string)
+
+	dryRunReq := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/v2/config/rollback?configHash=%s&dryRun=true", hashA),
+		bytes.NewBufferString(`{}`),
+	)
+	dryRunRec := httptest.NewRecorder()
+	mux.ServeHTTP(dryRunRec, dryRunReq)
+	if dryRunRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/config/rollback dry-run expected 200, got %d", dryRunRec.Code)
+	}
+
+	configOnDiskAfterDryRun, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config after rollback dry-run: %v", err)
+	}
+	if !strings.Contains(string(configOnDiskAfterDryRun), "team-dryrun-b") {
+		t.Fatalf("expected config after rollback dry-run to keep team-dryrun-b receiver")
+	}
+	if strings.Contains(string(configOnDiskAfterDryRun), "team-dryrun-a") {
+		t.Fatalf("expected config after rollback dry-run to not switch to team-dryrun-a receiver")
+	}
+
+	afterStatusReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/status", nil)
+	afterStatusRec := httptest.NewRecorder()
+	mux.ServeHTTP(afterStatusRec, afterStatusReq)
+	if afterStatusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/status after dry-run expected 200, got %d", afterStatusRec.Code)
+	}
+
+	var afterStatus map[string]any
+	if err := json.Unmarshal(afterStatusRec.Body.Bytes(), &afterStatus); err != nil {
+		t.Fatalf("failed to decode status after dry-run: %v", err)
+	}
+	afterSource, _ := afterStatus["source"].(string)
+	if afterSource != beforeSource {
+		t.Fatalf("expected config status source to remain %q after dry-run, got %q", beforeSource, afterSource)
+	}
+}
+
+func TestPhase0ConfigRevisionsPruneDryRunDoesNotMutate(t *testing.T) {
+	configPath := writeTestConfigFile(t, validConfigPayload)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	postConfig := func(payload string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/config", bytes.NewBufferString(payload))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/config expected 200, got %d", rec.Code)
+		}
+	}
+
+	configA := `
+route:
+  receiver: "team-prune-dryrun-a"
+receivers:
+  - name: "team-prune-dryrun-a"
+`
+	configB := `
+route:
+  receiver: "team-prune-dryrun-b"
+receivers:
+  - name: "team-prune-dryrun-b"
+`
+	configC := `
+route:
+  receiver: "team-prune-dryrun-c"
+receivers:
+  - name: "team-prune-dryrun-c"
+`
+	postConfig(configA)
+	postConfig(configB)
+	postConfig(configC)
+
+	hashA := configSHA256(configA)
+
+	beforeRevisionsReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/revisions?limit=20", nil)
+	beforeRevisionsRec := httptest.NewRecorder()
+	mux.ServeHTTP(beforeRevisionsRec, beforeRevisionsReq)
+	if beforeRevisionsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/revisions before prune dry-run expected 200, got %d", beforeRevisionsRec.Code)
+	}
+
+	var beforePayload map[string]any
+	if err := json.Unmarshal(beforeRevisionsRec.Body.Bytes(), &beforePayload); err != nil {
+		t.Fatalf("failed to decode revisions before prune dry-run: %v", err)
+	}
+	beforeTotal, _ := beforePayload["total"].(float64)
+
+	dryRunPruneReq := httptest.NewRequest(http.MethodDelete, "/api/v2/config/revisions/prune?keep=1&dryRun=true", nil)
+	dryRunPruneRec := httptest.NewRecorder()
+	mux.ServeHTTP(dryRunPruneRec, dryRunPruneReq)
+	if dryRunPruneRec.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/v2/config/revisions/prune dry-run expected 200, got %d", dryRunPruneRec.Code)
+	}
+
+	var dryRunPayload map[string]any
+	if err := json.Unmarshal(dryRunPruneRec.Body.Bytes(), &dryRunPayload); err != nil {
+		t.Fatalf("failed to decode prune dry-run response: %v", err)
+	}
+	if dryRunPayload["status"] != "dry_run" {
+		t.Fatalf("expected prune dry-run status=dry_run, got %v", dryRunPayload["status"])
+	}
+
+	afterRevisionsReq := httptest.NewRequest(http.MethodGet, "/api/v2/config/revisions?limit=20", nil)
+	afterRevisionsRec := httptest.NewRecorder()
+	mux.ServeHTTP(afterRevisionsRec, afterRevisionsReq)
+	if afterRevisionsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/config/revisions after prune dry-run expected 200, got %d", afterRevisionsRec.Code)
+	}
+
+	var afterPayload map[string]any
+	if err := json.Unmarshal(afterRevisionsRec.Body.Bytes(), &afterPayload); err != nil {
+		t.Fatalf("failed to decode revisions after prune dry-run: %v", err)
+	}
+	afterTotal, _ := afterPayload["total"].(float64)
+	if afterTotal != beforeTotal {
+		t.Fatalf("expected revisions total unchanged after dry-run, before=%v after=%v", beforeTotal, afterTotal)
+	}
+
+	rollbackToOldReq := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/v2/config/rollback?configHash=%s", hashA),
+		bytes.NewBufferString(`{}`),
+	)
+	rollbackToOldRec := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackToOldRec, rollbackToOldReq)
+	if rollbackToOldRec.Code != http.StatusOK {
+		t.Fatalf("expected rollback to old hash after prune dry-run to still work, got %d", rollbackToOldRec.Code)
 	}
 }
 
