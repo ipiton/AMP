@@ -404,11 +404,15 @@ curl "http://localhost:9093/api/v2/config/history?status=failed"
 
 # View history for specific apply source
 curl "http://localhost:9093/api/v2/config/history?source=rollback"
+
+# List unique successful revisions for rollback target selection
+curl "http://localhost:9093/api/v2/config/revisions?limit=20"
 ```
 
 If there is no previous successful revision, rollback returns `409 Conflict`.
 Rollback by hash returns `400 Bad Request` for invalid hash and `404 Not Found` when the revision is absent.
 History supports filters: `status=ok|failed` and `source=<startup|api|reload|rollback>`.
+Revisions endpoint returns unique successful hashes with `isCurrent` marker.
 
 ---
 
