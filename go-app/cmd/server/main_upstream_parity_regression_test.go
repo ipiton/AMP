@@ -546,6 +546,66 @@ func TestUpstreamParity_AlertsAndGroupsInvalidQueryErrorPayloadIsJSONString(t *t
 	}
 }
 
+func TestUpstreamParity_PostAlertsErrorPayloadContracts(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	invalidJSONReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`{}`))
+	invalidJSONRec := httptest.NewRecorder()
+	mux.ServeHTTP(invalidJSONRec, invalidJSONReq)
+	if invalidJSONRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v2/alerts invalid JSON expected 400, got %d", invalidJSONRec.Code)
+	}
+	var invalidJSONPayload map[string]any
+	if err := json.Unmarshal(invalidJSONRec.Body.Bytes(), &invalidJSONPayload); err != nil {
+		t.Fatalf("invalid JSON expected object payload, got %q (%v)", invalidJSONRec.Body.String(), err)
+	}
+	if invalidJSONPayload["code"] != float64(http.StatusBadRequest) {
+		t.Fatalf("invalid JSON expected code=400, got %v", invalidJSONPayload["code"])
+	}
+
+	missingLabelsReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{}]`))
+	missingLabelsRec := httptest.NewRecorder()
+	mux.ServeHTTP(missingLabelsRec, missingLabelsReq)
+	if missingLabelsRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /api/v2/alerts missing labels expected 422, got %d", missingLabelsRec.Code)
+	}
+	var missingLabelsPayload map[string]any
+	if err := json.Unmarshal(missingLabelsRec.Body.Bytes(), &missingLabelsPayload); err != nil {
+		t.Fatalf("missing labels expected object payload, got %q (%v)", missingLabelsRec.Body.String(), err)
+	}
+	if missingLabelsPayload["code"] != float64(602) {
+		t.Fatalf("missing labels expected code=602, got %v", missingLabelsPayload["code"])
+	}
+
+	emptyLabelsReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{}}]`))
+	emptyLabelsRec := httptest.NewRecorder()
+	mux.ServeHTTP(emptyLabelsRec, emptyLabelsReq)
+	if emptyLabelsRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v2/alerts empty labels expected 400, got %d", emptyLabelsRec.Code)
+	}
+	var emptyLabelsPayload string
+	if err := json.Unmarshal(emptyLabelsRec.Body.Bytes(), &emptyLabelsPayload); err != nil {
+		t.Fatalf("empty labels expected JSON string payload, got %q (%v)", emptyLabelsRec.Body.String(), err)
+	}
+	if strings.TrimSpace(emptyLabelsPayload) == "" {
+		t.Fatalf("empty labels expected non-empty message")
+	}
+
+	invalidGeneratorReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{"alertname":"A"},"generatorURL":":bad"}]`))
+	invalidGeneratorRec := httptest.NewRecorder()
+	mux.ServeHTTP(invalidGeneratorRec, invalidGeneratorReq)
+	if invalidGeneratorRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /api/v2/alerts invalid generatorURL expected 422, got %d", invalidGeneratorRec.Code)
+	}
+	var invalidGeneratorPayload map[string]any
+	if err := json.Unmarshal(invalidGeneratorRec.Body.Bytes(), &invalidGeneratorPayload); err != nil {
+		t.Fatalf("invalid generatorURL expected object payload, got %q (%v)", invalidGeneratorRec.Body.String(), err)
+	}
+	if invalidGeneratorPayload["code"] != float64(601) {
+		t.Fatalf("invalid generatorURL expected code=601, got %v", invalidGeneratorPayload["code"])
+	}
+}
+
 func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	mux := newPhase0TestMux(t)
 	now := time.Now().UTC()
