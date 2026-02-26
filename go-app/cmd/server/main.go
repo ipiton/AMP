@@ -1354,8 +1354,9 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/v2/silence/")
 		if id == "" || strings.Contains(id, "/") {
-			writeJSON(w, http.StatusNotFound, map[string]string{
-				"error": "silence not found",
+			writeJSON(w, http.StatusNotFound, map[string]any{
+				"code":    http.StatusNotFound,
+				"message": fmt.Sprintf("path %s was not found", r.URL.Path),
 			})
 			return
 		}
@@ -1363,30 +1364,28 @@ func silenceByIDHandler(store *silenceStore) http.HandlerFunc {
 		switch r.Method {
 		case http.MethodGet:
 			if _, err := uuid.Parse(id); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{
-					"error": "invalid silence id",
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+					"code":    601,
+					"message": fmt.Sprintf("silenceID in path must be of type uuid: %q", id),
 				})
 				return
 			}
 			silence, ok := store.get(id, time.Now().UTC())
 			if !ok {
-				writeJSON(w, http.StatusNotFound, map[string]string{
-					"error": "silence not found",
-				})
+				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			writeJSON(w, http.StatusOK, silence)
 		case http.MethodDelete:
 			if _, err := uuid.Parse(id); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{
-					"error": "invalid silence id",
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+					"code":    601,
+					"message": fmt.Sprintf("silenceID in path must be of type uuid: %q", id),
 				})
 				return
 			}
 			if !store.delete(id) {
-				writeJSON(w, http.StatusNotFound, map[string]string{
-					"error": "silence not found",
-				})
+				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			w.WriteHeader(http.StatusOK)

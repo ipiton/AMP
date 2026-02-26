@@ -40,8 +40,8 @@
 | `GET /api/v2/alerts/groups` | ✅ | ✅ **ACTIVE** | 🟡 | Upstream-like shape and filters; runtime grouping subset |
 | `GET /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Matcher filters and ordering aligned for covered scenarios; invalid matcher filter errors return upstream-like JSON string payload (`400`) |
 | `POST /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Create/update via POST path with runtime validation; error responses now use upstream-like JSON string payload |
-| `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + not-found contracts covered |
-| `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | UUID + delete/not-found contracts covered; success response is `200` with empty body (upstream-like) |
+| `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |
+| `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Success response is `200` with empty body; invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |
 
 ### Operational Compatibility Endpoints (Active Runtime)
 
