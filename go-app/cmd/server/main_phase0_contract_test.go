@@ -1254,6 +1254,13 @@ receivers:
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/alerts with invalid receiver regex expected 400, got %d", rec.Code)
 		}
+		var payload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alerts invalid receiver expected JSON string body, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(payload) == "" {
+			t.Fatalf("alerts invalid receiver expected non-empty error message")
+		}
 	})
 
 	t.Run("alerts get invalid state flag contract", func(t *testing.T) {
@@ -1273,6 +1280,13 @@ receivers:
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/alerts with invalid filter expected 400, got %d", rec.Code)
+		}
+		var payload string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("alerts invalid filter expected JSON string body, got %q (%v)", rec.Body.String(), err)
+		}
+		if strings.TrimSpace(payload) == "" {
+			t.Fatalf("alerts invalid filter expected non-empty error message")
 		}
 	})
 
@@ -1621,6 +1635,13 @@ receivers:
 		if recReceiver.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 400, got %d", recReceiver.Code)
 		}
+		var receiverPayload string
+		if err := json.Unmarshal(recReceiver.Body.Bytes(), &receiverPayload); err != nil {
+			t.Fatalf("alert groups invalid receiver expected JSON string body, got %q (%v)", recReceiver.Body.String(), err)
+		}
+		if strings.TrimSpace(receiverPayload) == "" {
+			t.Fatalf("alert groups invalid receiver expected non-empty error message")
+		}
 
 		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
 		recActive := httptest.NewRecorder()
@@ -1641,6 +1662,13 @@ receivers:
 		mux.ServeHTTP(recFilter, reqFilter)
 		if recFilter.Code != http.StatusBadRequest {
 			t.Fatalf("GET /api/v2/alerts/groups with invalid filter expected 400, got %d", recFilter.Code)
+		}
+		var filterPayload string
+		if err := json.Unmarshal(recFilter.Body.Bytes(), &filterPayload); err != nil {
+			t.Fatalf("alert groups invalid filter expected JSON string body, got %q (%v)", recFilter.Body.String(), err)
+		}
+		if strings.TrimSpace(filterPayload) == "" {
+			t.Fatalf("alert groups invalid filter expected non-empty error message")
 		}
 	})
 
