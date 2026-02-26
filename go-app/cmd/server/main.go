@@ -256,6 +256,7 @@ func registerRoutes(mux *http.ServeMux) {
 		slog.Error("Failed to mount static files", "error", err)
 	} else {
 		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+		registerUpstreamStaticCompatRoutes(mux, staticSub)
 	}
 
 	// Dashboard pages
@@ -770,6 +771,48 @@ func debugCompatHandler(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path += "/"
 	}
 	http.DefaultServeMux.ServeHTTP(w, r)
+}
+
+func registerUpstreamStaticCompatRoutes(mux *http.ServeMux, staticSub fs.FS) {
+	fileServer := http.FileServer(http.FS(staticSub))
+
+	// Alertmanager-compatible static entrypoint aliases.
+	mux.HandleFunc("/script.js", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		req := r.Clone(r.Context())
+		req.URL.Path = "/js/realtime-client.js"
+		fileServer.ServeHTTP(w, req)
+	})
+
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		req := r.Clone(r.Context())
+		req.URL.Path = "/favicon.ico"
+		fileServer.ServeHTTP(w, req)
+	})
+
+	mux.HandleFunc("/lib/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		subpath := strings.TrimPrefix(r.URL.Path, "/lib/")
+		req := r.Clone(r.Context())
+		req.URL.Path = path.Join("/lib", subpath)
+		if strings.HasSuffix(subpath, "/") && !strings.HasSuffix(req.URL.Path, "/") {
+			req.URL.Path += "/"
+		}
+		fileServer.ServeHTTP(w, req)
+	})
 }
 
 // API handlers
