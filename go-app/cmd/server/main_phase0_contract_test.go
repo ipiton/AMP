@@ -34,6 +34,7 @@ const validSilencePayload = `{
 const validConfigPayload = `
 route:
   receiver: "default"
+  group_by: ["alertname", "service", "namespace"]
 receivers:
   - name: "default"
 `
@@ -4273,6 +4274,11 @@ inhibit_rules:
 
 func TestPhase0AlertGroupsInhibitedByRulesRegexAndEqualSemantics(t *testing.T) {
 	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-ops"
+  group_by: ["alertname", "service", "namespace"]
+receivers:
+  - name: "team-ops"
 inhibit_rules:
   - name: "regex-critical-inhibits-warning-same-cluster"
     source_match_re:
