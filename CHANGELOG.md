@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - service registry classification bootstrap now passes `llm.provider`, `llm.max_tokens`, `llm.temperature` into LLM client config
   - added in-memory cache fallback for classification service bootstrap when Redis is unavailable
   - added runtime endpoint `GET /api/v2/classification/stats` with active provider/API endpoints and supported-provider matrix
+  - added runtime endpoint `GET /api/v2/classification/health` with live health probe of active provider endpoint (`/health` or `/models`)
   - runtime config reload/apply/rollback now refreshes LLM provider snapshot used by classification stats endpoint
   - added unit coverage for provider endpoint/header behavior and backward compatibility path
 - **Metrics System v2 Migration** - Complete migration of Health and Refresh metrics to unified `pkg/metrics/v2` (2024-12-08)
