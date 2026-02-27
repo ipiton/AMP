@@ -2257,13 +2257,9 @@ func parseRegexQuery(raw string) (*regexp.Regexp, error) {
 		return nil, nil
 	}
 
-	re, err := regexp.Compile(raw)
+	// Upstream compiles receiver regex as full-match: ^(?:<query>)$
+	re, err := regexp.Compile("^(?:" + raw + ")$")
 	if err != nil {
-		// Upstream receiver parser wraps query value in "(...)$" for validation,
-		// which affects error text (for example: `[)$` for input `[`)
-		if _, wrappedErr := regexp.Compile("(" + raw + ")$"); wrappedErr != nil {
-			err = wrappedErr
-		}
 		return nil, fmt.Errorf("failed to parse receiver param: %v", err)
 	}
 	return re, nil

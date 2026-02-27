@@ -805,6 +805,81 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_ReceiverRegexUsesFullMatchSemantics(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"ReceiverRegexFullMatchParity","receiver":"team-ops"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	testCases := []struct {
+		name        string
+		path        string
+		wantEntries int
+	}{
+		{
+			name:        "alerts exact full match",
+			path:        "/api/v2/alerts?receiver=team-ops",
+			wantEntries: 1,
+		},
+		{
+			name:        "alerts partial does not match",
+			path:        "/api/v2/alerts?receiver=ops",
+			wantEntries: 0,
+		},
+		{
+			name:        "alerts explicit substring regex matches",
+			path:        "/api/v2/alerts?receiver=.*ops.*",
+			wantEntries: 1,
+		},
+		{
+			name:        "groups exact full match",
+			path:        "/api/v2/alerts/groups?receiver=team-ops",
+			wantEntries: 1,
+		},
+		{
+			name:        "groups partial does not match",
+			path:        "/api/v2/alerts/groups?receiver=ops",
+			wantEntries: 0,
+		},
+		{
+			name:        "groups explicit substring regex matches",
+			path:        "/api/v2/alerts/groups?receiver=.*ops.*",
+			wantEntries: 1,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET %s expected 200, got %d", tc.path, rec.Code)
+			}
+
+			var payload []map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("failed to decode response for %s: %v", tc.path, err)
+			}
+			if len(payload) != tc.wantEntries {
+				t.Fatalf("GET %s expected %d entries, got %d", tc.path, tc.wantEntries, len(payload))
+			}
+		})
+	}
+}
+
 func TestUpstreamParity_AlertGroupsWithoutGroupByHaveEmptyLabels(t *testing.T) {
 	configPath := writeTestConfigFile(t, `
 route:
