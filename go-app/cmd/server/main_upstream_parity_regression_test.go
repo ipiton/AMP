@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +335,84 @@ func TestUpstreamParity_TimestampsUseMillisecondPrecision(t *testing.T) {
 	}
 	statusUptime, _ := statusPayload["uptime"].(string)
 	requireUpstreamLikeTimestampMillis(t, "status uptime", statusUptime)
+}
+
+func TestUpstreamParity_AlertsListOrderByStartsAtThenFingerprint(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"OrderParityM"},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"OrderParityA"},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"OrderParityZ"},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"OrderParityNewer"},
+			"startsAt": "2026-02-27T00:10:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	getRec := httptest.NewRecorder()
+	mux.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", getRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 4 {
+		t.Fatalf("expected 4 alerts, got %d", len(alerts))
+	}
+
+	firstLabels, ok := alerts[0]["labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("alerts[0].labels expected object, got %T", alerts[0]["labels"])
+	}
+	if firstLabels["alertname"] != "OrderParityNewer" {
+		t.Fatalf("expected newest startsAt alert first, got %v", firstLabels["alertname"])
+	}
+
+	sameStartsAtFingerprints := make([]string, 0, 3)
+	for i := 1; i < len(alerts); i++ {
+		startsAt, _ := alerts[i]["startsAt"].(string)
+		if !strings.HasPrefix(startsAt, "2026-02-27T00:00:00") {
+			t.Fatalf("alerts[%d] expected equal startsAt bucket, got %q", i, startsAt)
+		}
+		fingerprint, _ := alerts[i]["fingerprint"].(string)
+		if strings.TrimSpace(fingerprint) == "" {
+			t.Fatalf("alerts[%d] expected non-empty fingerprint", i)
+		}
+		sameStartsAtFingerprints = append(sameStartsAtFingerprints, fingerprint)
+	}
+
+	sorted := append([]string(nil), sameStartsAtFingerprints...)
+	sort.Strings(sorted)
+	for i := range sorted {
+		if sameStartsAtFingerprints[i] != sorted[i] {
+			t.Fatalf("equal startsAt alerts expected fingerprint-ascending order, got %v", sameStartsAtFingerprints)
+		}
+	}
 }
 
 func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {

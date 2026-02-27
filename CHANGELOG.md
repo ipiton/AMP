@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - invalid `receiver` / `filter` error message text now matches upstream wording (`failed to parse receiver param: ...`, `bad matcher format: ...`)
     - `GET /api/v2/alerts/groups` grouping labels now respect runtime `route.group_by` (including upstream-like empty `labels: {}` when `group_by` is omitted/empty in config)
     - added upstream parity regression coverage for `route.group_by: ["..."]` (full-label grouping semantics)
+    - `GET /api/v2/alerts` list ordering aligned with upstream tie-break behavior for equal `startsAt` (fingerprint ascending)
   - API timestamps now use upstream-like millisecond precision (`.000Z`) for core runtime responses (`/api/v2/status` uptime, alerts/silences list payloads)
   - `POST /api/v2/alerts` error contracts aligned closer to upstream runtime behavior:
     - invalid JSON/time payloads return `{code:400,message}` on `400`
