@@ -512,6 +512,69 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_AlertGroupsWithoutGroupByHaveEmptyLabels(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "default"
+receivers:
+  - name: "default"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"GroupNoByA","service":"api","namespace":"prod"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"GroupNoByB","service":"api","namespace":"prod"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", rec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected one receiver-level group without route.group_by, got %d", len(groups))
+	}
+
+	labels, ok := groups[0]["labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("group labels expected object, got %T", groups[0]["labels"])
+	}
+	if len(labels) != 0 {
+		t.Fatalf("group labels expected empty object without route.group_by, got %v", labels)
+	}
+
+	alerts, ok := groups[0]["alerts"].([]any)
+	if !ok {
+		t.Fatalf("group alerts expected array, got %T", groups[0]["alerts"])
+	}
+	if len(alerts) != 2 {
+		t.Fatalf("expected two alerts inside receiver-level group, got %d", len(alerts))
+	}
+}
+
 func TestUpstreamParity_AlertsAndGroupsInvalidQueryErrorPayloadIsJSONString(t *testing.T) {
 	mux := newPhase0TestMux(t)
 

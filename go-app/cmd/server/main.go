@@ -247,6 +247,7 @@ func registerRoutes(mux *http.ServeMux) {
 	silenceStore := newSilenceStore()
 	inhibitionEngine := loadRuntimeInhibitionEngine(configPath)
 	receiverCatalog := loadRuntimeReceiverCatalog(configPath)
+	alertGroupByCatalog := loadRuntimeAlertGroupByCatalog(configPath)
 	setupRuntimeStatePersistence(alertStore, silenceStore)
 	persistencePath := resolveRuntimeStatePath()
 	statusCtx := &runtimeStatusContext{
@@ -257,7 +258,7 @@ func registerRoutes(mux *http.ServeMux) {
 		configApplyStatus:  "unknown",
 		configApplySource:  "startup",
 	}
-	if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitionEngine, receiverCatalog); err != nil {
+	if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog); err != nil {
 		slog.Warn("Initial runtime config apply failed",
 			"config", configPath,
 			"error", err,
@@ -293,7 +294,7 @@ func registerRoutes(mux *http.ServeMux) {
 	// Alertmanager-compatible probe endpoints
 	mux.HandleFunc("/-/healthy", alertmanagerHealthyHandler)
 	mux.HandleFunc("/-/ready", alertmanagerReadyHandler)
-	mux.HandleFunc("/-/reload", alertmanagerReloadHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
+	mux.HandleFunc("/-/reload", alertmanagerReloadHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
 	mux.HandleFunc("/debug/", debugCompatHandler)
 
 	// Metrics endpoint
@@ -303,17 +304,17 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore, inhibitionEngine))
 	// Alertmanager v1 compatibility ingest endpoint (intentionally limited)
 	mux.HandleFunc("/api/v1/alerts", alertsV1Handler(alertStore, silenceStore, inhibitionEngine))
-	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine))
+	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine, alertGroupByCatalog))
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
-	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
+	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/history", configHistoryHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/revisions", configRevisionsHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/revisions/prune", configRevisionsPruneHandler(configPath, statusCtx))
-	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
+	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -385,6 +386,12 @@ type runtimeReceiverCatalog struct {
 	configured []string
 }
 
+type runtimeAlertGroupByCatalog struct {
+	mu         sync.RWMutex
+	groupBy    []string
+	configured bool
+}
+
 type alertmanagerRuntimeConfig struct {
 	Route     alertmanagerRouteConfig      `yaml:"route"`
 	Receivers []alertmanagerReceiverConfig `yaml:"receivers"`
@@ -392,6 +399,7 @@ type alertmanagerRuntimeConfig struct {
 
 type alertmanagerRouteConfig struct {
 	Receiver string                    `yaml:"receiver"`
+	GroupBy  []string                  `yaml:"group_by"`
 	Routes   []alertmanagerRouteConfig `yaml:"routes"`
 }
 
@@ -783,6 +791,28 @@ func (c *runtimeReceiverCatalog) setConfigured(configured []string) {
 	c.mu.Unlock()
 }
 
+func (c *runtimeAlertGroupByCatalog) getGroupBy() ([]string, bool) {
+	if c == nil {
+		return nil, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	groupBy := append([]string(nil), c.groupBy...)
+	return groupBy, c.configured
+}
+
+func (c *runtimeAlertGroupByCatalog) setGroupBy(groupBy []string, configured bool) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.groupBy = append([]string(nil), groupBy...)
+	c.configured = configured
+	c.mu.Unlock()
+}
+
 // Dashboard handlers
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	// "/"" is a catch-all pattern in net/http ServeMux. Guard unknown paths here
@@ -1062,6 +1092,7 @@ func alertmanagerReloadHandler(
 	statusCtx *runtimeStatusContext,
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
+	groupBy *runtimeAlertGroupByCatalog,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1069,7 +1100,7 @@ func alertmanagerReloadHandler(
 			return
 		}
 
-		err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
+		err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy)
 		if err != nil {
 			statusCtx.setConfigApplyResult("reload", err)
 			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
@@ -1432,7 +1463,12 @@ func receiversHandler(catalog *runtimeReceiverCatalog) http.HandlerFunc {
 	}
 }
 
-func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *runtimeInhibitionEngine) http.HandlerFunc {
+func alertGroupsHandler(
+	store *alertStore,
+	silences *silenceStore,
+	inhibitions *runtimeInhibitionEngine,
+	groupByCatalog *runtimeAlertGroupByCatalog,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1466,24 +1502,21 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *
 		alerts := store.list("", includeResolved)
 		alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
 		alerts = filterAlertsByGroupStateFilters(alerts, stateFilters, silences, now, inhibitedByIndex)
+		groupBy := resolveAlertGroupBy(groupByCatalog)
 
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
-			groupLabels := map[string]string{
-				"alertname": alert.Labels["alertname"],
-				"service":   alert.Labels["service"],
-				"namespace": alert.Labels["namespace"],
-			}
+			groupLabels := buildAlertGroupLabels(alert, groupBy)
 			receiver := alertReceiverName(alert)
 			if receiverRegex != nil && !receiverRegex.MatchString(receiver) {
 				continue
 			}
 
-			key := groupLabels["alertname"] + "|" + groupLabels["service"] + "|" + groupLabels["namespace"] + "|" + receiver
+			key := alertGroupKey(groupLabels, receiver)
 			group, ok := groupsMap[key]
 			if !ok {
 				group = &apiAlertGroup{
-					Labels:   groupLabels,
+					Labels:   cloneStringMap(groupLabels),
 					Receiver: apiReceiver{Name: receiver},
 					Alerts:   make([]apiAlert, 0, 1),
 				}
@@ -1500,9 +1533,7 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *
 			groups = append(groups, *group)
 		}
 		sort.Slice(groups, func(i, j int) bool {
-			a := groups[i].Labels["alertname"] + "|" + groups[i].Labels["service"] + "|" + groups[i].Labels["namespace"] + "|" + groups[i].Receiver.Name
-			b := groups[j].Labels["alertname"] + "|" + groups[j].Labels["service"] + "|" + groups[j].Labels["namespace"] + "|" + groups[j].Receiver.Name
-			return a < b
+			return alertGroupSortKey(groups[i]) < alertGroupSortKey(groups[j])
 		})
 
 		responseGroups := make([]apiGettableAlertGroup, 0, len(groups))
@@ -1516,6 +1547,58 @@ func alertGroupsHandler(store *alertStore, silences *silenceStore, inhibitions *
 
 		writeJSON(w, http.StatusOK, responseGroups)
 	}
+}
+
+var legacyAlertGroupBy = []string{"alertname", "service", "namespace"}
+
+func resolveAlertGroupBy(catalog *runtimeAlertGroupByCatalog) []string {
+	if catalog == nil {
+		return append([]string(nil), legacyAlertGroupBy...)
+	}
+
+	groupBy, configured := catalog.getGroupBy()
+	if !configured {
+		return append([]string(nil), legacyAlertGroupBy...)
+	}
+	return groupBy
+}
+
+func buildAlertGroupLabels(alert apiAlert, groupBy []string) map[string]string {
+	if len(groupBy) == 0 {
+		return map[string]string{}
+	}
+	if len(groupBy) == 1 && groupBy[0] == "..." {
+		labels := cloneStringMap(alert.Labels)
+		if labels == nil {
+			return map[string]string{}
+		}
+		return labels
+	}
+
+	labels := make(map[string]string, len(groupBy))
+	for _, labelName := range groupBy {
+		labels[labelName] = alert.Labels[labelName]
+	}
+	return labels
+}
+
+func alertGroupKey(labels map[string]string, receiver string) string {
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys)+1)
+	parts = append(parts, receiver)
+	for _, key := range keys {
+		parts = append(parts, key+"="+labels[key])
+	}
+	return strings.Join(parts, "|")
+}
+
+func alertGroupSortKey(group apiAlertGroup) string {
+	return alertGroupKey(group.Labels, group.Receiver.Name)
 }
 
 func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx *runtimeStatusContext) http.HandlerFunc {
@@ -1574,6 +1657,7 @@ func configHandler(
 	statusCtx *runtimeStatusContext,
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
+	groupBy *runtimeAlertGroupByCatalog,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -1645,10 +1729,10 @@ func configHandler(
 				return
 			}
 
-			if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers); err != nil {
+			if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy); err != nil {
 				// Best-effort rollback to keep runtime consistent if apply fails after write.
 				if rollbackErr := writeRuntimeConfig(configPath, []byte(previousConfig)); rollbackErr == nil {
-					_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
+					_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy)
 				}
 				statusCtx.setConfigApplyResult("api", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -1823,6 +1907,7 @@ func configRollbackHandler(
 	statusCtx *runtimeStatusContext,
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
+	groupBy *runtimeAlertGroupByCatalog,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1914,10 +1999,10 @@ func configRollbackHandler(
 			return
 		}
 
-		if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers); err != nil {
+		if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy); err != nil {
 			// Best-effort rollback of rollback to keep runtime consistent.
 			if rollbackErr := writeRuntimeConfig(configPath, []byte(currentConfig)); rollbackErr == nil {
-				_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers)
+				_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy)
 			}
 			statusCtx.setConfigApplyResult("rollback", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -1973,12 +2058,17 @@ func applyRuntimeConfigReload(
 	statusCtx *runtimeStatusContext,
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
+	groupBy *runtimeAlertGroupByCatalog,
 ) error {
 	reloadedRules, err := parseRuntimeInhibitionRules(configPath)
 	if err != nil {
 		return err
 	}
 	reloadedReceivers, err := parseRuntimeConfiguredReceivers(configPath)
+	if err != nil {
+		return err
+	}
+	reloadedGroupBy, groupByConfigured, err := parseRuntimeAlertGroupBy(configPath)
 	if err != nil {
 		return err
 	}
@@ -1992,6 +2082,9 @@ func applyRuntimeConfigReload(
 	}
 	if receivers != nil {
 		receivers.setConfigured(reloadedReceivers)
+	}
+	if groupBy != nil {
+		groupBy.setGroupBy(reloadedGroupBy, groupByConfigured)
 	}
 	if statusCtx != nil {
 		statusCtx.setConfigOriginal(configOriginal)
@@ -2920,6 +3013,30 @@ func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
 	return catalog
 }
 
+func loadRuntimeAlertGroupByCatalog(configPath string) *runtimeAlertGroupByCatalog {
+	catalog := &runtimeAlertGroupByCatalog{}
+
+	groupBy, configured, err := parseRuntimeAlertGroupBy(configPath)
+	if err != nil {
+		slog.Warn("Failed to parse runtime alert group_by from config",
+			"config", configPath,
+			"error", err,
+		)
+		return catalog
+	}
+
+	catalog.setGroupBy(groupBy, configured)
+
+	if configured {
+		slog.Info("Loaded runtime alert group_by from config",
+			"count", len(groupBy),
+			"config", configPath,
+		)
+	}
+
+	return catalog
+}
+
 func parseRuntimeConfiguredReceivers(configPath string) ([]string, error) {
 	content, err := os.ReadFile(configPath)
 	if err != nil {
@@ -2952,6 +3069,52 @@ func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
 	}
 	sort.Strings(configured)
 	return configured, nil
+}
+
+func parseRuntimeAlertGroupBy(configPath string) ([]string, bool, error) {
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	return parseRuntimeAlertGroupByFromData(content)
+}
+
+func parseRuntimeAlertGroupByFromData(content []byte) ([]string, bool, error) {
+	var cfg alertmanagerRuntimeConfig
+	if err := yaml.Unmarshal(content, &cfg); err != nil {
+		return nil, false, err
+	}
+
+	return normalizeRuntimeAlertGroupBy(cfg.Route.GroupBy), true, nil
+}
+
+func normalizeRuntimeAlertGroupBy(groupBy []string) []string {
+	if len(groupBy) == 0 {
+		return []string{}
+	}
+
+	normalized := make([]string, 0, len(groupBy))
+	seen := map[string]struct{}{}
+	for _, rawLabel := range groupBy {
+		label := strings.TrimSpace(rawLabel)
+		if label == "" {
+			continue
+		}
+		if label == "..." {
+			return []string{"..."}
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		normalized = append(normalized, label)
+	}
+
+	return normalized
 }
 
 func webhookHandler(alertStore *alertStore, silences *silenceStore) http.Handler {
