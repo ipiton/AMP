@@ -485,6 +485,233 @@ receivers:
 	}
 }
 
+func TestUpstreamParity_ReceiverRoutingContinueAddsAdditionalReceiverGroups(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-db"
+      match:
+        service: "db"
+      continue: true
+    - receiver: "team-critical"
+      matchers:
+        - severity="critical"
+receivers:
+  - name: "team-default"
+  - name: "team-db"
+  - name: "team-critical"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+	runID := fmt.Sprintf("route-continue-%d", time.Now().UnixNano())
+	alertPayload := fmt.Sprintf(`[
+		{
+			"labels": {"alertname":"RouteContinueParity","service":"db","severity":"critical","runid":%q},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		}
+	]`, runID)
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(alertPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	query := url.Values{}
+	query.Add("filter", fmt.Sprintf(`runid="%s"`, runID))
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode(), nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected one routed alert, got %d", len(alerts))
+	}
+	receivers, ok := alerts[0]["receivers"].([]any)
+	if !ok || len(receivers) != 2 {
+		t.Fatalf("alert receivers expected exactly two entries with continue=true, got %v", alerts[0]["receivers"])
+	}
+	receiverSet := make(map[string]struct{}, len(receivers))
+	for _, receiverRaw := range receivers {
+		receiverObj, _ := receiverRaw.(map[string]any)
+		receiverName, _ := receiverObj["name"].(string)
+		receiverSet[receiverName] = struct{}{}
+	}
+	for _, expected := range []string{"team-db", "team-critical"} {
+		if _, ok := receiverSet[expected]; !ok {
+			t.Fatalf("expected alert receivers to include %q, got %v", expected, alerts[0]["receivers"])
+		}
+	}
+
+	alertsDBReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode()+"&receiver=%5Eteam-db%24", nil)
+	alertsDBRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsDBRec, alertsDBReq)
+	if alertsDBRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts receiver team-db expected 200, got %d", alertsDBRec.Code)
+	}
+	var alertsDB []map[string]any
+	if err := json.Unmarshal(alertsDBRec.Body.Bytes(), &alertsDB); err != nil {
+		t.Fatalf("failed to decode team-db alerts response: %v", err)
+	}
+	if len(alertsDB) != 1 {
+		t.Fatalf("expected alert to match receiver=team-db filter, got %d", len(alertsDB))
+	}
+
+	alertsCriticalReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode()+"&receiver=%5Eteam-critical%24", nil)
+	alertsCriticalRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsCriticalRec, alertsCriticalReq)
+	if alertsCriticalRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts receiver team-critical expected 200, got %d", alertsCriticalRec.Code)
+	}
+	var alertsCritical []map[string]any
+	if err := json.Unmarshal(alertsCriticalRec.Body.Bytes(), &alertsCritical); err != nil {
+		t.Fatalf("failed to decode team-critical alerts response: %v", err)
+	}
+	if len(alertsCritical) != 1 {
+		t.Fatalf("expected alert to match receiver=team-critical filter, got %d", len(alertsCritical))
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+query.Encode(), nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", groupsRec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("expected two receiver groups with continue=true, got %d", len(groups))
+	}
+	groupReceiverSet := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		groupReceiver, _ := group["receiver"].(map[string]any)
+		groupReceiverName, _ := groupReceiver["name"].(string)
+		groupReceiverSet[groupReceiverName] = struct{}{}
+
+		groupAlerts, _ := group["alerts"].([]any)
+		if len(groupAlerts) != 1 {
+			t.Fatalf("expected one alert per continue group, got %d", len(groupAlerts))
+		}
+		groupAlert, _ := groupAlerts[0].(map[string]any)
+		groupAlertReceivers, _ := groupAlert["receivers"].([]any)
+		if len(groupAlertReceivers) != 2 {
+			t.Fatalf("nested alert receivers expected two entries, got %v", groupAlert["receivers"])
+		}
+	}
+	for _, expected := range []string{"team-db", "team-critical"} {
+		if _, ok := groupReceiverSet[expected]; !ok {
+			t.Fatalf("expected groups to include receiver %q, got %v", expected, groupReceiverSet)
+		}
+	}
+}
+
+func TestUpstreamParity_ReceiverRoutingWithoutContinueStopsAtFirstRoute(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-db"
+      match:
+        service: "db"
+    - receiver: "team-critical"
+      matchers:
+        - severity="critical"
+receivers:
+  - name: "team-default"
+  - name: "team-db"
+  - name: "team-critical"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+	runID := fmt.Sprintf("route-no-continue-%d", time.Now().UnixNano())
+	alertPayload := fmt.Sprintf(`[
+		{
+			"labels": {"alertname":"RouteNoContinueParity","service":"db","severity":"critical","runid":%q},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		}
+	]`, runID)
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(alertPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	query := url.Values{}
+	query.Add("filter", fmt.Sprintf(`runid="%s"`, runID))
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode(), nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected one alert, got %d", len(alerts))
+	}
+	receivers, ok := alerts[0]["receivers"].([]any)
+	if !ok || len(receivers) != 1 {
+		t.Fatalf("alert receivers expected one entry without continue, got %v", alerts[0]["receivers"])
+	}
+	receiverObj, _ := receivers[0].(map[string]any)
+	receiverName, _ := receiverObj["name"].(string)
+	if receiverName != "team-db" {
+		t.Fatalf("expected first matching route receiver team-db, got %q", receiverName)
+	}
+
+	alertsCriticalReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode()+"&receiver=%5Eteam-critical%24", nil)
+	alertsCriticalRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsCriticalRec, alertsCriticalReq)
+	if alertsCriticalRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts receiver team-critical expected 200, got %d", alertsCriticalRec.Code)
+	}
+	var alertsCritical []map[string]any
+	if err := json.Unmarshal(alertsCriticalRec.Body.Bytes(), &alertsCritical); err != nil {
+		t.Fatalf("failed to decode team-critical alerts response: %v", err)
+	}
+	if len(alertsCritical) != 0 {
+		t.Fatalf("expected no alerts for receiver=team-critical without continue, got %d", len(alertsCritical))
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+query.Encode(), nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", groupsRec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected one group without continue, got %d", len(groups))
+	}
+	groupReceiver, _ := groups[0]["receiver"].(map[string]any)
+	groupReceiverName, _ := groupReceiver["name"].(string)
+	if groupReceiverName != "team-db" {
+		t.Fatalf("expected group receiver team-db without continue, got %q", groupReceiverName)
+	}
+}
+
 func TestUpstreamParity_TimestampsUseMillisecondPrecision(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
