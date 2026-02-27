@@ -188,6 +188,39 @@ func TestUpstreamParity_StatusClusterEnabledShapeWhenListenAddressConfigured(t *
 	}
 }
 
+func TestUpstreamParity_StatusClusterGeneratedNameLooksULID(t *testing.T) {
+	t.Setenv(runtimeClusterListenAddressEnv, "0.0.0.0:9094")
+	t.Setenv(runtimeClusterNameEnv, "")
+
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/status expected 200, got %d", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("status response is not valid json: %v", err)
+	}
+	cluster, ok := payload["cluster"].(map[string]any)
+	if !ok {
+		t.Fatalf("status cluster expected object, got %T", payload["cluster"])
+	}
+
+	clusterName, _ := cluster["name"].(string)
+	if strings.TrimSpace(clusterName) == "" {
+		t.Fatalf("status cluster.name expected non-empty generated value")
+	}
+
+	reULID := regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+	if !reULID.MatchString(clusterName) {
+		t.Fatalf("status cluster.name expected ULID-like format, got %q", clusterName)
+	}
+}
+
 func TestUpstreamParity_StatusClusterSettlingWindow(t *testing.T) {
 	now := time.Now().UTC()
 	clusterCtx := &runtimeClusterContext{
