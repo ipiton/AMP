@@ -71,9 +71,12 @@ llm:
 # config.yaml
 llm:
   enabled: true
-  base_url: "https://your-custom-proxy.example.com/classify"
+  provider: "proxy" # proxy | openai
+  base_url: "https://your-custom-proxy.example.com"
   api_key: "your-custom-api-key"
   model: "your-model"
+  max_tokens: 1000
+  temperature: 0.0
   timeout: 30s
 ```
 
@@ -95,9 +98,12 @@ import (
 func main() {
     // Configure LLM client
     config := llm.Config{
-        BaseURL:    "https://api.openai.com/v1/chat/completions",
+        Provider:   "openai",
+        BaseURL:    "https://api.openai.com/v1",
         APIKey:     "sk-YOUR-KEY",  // Your own OpenAI key
         Model:      "gpt-4o",
+        MaxTokens:  800,
+        Temperature: 0.1,
         Timeout:    30 * time.Second,
         MaxRetries: 3,
         CircuitBreaker: llm.CircuitBreakerConfig{
@@ -132,6 +138,17 @@ func main() {
     log.Printf("Classification: %+v", result)
 }
 ```
+
+### Provider Endpoints
+
+- `provider=proxy`
+  - classify: `POST <base_url>/classify`
+  - health: `GET <base_url>/health`
+- `provider=openai`
+  - classify: `POST <base_url>/chat/completions`
+  - health: `GET <base_url>/models`
+
+`base_url` for OpenAI should be `https://api.openai.com/v1` (without `/chat/completions`).
 
 ---
 
