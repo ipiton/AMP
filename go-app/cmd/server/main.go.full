@@ -643,11 +643,14 @@ func main() {
 
 		// Initialize LLM client
 		llmConfig := llm.Config{
-			BaseURL:    cfg.LLM.BaseURL,
-			APIKey:     cfg.LLM.APIKey,
-			Model:      cfg.LLM.Model,
-			Timeout:    cfg.LLM.Timeout,
-			MaxRetries: cfg.LLM.MaxRetries,
+			Provider:    cfg.LLM.Provider,
+			BaseURL:     cfg.LLM.BaseURL,
+			APIKey:      cfg.LLM.APIKey,
+			Model:       cfg.LLM.Model,
+			MaxTokens:   cfg.LLM.MaxTokens,
+			Temperature: cfg.LLM.Temperature,
+			Timeout:     cfg.LLM.Timeout,
+			MaxRetries:  cfg.LLM.MaxRetries,
 		}
 		llmClient := llm.NewHTTPLLMClient(llmConfig, appLogger)
 
