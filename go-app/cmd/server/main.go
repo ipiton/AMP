@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/oklog/ulid/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gopkg.in/yaml.v3"
 
@@ -3067,7 +3069,7 @@ func loadRuntimeClusterContext() *runtimeClusterContext {
 
 	clusterName := strings.TrimSpace(os.Getenv(runtimeClusterNameEnv))
 	if clusterName == "" {
-		clusterName = strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
+		clusterName = generateRuntimeClusterName()
 	}
 
 	advertiseAddress := strings.TrimSpace(os.Getenv(runtimeClusterAdvertiseAddressEnv))
@@ -3086,6 +3088,14 @@ func loadRuntimeClusterContext() *runtimeClusterContext {
 		},
 		settleUntil: time.Now().UTC().Add(defaultRuntimeClusterSettlingDuration),
 	}
+}
+
+func generateRuntimeClusterName() string {
+	id, err := ulid.New(ulid.Now(), rand.Reader)
+	if err == nil {
+		return id.String()
+	}
+	return strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
 }
 
 func deriveRuntimeClusterAdvertiseAddress(listenAddress string) string {

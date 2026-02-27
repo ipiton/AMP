@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
   - `GET /api/v2/status` cluster payload now follows upstream-like mode semantics:
     - default runtime returns active single-node cluster shape with startup settling window (`status=settling` -> `status=ready`, self peer + name)
+    - default generated `cluster.name` now uses upstream-like ULID format when `AMP_CLUSTER_NAME` is not set
     - `AMP_CLUSTER_LISTEN_ADDRESS=` (empty value) forces disabled shape (`status=disabled`, empty peers)
   - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
   - `GET /api/v2/receivers` preserves runtime config receiver order (aligned with upstream response ordering)
