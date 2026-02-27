@@ -327,6 +327,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/config/revisions/prune", configRevisionsPruneHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog, llmContext))
 	mux.HandleFunc("/api/v2/classification/stats", classificationStatsHandler(llmContext))
+	mux.HandleFunc("/api/v2/classification/health", classificationHealthHandler(llmContext))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -1833,6 +1834,93 @@ func classificationStatsHandler(llmCtx *runtimeLLMContext) http.HandlerFunc {
 				},
 			},
 		})
+	}
+}
+
+func classificationHealthHandler(llmCtx *runtimeLLMContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		llmConfig := runtimeDefaultLLMConfig()
+		if llmCtx != nil {
+			llmConfig = llmCtx.getConfig()
+		}
+
+		configuredProvider := strings.TrimSpace(llmConfig.Provider)
+		if configuredProvider == "" {
+			configuredProvider = "proxy"
+		}
+		resolvedProvider := resolveRuntimeLLMProvider(configuredProvider)
+		_, healthURL := runtimeLLMActiveEndpoints(resolvedProvider, llmConfig.BaseURL)
+
+		payload := map[string]any{
+			"enabled":            llmConfig.Enabled,
+			"configuredProvider": configuredProvider,
+			"resolvedProvider":   resolvedProvider,
+			"healthEndpoint":     healthURL,
+			"baseURL":            llmConfig.BaseURL,
+			"model":              llmConfig.Model,
+			"hasAPIKey":          strings.TrimSpace(llmConfig.APIKey) != "",
+		}
+
+		if !llmConfig.Enabled {
+			payload["healthy"] = false
+			payload["status"] = "disabled"
+			payload["message"] = "llm provider is disabled"
+			writeJSON(w, http.StatusOK, payload)
+			return
+		}
+
+		if strings.TrimSpace(llmConfig.BaseURL) == "" {
+			payload["healthy"] = false
+			payload["status"] = "unhealthy"
+			payload["error"] = "llm base_url is empty"
+			writeJSON(w, http.StatusServiceUnavailable, payload)
+			return
+		}
+
+		checkCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			payload["healthy"] = false
+			payload["status"] = "unhealthy"
+			payload["error"] = fmt.Sprintf("failed to build health request: %v", err)
+			writeJSON(w, http.StatusServiceUnavailable, payload)
+			return
+		}
+		req.Header.Set("User-Agent", "alert-history-go/1.0.0")
+		if resolvedProvider == "openai" && strings.TrimSpace(llmConfig.APIKey) != "" {
+			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(llmConfig.APIKey))
+		}
+
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			payload["healthy"] = false
+			payload["status"] = "unhealthy"
+			payload["error"] = err.Error()
+			writeJSON(w, http.StatusServiceUnavailable, payload)
+			return
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+
+		payload["statusCode"] = resp.StatusCode
+		payload["healthy"] = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
+		if payload["healthy"].(bool) {
+			payload["status"] = "healthy"
+			writeJSON(w, http.StatusOK, payload)
+			return
+		}
+
+		payload["status"] = "unhealthy"
+		payload["error"] = fmt.Sprintf("health endpoint returned status %d", resp.StatusCode)
+		writeJSON(w, http.StatusServiceUnavailable, payload)
 	}
 }
 

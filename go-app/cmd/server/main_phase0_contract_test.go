@@ -152,6 +152,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "config revisions prune delete", method: http.MethodDelete, path: "/api/v2/config/revisions/prune", allowedStatus: []int{http.StatusOK}},
 		{name: "config rollback post", method: http.MethodPost, path: "/api/v2/config/rollback", body: `{}`, allowedStatus: []int{http.StatusOK, http.StatusConflict}},
 		{name: "classification stats get", method: http.MethodGet, path: "/api/v2/classification/stats", allowedStatus: []int{http.StatusOK}},
+		{name: "classification health get", method: http.MethodGet, path: "/api/v2/classification/health", allowedStatus: []int{http.StatusOK, http.StatusServiceUnavailable}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -1787,6 +1788,7 @@ receivers:
 			{name: "config revisions prune get not allowed", method: http.MethodGet, path: "/api/v2/config/revisions/prune"},
 			{name: "config rollback get not allowed", method: http.MethodGet, path: "/api/v2/config/rollback"},
 			{name: "classification stats post not allowed", method: http.MethodPost, path: "/api/v2/classification/stats"},
+			{name: "classification health post not allowed", method: http.MethodPost, path: "/api/v2/classification/health"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
@@ -2001,6 +2003,89 @@ func TestPhase0ClassificationStatsContract(t *testing.T) {
 	if len(supportedProviders) < 2 {
 		t.Fatalf("expected at least 2 supported providers, got %d", len(supportedProviders))
 	}
+}
+
+func TestPhase0ClassificationHealthContract(t *testing.T) {
+	t.Run("openai provider health", func(t *testing.T) {
+		var gotPath string
+		var gotAuth string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		config := fmt.Sprintf(`
+route:
+  receiver: "default"
+receivers:
+  - name: "default"
+llm:
+  enabled: true
+  provider: openai
+  api_key: sk-test
+  base_url: %q
+  model: gpt-4o-mini
+`, server.URL+"/v1")
+		t.Setenv(runtimeConfigFileEnv, writeTestConfigFile(t, config))
+		mux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/classification/health", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/classification/health expected 200, got %d", rec.Code)
+		}
+
+		if gotPath != "/v1/models" {
+			t.Fatalf("expected openai health path /v1/models, got %q", gotPath)
+		}
+		if gotAuth != "Bearer sk-test" {
+			t.Fatalf("expected Bearer auth header, got %q", gotAuth)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid json payload: %v", err)
+		}
+
+		if healthy, ok := payload["healthy"].(bool); !ok || !healthy {
+			t.Fatalf("expected healthy=true, got %v", payload["healthy"])
+		}
+		if status, _ := payload["status"].(string); status != "healthy" {
+			t.Fatalf("expected status=healthy, got %q", status)
+		}
+	})
+
+	t.Run("disabled provider returns disabled status", func(t *testing.T) {
+		t.Setenv(runtimeConfigFileEnv, writeTestConfigFile(t, validConfigPayload))
+		mux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/classification/health", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v2/classification/health expected 200 when disabled, got %d", rec.Code)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid json payload: %v", err)
+		}
+
+		if enabled, ok := payload["enabled"].(bool); !ok || enabled {
+			t.Fatalf("expected enabled=false, got %v", payload["enabled"])
+		}
+		if healthy, ok := payload["healthy"].(bool); !ok || healthy {
+			t.Fatalf("expected healthy=false, got %v", payload["healthy"])
+		}
+		if status, _ := payload["status"].(string); status != "disabled" {
+			t.Fatalf("expected status=disabled, got %q", status)
+		}
+	})
 }
 
 func TestPhase0AlertsStateSemantics(t *testing.T) {
