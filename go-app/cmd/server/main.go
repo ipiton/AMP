@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -45,6 +46,11 @@ const (
 )
 
 const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
+const runtimeClusterListenAddressEnv = "AMP_CLUSTER_LISTEN_ADDRESS"
+const runtimeClusterAdvertiseAddressEnv = "AMP_CLUSTER_ADVERTISE_ADDRESS"
+const runtimeClusterNameEnv = "AMP_CLUSTER_NAME"
+
+const defaultRuntimeClusterListenAddress = "0.0.0.0:9094"
 
 const maxConfigApplyHistoryEntries = 500
 const maxConfigRevisionEntries = 100
@@ -248,6 +254,7 @@ func registerRoutes(mux *http.ServeMux) {
 	inhibitionEngine := loadRuntimeInhibitionEngine(configPath)
 	receiverCatalog := loadRuntimeReceiverCatalog(configPath)
 	alertGroupByCatalog := loadRuntimeAlertGroupByCatalog(configPath)
+	clusterCtx := loadRuntimeClusterContext()
 	setupRuntimeStatePersistence(alertStore, silenceStore)
 	persistencePath := resolveRuntimeStatePath()
 	statusCtx := &runtimeStatusContext{
@@ -308,7 +315,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(receiverCatalog))
-	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx))
+	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx, clusterCtx))
 	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/history", configHistoryHandler(configPath, statusCtx))
@@ -352,6 +359,12 @@ type runtimeStatusContext struct {
 	configApplyAt      time.Time
 	configApplyHistory []runtimeConfigApplyHistoryEntry
 	configRevisions    []runtimeConfigRevision
+}
+
+type runtimeClusterContext struct {
+	status string
+	name   string
+	peers  []map[string]string
 }
 
 type runtimeConfigApplyHistoryEntry struct {
@@ -1601,7 +1614,12 @@ func alertGroupSortKey(group apiAlertGroup) string {
 	return alertGroupKey(group.Labels, group.Receiver.Name)
 }
 
-func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx *runtimeStatusContext) http.HandlerFunc {
+func statusHandler(
+	alertStore *alertStore,
+	silenceStore *silenceStore,
+	statusCtx *runtimeStatusContext,
+	clusterCtx *runtimeClusterContext,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -1612,10 +1630,7 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 		alertTotal, alertFiring, alertResolved := alertStore.stats()
 		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
 
-		cluster := map[string]any{
-			"status": "disabled",
-			"peers":  []map[string]string{},
-		}
+		cluster := buildRuntimeClusterStatusPayload(clusterCtx)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"cluster": cluster,
@@ -3035,6 +3050,97 @@ func loadRuntimeAlertGroupByCatalog(configPath string) *runtimeAlertGroupByCatal
 	}
 
 	return catalog
+}
+
+func loadRuntimeClusterContext() *runtimeClusterContext {
+	listenAddress, listenDefined := os.LookupEnv(runtimeClusterListenAddressEnv)
+	listenAddress = strings.TrimSpace(listenAddress)
+
+	if listenDefined && listenAddress == "" {
+		return &runtimeClusterContext{
+			status: "disabled",
+			peers:  []map[string]string{},
+		}
+	}
+
+	if listenAddress == "" {
+		listenAddress = defaultRuntimeClusterListenAddress
+	}
+
+	clusterName := strings.TrimSpace(os.Getenv(runtimeClusterNameEnv))
+	if clusterName == "" {
+		clusterName = strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", ""))
+	}
+
+	advertiseAddress := strings.TrimSpace(os.Getenv(runtimeClusterAdvertiseAddressEnv))
+	if advertiseAddress == "" {
+		advertiseAddress = deriveRuntimeClusterAdvertiseAddress(listenAddress)
+	}
+
+	return &runtimeClusterContext{
+		status: "ready",
+		name:   clusterName,
+		peers: []map[string]string{
+			{
+				"name":    clusterName,
+				"address": advertiseAddress,
+			},
+		},
+	}
+}
+
+func deriveRuntimeClusterAdvertiseAddress(listenAddress string) string {
+	listenAddress = strings.TrimSpace(listenAddress)
+	if listenAddress == "" {
+		return "127.0.0.1:9094"
+	}
+
+	host, port, err := net.SplitHostPort(listenAddress)
+	if err != nil {
+		return "127.0.0.1:9094"
+	}
+	host = strings.TrimSpace(host)
+	port = strings.TrimSpace(port)
+	if port == "" {
+		port = "9094"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
+}
+
+func buildRuntimeClusterStatusPayload(clusterCtx *runtimeClusterContext) map[string]any {
+	cluster := map[string]any{
+		"status": "disabled",
+		"peers":  []map[string]string{},
+	}
+	if clusterCtx == nil {
+		return cluster
+	}
+
+	status := strings.TrimSpace(clusterCtx.status)
+	if status == "" {
+		status = "disabled"
+	}
+	cluster["status"] = status
+	if status != "disabled" && strings.TrimSpace(clusterCtx.name) != "" {
+		cluster["name"] = strings.TrimSpace(clusterCtx.name)
+	}
+
+	if len(clusterCtx.peers) == 0 {
+		cluster["peers"] = []map[string]string{}
+		return cluster
+	}
+	peers := make([]map[string]string, 0, len(clusterCtx.peers))
+	for _, peer := range clusterCtx.peers {
+		peers = append(peers, map[string]string{
+			"name":    strings.TrimSpace(peer["name"]),
+			"address": strings.TrimSpace(peer["address"]),
+		})
+	}
+	cluster["peers"] = peers
+	return cluster
 }
 
 func parseRuntimeConfiguredReceivers(configPath string) ([]string, error) {

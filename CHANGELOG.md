@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `POST /-/reload` returns `500` on config reload/parse failures
   - `/debug/*` switched from JSON stub to pprof-backed proxy behavior
   - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
-  - `GET /api/v2/status` now reports `cluster.status=disabled` in single-node runtime (closer to upstream behavior when clustering is off)
+  - `GET /api/v2/status` cluster payload now follows upstream-like mode semantics:
+    - default runtime returns active single-node cluster shape (`status=ready`, self peer + name)
+    - `AMP_CLUSTER_LISTEN_ADDRESS=` (empty value) forces disabled shape (`status=disabled`, empty peers)
   - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
   - `GET /api/v2/alerts` and `GET /api/v2/alerts/groups` query parsing aligned closer to upstream runtime behavior:
     - invalid state-flag bool values (`active/silenced/inhibited/unprocessed/muted`) now fall back to `false` when parameter is present
