@@ -2149,7 +2149,12 @@ func parseRegexQuery(raw string) (*regexp.Regexp, error) {
 
 	re, err := regexp.Compile(raw)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex query value")
+		// Upstream receiver parser wraps query value in "(...)$" for validation,
+		// which affects error text (for example: `[)$` for input `[`)
+		if _, wrappedErr := regexp.Compile("(" + raw + ")$"); wrappedErr != nil {
+			err = wrappedErr
+		}
+		return nil, fmt.Errorf("failed to parse receiver param: %v", err)
 	}
 	return re, nil
 }
@@ -2193,21 +2198,23 @@ func parseAlertLabelMatchers(r *http.Request) ([]*cfgmatcher.Matcher, error) {
 
 	parsed := make([]*cfgmatcher.Matcher, 0, len(rawMatchers))
 	for _, raw := range rawMatchers {
-		m, err := cfgmatcher.Parse(strings.TrimSpace(raw))
+		trimmed := strings.TrimSpace(raw)
+		m, err := cfgmatcher.Parse(trimmed)
 		if err != nil {
-			return nil, fmt.Errorf("invalid filter matcher")
+			return nil, fmt.Errorf("bad matcher format: %s", trimmed)
 		}
 
 		value, err := parseAlertLabelMatcherValue(m.Value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid filter matcher")
+			return nil, err
 		}
 		m.Value = value
 
 		if m.IsRegex() {
-			re, err := regexp.Compile(value)
+			// Upstream compiles label regex as full match.
+			re, err := regexp.Compile("^(?:" + value + ")$")
 			if err != nil {
-				return nil, fmt.Errorf("invalid filter matcher")
+				return nil, err
 			}
 			m.CompiledRegex = re
 		}
@@ -2228,6 +2235,9 @@ func parseAlertLabelMatcherValue(raw string) (string, error) {
 
 	first := value[0]
 	last := value[len(value)-1]
+	if first == '"' && last != '"' {
+		return "", fmt.Errorf("matcher value contains unescaped double quote: %s", value)
+	}
 	if first != '"' && first != '\'' {
 		return value, nil
 	}

@@ -516,13 +516,30 @@ func TestUpstreamParity_AlertsAndGroupsInvalidQueryErrorPayloadIsJSONString(t *t
 	mux := newPhase0TestMux(t)
 
 	cases := []struct {
-		name string
-		path string
+		name    string
+		path    string
+		message string
 	}{
-		{name: "alerts invalid receiver", path: "/api/v2/alerts?receiver=["},
-		{name: "alerts invalid filter", path: "/api/v2/alerts?filter=broken-matcher"},
-		{name: "groups invalid receiver", path: "/api/v2/alerts/groups?receiver=["},
-		{name: "groups invalid filter", path: "/api/v2/alerts/groups?filter=broken-matcher"},
+		{
+			name:    "alerts invalid receiver",
+			path:    "/api/v2/alerts?receiver=[",
+			message: "failed to parse receiver param: error parsing regexp: missing closing ]: `[)$`",
+		},
+		{
+			name:    "alerts invalid filter",
+			path:    "/api/v2/alerts?filter=broken-matcher",
+			message: "bad matcher format: broken-matcher",
+		},
+		{
+			name:    "groups invalid receiver",
+			path:    "/api/v2/alerts/groups?receiver=[",
+			message: "failed to parse receiver param: error parsing regexp: missing closing ]: `[)$`",
+		},
+		{
+			name:    "groups invalid filter",
+			path:    "/api/v2/alerts/groups?filter=broken-matcher",
+			message: "bad matcher format: broken-matcher",
+		},
 	}
 
 	for _, tc := range cases {
@@ -539,8 +556,8 @@ func TestUpstreamParity_AlertsAndGroupsInvalidQueryErrorPayloadIsJSONString(t *t
 			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 				t.Fatalf("GET %s expected JSON string body, got %q (%v)", tc.path, rec.Body.String(), err)
 			}
-			if strings.TrimSpace(payload) == "" {
-				t.Fatalf("GET %s expected non-empty error message", tc.path)
+			if payload != tc.message {
+				t.Fatalf("GET %s expected message %q, got %q", tc.path, tc.message, payload)
 			}
 		})
 	}
@@ -779,8 +796,9 @@ func TestUpstreamParity_SilencesInvalidFilterErrorPayloadIsJSONString(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid filter error expected JSON string body, got %q (%v)", rec.Body.String(), err)
 	}
-	if strings.TrimSpace(payload) == "" {
-		t.Fatalf("invalid filter error expected non-empty message")
+	const expected = "bad matcher format: broken-matcher"
+	if payload != expected {
+		t.Fatalf("invalid filter error expected message %q, got %q", expected, payload)
 	}
 }
 
