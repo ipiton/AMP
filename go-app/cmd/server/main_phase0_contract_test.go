@@ -39,6 +39,22 @@ receivers:
   - name: "default"
 `
 
+const validConfigWithOpenAILLMPayload = `
+route:
+  receiver: "default"
+  group_by: ["alertname", "service", "namespace"]
+receivers:
+  - name: "default"
+llm:
+  enabled: true
+  provider: openai
+  api_key: sk-test
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+  max_tokens: 256
+  temperature: 0.1
+`
+
 const unknownSilenceUUID = "00000000-0000-0000-0000-000000000001"
 
 func activeSilencePayload(now time.Time) string {
@@ -135,6 +151,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "config revisions get", method: http.MethodGet, path: "/api/v2/config/revisions", allowedStatus: []int{http.StatusOK}},
 		{name: "config revisions prune delete", method: http.MethodDelete, path: "/api/v2/config/revisions/prune", allowedStatus: []int{http.StatusOK}},
 		{name: "config rollback post", method: http.MethodPost, path: "/api/v2/config/rollback", body: `{}`, allowedStatus: []int{http.StatusOK, http.StatusConflict}},
+		{name: "classification stats get", method: http.MethodGet, path: "/api/v2/classification/stats", allowedStatus: []int{http.StatusOK}},
 		{name: "history get", method: http.MethodGet, path: "/history", allowedStatus: []int{http.StatusOK}},
 		{name: "history recent get", method: http.MethodGet, path: "/history/recent", allowedStatus: []int{http.StatusOK}},
 		{name: "dashboard overview api", method: http.MethodGet, path: "/api/dashboard/overview", allowedStatus: []int{http.StatusOK}},
@@ -1769,6 +1786,7 @@ receivers:
 			{name: "config revisions post not allowed", method: http.MethodPost, path: "/api/v2/config/revisions"},
 			{name: "config revisions prune get not allowed", method: http.MethodGet, path: "/api/v2/config/revisions/prune"},
 			{name: "config rollback get not allowed", method: http.MethodGet, path: "/api/v2/config/rollback"},
+			{name: "classification stats post not allowed", method: http.MethodPost, path: "/api/v2/classification/stats"},
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences"},
 			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers"},
 			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups"},
@@ -1933,6 +1951,56 @@ receivers:
 			t.Fatalf("GET /api/v1/alerts expected 405, got %d", getRec.Code)
 		}
 	})
+}
+
+func TestPhase0ClassificationStatsContract(t *testing.T) {
+	t.Setenv(runtimeConfigFileEnv, writeTestConfigFile(t, validConfigWithOpenAILLMPayload))
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/classification/stats", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/classification/stats expected 200, got %d", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json payload: %v", err)
+	}
+
+	if enabled, ok := payload["enabled"].(bool); !ok || !enabled {
+		t.Fatalf("expected enabled=true, got %v", payload["enabled"])
+	}
+	if provider, _ := payload["configuredProvider"].(string); provider != "openai" {
+		t.Fatalf("expected configuredProvider=openai, got %q", provider)
+	}
+	if provider, _ := payload["resolvedProvider"].(string); provider != "openai" {
+		t.Fatalf("expected resolvedProvider=openai, got %q", provider)
+	}
+	if hasAPIKey, ok := payload["hasAPIKey"].(bool); !ok || !hasAPIKey {
+		t.Fatalf("expected hasAPIKey=true, got %v", payload["hasAPIKey"])
+	}
+
+	activeEndpoints, ok := payload["activeEndpoints"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected activeEndpoints object, got %T", payload["activeEndpoints"])
+	}
+	if classify, _ := activeEndpoints["classify"].(string); classify != "https://api.openai.com/v1/chat/completions" {
+		t.Fatalf("unexpected classify endpoint: %q", classify)
+	}
+	if health, _ := activeEndpoints["health"].(string); health != "https://api.openai.com/v1/models" {
+		t.Fatalf("unexpected health endpoint: %q", health)
+	}
+
+	supportedProviders, ok := payload["supportedProviders"].([]any)
+	if !ok {
+		t.Fatalf("expected supportedProviders array, got %T", payload["supportedProviders"])
+	}
+	if len(supportedProviders) < 2 {
+		t.Fatalf("expected at least 2 supported providers, got %d", len(supportedProviders))
+	}
 }
 
 func TestPhase0AlertsStateSemantics(t *testing.T) {
