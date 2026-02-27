@@ -816,8 +816,16 @@ func (c *runtimeReceiverCatalog) getDefaultReceiver() string {
 }
 
 func (c *runtimeReceiverCatalog) resolveReceiverForLabels(labels map[string]string) string {
-	if c == nil {
+	resolved := c.resolveReceiversForLabels(labels)
+	if len(resolved) == 0 {
 		return "default"
+	}
+	return resolved[0]
+}
+
+func (c *runtimeReceiverCatalog) resolveReceiversForLabels(labels map[string]string) []string {
+	if c == nil {
+		return []string{"default"}
 	}
 
 	c.mu.RLock()
@@ -825,9 +833,9 @@ func (c *runtimeReceiverCatalog) resolveReceiverForLabels(labels map[string]stri
 
 	defaultReceiver := normalizeDefaultReceiver(c.defaultRef)
 	if !c.routeSet {
-		return defaultReceiver
+		return []string{defaultReceiver}
 	}
-	return resolveRouteReceiver(c.rootRoute, labels, defaultReceiver)
+	return resolveRouteReceivers(c.rootRoute, labels, defaultReceiver)
 }
 
 func (c *runtimeReceiverCatalog) setConfiguredAndDefault(
@@ -1294,7 +1302,7 @@ func handleAlertsGet(
 	if receiverRegex != nil {
 		filtered := make([]apiAlert, 0, len(alerts))
 		for _, alert := range alerts {
-			if receiverRegex.MatchString(alertReceiverName(alert, receivers)) {
+			if alertMatchesReceiverRegex(alert, receiverRegex, receivers) {
 				filtered = append(filtered, alert)
 			}
 		}
@@ -1571,22 +1579,24 @@ func alertGroupsHandler(
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
 			groupLabels := buildAlertGroupLabels(alert, groupBy)
-			receiver := alertReceiverName(alert, receivers)
-			if receiverRegex != nil && !receiverRegex.MatchString(receiver) {
-				continue
-			}
-
-			key := alertGroupKey(groupLabels, receiver)
-			group, ok := groupsMap[key]
-			if !ok {
-				group = &apiAlertGroup{
-					Labels:   cloneStringMap(groupLabels),
-					Receiver: apiReceiver{Name: receiver},
-					Alerts:   make([]apiAlert, 0, 1),
+			receiverNames := alertReceiverNames(alert, receivers)
+			for _, receiver := range receiverNames {
+				if receiverRegex != nil && !receiverRegex.MatchString(receiver) {
+					continue
 				}
-				groupsMap[key] = group
+
+				key := alertGroupKey(groupLabels, receiver)
+				group, ok := groupsMap[key]
+				if !ok {
+					group = &apiAlertGroup{
+						Labels:   cloneStringMap(groupLabels),
+						Receiver: apiReceiver{Name: receiver},
+						Alerts:   make([]apiAlert, 0, 1),
+					}
+					groupsMap[key] = group
+				}
+				group.Alerts = append(group.Alerts, alert)
 			}
-			group.Alerts = append(group.Alerts, alert)
 		}
 
 		groups := make([]apiAlertGroup, 0, len(groupsMap))
@@ -2540,10 +2550,16 @@ func toGettableAlert(
 		annotations = map[string]string{}
 	}
 
+	receiverNames := alertReceiverNames(alert, receivers)
+	gettableReceivers := make([]apiReceiver, 0, len(receiverNames))
+	for _, receiverName := range receiverNames {
+		gettableReceivers = append(gettableReceivers, apiReceiver{Name: receiverName})
+	}
+
 	return apiGettableAlert{
 		Labels:       cloneStringMap(alert.Labels),
 		Annotations:  annotations,
-		Receivers:    []apiReceiver{{Name: alertReceiverName(alert, receivers)}},
+		Receivers:    gettableReceivers,
 		StartsAt:     alert.StartsAt,
 		UpdatedAt:    alert.UpdatedAt,
 		EndsAt:       endsAt,
@@ -2768,14 +2784,34 @@ func isAlertMuted(
 }
 
 func alertReceiverName(alert apiAlert, receivers *runtimeReceiverCatalog) string {
+	names := alertReceiverNames(alert, receivers)
+	if len(names) == 0 {
+		return "default"
+	}
+	return names[0]
+}
+
+func alertReceiverNames(alert apiAlert, receivers *runtimeReceiverCatalog) []string {
 	receiver := strings.TrimSpace(alert.Labels["receiver"])
 	if receiver == "" {
 		if receivers == nil {
-			return "default"
+			return []string{"default"}
 		}
-		return receivers.resolveReceiverForLabels(alert.Labels)
+		return receivers.resolveReceiversForLabels(alert.Labels)
 	}
-	return receiver
+	return []string{receiver}
+}
+
+func alertMatchesReceiverRegex(alert apiAlert, receiverRegex *regexp.Regexp, receivers *runtimeReceiverCatalog) bool {
+	if receiverRegex == nil {
+		return true
+	}
+	for _, receiver := range alertReceiverNames(alert, receivers) {
+		if receiverRegex.MatchString(receiver) {
+			return true
+		}
+	}
+	return false
 }
 
 func copyStringSlice(in []string) []string {
@@ -3286,20 +3322,36 @@ func validateRuntimeRouteConfig(route alertmanagerRouteConfig) error {
 	return nil
 }
 
-func resolveRouteReceiver(route alertmanagerRouteConfig, labels map[string]string, fallback string) string {
+func resolveRouteReceivers(route alertmanagerRouteConfig, labels map[string]string, fallback string) []string {
 	receiver := normalizeDefaultReceiver(route.Receiver)
 	if strings.TrimSpace(route.Receiver) == "" {
 		receiver = normalizeDefaultReceiver(fallback)
 	}
 
+	var matchedReceivers []string
+	matchedChild := false
 	for _, child := range route.Routes {
 		if !routeMatchesLabels(child, labels) {
 			continue
 		}
-		return resolveRouteReceiver(child, labels, receiver)
+		matchedChild = true
+		matchedReceivers = mergeUniqueStringSlices(
+			matchedReceivers,
+			resolveRouteReceivers(child, labels, receiver),
+		)
+		if !child.Continue {
+			break
+		}
 	}
 
-	return receiver
+	if matchedChild {
+		if len(matchedReceivers) == 0 {
+			return []string{receiver}
+		}
+		return matchedReceivers
+	}
+
+	return []string{receiver}
 }
 
 func routeMatchesLabels(route alertmanagerRouteConfig, labels map[string]string) bool {
