@@ -298,6 +298,193 @@ receivers:
 	}
 }
 
+func TestUpstreamParity_ReceiverFallbackUsesRouteReceiver(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-ops"
+receivers:
+  - name: "team-ops"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	alertPayload := `[
+		{
+			"labels": {"alertname":"ReceiverFallbackParity"},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		}
+	]`
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(alertPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?receiver=^team-ops$", nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected exactly one alert with route.receiver fallback, got %d", len(alerts))
+	}
+	receivers, ok := alerts[0]["receivers"].([]any)
+	if !ok || len(receivers) != 1 {
+		t.Fatalf("alert receivers expected one item, got %v", alerts[0]["receivers"])
+	}
+	receiver, ok := receivers[0].(map[string]any)
+	if !ok || receiver["name"] != "team-ops" {
+		t.Fatalf("alert receiver fallback expected team-ops, got %v", receivers[0])
+	}
+
+	groupsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=^team-ops$", nil)
+	groupsRec := httptest.NewRecorder()
+	mux.ServeHTTP(groupsRec, groupsReq)
+	if groupsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", groupsRec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(groupsRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode alert groups response: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected one group with route.receiver fallback, got %d", len(groups))
+	}
+	groupReceiver, ok := groups[0]["receiver"].(map[string]any)
+	if !ok || groupReceiver["name"] != "team-ops" {
+		t.Fatalf("group receiver fallback expected team-ops, got %v", groups[0]["receiver"])
+	}
+}
+
+func TestUpstreamParity_ReceiverRoutingUsesRouteMatchers(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-db"
+      match:
+        service: "db"
+    - receiver: "team-api"
+      match_re:
+        service: "api-.+"
+    - receiver: "team-critical"
+      matchers:
+        - severity="critical"
+receivers:
+  - name: "team-default"
+  - name: "team-db"
+  - name: "team-api"
+  - name: "team-critical"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	runID := fmt.Sprintf("route-matchers-%d", time.Now().UnixNano())
+	alertPayload := fmt.Sprintf(`[
+		{
+			"labels": {"alertname":"RouteMatcherDB","service":"db","runid":%q},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"RouteMatcherAPI","service":"api-prod","runid":%q},
+			"startsAt": "2026-02-27T00:01:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"RouteMatcherCritical","severity":"critical","runid":%q},
+			"startsAt": "2026-02-27T00:02:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"RouteMatcherDefault","runid":%q},
+			"startsAt": "2026-02-27T00:03:00Z",
+			"status": "firing"
+		}
+	]`, runID, runID, runID, runID)
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(alertPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	query := url.Values{}
+	query.Add("filter", fmt.Sprintf(`runid="%s"`, runID))
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode(), nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 4 {
+		t.Fatalf("expected 4 routed alerts, got %d", len(alerts))
+	}
+
+	gotReceiversByAlert := make(map[string]string, len(alerts))
+	for _, alert := range alerts {
+		labels, _ := alert["labels"].(map[string]any)
+		alertName, _ := labels["alertname"].(string)
+		receivers, _ := alert["receivers"].([]any)
+		if len(receivers) != 1 {
+			t.Fatalf("alert %q expected one receiver, got %v", alertName, alert["receivers"])
+		}
+		receiverObj, _ := receivers[0].(map[string]any)
+		receiverName, _ := receiverObj["name"].(string)
+		gotReceiversByAlert[alertName] = receiverName
+	}
+
+	wantReceiversByAlert := map[string]string{
+		"RouteMatcherDB":       "team-db",
+		"RouteMatcherAPI":      "team-api",
+		"RouteMatcherCritical": "team-critical",
+		"RouteMatcherDefault":  "team-default",
+	}
+	for alertName, wantReceiver := range wantReceiversByAlert {
+		if gotReceiversByAlert[alertName] != wantReceiver {
+			t.Fatalf("alert %q expected receiver %q, got %q", alertName, wantReceiver, gotReceiversByAlert[alertName])
+		}
+	}
+
+	dbFilter := url.Values{}
+	dbFilter.Add("filter", fmt.Sprintf(`runid="%s"`, runID))
+	dbFilter.Set("receiver", "^team-db$")
+	dbReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+dbFilter.Encode(), nil)
+	dbRec := httptest.NewRecorder()
+	mux.ServeHTTP(dbRec, dbReq)
+	if dbRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", dbRec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(dbRec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected one group for receiver team-db, got %d", len(groups))
+	}
+	groupReceiver, ok := groups[0]["receiver"].(map[string]any)
+	if !ok || groupReceiver["name"] != "team-db" {
+		t.Fatalf("group receiver expected team-db, got %v", groups[0]["receiver"])
+	}
+}
+
 func TestUpstreamParity_TimestampsUseMillisecondPrecision(t *testing.T) {
 	mux := newPhase0TestMux(t)
 

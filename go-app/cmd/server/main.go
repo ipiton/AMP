@@ -311,10 +311,10 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// API endpoints
-	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore, inhibitionEngine))
+	mux.HandleFunc("/api/v2/alerts", alertsHandler(alertStore, silenceStore, inhibitionEngine, receiverCatalog))
 	// Alertmanager v1 compatibility ingest endpoint (intentionally limited)
 	mux.HandleFunc("/api/v1/alerts", alertsV1Handler(alertStore, silenceStore, inhibitionEngine))
-	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine, alertGroupByCatalog))
+	mux.HandleFunc("/api/v2/alerts/groups", alertGroupsHandler(alertStore, silenceStore, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
 	mux.HandleFunc("/api/v2/silences", silencesHandler(silenceStore))
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(receiverCatalog))
@@ -401,6 +401,9 @@ type runtimeInhibitionEngine struct {
 type runtimeReceiverCatalog struct {
 	mu         sync.RWMutex
 	configured []string
+	defaultRef string
+	rootRoute  alertmanagerRouteConfig
+	routeSet   bool
 }
 
 type runtimeAlertGroupByCatalog struct {
@@ -416,6 +419,10 @@ type alertmanagerRuntimeConfig struct {
 
 type alertmanagerRouteConfig struct {
 	Receiver string                    `yaml:"receiver"`
+	Match    map[string]string         `yaml:"match"`
+	MatchRE  map[string]string         `yaml:"match_re"`
+	Matchers []string                  `yaml:"matchers"`
+	Continue bool                      `yaml:"continue"`
 	GroupBy  []string                  `yaml:"group_by"`
 	Routes   []alertmanagerRouteConfig `yaml:"routes"`
 }
@@ -798,13 +805,46 @@ func (c *runtimeReceiverCatalog) getConfigured() []string {
 	return append([]string(nil), c.configured...)
 }
 
-func (c *runtimeReceiverCatalog) setConfigured(configured []string) {
+func (c *runtimeReceiverCatalog) getDefaultReceiver() string {
+	if c == nil {
+		return "default"
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return normalizeDefaultReceiver(c.defaultRef)
+}
+
+func (c *runtimeReceiverCatalog) resolveReceiverForLabels(labels map[string]string) string {
+	if c == nil {
+		return "default"
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	defaultReceiver := normalizeDefaultReceiver(c.defaultRef)
+	if !c.routeSet {
+		return defaultReceiver
+	}
+	return resolveRouteReceiver(c.rootRoute, labels, defaultReceiver)
+}
+
+func (c *runtimeReceiverCatalog) setConfiguredAndDefault(
+	configured []string,
+	defaultReceiver string,
+	rootRoute alertmanagerRouteConfig,
+	routeSet bool,
+) {
 	if c == nil {
 		return
 	}
 
 	c.mu.Lock()
 	c.configured = append([]string(nil), configured...)
+	c.defaultRef = normalizeDefaultReceiver(defaultReceiver)
+	c.rootRoute = rootRoute
+	c.routeSet = routeSet
 	c.mu.Unlock()
 }
 
@@ -1196,11 +1236,16 @@ func alertsV1Handler(store *alertStore, silences *silenceStore, inhibitions *run
 	}
 }
 
-func alertsHandler(store *alertStore, silences *silenceStore, inhibitions *runtimeInhibitionEngine) http.HandlerFunc {
+func alertsHandler(
+	store *alertStore,
+	silences *silenceStore,
+	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			handleAlertsGet(store, silences, inhibitions, w, r)
+			handleAlertsGet(store, silences, inhibitions, receivers, w, r)
 		case http.MethodPost:
 			handleAlertsPost(store, silences, inhibitions, w, r)
 		default:
@@ -1213,6 +1258,7 @@ func handleAlertsGet(
 	store *alertStore,
 	silences *silenceStore,
 	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
@@ -1248,7 +1294,7 @@ func handleAlertsGet(
 	if receiverRegex != nil {
 		filtered := make([]apiAlert, 0, len(alerts))
 		for _, alert := range alerts {
-			if receiverRegex.MatchString(alertReceiverName(alert)) {
+			if receiverRegex.MatchString(alertReceiverName(alert, receivers)) {
 				filtered = append(filtered, alert)
 			}
 		}
@@ -1257,7 +1303,7 @@ func handleAlertsGet(
 	alerts = filterAlertsByLabelMatchers(alerts, labelMatchers)
 	alerts = filterAlertsByStateFilters(alerts, stateFilters, silences, now, inhibitedByIndex)
 
-	writeJSON(w, http.StatusOK, toGettableAlerts(alerts, silences, now, inhibitedByIndex))
+	writeJSON(w, http.StatusOK, toGettableAlerts(alerts, silences, now, inhibitedByIndex, receivers))
 }
 
 func handleAlertsPost(
@@ -1484,6 +1530,7 @@ func alertGroupsHandler(
 	store *alertStore,
 	silences *silenceStore,
 	inhibitions *runtimeInhibitionEngine,
+	receivers *runtimeReceiverCatalog,
 	groupByCatalog *runtimeAlertGroupByCatalog,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1524,7 +1571,7 @@ func alertGroupsHandler(
 		groupsMap := make(map[string]*apiAlertGroup)
 		for _, alert := range alerts {
 			groupLabels := buildAlertGroupLabels(alert, groupBy)
-			receiver := alertReceiverName(alert)
+			receiver := alertReceiverName(alert, receivers)
 			if receiverRegex != nil && !receiverRegex.MatchString(receiver) {
 				continue
 			}
@@ -1558,7 +1605,7 @@ func alertGroupsHandler(
 			responseGroups = append(responseGroups, apiGettableAlertGroup{
 				Labels:   cloneStringMap(group.Labels),
 				Receiver: group.Receiver,
-				Alerts:   toGettableAlerts(group.Alerts, silences, now, inhibitedByIndex),
+				Alerts:   toGettableAlerts(group.Alerts, silences, now, inhibitedByIndex, receivers),
 			})
 		}
 
@@ -2083,7 +2130,7 @@ func applyRuntimeConfigReload(
 	if err != nil {
 		return err
 	}
-	reloadedReceivers, err := parseRuntimeConfiguredReceivers(configPath)
+	reloadedReceivers, reloadedDefaultReceiver, reloadedRoute, routeSet, err := parseRuntimeConfiguredReceivers(configPath)
 	if err != nil {
 		return err
 	}
@@ -2100,7 +2147,7 @@ func applyRuntimeConfigReload(
 		inhibitions.setRules(reloadedRules)
 	}
 	if receivers != nil {
-		receivers.setConfigured(reloadedReceivers)
+		receivers.setConfiguredAndDefault(reloadedReceivers, reloadedDefaultReceiver, reloadedRoute, routeSet)
 	}
 	if groupBy != nil {
 		groupBy.setGroupBy(reloadedGroupBy, groupByConfigured)
@@ -2116,7 +2163,7 @@ func validateRuntimeConfigPayload(content []byte) error {
 	if _, err := parseRuntimeInhibitionRulesFromData(content); err != nil {
 		return err
 	}
-	if _, err := parseRuntimeConfiguredReceiversFromData(content); err != nil {
+	if _, _, _, err := parseRuntimeConfiguredReceiversFromData(content); err != nil {
 		return err
 	}
 	return nil
@@ -2445,6 +2492,7 @@ func toGettableAlerts(
 	silences *silenceStore,
 	now time.Time,
 	inhibitedByIndex map[string][]string,
+	receivers *runtimeReceiverCatalog,
 ) []apiGettableAlert {
 	if len(in) == 0 {
 		return []apiGettableAlert{}
@@ -2452,7 +2500,7 @@ func toGettableAlerts(
 
 	out := make([]apiGettableAlert, 0, len(in))
 	for i := range in {
-		out = append(out, toGettableAlert(in[i], silences, now, inhibitedByIndex))
+		out = append(out, toGettableAlert(in[i], silences, now, inhibitedByIndex, receivers))
 	}
 	return out
 }
@@ -2462,6 +2510,7 @@ func toGettableAlert(
 	silences *silenceStore,
 	now time.Time,
 	inhibitedByIndex map[string][]string,
+	receivers *runtimeReceiverCatalog,
 ) apiGettableAlert {
 	silencedBy := make([]string, 0)
 	inhibitedBy := copyStringSlice(inhibitedByForAlert(alert, inhibitedByIndex))
@@ -2494,7 +2543,7 @@ func toGettableAlert(
 	return apiGettableAlert{
 		Labels:       cloneStringMap(alert.Labels),
 		Annotations:  annotations,
-		Receivers:    append([]apiReceiver(nil), alert.Receivers...),
+		Receivers:    []apiReceiver{{Name: alertReceiverName(alert, receivers)}},
 		StartsAt:     alert.StartsAt,
 		UpdatedAt:    alert.UpdatedAt,
 		EndsAt:       endsAt,
@@ -2539,30 +2588,31 @@ func filterSilencesByLabelMatchers(in []apiSilence, matchers []*cfgmatcher.Match
 
 func alertMatchesLabelMatchers(alert apiAlert, matchers []*cfgmatcher.Matcher) bool {
 	for _, matcher := range matchers {
-		labelValue, labelExists := alert.Labels[matcher.Label]
-
-		switch matcher.Type {
-		case cfgmatcher.MatchEqual:
-			if !labelExists || labelValue != matcher.Value {
-				return false
-			}
-		case cfgmatcher.MatchNotEqual:
-			if labelExists && labelValue == matcher.Value {
-				return false
-			}
-		case cfgmatcher.MatchRegexp:
-			if !labelExists || matcher.CompiledRegex == nil || !matcher.CompiledRegex.MatchString(labelValue) {
-				return false
-			}
-		case cfgmatcher.MatchNotRegexp:
-			if labelExists && matcher.CompiledRegex != nil && matcher.CompiledRegex.MatchString(labelValue) {
-				return false
-			}
-		default:
+		if !labelSetMatchesMatcher(alert.Labels, matcher) {
 			return false
 		}
 	}
 	return true
+}
+
+func labelSetMatchesMatcher(labels map[string]string, matcher *cfgmatcher.Matcher) bool {
+	if matcher == nil {
+		return false
+	}
+
+	labelValue, labelExists := labels[matcher.Label]
+	switch matcher.Type {
+	case cfgmatcher.MatchEqual:
+		return labelExists && labelValue == matcher.Value
+	case cfgmatcher.MatchNotEqual:
+		return !labelExists || labelValue != matcher.Value
+	case cfgmatcher.MatchRegexp:
+		return labelExists && matcher.CompiledRegex != nil && matcher.CompiledRegex.MatchString(labelValue)
+	case cfgmatcher.MatchNotRegexp:
+		return !labelExists || matcher.CompiledRegex == nil || !matcher.CompiledRegex.MatchString(labelValue)
+	default:
+		return false
+	}
 }
 
 func silenceMatchesLabelMatchers(silence apiSilence, matchers []*cfgmatcher.Matcher) bool {
@@ -2717,10 +2767,13 @@ func isAlertMuted(
 	return state.silenced || state.inhibited
 }
 
-func alertReceiverName(alert apiAlert) string {
+func alertReceiverName(alert apiAlert, receivers *runtimeReceiverCatalog) string {
 	receiver := strings.TrimSpace(alert.Labels["receiver"])
 	if receiver == "" {
-		return "default"
+		if receivers == nil {
+			return "default"
+		}
+		return receivers.resolveReceiverForLabels(alert.Labels)
 	}
 	return receiver
 }
@@ -3008,7 +3061,7 @@ func isNoInhibitionRulesError(err error) bool {
 func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
 	catalog := &runtimeReceiverCatalog{}
 
-	configured, err := parseRuntimeConfiguredReceivers(configPath)
+	configured, defaultReceiver, rootRoute, routeSet, err := parseRuntimeConfiguredReceivers(configPath)
 	if err != nil {
 		slog.Warn("Failed to parse runtime receivers from config",
 			"config", configPath,
@@ -3016,11 +3069,12 @@ func loadRuntimeReceiverCatalog(configPath string) *runtimeReceiverCatalog {
 		)
 		return catalog
 	}
-	catalog.setConfigured(configured)
+	catalog.setConfiguredAndDefault(configured, defaultReceiver, rootRoute, routeSet)
 
-	if len(configured) > 0 {
+	if len(configured) > 0 || defaultReceiver != "" {
 		slog.Info("Loaded runtime receivers from config",
 			"count", len(configured),
+			"defaultReceiver", normalizeDefaultReceiver(defaultReceiver),
 			"config", configPath,
 		)
 	}
@@ -3155,21 +3209,28 @@ func buildRuntimeClusterStatusPayload(clusterCtx *runtimeClusterContext, now tim
 	return cluster
 }
 
-func parseRuntimeConfiguredReceivers(configPath string) ([]string, error) {
+func parseRuntimeConfiguredReceivers(configPath string) ([]string, string, alertmanagerRouteConfig, bool, error) {
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, "", alertmanagerRouteConfig{}, false, nil
 		}
-		return nil, err
+		return nil, "", alertmanagerRouteConfig{}, false, err
 	}
-	return parseRuntimeConfiguredReceiversFromData(content)
+	receivers, defaultReceiver, rootRoute, err := parseRuntimeConfiguredReceiversFromData(content)
+	if err != nil {
+		return nil, "", alertmanagerRouteConfig{}, false, err
+	}
+	return receivers, defaultReceiver, rootRoute, true, nil
 }
 
-func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
+func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, string, alertmanagerRouteConfig, error) {
 	var cfg alertmanagerRuntimeConfig
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
-		return nil, err
+		return nil, "", alertmanagerRouteConfig{}, err
+	}
+	if err := validateRuntimeRouteConfig(cfg.Route); err != nil {
+		return nil, "", alertmanagerRouteConfig{}, err
 	}
 
 	receivers := make([]string, 0, len(cfg.Receivers))
@@ -3186,7 +3247,116 @@ func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
 		receivers = append(receivers, name)
 	}
 
-	return receivers, nil
+	return receivers, normalizeDefaultReceiver(cfg.Route.Receiver), cfg.Route, nil
+}
+
+func normalizeDefaultReceiver(raw string) string {
+	receiver := strings.TrimSpace(raw)
+	if receiver == "" {
+		return "default"
+	}
+	return receiver
+}
+
+func validateRuntimeRouteConfig(route alertmanagerRouteConfig) error {
+	for labelName := range route.Match {
+		if strings.TrimSpace(labelName) == "" {
+			return fmt.Errorf("route.match contains empty label name")
+		}
+	}
+	for labelName, pattern := range route.MatchRE {
+		labelName = strings.TrimSpace(labelName)
+		if labelName == "" {
+			return fmt.Errorf("route.match_re contains empty label name")
+		}
+		if _, err := regexp.Compile("^(?:" + strings.TrimSpace(pattern) + ")$"); err != nil {
+			return fmt.Errorf("invalid route.match_re[%q]: %w", labelName, err)
+		}
+	}
+	for _, rawMatcher := range route.Matchers {
+		if _, err := parseRuntimeRouteMatcher(rawMatcher); err != nil {
+			return fmt.Errorf("invalid route.matchers entry %q: %w", rawMatcher, err)
+		}
+	}
+	for _, child := range route.Routes {
+		if err := validateRuntimeRouteConfig(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resolveRouteReceiver(route alertmanagerRouteConfig, labels map[string]string, fallback string) string {
+	receiver := normalizeDefaultReceiver(route.Receiver)
+	if strings.TrimSpace(route.Receiver) == "" {
+		receiver = normalizeDefaultReceiver(fallback)
+	}
+
+	for _, child := range route.Routes {
+		if !routeMatchesLabels(child, labels) {
+			continue
+		}
+		return resolveRouteReceiver(child, labels, receiver)
+	}
+
+	return receiver
+}
+
+func routeMatchesLabels(route alertmanagerRouteConfig, labels map[string]string) bool {
+	for labelName, expected := range route.Match {
+		if labels[labelName] != expected {
+			return false
+		}
+	}
+
+	for labelName, pattern := range route.MatchRE {
+		re, err := regexp.Compile("^(?:" + strings.TrimSpace(pattern) + ")$")
+		if err != nil {
+			return false
+		}
+		if !re.MatchString(labels[labelName]) {
+			return false
+		}
+	}
+
+	for _, rawMatcher := range route.Matchers {
+		matcher, err := parseRuntimeRouteMatcher(rawMatcher)
+		if err != nil {
+			return false
+		}
+		if !labelSetMatchesMatcher(labels, matcher) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func parseRuntimeRouteMatcher(raw string) (*cfgmatcher.Matcher, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty matcher")
+	}
+
+	matcher, err := cfgmatcher.Parse(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	value, err := parseAlertLabelMatcherValue(matcher.Value)
+	if err != nil {
+		return nil, err
+	}
+	matcher.Value = value
+
+	if matcher.IsRegex() {
+		re, err := regexp.Compile("^(?:" + value + ")$")
+		if err != nil {
+			return nil, err
+		}
+		matcher.CompiledRegex = re
+	}
+
+	return matcher, nil
 }
 
 func parseRuntimeAlertGroupBy(configPath string) ([]string, bool, error) {
