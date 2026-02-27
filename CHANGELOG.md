@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - added `llm.provider` routing in client config (`proxy` and `openai`)
   - `provider=proxy` keeps legacy endpoints (`POST /classify`, `GET /health`)
   - `provider=openai` uses OpenAI-compatible endpoints (`POST /chat/completions`, `GET /models`) and parses JSON classification payload from chat response
+  - service registry classification bootstrap now passes `llm.provider`, `llm.max_tokens`, `llm.temperature` into LLM client config
+  - added in-memory cache fallback for classification service bootstrap when Redis is unavailable
   - added unit coverage for provider endpoint/header behavior and backward compatibility path
 - **Metrics System v2 Migration** - Complete migration of Health and Refresh metrics to unified `pkg/metrics/v2` (2024-12-08)
   - Added 8 new Prometheus metrics for health and refresh monitoring

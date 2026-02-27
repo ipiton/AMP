@@ -9,6 +9,8 @@ import (
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/database/postgres"
+	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/ipiton/AMP/internal/infrastructure/llm"
 	"github.com/ipiton/AMP/pkg/metrics"
 )
 
@@ -35,7 +37,7 @@ type ServiceRegistry struct {
 	// Infrastructure Services
 	database *postgres.PostgresPool
 	storage  core.AlertStorage
-	cache    core.Cache
+	cache    infrastructurecache.Cache
 	metrics  *metrics.BusinessMetrics
 
 	// Core Services
@@ -198,8 +200,35 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 
 // initializeCache initializes the cache backend.
 func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
-	// TODO: Initialize Redis or Memory cache based on profile
-	r.logger.Info("Cache initialization skipped (TODO)")
+	r.logger.Info("Initializing cache backend...")
+
+	cacheConfig := &infrastructurecache.CacheConfig{
+		Addr:            r.config.Redis.Addr,
+		Password:        r.config.Redis.Password,
+		DB:              r.config.Redis.DB,
+		PoolSize:        r.config.Redis.PoolSize,
+		MinIdleConns:    r.config.Redis.MinIdleConns,
+		DialTimeout:     r.config.Redis.DialTimeout,
+		ReadTimeout:     r.config.Redis.ReadTimeout,
+		WriteTimeout:    r.config.Redis.WriteTimeout,
+		MaxRetries:      r.config.Redis.MaxRetries,
+		MinRetryBackoff: r.config.Redis.MinRetryBackoff,
+		MaxRetryBackoff: r.config.Redis.MaxRetryBackoff,
+	}
+
+	redisCache, err := infrastructurecache.NewRedisCache(cacheConfig, r.logger)
+	if err != nil {
+		r.logger.Warn("Redis cache unavailable, falling back to in-memory cache",
+			"error", err,
+			"addr", cacheConfig.Addr,
+		)
+		r.cache = infrastructurecache.NewMemoryCache(r.logger)
+		return nil
+	}
+
+	r.cache = redisCache
+	r.logger.Info("✅ Redis cache initialized", "addr", cacheConfig.Addr, "db", cacheConfig.DB)
+	_ = ctx
 	return nil
 }
 
@@ -278,8 +307,47 @@ func (r *ServiceRegistry) initializeClassification(ctx context.Context) error {
 
 	r.logger.Info("Initializing Classification Service...")
 
-	// TODO: Initialize LLM client and classification service
-	r.logger.Info("Classification service initialization skipped (TODO)")
+	if r.cache == nil {
+		r.logger.Warn("Cache backend unavailable for classification, using in-memory cache fallback")
+		r.cache = infrastructurecache.NewMemoryCache(r.logger)
+	}
+
+	llmConfig := llm.DefaultConfig()
+	llmConfig.Provider = r.config.LLM.Provider
+	llmConfig.BaseURL = r.config.LLM.BaseURL
+	llmConfig.APIKey = r.config.LLM.APIKey
+	llmConfig.Model = r.config.LLM.Model
+	llmConfig.MaxTokens = r.config.LLM.MaxTokens
+	llmConfig.Temperature = r.config.LLM.Temperature
+	llmConfig.Timeout = r.config.LLM.Timeout
+	llmConfig.MaxRetries = r.config.LLM.MaxRetries
+
+	llmClient := llm.NewHTTPLLMClient(llmConfig, r.logger)
+
+	classificationConfig := services.DefaultClassificationConfig()
+	classificationConfig.EnableLLM = true
+	if r.config.LLM.Timeout > 0 {
+		classificationConfig.LLMTimeout = r.config.LLM.Timeout
+	}
+
+	svc, err := services.NewClassificationService(services.ClassificationServiceConfig{
+		LLMClient:       llmClient,
+		Cache:           r.cache,
+		Storage:         r.storage,
+		Config:          classificationConfig,
+		Logger:          r.logger,
+		BusinessMetrics: r.metrics,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create classification service: %w", err)
+	}
+
+	r.classificationSvc = svc
+	r.logger.Info("✅ Classification Service initialized",
+		"provider", llmConfig.Provider,
+		"model", llmConfig.Model,
+	)
+	_ = ctx
 	return nil
 }
 
@@ -289,6 +357,7 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 
 	config := services.AlertProcessorConfig{
 		FilterEngine:    r.filterEngine,
+		LLMClient:       r.classificationSvc,
 		Publisher:       r.publisher,
 		Deduplication:   r.deduplicationSvc,
 		BusinessMetrics: r.metrics,
