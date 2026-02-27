@@ -1258,8 +1258,9 @@ receivers:
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("alerts invalid receiver expected JSON string body, got %q (%v)", rec.Body.String(), err)
 		}
-		if strings.TrimSpace(payload) == "" {
-			t.Fatalf("alerts invalid receiver expected non-empty error message")
+		const expected = "failed to parse receiver param: error parsing regexp: missing closing ]: `[)$`"
+		if payload != expected {
+			t.Fatalf("alerts invalid receiver expected message %q, got %q", expected, payload)
 		}
 	})
 
@@ -1285,8 +1286,9 @@ receivers:
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("alerts invalid filter expected JSON string body, got %q (%v)", rec.Body.String(), err)
 		}
-		if strings.TrimSpace(payload) == "" {
-			t.Fatalf("alerts invalid filter expected non-empty error message")
+		const expected = "bad matcher format: broken-matcher"
+		if payload != expected {
+			t.Fatalf("alerts invalid filter expected message %q, got %q", expected, payload)
 		}
 	})
 
@@ -1418,8 +1420,9 @@ receivers:
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("silences invalid filter expected json string error, got %q (%v)", rec.Body.String(), err)
 		}
-		if strings.TrimSpace(payload) == "" {
-			t.Fatalf("silences invalid filter expected non-empty error message")
+		const expected = "bad matcher format: broken-matcher"
+		if payload != expected {
+			t.Fatalf("silences invalid filter expected message %q, got %q", expected, payload)
 		}
 	})
 
@@ -1717,8 +1720,9 @@ receivers:
 		if err := json.Unmarshal(recReceiver.Body.Bytes(), &receiverPayload); err != nil {
 			t.Fatalf("alert groups invalid receiver expected JSON string body, got %q (%v)", recReceiver.Body.String(), err)
 		}
-		if strings.TrimSpace(receiverPayload) == "" {
-			t.Fatalf("alert groups invalid receiver expected non-empty error message")
+		const expectedReceiverMessage = "failed to parse receiver param: error parsing regexp: missing closing ]: `[)$`"
+		if receiverPayload != expectedReceiverMessage {
+			t.Fatalf("alert groups invalid receiver expected message %q, got %q", expectedReceiverMessage, receiverPayload)
 		}
 
 		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
@@ -1745,8 +1749,9 @@ receivers:
 		if err := json.Unmarshal(recFilter.Body.Bytes(), &filterPayload); err != nil {
 			t.Fatalf("alert groups invalid filter expected JSON string body, got %q (%v)", recFilter.Body.String(), err)
 		}
-		if strings.TrimSpace(filterPayload) == "" {
-			t.Fatalf("alert groups invalid filter expected non-empty error message")
+		const expectedFilterMessage = "bad matcher format: broken-matcher"
+		if filterPayload != expectedFilterMessage {
+			t.Fatalf("alert groups invalid filter expected message %q, got %q", expectedFilterMessage, filterPayload)
 		}
 	})
 
@@ -2268,20 +2273,37 @@ func TestPhase0AlertsFilterMatcherSemantics(t *testing.T) {
 		t.Fatalf("expected 2 alerts for service=api, got %d", len(serviceAlerts))
 	}
 
-	regexQuery := url.Values{}
-	regexQuery.Add("filter", `alertname=~"^CPU"`)
-	regexReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+regexQuery.Encode(), nil)
-	regexRec := httptest.NewRecorder()
-	mux.ServeHTTP(regexRec, regexReq)
-	if regexRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/alerts with regex filter expected 200, got %d", regexRec.Code)
+	regexExactQuery := url.Values{}
+	regexExactQuery.Add("filter", `alertname=~"^CPU"`)
+	regexExactReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+regexExactQuery.Encode(), nil)
+	regexExactRec := httptest.NewRecorder()
+	mux.ServeHTTP(regexExactRec, regexExactReq)
+	if regexExactRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with regex filter expected 200, got %d", regexExactRec.Code)
 	}
-	var regexAlerts []map[string]any
-	if err := json.Unmarshal(regexRec.Body.Bytes(), &regexAlerts); err != nil {
-		t.Fatalf("failed to decode regex filter response: %v", err)
+	var regexExactAlerts []map[string]any
+	if err := json.Unmarshal(regexExactRec.Body.Bytes(), &regexExactAlerts); err != nil {
+		t.Fatalf("failed to decode regex exact filter response: %v", err)
 	}
-	if len(regexAlerts) != 2 {
-		t.Fatalf("expected 2 alerts for alertname=~^CPU, got %d", len(regexAlerts))
+	// Upstream treats =~ filter as full-string match.
+	if len(regexExactAlerts) != 0 {
+		t.Fatalf("expected 0 alerts for alertname=~^CPU (full match semantics), got %d", len(regexExactAlerts))
+	}
+
+	regexPrefixQuery := url.Values{}
+	regexPrefixQuery.Add("filter", `alertname=~"^CPU.*"`)
+	regexPrefixReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+regexPrefixQuery.Encode(), nil)
+	regexPrefixRec := httptest.NewRecorder()
+	mux.ServeHTTP(regexPrefixRec, regexPrefixReq)
+	if regexPrefixRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts with regex prefix filter expected 200, got %d", regexPrefixRec.Code)
+	}
+	var regexPrefixAlerts []map[string]any
+	if err := json.Unmarshal(regexPrefixRec.Body.Bytes(), &regexPrefixAlerts); err != nil {
+		t.Fatalf("failed to decode regex prefix filter response: %v", err)
+	}
+	if len(regexPrefixAlerts) != 2 {
+		t.Fatalf("expected 2 alerts for alertname=~^CPU.*, got %d", len(regexPrefixAlerts))
 	}
 
 	multiQuery := url.Values{}
