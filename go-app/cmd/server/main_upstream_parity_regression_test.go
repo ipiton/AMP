@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -337,27 +336,17 @@ func TestUpstreamParity_TimestampsUseMillisecondPrecision(t *testing.T) {
 	requireUpstreamLikeTimestampMillis(t, "status uptime", statusUptime)
 }
 
-func TestUpstreamParity_AlertsListOrderByStartsAtThenFingerprint(t *testing.T) {
+func TestUpstreamParity_AlertsListOrderByFingerprint(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
 	payload := `[
 		{
-			"labels": {"alertname":"OrderParityM"},
+			"labels": {"alertname":"newer"},
 			"startsAt": "2026-02-27T00:00:00Z",
 			"status": "firing"
 		},
 		{
-			"labels": {"alertname":"OrderParityA"},
-			"startsAt": "2026-02-27T00:00:00Z",
-			"status": "firing"
-		},
-		{
-			"labels": {"alertname":"OrderParityZ"},
-			"startsAt": "2026-02-27T00:00:00Z",
-			"status": "firing"
-		},
-		{
-			"labels": {"alertname":"OrderParityNewer"},
+			"labels": {"alertname":"a"},
 			"startsAt": "2026-02-27T00:10:00Z",
 			"status": "firing"
 		}
@@ -381,37 +370,28 @@ func TestUpstreamParity_AlertsListOrderByStartsAtThenFingerprint(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &alerts); err != nil {
 		t.Fatalf("failed to decode alerts response: %v", err)
 	}
-	if len(alerts) != 4 {
-		t.Fatalf("expected 4 alerts, got %d", len(alerts))
+	if len(alerts) != 2 {
+		t.Fatalf("expected 2 alerts, got %d", len(alerts))
 	}
 
 	firstLabels, ok := alerts[0]["labels"].(map[string]any)
 	if !ok {
 		t.Fatalf("alerts[0].labels expected object, got %T", alerts[0]["labels"])
 	}
-	if firstLabels["alertname"] != "OrderParityNewer" {
-		t.Fatalf("expected newest startsAt alert first, got %v", firstLabels["alertname"])
+	secondLabels, ok := alerts[1]["labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("alerts[1].labels expected object, got %T", alerts[1]["labels"])
 	}
-
-	sameStartsAtFingerprints := make([]string, 0, 3)
-	for i := 1; i < len(alerts); i++ {
-		startsAt, _ := alerts[i]["startsAt"].(string)
-		if !strings.HasPrefix(startsAt, "2026-02-27T00:00:00") {
-			t.Fatalf("alerts[%d] expected equal startsAt bucket, got %q", i, startsAt)
-		}
-		fingerprint, _ := alerts[i]["fingerprint"].(string)
-		if strings.TrimSpace(fingerprint) == "" {
-			t.Fatalf("alerts[%d] expected non-empty fingerprint", i)
-		}
-		sameStartsAtFingerprints = append(sameStartsAtFingerprints, fingerprint)
+	firstFingerprint, _ := alerts[0]["fingerprint"].(string)
+	secondFingerprint, _ := alerts[1]["fingerprint"].(string)
+	if strings.TrimSpace(firstFingerprint) == "" || strings.TrimSpace(secondFingerprint) == "" {
+		t.Fatalf("expected non-empty fingerprints, got first=%q second=%q", firstFingerprint, secondFingerprint)
 	}
-
-	sorted := append([]string(nil), sameStartsAtFingerprints...)
-	sort.Strings(sorted)
-	for i := range sorted {
-		if sameStartsAtFingerprints[i] != sorted[i] {
-			t.Fatalf("equal startsAt alerts expected fingerprint-ascending order, got %v", sameStartsAtFingerprints)
-		}
+	if firstFingerprint >= secondFingerprint {
+		t.Fatalf("expected fingerprint-ascending order, got first=%q second=%q", firstFingerprint, secondFingerprint)
+	}
+	if firstLabels["alertname"] == secondLabels["alertname"] {
+		t.Fatalf("expected two distinct alerts, got duplicated alertname=%v", firstLabels["alertname"])
 	}
 }
 

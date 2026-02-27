@@ -251,9 +251,6 @@ func (s *alertStore) list(statusFilter string, includeResolved bool) []apiAlert 
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].StartsAt != out[j].StartsAt {
-			return out[i].StartsAt > out[j].StartsAt
-		}
 		return out[i].Fingerprint < out[j].Fingerprint
 	})
 
