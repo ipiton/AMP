@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - invalid state-flag bool values (`active/silenced/inhibited/unprocessed/muted`) now fall back to `false` when parameter is present
     - invalid `status`/`resolved` query values no longer return `400` and are ignored (`200` response)
     - `receiver` regex now uses upstream-like full-match semantics (`^(?:<query>)$`), not substring matching
-    - when `labels.receiver` is missing, receiver is now resolved via runtime route tree matchers (`match`/`match_re`/`matchers`) with `continue` support; multi-match routes now produce multiple receivers in `GET /api/v2/alerts` and duplicated receiver groups in `GET /api/v2/alerts/groups`
+    - receiver is now always resolved via runtime route tree matchers (`match`/`match_re`/`matchers`) with `continue` support and fallback to root `route.receiver`; `labels.receiver` no longer overrides routing; multi-match routes produce multiple receivers in `GET /api/v2/alerts` and duplicated receiver groups in `GET /api/v2/alerts/groups`
     - `GET /api/v2/alerts/groups` nested alert `receivers[]` is now sorted by receiver name (upstream-like), while top-level `GET /api/v2/alerts` keeps route-evaluation order
     - invalid `receiver`/`filter` query errors now return upstream-like JSON string payloads on `400` (instead of object-wrapped errors)
     - invalid `receiver` / `filter` error message text now matches upstream wording (`failed to parse receiver param: ...`, `bad matcher format: ...`)

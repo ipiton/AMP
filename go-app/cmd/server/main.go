@@ -2802,14 +2802,10 @@ func alertReceiverName(alert apiAlert, receivers *runtimeReceiverCatalog) string
 }
 
 func alertReceiverNames(alert apiAlert, receivers *runtimeReceiverCatalog) []string {
-	receiver := strings.TrimSpace(alert.Labels["receiver"])
-	if receiver == "" {
-		if receivers == nil {
-			return []string{"default"}
-		}
-		return receivers.resolveReceiversForLabels(alert.Labels)
+	if receivers == nil {
+		return []string{"default"}
 	}
-	return []string{receiver}
+	return receivers.resolveReceiversForLabels(alert.Labels)
 }
 
 func alertMatchesReceiverRegex(alert apiAlert, receiverRegex *regexp.Regexp, receivers *runtimeReceiverCatalog) bool {
