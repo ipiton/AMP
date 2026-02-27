@@ -3858,14 +3858,14 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 func TestPhase0ReceiversIncludeConfiguredNames(t *testing.T) {
 	configPath := writeTestConfigFile(t, `
 route:
-  receiver: "team-default"
+  receiver: "team-zeta"
   routes:
     - receiver: "team-db"
       routes:
         - receiver: "team-nested"
 receivers:
-  - name: "team-default"
-  - name: "team-email"
+  - name: "team-zeta"
+  - name: "team-alpha"
 `)
 	t.Setenv(runtimeConfigFileEnv, configPath)
 
@@ -3894,11 +3894,14 @@ receivers:
 		receiverSet[name] = struct{}{}
 	}
 
-	required := []string{"team-default", "team-email"}
+	required := []string{"team-zeta", "team-alpha"}
 	for _, name := range required {
 		if _, ok := receiverSet[name]; !ok {
 			t.Fatalf("expected configured receiver %q in /api/v2/receivers, got %v", name, receiverNames)
 		}
+	}
+	if len(receiverNames) != 2 || receiverNames[0] != "team-zeta" || receiverNames[1] != "team-alpha" {
+		t.Fatalf("expected receivers to preserve config order [team-zeta team-alpha], got %v", receiverNames)
 	}
 	for _, excluded := range []string{"default", "team-db", "team-nested"} {
 		if _, ok := receiverSet[excluded]; ok {
