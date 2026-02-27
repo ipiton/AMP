@@ -433,7 +433,7 @@ func shortHash(input string) string {
 func toAPIAlert(a *storedAlert) apiAlert {
 	var endsAt *string
 	if a.EndsAt != nil {
-		s := a.EndsAt.UTC().Format(time.RFC3339)
+		s := formatAPITimestamp(a.EndsAt.UTC())
 		endsAt = &s
 	}
 	receiverName := strings.TrimSpace(a.Labels["receiver"])
@@ -444,8 +444,8 @@ func toAPIAlert(a *storedAlert) apiAlert {
 		Labels:       cloneStringMap(a.Labels),
 		Annotations:  cloneStringMap(a.Annotations),
 		Receivers:    []apiReceiver{{Name: receiverName}},
-		StartsAt:     a.StartsAt.UTC().Format(time.RFC3339),
-		UpdatedAt:    a.UpdatedAt.UTC().Format(time.RFC3339),
+		StartsAt:     formatAPITimestamp(a.StartsAt.UTC()),
+		UpdatedAt:    formatAPITimestamp(a.UpdatedAt.UTC()),
 		EndsAt:       endsAt,
 		GeneratorURL: a.GeneratorURL,
 		Fingerprint:  a.BaseFingerprint,

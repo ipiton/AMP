@@ -485,7 +485,7 @@ func (c *runtimeStatusContext) setConfigApplyResult(source string, err error) {
 	c.configApplyHistory = append(c.configApplyHistory, runtimeConfigApplyHistoryEntry{
 		Status:     c.configApplyStatus,
 		Source:     c.configApplySource,
-		AppliedAt:  c.configApplyAt.Format(time.RFC3339),
+		AppliedAt:  formatAPITimestamp(c.configApplyAt),
 		Error:      c.configApplyError,
 		ConfigHash: configSHA256(c.configOriginal),
 	})
@@ -656,7 +656,7 @@ func (c *runtimeStatusContext) getConfigRevisions(limit int) []runtimeConfigRevi
 
 		appliedAt := ""
 		if !revision.AppliedAt.IsZero() {
-			appliedAt = revision.AppliedAt.Format(time.RFC3339)
+			appliedAt = formatAPITimestamp(revision.AppliedAt)
 		}
 
 		result = append(result, runtimeConfigRevisionSummary{
@@ -1630,7 +1630,7 @@ func statusHandler(alertStore *alertStore, silenceStore *silenceStore, statusCtx
 			"config": map[string]string{
 				"original": statusCtx.getConfigOriginal(),
 			},
-			"uptime": statusCtx.startedAt.Format(time.RFC3339),
+			"uptime": formatAPITimestamp(statusCtx.startedAt),
 			"stats": map[string]any{
 				"alerts": map[string]int{
 					"total":    alertTotal,
@@ -1766,7 +1766,7 @@ func configStatusHandler(
 		status, source, errorText, appliedAt := statusCtx.getConfigApplyResult()
 		appliedAtStr := ""
 		if !appliedAt.IsZero() {
-			appliedAtStr = appliedAt.Format(time.RFC3339)
+			appliedAtStr = formatAPITimestamp(appliedAt)
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -1976,7 +1976,7 @@ func configRollbackHandler(
 
 		targetAppliedAt := ""
 		if !targetRevision.AppliedAt.IsZero() {
-			targetAppliedAt = targetRevision.AppliedAt.Format(time.RFC3339)
+			targetAppliedAt = formatAPITimestamp(targetRevision.AppliedAt)
 		}
 		if dryRun {
 			writeJSON(w, http.StatusOK, map[string]any{

@@ -487,9 +487,9 @@ func toAPISilence(in *storedSilence, now time.Time) apiSilence {
 	return apiSilence{
 		ID:        in.ID,
 		Matchers:  matchers,
-		StartsAt:  in.StartsAt.UTC().Format(time.RFC3339),
-		EndsAt:    in.EndsAt.UTC().Format(time.RFC3339),
-		UpdatedAt: in.UpdatedAt.UTC().Format(time.RFC3339),
+		StartsAt:  formatAPITimestamp(in.StartsAt.UTC()),
+		EndsAt:    formatAPITimestamp(in.EndsAt.UTC()),
+		UpdatedAt: formatAPITimestamp(in.UpdatedAt.UTC()),
 		CreatedBy: in.CreatedBy,
 		Comment:   in.Comment,
 		Status: apiSilenceStatus{
