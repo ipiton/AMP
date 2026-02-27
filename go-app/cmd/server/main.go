@@ -1612,10 +1612,12 @@ func alertGroupsHandler(
 
 		responseGroups := make([]apiGettableAlertGroup, 0, len(groups))
 		for _, group := range groups {
+			nestedAlerts := toGettableAlerts(group.Alerts, silences, now, inhibitedByIndex, receivers)
+			sortGettableAlertReceiversByName(nestedAlerts)
 			responseGroups = append(responseGroups, apiGettableAlertGroup{
 				Labels:   cloneStringMap(group.Labels),
 				Receiver: group.Receiver,
-				Alerts:   toGettableAlerts(group.Alerts, silences, now, inhibitedByIndex, receivers),
+				Alerts:   nestedAlerts,
 			})
 		}
 
@@ -2513,6 +2515,14 @@ func toGettableAlerts(
 		out = append(out, toGettableAlert(in[i], silences, now, inhibitedByIndex, receivers))
 	}
 	return out
+}
+
+func sortGettableAlertReceiversByName(alerts []apiGettableAlert) {
+	for i := range alerts {
+		sort.Slice(alerts[i].Receivers, func(j, k int) bool {
+			return alerts[i].Receivers[j].Name < alerts[i].Receivers[k].Name
+		})
+	}
 }
 
 func toGettableAlert(

@@ -540,15 +540,11 @@ receivers:
 	if !ok || len(receivers) != 2 {
 		t.Fatalf("alert receivers expected exactly two entries with continue=true, got %v", alerts[0]["receivers"])
 	}
-	receiverSet := make(map[string]struct{}, len(receivers))
-	for _, receiverRaw := range receivers {
-		receiverObj, _ := receiverRaw.(map[string]any)
+	for idx, expected := range []string{"team-db", "team-critical"} {
+		receiverObj, _ := receivers[idx].(map[string]any)
 		receiverName, _ := receiverObj["name"].(string)
-		receiverSet[receiverName] = struct{}{}
-	}
-	for _, expected := range []string{"team-db", "team-critical"} {
-		if _, ok := receiverSet[expected]; !ok {
-			t.Fatalf("expected alert receivers to include %q, got %v", expected, alerts[0]["receivers"])
+		if receiverName != expected {
+			t.Fatalf("alert receivers expected order [team-db team-critical], got %v", alerts[0]["receivers"])
 		}
 	}
 
@@ -608,6 +604,13 @@ receivers:
 		groupAlertReceivers, _ := groupAlert["receivers"].([]any)
 		if len(groupAlertReceivers) != 2 {
 			t.Fatalf("nested alert receivers expected two entries, got %v", groupAlert["receivers"])
+		}
+		for idx, expected := range []string{"team-critical", "team-db"} {
+			receiverObj, _ := groupAlertReceivers[idx].(map[string]any)
+			receiverName, _ := receiverObj["name"].(string)
+			if receiverName != expected {
+				t.Fatalf("nested alert receivers expected order [team-critical team-db], got %v", groupAlert["receivers"])
+			}
 		}
 	}
 	for _, expected := range []string{"team-db", "team-critical"} {
