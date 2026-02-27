@@ -2083,6 +2083,23 @@ func TestPhase0AlertsV1AliasUsesSameIngestPath(t *testing.T) {
 }
 
 func TestPhase0AlertsReceiverFilterSemantics(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "default"
+  routes:
+    - receiver: "team-ops"
+      match:
+        receiver: "team-ops"
+    - receiver: "team-app"
+      match:
+        receiver: "team-app"
+receivers:
+  - name: "default"
+  - name: "team-ops"
+  - name: "team-app"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
 	mux := newPhase0TestMux(t)
 
 	payload := `[
@@ -3748,6 +3765,19 @@ func TestPhase0ReloadInvalidConfigReturns500(t *testing.T) {
 }
 
 func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "default"
+  routes:
+    - receiver: "team-ops"
+      match:
+        receiver: "team-ops"
+receivers:
+  - name: "default"
+  - name: "team-ops"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
 	mux := newPhase0TestMux(t)
 
 	payload := `[
@@ -3847,11 +3877,11 @@ func TestPhase0AlertGroupsAndReceiversSemantics(t *testing.T) {
 	if err := json.Unmarshal(receiversRec.Body.Bytes(), &receivers); err != nil {
 		t.Fatalf("failed to decode receivers response: %v", err)
 	}
-	if len(receivers) != 1 {
-		t.Fatalf("expected exactly one configured receiver from runtime config, got %d", len(receivers))
+	if len(receivers) != 2 {
+		t.Fatalf("expected exactly two configured receivers from runtime config, got %d", len(receivers))
 	}
-	if receivers[0]["name"] != "default" {
-		t.Fatalf("expected configured receiver default, got %v", receivers[0]["name"])
+	if receivers[0]["name"] != "default" || receivers[1]["name"] != "team-ops" {
+		t.Fatalf("expected configured receivers [default team-ops], got %v", receivers)
 	}
 }
 

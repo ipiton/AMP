@@ -715,6 +715,73 @@ receivers:
 	}
 }
 
+func TestUpstreamParity_ReceiverLabelDoesNotOverrideRouting(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+receivers:
+  - name: "team-default"
+  - name: "team-ops"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+	runID := fmt.Sprintf("receiver-label-no-override-%d", time.Now().UnixNano())
+	alertPayload := fmt.Sprintf(`[
+		{
+			"labels": {"alertname":"ReceiverLabelNoOverride","receiver":"team-ops","runid":%q},
+			"startsAt": "2026-02-27T00:00:00Z",
+			"status": "firing"
+		}
+	]`, runID)
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(alertPayload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	query := url.Values{}
+	query.Add("filter", fmt.Sprintf(`runid="%s"`, runID))
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode(), nil)
+	alertsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsRec, alertsReq)
+	if alertsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected one alert, got %d", len(alerts))
+	}
+	receivers, ok := alerts[0]["receivers"].([]any)
+	if !ok || len(receivers) != 1 {
+		t.Fatalf("alert receivers expected one entry, got %v", alerts[0]["receivers"])
+	}
+	receiverObj, _ := receivers[0].(map[string]any)
+	receiverName, _ := receiverObj["name"].(string)
+	if receiverName != "team-default" {
+		t.Fatalf("expected route-based receiver team-default (not labels.receiver), got %q", receiverName)
+	}
+
+	alertsOpsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+query.Encode()+"&receiver=%5Eteam-ops%24", nil)
+	alertsOpsRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertsOpsRec, alertsOpsReq)
+	if alertsOpsRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts receiver team-ops expected 200, got %d", alertsOpsRec.Code)
+	}
+	var alertsOps []map[string]any
+	if err := json.Unmarshal(alertsOpsRec.Body.Bytes(), &alertsOps); err != nil {
+		t.Fatalf("failed to decode team-ops filtered alerts response: %v", err)
+	}
+	if len(alertsOps) != 0 {
+		t.Fatalf("expected no alerts for receiver=team-ops without routing rule, got %d", len(alertsOps))
+	}
+}
+
 func TestUpstreamParity_TimestampsUseMillisecondPrecision(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
@@ -1189,6 +1256,23 @@ func TestUpstreamParity_InvalidStatusAndResolvedAreIgnored(t *testing.T) {
 }
 
 func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-ops"
+      match:
+        receiver: "team-ops"
+    - receiver: "team-sre"
+      match:
+        receiver: "team-sre"
+receivers:
+  - name: "team-default"
+  - name: "team-ops"
+  - name: "team-sre"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
 	mux := newPhase0TestMux(t)
 
 	payload := `[
@@ -1256,6 +1340,19 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 }
 
 func TestUpstreamParity_ReceiverRegexUsesFullMatchSemantics(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "team-default"
+  routes:
+    - receiver: "team-ops"
+      match:
+        receiver: "team-ops"
+receivers:
+  - name: "team-default"
+  - name: "team-ops"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
 	mux := newPhase0TestMux(t)
 
 	payload := `[
