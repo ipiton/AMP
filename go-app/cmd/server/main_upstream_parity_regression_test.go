@@ -784,6 +784,107 @@ receivers:
 	}
 }
 
+func TestUpstreamParity_AlertGroupsWithGroupByAllUseFullLabelSet(t *testing.T) {
+	configPath := writeTestConfigFile(t, `
+route:
+  receiver: "default"
+  group_by: ["..."]
+receivers:
+  - name: "default"
+`)
+	t.Setenv(runtimeConfigFileEnv, configPath)
+
+	mux := newPhase0TestMux(t)
+
+	payload := `[
+		{
+			"labels": {"alertname":"GroupByAllParity","service":"api","namespace":"prod","instance":"api-1"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"status": "firing"
+		},
+		{
+			"labels": {"alertname":"GroupByAllParity","service":"api","namespace":"prod","instance":"api-2"},
+			"startsAt": "2026-02-25T00:01:00Z",
+			"status": "firing"
+		}
+	]`
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	postRec := httptest.NewRecorder()
+	mux.ServeHTTP(postRec, postReq)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups expected 200, got %d", rec.Code)
+	}
+
+	var groups []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("expected two groups with route.group_by=['...'], got %d", len(groups))
+	}
+
+	expectedInstances := map[string]struct{}{
+		"api-1": {},
+		"api-2": {},
+	}
+	for i, group := range groups {
+		labels, ok := group["labels"].(map[string]any)
+		if !ok {
+			t.Fatalf("group[%d] labels expected object, got %T", i, group["labels"])
+		}
+
+		instance, _ := labels["instance"].(string)
+		if _, ok := expectedInstances[instance]; !ok {
+			t.Fatalf("group[%d] labels.instance expected one of api-1/api-2, got %q", i, instance)
+		}
+		delete(expectedInstances, instance)
+
+		if labels["alertname"] != "GroupByAllParity" {
+			t.Fatalf("group[%d] labels.alertname expected GroupByAllParity, got %v", i, labels["alertname"])
+		}
+		if labels["service"] != "api" {
+			t.Fatalf("group[%d] labels.service expected api, got %v", i, labels["service"])
+		}
+		if labels["namespace"] != "prod" {
+			t.Fatalf("group[%d] labels.namespace expected prod, got %v", i, labels["namespace"])
+		}
+		if len(labels) != 4 {
+			t.Fatalf("group[%d] labels expected full alert label set size=4, got %v", i, labels)
+		}
+
+		alerts, ok := group["alerts"].([]any)
+		if !ok || len(alerts) != 1 {
+			t.Fatalf("group[%d] alerts expected array with one alert, got %v", i, group["alerts"])
+		}
+		alert, ok := alerts[0].(map[string]any)
+		if !ok {
+			t.Fatalf("group[%d] alert expected object, got %T", i, alerts[0])
+		}
+		alertLabels, ok := alert["labels"].(map[string]any)
+		if !ok {
+			t.Fatalf("group[%d] alert.labels expected object, got %T", i, alert["labels"])
+		}
+		if alertLabels["instance"] != instance {
+			t.Fatalf("group[%d] alert.labels.instance expected %q, got %v", i, instance, alertLabels["instance"])
+		}
+		if len(alertLabels) != 4 {
+			t.Fatalf("group[%d] alert.labels expected full label set size=4, got %v", i, alertLabels)
+		}
+	}
+
+	if len(expectedInstances) != 0 {
+		t.Fatalf("missing groups for instances: %v", expectedInstances)
+	}
+}
+
 func TestUpstreamParity_AlertsAndGroupsInvalidQueryErrorPayloadIsJSONString(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
