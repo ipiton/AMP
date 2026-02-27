@@ -200,12 +200,12 @@ func requireUpstreamLikeTimestampMillis(t *testing.T, field, value string) {
 func TestUpstreamParity_ReceiversConfiguredListOnly(t *testing.T) {
 	configPath := writeTestConfigFile(t, `
 route:
-  receiver: "team-default"
+  receiver: "team-zeta"
   routes:
     - receiver: "team-db"
 receivers:
-  - name: "team-default"
-  - name: "team-email"
+  - name: "team-zeta"
+  - name: "team-alpha"
 `)
 	t.Setenv(runtimeConfigFileEnv, configPath)
 
@@ -235,8 +235,8 @@ receivers:
 		names = append(names, name)
 	}
 
-	if names[0] != "team-default" || names[1] != "team-email" {
-		t.Fatalf("unexpected receiver list order/content: %v", names)
+	if names[0] != "team-zeta" || names[1] != "team-alpha" {
+		t.Fatalf("unexpected receiver list order/content (must preserve config order): %v", names)
 	}
 }
 

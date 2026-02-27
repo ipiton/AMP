@@ -1453,24 +1453,24 @@ func receiversHandler(catalog *runtimeReceiverCatalog) http.HandlerFunc {
 			return
 		}
 
-		receiversSet := map[string]struct{}{}
+		configured := []string{}
 		if catalog != nil {
-			for _, name := range catalog.getConfigured() {
-				trimmed := strings.TrimSpace(name)
-				if trimmed == "" {
-					continue
-				}
-				receiversSet[trimmed] = struct{}{}
-			}
+			configured = catalog.getConfigured()
 		}
 
-		receivers := make([]apiReceiver, 0, len(receiversSet))
-		for name := range receiversSet {
-			receivers = append(receivers, apiReceiver{Name: name})
+		seen := make(map[string]struct{}, len(configured))
+		receivers := make([]apiReceiver, 0, len(configured))
+		for _, name := range configured {
+			trimmed := strings.TrimSpace(name)
+			if trimmed == "" {
+				continue
+			}
+			if _, exists := seen[trimmed]; exists {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			receivers = append(receivers, apiReceiver{Name: trimmed})
 		}
-		sort.Slice(receivers, func(i, j int) bool {
-			return receivers[i].Name < receivers[j].Name
-		})
 
 		writeJSON(w, http.StatusOK, receivers)
 	}
@@ -3160,21 +3160,21 @@ func parseRuntimeConfiguredReceiversFromData(content []byte) ([]string, error) {
 		return nil, err
 	}
 
+	receivers := make([]string, 0, len(cfg.Receivers))
 	receiversSet := map[string]struct{}{}
 	for _, receiver := range cfg.Receivers {
 		name := strings.TrimSpace(receiver.Name)
 		if name == "" {
 			continue
 		}
+		if _, exists := receiversSet[name]; exists {
+			continue
+		}
 		receiversSet[name] = struct{}{}
+		receivers = append(receivers, name)
 	}
 
-	configured := make([]string, 0, len(receiversSet))
-	for name := range receiversSet {
-		configured = append(configured, name)
-	}
-	sort.Strings(configured)
-	return configured, nil
+	return receivers, nil
 }
 
 func parseRuntimeAlertGroupBy(configPath string) ([]string, bool, error) {
