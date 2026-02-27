@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,15 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	}
 }
 
+var upstreamTimestampMillisPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`)
+
+func requireUpstreamLikeTimestampMillis(t *testing.T, field, value string) {
+	t.Helper()
+	if !upstreamTimestampMillisPattern.MatchString(value) {
+		t.Fatalf("%s expected upstream-like millisecond timestamp, got %q", field, value)
+	}
+}
+
 func TestUpstreamParity_ReceiversConfiguredListOnly(t *testing.T) {
 	configPath := writeTestConfigFile(t, `
 route:
@@ -125,6 +135,102 @@ receivers:
 	if names[0] != "team-default" || names[1] != "team-email" {
 		t.Fatalf("unexpected receiver list order/content: %v", names)
 	}
+}
+
+func TestUpstreamParity_TimestampsUseMillisecondPrecision(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	alertPayload := `[
+		{
+			"labels": {"alertname":"TimestampMillisParity"},
+			"startsAt": "2026-02-25T00:00:00Z",
+			"endsAt": "2026-02-25T00:05:00Z",
+			"status": "firing"
+		}
+	]`
+	alertPostReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(alertPayload))
+	alertPostRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertPostRec, alertPostReq)
+	if alertPostRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts expected 200, got %d", alertPostRec.Code)
+	}
+
+	alertQuery := url.Values{}
+	alertQuery.Add("filter", `alertname="TimestampMillisParity"`)
+	alertGetReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+alertQuery.Encode(), nil)
+	alertGetRec := httptest.NewRecorder()
+	mux.ServeHTTP(alertGetRec, alertGetReq)
+	if alertGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertGetRec.Code)
+	}
+
+	var alerts []map[string]any
+	if err := json.Unmarshal(alertGetRec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("failed to decode alerts payload: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("expected exactly one alert, got %d", len(alerts))
+	}
+
+	alertStartsAt, _ := alerts[0]["startsAt"].(string)
+	alertEndsAt, _ := alerts[0]["endsAt"].(string)
+	alertUpdatedAt, _ := alerts[0]["updatedAt"].(string)
+	requireUpstreamLikeTimestampMillis(t, "alert startsAt", alertStartsAt)
+	requireUpstreamLikeTimestampMillis(t, "alert endsAt", alertEndsAt)
+	requireUpstreamLikeTimestampMillis(t, "alert updatedAt", alertUpdatedAt)
+
+	now := time.Now().UTC()
+	silencePayload := fmt.Sprintf(`{
+		"matchers": [{"name":"alertname","value":"TimestampMillisParity","isRegex":false}],
+		"startsAt": %q,
+		"endsAt": %q,
+		"createdBy": "parity-suite",
+		"comment": "timestamp-millis-parity"
+	}`, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(10*time.Minute).Format(time.RFC3339))
+	silencePostReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(silencePayload))
+	silencePostRec := httptest.NewRecorder()
+	mux.ServeHTTP(silencePostRec, silencePostReq)
+	if silencePostRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/silences expected 200, got %d", silencePostRec.Code)
+	}
+
+	silenceFilter := url.Values{}
+	silenceFilter.Add("filter", `alertname="TimestampMillisParity"`)
+	silenceGetReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+silenceFilter.Encode(), nil)
+	silenceGetRec := httptest.NewRecorder()
+	mux.ServeHTTP(silenceGetRec, silenceGetReq)
+	if silenceGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences expected 200, got %d", silenceGetRec.Code)
+	}
+
+	var silences []map[string]any
+	if err := json.Unmarshal(silenceGetRec.Body.Bytes(), &silences); err != nil {
+		t.Fatalf("failed to decode silences payload: %v", err)
+	}
+	if len(silences) != 1 {
+		t.Fatalf("expected exactly one silence, got %d", len(silences))
+	}
+
+	silenceStartsAt, _ := silences[0]["startsAt"].(string)
+	silenceEndsAt, _ := silences[0]["endsAt"].(string)
+	silenceUpdatedAt, _ := silences[0]["updatedAt"].(string)
+	requireUpstreamLikeTimestampMillis(t, "silence startsAt", silenceStartsAt)
+	requireUpstreamLikeTimestampMillis(t, "silence endsAt", silenceEndsAt)
+	requireUpstreamLikeTimestampMillis(t, "silence updatedAt", silenceUpdatedAt)
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	statusRec := httptest.NewRecorder()
+	mux.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/status expected 200, got %d", statusRec.Code)
+	}
+
+	var statusPayload map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("failed to decode status payload: %v", err)
+	}
+	statusUptime, _ := statusPayload["uptime"].(string)
+	requireUpstreamLikeTimestampMillis(t, "status uptime", statusUptime)
 }
 
 func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {
