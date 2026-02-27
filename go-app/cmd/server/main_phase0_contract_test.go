@@ -1325,8 +1325,9 @@ receivers:
 		if payload["code"] != float64(http.StatusBadRequest) {
 			t.Fatalf("alerts invalid payload expected code=400, got %v", payload["code"])
 		}
-		if msg, _ := payload["message"].(string); strings.TrimSpace(msg) == "" {
-			t.Fatalf("alerts invalid payload expected non-empty message")
+		const expected = `parsing alerts body from "" failed, because json: cannot unmarshal object into Go value of type models.PostableAlerts`
+		if msg, _ := payload["message"].(string); msg != expected {
+			t.Fatalf("alerts invalid payload expected message %q, got %q", expected, msg)
 		}
 	})
 

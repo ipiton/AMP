@@ -562,6 +562,28 @@ func TestUpstreamParity_PostAlertsErrorPayloadContracts(t *testing.T) {
 	if invalidJSONPayload["code"] != float64(http.StatusBadRequest) {
 		t.Fatalf("invalid JSON expected code=400, got %v", invalidJSONPayload["code"])
 	}
+	const expectedInvalidJSONMessage = `parsing alerts body from "" failed, because json: cannot unmarshal object into Go value of type models.PostableAlerts`
+	if invalidJSONPayload["message"] != expectedInvalidJSONMessage {
+		t.Fatalf("invalid JSON expected message %q, got %v", expectedInvalidJSONMessage, invalidJSONPayload["message"])
+	}
+
+	invalidStartsAtReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{"alertname":"A"},"startsAt":"not-time"}]`))
+	invalidStartsAtRec := httptest.NewRecorder()
+	mux.ServeHTTP(invalidStartsAtRec, invalidStartsAtReq)
+	if invalidStartsAtRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v2/alerts invalid startsAt expected 400, got %d", invalidStartsAtRec.Code)
+	}
+	var invalidStartsAtPayload map[string]any
+	if err := json.Unmarshal(invalidStartsAtRec.Body.Bytes(), &invalidStartsAtPayload); err != nil {
+		t.Fatalf("invalid startsAt expected object payload, got %q (%v)", invalidStartsAtRec.Body.String(), err)
+	}
+	if invalidStartsAtPayload["code"] != float64(http.StatusBadRequest) {
+		t.Fatalf("invalid startsAt expected code=400, got %v", invalidStartsAtPayload["code"])
+	}
+	msg, _ := invalidStartsAtPayload["message"].(string)
+	if !strings.Contains(msg, `as "2006-01-02"`) {
+		t.Fatalf("invalid startsAt expected upstream-like date parse message, got %q", msg)
+	}
 
 	missingLabelsReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{}]`))
 	missingLabelsRec := httptest.NewRecorder()

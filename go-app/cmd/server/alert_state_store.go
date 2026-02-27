@@ -549,7 +549,7 @@ func parseAlertIngestPayload(body []byte) ([]alertIngestInput, error) {
 		return nil, newAlertCodeMessageError(
 			http.StatusBadRequest,
 			http.StatusBadRequest,
-			fmt.Sprintf("parsing alerts body from %q failed, because %v", "", directErr),
+			formatAlertBodyParseError(directErr),
 		)
 	}
 
@@ -568,8 +568,19 @@ func parseAlertIngestPayload(body []byte) ([]alertIngestInput, error) {
 	return nil, newAlertCodeMessageError(
 		http.StatusBadRequest,
 		http.StatusBadRequest,
-		fmt.Sprintf("parsing alerts body from %q failed, because %v", "", directErr),
+		formatAlertBodyParseError(directErr),
 	)
+}
+
+func formatAlertBodyParseError(err error) string {
+	msg := strings.TrimSpace(fmt.Sprint(err))
+	if msg == "" {
+		msg = "unknown error"
+	}
+
+	// Align payload type wording with upstream Alertmanager error messages.
+	msg = strings.ReplaceAll(msg, "[]main.alertIngestInput", "models.PostableAlerts")
+	return fmt.Sprintf("parsing alerts body from %q failed, because %s", "", msg)
 }
 
 func validateAlertIngestInputs(inputs []alertIngestInput) error {
@@ -592,7 +603,7 @@ func validateAlertIngestInputs(inputs []alertIngestInput) error {
 				return newAlertCodeMessageError(
 					http.StatusBadRequest,
 					http.StatusBadRequest,
-					fmt.Sprintf("parsing alerts body from %q failed, because %v", "", err),
+					formatAlertBodyParseError(err),
 				)
 			}
 		}
@@ -601,7 +612,7 @@ func validateAlertIngestInputs(inputs []alertIngestInput) error {
 				return newAlertCodeMessageError(
 					http.StatusBadRequest,
 					http.StatusBadRequest,
-					fmt.Sprintf("parsing alerts body from %q failed, because %v", "", err),
+					formatAlertBodyParseError(err),
 				)
 			}
 		}
