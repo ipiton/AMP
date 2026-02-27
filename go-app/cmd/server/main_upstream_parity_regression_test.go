@@ -45,15 +45,32 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	default:
 		t.Fatalf("status cluster.status unexpected value: %v", cluster["status"])
 	}
-	if clusterStatus != "disabled" {
-		t.Fatalf("status cluster.status expected disabled in single-node runtime, got %q", clusterStatus)
-	}
-	if _, ok := cluster["peers"].([]any); !ok {
+	clusterPeersRaw, ok := cluster["peers"].([]any)
+	if !ok {
 		t.Fatalf("status cluster.peers expected array, got %T", cluster["peers"])
 	}
-	if clusterName, exists := cluster["name"]; exists {
-		if _, ok := clusterName.(string); !ok {
-			t.Fatalf("status cluster.name expected string when present, got %T", clusterName)
+	if clusterStatus == "disabled" {
+		if len(clusterPeersRaw) != 0 {
+			t.Fatalf("status cluster.peers expected empty for disabled mode, got %v", clusterPeersRaw)
+		}
+	} else {
+		clusterName, ok := cluster["name"].(string)
+		if !ok || strings.TrimSpace(clusterName) == "" {
+			t.Fatalf("status cluster.name expected non-empty string in active cluster mode, got %v", cluster["name"])
+		}
+		if len(clusterPeersRaw) == 0 {
+			t.Fatalf("status cluster.peers expected non-empty in active cluster mode")
+		}
+		for i, rawPeer := range clusterPeersRaw {
+			peer, ok := rawPeer.(map[string]any)
+			if !ok {
+				t.Fatalf("status cluster.peers[%d] expected object, got %T", i, rawPeer)
+			}
+			peerName, _ := peer["name"].(string)
+			peerAddress, _ := peer["address"].(string)
+			if strings.TrimSpace(peerName) == "" || strings.TrimSpace(peerAddress) == "" {
+				t.Fatalf("status cluster.peers[%d] expected non-empty name/address, got %v", i, peer)
+			}
 		}
 	}
 
@@ -82,6 +99,92 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339, uptimeRaw); err != nil {
 		t.Fatalf("status uptime expected RFC3339, got %q: %v", uptimeRaw, err)
+	}
+}
+
+func TestUpstreamParity_StatusClusterDisabledWhenListenAddressEmpty(t *testing.T) {
+	t.Setenv(runtimeClusterListenAddressEnv, "")
+
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/status expected 200, got %d", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("status response is not valid json: %v", err)
+	}
+	cluster, ok := payload["cluster"].(map[string]any)
+	if !ok {
+		t.Fatalf("status cluster expected object, got %T", payload["cluster"])
+	}
+
+	status, _ := cluster["status"].(string)
+	if status != "disabled" {
+		t.Fatalf("status cluster.status expected disabled when listen address is empty, got %q", status)
+	}
+	peers, ok := cluster["peers"].([]any)
+	if !ok {
+		t.Fatalf("status cluster.peers expected array, got %T", cluster["peers"])
+	}
+	if len(peers) != 0 {
+		t.Fatalf("status cluster.peers expected empty in disabled mode, got %v", peers)
+	}
+}
+
+func TestUpstreamParity_StatusClusterReadyShapeWhenListenAddressConfigured(t *testing.T) {
+	t.Setenv(runtimeClusterListenAddressEnv, "0.0.0.0:9094")
+	t.Setenv(runtimeClusterAdvertiseAddressEnv, "127.0.0.1:9094")
+	t.Setenv(runtimeClusterNameEnv, "AMPSTATUSPARITYNODE")
+
+	mux := newPhase0TestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/status expected 200, got %d", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("status response is not valid json: %v", err)
+	}
+	cluster, ok := payload["cluster"].(map[string]any)
+	if !ok {
+		t.Fatalf("status cluster expected object, got %T", payload["cluster"])
+	}
+
+	status, _ := cluster["status"].(string)
+	if status != "ready" {
+		t.Fatalf("status cluster.status expected ready with listen address configured, got %q", status)
+	}
+
+	name, _ := cluster["name"].(string)
+	if name != "AMPSTATUSPARITYNODE" {
+		t.Fatalf("status cluster.name expected configured node name, got %q", name)
+	}
+
+	peersRaw, ok := cluster["peers"].([]any)
+	if !ok {
+		t.Fatalf("status cluster.peers expected array, got %T", cluster["peers"])
+	}
+	if len(peersRaw) != 1 {
+		t.Fatalf("status cluster.peers expected exactly one self peer, got %d", len(peersRaw))
+	}
+	peer, ok := peersRaw[0].(map[string]any)
+	if !ok {
+		t.Fatalf("status cluster.peers[0] expected object, got %T", peersRaw[0])
+	}
+	if peer["name"] != "AMPSTATUSPARITYNODE" {
+		t.Fatalf("status peer name expected AMPSTATUSPARITYNODE, got %v", peer["name"])
+	}
+	if peer["address"] != "127.0.0.1:9094" {
+		t.Fatalf("status peer address expected 127.0.0.1:9094, got %v", peer["address"])
 	}
 }
 
