@@ -136,7 +136,7 @@ func TestUpstreamParity_StatusClusterDisabledWhenListenAddressEmpty(t *testing.T
 	}
 }
 
-func TestUpstreamParity_StatusClusterReadyShapeWhenListenAddressConfigured(t *testing.T) {
+func TestUpstreamParity_StatusClusterEnabledShapeWhenListenAddressConfigured(t *testing.T) {
 	t.Setenv(runtimeClusterListenAddressEnv, "0.0.0.0:9094")
 	t.Setenv(runtimeClusterAdvertiseAddressEnv, "127.0.0.1:9094")
 	t.Setenv(runtimeClusterNameEnv, "AMPSTATUSPARITYNODE")
@@ -160,8 +160,8 @@ func TestUpstreamParity_StatusClusterReadyShapeWhenListenAddressConfigured(t *te
 	}
 
 	status, _ := cluster["status"].(string)
-	if status != "ready" {
-		t.Fatalf("status cluster.status expected ready with listen address configured, got %q", status)
+	if status != "ready" && status != "settling" {
+		t.Fatalf("status cluster.status expected ready or settling with listen address configured, got %q", status)
 	}
 
 	name, _ := cluster["name"].(string)
@@ -185,6 +185,31 @@ func TestUpstreamParity_StatusClusterReadyShapeWhenListenAddressConfigured(t *te
 	}
 	if peer["address"] != "127.0.0.1:9094" {
 		t.Fatalf("status peer address expected 127.0.0.1:9094, got %v", peer["address"])
+	}
+}
+
+func TestUpstreamParity_StatusClusterSettlingWindow(t *testing.T) {
+	now := time.Now().UTC()
+	clusterCtx := &runtimeClusterContext{
+		status:      "ready",
+		name:        "AMPSTATUSPARITYNODE",
+		settleUntil: now.Add(2 * time.Second),
+		peers: []map[string]string{
+			{
+				"name":    "AMPSTATUSPARITYNODE",
+				"address": "127.0.0.1:9094",
+			},
+		},
+	}
+
+	settlingPayload := buildRuntimeClusterStatusPayload(clusterCtx, now)
+	if settlingPayload["status"] != "settling" {
+		t.Fatalf("status during settling window expected settling, got %v", settlingPayload["status"])
+	}
+
+	readyPayload := buildRuntimeClusterStatusPayload(clusterCtx, now.Add(3*time.Second))
+	if readyPayload["status"] != "ready" {
+		t.Fatalf("status after settling window expected ready, got %v", readyPayload["status"])
 	}
 }
 
