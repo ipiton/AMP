@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Go Toolchain Baseline Updated** - Project runtime/build baseline raised to Go 1.26 (2026-02-27)
   - `go-app/go.mod` now declares `go 1.26.0`
   - Docker builder image updated to `golang:1.26-alpine`
+- **LLM Provider API Baseline** - LLM HTTP client now supports provider-aware endpoints (2026-02-27)
+  - added `llm.provider` routing in client config (`proxy` and `openai`)
+  - `provider=proxy` keeps legacy endpoints (`POST /classify`, `GET /health`)
+  - `provider=openai` uses OpenAI-compatible endpoints (`POST /chat/completions`, `GET /models`) and parses JSON classification payload from chat response
+  - added unit coverage for provider endpoint/header behavior and backward compatibility path
 - **Metrics System v2 Migration** - Complete migration of Health and Refresh metrics to unified `pkg/metrics/v2` (2024-12-08)
   - Added 8 new Prometheus metrics for health and refresh monitoring
   - Removed deprecated stub metrics files

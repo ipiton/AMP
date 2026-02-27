@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -39,9 +40,12 @@ type LLMClient interface {
 
 // Config holds configuration for LLM client.
 type Config struct {
+	Provider       string               `mapstructure:"provider"`
 	BaseURL        string               `mapstructure:"base_url"`
 	APIKey         string               `mapstructure:"api_key"`
 	Model          string               `mapstructure:"model"`
+	MaxTokens      int                  `mapstructure:"max_tokens"`
+	Temperature    float64              `mapstructure:"temperature"`
 	Timeout        time.Duration        `mapstructure:"timeout"`
 	MaxRetries     int                  `mapstructure:"max_retries"`
 	RetryDelay     time.Duration        `mapstructure:"retry_delay"`
@@ -54,8 +58,11 @@ type Config struct {
 // Note: User MUST provide BaseURL and APIKey (BYOK - Bring Your Own Key)
 func DefaultConfig() Config {
 	return Config{
+		Provider:       "proxy",
 		BaseURL:        "", // User must provide: OpenAI, Anthropic, Azure, or custom proxy
 		Model:          "gpt-4o",
+		MaxTokens:      1000,
+		Temperature:    0.0,
 		Timeout:        30 * time.Second,
 		MaxRetries:     3,
 		RetryDelay:     1 * time.Second,
@@ -182,6 +189,13 @@ func (e *llmErrorChecker) IsRetryable(err error) bool {
 
 // classifyAlertOnce performs a single classification request.
 func (c *HTTPLLMClient) classifyAlertOnce(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
+	if providerUsesOpenAI(c.config.Provider) {
+		return c.classifyAlertOpenAI(ctx, alert)
+	}
+	return c.classifyAlertProxy(ctx, alert)
+}
+
+func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
 	// Convert core.Alert to LLM API format
 	llmAlert := CoreAlertToLLMRequest(alert)
 	if llmAlert == nil {
@@ -282,9 +296,113 @@ func (c *HTTPLLMClient) classifyAlertOnce(ctx context.Context, alert *core.Alert
 	return result, nil
 }
 
+func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
+	llmAlert := CoreAlertToLLMRequest(alert)
+	if llmAlert == nil {
+		return nil, fmt.Errorf("failed to convert alert to LLM format")
+	}
+
+	llmAlertBytes, err := json.Marshal(llmAlert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal alert payload: %w", err)
+	}
+
+	request := map[string]any{
+		"model": c.config.Model,
+		"messages": []map[string]string{
+			{
+				"role": "system",
+				"content": "You are an alert classification engine. Return ONLY valid JSON with keys: " +
+					"severity (1-4), category (string), summary (string), confidence (0-1), reasoning (string), suggestions (array of strings).",
+			},
+			{
+				"role":    "user",
+				"content": "Classify this alert payload:\n" + string(llmAlertBytes),
+			},
+		},
+		"response_format": map[string]string{
+			"type": "json_object",
+		},
+	}
+	if c.config.MaxTokens > 0 {
+		request["max_tokens"] = c.config.MaxTokens
+	}
+	if c.config.Temperature >= 0 {
+		request["temperature"] = c.config.Temperature
+	}
+
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal OpenAI request: %w", err)
+	}
+
+	url := buildOpenAIChatCompletionsURL(c.config.BaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OpenAI request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
+	if c.config.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("OpenAI request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read OpenAI response body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("OpenAI API error: status %d, body: %s", resp.StatusCode, string(body)),
+		}
+	}
+
+	var openAIResponse struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &openAIResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse OpenAI response: %w", err)
+	}
+	if len(openAIResponse.Choices) == 0 {
+		return nil, fmt.Errorf("OpenAI response has no choices")
+	}
+
+	content := strings.TrimSpace(openAIResponse.Choices[0].Message.Content)
+	if content == "" {
+		return nil, fmt.Errorf("OpenAI response content is empty")
+	}
+	content = unwrapJSONCodeFence(content)
+
+	var llmResp LLMClassificationResponse
+	if err := json.Unmarshal([]byte(content), &llmResp); err != nil {
+		return nil, fmt.Errorf("failed to parse OpenAI classification payload: %w", err)
+	}
+
+	result, err := LLMResponseToCoreClassification(&llmResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert OpenAI response: %w", err)
+	}
+	return result, nil
+}
+
 // Health checks if the LLM service is available.
 func (c *HTTPLLMClient) Health(ctx context.Context) error {
 	url := c.config.BaseURL + "/health"
+	if providerUsesOpenAI(c.config.Provider) {
+		url = buildOpenAIModelsURL(c.config.BaseURL)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -292,6 +410,9 @@ func (c *HTTPLLMClient) Health(ctx context.Context) error {
 	}
 
 	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
+	if providerUsesOpenAI(c.config.Provider) && c.config.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -304,6 +425,45 @@ func (c *HTTPLLMClient) Health(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func providerUsesOpenAI(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai", "openai-compatible", "openai_compatible":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildOpenAIChatCompletionsURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/chat/completions") {
+		return base
+	}
+	return base + "/chat/completions"
+}
+
+func buildOpenAIModelsURL(baseURL string) string {
+	base := strings.TrimSpace(baseURL)
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/chat/completions") {
+		base = strings.TrimSuffix(base, "/chat/completions")
+		base = strings.TrimRight(base, "/")
+	}
+	return base + "/models"
+}
+
+func unwrapJSONCodeFence(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "```") {
+		trimmed = strings.TrimPrefix(trimmed, "```json")
+		trimmed = strings.TrimPrefix(trimmed, "```")
+		trimmed = strings.TrimSuffix(trimmed, "```")
+		return strings.TrimSpace(trimmed)
+	}
+	return trimmed
 }
 
 // GetCircuitBreakerState returns current circuit breaker state.
