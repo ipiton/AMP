@@ -51,6 +51,7 @@ const runtimeClusterAdvertiseAddressEnv = "AMP_CLUSTER_ADVERTISE_ADDRESS"
 const runtimeClusterNameEnv = "AMP_CLUSTER_NAME"
 
 const defaultRuntimeClusterListenAddress = "0.0.0.0:9094"
+const defaultRuntimeClusterSettlingDuration = 10 * time.Second
 
 const maxConfigApplyHistoryEntries = 500
 const maxConfigRevisionEntries = 100
@@ -362,9 +363,10 @@ type runtimeStatusContext struct {
 }
 
 type runtimeClusterContext struct {
-	status string
-	name   string
-	peers  []map[string]string
+	status      string
+	name        string
+	peers       []map[string]string
+	settleUntil time.Time
 }
 
 type runtimeConfigApplyHistoryEntry struct {
@@ -1630,7 +1632,7 @@ func statusHandler(
 		alertTotal, alertFiring, alertResolved := alertStore.stats()
 		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
 
-		cluster := buildRuntimeClusterStatusPayload(clusterCtx)
+		cluster := buildRuntimeClusterStatusPayload(clusterCtx, now)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"cluster": cluster,
@@ -3086,6 +3088,7 @@ func loadRuntimeClusterContext() *runtimeClusterContext {
 				"address": advertiseAddress,
 			},
 		},
+		settleUntil: time.Now().UTC().Add(defaultRuntimeClusterSettlingDuration),
 	}
 }
 
@@ -3110,7 +3113,7 @@ func deriveRuntimeClusterAdvertiseAddress(listenAddress string) string {
 	return net.JoinHostPort(host, port)
 }
 
-func buildRuntimeClusterStatusPayload(clusterCtx *runtimeClusterContext) map[string]any {
+func buildRuntimeClusterStatusPayload(clusterCtx *runtimeClusterContext, now time.Time) map[string]any {
 	cluster := map[string]any{
 		"status": "disabled",
 		"peers":  []map[string]string{},
@@ -3122,6 +3125,9 @@ func buildRuntimeClusterStatusPayload(clusterCtx *runtimeClusterContext) map[str
 	status := strings.TrimSpace(clusterCtx.status)
 	if status == "" {
 		status = "disabled"
+	}
+	if status == "ready" && !clusterCtx.settleUntil.IsZero() && now.UTC().Before(clusterCtx.settleUntil) {
+		status = "settling"
 	}
 	cluster["status"] = status
 	if status != "disabled" && strings.TrimSpace(clusterCtx.name) != "" {
