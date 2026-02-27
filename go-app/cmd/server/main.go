@@ -257,6 +257,7 @@ func registerRoutes(mux *http.ServeMux) {
 	inhibitionEngine := loadRuntimeInhibitionEngine(configPath)
 	receiverCatalog := loadRuntimeReceiverCatalog(configPath)
 	alertGroupByCatalog := loadRuntimeAlertGroupByCatalog(configPath)
+	llmContext := loadRuntimeLLMContext(configPath)
 	clusterCtx := loadRuntimeClusterContext()
 	setupRuntimeStatePersistence(alertStore, silenceStore)
 	persistencePath := resolveRuntimeStatePath()
@@ -268,7 +269,7 @@ func registerRoutes(mux *http.ServeMux) {
 		configApplyStatus:  "unknown",
 		configApplySource:  "startup",
 	}
-	if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog); err != nil {
+	if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog, llmContext); err != nil {
 		slog.Warn("Initial runtime config apply failed",
 			"config", configPath,
 			"error", err,
@@ -304,7 +305,7 @@ func registerRoutes(mux *http.ServeMux) {
 	// Alertmanager-compatible probe endpoints
 	mux.HandleFunc("/-/healthy", alertmanagerHealthyHandler)
 	mux.HandleFunc("/-/ready", alertmanagerReadyHandler)
-	mux.HandleFunc("/-/reload", alertmanagerReloadHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
+	mux.HandleFunc("/-/reload", alertmanagerReloadHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog, llmContext))
 	mux.HandleFunc("/debug/", debugCompatHandler)
 
 	// Metrics endpoint
@@ -319,12 +320,13 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/silence/", silenceByIDHandler(silenceStore))
 	mux.HandleFunc("/api/v2/receivers", receiversHandler(receiverCatalog))
 	mux.HandleFunc("/api/v2/status", statusHandler(alertStore, silenceStore, statusCtx, clusterCtx))
-	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
+	mux.HandleFunc("/api/v2/config", configHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog, llmContext))
 	mux.HandleFunc("/api/v2/config/status", configStatusHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog))
 	mux.HandleFunc("/api/v2/config/history", configHistoryHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/revisions", configRevisionsHandler(configPath, statusCtx))
 	mux.HandleFunc("/api/v2/config/revisions/prune", configRevisionsPruneHandler(configPath, statusCtx))
-	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog))
+	mux.HandleFunc("/api/v2/config/rollback", configRollbackHandler(configPath, statusCtx, inhibitionEngine, receiverCatalog, alertGroupByCatalog, llmContext))
+	mux.HandleFunc("/api/v2/classification/stats", classificationStatsHandler(llmContext))
 	mux.HandleFunc("/history", historyHandler(alertStore))
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
@@ -410,6 +412,25 @@ type runtimeAlertGroupByCatalog struct {
 	mu         sync.RWMutex
 	groupBy    []string
 	configured bool
+}
+
+type runtimeLLMConfig struct {
+	Enabled     bool    `yaml:"enabled"`
+	Provider    string  `yaml:"provider"`
+	APIKey      string  `yaml:"api_key"`
+	BaseURL     string  `yaml:"base_url"`
+	Model       string  `yaml:"model"`
+	MaxTokens   int     `yaml:"max_tokens"`
+	Temperature float64 `yaml:"temperature"`
+}
+
+type runtimeLLMFileConfig struct {
+	LLM runtimeLLMConfig `yaml:"llm"`
+}
+
+type runtimeLLMContext struct {
+	mu     sync.RWMutex
+	config runtimeLLMConfig
 }
 
 type alertmanagerRuntimeConfig struct {
@@ -878,6 +899,40 @@ func (c *runtimeAlertGroupByCatalog) setGroupBy(groupBy []string, configured boo
 	c.mu.Unlock()
 }
 
+func runtimeDefaultLLMConfig() runtimeLLMConfig {
+	return runtimeLLMConfig{
+		Provider: "proxy",
+	}
+}
+
+func (c *runtimeLLMContext) getConfig() runtimeLLMConfig {
+	if c == nil {
+		return runtimeDefaultLLMConfig()
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.config
+}
+
+func (c *runtimeLLMContext) setConfig(cfg runtimeLLMConfig) {
+	if c == nil {
+		return
+	}
+
+	cfg.Provider = strings.TrimSpace(cfg.Provider)
+	if cfg.Provider == "" {
+		cfg.Provider = "proxy"
+	}
+	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
+	cfg.Model = strings.TrimSpace(cfg.Model)
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
+
+	c.mu.Lock()
+	c.config = cfg
+	c.mu.Unlock()
+}
+
 // Dashboard handlers
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	// "/"" is a catch-all pattern in net/http ServeMux. Guard unknown paths here
@@ -1158,6 +1213,7 @@ func alertmanagerReloadHandler(
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
 	groupBy *runtimeAlertGroupByCatalog,
+	llmCtx *runtimeLLMContext,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1165,7 +1221,7 @@ func alertmanagerReloadHandler(
 			return
 		}
 
-		err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy)
+		err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy, llmCtx)
 		if err != nil {
 			statusCtx.setConfigApplyResult("reload", err)
 			http.Error(w, fmt.Sprintf("failed to reload config: %s", err), http.StatusInternalServerError)
@@ -1730,12 +1786,116 @@ func statusHandler(
 	}
 }
 
+func classificationStatsHandler(llmCtx *runtimeLLMContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		llmConfig := runtimeDefaultLLMConfig()
+		if llmCtx != nil {
+			llmConfig = llmCtx.getConfig()
+		}
+
+		configuredProvider := strings.TrimSpace(llmConfig.Provider)
+		if configuredProvider == "" {
+			configuredProvider = "proxy"
+		}
+		resolvedProvider := resolveRuntimeLLMProvider(configuredProvider)
+		classifyURL, healthURL := runtimeLLMActiveEndpoints(resolvedProvider, llmConfig.BaseURL)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled":            llmConfig.Enabled,
+			"configuredProvider": configuredProvider,
+			"resolvedProvider":   resolvedProvider,
+			"model":              llmConfig.Model,
+			"baseURL":            llmConfig.BaseURL,
+			"hasAPIKey":          strings.TrimSpace(llmConfig.APIKey) != "",
+			"maxTokens":          llmConfig.MaxTokens,
+			"temperature":        llmConfig.Temperature,
+			"activeEndpoints": map[string]string{
+				"classify": classifyURL,
+				"health":   healthURL,
+			},
+			"supportedProviders": []map[string]any{
+				{
+					"name":         "proxy",
+					"aliases":      []string{"proxy"},
+					"classifyPath": "/classify",
+					"healthPath":   "/health",
+				},
+				{
+					"name":         "openai",
+					"aliases":      []string{"openai", "openai-compatible", "openai_compatible"},
+					"classifyPath": "/chat/completions",
+					"healthPath":   "/models",
+				},
+			},
+		})
+	}
+}
+
+func resolveRuntimeLLMProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai", "openai-compatible", "openai_compatible":
+		return "openai"
+	default:
+		return "proxy"
+	}
+}
+
+func runtimeLLMActiveEndpoints(provider, baseURL string) (classifyURL, healthURL string) {
+	if provider == "openai" {
+		return buildRuntimeOpenAIChatCompletionsURL(baseURL), buildRuntimeOpenAIModelsURL(baseURL)
+	}
+	return buildRuntimeProxyEndpointURL(baseURL, "/classify"), buildRuntimeProxyEndpointURL(baseURL, "/health")
+}
+
+func buildRuntimeProxyEndpointURL(baseURL, suffix string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return suffix
+	}
+	if strings.HasSuffix(base, suffix) {
+		return base
+	}
+	return base + suffix
+}
+
+func buildRuntimeOpenAIChatCompletionsURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return "/chat/completions"
+	}
+	if strings.HasSuffix(base, "/chat/completions") {
+		return base
+	}
+	return base + "/chat/completions"
+}
+
+func buildRuntimeOpenAIModelsURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return "/models"
+	}
+	if strings.HasSuffix(base, "/chat/completions") {
+		base = strings.TrimSuffix(base, "/chat/completions")
+		base = strings.TrimRight(base, "/")
+	}
+	if strings.HasSuffix(base, "/models") {
+		return base
+	}
+	return base + "/models"
+}
+
 func configHandler(
 	configPath string,
 	statusCtx *runtimeStatusContext,
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
 	groupBy *runtimeAlertGroupByCatalog,
+	llmCtx *runtimeLLMContext,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -1807,10 +1967,10 @@ func configHandler(
 				return
 			}
 
-			if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy); err != nil {
+			if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy, llmCtx); err != nil {
 				// Best-effort rollback to keep runtime consistent if apply fails after write.
 				if rollbackErr := writeRuntimeConfig(configPath, []byte(previousConfig)); rollbackErr == nil {
-					_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy)
+					_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy, llmCtx)
 				}
 				statusCtx.setConfigApplyResult("api", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -1986,6 +2146,7 @@ func configRollbackHandler(
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
 	groupBy *runtimeAlertGroupByCatalog,
+	llmCtx *runtimeLLMContext,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -2077,10 +2238,10 @@ func configRollbackHandler(
 			return
 		}
 
-		if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy); err != nil {
+		if err := applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy, llmCtx); err != nil {
 			// Best-effort rollback of rollback to keep runtime consistent.
 			if rollbackErr := writeRuntimeConfig(configPath, []byte(currentConfig)); rollbackErr == nil {
-				_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy)
+				_ = applyRuntimeConfigReload(configPath, statusCtx, inhibitions, receivers, groupBy, llmCtx)
 			}
 			statusCtx.setConfigApplyResult("rollback", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -2137,6 +2298,7 @@ func applyRuntimeConfigReload(
 	inhibitions *runtimeInhibitionEngine,
 	receivers *runtimeReceiverCatalog,
 	groupBy *runtimeAlertGroupByCatalog,
+	llmCtx *runtimeLLMContext,
 ) error {
 	reloadedRules, err := parseRuntimeInhibitionRules(configPath)
 	if err != nil {
@@ -2163,6 +2325,17 @@ func applyRuntimeConfigReload(
 	}
 	if groupBy != nil {
 		groupBy.setGroupBy(reloadedGroupBy, groupByConfigured)
+	}
+	if llmCtx != nil {
+		reloadedLLMConfig, llmErr := parseRuntimeLLMConfigFromData([]byte(configOriginal))
+		if llmErr != nil {
+			slog.Warn("Failed to parse runtime llm config",
+				"config", configPath,
+				"error", llmErr,
+			)
+		} else {
+			llmCtx.setConfig(reloadedLLMConfig)
+		}
 	}
 	if statusCtx != nil {
 		statusCtx.setConfigOriginal(configOriginal)
@@ -3146,6 +3319,43 @@ func loadRuntimeAlertGroupByCatalog(configPath string) *runtimeAlertGroupByCatal
 	}
 
 	return catalog
+}
+
+func loadRuntimeLLMContext(configPath string) *runtimeLLMContext {
+	ctx := &runtimeLLMContext{}
+	ctx.setConfig(runtimeDefaultLLMConfig())
+
+	content := readRuntimeConfigOriginalAt(configPath)
+	if strings.TrimSpace(content) == "" {
+		return ctx
+	}
+
+	cfg, err := parseRuntimeLLMConfigFromData([]byte(content))
+	if err != nil {
+		slog.Warn("Failed to parse runtime llm config from file",
+			"config", configPath,
+			"error", err,
+		)
+		return ctx
+	}
+
+	ctx.setConfig(cfg)
+	return ctx
+}
+
+func parseRuntimeLLMConfigFromData(content []byte) (runtimeLLMConfig, error) {
+	cfg := runtimeDefaultLLMConfig()
+
+	var runtimeCfg runtimeLLMFileConfig
+	if err := yaml.Unmarshal(content, &runtimeCfg); err != nil {
+		return cfg, err
+	}
+
+	if strings.TrimSpace(runtimeCfg.LLM.Provider) == "" {
+		runtimeCfg.LLM.Provider = cfg.Provider
+	}
+
+	return runtimeCfg.LLM, nil
 }
 
 func loadRuntimeClusterContext() *runtimeClusterContext {
