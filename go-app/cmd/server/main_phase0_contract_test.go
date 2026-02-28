@@ -1169,6 +1169,89 @@ receivers:
 		if !ok || activeSilences < 1 {
 			t.Fatalf("overview expected active_silences >= 1, got %v", data["active_silences"])
 		}
+		if llmStatus, _ := data["llm_health_status"].(string); llmStatus != "disabled" {
+			t.Fatalf("overview expected llm_health_status=disabled by default, got %q", llmStatus)
+		}
+		if llmProvider, _ := data["llm_provider"].(string); llmProvider != "proxy" {
+			t.Fatalf("overview expected llm_provider=proxy by default, got %q", llmProvider)
+		}
+		if _, ok := data["llm_health_endpoint"].(string); !ok {
+			t.Fatalf("overview expected llm_health_endpoint string, got %T", data["llm_health_endpoint"])
+		}
+		if llmEnabled, ok := data["llm_enabled"].(bool); !ok || llmEnabled {
+			t.Fatalf("overview expected llm_enabled=false by default, got %v", data["llm_enabled"])
+		}
+		if llmHealthy, ok := data["llm_healthy"].(bool); !ok || llmHealthy {
+			t.Fatalf("overview expected llm_healthy=false by default, got %v", data["llm_healthy"])
+		}
+	})
+
+	t.Run("dashboard overview includes llm provider health snapshot", func(t *testing.T) {
+		var gotPath string
+		var gotAuth string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		config := fmt.Sprintf(`
+route:
+  receiver: "default"
+receivers:
+  - name: "default"
+llm:
+  enabled: true
+  provider: openai
+  api_key: sk-overview
+  base_url: %q
+  model: gpt-4o-mini
+`, server.URL+"/v1")
+		t.Setenv(runtimeConfigFileEnv, writeTestConfigFile(t, config))
+		localMux := newPhase0TestMux(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/dashboard/overview", nil)
+		rec := httptest.NewRecorder()
+		localMux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/dashboard/overview expected 200, got %d", rec.Code)
+		}
+
+		if gotPath != "/v1/models" {
+			t.Fatalf("overview llm health expected openai path /v1/models, got %q", gotPath)
+		}
+		if gotAuth != "Bearer sk-overview" {
+			t.Fatalf("overview llm health expected bearer auth, got %q", gotAuth)
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("overview response is not valid json: %v", err)
+		}
+		data, ok := payload["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("overview response missing data object")
+		}
+
+		if llmStatus, _ := data["llm_health_status"].(string); llmStatus != "healthy" {
+			t.Fatalf("overview expected llm_health_status=healthy, got %q", llmStatus)
+		}
+		if llmProvider, _ := data["llm_provider"].(string); llmProvider != "openai" {
+			t.Fatalf("overview expected llm_provider=openai, got %q", llmProvider)
+		}
+		if llmProviderRaw, _ := data["llm_provider_raw"].(string); llmProviderRaw != "openai" {
+			t.Fatalf("overview expected llm_provider_raw=openai, got %q", llmProviderRaw)
+		}
+		if endpoint, _ := data["llm_health_endpoint"].(string); endpoint != server.URL+"/v1/models" {
+			t.Fatalf("overview expected llm_health_endpoint=%q, got %q", server.URL+"/v1/models", endpoint)
+		}
+		if llmEnabled, ok := data["llm_enabled"].(bool); !ok || !llmEnabled {
+			t.Fatalf("overview expected llm_enabled=true, got %v", data["llm_enabled"])
+		}
+		if llmHealthy, ok := data["llm_healthy"].(bool); !ok || !llmHealthy {
+			t.Fatalf("overview expected llm_healthy=true, got %v", data["llm_healthy"])
+		}
 	})
 
 	t.Run("dashboard recent endpoint supports limit", func(t *testing.T) {

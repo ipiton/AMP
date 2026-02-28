@@ -332,7 +332,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/history/recent", historyRecentHandler(alertStore))
 
 	// Dashboard API
-	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI(alertStore, silenceStore, statusCtx))
+	mux.HandleFunc("/api/dashboard/overview", dashboardOverviewAPI(alertStore, silenceStore, statusCtx, llmContext))
 	mux.HandleFunc("/api/dashboard/alerts/recent", dashboardAlertsRecentAPI(alertStore))
 
 	// Alertmanager-compatible webhook endpoint with rate limiting
@@ -1101,6 +1101,7 @@ func dashboardOverviewAPI(
 	alertStore *alertStore,
 	silenceStore *silenceStore,
 	statusCtx *runtimeStatusContext,
+	llmCtx *runtimeLLMContext,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1111,6 +1112,8 @@ func dashboardOverviewAPI(
 		now := time.Now().UTC()
 		alertTotal, alertFiring, alertResolved := alertStore.stats()
 		silenceTotal, silenceActive, silencePending, silenceExpired := silenceStore.stats(now)
+		llmConfig := runtimeLLMConfigFromContext(llmCtx)
+		llmHealth := collectRuntimeLLMHealth(r.Context(), llmConfig, 1500*time.Millisecond)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "success",
@@ -1123,6 +1126,14 @@ func dashboardOverviewAPI(
 				"silences_pending":     silencePending,
 				"silences_expired":     silenceExpired,
 				"llm_classifications":  0,
+				"llm_enabled":          llmHealth.Enabled,
+				"llm_provider":         llmHealth.ResolvedProvider,
+				"llm_provider_raw":     llmHealth.ConfiguredProvider,
+				"llm_has_api_key":      llmHealth.HasAPIKey,
+				"llm_health_status":    llmHealth.Status,
+				"llm_health_endpoint":  llmHealth.HealthEndpoint,
+				"llm_healthy":          llmHealth.Healthy,
+				"llm_health_error":     llmHealth.Error,
 				"system_health":        "healthy",
 				"runtime_uptime":       now.Sub(statusCtx.startedAt).String(),
 				"persistence_enabled":  statusCtx.persistenceEnabled,
@@ -1794,10 +1805,7 @@ func classificationStatsHandler(llmCtx *runtimeLLMContext) http.HandlerFunc {
 			return
 		}
 
-		llmConfig := runtimeDefaultLLMConfig()
-		if llmCtx != nil {
-			llmConfig = llmCtx.getConfig()
-		}
+		llmConfig := runtimeLLMConfigFromContext(llmCtx)
 
 		configuredProvider := strings.TrimSpace(llmConfig.Provider)
 		if configuredProvider == "" {
@@ -1844,84 +1852,131 @@ func classificationHealthHandler(llmCtx *runtimeLLMContext) http.HandlerFunc {
 			return
 		}
 
-		llmConfig := runtimeDefaultLLMConfig()
-		if llmCtx != nil {
-			llmConfig = llmCtx.getConfig()
-		}
+		llmConfig := runtimeLLMConfigFromContext(llmCtx)
+		health := collectRuntimeLLMHealth(r.Context(), llmConfig, 3*time.Second)
 
-		configuredProvider := strings.TrimSpace(llmConfig.Provider)
-		if configuredProvider == "" {
-			configuredProvider = "proxy"
+		statusCode := http.StatusOK
+		if health.Status == "unhealthy" {
+			statusCode = http.StatusServiceUnavailable
 		}
-		resolvedProvider := resolveRuntimeLLMProvider(configuredProvider)
-		_, healthURL := runtimeLLMActiveEndpoints(resolvedProvider, llmConfig.BaseURL)
-
-		payload := map[string]any{
-			"enabled":            llmConfig.Enabled,
-			"configuredProvider": configuredProvider,
-			"resolvedProvider":   resolvedProvider,
-			"healthEndpoint":     healthURL,
-			"baseURL":            llmConfig.BaseURL,
-			"model":              llmConfig.Model,
-			"hasAPIKey":          strings.TrimSpace(llmConfig.APIKey) != "",
-		}
-
-		if !llmConfig.Enabled {
-			payload["healthy"] = false
-			payload["status"] = "disabled"
-			payload["message"] = "llm provider is disabled"
-			writeJSON(w, http.StatusOK, payload)
-			return
-		}
-
-		if strings.TrimSpace(llmConfig.BaseURL) == "" {
-			payload["healthy"] = false
-			payload["status"] = "unhealthy"
-			payload["error"] = "llm base_url is empty"
-			writeJSON(w, http.StatusServiceUnavailable, payload)
-			return
-		}
-
-		checkCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, healthURL, nil)
-		if err != nil {
-			payload["healthy"] = false
-			payload["status"] = "unhealthy"
-			payload["error"] = fmt.Sprintf("failed to build health request: %v", err)
-			writeJSON(w, http.StatusServiceUnavailable, payload)
-			return
-		}
-		req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-		if resolvedProvider == "openai" && strings.TrimSpace(llmConfig.APIKey) != "" {
-			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(llmConfig.APIKey))
-		}
-
-		client := &http.Client{Timeout: 3 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			payload["healthy"] = false
-			payload["status"] = "unhealthy"
-			payload["error"] = err.Error()
-			writeJSON(w, http.StatusServiceUnavailable, payload)
-			return
-		}
-		defer resp.Body.Close()
-		_, _ = io.Copy(io.Discard, resp.Body)
-
-		payload["statusCode"] = resp.StatusCode
-		payload["healthy"] = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
-		if payload["healthy"].(bool) {
-			payload["status"] = "healthy"
-			writeJSON(w, http.StatusOK, payload)
-			return
-		}
-
-		payload["status"] = "unhealthy"
-		payload["error"] = fmt.Sprintf("health endpoint returned status %d", resp.StatusCode)
-		writeJSON(w, http.StatusServiceUnavailable, payload)
+		writeJSON(w, statusCode, runtimeLLMHealthPayload(health))
 	}
+}
+
+type runtimeLLMHealthSnapshot struct {
+	Enabled            bool
+	ConfiguredProvider string
+	ResolvedProvider   string
+	HealthEndpoint     string
+	BaseURL            string
+	Model              string
+	HasAPIKey          bool
+	Healthy            bool
+	Status             string
+	Message            string
+	Error              string
+	ProviderStatusCode int
+}
+
+func runtimeLLMConfigFromContext(llmCtx *runtimeLLMContext) runtimeLLMConfig {
+	llmConfig := runtimeDefaultLLMConfig()
+	if llmCtx != nil {
+		llmConfig = llmCtx.getConfig()
+	}
+	return llmConfig
+}
+
+func collectRuntimeLLMHealth(ctx context.Context, llmConfig runtimeLLMConfig, timeout time.Duration) runtimeLLMHealthSnapshot {
+	configuredProvider := strings.TrimSpace(llmConfig.Provider)
+	if configuredProvider == "" {
+		configuredProvider = "proxy"
+	}
+	resolvedProvider := resolveRuntimeLLMProvider(configuredProvider)
+	_, healthURL := runtimeLLMActiveEndpoints(resolvedProvider, llmConfig.BaseURL)
+
+	snapshot := runtimeLLMHealthSnapshot{
+		Enabled:            llmConfig.Enabled,
+		ConfiguredProvider: configuredProvider,
+		ResolvedProvider:   resolvedProvider,
+		HealthEndpoint:     healthURL,
+		BaseURL:            llmConfig.BaseURL,
+		Model:              llmConfig.Model,
+		HasAPIKey:          strings.TrimSpace(llmConfig.APIKey) != "",
+		Healthy:            false,
+	}
+
+	if !llmConfig.Enabled {
+		snapshot.Status = "disabled"
+		snapshot.Message = "llm provider is disabled"
+		return snapshot
+	}
+
+	if strings.TrimSpace(llmConfig.BaseURL) == "" {
+		snapshot.Status = "unhealthy"
+		snapshot.Error = "llm base_url is empty"
+		return snapshot
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		snapshot.Status = "unhealthy"
+		snapshot.Error = fmt.Sprintf("failed to build health request: %v", err)
+		return snapshot
+	}
+	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
+	if resolvedProvider == "openai" && strings.TrimSpace(llmConfig.APIKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(llmConfig.APIKey))
+	}
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		snapshot.Status = "unhealthy"
+		snapshot.Error = err.Error()
+		return snapshot
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	snapshot.ProviderStatusCode = resp.StatusCode
+	snapshot.Healthy = resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
+	if snapshot.Healthy {
+		snapshot.Status = "healthy"
+		return snapshot
+	}
+
+	snapshot.Status = "unhealthy"
+	snapshot.Error = fmt.Sprintf("health endpoint returned status %d", resp.StatusCode)
+	return snapshot
+}
+
+func runtimeLLMHealthPayload(health runtimeLLMHealthSnapshot) map[string]any {
+	payload := map[string]any{
+		"enabled":            health.Enabled,
+		"configuredProvider": health.ConfiguredProvider,
+		"resolvedProvider":   health.ResolvedProvider,
+		"healthEndpoint":     health.HealthEndpoint,
+		"baseURL":            health.BaseURL,
+		"model":              health.Model,
+		"hasAPIKey":          health.HasAPIKey,
+		"healthy":            health.Healthy,
+		"status":             health.Status,
+	}
+
+	if health.Message != "" {
+		payload["message"] = health.Message
+	}
+	if health.Error != "" {
+		payload["error"] = health.Error
+	}
+	if health.ProviderStatusCode > 0 {
+		payload["statusCode"] = health.ProviderStatusCode
+	}
+
+	return payload
 }
 
 func resolveRuntimeLLMProvider(provider string) string {
