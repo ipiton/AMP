@@ -83,7 +83,7 @@ See `config.yaml.example` for all options.
 
 #### 2. Alertmanager Config (`alertmanager.yaml`)
 
-Routing and receivers (100% Alertmanager-compatible):
+Routing and receivers (Alertmanager-compatible core syntax):
 
 ```yaml
 # alertmanager.yaml - Routing configuration
@@ -178,6 +178,8 @@ Both rollback and prune support `dryRun=true` preview mode without mutating runt
 - **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Full compatibility matrix
 - **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
+
+Compatibility note: active runtime tracks non-deprecated Alertmanager core endpoint/method parity with contract tests; semantic parity (routing/inhibition/config lifecycle details) is phased and documented in the compatibility matrix.
 
 ## 🏗️ Architecture
 

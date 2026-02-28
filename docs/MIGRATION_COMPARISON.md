@@ -1,6 +1,6 @@
 # Alertmanager vs Alertmanager++ - Feature Comparison
 
-**Last Updated**: 2025-12-01
+**Last Updated**: 2026-02-28
 **Alertmanager Version**: v0.27+
 **Alertmanager++ Version**: v1.0.0
 
@@ -10,7 +10,7 @@
 
 | Feature | Alertmanager | Alertmanager++ | Winner |
 |---------|--------------|---------------|--------|
-| **API Compatibility** | v2 | v2 (100% compatible) | 🤝 Tie |
+| **API Compatibility** | v2 | v2 core non-deprecated method/route compatible | 🤝 Tie |
 | **History Retention** | 14 days (memory) | Unlimited (PostgreSQL) | 🏆 Alertmanager++ |
 | **Performance** | ~50ms p95 | ~5ms p95 | 🏆 Alertmanager++ (10x) |
 | **Memory Usage** | ~200MB | ~50MB | 🏆 Alertmanager++ (4x less) |
@@ -178,7 +178,7 @@
 - ✅ You're happy with current performance/resources
 
 ### Use Alertmanager++ If:
-- ✅ You want **100% compatible drop-in replacement** with better performance
+- ✅ You want non-deprecated core API drop-in compatibility with better performance
 - ✅ You need **unlimited alert history** for compliance/analytics
 - ✅ You want **75% less resources** (memory/CPU)
 - ✅ You need **zero-downtime hot reload**
@@ -189,7 +189,7 @@
 ### Migration Recommendation: ✅ **MIGRATE NOW**
 
 **Why?**
-- ✅ **Low risk**: 100% API compatible, easy rollback
+- ✅ **Low risk**: core API method/route compatibility is contract-tested, easy rollback
 - ✅ **High benefit**: 10x performance, 75% less resources, unlimited history
 - ✅ **Quick migration**: 5 minutes with zero code changes
 - ✅ **Future-proof**: Modern architecture, active development
@@ -222,15 +222,14 @@
 
 ## ✅ Compatibility Guarantee
 
-Alertmanager++ is **100% API-compatible** with Alertmanager v0.25+ API v2:
+Alertmanager++ active runtime guarantees compatibility on the non-deprecated core Alertmanager API surface:
 
-- ✅ Same request/response formats
-- ✅ Same configuration syntax
-- ✅ Same amtool commands
-- ✅ Same Grafana integration
-- ✅ Same Prometheus integration
+- ✅ Core v2 endpoint/method matrix is contract-tested (`/api/v2/status`, `/api/v2/receivers`, `/api/v2/alerts`, `/api/v2/alerts/groups`, `/api/v2/silences`, `/api/v2/silence/{id}`, `/-/healthy`, `/-/ready`, `/-/reload`)
+- ✅ Same Prometheus/VMAlert ingest entrypoints (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
+- ✅ Existing Grafana/amtool workflows remain usable on covered endpoints
+- 🟡 Semantic parity remains phased (routing/inhibition/config lifecycle details); see `ALERTMANAGER_COMPATIBILITY.md`
 
-**All enhancements are additive** - no breaking changes!
+All enhancements are additive on top of this runtime compatibility baseline.
 
 ---
 
@@ -243,6 +242,6 @@ Alertmanager++ is **100% API-compatible** with Alertmanager v0.25+ API v2:
 
 ---
 
-**Last Updated**: 2025-12-01
+**Last Updated**: 2026-02-28
 **Maintainer**: Vitalii Semenov
 **License**: Apache 2.0
