@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET /api/dashboard/overview` now includes LLM provider and health snapshot fields (`llm_provider`, `llm_health_status`, `llm_health_endpoint`, `llm_healthy`)
   - runtime config reload/apply/rollback now refreshes LLM provider snapshot used by classification stats endpoint
   - added unit coverage for provider endpoint/header behavior and backward compatibility path
+- **Alertmanager Core Endpoint Matrix Gate** - Added explicit parity matrix test for non-deprecated endpoint surface (2026-02-28)
+  - added `TestUpstreamParity_CoreEndpointMethodMatrix` in `go-app/cmd/server/main_upstream_parity_regression_test.go`
+  - locks method/route contracts for `/api/v2/status`, `/api/v2/receivers`, `/api/v2/alerts`, `/api/v2/alerts/groups`, `/api/v2/silences`, `/api/v2/silence/{id}`, `/-/healthy`, `/-/ready`, `/-/reload`
+  - verifies allowed methods and disallowed `405` behavior on the same runtime matrix
 - **Metrics System v2 Migration** - Complete migration of Health and Refresh metrics to unified `pkg/metrics/v2` (2024-12-08)
   - Added 8 new Prometheus metrics for health and refresh monitoring
   - Removed deprecated stub metrics files

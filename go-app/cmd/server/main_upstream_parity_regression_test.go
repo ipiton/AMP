@@ -102,6 +102,75 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_CoreEndpointMethodMatrix(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	startsAt := time.Now().UTC().Add(2 * time.Minute).Format(time.RFC3339)
+	endsAt := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339)
+
+	alertPayload := fmt.Sprintf(
+		`[{"labels":{"alertname":"CoreEndpointMatrix","service":"core-matrix","severity":"critical"},"annotations":{"summary":"core endpoint matrix"},"startsAt":"%s","generatorURL":"http://example.local/alert"}]`,
+		startsAt,
+	)
+	silencePayload := fmt.Sprintf(
+		`{"matchers":[{"name":"service","value":"core-matrix","isRegex":false}],"startsAt":"%s","endsAt":"%s","createdBy":"parity-suite","comment":"core endpoint matrix"}`,
+		startsAt,
+		endsAt,
+	)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		status int
+	}{
+		{name: "status get", method: http.MethodGet, path: "/api/v2/status", status: http.StatusOK},
+		{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status", status: http.StatusMethodNotAllowed},
+
+		{name: "receivers get", method: http.MethodGet, path: "/api/v2/receivers", status: http.StatusOK},
+		{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers", status: http.StatusMethodNotAllowed},
+
+		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", status: http.StatusOK},
+		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: alertPayload, status: http.StatusOK},
+		{name: "alerts put not allowed", method: http.MethodPut, path: "/api/v2/alerts", status: http.StatusMethodNotAllowed},
+
+		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", status: http.StatusOK},
+		{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups", status: http.StatusMethodNotAllowed},
+
+		{name: "silences get", method: http.MethodGet, path: "/api/v2/silences", status: http.StatusOK},
+		{name: "silences post", method: http.MethodPost, path: "/api/v2/silences", body: silencePayload, status: http.StatusOK},
+
+		{name: "silence by id get", method: http.MethodGet, path: "/api/v2/silence/00000000-0000-4000-8000-000000000001", status: http.StatusNotFound},
+		{name: "silence by id delete", method: http.MethodDelete, path: "/api/v2/silence/00000000-0000-4000-8000-000000000001", status: http.StatusNotFound},
+		{name: "silence by id post not allowed", method: http.MethodPost, path: "/api/v2/silence/00000000-0000-4000-8000-000000000001", status: http.StatusMethodNotAllowed},
+
+		{name: "healthy get", method: http.MethodGet, path: "/-/healthy", status: http.StatusOK},
+		{name: "healthy head", method: http.MethodHead, path: "/-/healthy", status: http.StatusOK},
+		{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed},
+
+		{name: "ready get", method: http.MethodGet, path: "/-/ready", status: http.StatusOK},
+		{name: "ready head", method: http.MethodHead, path: "/-/ready", status: http.StatusOK},
+		{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed},
+
+		{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK},
+		{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != tt.status {
+				t.Fatalf("%s %s expected %d, got %d body=%q", tt.method, tt.path, tt.status, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestUpstreamParity_StatusClusterDisabledWhenListenAddressEmpty(t *testing.T) {
 	t.Setenv(runtimeClusterListenAddressEnv, "")
 
