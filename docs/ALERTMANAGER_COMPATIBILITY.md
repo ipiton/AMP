@@ -1,6 +1,6 @@
 # Alertmanager API Compatibility Matrix
 
-**Date**: 2026-02-27
+**Date**: 2026-02-28
 **Status**: 🟡 **RUNTIME PARITY IN PROGRESS** - upstream input compatibility + phased hardening
 **Alertmanager Version**: v0.31.1 (API v2)
 **Alertmanager++ Version**: v0.0.1
@@ -22,8 +22,10 @@
 - ✅ **Core API v2 routes are present in active runtime**
 - ✅ **Prometheus/VMAlert ingest compatibility path is active** (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
 - ✅ **Ops probe compatibility is active** (`/-/healthy`, `/-/ready`, `/-/reload`)
+- ✅ **Non-deprecated core method matrix is contract-locked** (`TestUpstreamParity_CoreEndpointMethodMatrix`)
 - 🟡 **Semantic parity is partial** (routing/inhibition behavior is a focused subset in Phase 0 runtime)
 - 🟡 **Advanced config API is partial** (`POST /api/v2/config`, `GET /api/v2/config/status`, `GET /api/v2/config/history`, `GET /api/v2/config/revisions`, `DELETE /api/v2/config/revisions/prune`, `POST /api/v2/config/rollback` active; targeted rollback policies are planned)
+- ℹ️ **Deprecated Alertmanager endpoints are intentionally out of scope** for active parity tracking
 
 ---
 
@@ -42,6 +44,23 @@
 | `POST /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Create/update via POST path with runtime validation; error contracts follow upstream-like mixed shape (`422` `{code,message}` for schema/required, `404` JSON string for unknown/invalid `id`, `400` JSON string for semantic validation) |
 | `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |
 | `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Success response is `200` with empty body; invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |
+
+### Core Endpoint Method Matrix (non-deprecated)
+
+This matrix is locked by runtime parity test `TestUpstreamParity_CoreEndpointMethodMatrix` in
+`go-app/cmd/server/main_upstream_parity_regression_test.go`.
+
+| Endpoint | Allowed methods | Runtime contract |
+|----------|-----------------|------------------|
+| `/api/v2/status` | `GET` | `GET=200`, others `405` |
+| `/api/v2/receivers` | `GET` | `GET=200`, others `405` |
+| `/api/v2/alerts` | `GET`, `POST` | `GET=200`, valid `POST=200`, others `405` |
+| `/api/v2/alerts/groups` | `GET` | `GET=200`, others `405` |
+| `/api/v2/silences` | `GET`, `POST` | `GET=200`, valid `POST=200`, others `405` |
+| `/api/v2/silence/{id}` | `GET`, `DELETE` | unknown valid UUID: `404`; other methods `405` |
+| `/-/healthy` | `GET`, `HEAD` | `GET=200`, `HEAD=200`, others `405` |
+| `/-/ready` | `GET`, `HEAD` | `GET=200`, `HEAD=200`, others `405` |
+| `/-/reload` | `POST` | valid `POST=200`, others `405` |
 
 ### Operational Compatibility Endpoints (Active Runtime)
 
@@ -460,7 +479,7 @@ helm install alertmanager prometheus-community/alertmanager
 ## ❓ FAQ
 
 ### Q: Is Alertmanager++ 100% compatible with Alertmanager?
-**A**: Yes! All core API v2 endpoints are implemented with identical request/response formats. Existing Grafana dashboards, amtool commands, and Prometheus configurations work without modification.
+**A**: For the non-deprecated core API/ops endpoint surface, method and route compatibility is locked by runtime contract tests. Semantic parity is still phased (routing/inhibition/config lifecycle details are marked in this document).
 
 ### Q: What are the differences from Alertmanager?
 **A**: Alertmanager++ is a **superset** of Alertmanager:
