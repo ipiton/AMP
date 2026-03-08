@@ -1,8 +1,8 @@
 apiVersion: v2
 name: amp
 description: |
-  Alertmanager++ (AMP) - Enhanced Alertmanager with LLM classification,
-  advanced grouping, and intelligent routing. 100% Alertmanager API compatible.
+  Alertmanager++ (AMP) - Alertmanager-inspired runtime with a real publishing
+  path, controlled replacement slice, and phased compatibility work.
 
 type: application
 version: 0.1.0
@@ -34,10 +34,10 @@ annotations:
   license: AGPL-3.0
   artifacthub.io/changes: |
     - Initial OSS release
-    - 100% Alertmanager API compatible
+    - Controlled replacement slice for active runtime
     - LLM classification (BYOK - Bring Your Own Key)
-    - Advanced grouping and routing
-    - Web dashboard included
+    - Real publishing path with phased wider parity
+    - Web dashboard surface included (partial)
 
 dependencies:
   - name: valkey
