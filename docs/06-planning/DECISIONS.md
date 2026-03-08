@@ -6,11 +6,19 @@
 - **Решение**: Go — основной язык для серверной части. Python-код удалён.
 - **Следствие**: API-совместимость с Alertmanager проще поддерживать на том же языке.
 
-## ADR-002: Alertmanager API compatibility (non-deprecated endpoints)
-- **Дата**: 2026-02-25
-- **Контекст**: Нужно определить scope совместимости с upstream Alertmanager.
-- **Решение**: Поддерживаем только non-deprecated core endpoints (alerts, silences, status, receivers, alert groups, config). Deprecated endpoints (v1 API) не реализуем.
-- **Следствие**: Contract tests фиксируют method/route matrix. Regression test `TestUpstreamParity_CoreEndpointMethodMatrix` блокирует нарушения.
+## ADR-002: Alertmanager Replacement Scope Is Active-Runtime-First
+- **Дата**: 2026-03-08
+- **Контекст**: Historical docs, DONE entries и parity tests начали описывать runtime шире, чем текущий active bootstrap в `go-app/cmd/server/main.go` и `go-app/internal/application/router.go`.
+- **Решение**:
+  - source of truth для replacement story — active runtime, а не historical docs/tests;
+  - текущий допустимый claim — только `controlled replacement`, не `general-purpose drop-in replacement`;
+  - текущий active scope ограничен alert ingest, silence CRUD, health/readiness, metrics и real publishing path;
+  - deprecated `v1` endpoints не входят в current active scope;
+  - wide-surface parity expectations фиксируются как future/backlog parity до отдельного runtime-restoration slice.
+- **Следствие**:
+  - planning/docs/tests должны синхронизироваться с active runtime first;
+  - historical parity suites не должны автоматически определять публичные claims;
+  - если нужен stronger Alertmanager replacement claim, это оформляется отдельной runtime/API задачей.
 
 ## ADR-003: Solo Kanban (SEMA) как процесс разработки
 - **Дата**: 2026-03-08

@@ -2,13 +2,15 @@
 
 **Date:** 8 марта 2026
 **Version:** 1.0.0
-**Status:** ✅ Production-Ready
+**Status:** 🟡 Controlled replacement slice documented; some historical config/runtime sections are ahead of the current active bootstrap
 
 ---
 
 ## 📋 Overview
 
-Alertmanager++ uses **two separate configuration files** for flexibility and hot reload support:
+Alertmanager++ uses **two separate configuration files** for flexibility and staged runtime evolution.
+
+Current runtime note (2026-03-08): this guide includes historical and target configuration surfaces. The active runtime source of truth remains `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`.
 
 1. **`config.yaml`** - Application infrastructure configuration
 2. **`alertmanager.yaml`** - Alerting routing configuration (Alertmanager-compatible)

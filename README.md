@@ -1,27 +1,23 @@
 # Alertmanager++ 🚀
 
-> A high-performance, Alertmanager-compatible alert management system with 10-20x better performance
+> An alert management runtime with Alertmanager-inspired APIs, a real publishing path, and phased parity work
 
 [![License](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ipiton/AMP)](https://goreportcard.com/report/github.com/ipiton/AMP)
 
 ## ✨ Features
 
-- **Alertmanager API v2 Core Compatibility** - Active runtime covers core ingest/query/silence/status endpoints with phased parity hardening
-- **10-20x Faster Performance** - Optimized Go implementation with sub-5ms latency
-- **75% Less Resources** - 50MB memory footprint (vs 200MB Alertmanager)
-- **Extensible Architecture** - Plugin system for custom classifiers and publishers
-- **Production-Ready** - Comprehensive documentation, tests, and monitoring
-- **Easy Migration** - 5-minute quick start guide with blue-green deployment
+- **Controlled Replacement Slice** - Active runtime currently covers alert ingest, silence CRUD, health/readiness, metrics, and a real publishing path
+- **Lean Go Runtime** - Current top-level docs avoid unverified benchmark/resource claims until a reproducible benchmark report is published
+- **Extensible Architecture** - Code-level extension points for custom classifiers and publishers
+- **Phased Compatibility** - Wider Alertmanager parity remains explicit follow-up work, not an implied full drop-in claim
+- **Controlled Migration** - Pilot-oriented quick start for scoped deployments and explicit verification
 
-## 📊 Performance Comparison
+Current runtime note (2026-03-08): AMP is currently positioned as a **controlled replacement** for scoped deployments, not as a general-purpose Alertmanager drop-in replacement. The active runtime source of truth is `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`.
 
-| Metric | Alertmanager | Alertmanager++ | Improvement |
-|--------|--------------|----------------|-------------|
-| Latency (p95) | 50ms | <5ms | **10x faster** ⚡ |
-| Throughput | 500 req/s | 5,000 req/s | **10x higher** 🚀 |
-| Memory | 200MB | 50MB | **4x less** 💾 |
-| CPU | 500m | 100m | **5x less** ⚡ |
+## 📊 Performance Note
+
+Top-level benchmark and resource comparison numbers have been removed from the README until they are backed by a reproducible benchmark report for the current `main` branch.
 
 ## 🚀 Quick Start
 
@@ -34,8 +30,7 @@ docker run -p 9093:9093 ghcr.io/ipiton/amp:latest
 ### Using Helm
 
 ```bash
-helm repo add amp https://ipiton.github.io/AMP
-helm install alertmanager-plus-plus amp/alertmanager-plus-plus
+helm install amp ./helm/amp
 ```
 
 ### From Source
@@ -118,7 +113,7 @@ receivers:
 
 See `go-app/internal/infrastructure/routing/testdata/production.yaml` for full example.
 
-**Runtime config operations (active `main.go`):**
+**Historical runtime config contract (not active in current bootstrap):**
 ```bash
 # Read current runtime config snapshot (JSON)
 curl http://localhost:8080/api/v2/config
@@ -174,12 +169,12 @@ Both rollback and prune support `dryRun=true` preview mode without mutating runt
 
 ## 📚 Documentation
 
-- **[Migration from Alertmanager](docs/MIGRATION_QUICK_START.md)** - 5-minute migration guide
-- **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Full compatibility matrix
+- **[Migration from Alertmanager](docs/MIGRATION_QUICK_START.md)** - Controlled migration quick start
+- **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Current active slice and future parity gaps
 - **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
 
-Compatibility note: active runtime tracks non-deprecated Alertmanager core endpoint/method parity with contract tests; semantic parity (routing/inhibition/config lifecycle details) is phased and documented in the compatibility matrix.
+Compatibility note: current active runtime is intentionally narrower than the historical parity/test narrative. Treat AMP today as a controlled replacement slice; wider Alertmanager parity is tracked as follow-up work.
 
 ## 🏗️ Architecture
 
@@ -207,7 +202,7 @@ pkg/core/                   # Core interfaces (zero dependencies)
 
 ## 🔌 Extensibility
 
-Build your own extensions using the plugin system:
+Build your own extensions using the existing extension interfaces:
 
 ### Custom Classifier Example
 
@@ -254,7 +249,7 @@ We welcome contributions! See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for commu
 
 ## 📄 License
 
-Apache 2.0 - See [LICENSE](LICENSE) for details.
+AGPL 3.0 - See [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 

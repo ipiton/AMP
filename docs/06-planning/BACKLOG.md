@@ -6,6 +6,7 @@
 > Задачи из этой секции перенесены в `NEXT.md` Queue. Здесь остаются только задачи, не попавшие в очередь.
 
 ## Later
+- [ ] **RUNTIME-SURFACE-RESTORATION** — если нужен stronger Alertmanager replacement claim, вернуть в active runtime historical wide surface (`status`, `receivers`, `alerts/groups`, `/-/reload` и, отдельно, `config/history/classification/inhibition`) через явный integration slice.
 - [ ] **PHASE-5-ML-LLM-INTEGRATION** — довести end-to-end classification path и четкую provider/fallback policy в активном runtime.
 - [ ] **PHASE-6-MCP-CONTEXT-TRIAGE-MVP** — registry, evidence model, connectors и triage API.
 - [ ] **PHASE-7-UI-UX-WORKFLOW** — реализовать operator workflow для silences/LLM/routing/triage в UI.

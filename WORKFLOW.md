@@ -2,6 +2,16 @@
 
 Это декларативная политика разработки для одного разработчика с AI-агентом.
 
+## Agent Entry Points
+- `AGENTS.md` — Solo Kanban instructions for generic coding agents
+- `CLAUDE.md` — Solo Kanban instructions for Claude-based agents
+- `GEMINI.md` — Solo Kanban instructions for Gemini-based agents
+- `.claude/commands/` — Claude slash-commands for each workflow step
+- `.gemini/commands/` — Gemini command prompts for each workflow step (`/sk-*` namespace to avoid built-in command collisions)
+- `skills/` — shared Solo Kanban skills used by multiple agents
+
+Все три файла должны оставаться согласованными с этим `WORKFLOW.md` и planning artifacts в `docs/06-planning/`.
+
 ## Принципы
 - **Одна задача в фокусе** — WIP max 2 (1 основная + 1 hotfix).
 - **Баланс 50/50** — maintenance vs roadmap.
