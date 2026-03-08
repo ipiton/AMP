@@ -43,7 +43,7 @@ type QueryFilters struct {
 	EndTime   *time.Time
 
 	// Label filters
-	Labels map[string]string // Exact match
+	Labels      map[string]string // Exact match
 	LabelsRegex map[string]string // Regex match
 
 	// Status filters
@@ -60,12 +60,12 @@ type QueryFilters struct {
 
 // StorageStats provides storage statistics
 type StorageStats struct {
-	TotalAlerts     int64
-	FiringAlerts    int64
-	ResolvedAlerts  int64
+	TotalAlerts      int64
+	FiringAlerts     int64
+	ResolvedAlerts   int64
 	StorageSizeBytes int64
-	OldestAlert     *time.Time
-	NewestAlert     *time.Time
+	OldestAlert      *time.Time
+	NewestAlert      *time.Time
 }
 
 // HistoryStorage defines extended history storage (optional)
@@ -127,12 +127,12 @@ type SilenceStorage interface {
 
 // SilenceFilters defines filtering options for silence queries
 type SilenceFilters struct {
-	Status   []string // active, pending, expired
-	Creator  string
+	Status    []string // active, pending, expired
+	Creator   string
 	StartTime *time.Time
 	EndTime   *time.Time
-	Limit    int
-	Offset   int
+	Limit     int
+	Offset    int
 }
 
 // ================================================================================

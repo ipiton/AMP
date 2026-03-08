@@ -79,9 +79,9 @@ func NewTrendDetector() *TrendDetector {
 	return &TrendDetector{
 		history: NewTimeSeriesStorage(24 * time.Hour), // 24h retention
 		config: TrendDetectorConfig{
-			EMAAlpha:         0.3,  // 30% weight on new values
-			AnomalyThreshold: 3.0,  // 3 standard deviations
-			TrendThreshold:   5.0,  // 5% change to classify as trend
+			EMAAlpha:         0.3, // 30% weight on new values
+			AnomalyThreshold: 3.0, // 3 standard deviations
+			TrendThreshold:   5.0, // 5% change to classify as trend
 			HistoryRetention: 24 * time.Hour,
 		},
 		emaState: make(map[string]float64),
@@ -106,12 +106,12 @@ func (td *TrendDetector) RecordSnapshot(snapshot *MetricsSnapshot) {
 // Analyze detects trends in recent metrics vs historical data.
 //
 // Algorithm:
-//   1. Load recent data (last 1h) and baseline (24h)
-//   2. Calculate EMA for key metrics
-//   3. Compute standard deviation (σ)
-//   4. Classify trends (increasing/stable/decreasing)
-//   5. Detect anomalies (>3σ from baseline)
-//   6. Calculate queue growth rate
+//  1. Load recent data (last 1h) and baseline (24h)
+//  2. Calculate EMA for key metrics
+//  3. Compute standard deviation (σ)
+//  4. Classify trends (increasing/stable/decreasing)
+//  5. Detect anomalies (>3σ from baseline)
+//  6. Calculate queue growth rate
 //
 // Performance: <500µs
 //
@@ -233,8 +233,8 @@ func (td *TrendDetector) classifyQueueTrend(recent, baseline float64) string {
 // detectAnomaly returns true if current value is >3σ from baseline.
 //
 // Algorithm:
-//   1. Calculate mean (μ) and standard deviation (σ) from historical data
-//   2. Check if abs(current - μ) > threshold * σ (default: 3σ)
+//  1. Calculate mean (μ) and standard deviation (σ) from historical data
+//  2. Check if abs(current - μ) > threshold * σ (default: 3σ)
 //
 // Performance: <100µs
 func (td *TrendDetector) detectAnomaly(

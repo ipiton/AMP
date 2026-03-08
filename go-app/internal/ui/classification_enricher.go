@@ -44,9 +44,9 @@ type EnrichedAlert struct {
 	Classification *core.ClassificationResult `json:"classification,omitempty"`
 
 	// Metadata
-	HasClassification   bool   `json:"has_classification"`
-	ClassificationSource string `json:"classification_source,omitempty"` // "llm", "fallback", "cache", "none"
-	ClassificationCached bool  `json:"classification_cached"`
+	HasClassification    bool           `json:"has_classification"`
+	ClassificationSource string         `json:"classification_source,omitempty"` // "llm", "fallback", "cache", "none"
+	ClassificationCached bool           `json:"classification_cached"`
 	ClassificationAge    *time.Duration `json:"classification_age,omitempty"` // время с момента классификации
 }
 
@@ -57,7 +57,7 @@ type defaultClassificationEnricher struct {
 
 	// Request-scoped cache (in-memory, cleared after request)
 	requestCache map[string]*core.ClassificationResult
-	requestMu   sync.RWMutex
+	requestMu    sync.RWMutex
 }
 
 // NewClassificationEnricher creates a new ClassificationEnricher.
@@ -93,7 +93,7 @@ func (e *defaultClassificationEnricher) EnrichAlert(ctx context.Context, alert *
 	}
 
 	enriched := &EnrichedAlert{
-		Alert:            alert,
+		Alert:             alert,
 		HasClassification: false,
 	}
 
@@ -171,7 +171,7 @@ func (e *defaultClassificationEnricher) BatchEnrich(ctx context.Context, alerts 
 			} else {
 				// Fallback: create enriched alert without classification
 				enriched[i+j] = &EnrichedAlert{
-					Alert:            alert,
+					Alert:             alert,
 					HasClassification: false,
 				}
 			}
@@ -200,9 +200,9 @@ func (e *defaultClassificationEnricher) enrichBatch(ctx context.Context, alerts 
 
 		if found && cached != nil {
 			enriched[i] = &EnrichedAlert{
-				Alert:              alert,
-				Classification:     cached,
-				HasClassification:  true,
+				Alert:                alert,
+				Classification:       cached,
+				HasClassification:    true,
 				ClassificationSource: "cache",
 				ClassificationCached: true,
 			}
@@ -217,36 +217,36 @@ func (e *defaultClassificationEnricher) enrichBatch(ctx context.Context, alerts 
 		return enriched, nil
 	}
 
-		// Try batch classification for uncached alerts
-		if e.classificationSvc != nil {
-			results, err := e.classificationSvc.ClassifyBatch(ctx, uncachedAlerts)
-			if err == nil && len(results) == len(uncachedAlerts) {
-				// Store results in request cache and create enriched alerts
-				for j, result := range results {
-					idx := uncachedIndices[j]
-					alert := uncachedAlerts[j]
+	// Try batch classification for uncached alerts
+	if e.classificationSvc != nil {
+		results, err := e.classificationSvc.ClassifyBatch(ctx, uncachedAlerts)
+		if err == nil && len(results) == len(uncachedAlerts) {
+			// Store results in request cache and create enriched alerts
+			for j, result := range results {
+				idx := uncachedIndices[j]
+				alert := uncachedAlerts[j]
 
-					if result != nil {
-						// Store in request cache
-						e.requestMu.Lock()
-						e.requestCache[alert.Fingerprint] = result
-						e.requestMu.Unlock()
+				if result != nil {
+					// Store in request cache
+					e.requestMu.Lock()
+					e.requestCache[alert.Fingerprint] = result
+					e.requestMu.Unlock()
 
-						enriched[idx] = &EnrichedAlert{
-							Alert:              alert,
-							Classification:     result,
-							HasClassification:  true,
-							ClassificationSource: "llm", // Assume LLM source for batch classification
-							ClassificationCached: false,
-						}
-					} else {
-						// No classification available
-						enriched[idx] = &EnrichedAlert{
-							Alert:            alert,
-							HasClassification: false,
-						}
+					enriched[idx] = &EnrichedAlert{
+						Alert:                alert,
+						Classification:       result,
+						HasClassification:    true,
+						ClassificationSource: "llm", // Assume LLM source for batch classification
+						ClassificationCached: false,
+					}
+				} else {
+					// No classification available
+					enriched[idx] = &EnrichedAlert{
+						Alert:             alert,
+						HasClassification: false,
 					}
 				}
+			}
 		} else {
 			// Batch classification failed, try individual lookups
 			for j, alert := range uncachedAlerts {
@@ -256,7 +256,7 @@ func (e *defaultClassificationEnricher) enrichBatch(ctx context.Context, alerts 
 					enriched[idx] = enrichedAlert
 				} else {
 					enriched[idx] = &EnrichedAlert{
-						Alert:            alert,
+						Alert:             alert,
 						HasClassification: false,
 					}
 				}
@@ -267,7 +267,7 @@ func (e *defaultClassificationEnricher) enrichBatch(ctx context.Context, alerts 
 		for j, alert := range uncachedAlerts {
 			idx := uncachedIndices[j]
 			enriched[idx] = &EnrichedAlert{
-				Alert:            alert,
+				Alert:             alert,
 				HasClassification: false,
 			}
 		}

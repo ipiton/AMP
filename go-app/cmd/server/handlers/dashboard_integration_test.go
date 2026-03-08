@@ -1,5 +1,6 @@
 // Package handlers provides HTTP handlers for the dashboard.
 // TN-77: Modern Dashboard Page - Integration Tests (150% Quality Target)
+//go:build integration
 // +build integration
 
 package handlers
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,6 +28,7 @@ func TestDashboardHandler_Integration(t *testing.T) {
 	logger := slog.Default()
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	templateEngine, err := ui.NewTemplateEngine(opts)
 	if err != nil {
 		t.Fatalf("Failed to create template engine: %v", err)
@@ -96,6 +99,7 @@ func TestDashboardHandler_Accessibility(t *testing.T) {
 	logger := slog.Default()
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	templateEngine, err := ui.NewTemplateEngine(opts)
 	if err != nil {
 		t.Fatalf("Failed to create template engine: %v", err)
@@ -139,6 +143,7 @@ func TestDashboardHandler_KeyboardShortcuts(t *testing.T) {
 	logger := slog.Default()
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	templateEngine, err := ui.NewTemplateEngine(opts)
 	if err != nil {
 		t.Fatalf("Failed to create template engine: %v", err)
@@ -172,6 +177,7 @@ func BenchmarkDashboardHandler_Integration(b *testing.B) {
 	logger := slog.Default()
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	templateEngine, err := ui.NewTemplateEngine(opts)
 	if err != nil {
 		b.Fatalf("Failed to create template engine: %v", err)
@@ -203,6 +209,7 @@ func TestDashboardHandler_ResponseSize(t *testing.T) {
 	logger := slog.Default()
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	templateEngine, err := ui.NewTemplateEngine(opts)
 	if err != nil {
 		t.Fatalf("Failed to create template engine: %v", err)
@@ -236,6 +243,7 @@ func TestDashboardHandler_HTMLValidation(t *testing.T) {
 	logger := slog.Default()
 	opts := ui.DefaultTemplateOptions()
 	opts.HotReload = false
+	opts.TemplateDir = filepath.Clean(filepath.Join("..", "templates"))
 	templateEngine, err := ui.NewTemplateEngine(opts)
 	if err != nil {
 		t.Fatalf("Failed to create template engine: %v", err)

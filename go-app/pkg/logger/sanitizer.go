@@ -110,8 +110,8 @@ func SanitizeURL(rawURL string) string {
 // Sanitized headers:
 //   - Headers matching SensitiveHeaders → value replaced with [REDACTED]
 //   - Partial sanitization for common patterns:
-//     * "Bearer xxx" → "Bearer [REDACTED]"
-//     * "Basic xxx" → "Basic [REDACTED]"
+//   - "Bearer xxx" → "Bearer [REDACTED]"
+//   - "Basic xxx" → "Basic [REDACTED]"
 //   - Case-insensitive matching
 //
 // Example:

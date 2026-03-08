@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // setupTestDB creates a PostgreSQL container and returns a connection pool

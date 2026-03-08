@@ -238,7 +238,7 @@ func (t *RouteTree) Clone() *RouteTree {
 	return &RouteTree{
 		Root:      t.Root.Clone(), // Deep clone root node and subtree
 		receivers: receiversClone,
-		stats:     t.stats,   // Copy struct value
+		stats:     t.stats,    // Copy struct value
 		built:     time.Now(), // Update build time for clone
 	}
 }

@@ -153,13 +153,14 @@ type ConfigUpdateService interface {
 //
 // Storage Options:
 // 1. PostgreSQL (recommended for production):
-//    - Tables: config_versions, config_audit_log
-//    - ACID transactions
-//    - Retention policies via triggers
+//   - Tables: config_versions, config_audit_log
+//   - ACID transactions
+//   - Retention policies via triggers
+//
 // 2. Filesystem (fallback for development):
-//    - Files: config/versions/v{version}.json
-//    - Atomic writes via temp file + rename
-//    - Limited concurrency support
+//   - Files: config/versions/v{version}.json
+//   - Atomic writes via temp file + rename
+//   - Limited concurrency support
 type ConfigStorage interface {
 	// Save persists configuration and returns new version number
 	//

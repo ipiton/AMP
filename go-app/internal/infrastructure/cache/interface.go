@@ -51,21 +51,21 @@ type Cache interface {
 
 // CacheStats содержит статистику по работе cache
 type CacheStats struct {
-	Hits         int64
-	Misses       int64
-	Sets         int64
-	Deletes      int64
-	Errors       int64
-	Connections  int
-	Uptime       time.Duration
+	Hits        int64
+	Misses      int64
+	Sets        int64
+	Deletes     int64
+	Errors      int64
+	Connections int
+	Uptime      time.Duration
 }
 
 // CacheConfig содержит конфигурацию cache
 type CacheConfig struct {
 	// Redis connection settings
-	Addr     string        `env:"REDIS_ADDR" default:"localhost:6379"`
-	Password string        `env:"REDIS_PASSWORD" default:""`
-	DB       int           `env:"REDIS_DB" default:"0"`
+	Addr     string `env:"REDIS_ADDR" default:"localhost:6379"`
+	Password string `env:"REDIS_PASSWORD" default:""`
+	DB       int    `env:"REDIS_DB" default:"0"`
 
 	// Pool settings
 	PoolSize     int           `env:"REDIS_POOL_SIZE" default:"10"`

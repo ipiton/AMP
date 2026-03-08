@@ -369,9 +369,9 @@ func DefaultSilenceManagerConfig() SilenceManagerConfig {
 //	}
 type SilenceManagerStats struct {
 	// Cache Statistics
-	CacheSize     int                                           // Number of silences in cache
-	CacheLastSync time.Time                                     // Last cache synchronization time
-	CacheByStatus map[silencing.SilenceStatus]int               // Count by status (pending/active/expired)
+	CacheSize     int                             // Number of silences in cache
+	CacheLastSync time.Time                       // Last cache synchronization time
+	CacheByStatus map[silencing.SilenceStatus]int // Count by status (pending/active/expired)
 
 	// Repository Statistics
 	TotalSilences   int64 // Total silences in database

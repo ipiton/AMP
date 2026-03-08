@@ -16,10 +16,10 @@ type TargetConfig struct {
 type TargetType string
 
 const (
-	TargetTypeRootly     TargetType = "rootly"
-	TargetTypePagerDuty  TargetType = "pagerduty"
-	TargetTypeSlack      TargetType = "slack"
-	TargetTypeWebhook    TargetType = "webhook"
+	TargetTypeRootly       TargetType = "rootly"
+	TargetTypePagerDuty    TargetType = "pagerduty"
+	TargetTypeSlack        TargetType = "slack"
+	TargetTypeWebhook      TargetType = "webhook"
 	TargetTypeAlertmanager TargetType = "alertmanager"
 )
 

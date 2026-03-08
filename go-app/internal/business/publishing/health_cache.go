@@ -74,10 +74,10 @@ func newHealthStatusCache() *healthStatusCache {
 // Get retrieves health status for target (O(1)).
 //
 // This method:
-//   1. Acquires read lock (allows concurrent readers)
-//   2. Looks up target in map (O(1))
-//   3. Checks if entry is stale (LastCheck > maxAge)
-//   4. Returns status or nil if not found/stale
+//  1. Acquires read lock (allows concurrent readers)
+//  2. Looks up target in map (O(1))
+//  3. Checks if entry is stale (LastCheck > maxAge)
+//  4. Returns status or nil if not found/stale
 //
 // Parameters:
 //   - targetName: Name of target (e.g., "rootly-prod")
@@ -119,9 +119,9 @@ func (c *healthStatusCache) Get(targetName string) (*TargetHealthStatus, bool) {
 // Set stores health status for target (O(1)).
 //
 // This method:
-//   1. Acquires write lock (blocks all readers/writers)
-//   2. Stores status in map (O(1))
-//   3. Overwrites existing entry if present
+//  1. Acquires write lock (blocks all readers/writers)
+//  2. Stores status in map (O(1))
+//  3. Overwrites existing entry if present
 //
 // Parameters:
 //   - status: Health status to store (must not be nil)
@@ -155,10 +155,10 @@ func (c *healthStatusCache) Set(status *TargetHealthStatus) {
 // Update atomically updates health status using update function.
 //
 // This method provides atomic read-modify-write operation:
-//   1. Acquires write lock (blocks all readers/writers)
-//   2. Gets current status (or creates new if not exists)
-//   3. Calls updateFn to modify status
-//   4. Stores updated status back to cache
+//  1. Acquires write lock (blocks all readers/writers)
+//  2. Gets current status (or creates new if not exists)
+//  3. Calls updateFn to modify status
+//  4. Stores updated status back to cache
 //
 // This prevents race conditions when multiple goroutines update same target.
 //
@@ -209,9 +209,9 @@ func (c *healthStatusCache) Update(targetName string, updateFn func(*TargetHealt
 // GetAll returns all health statuses (O(n)).
 //
 // This method:
-//   1. Acquires read lock (allows concurrent readers)
-//   2. Copies all statuses from map to slice
-//   3. Returns slice (non-stale entries only)
+//  1. Acquires read lock (allows concurrent readers)
+//  2. Copies all statuses from map to slice
+//  3. Returns slice (non-stale entries only)
 //
 // Note: Stale entries are excluded from result.
 //
@@ -256,9 +256,9 @@ func (c *healthStatusCache) GetAll() []TargetHealthStatus {
 // Delete removes health status for target (O(1)).
 //
 // This method:
-//   1. Acquires write lock (blocks all readers/writers)
-//   2. Deletes entry from map (O(1))
-//   3. No-op if target doesn't exist
+//  1. Acquires write lock (blocks all readers/writers)
+//  2. Deletes entry from map (O(1))
+//  3. No-op if target doesn't exist
 //
 // Parameters:
 //   - targetName: Name of target to delete
@@ -281,9 +281,9 @@ func (c *healthStatusCache) Delete(targetName string) {
 // Clear removes all entries from cache.
 //
 // This method:
-//   1. Acquires write lock (blocks all readers/writers)
-//   2. Creates new empty map
-//   3. Old map becomes garbage collected
+//  1. Acquires write lock (blocks all readers/writers)
+//  2. Creates new empty map
+//  3. Old map becomes garbage collected
 //
 // Performance: ~100ns (O(1), map re-allocation)
 //
@@ -304,8 +304,8 @@ func (c *healthStatusCache) Clear() {
 // Size returns number of entries in cache.
 //
 // This method:
-//   1. Acquires read lock (allows concurrent readers)
-//   2. Returns map size (O(1))
+//  1. Acquires read lock (allows concurrent readers)
+//  2. Returns map size (O(1))
 //
 // Note: Includes stale entries in count.
 //
@@ -330,9 +330,9 @@ func (c *healthStatusCache) Size() int {
 // GetAllNames returns names of all cached targets.
 //
 // This method:
-//   1. Acquires read lock (allows concurrent readers)
-//   2. Copies all keys from map to slice
-//   3. Returns slice (non-stale entries only)
+//  1. Acquires read lock (allows concurrent readers)
+//  2. Copies all keys from map to slice
+//  3. Returns slice (non-stale entries only)
 //
 // Returns:
 //   - []string: Names of all targets in cache

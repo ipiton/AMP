@@ -3,9 +3,9 @@ package services
 import (
 	"testing"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // TestNewFingerprintGenerator_DefaultConfig tests default configuration

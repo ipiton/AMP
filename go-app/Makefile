@@ -1,5 +1,5 @@
 # Makefile for Alert History Service (Go version)
-.PHONY: build test lint run clean help deps fmt vet mod-tidy
+.PHONY: build test test-mvp test-all test-upstream-parity lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
 
 # Go parameters
 GOCMD=go
@@ -10,6 +10,16 @@ GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
+
+# Local Go caches (useful for sandboxed/offline development environments)
+GOLOCAL_GOCACHE ?= $(CURDIR)/.cache/go-build
+GOLOCAL_GOMODCACHE ?= $(CURDIR)/.cache/go-mod
+GOLOCAL_GOPATH ?= $(CURDIR)/.cache/go
+GO_LOCAL_ENV = GOCACHE=$(GOLOCAL_GOCACHE) GOMODCACHE=$(GOLOCAL_GOMODCACHE) GOPATH=$(GOLOCAL_GOPATH)
+
+# Test matrices
+TEST_TARGETS_MVP ?= ./cmd/server/... ./internal/ui
+TEST_TARGETS_ALL ?= ./...
 
 # Main package path
 MAIN_PATH=./cmd/server
@@ -30,13 +40,54 @@ build-linux:
 
 # Run tests
 test:
-	@echo "Running tests..."
-	$(GOTEST) -v ./...
+	@$(MAKE) test-mvp
+
+test-mvp:
+	@echo "Running MVP test matrix..."
+	$(GOTEST) -count=1 -v $(TEST_TARGETS_MVP)
+
+test-all:
+	@echo "Running full test suite..."
+	$(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
+
+test-upstream-parity:
+	@echo "Running upstream parity regression suite..."
+	$(GOTEST) -count=1 -v ./cmd/server -run UpstreamParity
+
+# Fast quality gates for local inner loop
+quality-gates-fast:
+	@echo "Running fast quality gates (fmt + vet)..."
+	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
+	$(GOFMT) ./...
+	$(GO_LOCAL_ENV) $(GOVET) ./...
+	@echo "Fast quality gates passed"
+
+# Full quality gates for pre-merge/pre-release checks
+quality-gates:
+	@echo "Running quality gates (fmt + vet + MVP test matrix)..."
+	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
+	$(GOFMT) ./...
+	$(GO_LOCAL_ENV) $(GOVET) ./...
+	$(GO_LOCAL_ENV) $(GOTEST) -count=1 -v $(TEST_TARGETS_MVP)
+	@echo "Quality gates passed"
+
+quality-gates-all:
+	@echo "Running full quality gates (fmt + vet + full test suite)..."
+	@mkdir -p $(GOLOCAL_GOCACHE) $(GOLOCAL_GOMODCACHE) $(GOLOCAL_GOPATH)
+	$(GOFMT) ./...
+	$(GO_LOCAL_ENV) $(GOVET) ./...
+	$(GO_LOCAL_ENV) $(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
+	@echo "Full quality gates passed"
 
 # Run tests with coverage
 test-coverage:
-	@echo "Running tests with coverage..."
-	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic ./...
+	@echo "Running MVP test matrix with coverage..."
+	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic $(TEST_TARGETS_MVP)
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+
+test-coverage-all:
+	@echo "Running full test suite with coverage..."
+	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic $(TEST_TARGETS_ALL)
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
 # Run linter (requires golangci-lint to be installed)
@@ -89,8 +140,8 @@ install-tools:
 	$(GOGET) -u github.com/cosmtrek/air
 	$(GOGET) -u github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
-# Include advanced migration commands from Makefile.migrations
-include Makefile.migrations
+# Include advanced migration commands from Makefile.migrations (optional)
+-include Makefile.migrations
 
 # Database URL for migrations (uses environment variables)
 DATABASE_URL ?= postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSL_MODE)
@@ -192,8 +243,8 @@ compose-build:
 	docker-compose build
 	@echo "Services built"
 
-# Include Docker Compose development commands
-include ../Makefile.docker
+# Include Docker Compose development commands (optional)
+-include ../Makefile.docker
 
 # Bake commands (advanced multi-arch builds)
 bake-build:
@@ -218,8 +269,14 @@ help:
 	@echo "📦 Build & Development:"
 	@echo "  build           - Build the application"
 	@echo "  build-linux     - Build for Linux (Docker)"
-	@echo "  test            - Run tests"
-	@echo "  test-coverage   - Run tests with coverage report"
+	@echo "  test            - Run MVP test matrix (default)"
+	@echo "  test-mvp        - Run MVP test matrix (cmd/server + internal/ui)"
+	@echo "  test-all        - Run full test suite"
+	@echo "  quality-gates-fast - fmt + vet (inner loop)"
+	@echo "  quality-gates   - fmt + vet + MVP test matrix"
+	@echo "  quality-gates-all - fmt + vet + full test suite"
+	@echo "  test-coverage   - Run MVP test matrix with coverage report"
+	@echo "  test-coverage-all - Run full test suite with coverage report"
 	@echo "  lint            - Run linter (requires golangci-lint)"
 	@echo "  fmt             - Format code"
 	@echo "  vet             - Run go vet"

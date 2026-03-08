@@ -149,12 +149,12 @@ func TestAuthConfig_CustomHeaders(t *testing.T) {
 
 func TestWebhookRequest_Creation(t *testing.T) {
 	payload := map[string]interface{}{
-		"alert": "test",
+		"alert":    "test",
 		"severity": "critical",
 	}
 
 	headers := map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type":    "application/json",
 		"X-Custom-Header": "value",
 	}
 

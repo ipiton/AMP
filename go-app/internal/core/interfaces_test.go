@@ -17,10 +17,10 @@ func TestAlertFilters_Validate(t *testing.T) {
 		{
 			name: "valid filters with all fields",
 			filters: &AlertFilters{
-				Limit:  100,
-				Offset: 0,
-				Status: ptrAlertStatus(StatusFiring),
-				Severity: ptrString("warning"),
+				Limit:     100,
+				Offset:    0,
+				Status:    ptrAlertStatus(StatusFiring),
+				Severity:  ptrString("warning"),
 				Namespace: ptrString("production"),
 				Labels: map[string]string{
 					"env": "prod",

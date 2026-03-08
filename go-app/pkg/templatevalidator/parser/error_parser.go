@@ -28,10 +28,12 @@ import (
 // ErrorParser parses Go template errors into structured ValidationError
 //
 // Go template errors have format:
-//   "template: <name>:<line>:<column>: <message>"
+//
+//	"template: <name>:<line>:<column>: <message>"
 //
 // Example:
-//   "template: slack:15:24: function \"toUpperCase\" not defined"
+//
+//	"template: slack:15:24: function \"toUpperCase\" not defined"
 //
 // ErrorParser extracts:
 // - line: 15
@@ -207,8 +209,9 @@ func (p *ErrorParser) GenerateSuggestion(errMessage string) string {
 // FormatErrorMessage formats ValidationError into human-readable message
 //
 // Format:
-//   "line <line>, column <column>: <message>"
-//   "Suggestion: <suggestion>"
+//
+//	"line <line>, column <column>: <message>"
+//	"Suggestion: <suggestion>"
 //
 // Example:
 //

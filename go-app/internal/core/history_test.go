@@ -7,10 +7,10 @@ import (
 // TestPagination tests the Pagination struct
 func TestPagination(t *testing.T) {
 	tests := []struct {
-		name      string
-		page      int
-		perPage   int
-		wantErr   bool
+		name       string
+		page       int
+		perPage    int
+		wantErr    bool
 		wantOffset int
 	}{
 		{
@@ -92,11 +92,11 @@ func TestPagination(t *testing.T) {
 // TestSorting tests the Sorting struct
 func TestSorting(t *testing.T) {
 	tests := []struct {
-		name      string
-		field     string
-		order     SortOrder
-		wantErr   bool
-		wantSQL   string
+		name    string
+		field   string
+		order   SortOrder
+		wantErr bool
+		wantSQL string
 	}{
 		{
 			name:    "valid sorting - created_at desc",

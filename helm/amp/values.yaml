@@ -338,7 +338,7 @@ externalSecrets:
 cache:
   enabled: true  # Overridden by profile in deployment.yaml
   # Valkey connection details
-  host: "{{ include \"alerthistory.fullname\" . }}-valkey"  # Service name of Valkey
+  host: "{{ include \"amp.fullname\" . }}-redis"  # Service name of Redis/Valkey
   port: 6379
   # Valkey authentication (if needed)
   auth:
@@ -481,9 +481,40 @@ monitoring:
 # ===============================
 publishing:
   enabled: true
-  maxConcurrent: 10
-  timeout: 30
-  retries: 3
+  discovery:
+    namespace: ""
+    labelSelector: "publishing-target=true"
+  queue:
+    maxConcurrent: 10
+    workerCount: 10
+    highPriorityQueueSize: 500
+    mediumPriorityQueueSize: 1000
+    lowPriorityQueueSize: 500
+    maxRetries: 3
+    retryInterval: "2s"
+    stopTimeout: "10s"
+    jobTrackingCapacity: 10000
+  refresh:
+    enabled: true
+    interval: "5m"
+    maxRetries: 5
+    baseBackoff: "30s"
+    maxBackoff: "5m"
+    rateLimitPer: "1m"
+    timeout: "30s"
+    warmupPeriod: "30s"
+  health:
+    enabled: true
+    checkInterval: "2m"
+    httpTimeout: "5s"
+    warmupDelay: "10s"
+    failureThreshold: 3
+    degradedThreshold: "5s"
+    maxConcurrentChecks: 10
+    maxIdleConns: 100
+    tlsSkipVerify: false
+    followRedirects: true
+    maxRedirects: 3
 
 # ===============================
 # Rootly Integration (Priority)
@@ -533,9 +564,9 @@ publishingTargets: []
 # publishingTargets:
 #   # Rootly integration
 #   - name: rootly-production
-#     type: webhook
+#     type: rootly
 #     format: rootly
-#     url: https://api.rootly.com/webhooks/your-webhook-id
+#     url: https://api.rootly.com/v1/incidents
 #     enabled: true
 #     secret:
 #       apiKey: "your-rootly-api-key"
@@ -547,7 +578,7 @@ publishingTargets: []
 #
 #   # PagerDuty integration
 #   - name: pagerduty-oncall
-#     type: webhook
+#     type: pagerduty
 #     format: pagerduty
 #     url: https://events.pagerduty.com/v2/enqueue
 #     enabled: true
@@ -560,7 +591,7 @@ publishingTargets: []
 #
 #   # Slack notifications
 #   - name: slack-alerts
-#     type: webhook
+#     type: slack
 #     format: slack
 #     url: https://hooks.slack.com/your-webhook-url
 #     enabled: true

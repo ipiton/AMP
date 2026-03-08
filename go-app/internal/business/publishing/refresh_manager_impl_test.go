@@ -348,9 +348,9 @@ func TestGetStatus_Accuracy(t *testing.T) {
 // TestGetStatus_FailureTracking tests consecutive failure tracking.
 func TestGetStatus_FailureTracking(t *testing.T) {
 	mock := &MockTargetDiscoveryManager{
-		targetCount:  10,
-		shouldFail:   true,
-		failureCount: 0, // Always fail
+		targetCount:   10,
+		shouldFail:    true,
+		failureCount:  0, // Always fail
 		errorToReturn: errors.New("mock k8s api unavailable"),
 	}
 

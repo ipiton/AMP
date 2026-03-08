@@ -126,7 +126,7 @@ func (s *PostgreSQLConfigStorage) Save(ctx context.Context, cfg *Config) (int64,
 
 // Load implements ConfigStorage.Load
 //
-// Loads configuration by version number
+// # Loads configuration by version number
 //
 // Performance: < 50ms p95
 func (s *PostgreSQLConfigStorage) Load(ctx context.Context, version int64) (*Config, error) {
@@ -164,7 +164,7 @@ func (s *PostgreSQLConfigStorage) Load(ctx context.Context, version int64) (*Con
 
 // GetLatestVersion implements ConfigStorage.GetLatestVersion
 //
-// Returns the most recent version number
+// # Returns the most recent version number
 //
 // Performance: < 5ms p95
 func (s *PostgreSQLConfigStorage) GetLatestVersion(ctx context.Context) (int64, error) {
@@ -232,7 +232,7 @@ func (s *PostgreSQLConfigStorage) Backup(ctx context.Context, cfg *Config) error
 
 // GetHistory implements ConfigStorage.GetHistory
 //
-// Returns configuration version history
+// # Returns configuration version history
 //
 // Performance: < 100ms p95
 func (s *PostgreSQLConfigStorage) GetHistory(ctx context.Context, limit int) ([]*ConfigVersion, error) {

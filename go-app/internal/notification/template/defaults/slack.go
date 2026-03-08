@@ -64,9 +64,11 @@ const DefaultSlackPretext = `{{ if .CommonLabels.environment }}Environment: *{{ 
 //
 // Example output:
 // [
-//   {"title": "Severity", "value": "CRITICAL", "short": true},
-//   {"title": "Instance", "value": "web-01.example.com", "short": true},
-//   {"title": "Description", "value": "CPU usage is 95%", "short": false}
+//
+//	{"title": "Severity", "value": "CRITICAL", "short": true},
+//	{"title": "Instance", "value": "web-01.example.com", "short": true},
+//	{"title": "Description", "value": "CPU usage is 95%", "short": false}
+//
 // ]
 const DefaultSlackFieldsSingle = `[
   {"title": "Severity", "value": "{{ .CommonLabels.severity | upper }}", "short": true},
@@ -85,11 +87,13 @@ const DefaultSlackFieldsSingle = `[
 //
 // Example output:
 // [
-//   {"title": "Severity", "value": "WARNING", "short": true},
-//   {"title": "Alert Count", "value": "5", "short": true},
-//   {"title": "Status", "value": "FIRING", "short": true},
-//   {"title": "Environment", "value": "production", "short": true},
-//   {"title": "Cluster", "value": "us-west-1", "short": true}
+//
+//	{"title": "Severity", "value": "WARNING", "short": true},
+//	{"title": "Alert Count", "value": "5", "short": true},
+//	{"title": "Status", "value": "FIRING", "short": true},
+//	{"title": "Environment", "value": "production", "short": true},
+//	{"title": "Cluster", "value": "us-west-1", "short": true}
+//
 // ]
 const DefaultSlackFieldsMulti = `[
   {"title": "Severity", "value": "{{ .CommonLabels.severity | upper }}", "short": true},

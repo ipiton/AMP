@@ -9,15 +9,15 @@ import (
 
 // ClassificationDisplayData represents classification data formatted for template display.
 type ClassificationDisplayData struct {
-	Severity             string   `json:"severity"`              // "critical", "warning", "info", "noise"
-	Confidence           float64  `json:"confidence"`             // 0.0-1.0
-	ConfidencePercent    int      `json:"confidence_percent"`    // 0-100 (для отображения)
-	Reasoning            string   `json:"reasoning"`               // HTML-escaped
-	Recommendations      []string `json:"recommendations"`        // HTML-escaped
-	ProcessingTime       float64  `json:"processing_time"`        // секунды
-	ProcessingTimeMs     int      `json:"processing_time_ms"`    // миллисекунды (для отображения)
-	Source               string   `json:"source"`                 // "llm", "fallback", "cache"
-	HasRecommendations   bool     `json:"has_recommendations"`
+	Severity           string   `json:"severity"`           // "critical", "warning", "info", "noise"
+	Confidence         float64  `json:"confidence"`         // 0.0-1.0
+	ConfidencePercent  int      `json:"confidence_percent"` // 0-100 (для отображения)
+	Reasoning          string   `json:"reasoning"`          // HTML-escaped
+	Recommendations    []string `json:"recommendations"`    // HTML-escaped
+	ProcessingTime     float64  `json:"processing_time"`    // секунды
+	ProcessingTimeMs   int      `json:"processing_time_ms"` // миллисекунды (для отображения)
+	Source             string   `json:"source"`             // "llm", "fallback", "cache"
+	HasRecommendations bool     `json:"has_recommendations"`
 }
 
 // AlertCardData represents alert data formatted for alert-card template.
@@ -86,14 +86,14 @@ func ToClassificationDisplayData(classification *core.ClassificationResult, sour
 	}
 
 	display := &ClassificationDisplayData{
-		Severity:          string(classification.Severity),
-		Confidence:        classification.Confidence,
-		ConfidencePercent: int(classification.Confidence * 100),
-		Reasoning:         classification.Reasoning, // Will be HTML-escaped in template
-		Recommendations:  classification.Recommendations,
-		ProcessingTime:    classification.ProcessingTime,
-		ProcessingTimeMs:  int(classification.ProcessingTime * 1000),
-		Source:            source,
+		Severity:           string(classification.Severity),
+		Confidence:         classification.Confidence,
+		ConfidencePercent:  int(classification.Confidence * 100),
+		Reasoning:          classification.Reasoning, // Will be HTML-escaped in template
+		Recommendations:    classification.Recommendations,
+		ProcessingTime:     classification.ProcessingTime,
+		ProcessingTimeMs:   int(classification.ProcessingTime * 1000),
+		Source:             source,
 		HasRecommendations: len(classification.Recommendations) > 0,
 	}
 

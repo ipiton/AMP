@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"gopkg.in/yaml.v3"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"gopkg.in/yaml.v3"
 )
 
 // Parser limits and thresholds

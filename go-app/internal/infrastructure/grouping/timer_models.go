@@ -207,10 +207,10 @@ func (t *GroupTimer) Clone() *GroupTimer {
 	// Deep copy metadata if present
 	if t.Metadata != nil {
 		clone.Metadata = &TimerMetadata{
-			Version:     t.Metadata.Version,
-			CreatedBy:   t.Metadata.CreatedBy,
-			ResetCount:  t.Metadata.ResetCount,
-			LockID:      t.Metadata.LockID,
+			Version:    t.Metadata.Version,
+			CreatedBy:  t.Metadata.CreatedBy,
+			ResetCount: t.Metadata.ResetCount,
+			LockID:     t.Metadata.LockID,
 		}
 		if t.Metadata.LastResetAt != nil {
 			resetTime := *t.Metadata.LastResetAt

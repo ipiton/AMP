@@ -23,11 +23,11 @@ import (
 
 // CreateSilenceRequest represents the request body for POST /api/v2/silences
 type CreateSilenceRequest struct {
-	CreatedBy string               `json:"createdBy"` // Email of creator (required, 1-255 chars)
-	Comment   string               `json:"comment"`   // Reason for silence (required, 3-1024 chars)
-	StartsAt  time.Time            `json:"startsAt"`  // Start time (required)
-	EndsAt    time.Time            `json:"endsAt"`    // End time (required, must be after StartsAt)
-	Matchers  []silencing.Matcher  `json:"matchers"`  // Label matchers (required, 1-100 matchers)
+	CreatedBy string              `json:"createdBy"` // Email of creator (required, 1-255 chars)
+	Comment   string              `json:"comment"`   // Reason for silence (required, 3-1024 chars)
+	StartsAt  time.Time           `json:"startsAt"`  // Start time (required)
+	EndsAt    time.Time           `json:"endsAt"`    // End time (required, must be after StartsAt)
+	Matchers  []silencing.Matcher `json:"matchers"`  // Label matchers (required, 1-100 matchers)
 }
 
 // UpdateSilenceRequest represents the request body for PUT /api/v2/silences/{id}
@@ -160,8 +160,8 @@ type CheckAlertResponse struct {
 
 // BulkDeleteResponse represents the response for POST /api/v2/silences/bulk/delete
 type BulkDeleteResponse struct {
-	Deleted int                 `json:"deleted"`         // Count of successfully deleted silences
-	Errors  []BulkDeleteError   `json:"errors,omitempty"` // Errors for failed deletes (empty if all succeeded)
+	Deleted int               `json:"deleted"`          // Count of successfully deleted silences
+	Errors  []BulkDeleteError `json:"errors,omitempty"` // Errors for failed deletes (empty if all succeeded)
 }
 
 // BulkDeleteError represents an error for a single silence in bulk delete.
@@ -324,8 +324,8 @@ func (h *SilenceHandler) validateCreateSilenceRequest(req *CreateSilenceRequest)
 // parseListSilencesParams parses query parameters for GET /api/v2/silences
 func (h *SilenceHandler) parseListSilencesParams(r *http.Request) (*ListSilencesParams, error) {
 	params := &ListSilencesParams{
-		Limit:  100, // Default limit
-		Offset: 0,   // Default offset
+		Limit:  100,          // Default limit
+		Offset: 0,            // Default offset
 		Sort:   "created_at", // Default sort
 		Order:  "desc",       // Default order
 	}

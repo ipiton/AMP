@@ -78,12 +78,12 @@ func (v *SemanticValidator) Enabled(opts templatevalidator.ValidateOptions) bool
 // Validate validates template semantic compatibility
 //
 // Validation steps:
-// 1. Extract all variable references from template
-// 2. For each variable:
-//    a. Check if top-level field exists in schema
-//    b. Check if nested access is valid (for map fields)
-//    c. Warn if field is optional (may be nil/zero)
-// 3. Return errors, warnings, suggestions
+//  1. Extract all variable references from template
+//  2. For each variable:
+//     a. Check if top-level field exists in schema
+//     b. Check if nested access is valid (for map fields)
+//     c. Warn if field is optional (may be nil/zero)
+//  3. Return errors, warnings, suggestions
 //
 // Performance: < 5ms p95
 func (v *SemanticValidator) Validate(

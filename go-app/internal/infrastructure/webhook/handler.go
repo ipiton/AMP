@@ -99,25 +99,25 @@ type HandleWebhookRequest struct {
 
 // HandleWebhookResponse represents the webhook processing response.
 type HandleWebhookResponse struct {
-	Status         string   `json:"status"`
-	Message        string   `json:"message"`
-	WebhookType    string   `json:"webhook_type"`
-	AlertsReceived int      `json:"alerts_received"`
-	AlertsProcessed int     `json:"alerts_processed"`
-	Errors         []string `json:"errors,omitempty"`
-	ProcessingTime string   `json:"processing_time"`
+	Status          string   `json:"status"`
+	Message         string   `json:"message"`
+	WebhookType     string   `json:"webhook_type"`
+	AlertsReceived  int      `json:"alerts_received"`
+	AlertsProcessed int      `json:"alerts_processed"`
+	Errors          []string `json:"errors,omitempty"`
+	ProcessingTime  string   `json:"processing_time"`
 }
 
 // HandleWebhook processes a webhook request with auto-detection and validation.
 //
 // Processing flow:
-//   1. Detect webhook type (Alertmanager vs Generic)
-//   2. Parse payload using appropriate parser
-//   3. Validate parsed webhook
-//   4. Convert to domain alerts
-//   5. Process each alert
-//   6. Record metrics
-//   7. Return response
+//  1. Detect webhook type (Alertmanager vs Generic)
+//  2. Parse payload using appropriate parser
+//  3. Validate parsed webhook
+//  4. Convert to domain alerts
+//  5. Process each alert
+//  6. Record metrics
+//  7. Return response
 //
 // Parameters:
 //   - ctx: Request context for cancellation

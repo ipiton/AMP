@@ -1,24 +1,31 @@
 # Alertmanager API Compatibility Matrix
 
-**Date**: 2025-12-01
-**Status**: ✅ **100% COMPATIBLE** - Drop-in replacement ready
-**Alertmanager Version**: v0.27+ (API v2)
-**Alert History Version**: v1.0.0
+**Date**: 2026-02-28
+**Status**: 🟡 **RUNTIME PARITY IN PROGRESS** - upstream input compatibility + phased hardening
+**Alertmanager Version**: v0.31.1 (API v2)
+**Alertmanager++ Version**: v0.0.1
 
 ---
 
 ## 🎯 Executive Summary
 
-**Alertmanager++** (Alert History Service) is a **100% API-compatible drop-in replacement** for Prometheus Alertmanager with enhanced features.
+**Alertmanager++** (AMP Service) in active runtime (`go-app/cmd/server/main.go`) focuses on:
+- Alertmanager-compatible ingest + core API v2 endpoint surface
+- operational probe compatibility (`/-/healthy`, `/-/ready`, `/-/reload`, `/debug/*`)
+- phased semantic parity hardening through contract tests
+
+> Runtime note (2026-02-26): active compatibility behavior is enforced by `go-app/cmd/server/main_phase0_contract_test.go`
+> and `go-app/cmd/server/main_upstream_parity_regression_test.go` for the current `go-app/cmd/server/main.go` runtime.
 
 ### Compatibility Guarantee
 
-- ✅ **100% Alertmanager API v2 compatible** - All core endpoints implemented
-- ✅ **Same configuration format** - alertmanager.yml works as-is
-- ✅ **Same response formats** - Byte-compatible JSON responses
-- ✅ **amtool CLI compatible** - Works without modifications
-- ✅ **Grafana compatible** - Existing dashboards work unchanged
-- ✅ **Prometheus compatible** - Direct replacement in alerting config
+- ✅ **Core API v2 routes are present in active runtime**
+- ✅ **Prometheus/VMAlert ingest compatibility path is active** (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
+- ✅ **Ops probe compatibility is active** (`/-/healthy`, `/-/ready`, `/-/reload`)
+- ✅ **Non-deprecated core method matrix is contract-locked** (`TestUpstreamParity_CoreEndpointMethodMatrix`)
+- 🟡 **Semantic parity is partial** (routing/inhibition behavior is a focused subset in Phase 0 runtime)
+- 🟡 **Advanced config API is partial** (`POST /api/v2/config`, `GET /api/v2/config/status`, `GET /api/v2/config/history`, `GET /api/v2/config/revisions`, `DELETE /api/v2/config/revisions/prune`, `POST /api/v2/config/rollback` active; targeted rollback policies are planned)
+- ℹ️ **Deprecated Alertmanager endpoints are intentionally out of scope** for active parity tracking
 
 ---
 
@@ -26,35 +33,75 @@
 
 ### Core Alertmanager API v2 Endpoints
 
-| Endpoint | Alertmanager | Alert History | Status | Notes |
+| Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
 |----------|--------------|---------------|---------|-------|
-| **Alert Management** | | | | |
-| `POST /api/v2/alerts` | ✅ | ✅ **COMPLETE** | 🟢 100% | Prometheus v1/v2 formats, 207 multi-status |
-| `GET /api/v2/alerts` | ✅ | ✅ **COMPLETE** | 🟢 100% | Filtering, pagination, sorting, Grafana compatible |
-| **Silence Management** | | | | |
-| `POST /api/v2/silences` | ✅ | ✅ **COMPLETE** | 🟢 100% | Create silence, Alertmanager format |
-| `GET /api/v2/silences` | ✅ | ✅ **COMPLETE** | 🟢 100% | List silences, filter/sort/pagination |
-| `GET /api/v2/silences/{id}` | ✅ | ✅ **COMPLETE** | 🟢 100% | Get silence by UUID |
-| `PUT /api/v2/silences/{id}` | ✅ | ✅ **COMPLETE** | 🟢 100% | Update existing silence |
-| `DELETE /api/v2/silences/{id}` | ✅ | ✅ **COMPLETE** | 🟢 100% | Delete silence |
-| **Configuration** | | | | |
-| `GET /api/v2/config` | ✅ | ✅ **COMPLETE** | 🟢 100% | Get config (YAML/JSON), sanitization support |
-| `POST /api/v2/config` | ⚠️ Limited | ✅ **ENHANCED** | 🟢 120% | Update config + validation + hot reload |
-| **System Status** | | | | |
-| `GET /api/v2/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Basic /healthz exists, full status planned |
-| `GET /api/v1/status` | ✅ | ⏳ **PLANNED** | 🟡 80% | Legacy v1 status endpoint |
+| `GET /api/v2/status` | ✅ | ✅ **ACTIVE** | 🟢 | Runtime-backed status shape with `cluster`, `versionInfo`, `config`, `uptime`; cluster mode is upstream-like configurable (`AMP_CLUSTER_LISTEN_ADDRESS=` -> disabled, otherwise startup `settling` with automatic transition to `ready` self-peer shape); default generated `cluster.name` uses upstream-like ULID format when `AMP_CLUSTER_NAME` is not set; `uptime` uses upstream-like millisecond precision timestamp format |
+| `GET /api/v2/receivers` | ✅ | ✅ **ACTIVE** | 🟢 | Returns configured `receivers[*].name` list from runtime config and preserves config order (upstream-like behavior) |
+| `GET /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | State filters and matchers supported; invalid state-flag bool values fallback to `false` (upstream-like parse behavior), invalid `status`/`resolved` values are ignored with `200`, `receiver` regex uses upstream-like full-match semantics (`^(?:<query>)$`), receiver resolution is route-based via runtime matcher subset (`route.routes[].match` / `match_re` / `matchers`) with `continue` support (multi-match -> multiple `receivers[]`) and fallback to root `route.receiver`; `labels.receiver` does not override route result, invalid `receiver/filter` errors return JSON string payloads on `400` with upstream-like wording (`failed to parse receiver param: ...`, `bad matcher format: ...`); timestamp fields use upstream-like millisecond precision; alert list ordering follows upstream-like semantics (`fingerprint` ascending); full routing/inhibition parity pending |
+| `POST /api/v2/alerts` | ✅ | ✅ **ACTIVE** | 🟡 | Ingest + dedup + resolve semantics; error contracts closer to upstream (`400` `{code,message}` for parse/time errors with upstream-like invalid-object wording `models.PostableAlerts`, `422` `{code:602}` for missing labels, `422` `{code:601}` for invalid `generatorURL`, `400` JSON string for empty labels); date-only ingest timestamps (`YYYY-MM-DD`) accepted for `startsAt`/`endsAt`; no full upstream routing tree parity |
+| `GET /api/v2/alerts/groups` | ✅ | ✅ **ACTIVE** | 🟡 | Upstream-like shape and filters; invalid state-flag bool values fallback to `false` (upstream-like parse behavior), invalid `resolved` values are ignored with `200`, `receiver` regex uses upstream-like full-match semantics (`^(?:<query>)$`), receiver resolution is route-based via runtime matcher subset (`route.routes[].match` / `match_re` / `matchers`) with `continue` support (multi-match alerts appear in multiple receiver groups) and fallback to root `route.receiver`; `labels.receiver` does not override route result; nested alert `receivers[]` is sorted by receiver name (upstream-like); invalid `receiver/filter` errors return JSON string payloads on `400` with upstream-like wording (`failed to parse receiver param: ...`, `bad matcher format: ...`); group labels now respect runtime `route.group_by` (`[]`/omitted -> empty group labels `{}` and receiver-level grouping, `["..."]` -> full alert label set per-group) |
+| `GET /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Matcher filters and ordering aligned for covered scenarios; invalid matcher filter errors return upstream-like JSON string payload (`400`, `bad matcher format: ...`); timestamp fields use upstream-like millisecond precision |
+| `POST /api/v2/silences` | ✅ | ✅ **ACTIVE** | 🟡 | Create/update via POST path with runtime validation; error contracts follow upstream-like mixed shape (`422` `{code,message}` for schema/required, `404` JSON string for unknown/invalid `id`, `400` JSON string for semantic validation) |
+| `GET /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |
+| `DELETE /api/v2/silence/{id}` | ✅ | ✅ **ACTIVE** | 🟢 | Success response is `200` with empty body; invalid UUID returns `422` with upstream-like `{code,message}` payload; unknown valid UUID returns `404` with empty body |
+
+### Core Endpoint Method Matrix (non-deprecated)
+
+This matrix is locked by runtime parity test `TestUpstreamParity_CoreEndpointMethodMatrix` in
+`go-app/cmd/server/main_upstream_parity_regression_test.go`.
+
+| Endpoint | Allowed methods | Runtime contract |
+|----------|-----------------|------------------|
+| `/api/v2/status` | `GET` | `GET=200`, others `405` |
+| `/api/v2/receivers` | `GET` | `GET=200`, others `405` |
+| `/api/v2/alerts` | `GET`, `POST` | `GET=200`, valid `POST=200`, others `405` |
+| `/api/v2/alerts/groups` | `GET` | `GET=200`, others `405` |
+| `/api/v2/silences` | `GET`, `POST` | `GET=200`, valid `POST=200`, others `405` |
+| `/api/v2/silence/{id}` | `GET`, `DELETE` | unknown valid UUID: `404`; other methods `405` |
+| `/-/healthy` | `GET`, `HEAD` | `GET=200`, `HEAD=200`, others `405` |
+| `/-/ready` | `GET`, `HEAD` | `GET=200`, `HEAD=200`, others `405` |
+| `/-/reload` | `POST` | valid `POST=200`, others `405` |
+
+### Operational Compatibility Endpoints (Active Runtime)
+
+| Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
+|----------|--------------|---------------|--------|-------|
+| `GET /-/healthy` | ✅ | ✅ | 🟢 | Returns `200` + `OK` |
+| `HEAD /-/healthy` | ✅ | ✅ | 🟢 | Returns `200` |
+| `GET /-/ready` | ✅ | ✅ | 🟢 | Returns `200` + `OK` |
+| `HEAD /-/ready` | ✅ | ✅ | 🟢 | Returns `200` |
+| `POST /-/reload` | ✅ | ✅ | 🟢 | `200` with empty body on success, `500` on config parse/reload error |
+| `GET /debug/*` | ✅ | ✅ | 🟢 | Proxied to Go `net/http/pprof` handlers |
+| `POST /debug/*` | ✅ | ✅ | 🟢 | Routed to pprof; status depends on underlying handler (e.g. `/debug/pprof/` -> `405`) |
+| `GET /script.js` | ✅ | ✅ | 🟢 | Compatibility alias to runtime static JS |
+| `GET /favicon.ico` | ✅ | ✅ | 🟡 | Route present; returns `404` if asset is absent |
+| `GET /lib/*` | ✅ | ✅ | 🟡 | Route present; returns `404` for missing assets |
+
+### Active AMP Config API Extension (non-upstream)
+
+| Endpoint | Alertmanager | Alertmanager++ | Status | Notes |
+|----------|--------------|---------------|--------|-------|
+| `GET /api/v2/config` | ❌ | ✅ | 🟢 | Read-only runtime config snapshot (`json` default, `?format=yaml`) |
+| `POST /api/v2/config` | ❌ | ✅ | 🟡 | Minimal write-path in active runtime: validates payload, persists file, applies inhibition/receivers |
+| `GET /api/v2/config/status` | ❌ | ✅ | 🟡 | Runtime apply status (`status/source/appliedAt/error`) + current rule/receiver counters |
+| `GET /api/v2/config/history` | ❌ | ✅ | 🟡 | Runtime apply history (newest-first, supports `limit`, `status`, `source`; includes source/status/error/hash) |
+| `GET /api/v2/config/revisions` | ❌ | ✅ | 🟡 | Unique successful revisions for rollback target selection (`configHash/source/appliedAt/isCurrent`) |
+| `DELETE /api/v2/config/revisions/prune` | ❌ | ✅ | 🟡 | Prunes older revision targets by keep policy (`keep` query, keeps current active revision); supports `dryRun=true` |
+| `POST /api/v2/config/rollback` | ❌ | ✅ | 🟡 | Rolls back to previous successful revision or to `configHash`; returns `400/404/409` for invalid/not-found/conflict cases; supports `dryRun=true` |
 
 ### Enhanced Endpoints (Beyond Alertmanager)
 
 These endpoints provide additional functionality while maintaining backward compatibility:
 
-| Endpoint | Alert History | Purpose | Benefit |
+| Endpoint | Alertmanager++ | Purpose | Benefit |
 |----------|---------------|---------|---------|
 | `POST /api/v2/silences/check` | ✅ **COMPLETE** | Test if alert would be silenced | Debugging & validation |
 | `POST /api/v2/silences/bulk/delete` | ✅ **COMPLETE** | Bulk delete silences (up to 100) | Operational efficiency |
-| `POST /api/v2/config/rollback` | ✅ **COMPLETE** | Rollback to previous config | Safety & reliability |
-| `GET /api/v2/config/history` | ✅ **COMPLETE** | Config version history | Audit trail |
-| `GET /api/v2/config/status` | ✅ **COMPLETE** | Config validation status | Operational visibility |
+| `POST /api/v2/config/rollback` | ✅ **ACTIVE (MVP)** | Rollback to previous/specific successful config | Supports `configHash` selection + `dryRun` preview + runtime apply/status/history tracking |
+| `GET /api/v2/config/history` | ✅ **ACTIVE (MVP)** | Runtime config apply history | Tracks startup/api/reload/rollback timeline with filterable `status`/`source` |
+| `GET /api/v2/config/revisions` | ✅ **ACTIVE (MVP)** | Runtime config revisions catalog | Exposes unique successful hashes with current marker for rollback UX/API |
+| `DELETE /api/v2/config/revisions/prune` | ✅ **ACTIVE (MVP)** | Runtime revision pruning | Keeps newest unique revision targets, trims stale rollback hashes, supports `dryRun` preview |
+| `GET /api/v2/config/status` | ✅ **ACTIVE (MVP)** | Runtime config apply status | Tracks last apply/reload result in active runtime |
 | `GET /api/v2/inhibition/rules` | ✅ **COMPLETE** | List loaded inhibition rules | Debugging |
 | `GET /api/v2/inhibition/status` | ✅ **COMPLETE** | Active inhibition relationships | Operational insight |
 | `POST /api/v2/inhibition/check` | ✅ **COMPLETE** | Test inhibition rule matching | Rule validation |
@@ -62,7 +109,7 @@ These endpoints provide additional functionality while maintaining backward comp
 | `GET /history/recent` | ✅ **COMPLETE** | Recent alerts (fast query) | Dashboard integration |
 | `GET /history/stats` | ✅ **COMPLETE** | Aggregated statistics | Trend analysis |
 
-**Total**: 10/11 core endpoints (91%) + 11 enhanced endpoints
+**Runtime note**: this matrix tracks the active `main.go` runtime first; historical `main.go.full` wiring is treated as backlog until re-integrated.
 
 ---
 
@@ -92,7 +139,7 @@ Content-Type: application/json
 Response: 200 OK
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same request format (Prometheus v1 array)
@@ -141,7 +188,7 @@ Response: 200 OK
 ]
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same query parameters (`filter`, `silenced`, `inhibited`, `active`)
@@ -183,7 +230,7 @@ Response: 200 OK
 }
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same request/response format
@@ -216,7 +263,7 @@ receivers:
   - name: 'default'
 ```
 
-#### Alert History Behavior
+#### Alertmanager++ Behavior
 ✅ **100% Compatible** + Enhanced
 
 - ✅ Same YAML configuration format
@@ -237,7 +284,7 @@ receivers:
 
 ### Core Alertmanager Features
 
-| Feature | Alertmanager | Alert History | Implementation | Notes |
+| Feature | Alertmanager | Alertmanager++ | Implementation | Notes |
 |---------|--------------|---------------|----------------|-------|
 | **Alert Ingestion** | | | | |
 | Prometheus v1 format | ✅ | ✅ | `prometheus_alerts.go` | Array of alerts |
@@ -305,7 +352,7 @@ receivers:
 
 ## 📈 Performance Comparison
 
-| Metric | Alertmanager | Alert History | Improvement |
+| Metric | Alertmanager | Alertmanager++ | Improvement |
 |--------|--------------|---------------|-------------|
 | **Alert Ingestion** | | | |
 | p50 latency | ~50ms | ~2ms | **25x faster** ⚡ |
@@ -364,13 +411,13 @@ Tested with popular Alertmanager dashboards:
 
 ```bash
 # Works with existing amtool without modifications
-amtool --alertmanager.url=http://localhost:8080 \
+amtool --alertmanager.url=http://localhost:9093 \
   alert add test severity=critical
 
-amtool --alertmanager.url=http://localhost:8080 \
+amtool --alertmanager.url=http://localhost:9093 \
   silence add alertname=test duration=1h
 
-amtool --alertmanager.url=http://localhost:8080 \
+amtool --alertmanager.url=http://localhost:9093 \
   config show
 ```
 
@@ -385,8 +432,8 @@ amtool --alertmanager.url=http://localhost:8080 \
 # Stop Alertmanager
 kubectl delete deployment alertmanager
 
-# Deploy Alert History
-helm install alert-history ./helm/alert-history \
+# Deploy Alertmanager++
+helm install amp ./helm/amp \
   --set profile=standard \
   --set image.tag=v1.0.0
 ```
@@ -398,7 +445,7 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - 'alert-history:8080'  # Changed from alertmanager:9093
+          - 'amp:9093'  # Changed from alertmanager:9093
 ```
 
 **Step 3**: Import existing state (optional)
@@ -406,8 +453,8 @@ alerting:
 # Export from Alertmanager
 amtool --alertmanager.url=http://alertmanager:9093 silence query -o json > silences.json
 
-# Import to Alert History
-curl -X POST http://alert-history:8080/api/v2/silences \
+# Import to Alertmanager++
+curl -X POST http://amp:9093/api/v2/silences \
   -H "Content-Type: application/json" \
   -d @silences.json
 ```
@@ -421,7 +468,7 @@ If needed, rollback is trivial:
 
 ```bash
 # Rollback Helm deployment
-helm rollback alert-history
+helm rollback amp
 
 # Or redeploy Alertmanager
 helm install alertmanager prometheus-community/alertmanager
@@ -431,11 +478,11 @@ helm install alertmanager prometheus-community/alertmanager
 
 ## ❓ FAQ
 
-### Q: Is Alert History 100% compatible with Alertmanager?
-**A**: Yes! All core API v2 endpoints are implemented with identical request/response formats. Existing Grafana dashboards, amtool commands, and Prometheus configurations work without modification.
+### Q: Is Alertmanager++ 100% compatible with Alertmanager?
+**A**: For the non-deprecated core API/ops endpoint surface, method and route compatibility is locked by runtime contract tests. Semantic parity is still phased (routing/inhibition/config lifecycle details are marked in this document).
 
 ### Q: What are the differences from Alertmanager?
-**A**: Alert History is a **superset** of Alertmanager:
+**A**: Alertmanager++ is a **superset** of Alertmanager:
 - ✅ **Same**: All core features (routing, silences, inhibition, grouping, templates)
 - ✅ **Enhanced**: Better performance (10-20x faster), extended history (PostgreSQL), hot reload, validation, bulk operations
 - ✅ **Optional**: LLM classification (BYOK), advanced analytics (can be disabled)
@@ -463,7 +510,7 @@ alertmanagers:
 # After
 alertmanagers:
   - static_configs:
-      - targets: ['alert-history:8080']
+      - targets: ['amp:9093']
 ```
 
 ### Q: Will my Grafana dashboards work?
@@ -472,11 +519,11 @@ alertmanagers:
 ### Q: Does amtool CLI work?
 **A**: Yes! Just change the URL:
 ```bash
-amtool --alertmanager.url=http://alert-history:8080 alert query
+amtool --alertmanager.url=http://amp:9093 alert query
 ```
 
 ### Q: What about high availability?
-**A**: Alert History supports:
+**A**: Alertmanager++ supports:
 - ✅ **Kubernetes-native HA**: Horizontal Pod Autoscaler (2-10 replicas)
 - ✅ **State replication**: Redis-backed (vs Alertmanager's gossip mesh)
 - ✅ **Load balancing**: Any K8s Service (vs Alertmanager's internal mesh)
@@ -493,26 +540,26 @@ amtool --alertmanager.url=http://alert-history:8080 alert query
 **A**: The OSS edition is 100% free (Apache 2.0). Commercial support and paid features (ML anomaly detection, multi-tenancy) available separately.
 
 ### Q: What's the roadmap?
-**A**: See [ROADMAP.md](ROADMAP.md) for upcoming features. We maintain backward compatibility in all releases.
+**A**: See [TECHNICAL_DECISIONS.md](TECHNICAL_DECISIONS.md) for upcoming features. We maintain backward compatibility in all releases.
 
 ---
 
 ## 📚 Additional Resources
 
 ### Documentation
-- **Migration Guide**: [MIGRATION_FROM_ALERTMANAGER.md](MIGRATION_FROM_ALERTMANAGER.md)
-- **API Reference**: [openapi.yaml](api/openapi.yaml)
-- **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Configuration**: [CONFIGURATION.md](CONFIGURATION.md)
+- **Migration Guide**: [MIGRATION_QUICK_START.md](MIGRATION_QUICK_START.md)
+- **Compatibility Matrix**: [ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md)
+- **Technical Decisions**: [TECHNICAL_DECISIONS.md](TECHNICAL_DECISIONS.md)
+- **Configuration**: [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)
 
 ### Examples
-- **Kubernetes Deployment**: [examples/k8s/](../examples/k8s/)
-- **Helm Charts**: [helm/alert-history/](../helm/alert-history/)
-- **Configuration Examples**: [examples/configs/](../go-app/examples/configs/)
+- **Extension Examples**: [examples/README.md](../examples/README.md)
+- **Helm Chart**: [helm/amp/README.md](../helm/amp/README.md)
+- **Routing Config Examples**: [go-app/internal/infrastructure/routing/testdata/](../go-app/internal/infrastructure/routing/testdata/)
 
 ### Community
-- **GitHub Issues**: [Report bugs or request features](https://github.com/ipiton/alert-history-service/issues)
-- **Discussions**: [Ask questions](https://github.com/ipiton/alert-history-service/discussions)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/ipiton/AMP/issues)
+- **Discussions**: [Ask questions](https://github.com/ipiton/AMP/discussions)
 - **Slack**: [Join community](https://join.slack.com/t/alertmanager-plusplus)
 
 ---

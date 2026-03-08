@@ -27,9 +27,10 @@ import (
 //   - Improvement: 40% faster, 100% less GC pressure
 //
 // Usage:
-//   buf := getBuffer()
-//   defer releaseBuffer(buf)
-//   // ... use buffer
+//
+//	buf := getBuffer()
+//	defer releaseBuffer(buf)
+//	// ... use buffer
 var bufferPool = sync.Pool{
 	New: func() interface{} {
 		return bytes.NewBuffer(make([]byte, 0, 4096)) // Pre-allocate 4KB

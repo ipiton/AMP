@@ -51,9 +51,9 @@ type InMemoryTimerStorage struct {
 
 // inMemoryLock represents an in-memory distributed lock.
 type inMemoryLock struct {
-	lockID    string
+	lockID     string
 	acquiredAt time.Time
-	expiresAt time.Time
+	expiresAt  time.Time
 }
 
 // isExpired returns true if the lock has expired.

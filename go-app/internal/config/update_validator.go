@@ -763,12 +763,12 @@ func (cv *DefaultConfigValidator) sanitizeValue(namespace string, value interfac
 // buildSecretFieldsMap builds map of secret field paths
 func buildSecretFieldsMap() map[string]bool {
 	return map[string]bool{
-		"database.password":              true,
-		"redis.password":                 true,
-		"llm.api_key":                    true,
-		"webhook.authentication.api_key": true,
+		"database.password":                 true,
+		"redis.password":                    true,
+		"llm.api_key":                       true,
+		"webhook.authentication.api_key":    true,
 		"webhook.authentication.jwt_secret": true,
-		"webhook.signature.secret":       true,
+		"webhook.signature.secret":          true,
 	}
 }
 

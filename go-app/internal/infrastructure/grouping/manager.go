@@ -360,8 +360,8 @@ type GroupMetrics struct {
 // 150% Enhancement: Extended statistics for advanced monitoring.
 type GroupStats struct {
 	// Total operations
-	TotalAdds    int64 `json:"total_adds"`
-	TotalRemoves int64 `json:"total_removes"`
+	TotalAdds     int64 `json:"total_adds"`
+	TotalRemoves  int64 `json:"total_removes"`
 	TotalCleanups int64 `json:"total_cleanups"`
 	TotalUpdates  int64 `json:"total_updates"`
 
@@ -369,10 +369,10 @@ type GroupStats struct {
 	LastCleanupTime time.Time `json:"last_cleanup_time"`
 
 	// Current state
-	ActiveGroups    int `json:"active_groups"`
-	TotalAlerts     int `json:"total_alerts"`
-	FiringAlerts    int `json:"firing_alerts"`
-	ResolvedAlerts  int `json:"resolved_alerts"`
+	ActiveGroups   int `json:"active_groups"`
+	TotalAlerts    int `json:"total_alerts"`
+	FiringAlerts   int `json:"firing_alerts"`
+	ResolvedAlerts int `json:"resolved_alerts"`
 
 	// Memory estimate (approximate)
 	EstimatedMemoryBytes int64 `json:"estimated_memory_bytes"`

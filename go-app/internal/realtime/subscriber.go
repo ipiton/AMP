@@ -23,8 +23,8 @@ type EventSubscriber interface {
 
 // baseSubscriber provides common functionality for subscribers.
 type baseSubscriber struct {
-	id    string
-	ctx   context.Context
+	id      string
+	ctx     context.Context
 	onClose func()
 }
 

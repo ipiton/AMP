@@ -86,32 +86,32 @@ type TargetResponse struct {
 
 // StatsResponse represents publishing statistics
 type StatsResponse struct {
-	TotalTargets   int                       `json:"total_targets"`
-	EnabledTargets int                       `json:"enabled_targets"`
-	TargetsByType  map[string]int            `json:"targets_by_type"`
-	QueueSize      int                       `json:"queue_size"`
-	QueueCapacity  int                       `json:"queue_capacity"`
-	QueueUtilization float64                 `json:"queue_utilization_percent"`
+	TotalTargets     int            `json:"total_targets"`
+	EnabledTargets   int            `json:"enabled_targets"`
+	TargetsByType    map[string]int `json:"targets_by_type"`
+	QueueSize        int            `json:"queue_size"`
+	QueueCapacity    int            `json:"queue_capacity"`
+	QueueUtilization float64        `json:"queue_utilization_percent"`
 }
 
 // QueueStatusResponse represents queue status
 type QueueStatusResponse struct {
-	Size             int     `json:"size"`
-	Capacity         int     `json:"capacity"`
-	Utilization      float64 `json:"utilization_percent"`
-	WorkersCount     int     `json:"workers_count"`
+	Size         int     `json:"size"`
+	Capacity     int     `json:"capacity"`
+	Utilization  float64 `json:"utilization_percent"`
+	WorkersCount int     `json:"workers_count"`
 }
 
 // PublishingModeResponse represents current publishing mode
 type PublishingModeResponse struct {
-	Mode                      string    `json:"mode"`
-	TargetsAvailable          bool      `json:"targets_available"`
-	EnabledTargets            int       `json:"enabled_targets"`
-	MetricsOnlyActive         bool      `json:"metrics_only_active"`
-	TransitionCount           int64     `json:"transition_count,omitempty"`           // TN-060: Number of mode transitions
+	Mode                       string    `json:"mode"`
+	TargetsAvailable           bool      `json:"targets_available"`
+	EnabledTargets             int       `json:"enabled_targets"`
+	MetricsOnlyActive          bool      `json:"metrics_only_active"`
+	TransitionCount            int64     `json:"transition_count,omitempty"`              // TN-060: Number of mode transitions
 	CurrentModeDurationSeconds float64   `json:"current_mode_duration_seconds,omitempty"` // TN-060: Duration in current mode
-	LastTransitionTime        time.Time `json:"last_transition_time,omitempty"`      // TN-060: Last transition timestamp
-	LastTransitionReason      string    `json:"last_transition_reason,omitempty"`     // TN-060: Reason for last transition
+	LastTransitionTime         time.Time `json:"last_transition_time,omitempty"`          // TN-060: Last transition timestamp
+	LastTransitionReason       string    `json:"last_transition_reason,omitempty"`        // TN-060: Reason for last transition
 }
 
 // TestTargetRequest represents test request
@@ -158,8 +158,8 @@ type DetailedQueueStatsResponse struct {
 	Capacity     int `json:"capacity"`
 
 	// Worker stats
-	WorkerCount  int `json:"worker_count"`
-	ActiveJobs   int `json:"active_jobs"`
+	WorkerCount int `json:"worker_count"`
+	ActiveJobs  int `json:"active_jobs"`
 
 	// Metrics
 	TotalSubmitted int64   `json:"total_submitted"`
@@ -173,19 +173,19 @@ type DetailedQueueStatsResponse struct {
 
 // JobStatusResponse represents job status
 type JobStatusResponse struct {
-	ID              string    `json:"id"`
-	Fingerprint     string    `json:"fingerprint"`
-	TargetName      string    `json:"target_name"`
-	TargetType      string    `json:"target_type"`
-	Priority        string    `json:"priority"`
-	State           string    `json:"state"`
-	RetryCount      int       `json:"retry_count"`
-	MaxRetries      int       `json:"max_retries"`
-	LastError       string    `json:"last_error,omitempty"`
-	ErrorType       string    `json:"error_type,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	ProcessingTime  string    `json:"processing_time,omitempty"`
+	ID             string     `json:"id"`
+	Fingerprint    string     `json:"fingerprint"`
+	TargetName     string     `json:"target_name"`
+	TargetType     string     `json:"target_type"`
+	Priority       string     `json:"priority"`
+	State          string     `json:"state"`
+	RetryCount     int        `json:"retry_count"`
+	MaxRetries     int        `json:"max_retries"`
+	LastError      string     `json:"last_error,omitempty"`
+	ErrorType      string     `json:"error_type,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	ProcessingTime string     `json:"processing_time,omitempty"`
 }
 
 // JobListResponse represents list of jobs
@@ -198,17 +198,17 @@ type JobListResponse struct {
 
 // DLQEntryResponse represents a DLQ entry in API
 type DLQEntryResponse struct {
-	ID           string    `json:"id"`
-	JobID        string    `json:"job_id"`
-	Fingerprint  string    `json:"fingerprint"`
-	TargetName   string    `json:"target_name"`
-	TargetType   string    `json:"target_type"`
-	ErrorMessage string    `json:"error_message"`
-	ErrorType    string    `json:"error_type"`
-	RetryCount   int       `json:"retry_count"`
-	Priority     string    `json:"priority"`
-	FailedAt     time.Time `json:"failed_at"`
-	Replayed     bool      `json:"replayed"`
+	ID           string     `json:"id"`
+	JobID        string     `json:"job_id"`
+	Fingerprint  string     `json:"fingerprint"`
+	TargetName   string     `json:"target_name"`
+	TargetType   string     `json:"target_type"`
+	ErrorMessage string     `json:"error_message"`
+	ErrorType    string     `json:"error_type"`
+	RetryCount   int        `json:"retry_count"`
+	Priority     string     `json:"priority"`
+	FailedAt     time.Time  `json:"failed_at"`
+	Replayed     bool       `json:"replayed"`
 	ReplayedAt   *time.Time `json:"replayed_at,omitempty"`
 }
 
@@ -449,14 +449,14 @@ func (h *PublishingHandlers) GetPublishingMode(w http.ResponseWriter, r *http.Re
 		targetsAvailable := enabledCount > 0
 
 		response := PublishingModeResponse{
-			Mode:                      currentMode.String(),
-			TargetsAvailable:          targetsAvailable,
-			EnabledTargets:           enabledCount,
-			MetricsOnlyActive:         currentMode == ModeMetricsOnly,
-			TransitionCount:           modeMetrics.TransitionCount,
+			Mode:                       currentMode.String(),
+			TargetsAvailable:           targetsAvailable,
+			EnabledTargets:             enabledCount,
+			MetricsOnlyActive:          currentMode == ModeMetricsOnly,
+			TransitionCount:            modeMetrics.TransitionCount,
 			CurrentModeDurationSeconds: modeMetrics.CurrentModeDuration.Seconds(),
-			LastTransitionTime:        modeMetrics.LastTransitionTime,
-			LastTransitionReason:      modeMetrics.LastTransitionReason,
+			LastTransitionTime:         modeMetrics.LastTransitionTime,
+			LastTransitionReason:       modeMetrics.LastTransitionReason,
 		}
 
 		h.sendJSON(w, http.StatusOK, response)
@@ -637,9 +637,9 @@ func (h *PublishingHandlers) ListJobs(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
 	filters := JobFilters{
-		State:      query.Get("state"),       // pending, processing, completed, failed, retrying
-		TargetName: query.Get("target"),      // target name
-		Priority:   query.Get("priority"),    // high, medium, low
+		State:      query.Get("state"),    // pending, processing, completed, failed, retrying
+		TargetName: query.Get("target"),   // target name
+		Priority:   query.Get("priority"), // high, medium, low
 	}
 
 	// Get jobs from tracking store

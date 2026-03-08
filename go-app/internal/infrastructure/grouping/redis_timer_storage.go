@@ -34,8 +34,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -46,7 +46,7 @@ const (
 
 	// TTL settings
 	timerTTLGracePeriod = 60 * time.Second // Extra TTL beyond expiration
-	lockTTL             = 30 * time.Second  // Distributed lock duration
+	lockTTL             = 30 * time.Second // Distributed lock duration
 )
 
 // RedisTimerStorage implements TimerStorage using Redis.

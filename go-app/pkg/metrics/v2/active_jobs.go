@@ -24,7 +24,7 @@ import (
 //	defer tracker.EndJob(jobID)
 type ActiveJobsTracker struct {
 	// Metrics
-	activeJobsGauge     *prometheus.GaugeVec
+	activeJobsGauge      *prometheus.GaugeVec
 	jobDurationHistogram *prometheus.HistogramVec
 
 	// Job tracking

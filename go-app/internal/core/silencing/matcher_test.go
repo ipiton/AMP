@@ -837,10 +837,10 @@ func TestMultiMatcher_MixedTypes(t *testing.T) {
 	})
 
 	silence := newTestSilence("s1", []Matcher{
-		{Name: "alertname", Value: "HighCPU", Type: MatcherTypeEqual},              // =
-		{Name: "env", Value: "dev", Type: MatcherTypeNotEqual},                     // !=
-		{Name: "severity", Value: "(critical|warning)", Type: MatcherTypeRegex},    // =~
-		{Name: "instance", Value: ".*-staging-.*", Type: MatcherTypeNotRegex},      // !~
+		{Name: "alertname", Value: "HighCPU", Type: MatcherTypeEqual},           // =
+		{Name: "env", Value: "dev", Type: MatcherTypeNotEqual},                  // !=
+		{Name: "severity", Value: "(critical|warning)", Type: MatcherTypeRegex}, // =~
+		{Name: "instance", Value: ".*-staging-.*", Type: MatcherTypeNotRegex},   // !~
 	})
 
 	matched, err := matcher.Matches(ctx, alert, silence)
@@ -921,7 +921,7 @@ func TestMultiMatcher_ShortCircuit(t *testing.T) {
 
 	// First matcher fails, should not evaluate second (which has invalid regex)
 	silence := newTestSilence("s1", []Matcher{
-		{Name: "first", Value: "correct", Type: MatcherTypeEqual},  // This fails
+		{Name: "first", Value: "correct", Type: MatcherTypeEqual},   // This fails
 		{Name: "second", Value: "[invalid", Type: MatcherTypeRegex}, // Should not be evaluated
 	})
 

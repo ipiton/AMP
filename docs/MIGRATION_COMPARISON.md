@@ -1,24 +1,24 @@
-# Alertmanager vs Alert History - Feature Comparison
+# Alertmanager vs Alertmanager++ - Feature Comparison
 
-**Last Updated**: 2025-12-01
+**Last Updated**: 2026-02-28
 **Alertmanager Version**: v0.27+
-**Alert History Version**: v1.0.0
+**Alertmanager++ Version**: v1.0.0
 
 ---
 
 ## 📊 Quick Comparison
 
-| Feature | Alertmanager | Alert History | Winner |
+| Feature | Alertmanager | Alertmanager++ | Winner |
 |---------|--------------|---------------|--------|
-| **API Compatibility** | v2 | v2 (100% compatible) | 🤝 Tie |
-| **Alert History** | 14 days (memory) | Unlimited (PostgreSQL) | 🏆 Alert History |
-| **Performance** | ~50ms p95 | ~5ms p95 | 🏆 Alert History (10x) |
-| **Memory Usage** | ~200MB | ~50MB | 🏆 Alert History (4x less) |
-| **Storage** | Memory only | PostgreSQL/SQLite | 🏆 Alert History |
-| **Hot Reload** | Kill + restart | SIGHUP (zero downtime) | 🏆 Alert History |
-| **Horizontal Scaling** | Mesh (complex) | K8s HPA (native) | 🏆 Alert History |
-| **Analytics** | None | Built-in | 🏆 Alert History |
-| **LLM Classification** | None | Optional (BYOK) | 🏆 Alert History |
+| **API Compatibility** | v2 | v2 core non-deprecated method/route compatible | 🤝 Tie |
+| **History Retention** | 14 days (memory) | Unlimited (PostgreSQL) | 🏆 Alertmanager++ |
+| **Performance** | ~50ms p95 | ~5ms p95 | 🏆 Alertmanager++ (10x) |
+| **Memory Usage** | ~200MB | ~50MB | 🏆 Alertmanager++ (4x less) |
+| **Storage** | Memory only | PostgreSQL/SQLite | 🏆 Alertmanager++ |
+| **Hot Reload** | Kill + restart | SIGHUP (zero downtime) | 🏆 Alertmanager++ |
+| **Horizontal Scaling** | Mesh (complex) | K8s HPA (native) | 🏆 Alertmanager++ |
+| **Analytics** | None | Built-in | 🏆 Alertmanager++ |
+| **LLM Classification** | None | Optional (BYOK) | 🏆 Alertmanager++ |
 
 ---
 
@@ -26,7 +26,7 @@
 
 ### Core Alerting Features
 
-| Feature | Alertmanager | Alert History | Notes |
+| Feature | Alertmanager | Alertmanager++ | Notes |
 |---------|--------------|---------------|-------|
 | **Alert Ingestion** |
 | Prometheus v1 format | ✅ | ✅ | Identical |
@@ -65,7 +65,7 @@
 
 #### Latency (p95)
 
-| Operation | Alertmanager | Alert History | Improvement |
+| Operation | Alertmanager | Alertmanager++ | Improvement |
 |-----------|--------------|---------------|-------------|
 | POST /api/v2/alerts | ~50ms | ~5ms | **10x faster** ⚡ |
 | GET /api/v2/alerts (1K) | ~100ms | ~50ms | **2x faster** ⚡ |
@@ -74,14 +74,14 @@
 
 #### Throughput
 
-| Metric | Alertmanager | Alert History | Improvement |
+| Metric | Alertmanager | Alertmanager++ | Improvement |
 |--------|--------------|---------------|-------------|
 | Max req/s | ~500 | ~5,000 | **10x higher** ⚡ |
 | Concurrent connections | ~100 | ~1,000 | **10x more** ⚡ |
 
 #### Resource Usage
 
-| Resource | Alertmanager | Alert History | Savings |
+| Resource | Alertmanager | Alertmanager++ | Savings |
 |----------|--------------|---------------|---------|
 | Memory (idle) | ~200MB | ~50MB | **75% less** 💾 |
 | Memory (1M alerts) | ~2GB | ~500MB | **75% less** 💾 |
@@ -92,9 +92,9 @@
 
 ### Storage & Persistence
 
-| Feature | Alertmanager | Alert History | Notes |
+| Feature | Alertmanager | Alertmanager++ | Notes |
 |---------|--------------|---------------|-------|
-| **Alert History** |
+| **History Retention** |
 | Retention | 14 days (memory) | Unlimited | PostgreSQL-backed |
 | Storage backend | Memory only | PostgreSQL/SQLite | Persistent |
 | Query performance | Fast (memory) | Fast (<100ms) | Indexed queries |
@@ -110,7 +110,7 @@
 
 ### High Availability
 
-| Feature | Alertmanager | Alert History | Notes |
+| Feature | Alertmanager | Alertmanager++ | Notes |
 |---------|--------------|---------------|-------|
 | **Clustering** |
 | Method | Gossip mesh | Kubernetes HPA | K8s-native |
@@ -129,7 +129,7 @@
 
 ### Configuration Management
 
-| Feature | Alertmanager | Alert History | Notes |
+| Feature | Alertmanager | Alertmanager++ | Notes |
 |---------|--------------|---------------|-------|
 | **Config Format** |
 | YAML format | ✅ | ✅ | Identical |
@@ -148,7 +148,7 @@
 
 ### Advanced Features
 
-| Feature | Alertmanager | Alert History | Notes |
+| Feature | Alertmanager | Alertmanager++ | Notes |
 |---------|--------------|---------------|-------|
 | **Analytics** |
 | Alert trends | ❌ | ✅ | Time-series stats |
@@ -177,8 +177,8 @@
 - ✅ You don't need alert history beyond 14 days
 - ✅ You're happy with current performance/resources
 
-### Use Alert History If:
-- ✅ You want **100% compatible drop-in replacement** with better performance
+### Use Alertmanager++ If:
+- ✅ You want non-deprecated core API drop-in compatibility with better performance
 - ✅ You need **unlimited alert history** for compliance/analytics
 - ✅ You want **75% less resources** (memory/CPU)
 - ✅ You need **zero-downtime hot reload**
@@ -189,7 +189,7 @@
 ### Migration Recommendation: ✅ **MIGRATE NOW**
 
 **Why?**
-- ✅ **Low risk**: 100% API compatible, easy rollback
+- ✅ **Low risk**: core API method/route compatibility is contract-tested, easy rollback
 - ✅ **High benefit**: 10x performance, 75% less resources, unlimited history
 - ✅ **Quick migration**: 5 minutes with zero code changes
 - ✅ **Future-proof**: Modern architecture, active development
@@ -208,7 +208,7 @@
 - 5-10s config reload downtime
 - ~500 alerts/day processed
 
-**After (Alert History)**:
+**After (Alertmanager++)**:
 - 2 replicas with HPA
 - 150MB total memory (**75% reduction**)
 - 0.3 CPU cores (**80% reduction**)
@@ -222,27 +222,26 @@
 
 ## ✅ Compatibility Guarantee
 
-Alert History is **100% API-compatible** with Alertmanager v0.25+ API v2:
+Alertmanager++ active runtime guarantees compatibility on the non-deprecated core Alertmanager API surface:
 
-- ✅ Same request/response formats
-- ✅ Same configuration syntax
-- ✅ Same amtool commands
-- ✅ Same Grafana integration
-- ✅ Same Prometheus integration
+- ✅ Core v2 endpoint/method matrix is contract-tested (`/api/v2/status`, `/api/v2/receivers`, `/api/v2/alerts`, `/api/v2/alerts/groups`, `/api/v2/silences`, `/api/v2/silence/{id}`, `/-/healthy`, `/-/ready`, `/-/reload`)
+- ✅ Same Prometheus/VMAlert ingest entrypoints (`POST /api/v2/alerts`, alias `POST /api/v1/alerts`)
+- ✅ Existing Grafana/amtool workflows remain usable on covered endpoints
+- 🟡 Semantic parity remains phased (routing/inhibition/config lifecycle details); see `ALERTMANAGER_COMPATIBILITY.md`
 
-**All enhancements are additive** - no breaking changes!
+All enhancements are additive on top of this runtime compatibility baseline.
 
 ---
 
 ## 🔗 Learn More
 
 - **Quick Start**: [MIGRATION_QUICK_START.md](MIGRATION_QUICK_START.md)
-- **Detailed Guide**: [MIGRATION_DETAILED.md](MIGRATION_DETAILED.md)
+- **Migration details**: [ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md)
 - **API Compatibility**: [ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md)
-- **Configuration**: [CONFIGURATION.md](CONFIGURATION.md)
+- **Configuration**: [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)
 
 ---
 
-**Last Updated**: 2025-12-01
+**Last Updated**: 2026-02-28
 **Maintainer**: Vitalii Semenov
 **License**: Apache 2.0

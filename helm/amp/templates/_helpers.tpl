@@ -115,9 +115,9 @@ Return the proper Valkey/Redis URL
 {{- define "amp.cacheUrl" -}}
 {{- if .Values.cache.enabled }}
 {{- if .Values.cache.auth.enabled }}
-{{- printf "redis://:%s@%s:%g/0" .Values.cache.auth.password .Values.cache.host .Values.cache.port }}
+{{- printf "redis://:%s@%s:%g/0" .Values.cache.auth.password (tpl .Values.cache.host .) .Values.cache.port }}
 {{- else }}
-{{- printf "redis://%s:%g/0" .Values.cache.host .Values.cache.port }}
+{{- printf "redis://%s:%g/0" (tpl .Values.cache.host .) .Values.cache.port }}
 {{- end }}
 {{- else }}
 {{- printf "redis://localhost:6379/0" }}
@@ -129,4 +129,51 @@ Return the proper Redis URL (legacy compatibility)
 */}}
 {{- define "amp.redisUrl" -}}
 {{- include "amp.cacheUrl" . }}
+{{- end }}
+
+{{/*
+Build canonical publishing target config and return it base64-encoded.
+Expected input: dict "target" <map>
+*/}}
+{{- define "amp.publishingTargetConfigB64" -}}
+{{- $target := .target -}}
+{{- $headers := dict -}}
+{{- range $key, $value := (default (dict) $target.headers) }}
+{{- $_ := set $headers $key $value -}}
+{{- end }}
+{{- with $target.secret }}
+{{- if .apiKey }}
+{{- if eq $target.type "webhook" }}
+{{- $_ := set $headers "X-API-Key" .apiKey -}}
+{{- else }}
+{{- $_ := set $headers "Authorization" (printf "Bearer %s" .apiKey) -}}
+{{- end }}
+{{- end }}
+{{- if .token }}
+{{- $_ := set $headers "Authorization" (printf "Bearer %s" .token) -}}
+{{- end }}
+{{- if .authHeader }}
+{{- $_ := set $headers "Authorization" .authHeader -}}
+{{- end }}
+{{- if .routingKey }}
+{{- $_ := set $headers "routing_key" .routingKey -}}
+{{- end }}
+{{- range $key, $value := (default (dict) .customHeaders) }}
+{{- $_ := set $headers $key $value -}}
+{{- end }}
+{{- end }}
+{{- $enabled := true -}}
+{{- if hasKey $target "enabled" -}}
+{{- $enabled = $target.enabled -}}
+{{- end -}}
+{{- $config := dict
+  "name" $target.name
+  "type" $target.type
+  "url" $target.url
+  "enabled" $enabled
+  "filter_config" (default (dict) $target.filterConfig)
+  "headers" $headers
+  "format" (default $target.type $target.format)
+-}}
+{{- toJson $config | b64enc -}}
 {{- end }}

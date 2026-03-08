@@ -52,19 +52,19 @@ type HTTPClientConfig struct {
 // DefaultHTTPClientConfig returns default HTTP client configuration
 func DefaultHTTPClientConfig() HTTPClientConfig {
 	return HTTPClientConfig{
-		Timeout:                30 * time.Second,
-		DialTimeout:            5 * time.Second,
-		TLSHandshakeTimeout:    5 * time.Second,
-		ResponseHeaderTimeout:  10 * time.Second,
-		ExpectContinueTimeout:  1 * time.Second,
-		KeepAlive:              30 * time.Second,
-		IdleConnTimeout:        90 * time.Second,
-		MaxIdleConns:           100,
-		MaxIdleConnsPerHost:    10,
-		MaxConnsPerHost:        0, // Unlimited
-		MinTLSVersion:          "1.2",
-		DisableHTTP2:           false,
-		InsecureSkipVerify:     false,
+		Timeout:               30 * time.Second,
+		DialTimeout:           5 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		KeepAlive:             30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		MaxConnsPerHost:       0, // Unlimited
+		MinTLSVersion:         "1.2",
+		DisableHTTP2:          false,
+		InsecureSkipVerify:    false,
 	}
 }
 

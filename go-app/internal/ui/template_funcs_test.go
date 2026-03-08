@@ -488,7 +488,7 @@ func TestCreateTemplateFuncs(t *testing.T) {
 		"formatTime", "timeAgo",
 		"severity", "statusClass",
 		"truncate", "jsonPretty", "upper", "lower",
-		"defaultVal", "join", "contains",
+		"defaultVal", "default", "join", "contains", "dict", "until",
 		"add", "sub", "mul", "div",
 		"plural",
 	}
@@ -502,5 +502,61 @@ func TestCreateTemplateFuncs(t *testing.T) {
 	// Verify we have at least 15 functions
 	if len(funcs) < 15 {
 		t.Errorf("Expected at least 15 functions, got %d", len(funcs))
+	}
+}
+
+func TestDict(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		result, err := dict("key", "value", "count", 2)
+		if err != nil {
+			t.Fatalf("dict returned unexpected error: %v", err)
+		}
+
+		if result["key"] != "value" {
+			t.Errorf("expected key=value, got %v", result["key"])
+		}
+		if result["count"] != 2 {
+			t.Errorf("expected count=2, got %v", result["count"])
+		}
+	})
+
+	t.Run("odd arguments", func(t *testing.T) {
+		_, err := dict("key")
+		if err == nil {
+			t.Fatal("expected error for odd argument count")
+		}
+	})
+
+	t.Run("non-string key", func(t *testing.T) {
+		_, err := dict(1, "value")
+		if err == nil {
+			t.Fatal("expected error for non-string key")
+		}
+	})
+}
+
+func TestUntil(t *testing.T) {
+	tests := []struct {
+		name     string
+		n        int
+		expected []int
+	}{
+		{name: "positive", n: 5, expected: []int{0, 1, 2, 3, 4}},
+		{name: "zero", n: 0, expected: []int{}},
+		{name: "negative", n: -3, expected: []int{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := until(tt.n)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("unexpected length: got=%d want=%d", len(result), len(tt.expected))
+			}
+			for i := range result {
+				if result[i] != tt.expected[i] {
+					t.Fatalf("unexpected value at %d: got=%d want=%d", i, result[i], tt.expected[i])
+				}
+			}
+		})
 	}
 }

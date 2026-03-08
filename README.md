@@ -2,12 +2,12 @@
 
 > A high-performance, Alertmanager-compatible alert management system with 10-20x better performance
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ipiton/AMP)](https://goreportcard.com/report/github.com/ipiton/AMP)
 
 ## ✨ Features
 
-- **100% Alertmanager API v2 Compatible** - Drop-in replacement for Prometheus Alertmanager
+- **Alertmanager API v2 Core Compatibility** - Active runtime covers core ingest/query/silence/status endpoints with phased parity hardening
 - **10-20x Faster Performance** - Optimized Go implementation with sub-5ms latency
 - **75% Less Resources** - 50MB memory footprint (vs 200MB Alertmanager)
 - **Extensible Architecture** - Plugin system for custom classifiers and publishers
@@ -83,7 +83,7 @@ See `config.yaml.example` for all options.
 
 #### 2. Alertmanager Config (`alertmanager.yaml`)
 
-Routing and receivers (100% Alertmanager-compatible):
+Routing and receivers (Alertmanager-compatible core syntax):
 
 ```yaml
 # alertmanager.yaml - Routing configuration
@@ -118,16 +118,59 @@ receivers:
 
 See `go-app/internal/infrastructure/routing/testdata/production.yaml` for full example.
 
-**Load alerting config:**
+**Runtime config operations (active `main.go`):**
 ```bash
-# Via API (hot reload without restart!)
+# Read current runtime config snapshot (JSON)
+curl http://localhost:8080/api/v2/config
+
+# Read runtime config snapshot as YAML
+curl "http://localhost:8080/api/v2/config?format=yaml"
+
+# Update runtime config from file (applies inhibition/receivers immediately)
 curl -X POST http://localhost:8080/api/v2/config \
   --data-binary @alertmanager.yaml
+
+# Check runtime config apply status
+curl http://localhost:8080/api/v2/config/status
+
+# Check runtime config apply history
+curl "http://localhost:8080/api/v2/config/history?limit=20"
+
+# Filter history by apply status/source
+curl "http://localhost:8080/api/v2/config/history?status=ok&source=rollback&limit=20"
+
+# List unique successful config revisions for rollback target selection
+curl "http://localhost:8080/api/v2/config/revisions?limit=20"
+
+# Prune old revisions (keep N newest unique successful revisions)
+curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20"
+
+# Preview prune result without applying changes
+curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20&dryRun=true"
+
+# Roll back to previous successful runtime config revision
+curl -X POST http://localhost:8080/api/v2/config/rollback
+
+# Roll back to a specific successful revision by config hash
+curl -X POST "http://localhost:8080/api/v2/config/rollback?configHash=<sha256>"
+
+# Preview rollback result without applying changes
+curl -X POST "http://localhost:8080/api/v2/config/rollback?configHash=<sha256>&dryRun=true"
+
+# Apply config file changes and reload runtime metadata
+curl -X POST http://localhost:8080/-/reload
 
 # Or via Kubernetes ConfigMap
 kubectl create configmap alertmanager-config \
   --from-file=alertmanager.yaml
 ```
+
+`POST /api/v2/config/rollback` returns `409` if there is no previous successful revision to roll back to.
+`POST /api/v2/config/rollback?configHash=...` returns `400` for invalid hash, `404` for unknown revision, `409` if the requested revision is already active.
+`GET /api/v2/config/history` supports `status=ok|failed` and `source=<startup|api|reload|rollback>` filters.
+`GET /api/v2/config/revisions` returns unique successful revisions (`configHash`, `source`, `appliedAt`, `isCurrent`) for targeted rollback selection.
+`DELETE /api/v2/config/revisions/prune?keep=...` prunes old revision targets and keeps newest unique successful revisions.
+Both rollback and prune support `dryRun=true` preview mode without mutating runtime/file state.
 
 ## 📚 Documentation
 
@@ -135,6 +178,8 @@ kubectl create configmap alertmanager-config \
 - **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Full compatibility matrix
 - **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
+
+Compatibility note: active runtime tracks non-deprecated Alertmanager core endpoint/method parity with contract tests; semantic parity (routing/inhibition/config lifecycle details) is phased and documented in the compatibility matrix.
 
 ## 🏗️ Architecture
 

@@ -156,13 +156,13 @@ func (cc *DefaultConfigComparator) IdentifyAffectedComponents(diff *ConfigDiff) 
 // Returns true if diff contains critical changes that require extra caution
 func (cc *DefaultConfigComparator) IsCriticalChange(diff *ConfigDiff) bool {
 	criticalFields := map[string]bool{
-		"database.host":               true,
-		"database.port":               true,
-		"database.driver":             true,
-		"redis.addr":                  true,
-		"server.port":                 true,
+		"database.host":                  true,
+		"database.port":                  true,
+		"database.driver":                true,
+		"redis.addr":                     true,
+		"server.port":                    true,
 		"webhook.authentication.enabled": true,
-		"webhook.signature.enabled":   true,
+		"webhook.signature.enabled":      true,
 	}
 
 	// Check if any critical field was modified or deleted

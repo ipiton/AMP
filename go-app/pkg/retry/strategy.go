@@ -215,12 +215,12 @@ func (s Strategy) WithErrorClassifier(classifier ErrorClassifier) Strategy {
 //   - error: Last error if all attempts failed, or context error
 //
 // Behavior:
-//   1. Execute operation
-//   2. If success, return result
-//   3. If error is non-retryable, return error immediately
-//   4. If retryable, wait with exponential backoff + jitter
-//   5. Repeat until max attempts or success
-//   6. Check context cancellation before each attempt
+//  1. Execute operation
+//  2. If success, return result
+//  3. If error is non-retryable, return error immediately
+//  4. If retryable, wait with exponential backoff + jitter
+//  5. Repeat until max attempts or success
+//  6. Check context cancellation before each attempt
 //
 // Example:
 //

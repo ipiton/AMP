@@ -189,10 +189,10 @@ func TestLRUCache_Stats(t *testing.T) {
 	cache.Set("key2", map[string]any{}, 0)
 
 	// Generate hits and misses
-	cache.Get("key1")          // hit
-	cache.Get("key1")          // hit
-	cache.Get("nonexistent")   // miss
-	cache.Get("key2")          // hit
+	cache.Get("key1")        // hit
+	cache.Get("key1")        // hit
+	cache.Get("nonexistent") // miss
+	cache.Get("key2")        // hit
 
 	// Check stats
 	stats = cache.Stats()

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDeduplicationIntegration_RealPostgres tests deduplication with real PostgreSQL database.

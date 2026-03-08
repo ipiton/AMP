@@ -362,16 +362,16 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 				"error", err,
 			)
 
-		// Retry on network errors
-		if attempt < c.retryConfig.MaxRetries {
-			backoff := c.calculateBackoff(attempt)
-			// Level guard: avoid expensive logging in production
-			if c.logger.Enabled(ctx, slog.LevelDebug) {
-				c.logger.Debug("Retrying after backoff", "backoff", backoff, "attempt", attempt+1)
+			// Retry on network errors
+			if attempt < c.retryConfig.MaxRetries {
+				backoff := c.calculateBackoff(attempt)
+				// Level guard: avoid expensive logging in production
+				if c.logger.Enabled(ctx, slog.LevelDebug) {
+					c.logger.Debug("Retrying after backoff", "backoff", backoff, "attempt", attempt+1)
+				}
+				time.Sleep(backoff)
+				continue
 			}
-			time.Sleep(backoff)
-			continue
-		}
 			if c.metrics != nil {
 				c.metrics.RecordAPIError(v2.ProviderPagerDuty, endpoint, "network_error")
 			}
@@ -395,15 +395,15 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 				"status", resp.StatusCode,
 				"error", apiErr,
 			)
-		resp.Body.Close()
+			resp.Body.Close()
 
-		backoff := c.calculateBackoff(attempt)
-		// Level guard: avoid expensive logging in production
-		if c.logger.Enabled(ctx, slog.LevelDebug) {
-			c.logger.Debug("Retrying after backoff", "backoff", backoff, "attempt", attempt+1)
-		}
-		time.Sleep(backoff)
-		continue
+			backoff := c.calculateBackoff(attempt)
+			// Level guard: avoid expensive logging in production
+			if c.logger.Enabled(ctx, slog.LevelDebug) {
+				c.logger.Debug("Retrying after backoff", "backoff", backoff, "attempt", attempt+1)
+			}
+			time.Sleep(backoff)
+			continue
 		}
 
 		// Permanent error - no retry

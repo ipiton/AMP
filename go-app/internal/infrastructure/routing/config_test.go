@@ -3,17 +3,17 @@ package routing
 import (
 	"testing"
 
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 )
 
 func TestRouteConfig_GetReceiver(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      *RouteConfig
+		name         string
+		config       *RouteConfig
 		receiverName string
-		wantFound   bool
+		wantFound    bool
 	}{
 		{
 			name: "existing receiver",
@@ -168,9 +168,9 @@ func TestRouteConfig_String(t *testing.T) {
 
 func TestReceiver_Validate(t *testing.T) {
 	tests := []struct {
-		name    string
+		name     string
 		receiver *Receiver
-		wantErr bool
+		wantErr  bool
 	}{
 		{
 			name: "valid receiver with webhook",

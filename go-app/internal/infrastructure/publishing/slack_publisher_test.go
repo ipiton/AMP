@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // slack_publisher_test.go - Comprehensive tests for EnhancedSlackPublisher

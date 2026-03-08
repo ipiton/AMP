@@ -220,11 +220,11 @@ func (r *Route) Validate() error {
 // Useful for route tree manipulation and testing.
 func (r *Route) Clone() *Route {
 	clone := &Route{
-		Receiver:       r.Receiver,
-		GroupBy:        make([]string, len(r.GroupBy)),
-		Continue:       r.Continue,
-		parsedAt:       r.parsedAt,
-		source:         r.source,
+		Receiver: r.Receiver,
+		GroupBy:  make([]string, len(r.GroupBy)),
+		Continue: r.Continue,
+		parsedAt: r.parsedAt,
+		source:   r.source,
 	}
 
 	copy(clone.GroupBy, r.GroupBy)

@@ -75,7 +75,7 @@ func TestNewHTTPClient(t *testing.T) {
 			},
 		},
 		{
-			name: "zero values use defaults",
+			name:   "zero values use defaults",
 			config: HTTPClientConfig{
 				// All zero values
 			},
@@ -160,19 +160,19 @@ func TestParseTLSVersion(t *testing.T) {
 func TestHTTPClientConfigIntegration(t *testing.T) {
 	// Test that client can be created and used
 	cfg := HTTPClientConfig{
-		Timeout:                10 * time.Second,
-		DialTimeout:            2 * time.Second,
-		TLSHandshakeTimeout:    3 * time.Second,
-		ResponseHeaderTimeout:  5 * time.Second,
-		ExpectContinueTimeout:  500 * time.Millisecond,
-		KeepAlive:              15 * time.Second,
-		IdleConnTimeout:        60 * time.Second,
-		MaxIdleConns:           50,
-		MaxIdleConnsPerHost:    5,
-		MaxConnsPerHost:        10,
-		MinTLSVersion:          "1.3",
-		DisableHTTP2:           false,
-		InsecureSkipVerify:     false,
+		Timeout:               10 * time.Second,
+		DialTimeout:           2 * time.Second,
+		TLSHandshakeTimeout:   3 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+		ExpectContinueTimeout: 500 * time.Millisecond,
+		KeepAlive:             15 * time.Second,
+		IdleConnTimeout:       60 * time.Second,
+		MaxIdleConns:          50,
+		MaxIdleConnsPerHost:   5,
+		MaxConnsPerHost:       10,
+		MinTLSVersion:         "1.3",
+		DisableHTTP2:          false,
+		InsecureSkipVerify:    false,
 	}
 
 	client := NewHTTPClient(cfg)

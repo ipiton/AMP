@@ -50,11 +50,13 @@ type MiddlewareChain struct {
 // NewMiddlewareChain creates a chain with middleware applied in order.
 //
 // Parameters:
-//   base: Base formatter (innermost layer)
-//   middleware: Middleware to apply (first = outermost)
+//
+//	base: Base formatter (innermost layer)
+//	middleware: Middleware to apply (first = outermost)
 //
 // Returns:
-//   *MiddlewareChain: Composed formatter with all middleware
+//
+//	*MiddlewareChain: Composed formatter with all middleware
 func NewMiddlewareChain(base formatFunc, middleware ...FormatterMiddleware) *MiddlewareChain {
 	// Apply middleware in reverse order (last middleware wraps base first)
 	formatter := base
@@ -163,7 +165,8 @@ type RateLimiter interface {
 // NewRateLimitMiddleware creates rate limiting middleware.
 //
 // Parameters:
-//   limiter: Rate limiter implementation (e.g., golang.org/x/time/rate)
+//
+//	limiter: Rate limiter implementation (e.g., golang.org/x/time/rate)
 //
 // Behavior:
 //   - If Allow() returns false, returns RateLimitError
@@ -187,7 +190,8 @@ func NewRateLimitMiddleware(limiter RateLimiter) FormatterMiddleware {
 // TimeoutMiddleware adds timeout to formatting operations.
 //
 // Parameters:
-//   timeout: Maximum duration for formatting
+//
+//	timeout: Maximum duration for formatting
 //
 // Returns: TimeoutError if formatting exceeds timeout
 func TimeoutMiddleware(timeout time.Duration) FormatterMiddleware {
@@ -227,8 +231,9 @@ func TimeoutMiddleware(timeout time.Duration) FormatterMiddleware {
 // RetryMiddleware retries formatting on transient errors.
 //
 // Parameters:
-//   maxRetries: Maximum number of retry attempts
-//   backoff: Delay between retries (exponential backoff)
+//
+//	maxRetries: Maximum number of retry attempts
+//	backoff: Delay between retries (exponential backoff)
 //
 // Retries on:
 //   - Network errors

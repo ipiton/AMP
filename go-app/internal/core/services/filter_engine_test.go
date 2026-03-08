@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewSimpleFilterEngine(t *testing.T) {
@@ -280,9 +280,9 @@ func TestSimpleFilterEngine_ShouldBlock_LowConfidence(t *testing.T) {
 				Labels:      map[string]string{},
 			},
 			classification: &core.ClassificationResult{
-				Severity:    core.SeverityWarning,
-				Confidence:  0.3,
-				Reasoning:   "Acceptable confidence",
+				Severity:   core.SeverityWarning,
+				Confidence: 0.3,
+				Reasoning:  "Acceptable confidence",
 			},
 			expectBlock:  false,
 			expectReason: "",
@@ -296,9 +296,9 @@ func TestSimpleFilterEngine_ShouldBlock_LowConfidence(t *testing.T) {
 				Labels:      map[string]string{},
 			},
 			classification: &core.ClassificationResult{
-				Severity:    core.SeverityWarning,
-				Confidence:  0.95,
-				Reasoning:   "High confidence",
+				Severity:   core.SeverityWarning,
+				Confidence: 0.95,
+				Reasoning:  "High confidence",
 			},
 			expectBlock:  false,
 			expectReason: "",
@@ -348,9 +348,9 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 				Labels:      map[string]string{},
 			},
 			classification: &core.ClassificationResult{
-				Severity:    core.SeverityCritical,
-				Confidence:  0.99,
-				Reasoning:   "Critical issue",
+				Severity:   core.SeverityCritical,
+				Confidence: 0.99,
+				Reasoning:  "Critical issue",
 			},
 			expectBlock:  true,
 			expectReason: "test_alert",
@@ -367,9 +367,9 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 				},
 			},
 			classification: &core.ClassificationResult{
-				Severity:    core.SeverityNoise,
-				Confidence:  0.95,
-				Reasoning:   "Classified as noise",
+				Severity:   core.SeverityNoise,
+				Confidence: 0.95,
+				Reasoning:  "Classified as noise",
 			},
 			expectBlock:  true,
 			expectReason: "noise",
@@ -387,9 +387,9 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 				},
 			},
 			classification: &core.ClassificationResult{
-				Severity:    core.SeverityCritical,
-				Confidence:  0.95,
-				Reasoning:   "Valid critical alert",
+				Severity:   core.SeverityCritical,
+				Confidence: 0.95,
+				Reasoning:  "Valid critical alert",
 			},
 			expectBlock:  false,
 			expectReason: "",
@@ -406,9 +406,9 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 				},
 			},
 			classification: &core.ClassificationResult{
-				Severity:    core.SeverityWarning,
-				Confidence:  0.15,
-				Reasoning:   "Uncertain classification",
+				Severity:   core.SeverityWarning,
+				Confidence: 0.15,
+				Reasoning:  "Uncertain classification",
 			},
 			expectBlock:  true,
 			expectReason: "low_confidence",
@@ -679,7 +679,7 @@ func TestContainsTest(t *testing.T) {
 		{"partial est", "est", false},
 		{"empty string", "", false},
 		{"similar latest", "latest", false},
-		{"contest", "contest", false}, // contains 'test' but starts with 'con'
+		{"contest", "contest", false},              // contains 'test' but starts with 'con'
 		{"in middle", "prefix_test_suffix", false}, // containsTest only checks start of string
 		{"at end", "prefix_test", false},           // containsTest only checks start of string
 	}
@@ -711,9 +711,9 @@ func BenchmarkSimpleFilterEngine_ShouldBlock(b *testing.B) {
 		StartsAt: time.Now(),
 	}
 	classification := &core.ClassificationResult{
-		Severity:    core.SeverityWarning,
-		Confidence:  0.85,
-		Reasoning:   "Test reasoning",
+		Severity:   core.SeverityWarning,
+		Confidence: 0.85,
+		Reasoning:  "Test reasoning",
 	}
 
 	b.ResetTimer()

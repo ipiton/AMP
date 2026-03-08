@@ -8,8 +8,8 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/ipiton/AMP/internal/infrastructure/cache"
 	"github.com/ipiton/AMP/internal/core/domain"
+	"github.com/ipiton/AMP/internal/infrastructure/cache"
 )
 
 // ================================================================================
@@ -53,14 +53,14 @@ type TemplateCache interface {
 
 // CacheStats holds cache performance statistics
 type CacheStats struct {
-	L1Size      int     `json:"l1_size"`       // Current L1 cache size
-	L1Hits      int64   `json:"l1_hits"`       // L1 cache hits
-	L1Misses    int64   `json:"l1_misses"`     // L1 cache misses
-	L2Hits      int64   `json:"l2_hits"`       // L2 cache hits
-	L2Misses    int64   `json:"l2_misses"`     // L2 cache misses
-	TotalHits   int64   `json:"total_hits"`    // Total cache hits (L1 + L2)
-	TotalMisses int64   `json:"total_misses"`  // Total cache misses
-	HitRatio    float64 `json:"hit_ratio"`     // Overall hit ratio (0.0-1.0)
+	L1Size      int     `json:"l1_size"`      // Current L1 cache size
+	L1Hits      int64   `json:"l1_hits"`      // L1 cache hits
+	L1Misses    int64   `json:"l1_misses"`    // L1 cache misses
+	L2Hits      int64   `json:"l2_hits"`      // L2 cache hits
+	L2Misses    int64   `json:"l2_misses"`    // L2 cache misses
+	TotalHits   int64   `json:"total_hits"`   // Total cache hits (L1 + L2)
+	TotalMisses int64   `json:"total_misses"` // Total cache misses
+	HitRatio    float64 `json:"hit_ratio"`    // Overall hit ratio (0.0-1.0)
 }
 
 // ================================================================================
@@ -72,11 +72,11 @@ type TwoTierTemplateCache struct {
 	logger  *slog.Logger
 
 	// Statistics (protected by mutex)
-	mu          sync.RWMutex
-	l1Hits      int64
-	l1Misses    int64
-	l2Hits      int64
-	l2Misses    int64
+	mu       sync.RWMutex
+	l1Hits   int64
+	l1Misses int64
+	l2Hits   int64
+	l2Misses int64
 }
 
 // NewTwoTierTemplateCache creates a new two-tier cache

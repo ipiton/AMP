@@ -330,8 +330,8 @@ func TestValidateAlert_InvalidTimestamps(t *testing.T) {
 		Status:   "firing",
 		Alerts: []AlertmanagerAlert{
 			{
-				Status: "resolved",
-				Labels: map[string]string{"alertname": "test"},
+				Status:   "resolved",
+				Labels:   map[string]string{"alertname": "test"},
 				StartsAt: startsAt,
 				EndsAt:   endsAt,
 			},
@@ -392,9 +392,9 @@ func TestValidateAlertmanager_TruncatedAlerts(t *testing.T) {
 	validator := NewWebhookValidator()
 
 	tests := []struct {
-		name              string
-		truncatedAlerts   int
-		expectValid       bool
+		name            string
+		truncatedAlerts int
+		expectValid     bool
 	}{
 		{"positive truncated", 5, true},
 		{"zero truncated", 0, true},
@@ -457,9 +457,9 @@ func TestValidateGeneric_MissingRequiredFields(t *testing.T) {
 	validator := NewWebhookValidator()
 
 	tests := []struct {
-		name          string
-		data          map[string]interface{}
-		missingField  string
+		name         string
+		data         map[string]interface{}
+		missingField string
 	}{
 		{
 			name: "missing alertname",
@@ -590,7 +590,7 @@ func TestIsValidWebhookStatus(t *testing.T) {
 	}{
 		{"firing", true},
 		{"resolved", true},
-		{"FIRING", false},   // Case sensitive
+		{"FIRING", false}, // Case sensitive
 		{"Resolved", false},
 		{"pending", false},
 		{"", false},
@@ -890,10 +890,10 @@ func TestValidateValidPrometheusAlert(t *testing.T) {
 		Alerts: []PrometheusAlert{
 			{
 				Labels: map[string]string{
-					"alertname": "HighCPU",
-					"instance":  "server-1:9100",
-					"job":       "node-exporter",
-					"severity":  "warning",
+					"alertname":  "HighCPU",
+					"instance":   "server-1:9100",
+					"job":        "node-exporter",
+					"severity":   "warning",
 					"__meta_foo": "bar", // Valid: starts with underscore
 				},
 				Annotations: map[string]string{
@@ -1041,18 +1041,18 @@ func TestIsValidPrometheusLabelName(t *testing.T) {
 		name     string
 		expected bool
 	}{
-		{"alertname", true},      // Valid: starts with letter
-		{"_private", true},       // Valid: starts with underscore
-		{"job_name", true},       // Valid: contains underscore
+		{"alertname", true},           // Valid: starts with letter
+		{"_private", true},            // Valid: starts with underscore
+		{"job_name", true},            // Valid: contains underscore
 		{"http_requests_total", true}, // Valid: multiple underscores
-		{"123invalid", false},    // Invalid: starts with digit
-		{"invalid-name", false},  // Invalid: contains hyphen
-		{"invalid.name", false},  // Invalid: contains dot
-		{"", false},              // Invalid: empty
-		{"a", true},              // Valid: single letter
-		{"_", true},              // Valid: single underscore
-		{"a1", true},             // Valid: letter + digit
-		{"1a", false},            // Invalid: digit + letter
+		{"123invalid", false},         // Invalid: starts with digit
+		{"invalid-name", false},       // Invalid: contains hyphen
+		{"invalid.name", false},       // Invalid: contains dot
+		{"", false},                   // Invalid: empty
+		{"a", true},                   // Valid: single letter
+		{"_", true},                   // Valid: single underscore
+		{"a1", true},                  // Valid: letter + digit
+		{"1a", false},                 // Invalid: digit + letter
 	}
 
 	for _, tt := range tests {
@@ -1074,8 +1074,8 @@ func TestValidatePrometheusState(t *testing.T) {
 		{"firing", false},
 		{"pending", false},
 		{"inactive", false},
-		{"resolved", true},    // Invalid: not Prometheus state
-		{"FIRING", true},      // Invalid: case sensitive
+		{"resolved", true}, // Invalid: not Prometheus state
+		{"FIRING", true},   // Invalid: case sensitive
 		{"unknown", true},
 		{"", true},
 	}

@@ -84,9 +84,9 @@ func (eh *ErrorHandler) ExecuteWithRetry(ctx context.Context, operation func() e
 	strategy := retry.Strategy{
 		MaxAttempts:     eh.maxRetries + 1, // +1 because retry.Strategy counts attempts, not retries
 		BaseDelay:       eh.retryDelay,
-		MaxDelay:        eh.retryDelay * 10, // Cap at 10x base delay
-		Multiplier:      1.0, // Linear backoff (constant delay, as original)
-		JitterRatio:     0.05, // 5% jitter (minimal)
+		MaxDelay:        eh.retryDelay * 10,            // Cap at 10x base delay
+		Multiplier:      1.0,                           // Linear backoff (constant delay, as original)
+		JitterRatio:     0.05,                          // 5% jitter (minimal)
 		ErrorClassifier: &migrationErrorClassifier{eh}, // Use existing isRetryable logic
 		Logger:          eh.logger,
 		OperationName:   "migration_operation",
