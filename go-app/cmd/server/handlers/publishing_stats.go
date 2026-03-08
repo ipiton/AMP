@@ -363,7 +363,7 @@ func (h *PublishingStatsHandler) GetStats(w http.ResponseWriter, r *http.Request
 	queueStats := make(map[string]float64)
 
 	for key, value := range snapshot.Metrics {
-		if strings.Contains(key, "target") || strings.Contains(key, "health") || strings.Contains(key, "discovery") {
+		if strings.Contains(key, "target") || strings.Contains(key, "health") || strings.Contains(key, "discovery") || strings.Contains(key, "mode") {
 			targetStats[key] = value
 		} else if strings.Contains(key, "queue") || strings.Contains(key, "worker") || strings.Contains(key, "job") {
 			queueStats[key] = value

@@ -6,59 +6,54 @@ metadata:
   labels:
     {{- include "amp.labels" . | nindent 4 }}
 data:
-  # Application Configuration
-  environment: {{ .Values.environment | quote }}
-  log-level: {{ .Values.logLevel | quote }}
+  {{- $llmTimeout := .Values.llm.timeout | toString }}
+  APP_ENVIRONMENT: {{ .Values.environment | quote }}
+  PROFILE: {{ .Values.profile | quote }}
+  STORAGE_BACKEND: {{ ternary "filesystem" "postgres" (eq .Values.profile "lite") | quote }}
+  LOG_LEVEL: {{ .Values.logLevel | quote }}
 
-  # Alert Processing Configuration
-  retention-days: {{ .Values.alerts.retentionDays | quote }}
-  alert-batch-size: {{ .Values.alerts.batchSize | quote }}
-  max-concurrent-alerts: {{ .Values.alerts.maxConcurrentAlerts | quote }}
-  enable-classification: {{ .Values.alerts.enableClassification | quote }}
-
+  LLM_ENABLED: {{ .Values.llm.enabled | quote }}
   {{- if .Values.llm.enabled }}
-  # LLM Configuration (non-sensitive)
-  llm-proxy-url: {{ .Values.llm.proxyUrl | quote }}
-  llm-model: {{ .Values.llm.model | quote }}
-  llm-timeout: {{ .Values.llm.timeout | quote }}
-  llm-max-retries: {{ .Values.llm.maxRetries | quote }}
-  llm-retry-delay: {{ .Values.llm.retryDelay | quote }}
-  llm-cache-ttl: {{ .Values.llm.cacheTtl | quote }}
+  LLM_BASE_URL: {{ .Values.llm.proxyUrl | quote }}
+  LLM_MODEL: {{ .Values.llm.model | quote }}
+  {{- if or (hasSuffix "ms" $llmTimeout) (hasSuffix "s" $llmTimeout) (hasSuffix "m" $llmTimeout) (hasSuffix "h" $llmTimeout) }}
+  LLM_TIMEOUT: {{ $llmTimeout | quote }}
+  {{- else }}
+  LLM_TIMEOUT: {{ printf "%ss" $llmTimeout | quote }}
+  {{- end }}
+  LLM_MAX_RETRIES: {{ .Values.llm.maxRetries | quote }}
   {{- end }}
 
-  # Migration Configuration
-  {{- if .Values.migration.enabled }}
-  migration-enabled: "true"
-  auto-migrate: {{ .Values.migration.autoMigrate | quote }}
-  migration-batch-size: {{ .Values.migration.batchSize | quote }}
-  verify-migration-data: {{ .Values.migration.verifyData | quote }}
-  backup-before-migration: {{ .Values.migration.backupBeforeMigration | quote }}
+  PUBLISHING_ENABLED: {{ .Values.publishing.enabled | quote }}
+  {{- if .Values.publishing.discovery.namespace }}
+  PUBLISHING_DISCOVERY_NAMESPACE: {{ .Values.publishing.discovery.namespace | quote }}
   {{- end }}
-
-  # Monitoring Configuration
-  prometheus-enabled: {{ .Values.monitoring.prometheusEnabled | quote }}
-  metrics-port: {{ .Values.service.metricsPort | default 9090 | quote }}
-  health-check-interval: {{ .Values.monitoring.healthCheckInterval | quote }}
-
-  # Target Discovery Configuration
-  {{- if .Values.targetDiscovery.enabled }}
-  target-discovery-enabled: "true"
-  target-discovery-namespaces: {{ join "," .Values.targetDiscovery.namespaces | quote }}
-  target-discovery-labels: {{ join "," .Values.targetDiscovery.labels | quote }}
-  target-discovery-refresh-interval: {{ .Values.targetDiscovery.refreshInterval | quote }}
-  {{- end }}
-
-  # Publishing Configuration
-  {{- if .Values.publishing.enabled }}
-  publishing-enabled: "true"
-  publishing-max-concurrent: {{ .Values.publishing.maxConcurrent | quote }}
-  publishing-timeout: {{ .Values.publishing.timeout | quote }}
-  publishing-retries: {{ .Values.publishing.retries | quote }}
-  {{- end }}
-
-  # Filter Configuration
-  {{- if .Values.filters }}
-  {{- range $key, $value := .Values.filters }}
-  filter-{{ $key }}: {{ $value | quote }}
-  {{- end }}
-  {{- end }}
+  PUBLISHING_DISCOVERY_LABEL_SELECTOR: {{ .Values.publishing.discovery.labelSelector | quote }}
+  PUBLISHING_QUEUE_MAX_CONCURRENT: {{ .Values.publishing.queue.maxConcurrent | quote }}
+  PUBLISHING_QUEUE_WORKER_COUNT: {{ .Values.publishing.queue.workerCount | quote }}
+  PUBLISHING_QUEUE_HIGH_PRIORITY_QUEUE_SIZE: {{ .Values.publishing.queue.highPriorityQueueSize | quote }}
+  PUBLISHING_QUEUE_MEDIUM_PRIORITY_QUEUE_SIZE: {{ .Values.publishing.queue.mediumPriorityQueueSize | quote }}
+  PUBLISHING_QUEUE_LOW_PRIORITY_QUEUE_SIZE: {{ .Values.publishing.queue.lowPriorityQueueSize | quote }}
+  PUBLISHING_QUEUE_MAX_RETRIES: {{ .Values.publishing.queue.maxRetries | quote }}
+  PUBLISHING_QUEUE_RETRY_INTERVAL: {{ .Values.publishing.queue.retryInterval | quote }}
+  PUBLISHING_QUEUE_STOP_TIMEOUT: {{ .Values.publishing.queue.stopTimeout | quote }}
+  PUBLISHING_QUEUE_JOB_TRACKING_CAPACITY: {{ .Values.publishing.queue.jobTrackingCapacity | quote }}
+  PUBLISHING_REFRESH_ENABLED: {{ .Values.publishing.refresh.enabled | quote }}
+  PUBLISHING_REFRESH_INTERVAL: {{ .Values.publishing.refresh.interval | quote }}
+  PUBLISHING_REFRESH_MAX_RETRIES: {{ .Values.publishing.refresh.maxRetries | quote }}
+  PUBLISHING_REFRESH_BASE_BACKOFF: {{ .Values.publishing.refresh.baseBackoff | quote }}
+  PUBLISHING_REFRESH_MAX_BACKOFF: {{ .Values.publishing.refresh.maxBackoff | quote }}
+  PUBLISHING_REFRESH_RATE_LIMIT_PER: {{ .Values.publishing.refresh.rateLimitPer | quote }}
+  PUBLISHING_REFRESH_TIMEOUT: {{ .Values.publishing.refresh.timeout | quote }}
+  PUBLISHING_REFRESH_WARMUP_PERIOD: {{ .Values.publishing.refresh.warmupPeriod | quote }}
+  PUBLISHING_HEALTH_ENABLED: {{ .Values.publishing.health.enabled | quote }}
+  PUBLISHING_HEALTH_CHECK_INTERVAL: {{ .Values.publishing.health.checkInterval | quote }}
+  PUBLISHING_HEALTH_HTTP_TIMEOUT: {{ .Values.publishing.health.httpTimeout | quote }}
+  PUBLISHING_HEALTH_WARMUP_DELAY: {{ .Values.publishing.health.warmupDelay | quote }}
+  PUBLISHING_HEALTH_FAILURE_THRESHOLD: {{ .Values.publishing.health.failureThreshold | quote }}
+  PUBLISHING_HEALTH_DEGRADED_THRESHOLD: {{ .Values.publishing.health.degradedThreshold | quote }}
+  PUBLISHING_HEALTH_MAX_CONCURRENT_CHECKS: {{ .Values.publishing.health.maxConcurrentChecks | quote }}
+  PUBLISHING_HEALTH_MAX_IDLE_CONNS: {{ .Values.publishing.health.maxIdleConns | quote }}
+  PUBLISHING_HEALTH_TLS_SKIP_VERIFY: {{ .Values.publishing.health.tlsSkipVerify | quote }}
+  PUBLISHING_HEALTH_FOLLOW_REDIRECTS: {{ .Values.publishing.health.followRedirects | quote }}
+  PUBLISHING_HEALTH_MAX_REDIRECTS: {{ .Values.publishing.health.maxRedirects | quote }}

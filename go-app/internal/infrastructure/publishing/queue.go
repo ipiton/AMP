@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,6 +126,9 @@ type PublishingQueue struct {
 	cancel           context.CancelFunc
 	circuitBreakers  map[string]*CircuitBreaker
 	mu               sync.RWMutex
+	totalSubmitted   atomic.Int64
+	totalCompleted   atomic.Int64
+	totalFailed      atomic.Int64
 }
 
 // PublishingQueueConfig holds configuration for publishing queue
@@ -268,6 +272,8 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 	// Submit to queue
 	select {
 	case targetQueue <- job:
+		q.totalSubmitted.Add(1)
+
 		// Update metrics
 		if q.metrics != nil {
 			q.metrics.RecordQueueSubmission(priority.String(), true)
@@ -422,12 +428,24 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	// Create publisher
 	publisher, err := q.factory.CreatePublisher(job.Target.Type)
 	if err != nil {
+		job.State = JobStateFailed
+		now := time.Now()
+		job.CompletedAt = &now
+		job.LastError = err
+		q.totalFailed.Add(1)
+
 		q.logger.Error("Failed to create publisher",
 			"target", job.Target.Name,
 			"type", job.Target.Type,
 			"error", err,
 		)
 		cb.RecordFailure()
+		if q.metrics != nil {
+			q.metrics.RecordJobFailure(job.Target.Name)
+		}
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Add(job)
+		}
 		return
 	}
 
@@ -437,6 +455,8 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	duration := time.Since(startTime).Seconds()
 
 	if err != nil {
+		q.totalFailed.Add(1)
+
 		q.logger.Error("Failed to publish after retries",
 			"job_id", job.ID,
 			"target", job.Target.Name,
@@ -473,6 +493,8 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 			}
 		}
 	} else {
+		q.totalCompleted.Add(1)
+
 		q.logger.Info("Alert published successfully",
 			"job_id", job.ID,
 			"target", job.Target.Name,
@@ -580,22 +602,16 @@ func (q *PublishingQueue) GetStats() QueueStats {
 	}
 
 	stats := QueueStats{
-		TotalSize:    q.GetQueueSize(),
-		HighPriority: q.GetQueueSizeByPriority(PriorityHigh),
-		MedPriority:  q.GetQueueSizeByPriority(PriorityMedium),
-		LowPriority:  q.GetQueueSizeByPriority(PriorityLow),
-		Capacity:     q.GetQueueCapacity(),
-		WorkerCount:  q.workerCount,
-		ActiveJobs:   activeJobs, // Now tracked via JobTrackingStore
-	}
-
-	// Get metrics if available
-	if q.metrics != nil {
-		// Prometheus metrics can't be read directly, so we return 0s
-		// These would need to be tracked separately if needed
-		stats.TotalSubmitted = 0
-		stats.TotalCompleted = 0
-		stats.TotalFailed = 0
+		TotalSize:      q.GetQueueSize(),
+		HighPriority:   q.GetQueueSizeByPriority(PriorityHigh),
+		MedPriority:    q.GetQueueSizeByPriority(PriorityMedium),
+		LowPriority:    q.GetQueueSizeByPriority(PriorityLow),
+		Capacity:       q.GetQueueCapacity(),
+		WorkerCount:    q.workerCount,
+		ActiveJobs:     activeJobs, // Now tracked via JobTrackingStore
+		TotalSubmitted: q.totalSubmitted.Load(),
+		TotalCompleted: q.totalCompleted.Load(),
+		TotalFailed:    q.totalFailed.Load(),
 	}
 
 	return stats

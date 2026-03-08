@@ -30,6 +30,7 @@ type Config struct {
 	HTTPClient HTTPClientConfig `mapstructure:"http_client"`
 	Retry      RetryConfig      `mapstructure:"retry"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
+	Publishing PublishingConfig `mapstructure:"publishing"`
 }
 
 // DeploymentProfile represents the deployment profile type
@@ -246,6 +247,61 @@ type TelemetryConfig struct {
 	SamplingRatio float64 `mapstructure:"sampling_ratio"`
 }
 
+// PublishingConfig holds runtime publishing configuration.
+type PublishingConfig struct {
+	Enabled   bool                      `mapstructure:"enabled"`
+	Discovery PublishingDiscoveryConfig `mapstructure:"discovery"`
+	Queue     PublishingQueueConfig     `mapstructure:"queue"`
+	Refresh   PublishingRefreshConfig   `mapstructure:"refresh"`
+	Health    PublishingHealthConfig    `mapstructure:"health"`
+}
+
+// PublishingDiscoveryConfig holds target discovery settings.
+type PublishingDiscoveryConfig struct {
+	Namespace     string `mapstructure:"namespace"`
+	LabelSelector string `mapstructure:"label_selector"`
+}
+
+// PublishingQueueConfig holds publishing queue settings.
+type PublishingQueueConfig struct {
+	MaxConcurrent           int           `mapstructure:"max_concurrent"`
+	WorkerCount             int           `mapstructure:"worker_count"`
+	HighPriorityQueueSize   int           `mapstructure:"high_priority_queue_size"`
+	MediumPriorityQueueSize int           `mapstructure:"medium_priority_queue_size"`
+	LowPriorityQueueSize    int           `mapstructure:"low_priority_queue_size"`
+	MaxRetries              int           `mapstructure:"max_retries"`
+	RetryInterval           time.Duration `mapstructure:"retry_interval"`
+	StopTimeout             time.Duration `mapstructure:"stop_timeout"`
+	JobTrackingCapacity     int           `mapstructure:"job_tracking_capacity"`
+}
+
+// PublishingRefreshConfig holds dynamic target refresh settings.
+type PublishingRefreshConfig struct {
+	Enabled      bool          `mapstructure:"enabled"`
+	Interval     time.Duration `mapstructure:"interval"`
+	MaxRetries   int           `mapstructure:"max_retries"`
+	BaseBackoff  time.Duration `mapstructure:"base_backoff"`
+	MaxBackoff   time.Duration `mapstructure:"max_backoff"`
+	RateLimitPer time.Duration `mapstructure:"rate_limit_per"`
+	Timeout      time.Duration `mapstructure:"timeout"`
+	WarmupPeriod time.Duration `mapstructure:"warmup_period"`
+}
+
+// PublishingHealthConfig holds publishing target health settings.
+type PublishingHealthConfig struct {
+	Enabled             bool          `mapstructure:"enabled"`
+	CheckInterval       time.Duration `mapstructure:"check_interval"`
+	HTTPTimeout         time.Duration `mapstructure:"http_timeout"`
+	WarmupDelay         time.Duration `mapstructure:"warmup_delay"`
+	FailureThreshold    int           `mapstructure:"failure_threshold"`
+	DegradedThreshold   time.Duration `mapstructure:"degraded_threshold"`
+	MaxConcurrentChecks int           `mapstructure:"max_concurrent_checks"`
+	MaxIdleConns        int           `mapstructure:"max_idle_conns"`
+	TLSSkipVerify       bool          `mapstructure:"tls_skip_verify"`
+	FollowRedirects     bool          `mapstructure:"follow_redirects"`
+	MaxRedirects        int           `mapstructure:"max_redirects"`
+}
+
 // StorageBackend represents the storage implementation
 type StorageBackend string
 
@@ -450,6 +506,42 @@ func setDefaults() {
 	viper.SetDefault("http_client.min_tls_version", "1.2")
 	viper.SetDefault("http_client.disable_http2", false)
 	viper.SetDefault("http_client.insecure_skip_verify", false)
+
+	// Publishing defaults
+	viper.SetDefault("publishing.enabled", true)
+	viper.SetDefault("publishing.discovery.namespace", "")
+	viper.SetDefault("publishing.discovery.label_selector", "publishing-target=true")
+
+	viper.SetDefault("publishing.queue.max_concurrent", 5)
+	viper.SetDefault("publishing.queue.worker_count", 10)
+	viper.SetDefault("publishing.queue.high_priority_queue_size", 500)
+	viper.SetDefault("publishing.queue.medium_priority_queue_size", 1000)
+	viper.SetDefault("publishing.queue.low_priority_queue_size", 500)
+	viper.SetDefault("publishing.queue.max_retries", 3)
+	viper.SetDefault("publishing.queue.retry_interval", "2s")
+	viper.SetDefault("publishing.queue.stop_timeout", "10s")
+	viper.SetDefault("publishing.queue.job_tracking_capacity", 10000)
+
+	viper.SetDefault("publishing.refresh.enabled", true)
+	viper.SetDefault("publishing.refresh.interval", "5m")
+	viper.SetDefault("publishing.refresh.max_retries", 5)
+	viper.SetDefault("publishing.refresh.base_backoff", "30s")
+	viper.SetDefault("publishing.refresh.max_backoff", "5m")
+	viper.SetDefault("publishing.refresh.rate_limit_per", "1m")
+	viper.SetDefault("publishing.refresh.timeout", "30s")
+	viper.SetDefault("publishing.refresh.warmup_period", "30s")
+
+	viper.SetDefault("publishing.health.enabled", true)
+	viper.SetDefault("publishing.health.check_interval", "2m")
+	viper.SetDefault("publishing.health.http_timeout", "5s")
+	viper.SetDefault("publishing.health.warmup_delay", "10s")
+	viper.SetDefault("publishing.health.failure_threshold", 3)
+	viper.SetDefault("publishing.health.degraded_threshold", "5s")
+	viper.SetDefault("publishing.health.max_concurrent_checks", 10)
+	viper.SetDefault("publishing.health.max_idle_conns", 100)
+	viper.SetDefault("publishing.health.tls_skip_verify", false)
+	viper.SetDefault("publishing.health.follow_redirects", true)
+	viper.SetDefault("publishing.health.max_redirects", 3)
 }
 
 // Validate validates the configuration
@@ -503,6 +595,97 @@ func (c *Config) Validate() error {
 
 	if c.App.Name == "" {
 		return fmt.Errorf("app name cannot be empty")
+	}
+
+	if err := c.validatePublishing(); err != nil {
+		return fmt.Errorf("publishing validation failed: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Config) validatePublishing() error {
+	if !c.Publishing.Enabled {
+		return nil
+	}
+
+	if c.Publishing.Queue.MaxConcurrent <= 0 {
+		return fmt.Errorf("publishing.queue.max_concurrent must be positive")
+	}
+	if c.Publishing.Queue.WorkerCount <= 0 {
+		return fmt.Errorf("publishing.queue.worker_count must be positive")
+	}
+	if c.Publishing.Queue.HighPriorityQueueSize <= 0 {
+		return fmt.Errorf("publishing.queue.high_priority_queue_size must be positive")
+	}
+	if c.Publishing.Queue.MediumPriorityQueueSize <= 0 {
+		return fmt.Errorf("publishing.queue.medium_priority_queue_size must be positive")
+	}
+	if c.Publishing.Queue.LowPriorityQueueSize <= 0 {
+		return fmt.Errorf("publishing.queue.low_priority_queue_size must be positive")
+	}
+	if c.Publishing.Queue.MaxRetries < 0 {
+		return fmt.Errorf("publishing.queue.max_retries must be non-negative")
+	}
+	if c.Publishing.Queue.RetryInterval <= 0 {
+		return fmt.Errorf("publishing.queue.retry_interval must be positive")
+	}
+	if c.Publishing.Queue.StopTimeout <= 0 {
+		return fmt.Errorf("publishing.queue.stop_timeout must be positive")
+	}
+	if c.Publishing.Queue.JobTrackingCapacity <= 0 {
+		return fmt.Errorf("publishing.queue.job_tracking_capacity must be positive")
+	}
+
+	if c.Publishing.Refresh.Enabled {
+		if c.Publishing.Refresh.Interval <= 0 {
+			return fmt.Errorf("publishing.refresh.interval must be positive")
+		}
+		if c.Publishing.Refresh.MaxRetries < 0 {
+			return fmt.Errorf("publishing.refresh.max_retries must be non-negative")
+		}
+		if c.Publishing.Refresh.BaseBackoff <= 0 {
+			return fmt.Errorf("publishing.refresh.base_backoff must be positive")
+		}
+		if c.Publishing.Refresh.MaxBackoff < c.Publishing.Refresh.BaseBackoff {
+			return fmt.Errorf("publishing.refresh.max_backoff must be >= base_backoff")
+		}
+		if c.Publishing.Refresh.RateLimitPer <= 0 {
+			return fmt.Errorf("publishing.refresh.rate_limit_per must be positive")
+		}
+		if c.Publishing.Refresh.Timeout <= 0 {
+			return fmt.Errorf("publishing.refresh.timeout must be positive")
+		}
+		if c.Publishing.Refresh.WarmupPeriod < 0 {
+			return fmt.Errorf("publishing.refresh.warmup_period must be non-negative")
+		}
+	}
+
+	if c.Publishing.Health.Enabled {
+		if c.Publishing.Health.CheckInterval <= 0 {
+			return fmt.Errorf("publishing.health.check_interval must be positive")
+		}
+		if c.Publishing.Health.HTTPTimeout <= 0 {
+			return fmt.Errorf("publishing.health.http_timeout must be positive")
+		}
+		if c.Publishing.Health.WarmupDelay < 0 {
+			return fmt.Errorf("publishing.health.warmup_delay must be non-negative")
+		}
+		if c.Publishing.Health.FailureThreshold <= 0 {
+			return fmt.Errorf("publishing.health.failure_threshold must be positive")
+		}
+		if c.Publishing.Health.DegradedThreshold <= 0 {
+			return fmt.Errorf("publishing.health.degraded_threshold must be positive")
+		}
+		if c.Publishing.Health.MaxConcurrentChecks <= 0 {
+			return fmt.Errorf("publishing.health.max_concurrent_checks must be positive")
+		}
+		if c.Publishing.Health.MaxIdleConns <= 0 {
+			return fmt.Errorf("publishing.health.max_idle_conns must be positive")
+		}
+		if c.Publishing.Health.MaxRedirects < 0 {
+			return fmt.Errorf("publishing.health.max_redirects must be non-negative")
+		}
 	}
 
 	return nil

@@ -97,12 +97,34 @@ autoscaling:
   targetMemoryUtilizationPercentage: 80
 
 # ===============================
-# Publishing Targets (Production)
+# Publishing Runtime (Production)
 # ===============================
+publishing:
+  enabled: true
+  discovery:
+    namespace: monitoring
+    labelSelector: "publishing-target=true"
+  queue:
+    maxConcurrent: 10
+    workerCount: 10
+    maxRetries: 3
+    retryInterval: "2s"
+  refresh:
+    enabled: true
+    interval: "5m"
+  health:
+    enabled: true
+    checkInterval: "2m"
+    httpTimeout: "5s"
+
+# `publishingTargets` is the Helm input shape.
+# The chart serializes each entry into a canonical runtime Secret:
+#   label: publishing-target=true
+#   data.config: <base64 JSON core.PublishingTarget>
 publishingTargets:
   # Rootly integration for production
   - name: rootly-production
-    type: webhook
+    type: rootly
     format: rootly
     url: "https://api.rootly.com/webhooks/your-webhook-id"
     enabled: true
@@ -116,7 +138,7 @@ publishingTargets:
 
   # PagerDuty integration
   - name: pagerduty-oncall
-    type: webhook
+    type: pagerduty
     format: pagerduty
     url: "https://events.pagerduty.com/v2/enqueue"
     enabled: true
@@ -129,7 +151,7 @@ publishingTargets:
 
   # Slack notifications
   - name: slack-alerts
-    type: webhook
+    type: slack
     format: slack
     url: "https://hooks.slack.com/your-webhook-url"
     enabled: true
