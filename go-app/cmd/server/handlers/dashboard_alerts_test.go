@@ -290,7 +290,7 @@ func TestDashboardAlertsHandler_GetRecentAlerts_WithClassification(t *testing.T)
 				Severity:   core.SeverityCritical,
 				Confidence: 0.85,
 			},
-			HasClassification:   true,
+			HasClassification:    true,
 			ClassificationSource: "llm",
 		},
 		{

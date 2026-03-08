@@ -265,8 +265,8 @@ func (c *DefaultK8sClient) retryWithBackoff(ctx context.Context, operation func(
 		MaxAttempts:     c.config.MaxRetries + 1, // +1 because pkg/retry counts attempts, not retries
 		BaseDelay:       c.config.RetryBackoff,
 		MaxDelay:        c.config.MaxRetryBackoff,
-		Multiplier:      2.0, // Exponential backoff
-		JitterRatio:     0.1, // 10% jitter
+		Multiplier:      2.0,                   // Exponential backoff
+		JitterRatio:     0.1,                   // 10% jitter
 		ErrorClassifier: &k8sErrorClassifier{}, // K8s-specific error classifier
 		Logger:          c.logger,
 		OperationName:   "k8s_operation",

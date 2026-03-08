@@ -153,13 +153,13 @@ func (v *SecurityValidator) checkHardcodedSecrets(content string) []templatevali
 				}
 
 				errors = append(errors, templatevalidator.ValidationError{
-					Phase:    "security",
-					Severity: pattern.Severity,
-					Line:     lineNum + 1,
-					Column:   column,
-					Message:  fmt.Sprintf("%s detected: %s", pattern.Name, pattern.Message),
+					Phase:      "security",
+					Severity:   pattern.Severity,
+					Line:       lineNum + 1,
+					Column:     column,
+					Message:    fmt.Sprintf("%s detected: %s", pattern.Name, pattern.Message),
 					Suggestion: "Use environment variables, K8s secrets, or secret management system (Vault, AWS Secrets Manager).",
-					Code:     "hardcoded-secret",
+					Code:       "hardcoded-secret",
 				})
 			}
 		}
@@ -246,13 +246,13 @@ func (v *SecurityValidator) checkTemplateInjection(content string) []templateval
 			}
 
 			errors = append(errors, templatevalidator.ValidationError{
-				Phase:    "security",
-				Severity: "high",
-				Line:     lineNum + 1,
-				Column:   column,
-				Message:  "Dynamic template execution detected (template injection vulnerability)",
+				Phase:      "security",
+				Severity:   "high",
+				Line:       lineNum + 1,
+				Column:     column,
+				Message:    "Dynamic template execution detected (template injection vulnerability)",
 				Suggestion: "Never execute user-controlled template names. Use static template names only: {{ template \"template_name\" }}",
-				Code:     "template-injection",
+				Code:       "template-injection",
 			})
 		}
 	}

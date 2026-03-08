@@ -313,10 +313,10 @@ func TestIsRetryableError_Permanent(t *testing.T) {
 // TestIsRetryableError_EdgeCases tests edge cases for retry logic
 func TestIsRetryableError_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name       string
-		err        error
-		retryable  bool
-		comment    string
+		name      string
+		err       error
+		retryable bool
+		comment   string
 	}{
 		{
 			name:      "nil error",
@@ -380,33 +380,33 @@ func TestErrorTypeChain(t *testing.T) {
 // TestErrorsAs tests errors.As() compatibility with all error types
 func TestErrorsAs(t *testing.T) {
 	tests := []struct {
-		name      string
-		err       error
+		name       string
+		err        error
 		targetType interface{}
 	}{
 		{
-			name:      "K8sError",
-			err:       &K8sError{Op: "test", Message: "test"},
+			name:       "K8sError",
+			err:        &K8sError{Op: "test", Message: "test"},
 			targetType: &K8sError{},
 		},
 		{
-			name:      "ConnectionError",
-			err:       NewConnectionError("test", nil),
+			name:       "ConnectionError",
+			err:        NewConnectionError("test", nil),
 			targetType: &ConnectionError{},
 		},
 		{
-			name:      "AuthError",
-			err:       NewAuthError("test", nil),
+			name:       "AuthError",
+			err:        NewAuthError("test", nil),
 			targetType: &AuthError{},
 		},
 		{
-			name:      "NotFoundError",
-			err:       NewNotFoundError("test"),
+			name:       "NotFoundError",
+			err:        NewNotFoundError("test"),
 			targetType: &NotFoundError{},
 		},
 		{
-			name:      "TimeoutError",
-			err:       NewTimeoutError("test", nil),
+			name:       "TimeoutError",
+			err:        NewTimeoutError("test", nil),
 			targetType: &TimeoutError{},
 		},
 	}

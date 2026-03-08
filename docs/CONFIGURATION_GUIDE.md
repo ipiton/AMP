@@ -1,6 +1,6 @@
 # 📝 Configuration Guide
 
-**Date:** 9 декабря 2024
+**Date:** 8 марта 2026
 **Version:** 1.0.0
 **Status:** ✅ Production-Ready
 
@@ -47,7 +47,7 @@ This separation follows industry best practices (Prometheus, Grafana, Kubernetes
 - ✅ Separation of concerns
 - ✅ Hot reload for routing changes
 - ✅ Security (sensitive data separate)
-- ✅ Alertmanager compatibility
+- ✅ Core non-deprecated Alertmanager API compatibility baseline
 - ✅ Version control friendly
 
 ---
@@ -61,7 +61,7 @@ Infrastructure and application settings.
 ### Location
 
 ```
-/Users/vitaliisemenov/Documents/Helpfull/AMP-OSS/
+AMP/
 ├── config.yaml.example  ← Template
 └── config.yaml          ← Your config (create from example)
 ```
@@ -85,7 +85,7 @@ storage:
 # Server Configuration
 # ============================================================================
 server:
-  port: 8080
+  port: 9093
   host: 0.0.0.0
   read_timeout: 30s
   write_timeout: 30s
@@ -175,8 +175,30 @@ retry:
 telemetry:
   enabled: false  # Set to true to enable distributed tracing
   endpoint: localhost:4317
-  service_name: alert-history-service
+  service_name: amp-service
   sampling_ratio: 1.0
+
+# ============================================================================
+# Dynamic Publishing Runtime (Standard profile)
+# ============================================================================
+publishing:
+  enabled: true
+  discovery:
+    namespace: monitoring
+    label_selector: publishing-target=true
+  queue:
+    max_concurrent: 5
+    worker_count: 10
+    max_retries: 3
+    retry_interval: 2s
+  refresh:
+    enabled: true
+    interval: 5m
+    timeout: 30s
+  health:
+    enabled: true
+    check_interval: 2m
+    http_timeout: 5s
 ```
 
 ### Usage
@@ -207,13 +229,62 @@ export LLM_API_KEY=sk-your-openai-key  # Optional
 
 **Requires:** Application restart
 
+### Dynamic Publishing Runtime
+
+`publishing.*` controls the real outbound delivery path used by the active runtime.
+
+- In `standard` profile AMP discovers publishing targets from Kubernetes Secrets and delivers alerts through the coordinator and queue.
+- In `lite`, with `publishing.enabled=false`, with zero enabled targets, or on stack initialization failure, AMP stays in explicit `metrics-only` mode.
+- Helm uses env overrides compatible with runtime config, including `PROFILE`, `APP_ENVIRONMENT`, `DATABASE_*`, `REDIS_ADDR`, `REDIS_PASSWORD`, and `PUBLISHING_*`.
+
+### Canonical Publishing Target Secret
+
+The runtime discovery contract is a Kubernetes Secret with label `publishing-target=true` and JSON payload in `data.config`.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: amp-rootly-target
+  namespace: monitoring
+  labels:
+    publishing-target: "true"
+type: Opaque
+data:
+  config: <base64(JSON)>
+```
+
+JSON inside `config`:
+
+```json
+{
+  "name": "rootly-production",
+  "type": "rootly",
+  "url": "https://api.rootly.com/v1/incidents",
+  "enabled": true,
+  "format": "rootly",
+  "headers": {
+    "Authorization": "Bearer <token>"
+  },
+  "filter_config": {
+    "severity": ["critical", "warning"],
+    "namespaces": ["production"]
+  }
+}
+```
+
+Notes:
+- When authoring YAML by hand, `stringData.config` is acceptable; Kubernetes will materialize it into `data.config`.
+- The Helm chart generates these canonical target secrets automatically from `.Values.publishingTargets`.
+- If no matching target secrets are discovered, the runtime remains in `metrics-only`.
+
 ---
 
 ## 📄 Config 2: Alertmanager Config (`alertmanager.yaml`)
 
 ### Purpose
 
-Alerting routing and notification receivers (100% Alertmanager-compatible).
+Alerting routing and notification receivers (Alertmanager-compatible core syntax).
 
 ### Location
 
@@ -328,15 +399,15 @@ inhibit_rules:
 **Option 1: Load via API (Hot Reload)**
 ```bash
 # Load configuration
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   -H "Content-Type: application/yaml" \
   --data-binary @alertmanager.yaml
 
 # Verify
-curl http://localhost:8080/api/v2/config
+curl http://localhost:9093/api/v2/config
 
 # Update without restart!
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @alertmanager-updated.yaml
 ```
 
@@ -345,7 +416,7 @@ curl -X POST http://localhost:8080/api/v2/config \
 # Create ConfigMap
 kubectl create configmap alertmanager-config \
   --from-file=alertmanager.yaml \
-  -n alert-history
+  -n monitoring
 
 # Application loads it automatically on startup
 ```
@@ -378,11 +449,11 @@ app:
 vi alertmanager.yaml
 
 # 2. Reload via API
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @alertmanager.yaml
 
 # 3. Verify
-curl http://localhost:8080/api/v2/config/status
+curl http://localhost:9093/api/v2/config/status
 
 # Application continues running! ✨
 ```
@@ -391,11 +462,39 @@ curl http://localhost:8080/api/v2/config/status
 
 ```bash
 # Rollback to previous version
-curl -X POST http://localhost:8080/api/v2/config/rollback
+curl -X POST http://localhost:9093/api/v2/config/rollback
+
+# Rollback to a specific successful revision from history
+curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>"
 
 # View config history
-curl http://localhost:8080/api/v2/config/history
+curl http://localhost:9093/api/v2/config/history
+
+# View only failed apply attempts
+curl "http://localhost:9093/api/v2/config/history?status=failed"
+
+# View history for specific apply source
+curl "http://localhost:9093/api/v2/config/history?source=rollback"
+
+# List unique successful revisions for rollback target selection
+curl "http://localhost:9093/api/v2/config/revisions?limit=20"
+
+# Prune old revision targets (keep N newest unique successful revisions)
+curl -X DELETE "http://localhost:9093/api/v2/config/revisions/prune?keep=20"
+
+# Preview prune result without applying changes
+curl -X DELETE "http://localhost:9093/api/v2/config/revisions/prune?keep=20&dryRun=true"
+
+# Preview rollback result without applying changes
+curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>&dryRun=true"
 ```
+
+If there is no previous successful revision, rollback returns `409 Conflict`.
+Rollback by hash returns `400 Bad Request` for invalid hash and `404 Not Found` when the revision is absent.
+History supports filters: `status=ok|failed` and `source=<startup|api|reload|rollback>`.
+Revisions endpoint returns unique successful hashes with `isCurrent` marker.
+Revision prune endpoint keeps current active revision and trims older rollback targets.
+Rollback and prune support `dryRun=true` for non-mutating preview mode.
 
 ---
 
@@ -454,7 +553,7 @@ storage:
   filesystem_path: /tmp/alerthistory.db
 
 server:
-  port: 8080
+  port: 9093
 
 log:
   level: debug
@@ -475,7 +574,7 @@ receivers:
 **Start:**
 ```bash
 ./amp-server --config config.yaml
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @alertmanager.yaml
 ```
 
@@ -503,7 +602,7 @@ redis:
   pool_size: 20
 
 server:
-  port: 8080
+  port: 9093
 
 log:
   level: info
@@ -513,6 +612,21 @@ telemetry:
   enabled: true
   endpoint: jaeger-collector:4317
   sampling_ratio: 0.1  # 10% sampling
+
+publishing:
+  enabled: true
+  discovery:
+    namespace: monitoring
+    label_selector: publishing-target=true
+  queue:
+    max_concurrent: 5
+    worker_count: 10
+  refresh:
+    enabled: true
+    interval: 5m
+  health:
+    enabled: true
+    check_interval: 2m
 
 llm:
   enabled: true
@@ -585,7 +699,10 @@ kubectl create configmap amp-config \
 kubectl create configmap alertmanager-config \
   --from-file=alertmanager.yaml
 
-helm install amp ./helm/amp -n monitoring
+helm install amp ./helm/amp -n monitoring -f values-production.yaml
+
+# Verify runtime-discoverable publishing targets exist
+kubectl get secret -n monitoring -l publishing-target=true
 ```
 
 ---
@@ -601,6 +718,7 @@ helm install amp ./helm/amp -n monitoring
 | `server` | HTTP server | Yes | Yes |
 | `database` | PostgreSQL | Conditional | Yes |
 | `redis` | Redis cache | Optional | Yes |
+| `app` | App identity and environment | Optional | Yes |
 | `llm` | AI classification | Optional | Yes |
 | `log` | Logging | Yes | Yes |
 | `metrics` | Prometheus | Yes | Yes |
@@ -608,6 +726,7 @@ helm install amp ./helm/amp -n monitoring
 | `http_client` | HTTP client | Yes | Yes |
 | `retry` | Retry strategy | Yes | Yes |
 | `telemetry` | OpenTelemetry | Optional | Yes |
+| `publishing` | Runtime delivery, discovery, queue, refresh, health | Optional | Yes |
 
 ### Alertmanager Config Fields
 
@@ -736,7 +855,7 @@ spec:
 **Load alertmanager.yaml:**
 ```bash
 # Via init container or API call
-kubectl exec -it amp-0 -- curl -X POST http://localhost:8080/api/v2/config \
+kubectl exec -it amp-0 -- curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @/etc/alertmanager/alertmanager.yaml
 ```
 
@@ -760,7 +879,7 @@ export REDIS_PASSWORD=secret
 /usr/local/bin/amp-server --config /etc/amp/config.yaml
 
 # 4. Load alerting config
-curl -X POST http://localhost:8080/api/v2/config \
+curl -X POST http://localhost:9093/api/v2/config \
   --data-binary @/etc/amp/alertmanager.yaml
 ```
 
@@ -770,7 +889,7 @@ curl -X POST http://localhost:8080/api/v2/config \
 
 - **`config.yaml.example`** - Full application config example
 - **`go-app/internal/infrastructure/routing/testdata/production.yaml`** - Full alertmanager config example
-- **`docs/ALERTMANAGER_COMPATIBILITY.md`** - API compatibility guide
+- **`docs/ALERTMANAGER_COMPATIBILITY.md`** - API compatibility guide (contract-locked core method matrix)
 - **`helm/amp/DEPLOYMENT.md`** - Kubernetes deployment guide
 - **`docs/MIGRATION_QUICK_START.md`** - Migration from Alertmanager
 
@@ -800,7 +919,7 @@ curl -X POST http://localhost:8080/api/v2/config \
 - ✅ Separation of concerns
 - ✅ Hot reload support
 - ✅ Security (secrets separate)
-- ✅ Alertmanager compatibility
+- ✅ Core non-deprecated Alertmanager API compatibility baseline
 - ✅ Flexible management
 
 ---

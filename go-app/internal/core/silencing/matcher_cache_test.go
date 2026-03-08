@@ -364,7 +364,7 @@ func BenchmarkRegexCache_Get_CacheMiss(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		pattern := string(rune('a' + (i % 26))) + string(rune('0' + (i % 10)))
+		pattern := string(rune('a'+(i%26))) + string(rune('0'+(i%10)))
 		_, err := cache.Get(pattern)
 		if err != nil {
 			b.Fatal(err)

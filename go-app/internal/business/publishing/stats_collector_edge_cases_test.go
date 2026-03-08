@@ -43,7 +43,7 @@ func TestEdgeCase_NilContext(t *testing.T) {
 
 	collector := NewPublishingMetricsCollector()
 	mockCollector := &NamedCollector{
-		name: "TestCollector",
+		name:    "TestCollector",
 		metrics: map[string]float64{"test": 1.0},
 	}
 	collector.RegisterCollector(mockCollector)
@@ -114,11 +114,11 @@ func TestEdgeCase_VeryLargeMetricValues(t *testing.T) {
 	collector := &NamedCollector{
 		name: "ExtremeValues",
 		metrics: map[string]float64{
-			"very_large":    1e308,          // Near float64 max
-			"very_small":    1e-308,         // Near float64 min
+			"very_large":    1e308,  // Near float64 max
+			"very_small":    1e-308, // Near float64 min
 			"zero":          0.0,
 			"negative_zero": -0.0,
-			"infinity":      math.Inf(1),    // Positive infinity
+			"infinity":      math.Inf(1), // Positive infinity
 		},
 	}
 
@@ -139,13 +139,13 @@ func TestEdgeCase_SpecialCharactersInMetricNames(t *testing.T) {
 	collector := &NamedCollector{
 		name: "SpecialChars",
 		metrics: map[string]float64{
-			"metric_with_spaces":           1.0,
-			"metric-with-dashes":           2.0,
-			"metric.with.dots":             3.0,
-			"metric{with=\"labels\"}":      4.0,
-			"metric/with/slashes":          5.0,
-			"metric:with:colons":           6.0,
-			"метрика_с_unicode":            7.0, // Cyrillic
+			"metric_with_spaces":      1.0,
+			"metric-with-dashes":      2.0,
+			"metric.with.dots":        3.0,
+			"metric{with=\"labels\"}": 4.0,
+			"metric/with/slashes":     5.0,
+			"metric:with:colons":      6.0,
+			"метрика_с_unicode":       7.0, // Cyrillic
 		},
 	}
 

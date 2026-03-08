@@ -9,9 +9,9 @@ import (
 
 func TestSanitizeURL(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		contains string
+		name        string
+		input       string
+		contains    string
 		notContains string
 	}{
 		{
@@ -52,8 +52,8 @@ func TestSanitizeURL(t *testing.T) {
 
 func TestIsSensitiveHeader(t *testing.T) {
 	tests := []struct {
-		name       string
-		header     string
+		name        string
+		header      string
 		isSensitive bool
 	}{
 		{"Authorization", "Authorization", true},
@@ -75,8 +75,8 @@ func TestIsSensitiveHeader(t *testing.T) {
 
 func TestIsSecretReference(t *testing.T) {
 	tests := []struct {
-		name         string
-		value        string
+		name        string
+		value       string
 		isSecretRef bool
 	}{
 		{"env var format", "${API_KEY}", true},

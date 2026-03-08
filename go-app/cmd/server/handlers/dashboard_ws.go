@@ -78,11 +78,11 @@ func (h *DashboardWebSocketHub) BroadcastDashboardEvent(eventType string, data m
 
 // WebSocketBroadcastSubscriber is a subscriber that broadcasts EventBus events to WebSocket clients.
 type WebSocketBroadcastSubscriber struct {
-	hub    *WebSocketHub
-	logger *slog.Logger
+	hub     *WebSocketHub
+	logger  *slog.Logger
 	metrics *realtime.RealtimeMetrics
-	id     string
-	ctx    context.Context
+	id      string
+	ctx     context.Context
 }
 
 // NewWebSocketBroadcastSubscriber creates a new WebSocket broadcast subscriber.
@@ -92,11 +92,11 @@ func NewWebSocketBroadcastSubscriber(
 	metrics *realtime.RealtimeMetrics,
 ) *WebSocketBroadcastSubscriber {
 	return &WebSocketBroadcastSubscriber{
-		hub:    hub,
-		logger: logger.With("component", "ws_broadcast_subscriber"),
+		hub:     hub,
+		logger:  logger.With("component", "ws_broadcast_subscriber"),
 		metrics: metrics,
-		id:     "ws-broadcast-subscriber",
-		ctx:    context.Background(),
+		id:      "ws-broadcast-subscriber",
+		ctx:     context.Background(),
 	}
 }
 
@@ -147,8 +147,8 @@ type RateLimiter struct {
 func NewRateLimiter(maxPerIP int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
 		connections: make(map[string][]time.Time),
-		maxPerIP:   maxPerIP,
-		window:     window,
+		maxPerIP:    maxPerIP,
+		window:      window,
 	}
 }
 

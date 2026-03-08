@@ -89,8 +89,9 @@ func (e ValidationErrors) ToError() error {
 //   - errOrField: can be either a ValidationError or a field name (string)
 //
 // Usage:
-//   errors.AddError(validationError)                // Add ValidationError directly
-//   errors.AddError(field, err)                      // Add error for field
+//
+//	errors.AddError(validationError)                // Add ValidationError directly
+//	errors.AddError(field, err)                      // Add error for field
 func (e *ValidationErrors) AddError(args ...interface{}) {
 	if len(args) == 0 {
 		return
@@ -168,8 +169,9 @@ func NewParseError(field, value string, err error) *ParseError {
 
 // NewValidationError creates a new ValidationError.
 // Can be called with 3 or 4 arguments:
-//   NewValidationError(field, message, value)
-//   NewValidationError(field, message, value, rule)
+//
+//	NewValidationError(field, message, value)
+//	NewValidationError(field, message, value, rule)
 func NewValidationError(field, message, value string, rule ...string) ValidationError {
 	ve := ValidationError{
 		Field:   field,

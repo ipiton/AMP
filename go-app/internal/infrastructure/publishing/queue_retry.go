@@ -96,9 +96,9 @@ func ShouldRetry(errorType QueueErrorType, currentAttempt int, maxRetries int) b
 
 // RetryResult represents the outcome of a retry operation
 type RetryResult struct {
-	Success       bool          // Whether the operation succeeded
-	TotalAttempts int           // Total number of attempts made
-	TotalDuration time.Duration // Total duration including backoffs
-	LastError     error         // Last error encountered (nil if success)
+	Success       bool           // Whether the operation succeeded
+	TotalAttempts int            // Total number of attempts made
+	TotalDuration time.Duration  // Total duration including backoffs
+	LastError     error          // Last error encountered (nil if success)
 	ErrorType     QueueErrorType // Classified error type
 }

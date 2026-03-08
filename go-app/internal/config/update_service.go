@@ -44,12 +44,12 @@ type DefaultConfigUpdateService struct {
 	versionMu      sync.RWMutex
 
 	// Dependencies
-	storage    ConfigStorage
-	validator  *DefaultConfigValidator
-	comparator *DefaultConfigComparator
-	reloader   *DefaultConfigReloader
+	storage     ConfigStorage
+	validator   *DefaultConfigValidator
+	comparator  *DefaultConfigComparator
+	reloader    *DefaultConfigReloader
 	lockManager LockManager
-	logger     *slog.Logger
+	logger      *slog.Logger
 }
 
 // NewConfigUpdateService creates a new ConfigUpdateService instance
@@ -67,7 +67,7 @@ func NewConfigUpdateService(
 	}
 
 	return &DefaultConfigUpdateService{
-		currentConfig: currentConfig,
+		currentConfig:  currentConfig,
 		currentVersion: 0, // Will be initialized from storage
 		storage:        storage,
 		validator:      validator,

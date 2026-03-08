@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,11 +41,11 @@ type JobState int
 
 const (
 	JobStateQueued     JobState = iota // Job submitted to queue
-	JobStateProcessing                  // Worker picked up job
-	JobStateRetrying                    // Job failed, retrying
-	JobStateSucceeded                   // Job completed successfully
-	JobStateFailed                      // Job failed (permanent error)
-	JobStateDLQ                         // Job sent to DLQ after max retries
+	JobStateProcessing                 // Worker picked up job
+	JobStateRetrying                   // Job failed, retrying
+	JobStateSucceeded                  // Job completed successfully
+	JobStateFailed                     // Job failed (permanent error)
+	JobStateDLQ                        // Job sent to DLQ after max retries
 )
 
 func (s JobState) String() string {
@@ -70,9 +71,9 @@ func (s JobState) String() string {
 type QueueErrorType int
 
 const (
-	QueueErrorTypeUnknown    QueueErrorType = iota // Default, retry with caution
-	QueueErrorTypeTransient                        // Network timeout, rate limit, 502/503/504 → RETRY
-	QueueErrorTypePermanent                        // 400 bad request, 401 unauthorized, 404 → NO RETRY
+	QueueErrorTypeUnknown   QueueErrorType = iota // Default, retry with caution
+	QueueErrorTypeTransient                       // Network timeout, rate limit, 502/503/504 → RETRY
+	QueueErrorTypePermanent                       // 400 bad request, 401 unauthorized, 404 → NO RETRY
 )
 
 func (e QueueErrorType) String() string {
@@ -111,20 +112,23 @@ type PublishingQueue struct {
 	mediumPriorityJobs chan *PublishingJob
 	lowPriorityJobs    chan *PublishingJob
 
-	factory           *PublisherFactory
-	dlqRepository     DLQRepository     // Dead Letter Queue for failed jobs
-	jobTrackingStore  JobTrackingStore  // LRU cache for job status tracking
-	modeManager       ModeManager       // TN-060: Mode manager for metrics-only fallback
-	maxRetries        int
-	retryInterval     time.Duration
-	workerCount       int
-	logger            *slog.Logger
-	metrics           *v2.PublishingMetrics // v2 metrics for queue operations
-	wg                sync.WaitGroup
-	ctx               context.Context
-	cancel            context.CancelFunc
-	circuitBreakers   map[string]*CircuitBreaker
-	mu                sync.RWMutex
+	factory          *PublisherFactory
+	dlqRepository    DLQRepository    // Dead Letter Queue for failed jobs
+	jobTrackingStore JobTrackingStore // LRU cache for job status tracking
+	modeManager      ModeManager      // TN-060: Mode manager for metrics-only fallback
+	maxRetries       int
+	retryInterval    time.Duration
+	workerCount      int
+	logger           *slog.Logger
+	metrics          *v2.PublishingMetrics // v2 metrics for queue operations
+	wg               sync.WaitGroup
+	ctx              context.Context
+	cancel           context.CancelFunc
+	circuitBreakers  map[string]*CircuitBreaker
+	mu               sync.RWMutex
+	totalSubmitted   atomic.Int64
+	totalCompleted   atomic.Int64
+	totalFailed      atomic.Int64
 }
 
 // PublishingQueueConfig holds configuration for publishing queue
@@ -268,6 +272,8 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 	// Submit to queue
 	select {
 	case targetQueue <- job:
+		q.totalSubmitted.Add(1)
+
 		// Update metrics
 		if q.metrics != nil {
 			q.metrics.RecordQueueSubmission(priority.String(), true)
@@ -279,15 +285,15 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 			q.jobTrackingStore.Add(job)
 		}
 
-	// Level guard: avoid expensive string formatting in production
-	if q.logger.Enabled(q.ctx, slog.LevelDebug) {
-		q.logger.Debug("Job submitted",
-			"job_id", jobID,
-			"priority", priority,
-			"target", target.Name,
-			"fingerprint", enrichedAlert.Alert.Fingerprint,
-		)
-	}
+		// Level guard: avoid expensive string formatting in production
+		if q.logger.Enabled(q.ctx, slog.LevelDebug) {
+			q.logger.Debug("Job submitted",
+				"job_id", jobID,
+				"priority", priority,
+				"target", target.Name,
+				"fingerprint", enrichedAlert.Alert.Fingerprint,
+			)
+		}
 		return nil
 	case <-q.ctx.Done():
 		if q.metrics != nil {
@@ -369,18 +375,18 @@ func (q *PublishingQueue) worker(id int) {
 				continue
 			}
 
-		// Update worker metrics (v2 API uses Inc/Dec pattern)
-		if q.metrics != nil {
-			q.metrics.RecordWorkerActive()
-		}
+			// Update worker metrics (v2 API uses Inc/Dec pattern)
+			if q.metrics != nil {
+				q.metrics.RecordWorkerActive()
+			}
 
 			// Process job
 			q.processJob(job)
 
-		// Update worker metrics (v2 API uses Inc/Dec pattern)
-		if q.metrics != nil {
-			q.metrics.RecordWorkerIdle()
-		}
+			// Update worker metrics (v2 API uses Inc/Dec pattern)
+			if q.metrics != nil {
+				q.metrics.RecordWorkerIdle()
+			}
 
 			// Update queue size metric
 			if q.metrics != nil {
@@ -422,12 +428,24 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	// Create publisher
 	publisher, err := q.factory.CreatePublisher(job.Target.Type)
 	if err != nil {
+		job.State = JobStateFailed
+		now := time.Now()
+		job.CompletedAt = &now
+		job.LastError = err
+		q.totalFailed.Add(1)
+
 		q.logger.Error("Failed to create publisher",
 			"target", job.Target.Name,
 			"type", job.Target.Type,
 			"error", err,
 		)
 		cb.RecordFailure()
+		if q.metrics != nil {
+			q.metrics.RecordJobFailure(job.Target.Name)
+		}
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Add(job)
+		}
 		return
 	}
 
@@ -437,17 +455,19 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	duration := time.Since(startTime).Seconds()
 
 	if err != nil {
+		q.totalFailed.Add(1)
+
 		q.logger.Error("Failed to publish after retries",
 			"job_id", job.ID,
 			"target", job.Target.Name,
 			"fingerprint", job.EnrichedAlert.Alert.Fingerprint,
 			"error", err,
 		)
-	cb.RecordFailure()
-	if q.metrics != nil {
-		// v2 API: RecordJobFailure(target string)
-		q.metrics.RecordJobFailure(job.Target.Name)
-	}
+		cb.RecordFailure()
+		if q.metrics != nil {
+			// v2 API: RecordJobFailure(target string)
+			q.metrics.RecordJobFailure(job.Target.Name)
+		}
 
 		// Send to Dead Letter Queue
 		if q.dlqRepository != nil {
@@ -473,17 +493,19 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 			}
 		}
 	} else {
+		q.totalCompleted.Add(1)
+
 		q.logger.Info("Alert published successfully",
 			"job_id", job.ID,
 			"target", job.Target.Name,
 			"fingerprint", job.EnrichedAlert.Alert.Fingerprint,
 			"queue_time", time.Since(job.SubmittedAt),
 		)
-	cb.RecordSuccess()
-	if q.metrics != nil {
-		// v2 API: RecordJobSuccess(target, priority string, duration time.Duration)
-		q.metrics.RecordJobSuccess(job.Target.Name, job.Priority.String(), time.Duration(duration*float64(time.Second)))
-	}
+		cb.RecordSuccess()
+		if q.metrics != nil {
+			// v2 API: RecordJobSuccess(target, priority string, duration time.Duration)
+			q.metrics.RecordJobSuccess(job.Target.Name, job.Priority.String(), time.Duration(duration*float64(time.Second)))
+		}
 
 		// Track success state (updated in retryPublish)
 		if q.jobTrackingStore != nil {
@@ -580,22 +602,16 @@ func (q *PublishingQueue) GetStats() QueueStats {
 	}
 
 	stats := QueueStats{
-		TotalSize:    q.GetQueueSize(),
-		HighPriority: q.GetQueueSizeByPriority(PriorityHigh),
-		MedPriority:  q.GetQueueSizeByPriority(PriorityMedium),
-		LowPriority:  q.GetQueueSizeByPriority(PriorityLow),
-		Capacity:     q.GetQueueCapacity(),
-		WorkerCount:  q.workerCount,
-		ActiveJobs:   activeJobs, // Now tracked via JobTrackingStore
-	}
-
-	// Get metrics if available
-	if q.metrics != nil {
-		// Prometheus metrics can't be read directly, so we return 0s
-		// These would need to be tracked separately if needed
-		stats.TotalSubmitted = 0
-		stats.TotalCompleted = 0
-		stats.TotalFailed = 0
+		TotalSize:      q.GetQueueSize(),
+		HighPriority:   q.GetQueueSizeByPriority(PriorityHigh),
+		MedPriority:    q.GetQueueSizeByPriority(PriorityMedium),
+		LowPriority:    q.GetQueueSizeByPriority(PriorityLow),
+		Capacity:       q.GetQueueCapacity(),
+		WorkerCount:    q.workerCount,
+		ActiveJobs:     activeJobs, // Now tracked via JobTrackingStore
+		TotalSubmitted: q.totalSubmitted.Load(),
+		TotalCompleted: q.totalCompleted.Load(),
+		TotalFailed:    q.totalFailed.Load(),
 	}
 
 	return stats
@@ -650,10 +666,10 @@ func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *Publishing
 			}
 
 			// Record metrics
-		if q.metrics != nil {
-			// v2 API: RecordRetryAttempt(target, errorType string)
-			q.metrics.RecordRetryAttempt(job.Target.Name, errorType.String())
-		}
+			if q.metrics != nil {
+				// v2 API: RecordRetryAttempt(target, errorType string)
+				q.metrics.RecordRetryAttempt(job.Target.Name, errorType.String())
+			}
 
 			return publishErr
 		}

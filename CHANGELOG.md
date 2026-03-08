@@ -8,11 +8,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Go Toolchain Baseline Updated** - Project runtime/build baseline raised to Go 1.26 (2026-02-27)
+  - `go-app/go.mod` now declares `go 1.26.0`
+  - Docker builder image updated to `golang:1.26-alpine`
+- **LLM Provider API Baseline** - LLM HTTP client now supports provider-aware endpoints (2026-02-27)
+  - added `llm.provider` routing in client config (`proxy` and `openai`)
+  - `provider=proxy` keeps legacy endpoints (`POST /classify`, `GET /health`)
+  - `provider=openai` uses OpenAI-compatible endpoints (`POST /chat/completions`, `GET /models`) and parses JSON classification payload from chat response
+  - service registry classification bootstrap now passes `llm.provider`, `llm.max_tokens`, `llm.temperature` into LLM client config
+  - added in-memory cache fallback for classification service bootstrap when Redis is unavailable
+  - added runtime endpoint `GET /api/v2/classification/stats` with active provider/API endpoints and supported-provider matrix
+  - added runtime endpoint `GET /api/v2/classification/health` with live health probe of active provider endpoint (`/health` or `/models`)
+  - `GET /api/dashboard/overview` now includes LLM provider and health snapshot fields (`llm_provider`, `llm_health_status`, `llm_health_endpoint`, `llm_healthy`)
+  - runtime config reload/apply/rollback now refreshes LLM provider snapshot used by classification stats endpoint
+  - added unit coverage for provider endpoint/header behavior and backward compatibility path
+- **Alertmanager Core Endpoint Matrix Gate** - Added explicit parity matrix test for non-deprecated endpoint surface (2026-02-28)
+  - added `TestUpstreamParity_CoreEndpointMethodMatrix` in `go-app/cmd/server/main_upstream_parity_regression_test.go`
+  - locks method/route contracts for `/api/v2/status`, `/api/v2/receivers`, `/api/v2/alerts`, `/api/v2/alerts/groups`, `/api/v2/silences`, `/api/v2/silence/{id}`, `/-/healthy`, `/-/ready`, `/-/reload`
+  - verifies allowed methods and disallowed `405` behavior on the same runtime matrix
 - **Metrics System v2 Migration** - Complete migration of Health and Refresh metrics to unified `pkg/metrics/v2` (2024-12-08)
   - Added 8 new Prometheus metrics for health and refresh monitoring
   - Removed deprecated stub metrics files
   - Unified API for all publishing metrics
   - Full documentation: `tasks/metrics-v2-full-migration/`
+- **Alertmanager Ops Compatibility Hardening** - Runtime contract aligned with upstream behavior (2026-02-26)
+  - `POST /-/reload` returns `200` with empty body on success
+  - `POST /-/reload` returns `500` on config reload/parse failures
+  - `/debug/*` switched from JSON stub to pprof-backed proxy behavior
+  - Added static compatibility routes: `/script.js`, `/favicon.ico`, `/lib/*`
+  - `GET /api/v2/status` cluster payload now follows upstream-like mode semantics:
+    - default runtime returns active single-node cluster shape with startup settling window (`status=settling` -> `status=ready`, self peer + name)
+    - default generated `cluster.name` now uses upstream-like ULID format when `AMP_CLUSTER_NAME` is not set
+    - `AMP_CLUSTER_LISTEN_ADDRESS=` (empty value) forces disabled shape (`status=disabled`, empty peers)
+  - `GET /api/v2/receivers` now returns only configured `receivers[*].name` values (no route-name expansion, no alert-label discovery fallback)
+  - `GET /api/v2/receivers` preserves runtime config receiver order (aligned with upstream response ordering)
+  - `GET /api/v2/alerts` and `GET /api/v2/alerts/groups` query parsing aligned closer to upstream runtime behavior:
+    - invalid state-flag bool values (`active/silenced/inhibited/unprocessed/muted`) now fall back to `false` when parameter is present
+    - invalid `status`/`resolved` query values no longer return `400` and are ignored (`200` response)
+    - `receiver` regex now uses upstream-like full-match semantics (`^(?:<query>)$`), not substring matching
+    - receiver is now always resolved via runtime route tree matchers (`match`/`match_re`/`matchers`) with `continue` support and fallback to root `route.receiver`; `labels.receiver` no longer overrides routing; multi-match routes produce multiple receivers in `GET /api/v2/alerts` and duplicated receiver groups in `GET /api/v2/alerts/groups`
+    - `GET /api/v2/alerts/groups` nested alert `receivers[]` is now sorted by receiver name (upstream-like), while top-level `GET /api/v2/alerts` keeps route-evaluation order
+    - invalid `receiver`/`filter` query errors now return upstream-like JSON string payloads on `400` (instead of object-wrapped errors)
+    - invalid `receiver` / `filter` error message text now matches upstream wording (`failed to parse receiver param: ...`, `bad matcher format: ...`)
+    - `GET /api/v2/alerts/groups` grouping labels now respect runtime `route.group_by` (including upstream-like empty `labels: {}` when `group_by` is omitted/empty in config)
+    - added upstream parity regression coverage for `route.group_by: ["..."]` (full-label grouping semantics)
+    - `GET /api/v2/alerts` list ordering aligned with upstream behavior (`fingerprint` ascending)
+  - API timestamps now use upstream-like millisecond precision (`.000Z`) for core runtime responses (`/api/v2/status` uptime, alerts/silences list payloads)
+  - `POST /api/v2/alerts` error contracts aligned closer to upstream runtime behavior:
+    - invalid JSON/time payloads return `{code:400,message}` on `400`
+    - invalid JSON object parse message now uses upstream-like payload type wording (`models.PostableAlerts`)
+    - missing `labels` returns `{code:602,message}` on `422`
+    - invalid `generatorURL` returns `{code:601,message}` on `422`
+    - empty `labels` returns upstream-like JSON string message on `400`
+    - date-only timestamps (`YYYY-MM-DD`) for `startsAt`/`endsAt` are now accepted (upstream-like ingest behavior)
+  - `DELETE /api/v2/silence/{id}` now returns `200` with empty body on success (upstream-like)
+  - `POST /api/v2/silences` error contracts moved closer to upstream runtime behavior:
+    - schema/required validation errors return `422` with `{code,message}` (for example `code=602/612`)
+    - update with unknown/invalid `id` returns `404` with JSON string payload (`"silence not found"`)
+    - create-time semantic validation keeps upstream-like JSON string payloads on `400` (e.g. invalid matcher regex, invalid timing)
+  - `GET /api/v2/silences?filter=...` now returns upstream-like JSON string payload for invalid matcher errors (`400`)
+  - `GET|DELETE /api/v2/silence/{id}` now return `422` + `{code,message}` for invalid UUID path values and `404` with empty body for unknown valid UUID (closer to upstream runtime behavior)
+  - `GET /api/v2/silences` and `GET /api/v2/silence/{id}` now always include `matchers[].isRegex` (including `false`)
+  - Added upstream parity regression coverage for reload/debug/static compatibility
+- **Runtime Config API Baseline** - Added minimal config read/write path in active runtime (2026-02-26)
+  - Added `GET /api/v2/config` (`format=json` default, `format=yaml`)
+  - Added `POST /api/v2/config` (payload validation, atomic file write, runtime apply of inhibition/receivers)
+  - Added `GET /api/v2/config/status` (last apply/reload result + source + timestamp + error + runtime counters)
+  - Added `GET /api/v2/config/history` (newest-first runtime apply timeline with `limit` and config hash)
+  - Added `POST /api/v2/config/rollback` (rollback to previous successful runtime revision; `409` when no previous revision exists)
+  - Extended rollback with target hash selection: `POST /api/v2/config/rollback?configHash=<sha256>` (`400` invalid hash, `404` unknown hash, `409` when target already active)
+  - Extended config history with filters: `GET /api/v2/config/history?status=ok|failed&source=<...>` for targeted audit and rollback prep
+  - Added `GET /api/v2/config/revisions` (unique successful revision catalog with `isCurrent` for rollback target selection)
+  - Added `DELETE /api/v2/config/revisions/prune?keep=<n>` to trim stale revision targets while keeping current active revision
+  - Added non-mutating preview mode: `dryRun=true` for `POST /api/v2/config/rollback` and `DELETE /api/v2/config/revisions/prune`
+  - `POST /api/v2/config` returns `400` for invalid payload, `413` for oversized payload, `405` for unsupported methods
+  - Added Phase0 contract coverage for route inventory, format handling, method contracts and runtime-apply semantics
 
 ### Improved
 - **Code Quality Refactoring** - Comprehensive refactoring achieving 160% quality target (2024-12-05)

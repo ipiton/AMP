@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -171,5 +172,59 @@ server:
 
 	cfg, err := LoadConfig(path)
 	require.Error(t, err, "validation should fail for invalid server.port")
+	assert.Nil(t, cfg)
+}
+
+func TestLoadConfigFromEnv_PublishingEnvMapping(t *testing.T) {
+	resetViper()
+	unsetEnvKeys(
+		"PROFILE",
+		"STORAGE_BACKEND",
+		"PUBLISHING_ENABLED",
+		"PUBLISHING_DISCOVERY_NAMESPACE",
+		"PUBLISHING_QUEUE_WORKER_COUNT",
+		"PUBLISHING_REFRESH_TIMEOUT",
+	)
+
+	require.NoError(t, os.Setenv("PROFILE", "lite"))
+	require.NoError(t, os.Setenv("STORAGE_BACKEND", "filesystem"))
+	require.NoError(t, os.Setenv("PUBLISHING_ENABLED", "true"))
+	require.NoError(t, os.Setenv("PUBLISHING_DISCOVERY_NAMESPACE", "sema-prod"))
+	require.NoError(t, os.Setenv("PUBLISHING_QUEUE_WORKER_COUNT", "7"))
+	require.NoError(t, os.Setenv("PUBLISHING_REFRESH_TIMEOUT", "45s"))
+	t.Cleanup(func() {
+		unsetEnvKeys(
+			"PROFILE",
+			"STORAGE_BACKEND",
+			"PUBLISHING_ENABLED",
+			"PUBLISHING_DISCOVERY_NAMESPACE",
+			"PUBLISHING_QUEUE_WORKER_COUNT",
+			"PUBLISHING_REFRESH_TIMEOUT",
+		)
+	})
+
+	cfg, err := LoadConfigFromEnv()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Publishing.Enabled)
+	assert.Equal(t, "sema-prod", cfg.Publishing.Discovery.Namespace)
+	assert.Equal(t, 7, cfg.Publishing.Queue.WorkerCount)
+	assert.Equal(t, 45*time.Second, cfg.Publishing.Refresh.Timeout)
+}
+
+func TestLoadConfig_ValidationError_PublishingQueue(t *testing.T) {
+	resetViper()
+
+	yaml := `
+profile: "lite"
+publishing:
+  enabled: true
+  queue:
+    worker_count: 0
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.Error(t, err)
 	assert.Nil(t, cfg)
 }

@@ -12,11 +12,11 @@ import (
 // Migrated to use pkg/retry for unified retry strategy (TN-057).
 //
 // This method:
-//   1. Attempts refresh (m.discovery.DiscoverTargets)
-//   2. On failure, classifies error (transient vs permanent)
-//   3. If transient, retries with exponential backoff (via pkg/retry)
-//   4. If permanent, fails immediately (no retry)
-//   5. Returns after maxRetries or success
+//  1. Attempts refresh (m.discovery.DiscoverTargets)
+//  2. On failure, classifies error (transient vs permanent)
+//  3. If transient, retries with exponential backoff (via pkg/retry)
+//  4. If permanent, fails immediately (no retry)
+//  5. Returns after maxRetries or success
 //
 // Error Classification:
 //   - Transient: Network timeout, connection refused, 503
@@ -40,8 +40,8 @@ func (m *DefaultRefreshManager) refreshWithRetry(ctx context.Context) error {
 		MaxAttempts:     m.config.MaxRetries,
 		BaseDelay:       m.config.BaseBackoff,
 		MaxDelay:        m.config.MaxBackoff,
-		Multiplier:      2.0, // Exponential backoff (30s → 1m → 2m → 4m → 5m)
-		JitterRatio:     0.1, // 10% jitter to prevent thundering herd
+		Multiplier:      2.0,                       // Exponential backoff (30s → 1m → 2m → 4m → 5m)
+		JitterRatio:     0.1,                       // 10% jitter to prevent thundering herd
 		ErrorClassifier: &refreshErrorClassifier{}, // Classify transient vs permanent
 		Logger:          m.logger,
 		OperationName:   "refresh_targets",

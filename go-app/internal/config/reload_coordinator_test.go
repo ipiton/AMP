@@ -85,10 +85,10 @@ func (m *MockConfigComparator) IsCriticalChange(diff *ConfigDiff) bool {
 
 // MockConfigStorage implements ConfigStorage interface for testing
 type MockConfigStorage struct {
-	SaveFunc        func(ctx context.Context, cfg *Config) (int64, error)
-	LoadFunc        func(ctx context.Context, version int64) (*Config, error)
-	BackupFunc      func(ctx context.Context, cfg *Config) error
-	GetHistoryFunc  func(ctx context.Context, limit int) ([]*ConfigVersion, error)
+	SaveFunc         func(ctx context.Context, cfg *Config) (int64, error)
+	LoadFunc         func(ctx context.Context, version int64) (*Config, error)
+	BackupFunc       func(ctx context.Context, cfg *Config) error
+	GetHistoryFunc   func(ctx context.Context, limit int) ([]*ConfigVersion, error)
 	SaveAuditLogFunc func(ctx context.Context, entry *AuditLogEntry) error
 }
 
@@ -379,7 +379,7 @@ func TestReloadCoordinator_ReloadFromFile_Success(t *testing.T) {
 		CompareFunc: func(oldCfg *Config, newCfg *Config, sections []string) (*ConfigDiff, error) {
 			// Return diff with changes
 			return &ConfigDiff{
-				Added:    make(map[string]interface{}),
+				Added: make(map[string]interface{}),
 				Modified: map[string]DiffEntry{
 					"server.port": {
 						OldValue: 8080,
@@ -526,9 +526,9 @@ func TestReloadCoordinator_identifyAffectedComponents(t *testing.T) {
 			name: "multiple changes affect multiple components",
 			diff: &ConfigDiff{
 				Modified: map[string]DiffEntry{
-					"route.receiver":    {OldValue: "old", NewValue: "new"},
-					"database.host":     {OldValue: "old", NewValue: "new"},
-					"llm.api_key":       {OldValue: "old", NewValue: "new"},
+					"route.receiver": {OldValue: "old", NewValue: "new"},
+					"database.host":  {OldValue: "old", NewValue: "new"},
+					"llm.api_key":    {OldValue: "old", NewValue: "new"},
 				},
 			},
 			expected: []string{"routing", "database", "llm"},
@@ -638,7 +638,7 @@ func TestReloadCoordinator_countSuccessful(t *testing.T) {
 		expected int
 	}{
 		{
-			name:     "all successful",
+			name: "all successful",
 			results: []ComponentReloadResult{
 				{Name: "routing", Success: true},
 				{Name: "receivers", Success: true},
@@ -655,7 +655,7 @@ func TestReloadCoordinator_countSuccessful(t *testing.T) {
 			expected: 2,
 		},
 		{
-			name:     "all failed",
+			name: "all failed",
 			results: []ComponentReloadResult{
 				{Name: "routing", Success: false},
 				{Name: "receivers", Success: false},

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // TestCachingMiddleware_CacheHit tests cache hit scenario
@@ -241,10 +241,10 @@ func TestInMemoryCache_Stats(t *testing.T) {
 	cache.Set("key2", map[string]any{}, 1*time.Minute)
 
 	// Generate hits and misses
-	cache.Get("key1")          // hit
-	cache.Get("key1")          // hit
-	cache.Get("nonexistent")   // miss
-	cache.Get("key2")          // hit
+	cache.Get("key1")        // hit
+	cache.Get("key1")        // hit
+	cache.Get("nonexistent") // miss
+	cache.Get("key2")        // hit
 
 	// Check stats
 	stats = cache.Stats()

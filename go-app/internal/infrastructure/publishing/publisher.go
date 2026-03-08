@@ -185,16 +185,16 @@ func (p *WebhookPublisher) Name() string {
 
 // PublisherFactory creates publishers based on target type
 type PublisherFactory struct {
-	formatter           AlertFormatter
-	logger              *slog.Logger
-	rootlyCache         IncidentIDCache                  // Shared Rootly incident cache
-	rootlyClientMap     map[string]RootlyIncidentsClient // Cache of Rootly clients by API key
-	pagerDutyCache      EventKeyCache                    // Shared PagerDuty event key cache
-	pagerDutyClientMap  map[string]PagerDutyEventsClient // Cache of PagerDuty clients by routing key
-	slackCache          MessageIDCache                   // Shared Slack message cache (for threading)
-	slackClientMap      map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL
-	slackCleanupWorker  func()                           // Slack cache cleanup worker cancel function
-	metrics             *v2.PublishingMetrics            // Unified publishing metrics (v2)
+	formatter          AlertFormatter
+	logger             *slog.Logger
+	rootlyCache        IncidentIDCache                  // Shared Rootly incident cache
+	rootlyClientMap    map[string]RootlyIncidentsClient // Cache of Rootly clients by API key
+	pagerDutyCache     EventKeyCache                    // Shared PagerDuty event key cache
+	pagerDutyClientMap map[string]PagerDutyEventsClient // Cache of PagerDuty clients by routing key
+	slackCache         MessageIDCache                   // Shared Slack message cache (for threading)
+	slackClientMap     map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL
+	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
+	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
 // NewPublisherFactory creates a new publisher factory with unified v2 metrics

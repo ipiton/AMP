@@ -31,9 +31,9 @@ func NewSARIFFormatter() OutputFormatter {
 
 // SARIF v2.1.0 structures (simplified)
 type SARIFOutput struct {
-	Schema  string      `json:"$schema"`
-	Version string      `json:"version"`
-	Runs    []SARIFRun  `json:"runs"`
+	Schema  string     `json:"$schema"`
+	Version string     `json:"version"`
+	Runs    []SARIFRun `json:"runs"`
 }
 
 type SARIFRun struct {
@@ -46,17 +46,17 @@ type SARIFTool struct {
 }
 
 type SARIFDriver struct {
-	Name            string      `json:"name"`
-	Version         string      `json:"version"`
-	InformationUri  string      `json:"informationUri"`
-	Rules           []SARIFRule `json:"rules"`
+	Name           string      `json:"name"`
+	Version        string      `json:"version"`
+	InformationUri string      `json:"informationUri"`
+	Rules          []SARIFRule `json:"rules"`
 }
 
 type SARIFRule struct {
-	ID      string          `json:"id"`
-	Name    string          `json:"name"`
-	ShortDescription SARIFMessage `json:"shortDescription"`
-	FullDescription  SARIFMessage `json:"fullDescription"`
+	ID                   string             `json:"id"`
+	Name                 string             `json:"name"`
+	ShortDescription     SARIFMessage       `json:"shortDescription"`
+	FullDescription      SARIFMessage       `json:"fullDescription"`
 	DefaultConfiguration SARIFConfiguration `json:"defaultConfiguration"`
 }
 
@@ -130,24 +130,24 @@ func (f *SARIFFormatter) Format(
 func buildRules() []SARIFRule {
 	return []SARIFRule{
 		{
-			ID:   "syntax-error",
-			Name: "Template Syntax Error",
-			ShortDescription: SARIFMessage{Text: "Go text/template syntax error"},
-			FullDescription:  SARIFMessage{Text: "Template contains invalid Go text/template syntax"},
+			ID:                   "syntax-error",
+			Name:                 "Template Syntax Error",
+			ShortDescription:     SARIFMessage{Text: "Go text/template syntax error"},
+			FullDescription:      SARIFMessage{Text: "Template contains invalid Go text/template syntax"},
 			DefaultConfiguration: SARIFConfiguration{Level: "error"},
 		},
 		{
-			ID:   "unknown-field",
-			Name: "Unknown Data Field",
-			ShortDescription: SARIFMessage{Text: "Field not in Alertmanager data model"},
-			FullDescription:  SARIFMessage{Text: "Template references a field that doesn't exist in Alertmanager data model"},
+			ID:                   "unknown-field",
+			Name:                 "Unknown Data Field",
+			ShortDescription:     SARIFMessage{Text: "Field not in Alertmanager data model"},
+			FullDescription:      SARIFMessage{Text: "Template references a field that doesn't exist in Alertmanager data model"},
 			DefaultConfiguration: SARIFConfiguration{Level: "error"},
 		},
 		{
-			ID:   "hardcoded-secret",
-			Name: "Hardcoded Secret",
-			ShortDescription: SARIFMessage{Text: "Hardcoded secret detected"},
-			FullDescription:  SARIFMessage{Text: "Template contains hardcoded secret (API key, password, token)"},
+			ID:                   "hardcoded-secret",
+			Name:                 "Hardcoded Secret",
+			ShortDescription:     SARIFMessage{Text: "Hardcoded secret detected"},
+			FullDescription:      SARIFMessage{Text: "Template contains hardcoded secret (API key, password, token)"},
 			DefaultConfiguration: SARIFConfiguration{Level: "error"},
 		},
 	}

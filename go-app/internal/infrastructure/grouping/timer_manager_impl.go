@@ -67,10 +67,10 @@ type DefaultTimerManager struct {
 	statsMu sync.RWMutex
 
 	// Lifecycle management
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	shutdown bool
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	shutdown   bool
 	shutdownMu sync.RWMutex
 
 	// Instance ID for distributed debugging

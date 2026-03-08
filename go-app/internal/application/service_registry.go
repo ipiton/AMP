@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"log/slog"
 
+	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/database/postgres"
+	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/ipiton/AMP/internal/infrastructure/k8s"
+	"github.com/ipiton/AMP/internal/infrastructure/llm"
+	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
+	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/pkg/metrics"
 )
 
@@ -25,9 +31,9 @@ import (
 //   - Handle graceful degradation (fallback to memory storage, etc.)
 //
 // Services are initialized in dependency order:
-//   1. Infrastructure (database, cache, metrics)
-//   2. Core services (alert processor, classification)
-//   3. Business services (publishing, silencing, grouping)
+//  1. Infrastructure (database, cache, metrics)
+//  2. Core services (alert processor, classification)
+//  3. Business services (publishing, silencing, grouping)
 type ServiceRegistry struct {
 	config *appconfig.Config
 	logger *slog.Logger
@@ -35,8 +41,12 @@ type ServiceRegistry struct {
 	// Infrastructure Services
 	database *postgres.PostgresPool
 	storage  core.AlertStorage
-	cache    core.Cache
+	cache    infrastructurecache.Cache
 	metrics  *metrics.BusinessMetrics
+
+	// Memory Stores (for Alertmanager compatibility mode)
+	alertStore   *memory.AlertStore
+	silenceStore *memory.SilenceStore
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -46,7 +56,16 @@ type ServiceRegistry struct {
 	publisher         services.Publisher
 
 	// Business Services
-	// (silencing, grouping, publishing, etc. - to be added)
+	k8sClient                  k8s.K8sClient
+	publishingDiscovery        businesspublishing.TargetDiscoveryManager
+	publishingDiscoveryAdapter *DiscoveryAdapter
+	publishingRefresh          businesspublishing.RefreshManager
+	publishingHealth           businesspublishing.HealthMonitor
+	publishingMode             infrapublishing.ModeManager
+	publishingQueue            *infrapublishing.PublishingQueue
+	publishingCoordinator      *infrapublishing.PublishingCoordinator
+	publishingMetricsCollector *businesspublishing.PublishingMetricsCollector
+	publisherFactory           *infrapublishing.PublisherFactory
 
 	// State
 	initialized bool
@@ -94,6 +113,11 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 		return fmt.Errorf("business services initialization failed: %w", err)
 	}
 
+	// Step 4: Initialize Alert Processor after publisher wiring is ready
+	if err := r.initializeAlertProcessor(ctx); err != nil {
+		return fmt.Errorf("alert processor initialization failed: %w", err)
+	}
+
 	r.initialized = true
 	r.logger.Info("✅ Service registry initialized successfully")
 	return nil
@@ -111,6 +135,11 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 	// Initialize Metrics first (needed by other services)
 	r.metrics = metrics.NewBusinessMetrics()
 	r.logger.Info("✅ Business Metrics initialized")
+
+	// Initialize Memory Stores (compatibility mode)
+	r.alertStore = memory.NewAlertStore()
+	r.silenceStore = memory.NewSilenceStore()
+	r.logger.Info("✅ Memory stores initialized (compatibility mode)")
 
 	// Initialize Database based on profile
 	if err := r.initializeDatabase(ctx); err != nil {
@@ -187,7 +216,7 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 	//     return fmt.Errorf("failed to create storage: %w", err)
 	// }
 	// r.storage = st
-	_ = ctx // Use ctx to avoid unused variable warning
+	_ = ctx         // Use ctx to avoid unused variable warning
 	r.storage = nil // Placeholder - storage not yet implemented
 	r.logger.Info("✅ Storage backend initialized",
 		"type", r.config.Profile,
@@ -198,8 +227,35 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 
 // initializeCache initializes the cache backend.
 func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
-	// TODO: Initialize Redis or Memory cache based on profile
-	r.logger.Info("Cache initialization skipped (TODO)")
+	r.logger.Info("Initializing cache backend...")
+
+	cacheConfig := &infrastructurecache.CacheConfig{
+		Addr:            r.config.Redis.Addr,
+		Password:        r.config.Redis.Password,
+		DB:              r.config.Redis.DB,
+		PoolSize:        r.config.Redis.PoolSize,
+		MinIdleConns:    r.config.Redis.MinIdleConns,
+		DialTimeout:     r.config.Redis.DialTimeout,
+		ReadTimeout:     r.config.Redis.ReadTimeout,
+		WriteTimeout:    r.config.Redis.WriteTimeout,
+		MaxRetries:      r.config.Redis.MaxRetries,
+		MinRetryBackoff: r.config.Redis.MinRetryBackoff,
+		MaxRetryBackoff: r.config.Redis.MaxRetryBackoff,
+	}
+
+	redisCache, err := infrastructurecache.NewRedisCache(cacheConfig, r.logger)
+	if err != nil {
+		r.logger.Warn("Redis cache unavailable, falling back to in-memory cache",
+			"error", err,
+			"addr", cacheConfig.Addr,
+		)
+		r.cache = infrastructurecache.NewMemoryCache(r.logger)
+		return nil
+	}
+
+	r.cache = redisCache
+	r.logger.Info("✅ Redis cache initialized", "addr", cacheConfig.Addr, "db", cacheConfig.DB)
+	_ = ctx
 	return nil
 }
 
@@ -211,14 +267,6 @@ func (r *ServiceRegistry) initializeCoreServices(ctx context.Context) error {
 	r.filterEngine = services.NewSimpleFilterEngine(r.logger)
 	r.logger.Info("✅ Filter Engine initialized")
 
-	// Initialize Publisher
-	// NOTE: SimplePublisher is a STUB for development only.
-	// In production, use PublisherFactory from infrastructure/publishing package.
-	r.publisher = services.NewSimplePublisher(r.logger,
-		services.WithEnvironment(r.config.App.Environment),
-	)
-	r.logger.Info("✅ Publisher initialized (STUB - development only)")
-
 	// Initialize Deduplication Service
 	if err := r.initializeDeduplication(ctx); err != nil {
 		r.logger.Warn("Deduplication service initialization failed", "error", err)
@@ -229,11 +277,6 @@ func (r *ServiceRegistry) initializeCoreServices(ctx context.Context) error {
 	if err := r.initializeClassification(ctx); err != nil {
 		r.logger.Warn("Classification service initialization failed", "error", err)
 		// Continue without classification (graceful degradation)
-	}
-
-	// Initialize Alert Processor (orchestrates all services)
-	if err := r.initializeAlertProcessor(ctx); err != nil {
-		return fmt.Errorf("alert processor initialization failed: %w", err)
 	}
 
 	r.logger.Info("✅ Core services initialized")
@@ -278,8 +321,47 @@ func (r *ServiceRegistry) initializeClassification(ctx context.Context) error {
 
 	r.logger.Info("Initializing Classification Service...")
 
-	// TODO: Initialize LLM client and classification service
-	r.logger.Info("Classification service initialization skipped (TODO)")
+	if r.cache == nil {
+		r.logger.Warn("Cache backend unavailable for classification, using in-memory cache fallback")
+		r.cache = infrastructurecache.NewMemoryCache(r.logger)
+	}
+
+	llmConfig := llm.DefaultConfig()
+	llmConfig.Provider = r.config.LLM.Provider
+	llmConfig.BaseURL = r.config.LLM.BaseURL
+	llmConfig.APIKey = r.config.LLM.APIKey
+	llmConfig.Model = r.config.LLM.Model
+	llmConfig.MaxTokens = r.config.LLM.MaxTokens
+	llmConfig.Temperature = r.config.LLM.Temperature
+	llmConfig.Timeout = r.config.LLM.Timeout
+	llmConfig.MaxRetries = r.config.LLM.MaxRetries
+
+	llmClient := llm.NewHTTPLLMClient(llmConfig, r.logger)
+
+	classificationConfig := services.DefaultClassificationConfig()
+	classificationConfig.EnableLLM = true
+	if r.config.LLM.Timeout > 0 {
+		classificationConfig.LLMTimeout = r.config.LLM.Timeout
+	}
+
+	svc, err := services.NewClassificationService(services.ClassificationServiceConfig{
+		LLMClient:       llmClient,
+		Cache:           r.cache,
+		Storage:         r.storage,
+		Config:          classificationConfig,
+		Logger:          r.logger,
+		BusinessMetrics: r.metrics,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create classification service: %w", err)
+	}
+
+	r.classificationSvc = svc
+	r.logger.Info("✅ Classification Service initialized",
+		"provider", llmConfig.Provider,
+		"model", llmConfig.Model,
+	)
+	_ = ctx
 	return nil
 }
 
@@ -289,6 +371,7 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 
 	config := services.AlertProcessorConfig{
 		FilterEngine:    r.filterEngine,
+		LLMClient:       r.classificationSvc,
 		Publisher:       r.publisher,
 		Deduplication:   r.deduplicationSvc,
 		BusinessMetrics: r.metrics,
@@ -310,8 +393,7 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 func (r *ServiceRegistry) initializeBusinessServices(ctx context.Context) error {
 	r.logger.Info("Initializing business services...")
 
-	// TODO: Initialize publishing, silencing, grouping, inhibition, etc.
-	r.logger.Info("Business services initialization skipped (TODO)")
+	r.initializePublishing(ctx)
 
 	r.logger.Info("✅ Business services initialized")
 	return nil
@@ -328,6 +410,8 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		r.logger.Info("Shutting down Alert Processor...")
 		// TODO: Add shutdown method
 	}
+
+	r.shutdownPublishing()
 
 	// Shutdown Database
 	if r.database != nil {
@@ -380,6 +464,26 @@ func (r *ServiceRegistry) FilterEngine() services.FilterEngine {
 
 func (r *ServiceRegistry) Publisher() services.Publisher {
 	return r.publisher
+}
+
+func (r *ServiceRegistry) PublishingMetricsCollector() *businesspublishing.PublishingMetricsCollector {
+	return r.publishingMetricsCollector
+}
+
+func (r *ServiceRegistry) Config() *appconfig.Config {
+	return r.config
+}
+
+func (r *ServiceRegistry) Logger() *slog.Logger {
+	return r.logger
+}
+
+func (r *ServiceRegistry) AlertStore() *memory.AlertStore {
+	return r.alertStore
+}
+
+func (r *ServiceRegistry) SilenceStore() *memory.SilenceStore {
+	return r.silenceStore
 }
 
 // Helper functions

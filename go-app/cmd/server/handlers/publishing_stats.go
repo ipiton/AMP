@@ -23,12 +23,12 @@ type MetricsCollectorInterface interface {
 // PublishingStatsHandler handles HTTP requests for publishing metrics & stats.
 //
 // This handler provides 6 REST endpoints:
-//   1. GET  /api/v1/publishing/stats         - Aggregated statistics (v1, backward compatibility)
-//   2. GET  /api/v2/publishing/metrics       - Raw metrics snapshot
-//   3. GET  /api/v2/publishing/stats         - Aggregated statistics (v2, enhanced)
-//   4. GET  /api/v2/publishing/stats/{target} - Per-target statistics
-//   5. GET  /api/v2/publishing/health        - System health summary
-//   6. GET  /api/v2/publishing/trends        - Trend analysis
+//  1. GET  /api/v1/publishing/stats         - Aggregated statistics (v1, backward compatibility)
+//  2. GET  /api/v2/publishing/metrics       - Raw metrics snapshot
+//  3. GET  /api/v2/publishing/stats         - Aggregated statistics (v2, enhanced)
+//  4. GET  /api/v2/publishing/stats/{target} - Per-target statistics
+//  5. GET  /api/v2/publishing/health        - System health summary
+//  6. GET  /api/v2/publishing/trends        - Trend analysis
 //
 // Query Parameters (v2 only):
 //   - filter: Filter by type or status (e.g., "type:rootly", "status:healthy")
@@ -39,9 +39,9 @@ type MetricsCollectorInterface interface {
 //
 // Thread-Safe: Yes (PublishingMetricsCollector is thread-safe)
 type PublishingStatsHandler struct {
-	collector      MetricsCollectorInterface
-	trendDetector  *publishing.TrendDetector
-	logger         *slog.Logger
+	collector     MetricsCollectorInterface
+	trendDetector *publishing.TrendDetector
+	logger        *slog.Logger
 }
 
 // NewPublishingStatsHandler creates a new handler.
@@ -363,7 +363,7 @@ func (h *PublishingStatsHandler) GetStats(w http.ResponseWriter, r *http.Request
 	queueStats := make(map[string]float64)
 
 	for key, value := range snapshot.Metrics {
-		if strings.Contains(key, "target") || strings.Contains(key, "health") || strings.Contains(key, "discovery") {
+		if strings.Contains(key, "target") || strings.Contains(key, "health") || strings.Contains(key, "discovery") || strings.Contains(key, "mode") {
 			targetStats[key] = value
 		} else if strings.Contains(key, "queue") || strings.Contains(key, "worker") || strings.Contains(key, "job") {
 			queueStats[key] = value
@@ -668,9 +668,9 @@ func (h *PublishingStatsHandler) GetTargetStats(w http.ResponseWriter, r *http.R
 
 // TrendsResponse represents trend analysis response.
 type TrendsResponse struct {
-	Timestamp time.Time                  `json:"timestamp"`
-	Trends    publishing.TrendAnalysis   `json:"trends"`
-	Summary   string                     `json:"summary"`
+	Timestamp time.Time                `json:"timestamp"`
+	Trends    publishing.TrendAnalysis `json:"trends"`
+	Summary   string                   `json:"summary"`
 }
 
 // GetTrends handles GET /api/v2/publishing/trends

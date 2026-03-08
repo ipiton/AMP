@@ -19,17 +19,17 @@ import (
 // DashboardAlertsHandler handles dashboard-specific alert endpoints.
 // Optimized for dashboard usage: compact format, fast response, optional classification.
 type DashboardAlertsHandler struct {
-	historyRepo          core.AlertHistoryRepository
+	historyRepo            core.AlertHistoryRepository
 	classificationEnricher ui.ClassificationEnricher // optional
-	cache                cache.Cache                    // optional, for response caching
-	logger               *slog.Logger
+	cache                  cache.Cache               // optional, for response caching
+	logger                 *slog.Logger
 }
 
 // NewDashboardAlertsHandler creates a new dashboard alerts handler.
 func NewDashboardAlertsHandler(
 	historyRepo core.AlertHistoryRepository,
 	classificationEnricher ui.ClassificationEnricher, // optional, can be nil
-	cache cache.Cache,                                  // optional, can be nil
+	cache cache.Cache, // optional, can be nil
 	logger *slog.Logger,
 ) *DashboardAlertsHandler {
 	if logger == nil {
@@ -37,20 +37,20 @@ func NewDashboardAlertsHandler(
 	}
 
 	return &DashboardAlertsHandler{
-		historyRepo:          historyRepo,
+		historyRepo:            historyRepo,
 		classificationEnricher: classificationEnricher,
-		cache:                cache,
-		logger:               logger,
+		cache:                  cache,
+		logger:                 logger,
 	}
 }
 
 // DashboardAlertResponse represents the response format for dashboard alerts endpoint.
 type DashboardAlertResponse struct {
-	Alerts    []DashboardAlert  `json:"alerts"`
-	Count     int               `json:"count"`
-	Limit     int               `json:"limit"`
-	Filters   *ResponseFilters  `json:"filters,omitempty"`
-	Timestamp string            `json:"timestamp"`
+	Alerts    []DashboardAlert `json:"alerts"`
+	Count     int              `json:"count"`
+	Limit     int              `json:"limit"`
+	Filters   *ResponseFilters `json:"filters,omitempty"`
+	Timestamp string           `json:"timestamp"`
 }
 
 // DashboardAlert represents a compact alert format for dashboard display.
@@ -76,15 +76,15 @@ type ClassificationSummary struct {
 
 // ResponseFilters represents applied filters in response.
 type ResponseFilters struct {
-	Status  string `json:"status,omitempty"`
+	Status   string `json:"status,omitempty"`
 	Severity string `json:"severity,omitempty"`
 }
 
 // QueryParams represents parsed query parameters.
 type QueryParams struct {
-	Limit                int
-	Status               string
-	Severity             string
+	Limit                 int
+	Status                string
+	Severity              string
 	IncludeClassification bool
 }
 
@@ -177,7 +177,7 @@ func (h *DashboardAlertsHandler) GetRecentAlerts(w http.ResponseWriter, r *http.
 func (h *DashboardAlertsHandler) parseQueryParams(r *http.Request) (*QueryParams, error) {
 	query := r.URL.Query()
 	params := &QueryParams{
-		Limit:                10, // default
+		Limit:                 10, // default
 		IncludeClassification: false,
 	}
 

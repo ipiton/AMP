@@ -11,14 +11,14 @@ func TestHealthStatusCache_GetSet(t *testing.T) {
 	cache := newHealthStatusCache()
 
 	status := &TargetHealthStatus{
-		TargetName:   "test-target",
-		TargetType:   "rootly",
-		Enabled:      true,
-		Status:       HealthStatusHealthy,
-		LatencyMs:    ptr(int64(123)),
-		LastCheck:    time.Now(),
-		TotalChecks:  100,
-		SuccessRate:  99.5,
+		TargetName:  "test-target",
+		TargetType:  "rootly",
+		Enabled:     true,
+		Status:      HealthStatusHealthy,
+		LatencyMs:   ptr(int64(123)),
+		LastCheck:   time.Now(),
+		TotalChecks: 100,
+		SuccessRate: 99.5,
 	}
 
 	// Test Set
@@ -280,9 +280,9 @@ func TestHealthStatusCache_Concurrent(t *testing.T) {
 
 			for j := 0; j < 100; j++ {
 				status := &TargetHealthStatus{
-					TargetName: "target" + string(rune('0'+id)),
-					Status:     HealthStatusHealthy,
-					LastCheck:  time.Now(),
+					TargetName:  "target" + string(rune('0'+id)),
+					Status:      HealthStatusHealthy,
+					LastCheck:   time.Now(),
 					TotalChecks: int64(j),
 				}
 				cache.Set(status)

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ipiton/AMP/internal/core"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // health_edge_cases_test.go - Edge case tests for Health Monitor
@@ -465,7 +465,7 @@ func TestHealthMonitor_ContextCancellation(t *testing.T) {
 	})
 
 	config := DefaultHealthConfig()
-	config.WarmupDelay = 0 // Skip warmup for tests
+	config.WarmupDelay = 0      // Skip warmup for tests
 	config.FailureThreshold = 1 // Mark unhealthy immediately
 	monitor, err := NewHealthMonitor(discovery, config, nil, metrics)
 	if err != nil {

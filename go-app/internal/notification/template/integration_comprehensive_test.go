@@ -243,7 +243,7 @@ func TestProcessSlackConfig_TemplateError(t *testing.T) {
 
 	config := &SlackConfig{
 		Channel: "#alerts",
-		Title:   "{{ .Invalid",  // Invalid template
+		Title:   "{{ .Invalid", // Invalid template
 	}
 
 	_, err = ProcessSlackConfig(ctx, engine, config, data)
@@ -323,7 +323,7 @@ func TestProcessPagerDutyConfig_TemplateError(t *testing.T) {
 		time.Now())
 
 	config := &PagerDutyConfig{
-		Summary: "{{ .Invalid",  // Invalid template
+		Summary: "{{ .Invalid", // Invalid template
 	}
 
 	_, err = ProcessPagerDutyConfig(ctx, engine, config, data)
@@ -426,7 +426,7 @@ func TestProcessEmailConfig_TemplateError(t *testing.T) {
 
 	config := &EmailConfig{
 		To:      []string{"test@example.com"},
-		Subject: "{{ .Invalid",  // Invalid template
+		Subject: "{{ .Invalid", // Invalid template
 	}
 
 	_, err = ProcessEmailConfig(ctx, engine, config, data)
@@ -509,7 +509,7 @@ func TestProcessWebhookConfig_TemplateError(t *testing.T) {
 	config := &WebhookConfig{
 		URL: "https://example.com/webhook",
 		Fields: map[string]string{
-			"field": "{{ .Invalid",  // Invalid template
+			"field": "{{ .Invalid", // Invalid template
 		},
 	}
 

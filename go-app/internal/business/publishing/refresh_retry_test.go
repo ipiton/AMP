@@ -41,7 +41,7 @@ func TestRefreshWithRetry_TransientError(t *testing.T) {
 	mock := &MockTargetDiscoveryManager{
 		targetCount:   5,
 		shouldFail:    true,
-		failureCount:  2,                             // Fail first 2 attempts, succeed on 3rd
+		failureCount:  2,                                // Fail first 2 attempts, succeed on 3rd
 		errorToReturn: errors.New("connection refused"), // Transient error
 	}
 
@@ -73,7 +73,7 @@ func TestRefreshWithRetry_PermanentError(t *testing.T) {
 	mock := &MockTargetDiscoveryManager{
 		targetCount:   5,
 		shouldFail:    true,
-		failureCount:  0,                         // Always fail
+		failureCount:  0,                              // Always fail
 		errorToReturn: errors.New("401 Unauthorized"), // Permanent error (auth failure)
 	}
 
@@ -105,7 +105,7 @@ func TestRefreshWithRetry_MaxRetriesExceeded(t *testing.T) {
 	mock := &MockTargetDiscoveryManager{
 		targetCount:   5,
 		shouldFail:    true,
-		failureCount:  0,                             // Always fail
+		failureCount:  0,                                // Always fail
 		errorToReturn: errors.New("connection timeout"), // Transient error
 	}
 
@@ -137,11 +137,11 @@ func TestRefreshWithRetry_MaxRetriesExceeded(t *testing.T) {
 // TestRefreshWithRetry_ContextCancellation tests context cancellation during retry.
 func TestRefreshWithRetry_ContextCancellation(t *testing.T) {
 	mock := &MockTargetDiscoveryManager{
-		targetCount:   5,
-		shouldFail:    true,
-		failureCount:  0,                             // Always fail
-		errorToReturn: errors.New("connection timeout"), // Transient error
-		ctxCancelCheck: true, // Enable context checking
+		targetCount:    5,
+		shouldFail:     true,
+		failureCount:   0,                                // Always fail
+		errorToReturn:  errors.New("connection timeout"), // Transient error
+		ctxCancelCheck: true,                             // Enable context checking
 	}
 
 	// Create config with longer backoff (to test cancellation during backoff)
@@ -175,7 +175,7 @@ func TestRefreshWithRetry_BackoffSchedule(t *testing.T) {
 	mock := &MockTargetDiscoveryManager{
 		targetCount:   5,
 		shouldFail:    true,
-		failureCount:  3,                             // Fail first 3 attempts
+		failureCount:  3,                                // Fail first 3 attempts
 		errorToReturn: errors.New("connection refused"), // Transient error
 	}
 

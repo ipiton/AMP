@@ -15,10 +15,10 @@ import (
 // ClassificationResult represents the AI classification output.
 type ClassificationResult struct {
 	// Primary classification
-	IncidentType string  `json:"incident_type"` // database, network, application, security, etc.
-	Severity     string  `json:"severity"`      // critical, high, medium, low
-	Urgency      string  `json:"urgency"`       // immediate, high, normal, low
-	Category     string  `json:"category"`      // performance, availability, security, compliance
+	IncidentType string `json:"incident_type"` // database, network, application, security, etc.
+	Severity     string `json:"severity"`      // critical, high, medium, low
+	Urgency      string `json:"urgency"`       // immediate, high, normal, low
+	Category     string `json:"category"`      // performance, availability, security, compliance
 
 	// Confidence scores (0.0 to 1.0)
 	TypeConfidence     float64 `json:"type_confidence"`
@@ -26,15 +26,15 @@ type ClassificationResult struct {
 	UrgencyConfidence  float64 `json:"urgency_confidence"`
 
 	// Routing suggestions
-	SuggestedTeam     string   `json:"suggested_team"`      // dba, network, security, ops
-	SuggestedPriority string   `json:"suggested_priority"`  // high, medium, low
-	SuggestedTargets  []string `json:"suggested_targets"`   // slack channels, pagerduty, etc.
+	SuggestedTeam     string   `json:"suggested_team"`     // dba, network, security, ops
+	SuggestedPriority string   `json:"suggested_priority"` // high, medium, low
+	SuggestedTargets  []string `json:"suggested_targets"`  // slack channels, pagerduty, etc.
 
 	// Analysis
-	IsAnomaly         bool    `json:"is_anomaly"`          // Unusual pattern detected
-	IsFalsePositive   bool    `json:"is_false_positive"`   // Likely false positive
-	RecommendedAction string  `json:"recommended_action"`  // Human-readable action
-	Reasoning         string  `json:"reasoning"`           // Why this classification
+	IsAnomaly         bool   `json:"is_anomaly"`         // Unusual pattern detected
+	IsFalsePositive   bool   `json:"is_false_positive"`  // Likely false positive
+	RecommendedAction string `json:"recommended_action"` // Human-readable action
+	Reasoning         string `json:"reasoning"`          // Why this classification
 
 	// Metadata
 	ModelVersion string    `json:"model_version"`

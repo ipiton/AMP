@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	templateEngine "github.com/ipiton/AMP/internal/notification/template"
 	"github.com/ipiton/AMP/internal/core/domain"
+	templateEngine "github.com/ipiton/AMP/internal/notification/template"
 )
 
 // ================================================================================

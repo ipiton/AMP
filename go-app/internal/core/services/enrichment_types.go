@@ -4,8 +4,8 @@ package services
 type EnrichmentMode string
 
 const (
-	EnrichmentModeEnriched                        EnrichmentMode = "enriched"
-	EnrichmentModeTransparent                     EnrichmentMode = "transparent"
+	EnrichmentModeEnriched                       EnrichmentMode = "enriched"
+	EnrichmentModeTransparent                    EnrichmentMode = "transparent"
 	EnrichmentModeTransparentWithRecommendations EnrichmentMode = "transparent_with_recommendations"
 )
 

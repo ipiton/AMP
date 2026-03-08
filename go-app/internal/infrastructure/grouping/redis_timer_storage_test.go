@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/ipiton/AMP/internal/infrastructure/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/infrastructure/cache"
 )
 
 // setupTestRedisStorage creates a test Redis storage with miniredis

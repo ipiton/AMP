@@ -44,22 +44,22 @@ type LabelMatcher struct {
 // PrometheusAlertsMetrics metrics
 type PrometheusAlertsMetrics struct{}
 
-func (m *PrometheusAlertsMetrics) IncrementConcurrent() {}
-func (m *PrometheusAlertsMetrics) DecrementConcurrent() {}
-func (m *PrometheusAlertsMetrics) RecordPayloadSize(size int) {}
+func (m *PrometheusAlertsMetrics) IncrementConcurrent()                                        {}
+func (m *PrometheusAlertsMetrics) DecrementConcurrent()                                        {}
+func (m *PrometheusAlertsMetrics) RecordPayloadSize(size int)                                  {}
 func (m *PrometheusAlertsMetrics) RecordAlerts(format string, received, processed, failed int) {}
-func (m *PrometheusAlertsMetrics) RecordProcessingError(errorType string) {}
-func (m *PrometheusAlertsMetrics) RecordValidationError(errorType string) {}
-func (m *PrometheusAlertsMetrics) RecordRequest(method string, duration float64) {}
+func (m *PrometheusAlertsMetrics) RecordProcessingError(errorType string)                      {}
+func (m *PrometheusAlertsMetrics) RecordValidationError(errorType string)                      {}
+func (m *PrometheusAlertsMetrics) RecordRequest(method string, duration float64)               {}
 
 type PrometheusQueryMetrics struct{}
 
-func (m *PrometheusQueryMetrics) IncrementConcurrent() {}
-func (m *PrometheusQueryMetrics) DecrementConcurrent() {}
+func (m *PrometheusQueryMetrics) IncrementConcurrent()                                         {}
+func (m *PrometheusQueryMetrics) DecrementConcurrent()                                         {}
 func (m *PrometheusQueryMetrics) RecordRequest(status string, count int, duration interface{}) {}
-func (m *PrometheusQueryMetrics) RecordValidationError(reason string) {}
+func (m *PrometheusQueryMetrics) RecordValidationError(reason string)                          {}
 
-type ConverterDependencies struct{
+type ConverterDependencies struct {
 	Logger interface{}
 }
 

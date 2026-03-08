@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	metricsOnce sync.Once
+	metricsOnce     sync.Once
 	metricsInstance *SilenceUIMetrics
 )
 
@@ -45,85 +45,85 @@ type SilenceUIMetrics struct {
 func NewSilenceUIMetrics(logger *slog.Logger) *SilenceUIMetrics {
 	metricsOnce.Do(func() {
 		metricsInstance = &SilenceUIMetrics{
-		PageRenderDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "page_render_duration_seconds",
-				Help:      "Duration of UI page rendering in seconds",
-				Buckets:   []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5},
-			},
-			[]string{"page"},
-		),
-		PageRenderTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "page_render_total",
-				Help:      "Total number of page renders",
-			},
-			[]string{"page", "status"},
-		),
-		TemplateCacheHits: promauto.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "template_cache_hits_total",
-				Help:      "Total number of template cache hits",
-			},
-		),
-		TemplateCacheMisses: promauto.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "template_cache_misses_total",
-				Help:      "Total number of template cache misses",
-			},
-		),
-		TemplateCacheSize: promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "template_cache_size",
-				Help:      "Current number of cached templates",
-			},
-		),
-		WebSocketConnections: promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "websocket_connections",
-				Help:      "Current number of WebSocket connections",
-			},
-		),
-		WebSocketMessages: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "websocket_messages_total",
-				Help:      "Total number of WebSocket messages sent",
-			},
-			[]string{"event_type"},
-		),
-		UserActionsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "user_actions_total",
-				Help:      "Total number of user actions",
-			},
-			[]string{"action", "status"},
-		),
-		UIErrorsTotal: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: "alert_history",
-				Subsystem: "ui",
-				Name:      "errors_total",
-				Help:      "Total number of UI errors",
-			},
-			[]string{"error_type", "page"},
-		),
-		logger: logger,
+			PageRenderDuration: promauto.NewHistogramVec(
+				prometheus.HistogramOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "page_render_duration_seconds",
+					Help:      "Duration of UI page rendering in seconds",
+					Buckets:   []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5},
+				},
+				[]string{"page"},
+			),
+			PageRenderTotal: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "page_render_total",
+					Help:      "Total number of page renders",
+				},
+				[]string{"page", "status"},
+			),
+			TemplateCacheHits: promauto.NewCounter(
+				prometheus.CounterOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "template_cache_hits_total",
+					Help:      "Total number of template cache hits",
+				},
+			),
+			TemplateCacheMisses: promauto.NewCounter(
+				prometheus.CounterOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "template_cache_misses_total",
+					Help:      "Total number of template cache misses",
+				},
+			),
+			TemplateCacheSize: promauto.NewGauge(
+				prometheus.GaugeOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "template_cache_size",
+					Help:      "Current number of cached templates",
+				},
+			),
+			WebSocketConnections: promauto.NewGauge(
+				prometheus.GaugeOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "websocket_connections",
+					Help:      "Current number of WebSocket connections",
+				},
+			),
+			WebSocketMessages: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "websocket_messages_total",
+					Help:      "Total number of WebSocket messages sent",
+				},
+				[]string{"event_type"},
+			),
+			UserActionsTotal: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "user_actions_total",
+					Help:      "Total number of user actions",
+				},
+				[]string{"action", "status"},
+			),
+			UIErrorsTotal: promauto.NewCounterVec(
+				prometheus.CounterOpts{
+					Namespace: "alert_history",
+					Subsystem: "ui",
+					Name:      "errors_total",
+					Help:      "Total number of UI errors",
+				},
+				[]string{"error_type", "page"},
+			),
+			logger: logger,
 		}
 	})
 	return metricsInstance

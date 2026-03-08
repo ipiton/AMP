@@ -32,7 +32,8 @@ By participating, you are expected to uphold this code.
 2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
 3. **Make your changes** with clear, focused commits
 4. **Add tests** for new functionality
-5. **Run tests**: `cd go-app && make test`
+5. **Run tests**: `cd go-app && make test` (MVP matrix)
+   - Full suite (optional before deep refactors): `make test-all`
 6. **Run linter**: `make lint`
 7. **Commit**: `git commit -m 'feat: add amazing feature'`
 8. **Push**: `git push origin feature/amazing-feature`
@@ -63,6 +64,9 @@ make build
 
 # Run tests
 make test
+
+# Optional: full repository test suite
+make test-all
 
 # Run locally
 ./bin/server
@@ -161,5 +165,4 @@ By contributing, you agree that your contributions will be licensed under the Ap
 - [GitHub Issues](https://github.com/ipiton/AMP/issues)
 
 Thank you for contributing! 🙌
-
 

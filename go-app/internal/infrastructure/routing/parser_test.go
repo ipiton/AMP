@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 )
 
 func TestNewRouteConfigParser(t *testing.T) {

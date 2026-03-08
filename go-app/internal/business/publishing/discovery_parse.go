@@ -105,9 +105,9 @@ func parseSecret(secret corev1.Secret) (*core.PublishingTarget, error) {
 // isBase64Encoded checks if data looks like base64-encoded string.
 //
 // Heuristic:
-//  - Try base64 decode
-//  - If succeeds without error → probably base64
-//  - If fails → probably already decoded (raw bytes)
+//   - Try base64 decode
+//   - If succeeds without error → probably base64
+//   - If fails → probably already decoded (raw bytes)
 //
 // Note: This is not 100% accurate but works for K8s secrets.
 // K8s secrets can be base64-encoded or raw bytes depending on client.

@@ -8,30 +8,30 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // DLQEntry represents a failed job in the Dead Letter Queue
 type DLQEntry struct {
-	ID             uuid.UUID               `json:"id"`
-	JobID          uuid.UUID               `json:"job_id"`
-	Fingerprint    string                  `json:"fingerprint"`
-	TargetName     string                  `json:"target_name"`
-	TargetType     string                  `json:"target_type"`
-	EnrichedAlert  *core.EnrichedAlert     `json:"enriched_alert"`
-	TargetConfig   *core.PublishingTarget  `json:"target_config"`
-	ErrorMessage   string                  `json:"error_message"`
-	ErrorType      string                  `json:"error_type"`
-	RetryCount     int                     `json:"retry_count"`
-	LastRetryAt    *time.Time              `json:"last_retry_at,omitempty"`
-	Priority       string                  `json:"priority"`
-	FailedAt       time.Time               `json:"failed_at"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
-	Replayed       bool                    `json:"replayed"`
-	ReplayedAt     *time.Time              `json:"replayed_at,omitempty"`
-	ReplayResult   *string                 `json:"replay_result,omitempty"`
+	ID            uuid.UUID              `json:"id"`
+	JobID         uuid.UUID              `json:"job_id"`
+	Fingerprint   string                 `json:"fingerprint"`
+	TargetName    string                 `json:"target_name"`
+	TargetType    string                 `json:"target_type"`
+	EnrichedAlert *core.EnrichedAlert    `json:"enriched_alert"`
+	TargetConfig  *core.PublishingTarget `json:"target_config"`
+	ErrorMessage  string                 `json:"error_message"`
+	ErrorType     string                 `json:"error_type"`
+	RetryCount    int                    `json:"retry_count"`
+	LastRetryAt   *time.Time             `json:"last_retry_at,omitempty"`
+	Priority      string                 `json:"priority"`
+	FailedAt      time.Time              `json:"failed_at"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	Replayed      bool                   `json:"replayed"`
+	ReplayedAt    *time.Time             `json:"replayed_at,omitempty"`
+	ReplayResult  *string                `json:"replay_result,omitempty"`
 }
 
 // DLQFilters for querying DLQ entries
@@ -163,7 +163,6 @@ func (r *PostgreSQLDLQRepository) Write(ctx context.Context, job *PublishingJob)
 		"target", job.Target.Name,
 		"error_type", job.ErrorType,
 	)
-
 
 	return nil
 }
@@ -333,7 +332,6 @@ func (r *PostgreSQLDLQRepository) Replay(ctx context.Context, id uuid.UUID) erro
 	}
 
 	r.logger.Info("DLQ entry replayed successfully", "dlq_id", id)
-
 
 	return nil
 }

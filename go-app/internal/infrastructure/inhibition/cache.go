@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // CacheMetrics contains Prometheus metrics for TwoTierAlertCache.

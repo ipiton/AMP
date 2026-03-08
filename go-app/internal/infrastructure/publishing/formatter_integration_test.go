@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package publishing
@@ -11,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/ipiton/AMP/internal/core"
 )
 
 // TestIntegration_AlertmanagerFormat tests Alertmanager format against mock server

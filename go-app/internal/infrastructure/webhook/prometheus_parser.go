@@ -227,11 +227,11 @@ func (p *prometheusParser) convertToAlertmanagerFormat(
 	// Create Alertmanager-compatible webhook
 	// Use "prom_v1" or "prom_v2" as version to track source format
 	return &AlertmanagerWebhook{
-		Version:  "prom_" + format, // e.g. "prom_v1", "prom_v2"
-		GroupKey: "prometheus",     // Fake group key
-		Receiver: "prometheus",     // Fake receiver
-		Status:   "firing",         // Assume firing for Prometheus
-		Alerts:   amAlerts,
+		Version:           "prom_" + format, // e.g. "prom_v1", "prom_v2"
+		GroupKey:          "prometheus",     // Fake group key
+		Receiver:          "prometheus",     // Fake receiver
+		Status:            "firing",         // Assume firing for Prometheus
+		Alerts:            amAlerts,
 		GroupLabels:       make(map[string]string),
 		CommonLabels:      make(map[string]string),
 		CommonAnnotations: make(map[string]string),

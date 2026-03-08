@@ -153,11 +153,11 @@ func (c *PublishingMetricsCollector) RegisterCollector(collector MetricsCollecto
 // CollectAll collects metrics from all registered collectors.
 //
 // This method:
-//   1. Creates context with 5s timeout (safety net)
-//   2. Concurrently collects from all collectors (sync.WaitGroup)
-//   3. Handles nil collectors gracefully (skip if not available)
-//   4. Aggregates results into single MetricsSnapshot
-//   5. Records collection duration
+//  1. Creates context with 5s timeout (safety net)
+//  2. Concurrently collects from all collectors (sync.WaitGroup)
+//  3. Handles nil collectors gracefully (skip if not available)
+//  4. Aggregates results into single MetricsSnapshot
+//  5. Records collection duration
 //
 // Performance:
 //   - Target: <100µs (with 10 collectors at 10µs each)

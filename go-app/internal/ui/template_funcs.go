@@ -20,8 +20,8 @@ import (
 func createTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		// Time functions
-		"formatTime":   formatTime,
-		"timeAgo":      timeAgo,
+		"formatTime":     formatTime,
+		"timeAgo":        timeAgo,
 		"formatDateTime": formatDateTime,
 
 		// CSS helper functions
@@ -36,8 +36,11 @@ func createTemplateFuncs() template.FuncMap {
 
 		// Utility functions
 		"defaultVal": defaultVal,
+		"default":    defaultVal,
 		"join":       join,
 		"contains":   contains,
+		"dict":       dict,
+		"until":      until,
 
 		// Math functions
 		"add": add,
@@ -57,9 +60,9 @@ func createTemplateFuncs() template.FuncMap {
 		"statusBadge": statusBadge,
 
 		// TN-80: Classification helper functions
-		"classificationSeverityClass": classificationSeverityClass,
+		"classificationSeverityClass":     classificationSeverityClass,
 		"classificationConfidencePercent": classificationConfidencePercent,
-		"classificationConfidenceColor": classificationConfidenceColor,
+		"classificationConfidenceColor":   classificationConfidenceColor,
 	}
 }
 
@@ -223,6 +226,42 @@ func defaultVal(def, val interface{}) interface{} {
 		}
 	}
 	return val
+}
+
+// dict builds a map from key-value pairs.
+//
+// Keys must be strings and values are arbitrary.
+// Returns an error for odd argument counts or non-string keys.
+func dict(values ...interface{}) (map[string]interface{}, error) {
+	if len(values)%2 != 0 {
+		return nil, fmt.Errorf("dict requires an even number of arguments")
+	}
+
+	result := make(map[string]interface{}, len(values)/2)
+	for i := 0; i < len(values); i += 2 {
+		key, ok := values[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict keys must be strings")
+		}
+		result[key] = values[i+1]
+	}
+
+	return result, nil
+}
+
+// until returns a slice [0, 1, ..., n-1].
+//
+// For non-positive n, returns an empty slice.
+func until(n int) []int {
+	if n <= 0 {
+		return []int{}
+	}
+
+	values := make([]int, n)
+	for i := 0; i < n; i++ {
+		values[i] = i
+	}
+	return values
 }
 
 // join joins slice with separator.

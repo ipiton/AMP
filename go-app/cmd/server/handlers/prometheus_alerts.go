@@ -21,25 +21,26 @@ import (
 // alert formats and processes them through the full AlertProcessor pipeline.
 //
 // Architecture:
-//   HTTP Request → Parse (TN-146) → Validate → Process → Response
+//
+//	HTTP Request → Parse (TN-146) → Validate → Process → Response
 //
 // Supported Formats:
 //   - Prometheus v1: Array of alerts [{"labels":..., "state":"firing", ...}]
 //   - Prometheus v2: Grouped alerts {"groups":[{"labels":..., "alerts":[...]}]}
 //
 // Processing Pipeline:
-//   1. Parse via TN-146 PrometheusParser (format auto-detection)
-//   2. Validate structure via TN-043 WebhookValidator
-//   3. Convert to []core.Alert domain models
-//   4. Process each alert via AlertProcessor:
-//      - Deduplication (TN-036)
-//      - Inhibition (TN-130)
-//      - Enrichment (TN-033/034, optional)
-//      - Filtering (TN-035, optional)
-//      - Storage (TN-032)
-//      - Publishing (TN-051-060, optional)
-//   5. Build response (200/207/400/500)
-//   6. Record metrics and log results
+//  1. Parse via TN-146 PrometheusParser (format auto-detection)
+//  2. Validate structure via TN-043 WebhookValidator
+//  3. Convert to []core.Alert domain models
+//  4. Process each alert via AlertProcessor:
+//     - Deduplication (TN-036)
+//     - Inhibition (TN-130)
+//     - Enrichment (TN-033/034, optional)
+//     - Filtering (TN-035, optional)
+//     - Storage (TN-032)
+//     - Publishing (TN-051-060, optional)
+//  5. Build response (200/207/400/500)
+//  6. Record metrics and log results
 //
 // HTTP Status Codes:
 //   - 200 OK: All alerts processed successfully
@@ -62,15 +63,16 @@ import (
 //   - Drop-in replacement for Alertmanager
 //
 // Example Usage:
-//   parser := webhook.NewPrometheusParser()
-//   handler, err := NewPrometheusAlertsHandler(parser, alertProcessor, logger, nil)
-//   mux.HandleFunc("POST /api/v2/alerts", handler.HandlePrometheusAlerts)
+//
+//	parser := webhook.NewPrometheusParser()
+//	handler, err := NewPrometheusAlertsHandler(parser, alertProcessor, logger, nil)
+//	mux.HandleFunc("POST /api/v2/alerts", handler.HandlePrometheusAlerts)
 type PrometheusAlertsHandler struct {
-	parser    webhook.WebhookParser      // TN-146: Prometheus parser
-	processor AlertProcessor              // TN-061: Alert processing pipeline
-	metrics   *PrometheusAlertsMetrics   // TN-147: Endpoint metrics
-	logger    *slog.Logger                // Structured logging
-	config    *PrometheusAlertsConfig    // Handler configuration
+	parser    webhook.WebhookParser    // TN-146: Prometheus parser
+	processor AlertProcessor           // TN-061: Alert processing pipeline
+	metrics   *PrometheusAlertsMetrics // TN-147: Endpoint metrics
+	logger    *slog.Logger             // Structured logging
+	config    *PrometheusAlertsConfig  // Handler configuration
 }
 
 // PrometheusAlertsConfig holds configuration for the handler.
@@ -79,11 +81,12 @@ type PrometheusAlertsHandler struct {
 // Configuration can be overridden from environment variables or config files.
 //
 // Example:
-//   config := &PrometheusAlertsConfig{
-//       MaxRequestSize: 5 * 1024 * 1024,  // 5 MB
-//       RequestTimeout: 15 * time.Second,
-//       MaxAlertsPerReq: 500,
-//   }
+//
+//	config := &PrometheusAlertsConfig{
+//	    MaxRequestSize: 5 * 1024 * 1024,  // 5 MB
+//	    RequestTimeout: 15 * time.Second,
+//	    MaxAlertsPerReq: 500,
+//	}
 type PrometheusAlertsConfig struct {
 	MaxRequestSize  int64         // Max request body size in bytes (default: 10 MB)
 	RequestTimeout  time.Duration // Max request processing time (default: 30s)
@@ -120,15 +123,16 @@ func DefaultPrometheusAlertsConfig() *PrometheusAlertsConfig {
 // ensures compatibility with monitoring tools and dashboards.
 //
 // Example (all success):
-//   {
-//     "status": "success",
-//     "data": {
-//       "received": 5,
-//       "processed": 5,
-//       "stored": 5,
-//       "timestamp": "2025-11-18T10:01:30Z"
-//     }
-//   }
+//
+//	{
+//	  "status": "success",
+//	  "data": {
+//	    "received": 5,
+//	    "processed": 5,
+//	    "stored": 5,
+//	    "timestamp": "2025-11-18T10:01:30Z"
+//	  }
+//	}
 type PrometheusAlertsResponse struct {
 	Status string                     `json:"status"` // "success" or "partial"
 	Data   PrometheusAlertsResultData `json:"data"`   // Processing results
@@ -144,12 +148,12 @@ type PrometheusAlertsResponse struct {
 //   - Errors: Details of failed alerts (only in partial success)
 //   - Timestamp: Response timestamp in RFC3339 format
 type PrometheusAlertsResultData struct {
-	Received  int            `json:"received"`            // Total alerts received
-	Processed int            `json:"processed"`           // Successfully processed
-	Stored    int            `json:"stored,omitempty"`    // Stored in database
-	Failed    int            `json:"failed,omitempty"`    // Failed to process
-	Errors    []AlertFailure `json:"errors,omitempty"`    // Error details (207 only)
-	Timestamp string         `json:"timestamp"`           // Response timestamp (RFC3339)
+	Received  int            `json:"received"`         // Total alerts received
+	Processed int            `json:"processed"`        // Successfully processed
+	Stored    int            `json:"stored,omitempty"` // Stored in database
+	Failed    int            `json:"failed,omitempty"` // Failed to process
+	Errors    []AlertFailure `json:"errors,omitempty"` // Error details (207 only)
+	Timestamp string         `json:"timestamp"`        // Response timestamp (RFC3339)
 }
 
 // AlertFailure represents a failed alert in partial success response.
@@ -158,12 +162,13 @@ type PrometheusAlertsResultData struct {
 // This information is only included in 207 Multi-Status responses.
 //
 // Example:
-//   {
-//     "index": 1,
-//     "fingerprint": "abc123",
-//     "alertname": "HighCPU",
-//     "error": "storage connection timeout"
-//   }
+//
+//	{
+//	  "index": 1,
+//	  "fingerprint": "abc123",
+//	  "alertname": "HighCPU",
+//	  "error": "storage connection timeout"
+//	}
 type AlertFailure struct {
 	Index       int    `json:"index"`                 // Alert index in request
 	Fingerprint string `json:"fingerprint,omitempty"` // Alert fingerprint
@@ -177,20 +182,21 @@ type AlertFailure struct {
 // Provides detailed error information to help diagnose issues.
 //
 // Example (validation error):
-//   {
-//     "status": "error",
-//     "error": "validation failed",
-//     "errors": [
-//       {
-//         "field": "alerts[0].labels.alertname",
-//         "message": "required field missing",
-//         "value": null
-//       }
-//     ]
-//   }
+//
+//	{
+//	  "status": "error",
+//	  "error": "validation failed",
+//	  "errors": [
+//	    {
+//	      "field": "alerts[0].labels.alertname",
+//	      "message": "required field missing",
+//	      "value": null
+//	    }
+//	  ]
+//	}
 type PrometheusAlertsErrorResponse struct {
-	Status string            `json:"status"` // "error"
-	Error  string            `json:"error"`  // High-level error message
+	Status string            `json:"status"`           // "error"
+	Error  string            `json:"error"`            // High-level error message
 	Errors []ValidationError `json:"errors,omitempty"` // Detailed validation errors (400 only)
 }
 
@@ -199,9 +205,9 @@ type PrometheusAlertsErrorResponse struct {
 // Provides detailed context about what field failed validation and why.
 // Only included in 400 Bad Request responses.
 type ValidationError struct {
-	Field   string      `json:"field"`             // Field path (e.g., "alerts[0].labels.alertname")
-	Message string      `json:"message"`           // Error message
-	Value   interface{} `json:"value,omitempty"`   // Invalid value (if available)
+	Field   string      `json:"field"`           // Field path (e.g., "alerts[0].labels.alertname")
+	Message string      `json:"message"`         // Error message
+	Value   interface{} `json:"value,omitempty"` // Invalid value (if available)
 }
 
 // NewPrometheusAlertsHandler creates a new Prometheus alerts handler.
@@ -219,12 +225,13 @@ type ValidationError struct {
 //   - error: Configuration error (parser/processor nil)
 //
 // Example:
-//   parser := webhook.NewPrometheusParser()
-//   handler, err := NewPrometheusAlertsHandler(parser, alertProcessor, logger, nil)
-//   if err != nil {
-//       log.Fatal(err)
-//   }
-//   mux.HandleFunc("POST /api/v2/alerts", handler.HandlePrometheusAlerts)
+//
+//	parser := webhook.NewPrometheusParser()
+//	handler, err := NewPrometheusAlertsHandler(parser, alertProcessor, logger, nil)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	mux.HandleFunc("POST /api/v2/alerts", handler.HandlePrometheusAlerts)
 func NewPrometheusAlertsHandler(
 	parser webhook.WebhookParser,
 	processor AlertProcessor,
@@ -263,15 +270,15 @@ func NewPrometheusAlertsHandler(
 // HandlePrometheusAlerts handles POST /api/v2/alerts requests.
 //
 // Request flow:
-//   1. Validate HTTP method (POST only)
-//   2. Read and validate request body size
-//   3. Parse JSON (Prometheus v1/v2 format via TN-146)
-//   4. Validate alert structure (via TN-043)
-//   5. Convert to domain models (via TN-146)
-//   6. Check alert count limit
-//   7. Process each alert (via AlertProcessor)
-//   8. Build response (200/207/400/500)
-//   9. Record metrics and log results
+//  1. Validate HTTP method (POST only)
+//  2. Read and validate request body size
+//  3. Parse JSON (Prometheus v1/v2 format via TN-146)
+//  4. Validate alert structure (via TN-043)
+//  5. Convert to domain models (via TN-146)
+//  6. Check alert count limit
+//  7. Process each alert (via AlertProcessor)
+//  8. Build response (200/207/400/500)
+//  9. Record metrics and log results
 //
 // HTTP Status Codes:
 //   - 200: All alerts processed successfully
@@ -464,8 +471,8 @@ func (h *PrometheusAlertsHandler) HandlePrometheusAlerts(w http.ResponseWriter, 
 // readRequestBody reads and validates request body size.
 //
 // Performs two levels of validation:
-//   1. Check Content-Length header (fast, early rejection)
-//   2. Read with io.LimitReader (defense in depth, actual size validation)
+//  1. Check Content-Length header (fast, early rejection)
+//  2. Read with io.LimitReader (defense in depth, actual size validation)
 //
 // Returns:
 //   - []byte: Request body contents

@@ -29,15 +29,16 @@ type PublishingModeMetrics struct {
 // NewPublishingModeMetrics creates and registers all mode metrics
 //
 // Metrics:
-//   1. publishing_mode_current - Gauge (0=normal, 1=metrics-only)
-//   2. publishing_mode_transitions_total - Counter
-//   3. publishing_mode_duration_seconds - Histogram (mode)
-//   4. publishing_mode_check_duration_seconds - Histogram
-//   5. publishing_submissions_rejected_total{reason="metrics_only"} - Counter
-//   6. publishing_jobs_skipped_total{reason="metrics_only"} - Counter
+//  1. publishing_mode_current - Gauge (0=normal, 1=metrics-only)
+//  2. publishing_mode_transitions_total - Counter
+//  3. publishing_mode_duration_seconds - Histogram (mode)
+//  4. publishing_mode_check_duration_seconds - Histogram
+//  5. publishing_submissions_rejected_total{reason="metrics_only"} - Counter
+//  6. publishing_jobs_skipped_total{reason="metrics_only"} - Counter
 //
 // Returns:
-//   *PublishingModeMetrics: Registered metrics
+//
+//	*PublishingModeMetrics: Registered metrics
 func NewPublishingModeMetrics(namespace, subsystem string) *PublishingModeMetrics {
 	return &PublishingModeMetrics{
 		ModeCurrent: promauto.NewGauge(

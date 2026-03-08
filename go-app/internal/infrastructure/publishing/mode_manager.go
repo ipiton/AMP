@@ -86,8 +86,8 @@ type DefaultModeManager struct {
 	lastTransitionReason string
 
 	// Subscribers (protected by subscribersMu)
-	subscribers    []ModeChangeCallback
-	subscribersMu  sync.RWMutex
+	subscribers   []ModeChangeCallback
+	subscribersMu sync.RWMutex
 
 	// Caching (for performance)
 	cachedMode   Mode
@@ -246,7 +246,7 @@ func (m *DefaultModeManager) GetModeMetrics() ModeMetrics {
 		CurrentMode:          m.currentMode,
 		CurrentModeDuration:  time.Since(m.modeChangedAt),
 		TransitionCount:      atomic.LoadInt64(&m.transitionCount),
-		LastTransitionTime:    m.modeChangedAt,
+		LastTransitionTime:   m.modeChangedAt,
 		LastTransitionReason: m.lastTransitionReason,
 		ModeCheckDuration:    m.modeCheckDuration, // Already protected by RLock
 	}

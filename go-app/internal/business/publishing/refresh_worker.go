@@ -8,12 +8,12 @@ import (
 // runBackgroundWorker is the main goroutine for periodic refresh.
 //
 // This goroutine:
-//   1. Waits for warmup period (30s delay before first refresh)
-//   2. Executes first refresh
-//   3. Creates ticker for periodic refresh (5m interval)
-//   4. Executes refresh on each tick
-//   5. Exits gracefully on context cancellation
-//   6. Signals completion via WaitGroup
+//  1. Waits for warmup period (30s delay before first refresh)
+//  2. Executes first refresh
+//  3. Creates ticker for periodic refresh (5m interval)
+//  4. Executes refresh on each tick
+//  5. Exits gracefully on context cancellation
+//  6. Signals completion via WaitGroup
 //
 // Lifecycle:
 //   - Started by Start() (via go m.runBackgroundWorker())
@@ -71,13 +71,13 @@ func (m *DefaultRefreshManager) runBackgroundWorker() {
 // executeRefresh performs actual refresh with retry logic.
 //
 // This method:
-//   1. Checks if refresh already in progress (skip if yes)
-//   2. Sets state to in_progress
-//   3. Updates metrics (in_progress=1)
-//   4. Calls refreshWithRetry() (retry logic with exponential backoff)
-//   5. Updates state based on result (success/failed)
-//   6. Records metrics (duration, errors, last_success)
-//   7. Logs result (success/failure with details)
+//  1. Checks if refresh already in progress (skip if yes)
+//  2. Sets state to in_progress
+//  3. Updates metrics (in_progress=1)
+//  4. Calls refreshWithRetry() (retry logic with exponential backoff)
+//  5. Updates state based on result (success/failed)
+//  6. Records metrics (duration, errors, last_success)
+//  7. Logs result (success/failure with details)
 //
 // Parameters:
 //   - isManual: true if triggered via API, false if periodic
