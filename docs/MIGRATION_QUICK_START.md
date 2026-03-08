@@ -22,6 +22,8 @@ helm install amp amp/amp \
   --namespace monitoring
 ```
 
+If you expect real outbound notifications in Kubernetes, also configure at least one publishing target through Helm values or a canonical target Secret. Without discovered targets AMP will ingest alerts but stay in `metrics-only` mode.
+
 #### Docker
 ```bash
 docker run -d \
@@ -77,10 +79,11 @@ curl http://localhost:9093/api/v2/alerts
 
 ### What Just Happened?
 
-- ✅ 100% Alertmanager API compatible - no other changes needed
+- ✅ Core non-deprecated Alertmanager API surface is compatible (method/route contract-locked)
 - ✅ Your existing `alertmanager.yml` works unchanged
 - ✅ Grafana dashboards work automatically
 - ✅ `amtool` commands work without modification
+- 🟡 Semantic parity is phased (routing/inhibition/config lifecycle details)
 - ✅ **BONUS**: Now you have extended history, better performance, and optional AI classification
 
 ---
@@ -118,6 +121,12 @@ kubectl logs -n monitoring prometheus-0 | grep amp
 kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 ```
 
+**Alerts are ingested, but Slack/PagerDuty/Rootly delivery does not happen?**
+- Verify `publishing.enabled=true`
+- Verify `kubectl get secret -n monitoring -l publishing-target=true`
+- Verify `publishing.discovery.namespace` matches the namespace where target Secrets live
+- If zero targets are discovered, the runtime remains in `metrics-only`
+
 **Grafana dashboard broken?**
 - Verify dashboard uses `/api/v2/alerts` endpoint (should work automatically)
 - Check datasource URL points to `amp:9093`
@@ -128,6 +137,6 @@ kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 
 ---
 
-**Last Updated**: 2025-12-01
+**Last Updated**: 2026-03-08
 **Version**: v1.0.0
-**Compatibility**: Alertmanager v0.25+ API v2
+**Compatibility**: Alertmanager v0.25+ API v2 (non-deprecated core surface)

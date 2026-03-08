@@ -57,48 +57,37 @@ spec:
               protocol: TCP
           env:
             # Application Configuration
-            - name: ENVIRONMENT
-              value: {{ .Values.environment | quote }}
             - name: SERVICE_NAME
               value: {{ include "amp.fullname" . }}
             - name: SERVICE_VERSION
               value: {{ .Chart.AppVersion | quote }}
 
-            # TN-96: Deployment Profile Configuration
-            - name: DEPLOYMENT_PROFILE
-              value: {{ .Values.profile | quote }}
-
             # Database Configuration
             {{- if and .Values.postgresql.enabled (eq .Values.profile "standard") }}
-            - name: POSTGRES_HOST
+            - name: DATABASE_HOST
               value: {{ include "amp.postgresql.fullname" . }}
-            - name: POSTGRES_PORT
+            - name: DATABASE_PORT
               value: "5432"
-            - name: POSTGRES_DATABASE
+            - name: DATABASE_DATABASE
               value: {{ .Values.postgresql.database | quote }}
-            - name: POSTGRES_USERNAME
+            - name: DATABASE_USERNAME
               value: {{ .Values.postgresql.username | quote }}
-            - name: POSTGRES_PASSWORD
+            - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "amp.postgresql.secretName" . }}
                   key: password
-            - name: DATABASE_URL
-              value: {{ include "amp.databaseUrl" . | quote }}
+            - name: DATABASE_SSL_MODE
+              value: {{ ternary "require" "disable" (eq (default "off" .Values.postgresql.config.ssl) "on") | quote }}
             {{- else }}
-            # Fallback to SQLite for backward compatibility
-            - name: ALERT_HISTORY_DB
-              value: "/data/alert_history.sqlite3"
-            - name: DATABASE_URL
-              value: "sqlite:///data/alert_history.sqlite3"
+            - name: STORAGE_FILESYSTEM_PATH
+              value: {{ printf "%s/alerthistory.db" .Values.liteProfile.persistence.mountPath | quote }}
             {{- end }}
 
             # Valkey/Redis Configuration (Standard Profile Only)
             {{- if and .Values.cache.enabled (eq .Values.profile "standard") }}
-            - name: REDIS_HOST
-              value: {{ .Values.cache.host | quote }}
-            - name: REDIS_PORT
-              value: {{ .Values.cache.port | quote }}
+            - name: REDIS_ADDR
+              value: {{ printf "%s:%v" (tpl .Values.cache.host .) .Values.cache.port | quote }}
             {{- if .Values.cache.auth.enabled }}
             - name: REDIS_PASSWORD
               valueFrom:
@@ -106,56 +95,30 @@ spec:
                   name: {{ include "amp.fullname" . }}-secrets
                   key: redis-password
             {{- end }}
-            - name: REDIS_URL
-              value: {{ include "amp.cacheUrl" . | quote }}
             {{- else }}
-            # Fallback to localhost for development
-            - name: REDIS_HOST
-              value: "localhost"
-            - name: REDIS_PORT
-              value: "6379"
-            - name: REDIS_URL
-              value: "redis://localhost:6379/0"
+            - name: REDIS_ADDR
+              value: "localhost:6379"
             {{- end }}
 
             # LLM Configuration
             {{- if .Values.llm.enabled }}
-            - name: LLM_ENABLED
-              value: "true"
-            - name: LLM_PROXY_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "amp.fullname" . }}-config
-                  key: llm-proxy-url
             - name: LLM_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "amp.fullname" . }}-secrets
                   key: llm-api-key
-            - name: LLM_MODEL
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "amp.fullname" . }}-config
-                  key: llm-model
-            {{- else }}
-            - name: LLM_ENABLED
-              value: "false"
             {{- end }}
 
-            # Alert Processing Configuration
-            - name: RETENTION_DAYS
-              value: {{ .Values.alerts.retentionDays | quote }}
-            - name: ENABLE_CLASSIFICATION
-              value: {{ .Values.alerts.enableClassification | quote }}
-            - name: ALERT_BATCH_SIZE
-              value: {{ .Values.alerts.batchSize | quote }}
-
-            # Migration Configuration
-            {{- if .Values.migration.enabled }}
-            - name: MIGRATION_ENABLED
-              value: "true"
-            - name: AUTO_MIGRATE
-              value: {{ .Values.migration.autoMigrate | quote }}
+            # Publishing Configuration
+            {{- if .Values.publishing.discovery.namespace }}
+            - name: PUBLISHING_DISCOVERY_NAMESPACE
+              value: {{ .Values.publishing.discovery.namespace | quote }}
+            {{- else }}
+            - name: PUBLISHING_DISCOVERY_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
             {{- end }}
 
             # Server Configuration

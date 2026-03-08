@@ -1,117 +1,39 @@
-package main
+package memory
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ipiton/AMP/internal/core"
 )
 
-type alertIngestInput struct {
-	Labels       map[string]string `json:"labels"`
-	Annotations  map[string]string `json:"annotations"`
-	StartsAt     string            `json:"startsAt"`
-	EndsAt       string            `json:"endsAt"`
-	GeneratorURL string            `json:"generatorURL"`
-	Fingerprint  string            `json:"fingerprint"`
-	Status       string            `json:"status"`
-}
-
-type storedAlert struct {
-	DedupKey        string
-	BaseFingerprint string
-	Labels          map[string]string
-	Annotations     map[string]string
-	StartsAt        time.Time
-	EndsAt          *time.Time
-	GeneratorURL    string
-	Status          string
-	UpdatedAt       time.Time
-}
-
-type apiAlert struct {
-	Labels       map[string]string `json:"labels"`
-	Annotations  map[string]string `json:"annotations,omitempty"`
-	Receivers    []apiReceiver     `json:"receivers,omitempty"`
-	StartsAt     string            `json:"startsAt"`
-	UpdatedAt    string            `json:"updatedAt,omitempty"`
-	EndsAt       *string           `json:"endsAt,omitempty"`
-	GeneratorURL string            `json:"generatorURL,omitempty"`
-	Fingerprint  string            `json:"fingerprint,omitempty"`
-	Status       string            `json:"status"`
-}
-
-type alertStore struct {
+type AlertStore struct {
 	mu sync.RWMutex
 	// all keeps last known state by dedup key (firing/resolved).
-	all map[string]*storedAlert
+	all map[string]*core.StoredAlertState
 	// activeByBase indexes currently firing alerts by base fingerprint.
 	activeByBase map[string]map[string]struct{}
 	onChange     func()
 }
 
-type alertAPIError struct {
-	status  int
-	payload any
-	message string
-}
-
-func (e *alertAPIError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if strings.TrimSpace(e.message) != "" {
-		return e.message
-	}
-	switch p := e.payload.(type) {
-	case string:
-		return p
-	case map[string]any:
-		if msg, ok := p["message"].(string); ok && strings.TrimSpace(msg) != "" {
-			return msg
-		}
-	}
-	return "alert api error"
-}
-
-func newAlertAPIError(status int, payload any, message string) *alertAPIError {
-	return &alertAPIError{
-		status:  status,
-		payload: payload,
-		message: strings.TrimSpace(message),
-	}
-}
-
-func newAlertCodeMessageError(status int, code int, message string) *alertAPIError {
-	return newAlertAPIError(status, map[string]any{
-		"code":    code,
-		"message": message,
-	}, message)
-}
-
-func newAlertStringError(status int, message string) *alertAPIError {
-	return newAlertAPIError(status, message, message)
-}
-
-func newAlertStore() *alertStore {
-	return &alertStore{
-		all:          make(map[string]*storedAlert),
+func NewAlertStore() *AlertStore {
+	return &AlertStore{
+		all:          make(map[string]*core.StoredAlertState),
 		activeByBase: make(map[string]map[string]struct{}),
 	}
 }
 
-func (s *alertStore) ingestBatch(inputs []alertIngestInput, now time.Time) error {
+func (s *AlertStore) IngestBatch(inputs []core.AlertIngestInput, now time.Time) error {
 	return s.ingestBatchInternal(inputs, now, true)
 }
 
-func (s *alertStore) ingestBatchInternal(inputs []alertIngestInput, now time.Time, notify bool) error {
+func (s *AlertStore) ingestBatchInternal(inputs []core.AlertIngestInput, now time.Time, notify bool) error {
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -130,13 +52,13 @@ func (s *alertStore) ingestBatchInternal(inputs []alertIngestInput, now time.Tim
 	return nil
 }
 
-func (s *alertStore) setOnChange(fn func()) {
+func (s *AlertStore) SetOnChange(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onChange = fn
 }
 
-func (s *alertStore) notifyChange() {
+func (s *AlertStore) notifyChange() {
 	s.mu.RLock()
 	fn := s.onChange
 	s.mu.RUnlock()
@@ -146,7 +68,7 @@ func (s *alertStore) notifyChange() {
 	}
 }
 
-func (s *alertStore) apply(in *storedAlert, now time.Time) {
+func (s *AlertStore) apply(in *core.StoredAlertState, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -178,7 +100,7 @@ func (s *alertStore) apply(in *storedAlert, now time.Time) {
 	s.markActiveLocked(existing.BaseFingerprint, existing.DedupKey)
 }
 
-func (s *alertStore) resolveAlertLocked(in *storedAlert, now time.Time) {
+func (s *AlertStore) resolveAlertLocked(in *core.StoredAlertState, now time.Time) {
 	keys := make([]string, 0, 1)
 	if _, ok := s.all[in.DedupKey]; ok {
 		keys = append(keys, in.DedupKey)
@@ -228,18 +150,18 @@ func (s *alertStore) resolveAlertLocked(in *storedAlert, now time.Time) {
 	}
 }
 
-func (s *alertStore) markActiveLocked(baseFingerprint, dedupKey string) {
+func (s *AlertStore) markActiveLocked(baseFingerprint, dedupKey string) {
 	if _, ok := s.activeByBase[baseFingerprint]; !ok {
 		s.activeByBase[baseFingerprint] = make(map[string]struct{})
 	}
 	s.activeByBase[baseFingerprint][dedupKey] = struct{}{}
 }
 
-func (s *alertStore) list(statusFilter string, includeResolved bool) []apiAlert {
+func (s *AlertStore) List(statusFilter string, includeResolved bool) []core.APIAlert {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	out := make([]apiAlert, 0, len(s.all))
+	out := make([]core.APIAlert, 0, len(s.all))
 	for _, a := range s.all {
 		if statusFilter != "" && a.Status != statusFilter {
 			continue
@@ -257,11 +179,11 @@ func (s *alertStore) list(statusFilter string, includeResolved bool) []apiAlert 
 	return out
 }
 
-func (s *alertStore) exportForPersistence() []apiAlert {
-	return s.list("", true)
+func (s *AlertStore) ExportForPersistence() []core.APIAlert {
+	return s.List("", true)
 }
 
-func (s *alertStore) stats() (total, firing, resolved int) {
+func (s *AlertStore) Stats() (total, firing, resolved int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -277,18 +199,18 @@ func (s *alertStore) stats() (total, firing, resolved int) {
 	return total, firing, resolved
 }
 
-func (s *alertStore) restoreFromPersistence(alerts []apiAlert, now time.Time) error {
+func (s *AlertStore) RestoreFromPersistence(alerts []core.APIAlert, now time.Time) error {
 	if len(alerts) == 0 {
 		return nil
 	}
 
-	inputs := make([]alertIngestInput, 0, len(alerts))
+	inputs := make([]core.AlertIngestInput, 0, len(alerts))
 	for i, alert := range alerts {
 		if strings.TrimSpace(alert.StartsAt) == "" {
 			return fmt.Errorf("persisted alert[%d]: startsAt is required", i)
 		}
 
-		in := alertIngestInput{
+		in := core.AlertIngestInput{
 			Labels:       cloneStringMap(alert.Labels),
 			Annotations:  cloneStringMap(alert.Annotations),
 			StartsAt:     alert.StartsAt,
@@ -305,7 +227,9 @@ func (s *alertStore) restoreFromPersistence(alerts []apiAlert, now time.Time) er
 	return s.ingestBatchInternal(inputs, now, false)
 }
 
-func normalizeIngestInput(in alertIngestInput, now time.Time) (*storedAlert, error) {
+// Internal helpers
+
+func normalizeIngestInput(in core.AlertIngestInput, now time.Time) (*core.StoredAlertState, error) {
 	startsAt, err := parseAlertTime(in.StartsAt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid startsAt: %w", err)
@@ -345,7 +269,7 @@ func normalizeIngestInput(in alertIngestInput, now time.Time) (*storedAlert, err
 	}
 
 	dedupKey := dedupKey(baseFingerprint, startsAt)
-	return &storedAlert{
+	return &core.StoredAlertState{
 		DedupKey:        dedupKey,
 		BaseFingerprint: baseFingerprint,
 		Labels:          labels,
@@ -430,22 +354,22 @@ func shortHash(input string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-func toAPIAlert(a *storedAlert) apiAlert {
+func toAPIAlert(a *core.StoredAlertState) core.APIAlert {
 	var endsAt *string
 	if a.EndsAt != nil {
-		s := formatAPITimestamp(a.EndsAt.UTC())
+		s := a.EndsAt.UTC().Format(time.RFC3339)
 		endsAt = &s
 	}
 	receiverName := strings.TrimSpace(a.Labels["receiver"])
 	if receiverName == "" {
 		receiverName = "default"
 	}
-	return apiAlert{
+	return core.APIAlert{
 		Labels:       cloneStringMap(a.Labels),
 		Annotations:  cloneStringMap(a.Annotations),
-		Receivers:    []apiReceiver{{Name: receiverName}},
-		StartsAt:     formatAPITimestamp(a.StartsAt.UTC()),
-		UpdatedAt:    formatAPITimestamp(a.UpdatedAt.UTC()),
+		Receivers:    []core.APIReceiver{{Name: receiverName}},
+		StartsAt:     a.StartsAt.UTC().Format(time.RFC3339),
+		UpdatedAt:    a.UpdatedAt.UTC().Format(time.RFC3339),
 		EndsAt:       endsAt,
 		GeneratorURL: a.GeneratorURL,
 		Fingerprint:  a.BaseFingerprint,
@@ -453,7 +377,7 @@ func toAPIAlert(a *storedAlert) apiAlert {
 	}
 }
 
-func isSameAlertPayload(a, b *storedAlert) bool {
+func isSameAlertPayload(a, b *core.StoredAlertState) bool {
 	if a == nil || b == nil {
 		return false
 	}
@@ -511,123 +435,4 @@ func cloneTimePtr(t *time.Time) *time.Time {
 	}
 	v := *t
 	return &v
-}
-
-func parseBoolWithDefault(raw string, def bool) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return def
-	}
-	v, err := strconv.ParseBool(raw)
-	if err != nil {
-		return def
-	}
-	return v
-}
-
-func parseAlertIngestPayload(body []byte) ([]alertIngestInput, error) {
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
-		return nil, newAlertCodeMessageError(http.StatusUnprocessableEntity, 602, "alerts in body is required")
-	}
-
-	var direct []alertIngestInput
-	directErr := json.Unmarshal(body, &direct)
-	if directErr == nil {
-		return direct, nil
-	}
-
-	// Support grouped/envelope payloads for compatibility with clients that
-	// proxy alerts through wrapper formats.
-	var envelope struct {
-		Alerts []alertIngestInput `json:"alerts"`
-		Groups []struct {
-			Alerts []alertIngestInput `json:"alerts"`
-		} `json:"groups"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, newAlertCodeMessageError(
-			http.StatusBadRequest,
-			http.StatusBadRequest,
-			formatAlertBodyParseError(directErr),
-		)
-	}
-
-	if len(envelope.Alerts) > 0 {
-		return envelope.Alerts, nil
-	}
-
-	var grouped []alertIngestInput
-	for i := range envelope.Groups {
-		grouped = append(grouped, envelope.Groups[i].Alerts...)
-	}
-	if len(grouped) > 0 {
-		return grouped, nil
-	}
-
-	return nil, newAlertCodeMessageError(
-		http.StatusBadRequest,
-		http.StatusBadRequest,
-		formatAlertBodyParseError(directErr),
-	)
-}
-
-func formatAlertBodyParseError(err error) string {
-	msg := strings.TrimSpace(fmt.Sprint(err))
-	if msg == "" {
-		msg = "unknown error"
-	}
-
-	// Align payload type wording with upstream Alertmanager error messages.
-	msg = strings.ReplaceAll(msg, "[]main.alertIngestInput", "models.PostableAlerts")
-	return fmt.Sprintf("parsing alerts body from %q failed, because %s", "", msg)
-}
-
-func validateAlertIngestInputs(inputs []alertIngestInput) error {
-	for i := range inputs {
-		in := inputs[i]
-
-		if in.Labels == nil {
-			return newAlertCodeMessageError(
-				http.StatusUnprocessableEntity,
-				602,
-				fmt.Sprintf("%d.labels in body is required", i),
-			)
-		}
-		if len(in.Labels) == 0 {
-			return newAlertStringError(http.StatusBadRequest, "at least one label pair required")
-		}
-
-		if raw := strings.TrimSpace(in.StartsAt); raw != "" {
-			if _, err := parseAlertTime(raw); err != nil {
-				return newAlertCodeMessageError(
-					http.StatusBadRequest,
-					http.StatusBadRequest,
-					formatAlertBodyParseError(err),
-				)
-			}
-		}
-		if raw := strings.TrimSpace(in.EndsAt); raw != "" {
-			if _, err := parseAlertTime(raw); err != nil {
-				return newAlertCodeMessageError(
-					http.StatusBadRequest,
-					http.StatusBadRequest,
-					formatAlertBodyParseError(err),
-				)
-			}
-		}
-
-		generatorURL := strings.TrimSpace(in.GeneratorURL)
-		if generatorURL != "" {
-			if _, err := url.ParseRequestURI(generatorURL); err != nil {
-				return newAlertCodeMessageError(
-					http.StatusUnprocessableEntity,
-					601,
-					fmt.Sprintf("%d.generatorURL in body must be of type uri: %q", i, in.GeneratorURL),
-				)
-			}
-		}
-	}
-
-	return nil
 }

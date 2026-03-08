@@ -1066,6 +1066,44 @@ func TestUpstreamParity_DebugPprofContract(t *testing.T) {
 	}
 }
 
+func TestUpstreamParity_DebugPprofSubpathMethodMatrix(t *testing.T) {
+	mux := newPhase0TestMux(t)
+
+	cmdlineGetReq := httptest.NewRequest(http.MethodGet, "/debug/pprof/cmdline", nil)
+	cmdlineGetRec := httptest.NewRecorder()
+	mux.ServeHTTP(cmdlineGetRec, cmdlineGetReq)
+	if cmdlineGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /debug/pprof/cmdline expected 200, got %d", cmdlineGetRec.Code)
+	}
+	if cmdlineGetRec.Body.Len() == 0 {
+		t.Fatalf("GET /debug/pprof/cmdline expected non-empty body")
+	}
+
+	cmdlinePostReq := httptest.NewRequest(http.MethodPost, "/debug/pprof/cmdline", bytes.NewBufferString(`{}`))
+	cmdlinePostRec := httptest.NewRecorder()
+	mux.ServeHTTP(cmdlinePostRec, cmdlinePostReq)
+	if cmdlinePostRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /debug/pprof/cmdline expected 405, got %d", cmdlinePostRec.Code)
+	}
+
+	symbolGetReq := httptest.NewRequest(http.MethodGet, "/debug/pprof/symbol", nil)
+	symbolGetRec := httptest.NewRecorder()
+	mux.ServeHTTP(symbolGetRec, symbolGetReq)
+	if symbolGetRec.Code != http.StatusOK {
+		t.Fatalf("GET /debug/pprof/symbol expected 200, got %d", symbolGetRec.Code)
+	}
+	if !strings.Contains(symbolGetRec.Body.String(), "num_symbols:") {
+		t.Fatalf("GET /debug/pprof/symbol expected num_symbols payload, got %q", symbolGetRec.Body.String())
+	}
+
+	symbolPostReq := httptest.NewRequest(http.MethodPost, "/debug/pprof/symbol", bytes.NewBufferString(`{}`))
+	symbolPostRec := httptest.NewRecorder()
+	mux.ServeHTTP(symbolPostRec, symbolPostReq)
+	if symbolPostRec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /debug/pprof/symbol expected 405, got %d", symbolPostRec.Code)
+	}
+}
+
 func TestUpstreamParity_UpstreamStaticCompatibilityPaths(t *testing.T) {
 	mux := newPhase0TestMux(t)
 

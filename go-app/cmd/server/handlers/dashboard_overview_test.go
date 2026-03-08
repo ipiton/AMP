@@ -479,7 +479,7 @@ func TestPublishingStatsProvider_GetTargetCount(t *testing.T) {
 			return &publishing.MetricsSnapshot{
 				Timestamp: time.Now(),
 				Metrics: map[string]float64{
-					"discovery.total_targets": 3,
+					"targets_total": 3,
 				},
 			}
 		},
@@ -499,7 +499,7 @@ func TestPublishingStatsProvider_GetPublishingMode(t *testing.T) {
 			return &publishing.MetricsSnapshot{
 				Timestamp: time.Now(),
 				Metrics: map[string]float64{
-					"discovery.total_targets": 3,
+					"publishing_mode_current": 0,
 				},
 			}
 		},
@@ -515,7 +515,7 @@ func TestPublishingStatsProvider_GetPublishingMode(t *testing.T) {
 			return &publishing.MetricsSnapshot{
 				Timestamp: time.Now(),
 				Metrics: map[string]float64{
-					"discovery.total_targets": 0,
+					"publishing_mode_current": 1,
 				},
 			}
 		},
@@ -523,5 +523,28 @@ func TestPublishingStatsProvider_GetPublishingMode(t *testing.T) {
 	provider2 := NewPublishingStatsProviderWithCollector(mockCollector2, nil)
 	if mode := provider2.GetPublishingMode(); mode != "metrics-only" {
 		t.Errorf("Expected 'metrics-only' mode, got %s", mode)
+	}
+}
+
+func TestPublishingStatsProvider_GetPublishCounters(t *testing.T) {
+	mockCollector := &MockCollectorForHandler{
+		CollectAllFunc: func(ctx context.Context) *publishing.MetricsSnapshot {
+			return &publishing.MetricsSnapshot{
+				Timestamp: time.Now(),
+				Metrics: map[string]float64{
+					"jobs_completed_total": 12,
+					"jobs_failed_total":    2,
+				},
+			}
+		},
+	}
+
+	provider := NewPublishingStatsProviderWithCollector(mockCollector, nil)
+
+	if got := provider.GetSuccessfulPublishes(); got != 12 {
+		t.Fatalf("GetSuccessfulPublishes() = %d, want 12", got)
+	}
+	if got := provider.GetFailedPublishes(); got != 2 {
+		t.Fatalf("GetFailedPublishes() = %d, want 2", got)
 	}
 }

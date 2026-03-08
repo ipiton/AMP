@@ -30,6 +30,31 @@ type publishingStatsProviderImpl struct {
 	logger    *slog.Logger
 }
 
+func (p *publishingStatsProviderImpl) collectSnapshot() map[string]float64 {
+	if p.collector == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	snapshot := p.collector.CollectAll(ctx)
+	if snapshot == nil {
+		return nil
+	}
+
+	return snapshot.Metrics
+}
+
+func getPublishingMetric(metrics map[string]float64, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		if value, ok := metrics[key]; ok {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
 // NewPublishingStatsProvider creates a new publishing stats provider.
 func NewPublishingStatsProvider(statsHandler *PublishingStatsHandler, logger *slog.Logger) PublishingStatsProvider {
 	if logger == nil {
@@ -65,17 +90,12 @@ func NewPublishingStatsProviderWithCollector(collector MetricsCollectorInterface
 
 // GetTargetCount returns the number of publishing targets.
 func (p *publishingStatsProviderImpl) GetTargetCount() int {
-	if p.collector == nil {
+	metrics := p.collectSnapshot()
+	if metrics == nil {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	snapshot := p.collector.CollectAll(ctx)
-	if snapshot == nil {
-		return 0
-	}
-	// Extract target count from metrics
-	if count, ok := snapshot.Metrics["discovery.total_targets"]; ok {
+
+	if count, ok := getPublishingMetric(metrics, "targets_total", "discovery.total_targets"); ok {
 		return int(count)
 	}
 	return 0
@@ -83,18 +103,19 @@ func (p *publishingStatsProviderImpl) GetTargetCount() int {
 
 // GetPublishingMode returns the current publishing mode.
 func (p *publishingStatsProviderImpl) GetPublishingMode() string {
-	if p.collector == nil {
+	metrics := p.collectSnapshot()
+	if metrics == nil {
 		return "unknown"
 	}
-	// Try to determine mode from metrics
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	snapshot := p.collector.CollectAll(ctx)
-	if snapshot == nil {
-		return "unknown"
+
+	if currentMode, ok := getPublishingMetric(metrics, "publishing_mode_current", "mode_current"); ok {
+		if currentMode >= 0.5 {
+			return "metrics-only"
+		}
+		return "intelligent"
 	}
-	// Check if metrics-only mode (no targets)
-	if count, ok := snapshot.Metrics["discovery.total_targets"]; ok && count == 0 {
+
+	if count, ok := getPublishingMetric(metrics, "targets_total", "discovery.total_targets"); ok && count == 0 {
 		return "metrics-only"
 	}
 	return "intelligent"
@@ -102,17 +123,12 @@ func (p *publishingStatsProviderImpl) GetPublishingMode() string {
 
 // GetSuccessfulPublishes returns the number of successful publishes.
 func (p *publishingStatsProviderImpl) GetSuccessfulPublishes() int64 {
-	if p.collector == nil {
+	metrics := p.collectSnapshot()
+	if metrics == nil {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	snapshot := p.collector.CollectAll(ctx)
-	if snapshot == nil {
-		return 0
-	}
-	// Extract successful publishes from metrics
-	if count, ok := snapshot.Metrics["queue.jobs_succeeded_total"]; ok {
+
+	if count, ok := getPublishingMetric(metrics, "jobs_completed_total", "queue.jobs_succeeded_total"); ok {
 		return int64(count)
 	}
 	return 0
@@ -120,17 +136,12 @@ func (p *publishingStatsProviderImpl) GetSuccessfulPublishes() int64 {
 
 // GetFailedPublishes returns the number of failed publishes.
 func (p *publishingStatsProviderImpl) GetFailedPublishes() int64 {
-	if p.collector == nil {
+	metrics := p.collectSnapshot()
+	if metrics == nil {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	snapshot := p.collector.CollectAll(ctx)
-	if snapshot == nil {
-		return 0
-	}
-	// Extract failed publishes from metrics
-	if count, ok := snapshot.Metrics["queue.jobs_failed_total"]; ok {
+
+	if count, ok := getPublishingMetric(metrics, "jobs_failed_total", "queue.jobs_failed_total"); ok {
 		return int64(count)
 	}
 	return 0
