@@ -1,23 +1,21 @@
-# Quick Start: Replace Alertmanager in 5 Minutes
+# Quick Start: Controlled Migration from Alertmanager
 
-**Target Audience**: Ops/SRE wanting immediate replacement
-**Time Required**: 5 minutes
+**Target Audience**: Ops/SRE evaluating a controlled replacement slice
+**Time Required**: Environment-dependent
 **Difficulty**: Easy
+
+Current runtime note (2026-03-08): this guide covers AMP's current controlled replacement slice. It does not imply full Alertmanager drop-in parity.
 
 ---
 
 ## 🚀 3-Step Migration
 
-### Step 1: Deploy Alertmanager++ (2 minutes)
+### Step 1: Deploy Alertmanager++
 
 #### Kubernetes (Helm)
 ```bash
-# Add repo
-helm repo add amp https://ipiton.github.io/AMP
-helm repo update
-
-# Install (standard profile)
-helm install amp amp/amp \
+# Install from the repository-local chart
+helm install amp ./helm/amp \
   --set profile=standard \
   --namespace monitoring
 ```
@@ -35,7 +33,7 @@ docker run -d \
 
 ---
 
-### Step 2: Update Prometheus (1 minute)
+### Step 2: Update Prometheus
 
 ```yaml
 # prometheus.yml
@@ -56,7 +54,7 @@ docker restart prometheus
 
 ---
 
-### Step 3: Verify (2 minutes)
+### Step 3: Verify
 
 ```bash
 # Check health
@@ -73,18 +71,17 @@ curl http://localhost:9093/api/v2/alerts
 
 ---
 
-## ✅ Done!
+## ✅ Pilot Ready!
 
-**That's it!** Your alerts are now flowing through Alertmanager++.
+**That's it!** Your alerts are now flowing through AMP's current active runtime slice.
 
 ### What Just Happened?
 
-- ✅ Core non-deprecated Alertmanager API surface is compatible (method/route contract-locked)
-- ✅ Your existing `alertmanager.yml` works unchanged
-- ✅ Grafana dashboards work automatically
-- ✅ `amtool` commands work without modification
-- 🟡 Semantic parity is phased (routing/inhibition/config lifecycle details)
-- ✅ **BONUS**: Now you have extended history, better performance, and optional AI classification
+- ✅ Alert ingest works through the active `/api/v2/alerts` path
+- ✅ Silence CRUD and health/readiness endpoints are available
+- ✅ Real publishing path is active when targets are discovered
+- 🟡 Wider Alertmanager parity remains phased/backlog work
+- 🟡 Validate dashboards, `amtool`, routing semantics and config APIs explicitly before claiming full replacement
 
 ---
 
@@ -106,7 +103,7 @@ helm install alertmanager prometheus-community/alertmanager
 
 - **Migration details**: See [MIGRATION_COMPARISON.md](MIGRATION_COMPARISON.md)
 - **Feature comparison**: See [MIGRATION_COMPARISON.md](MIGRATION_COMPARISON.md)
-- **Configuration**: Your `alertmanager.yml` works as-is, but check [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for new features
+- **Configuration**: Validate your `alertmanager.yml` against the active runtime surface and check [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for current caveats
 
 ---
 
@@ -139,4 +136,4 @@ kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 
 **Last Updated**: 2026-03-08
 **Version**: v1.0.0
-**Compatibility**: Alertmanager v0.25+ API v2 (non-deprecated core surface)
+**Compatibility**: Alertmanager v0.25+ API v2 (current non-deprecated active slice only)
