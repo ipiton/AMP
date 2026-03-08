@@ -249,7 +249,6 @@ go.work
 k6-results/
 *.json.gz
 go-app/configvalidator
-tasks/
 
 # Local private planning artifacts (not for git)
 .plans/

@@ -1,3 +1,8 @@
+//go:build futureparity
+// +build futureparity
+
+// Historical wide-surface parity suite. Opt-in only until runtime restoration.
+
 package main
 
 import (

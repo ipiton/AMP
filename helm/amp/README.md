@@ -4,23 +4,20 @@
 
 ## Overview
 
-Alertmanager++ (AMP) is an enhanced Alertmanager with:
-- 🤖 **LLM Classification** - AI-powered alert categorization (BYOK)
-- 🔄 **100% API Compatible** - Drop-in replacement for Alertmanager
-- 📊 **Web Dashboard** - Built-in UI for alert history and management
-- 🚀 **10x Performance** - Handles 5K+ alerts/second
+Alertmanager++ (AMP) chart packages the current repository runtime with:
+- ✅ **Controlled replacement slice** for alert ingest, silence CRUD, health/readiness, metrics, and the real publishing path
+- 🤖 **Optional LLM-related values** for environments that wire them explicitly
+- 📊 **Partial dashboard surface** with broader UI/runtime parity still tracked as follow-up work
+- 🟡 **Phased compatibility** rather than a verified full Alertmanager drop-in claim
 
 ## Quick Start
 
 ```bash
-# Add Helm repo (if published)
-helm repo add amp https://ipiton.github.io/AMP
-
 # Install with default values (Lite profile)
-helm install amp amp/amp
+helm install amp ./helm/amp
 
 # Install with LLM enabled
-helm install amp amp/amp \
+helm install amp ./helm/amp \
   --set llm.enabled=true \
   --set llm.provider=openai \
   --set llm.apiKey=sk-your-key
@@ -31,7 +28,7 @@ helm install amp amp/amp \
 ### Lite Profile (Default)
 Single-node, no external dependencies:
 ```bash
-helm install amp amp/amp --set profile=lite
+helm install amp ./helm/amp --set profile=lite
 ```
 - SQLite storage (PVC-based)
 - Memory cache
@@ -40,7 +37,7 @@ helm install amp amp/amp --set profile=lite
 ### Standard Profile
 HA-ready with PostgreSQL + Redis:
 ```bash
-helm install amp amp/amp \
+helm install amp ./helm/amp \
   --set profile=standard \
   --set postgresql.enabled=true \
   --set cache.enabled=true
@@ -81,10 +78,10 @@ helm install amp amp/amp \
 
 ## Alertmanager Compatibility
 
-AMP is a **drop-in replacement** for Alertmanager:
+AMP chart should currently be treated as a **controlled replacement** deployment path, not as a verified full Alertmanager drop-in replacement:
 
 ```yaml
-# prometheus.yml - just change the URL
+# prometheus.yml - change the URL only after validating the covered slice
 alerting:
   alertmanagers:
     - static_configs:
@@ -92,17 +89,19 @@ alerting:
           - amp:9093  # Was: alertmanager:9093
 ```
 
-All Alertmanager API endpoints are supported:
+Current active runtime surface mounted by the repository bootstrap:
 - `POST /api/v2/alerts`
 - `GET /api/v2/alerts`
-- `GET /api/v2/status`
-- `GET /api/v2/receivers`
-- `POST/GET/DELETE /api/v2/silences`
+- `GET/POST /api/v2/silences`
+- `GET/DELETE /api/v2/silence/{id}`
+- `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
+
+Wider parity such as `status`, `receivers`, `alerts/groups`, `/-/reload`, config/history APIs, and broader dashboard surfaces remains explicit follow-up work.
 
 ## Upgrading
 
 ```bash
-helm upgrade amp amp/amp --reuse-values
+helm upgrade amp ./helm/amp --reuse-values
 ```
 
 ## Uninstalling
