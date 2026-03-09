@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **FUTUREPARITY-SUITE-DRIFT** — завершен узкий code/test slice для opt-in historical `futureparity`: missing helper/env/bootstrap seams возвращены в explicit build-tagged compatibility owner без расширения active runtime.
+- В `go-app/cmd/server/futureparity_compat.go` собран historical compatibility harness, а в `go-app/cmd/server/futureparity_compat_test.go` добавлен tagged smoke path для route registration и deterministic `configSHA256`.
+- Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -tags=futureparity -run TestDoesNotExist -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -tags=futureparity -run 'TestFutureParityHarness|TestFutureParityConfigHash' -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -count=1`, `git diff --check`.
+- Ограничение: full `go test ./cmd/server -tags=futureparity -count=1` остается red на residual historical/runtime mismatch и одном sandbox-limited subtest; это не скрыто и вынесено в `docs/06-planning/BUGS.md` как `FUTUREPARITY-HISTORICAL-RUNTIME-GAP`; workspace архивирован в `tasks/archive/FUTUREPARITY-SUITE-DRIFT/`.
 - **REPO-DOC-LICENSE-DRIFT** — завершен narrow docs-only cleanup для `CONTRIBUTING.md`, `examples/README.md`, `go-app/pkg/core/README.md` и `go-app/internal/infrastructure/llm/README.md`.
 - В этих четырех файлах убраны scoped license/status/branding/package-contract drift: contribution clause выровнен под `AGPL-3.0`, examples index очищен от stale repo story, `pkg/core` и `llm` README сужены до factual local contract.
 - Проверка scope: targeted drift-marker scan, manual review против `LICENSE` / `README.md` / `DECISIONS.md`, link/path sanity и `git diff --check` проходят; кодовые runtime gates не требовались, потому что slice не меняет код.
