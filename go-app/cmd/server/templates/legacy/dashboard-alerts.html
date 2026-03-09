@@ -1,0 +1,64 @@
+{{ define "dashboard-alerts.html" }}
+{{ template "legacy-shell-start" . }}
+    <section class="card-grid">
+        <article class="stat-card">
+            <p class="kicker">Page state</p>
+            <strong><span class="badge {{ .Content.RuntimeStatusClass }}">{{ .Content.RuntimeStatus }}</span></strong>
+            <span class="muted">{{ .Content.RuntimeDetail }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Total alerts</p>
+            <strong>{{ .Content.Total }}</strong>
+            <span class="muted">Current compatibility-store inventory</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Firing</p>
+            <strong>{{ .Content.Firing }}</strong>
+            <span class="muted">Alerts still active</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Resolved</p>
+            <strong>{{ .Content.Resolved }}</strong>
+            <span class="muted">Alerts resolved in memory</span>
+        </article>
+    </section>
+
+    {{ if .Content.Alerts }}
+    <section class="panel">
+        <div class="panel-head">
+            <h2>Alert inventory</h2>
+            <a class="inline-link" href="/api/v2/alerts">API view</a>
+        </div>
+        <div class="stack-list">
+            {{ range .Content.Alerts }}
+            <article class="list-card">
+                <div class="list-card-head">
+                    <div>
+                        <h3>{{ .AlertName }}</h3>
+                        <p class="muted">{{ .Summary }}</p>
+                    </div>
+                    <span class="badge {{ .StatusClass }}">{{ .Status }}</span>
+                </div>
+                <dl class="meta-grid">
+                    <div><dt>Severity</dt><dd>{{ .Severity }}</dd></div>
+                    <div><dt>Namespace</dt><dd>{{ .Namespace }}</dd></div>
+                    <div><dt>Service</dt><dd>{{ .Service }}</dd></div>
+                    <div><dt>Fingerprint</dt><dd class="mono">{{ .Fingerprint }}</dd></div>
+                    <div><dt>Starts at</dt><dd>{{ .StartsAt }}</dd></div>
+                    <div><dt>Updated at</dt><dd>{{ .UpdatedAt }}</dd></div>
+                </dl>
+            </article>
+            {{ end }}
+        </div>
+        {{ if .Content.Truncated }}
+        <p class="panel-note">Showing the first {{ len .Content.Alerts }} alerts. {{ .Content.HiddenCount }} additional alerts remain in the active store.</p>
+        {{ end }}
+    </section>
+    {{ else }}
+    <section class="panel empty-state">
+        <h2>No alerts yet</h2>
+        <p>{{ .Content.RuntimeDetail }}</p>
+    </section>
+    {{ end }}
+{{ template "legacy-shell-end" . }}
+{{ end }}
