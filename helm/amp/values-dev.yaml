@@ -1,4 +1,4 @@
-# Development values for Alert History Service with LLM integration
+# Development-oriented values overrides for AMP with optional LLM settings
 # Usage: helm install amp ./helm/amp -f values-dev.yaml
 
 # ===============================
@@ -49,7 +49,7 @@ cache:
 llm:
   enabled: true
   proxyUrl: "https://llm-proxy.b2broker.tech"
-  apiKey: "sk-eEyKBRlxsrWB81yZT5Mc1w"  # Development API key
+  apiKey: ""  # Set via local override or secret; never commit real keys
   model: "openai/gpt-4o"
   timeout: 30
   maxRetries: 3
