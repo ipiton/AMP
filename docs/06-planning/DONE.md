@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **GRAFANA-DASHBOARD-BRANDING-DRIFT** — завершен как narrow visible dashboard title cleanup, а не как full Grafana identity/provisioning rewrite.
+- В [alert-history-service.json](/Users/vit/Documents/Projects/AMP/grafana/dashboards/alert-history-service.json) top-level title обновлен с `AMP - Alert History Service` на `AMP - Operations Dashboard`; `uid = amp-alert-history`, filename и весь dashboard content ниже сознательно оставлены без изменений.
+- Проверка scope: targeted search по `AMP - Alert History Service|AMP - Operations Dashboard|amp-alert-history`, `jq '{title,uid,version}' grafana/dashboards/alert-history-service.json`, manual review против `docs/06-planning/BUGS.md` / `docs/06-planning/DECISIONS.md` / `README.md`, `git diff --check`.
+- Ограничение: identity-shaped residual по `uid` и filename сознательно не маскировался этим task id и вынесен отдельно в `GRAFANA-DASHBOARD-IDENTITY-DRIFT`. Workspace архивирован в `tasks/archive/GRAFANA-DASHBOARD-BRANDING-DRIFT/`.
 - **CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT** — завершен как narrow self-contained example-code alignment slice, а не как full rewrite examples policy или strict `pkg/core/interfaces` conformance pass.
 - В [custom-publisher/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-publisher/main.go) local `PublishingTarget` переведен с `webhook_url`-centric shape на current canonical field names `url`, `headers`, `filter_config`, `format`, `enabled`; `Publish(...)` теперь строит request через `target.URL` и честно применяет `target.Headers`, а sample target object в `main()` синхронизирован с новой local shape.
 - Проверка scope: targeted search по `WebhookURL|webhook_url`, manual review против `docs/CONFIGURATION_GUIDE.md` / archived `PHASE-4` spec / `examples/README.md`, example sanity review, `git diff --check`.
