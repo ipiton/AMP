@@ -2,7 +2,7 @@
 //
 // This example shows:
 //   - How to implement the AlertPublisher interface
-//   - How to integrate with Alert History Service
+//   - How to integrate with AMP publishing flow
 //   - How to format alerts for custom targets
 //   - How to handle errors and retries
 //
@@ -331,7 +331,7 @@ func main() {
 }
 
 // ================================================================================
-// Integration with Alert History Service
+// Integration with AMP Publishing
 // ================================================================================
 //
 // To integrate your custom publisher:
@@ -343,19 +343,14 @@ func main() {
 //    publisher := NewMSTeamsPublisher(10 * time.Second)
 //    registry.Register("ms-teams", publisher)
 //
-// 3. Configure publishing targets:
+// 3. Configure publishing according to the current repo docs:
 //
-//    config.yml:
-//      publishing:
-//        targets:
-//          - name: ops-team
-//            type: ms-teams
-//            webhook_url: https://outlook.office.com/webhook/...
-//            enabled: true
-//            filters:
-//              - field: severity
-//                op: eq
-//                value: critical
+//    - runtime toggles live under `publishing.*`
+//    - publishing targets are discovered from Secrets labeled
+//      `publishing-target=true`
+//    - target payload lives in `data.config` / `stringData.config`
+//
+//    See: docs/CONFIGURATION_GUIDE.md
 //
 // 4. Deploy and monitor:
 //
@@ -364,7 +359,7 @@ func main() {
 //    - Set up alerts for publishing failures
 //    - Monitor webhook health
 //
-// That's it! Alerts will now be published to MS Teams.
+// That's it! Alerts can now be published through your custom AMP publisher.
 //
 // ================================================================================
 // Advanced Features
