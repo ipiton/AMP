@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **REPO-DOC-LICENSE-DRIFT** — завершен narrow docs-only cleanup для `CONTRIBUTING.md`, `examples/README.md`, `go-app/pkg/core/README.md` и `go-app/internal/infrastructure/llm/README.md`.
+- В этих четырех файлах убраны scoped license/status/branding/package-contract drift: contribution clause выровнен под `AGPL-3.0`, examples index очищен от stale repo story, `pkg/core` и `llm` README сужены до factual local contract.
+- Проверка scope: targeted drift-marker scan, manual review против `LICENSE` / `README.md` / `DECISIONS.md`, link/path sanity и `git diff --check` проходят; кодовые runtime gates не требовались, потому что slice не меняет код.
+- Ограничение: более широкий historical repo-doc drift вне этого four-file scope не скрыт и остается открытым в `docs/06-planning/BUGS.md` как `SECONDARY-REPO-DOC-HISTORICAL-DRIFT`; workspace архивирован в `tasks/archive/REPO-DOC-LICENSE-DRIFT/`.
 - **UI-PLACEHOLDER-REMOVAL** — active `/dashboard/silences`, `/dashboard/llm` и `/dashboard/routing` больше не возвращают placeholder body и закреплены как honest read-only страницы на текущем `/dashboard/*` surface.
 - Render path вынесен в `go-app/cmd/server/legacy_dashboard.go` с отдельным simple template stack `go-app/cmd/server/templates/legacy/*`; page-facing runtime summaries собираются через `go-app/internal/application/legacy_dashboard.go`.
 - Default non-tagged coverage добавлена в `go-app/cmd/server/legacy_dashboard_test.go`; scope подтвержден через `go test ./cmd/server`, `go test ./internal/application/...`, `go build ./cmd/server`, `git diff --check`.
