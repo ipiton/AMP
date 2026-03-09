@@ -28,12 +28,12 @@ func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/silence/", handlers.SilenceByIDHandler(rt.registry))
 
 	// Health
-	mux.HandleFunc("/health", handlers.HealthHandler)
-	mux.HandleFunc("/ready", handlers.ReadyHandler)
-	mux.HandleFunc("/healthz", handlers.HealthHandler)
-	mux.HandleFunc("/readyz", handlers.ReadyHandler)
-	mux.HandleFunc("/-/healthy", handlers.AlertmanagerHealthyHandler)
-	mux.HandleFunc("/-/ready", handlers.AlertmanagerReadyHandler)
+	mux.HandleFunc("/health", handlers.HealthHandler(rt.registry))
+	mux.HandleFunc("/ready", handlers.ReadyHandler(rt.registry))
+	mux.HandleFunc("/healthz", handlers.HealthHandler(rt.registry))
+	mux.HandleFunc("/readyz", handlers.ReadyHandler(rt.registry))
+	mux.HandleFunc("/-/healthy", handlers.AlertmanagerHealthyHandler(rt.registry))
+	mux.HandleFunc("/-/ready", handlers.AlertmanagerReadyHandler(rt.registry))
 
 	// Metrics
 	mux.Handle("/metrics", promhttp.Handler())

@@ -4,7 +4,7 @@
 **Time Required**: Environment-dependent
 **Difficulty**: Easy
 
-Current runtime note (2026-03-08): this guide covers AMP's current controlled replacement slice. It does not imply full Alertmanager drop-in parity.
+Current runtime note (2026-03-09): this guide covers AMP's current controlled replacement slice. It does not imply full Alertmanager drop-in parity.
 
 ---
 
@@ -57,8 +57,9 @@ docker restart prometheus
 ### Step 3: Verify
 
 ```bash
-# Check health
+# Check liveness and readiness
 curl http://localhost:9093/health
+curl http://localhost:9093/ready
 
 # Test alert ingestion
 curl -X POST http://localhost:9093/api/v2/alerts \
@@ -79,6 +80,7 @@ curl http://localhost:9093/api/v2/alerts
 
 - ✅ Alert ingest works through the active `/api/v2/alerts` path
 - ✅ Silence CRUD and health/readiness endpoints are available
+- ✅ `/health` reports liveness, `/ready` reports readiness; optional degraded components can still return `200` with a degraded JSON body
 - ✅ Real publishing path is active when targets are discovered
 - 🟡 Wider Alertmanager parity remains phased/backlog work
 - 🟡 Validate dashboards, `amtool`, routing semantics and config APIs explicitly before claiming full replacement
@@ -134,6 +136,6 @@ kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 
 ---
 
-**Last Updated**: 2026-03-08
+**Last Updated**: 2026-03-09
 **Version**: v1.0.0
 **Compatibility**: Alertmanager v0.25+ API v2 (current non-deprecated active slice only)

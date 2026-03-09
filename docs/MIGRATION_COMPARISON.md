@@ -1,6 +1,6 @@
 # Alertmanager vs Alertmanager++ - Controlled Replacement Comparison
 
-**Last Updated**: 2026-03-08
+**Last Updated**: 2026-03-09
 **Alertmanager Version**: v0.27+
 **Alertmanager++ Version**: v1.0.0
 **Status**: AMP should currently be evaluated as a **controlled replacement slice**, not as a verified full Alertmanager drop-in replacement.
@@ -14,7 +14,7 @@ Treat AMP today as a pilot-oriented runtime for a narrow, explicit surface:
 - alert ingest via `POST /api/v2/alerts`
 - alert query via `GET /api/v2/alerts`
 - silence CRUD via `GET/POST /api/v2/silences` and `GET/DELETE /api/v2/silence/{id}`
-- health/readiness probes and `/metrics`
+- state-aware liveness/readiness probes and `/metrics`
 - real publishing path with explicit `metrics-only` fallback
 
 Anything wider than this should be treated as future parity or environment-specific validation work, not as an assumed baseline.
@@ -40,7 +40,7 @@ AMP is a realistic candidate when you want to pilot a controlled replacement pat
 
 - Prometheus or compatible senders post alerts to `/api/v2/alerts`
 - operators rely on current silence CRUD endpoints
-- health/readiness and `/metrics` are enough for runtime checks
+- liveness/readiness JSON probes and `/metrics` are enough for runtime checks
 - outbound delivery is validated through the current publishing path
 - your team accepts that broader Alertmanager parity is not yet the active contract
 
@@ -96,7 +96,7 @@ Suggested rollout shape:
 
 1. deploy AMP with the repo-local chart `./helm/amp`
 2. point a controlled Prometheus/VMAlert sender or environment at AMP
-3. validate `/api/v2/alerts`, `/api/v2/silences`, health/readiness, `/metrics`, and real target delivery
+3. validate `/api/v2/alerts`, `/api/v2/silences`, state-aware health/readiness, `/metrics`, and real target delivery
 4. keep rollback to Alertmanager straightforward until your covered slice is proven
 
 See:
@@ -116,7 +116,7 @@ Alertmanager++ current active runtime guarantees only this controlled replacemen
 - `POST /api/v2/silences`
 - `GET /api/v2/silence/{id}`
 - `DELETE /api/v2/silence/{id}`
-- `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
+- `/health`, `/healthz`, `/ready`, `/readyz`, `/-/healthy`, `/-/ready`, `/metrics`
 - real publishing path with explicit `metrics-only` fallback
 
 Anything beyond this surface should be treated as:
@@ -132,6 +132,7 @@ Anything beyond this surface should be treated as:
 - Helm examples in repo docs use the repository-local chart path `./helm/amp` as the canonical install story.
 - Public docs use AGPL-3.0 as the license source of truth.
 - Comparative performance/resource numbers are intentionally excluded from this document until a reproducible benchmark report is published for the current branch.
+- `/health|/healthz` describe liveness, `/ready|/readyz` describe readiness; optional degraded components may still produce `200` with a degraded JSON body while required dependency failures move readiness to `503`.
 
 ---
 

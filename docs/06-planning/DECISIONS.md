@@ -25,3 +25,17 @@
 - **Контекст**: Один разработчик + AI-агент. Нужен легковесный, но структурированный процесс.
 - **Решение**: Solo Kanban с WIP max 2, балансом 50/50 maintenance/roadmap, вертикальными срезами и quality gates.
 - **Следствие**: Planning files версионируются в `docs/06-planning/`, задачи в `tasks/`.
+
+## ADR-004: Active Storage Bootstrap Is Profile-Aware And State-Aware
+- **Дата**: 2026-03-09
+- **Контекст**: Active runtime в `go-app/internal/application/service_registry.go` держал `nil` placeholder для `core.AlertStorage`, standard migrations были незавершенными, а health/readiness handlers отвечали статическим success независимо от реального storage/bootstrap state.
+- **Решение**:
+  - `ProfileLite` использует `internal/infrastructure.SQLiteDatabase` как canonical embedded storage runtime с обязательными `Connect()` и `MigrateUp()` до публикации storage;
+  - `ProfileStandard` использует canonical path `PostgresPool.Connect -> goose migrations -> thin Postgres storage adapter`, работающий поверх уже созданного pool и не открывающий второй connection pool;
+  - required storage и database bootstrap failures считаются fail-fast и не допускают pseudo-healthy startup;
+  - `/health` и `/healthz` закреплены как liveness JSON endpoints, `/ready` и `/readyz` как readiness JSON endpoints, `/-/healthy` и `/-/ready` сохраняют Alertmanager-compatible plain-text contract;
+  - optional degradations вроде cache fallback отражаются в runtime report как `degraded`, но не переводят readiness в failure, пока required dependencies healthy.
+- **Следствие**:
+  - active runtime больше не стартует с отсутствующим required storage и ложным `healthy`;
+  - observable health contract теперь различает bootstrap, storage, database и optional degraded state;
+  - active alert/silence handlers пока сознательно остаются на memory compatibility stores и требуют отдельного follow-up, если их нужно переводить на persistent backend.
