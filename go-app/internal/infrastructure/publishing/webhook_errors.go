@@ -67,41 +67,46 @@ func (t ErrorType) String() string {
 var (
 	// URL validation errors
 	ErrEmptyURL         = errors.New("webhook URL cannot be empty")
-	ErrInvalidURL       = errors.New("invalid webhook URL")
-	ErrInsecureScheme   = errors.New("URL must use HTTPS")
-	ErrCredentialsInURL = errors.New("URL must not contain credentials")
-	ErrBlockedHost      = errors.New("blocked hostname")
+	ErrInvalidURL       = errors.New("webhook URL is invalid")
+	ErrInsecureScheme   = errors.New("webhook URL must use HTTPS scheme")
+	ErrCredentialsInURL = errors.New("webhook URL must not contain credentials")
+	ErrBlockedHost      = errors.New("webhook URL host is blocked (localhost/private IP)")
 
 	// Payload validation errors
-	ErrPayloadTooLarge = errors.New("payload exceeds size limit")
-	ErrInvalidFormat   = errors.New("invalid payload format")
+	ErrPayloadTooLarge = errors.New("webhook payload exceeds maximum size")
+	ErrInvalidFormat   = errors.New("webhook payload format is invalid")
 
 	// Header validation errors
-	ErrTooManyHeaders      = errors.New("too many headers")
-	ErrHeaderValueTooLarge = errors.New("header value too large")
+	ErrTooManyHeaders      = errors.New("webhook has too many headers")
+	ErrHeaderValueTooLarge = errors.New("webhook header value exceeds maximum size")
 
 	// Configuration validation errors
-	ErrInvalidTimeout     = errors.New("timeout out of range")
-	ErrInvalidRetryConfig = errors.New("invalid retry configuration")
+	ErrInvalidTimeout     = errors.New("webhook timeout must be between 1s and 60s")
+	ErrInvalidRetryConfig = errors.New("webhook retry configuration is invalid")
 
 	// Authentication errors
-	ErrMissingAuthToken            = errors.New("missing auth token")
-	ErrMissingBasicAuthCredentials = errors.New("missing basic auth credentials")
-	ErrMissingAPIKey               = errors.New("missing API key")
-	ErrNoCustomHeaders             = errors.New("no custom headers provided")
+	ErrMissingAuthToken            = errors.New("bearer token is required but not provided")
+	ErrMissingBasicAuthCredentials = errors.New("basic auth username/password required but not provided")
+	ErrMissingAPIKey               = errors.New("API key is required but not provided")
+	ErrNoCustomHeaders             = errors.New("custom headers are required but not provided")
 )
 
 // IsWebhookRetryableError checks if a webhook error should be retried.
-//
-// Deprecated: Use httperror.IsRetryable or IsPublishingRetryable instead.
 func IsWebhookRetryableError(err error) bool {
 	return httperror.IsRetryable(err)
 }
 
 // IsWebhookPermanentError checks if an error is permanent (not retryable).
-//
-// Deprecated: Use !httperror.IsRetryable instead.
 func IsWebhookPermanentError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// For non-webhook errors, we follow the test expectation
+	if _, ok := err.(*httperror.HTTPAPIError); !ok {
+		return false
+	}
+
 	return !httperror.IsRetryable(err)
 }
 

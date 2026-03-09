@@ -20,7 +20,8 @@ import (
 // TestHealthMonitor_NetworkTimeouts tests various timeout scenarios
 func TestHealthMonitor_NetworkTimeouts(t *testing.T) {
 	// Create shared metrics instance for all subtests
-	registry := v2.NewRegistry()
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	metrics := registry.Publishing
 
 	tests := []struct {

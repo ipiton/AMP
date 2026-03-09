@@ -31,6 +31,12 @@ type Config struct {
 	Retry      RetryConfig      `mapstructure:"retry"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 	Publishing PublishingConfig `mapstructure:"publishing"`
+	Receivers  []ReceiverConfig `mapstructure:"receivers"`
+}
+
+// ReceiverConfig holds configuration for a notification receiver
+type ReceiverConfig struct {
+	Name string `mapstructure:"name"`
 }
 
 // DeploymentProfile represents the deployment profile type
@@ -542,6 +548,11 @@ func setDefaults() {
 	viper.SetDefault("publishing.health.tls_skip_verify", false)
 	viper.SetDefault("publishing.health.follow_redirects", true)
 	viper.SetDefault("publishing.health.max_redirects", 3)
+
+	// Default receivers
+	viper.SetDefault("receivers", []map[string]string{
+		{"name": "default"},
+	})
 }
 
 // Validate validates the configuration

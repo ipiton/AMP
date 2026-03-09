@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
@@ -24,6 +26,9 @@ type RegistryProvider interface {
 	AlertStore() *memory.AlertStore
 	SilenceStore() *memory.SilenceStore
 	AlertProcessor() *services.AlertProcessor
+	Config() *appconfig.Config
+	StartTime() time.Time
+	ReloadConfig(ctx context.Context) error
 }
 
 func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
@@ -60,6 +65,16 @@ func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w 
 	}
 
 	writeJSON(w, http.StatusOK, gettableAlerts)
+}
+
+func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		queryParams := r.URL.Query()
+		groupBy := queryParams["group_by"]
+
+		groups := registry.AlertStore().GroupAlerts(groupBy)
+		writeJSON(w, http.StatusOK, groups)
+	}
 }
 
 func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {

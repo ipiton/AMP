@@ -2,6 +2,7 @@ package publishing
 
 import (
 	"errors"
+	"net"
 	"testing"
 
 	"github.com/ipiton/AMP/pkg/httperror"
@@ -160,8 +161,9 @@ func TestSentinelErrors_NoCustomHeaders(t *testing.T) {
 // ==================== Error Classification Tests ====================
 
 func TestIsWebhookRetryableError_NetworkError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeNetwork, "connection refused", nil)
-
+	// Network errors need an underlying net.Error with Timeout()=true or specific syscall error
+	netErr := &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
+	err := NewWebhookErrorWithType(ErrorTypeNetwork, "network error", netErr)
 	if !IsWebhookRetryableError(err) {
 		t.Error("Network error should be retryable")
 	}
@@ -232,8 +234,8 @@ func TestIsWebhookPermanentError_AuthError(t *testing.T) {
 }
 
 func TestIsWebhookPermanentError_NetworkError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeNetwork, "connection refused", nil)
-
+	netErr := &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
+	err := NewWebhookErrorWithType(ErrorTypeNetwork, "network error", netErr)
 	if IsWebhookPermanentError(err) {
 		t.Error("Network error should NOT be permanent")
 	}

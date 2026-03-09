@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // AlertProcessor defines the interface for processing alerts.
@@ -39,24 +40,17 @@ type UniversalWebhookHandler struct {
 }
 
 // NewUniversalWebhookHandler creates a new universal webhook handler.
-//
-// The handler supports multiple webhook formats via Strategy pattern:
-//   - Alertmanager webhooks (v0.25+ format)
-//   - Prometheus direct alerts (v1 array and v2 grouped formats)
-//
-// Parser selection is automatic based on webhook detection.
-//
-// Parameters:
-//   - processor: Alert processor for handling converted alerts
-//   - logger: Structured logger (optional, defaults to slog.Default())
-//
-// Returns:
-//   - *UniversalWebhookHandler: Initialized handler with all dependencies
-//
-// TN-146: Added Prometheus parser support via parsers map.
 func NewUniversalWebhookHandler(processor AlertProcessor, logger *slog.Logger) *UniversalWebhookHandler {
+	return NewUniversalWebhookHandlerWithRegisterer(processor, logger, prometheus.DefaultRegisterer)
+}
+
+// NewUniversalWebhookHandlerWithRegisterer creates a new universal webhook handler with a custom registerer.
+func NewUniversalWebhookHandlerWithRegisterer(processor AlertProcessor, logger *slog.Logger, reg prometheus.Registerer) *UniversalWebhookHandler {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if reg == nil {
+		reg = prometheus.DefaultRegisterer
 	}
 
 	return &UniversalWebhookHandler{
@@ -67,7 +61,7 @@ func NewUniversalWebhookHandler(processor AlertProcessor, logger *slog.Logger) *
 		},
 		validator: NewWebhookValidator(),
 		processor: processor,
-		metrics:   metrics.NewWebhookMetrics(),
+		metrics:   metrics.NewWebhookMetricsWithRegisterer(reg),
 		logger:    logger,
 	}
 }

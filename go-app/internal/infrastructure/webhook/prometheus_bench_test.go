@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // =======================================================================================
@@ -146,7 +148,7 @@ func BenchmarkFlattenGroups(b *testing.B) {
 // Target: < 100µs/op
 func BenchmarkHandlerE2E(b *testing.B) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandler(processor, nil)
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
 
 	payload := []byte(`[{
 		"labels": {"alertname": "HighCPU", "instance": "server-1"},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // BenchmarkHealthMonitor_Start tests Start performance.
@@ -283,7 +284,8 @@ func getBenchMetrics(b *testing.B) *v2.PublishingMetrics {
 	b.Helper()
 
 	benchMetricsOnce.Do(func() {
-		registry := v2.NewRegistry()
+		promReg := prometheus.NewRegistry()
+		registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 		benchMetrics = registry.Publishing
 	})
 

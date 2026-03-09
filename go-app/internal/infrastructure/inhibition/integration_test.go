@@ -139,7 +139,9 @@ func TestIntegration_InhibitionStateManager_Redis(t *testing.T) {
 		t.Error("Alert should not be inhibited after removal")
 	}
 
-	inhibited4, _ := sm2.IsInhibited(ctx, fingerprint)
+	// 5. Create THIRD instance to verify removal from Redis
+	sm3 := NewDefaultStateManager(redisClient, nil, nil)
+	inhibited4, _ := sm3.IsInhibited(ctx, fingerprint)
 	if inhibited4 {
 		t.Error("Alert should not be inhibited in new instance after removal")
 	}
