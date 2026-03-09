@@ -73,11 +73,14 @@ func (p *MSTeamsPublisher) Publish(ctx context.Context, alert *domain.EnrichedAl
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", target.WebhookURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, "POST", target.URL, bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
+	for key, value := range target.Headers {
+		req.Header.Set(key, value)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	// Send request
@@ -120,10 +123,10 @@ func (p *MSTeamsPublisher) Shutdown(ctx context.Context) error {
 //
 // Spec: https://adaptivecards.io/explorer/
 type AdaptiveCard struct {
-	Type        string      `json:"type"`
-	Version     string      `json:"version"`
-	Body        []CardElement `json:"body"`
-	Actions     []CardAction  `json:"actions,omitempty"`
+	Type    string        `json:"type"`
+	Version string        `json:"version"`
+	Body    []CardElement `json:"body"`
+	Actions []CardAction  `json:"actions,omitempty"`
 }
 
 // CardElement represents a card element (text, image, etc.).
@@ -267,11 +270,13 @@ func (p *MSTeamsPublisher) severityColor(severity domain.AlertSeverity) string {
 
 // PublishingTarget defines where to publish alerts.
 type PublishingTarget struct {
-	Name       string            `json:"name"`
-	Type       string            `json:"type"`
-	WebhookURL string            `json:"webhook_url"`
-	Headers    map[string]string `json:"headers"`
-	Enabled    bool              `json:"enabled"`
+	Name         string              `json:"name"`
+	Type         string              `json:"type"`
+	URL          string              `json:"url"`
+	Headers      map[string]string   `json:"headers,omitempty"`
+	FilterConfig map[string][]string `json:"filter_config,omitempty"`
+	Format       string              `json:"format,omitempty"`
+	Enabled      bool                `json:"enabled"`
 }
 
 // ================================================================================
@@ -314,10 +319,15 @@ func main() {
 
 	// Publishing target
 	target := &PublishingTarget{
-		Name:       "ops-team",
-		Type:       "teams",
-		WebhookURL: "https://outlook.office.com/webhook/YOUR-WEBHOOK-URL",
-		Enabled:    true,
+		Name:   "ops-team",
+		Type:   "teams",
+		URL:    "https://outlook.office.com/webhook/YOUR-WEBHOOK-URL",
+		Format: "teams",
+		FilterConfig: map[string][]string{
+			"severity":   {"critical"},
+			"namespaces": {"production"},
+		},
+		Enabled: true,
 	}
 
 	// Publish alert
