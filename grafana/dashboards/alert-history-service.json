@@ -1467,7 +1467,7 @@
   "time": { "from": "now-24h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "AMP - Alert History Service",
+  "title": "AMP - Operations Dashboard",
   "uid": "amp-alert-history",
   "version": 3
 }
