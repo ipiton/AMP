@@ -8,13 +8,13 @@ metadata:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: database-exporter
   annotations:
-    description: "PostgreSQL Exporter custom queries for 150% observability (TN-98)"
+    description: "PostgreSQL Exporter custom queries for PostgreSQL observability (TN-98)"
 data:
   queries.yaml: |
     # =========================================
     # PostgreSQL Exporter Custom Queries
-    # Target: 50+ Metrics for Enterprise Observability
-    # TN-98: 150% Quality Target
+    # Target: PostgreSQL observability metrics
+    # TN-98: Monitoring baseline
     # =========================================
 
     # =====================================
