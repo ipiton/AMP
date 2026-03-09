@@ -9,7 +9,9 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
+	dbmigrations "github.com/ipiton/AMP/internal/database"
 	"github.com/ipiton/AMP/internal/database/postgres"
+	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
@@ -39,10 +41,11 @@ type ServiceRegistry struct {
 	logger *slog.Logger
 
 	// Infrastructure Services
-	database *postgres.PostgresPool
-	storage  core.AlertStorage
-	cache    infrastructurecache.Cache
-	metrics  *metrics.BusinessMetrics
+	database       *postgres.PostgresPool
+	storageRuntime storageRuntime
+	storage        core.AlertStorage
+	cache          infrastructurecache.Cache
+	metrics        *metrics.BusinessMetrics
 
 	// Memory Stores (for Alertmanager compatibility mode)
 	alertStore   *memory.AlertStore
@@ -68,7 +71,8 @@ type ServiceRegistry struct {
 	publisherFactory           *infrapublishing.PublisherFactory
 
 	// State
-	initialized bool
+	initialized     bool
+	degradedReasons []string
 }
 
 // NewServiceRegistry creates a new service registry.
@@ -81,8 +85,9 @@ func NewServiceRegistry(config *appconfig.Config, logger *slog.Logger) (*Service
 	}
 
 	return &ServiceRegistry{
-		config: config,
-		logger: logger,
+		config:          config,
+		logger:          logger,
+		degradedReasons: make([]string, 0, 4),
 	}, nil
 }
 
@@ -143,11 +148,10 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 
 	// Initialize Database based on profile
 	if err := r.initializeDatabase(ctx); err != nil {
-		r.logger.Error("Database initialization failed", "error", err)
-		// Continue with graceful degradation (memory storage)
+		return fmt.Errorf("database initialization failed: %w", err)
 	}
 
-	// Initialize Storage (uses database if available, otherwise memory)
+	// Initialize Storage (required for active bootstrap path)
 	if err := r.initializeStorage(ctx); err != nil {
 		return fmt.Errorf("storage initialization failed: %w", err)
 	}
@@ -183,6 +187,18 @@ func (r *ServiceRegistry) initializeDatabase(ctx context.Context) error {
 	if r.config.Database.MaxConnections > 0 {
 		dbCfg.MaxConns = int32(r.config.Database.MaxConnections)
 	}
+	if r.config.Database.MinConnections > 0 {
+		dbCfg.MinConns = int32(r.config.Database.MinConnections)
+	}
+	if r.config.Database.MaxConnLifetime > 0 {
+		dbCfg.MaxConnLifetime = r.config.Database.MaxConnLifetime
+	}
+	if r.config.Database.MaxConnIdleTime > 0 {
+		dbCfg.MaxConnIdleTime = r.config.Database.MaxConnIdleTime
+	}
+	if r.config.Database.ConnectTimeout > 0 {
+		dbCfg.ConnectTimeout = r.config.Database.ConnectTimeout
+	}
 
 	// Create and connect
 	pool := postgres.NewPostgresPool(dbCfg, r.logger)
@@ -194,10 +210,9 @@ func (r *ServiceRegistry) initializeDatabase(ctx context.Context) error {
 	r.logger.Info("✅ PostgreSQL connected successfully")
 
 	// Run migrations
-	// TODO: Add migration runner
-	// if err := r.runMigrations(ctx); err != nil {
-	//     return fmt.Errorf("migrations failed: %w", err)
-	// }
+	if err := dbmigrations.RunMigrations(ctx, pool, r.logger); err != nil {
+		return fmt.Errorf("migrations failed: %w", err)
+	}
 
 	return nil
 }
@@ -206,21 +221,53 @@ func (r *ServiceRegistry) initializeDatabase(ctx context.Context) error {
 func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 	r.logger.Info("Initializing storage backend...")
 
-	// TODO: Implement storage initialization when storage package is ready
-	// var pgxPool *pgxpool.Pool
-	// if r.database != nil {
-	//     pgxPool = r.database.Pool()
-	// }
-	// st, err := storage.NewStorage(ctx, r.config, pgxPool, r.logger)
-	// if err != nil {
-	//     return fmt.Errorf("failed to create storage: %w", err)
-	// }
-	// r.storage = st
-	_ = ctx         // Use ctx to avoid unused variable warning
-	r.storage = nil // Placeholder - storage not yet implemented
+	switch r.config.Profile {
+	case appconfig.ProfileLite:
+		sqliteConfig := &infrastructure.Config{
+			Driver:          "sqlite",
+			Logger:          r.logger,
+			SQLiteFile:      r.config.Storage.FilesystemPath,
+			MaxOpenConns:    r.config.Database.MaxConnections,
+			MaxIdleConns:    r.config.Database.MinConnections,
+			ConnMaxLifetime: r.config.Database.MaxConnLifetime,
+			ConnMaxIdleTime: r.config.Database.MaxConnIdleTime,
+		}
+
+		sqliteDB, err := infrastructure.NewSQLiteDatabase(sqliteConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create sqlite storage: %w", err)
+		}
+		if err := sqliteDB.Connect(ctx); err != nil {
+			return fmt.Errorf("failed to connect sqlite storage: %w", err)
+		}
+		if err := sqliteDB.MigrateUp(ctx); err != nil {
+			return fmt.Errorf("failed to migrate sqlite storage: %w", err)
+		}
+
+		r.storageRuntime = sqliteDB
+		r.storage = sqliteDB
+
+	case appconfig.ProfileStandard:
+		if r.database == nil || r.database.Pool() == nil {
+			return fmt.Errorf("postgres database is not initialized")
+		}
+
+		storageAdapter, err := infrastructure.NewPostgresStorageAdapter(r.database.Pool(), r.logger)
+		if err != nil {
+			return fmt.Errorf("failed to create postgres storage adapter: %w", err)
+		}
+
+		r.storageRuntime = storageAdapter
+		r.storage = storageAdapter
+
+	default:
+		return fmt.Errorf("unsupported deployment profile: %q", r.config.Profile)
+	}
+
 	r.logger.Info("✅ Storage backend initialized",
 		"type", r.config.Profile,
-		"backend", getStorageType(r.config.Profile))
+		"backend", getStorageType(r.config.Profile),
+	)
 
 	return nil
 }
@@ -249,6 +296,7 @@ func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
 			"error", err,
 			"addr", cacheConfig.Addr,
 		)
+		r.addDegradedReason("cache backend unavailable: %v", err)
 		r.cache = infrastructurecache.NewMemoryCache(r.logger)
 		return nil
 	}
@@ -270,12 +318,14 @@ func (r *ServiceRegistry) initializeCoreServices(ctx context.Context) error {
 	// Initialize Deduplication Service
 	if err := r.initializeDeduplication(ctx); err != nil {
 		r.logger.Warn("Deduplication service initialization failed", "error", err)
+		r.addDegradedReason("deduplication unavailable: %v", err)
 		// Continue without deduplication (graceful degradation)
 	}
 
 	// Initialize Classification Service
 	if err := r.initializeClassification(ctx); err != nil {
 		r.logger.Warn("Classification service initialization failed", "error", err)
+		r.addDegradedReason("classification unavailable: %v", err)
 		// Continue without classification (graceful degradation)
 	}
 
@@ -413,6 +463,16 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 
 	r.shutdownPublishing()
 
+	// Shutdown Storage runtime before database ownership is torn down
+	if r.storageRuntime != nil {
+		r.logger.Info("Shutting down storage runtime...")
+		if err := r.storageRuntime.Disconnect(ctx); err != nil {
+			r.logger.Error("Storage runtime disconnect error", "error", err)
+		}
+		r.storageRuntime = nil
+	}
+	r.storage = nil
+
 	// Shutdown Database
 	if r.database != nil {
 		r.logger.Info("Shutting down database connection...")
@@ -423,25 +483,14 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	r.initialized = false
 	r.logger.Info("✅ All services shut down")
 	return nil
 }
 
 // Health checks the health of all services.
 func (r *ServiceRegistry) Health(ctx context.Context) error {
-	// Check database health
-	if r.database != nil {
-		if err := r.database.Health(ctx); err != nil {
-			return fmt.Errorf("database unhealthy: %w", err)
-		}
-	}
-
-	// Check storage health
-	if r.storage != nil {
-		// TODO: Add Health method to storage interface
-	}
-
-	return nil
+	return r.Readiness(ctx)
 }
 
 // Getters for services (used by handlers)

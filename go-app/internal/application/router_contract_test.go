@@ -3,12 +3,14 @@ package application
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
@@ -30,7 +32,47 @@ func (f *contractFilterEngine) ShouldBlock(_ *core.Alert, _ *core.Classification
 	return false, ""
 }
 
-func newActiveContractMux(t *testing.T) *http.ServeMux {
+type contractStorageRuntime struct {
+	healthErr error
+}
+
+func (s *contractStorageRuntime) SaveAlert(context.Context, *core.Alert) error {
+	return nil
+}
+
+func (s *contractStorageRuntime) GetAlertByFingerprint(context.Context, string) (*core.Alert, error) {
+	return nil, core.ErrAlertNotFound
+}
+
+func (s *contractStorageRuntime) ListAlerts(context.Context, *core.AlertFilters) (*core.AlertList, error) {
+	return &core.AlertList{}, nil
+}
+
+func (s *contractStorageRuntime) UpdateAlert(context.Context, *core.Alert) error {
+	return nil
+}
+
+func (s *contractStorageRuntime) DeleteAlert(context.Context, string) error {
+	return nil
+}
+
+func (s *contractStorageRuntime) GetAlertStats(context.Context) (*core.AlertStats, error) {
+	return &core.AlertStats{}, nil
+}
+
+func (s *contractStorageRuntime) CleanupOldAlerts(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (s *contractStorageRuntime) Health(context.Context) error {
+	return s.healthErr
+}
+
+func (s *contractStorageRuntime) Disconnect(context.Context) error {
+	return nil
+}
+
+func newActiveContractMux(t *testing.T, storageHealthErr error) *http.ServeMux {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -43,11 +85,22 @@ func newActiveContractMux(t *testing.T) *http.ServeMux {
 		t.Fatalf("NewAlertProcessor() error = %v", err)
 	}
 
+	storageRuntime := &contractStorageRuntime{healthErr: storageHealthErr}
 	registry := &ServiceRegistry{
+		config: &appconfig.Config{
+			Profile: appconfig.ProfileLite,
+			Storage: appconfig.StorageConfig{
+				Backend:        appconfig.StorageBackendFilesystem,
+				FilesystemPath: ":memory:",
+			},
+		},
 		logger:         logger,
 		alertStore:     memory.NewAlertStore(),
 		silenceStore:   memory.NewSilenceStore(),
 		alertProcessor: processor,
+		storageRuntime: storageRuntime,
+		storage:        storageRuntime,
+		initialized:    true,
 	}
 
 	mux := http.NewServeMux()
@@ -56,7 +109,7 @@ func newActiveContractMux(t *testing.T) *http.ServeMux {
 }
 
 func TestActiveRuntimeContract_PresentEndpoints(t *testing.T) {
-	mux := newActiveContractMux(t)
+	mux := newActiveContractMux(t, nil)
 
 	alertPayload := `[
 		{
@@ -113,7 +166,7 @@ func TestActiveRuntimeContract_PresentEndpoints(t *testing.T) {
 }
 
 func TestActiveRuntimeContract_HistoricalWideSurfaceIsAbsent(t *testing.T) {
-	mux := newActiveContractMux(t)
+	mux := newActiveContractMux(t, nil)
 
 	probes := []struct {
 		name   string
@@ -129,6 +182,36 @@ func TestActiveRuntimeContract_HistoricalWideSurfaceIsAbsent(t *testing.T) {
 		{name: "config api not mounted", method: http.MethodGet, path: "/api/v2/config", status: http.StatusNotFound},
 		{name: "classification api not mounted", method: http.MethodGet, path: "/api/v2/classification/health", status: http.StatusNotFound},
 		{name: "history api not mounted", method: http.MethodGet, path: "/history", status: http.StatusNotFound},
+	}
+
+	for _, probe := range probes {
+		t.Run(probe.name, func(t *testing.T) {
+			req := httptest.NewRequest(probe.method, probe.path, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != probe.status {
+				t.Fatalf("%s %s expected %d, got %d body=%q", probe.method, probe.path, probe.status, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestActiveRuntimeContract_HealthEndpointsReflectReadiness(t *testing.T) {
+	mux := newActiveContractMux(t, errors.New("storage unavailable"))
+
+	probes := []struct {
+		name   string
+		method string
+		path   string
+		status int
+	}{
+		{name: "health stays live", method: http.MethodGet, path: "/health", status: http.StatusOK},
+		{name: "healthz stays live", method: http.MethodGet, path: "/healthz", status: http.StatusOK},
+		{name: "ready fails", method: http.MethodGet, path: "/ready", status: http.StatusServiceUnavailable},
+		{name: "readyz fails", method: http.MethodGet, path: "/readyz", status: http.StatusServiceUnavailable},
+		{name: "alertmanager healthy stays live", method: http.MethodGet, path: "/-/healthy", status: http.StatusOK},
+		{name: "alertmanager ready fails", method: http.MethodGet, path: "/-/ready", status: http.StatusServiceUnavailable},
 	}
 
 	for _, probe := range probes {

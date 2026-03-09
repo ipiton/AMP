@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
 	"github.com/ipiton/AMP/internal/database/postgres"
@@ -20,8 +23,10 @@ func RunMigrations(ctx context.Context, pool postgres.DatabaseConnection, logger
 
 	logger.Info("Starting database migrations...")
 
-	// Получаем путь к директории миграций относительно корня проекта
-	migrationsDir := filepath.Join("migrations")
+	migrationsDir, err := resolveMigrationsDir()
+	if err != nil {
+		return err
+	}
 
 	// Для goose нужен *sql.DB, поэтому получаем его из пула
 	// Поскольку мы используем pgx/v5, нужно создать *sql.DB wrapper
@@ -56,7 +61,10 @@ func RunMigrationsDown(ctx context.Context, pool postgres.DatabaseConnection, st
 
 	logger.Info("Starting database migration rollback", "steps", steps)
 
-	migrationsDir := filepath.Join("migrations")
+	migrationsDir, err := resolveMigrationsDir()
+	if err != nil {
+		return err
+	}
 
 	db, err := createSQLDBFromPool(pool)
 	if err != nil {
@@ -85,7 +93,10 @@ func GetMigrationStatus(ctx context.Context, pool postgres.DatabaseConnection, l
 		logger = slog.Default()
 	}
 
-	migrationsDir := filepath.Join("migrations")
+	migrationsDir, err := resolveMigrationsDir()
+	if err != nil {
+		return err
+	}
 
 	db, err := createSQLDBFromPool(pool)
 	if err != nil {
@@ -134,4 +145,28 @@ func createSQLDBFromPool(pool postgres.DatabaseConnection) (*sql.DB, error) {
 	}
 
 	return nil, fmt.Errorf("unsupported pool type")
+}
+
+func resolveMigrationsDir() (string, error) {
+	candidates := []string{
+		filepath.Join("migrations"),
+		filepath.Join("go-app", "migrations"),
+	}
+
+	if _, filename, _, ok := runtime.Caller(0); ok {
+		baseDir := filepath.Dir(filename)
+		candidates = append(candidates, filepath.Clean(filepath.Join(baseDir, "..", "..", "migrations")))
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("migrations directory not found; checked: %v", candidates)
 }

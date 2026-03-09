@@ -1,6 +1,6 @@
 # Alertmanager API Compatibility Matrix
 
-**Date**: 2026-03-08
+**Date**: 2026-03-09
 **Status**: 🟡 **CONTROLLED REPLACEMENT SLICE ACTIVE**
 **Alertmanager Version**: v0.31.1 (API v2)
 **Alertmanager++ Version**: v0.0.1
@@ -24,7 +24,7 @@ Current active replacement slice:
 - `POST /api/v2/silences`
 - `GET /api/v2/silence/{id}`
 - `DELETE /api/v2/silence/{id}`
-- `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
+- `/health`, `/healthz`, `/ready`, `/readyz`, `/-/healthy`, `/-/ready`, `/metrics`
 - real publishing path with explicit `metrics-only` fallback
 
 Wider Alertmanager parity remains backlog or future restoration work.
@@ -41,8 +41,8 @@ Wider Alertmanager parity remains backlog or future restoration work.
 | `POST /api/v2/silences` | ✅ | ✅ | 🟡 | Active current route for create/update |
 | `GET /api/v2/silence/{id}` | ✅ | ✅ | 🟢 | Active current route |
 | `DELETE /api/v2/silence/{id}` | ✅ | ✅ | 🟢 | Active current route |
-| `GET /health`, `GET /ready` | N/A | ✅ | 🟢 | Active current health/readiness routes |
-| `GET /-/healthy`, `GET /-/ready` | ✅ | ✅ | 🟢 | Active current Alertmanager-style readiness routes |
+| `GET /health`, `GET /healthz`, `GET /ready`, `GET /readyz` | N/A | ✅ | 🟢 | Active current state-aware health/readiness routes |
+| `GET /-/healthy`, `GET /-/ready` | ✅ | ✅ | 🟢 | Active current Alertmanager-style liveness/readiness routes |
 | `GET /metrics` | ✅ | ✅ | 🟢 | Active current metrics route |
 
 ---
@@ -73,11 +73,19 @@ The endpoints below are **not** part of the current guaranteed replacement slice
 | `/api/v2/alerts` | `GET`, `POST` | Current active runtime route |
 | `/api/v2/silences` | `GET`, `POST` | Current active runtime route |
 | `/api/v2/silence/{id}` | `GET`, `DELETE` | Current active runtime route |
-| `/health`, `/ready` | `GET` | Current active runtime route |
+| `/health`, `/healthz`, `/ready`, `/readyz` | `GET` | Current active runtime route |
 | `/-/healthy`, `/-/ready` | `GET` | Current active runtime route |
 | `/metrics` | `GET` | Current active runtime route |
 
 Historical wide-surface method expectations are no longer the default current-runtime gate and should be treated as future parity work.
+
+## Health Semantics In Current Slice
+
+- `/health` и `/healthz` отражают **liveness** active runtime в JSON-виде.
+- `/ready` и `/readyz` отражают **readiness** required dependencies в JSON-виде.
+- `/-/healthy` и `/-/ready` сохраняют короткий plain-text compatibility contract для Alertmanager-style probes.
+- Optional degraded state допустим и может возвращать `200` с body/status `degraded`, если required storage/database checks остаются healthy.
+- Required storage/database failure не должен маскироваться под `healthy`: readiness должен переходить в `503`.
 
 ---
 
