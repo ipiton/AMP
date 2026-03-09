@@ -8,9 +8,9 @@ metadata:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: database
   annotations:
-    description: "PostgreSQL StatefulSet for Alert History - Production Ready (TN-98)"
+    description: "PostgreSQL StatefulSet for AMP (TN-98)"
     tn-97: "HPA cluster mode support (max_connections=250)"
-    tn-98: "Production hardening (150% quality)"
+    tn-98: "Operational hardening baseline"
 spec:
   serviceName: {{ include "amp.postgresql.fullname" . }}
   replicas: {{ .Values.postgresql.replicas | default 1 }}
@@ -160,7 +160,7 @@ spec:
           runAsUser: 999
           runAsGroup: 999
       {{- if .Values.postgresql.exporter.enabled }}
-      # PostgreSQL Exporter Sidecar (TN-98: 150% quality - 50+ metrics)
+      # PostgreSQL Exporter sidecar (TN-98: metrics exposure)
       - name: postgres-exporter
         image: {{ .Values.postgresql.exporter.image }}:{{ .Values.postgresql.exporter.tag }}
         imagePullPolicy: {{ .Values.postgresql.exporter.pullPolicy | default "IfNotPresent" }}

@@ -1,170 +1,111 @@
-# Alert History Service Deployment Guide
+# AMP Helm Deployment Guide
 
-## Quick Start with LLM Integration
+This guide covers operator-facing installation and verification for the `helm/amp` chart.
+Treat the chart as a controlled replacement deployment path for the active runtime surface documented in `helm/amp/README.md`, not as a verified full Alertmanager drop-in replacement.
 
-### 1. Prerequisites
+## Prerequisites
 
-- Kubernetes cluster (1.20+)
+- Kubernetes cluster with `kubectl` access
 - Helm 3.8+
-- kubectl configured
-- LLM API key for `https://llm-proxy.b2broker.tech`
+- A release name that contains `amp` if you want resource names to stay short in the examples below
+- Optional: BYOK LLM credentials provided via a local override, secret, or external secret
 
-### 2. Development Deployment
+## 1. Lite / Development Deployment
 
-```bash
-# Clone the repository
-git clone <your-repo>
-cd alert-history
-
-# Install with development configuration
-helm install alert-history-dev ./helm/alert-history \
-  -f helm/alert-history/values-dev.yaml \
-  --namespace monitoring \
-  --create-namespace
-
-# Port forward for local access
-kubectl port-forward svc/alert-history-dev-alert-history 8080:8080 -n monitoring
-```
-
-### 3. Production Deployment
+Use the development overrides when you want a single-release evaluation path with embedded storage and no external database dependency.
 
 ```bash
-# Create namespace
-kubectl create namespace monitoring
+RELEASE=amp-dev
+NAMESPACE=monitoring
 
-# Install with production configuration
-helm install alert-history ./helm/alert-history \
-  -f helm/alert-history/values-production.yaml \
-  --namespace monitoring
-
-# Set LLM API key via external secrets (recommended)
-# Or set directly in values-production.yaml
+helm upgrade --install "$RELEASE" ./helm/amp \
+  --namespace "$NAMESPACE" \
+  --create-namespace \
+  --set profile=lite \
+  -f helm/amp/values-dev.yaml
 ```
 
-### 4. Test LLM Integration
+Verify the release:
 
 ```bash
-# Set enrichment mode
-curl -X POST http://localhost:8080/enrichment/mode \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "transparent_with_recommendations"}'
+kubectl rollout status deployment/"$RELEASE" -n "$NAMESPACE"
+kubectl port-forward svc/"$RELEASE" 8080:8080 -n "$NAMESPACE"
 
-# Send test webhook
-curl -X POST http://localhost:8080/webhook/proxy \
-  -H "Content-Type: application/json" \
-  -d '{
-    "receiver": "test",
-    "alerts": [{
-      "fingerprint": "test-llm",
-      "status": "firing",
-      "labels": {"alertname": "HighCPUUsage"},
-      "annotations": {"summary": "High CPU usage detected"},
-      "startsAt": "2024-01-01T00:00:00Z"
-    }]
-  }'
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/api/v2/status
 ```
 
-### 5. Configure Alertmanager
+## 2. Standard / Cluster Deployment
+
+Use the production-oriented overrides when you want the chart-managed PostgreSQL and cache path.
+
+```bash
+RELEASE=amp
+NAMESPACE=monitoring
+
+helm upgrade --install "$RELEASE" ./helm/amp \
+  --namespace "$NAMESPACE" \
+  --create-namespace \
+  --set profile=standard \
+  -f helm/amp/values-production.yaml
+```
+
+Inspect the resulting resources:
+
+```bash
+kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE"
+kubectl get svc -n "$NAMESPACE"
+kubectl get statefulset -n "$NAMESPACE"
+```
+
+## 3. Optional LLM Configuration
+
+If you enable LLM classification, pass the API key through a local override, secret, or external secret. Do not commit real keys into chart values files.
+
+Example local override:
+
+```bash
+LLM_API_KEY=...
+
+helm upgrade --install "$RELEASE" ./helm/amp \
+  --namespace "$NAMESPACE" \
+  --create-namespace \
+  --set profile=lite \
+  --set llm.enabled=true \
+  --set llm.apiKey="$LLM_API_KEY"
+```
+
+The chart also exposes `llm.secret.*` and `llm.externalSecrets.*` values for secret-backed setups.
+
+## 4. Routing Alertmanager Traffic
+
+The chart exposes the active runtime over the service HTTP port (`service.port`, default `8080`).
+Only redirect Alertmanager traffic after validating that the covered slice matches your operational needs.
 
 ```yaml
-# alertmanager-config.yaml
-global:
-  resolve_timeout: 5m
-
-route:
-  group_by: ['alertname']
-  group_wait: 10s
-  group_interval: 10s
-  repeat_interval: 1h
-  receiver: 'alert-history'
-
-receivers:
-  - name: 'alert-history'
-    webhook_configs:
-      - url: 'http://alert-history-alert-history:8080/webhook/proxy'
-        send_resolved: true
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - amp:8080
 ```
 
-### 6. Access Dashboard
+If your Helm release name differs from `amp`, use the rendered service name instead.
+
+## 5. Post-Install Checks
+
+Helpful checks after install:
 
 ```bash
-# Port forward dashboard
-kubectl port-forward svc/alert-history-alert-history 8080:8080 -n monitoring
+kubectl logs deployment/"$RELEASE" -n "$NAMESPACE"
+kubectl get configmap "${RELEASE}-config" -n "$NAMESPACE"
 
-# Open in browser
-open http://localhost:8080/dashboard
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/api/v2/receivers
+curl http://127.0.0.1:8080/metrics
 ```
 
-## Configuration Options
+## 6. Notes
 
-### LLM Configuration
-
-```yaml
-llm:
-  enabled: true
-  proxyUrl: "https://llm-proxy.b2broker.tech"
-  apiKey: "your-api-key"  # Set via secret in production
-  model: "openai/gpt-4o"
-  timeout: 30
-  maxRetries: 3
-```
-
-### Enrichment Modes
-
-1. **transparent** - Simple processing without LLM
-2. **transparent_with_recommendations** - LLM analysis with recommendations (no filtering)
-3. **enriched** - Full LLM processing with filtering
-
-### Publishing Targets
-
-Configure targets in `values-production.yaml`:
-
-```yaml
-publishingTargets:
-  - name: rootly-production
-    type: webhook
-    format: rootly
-    url: "https://api.rootly.com/webhooks/your-webhook-id"
-    enabled: true
-    secret:
-      apiKey: "your-api-key"
-    filterConfig:
-      severity: ["critical", "warning"]
-      excludeNoise: true
-      minConfidence: 0.8
-```
-
-## Troubleshooting
-
-### Check LLM Status
-
-```bash
-# Check if LLM is working
-curl http://localhost:8080/healthz
-
-# Check logs
-kubectl logs -f deployment/alert-history-alert-history -n monitoring
-
-# Check LLM configuration
-kubectl get configmap alert-history-alert-history-config -n monitoring -o yaml
-```
-
-### Common Issues
-
-1. **LLM not working**: Check API key and proxy URL
-2. **Webhook errors**: Verify Alertmanager configuration
-3. **Database issues**: Check PostgreSQL connection
-4. **Cache issues**: Verify Redis/DragonflyDB connection
-
-## Monitoring
-
-- Prometheus metrics: `http://localhost:8080/metrics`
-- Health check: `http://localhost:8080/healthz`
-- Dashboard: `http://localhost:8080/dashboard`
-
-## Security Notes
-
-- Use external secrets for API keys in production
-- Enable RBAC for cross-namespace access
-- Configure network policies
-- Use TLS for ingress in production
+- Keep `helm/amp/README.md` as the chart-level source of truth for compatibility claims and the currently mounted runtime surface.
+- Wider parity such as config/history APIs, broader dashboard parity, and other historical compatibility layers remains explicit follow-up work.

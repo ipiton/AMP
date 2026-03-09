@@ -234,7 +234,7 @@ postgresql:
     enabled: true
     minAvailable: 1  # Keep at least 1 pod available during voluntary disruptions
 
-  # PostgreSQL Exporter (TN-98: 150% quality - 50+ metrics)
+  # PostgreSQL Exporter (TN-98: metrics sidecar)
   exporter:
     enabled: true  # Enable postgres-exporter sidecar
     image: quay.io/prometheuscommunity/postgres-exporter
@@ -265,7 +265,7 @@ postgresql:
         cpu: 250m
         memory: 256Mi
 
-  # PostgreSQL Monitoring (TN-98: 150% observability)
+  # PostgreSQL Monitoring (TN-98: observability)
   monitoring:
     prometheusRules:
       enabled: true  # Enable Prometheus alerting rules
@@ -354,7 +354,7 @@ cache:
       memory: 256Mi
 
 # ===============================
-# Valkey/Redis StatefulSet Configuration (TN-99: Production-Ready)
+# Valkey/Redis StatefulSet Configuration (TN-99)
 # ===============================
 # Valkey is a Redis-compatible cache used by Standard Profile only
 # Connection pool: 50 conns/pod × 10 replicas = 500 connections
@@ -436,7 +436,7 @@ alerts:
 llm:
   enabled: true
   proxyUrl: "https://llm-proxy.b2broker.tech"
-  apiKey: "sk-eEyKBRlxsrWB81yZT5Mc1w"  # Set via LLM_API_KEY environment variable or secret
+  apiKey: ""  # Set via local override, environment, or secret; never commit real keys
   model: "openai/gpt-4o"
   timeout: 30
   maxRetries: 3
