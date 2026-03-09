@@ -7,13 +7,13 @@
 
 ## ✨ Features
 
-- **Controlled Replacement Slice** - Active runtime currently covers alert ingest, silence CRUD, health/readiness, metrics, and a real publishing path
+- **Controlled Replacement Surface** - Active runtime currently covers alert ingest/query, alert groups, `status`/`receivers`/`reload` operational APIs, silence CRUD, health/readiness, metrics, and a real publishing path
 - **Lean Go Runtime** - Current top-level docs avoid unverified benchmark/resource claims until a reproducible benchmark report is published
 - **Extensible Architecture** - Code-level extension points for custom classifiers and publishers
 - **Phased Compatibility** - Wider Alertmanager parity remains explicit follow-up work, not an implied full drop-in claim
 - **Controlled Migration** - Pilot-oriented quick start for scoped deployments and explicit verification
 
-Current runtime note (2026-03-08): AMP is currently positioned as a **controlled replacement** for scoped deployments, not as a general-purpose Alertmanager drop-in replacement. The active runtime source of truth is `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`.
+Current runtime note (2026-03-09): AMP is currently positioned as a **controlled replacement** for scoped deployments, not as a general-purpose Alertmanager drop-in replacement. The active runtime now includes `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups`, and `POST /-/reload` alongside alert ingest/query, silence CRUD, health/readiness, metrics, and the real publishing path. The active runtime source of truth is `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`.
 
 ## 📊 Performance Note
 
@@ -174,7 +174,7 @@ Both rollback and prune support `dryRun=true` preview mode without mutating runt
 - **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
 
-Compatibility note: current active runtime is intentionally narrower than the historical parity/test narrative. Treat AMP today as a controlled replacement slice; wider Alertmanager parity is tracked as follow-up work.
+Compatibility note: current active runtime is still narrower than full historical Alertmanager parity. Treat AMP today as a controlled replacement surface with restored operational APIs; wider config/history/inhibition/classification parity remains explicit follow-up work.
 
 ## 🏗️ Architecture
 

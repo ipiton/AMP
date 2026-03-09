@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Restored operational Alertmanager-compatible endpoints (2026-03-09)**:
+  - `GET /api/v2/status`: returns current config text, version metadata, and runtime start time.
+  - `GET /api/v2/receivers`: returns receiver names from the active config snapshot.
+  - `GET /api/v2/alerts/groups`: exposes grouped alert responses for the current Grafana-compatible path.
+  - `POST /-/reload`: triggers config reload via `ReloadCoordinator`.
+- `ServiceRegistry` now tracks `startTime` and manages `ReloadCoordinator` for runtime configuration updates.
+- New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
+
 ### Changed
 - **Go Toolchain Baseline Updated** - Project runtime/build baseline raised to Go 1.26 (2026-02-27)
   - `go-app/go.mod` now declares `go 1.26.0`

@@ -199,6 +199,85 @@ func (s *AlertStore) Stats() (total, firing, resolved int) {
 	return total, firing, resolved
 }
 
+func (s *AlertStore) GroupAlerts(groupBy []string) []core.APIGettableAlertGroup {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	groups := make(map[string]*core.APIGettableAlertGroup)
+	now := time.Now().UTC()
+
+	for _, a := range s.all {
+		// Calculate grouping labels and key
+		groupLabels := make(map[string]string)
+		var keyBuilder strings.Builder
+
+		sortedGroupBy := make([]string, len(groupBy))
+		copy(sortedGroupBy, groupBy)
+		sort.Strings(sortedGroupBy)
+
+		for _, l := range sortedGroupBy {
+			val := a.Labels[l]
+			groupLabels[l] = val
+			keyBuilder.WriteString(l)
+			keyBuilder.WriteByte('=')
+			keyBuilder.WriteString(val)
+			keyBuilder.WriteByte('|')
+		}
+		key := keyBuilder.String()
+
+		group, ok := groups[key]
+		if !ok {
+			group = &core.APIGettableAlertGroup{
+				Labels:   groupLabels,
+				Receiver: core.APIReceiver{Name: "default"},
+				Alerts:   make([]core.APIGettableAlert, 0),
+			}
+			groups[key] = group
+		}
+
+		gettable := toGettableAlert(toAPIAlert(a), now)
+		group.Alerts = append(group.Alerts, gettable)
+	}
+
+	out := make([]core.APIGettableAlertGroup, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, *g)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return labelsFingerprint(out[i].Labels) < labelsFingerprint(out[j].Labels)
+	})
+
+	return out
+}
+
+func toGettableAlert(alert core.APIAlert, now time.Time) core.APIGettableAlert {
+	state := "active"
+	if alert.Status == "resolved" {
+		state = "unprocessed"
+	}
+
+	endsAt := alert.UpdatedAt
+	if alert.EndsAt != nil && *alert.EndsAt != "" {
+		endsAt = *alert.EndsAt
+	}
+
+	return core.APIGettableAlert{
+		Labels:       alert.Labels,
+		Annotations:  alert.Annotations,
+		Receivers:    alert.Receivers,
+		StartsAt:     alert.StartsAt,
+		UpdatedAt:    alert.UpdatedAt,
+		EndsAt:       endsAt,
+		GeneratorURL: alert.GeneratorURL,
+		Fingerprint:  alert.Fingerprint,
+		Status: core.APIAlertStatus{
+			State:      state,
+			SilencedBy: []string{},
+		},
+	}
+}
+
 func (s *AlertStore) RestoreFromPersistence(alerts []core.APIAlert, now time.Time) error {
 	if len(alerts) == 0 {
 		return nil

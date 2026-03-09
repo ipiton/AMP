@@ -197,8 +197,8 @@ func (m *mockResponseWriter) Header() http.Header {
 	return m.headers
 }
 
-func (m *mockResponseWriter) Write([]byte) (int, error) {
-	return 0, nil
+func (m *mockResponseWriter) Write(b []byte) (int, error) {
+	return len(b), nil
 }
 
 func (m *mockResponseWriter) WriteHeader(statusCode int) {}

@@ -257,17 +257,24 @@ func (sm *DefaultStateManager) GetInhibitedAlerts(ctx context.Context) ([]string
 
 // IsInhibited checks if a specific alert is currently inhibited.
 func (sm *DefaultStateManager) IsInhibited(ctx context.Context, targetFingerprint string) (bool, error) {
-	// 	start := time.Now()
-
 	if targetFingerprint == "" {
 		return false, fmt.Errorf("target fingerprint cannot be empty")
 	}
 
 	value, ok := sm.states.Load(targetFingerprint)
 	if !ok {
+		// Try Redis fallback if available (TN-129)
+		if sm.redisStore != nil {
+			state, err := sm.loadFromRedis(ctx, targetFingerprint)
+			if err == nil && state != nil {
+				// Repopulate memory cache
+				sm.states.Store(targetFingerprint, state)
+				return true, nil
+			}
+		}
+
 		// Record metrics for fast path (not found)
 		if sm.metrics != nil {
-			// 			duration := time.Since(start)
 			sm.metrics.RecordInhibitionStateOperation("check", "success")
 		}
 		return false, nil
@@ -285,7 +292,6 @@ func (sm *DefaultStateManager) IsInhibited(ctx context.Context, targetFingerprin
 
 		// Record metrics
 		if sm.metrics != nil {
-			// 			duration := time.Since(start)
 			sm.metrics.RecordInhibitionStateOperation("check", "success")
 		}
 		return false, nil
@@ -293,7 +299,6 @@ func (sm *DefaultStateManager) IsInhibited(ctx context.Context, targetFingerprin
 
 	// Record metrics for successful check
 	if sm.metrics != nil {
-		// 		duration := time.Since(start)
 		sm.metrics.RecordInhibitionStateOperation("check", "success")
 	}
 

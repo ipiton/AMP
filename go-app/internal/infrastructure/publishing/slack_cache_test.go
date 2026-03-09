@@ -347,6 +347,7 @@ func TestStartCleanupWorker_Stop(t *testing.T) {
 
 	// Stop worker
 	cancel()
+	time.Sleep(100 * time.Millisecond) // Give it time to actually stop
 
 	// Add old entry after stop
 	cache.Store("old", &MessageEntry{
@@ -356,7 +357,7 @@ func TestStartCleanupWorker_Stop(t *testing.T) {
 	})
 
 	// Wait longer than cleanup interval
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// Verify worker stopped (old entry not cleaned up)
 	_, found := cache.Get("old")

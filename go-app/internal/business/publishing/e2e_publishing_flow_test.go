@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // e2e_publishing_flow_test.go - End-to-End tests for complete publishing flow
@@ -88,7 +89,8 @@ func TestE2E_FullPublishingFlow(t *testing.T) {
 	discovery.SetTargets(targets)
 
 	// Create health monitor
-	registry := v2.NewRegistry()
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.WarmupDelay = 0 // Skip warmup for tests
@@ -190,9 +192,12 @@ func TestE2E_HealthAwareRouting(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	registry := v2.NewRegistry()
+	// FIXED: Use custom registry to avoid duplicate metrics registration panic in tests
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
+	config.WarmupDelay = 0      // Skip warmup for tests
 	config.FailureThreshold = 1 // Mark unhealthy after 1 failure
 	config.CheckInterval = 100 * time.Millisecond
 
@@ -271,7 +276,9 @@ func TestE2E_ParallelPublishing(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(targets)
 
-	registry := v2.NewRegistry()
+	// FIXED: Use custom registry to avoid duplicate metrics registration panic in tests
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.WarmupDelay = 0 // Skip warmup for tests
@@ -334,7 +341,8 @@ func TestE2E_TargetRecovery(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets([]*core.PublishingTarget{target})
 
-	registry := v2.NewRegistry()
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.CheckInterval = 200 * time.Millisecond
@@ -387,7 +395,8 @@ func TestE2E_DynamicTargetDiscovery(t *testing.T) {
 	discovery := NewTestHealthDiscoveryManager()
 	discovery.SetTargets(initialTargets)
 
-	registry := v2.NewRegistry()
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	healthMetrics := registry.Publishing
 	config := DefaultHealthConfig()
 	config.WarmupDelay = 0 // Skip warmup for tests

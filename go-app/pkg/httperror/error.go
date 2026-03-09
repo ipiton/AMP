@@ -46,6 +46,10 @@ type HTTPAPIError struct {
 	// Used for metrics labeling and logging.
 	Provider string `json:"provider"`
 
+	// ErrorType is a string classification of the error.
+	// Common values: "rate_limit", "timeout", "server_error", "auth_error", "validation".
+	ErrorType string `json:"error_type,omitempty"`
+
 	// RetryAfter is the recommended wait time in seconds before retry.
 	// Typically set for 429 (rate limit) responses via Retry-After header.
 	// Zero means no specific recommendation.
@@ -98,6 +102,46 @@ func (e *HTTPAPIError) Unwrap() error {
 	return e.Cause
 }
 
+// WithType sets the error type and returns the error.
+func (e *HTTPAPIError) WithType(errorType string) *HTTPAPIError {
+	if e != nil {
+		e.ErrorType = errorType
+	}
+	return e
+}
+
+// WithCause sets the underlying cause and returns the error.
+func (e *HTTPAPIError) WithCause(cause error) *HTTPAPIError {
+	if e != nil {
+		e.Cause = cause
+	}
+	return e
+}
+
+// WithRetryAfter sets the retry-after value and returns the error.
+func (e *HTTPAPIError) WithRetryAfter(retryAfter int) *HTTPAPIError {
+	if e != nil {
+		e.RetryAfter = retryAfter
+	}
+	return e
+}
+
+// WithDetails sets the error details and returns the error.
+func (e *HTTPAPIError) WithDetails(details []string) *HTTPAPIError {
+	if e != nil {
+		e.Details = details
+	}
+	return e
+}
+
+// WithRequestID sets the request ID and returns the error.
+func (e *HTTPAPIError) WithRequestID(requestID string) *HTTPAPIError {
+	if e != nil {
+		e.RequestID = requestID
+	}
+	return e
+}
+
 // Is implements errors.Is comparison.
 // Matches if both are HTTPAPIError with same StatusCode and Provider.
 func (e *HTTPAPIError) Is(target error) bool {
@@ -135,8 +179,12 @@ func (e *HTTPAPIError) IsRetryable() bool {
 	if e == nil {
 		return false
 	}
-	return e.StatusCode == http.StatusTooManyRequests ||
-		e.StatusCode >= http.StatusInternalServerError
+	if e.StatusCode == http.StatusTooManyRequests ||
+		e.StatusCode >= http.StatusInternalServerError {
+		return true
+	}
+	// Check if cause is retryable (e.g. network error)
+	return IsRetryableNetworkError(e.Cause)
 }
 
 // IsRateLimit returns true if the error indicates rate limiting (429).
@@ -185,8 +233,12 @@ func (e *HTTPAPIError) IsTimeout() bool {
 	if e == nil {
 		return false
 	}
-	return e.StatusCode == http.StatusRequestTimeout ||
-		e.StatusCode == http.StatusGatewayTimeout
+	if e.StatusCode == http.StatusRequestTimeout ||
+		e.StatusCode == http.StatusGatewayTimeout {
+		return true
+	}
+	// Check if cause is a timeout
+	return IsNetworkTimeout(e.Cause)
 }
 
 // IsBadRequest returns true if the error indicates bad request (400).
@@ -222,6 +274,11 @@ func (e *HTTPAPIError) IsValidation() bool {
 func (e *HTTPAPIError) Type() string {
 	if e == nil {
 		return "unknown"
+	}
+
+	// Use explicitly set error type if available
+	if e.ErrorType != "" && e.ErrorType != "unknown" {
+		return e.ErrorType
 	}
 
 	switch {

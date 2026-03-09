@@ -21,9 +21,10 @@ func TestMigrationManager_Connect(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -51,9 +52,10 @@ func TestMigrationManager_Status(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -86,9 +88,10 @@ func TestMigrationManager_Version(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -121,9 +124,10 @@ func TestMigrationManager_Up(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -157,9 +161,10 @@ func TestMigrationManager_Down(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -202,9 +207,10 @@ func TestMigrationManager_Validate(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -233,9 +239,10 @@ func TestMigrationManager_List(t *testing.T) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -388,9 +395,10 @@ func BenchmarkMigrationManager_Up(b *testing.B) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelError,
 		})),
@@ -426,9 +434,10 @@ func BenchmarkMigrationManager_Status(b *testing.B) {
 	defer db.Close()
 
 	config := &MigrationConfig{
-		Driver: "sqlite",
-		DSN:    ":memory:",
-		Dir:    "../../../../../migrations",
+		Driver:  "sqlite3",
+		Dialect: "sqlite3",
+		DSN:     ":memory:",
+		Dir:    "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelError,
 		})),
