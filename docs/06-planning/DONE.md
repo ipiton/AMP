@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT** — завершен как narrow self-contained example-code alignment slice, а не как full rewrite examples policy или strict `pkg/core/interfaces` conformance pass.
+- В [custom-publisher/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-publisher/main.go) local `PublishingTarget` переведен с `webhook_url`-centric shape на current canonical field names `url`, `headers`, `filter_config`, `format`, `enabled`; `Publish(...)` теперь строит request через `target.URL` и честно применяет `target.Headers`, а sample target object в `main()` синхронизирован с новой local shape.
+- Проверка scope: targeted search по `WebhookURL|webhook_url`, manual review против `docs/CONFIGURATION_GUIDE.md` / archived `PHASE-4` spec / `examples/README.md`, example sanity review, `git diff --check`.
+- Ограничение: `examples/` остаются вне `go-app` module root, поэтому отдельного repo-local compile gate для этого slice нет; broader examples policy и strict `pkg/core/interfaces` rewrite сознательно оставлены вне scope. Workspace архивирован в `tasks/archive/CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT/`.
 - **SOURCE-EXAMPLES-HISTORICAL-DRIFT** — завершен как source-example narrative/integration cleanup slice, а не как full alignment `examples/custom-*.go` to runtime internals.
 - В [custom-classifier/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-classifier/main.go) и [custom-publisher/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-publisher/main.go) убраны historical `Alert History Service` references из top intro и footer/integration blocks; classifier guidance сужен до generic AMP classification flow, а publisher guidance больше не учит obsolete inline `publishing.targets` / `webhook_url` / `filters` story и вместо этого ссылается на current `publishing.*` + Secret discovery docs.
 - Проверка scope: targeted marker scans по `examples/custom-*.go`, manual review против `docs/CONFIGURATION_GUIDE.md` / `docs/MIGRATION_QUICK_START.md` / archived `PHASE-4` spec, narrative sanity review, `git diff --check`.
