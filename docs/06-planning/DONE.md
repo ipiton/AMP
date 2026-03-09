@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **UI-PLACEHOLDER-REMOVAL** — active `/dashboard/silences`, `/dashboard/llm` и `/dashboard/routing` больше не возвращают placeholder body и закреплены как honest read-only страницы на текущем `/dashboard/*` surface.
+- Render path вынесен в `go-app/cmd/server/legacy_dashboard.go` с отдельным simple template stack `go-app/cmd/server/templates/legacy/*`; page-facing runtime summaries собираются через `go-app/internal/application/legacy_dashboard.go`.
+- Default non-tagged coverage добавлена в `go-app/cmd/server/legacy_dashboard_test.go`; scope подтвержден через `go test ./cmd/server`, `go test ./internal/application/...`, `go build ./cmd/server`, `git diff --check`.
+- Ограничение: opt-in historical `futureparity` suite и полный repo gate остаются вне scope и по-прежнему отражаются отдельно в `docs/06-planning/BUGS.md`; workspace архивирован в `tasks/archive/UI-PLACEHOLDER-REMOVAL/`.
 - **PHASE-3-STORAGE-HARDENING** — active bootstrap/storage path hardened: `ProfileLite` теперь поднимает `SQLiteDatabase`, `ProfileStandard` идет через `PostgresPool + goose + thin Postgres storage adapter`, а required storage failures больше не маскируются под pseudo-healthy startup.
 - Health plane переведен на state-aware contract: `/health|/healthz` отражают liveness, `/ready|/readyz` отражают readiness, `/-/healthy|/-/ready` сохраняют plain-text Alertmanager-compatible probes, optional degradations видны как `degraded`.
 - Planning/public docs и ADR синхронизированы с новым runtime truth; workspace архивирован в `tasks/archive/PHASE-3-STORAGE-HARDENING/`.

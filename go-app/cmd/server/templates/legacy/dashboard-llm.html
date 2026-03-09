@@ -1,0 +1,85 @@
+{{ define "dashboard-llm.html" }}
+{{ template "legacy-shell-start" . }}
+    <section class="card-grid">
+        <article class="stat-card">
+            <p class="kicker">Runtime state</p>
+            <strong><span class="badge {{ .Content.RuntimeStatusClass }}">{{ .Content.RuntimeStatus }}</span></strong>
+            <span class="muted">{{ .Content.RuntimeDetail }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Enabled</p>
+            <strong>{{ if .Content.Enabled }}yes{{ else }}no{{ end }}</strong>
+            <span class="muted">Current config switch</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Provider / model</p>
+            <strong>{{ .Content.Provider }}</strong>
+            <span class="muted">{{ .Content.Model }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Timeout</p>
+            <strong>{{ .Content.Timeout }}</strong>
+            <span class="muted">Max tokens {{ .Content.MaxTokens }}</span>
+        </article>
+    </section>
+
+    <section class="two-column">
+        <article class="panel">
+            <div class="panel-head">
+                <h2>Configuration</h2>
+            </div>
+            <ul class="detail-list">
+                <li><span>Provider</span><strong>{{ .Content.Provider }}</strong></li>
+                <li><span>Base URL</span><strong class="mono">{{ .Content.BaseURL }}</strong></li>
+                <li><span>Model</span><strong>{{ .Content.Model }}</strong></li>
+                <li><span>Timeout</span><strong>{{ .Content.Timeout }}</strong></li>
+                <li><span>Max tokens</span><strong>{{ .Content.MaxTokens }}</strong></li>
+                <li><span>Temperature</span><strong>{{ .Content.Temperature }}</strong></li>
+                <li><span>Max retries</span><strong>{{ .Content.MaxRetries }}</strong></li>
+            </ul>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <h2>Legacy UI boundary</h2>
+            </div>
+            <p class="panel-note">This page is intentionally read-only. It reports config truth and coarse runtime state without exposing full classification workflows.</p>
+        </article>
+    </section>
+
+    {{ if .Content.StatsAvailable }}
+    <section class="card-grid">
+        <article class="stat-card">
+            <p class="kicker">Requests</p>
+            <strong>{{ .Content.TotalRequests }}</strong>
+            <span class="muted">Total classification requests</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Cache hit rate</p>
+            <strong>{{ .Content.CacheHitRate }}</strong>
+            <span class="muted">Two-tier cache performance</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">LLM success rate</p>
+            <strong>{{ .Content.LLMSuccessRate }}</strong>
+            <span class="muted">Successful upstream calls</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Fallback rate</p>
+            <strong>{{ .Content.FallbackRate }}</strong>
+            <span class="muted">Fallback usage in runtime</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Average response</p>
+            <strong>{{ .Content.AvgResponseTime }}</strong>
+            <span class="muted">Observed classification latency</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Last error</p>
+            <strong>{{ .Content.LastError }}</strong>
+            <span class="muted">{{ .Content.LastErrorTime }}</span>
+        </article>
+    </section>
+    {{ end }}
+{{ template "legacy-shell-end" . }}
+{{ end }}
