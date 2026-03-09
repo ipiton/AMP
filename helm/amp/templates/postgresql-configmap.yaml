@@ -12,7 +12,7 @@ data:
     # =============================================================================
     # PostgreSQL Production Configuration - HPA Cluster Mode (TN-97 + TN-98)
     # =============================================================================
-    # Optimized for: Alert History Standard Profile with HPA (2-10 replicas)
+    # Optimized for: AMP standard profile with HPA (2-10 replicas)
     # TN-97: Connection pool sizing for cluster mode
     # TN-98: Production hardening and performance tuning
     # =============================================================================
@@ -137,7 +137,7 @@ data:
     # Allow connections from Kubernetes pods (Standard Profile)
     # TN-98: Restricted to cluster CIDR for security
     # =============================================================================
-    # Alert History application pods (Standard Profile)
+    # AMP application pods (Standard Profile)
     host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  10.0.0.0/8       md5
     host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  172.16.0.0/12    md5
     host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  192.168.0.0/16   md5
@@ -161,8 +161,8 @@ data:
   # =============================================================================
   init.sql: |
     -- =========================================================================
-    -- PostgreSQL Initialization Script for Alert History Service
-    -- TN-98: Production-Ready Setup for 150% Quality
+    -- PostgreSQL Initialization Script for AMP
+    -- TN-98: Operational initialization baseline
     -- =========================================================================
 
     -- -------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-# Production values for Alert History Service with LLM integration
+# Production-oriented values overrides for AMP with optional LLM settings
 # Usage: helm install amp ./helm/amp -f values-production.yaml
 
 # ===============================
