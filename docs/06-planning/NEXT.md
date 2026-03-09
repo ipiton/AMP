@@ -14,4 +14,5 @@
 - `PHASE-3-STORAGE-HARDENING` завершен как bootstrap/storage hardening slice; required storage теперь fail-fast, а health/readiness contract стал state-aware.
 - Анализ replacement readiness и публичных claims зафиксирован в `docs/06-planning/ALERTMANAGER-REPLACEMENT-GAP-ANALYSIS.md`; backlog items выше раскладывают его на отдельные incremental slices.
 - `PHASE-0` и core API unstubbing уже закрыты по коду и тестам; текущий следующий основной фокус нужно выбрать заново из planning artifacts при явном сохранении repo-wide test debt в `BUGS.md`.
+- `REPO-DOC-LICENSE-DRIFT` закрыт как narrow four-file cleanup; более широкий residual repo-doc drift остается отдельным bug `SECONDARY-REPO-DOC-HISTORICAL-DRIFT`.
 - Баланс 50/50 сейчас лучше держать через чередование `PHASE-2/3` и docs/UI cleanup.
