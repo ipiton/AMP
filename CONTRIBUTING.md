@@ -157,7 +157,7 @@ AMP/
 
 ## 📄 License
 
-By contributing, you agree that your contributions will be licensed under the Apache 2.0 License.
+By contributing, you agree that your contributions will be licensed under the repository's AGPL-3.0 license. See [LICENSE](LICENSE) for details.
 
 ## 💬 Questions?
 
@@ -165,4 +165,3 @@ By contributing, you agree that your contributions will be licensed under the Ap
 - [GitHub Issues](https://github.com/ipiton/AMP/issues)
 
 Thank you for contributing! 🙌
-
