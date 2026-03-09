@@ -4,7 +4,7 @@
 **Time Required**: Environment-dependent
 **Difficulty**: Easy
 
-Current runtime note (2026-03-09): this guide covers AMP's current controlled replacement slice. It does not imply full Alertmanager drop-in parity.
+Current runtime note (2026-03-09): this guide covers AMP's current controlled replacement surface. It includes the restored operational APIs `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups`, and `POST /-/reload`, but it still does not imply full Alertmanager drop-in parity.
 
 ---
 
@@ -68,6 +68,13 @@ curl -X POST http://localhost:9093/api/v2/alerts \
 
 # Query alerts (Alertmanager-compatible)
 curl http://localhost:9093/api/v2/alerts
+
+# Check grouped alerts for Grafana-style integrations
+curl http://localhost:9093/api/v2/alerts/groups
+
+# Check status and configured receivers
+curl http://localhost:9093/api/v2/status
+curl http://localhost:9093/api/v2/receivers
 ```
 
 ---
@@ -79,6 +86,7 @@ curl http://localhost:9093/api/v2/alerts
 ### What Just Happened?
 
 - ✅ Alert ingest works through the active `/api/v2/alerts` path
+- ✅ Status, receivers, grouped alerts, and reload APIs are mounted in the active runtime
 - ✅ Silence CRUD and health/readiness endpoints are available
 - ✅ `/health` reports liveness, `/ready` reports readiness; optional degraded components can still return `200` with a degraded JSON body
 - ✅ Real publishing path is active when targets are discovered
@@ -127,7 +135,7 @@ kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 - If zero targets are discovered, the runtime remains in `metrics-only`
 
 **Grafana dashboard broken?**
-- Verify dashboard uses `/api/v2/alerts` endpoint (should work automatically)
+- Verify dashboard uses `/api/v2/alerts/groups` for grouped-alert views
 - Check datasource URL points to `amp:9093`
 
 **Need help?**
@@ -137,5 +145,5 @@ kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
 ---
 
 **Last Updated**: 2026-03-09
-**Version**: v1.0.0
+**Version**: v0.0.1
 **Compatibility**: Alertmanager v0.25+ API v2 (current non-deprecated active slice only)

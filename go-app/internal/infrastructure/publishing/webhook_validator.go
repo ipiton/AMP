@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"reflect"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -19,6 +20,9 @@ type WebhookValidator struct {
 
 // NewWebhookValidator creates a new webhook validator with default configuration
 func NewWebhookValidator(logger *slog.Logger) *WebhookValidator {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &WebhookValidator{
 		config: DefaultValidationConfig,
 		logger: logger,
@@ -27,6 +31,9 @@ func NewWebhookValidator(logger *slog.Logger) *WebhookValidator {
 
 // NewWebhookValidatorWithConfig creates a new webhook validator with custom configuration
 func NewWebhookValidatorWithConfig(config ValidationConfig, logger *slog.Logger) *WebhookValidator {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &WebhookValidator{
 		config: config,
 		logger: logger,
@@ -85,9 +92,11 @@ func (v *WebhookValidator) ValidateURL(urlStr string) error {
 	}
 
 	// Check for private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-	if ip := net.ParseIP(hostname); ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() {
-			return fmt.Errorf("%w: private/loopback IP %s", ErrBlockedHost, ip)
+	if !v.config.AllowPrivateIPs {
+		if ip := net.ParseIP(hostname); ip != nil {
+			if ip.IsLoopback() || ip.IsPrivate() {
+				return fmt.Errorf("%w: private/loopback IP %s", ErrBlockedHost, ip)
+			}
 		}
 	}
 
@@ -159,6 +168,16 @@ func (v *WebhookValidator) ValidateRetryConfig(config WebhookRetryConfig) error 
 
 // ValidateFormat validates payload format (JSON serializable)
 func (v *WebhookValidator) ValidateFormat(payload interface{}) error {
+	if payload == nil {
+		return ErrInvalidFormat
+	}
+
+	// Check for nil pointer in interface
+	val := reflect.ValueOf(payload)
+	if val.Kind() == reflect.Ptr && val.IsNil() {
+		return ErrInvalidFormat
+	}
+
 	// Try to marshal to JSON
 	_, err := json.Marshal(payload)
 	if err != nil {

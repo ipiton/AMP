@@ -401,10 +401,13 @@ func NewRedisCacheFromURL(url string, logger *slog.Logger) (*RedisCache, error) 
 	}
 
 	config := &CacheConfig{
-		Addr:     opt.Addr,
-		Password: opt.Password,
-		DB:       opt.DB,
-		PoolSize: 10,
+		Addr:         opt.Addr,
+		Password:     opt.Password,
+		DB:           opt.DB,
+		PoolSize:     10,
+		DialTimeout:  5 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
 	}
 
 	return NewRedisCache(config, logger)

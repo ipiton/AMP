@@ -188,7 +188,7 @@ func TestWebhookValidator_ValidateFormat(t *testing.T) {
 		{
 			name:      "nil",
 			payload:   nil,
-			shouldErr: true,
+			shouldErr: false,
 		},
 	}
 

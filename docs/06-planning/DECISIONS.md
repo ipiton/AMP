@@ -50,5 +50,18 @@
   - richer operator workflows, full routing editor и полная миграция legacy dashboard остаются отдельным follow-up work.
 - **Следствие**:
   - active `/dashboard/*` surface больше не обещает незавершенный UI;
-  - default non-tagged `cmd/server` tests теперь защищают contract этих страниц;
-  - если репозиторий в будущем захочет единый UI stack, это должно идти отдельной задачей, а не скрытым follow-up к placeholder removal.
+- default non-tagged `cmd/server` tests теперь защищают contract этих страниц;
+- если репозиторий в будущем захочет единый UI stack, это должно идти отдельной задачей, а не скрытым follow-up к placeholder removal.
+
+## ADR-006: Restored Operational Alertmanager Endpoints Stay Inside The Controlled-Replacement Scope
+- **Дата**: 2026-03-09
+- **Контекст**: После ADR-002 active runtime был сознательно сужен до controlled-replacement narrative, но practical Grafana / automation flows все еще требовали `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups` и `POST /-/reload` в current mounted router.
+- **Решение**:
+  - active runtime снова монтирует `status`, `receivers`, `alerts/groups` и `reload` в `go-app/internal/application/router.go`;
+  - `ServiceRegistry` получает `startTime` и `ReloadCoordinator`, чтобы эти endpoints опирались на живое runtime state, а не на historical stubs;
+  - current public claim остается `controlled replacement`, а не `general-purpose drop-in replacement`;
+  - config/history/inhibition/classification surfaces, deprecated `v1` alias и broader dashboard/runtime parity остаются отдельным follow-up work.
+- **Следствие**:
+  - public docs и compatibility matrix больше не должны описывать эти четыре endpoints как backlog-only;
+  - planning/tests не должны продолжать фиксировать их отсутствие в active router contract;
+  - restoration этого operational surface не отменяет active-runtime-first policy и не возвращает repo к broad historical parity claim.

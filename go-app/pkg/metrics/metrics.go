@@ -1614,8 +1614,14 @@ type WebhookMetrics struct {
 
 // NewWebhookMetrics creates a new WebhookMetrics instance
 func NewWebhookMetrics() *WebhookMetrics {
+	return NewWebhookMetricsWithRegisterer(prometheus.DefaultRegisterer)
+}
+
+// NewWebhookMetricsWithRegisterer creates a new WebhookMetrics instance with a custom registerer
+func NewWebhookMetricsWithRegisterer(reg prometheus.Registerer) *WebhookMetrics {
+	factory := promauto.With(reg)
 	return &WebhookMetrics{
-		RequestsTotal: promauto.NewCounterVec(
+		RequestsTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Subsystem: "webhook",
@@ -1624,7 +1630,7 @@ func NewWebhookMetrics() *WebhookMetrics {
 			},
 			[]string{"endpoint", "method"},
 		),
-		RequestDuration: promauto.NewHistogramVec(
+		RequestDuration: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: Namespace,
 				Subsystem: "webhook",
@@ -1634,7 +1640,7 @@ func NewWebhookMetrics() *WebhookMetrics {
 			},
 			[]string{"endpoint", "method"},
 		),
-		ResponseStatus: promauto.NewCounterVec(
+		ResponseStatus: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Subsystem: "webhook",
@@ -1643,7 +1649,7 @@ func NewWebhookMetrics() *WebhookMetrics {
 			},
 			[]string{"endpoint", "status_code"},
 		),
-		PayloadSize: promauto.NewHistogramVec(
+		PayloadSize: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: Namespace,
 				Subsystem: "webhook",
@@ -1653,7 +1659,7 @@ func NewWebhookMetrics() *WebhookMetrics {
 			},
 			[]string{"endpoint"},
 		),
-		ErrorsTotal: promauto.NewCounterVec(
+		ErrorsTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Subsystem: "webhook",
@@ -1662,7 +1668,7 @@ func NewWebhookMetrics() *WebhookMetrics {
 			},
 			[]string{"endpoint", "error_type"},
 		),
-		ProcessingStage: promauto.NewHistogramVec(
+		ProcessingStage: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: Namespace,
 				Subsystem: "webhook",

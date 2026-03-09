@@ -46,7 +46,14 @@ func customHeadersHandler(headerName, expectedValue string) http.HandlerFunc {
 
 func TestEnhancedWebhookPublisher_Name(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
-	validator := NewWebhookValidator(nil)
+	validator := NewWebhookValidatorWithConfig(ValidationConfig{
+		AllowedSchemes:  []string{"http", "https"},
+		BlockedHosts:    []string{},
+		AllowPrivateIPs: true,
+		MaxPayloadSize:  1024 * 1024,
+		MaxHeaders:     100,
+		MaxHeaderSize:  4096,
+	}, nil)
 	formatter := NewAlertFormatter()
 	var metrics *v2.PublishingMetrics
 
@@ -63,7 +70,14 @@ func TestEnhancedWebhookPublisher_Publish_Success(t *testing.T) {
 	defer server.Close()
 
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
-	validator := NewWebhookValidator(nil)
+	validator := NewWebhookValidatorWithConfig(ValidationConfig{
+		AllowedSchemes:  []string{"http", "https"},
+		BlockedHosts:    []string{},
+		AllowPrivateIPs: true,
+		MaxPayloadSize:  1024 * 1024,
+		MaxHeaders:     100,
+		MaxHeaderSize:  4096,
+	}, nil)
 	formatter := NewAlertFormatter()
 	var metrics *v2.PublishingMetrics
 
@@ -98,7 +112,14 @@ func TestEnhancedWebhookPublisher_Publish_Success(t *testing.T) {
 
 func TestEnhancedWebhookPublisher_Publish_ValidationError(t *testing.T) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
-	validator := NewWebhookValidator(nil)
+	validator := NewWebhookValidatorWithConfig(ValidationConfig{
+		AllowedSchemes:  []string{"http", "https"},
+		BlockedHosts:    []string{},
+		AllowPrivateIPs: true,
+		MaxPayloadSize:  1024 * 1024,
+		MaxHeaders:     100,
+		MaxHeaderSize:  4096,
+	}, nil)
 	formatter := NewAlertFormatter()
 	var metrics *v2.PublishingMetrics
 
@@ -133,7 +154,14 @@ func TestEnhancedWebhookPublisher_Publish_WithBearerAuth(t *testing.T) {
 	defer server.Close()
 
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
-	validator := NewWebhookValidator(nil)
+	validator := NewWebhookValidatorWithConfig(ValidationConfig{
+		AllowedSchemes:  []string{"http", "https"},
+		BlockedHosts:    []string{},
+		AllowPrivateIPs: true,
+		MaxPayloadSize:  1024 * 1024,
+		MaxHeaders:     100,
+		MaxHeaderSize:  4096,
+	}, nil)
 	formatter := NewAlertFormatter()
 	var metrics *v2.PublishingMetrics
 
@@ -170,7 +198,14 @@ func TestEnhancedWebhookPublisher_Publish_WithCustomHeaders(t *testing.T) {
 	defer server.Close()
 
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
-	validator := NewWebhookValidator(nil)
+	validator := NewWebhookValidatorWithConfig(ValidationConfig{
+		AllowedSchemes:  []string{"http", "https"},
+		BlockedHosts:    []string{},
+		AllowPrivateIPs: true,
+		MaxPayloadSize:  1024 * 1024,
+		MaxHeaders:     100,
+		MaxHeaderSize:  4096,
+	}, nil)
 	formatter := NewAlertFormatter()
 	var metrics *v2.PublishingMetrics
 

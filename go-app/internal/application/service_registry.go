@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"time"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
@@ -71,8 +73,10 @@ type ServiceRegistry struct {
 	publisherFactory           *infrapublishing.PublisherFactory
 
 	// State
-	initialized     bool
-	degradedReasons []string
+	startTime         time.Time
+	reloadCoordinator *appconfig.ReloadCoordinator
+	initialized       bool
+	degradedReasons   []string
 }
 
 // NewServiceRegistry creates a new service registry.
@@ -87,6 +91,7 @@ func NewServiceRegistry(config *appconfig.Config, logger *slog.Logger) (*Service
 	return &ServiceRegistry{
 		config:          config,
 		logger:          logger,
+		startTime:       time.Now().UTC(),
 		degradedReasons: make([]string, 0, 4),
 	}, nil
 }
@@ -102,6 +107,27 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	}
 
 	r.logger.Info("Initializing service registry...")
+
+	// Initialize Reload Coordinator (TN-152)
+	// We use defaults for validator and comparator for now
+	validator := &appconfig.DefaultConfigValidator{}
+	comparator := &appconfig.DefaultConfigComparator{}
+	reloader := appconfig.NewConfigReloader(r.logger)
+	// storage and lockManager can be nil for basic reload
+	configPath := os.Getenv("AMP_CONFIG_FILE")
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	r.reloadCoordinator = appconfig.NewReloadCoordinator(
+		r.config,
+		configPath,
+		validator,
+		comparator,
+		reloader,
+		nil,
+		nil,
+		r.logger,
+	)
 
 	// Step 1: Initialize Infrastructure
 	if err := r.initializeInfrastructure(ctx); err != nil {
@@ -533,6 +559,39 @@ func (r *ServiceRegistry) AlertStore() *memory.AlertStore {
 
 func (r *ServiceRegistry) SilenceStore() *memory.SilenceStore {
 	return r.silenceStore
+}
+
+func (r *ServiceRegistry) StartTime() time.Time {
+	return r.startTime
+}
+
+func (r *ServiceRegistry) ReloadCoordinator() *appconfig.ReloadCoordinator {
+	return r.reloadCoordinator
+}
+
+func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
+	if r.reloadCoordinator == nil {
+		return fmt.Errorf("reload coordinator not initialized")
+	}
+
+	configPath := os.Getenv("AMP_CONFIG_FILE")
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	result, err := r.reloadCoordinator.ReloadFromFile(ctx, configPath)
+	if err != nil {
+		return err
+	}
+
+	if !result.Success {
+		return fmt.Errorf("reload failed: %v", result.Error)
+	}
+
+	// Update local config pointer
+	r.config = r.reloadCoordinator.GetCurrentConfig()
+
+	return nil
 }
 
 // Helper functions

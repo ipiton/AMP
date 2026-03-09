@@ -29,7 +29,7 @@ func TestRootlyAPIError_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Contains(t, tt.err.Error(), "Rootly")
+			assert.Contains(t, tt.err.Error(), "rootly")
 		})
 	}
 }

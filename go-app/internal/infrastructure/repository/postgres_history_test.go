@@ -8,6 +8,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -57,7 +58,8 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 	// matching the schema defined in migrations/000001_init_schema.up.sql
 	schema := `
 	CREATE TABLE IF NOT EXISTS alerts (
-		fingerprint VARCHAR(255) PRIMARY KEY,
+		id SERIAL PRIMARY KEY,
+		fingerprint VARCHAR(255) NOT NULL,
 		alert_name VARCHAR(255) NOT NULL,
 		status VARCHAR(50) NOT NULL,
 		starts_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -65,6 +67,7 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		generator_url TEXT,
 		labels JSONB,
 		annotations JSONB,
+		timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 	);
@@ -96,7 +99,7 @@ func TestGetTopAlerts_EmptyDatabase(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	timeRange := &core.TimeRange{
 		From: nil,
@@ -117,11 +120,11 @@ func TestGetFlappingAlerts_NoStateTransitions(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	// Insert a stable alert (always firing)
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
 		('fp1', 'StableAlert', 'firing', NOW(), NOW(), '{"namespace": "prod"}'),
 		('fp1', 'StableAlert', 'firing', NOW(), NOW() + INTERVAL '1 hour', '{"namespace": "prod"}')
@@ -145,13 +148,13 @@ func TestGetFlappingAlerts_MultipleTransitions(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	// Insert a flapping alert (firing -> resolved -> firing -> resolved)
 	// 4 transitions
 	baseTime := time.Now().Add(-24 * time.Hour)
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
 		('fp_flap', 'FlappingAlert', 'firing', $1, $1, '{"namespace": "prod"}'),
 		('fp_flap', 'FlappingAlert', 'resolved', $1, $1 + INTERVAL '10 minutes', '{"namespace": "prod"}'),
@@ -185,11 +188,11 @@ func TestGetAggregatedStats_WithData(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	// Insert mixed alerts
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
 		('fp1', 'Alert1', 'firing', NOW(), NOW(), '{"namespace": "prod", "severity": "critical"}'),
 		('fp2', 'Alert2', 'resolved', NOW(), NOW(), '{"namespace": "prod", "severity": "warning"}'),
@@ -225,14 +228,14 @@ func TestGetTopAlerts_WithTimeRange(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	now := time.Now()
 	old := now.Add(-48 * time.Hour)
 
 	// Insert old and new alerts
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
 		('fp_old', 'OldAlert', 'firing', $1, $1, '{"namespace": "prod"}'),
 		('fp_new', 'NewAlert', 'firing', $2, $2, '{"namespace": "prod"}'),
@@ -266,13 +269,13 @@ func TestGetTopAlerts_LimitValidation(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	// Insert 5 alerts
 	for i := 0; i < 5; i++ {
 		fp := fmt.Sprintf("fp%d", i)
 		_, err := pool.Exec(context.Background(), `
-			INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+			INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 			VALUES ($1, 'Alert', 'firing', NOW(), NOW(), '{"namespace": "prod"}')
 		`, fp)
 		if err != nil {
@@ -295,12 +298,12 @@ func TestGetFlappingAlerts_ThresholdFiltering(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	// Insert alert with 2 transitions (below threshold 3)
 	baseTime := time.Now()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
 		('fp_stable', 'Stable', 'firing', $1, $1, '{"namespace": "prod"}'),
 		('fp_stable', 'Stable', 'resolved', $1, $1 + INTERVAL '10 minutes', '{"namespace": "prod"}')
@@ -323,13 +326,13 @@ func TestGetAggregatedStats_TimeRange(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
-	repo := NewPostgresHistoryRepository(pool, nil, nil)
+	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
 	now := time.Now()
 	old := now.Add(-48 * time.Hour)
 
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO alert_history (fingerprint, alert_name, status, starts_at, created_at, labels)
+		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
 		('fp_old', 'Old', 'firing', $1, $1, '{"namespace": "prod"}'),
 		('fp_new', 'New', 'firing', $2, $2, '{"namespace": "prod"}')
