@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **SOURCE-EXAMPLES-HISTORICAL-DRIFT** — завершен как source-example narrative/integration cleanup slice, а не как full alignment `examples/custom-*.go` to runtime internals.
+- В [custom-classifier/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-classifier/main.go) и [custom-publisher/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-publisher/main.go) убраны historical `Alert History Service` references из top intro и footer/integration blocks; classifier guidance сужен до generic AMP classification flow, а publisher guidance больше не учит obsolete inline `publishing.targets` / `webhook_url` / `filters` story и вместо этого ссылается на current `publishing.*` + Secret discovery docs.
+- Проверка scope: targeted marker scans по `examples/custom-*.go`, manual review против `docs/CONFIGURATION_GUIDE.md` / `docs/MIGRATION_QUICK_START.md` / archived `PHASE-4` spec, narrative sanity review, `git diff --check`.
+- Ограничение: local executable `custom-publisher` demo shape сознательно не переписывался; residual code-shape mismatch вынесен в `CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT`. Workspace архивирован в `tasks/archive/SOURCE-EXAMPLES-HISTORICAL-DRIFT/`.
 - **EXAMPLES-HISTORICAL-DOC-DRIFT** — завершен как Kubernetes example contract cleanup slice, а не как полный sweep по `examples/**`.
 - В [pagerduty-secret-example.yaml](/Users/vit/Documents/Projects/AMP/examples/k8s/pagerduty-secret-example.yaml) и [rootly-secret-example.yaml](/Users/vit/Documents/Projects/AMP/examples/k8s/rootly-secret-example.yaml) examples приведены к canonical publishing Secret contract: `publishing-target=true`, `stringData.config` / `data.config`, generic `monitoring` namespace вместо historical `alert-history`, без legacy `target.json` и discrete secret-field shape.
 - Проверка scope: targeted marker scan по `examples/k8s`, manual review против `docs/CONFIGURATION_GUIDE.md` / `docs/MIGRATION_QUICK_START.md` / archived `PHASE-4` spec, YAML sanity review, `git diff --check`.

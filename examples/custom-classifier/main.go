@@ -2,7 +2,7 @@
 //
 // This example shows:
 //   - How to implement the AlertClassifier interface
-//   - How to integrate with Alert History Service
+//   - How to integrate with AMP classification flow
 //   - How to add custom classification logic
 //   - How to track metrics and performance
 //
@@ -288,7 +288,7 @@ func main() {
 }
 
 // ================================================================================
-// Integration with Alert History Service
+// Integration with AMP Classification
 // ================================================================================
 //
 // To integrate your custom classifier:
@@ -300,11 +300,10 @@ func main() {
 //    classifier := NewMLClassifier("my-model", "1.0.0")
 //    registry.Register("ml-classifier", classifier)
 //
-// 3. Configure Alert History to use your classifier:
-//
-//    config.yml:
-//      classification:
-//        default_classifier: ml-classifier
+// 3. Wire the classifier into your runtime bootstrap and classification flow.
+//    Treat this source example as implementation guidance, not as a fixed
+//    public config contract. Follow the current runtime wiring and
+//    deployment-specific classification docs for your environment.
 //
 // 4. Deploy and monitor:
 //
@@ -313,4 +312,5 @@ func main() {
 //    - Monitor model health
 //    - Set up alerts for classifier failures
 //
-// That's it! Your custom classifier is now integrated.
+// That's it! Your custom classifier can now participate in the AMP
+// classification pipeline.
