@@ -5,7 +5,7 @@
 ## Overview
 
 Alertmanager++ (AMP) chart packages the current repository runtime with:
-- ✅ **Controlled replacement slice** for alert ingest, silence CRUD, health/readiness, metrics, and the real publishing path
+- ✅ **Controlled replacement surface** for alert ingest/query, alert groups, `status`/`receivers`/`reload`, silence CRUD, health/readiness, metrics, and the real publishing path
 - 🤖 **Optional LLM-related values** for environments that wire them explicitly
 - 📊 **Partial dashboard surface** with broader UI/runtime parity still tracked as follow-up work
 - 🟡 **Phased compatibility** rather than a verified full Alertmanager drop-in claim
@@ -92,11 +92,15 @@ alerting:
 Current active runtime surface mounted by the repository bootstrap:
 - `POST /api/v2/alerts`
 - `GET /api/v2/alerts`
+- `GET /api/v2/alerts/groups`
+- `GET /api/v2/status`
+- `GET /api/v2/receivers`
 - `GET/POST /api/v2/silences`
 - `GET/DELETE /api/v2/silence/{id}`
+- `POST /-/reload`
 - `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
 
-Wider parity such as `status`, `receivers`, `alerts/groups`, `/-/reload`, config/history APIs, and broader dashboard surfaces remains explicit follow-up work.
+Wider parity such as config/history APIs, inhibition/classification surfaces, and broader dashboard surfaces remains explicit follow-up work.
 
 ## Upgrading
 

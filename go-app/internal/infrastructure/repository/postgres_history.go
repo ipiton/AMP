@@ -32,15 +32,25 @@ type HistoryMetrics struct {
 
 // NewPostgresHistoryRepository creates a new PostgreSQL history repository
 func NewPostgresHistoryRepository(pool *pgxpool.Pool, storage core.AlertStorage, logger *slog.Logger) *PostgresHistoryRepository {
+	return NewPostgresHistoryRepositoryWithRegisterer(pool, storage, logger, prometheus.DefaultRegisterer)
+}
+
+// NewPostgresHistoryRepositoryWithRegisterer creates a new PostgreSQL history repository with a custom registerer
+func NewPostgresHistoryRepositoryWithRegisterer(pool *pgxpool.Pool, storage core.AlertStorage, logger *slog.Logger, reg prometheus.Registerer) *PostgresHistoryRepository {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if reg == nil {
+		reg = prometheus.DefaultRegisterer
+	}
+
+	factory := promauto.With(reg)
 
 	// FIXED: Added Namespace and Subsystem for proper metric naming
 	// Old: alert_history_query_duration_seconds (no subsystem)
 	// New: alert_history_infra_repository_query_duration_seconds
 	metrics := &HistoryMetrics{
-		QueryDuration: promauto.NewHistogramVec(
+		QueryDuration: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "alert_history",
 				Subsystem: "infra_repository",
@@ -50,7 +60,7 @@ func NewPostgresHistoryRepository(pool *pgxpool.Pool, storage core.AlertStorage,
 			},
 			[]string{"operation", "status"},
 		),
-		QueryErrors: promauto.NewCounterVec(
+		QueryErrors: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "infra_repository",
@@ -59,7 +69,7 @@ func NewPostgresHistoryRepository(pool *pgxpool.Pool, storage core.AlertStorage,
 			},
 			[]string{"operation", "error_type"},
 		),
-		QueryResults: promauto.NewHistogramVec(
+		QueryResults: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "alert_history",
 				Subsystem: "infra_repository",
@@ -69,7 +79,7 @@ func NewPostgresHistoryRepository(pool *pgxpool.Pool, storage core.AlertStorage,
 			},
 			[]string{"operation"},
 		),
-		CacheHits: promauto.NewCounterVec(
+		CacheHits: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "infra_cache",
@@ -341,7 +351,7 @@ func (r *PostgresHistoryRepository) GetAggregatedStats(ctx context.Context, time
 	severityQuery := fmt.Sprintf(`
 		SELECT labels->>'severity' as severity, COUNT(*)
 		FROM alerts %s
-		WHERE labels->>'severity' IS NOT NULL
+		AND labels->>'severity' IS NOT NULL
 		GROUP BY severity`, whereClause)
 
 	rows, err = r.pool.Query(ctx, severityQuery, args...)
@@ -364,7 +374,7 @@ func (r *PostgresHistoryRepository) GetAggregatedStats(ctx context.Context, time
 	namespaceQuery := fmt.Sprintf(`
 		SELECT labels->>'namespace' as namespace, COUNT(*)
 		FROM alerts %s
-		WHERE labels->>'namespace' IS NOT NULL
+		AND labels->>'namespace' IS NOT NULL
 		GROUP BY namespace
 		ORDER BY COUNT(*) DESC
 		LIMIT 10`, whereClause)

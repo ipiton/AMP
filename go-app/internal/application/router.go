@@ -24,8 +24,11 @@ func NewRouter(registry *ServiceRegistry) *Router {
 func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	// API v2
 	mux.HandleFunc("/api/v2/alerts", handlers.AlertsHandler(rt.registry))
+	mux.HandleFunc("/api/v2/alerts/groups", handlers.AlertGroupsHandler(rt.registry))
 	mux.HandleFunc("/api/v2/silences", handlers.SilencesHandler(rt.registry))
 	mux.HandleFunc("/api/v2/silence/", handlers.SilenceByIDHandler(rt.registry))
+	mux.HandleFunc("/api/v2/status", handlers.StatusAPIHandler(rt.registry))
+	mux.HandleFunc("/api/v2/receivers", handlers.ReceiversHandler(rt.registry))
 
 	// Health
 	mux.HandleFunc("/health", handlers.HealthHandler(rt.registry))
@@ -34,6 +37,7 @@ func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/readyz", handlers.ReadyHandler(rt.registry))
 	mux.HandleFunc("/-/healthy", handlers.AlertmanagerHealthyHandler(rt.registry))
 	mux.HandleFunc("/-/ready", handlers.AlertmanagerReadyHandler(rt.registry))
+	mux.HandleFunc("/-/reload", handlers.ReloadHandler(rt.registry))
 
 	// Metrics
 	mux.Handle("/metrics", promhttp.Handler())

@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -91,6 +93,12 @@ func NewTimeoutError(message string, err error) *TimeoutError {
 
 // wrapK8sError wraps a Kubernetes API error into our custom error types
 func wrapK8sError(operation string, err error) error {
+	if errors.Is(err, context.Canceled) {
+		return NewTimeoutError("operation cancelled", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return NewTimeoutError("operation timed out", err)
+	}
 	if k8serrors.IsUnauthorized(err) || k8serrors.IsForbidden(err) {
 		return NewAuthError("insufficient permissions", err)
 	}

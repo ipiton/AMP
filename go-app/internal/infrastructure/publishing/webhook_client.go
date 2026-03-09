@@ -24,6 +24,10 @@ type WebhookHTTPClient struct {
 
 // NewWebhookHTTPClient creates a new webhook HTTP client
 func NewWebhookHTTPClient(retryConfig WebhookRetryConfig, logger *slog.Logger) *WebhookHTTPClient {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	// Create HTTP client with optimized settings
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second, // Default timeout

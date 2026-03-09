@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
-	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/ipiton/AMP/pkg/metrics/v2"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -623,7 +623,8 @@ func createTestDiscoveryManager(t *testing.T, targets map[string]*core.Publishin
 // createTestHealthMonitorWith creates health monitor with custom discovery and config.
 func createTestHealthMonitorWith(discoveryMgr TargetDiscoveryManager, config HealthConfig) (HealthMonitor, error) {
 	// Create metrics manually to avoid nil pointer
-	registry := v2.NewRegistry()
+	promReg := prometheus.NewRegistry()
+	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
 	metrics := registry.Publishing
 	return NewHealthMonitor(discoveryMgr, config, slog.Default(), metrics)
 }

@@ -21,8 +21,8 @@ func TestPagerDutyAPIError_Type(t *testing.T) {
 		expectedType string
 	}{
 		{400, "bad_request"},
-		{401, "unauthorized"},
-		{403, "forbidden"},
+		{401, "auth_error"},
+		{403, "auth_error"},
 		{404, "not_found"},
 		{429, "rate_limit"},
 		{500, "server_error"},

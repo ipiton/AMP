@@ -164,6 +164,10 @@ type ValidationConfig struct {
 	// BlockedHosts are blocked hostname patterns (default: ["localhost", "127.0.0.1"])
 	BlockedHosts []string `json:"blocked_hosts,omitempty"`
 
+	// AllowPrivateIPs allows private and loopback IP addresses (default: false)
+	// Useful for testing or internal webhooks
+	AllowPrivateIPs bool `json:"allow_private_ips,omitempty"`
+
 	// MinTimeout is the minimum timeout (default: 1s)
 	MinTimeout time.Duration `json:"min_timeout,omitempty"`
 
