@@ -1,0 +1,69 @@
+{{ define "dashboard-routing.html" }}
+{{ template "legacy-shell-start" . }}
+    <section class="card-grid">
+        <article class="stat-card">
+            <p class="kicker">Runtime state</p>
+            <strong><span class="badge {{ .Content.RuntimeStatusClass }}">{{ .Content.RuntimeStatus }}</span></strong>
+            <span class="muted">{{ .Content.RuntimeDetail }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Publishing enabled</p>
+            <strong>{{ if .Content.Enabled }}yes{{ else }}no{{ end }}</strong>
+            <span class="muted">Profile {{ .Content.Profile }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Current mode</p>
+            <strong><span class="badge {{ .Content.ModeClass }}">{{ .Content.Mode }}</span></strong>
+            <span class="muted">{{ .Content.ModeDuration }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Targets</p>
+            <strong>{{ .Content.TargetCount }}</strong>
+            <span class="muted">{{ .Content.ValidTargets }} valid / {{ .Content.InvalidTargets }} invalid</span>
+        </article>
+    </section>
+
+    <section class="two-column">
+        <article class="panel">
+            <div class="panel-head">
+                <h2>Routing config</h2>
+            </div>
+            <ul class="detail-list">
+                <li><span>Discovery namespace</span><strong>{{ .Content.Namespace }}</strong></li>
+                <li><span>Label selector</span><strong class="mono">{{ .Content.LabelSelector }}</strong></li>
+                <li><span>Queue workers</span><strong>{{ .Content.QueueWorkers }}</strong></li>
+                <li><span>Max concurrent</span><strong>{{ .Content.MaxConcurrent }}</strong></li>
+                <li><span>Refresh enabled</span><strong>{{ if .Content.RefreshEnabled }}yes{{ else }}no{{ end }}</strong></li>
+                <li><span>Health enabled</span><strong>{{ if .Content.HealthEnabled }}yes{{ else }}no{{ end }}</strong></li>
+            </ul>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <h2>Mode details</h2>
+            </div>
+            <ul class="detail-list">
+                <li><span>Transition count</span><strong>{{ .Content.TransitionCount }}</strong></li>
+                <li><span>Last transition</span><strong>{{ .Content.LastTransitionTime }}</strong></li>
+                <li><span>Reason</span><strong>{{ .Content.LastTransitionReason }}</strong></li>
+                <li><span>Last discovery</span><strong>{{ .Content.LastDiscovery }}</strong></li>
+                <li><span>Discovery errors</span><strong>{{ .Content.DiscoveryErrors }}</strong></li>
+                <li><span>Metric collectors</span><strong>{{ .Content.CollectorCount }}</strong></li>
+            </ul>
+        </article>
+    </section>
+
+    {{ if .Content.CollectorNames }}
+    <section class="panel">
+        <div class="panel-head">
+            <h2>Registered collectors</h2>
+        </div>
+        <div class="tag-list">
+            {{ range .Content.CollectorNames }}
+            <span class="tag">{{ . }}</span>
+            {{ end }}
+        </div>
+    </section>
+    {{ end }}
+{{ template "legacy-shell-end" . }}
+{{ end }}
