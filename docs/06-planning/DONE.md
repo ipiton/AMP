@@ -1,5 +1,12 @@
 # DONE
 
+## 2026-03-09
+- **PHASE-3-STORAGE-HARDENING** — active bootstrap/storage path hardened: `ProfileLite` теперь поднимает `SQLiteDatabase`, `ProfileStandard` идет через `PostgresPool + goose + thin Postgres storage adapter`, а required storage failures больше не маскируются под pseudo-healthy startup.
+- Health plane переведен на state-aware contract: `/health|/healthz` отражают liveness, `/ready|/readyz` отражают readiness, `/-/healthy|/-/ready` сохраняют plain-text Alertmanager-compatible probes, optional degradations видны как `degraded`.
+- Planning/public docs и ADR синхронизированы с новым runtime truth; workspace архивирован в `tasks/archive/PHASE-3-STORAGE-HARDENING/`.
+- Проверка scope: `go test ./internal/application/... ./internal/database`, `go test ./internal/infrastructure -run SQLiteDatabase`, `go build ./cmd/server`, `git diff --check` проходят.
+- Ограничение: полный `go test ./...` остается red на preexisting проблемах вне scope текущего slice; актуальный список зафиксирован в `docs/06-planning/BUGS.md`.
+
 ## 2026-03-08
 - **DOCS-HONESTY-PASS** — top-level public/docs honesty slice завершен: README, migration/compatibility docs и chart surface переведены на `controlled replacement` / `active-runtime-first` narrative.
 - Убраны direct overclaims про `drop-in replacement`, `100% API compatibility`, неподтвержденные benchmark/resource figures, конфликтный install story и top-level license mismatch в core public/docs scope.

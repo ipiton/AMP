@@ -1,16 +1,46 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 )
 
-func HealthHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
+type HealthStatusProvider interface {
+	Liveness(ctx context.Context) error
+	Readiness(ctx context.Context) error
+	LivenessReport(ctx context.Context) map[string]any
+	ReadinessReport(ctx context.Context) map[string]any
 }
 
-func ReadyHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
+func HealthHandler(provider HealthStatusProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if provider == nil {
+			InternalErrorHandler(w, "health provider is not available")
+			return
+		}
+
+		status := http.StatusOK
+		if err := provider.Liveness(r.Context()); err != nil {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, provider.LivenessReport(r.Context()))
+	}
+}
+
+func ReadyHandler(provider HealthStatusProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if provider == nil {
+			InternalErrorHandler(w, "health provider is not available")
+			return
+		}
+
+		status := http.StatusOK
+		if err := provider.Readiness(r.Context()); err != nil {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, provider.ReadinessReport(r.Context()))
+	}
 }
 
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,12 +52,40 @@ func InternalErrorHandler(w http.ResponseWriter, message string) {
 }
 
 // Alertmanager compatible health endpoints
-func AlertmanagerHealthyHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, "OK")
+func AlertmanagerHealthyHandler(provider HealthStatusProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if provider == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, "NOT OK")
+			return
+		}
+
+		if err := provider.Liveness(r.Context()); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, "NOT OK")
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "OK")
+	}
 }
 
-func AlertmanagerReadyHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, "OK")
+func AlertmanagerReadyHandler(provider HealthStatusProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if provider == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, "NOT READY")
+			return
+		}
+
+		if err := provider.Readiness(r.Context()); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, "NOT READY")
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "OK")
+	}
 }
