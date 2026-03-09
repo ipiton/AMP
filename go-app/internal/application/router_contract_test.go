@@ -8,13 +8,30 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 )
+
+const activeContractConfigYAML = `profile: lite
+server:
+  host: localhost
+  port: 8080
+storage:
+  backend: filesystem
+  filesystem_path: /tmp/amp-router-contract.db
+receivers:
+  - name: default
+  - name: team-ops
+`
+
+var activeContractStartTime = time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 
 type contractPublisher struct{}
 
@@ -72,10 +89,29 @@ func (s *contractStorageRuntime) Disconnect(context.Context) error {
 	return nil
 }
 
+func writeActiveContractConfigFile(t *testing.T) string {
+	t.Helper()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(activeContractConfigYAML), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", configPath, err)
+	}
+
+	return configPath
+}
+
 func newActiveContractMux(t *testing.T, storageHealthErr error) *http.ServeMux {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	configPath := writeActiveContractConfigFile(t)
+	t.Setenv("AMP_CONFIG_FILE", configPath)
+
+	cfg, err := appconfig.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig(%q) error = %v", configPath, err)
+	}
+
 	processor, err := services.NewAlertProcessor(services.AlertProcessorConfig{
 		FilterEngine: &contractFilterEngine{},
 		Publisher:    &contractPublisher{},
@@ -86,21 +122,27 @@ func newActiveContractMux(t *testing.T, storageHealthErr error) *http.ServeMux {
 	}
 
 	storageRuntime := &contractStorageRuntime{healthErr: storageHealthErr}
+	reloadCoordinator := appconfig.NewReloadCoordinator(
+		cfg,
+		configPath,
+		appconfig.NewConfigValidator(),
+		appconfig.NewConfigComparator(),
+		appconfig.NewConfigReloader(logger),
+		nil,
+		nil,
+		logger,
+	)
 	registry := &ServiceRegistry{
-		config: &appconfig.Config{
-			Profile: appconfig.ProfileLite,
-			Storage: appconfig.StorageConfig{
-				Backend:        appconfig.StorageBackendFilesystem,
-				FilesystemPath: ":memory:",
-			},
-		},
-		logger:         logger,
-		alertStore:     memory.NewAlertStore(),
-		silenceStore:   memory.NewSilenceStore(),
-		alertProcessor: processor,
-		storageRuntime: storageRuntime,
-		storage:        storageRuntime,
-		initialized:    true,
+		config:            cfg,
+		logger:            logger,
+		alertStore:        memory.NewAlertStore(),
+		silenceStore:      memory.NewSilenceStore(),
+		alertProcessor:    processor,
+		storageRuntime:    storageRuntime,
+		storage:           storageRuntime,
+		startTime:         activeContractStartTime,
+		reloadCoordinator: reloadCoordinator,
+		initialized:       true,
 	}
 
 	mux := http.NewServeMux()
@@ -165,7 +207,7 @@ func TestActiveRuntimeContract_PresentEndpoints(t *testing.T) {
 	}
 }
 
-func TestActiveRuntimeContract_HistoricalWideSurfaceIsAbsent(t *testing.T) {
+func TestActiveRuntimeContract_RestoredOperationalEndpointsPresent(t *testing.T) {
 	mux := newActiveContractMux(t, nil)
 
 	probes := []struct {
@@ -174,10 +216,35 @@ func TestActiveRuntimeContract_HistoricalWideSurfaceIsAbsent(t *testing.T) {
 		path   string
 		status int
 	}{
-		{name: "status not mounted", method: http.MethodGet, path: "/api/v2/status", status: http.StatusNotFound},
-		{name: "receivers not mounted", method: http.MethodGet, path: "/api/v2/receivers", status: http.StatusNotFound},
-		{name: "alert groups not mounted", method: http.MethodGet, path: "/api/v2/alerts/groups", status: http.StatusNotFound},
-		{name: "reload not mounted", method: http.MethodPost, path: "/-/reload", status: http.StatusNotFound},
+		{name: "status get", method: http.MethodGet, path: "/api/v2/status", status: http.StatusOK},
+		{name: "receivers get", method: http.MethodGet, path: "/api/v2/receivers", status: http.StatusOK},
+		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", status: http.StatusOK},
+		{name: "reload post", method: http.MethodPost, path: "/-/reload", status: http.StatusOK},
+		{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
+	}
+
+	for _, probe := range probes {
+		t.Run(probe.name, func(t *testing.T) {
+			req := httptest.NewRequest(probe.method, probe.path, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != probe.status {
+				t.Fatalf("%s %s expected %d, got %d body=%q", probe.method, probe.path, probe.status, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestActiveRuntimeContract_StillAbsentHistoricalSurface(t *testing.T) {
+	mux := newActiveContractMux(t, nil)
+
+	probes := []struct {
+		name   string
+		method string
+		path   string
+		status int
+	}{
 		{name: "alerts v1 alias not mounted", method: http.MethodPost, path: "/api/v1/alerts", status: http.StatusNotFound},
 		{name: "config api not mounted", method: http.MethodGet, path: "/api/v2/config", status: http.StatusNotFound},
 		{name: "classification api not mounted", method: http.MethodGet, path: "/api/v2/classification/health", status: http.StatusNotFound},

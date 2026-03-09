@@ -1,6 +1,10 @@
 # DONE
 
 ## 2026-03-09
+- **APPLICATION-ROUTER-CONTRACT-DRIFT** — active `internal/application` contract suite приведен в соответствие с restored runtime surface без расширения production router scope.
+- В `go-app/internal/application/router_contract_test.go` helper `newActiveContractMux(...)` теперь поднимает minimal honest reload-capable state через temporary config, deterministic `startTime` и real `ReloadCoordinator`, а old absent-surface assertion разделен на restored operational endpoints и still-absent historical surface.
+- Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application -run TestActiveRuntimeContract -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application/... -count=1`, `git diff --check`.
+- Ограничение: полный test scope пришлось подтверждать вне sandbox из-за `httptest.NewServer` bind restriction; это не residual code drift и не потребовало нового planning bug. Workspace архивирован в `tasks/archive/APPLICATION-ROUTER-CONTRACT-DRIFT/`.
 - **RUNTIME-SURFACE-RESTORATION** — active runtime surface восстановлен для `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups` и `POST /-/reload`, а public/docs truth синхронизирован с этим mounted contract.
 - В `go-app/internal/application/router.go` эти endpoints снова смонтированы через `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler` и `ReloadHandler`; `ServiceRegistry` получил `startTime` и `ReloadCoordinator`, а `Config` — minimal `receivers` snapshot.
 - Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application/handlers -count=1`, `git diff --check`.
