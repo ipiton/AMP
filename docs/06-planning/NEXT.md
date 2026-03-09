@@ -5,7 +5,6 @@
 
 ## WIP (Max 2)
 - Пусто.
-- Пусто.
 
 ## Notes
 - `SOLO-KANBAN-INIT` завершен и перенесен в `DONE.md`.
