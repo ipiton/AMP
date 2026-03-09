@@ -16,7 +16,7 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # Allow connections from Alert History application pods
+  # Allow connections from AMP application pods
   - from:
     - podSelector:
         matchLabels:
