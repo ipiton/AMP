@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/component: database
   annotations:
     description: "Headless service for PostgreSQL StatefulSet - enables direct pod access"
-    tn-98: "Production hardening (150% quality)"
+    tn-98: "Operational hardening baseline"
 spec:
   type: ClusterIP
   clusterIP: None  # Headless service

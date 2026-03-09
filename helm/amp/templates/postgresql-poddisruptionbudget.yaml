@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/component: database
   annotations:
     description: "Pod Disruption Budget for PostgreSQL - ensures availability during voluntary disruptions"
-    tn-98: "Production hardening (150% quality)"
+    tn-98: "Operational hardening baseline"
 spec:
   selector:
     matchLabels:
