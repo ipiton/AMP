@@ -1,0 +1,70 @@
+{{ define "dashboard-overview.html" }}
+{{ template "legacy-shell-start" . }}
+    <section class="card-grid">
+        <article class="stat-card">
+            <p class="kicker">Profile</p>
+            <strong>{{ .Content.Profile }}</strong>
+            <span class="muted">{{ .Content.StorageBackend }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Readiness</p>
+            <strong><span class="badge {{ .Content.ReadinessStatusClass }}">{{ .Content.ReadinessStatus }}</span></strong>
+            <span class="muted">{{ if .Content.Ready }}Ready for active traffic{{ else }}Required dependencies not ready{{ end }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Liveness</p>
+            <strong><span class="badge {{ .Content.LivenessStatusClass }}">{{ .Content.LivenessStatus }}</span></strong>
+            <span class="muted">Process and bootstrap state</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Alerts</p>
+            <strong>{{ .Content.AlertTotal }}</strong>
+            <span class="muted">{{ .Content.FiringAlerts }} firing / {{ .Content.ResolvedAlerts }} resolved</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Silences</p>
+            <strong>{{ .Content.SilenceTotal }}</strong>
+            <span class="muted">{{ .Content.ActiveSilences }} active / {{ .Content.PendingSilences }} pending / {{ .Content.ExpiredSilences }} expired</span>
+        </article>
+    </section>
+
+    <section class="two-column">
+        <article class="panel">
+            <div class="panel-head">
+                <h2>Runtime truth</h2>
+            </div>
+            <ul class="detail-list">
+                <li><span>Profile</span><strong>{{ .Content.Profile }}</strong></li>
+                <li><span>Storage</span><strong>{{ .Content.StorageBackend }}</strong></li>
+                <li><span>Readiness</span><strong class="badge {{ .Content.ReadinessStatusClass }}">{{ .Content.ReadinessStatus }}</strong></li>
+                <li><span>Liveness</span><strong class="badge {{ .Content.LivenessStatusClass }}">{{ .Content.LivenessStatus }}</strong></li>
+            </ul>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <h2>Next surfaces</h2>
+            </div>
+            <div class="tag-list">
+                <a class="tag-link" href="/dashboard/alerts">Read alert inventory</a>
+                <a class="tag-link" href="/dashboard/silences">Inspect active silences</a>
+                <a class="tag-link" href="/dashboard/llm">Review LLM config</a>
+                <a class="tag-link" href="/dashboard/routing">Check routing mode</a>
+            </div>
+        </article>
+    </section>
+
+    {{ if .Content.DegradedReasons }}
+    <section class="panel">
+        <div class="panel-head">
+            <h2>Degraded components</h2>
+        </div>
+        <ul class="note-list">
+            {{ range .Content.DegradedReasons }}
+            <li>{{ . }}</li>
+            {{ end }}
+        </ul>
+    </section>
+    {{ end }}
+{{ template "legacy-shell-end" . }}
+{{ end }}

@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"embed"
 	"fmt"
-	"html/template"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -25,14 +22,6 @@ const (
 )
 
 const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
-
-//go:embed templates/*
-var templatesFS embed.FS
-
-//go:embed static/*
-var staticFS embed.FS
-
-var templates *template.Template
 
 func main() {
 	// Setup structured logging
@@ -79,7 +68,7 @@ func main() {
 	router.SetupRoutes(mux)
 
 	// Dashboard and static files (legacy/compatibility)
-	registerLegacyDashboardRoutes(mux)
+	registerLegacyDashboardRoutes(mux, registry)
 
 	// Start server
 	port := cfg.Server.Port
@@ -133,110 +122,4 @@ func resolveRuntimeConfigPath() string {
 		return path
 	}
 	return "config.yaml"
-}
-
-func registerLegacyDashboardRoutes(mux *http.ServeMux) {
-	// Static files
-	staticSub, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		slog.Error("Failed to mount static files", "error", err)
-	} else {
-		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
-	}
-
-	// Dashboard pages
-	mux.HandleFunc("/", dashboardHandler)
-	mux.HandleFunc("/dashboard", dashboardHandler)
-	mux.HandleFunc("/dashboard/alerts", alertsPageHandler)
-	mux.HandleFunc("/dashboard/silences", silencesPageHandler)
-	mux.HandleFunc("/dashboard/llm", llmPageHandler)
-	mux.HandleFunc("/dashboard/routing", routingPageHandler)
-}
-
-func initTemplates() {
-	var err error
-	funcMap := webTemplateFuncMap()
-	templates, err = template.New("").Funcs(funcMap).ParseFS(
-		templatesFS,
-		"templates/layouts/*.html",
-		"templates/pages/*.html",
-		"templates/partials/*.html",
-	)
-	if err != nil {
-		slog.Warn("Failed to load embedded templates, trying disk", "error", err)
-		templates, err = template.New("").Funcs(funcMap).ParseGlob("templates/**/*.html")
-	}
-}
-
-func webTemplateFuncMap() template.FuncMap {
-	return template.FuncMap{
-		"add": func(a, b int) int { return a + b },
-		"sub": func(a, b int) int { return a - b },
-		"mul": func(a, b int) int { return a * b },
-		"default": func(def, val interface{}) interface{} {
-			if val == nil {
-				return def
-			}
-			return val
-		},
-		"truncate": func(s string, maxLen int) string {
-			if len(s) <= maxLen {
-				return s
-			}
-			return s[:maxLen-3] + "..."
-		},
-		"timeAgo": func(t time.Time) string {
-			return "some time ago"
-		},
-	}
-}
-
-// Page data for templates
-type PageData struct {
-	Title       string
-	Version     string
-	CurrentPage string
-	Data        interface{}
-}
-
-// Dashboard handlers (minimal placeholders until fully migrated to package handlers)
-
-func dashboardHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" && r.URL.Path != "/dashboard" {
-		http.NotFound(w, r)
-		return
-	}
-	renderTemplate(w, "dashboard.html", "Dashboard", "overview", nil)
-}
-
-func alertsPageHandler(w http.ResponseWriter, r *http.Request) {
-	renderTemplate(w, "alert-list.html", "Alerts", "alerts", nil)
-}
-
-func silencesPageHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Silences page not yet implemented")
-}
-
-func llmPageHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "LLM page not yet implemented")
-}
-
-func routingPageHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Routing page not yet implemented")
-}
-
-func renderTemplate(w http.ResponseWriter, name, title, current string, data interface{}) {
-	if templates == nil {
-		http.Error(w, "Templates not loaded", http.StatusInternalServerError)
-		return
-	}
-	pd := PageData{
-		Title:       title + " - Alertmanager++",
-		Version:     appVersion,
-		CurrentPage: current,
-		Data:        data,
-	}
-	if err := templates.ExecuteTemplate(w, name, pd); err != nil {
-		slog.Error("Template error", "error", err)
-	}
 }

@@ -1,0 +1,63 @@
+{{ define "dashboard-silences.html" }}
+{{ template "legacy-shell-start" . }}
+    <section class="card-grid">
+        <article class="stat-card">
+            <p class="kicker">Page state</p>
+            <strong><span class="badge {{ .Content.RuntimeStatusClass }}">{{ .Content.RuntimeStatus }}</span></strong>
+            <span class="muted">{{ .Content.RuntimeDetail }}</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Total silences</p>
+            <strong>{{ .Content.Total }}</strong>
+            <span class="muted">All silence records in memory</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Active</p>
+            <strong>{{ .Content.Active }}</strong>
+            <span class="muted">Silences affecting current traffic</span>
+        </article>
+        <article class="stat-card">
+            <p class="kicker">Pending / expired</p>
+            <strong>{{ .Content.Pending }} / {{ .Content.Expired }}</strong>
+            <span class="muted">Scheduled and completed windows</span>
+        </article>
+    </section>
+
+    {{ if .Content.Silences }}
+    <section class="panel">
+        <div class="panel-head">
+            <h2>Silence inventory</h2>
+            <a class="inline-link" href="/api/v2/silences">API view</a>
+        </div>
+        <div class="stack-list">
+            {{ range .Content.Silences }}
+            <article class="list-card">
+                <div class="list-card-head">
+                    <div>
+                        <h3>{{ .Comment }}</h3>
+                        <p class="muted mono">{{ .MatchersSummary }}</p>
+                    </div>
+                    <span class="badge {{ .StatusClass }}">{{ .Status }}</span>
+                </div>
+                <dl class="meta-grid">
+                    <div><dt>ID</dt><dd class="mono">{{ .ID }}</dd></div>
+                    <div><dt>Created by</dt><dd>{{ .CreatedBy }}</dd></div>
+                    <div><dt>Starts at</dt><dd>{{ .StartsAt }}</dd></div>
+                    <div><dt>Ends at</dt><dd>{{ .EndsAt }}</dd></div>
+                    <div><dt>Updated at</dt><dd>{{ .UpdatedAt }}</dd></div>
+                </dl>
+            </article>
+            {{ end }}
+        </div>
+        {{ if .Content.Truncated }}
+        <p class="panel-note">Showing the first {{ len .Content.Silences }} silences. {{ .Content.HiddenCount }} additional items remain in the active store.</p>
+        {{ end }}
+    </section>
+    {{ else }}
+    <section class="panel empty-state">
+        <h2>No silences yet</h2>
+        <p>{{ .Content.RuntimeDetail }}</p>
+    </section>
+    {{ end }}
+{{ template "legacy-shell-end" . }}
+{{ end }}

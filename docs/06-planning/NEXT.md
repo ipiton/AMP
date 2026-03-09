@@ -1,7 +1,7 @@
 # Очередь (Queue) и WIP
 
 ## Queue
-1. (UX / Ops) **UI-PLACEHOLDER-REMOVAL** — Реализовать `/dashboard/silences`, `/dashboard/llm`, `/dashboard/routing`. ~1-2d
+- Пусто.
 
 ## WIP (Max 2)
 - Пусто.
@@ -13,5 +13,5 @@
 - `DOCS-HONESTY-PASS` завершен как top-level public/docs honesty slice; residual doc cleanup сужен до `REPO-DOC-LICENSE-DRIFT`.
 - `PHASE-3-STORAGE-HARDENING` завершен как bootstrap/storage hardening slice; required storage теперь fail-fast, а health/readiness contract стал state-aware.
 - Анализ replacement readiness и публичных claims зафиксирован в `docs/06-planning/ALERTMANAGER-REPLACEMENT-GAP-ANALYSIS.md`; backlog items выше раскладывают его на отдельные incremental slices.
-- `PHASE-0` и core API unstubbing уже закрыты по коду и тестам; следующий основной фокус в queue — UI placeholder removal при явном сохранении repo-wide test debt в `BUGS.md`.
+- `PHASE-0` и core API unstubbing уже закрыты по коду и тестам; текущий следующий основной фокус нужно выбрать заново из planning artifacts при явном сохранении repo-wide test debt в `BUGS.md`.
 - Баланс 50/50 сейчас лучше держать через чередование `PHASE-2/3` и docs/UI cleanup.
