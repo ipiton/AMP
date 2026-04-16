@@ -57,7 +57,7 @@
   - Связано: TN-126, TN-137 (упомянуты в TODO)
   - Оценка: ~2d
 
-- [ ] **PARITY-A3-EMAIL-PUBLISHER** — Config + templates есть, publisher нет:
+- [x] **PARITY-A3-EMAIL-PUBLISHER** — Config + templates есть, publisher нет: _(closed by forge)_
   - `EmailConfig` определён в `alertmanager/config/config.go`
   - `email.go` templates (Subject, HTML, Text) в `notification/template/defaults/`
   - Нет: `EmailPublisher` в `infrastructure/publishing/`, SMTP client
