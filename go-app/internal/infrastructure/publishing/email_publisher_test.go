@@ -278,6 +278,40 @@ func TestExtractSMTPConfig_Full(t *testing.T) {
 	}
 }
 
+// Fix #5: прямой TLS (SMTPS, порт 465) через smtp_direct_tls
+func TestExtractSMTPConfig_DirectTLS(t *testing.T) {
+	target := newTestTarget(map[string]string{
+		"smtp_host":       "smtp.example.com",
+		"smtp_port":       "465",
+		"smtp_direct_tls": "true",
+	})
+	cfg := extractSMTPConfig(target)
+	if !cfg.DirectTLS {
+		t.Error("DirectTLS should be true when smtp_direct_tls=true")
+	}
+}
+
+// Fix #2: []string{""} должен возвращать ошибку "no recipients"
+func TestSendEmail_EmptyStringRecipient(t *testing.T) {
+	mock := &MockSMTPClient{}
+	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger())
+
+	// target с "to" состоящим только из пробелов/пустых строк
+	target := newTestTarget(map[string]string{"to": "  ,  , "})
+	alert := newTestEnrichedAlert(core.StatusFiring)
+
+	err := pub.Publish(context.Background(), alert, target)
+	if err == nil {
+		t.Fatal("expected error for whitespace-only recipients, got nil")
+	}
+	if !strings.Contains(err.Error(), "no recipients") {
+		t.Errorf("error = %q, want to contain 'no recipients'", err.Error())
+	}
+	if len(mock.SendEmailCalls) != 0 {
+		t.Errorf("SendEmail called %d times, want 0", len(mock.SendEmailCalls))
+	}
+}
+
 // ============================================================================
 // Тесты buildEmailTemplateData
 // ============================================================================
@@ -358,6 +392,8 @@ func TestClassifyEmailError(t *testing.T) {
 		{"rate_limit_452", "452 Insufficient system storage", "rate_limit"},
 		{"invalid_recipient_550", "550 User does not exist", "invalid_recipient"},
 		{"invalid_recipient_551", "551 User not local", "invalid_recipient"},
+		// Fix #3: 554 Transaction failed → server_error (не invalid_recipient)
+		{"server_error_554", "554 Transaction failed", "server_error"},
 		{"server_error_500", "500 Command unrecognized", "server_error"},
 		{"server_error_503", "503 Service unavailable", "server_error"},
 		{"tls_error", "tls: failed to verify certificate", "tls_error"},
@@ -408,6 +444,10 @@ func TestBuildMIMEMessage_ContainsHeaders(t *testing.T) {
 	if !strings.Contains(body, "Subject: Test Subject") {
 		t.Error("MIME message missing Subject header")
 	}
+	// Fix #1: Date header обязателен по RFC 2822
+	if !strings.Contains(body, "Date: ") {
+		t.Error("MIME message missing Date header (required by RFC 2822)")
+	}
 	if !strings.Contains(body, "multipart/alternative") {
 		t.Error("MIME message missing multipart/alternative content type")
 	}
@@ -416,6 +456,33 @@ func TestBuildMIMEMessage_ContainsHeaders(t *testing.T) {
 	}
 	if !strings.Contains(body, "text/plain") {
 		t.Error("MIME message missing text/plain part")
+	}
+}
+
+// Fix #6: Длинная тема должна разбиваться на encoded words ≤75 символов каждый
+func TestMime47Subject_LongNonASCII(t *testing.T) {
+	// Строка с кириллицей длиннее 63 символов в encoded form
+	long := "Критическое оповещение: превышение порогового значения CPU на сервере node-prod-01"
+	result := mime47Subject(long)
+
+	// Каждый encoded word не должен превышать 75 символов
+	parts := strings.Split(result, " ")
+	for _, part := range parts {
+		if strings.HasPrefix(part, "=?") {
+			if len(part) > 75 {
+				t.Errorf("encoded word len=%d > 75: %q", len(part), part)
+			}
+			if !strings.HasSuffix(part, "?=") {
+				t.Errorf("encoded word does not end with ?=: %q", part)
+			}
+		}
+	}
+}
+
+func TestMime47Subject_ASCIIUnchanged(t *testing.T) {
+	s := "Simple ASCII subject"
+	if got := mime47Subject(s); got != s {
+		t.Errorf("mime47Subject(%q) = %q, want unchanged", s, got)
 	}
 }
 

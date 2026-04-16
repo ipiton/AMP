@@ -58,41 +58,79 @@ func (d *SMTPDialer) addr() string {
 	return net.JoinHostPort(d.config.Host, strconv.Itoa(d.config.Port))
 }
 
-// SendEmail отправляет письмо через SMTP.
-// Каждый вызов: dial → STARTTLS → AUTH → MAIL FROM → RCPT TO → DATA → QUIT.
-func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
-	if len(msg.To) == 0 {
-		return fmt.Errorf("email: no recipients specified")
-	}
-
+// dialSMTP устанавливает соединение и создаёт SMTP client.
+// Для DirectTLS: TLS-обёртка поверх TCP до создания SMTP client.
+// Для STARTTLS: обычный TCP, STARTTLS вызывается позже в вызывающем коде.
+func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 	addr := d.addr()
-	d.logger.DebugContext(ctx, "Connecting to SMTP server",
-		slog.String("addr", addr),
-		slog.Int("recipients", len(msg.To)),
-	)
+	netDialer := &net.Dialer{Timeout: smtpDialTimeout}
 
-	// 1. Dial с поддержкой context cancellation/deadline
-	dialer := &net.Dialer{Timeout: smtpDialTimeout}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return fmt.Errorf("email: dial %s: %w", addr, err)
+	if d.config.DirectTLS {
+		// Direct TLS (SMTPS, порт 465): TLS handshake до SMTP banner
+		rawConn, err := netDialer.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("email: dial %s: %w", addr, err)
+		}
+		tlsCfg := &tls.Config{
+			ServerName: d.config.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+		tlsConn := tls.Client(rawConn, tlsCfg)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			rawConn.Close()
+			return nil, fmt.Errorf("email: TLS handshake: %w", err)
+		}
+		client, err := smtp.NewClient(tlsConn, d.config.Host)
+		if err != nil {
+			tlsConn.Close()
+			return nil, fmt.Errorf("email: smtp.NewClient (direct TLS): %w", err)
+		}
+		return client, nil
 	}
 
-	// Применить deadline из context к SMTP-сессии (StartTLS, Auth, DATA и др.)
+	// Plaintext TCP (с опциональным STARTTLS после)
+	conn, err := netDialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("email: dial %s: %w", addr, err)
+	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
-
-	// 2. Создать SMTP client
 	client, err := smtp.NewClient(conn, d.config.Host)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("email: smtp.NewClient: %w", err)
+		return nil, fmt.Errorf("email: smtp.NewClient: %w", err)
+	}
+	return client, nil
+}
+
+// SendEmail отправляет письмо через SMTP.
+// Каждый вызов: dial → (STARTTLS|TLS) → AUTH → MAIL FROM → RCPT TO → DATA → QUIT.
+func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
+	// Фильтруем пустые адреса до начала сессии — защита от []string{""}
+	validTo := make([]string, 0, len(msg.To))
+	for _, addr := range msg.To {
+		if trimmed := strings.TrimSpace(addr); trimmed != "" {
+			validTo = append(validTo, trimmed)
+		}
+	}
+	if len(validTo) == 0 {
+		return fmt.Errorf("email: no recipients specified")
+	}
+
+	d.logger.DebugContext(ctx, "Connecting to SMTP server",
+		slog.String("addr", d.addr()),
+		slog.Int("recipients", len(validTo)),
+	)
+
+	client, err := d.dialSMTP(ctx)
+	if err != nil {
+		return err
 	}
 	defer client.Close()
 
-	// 3. STARTTLS если RequireTLS
-	if d.config.RequireTLS {
+	// STARTTLS (только для non-direct TLS)
+	if d.config.RequireTLS && !d.config.DirectTLS {
 		tlsCfg := &tls.Config{
 			ServerName: d.config.Host,
 			MinVersion: tls.VersionTLS12,
@@ -102,7 +140,7 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		}
 	}
 
-	// 4. AUTH PLAIN (если указаны credentials)
+	// AUTH PLAIN (если указаны credentials)
 	if d.config.Username != "" {
 		auth := smtp.PlainAuth("", d.config.Username, d.config.Password, d.config.Host)
 		if err := client.Auth(auth); err != nil {
@@ -110,7 +148,7 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		}
 	}
 
-	// 5. MAIL FROM
+	// MAIL FROM
 	from := msg.From
 	if from == "" {
 		from = d.config.From
@@ -119,24 +157,20 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: MAIL FROM <%s>: %w", from, err)
 	}
 
-	// 6. RCPT TO для каждого получателя
-	for _, to := range msg.To {
-		to = strings.TrimSpace(to)
-		if to == "" {
-			continue
-		}
+	// RCPT TO для каждого валидного получателя
+	for _, to := range validTo {
 		if err := client.Rcpt(to); err != nil {
 			return fmt.Errorf("email: RCPT TO <%s>: %w", to, err)
 		}
 	}
 
-	// 7. DATA
+	// DATA
 	wc, err := client.Data()
 	if err != nil {
 		return fmt.Errorf("email: DATA: %w", err)
 	}
 
-	// 8. Собрать MIME-сообщение и записать (передаём resolved from для согласованности MAIL FROM и MIME From)
+	// Собрать MIME-сообщение
 	mimeBytes, err := buildMIMEMessage(msg, from)
 	if err != nil {
 		wc.Close()
@@ -150,7 +184,7 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: close DATA writer: %w", err)
 	}
 
-	// 9. QUIT
+	// QUIT
 	if err := client.Quit(); err != nil {
 		// QUIT ошибка некритична — письмо уже отправлено
 		d.logger.WarnContext(ctx, "SMTP QUIT error (non-fatal)", slog.String("error", err.Error()))
@@ -158,29 +192,39 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 
 	d.logger.DebugContext(ctx, "Email sent successfully",
 		slog.String("from", from),
-		slog.Any("to", msg.To),
+		slog.Any("to", validTo),
 	)
 	return nil
 }
 
-// Health проверяет доступность SMTP-сервера через NOOP.
+// Health проверяет доступность SMTP-сервера через NOOP с полной аутентификацией.
+// Выполняет те же шаги что и SendEmail (TLS + AUTH) для честного health check —
+// без этого серверы с обязательным TLS вернут ложный OK на уровне TCP.
 func (d *SMTPDialer) Health(ctx context.Context) error {
-	addr := d.addr()
-	dialer := &net.Dialer{Timeout: smtpDialTimeout}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	client, err := d.dialSMTP(ctx)
 	if err != nil {
-		return fmt.Errorf("email health: dial %s: %w", addr, err)
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-
-	client, err := smtp.NewClient(conn, d.config.Host)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("email health: smtp.NewClient: %w", err)
+		return fmt.Errorf("email health: %w", err)
 	}
 	defer client.Close()
+
+	// STARTTLS (только для non-direct TLS)
+	if d.config.RequireTLS && !d.config.DirectTLS {
+		tlsCfg := &tls.Config{
+			ServerName: d.config.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+		if err := client.StartTLS(tlsCfg); err != nil {
+			return fmt.Errorf("email health: StartTLS: %w", err)
+		}
+	}
+
+	// AUTH (если credentials заданы) — проверяем реальную аутентификацию
+	if d.config.Username != "" {
+		auth := smtp.PlainAuth("", d.config.Username, d.config.Password, d.config.Host)
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("email health: AUTH: %w", err)
+		}
+	}
 
 	if err := client.Noop(); err != nil {
 		return fmt.Errorf("email health: NOOP: %w", err)
@@ -199,9 +243,10 @@ func (d *SMTPDialer) Close() error {
 func buildMIMEMessage(msg *EmailMessage, resolvedFrom string) ([]byte, error) {
 	var buf bytes.Buffer
 
+	buf.WriteString("Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n")
 	buf.WriteString("From: " + resolvedFrom + "\r\n")
 	buf.WriteString("To: " + strings.Join(msg.To, ", ") + "\r\n")
-	buf.WriteString("Subject: " + mime64Subject(msg.Subject) + "\r\n")
+	buf.WriteString("Subject: " + mime47Subject(msg.Subject) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
 
 	// Дополнительные заголовки (sanitize CRLF для предотвращения header injection)
@@ -259,19 +304,57 @@ func buildMIMEMessage(msg *EmailMessage, resolvedFrom string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// mime64Subject кодирует тему письма в ASCII-safe форму.
-// Если тема содержит только ASCII — возвращает как есть.
-func mime64Subject(subject string) string {
+// mime47Subject кодирует тему письма согласно RFC 2047.
+// Если тема ASCII-only — возвращает как есть.
+// Для non-ASCII разбивает на encoded words (=?UTF-8?Q?...?=) длиной ≤75 символов.
+func mime47Subject(subject string) string {
 	for _, r := range subject {
 		if r > 127 {
-			// Нужна кодировка — используем UTF-8 quoted-printable (RFC 2047)
-			return "=?UTF-8?Q?" + encodeQP(subject) + "?="
+			return encodeRFC2047Words(subject)
 		}
 	}
 	return subject
 }
 
+// encodeRFC2047Words кодирует строку в последовательность RFC 2047 encoded words.
+// Каждый encoded word не превышает 75 символов (требование RFC 2047).
+// Соседние words разделяются " " (folded whitespace) — MUA склеивает их обратно.
+func encodeRFC2047Words(s string) string {
+	// =?UTF-8?Q? = 10 символов, ?= = 2 символа → encoded text ≤ 63 символа
+	const prefix = "=?UTF-8?Q?"
+	const suffix = "?="
+	const maxEncodedText = 63 // 75 - len(prefix) - len(suffix)
+
+	encoded := encodeQP(s)
+	if len(encoded) <= maxEncodedText {
+		return prefix + encoded + suffix
+	}
+
+	var parts []string
+	for len(encoded) > 0 {
+		chunk := encoded
+		if len(chunk) > maxEncodedText {
+			chunk = encoded[:maxEncodedText]
+			// Не разрывать посередине =XX escape-последовательности
+			for len(chunk) > 0 {
+				last := len(chunk) - 1
+				if chunk[last] == '=' {
+					chunk = chunk[:last]
+				} else if last >= 1 && chunk[last-1] == '=' {
+					chunk = chunk[:last-1]
+				} else {
+					break
+				}
+			}
+		}
+		parts = append(parts, prefix+chunk+suffix)
+		encoded = encoded[len(chunk):]
+	}
+	return strings.Join(parts, " ")
+}
+
 // encodeQP кодирует строку в RFC 2047 quoted-printable для заголовков.
+// Пробелы → '_', non-ASCII и специальные символы → =XX.
 func encodeQP(s string) string {
 	var b strings.Builder
 	for _, r := range []byte(s) {
