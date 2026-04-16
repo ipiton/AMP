@@ -444,6 +444,10 @@ func TestBuildMIMEMessage_ContainsHeaders(t *testing.T) {
 	if !strings.Contains(body, "Subject: Test Subject") {
 		t.Error("MIME message missing Subject header")
 	}
+	// Message-ID обязателен по RFC 2822 §3.6.4 — требуется production MTA
+	if !strings.Contains(body, "Message-ID: ") {
+		t.Error("MIME message missing Message-ID header (required by RFC 2822)")
+	}
 	// Fix #1: Date header обязателен по RFC 2822
 	if !strings.Contains(body, "Date: ") {
 		t.Error("MIME message missing Date header (required by RFC 2822)")

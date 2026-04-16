@@ -3,7 +3,9 @@ package publishing
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"mime/multipart"
@@ -11,6 +13,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +83,10 @@ func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 			rawConn.Close()
 			return nil, fmt.Errorf("email: TLS handshake: %w", err)
 		}
+		// Apply context deadline to TLS connection for SMTP commands (mirrors plaintext path)
+		if deadline, ok := ctx.Deadline(); ok {
+			_ = tlsConn.SetDeadline(deadline)
+		}
 		client, err := smtp.NewClient(tlsConn, d.config.Host)
 		if err != nil {
 			tlsConn.Close()
@@ -102,6 +109,27 @@ func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 		return nil, fmt.Errorf("email: smtp.NewClient: %w", err)
 	}
 	return client, nil
+}
+
+// setupSMTPSession настраивает SMTP-сессию: STARTTLS (если нужен) и AUTH.
+// Вызывается из SendEmail и Health для устранения дублирования кода.
+func (d *SMTPDialer) setupSMTPSession(client *smtp.Client) error {
+	if d.config.RequireTLS && !d.config.DirectTLS {
+		tlsCfg := &tls.Config{
+			ServerName: d.config.Host,
+			MinVersion: tls.VersionTLS12,
+		}
+		if err := client.StartTLS(tlsCfg); err != nil {
+			return fmt.Errorf("StartTLS: %w", err)
+		}
+	}
+	if d.config.Username != "" {
+		auth := smtp.PlainAuth("", d.config.Username, d.config.Password, d.config.Host)
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("AUTH: %w", err)
+		}
+	}
+	return nil
 }
 
 // SendEmail отправляет письмо через SMTP.
@@ -129,23 +157,8 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 	}
 	defer client.Close()
 
-	// STARTTLS (только для non-direct TLS)
-	if d.config.RequireTLS && !d.config.DirectTLS {
-		tlsCfg := &tls.Config{
-			ServerName: d.config.Host,
-			MinVersion: tls.VersionTLS12,
-		}
-		if err := client.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("email: StartTLS: %w", err)
-		}
-	}
-
-	// AUTH PLAIN (если указаны credentials)
-	if d.config.Username != "" {
-		auth := smtp.PlainAuth("", d.config.Username, d.config.Password, d.config.Host)
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("email: AUTH: %w", err)
-		}
+	if err := d.setupSMTPSession(client); err != nil {
+		return fmt.Errorf("email: %w", err)
 	}
 
 	// MAIL FROM
@@ -207,23 +220,8 @@ func (d *SMTPDialer) Health(ctx context.Context) error {
 	}
 	defer client.Close()
 
-	// STARTTLS (только для non-direct TLS)
-	if d.config.RequireTLS && !d.config.DirectTLS {
-		tlsCfg := &tls.Config{
-			ServerName: d.config.Host,
-			MinVersion: tls.VersionTLS12,
-		}
-		if err := client.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("email health: StartTLS: %w", err)
-		}
-	}
-
-	// AUTH (если credentials заданы) — проверяем реальную аутентификацию
-	if d.config.Username != "" {
-		auth := smtp.PlainAuth("", d.config.Username, d.config.Password, d.config.Host)
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("email health: AUTH: %w", err)
-		}
+	if err := d.setupSMTPSession(client); err != nil {
+		return fmt.Errorf("email health: %w", err)
 	}
 
 	if err := client.Noop(); err != nil {
@@ -243,14 +241,32 @@ func (d *SMTPDialer) Close() error {
 func buildMIMEMessage(msg *EmailMessage, resolvedFrom string) ([]byte, error) {
 	var buf bytes.Buffer
 
+	// Message-ID (RFC 2822 §3.6.4) — требуется большинством MTA для предотвращения spam-reject
+	buf.WriteString("Message-ID: " + generateMessageID(resolvedFrom) + "\r\n")
 	buf.WriteString("Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n")
 	buf.WriteString("From: " + resolvedFrom + "\r\n")
-	buf.WriteString("To: " + strings.Join(msg.To, ", ") + "\r\n")
+
+	// Фильтрация пустых адресов для заголовка To (реальная доставка идёт через validTo в SendEmail)
+	filteredTo := make([]string, 0, len(msg.To))
+	for _, addr := range msg.To {
+		if trimmed := strings.TrimSpace(addr); trimmed != "" {
+			filteredTo = append(filteredTo, trimmed)
+		}
+	}
+	buf.WriteString("To: " + strings.Join(filteredTo, ", ") + "\r\n")
+
 	buf.WriteString("Subject: " + mime47Subject(msg.Subject) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
 
 	// Дополнительные заголовки (sanitize CRLF для предотвращения header injection)
-	for k, v := range msg.Headers {
+	// Сортировка ключей для детерминированного порядка заголовков в unit-тестах
+	headerKeys := make([]string, 0, len(msg.Headers))
+	for k := range msg.Headers {
+		headerKeys = append(headerKeys, k)
+	}
+	sort.Strings(headerKeys)
+	for _, k := range headerKeys {
+		v := msg.Headers[k]
 		buf.WriteString(sanitizeHeaderValue(k) + ": " + sanitizeHeaderValue(v) + "\r\n")
 	}
 
@@ -373,4 +389,16 @@ func encodeQP(s string) string {
 func sanitizeHeaderValue(s string) string {
 	s = strings.ReplaceAll(s, "\r", "")
 	return strings.ReplaceAll(s, "\n", "")
+}
+
+// generateMessageID генерирует уникальный Message-ID заголовок для письма.
+// Формат: <random-hex@domain> — соответствует RFC 2822 §3.6.4.
+func generateMessageID(from string) string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	domain := "localhost"
+	if idx := strings.Index(from, "@"); idx >= 0 {
+		domain = from[idx+1:]
+	}
+	return fmt.Sprintf("<%s@%s>", hex.EncodeToString(b), domain)
 }
