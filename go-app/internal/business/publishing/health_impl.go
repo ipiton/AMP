@@ -280,12 +280,19 @@ func (m *DefaultHealthMonitor) CheckNow(ctx context.Context, targetName string) 
 
 // GetStats returns aggregate health statistics.
 func (m *DefaultHealthMonitor) GetStats(ctx context.Context) (*HealthStats, error) {
-	// Get all health statuses from cache
-	allStatuses := m.statusCache.GetAll()
+	// Filter by current discovery state (same as GetHealth) to exclude orphaned cache entries
+	targets := m.discoveryMgr.ListTargets()
+	statuses := make([]TargetHealthStatus, 0, len(targets))
+	for _, target := range targets {
+		if status, ok := m.statusCache.Get(target.Name); ok {
+			statuses = append(statuses, *status)
+		} else {
+			status := initializeHealthStatus(target.Name, target.Type, target.Enabled)
+			statuses = append(statuses, *status)
+		}
+	}
 
-	// Calculate aggregate stats
-	stats := calculateAggregateStats(allStatuses)
-
+	stats := calculateAggregateStats(statuses)
 	return stats, nil
 }
 
