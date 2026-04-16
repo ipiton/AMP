@@ -29,6 +29,7 @@ func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/silence/", handlers.SilenceByIDHandler(rt.registry))
 	mux.HandleFunc("/api/v2/status", handlers.StatusAPIHandler(rt.registry))
 	mux.HandleFunc("/api/v2/receivers", handlers.ReceiversHandler(rt.registry))
+	mux.HandleFunc("/api/v2/inhibitions", handlers.InhibitionsHandler(rt.registry))
 
 	// Health
 	mux.HandleFunc("/health", handlers.HealthHandler(rt.registry))
