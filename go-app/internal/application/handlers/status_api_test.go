@@ -11,6 +11,7 @@ import (
 
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core/services"
+	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 )
 
@@ -23,12 +24,13 @@ type extendedFakeRegistry struct {
 	reloadErr    error
 }
 
-func (r *extendedFakeRegistry) AlertStore() *memory.AlertStore           { return r.alertStore }
-func (r *extendedFakeRegistry) SilenceStore() *memory.SilenceStore       { return r.silenceStore }
-func (r *extendedFakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
-func (r *extendedFakeRegistry) Config() *appconfig.Config               { return r.config }
-func (r *extendedFakeRegistry) StartTime() time.Time                     { return r.startTime }
-func (r *extendedFakeRegistry) ReloadConfig(_ context.Context) error     { return r.reloadErr }
+func (r *extendedFakeRegistry) AlertStore() *memory.AlertStore                     { return r.alertStore }
+func (r *extendedFakeRegistry) SilenceStore() *memory.SilenceStore                 { return r.silenceStore }
+func (r *extendedFakeRegistry) AlertProcessor() *services.AlertProcessor           { return r.processor }
+func (r *extendedFakeRegistry) Config() *appconfig.Config                          { return r.config }
+func (r *extendedFakeRegistry) StartTime() time.Time                               { return r.startTime }
+func (r *extendedFakeRegistry) ReloadConfig(_ context.Context) error               { return r.reloadErr }
+func (r *extendedFakeRegistry) InhibitionState() inhibition.InhibitionStateManager { return nil }
 
 func TestStatusAPIHandler(t *testing.T) {
 	// Create a temporary config file
