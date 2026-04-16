@@ -279,16 +279,27 @@ func TestExtractSMTPConfig_Full(t *testing.T) {
 	}
 }
 
-// Fix #5: прямой TLS (SMTPS, порт 465) через smtp_direct_tls
-func TestExtractSMTPConfig_DirectTLS(t *testing.T) {
-	target := newTestTarget(map[string]string{
-		"smtp_host":       "smtp.example.com",
-		"smtp_port":       "465",
-		"smtp_direct_tls": "true",
-	})
-	cfg := extractSMTPConfig(target)
-	if !cfg.DirectTLS {
-		t.Error("DirectTLS should be true when smtp_direct_tls=true")
+// Port 465 + RequireTLS → isDirectTLS должен возвращать true (auto-detection).
+// DirectTLS поле удалено из spec; режим определяется автоматически по порту.
+func TestSMTPDialer_IsDirectTLS(t *testing.T) {
+	tests := []struct {
+		name       string
+		port       int
+		requireTLS bool
+		want       bool
+	}{
+		{"port 465 + RequireTLS → direct TLS", 465, true, true},
+		{"port 465 + no RequireTLS → no direct TLS", 465, false, false},
+		{"port 587 + RequireTLS → STARTTLS, not direct", 587, true, false},
+		{"port 25 + RequireTLS → STARTTLS, not direct", 25, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &SMTPDialer{config: SMTPConfig{Port: tt.port, RequireTLS: tt.requireTLS}}
+			if got := d.isDirectTLS(); got != tt.want {
+				t.Errorf("isDirectTLS() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -523,6 +534,68 @@ func TestMime2047Subject_ASCIIUnchanged(t *testing.T) {
 	s := "Simple ASCII subject"
 	if got := mime2047Subject(s); got != s {
 		t.Errorf("mime2047Subject(%q) = %q, want unchanged", s, got)
+	}
+}
+
+// TestEncodeRFC2047Words_BoundaryOnEscapeSeq проверяет что encodeRFC2047Words
+// корректно обрабатывает случай, когда =XX escape-последовательность оказывается
+// на границе maxEncodedText (63 символа).
+func TestEncodeRFC2047Words_BoundaryOnEscapeSeq(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		// Кириллица кодируется в =XX, проверяем что boundary не разрежет =XX
+		{"cyrillic short", "Привет"},
+		{"cyrillic long", "Критическое оповещение: превышение порогового значения CPU на сервере"},
+		// Строка чьё encoded-представление ровно 63 символа
+		{"exactly at boundary", "абвгдеёжзийклмнопрстуфхцчш"},
+		// Смешанный ASCII+non-ASCII — boundary может попасть прямо на =
+		{"mixed ascii non-ascii", "Alert: превышение лимита 90%"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := encodeRFC2047Words(tt.input)
+			// Каждый encoded word должен быть ≤75 символов и заканчиваться на ?=
+			parts := strings.Split(result, " ")
+			for _, part := range parts {
+				if !strings.HasPrefix(part, "=?") {
+					continue
+				}
+				if len(part) > 75 {
+					t.Errorf("encoded word len=%d > 75: %q", len(part), part)
+				}
+				if !strings.HasSuffix(part, "?=") {
+					t.Errorf("encoded word does not end with ?=: %q", part)
+				}
+				// Внутри encoded word не должно быть частичных =X последовательностей
+				// (только complete =XX или bare ASCII)
+				inner := strings.TrimPrefix(strings.TrimSuffix(part, "?="), "=?UTF-8?Q?")
+				for i := 0; i < len(inner); i++ {
+					if inner[i] == '=' {
+						if i+2 >= len(inner) {
+							t.Errorf("partial escape at end of encoded word inner=%q", inner)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestEncodeRFC2047Words_SingleNonASCII гарантирует что одиночный non-ASCII символ
+// кодируется без бесконечного цикла (safety guard в trim-цикле).
+func TestEncodeRFC2047Words_SingleNonASCII(t *testing.T) {
+	inputs := []string{"á", "я", "中", "ñ"}
+	for _, s := range inputs {
+		result := encodeRFC2047Words(s)
+		if !strings.HasPrefix(result, "=?UTF-8?Q?") {
+			t.Errorf("encodeRFC2047Words(%q) = %q: expected encoded word prefix", s, result)
+		}
+		if !strings.HasSuffix(result, "?=") {
+			t.Errorf("encodeRFC2047Words(%q) = %q: expected ?= suffix", s, result)
+		}
 	}
 }
 

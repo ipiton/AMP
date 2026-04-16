@@ -62,14 +62,20 @@ func (d *SMTPDialer) addr() string {
 	return net.JoinHostPort(d.config.Host, strconv.Itoa(d.config.Port))
 }
 
+// isDirectTLS возвращает true если нужен direct TLS (SMTPS).
+// Логика: RequireTLS=true + порт 465 → direct TLS; иначе → STARTTLS.
+func (d *SMTPDialer) isDirectTLS() bool {
+	return d.config.RequireTLS && d.config.Port == 465
+}
+
 // dialSMTP устанавливает соединение и создаёт SMTP client.
-// Для DirectTLS: TLS-обёртка поверх TCP до создания SMTP client.
-// Для STARTTLS: обычный TCP, STARTTLS вызывается позже в вызывающем коде.
+// Порт 465 + RequireTLS → direct TLS (SMTPS): TLS handshake до SMTP banner.
+// Иначе → обычный TCP; STARTTLS вызывается в setupSMTPSession если RequireTLS=true.
 func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 	addr := d.addr()
 	netDialer := &net.Dialer{Timeout: smtpDialTimeout}
 
-	if d.config.DirectTLS {
+	if d.isDirectTLS() {
 		// Direct TLS (SMTPS, порт 465): TLS handshake до SMTP banner
 		rawConn, err := netDialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
@@ -113,9 +119,11 @@ func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 }
 
 // setupSMTPSession настраивает SMTP-сессию: STARTTLS (если нужен) и AUTH.
+// STARTTLS применяется только когда RequireTLS=true и порт != 465
+// (direct TLS уже настраивается в dialSMTP для порта 465).
 // Вызывается из SendEmail и Health для устранения дублирования кода.
 func (d *SMTPDialer) setupSMTPSession(client *smtp.Client) error {
-	if d.config.RequireTLS && !d.config.DirectTLS {
+	if d.config.RequireTLS && !d.isDirectTLS() {
 		tlsCfg := &tls.Config{
 			ServerName: d.config.Host,
 			MinVersion: tls.VersionTLS12,
@@ -256,6 +264,13 @@ func (d *SMTPDialer) Close() error {
 // to — уже отфильтрованный список получателей (передаётся из SendEmail, дублирование логики исключено).
 // Возвращает raw bytes готовые для записи в smtp.Data writer.
 func buildMIMEMessage(msg *EmailMessage, resolvedFrom string, to []string) ([]byte, error) {
+	// Генерируем boundary заранее, до записи заголовков.
+	// Это позволяет писать Content-Type в логическом порядке вместе с остальными
+	// заголовками, а multipart.Writer использовать только для тела.
+	boundaryBytes := make([]byte, 16)
+	_, _ = rand.Read(boundaryBytes)
+	boundary := "amp" + hex.EncodeToString(boundaryBytes)
+
 	var buf bytes.Buffer
 
 	// Message-ID (RFC 2822 §3.6.4) — требуется большинством MTA для предотвращения spam-reject
@@ -266,11 +281,9 @@ func buildMIMEMessage(msg *EmailMessage, resolvedFrom string, to []string) ([]by
 	buf.WriteString("To: " + strings.Join(to, ", ") + "\r\n")
 	buf.WriteString("Subject: " + mime2047Subject(msg.Subject) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
-
-	// multipart/alternative writer объявляем до записи Content-Type,
-	// чтобы знать boundary. Content-Type записывается ПОСЛЕ custom headers —
-	// это гарантирует что наш Content-Type всегда последний и единственный.
-	mw := multipart.NewWriter(&buf)
+	// Content-Type с boundary пишется здесь вместе с остальными заголовками.
+	// Зарезервированные заголовки из msg.Headers (Content-Type, MIME-Version) пропускаются ниже.
+	buf.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n")
 
 	// Дополнительные заголовки (sanitize CRLF для предотвращения header injection).
 	// Зарезервированные заголовки (Content-Type, MIME-Version) пропускаются —
@@ -291,8 +304,13 @@ func buildMIMEMessage(msg *EmailMessage, resolvedFrom string, to []string) ([]by
 		buf.WriteString(sanitizeHeaderValue(k) + ": " + sanitizeHeaderValue(v) + "\r\n")
 	}
 
-	buf.WriteString("Content-Type: multipart/alternative; boundary=\"" + mw.Boundary() + "\"\r\n")
 	buf.WriteString("\r\n")
+
+	// multipart.Writer пишет только тело (части) с предустановленным boundary.
+	mw := multipart.NewWriter(&buf)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return nil, fmt.Errorf("set boundary: %w", err)
+	}
 
 	// text/plain часть
 	if msg.Text != "" {

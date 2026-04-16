@@ -192,9 +192,6 @@ func extractSMTPConfig(target *core.PublishingTarget) SMTPConfig {
 	if v, ok := target.Headers["smtp_tls"]; ok {
 		cfg.RequireTLS = strings.EqualFold(v, "true")
 	}
-	if v, ok := target.Headers["smtp_direct_tls"]; ok {
-		cfg.DirectTLS = strings.EqualFold(v, "true")
-	}
 	if v, ok := target.Headers["from"]; ok {
 		cfg.From = v
 	}

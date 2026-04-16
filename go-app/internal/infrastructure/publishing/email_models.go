@@ -9,8 +9,7 @@ type SMTPConfig struct {
 	Port       int    // SMTP-порт (по умолчанию 587)
 	Username   string // SMTP AUTH username
 	Password   string // SMTP AUTH password
-	RequireTLS bool   // Требовать STARTTLS (порт 587)
-	DirectTLS  bool   // Прямой TLS (SMTPS, порт 465) — tls.Dial вместо STARTTLS
+	RequireTLS bool   // Требовать TLS: порт 465 → direct TLS (SMTPS), остальные → STARTTLS
 	From       string // Адрес отправителя (MAIL FROM)
 }
 
