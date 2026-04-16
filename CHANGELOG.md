@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
 
 ### Changed
+- **PARITY-A2-INHIBITION-PIPELINE**: InhibitionMatcher не подключён в AlertProcessor pipeline. ~2d _(forge)_
 - **Go Toolchain Baseline Updated** - Project runtime/build baseline raised to Go 1.26 (2026-02-27)
   - `go-app/go.mod` now declares `go 1.26.0`
   - Docker builder image updated to `golang:1.26-alpine`
