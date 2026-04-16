@@ -148,6 +148,7 @@ func TestRefreshWithRetry_ContextCancellation(t *testing.T) {
 	// Create config with longer backoff (to test cancellation during backoff)
 	config := createTestConfig()
 	config.BaseBackoff = 100 * time.Millisecond
+	config.MaxBackoff = 500 * time.Millisecond // must be >= BaseBackoff
 
 	mockReg := &MockPrometheusRegisterer{}
 	manager, err := NewRefreshManager(mock, config, slog.Default(), mockReg)

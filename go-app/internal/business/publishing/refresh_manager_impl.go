@@ -279,6 +279,15 @@ func (m *DefaultRefreshManager) RefreshNow() error {
 	}
 	m.lifecycleMu.Unlock()
 
+	// Check if refresh in progress (before rate limit: in-progress is a state-machine blocker)
+	m.mu.RLock()
+	if m.inProgress {
+		m.mu.RUnlock()
+		m.logger.Debug("Manual refresh skipped (refresh in progress)")
+		return ErrRefreshInProgress
+	}
+	m.mu.RUnlock()
+
 	// Check rate limit
 	m.rateMu.Lock()
 	if time.Since(m.lastManualRefresh) < m.config.RateLimitPer {
@@ -290,15 +299,6 @@ func (m *DefaultRefreshManager) RefreshNow() error {
 	}
 	m.lastManualRefresh = time.Now()
 	m.rateMu.Unlock()
-
-	// Check if refresh in progress
-	m.mu.RLock()
-	if m.inProgress {
-		m.mu.RUnlock()
-		m.logger.Debug("Manual refresh skipped (refresh in progress)")
-		return ErrRefreshInProgress
-	}
-	m.mu.RUnlock()
 
 	m.logger.Info("Manual refresh triggered")
 
