@@ -393,7 +393,7 @@ func TestBuildMIMEMessage_ContainsHeaders(t *testing.T) {
 		Text:    "Hello",
 	}
 
-	raw, err := buildMIMEMessage(msg)
+	raw, err := buildMIMEMessage(msg, "from@example.com")
 	if err != nil {
 		t.Fatalf("buildMIMEMessage() error: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestBuildMIMEMessage_NoRecipients(t *testing.T) {
 		Text:    "Hello",
 	}
 	// Не должен паниковать
-	_, err := buildMIMEMessage(msg)
+	_, err := buildMIMEMessage(msg, "")
 	if err != nil {
 		t.Logf("buildMIMEMessage with nil To returned (expected): %v", err)
 	}
