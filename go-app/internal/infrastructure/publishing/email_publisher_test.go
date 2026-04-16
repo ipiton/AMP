@@ -613,6 +613,67 @@ func TestPublisherFactory_CreatePublisherForTarget_Email(t *testing.T) {
 }
 
 // ============================================================================
+// Тесты валидации пустого From
+// ============================================================================
+
+func TestSendEmail_EmptyFrom(t *testing.T) {
+	dialer := NewSMTPDialer(SMTPConfig{
+		Host: "localhost",
+		Port: 2525,
+		// From намеренно пуст
+	}, slog.Default())
+
+	msg := &EmailMessage{
+		To:   []string{"to@example.com"},
+		Text: "hello",
+		// From пуст
+	}
+
+	err := dialer.SendEmail(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for empty sender, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty sender") {
+		t.Errorf("error = %q, want to contain 'empty sender'", err.Error())
+	}
+}
+
+// ============================================================================
+// Тесты Content-Type collision в custom headers
+// ============================================================================
+
+func TestBuildMIMEMessage_CustomHeadersSkipReserved(t *testing.T) {
+	msg := &EmailMessage{
+		To:      []string{"to@example.com"},
+		From:    "from@example.com",
+		Subject: "Test",
+		HTML:    "<b>Hello</b>",
+		Text:    "Hello",
+		Headers: map[string]string{
+			"Content-Type": "text/plain",
+			"MIME-Version": "2.0",
+			"X-Custom":     "value",
+		},
+	}
+
+	raw, err := buildMIMEMessage(msg, "from@example.com", msg.To)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+
+	if !strings.Contains(body, "multipart/alternative") {
+		t.Error("Content-Type should be multipart/alternative, not overridden by custom header")
+	}
+	if strings.Contains(body, "MIME-Version: 2.0") {
+		t.Error("custom MIME-Version should be skipped")
+	}
+	if !strings.Contains(body, "X-Custom: value") {
+		t.Error("non-reserved custom header should be included")
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

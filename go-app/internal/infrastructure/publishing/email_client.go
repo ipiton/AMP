@@ -147,6 +147,15 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: no recipients specified")
 	}
 
+	// Resolve sender до dial — fail fast при пустом from
+	from := msg.From
+	if from == "" {
+		from = d.config.From
+	}
+	if from == "" {
+		return fmt.Errorf("email: empty sender address (set From in message or SMTP config)")
+	}
+
 	d.logger.DebugContext(ctx, "Connecting to SMTP server",
 		slog.String("addr", d.addr()),
 		slog.Int("recipients", len(validTo)),
@@ -170,11 +179,7 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: %w", err)
 	}
 
-	// MAIL FROM
-	from := msg.From
-	if from == "" {
-		from = d.config.From
-	}
+	// MAIL FROM (from resolved before dial)
 	if err := client.Mail(from); err != nil {
 		return fmt.Errorf("email: MAIL FROM <%s>: %w", from, err)
 	}
@@ -375,6 +380,9 @@ func encodeRFC2047Words(s string) string {
 				} else {
 					break
 				}
+			}
+			if len(chunk) == 0 {
+				chunk = encoded[:1] // safety: force progress
 			}
 		}
 		parts = append(parts, prefix+chunk+suffix)
