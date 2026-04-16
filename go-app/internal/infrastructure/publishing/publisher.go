@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -194,6 +196,8 @@ type PublisherFactory struct {
 	slackCache         MessageIDCache                   // Shared Slack message cache (for threading)
 	slackClientMap     map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL
 	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
+	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
+	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
@@ -213,6 +217,7 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics 
 		slackCache:         slackCache, // Slack message cache for threading
 		slackClientMap:     make(map[string]SlackWebhookClient),
 		slackCleanupWorker: slackCleanupWorker,
+		emailClientMap:     make(map[string]SMTPClient),
 		metrics:            metrics, // Unified v2 metrics
 	}
 }
@@ -228,6 +233,13 @@ func (f *PublisherFactory) CreatePublisher(targetType string) (AlertPublisher, e
 		return NewSlackPublisher(f.formatter, f.logger), nil
 	case TargetTypeWebhook, TargetTypeAlertmanager:
 		return NewWebhookPublisher(f.formatter, f.logger), nil
+	case TargetTypeEmail:
+		return NewEnhancedEmailPublisher(
+			NewSMTPDialer(SMTPConfig{Port: 587}, f.logger),
+			f.metrics,
+			f.formatter,
+			f.logger,
+		), nil
 	default:
 		return NewWebhookPublisher(f.formatter, f.logger), nil // Default to webhook
 	}
@@ -244,6 +256,8 @@ func (f *PublisherFactory) CreatePublisherForTarget(target *core.PublishingTarge
 		return f.createEnhancedSlackPublisher(target)
 	case TargetTypeWebhook, TargetTypeAlertmanager:
 		return f.createEnhancedWebhookPublisher(target)
+	case TargetTypeEmail:
+		return f.createEnhancedEmailPublisher(target)
 	default:
 		return f.createEnhancedWebhookPublisher(target) // Default to enhanced webhook
 	}
@@ -390,6 +404,41 @@ func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.Publishin
 		"features", "4 auth strategies, 6 validation rules, exponential backoff retry")
 
 	return publisher, nil
+}
+
+// createEnhancedEmailPublisher создаёт EnhancedEmailPublisher с конфигурацией из target.Headers.
+// SMTP-клиент кешируется по ключу "host:port" для переиспользования.
+func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingTarget) (AlertPublisher, error) {
+	// Извлечь SMTP конфиг из target.Headers
+	smtpCfg := extractSMTPConfig(target)
+
+	if smtpCfg.Host == "" {
+		f.logger.Warn("Email target missing smtp_host, publisher will fail on send",
+			slog.String("target", target.Name))
+	}
+
+	// Ключ кеша — smtp_host:port (одинаковый SMTP сервер переиспользуется)
+	cacheKey := strings.Join([]string{smtpCfg.Host, strconv.Itoa(smtpCfg.Port)}, ":")
+
+	f.emailClientMu.RLock()
+	client, ok := f.emailClientMap[cacheKey]
+	f.emailClientMu.RUnlock()
+	if !ok {
+		f.emailClientMu.Lock()
+		// double-check после upgrade до write lock — другая горутина могла создать клиент
+		if client, ok = f.emailClientMap[cacheKey]; !ok {
+			client = NewSMTPDialer(smtpCfg, f.logger)
+			f.emailClientMap[cacheKey] = client
+		}
+		f.emailClientMu.Unlock()
+	}
+
+	return NewEnhancedEmailPublisher(
+		client,
+		f.metrics,
+		f.formatter,
+		f.logger,
+	), nil
 }
 
 // Shutdown stops all background workers
