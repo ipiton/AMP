@@ -169,6 +169,37 @@ retry:
   jitter_ratio: 0.15    # Jitter ratio (0.15 = 15% random jitter)
 
 # ============================================================================
+# Inhibition Rules (Alertmanager parity, PARITY-A2)
+# Suppress target alerts while a source alert is firing on the same labels.
+# Compatible with Alertmanager inhibit_rules format.
+# ============================================================================
+inhibition:
+  # Optional: path to a separate YAML file with inhibit_rules
+  # config_file: /etc/amp/inhibition_rules.yaml
+
+  inhibit_rules:
+    # Example: NodeDown (critical) inhibits InstanceDown on the same node/cluster
+    - name: "node-down-inhibits-instance-down"
+      source_match:
+        alertname: "NodeDown"
+        severity: "critical"
+      target_match:
+        alertname: "InstanceDown"
+      equal:
+        - node
+        - cluster
+
+    # Example: any critical alert inhibits warning/info alerts in the same scope
+    - name: "critical-inhibits-warnings"
+      source_match:
+        severity: "critical"
+      target_match_re:
+        severity: "warning|info"
+      equal:
+        - cluster
+        - namespace
+
+# ============================================================================
 # Environment Variables
 # ============================================================================
 # The following environment variables can be used to override config values:
