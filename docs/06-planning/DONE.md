@@ -90,3 +90,7 @@
 ## 2026-02-25
 - **PHASE-0: Baseline and Contract Lock** — route inventory и baseline contract tests добавлены для активного runtime.
 - Источник фиксации: `.plans/phase0-baseline-report.md`.
+
+## 2026-04
+
+- 2026-04-16 — (TASK / Platform) **PARITY-A2-INHIBITION-PIPELINE** — InhibitionMatcher не подключён в AlertProcessor pipeline. ~2d _(closed by forge)_
