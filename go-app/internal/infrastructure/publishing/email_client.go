@@ -71,10 +71,16 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		slog.Int("recipients", len(msg.To)),
 	)
 
-	// 1. Dial с таймаутом
-	conn, err := net.DialTimeout("tcp", addr, smtpDialTimeout)
+	// 1. Dial с поддержкой context cancellation/deadline
+	dialer := &net.Dialer{Timeout: smtpDialTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("email: dial %s: %w", addr, err)
+	}
+
+	// Применить deadline из context к SMTP-сессии (StartTLS, Auth, DATA и др.)
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
 	}
 
 	// 2. Создать SMTP client
@@ -130,8 +136,8 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: DATA: %w", err)
 	}
 
-	// 8. Собрать MIME-сообщение и записать
-	mimeBytes, err := buildMIMEMessage(msg)
+	// 8. Собрать MIME-сообщение и записать (передаём resolved from для согласованности MAIL FROM и MIME From)
+	mimeBytes, err := buildMIMEMessage(msg, from)
 	if err != nil {
 		wc.Close()
 		return fmt.Errorf("email: build MIME: %w", err)
@@ -160,9 +166,13 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 // Health проверяет доступность SMTP-сервера через NOOP.
 func (d *SMTPDialer) Health(ctx context.Context) error {
 	addr := d.addr()
-	conn, err := net.DialTimeout("tcp", addr, smtpDialTimeout)
+	dialer := &net.Dialer{Timeout: smtpDialTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("email health: dial %s: %w", addr, err)
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
 	}
 
 	client, err := smtp.NewClient(conn, d.config.Host)
@@ -184,24 +194,19 @@ func (d *SMTPDialer) Close() error {
 }
 
 // buildMIMEMessage собирает MIME multipart/alternative сообщение (text/plain + text/html).
+// resolvedFrom — адрес отправителя уже разрешённый вызывающим кодом (согласован с SMTP MAIL FROM).
 // Возвращает raw bytes готовые для записи в smtp.Data writer.
-func buildMIMEMessage(msg *EmailMessage) ([]byte, error) {
+func buildMIMEMessage(msg *EmailMessage, resolvedFrom string) ([]byte, error) {
 	var buf bytes.Buffer
 
-	// Заголовки письма
-	from := msg.From
-	if from == "" {
-		from = "alertmanager@localhost"
-	}
-
-	buf.WriteString("From: " + from + "\r\n")
+	buf.WriteString("From: " + resolvedFrom + "\r\n")
 	buf.WriteString("To: " + strings.Join(msg.To, ", ") + "\r\n")
 	buf.WriteString("Subject: " + mime64Subject(msg.Subject) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
 
-	// Дополнительные заголовки
+	// Дополнительные заголовки (sanitize CRLF для предотвращения header injection)
 	for k, v := range msg.Headers {
-		buf.WriteString(k + ": " + v + "\r\n")
+		buf.WriteString(sanitizeHeaderValue(k) + ": " + sanitizeHeaderValue(v) + "\r\n")
 	}
 
 	// multipart/alternative writer
@@ -279,4 +284,10 @@ func encodeQP(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// sanitizeHeaderValue удаляет CR и LF из значений заголовков для предотвращения header injection.
+func sanitizeHeaderValue(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	return strings.ReplaceAll(s, "\n", "")
 }

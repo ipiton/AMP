@@ -3,6 +3,7 @@ package publishing
 import (
 	"errors"
 	"net"
+	"net/textproto"
 	"strings"
 )
 
@@ -50,12 +51,9 @@ func classifyEmailError(err error) string {
 		return "tls_error"
 	}
 
-	// Network / timeout errors
+	// Network / timeout errors (обе ветки netErr.Timeout() возвращали одно — упрощено)
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		if netErr.Timeout() {
-			return "network_error"
-		}
 		return "network_error"
 	}
 	if strings.Contains(msg, "connection refused") ||
@@ -66,8 +64,19 @@ func classifyEmailError(err error) string {
 		return "network_error"
 	}
 
-	// SMTP numeric codes
-	code := smtpErrorCode(msg)
+	// SMTP-коды — сначала через textproto.Error (корректно unwrap-ает обёрнутые ошибки net/smtp,
+	// например fmt.Errorf("email: AUTH: %w", err) где err — *textproto.Error)
+	var textErr *textproto.Error
+	if errors.As(err, &textErr) {
+		return classifyByCode(textErr.Code)
+	}
+
+	// Fallback: извлечь код из строки ошибки (для raw error strings, например в тестах)
+	return classifyByCode(smtpErrorCode(msg))
+}
+
+// classifyByCode преобразует числовой SMTP-код в категорию ошибки.
+func classifyByCode(code int) string {
 	switch code {
 	case 535:
 		return "auth_error"
@@ -79,6 +88,5 @@ func classifyEmailError(err error) string {
 	if code >= 500 && code < 600 {
 		return "server_error"
 	}
-
 	return "unknown"
 }
