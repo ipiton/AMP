@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"sort"
@@ -155,7 +156,15 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 	if err != nil {
 		return err
 	}
-	defer client.Close()
+	// closed отслеживает, закрыто ли соединение через Quit().
+	// Предотвращает двойное закрытие: Quit() уже закрывает conn,
+	// поэтому defer должен вызывать Close() только при ошибках до Quit.
+	var closed bool
+	defer func() {
+		if !closed {
+			_ = client.Close()
+		}
+	}()
 
 	if err := d.setupSMTPSession(client); err != nil {
 		return fmt.Errorf("email: %w", err)
@@ -197,7 +206,9 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: close DATA writer: %w", err)
 	}
 
-	// QUIT
+	// QUIT — отмечаем closed=true до вызова, чтобы defer не дублировал закрытие.
+	// Quit() сам закрывает соединение (посылает команду QUIT и закрывает conn).
+	closed = true
 	if err := client.Quit(); err != nil {
 		// QUIT ошибка некритична — письмо уже отправлено
 		d.logger.WarnContext(ctx, "SMTP QUIT error (non-fatal)", slog.String("error", err.Error()))
@@ -393,11 +404,20 @@ func sanitizeHeaderValue(s string) string {
 
 // generateMessageID генерирует уникальный Message-ID заголовок для письма.
 // Формат: <random-hex@domain> — соответствует RFC 2822 §3.6.4.
+// Корректно обрабатывает RFC 5322 display-name format: "Name <addr@domain.com>".
 func generateMessageID(from string) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	domain := "localhost"
-	if idx := strings.Index(from, "@"); idx >= 0 {
+	// net/mail.ParseAddress корректно разбирает оба формата:
+	//   "user@domain.com" и "Name <user@domain.com>"
+	// и возвращает только addr-spec без угловых скобок.
+	if addr, err := mail.ParseAddress(from); err == nil {
+		if idx := strings.LastIndex(addr.Address, "@"); idx >= 0 {
+			domain = addr.Address[idx+1:]
+		}
+	} else if idx := strings.Index(from, "@"); idx >= 0 {
+		// Fallback для bare-адресов без display-name
 		domain = from[idx+1:]
 	}
 	return fmt.Sprintf("<%s@%s>", hex.EncodeToString(b), domain)
