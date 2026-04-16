@@ -93,4 +93,6 @@
 
 ## 2026-04
 
+- 2026-04-16 — (TASK / Platform) **PARITY-A3-EMAIL-PUBLISHER** — SMTP client + EmailPublisher в factory. ~2-3d _(closed by forge)_
+
 - 2026-04-16 — (TASK / Platform) **PARITY-A2-INHIBITION-PIPELINE** — InhibitionMatcher не подключён в AlertProcessor pipeline. ~2d _(closed by forge)_
