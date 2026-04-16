@@ -10,23 +10,6 @@ import (
 // ProviderEmail — идентификатор провайдера для метрик и ошибок.
 const ProviderEmail = "email"
 
-// smtpErrorCode извлекает числовой код из SMTP-ответа вида "535 ..." или "5.x.x ...".
-// Возвращает 0 если код не найден.
-func smtpErrorCode(msg string) int {
-	if len(msg) < 3 {
-		return 0
-	}
-	code := 0
-	for i := 0; i < 3; i++ {
-		c := msg[i]
-		if c < '0' || c > '9' {
-			return 0
-		}
-		code = code*10 + int(c-'0')
-	}
-	return code
-}
-
 // classifyEmailError классифицирует ошибку SMTP для метрик и retry-логики.
 // Возвращает строку-категорию:
 //   - "auth_error"         — SMTP 535 (authentication failed)
@@ -64,15 +47,15 @@ func classifyEmailError(err error) string {
 		return "network_error"
 	}
 
-	// SMTP-коды — сначала через textproto.Error (корректно unwrap-ает обёрнутые ошибки net/smtp,
-	// например fmt.Errorf("email: AUTH: %w", err) где err — *textproto.Error)
+	// SMTP-коды — через textproto.Error (корректно unwrap-ает обёрнутые ошибки net/smtp,
+	// например fmt.Errorf("email: AUTH: %w", err) где err — *textproto.Error).
+	// Используем .Code напрямую — не дублируем логику парсинга из textproto пакета.
 	var textErr *textproto.Error
 	if errors.As(err, &textErr) {
 		return classifyByCode(textErr.Code)
 	}
 
-	// Fallback: извлечь код из строки ошибки (для raw error strings, например в тестах)
-	return classifyByCode(smtpErrorCode(msg))
+	return "unknown"
 }
 
 // classifyByCode преобразует числовой SMTP-код в категорию ошибки.

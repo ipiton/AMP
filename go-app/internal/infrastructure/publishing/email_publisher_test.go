@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/textproto"
 	"strings"
 	"testing"
 	"time"
@@ -381,36 +382,71 @@ func TestRenderEmailContent_BadTemplate(t *testing.T) {
 // ============================================================================
 
 func TestClassifyEmailError(t *testing.T) {
+	// SMTP-коды проверяем через *textproto.Error — так приходят реальные ошибки из net/smtp.
+	// String-based fallback удалён (был избыточным дублированием textproto.Error.Code).
 	tests := []struct {
 		name     string
-		errMsg   string
+		err      error
 		expected string
 	}{
-		{"auth_error", "535 Authentication credentials invalid", "auth_error"},
-		{"rate_limit_421", "421 Too many connections", "rate_limit"},
-		{"rate_limit_451", "451 Requested action aborted", "rate_limit"},
-		{"rate_limit_452", "452 Insufficient system storage", "rate_limit"},
-		{"invalid_recipient_550", "550 User does not exist", "invalid_recipient"},
-		{"invalid_recipient_551", "551 User not local", "invalid_recipient"},
-		// Fix #3: 554 Transaction failed → server_error (не invalid_recipient)
-		{"server_error_554", "554 Transaction failed", "server_error"},
-		{"server_error_500", "500 Command unrecognized", "server_error"},
-		{"server_error_503", "503 Service unavailable", "server_error"},
-		{"tls_error", "tls: failed to verify certificate", "tls_error"},
-		{"network_connection_refused", "connection refused", "network_error"},
-		{"network_no_host", "no such host", "network_error"},
-		{"nil_error", "", "unknown"},
+		{
+			"auth_error",
+			&textproto.Error{Code: 535, Msg: "Authentication credentials invalid"},
+			"auth_error",
+		},
+		{
+			"rate_limit_421",
+			&textproto.Error{Code: 421, Msg: "Too many connections"},
+			"rate_limit",
+		},
+		{
+			"rate_limit_451",
+			&textproto.Error{Code: 451, Msg: "Requested action aborted"},
+			"rate_limit",
+		},
+		{
+			"rate_limit_452",
+			&textproto.Error{Code: 452, Msg: "Insufficient system storage"},
+			"rate_limit",
+		},
+		{
+			"invalid_recipient_550",
+			&textproto.Error{Code: 550, Msg: "User does not exist"},
+			"invalid_recipient",
+		},
+		{
+			"invalid_recipient_551",
+			&textproto.Error{Code: 551, Msg: "User not local"},
+			"invalid_recipient",
+		},
+		{
+			// 554 Transaction failed → server_error (не invalid_recipient)
+			"server_error_554",
+			&textproto.Error{Code: 554, Msg: "Transaction failed"},
+			"server_error",
+		},
+		{
+			"server_error_500",
+			&textproto.Error{Code: 500, Msg: "Command unrecognized"},
+			"server_error",
+		},
+		{
+			"server_error_503",
+			&textproto.Error{Code: 503, Msg: "Service unavailable"},
+			"server_error",
+		},
+		// TLS и network ошибки классифицируются по строковому содержимому
+		{"tls_error", errors.New("tls: failed to verify certificate"), "tls_error"},
+		{"network_connection_refused", errors.New("connection refused"), "network_error"},
+		{"network_no_host", errors.New("no such host"), "network_error"},
+		{"nil_error", nil, "unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var err error
-			if tt.errMsg != "" {
-				err = errors.New(tt.errMsg)
-			}
-			got := classifyEmailError(err)
+			got := classifyEmailError(tt.err)
 			if got != tt.expected {
-				t.Errorf("classifyEmailError(%q) = %q, want %q", tt.errMsg, got, tt.expected)
+				t.Errorf("classifyEmailError(%v) = %q, want %q", tt.err, got, tt.expected)
 			}
 		})
 	}
@@ -487,6 +523,29 @@ func TestMime47Subject_ASCIIUnchanged(t *testing.T) {
 	s := "Simple ASCII subject"
 	if got := mime47Subject(s); got != s {
 		t.Errorf("mime47Subject(%q) = %q, want unchanged", s, got)
+	}
+}
+
+// TestGenerateMessageID_DisplayName проверяет что display-name формат "Name <user@domain>"
+// не создаёт невалидный Message-ID с trailing '>'.
+func TestGenerateMessageID_DisplayName(t *testing.T) {
+	inputs := []struct {
+		from   string
+		wantDomain string
+	}{
+		{"alerts@example.com", "example.com"},
+		{"AMP Alerts <alerts@example.com>", "example.com"},
+		{"\"Monitor\" <ops@corp.io>", "corp.io"},
+	}
+	for _, tc := range inputs {
+		msgID := generateMessageID(tc.from)
+		// Message-ID должен быть вида <hex@domain> без trailing '>'
+		if strings.Count(msgID, ">") != 1 {
+			t.Errorf("generateMessageID(%q) = %q: ожидался ровно один '>'", tc.from, msgID)
+		}
+		if !strings.Contains(msgID, "@"+tc.wantDomain+">") {
+			t.Errorf("generateMessageID(%q) = %q: ожидался домен %q", tc.from, msgID, tc.wantDomain)
+		}
 	}
 }
 
