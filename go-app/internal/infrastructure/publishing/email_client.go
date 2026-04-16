@@ -192,8 +192,8 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 		return fmt.Errorf("email: DATA: %w", err)
 	}
 
-	// Собрать MIME-сообщение
-	mimeBytes, err := buildMIMEMessage(msg, from)
+	// Собрать MIME-сообщение с уже отфильтрованным списком получателей
+	mimeBytes, err := buildMIMEMessage(msg, from, validTo)
 	if err != nil {
 		wc.Close()
 		return fmt.Errorf("email: build MIME: %w", err)
@@ -248,41 +248,44 @@ func (d *SMTPDialer) Close() error {
 
 // buildMIMEMessage собирает MIME multipart/alternative сообщение (text/plain + text/html).
 // resolvedFrom — адрес отправителя уже разрешённый вызывающим кодом (согласован с SMTP MAIL FROM).
+// to — уже отфильтрованный список получателей (передаётся из SendEmail, дублирование логики исключено).
 // Возвращает raw bytes готовые для записи в smtp.Data writer.
-func buildMIMEMessage(msg *EmailMessage, resolvedFrom string) ([]byte, error) {
+func buildMIMEMessage(msg *EmailMessage, resolvedFrom string, to []string) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// Message-ID (RFC 2822 §3.6.4) — требуется большинством MTA для предотвращения spam-reject
 	buf.WriteString("Message-ID: " + generateMessageID(resolvedFrom) + "\r\n")
 	buf.WriteString("Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n")
 	buf.WriteString("From: " + resolvedFrom + "\r\n")
-
-	// Фильтрация пустых адресов для заголовка To (реальная доставка идёт через validTo в SendEmail)
-	filteredTo := make([]string, 0, len(msg.To))
-	for _, addr := range msg.To {
-		if trimmed := strings.TrimSpace(addr); trimmed != "" {
-			filteredTo = append(filteredTo, trimmed)
-		}
-	}
-	buf.WriteString("To: " + strings.Join(filteredTo, ", ") + "\r\n")
-
-	buf.WriteString("Subject: " + mime47Subject(msg.Subject) + "\r\n")
+	// to уже отфильтрован вызывающим кодом (SendEmail) — повторная фильтрация не нужна
+	buf.WriteString("To: " + strings.Join(to, ", ") + "\r\n")
+	buf.WriteString("Subject: " + mime2047Subject(msg.Subject) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
 
-	// Дополнительные заголовки (sanitize CRLF для предотвращения header injection)
-	// Сортировка ключей для детерминированного порядка заголовков в unit-тестах
+	// multipart/alternative writer объявляем до записи Content-Type,
+	// чтобы знать boundary. Content-Type записывается ПОСЛЕ custom headers —
+	// это гарантирует что наш Content-Type всегда последний и единственный.
+	mw := multipart.NewWriter(&buf)
+
+	// Дополнительные заголовки (sanitize CRLF для предотвращения header injection).
+	// Зарезервированные заголовки (Content-Type, MIME-Version) пропускаются —
+	// их значения управляются buildMIMEMessage, дублирование сломает MIME-парсинг.
+	// Сортировка ключей для детерминированного порядка в unit-тестах.
 	headerKeys := make([]string, 0, len(msg.Headers))
 	for k := range msg.Headers {
 		headerKeys = append(headerKeys, k)
 	}
 	sort.Strings(headerKeys)
 	for _, k := range headerKeys {
+		// Пропускаем заголовки управляемые MIME-конструктором
+		switch strings.ToLower(k) {
+		case "content-type", "mime-version":
+			continue
+		}
 		v := msg.Headers[k]
 		buf.WriteString(sanitizeHeaderValue(k) + ": " + sanitizeHeaderValue(v) + "\r\n")
 	}
 
-	// multipart/alternative writer
-	mw := multipart.NewWriter(&buf)
 	buf.WriteString("Content-Type: multipart/alternative; boundary=\"" + mw.Boundary() + "\"\r\n")
 	buf.WriteString("\r\n")
 
@@ -331,10 +334,10 @@ func buildMIMEMessage(msg *EmailMessage, resolvedFrom string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// mime47Subject кодирует тему письма согласно RFC 2047.
+// mime2047Subject кодирует тему письма согласно RFC 2047.
 // Если тема ASCII-only — возвращает как есть.
 // Для non-ASCII разбивает на encoded words (=?UTF-8?Q?...?=) длиной ≤75 символов.
-func mime47Subject(subject string) string {
+func mime2047Subject(subject string) string {
 	for _, r := range subject {
 		if r > 127 {
 			return encodeRFC2047Words(subject)
