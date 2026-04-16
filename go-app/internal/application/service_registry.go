@@ -23,6 +23,14 @@ import (
 	"github.com/ipiton/AMP/pkg/metrics"
 )
 
+// alertCacheWithLifecycle extends ActiveAlertCache with lifecycle management (Stop).
+// Using a concrete interface here avoids type assertions in Shutdown and ensures that
+// Stop() is always called if the field is non-nil.
+type alertCacheWithLifecycle interface {
+	inhibitionpkg.ActiveAlertCache
+	Stop()
+}
+
 // ServiceRegistry manages all application services.
 //
 // This registry follows the Registry pattern to centralize service
@@ -62,7 +70,7 @@ type ServiceRegistry struct {
 	publisher         services.Publisher
 
 	// Inhibition subsystem (TN-130, PARITY-A2)
-	inhibitionCache   inhibitionpkg.ActiveAlertCache       // two-tier cache of firing alerts
+	inhibitionCache   alertCacheWithLifecycle              // two-tier cache of firing alerts (includes Stop)
 	inhibitionMatcher inhibitionpkg.InhibitionMatcher      // rule engine
 	inhibitionState   inhibitionpkg.InhibitionStateManager // active inhibition tracking
 
@@ -163,7 +171,7 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	}
 
 	r.initialized = true
-	r.logger.Info("✅ Service registry initialized successfully")
+	r.logger.Info("Service registry initialized successfully")
 	return nil
 }
 
@@ -178,12 +186,12 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 
 	// Initialize Metrics first (needed by other services)
 	r.metrics = metrics.NewBusinessMetrics()
-	r.logger.Info("✅ Business Metrics initialized")
+	r.logger.Info("Business Metrics initialized")
 
 	// Initialize Memory Stores (compatibility mode)
 	r.alertStore = memory.NewAlertStore()
 	r.silenceStore = memory.NewSilenceStore()
-	r.logger.Info("✅ Memory stores initialized (compatibility mode)")
+	r.logger.Info("Memory stores initialized (compatibility mode)")
 
 	// Initialize Database based on profile
 	if err := r.initializeDatabase(ctx); err != nil {
@@ -201,7 +209,7 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 		// Continue without cache (graceful degradation)
 	}
 
-	r.logger.Info("✅ Infrastructure services initialized")
+	r.logger.Info("Infrastructure services initialized")
 	return nil
 }
 
@@ -246,7 +254,7 @@ func (r *ServiceRegistry) initializeDatabase(ctx context.Context) error {
 	}
 
 	r.database = pool
-	r.logger.Info("✅ PostgreSQL connected successfully")
+	r.logger.Info("PostgreSQL connected successfully")
 
 	// Run migrations
 	if err := dbmigrations.RunMigrations(ctx, pool, r.logger); err != nil {
@@ -303,7 +311,7 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 		return fmt.Errorf("unsupported deployment profile: %q", r.config.Profile)
 	}
 
-	r.logger.Info("✅ Storage backend initialized",
+	r.logger.Info("Storage backend initialized",
 		"type", r.config.Profile,
 		"backend", getStorageType(r.config.Profile),
 	)
@@ -341,7 +349,7 @@ func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
 	}
 
 	r.cache = redisCache
-	r.logger.Info("✅ Redis cache initialized", "addr", cacheConfig.Addr, "db", cacheConfig.DB)
+	r.logger.Info("Redis cache initialized", "addr", cacheConfig.Addr, "db", cacheConfig.DB)
 	_ = ctx
 	return nil
 }
@@ -352,7 +360,7 @@ func (r *ServiceRegistry) initializeCoreServices(ctx context.Context) error {
 
 	// Initialize Filter Engine
 	r.filterEngine = services.NewSimpleFilterEngine(r.logger)
-	r.logger.Info("✅ Filter Engine initialized")
+	r.logger.Info("Filter Engine initialized")
 
 	// Initialize Deduplication Service
 	if err := r.initializeDeduplication(ctx); err != nil {
@@ -368,7 +376,7 @@ func (r *ServiceRegistry) initializeCoreServices(ctx context.Context) error {
 		// Continue without classification (graceful degradation)
 	}
 
-	r.logger.Info("✅ Core services initialized")
+	r.logger.Info("Core services initialized")
 	return nil
 }
 
@@ -397,7 +405,7 @@ func (r *ServiceRegistry) initializeDeduplication(ctx context.Context) error {
 	}
 
 	r.deduplicationSvc = svc
-	r.logger.Info("✅ Deduplication Service initialized")
+	r.logger.Info("Deduplication Service initialized")
 	return nil
 }
 
@@ -446,7 +454,7 @@ func (r *ServiceRegistry) initializeClassification(ctx context.Context) error {
 	}
 
 	r.classificationSvc = svc
-	r.logger.Info("✅ Classification Service initialized",
+	r.logger.Info("Classification Service initialized",
 		"provider", llmConfig.Provider,
 		"model", llmConfig.Model,
 	)
@@ -457,7 +465,9 @@ func (r *ServiceRegistry) initializeClassification(ctx context.Context) error {
 // initializeInhibition initializes the inhibition subsystem (TN-130, PARITY-A2).
 // Non-fatal: if no rules are configured, the subsystem is skipped (graceful degradation).
 func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before inhibition init: %w", err)
+	}
 
 	rules := r.config.Inhibition.ToInhibitionRules()
 	if len(rules) == 0 {
@@ -475,7 +485,7 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 	r.inhibitionState = stateManager
 	r.inhibitionMatcher = matcher
 
-	r.logger.Info("✅ Inhibition subsystem initialized", "rules", len(rules))
+	r.logger.Info("Inhibition subsystem initialized", "rules", len(rules))
 	return nil
 }
 
@@ -502,7 +512,7 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 	}
 
 	r.alertProcessor = processor
-	r.logger.Info("✅ Alert Processor initialized")
+	r.logger.Info("Alert Processor initialized")
 	return nil
 }
 
@@ -512,7 +522,7 @@ func (r *ServiceRegistry) initializeBusinessServices(ctx context.Context) error 
 
 	r.initializePublishing(ctx)
 
-	r.logger.Info("✅ Business services initialized")
+	r.logger.Info("Business services initialized")
 	return nil
 }
 
@@ -531,10 +541,8 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 	// Shutdown Inhibition cache background worker
 	if r.inhibitionCache != nil {
 		r.logger.Info("Shutting down inhibition cache...")
-		if stopper, ok := r.inhibitionCache.(interface{ Stop() }); ok {
-			stopper.Stop()
-		}
-		r.logger.Info("✅ Inhibition cache stopped")
+		r.inhibitionCache.Stop()
+		r.logger.Info("Inhibition cache stopped")
 	}
 
 	r.shutdownPublishing()
@@ -555,12 +563,12 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		if err := r.database.Disconnect(ctx); err != nil {
 			r.logger.Error("Database disconnect error", "error", err)
 		} else {
-			r.logger.Info("✅ Database disconnected")
+			r.logger.Info("Database disconnected")
 		}
 	}
 
 	r.initialized = false
-	r.logger.Info("✅ All services shut down")
+	r.logger.Info("All services shut down")
 	return nil
 }
 
@@ -645,6 +653,10 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 
 	// Update local config pointer
 	r.config = r.reloadCoordinator.GetCurrentConfig()
+
+	// TODO(PARITY-A2): hot-reload inhibition rules — currently the matcher keeps the old rules
+	// after a config reload. To apply new inhibit_rules without restart, call initializeInhibition
+	// and replace r.inhibitionMatcher atomically (requires mutex on the matcher field).
 
 	return nil
 }
