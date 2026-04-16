@@ -82,7 +82,7 @@ func classifyByCode(code int) string {
 		return "auth_error"
 	case 421, 451, 452:
 		return "rate_limit"
-	case 550, 551, 552, 553, 554:
+	case 550, 551, 552, 553:
 		return "invalid_recipient"
 	}
 	if code >= 500 && code < 600 {
