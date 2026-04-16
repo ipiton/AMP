@@ -465,7 +465,7 @@ func TestBuildMIMEMessage_ContainsHeaders(t *testing.T) {
 		Text:    "Hello",
 	}
 
-	raw, err := buildMIMEMessage(msg, "from@example.com")
+	raw, err := buildMIMEMessage(msg, "from@example.com", msg.To)
 	if err != nil {
 		t.Fatalf("buildMIMEMessage() error: %v", err)
 	}
@@ -500,10 +500,10 @@ func TestBuildMIMEMessage_ContainsHeaders(t *testing.T) {
 }
 
 // Fix #6: Длинная тема должна разбиваться на encoded words ≤75 символов каждый
-func TestMime47Subject_LongNonASCII(t *testing.T) {
+func TestMime2047Subject_LongNonASCII(t *testing.T) {
 	// Строка с кириллицей длиннее 63 символов в encoded form
 	long := "Критическое оповещение: превышение порогового значения CPU на сервере node-prod-01"
-	result := mime47Subject(long)
+	result := mime2047Subject(long)
 
 	// Каждый encoded word не должен превышать 75 символов
 	parts := strings.Split(result, " ")
@@ -519,10 +519,10 @@ func TestMime47Subject_LongNonASCII(t *testing.T) {
 	}
 }
 
-func TestMime47Subject_ASCIIUnchanged(t *testing.T) {
+func TestMime2047Subject_ASCIIUnchanged(t *testing.T) {
 	s := "Simple ASCII subject"
-	if got := mime47Subject(s); got != s {
-		t.Errorf("mime47Subject(%q) = %q, want unchanged", s, got)
+	if got := mime2047Subject(s); got != s {
+		t.Errorf("mime2047Subject(%q) = %q, want unchanged", s, got)
 	}
 }
 
@@ -558,7 +558,7 @@ func TestBuildMIMEMessage_NoRecipients(t *testing.T) {
 		Text:    "Hello",
 	}
 	// Не должен паниковать
-	_, err := buildMIMEMessage(msg, "")
+	_, err := buildMIMEMessage(msg, "", nil)
 	if err != nil {
 		t.Logf("buildMIMEMessage with nil To returned (expected): %v", err)
 	}
