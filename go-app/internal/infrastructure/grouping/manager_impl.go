@@ -49,6 +49,10 @@ type DefaultGroupManager struct {
 	// Optional: can be nil for backwards compatibility
 	timerManager GroupTimerManager
 
+	// publisher sends alert notifications when group timers fire (TN-124)
+	// Optional: can be nil for backwards compatibility (only logs)
+	publisher GroupNotificationPublisher
+
 	// logger for structured logging
 	logger *slog.Logger
 
@@ -103,6 +107,7 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		keyGenerator:     cfg.KeyGenerator,
 		config:           cfg.Config,
 		timerManager:     cfg.TimerManager, // Optional (TN-124)
+		publisher:        cfg.Publisher,    // Optional (TN-124)
 		logger:           cfg.Logger,
 		metrics:          cfg.Metrics,
 		stats:            &groupStats{},
@@ -776,6 +781,64 @@ func (m *DefaultGroupManager) startGroupIntervalTimer(ctx context.Context, group
 	return nil
 }
 
+// publishGroupAlerts publishes all alerts in the group via the configured publisher.
+//
+// If publisher is nil, this is a no-op (backwards compatible).
+// Errors are logged but do not abort iteration so all alerts get a publish attempt.
+func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *AlertGroup) {
+	if m.publisher == nil {
+		return
+	}
+
+	group.mu.RLock()
+	alerts := make([]*core.Alert, 0, len(group.Alerts))
+	for _, a := range group.Alerts {
+		alerts = append(alerts, a)
+	}
+	group.mu.RUnlock()
+
+	for _, alert := range alerts {
+		if err := m.publisher.PublishToAll(ctx, alert); err != nil {
+			m.logger.Error("failed to publish alert from group timer",
+				"group_key", group.Key,
+				"fingerprint", alert.Fingerprint,
+				"error", err)
+		}
+	}
+}
+
+// startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
+// This timer provides periodic reminders for ongoing alert groups with no new changes.
+//
+// Called after the group_interval notification is sent (when switching to "steady" mode).
+func (m *DefaultGroupManager) startRepeatIntervalTimer(ctx context.Context, groupKey GroupKey) error {
+	if m.timerManager == nil {
+		return nil // Timer functionality disabled
+	}
+
+	// Get repeat_interval duration from config via helper (default: 4h)
+	duration := 4 * time.Hour
+	if m.config != nil && m.config.Route != nil {
+		duration = m.config.Route.GetEffectiveRepeatInterval()
+	}
+
+	// Start repeat_interval timer
+	_, err := m.timerManager.StartTimer(ctx, groupKey, RepeatIntervalTimer, duration)
+	if err != nil {
+		m.logger.Error("failed to start repeat_interval timer",
+			"group_key", groupKey,
+			"duration", duration,
+			"error", err)
+		return fmt.Errorf("start repeat_interval timer: %w", err)
+	}
+
+	m.logger.Debug("started repeat_interval timer",
+		"group_key", groupKey,
+		"duration", duration)
+
+	return nil
+}
+
 // cancelGroupTimers cancels all timers for a group.
 // Called when a group is deleted (empty after alert removal).
 func (m *DefaultGroupManager) cancelGroupTimers(ctx context.Context, groupKey GroupKey) {
@@ -797,12 +860,12 @@ func (m *DefaultGroupManager) cancelGroupTimers(ctx context.Context, groupKey Gr
 // onGroupWaitExpired is the callback for group_wait timer expiration.
 // This sends the first notification for a group after the initial delay.
 func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
-	m.logger.Info("group_wait timer expired, ready to send first notification",
+	m.logger.Info("group_wait timer expired, sending first notification",
 		"group_key", groupKey,
 		"alert_count", len(group.Alerts))
 
-	// TODO: Trigger notification here (will be implemented in TN-125)
-	// For now, just start the group_interval timer
+	// Publish all alerts in the group as the first notification
+	m.publishGroupAlerts(ctx, group)
 
 	// Start group_interval timer for subsequent notifications
 	if err := m.startGroupIntervalTimer(ctx, groupKey); err != nil {
@@ -816,33 +879,73 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 }
 
 // onGroupIntervalExpired is the callback for group_interval timer expiration.
-// This allows sending subsequent notifications for a group.
+// This sends an update notification for the group and starts the repeat_interval timer
+// for periodic reminders.
 func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
-	m.logger.Info("group_interval timer expired, ready to send update notification",
+	m.logger.Info("group_interval timer expired, sending update notification",
 		"group_key", groupKey,
 		"alert_count", len(group.Alerts))
-
-	// TODO: Trigger notification here (will be implemented in TN-125)
-	// For now, just restart the group_interval timer if group still has alerts
 
 	// Check if group still exists and has alerts (TN-125: load from storage)
 	currentGroup, err := m.storage.Load(ctx, groupKey)
 	if err != nil {
-		m.logger.Debug("group no longer exists or is empty, not restarting timer",
+		m.logger.Debug("group no longer exists or is empty, not sending notification",
 			"group_key", groupKey,
 			"error", err)
 		return nil
 	}
 
 	if len(currentGroup.Alerts) == 0 {
-		m.logger.Debug("group is empty, not restarting timer",
+		m.logger.Debug("group is empty, not sending notification",
 			"group_key", groupKey)
 		return nil
 	}
 
-	// Restart group_interval timer for next notification
-	if err := m.startGroupIntervalTimer(ctx, groupKey); err != nil {
-		m.logger.Error("failed to restart group_interval timer",
+	// Publish update notification for all alerts in the current group snapshot
+	m.publishGroupAlerts(ctx, currentGroup)
+
+	// Switch to repeat_interval for periodic reminders.
+	// group_interval fires once after a notification is sent; subsequent reminders
+	// use repeat_interval (Alertmanager-compatible behaviour).
+	if err := m.startRepeatIntervalTimer(ctx, groupKey); err != nil {
+		m.logger.Error("failed to start repeat_interval timer after group_interval",
+			"group_key", groupKey,
+			"error", err)
+		return err
+	}
+
+	return nil
+}
+
+// onRepeatIntervalExpired is the callback for repeat_interval timer expiration.
+// This sends a periodic reminder notification for an ongoing alert group and
+// restarts the repeat_interval timer so reminders continue.
+func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
+	m.logger.Info("repeat_interval timer expired, sending reminder notification",
+		"group_key", groupKey,
+		"alert_count", len(group.Alerts))
+
+	// Check if group still exists and has alerts (TN-125: load from storage)
+	currentGroup, err := m.storage.Load(ctx, groupKey)
+	if err != nil {
+		m.logger.Debug("group no longer exists or is empty, stopping repeat_interval",
+			"group_key", groupKey,
+			"error", err)
+		return nil
+	}
+
+	if len(currentGroup.Alerts) == 0 {
+		m.logger.Debug("group is empty, stopping repeat_interval",
+			"group_key", groupKey)
+		return nil
+	}
+
+	// Publish reminder notification for all alerts
+	m.publishGroupAlerts(ctx, currentGroup)
+
+	// Restart repeat_interval for the next reminder
+	if err := m.startRepeatIntervalTimer(ctx, groupKey); err != nil {
+		m.logger.Error("failed to restart repeat_interval timer",
 			"group_key", groupKey,
 			"error", err)
 		return err
@@ -866,10 +969,7 @@ func (m *DefaultGroupManager) registerTimerCallbacks() error {
 		case GroupIntervalTimer:
 			return m.onGroupIntervalExpired(ctx, groupKey, timerType, group)
 		case RepeatIntervalTimer:
-			// RepeatInterval not yet implemented (future enhancement)
-			m.logger.Debug("repeat_interval timer expired (not implemented)",
-				"group_key", groupKey)
-			return nil
+			return m.onRepeatIntervalExpired(ctx, groupKey, timerType, group)
 		default:
 			m.logger.Warn("unknown timer type expired",
 				"group_key", groupKey,

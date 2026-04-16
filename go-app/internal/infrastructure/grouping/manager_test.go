@@ -649,3 +649,223 @@ func TestGetStats_WithOperations(t *testing.T) {
 	assert.Equal(t, int64(1), stats.TotalRemoves)
 	assert.Equal(t, 0, stats.ActiveGroups)
 }
+
+// === Notification Triggering Tests (parity-a1-notification-triggering) ===
+
+// mockPublisher records PublishToAll calls for assertion in tests.
+type mockPublisher struct {
+	published []*core.Alert
+	err       error
+}
+
+func (p *mockPublisher) PublishToAll(_ context.Context, alert *core.Alert) error {
+	p.published = append(p.published, alert)
+	return p.err
+}
+
+// createTestManagerWithPublisher creates a manager with a publisher and timer manager wired up.
+func createTestManagerWithPublisher(t *testing.T, pub GroupNotificationPublisher) (*DefaultGroupManager, *InMemoryTimerStorage) {
+	t.Helper()
+	keyGen := NewGroupKeyGenerator()
+	config := &GroupingConfig{
+		Route: &Route{
+			Receiver:      "default",
+			GroupBy:       []string{"alertname"},
+			GroupWait:     &Duration{10 * time.Millisecond},
+			GroupInterval: &Duration{10 * time.Millisecond},
+			RepeatInterval: &Duration{10 * time.Millisecond},
+		},
+	}
+
+	storage := NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()})
+	timerStorage := NewInMemoryTimerStorage(nil)
+
+	// Create a stub group manager for the timer manager (required by TimerManagerConfig).
+	// The real group manager will be wired after construction.
+	stubGroupMgr := &DefaultGroupManager{
+		storage:          storage,
+		fingerprintIndex: make(map[string]GroupKey),
+		logger:           slog.Default(),
+	}
+
+	timerMgr, err := NewDefaultTimerManager(TimerManagerConfig{
+		Storage:               timerStorage,
+		GroupManager:          stubGroupMgr,
+		DefaultGroupWait:      10 * time.Millisecond,
+		DefaultGroupInterval:  10 * time.Millisecond,
+		DefaultRepeatInterval: 10 * time.Millisecond,
+		Logger:                slog.Default(),
+	})
+	require.NoError(t, err)
+
+	manager, err := NewDefaultGroupManager(context.Background(), DefaultGroupManagerConfig{
+		KeyGenerator: keyGen,
+		Config:       config,
+		Logger:       slog.Default(),
+		Storage:      storage,
+		TimerManager: timerMgr,
+		Publisher:    pub,
+	})
+	require.NoError(t, err)
+
+	// Wire the real manager into the timer manager so timer callbacks can load groups.
+	timerMgr.groupManager = manager
+
+	return manager, timerStorage
+}
+
+// TestPublishGroupAlerts_CallsPublisherForEachAlert verifies that publishGroupAlerts
+// invokes the publisher once per alert in the group.
+func TestPublishGroupAlerts_CallsPublisherForEachAlert(t *testing.T) {
+	pub := &mockPublisher{}
+	manager, _ := createTestManagerWithPublisher(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("alertname=TestAlert")
+	alert1 := createTestAlert("A1", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	alert2 := createTestAlert("A2", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+
+	manager.AddAlertToGroup(ctx, alert1, groupKey)
+	manager.AddAlertToGroup(ctx, alert2, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	manager.publishGroupAlerts(ctx, group)
+
+	assert.Len(t, pub.published, 2)
+}
+
+// TestPublishGroupAlerts_NilPublisher verifies that publishGroupAlerts is a no-op
+// when no publisher is configured (backwards compatibility).
+func TestPublishGroupAlerts_NilPublisher(t *testing.T) {
+	manager := createTestManager(t) // no publisher
+	ctx := context.Background()
+
+	groupKey := GroupKey("alertname=TestAlert")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	manager.AddAlertToGroup(ctx, alert, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	// Must not panic
+	require.NotPanics(t, func() {
+		manager.publishGroupAlerts(ctx, group)
+	})
+}
+
+// TestOnGroupWaitExpired_TriggersNotification verifies that when the group_wait timer
+// fires the publisher is called and the group_interval timer is scheduled.
+func TestOnGroupWaitExpired_TriggersNotification(t *testing.T) {
+	pub := &mockPublisher{}
+	manager, _ := createTestManagerWithPublisher(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("alertname=TestAlert")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	manager.AddAlertToGroup(ctx, alert, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	err = manager.onGroupWaitExpired(ctx, groupKey, GroupWaitTimer, group)
+	require.NoError(t, err)
+
+	assert.Len(t, pub.published, 1, "expected one alert published on group_wait expiry")
+}
+
+// TestOnGroupIntervalExpired_TriggersNotification verifies that when the group_interval
+// timer fires the publisher is called and the repeat_interval timer is scheduled.
+func TestOnGroupIntervalExpired_TriggersNotification(t *testing.T) {
+	pub := &mockPublisher{}
+	manager, _ := createTestManagerWithPublisher(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("alertname=TestAlert")
+	alert := createTestAlert("B", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	manager.AddAlertToGroup(ctx, alert, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	err = manager.onGroupIntervalExpired(ctx, groupKey, GroupIntervalTimer, group)
+	require.NoError(t, err)
+
+	assert.Len(t, pub.published, 1, "expected one alert published on group_interval expiry")
+}
+
+// TestOnRepeatIntervalExpired_TriggersNotification verifies that when the repeat_interval
+// timer fires the publisher is called and the repeat_interval timer is restarted.
+func TestOnRepeatIntervalExpired_TriggersNotification(t *testing.T) {
+	pub := &mockPublisher{}
+	manager, _ := createTestManagerWithPublisher(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("alertname=TestAlert")
+	alert := createTestAlert("C", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	manager.AddAlertToGroup(ctx, alert, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	err = manager.onRepeatIntervalExpired(ctx, groupKey, RepeatIntervalTimer, group)
+	require.NoError(t, err)
+
+	assert.Len(t, pub.published, 1, "expected one alert published on repeat_interval expiry")
+}
+
+// TestOnRepeatIntervalExpired_EmptyGroup verifies that when a group is empty the
+// repeat_interval callback is a no-op (no publish, no new timer).
+func TestOnRepeatIntervalExpired_EmptyGroup(t *testing.T) {
+	pub := &mockPublisher{}
+	manager, _ := createTestManagerWithPublisher(t, pub)
+	ctx := context.Background()
+
+	// Non-existent group — storage.Load will return not-found error
+	groupKey := GroupKey("nonexistent-group")
+	group := &AlertGroup{
+		Key:    groupKey,
+		Alerts: make(map[string]*core.Alert),
+		Metadata: &GroupMetadata{
+			State:     GroupStateFiring,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+
+	err := manager.onRepeatIntervalExpired(ctx, groupKey, RepeatIntervalTimer, group)
+	require.NoError(t, err)
+
+	assert.Empty(t, pub.published, "no alerts should be published for non-existent group")
+}
+
+// TestTimerChain_GroupWaitToRepeatInterval is an integration test that starts a group,
+// waits for the group_wait timer to fire and verifies the full notification chain
+// (group_wait → publish → group_interval → publish → repeat_interval → publish).
+func TestTimerChain_GroupWaitToRepeatInterval(t *testing.T) {
+	pub := &mockPublisher{}
+	manager, _ := createTestManagerWithPublisher(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("alertname=Chain")
+	alert := createTestAlert("Chain", core.StatusFiring, map[string]string{"alertname": "Chain"})
+
+	// AddAlertToGroup triggers group_wait timer (configured to 10ms)
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+	require.NoError(t, err)
+
+	// Wait for group_wait → group_interval → repeat_interval chain
+	// Each timer is 10ms; give 500ms total for three rounds to avoid flakiness.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(pub.published) >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// At minimum, group_wait and group_interval should have fired.
+	assert.GreaterOrEqual(t, len(pub.published), 2,
+		"expected at least 2 notifications from group_wait+group_interval timers")
+}

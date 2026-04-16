@@ -512,6 +512,15 @@ type AlertGroupManager interface {
 	GetStats(ctx context.Context) (*GroupStats, error)
 }
 
+// GroupNotificationPublisher sends individual alert notifications when group timers expire.
+//
+// This interface is a subset of services.Publisher to avoid import cycles between
+// the infrastructure/grouping and core/services packages. Any implementation of
+// services.Publisher automatically satisfies this interface.
+type GroupNotificationPublisher interface {
+	PublishToAll(ctx context.Context, alert *core.Alert) error
+}
+
 // DefaultGroupManagerConfig holds configuration for DefaultGroupManager.
 type DefaultGroupManagerConfig struct {
 	// KeyGenerator generates group keys from alert labels (required, from TN-122)
@@ -527,6 +536,10 @@ type DefaultGroupManagerConfig struct {
 	// TimerManager manages group timers (optional, from TN-124)
 	// If nil, timer functionality is disabled (backwards compatible)
 	TimerManager GroupTimerManager
+
+	// Publisher sends notifications when group timers fire (optional).
+	// If nil, timer callbacks only log — no alerts are sent (backwards compatible).
+	Publisher GroupNotificationPublisher
 
 	// Logger for structured logging (optional, defaults to slog.Default())
 	Logger *slog.Logger
