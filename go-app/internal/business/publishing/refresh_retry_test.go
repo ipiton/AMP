@@ -2,6 +2,7 @@ package publishing
 
 import (
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -149,7 +150,7 @@ func TestRefreshWithRetry_ContextCancellation(t *testing.T) {
 	config.BaseBackoff = 100 * time.Millisecond
 
 	mockReg := &MockPrometheusRegisterer{}
-	manager, err := NewRefreshManager(mock, config, nil, mockReg)
+	manager, err := NewRefreshManager(mock, config, slog.Default(), mockReg)
 	require.NoError(t, err)
 
 	// Start manager

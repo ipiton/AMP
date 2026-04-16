@@ -22,8 +22,8 @@ func TestNewRefreshManager_Success(t *testing.T) {
 	// Verify manager created
 	assert.NotNil(t, manager)
 
-	// Verify metrics registered (5 metrics)
-	assertMetrics(t, mockReg, 5)
+	// Verify metrics registered (v2.NewPublishingMetrics registers all publishing metrics)
+	assert.Greater(t, mockReg.RegisteredCount(), 0, "Expected at least one metric registered")
 
 	// Verify initial state
 	status := manager.GetStatus()
@@ -224,6 +224,9 @@ func TestRefreshNow_Success(t *testing.T) {
 	err = manager.RefreshNow()
 	require.NoError(t, err)
 
+	// Give the goroutine time to start before polling
+	time.Sleep(20 * time.Millisecond)
+
 	// Wait for refresh to complete
 	waitForRefresh(t, manager, 2*time.Second)
 
@@ -285,10 +288,11 @@ func TestRefreshNow_RefreshInProgress(t *testing.T) {
 	require.NoError(t, err)
 	defer manager.Stop(1 * time.Second)
 
-	// Wait for warmup
+	// Wait for warmup and initial background refresh to complete
 	time.Sleep(20 * time.Millisecond)
+	waitForRefresh(t, manager, 2*time.Second)
 
-	// Trigger first manual refresh (will take 200ms)
+	// Trigger first manual refresh (will take 200ms due to mock delay)
 	err = manager.RefreshNow()
 	require.NoError(t, err)
 

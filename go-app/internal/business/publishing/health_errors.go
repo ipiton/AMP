@@ -183,12 +183,18 @@ func sanitizeErrorMessage(errMsg string) string {
 			// Find end of sensitive data
 			start := idx + len(p.prefix)
 			end := strings.Index(sanitized[start:], p.suffix)
+			// If the prefix already ends with a space, don't add another one
+			prefixPart := sanitized[:start]
+			redacted := " [REDACTED]"
+			if len(prefixPart) > 0 && prefixPart[len(prefixPart)-1] == ' ' {
+				redacted = "[REDACTED]"
+			}
 			if end == -1 {
 				// No suffix found, redact to end
-				sanitized = sanitized[:start] + " [REDACTED]"
+				sanitized = prefixPart + redacted
 			} else {
 				// Redact between prefix and suffix
-				sanitized = sanitized[:start] + " [REDACTED]" + sanitized[start+end:]
+				sanitized = prefixPart + redacted + sanitized[start+end:]
 			}
 		}
 	}
