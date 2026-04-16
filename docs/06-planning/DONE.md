@@ -1,5 +1,12 @@
 # DONE
 
+## 2026-04-16
+- **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT** — завершен как атомарный SQL + test-fixture fix без изменения публичного контракта `GetFlappingAlerts`.
+- В `go-app/internal/infrastructure/repository/postgres_history.go` добавлен тайбрейкер `id` в window function: `LAG(status) OVER (PARTITION BY fingerprint ORDER BY starts_at, id)` — детерминированный порядок для строк с одинаковым `starts_at`.
+- В `go-app/internal/infrastructure/repository/postgres_history_test.go` фикстура `TestGetFlappingAlerts_MultipleTransitions` исправлена: каждая из 4 строк получила уникальный `starts_at` (+10m каждая), `created_at` синхронизирован с `starts_at`, assertion исправлен с `>= 4` на `>= 3` (N строк → N−1 переходов).
+- Проверка scope: `go vet ./internal/infrastructure/repository/...` чист, `go build ./...` проходит; тесты требуют Docker (testcontainers) — pre-existing инфраструктурный блокер среды; `git diff --check` чист.
+- Ограничение: тест-запуск не подтверждён локально из-за отсутствия Docker в среде выполнения агента; изменения корректны по семантике и проверены `go vet` + сборкой. Workspace архивирован в `tasks/archive/REPOSITORY-FLAPPING-TRANSITIONS-DRIFT/`.
+
 ## 2026-03-09
 - **GRAFANA-DASHBOARD-BRANDING-DRIFT** — завершен как narrow visible dashboard title cleanup, а не как full Grafana identity/provisioning rewrite.
 - В [alert-history-service.json](/Users/vit/Documents/Projects/AMP/grafana/dashboards/alert-history-service.json) top-level title обновлен с `AMP - Alert History Service` на `AMP - Operations Dashboard`; `uid = amp-alert-history`, filename и весь dashboard content ниже сознательно оставлены без изменений.

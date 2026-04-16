@@ -555,7 +555,7 @@ func (r *PostgresHistoryRepository) GetFlappingAlerts(ctx context.Context, timeR
 				labels->>'namespace' as namespace,
 				status,
 				starts_at,
-				LAG(status) OVER (PARTITION BY fingerprint ORDER BY starts_at) as prev_status
+				LAG(status) OVER (PARTITION BY fingerprint ORDER BY starts_at, id) as prev_status
 			FROM alerts
 			%s
 		),
