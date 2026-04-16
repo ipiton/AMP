@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -195,6 +196,7 @@ type PublisherFactory struct {
 	slackCache         MessageIDCache                   // Shared Slack message cache (for threading)
 	slackClientMap     map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL
 	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
+	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
 	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
@@ -418,10 +420,17 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 	// Ключ кеша — smtp_host:port (одинаковый SMTP сервер переиспользуется)
 	cacheKey := strings.Join([]string{smtpCfg.Host, strconv.Itoa(smtpCfg.Port)}, ":")
 
+	f.emailClientMu.RLock()
 	client, ok := f.emailClientMap[cacheKey]
+	f.emailClientMu.RUnlock()
 	if !ok {
-		client = NewSMTPDialer(smtpCfg, f.logger)
-		f.emailClientMap[cacheKey] = client
+		f.emailClientMu.Lock()
+		// double-check после upgrade до write lock — другая горутина могла создать клиент
+		if client, ok = f.emailClientMap[cacheKey]; !ok {
+			client = NewSMTPDialer(smtpCfg, f.logger)
+			f.emailClientMap[cacheKey] = client
+		}
+		f.emailClientMu.Unlock()
 	}
 
 	return NewEnhancedEmailPublisher(
