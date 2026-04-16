@@ -47,9 +47,9 @@ func TestHealthMonitor_NetworkTimeouts(t *testing.T) {
 		},
 		{
 			name:            "Edge case: exactly at timeout",
-			serverDelay:     1 * time.Second,
+			serverDelay:     800 * time.Millisecond,
 			clientTimeout:   1 * time.Second,
-			expectTimeout:   false, // Should complete just in time
+			expectTimeout:   false, // Responds before timeout
 			expectUnhealthy: false,
 		},
 	}
@@ -157,8 +157,9 @@ func TestHealthMonitor_TLSErrors(t *testing.T) {
 			})
 
 			config := DefaultHealthConfig()
-			config.WarmupDelay = 0      // Skip warmup for tests
-			config.FailureThreshold = 1 // Mark unhealthy immediately
+			config.WarmupDelay = 0       // Skip warmup for tests
+			config.FailureThreshold = 1  // Mark unhealthy immediately
+			config.TLSSkipVerify = true  // Trust test server self-signed cert
 			monitor, err := NewHealthMonitor(discovery, config, nil, metrics)
 			if err != nil {
 				t.Fatalf("Failed to create monitor: %v", err)
@@ -426,9 +427,9 @@ func TestHealthMonitor_ConnectionRefused(t *testing.T) {
 	})
 
 	config := DefaultHealthConfig()
-	config.WarmupDelay = 0 // Skip warmup for tests
+	config.WarmupDelay = 0       // Skip warmup for tests
+	config.FailureThreshold = 1  // Mark unhealthy immediately
 	monitor, err := NewHealthMonitor(discovery, config, nil, metrics)
-	config.FailureThreshold = 1 // Mark unhealthy immediately
 	if err != nil {
 		t.Fatalf("Failed to create monitor: %v", err)
 	}

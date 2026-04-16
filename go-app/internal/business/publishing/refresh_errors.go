@@ -160,6 +160,15 @@ func classifyError(err error) (errorType string, transient bool) {
 		return "cancelled", false // User requested cancellation
 	}
 
+	// DNS errors (transient) — check before net.Error since *net.DNSError implements net.Error
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		if dnsErr.IsTimeout {
+			return "timeout", true
+		}
+		return "dns", true
+	}
+
 	// Network errors (transient)
 	var netErr net.Error
 	if errors.As(err, &netErr) {
@@ -170,10 +179,10 @@ func classifyError(err error) (errorType string, transient bool) {
 		return "network", true
 	}
 
-	// DNS errors (transient)
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return "dns", true
+	// String-based fallback for common network errors not wrapped in net.Error
+	errStr := err.Error()
+	if strings.Contains(errStr, "connection refused") {
+		return "network", true
 	}
 
 	// Authentication errors (permanent)
