@@ -16,6 +16,7 @@ const (
 	ProviderPagerDuty = "pagerduty"
 	ProviderRootly    = "rootly"
 	ProviderWebhook   = "webhook"
+	ProviderEmail     = "email"
 )
 
 // PublishingMetrics provides consolidated metrics for all publishing operations.

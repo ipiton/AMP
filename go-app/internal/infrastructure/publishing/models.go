@@ -21,6 +21,7 @@ const (
 	TargetTypeSlack        TargetType = "slack"
 	TargetTypeWebhook      TargetType = "webhook"
 	TargetTypeAlertmanager TargetType = "alertmanager"
+	TargetTypeEmail        TargetType = "email"
 )
 
 // ParseTargetType converts string to TargetType
@@ -36,6 +37,8 @@ func ParseTargetType(s string) TargetType {
 		return TargetTypeWebhook
 	case "alertmanager":
 		return TargetTypeAlertmanager
+	case "email":
+		return TargetTypeEmail
 	default:
 		return TargetTypeWebhook // Default to generic webhook
 	}
