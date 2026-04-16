@@ -252,3 +252,5 @@ go-app/configvalidator
 
 # Local private planning artifacts (not for git)
 .plans/
+data
+.forge
