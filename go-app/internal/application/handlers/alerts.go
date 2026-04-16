@@ -16,6 +16,7 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
+	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/internal/infrastructure/webhook"
 )
@@ -29,6 +30,7 @@ type RegistryProvider interface {
 	Config() *appconfig.Config
 	StartTime() time.Time
 	ReloadConfig(ctx context.Context) error
+	InhibitionState() inhibition.InhibitionStateManager
 }
 
 func AlertsHandler(registry RegistryProvider) http.HandlerFunc {

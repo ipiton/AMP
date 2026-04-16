@@ -35,6 +35,7 @@ type AlertProcessor struct {
 	filterEngine      FilterEngine
 	publisher         Publisher
 	deduplication     DeduplicationService              // TN-036 Phase 3: Deduplication service
+	inhibitionCache   inhibition.ActiveAlertCache       // TN-130 PARITY-A2: cache of firing alerts
 	inhibitionMatcher inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
 	inhibitionState   inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
 	businessMetrics   *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
@@ -49,6 +50,7 @@ type AlertProcessorConfig struct {
 	FilterEngine      FilterEngine
 	Publisher         Publisher
 	Deduplication     DeduplicationService              // TN-036 Phase 3: optional, recommended for production
+	InhibitionCache   inhibition.ActiveAlertCache       // TN-130 PARITY-A2: optional, cache of firing alerts
 	InhibitionMatcher inhibition.InhibitionMatcher      // TN-130 Phase 6: optional, recommended for inhibition
 	InhibitionState   inhibition.InhibitionStateManager // TN-130 Phase 6: optional, for state tracking
 	BusinessMetrics   *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
@@ -76,6 +78,7 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 		filterEngine:      config.FilterEngine,
 		publisher:         config.Publisher,
 		deduplication:     config.Deduplication,
+		inhibitionCache:   config.InhibitionCache,   // TN-130 PARITY-A2
 		inhibitionMatcher: config.InhibitionMatcher, // TN-130 Phase 6
 		inhibitionState:   config.InhibitionState,   // TN-130 Phase 6
 		businessMetrics:   config.BusinessMetrics,   // TN-130 Phase 6
@@ -111,6 +114,31 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 
 			// Use deduplicated alert for further processing (may be updated)
 			alert = dedupResult.Alert
+		}
+	}
+
+	// TN-130 PARITY-A2: Step 0.5 — Update inhibition cache and cleanup on status change
+	if p.inhibitionCache != nil {
+		switch alert.Status {
+		case core.StatusFiring:
+			if err := p.inhibitionCache.AddFiringAlert(ctx, alert); err != nil {
+				p.logger.Warn("Failed to add alert to inhibition cache",
+					"error", err,
+					"alert", alert.AlertName,
+					"fingerprint", alert.Fingerprint)
+				// Non-critical: continue processing
+			}
+		case core.StatusResolved:
+			if err := p.inhibitionCache.RemoveAlert(ctx, alert.Fingerprint); err != nil {
+				p.logger.Warn("Failed to remove alert from inhibition cache",
+					"error", err,
+					"alert", alert.AlertName,
+					"fingerprint", alert.Fingerprint)
+				// Non-critical: continue processing
+			}
+			if p.inhibitionState != nil {
+				p.cleanupInhibitionsForSource(ctx, alert.Fingerprint)
+			}
 		}
 	}
 
@@ -299,6 +327,38 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert)
 
 	// Step 3: Publish with classification (smart routing)
 	return p.publisher.PublishWithClassification(ctx, alert, classification)
+}
+
+// cleanupInhibitionsForSource removes all active inhibitions caused by the given source alert.
+// Called when a source (inhibitor) alert resolves.
+func (p *AlertProcessor) cleanupInhibitionsForSource(ctx context.Context, sourceFingerprint string) {
+	if p.inhibitionState == nil {
+		return
+	}
+
+	inhibitions, err := p.inhibitionState.GetActiveInhibitions(ctx)
+	if err != nil {
+		p.logger.Warn("Failed to get active inhibitions for cleanup",
+			"error", err,
+			"source_fingerprint", sourceFingerprint)
+		return
+	}
+
+	for _, state := range inhibitions {
+		if state.SourceFingerprint == sourceFingerprint {
+			if err := p.inhibitionState.RemoveInhibition(ctx, state.TargetFingerprint); err != nil {
+				p.logger.Warn("Failed to remove inhibition",
+					"error", err,
+					"target_fingerprint", state.TargetFingerprint,
+					"source_fingerprint", sourceFingerprint)
+			} else {
+				p.logger.Info("Inhibition removed (source resolved)",
+					"target_fingerprint", state.TargetFingerprint,
+					"source_fingerprint", sourceFingerprint,
+					"rule", state.RuleName)
+			}
+		}
+	}
 }
 
 // Health checks if all dependencies are healthy

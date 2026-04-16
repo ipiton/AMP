@@ -30,8 +30,29 @@ type Config struct {
 	HTTPClient HTTPClientConfig `mapstructure:"http_client"`
 	Retry      RetryConfig      `mapstructure:"retry"`
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
-	Publishing PublishingConfig `mapstructure:"publishing"`
+	Publishing PublishingConfig  `mapstructure:"publishing"`
+	Inhibition InhibitionConfig  `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Receivers  []ReceiverConfig `mapstructure:"receivers"`
+}
+
+// InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)
+type InhibitionConfig struct {
+	// Rules is the list of inhibition rules (Alertmanager compatible format)
+	Rules []InhibitionRuleConfig `mapstructure:"inhibit_rules" yaml:"inhibit_rules"`
+
+	// ConfigFile is an optional path to a separate inhibition rules YAML file.
+	// If specified, rules from the file are merged with inline Rules.
+	ConfigFile string `mapstructure:"config_file" yaml:"config_file,omitempty"`
+}
+
+// InhibitionRuleConfig holds a single inhibition rule in config format
+type InhibitionRuleConfig struct {
+	SourceMatch   map[string]string `mapstructure:"source_match"    yaml:"source_match,omitempty"`
+	SourceMatchRE map[string]string `mapstructure:"source_match_re" yaml:"source_match_re,omitempty"`
+	TargetMatch   map[string]string `mapstructure:"target_match"    yaml:"target_match,omitempty"`
+	TargetMatchRE map[string]string `mapstructure:"target_match_re" yaml:"target_match_re,omitempty"`
+	Equal         []string          `mapstructure:"equal"           yaml:"equal,omitempty"`
+	Name          string            `mapstructure:"name"            yaml:"name,omitempty"`
 }
 
 // ReceiverConfig holds configuration for a notification receiver

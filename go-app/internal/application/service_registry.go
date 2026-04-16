@@ -15,6 +15,7 @@ import (
 	"github.com/ipiton/AMP/internal/database/postgres"
 	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
+	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
@@ -59,6 +60,11 @@ type ServiceRegistry struct {
 	deduplicationSvc  services.DeduplicationService
 	filterEngine      services.FilterEngine
 	publisher         services.Publisher
+
+	// Inhibition subsystem (TN-130, PARITY-A2)
+	inhibitionCache   inhibitionpkg.ActiveAlertCache       // two-tier cache of firing alerts
+	inhibitionMatcher inhibitionpkg.InhibitionMatcher      // rule engine
+	inhibitionState   inhibitionpkg.InhibitionStateManager // active inhibition tracking
 
 	// Business Services
 	k8sClient                  k8s.K8sClient
@@ -137,6 +143,13 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	// Step 2: Initialize Core Services
 	if err := r.initializeCoreServices(ctx); err != nil {
 		return fmt.Errorf("core services initialization failed: %w", err)
+	}
+
+	// Step 2.5: Initialize Inhibition subsystem (non-fatal — graceful degradation)
+	if err := r.initializeInhibition(ctx); err != nil {
+		r.logger.Warn("Inhibition subsystem initialization failed, continuing without inhibition",
+			"error", err)
+		r.addDegradedReason("inhibition unavailable: %v", err)
 	}
 
 	// Step 3: Initialize Business Services
@@ -441,18 +454,46 @@ func (r *ServiceRegistry) initializeClassification(ctx context.Context) error {
 	return nil
 }
 
+// initializeInhibition initializes the inhibition subsystem (TN-130, PARITY-A2).
+// Non-fatal: if no rules are configured, the subsystem is skipped (graceful degradation).
+func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
+	_ = ctx
+
+	rules := r.config.Inhibition.ToInhibitionRules()
+	if len(rules) == 0 {
+		r.logger.Warn("No inhibition rules configured, inhibition engine disabled")
+		return nil
+	}
+
+	r.logger.Info("Initializing inhibition subsystem...", "rules", len(rules))
+
+	alertCache := inhibitionpkg.NewTwoTierAlertCache(r.cache, r.logger)
+	stateManager := inhibitionpkg.NewDefaultStateManager(r.cache, r.logger, r.metrics)
+	matcher := inhibitionpkg.NewMatcher(alertCache, rules, r.logger)
+
+	r.inhibitionCache = alertCache
+	r.inhibitionState = stateManager
+	r.inhibitionMatcher = matcher
+
+	r.logger.Info("✅ Inhibition subsystem initialized", "rules", len(rules))
+	return nil
+}
+
 // initializeAlertProcessor initializes the alert processor.
 func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 	r.logger.Info("Initializing Alert Processor...")
 
 	config := services.AlertProcessorConfig{
-		FilterEngine:    r.filterEngine,
-		LLMClient:       r.classificationSvc,
-		Publisher:       r.publisher,
-		Deduplication:   r.deduplicationSvc,
-		BusinessMetrics: r.metrics,
-		Logger:          r.logger,
-		Metrics:         nil, // TODO: MetricsManager
+		FilterEngine:      r.filterEngine,
+		LLMClient:         r.classificationSvc,
+		Publisher:         r.publisher,
+		Deduplication:     r.deduplicationSvc,
+		InhibitionMatcher: r.inhibitionMatcher,
+		InhibitionState:   r.inhibitionState,
+		InhibitionCache:   r.inhibitionCache,
+		BusinessMetrics:   r.metrics,
+		Logger:            r.logger,
+		Metrics:           nil, // TODO: MetricsManager
 	}
 
 	processor, err := services.NewAlertProcessor(config)
@@ -485,6 +526,15 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 	if r.alertProcessor != nil {
 		r.logger.Info("Shutting down Alert Processor...")
 		// TODO: Add shutdown method
+	}
+
+	// Shutdown Inhibition cache background worker
+	if r.inhibitionCache != nil {
+		r.logger.Info("Shutting down inhibition cache...")
+		if stopper, ok := r.inhibitionCache.(interface{ Stop() }); ok {
+			stopper.Stop()
+		}
+		r.logger.Info("✅ Inhibition cache stopped")
 	}
 
 	r.shutdownPublishing()
@@ -567,6 +617,11 @@ func (r *ServiceRegistry) StartTime() time.Time {
 
 func (r *ServiceRegistry) ReloadCoordinator() *appconfig.ReloadCoordinator {
 	return r.reloadCoordinator
+}
+
+// InhibitionState returns the inhibition state manager (may be nil if not configured).
+func (r *ServiceRegistry) InhibitionState() inhibitionpkg.InhibitionStateManager {
+	return r.inhibitionState
 }
 
 func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {

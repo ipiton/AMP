@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
+	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 )
 
@@ -43,12 +44,13 @@ type fakeRegistry struct {
 	processor    *services.AlertProcessor
 }
 
-func (r *fakeRegistry) AlertStore() *memory.AlertStore           { return r.alertStore }
-func (r *fakeRegistry) SilenceStore() *memory.SilenceStore       { return r.silenceStore }
-func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
-func (r *fakeRegistry) Config() *appconfig.Config               { return &appconfig.Config{} }
-func (r *fakeRegistry) StartTime() time.Time                     { return time.Now() }
-func (r *fakeRegistry) ReloadConfig(_ context.Context) error     { return nil }
+func (r *fakeRegistry) AlertStore() *memory.AlertStore                        { return r.alertStore }
+func (r *fakeRegistry) SilenceStore() *memory.SilenceStore                    { return r.silenceStore }
+func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor              { return r.processor }
+func (r *fakeRegistry) Config() *appconfig.Config                             { return &appconfig.Config{} }
+func (r *fakeRegistry) StartTime() time.Time                                  { return time.Now() }
+func (r *fakeRegistry) ReloadConfig(_ context.Context) error                  { return nil }
+func (r *fakeRegistry) InhibitionState() inhibition.InhibitionStateManager    { return nil }
 
 func newTestProcessor(t *testing.T, publisher *fakePublisher) *services.AlertProcessor {
 	t.Helper()
