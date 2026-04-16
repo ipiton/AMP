@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
 
 ### Changed
+- **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT**: REPOSITORY-FLAPPING-TRANSITIONS-DRIFT _(forge)_
 - **PUBLISHING-HEALTH-REFRESH-DRIFT**: PUBLISHING-HEALTH-REFRESH-DRIFT _(forge)_
 - **PARITY-A3-EMAIL-PUBLISHER**: SMTP client + EmailPublisher в factory. ~2-3d _(forge)_
 - **PARITY-A2-INHIBITION-PIPELINE**: InhibitionMatcher не подключён в AlertProcessor pipeline. ~2d _(forge)_
