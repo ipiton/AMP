@@ -150,23 +150,23 @@ func TestGetFlappingAlerts_MultipleTransitions(t *testing.T) {
 
 	repo := NewPostgresHistoryRepositoryWithRegisterer(pool, nil, nil, prometheus.NewRegistry())
 
-	// Insert a flapping alert (firing -> resolved -> firing -> resolved)
-	// 4 transitions
+	// Insert a flapping alert: 4 rows with distinct starts_at
+	// firing -> resolved -> firing -> resolved = 3 state transitions (N rows => N-1 transitions)
 	baseTime := time.Now().Add(-24 * time.Hour)
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO alerts (fingerprint, alert_name, status, starts_at, created_at, labels)
 		VALUES
-		('fp_flap', 'FlappingAlert', 'firing', $1, $1, '{"namespace": "prod"}'),
-		('fp_flap', 'FlappingAlert', 'resolved', $1, $1 + INTERVAL '10 minutes', '{"namespace": "prod"}'),
-		('fp_flap', 'FlappingAlert', 'firing', $1, $1 + INTERVAL '20 minutes', '{"namespace": "prod"}'),
-		('fp_flap', 'FlappingAlert', 'resolved', $1, $1 + INTERVAL '30 minutes', '{"namespace": "prod"}')
+		('fp_flap', 'FlappingAlert', 'firing',   $1,                         $1,                         '{"namespace": "prod"}'),
+		('fp_flap', 'FlappingAlert', 'resolved', $1 + INTERVAL '10 minutes', $1 + INTERVAL '10 minutes', '{"namespace": "prod"}'),
+		('fp_flap', 'FlappingAlert', 'firing',   $1 + INTERVAL '20 minutes', $1 + INTERVAL '20 minutes', '{"namespace": "prod"}'),
+		('fp_flap', 'FlappingAlert', 'resolved', $1 + INTERVAL '30 minutes', $1 + INTERVAL '30 minutes', '{"namespace": "prod"}')
 	`, baseTime)
 	if err != nil {
 		t.Fatalf("Failed to insert test data: %v", err)
 	}
 
 	timeRange := &core.TimeRange{}
-	// Threshold 3 should catch it (4 transitions)
+	// Threshold 3 should catch it (3 transitions)
 	alerts, err := repo.GetFlappingAlerts(context.Background(), timeRange, 3)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
@@ -179,8 +179,8 @@ func TestGetFlappingAlerts_MultipleTransitions(t *testing.T) {
 	if alerts[0].Fingerprint != "fp_flap" {
 		t.Errorf("Expected fingerprint fp_flap, got %s", alerts[0].Fingerprint)
 	}
-	if alerts[0].TransitionCount < 4 {
-		t.Errorf("Expected at least 4 transitions, got %d", alerts[0].TransitionCount)
+	if alerts[0].TransitionCount < 3 {
+		t.Errorf("Expected at least 3 transitions, got %d", alerts[0].TransitionCount)
 	}
 }
 
