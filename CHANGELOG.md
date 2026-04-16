@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
 
 ### Changed
+- **PUBLISHING-HEALTH-REFRESH-DRIFT**: PUBLISHING-HEALTH-REFRESH-DRIFT _(forge)_
 - **PARITY-A3-EMAIL-PUBLISHER**: SMTP client + EmailPublisher в factory. ~2-3d _(forge)_
 - **PARITY-A2-INHIBITION-PIPELINE**: InhibitionMatcher не подключён в AlertProcessor pipeline. ~2d _(forge)_
 - **Go Toolchain Baseline Updated** - Project runtime/build baseline raised to Go 1.26 (2026-02-27)
