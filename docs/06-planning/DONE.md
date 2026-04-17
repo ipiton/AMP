@@ -1,6 +1,8 @@
 # DONE
 
-## 2026-04-16
+## 2026-04
+- 2026-04-17 — (TASK / Platform) **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval`/`repeat_interval` таймеры не триггерят нотификации. ~3d _(closed by forge)_
+-16
 - **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT** — завершен как атомарный SQL + test-fixture fix без изменения публичного контракта `GetFlappingAlerts`.
 - В `go-app/internal/infrastructure/repository/postgres_history.go` добавлен тайбрейкер `id` в window function: `LAG(status) OVER (PARTITION BY fingerprint ORDER BY starts_at, id)` — детерминированный порядок для строк с одинаковым `starts_at`.
 - В `go-app/internal/infrastructure/repository/postgres_history_test.go` фикстура `TestGetFlappingAlerts_MultipleTransitions` исправлена: каждая из 4 строк получила уникальный `starts_at` (+10m каждая), `created_at` синхронизирован с `starts_at`, assertion исправлен с `>= 4` на `>= 3` (N строк → N−1 переходов).
