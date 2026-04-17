@@ -864,8 +864,24 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 		"group_key", groupKey,
 		"alert_count", len(group.Alerts))
 
-	// Publish all alerts in the group as the first notification
-	m.publishGroupAlerts(ctx, group)
+	// Check if group still exists and has alerts (load from storage for freshness,
+	// matching the pattern used in onGroupIntervalExpired/onRepeatIntervalExpired).
+	currentGroup, err := m.storage.Load(ctx, groupKey)
+	if err != nil {
+		m.logger.Debug("group no longer exists, not sending notification",
+			"group_key", groupKey,
+			"error", err)
+		return nil
+	}
+
+	if len(currentGroup.Alerts) == 0 {
+		m.logger.Debug("group is empty, not sending notification",
+			"group_key", groupKey)
+		return nil
+	}
+
+	// Publish all alerts in the current group snapshot as the first notification
+	m.publishGroupAlerts(ctx, currentGroup)
 
 	// Start group_interval timer for subsequent notifications
 	if err := m.startGroupIntervalTimer(ctx, groupKey); err != nil {

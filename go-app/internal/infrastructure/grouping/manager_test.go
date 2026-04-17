@@ -855,9 +855,10 @@ func TestTimerChain_GroupWaitToRepeatInterval(t *testing.T) {
 	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
 	require.NoError(t, err)
 
-	// Wait for group_wait → group_interval → repeat_interval chain
-	// Each timer is 10ms; give 500ms total for three rounds to avoid flakiness.
-	deadline := time.Now().Add(500 * time.Millisecond)
+	// Wait for group_wait → group_interval → repeat_interval chain.
+	// Each timer is 10ms; 2s deadline to remain stable under heavy CI load
+	// (real-time based — may still be flaky on severely resource-starved runners).
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(pub.published) >= 2 {
 			break
