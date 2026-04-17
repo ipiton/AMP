@@ -43,7 +43,7 @@
 ## Alertmanager Full Parity — Phase A (production-viable)
 > Критичные gaps, блокирующие использование AMP как замены Alertmanager. После Phase A — AMP пригоден для production (без maintenance windows и HA).
 
-- [ ] **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval` и `repeat_interval` таймеры не триггерят нотификации:
+- [x] **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval` и `repeat_interval` таймеры не триггерят нотификации: _(closed by forge)_
   - `manager_impl.go:804` — "Trigger notification here (will be implemented in TN-125)"
   - `manager_impl.go:825` — аналогичный TODO
   - `manager_impl.go:870` — "repeat_interval timer expired (not implemented)"
