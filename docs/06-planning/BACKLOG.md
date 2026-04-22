@@ -64,7 +64,7 @@
   - Нужно: SMTP client, EmailPublisher, регистрация в factory
   - Оценка: ~2-3d
 
-- [ ] **PARITY-A4-ADVANCED-FILTERING** — alert и silence filtering:
+- [x] **PARITY-A4-ADVANCED-FILTERING** — alert и silence filtering: _(closed by forge)_
   - `GET /api/v2/alerts` — только простой list, нет `filter` query param с matchers
   - `silences.go:61` — "Advanced filtering (regex, matchers) will be added later"
   - Alertmanager поддерживает: `filter=alertname="test"`, `filter=alertname=~".*foo.*"`
