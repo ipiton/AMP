@@ -45,13 +45,13 @@ func createTestEnrichedAlert() *core.EnrichedAlert {
 }
 
 func TestNewAlertFormatter(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 
 	assert.NotNil(t, formatter)
 }
 
 func TestFormatAlert_Alertmanager(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatAlertmanager)
@@ -84,7 +84,7 @@ func TestFormatAlert_Alertmanager(t *testing.T) {
 }
 
 func TestFormatAlert_Rootly(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatRootly)
@@ -115,7 +115,7 @@ func TestFormatAlert_Rootly(t *testing.T) {
 }
 
 func TestFormatAlert_PagerDuty(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatPagerDuty)
@@ -141,7 +141,7 @@ func TestFormatAlert_PagerDuty(t *testing.T) {
 }
 
 func TestFormatAlert_PagerDuty_Resolved(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 	enrichedAlert.Alert.Status = core.StatusResolved
 
@@ -152,7 +152,7 @@ func TestFormatAlert_PagerDuty_Resolved(t *testing.T) {
 }
 
 func TestFormatAlert_Slack(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatSlack)
@@ -179,7 +179,7 @@ func TestFormatAlert_Slack(t *testing.T) {
 }
 
 func TestFormatAlert_Slack_Critical(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 	enrichedAlert.Classification.Severity = core.SeverityCritical
 
@@ -194,7 +194,7 @@ func TestFormatAlert_Slack_Critical(t *testing.T) {
 }
 
 func TestFormatAlert_Webhook(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatWebhook)
@@ -219,7 +219,7 @@ func TestFormatAlert_Webhook(t *testing.T) {
 }
 
 func TestFormatAlert_NilAlert(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 
 	result, err := formatter.FormatAlert(context.Background(), nil, core.FormatWebhook)
 
@@ -229,7 +229,7 @@ func TestFormatAlert_NilAlert(t *testing.T) {
 }
 
 func TestFormatAlert_NilClassification(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 	enrichedAlert.Classification = nil
 
@@ -244,7 +244,7 @@ func TestFormatAlert_NilClassification(t *testing.T) {
 }
 
 func TestFormatAlert_UnknownFormat(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	// Use unknown format (should default to webhook)

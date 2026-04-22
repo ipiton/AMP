@@ -87,7 +87,7 @@ func newTestMetrics(t *testing.T) *v2.PublishingMetrics {
 
 func TestEnhancedEmailPublisher_Name(t *testing.T) {
 	mock := &MockSMTPClient{}
-	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger())
+	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger(), "")
 	if pub.Name() != "Email" {
 		t.Errorf("Name() = %q, want %q", pub.Name(), "Email")
 	}
@@ -96,7 +96,7 @@ func TestEnhancedEmailPublisher_Name(t *testing.T) {
 func TestEnhancedEmailPublisher_Publish_Success(t *testing.T) {
 	mock := &MockSMTPClient{}
 	metrics := newTestMetrics(t)
-	pub := NewEnhancedEmailPublisher(mock, metrics, nil, testLogger())
+	pub := NewEnhancedEmailPublisher(mock, metrics, nil, testLogger(), "")
 
 	target := newTestTarget(map[string]string{
 		"to":   "ops@example.com, dev@example.com",
@@ -133,7 +133,7 @@ func TestEnhancedEmailPublisher_Publish_Success(t *testing.T) {
 
 func TestEnhancedEmailPublisher_Publish_NoRecipients(t *testing.T) {
 	mock := &MockSMTPClient{}
-	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger())
+	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger(), "")
 
 	target := newTestTarget(map[string]string{}) // нет "to"
 	alert := newTestEnrichedAlert(core.StatusFiring)
@@ -154,7 +154,7 @@ func TestEnhancedEmailPublisher_Publish_SMTPError(t *testing.T) {
 	smtpErr := errors.New("535 Authentication failed")
 	mock := &MockSMTPClient{SendEmailErr: smtpErr}
 	metrics := newTestMetrics(t)
-	pub := NewEnhancedEmailPublisher(mock, metrics, nil, testLogger())
+	pub := NewEnhancedEmailPublisher(mock, metrics, nil, testLogger(), "")
 
 	target := newTestTarget(map[string]string{"to": "ops@example.com"})
 	alert := newTestEnrichedAlert(core.StatusFiring)
@@ -170,7 +170,7 @@ func TestEnhancedEmailPublisher_Publish_SMTPError(t *testing.T) {
 
 func TestEnhancedEmailPublisher_Publish_Resolved(t *testing.T) {
 	mock := &MockSMTPClient{}
-	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger())
+	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger(), "")
 
 	target := newTestTarget(map[string]string{"to": "ops@example.com"})
 	alert := newTestEnrichedAlert(core.StatusResolved)
@@ -306,7 +306,7 @@ func TestSMTPDialer_IsDirectTLS(t *testing.T) {
 // Fix #2: []string{""} должен возвращать ошибку "no recipients"
 func TestSendEmail_EmptyStringRecipient(t *testing.T) {
 	mock := &MockSMTPClient{}
-	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger())
+	pub := NewEnhancedEmailPublisher(mock, nil, nil, testLogger(), "")
 
 	// target с "to" состоящим только из пробелов/пустых строк
 	target := newTestTarget(map[string]string{"to": "  ,  , "})
@@ -332,7 +332,7 @@ func TestBuildEmailTemplateData(t *testing.T) {
 	alert := newTestEnrichedAlert(core.StatusFiring)
 	target := newTestTarget(map[string]string{})
 
-	data := buildEmailTemplateData(alert, target)
+	data := buildEmailTemplateData(alert, target, "")
 
 	if data.Status != "firing" {
 		t.Errorf("Status = %q, want firing", data.Status)
@@ -349,6 +349,29 @@ func TestBuildEmailTemplateData(t *testing.T) {
 	if data.Receiver != "test-email-target" {
 		t.Errorf("Receiver = %q, want test-email-target", data.Receiver)
 	}
+	if data.ExternalURL != "" {
+		t.Errorf("ExternalURL = %q, want empty when not set", data.ExternalURL)
+	}
+	if data.SilenceURL != "" {
+		t.Errorf("SilenceURL = %q, want empty when externalURL not set", data.SilenceURL)
+	}
+}
+
+func TestBuildEmailTemplateData_WithExternalURL(t *testing.T) {
+	alert := newTestEnrichedAlert(core.StatusFiring)
+	target := newTestTarget(map[string]string{})
+
+	data := buildEmailTemplateData(alert, target, "http://amp.example.com")
+
+	if data.ExternalURL != "http://amp.example.com" {
+		t.Errorf("ExternalURL = %q, want http://amp.example.com", data.ExternalURL)
+	}
+	if data.SilenceURL == "" {
+		t.Error("SilenceURL should not be empty when externalURL is set")
+	}
+	if !strings.HasPrefix(data.SilenceURL, "http://amp.example.com/#/silences?filter=") {
+		t.Errorf("SilenceURL = %q, want prefix http://amp.example.com/#/silences", data.SilenceURL)
+	}
 }
 
 // ============================================================================
@@ -358,7 +381,7 @@ func TestBuildEmailTemplateData(t *testing.T) {
 func TestRenderEmailContent_DefaultTemplates(t *testing.T) {
 	alert := newTestEnrichedAlert(core.StatusFiring)
 	target := newTestTarget(map[string]string{})
-	data := buildEmailTemplateData(alert, target)
+	data := buildEmailTemplateData(alert, target, "")
 
 	_, _, subjectTmpl, htmlTmpl, textTmpl := extractEmailConfig(target)
 	subject, html, text, err := renderEmailContent(data, subjectTmpl, htmlTmpl, textTmpl)
@@ -654,7 +677,7 @@ func TestParseTargetType_Email(t *testing.T) {
 
 func TestPublisherFactory_CreatePublisher_Email(t *testing.T) {
 	metrics := newTestMetrics(t)
-	factory := NewPublisherFactory(nil, testLogger(), metrics)
+	factory := NewPublisherFactory(nil, testLogger(), metrics, "")
 	defer factory.Shutdown()
 
 	pub, err := factory.CreatePublisher("email")
@@ -668,7 +691,7 @@ func TestPublisherFactory_CreatePublisher_Email(t *testing.T) {
 
 func TestPublisherFactory_CreatePublisherForTarget_Email(t *testing.T) {
 	metrics := newTestMetrics(t)
-	factory := NewPublisherFactory(nil, testLogger(), metrics)
+	factory := NewPublisherFactory(nil, testLogger(), metrics, "")
 	defer factory.Shutdown()
 
 	target := newTestTarget(map[string]string{
