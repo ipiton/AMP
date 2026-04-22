@@ -16,9 +16,11 @@ import (
 	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
 	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
+	investigationinfra "github.com/ipiton/AMP/internal/infrastructure/investigation"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
+	investigationrepo "github.com/ipiton/AMP/internal/infrastructure/repository"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/pkg/metrics"
 )
@@ -85,6 +87,10 @@ type ServiceRegistry struct {
 	publishingCoordinator      *infrapublishing.PublishingCoordinator
 	publishingMetricsCollector *businesspublishing.PublishingMetricsCollector
 	publisherFactory           *infrapublishing.PublisherFactory
+
+	// Investigation pipeline (PHASE-5A)
+	investigationRepo  core.InvestigationRepository
+	investigationQueue *investigationinfra.InvestigationQueue
 
 	// State
 	startTime         time.Time
@@ -163,6 +169,13 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	// Step 3: Initialize Business Services
 	if err := r.initializeBusinessServices(ctx); err != nil {
 		return fmt.Errorf("business services initialization failed: %w", err)
+	}
+
+	// Step 3.5: Initialize Investigation pipeline (non-fatal — graceful degradation)
+	if err := r.initializeInvestigation(ctx); err != nil {
+		r.logger.Warn("Investigation pipeline initialization failed, continuing without investigations",
+			"error", err)
+		r.addDegradedReason("investigation pipeline unavailable: %v", err)
 	}
 
 	// Step 4: Initialize Alert Processor after publisher wiring is ready
@@ -489,21 +502,71 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 	return nil
 }
 
+// initializeInvestigation sets up the async investigation pipeline (PHASE-5A).
+// Only available in standard profile with a live PostgreSQL pool.
+func (r *ServiceRegistry) initializeInvestigation(ctx context.Context) error {
+	if r.config.Profile != appconfig.ProfileStandard {
+		r.logger.Info("Skipping investigation pipeline (non-standard profile)")
+		return nil
+	}
+	if r.database == nil || r.database.Pool() == nil {
+		return fmt.Errorf("postgres pool not available for investigation pipeline")
+	}
+	if !r.config.LLM.Enabled {
+		r.logger.Info("Skipping investigation pipeline (LLM disabled)")
+		return nil
+	}
+
+	r.logger.Info("Initializing investigation pipeline...")
+
+	r.investigationRepo = investigationrepo.NewPostgresInvestigationRepository(r.database.Pool(), r.logger)
+
+	llmCfg := llm.DefaultConfig()
+	llmCfg.Provider = r.config.LLM.Provider
+	llmCfg.BaseURL = r.config.LLM.BaseURL
+	llmCfg.APIKey = r.config.LLM.APIKey
+	llmCfg.Model = r.config.LLM.Model
+	llmCfg.MaxTokens = r.config.LLM.MaxTokens
+	llmCfg.Temperature = r.config.LLM.Temperature
+	llmCfg.Timeout = r.config.LLM.Timeout
+	llmCfg.MaxRetries = r.config.LLM.MaxRetries
+
+	llmClient := llm.NewHTTPLLMClient(llmCfg, r.logger)
+
+	qCfg := investigationinfra.DefaultQueueConfig()
+	r.investigationQueue = investigationinfra.NewInvestigationQueue(
+		r.investigationRepo,
+		llmClient,
+		qCfg,
+		r.logger,
+		nil, // use default prometheus registerer
+	)
+	r.investigationQueue.Start()
+
+	r.logger.Info("Investigation pipeline initialized",
+		"workers", qCfg.WorkerCount,
+		"queue_size", qCfg.QueueSize,
+	)
+	_ = ctx
+	return nil
+}
+
 // initializeAlertProcessor initializes the alert processor.
 func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 	r.logger.Info("Initializing Alert Processor...")
 
 	config := services.AlertProcessorConfig{
-		FilterEngine:      r.filterEngine,
-		LLMClient:         r.classificationSvc,
-		Publisher:         r.publisher,
-		Deduplication:     r.deduplicationSvc,
-		InhibitionMatcher: r.inhibitionMatcher,
-		InhibitionState:   r.inhibitionState,
-		InhibitionCache:   r.inhibitionCache,
-		BusinessMetrics:   r.metrics,
-		Logger:            r.logger,
-		Metrics:           nil, // TODO: MetricsManager
+		FilterEngine:       r.filterEngine,
+		LLMClient:          r.classificationSvc,
+		Publisher:          r.publisher,
+		Deduplication:      r.deduplicationSvc,
+		InvestigationQueue: r.investigationQueue, // PHASE-5A: may be nil (graceful degradation)
+		InhibitionMatcher:  r.inhibitionMatcher,
+		InhibitionState:    r.inhibitionState,
+		InhibitionCache:    r.inhibitionCache,
+		BusinessMetrics:    r.metrics,
+		Logger:             r.logger,
+		Metrics:            nil, // TODO: MetricsManager
 	}
 
 	processor, err := services.NewAlertProcessor(config)
@@ -536,6 +599,14 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 	if r.alertProcessor != nil {
 		r.logger.Info("Shutting down Alert Processor...")
 		// TODO: Add shutdown method
+	}
+
+	// Shutdown Investigation Queue (PHASE-5A)
+	if r.investigationQueue != nil {
+		r.logger.Info("Shutting down investigation queue...")
+		if err := r.investigationQueue.Stop(5 * time.Second); err != nil {
+			r.logger.Warn("Investigation queue stop warning", "error", err)
+		}
 	}
 
 	// Shutdown Inhibition cache background worker
@@ -630,6 +701,11 @@ func (r *ServiceRegistry) ReloadCoordinator() *appconfig.ReloadCoordinator {
 // InhibitionState returns the inhibition state manager (may be nil if not configured).
 func (r *ServiceRegistry) InhibitionState() inhibitionpkg.InhibitionStateManager {
 	return r.inhibitionState
+}
+
+// InvestigationRepository returns the investigation repository (may be nil if not initialized).
+func (r *ServiceRegistry) InvestigationRepository() core.InvestigationRepository {
+	return r.investigationRepo
 }
 
 func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {

@@ -466,6 +466,145 @@ func unwrapJSONCodeFence(raw string) string {
 	return trimmed
 }
 
+// InvestigateAlert calls the LLM with an investigation prompt and returns structured findings.
+// The classification parameter may be nil if classification was unavailable.
+func (c *HTTPLLMClient) InvestigateAlert(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) (*core.InvestigationResult, error) {
+	if alert == nil {
+		return nil, fmt.Errorf("alert cannot be nil")
+	}
+
+	startTime := time.Now()
+
+	llmAlert := CoreAlertToLLMRequest(alert)
+	if llmAlert == nil {
+		return nil, fmt.Errorf("failed to convert alert to LLM format")
+	}
+
+	llmAlertBytes, err := json.Marshal(llmAlert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal alert for investigation: %w", err)
+	}
+
+	classificationInfo := "No classification available."
+	if classification != nil {
+		classificationInfo = fmt.Sprintf("Severity: %s, Confidence: %.2f, Reasoning: %s",
+			classification.Severity, classification.Confidence, classification.Reasoning)
+	}
+
+	systemPrompt := `You are an expert SRE investigating a production alert.
+Analyze the alert and provide a structured investigation report.
+Return ONLY valid JSON with these keys:
+- summary (string): 1-2 sentence description of what happened
+- findings (object): structured findings about the root cause
+- recommendations (array of strings): actionable remediation steps
+- confidence (float 0-1): confidence in your analysis`
+
+	userContent := fmt.Sprintf("Alert data:\n%s\n\nClassification context:\n%s\n\nProvide investigation findings.", string(llmAlertBytes), classificationInfo)
+
+	request := map[string]any{
+		"model": c.config.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userContent},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	if c.config.MaxTokens > 0 {
+		request["max_tokens"] = c.config.MaxTokens
+	}
+	if c.config.Temperature >= 0 {
+		request["temperature"] = c.config.Temperature
+	}
+
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal investigation request: %w", err)
+	}
+
+	url := buildOpenAIChatCompletionsURL(c.config.BaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create investigation request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
+	if c.config.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("investigation request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read investigation response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Message:    fmt.Sprintf("LLM investigation error: status %d, body: %s", resp.StatusCode, string(body)),
+		}
+	}
+
+	var openAIResponse struct {
+		Model string `json:"model"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &openAIResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse investigation response: %w", err)
+	}
+	if len(openAIResponse.Choices) == 0 {
+		return nil, fmt.Errorf("investigation response has no choices")
+	}
+
+	content := strings.TrimSpace(openAIResponse.Choices[0].Message.Content)
+	if content == "" {
+		return nil, fmt.Errorf("investigation response content is empty")
+	}
+	content = unwrapJSONCodeFence(content)
+
+	var payload struct {
+		Summary         string         `json:"summary"`
+		Findings        map[string]any `json:"findings"`
+		Recommendations []string       `json:"recommendations"`
+		Confidence      float64        `json:"confidence"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse investigation payload: %w", err)
+	}
+
+	result := &core.InvestigationResult{
+		Summary:          payload.Summary,
+		Findings:         payload.Findings,
+		Recommendations:  payload.Recommendations,
+		Confidence:       payload.Confidence,
+		LLMModel:         openAIResponse.Model,
+		PromptTokens:     openAIResponse.Usage.PromptTokens,
+		CompletionTokens: openAIResponse.Usage.CompletionTokens,
+		ProcessingTime:   time.Since(startTime).Seconds(),
+	}
+
+	c.logger.Info("Alert investigated successfully",
+		"alert", alert.AlertName,
+		"confidence", result.Confidence,
+		"processing_time", result.ProcessingTime,
+	)
+
+	return result, nil
+}
+
 // GetCircuitBreakerState returns current circuit breaker state.
 // Returns StateClosed if circuit breaker is disabled.
 func (c *HTTPLLMClient) GetCircuitBreakerState() CircuitBreakerState {
@@ -486,8 +625,9 @@ func (c *HTTPLLMClient) GetCircuitBreakerStats() CircuitBreakerStats {
 
 // MockLLMClient implements LLMClient interface for testing.
 type MockLLMClient struct {
-	ClassifyAlertFunc func(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error)
-	HealthFunc        func(ctx context.Context) error
+	ClassifyAlertFunc    func(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error)
+	HealthFunc           func(ctx context.Context) error
+	InvestigateAlertFunc func(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) (*core.InvestigationResult, error)
 }
 
 // NewMockLLMClient creates a new mock LLM client.
@@ -527,4 +667,19 @@ func (m *MockLLMClient) Health(ctx context.Context) error {
 		return m.HealthFunc(ctx)
 	}
 	return fmt.Errorf("HealthFunc not implemented")
+}
+
+// InvestigateAlert implements InvestigationLLMClient for testing.
+func (m *MockLLMClient) InvestigateAlert(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) (*core.InvestigationResult, error) {
+	if m.InvestigateAlertFunc != nil {
+		return m.InvestigateAlertFunc(ctx, alert, classification)
+	}
+	return &core.InvestigationResult{
+		Summary:         "Mock investigation: " + alert.AlertName,
+		Findings:        map[string]any{"source": "mock"},
+		Recommendations: []string{"Check system resources", "Review recent deployments"},
+		Confidence:      0.75,
+		LLMModel:        "mock",
+		ProcessingTime:  0.01,
+	}, nil
 }
