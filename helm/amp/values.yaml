@@ -636,6 +636,16 @@ persistence:
   storageClass: ""
 
 # ===============================
+# Server Configuration
+# ===============================
+server:
+  # Public base URL of this AMP instance (Alertmanager --web.external-url parity).
+  # Used to build callback links in email footers, Teams "Silence Alert" buttons,
+  # and webhook payload urls.silence. Leave empty to disable links gracefully.
+  # Env: SERVER_EXTERNAL_URL
+  externalUrl: ""
+
+# ===============================
 # Scheduling Configuration
 # ===============================
 nodeSelector: {}
