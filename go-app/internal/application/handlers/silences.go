@@ -57,9 +57,23 @@ func SilenceByIDHandler(registry RegistryProvider) http.HandlerFunc {
 }
 
 func handleSilencesGet(store *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
-	silences := store.List(time.Now().UTC())
-	// Filtering by label matchers can be added here later (similar to main.go logic)
-	writeJSON(w, http.StatusOK, silences)
+	filters, err := ParseLabelMatchers(r.URL.Query()["filter"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	all := store.List(time.Now().UTC())
+
+	result := make([]core.APISilence, 0, len(all))
+	for _, s := range all {
+		if !MatchesSilenceMatchers(filters, s.Matchers) {
+			continue
+		}
+		result = append(result, s)
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func handleSilencePost(store *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
