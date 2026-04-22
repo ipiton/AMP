@@ -147,6 +147,143 @@ func TestAlertsHandler_PostPrometheusPayloadUsesProcessorAndStoresAlert(t *testi
 	}
 }
 
+func postAlert(t *testing.T, handler http.HandlerFunc, labels map[string]string) {
+	t.Helper()
+	labelJSON := "{"
+	first := true
+	for k, v := range labels {
+		if !first {
+			labelJSON += ","
+		}
+		labelJSON += `"` + k + `":"` + v + `"`
+		first = false
+	}
+	labelJSON += "}"
+	payload := `[{"labels":` + labelJSON + `,"startsAt":"2026-03-08T10:00:00Z","status":"firing"}]`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func getAlerts(t *testing.T, handler http.HandlerFunc, query string) []core.APIGettableAlert {
+	t.Helper()
+	url := "/api/v2/alerts"
+	if query != "" {
+		url += "?" + query
+	}
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var alerts []core.APIGettableAlert
+	if err := json.Unmarshal(rec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	return alerts
+}
+
+func TestAlertsHandler_FilterByExactLabel(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	postAlert(t, handler, map[string]string{"alertname": "Watchdog", "severity": "critical"})
+	postAlert(t, handler, map[string]string{"alertname": "OtherAlert", "severity": "warning"})
+
+	alerts := getAlerts(t, handler, `filter=alertname%3D"Watchdog"`)
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	}
+	if alerts[0].Labels["alertname"] != "Watchdog" {
+		t.Errorf("unexpected alertname %q", alerts[0].Labels["alertname"])
+	}
+}
+
+func TestAlertsHandler_FilterByRegex(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	postAlert(t, handler, map[string]string{"alertname": "AlertA", "severity": "critical"})
+	postAlert(t, handler, map[string]string{"alertname": "AlertB", "severity": "warning"})
+
+	alerts := getAlerts(t, handler, `filter=severity%3D~"crit.*"`)
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	}
+	if alerts[0].Labels["severity"] != "critical" {
+		t.Errorf("unexpected severity %q", alerts[0].Labels["severity"])
+	}
+}
+
+func TestAlertsHandler_FilterBadSyntax_Returns400(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?filter=bad%3Asyntax", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestAlertsHandler_FilterCombinedWithStatus(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	postAlert(t, handler, map[string]string{"alertname": "X", "severity": "critical"})
+	postAlert(t, handler, map[string]string{"alertname": "Y", "severity": "warning"})
+
+	alerts := getAlerts(t, handler, `status=firing&filter=alertname%3D"X"`)
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	}
+	if alerts[0].Labels["alertname"] != "X" {
+		t.Errorf("unexpected alertname %q", alerts[0].Labels["alertname"])
+	}
+}
+
+func TestAlertsHandler_EmptyFilter_ReturnsAll(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	postAlert(t, handler, map[string]string{"alertname": "A", "severity": "critical"})
+	postAlert(t, handler, map[string]string{"alertname": "B", "severity": "warning"})
+
+	alerts := getAlerts(t, handler, "")
+	if len(alerts) != 2 {
+		t.Fatalf("expected 2 alerts, got %d", len(alerts))
+	}
+}
+
 func TestAlertsHandler_SilencedAlertIsSuppressed(t *testing.T) {
 	publisher := &fakePublisher{}
 	registry := &fakeRegistry{
