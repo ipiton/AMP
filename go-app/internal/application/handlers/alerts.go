@@ -54,13 +54,20 @@ func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w 
 		includeResolved = true
 	}
 
-	// For now, simple list. Advanced filtering (regex, matchers) will be added later
-	// as we migrate more helpers from main.go
+	filters, err := ParseLabelMatchers(r.URL.Query()["filter"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	alerts := store.List(status, includeResolved)
 
 	now := time.Now().UTC()
 	gettableAlerts := make([]core.APIGettableAlert, 0, len(alerts))
 	for _, alert := range alerts {
+		if !MatchesLabels(filters, alert.Labels) {
+			continue
+		}
 		gettableAlerts = append(gettableAlerts, toGettableAlert(alert, silences, now))
 	}
 
