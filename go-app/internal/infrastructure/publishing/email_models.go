@@ -26,15 +26,16 @@ type EmailMessage struct {
 // emailTemplateData — контекст для рендеринга email-шаблонов.
 // Структура совместима с шаблонами из defaults.DefaultEmailHTML/Text/Subject.
 type emailTemplateData struct {
-	Status             string
-	GroupLabels        map[string]string
-	CommonLabels       map[string]string
-	CommonAnnotations  map[string]string
-	Labels             map[string]string
-	Annotations        map[string]string
-	Alerts             []emailAlertItem
-	Receiver           string
-	ExternalURL        string
+	Status            string
+	GroupLabels       map[string]string
+	CommonLabels      map[string]string
+	CommonAnnotations map[string]string
+	Labels            map[string]string
+	Annotations       map[string]string
+	Alerts            []emailAlertItem
+	Receiver          string
+	ExternalURL       string
+	SilenceURL        string
 }
 
 // emailAlertItem — один алерт в контексте шаблона.

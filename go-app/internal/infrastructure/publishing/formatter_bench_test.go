@@ -11,7 +11,7 @@ import (
 
 // BenchmarkFormatAlert benchmarks the formatter with pooled maps
 func BenchmarkFormatAlert(b *testing.B) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	ctx := context.Background()
 
 	enrichedAlert := &core.EnrichedAlert{
@@ -69,7 +69,7 @@ func BenchmarkFormatAlert(b *testing.B) {
 
 // BenchmarkFormatAlertParallel benchmarks the formatter under concurrent load
 func BenchmarkFormatAlertParallel(b *testing.B) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	ctx := context.Background()
 
 	enrichedAlert := &core.EnrichedAlert{
