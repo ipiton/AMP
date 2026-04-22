@@ -1,6 +1,8 @@
 # DONE
 
 ## 2026-04
+
+- 2026-04-22 — (TASK / Platform) **PARITY-A4-ADVANCED-FILTERING** — `filter` query param для alerts и silences. ~3d _(closed by forge)_
 - 2026-04-17 — (TASK / Platform) **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval`/`repeat_interval` таймеры не триггерят нотификации. ~3d _(closed by forge)_
 -16
 - **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT** — завершен как атомарный SQL + test-fixture fix без изменения публичного контракта `GetFlappingAlerts`.
