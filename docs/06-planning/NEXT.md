@@ -5,7 +5,6 @@
 ### 1. Alertmanager Parity — Phase A (production-viable)
 > Цель: AMP пригоден как замена Alertmanager для production (без maintenance windows и HA).
 
-- [ ] **PARITY-A4-ADVANCED-FILTERING** — `filter` query param для alerts и silences. ~3d
 - [ ] **PARITY-A5-WEB-EXTERNAL-URL** — callback-ссылки в нотификациях. ~0.5d
 
 ### 2. Intelligence — Two-Phase Pipeline (AMP differentiator)
@@ -23,7 +22,7 @@
 
 ## WIP (Max 2)
 
-- [ ] **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval`/`repeat_interval` таймеры не триггерят нотификации. ~3d (started: 2026-04-16)
+- Пусто.
 ## Notes
 - Очередь обновлена 2026-04-16 после полного аудита AMP и исследования SherlockOps/HolmesGPT/Keep.
 - **Приоритет 1**: Parity Phase A — без этого AMP не может заменить Alertmanager.
