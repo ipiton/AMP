@@ -52,7 +52,7 @@ func BenchmarkDetectPrometheusFormat(b *testing.B) {
 // BenchmarkParseSingleAlert benchmarks parsing a single Prometheus v1 alert
 // Target: < 10µs/op, < 5 allocs/op
 func BenchmarkParseSingleAlert(b *testing.B) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[{
 		"labels": {"alertname": "HighCPU", "instance": "server-1", "job": "api", "severity": "warning"},
@@ -73,7 +73,7 @@ func BenchmarkParseSingleAlert(b *testing.B) {
 // BenchmarkParse100Alerts benchmarks parsing 100 Prometheus v1 alerts
 // Target: < 1ms/op (< 10µs per alert)
 func BenchmarkParse100Alerts(b *testing.B) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	// Build payload with 100 alerts using fmt.Sprintf
 	payloadStr := "["
@@ -148,7 +148,7 @@ func BenchmarkFlattenGroups(b *testing.B) {
 // Target: < 100µs/op
 func BenchmarkHandlerE2E(b *testing.B) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	payload := []byte(`[{
 		"labels": {"alertname": "HighCPU", "instance": "server-1"},
@@ -175,7 +175,7 @@ func BenchmarkHandlerE2E(b *testing.B) {
 // BenchmarkConcurrentParsing benchmarks scalability of concurrent parsing
 // Measures: Linear scaling with goroutines
 func BenchmarkConcurrentParsing(b *testing.B) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[{
 		"labels": {"alertname": "Test"},

@@ -40,12 +40,14 @@ type UniversalWebhookHandler struct {
 }
 
 // NewUniversalWebhookHandler creates a new universal webhook handler.
-func NewUniversalWebhookHandler(processor AlertProcessor, logger *slog.Logger) *UniversalWebhookHandler {
-	return NewUniversalWebhookHandlerWithRegisterer(processor, logger, prometheus.DefaultRegisterer)
+// externalURL is the public base URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
+func NewUniversalWebhookHandler(processor AlertProcessor, logger *slog.Logger, externalURL string) *UniversalWebhookHandler {
+	return NewUniversalWebhookHandlerWithRegisterer(processor, logger, prometheus.DefaultRegisterer, externalURL)
 }
 
 // NewUniversalWebhookHandlerWithRegisterer creates a new universal webhook handler with a custom registerer.
-func NewUniversalWebhookHandlerWithRegisterer(processor AlertProcessor, logger *slog.Logger, reg prometheus.Registerer) *UniversalWebhookHandler {
+// externalURL is the public base URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
+func NewUniversalWebhookHandlerWithRegisterer(processor AlertProcessor, logger *slog.Logger, reg prometheus.Registerer, externalURL string) *UniversalWebhookHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -57,7 +59,7 @@ func NewUniversalWebhookHandlerWithRegisterer(processor AlertProcessor, logger *
 		detector: NewWebhookDetector(),
 		parsers: map[WebhookType]WebhookParser{
 			WebhookTypeAlertmanager: NewAlertmanagerParser(),
-			WebhookTypePrometheus:   NewPrometheusParser(), // TN-146: Prometheus support
+			WebhookTypePrometheus:   NewPrometheusParser(externalURL), // TN-146: Prometheus support
 		},
 		validator: NewWebhookValidator(),
 		processor: processor,
