@@ -28,34 +28,41 @@ type Publisher interface {
 	PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error
 }
 
+// InvestigationSubmitter is the minimal interface AlertProcessor needs to fire-and-forget investigations.
+type InvestigationSubmitter interface {
+	Submit(alert *core.Alert, classification *core.ClassificationResult)
+}
+
 // AlertProcessor handles alert processing with enrichment mode support
 type AlertProcessor struct {
-	enrichmentManager EnrichmentModeManager
-	llmClient         LLMClient
-	filterEngine      FilterEngine
-	publisher         Publisher
-	deduplication     DeduplicationService              // TN-036 Phase 3: Deduplication service
-	inhibitionCache   inhibition.ActiveAlertCache       // TN-130 PARITY-A2: cache of firing alerts
-	inhibitionMatcher inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
-	inhibitionState   inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
-	businessMetrics   *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
-	logger            *slog.Logger
-	metrics           *metrics.MetricsManager
+	enrichmentManager   EnrichmentModeManager
+	llmClient           LLMClient
+	filterEngine        FilterEngine
+	publisher           Publisher
+	deduplication       DeduplicationService              // TN-036 Phase 3: Deduplication service
+	investigationQueue  InvestigationSubmitter            // PHASE-5A: async investigation pipeline
+	inhibitionCache     inhibition.ActiveAlertCache       // TN-130 PARITY-A2: cache of firing alerts
+	inhibitionMatcher   inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
+	inhibitionState     inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
+	businessMetrics     *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
+	logger              *slog.Logger
+	metrics             *metrics.MetricsManager
 }
 
 // AlertProcessorConfig holds configuration for AlertProcessor
 type AlertProcessorConfig struct {
-	EnrichmentManager EnrichmentModeManager
-	LLMClient         LLMClient // optional, required only for enriched mode
-	FilterEngine      FilterEngine
-	Publisher         Publisher
-	Deduplication     DeduplicationService              // TN-036 Phase 3: optional, recommended for production
-	InhibitionCache   inhibition.ActiveAlertCache       // TN-130 PARITY-A2: optional, cache of firing alerts
-	InhibitionMatcher inhibition.InhibitionMatcher      // TN-130 Phase 6: optional, recommended for inhibition
-	InhibitionState   inhibition.InhibitionStateManager // TN-130 Phase 6: optional, for state tracking
-	BusinessMetrics   *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
-	Logger            *slog.Logger
-	Metrics           *metrics.MetricsManager
+	EnrichmentManager  EnrichmentModeManager
+	LLMClient          LLMClient             // optional, required only for enriched mode
+	FilterEngine       FilterEngine
+	Publisher          Publisher
+	Deduplication      DeduplicationService              // TN-036 Phase 3: optional, recommended for production
+	InvestigationQueue InvestigationSubmitter            // PHASE-5A: optional, fire-and-forget investigation
+	InhibitionCache    inhibition.ActiveAlertCache       // TN-130 PARITY-A2: optional, cache of firing alerts
+	InhibitionMatcher  inhibition.InhibitionMatcher      // TN-130 Phase 6: optional, recommended for inhibition
+	InhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: optional, for state tracking
+	BusinessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
+	Logger             *slog.Logger
+	Metrics            *metrics.MetricsManager
 }
 
 // NewAlertProcessor creates a new alert processor
@@ -73,17 +80,18 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 	}
 
 	return &AlertProcessor{
-		enrichmentManager: config.EnrichmentManager,
-		llmClient:         config.LLMClient,
-		filterEngine:      config.FilterEngine,
-		publisher:         config.Publisher,
-		deduplication:     config.Deduplication,
-		inhibitionCache:   config.InhibitionCache,   // TN-130 PARITY-A2
-		inhibitionMatcher: config.InhibitionMatcher, // TN-130 Phase 6
-		inhibitionState:   config.InhibitionState,   // TN-130 Phase 6
-		businessMetrics:   config.BusinessMetrics,   // TN-130 Phase 6
-		logger:            config.Logger,
-		metrics:           config.Metrics,
+		enrichmentManager:  config.EnrichmentManager,
+		llmClient:          config.LLMClient,
+		filterEngine:       config.FilterEngine,
+		publisher:          config.Publisher,
+		deduplication:      config.Deduplication,
+		investigationQueue: config.InvestigationQueue, // PHASE-5A
+		inhibitionCache:    config.InhibitionCache,    // TN-130 PARITY-A2
+		inhibitionMatcher:  config.InhibitionMatcher,  // TN-130 Phase 6
+		inhibitionState:    config.InhibitionState,    // TN-130 Phase 6
+		businessMetrics:    config.BusinessMetrics,    // TN-130 Phase 6
+		logger:             config.Logger,
+		metrics:            config.Metrics,
 	}, nil
 }
 
@@ -312,6 +320,11 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert)
 		"severity", classification.Severity,
 		"confidence", classification.Confidence,
 	)
+
+	// PHASE-5A: Submit fire-and-forget investigation (does not block Phase 1).
+	if p.investigationQueue != nil {
+		p.investigationQueue.Submit(alert, classification)
+	}
 
 	// Step 2: Apply filters (with classification context)
 	blocked, reason := p.filterEngine.ShouldBlock(alert, classification)
