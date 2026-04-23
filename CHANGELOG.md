@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
 
 ### Changed
+- **PARITY-A5-WEB-EXTERNAL-URL**: callback-ссылки в нотификациях. ~0.5d _(forge)_
 - **PARITY-A4-ADVANCED-FILTERING**: `filter` query param для alerts и silences. ~3d _(forge)_
 - **PARITY-A1-NOTIFICATION-TRIGGERING**: `group_interval`/`repeat_interval` таймеры не триггерят нотификации. ~3d _(forge)_
 - **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT**: REPOSITORY-FLAPPING-TRANSITIONS-DRIFT _(forge)_
