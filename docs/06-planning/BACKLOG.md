@@ -70,7 +70,7 @@
   - Alertmanager поддерживает: `filter=alertname="test"`, `filter=alertname=~".*foo.*"`
   - Оценка: ~3d
 
-- [ ] **PARITY-A5-WEB-EXTERNAL-URL** — для callback-ссылок в нотификациях:
+- [x] **PARITY-A5-WEB-EXTERNAL-URL** — для callback-ссылок в нотификациях: _(closed by forge)_
   - Alertmanager: `--web.external-url` → используется в templates как `{{ .ExternalURL }}`
   - AMP: отсутствует → ссылки в alert templates не работают (Silence link, Generator URL)
   - Оценка: ~0.5d
