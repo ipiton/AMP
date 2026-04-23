@@ -5,14 +5,11 @@
 ### 1. Alertmanager Parity — Phase A (production-viable)
 > Цель: AMP пригоден как замена Alertmanager для production (без maintenance windows и HA).
 
-- [ ] **PARITY-A5-WEB-EXTERNAL-URL** — callback-ссылки в нотификациях. ~0.5d
 
 ### 2. Intelligence — Two-Phase Pipeline (AMP differentiator)
 > Цель: AI-powered alert investigation — то, что отличает AMP от Alertmanager.
 > Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-5A-INVESTIGATION-PIPELINE** — Двухфазный async pipeline (Phase 1: existing flow, Phase 2: AI investigation). ~3d
-- [ ] **PHASE-5B-LLM-AGENT** — Agentic investigation loop с tool calling. ~5d
 - [ ] **PHASE-6A-BUILTIN-TOOLS** — Prometheus (PromQL) + Loki (LogQL) + K8s (pods/events/logs) + DB tools. ~7d
 - [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. ~2d
 
@@ -22,7 +19,7 @@
 
 ## WIP (Max 2)
 
-- Пусто.
+- [ ] **PHASE-5A-INVESTIGATION-PIPELINE** — Двухфазный async pipeline (Phase 1: existing flow, Phase 2: AI investigation). ~3d (started: 2026-04-22)
 ## Notes
 - Очередь обновлена 2026-04-16 после полного аудита AMP и исследования SherlockOps/HolmesGPT/Keep.
 - **Приоритет 1**: Parity Phase A — без этого AMP не может заменить Alertmanager.
