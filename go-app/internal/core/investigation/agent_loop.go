@@ -55,7 +55,11 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop creates a loop wired to the given LLM client and tool registry.
+// Panics if cfg.MaxHistoryMsgs < 1 to prevent slice index panics in trimHistory.
 func NewAgentLoop(llm AgentLLMClient, registry *ToolRegistry, cfg AgentLoopConfig) *AgentLoop {
+	if cfg.MaxHistoryMsgs < 1 {
+		panic("investigation: AgentLoopConfig.MaxHistoryMsgs must be >= 1")
+	}
 	return &AgentLoop{llm: llm, registry: registry, config: cfg}
 }
 
