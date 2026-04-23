@@ -87,6 +87,16 @@ func (r *mockRepo) MoveToDLQ(_ context.Context, id string) error {
 	return nil
 }
 
+func (r *mockRepo) SaveAgentResult(_ context.Context, id string, result *core.InvestigationResult, _ *core.AgentRunSummary) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if inv, ok := r.rows[id]; ok {
+		inv.Status = core.InvestigationCompleted
+		inv.Result = result
+	}
+	return nil
+}
+
 // mockLLM is a controllable InvestigationLLMClient.
 type mockLLM struct {
 	result *core.InvestigationResult
