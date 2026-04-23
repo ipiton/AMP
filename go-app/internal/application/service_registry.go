@@ -10,6 +10,7 @@ import (
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
+	coreinv "github.com/ipiton/AMP/internal/core/investigation"
 	"github.com/ipiton/AMP/internal/core/services"
 	dbmigrations "github.com/ipiton/AMP/internal/database"
 	"github.com/ipiton/AMP/internal/database/postgres"
@@ -17,6 +18,7 @@ import (
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
 	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	investigationinfra "github.com/ipiton/AMP/internal/infrastructure/investigation"
+	invtools "github.com/ipiton/AMP/internal/infrastructure/investigation/tools"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
@@ -541,11 +543,23 @@ func (r *ServiceRegistry) initializeInvestigation(ctx context.Context) error {
 		r.logger,
 		nil, // use default prometheus registerer
 	)
+
+	// Phase 5B: wire agentic loop if AgentMode is enabled.
+	if r.config.LLM.AgentMode {
+		registry := coreinv.NewToolRegistry()
+		registry.Register(invtools.EchoTool{})
+
+		agentLoop := coreinv.NewAgentLoop(llmClient, registry, coreinv.DefaultAgentLoopConfig())
+		r.investigationQueue.SetAgentLoop(agentLoop)
+		r.logger.Info("Agentic investigation loop enabled")
+	}
+
 	r.investigationQueue.Start()
 
 	r.logger.Info("Investigation pipeline initialized",
 		"workers", qCfg.WorkerCount,
 		"queue_size", qCfg.QueueSize,
+		"agent_mode", r.config.LLM.AgentMode,
 	)
 	_ = ctx
 	return nil

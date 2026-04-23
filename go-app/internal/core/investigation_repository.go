@@ -22,4 +22,15 @@ type InvestigationRepository interface {
 
 	// MoveToDLQ sets status=dlq for a given investigation.
 	MoveToDLQ(ctx context.Context, id string) error
+
+	// SaveAgentResult stores Phase 5B agentic loop output (steps, iterations, tool calls).
+	SaveAgentResult(ctx context.Context, id string, result *InvestigationResult, agentRun *AgentRunSummary) error
+}
+
+// AgentRunSummary carries Phase 5B telemetry to save alongside the result.
+type AgentRunSummary struct {
+	StepsJSON       []byte // marshalled []investigation.InvestigationStep
+	IterationsCount int
+	ToolCallsCount  int
+	TerminationKind string
 }

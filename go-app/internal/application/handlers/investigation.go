@@ -74,6 +74,16 @@ func investigationResponse(inv *core.Investigation) map[string]any {
 	if inv.Result != nil {
 		resp["result"] = inv.Result
 	}
+	// Phase 5B: agentic loop trace
+	if inv.Steps != nil {
+		resp["steps"] = inv.Steps
+	}
+	if inv.IterationsCount > 0 {
+		resp["iterations_count"] = inv.IterationsCount
+	}
+	if inv.ToolCallsCount > 0 {
+		resp["tool_calls_count"] = inv.ToolCallsCount
+	}
 	return resp
 }
 

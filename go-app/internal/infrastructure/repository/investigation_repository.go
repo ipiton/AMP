@@ -214,7 +214,8 @@ func (r *PostgresInvestigationRepository) GetLatestByFingerprint(ctx context.Con
 			summary, findings, recommendations, confidence,
 			llm_model, prompt_tokens, completion_tokens, processing_time,
 			retry_count, error_message, error_type,
-			queued_at, started_at, completed_at, created_at, updated_at
+			queued_at, started_at, completed_at, created_at, updated_at,
+			steps, iterations_count, tool_calls_count
 		FROM alert_investigations
 		WHERE fingerprint = $1
 		ORDER BY queued_at DESC
@@ -232,6 +233,61 @@ func (r *PostgresInvestigationRepository) GetLatestByFingerprint(ctx context.Con
 		return nil, fmt.Errorf("investigation get latest: %w", err)
 	}
 	return inv, nil
+}
+
+// SaveAgentResult stores Phase 5B agentic loop output: result + trace (steps, iterations, tool calls).
+func (r *PostgresInvestigationRepository) SaveAgentResult(ctx context.Context, id string, result *core.InvestigationResult, agentRun *core.AgentRunSummary) error {
+	start := time.Now()
+	op := "save_agent_result"
+
+	findingsJSON, err := json.Marshal(result.Findings)
+	if err != nil {
+		return fmt.Errorf("marshal findings: %w", err)
+	}
+	recsJSON, err := json.Marshal(result.Recommendations)
+	if err != nil {
+		return fmt.Errorf("marshal recommendations: %w", err)
+	}
+
+	now := time.Now().UTC()
+	_, err = r.pool.Exec(ctx, `
+		UPDATE alert_investigations SET
+			status            = 'completed',
+			summary           = $1,
+			findings          = $2,
+			recommendations   = $3,
+			confidence        = $4,
+			llm_model         = $5,
+			prompt_tokens     = $6,
+			completion_tokens = $7,
+			processing_time   = $8,
+			steps             = $9,
+			iterations_count  = $10,
+			tool_calls_count  = $11,
+			completed_at      = $12,
+			updated_at        = $12
+		WHERE id = $13`,
+		result.Summary,
+		findingsJSON,
+		recsJSON,
+		result.Confidence,
+		result.LLMModel,
+		result.PromptTokens,
+		result.CompletionTokens,
+		result.ProcessingTime,
+		agentRun.StepsJSON,
+		agentRun.IterationsCount,
+		agentRun.ToolCallsCount,
+		now,
+		id,
+	)
+
+	r.metrics.QueryDuration.WithLabelValues(op, statusLabel(err)).Observe(time.Since(start).Seconds())
+	if err != nil {
+		r.metrics.QueryErrors.WithLabelValues(op, "database").Inc()
+		return fmt.Errorf("investigation save agent result: %w", err)
+	}
+	return nil
 }
 
 // MoveToDLQ sets status=dlq for the given investigation.
@@ -258,6 +314,7 @@ func scanInvestigation(row pgx.Row) (*core.Investigation, error) {
 	var (
 		findingsJSON []byte
 		recsJSON     []byte
+		stepsJSON    []byte
 		summary      *string
 		confidence   *float64
 		llmModel     *string
@@ -290,6 +347,9 @@ func scanInvestigation(row pgx.Row) (*core.Investigation, error) {
 		&inv.CompletedAt,
 		&inv.CreatedAt,
 		&inv.UpdatedAt,
+		&stepsJSON,
+		&inv.IterationsCount,
+		&inv.ToolCallsCount,
 	)
 	if err != nil {
 		return nil, err
@@ -300,6 +360,10 @@ func scanInvestigation(row pgx.Row) (*core.Investigation, error) {
 	if errType != nil {
 		et := core.InvestigationErrorType(*errType)
 		inv.ErrorType = &et
+	}
+
+	if stepsJSON != nil {
+		inv.Steps = stepsJSON
 	}
 
 	if summary != nil || findingsJSON != nil || recsJSON != nil {

@@ -3,6 +3,7 @@ package investigation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ipiton/AMP/internal/core"
+	coreinv "github.com/ipiton/AMP/internal/core/investigation"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -41,15 +43,16 @@ func DefaultQueueConfig() QueueConfig {
 
 // InvestigationQueue is a fire-and-forget async queue for alert investigation jobs.
 type InvestigationQueue struct {
-	jobs    chan *core.InvestigationJob
-	config  QueueConfig
-	repo    core.InvestigationRepository
-	llm     InvestigationLLMClient
-	metrics *Metrics
-	logger  *slog.Logger
-	wg      sync.WaitGroup
-	ctx     context.Context
-	cancel  context.CancelFunc
+	jobs      chan *core.InvestigationJob
+	config    QueueConfig
+	repo      core.InvestigationRepository
+	llm       InvestigationLLMClient
+	agentLoop *coreinv.AgentLoop // Phase 5B: optional agentic loop
+	metrics   *Metrics
+	logger    *slog.Logger
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // NewInvestigationQueue creates a new investigation queue.
@@ -75,6 +78,11 @@ func NewInvestigationQueue(
 		ctx:     ctx,
 		cancel:  cancel,
 	}
+}
+
+// SetAgentLoop wires the Phase 5B agentic loop. Must be called before Start().
+func (q *InvestigationQueue) SetAgentLoop(loop *coreinv.AgentLoop) {
+	q.agentLoop = loop
 }
 
 // Start launches the worker goroutines.
@@ -232,6 +240,12 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 		return
 	}
 
+	// Phase 5B: if agentic loop is wired, run full tool-calling cycle.
+	if q.agentLoop != nil {
+		q.processJobWithAgent(start, job, result)
+		return
+	}
+
 	if err := q.repo.SaveResult(q.ctx, job.ID, result); err != nil {
 		q.logger.Error("Failed to save investigation result", "id", job.ID, "error", err)
 		q.metrics.InvestigationsTotal.WithLabelValues("failed").Inc()
@@ -245,6 +259,56 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 		"id", job.ID,
 		"fingerprint", job.Alert.Fingerprint,
 		"confidence", result.Confidence,
+		"duration", time.Since(start),
+	)
+}
+
+// processJobWithAgent runs the Phase 5B agentic loop and persists the full trace.
+func (q *InvestigationQueue) processJobWithAgent(start time.Time, job *core.InvestigationJob, classResult *core.InvestigationResult) {
+	agentRun, err := q.agentLoop.Run(q.ctx, job.Alert, job.Classification)
+	if err != nil {
+		q.logger.Warn("Agent loop returned error",
+			"id", job.ID,
+			"termination", agentRun.TerminationKind,
+			"error", err,
+		)
+	}
+
+	// If the loop produced no final answer, record a failure.
+	if agentRun.TerminationKind != "final_answer" || agentRun.Result == nil {
+		stepsJSON, _ := json.Marshal(agentRun.Steps)
+		_ = q.repo.SaveAgentResult(q.ctx, job.ID, classResult, &core.AgentRunSummary{
+			StepsJSON:       stepsJSON,
+			IterationsCount: agentRun.IterationsUsed,
+			ToolCallsCount:  agentRun.ToolCallsCount,
+			TerminationKind: agentRun.TerminationKind,
+		})
+		q.metrics.InvestigationsTotal.WithLabelValues("failed").Inc()
+		return
+	}
+
+	stepsJSON, _ := json.Marshal(agentRun.Steps)
+	summary := &core.AgentRunSummary{
+		StepsJSON:       stepsJSON,
+		IterationsCount: agentRun.IterationsUsed,
+		ToolCallsCount:  agentRun.ToolCallsCount,
+		TerminationKind: agentRun.TerminationKind,
+	}
+	if err := q.repo.SaveAgentResult(q.ctx, job.ID, agentRun.Result, summary); err != nil {
+		q.logger.Error("Failed to save agent result", "id", job.ID, "error", err)
+		q.metrics.InvestigationsTotal.WithLabelValues("failed").Inc()
+		return
+	}
+
+	q.metrics.InvestigationsTotal.WithLabelValues("completed").Inc()
+	q.metrics.ProcessingTime.Observe(time.Since(start).Seconds())
+
+	q.logger.Info("Agent investigation completed",
+		"id", job.ID,
+		"fingerprint", job.Alert.Fingerprint,
+		"termination", agentRun.TerminationKind,
+		"iterations", agentRun.IterationsUsed,
+		"tool_calls", agentRun.ToolCallsCount,
 		"duration", time.Since(start),
 	)
 }

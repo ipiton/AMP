@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // InvestigationStatus represents the lifecycle status of an investigation.
 type InvestigationStatus string
@@ -60,4 +63,9 @@ type Investigation struct {
 	CompletedAt      *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+
+	// Phase 5B: agentic loop trace (steps stored as opaque JSONB)
+	Steps           json.RawMessage
+	IterationsCount int
+	ToolCallsCount  int
 }
