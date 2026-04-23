@@ -3,6 +3,7 @@ package investigation
 import (
 	"context"
 	"fmt"
+	"sort"
 )
 
 // ToolRegistry registers tools by name and executes them on behalf of the agent loop.
@@ -46,11 +47,13 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, callID string, 
 	return res
 }
 
-// Definitions returns the ToolDefinition for every registered tool.
+// Definitions returns the ToolDefinition for every registered tool, sorted by name
+// for deterministic ordering across calls.
 func (r *ToolRegistry) Definitions() []ToolDefinition {
 	defs := make([]ToolDefinition, 0, len(r.tools))
 	for _, t := range r.tools {
 		defs = append(defs, t.Definition())
 	}
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }

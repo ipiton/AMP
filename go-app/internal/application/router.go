@@ -31,7 +31,7 @@ func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v2/receivers", handlers.ReceiversHandler(rt.registry))
 	mux.HandleFunc("/api/v2/inhibitions", handlers.InhibitionsHandler(rt.registry))
 
-	// API v1 — Investigation pipeline (PHASE-5A)
+	// API v1 — Investigation pipeline (PHASE-5B)
 	// Register exact path first to prevent ServeMux from redirecting /api/v1/alerts → /api/v1/alerts/
 	mux.HandleFunc("/api/v1/alerts", handlers.NotFoundHandler)
 	mux.HandleFunc("/api/v1/alerts/", handlers.InvestigationHandler(rt.registry))

@@ -191,6 +191,21 @@ func TestAgentLoop_DirectFinalAnswer(t *testing.T) {
 	}
 }
 
+// ---- NewAgentLoop validation tests ----
+
+func TestNewAgentLoop_PanicsOnZeroMaxHistoryMsgs(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic with MaxHistoryMsgs=0")
+		}
+	}()
+	cfg := investigation.AgentLoopConfig{
+		MaxIterations:  10,
+		MaxHistoryMsgs: 0,
+	}
+	_ = investigation.NewAgentLoop(nil, nil, cfg)
+}
+
 // ---- trimHistory tests ----
 
 func TestTrimHistory_BelowLimit(t *testing.T) {

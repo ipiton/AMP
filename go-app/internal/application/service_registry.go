@@ -174,7 +174,7 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	}
 
 	// Step 3.5: Initialize Investigation pipeline (non-fatal — graceful degradation)
-	if err := r.initializeInvestigation(ctx); err != nil {
+	if err := r.initializeInvestigation(); err != nil {
 		r.logger.Warn("Investigation pipeline initialization failed, continuing without investigations",
 			"error", err)
 		r.addDegradedReason("investigation pipeline unavailable: %v", err)
@@ -504,9 +504,9 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 	return nil
 }
 
-// initializeInvestigation sets up the async investigation pipeline (PHASE-5A).
+// initializeInvestigation sets up the async investigation pipeline (PHASE-5B).
 // Only available in standard profile with a live PostgreSQL pool.
-func (r *ServiceRegistry) initializeInvestigation(ctx context.Context) error {
+func (r *ServiceRegistry) initializeInvestigation() error {
 	if r.config.Profile != appconfig.ProfileStandard {
 		r.logger.Info("Skipping investigation pipeline (non-standard profile)")
 		return nil
@@ -561,7 +561,6 @@ func (r *ServiceRegistry) initializeInvestigation(ctx context.Context) error {
 		"queue_size", qCfg.QueueSize,
 		"agent_mode", r.config.LLM.AgentMode,
 	)
-	_ = ctx
 	return nil
 }
 
