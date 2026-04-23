@@ -183,7 +183,7 @@
     - Webhook: POST enriched payload
   - Оценка: ~3d
 
-- [ ] **PHASE-5B-LLM-AGENT** — Agentic investigation loop:
+- [x] **PHASE-5B-LLM-AGENT** — Agentic investigation loop: _(closed by forge)_
   - Новый компонент: `internal/investigation/agent.go`
   - Использует existing `infrastructure/llm/` client (Claude/OpenAI/Azure + circuit breaker)
   - **Agentic loop** (как SherlockOps):
