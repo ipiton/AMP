@@ -9,7 +9,7 @@ import (
 
 // TestParsePrometheusV1SingleAlert tests parsing a single Prometheus v1 alert
 func TestParsePrometheusV1SingleAlert(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -51,7 +51,7 @@ func TestParsePrometheusV1SingleAlert(t *testing.T) {
 
 // TestParsePrometheusV1MultipleAlerts tests parsing multiple Prometheus v1 alerts
 func TestParsePrometheusV1MultipleAlerts(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -88,7 +88,7 @@ func TestParsePrometheusV1MultipleAlerts(t *testing.T) {
 
 // TestParsePrometheusV2Grouped tests parsing Prometheus v2 grouped format
 func TestParsePrometheusV2Grouped(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`{
 		"groups": [
@@ -136,7 +136,7 @@ func TestParsePrometheusV2Grouped(t *testing.T) {
 
 // TestParseMissingAlertname tests parsing alert without alertname label
 func TestParseMissingAlertname(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -158,7 +158,7 @@ func TestParseMissingAlertname(t *testing.T) {
 
 // TestParseInvalidTimestamp tests parsing with invalid timestamp
 func TestParseInvalidTimestamp(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -175,7 +175,7 @@ func TestParseInvalidTimestamp(t *testing.T) {
 
 // TestParseInvalidState tests parsing with invalid state value
 func TestParseInvalidState(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	// Missing generatorURL causes detection failure (required field)
 	payload := []byte(`[
@@ -194,7 +194,7 @@ func TestParseInvalidState(t *testing.T) {
 
 // TestParseMissingGeneratorURL tests parsing without required generatorURL
 func TestParseMissingGeneratorURL(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -212,7 +212,7 @@ func TestParseMissingGeneratorURL(t *testing.T) {
 
 // TestParseLargePayload tests parsing large payload with 100 alerts
 func TestParseLargePayload(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	// Build large payload
 	var payload []byte
@@ -238,7 +238,7 @@ func TestParseLargePayload(t *testing.T) {
 
 // TestParseWithFingerprintProvided tests using provided fingerprint
 func TestParseWithFingerprintProvided(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	providedFingerprint := "custom123fingerprint456"
 	payload := []byte(`[
@@ -259,7 +259,7 @@ func TestParseWithFingerprintProvided(t *testing.T) {
 
 // TestParseWithoutFingerprintGenerate tests fingerprint generation when not provided
 func TestParseWithoutFingerprintGenerate(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -280,7 +280,7 @@ func TestParseWithoutFingerprintGenerate(t *testing.T) {
 
 // TestConvertToDomain tests full conversion to core.Alert
 func TestConvertToDomain(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -314,7 +314,7 @@ func TestConvertToDomain(t *testing.T) {
 
 // TestConvertStateMapping tests state mapping (firing/pending/inactive)
 func TestConvertStateMapping(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	tests := []struct {
 		name           string
@@ -347,7 +347,7 @@ func TestConvertStateMapping(t *testing.T) {
 
 // TestConvertPreserveValue tests that Prometheus value is preserved in annotations
 func TestConvertPreserveValue(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -371,7 +371,7 @@ func TestConvertPreserveValue(t *testing.T) {
 
 // TestConvertGenerateFingerprint tests fingerprint generation
 func TestConvertGenerateFingerprint(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -395,7 +395,7 @@ func TestConvertGenerateFingerprint(t *testing.T) {
 
 // TestConvertNilHandling tests handling of nil/zero values
 func TestConvertNilHandling(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -422,7 +422,7 @@ func TestConvertNilHandling(t *testing.T) {
 
 // TestParseEmptyPayload tests empty payload error
 func TestParseEmptyPayload(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	_, err := parser.Parse([]byte{})
 	assert.Error(t, err)
@@ -431,7 +431,7 @@ func TestParseEmptyPayload(t *testing.T) {
 
 // TestParseNoAlerts tests webhook with no alerts
 func TestParseNoAlerts(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[]`)
 
@@ -464,7 +464,7 @@ func TestMapPrometheusState(t *testing.T) {
 
 // TestValidate tests webhook validation
 func TestValidate(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -486,7 +486,7 @@ func TestValidate(t *testing.T) {
 
 // TestConvertMultipleAlerts tests converting multiple alerts
 func TestConvertMultipleAlerts(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -518,7 +518,7 @@ func TestConvertMultipleAlerts(t *testing.T) {
 
 // TestConvertEmptyLabels tests conversion error with empty labels
 func TestConvertEmptyLabels(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	payload := []byte(`[
 		{
@@ -540,7 +540,7 @@ func TestConvertEmptyLabels(t *testing.T) {
 
 // TestConvertNilWebhook tests conversion with nil webhook
 func TestConvertNilWebhook(t *testing.T) {
-	parser := NewPrometheusParser()
+	parser := NewPrometheusParser("")
 
 	_, err := parser.ConvertToDomain(nil)
 	assert.Error(t, err)

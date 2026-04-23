@@ -20,7 +20,7 @@ import (
 //
 // Example usage:
 //
-//	parser := NewPrometheusParser()
+//	parser := NewPrometheusParser("")
 //	webhook, err := parser.Parse(jsonPayload)
 //	alerts, err := parser.ConvertToDomain(webhook)
 //
@@ -31,9 +31,12 @@ import (
 type prometheusParser struct {
 	validator      WebhookValidator
 	formatDetector PrometheusFormatDetector
+	externalURL    string
 }
 
 // NewPrometheusParser creates a new Prometheus alert parser.
+// externalURL is the public base URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
+// Empty string causes ExternalURL in converted webhooks to be empty (graceful degradation).
 //
 // The parser includes:
 //   - Format detector for distinguishing v1 vs v2
@@ -42,10 +45,11 @@ type prometheusParser struct {
 //
 // Returns:
 //   - WebhookParser: Initialized parser ready for use
-func NewPrometheusParser() WebhookParser {
+func NewPrometheusParser(externalURL string) WebhookParser {
 	return &prometheusParser{
 		validator:      NewWebhookValidator(),
 		formatDetector: NewPrometheusFormatDetector(),
+		externalURL:    externalURL,
 	}
 }
 
@@ -69,7 +73,7 @@ func NewPrometheusParser() WebhookParser {
 //
 // Example:
 //
-//	parser := NewPrometheusParser()
+//	parser := NewPrometheusParser("")
 //	webhook, err := parser.Parse([]byte(`[{"labels":{"alertname":"Test"},...}]`))
 //	if err != nil {
 //	    log.Fatal(err)
@@ -235,7 +239,7 @@ func (p *prometheusParser) convertToAlertmanagerFormat(
 		GroupLabels:       make(map[string]string),
 		CommonLabels:      make(map[string]string),
 		CommonAnnotations: make(map[string]string),
-		ExternalURL:       "",
+		ExternalURL:       p.externalURL,
 	}
 }
 

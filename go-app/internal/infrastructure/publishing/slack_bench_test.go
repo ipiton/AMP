@@ -15,7 +15,7 @@ func setupSlackBenchmark() *EnhancedSlackPublisher {
 	// Use mock client for benchmarks (no actual HTTP calls)
 	client := &mockSlackWebhookClient{}
 	cache := NewMessageCache()
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	return NewEnhancedSlackPublisher(client, cache, nil, formatter, logger).(*EnhancedSlackPublisher)

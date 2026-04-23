@@ -80,7 +80,13 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context) error
 	}
 
 	publishingMetrics := v2.Global().Publishing
-	r.publisherFactory = infrapublishing.NewPublisherFactory(infrapublishing.NewAlertFormatter(), r.logger, publishingMetrics)
+	externalURL := r.config.Server.ExternalURL
+	r.publisherFactory = infrapublishing.NewPublisherFactory(
+		infrapublishing.NewAlertFormatter(externalURL),
+		r.logger,
+		publishingMetrics,
+		externalURL,
+	)
 
 	queueConfig := infrapublishing.DefaultPublishingQueueConfig()
 	queueConfig.WorkerCount = r.config.Publishing.Queue.WorkerCount

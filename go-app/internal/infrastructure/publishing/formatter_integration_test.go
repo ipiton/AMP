@@ -52,7 +52,7 @@ func TestIntegration_AlertmanagerFormat(t *testing.T) {
 	defer server.Close()
 
 	// Create formatter
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 
 	// Create enriched alert
 	enrichedAlert := createTestEnrichedAlert()
@@ -86,7 +86,7 @@ func TestIntegration_AlertmanagerFormat(t *testing.T) {
 
 // TestIntegration_RootlyFormat tests Rootly incident format
 func TestIntegration_RootlyFormat(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	ctx := context.Background()
@@ -107,7 +107,7 @@ func TestIntegration_RootlyFormat(t *testing.T) {
 
 // TestIntegration_PagerDutyFormat tests PagerDuty event format
 func TestIntegration_PagerDutyFormat(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	ctx := context.Background()
@@ -130,7 +130,7 @@ func TestIntegration_PagerDutyFormat(t *testing.T) {
 
 // TestIntegration_SlackFormat tests Slack blocks format
 func TestIntegration_SlackFormat(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	ctx := context.Background()
@@ -160,7 +160,7 @@ func TestIntegration_MiddlewareStack(t *testing.T) {
 	cache := NewLRUCache(100, 5*time.Minute)
 
 	// Build middleware stack
-	baseFormatter := NewAlertFormatter()
+	baseFormatter := NewAlertFormatter("")
 	formatter := NewMiddlewareChain(
 		baseFormatter,
 		TracingValidationMiddleware(tracer, validator),
@@ -194,7 +194,7 @@ func TestIntegration_MiddlewareStack(t *testing.T) {
 // TestIntegration_ValidationFailure tests validation error flow
 func TestIntegration_ValidationFailure(t *testing.T) {
 	validator := NewDefaultAlertValidator()
-	baseFormatter := NewAlertFormatter()
+	baseFormatter := NewAlertFormatter("")
 	formatter := NewMiddlewareChain(
 		baseFormatter,
 		ValidationMiddleware(validator),
@@ -219,7 +219,7 @@ func TestIntegration_ValidationFailure(t *testing.T) {
 
 // TestIntegration_ConcurrentFormatting tests concurrent formatting
 func TestIntegration_ConcurrentFormatting(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 
 	const numGoroutines = 100
@@ -247,7 +247,7 @@ func TestIntegration_ConcurrentFormatting(t *testing.T) {
 
 // TestIntegration_PerformanceBenchmark runs performance validation
 func TestIntegration_PerformanceBenchmark(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
 	ctx := context.Background()
 

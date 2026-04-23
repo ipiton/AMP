@@ -11,7 +11,7 @@ import (
 
 // FuzzAlertFormatter tests formatter with random inputs
 func FuzzAlertFormatter(f *testing.F) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	ctx := context.Background()
 
 	// Seed corpus
@@ -45,7 +45,7 @@ func TestFuzz_RandomAlerts(t *testing.T) {
 		t.Skip("Skipping fuzzing in short mode")
 	}
 
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	ctx := context.Background()
 
 	const numIterations = 1_000_000
@@ -206,7 +206,7 @@ func randomTime(rng *rand.Rand) time.Time {
 
 // BenchmarkFuzz_Alertmanager benchmarks fuzzing performance
 func BenchmarkFuzz_Alertmanager(b *testing.B) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	ctx := context.Background()
 	rng := rand.New(rand.NewSource(42))
 
@@ -224,7 +224,7 @@ func BenchmarkFuzz_Alertmanager(b *testing.B) {
 
 // BenchmarkFuzz_AllFormats benchmarks all formats
 func BenchmarkFuzz_AllFormats(b *testing.B) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	ctx := context.Background()
 	rng := rand.New(rand.NewSource(42))
 
