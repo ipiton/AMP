@@ -2,6 +2,8 @@
 
 ## 2026-04
 
+- 2026-04-23 — (TASK / Platform) **PHASE-5B-LLM-AGENT** — Agentic investigation loop с tool calling. ~5d _(closed by forge)_
+
 - 2026-04-23 — (TASK / Platform) **PARITY-A5-WEB-EXTERNAL-URL** — callback-ссылки в нотификациях. ~0.5d _(closed by forge)_
 
 - 2026-04-22 — (TASK / Platform) **PARITY-A4-ADVANCED-FILTERING** — `filter` query param для alerts и silences. ~3d _(closed by forge)_
