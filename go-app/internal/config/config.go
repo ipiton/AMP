@@ -147,6 +147,9 @@ type LLMConfig struct {
 	Temperature float64       `mapstructure:"temperature"`
 	Timeout     time.Duration `mapstructure:"timeout"`
 	MaxRetries  int           `mapstructure:"max_retries"`
+	// AgentMode enables the Phase 5B agentic investigation loop with tool calling.
+	// When false, the pipeline uses the Phase 5A one-shot InvestigateAlert() call.
+	AgentMode bool `mapstructure:"agent_mode"`
 }
 
 // LogConfig holds logging-related configuration
