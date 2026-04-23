@@ -64,7 +64,7 @@ import (
 //
 // Example Usage:
 //
-//	parser := webhook.NewPrometheusParser()
+//	parser := webhook.NewPrometheusParser("")
 //	handler, err := NewPrometheusAlertsHandler(parser, alertProcessor, logger, nil)
 //	mux.HandleFunc("POST /api/v2/alerts", handler.HandlePrometheusAlerts)
 type PrometheusAlertsHandler struct {
@@ -226,7 +226,7 @@ type ValidationError struct {
 //
 // Example:
 //
-//	parser := webhook.NewPrometheusParser()
+//	parser := webhook.NewPrometheusParser("")
 //	handler, err := NewPrometheusAlertsHandler(parser, alertProcessor, logger, nil)
 //	if err != nil {
 //	    log.Fatal(err)

@@ -54,7 +54,7 @@ func TestEnhancedWebhookPublisher_Name(t *testing.T) {
 		MaxHeaders:     100,
 		MaxHeaderSize:  4096,
 	}, nil)
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
@@ -78,7 +78,7 @@ func TestEnhancedWebhookPublisher_Publish_Success(t *testing.T) {
 		MaxHeaders:     100,
 		MaxHeaderSize:  4096,
 	}, nil)
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
@@ -120,7 +120,7 @@ func TestEnhancedWebhookPublisher_Publish_ValidationError(t *testing.T) {
 		MaxHeaders:     100,
 		MaxHeaderSize:  4096,
 	}, nil)
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
@@ -162,7 +162,7 @@ func TestEnhancedWebhookPublisher_Publish_WithBearerAuth(t *testing.T) {
 		MaxHeaders:     100,
 		MaxHeaderSize:  4096,
 	}, nil)
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
@@ -206,7 +206,7 @@ func TestEnhancedWebhookPublisher_Publish_WithCustomHeaders(t *testing.T) {
 		MaxHeaders:     100,
 		MaxHeaderSize:  4096,
 	}, nil)
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, metrics, slog.Default())
@@ -239,7 +239,7 @@ func TestEnhancedWebhookPublisher_Publish_WithCustomHeaders(t *testing.T) {
 // ==================== Factory Methods Tests ====================
 
 func TestNewEnhancedWebhookPublisherWithDefaults(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 	logger := slog.Default()
 
@@ -260,7 +260,7 @@ func TestNewEnhancedWebhookPublisherWithRetry(t *testing.T) {
 		MaxBackoff:  10000,
 		Multiplier:  3.0,
 	}
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 	logger := slog.Default()
 
@@ -277,7 +277,7 @@ func TestNewEnhancedWebhookPublisherWithValidation(t *testing.T) {
 		MaxHeaders:     50,
 		MaxHeaderSize:  2 * 1024,
 	}
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
 	logger := slog.Default()
 

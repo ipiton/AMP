@@ -62,7 +62,7 @@ func (m *mockAlertProcessorWithHealth) getProcessedAlerts() []*core.Alert {
 // TestHandlerSelectsPrometheusParser tests that Prometheus webhook is correctly detected and parsed
 func TestHandlerSelectsPrometheusParser(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Prometheus v1 payload
 	payload := []byte(`[
@@ -110,7 +110,7 @@ func TestHandlerSelectsPrometheusParser(t *testing.T) {
 // TestHandlerSelectsAlertmanagerParser tests that Alertmanager webhook is correctly detected and parsed
 func TestHandlerSelectsAlertmanagerParser(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Alertmanager payload
 	payload := []byte(`{
@@ -165,7 +165,7 @@ func TestHandlerSelectsAlertmanagerParser(t *testing.T) {
 // TestHandlerFallbackToAlertmanager tests fallback to Alertmanager parser for unknown types
 func TestHandlerFallbackToAlertmanager(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Generic webhook (unknown type, should fallback to Alertmanager)
 	// This will fail Alertmanager parsing but tests fallback logic
@@ -191,7 +191,7 @@ func TestHandlerFallbackToAlertmanager(t *testing.T) {
 // TestHandlerPrometheusV2Grouped tests Prometheus v2 grouped format
 func TestHandlerPrometheusV2Grouped(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Prometheus v2 payload (grouped)
 	payload := []byte(`{
@@ -258,7 +258,7 @@ func TestHandlerPrometheusV2Grouped(t *testing.T) {
 // TestHandlerConcurrentRequests tests thread-safe concurrent webhook processing
 func TestHandlerConcurrentRequests(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Prometheus payload template
 	payloadTemplate := `[{
@@ -320,7 +320,7 @@ func TestHandlerConcurrentRequests(t *testing.T) {
 // TestHandlerPrometheusMultipleAlerts tests handling multiple alerts in single webhook
 func TestHandlerPrometheusMultipleAlerts(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Prometheus v1 payload with 3 alerts
 	payload := []byte(`[
@@ -370,7 +370,7 @@ func TestHandlerPrometheusMultipleAlerts(t *testing.T) {
 // TestHandlerPrometheusInvalidPayload tests error handling for invalid Prometheus payload
 func TestHandlerPrometheusInvalidPayload(t *testing.T) {
 	processor := newMockAlertProcessorWithHealth()
-	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry())
+	handler := NewUniversalWebhookHandlerWithRegisterer(processor, nil, prometheus.NewRegistry(), "")
 
 	// Invalid JSON
 	payload := []byte(`[invalid json}`)

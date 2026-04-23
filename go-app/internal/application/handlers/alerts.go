@@ -32,6 +32,7 @@ type RegistryProvider interface {
 }
 
 func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
+	externalURL := registry.Config().Server.ExternalURL
 	return func(w http.ResponseWriter, r *http.Request) {
 		alertStore := registry.AlertStore()
 		silenceStore := registry.SilenceStore()
@@ -40,7 +41,7 @@ func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
 		case http.MethodGet:
 			handleAlertsGet(alertStore, silenceStore, w, r)
 		case http.MethodPost:
-			handleAlertsPost(registry.AlertProcessor(), alertStore, silenceStore, w, r)
+			handleAlertsPost(registry.AlertProcessor(), alertStore, silenceStore, externalURL, w, r)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -84,7 +85,7 @@ func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 	}
 }
 
-func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
+func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, externalURL string, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	if processor == nil {
@@ -103,7 +104,7 @@ func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertSto
 	}
 
 	now := time.Now().UTC()
-	alerts, err := parseAlertsForProcessing(body, now)
+	alerts, err := parseAlertsForProcessing(body, now, externalURL)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": err.Error(),
@@ -159,16 +160,16 @@ func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertSto
 	})
 }
 
-func parseAlertsForProcessing(body []byte, now time.Time) ([]*core.Alert, error) {
-	if alerts, err := parsePrometheusAlerts(body); err == nil {
+func parseAlertsForProcessing(body []byte, now time.Time, externalURL string) ([]*core.Alert, error) {
+	if alerts, err := parsePrometheusAlerts(body, externalURL); err == nil {
 		return alerts, nil
 	}
 
 	return parseLegacyAlerts(body, now)
 }
 
-func parsePrometheusAlerts(body []byte) ([]*core.Alert, error) {
-	parser := webhook.NewPrometheusParser()
+func parsePrometheusAlerts(body []byte, externalURL string) ([]*core.Alert, error) {
+	parser := webhook.NewPrometheusParser(externalURL)
 	parsedWebhook, err := parser.Parse(body)
 	if err != nil {
 		return nil, err

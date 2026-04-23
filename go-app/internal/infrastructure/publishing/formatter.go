@@ -78,16 +78,20 @@ type AlertFormatter interface {
 
 // DefaultAlertFormatter implements AlertFormatter using strategy pattern
 type DefaultAlertFormatter struct {
-	formatters map[core.PublishingFormat]formatFunc
+	formatters  map[core.PublishingFormat]formatFunc
+	externalURL string
 }
 
 // formatFunc is the function signature for format-specific implementations
 type formatFunc func(*core.EnrichedAlert) (map[string]any, error)
 
-// NewAlertFormatter creates a new alert formatter
-func NewAlertFormatter() AlertFormatter {
+// NewAlertFormatter creates a new alert formatter.
+// externalURL is the public base URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
+// Empty string causes callback links to be omitted (graceful degradation).
+func NewAlertFormatter(externalURL string) AlertFormatter {
 	formatter := &DefaultAlertFormatter{
-		formatters: make(map[core.PublishingFormat]formatFunc),
+		formatters:  make(map[core.PublishingFormat]formatFunc),
+		externalURL: externalURL,
 	}
 
 	// Register format strategies
@@ -172,7 +176,7 @@ func (f *DefaultAlertFormatter) formatAlertmanager(enrichedAlert *core.EnrichedA
 	result["groupLabels"] = map[string]string{}
 	result["commonLabels"] = alert.Labels
 	result["commonAnnotations"] = alert.Annotations
-	result["externalURL"] = ""
+	result["externalURL"] = f.externalURL
 	result["version"] = "4"
 	result["groupKey"] = fmt.Sprintf("group:%s", alert.Fingerprint)
 	result["truncatedAlerts"] = 0

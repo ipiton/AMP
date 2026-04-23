@@ -119,7 +119,7 @@ func BenchmarkWebhookMetrics_RecordRequest(b *testing.B) {
 func BenchmarkEnhancedWebhookPublisher_Publish(b *testing.B) {
 	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, nil)
 	validator := NewWebhookValidator(nil)
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	logger := slog.New(slog.NewTextHandler(nil, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	publisher := NewEnhancedWebhookPublisher(client, validator, formatter, nil, logger)
@@ -172,7 +172,7 @@ func BenchmarkWebhookValidator_ValidateTarget(b *testing.B) {
 
 // BenchmarkAlertFormatter_FormatAlert benchmarks alert formatting
 func BenchmarkAlertFormatter_FormatAlert(b *testing.B) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	enrichedAlert := &core.EnrichedAlert{
 		Alert: &core.Alert{
 			Fingerprint: "bench123",

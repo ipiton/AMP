@@ -15,7 +15,7 @@ import (
 )
 
 func TestNewRootlyPublisher(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewRootlyPublisher(formatter, slog.Default())
 
 	assert.NotNil(t, publisher)
@@ -23,7 +23,7 @@ func TestNewRootlyPublisher(t *testing.T) {
 }
 
 func TestNewPagerDutyPublisher(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewPagerDutyPublisher(formatter, slog.Default())
 
 	assert.NotNil(t, publisher)
@@ -31,7 +31,7 @@ func TestNewPagerDutyPublisher(t *testing.T) {
 }
 
 func TestNewSlackPublisher(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewSlackPublisher(formatter, slog.Default())
 
 	assert.NotNil(t, publisher)
@@ -39,7 +39,7 @@ func TestNewSlackPublisher(t *testing.T) {
 }
 
 func TestNewWebhookPublisher(t *testing.T) {
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewWebhookPublisher(formatter, slog.Default())
 
 	assert.NotNil(t, publisher)
@@ -58,7 +58,7 @@ func TestPublish_Success(t *testing.T) {
 	defer server.Close()
 
 	// Create publisher
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewWebhookPublisher(formatter, slog.Default())
 
 	// Create test alert
@@ -101,7 +101,7 @@ func TestPublish_HTTPError(t *testing.T) {
 	defer server.Close()
 
 	// Create publisher
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewWebhookPublisher(formatter, slog.Default())
 
 	// Create test alert
@@ -141,7 +141,7 @@ func TestPublish_WithCustomHeaders(t *testing.T) {
 	defer server.Close()
 
 	// Create publisher
-	formatter := NewAlertFormatter()
+	formatter := NewAlertFormatter("")
 	publisher := NewWebhookPublisher(formatter, slog.Default())
 
 	// Create test alert
@@ -176,8 +176,8 @@ func TestPublish_WithCustomHeaders(t *testing.T) {
 }
 
 func TestPublisherFactory_CreatePublisher(t *testing.T) {
-	formatter := NewAlertFormatter()
-	factory := NewPublisherFactory(formatter, slog.Default(), nil)
+	formatter := NewAlertFormatter("")
+	factory := NewPublisherFactory(formatter, slog.Default(), nil, "")
 
 	tests := []struct {
 		targetType   string

@@ -189,6 +189,7 @@ func (p *WebhookPublisher) Name() string {
 type PublisherFactory struct {
 	formatter          AlertFormatter
 	logger             *slog.Logger
+	externalURL        string                           // AMP public URL for callback links
 	rootlyCache        IncidentIDCache                  // Shared Rootly incident cache
 	rootlyClientMap    map[string]RootlyIncidentsClient // Cache of Rootly clients by API key
 	pagerDutyCache     EventKeyCache                    // Shared PagerDuty event key cache
@@ -201,8 +202,9 @@ type PublisherFactory struct {
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
-// NewPublisherFactory creates a new publisher factory with unified v2 metrics
-func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics *v2.PublishingMetrics) *PublisherFactory {
+// NewPublisherFactory creates a new publisher factory with unified v2 metrics.
+// externalURL is the public AMP base URL used in notification callback links (e.g. silence URLs).
+func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics *v2.PublishingMetrics, externalURL string) *PublisherFactory {
 	// Create Slack cache and start background cleanup worker
 	slackCache := NewMessageCache()
 	slackCleanupWorker := StartCleanupWorker(slackCache, 5*time.Minute, 24*time.Hour)
@@ -210,6 +212,7 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics 
 	return &PublisherFactory{
 		formatter:          formatter,
 		logger:             logger,
+		externalURL:        externalURL,
 		rootlyCache:        NewIncidentIDCache(24 * time.Hour), // 24h TTL for Rootly incident tracking
 		rootlyClientMap:    make(map[string]RootlyIncidentsClient),
 		pagerDutyCache:     NewEventKeyCache(24 * time.Hour), // 24h TTL for PagerDuty event tracking
@@ -239,6 +242,7 @@ func (f *PublisherFactory) CreatePublisher(targetType string) (AlertPublisher, e
 			f.metrics,
 			f.formatter,
 			f.logger,
+			f.externalURL,
 		), nil
 	default:
 		return NewWebhookPublisher(f.formatter, f.logger), nil // Default to webhook
@@ -438,6 +442,7 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 		f.metrics,
 		f.formatter,
 		f.logger,
+		f.externalURL,
 	), nil
 }
 

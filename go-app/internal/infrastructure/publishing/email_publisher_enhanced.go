@@ -12,6 +12,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/notification/template/defaults"
+	notifurl "github.com/ipiton/AMP/internal/notification/url"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
@@ -20,15 +21,18 @@ import (
 // из шаблонов defaults.GetDefaultEmailTemplates().
 type EnhancedEmailPublisher struct {
 	*BaseEnhancedPublisher
-	client SMTPClient
+	client      SMTPClient
+	externalURL string
 }
 
 // NewEnhancedEmailPublisher создаёт email publisher с заданным SMTP клиентом.
+// externalURL используется для построения SilenceURL и footer-ссылки в письмах.
 func NewEnhancedEmailPublisher(
 	client SMTPClient,
 	metrics *v2.PublishingMetrics,
 	formatter AlertFormatter,
 	logger *slog.Logger,
+	externalURL string,
 ) AlertPublisher {
 	return &EnhancedEmailPublisher{
 		BaseEnhancedPublisher: NewBaseEnhancedPublisher(
@@ -36,7 +40,8 @@ func NewEnhancedEmailPublisher(
 			formatter,
 			logger.With("component", "email_publisher"),
 		),
-		client: client,
+		client:      client,
+		externalURL: externalURL,
 	}
 }
 
@@ -63,7 +68,7 @@ func (p *EnhancedEmailPublisher) Publish(ctx context.Context, enrichedAlert *cor
 	}
 
 	// Построить template data из enrichedAlert
-	tmplData := buildEmailTemplateData(enrichedAlert, target)
+	tmplData := buildEmailTemplateData(enrichedAlert, target, p.externalURL)
 
 	// Рендеринг тела письма
 	subject, html, text, err := renderEmailContent(tmplData, subjectTmpl, htmlTmpl, textTmpl)
@@ -200,7 +205,7 @@ func extractSMTPConfig(target *core.PublishingTarget) SMTPConfig {
 }
 
 // buildEmailTemplateData строит контекст шаблона из EnrichedAlert и PublishingTarget.
-func buildEmailTemplateData(enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) *emailTemplateData {
+func buildEmailTemplateData(enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget, externalURL string) *emailTemplateData {
 	alert := enrichedAlert.Alert
 
 	// Для single-alert publisher GroupLabels = {alertname: alert.AlertName}
@@ -237,7 +242,8 @@ func buildEmailTemplateData(enrichedAlert *core.EnrichedAlert, target *core.Publ
 		Annotations:       commonAnnotations,
 		Alerts:            []emailAlertItem{alertItem},
 		Receiver:          target.Name,
-		ExternalURL:       "",
+		ExternalURL:       externalURL,
+		SilenceURL:        notifurl.BuildSilenceURL(externalURL, alert.Labels),
 	}
 }
 

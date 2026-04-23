@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -96,6 +97,10 @@ type ServerConfig struct {
 	WriteTimeout            time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout             time.Duration `mapstructure:"idle_timeout"`
 	GracefulShutdownTimeout time.Duration `mapstructure:"graceful_shutdown_timeout"`
+	// ExternalURL is the public URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
+	// Used in notification callbacks: email footer, silence links, webhook externalURL field.
+	// Empty string disables callback links (graceful degradation).
+	ExternalURL string `mapstructure:"external_url"`
 }
 
 // DatabaseConfig holds database-related configuration
@@ -414,6 +419,7 @@ func setDefaults() {
 	viper.SetDefault("server.write_timeout", "30s")
 	viper.SetDefault("server.idle_timeout", "120s")
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
+	viper.SetDefault("server.external_url", "")
 
 	// Database defaults
 	viper.SetDefault("database.driver", "postgres")
@@ -589,6 +595,12 @@ func (c *Config) Validate() error {
 
 	if c.Server.Host == "" {
 		return fmt.Errorf("server host cannot be empty")
+	}
+
+	if c.Server.ExternalURL != "" {
+		if u, err := url.ParseRequestURI(c.Server.ExternalURL); err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("server.external_url must be a valid absolute URL, got %q", c.Server.ExternalURL)
+		}
 	}
 
 	// Skip database validation for Lite profile (TN-204)
