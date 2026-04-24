@@ -14,35 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockDB implements DBQuerier for tests without a real database.
-type mockDB struct {
-	rows []mockRow
-	err  error
-}
-
-type mockRow struct {
-	cols []string
-	vals []driver.Value
-}
-
-func (m *mockDB) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	// Use a registered mock driver to return fake rows.
-	db, err := sql.Open("mockdriver", "")
-	if err != nil {
-		panic(err)
-	}
-	// We can't easily return *sql.Rows without a real driver — use the mockQuerier approach instead.
-	_ = db
-	return nil, nil
-}
-
-// Since constructing *sql.Rows requires a real sql driver, we use a different approach:
-// we create a minimal fake that implements DBQuerier via a real in-memory SQLite-like approach
-// using Go's built-in database/sql with a custom fake driver.
-
 // fakeQuerier directly implements DBQuerier and returns pre-canned results.
 type fakeQuerier struct {
 	result []map[string]any
