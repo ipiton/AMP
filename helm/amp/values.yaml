@@ -458,6 +458,20 @@ llm:
     secretKey: "api-key"
 
 # ===============================
+# Investigation Pipeline (PHASE-5A / 5B)
+# ===============================
+# Async LLM-driven alert investigation.
+# Requires: profile=standard, Postgres, llm.enabled=true.
+investigation:
+  enabled: false
+  workerCount: 3
+  queueSize: 500
+  maxRetries: 3
+  retryInterval: 5s
+  llmTimeout: 60s
+  onlyFiring: true
+
+# ===============================
 # Database Migration Configuration
 # ===============================
 migration:

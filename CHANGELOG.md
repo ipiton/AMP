@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
 
 ### Changed
+- **PHASE-5A-TAIL** (2026-04-24): investigation pipeline config surface finalized.
+  - `InvestigationConfig` struct in `internal/config/config.go` (`enabled`, `worker_count`, `queue_size`, `max_retries`, `retry_interval`, `llm_timeout`, `only_firing`) + viper defaults.
+  - `OnlyFiring` added to `infrastructure/investigation.QueueConfig`; `Submit` drops resolved alerts when set.
+  - `ServiceRegistry.initializeInvestigation` now reads config-driven queue params instead of hardcoded defaults.
+  - Sample `investigation:` section added to `config.yaml.example` and `helm/amp/values.yaml`.
+- **PARITY-B2-OPSGENIE-PUBLISHER** marked skipped (2026-04-24): Atlassian announced OpsGenie EOL — no longer accepting new customers. Publisher is not a goal; existing `OpsGenieConfig` struct left as a no-op.
 - **PHASE-5B-LLM-AGENT**: Agentic investigation loop с tool calling. ~5d _(forge)_
 - **PARITY-A5-WEB-EXTERNAL-URL**: callback-ссылки в нотификациях. ~0.5d _(forge)_
 - **PARITY-A4-ADVANCED-FILTERING**: `filter` query param для alerts и silences. ~3d _(forge)_

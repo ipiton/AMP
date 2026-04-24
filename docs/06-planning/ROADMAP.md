@@ -5,7 +5,7 @@
 ## Stream: Runtime/API Stabilization
 - [x] **PHASE-0: Baseline and Contract Lock** — Тестовая база для фиксации текущего поведения активного runtime.
 - [x] **PHASE-1: API Unstabbing** — Активный runtime переведен на реальные обработчики core API (`status`, `alerts`, `silences`, `webhook`) и закреплен тестами.
-- [ ] **PHASE-2: Bootstrap Consolidation** — Единый путь инициализации, удаление `main.go.full`.
+- [x] **PHASE-2: Bootstrap Consolidation** — Единый путь инициализации (`ServiceRegistry`, `Router`, `handlers`), `main.go.full` удалён, `main.go` ~200 строк.
 
 ## Stream: Storage & Reliability
 - [x] **PHASE-3: Storage Hardening** — Стабильный startup/shutdown, migrations, health decomposition.
@@ -21,16 +21,16 @@
 ## Stream: Alertmanager Full Parity
 > Задачи для полноценной замены Alertmanager без deprecated методов. Три фазы по приоритету.
 
-### Phase A: Production-Viable Replacement (~2 недели)
-- [ ] **PARITY-A1: Notification Triggering** — `group_interval` и `repeat_interval` таймеры не триггерят нотификации. `manager_impl.go:804,825,870` — TODO "will be implemented in TN-125". Без этого повторные и обновлённые алерты не доставляются. ~3d
-- [ ] **PARITY-A2: Inhibition Pipeline Integration** — `InhibitionMatcher` реализован (<500µs), но `IsInhibited()` не вызывается в alert processing pipeline. Нужно wiring в `AlertProcessor`. ~2d
-- [ ] **PARITY-A3: Email Publisher (SMTP)** — `EmailConfig` + email templates уже есть, нужен `EmailPublisher` в factory + SMTP client. ~2-3d
-- [ ] **PARITY-A4: Advanced Alert/Silence Filtering** — `GET /api/v2/alerts` и `GET /api/v2/silences` — только простой list. Нужна фильтрация по matchers/regex (`filter` query param) как в Alertmanager. ~3d
-- [ ] **PARITY-A5: web.external-url** — Alertmanager использует для callback-ссылок в нотификациях. Без этого ссылки в alert templates битые. ~0.5d
+### Phase A: Production-Viable Replacement (~2 недели) — ✅ закрыта
+- [x] **PARITY-A1: Notification Triggering** — `group_interval` и `repeat_interval` таймеры триггерят нотификации. ~3d
+- [x] **PARITY-A2: Inhibition Pipeline Integration** — `ShouldInhibit` подключён в `AlertProcessor` (`alert_processor.go:154-155`). ~2d
+- [x] **PARITY-A3: Email Publisher (SMTP)** — `EmailPublisher` + SMTP client зарегистрированы в factory. ~2-3d
+- [x] **PARITY-A4: Advanced Alert/Silence Filtering** — `filter` query param для alerts/silences. ~3d
+- [x] **PARITY-A5: web.external-url** — проброшен через `PrometheusParser` и `helm values`. ~0.5d
 
 ### Phase B: Feature Parity (~2-3 недели)
 - [ ] **PARITY-B1: Mute Time Intervals** — Maintenance windows: time interval parser (weekday/time/month/year ranges), timezone support, `mute_time_intervals` и `active_time_intervals` в route config, wiring в routing evaluator. Alertmanager-compatible формат. ~5d
-- [ ] **PARITY-B2: OpsGenie Publisher** — Config определён (`OpsGenieConfig`), нужен publisher. Популярен в enterprise. ~1-2d
+- [~] **PARITY-B2: OpsGenie Publisher** — SKIPPED: Atlassian объявил EOL OpsGenie (April 2027, прием новых клиентов закрыт). Конфиг-структура в коде остаётся как non-goal; publisher не реализуем.
 - [ ] **PARITY-B3: Telegram Publisher** — Полностью отсутствует. Популярен в СНГ-сегменте. ~1-2d
 - [ ] **PARITY-B4: Reloadable Components + Sidecar** — из AMP-OSS (см. PHASE-4.5). ~3d
 - [ ] **PARITY-B5: Production Helm + Release Notes** — из AMP-OSS (см. PHASE-4.6). ~0.5d

@@ -2,13 +2,19 @@
 
 ## 2026-04
 
+- 2026-04-24 — (TASK / Platform) **PHASE-5A-TAIL** — хвост PHASE-5A: `InvestigationConfig` в `config.go` (Enabled/WorkerCount/QueueSize/MaxRetries/RetryInterval/LLMTimeout/OnlyFiring) + viper defaults, `OnlyFiring` в `QueueConfig.Submit`, wiring через `r.config.Investigation.*`, секции `investigation:` в `config.yaml.example` и `helm/amp/values.yaml`. ~0.5d. Проверка: `go vet ./...` чист, `go test ./internal/config/... ./internal/core/services/... ./internal/infrastructure/investigation/...` зелёные.
 - 2026-04-23 — (TASK / Platform) **PHASE-5B-LLM-AGENT** — Agentic investigation loop с tool calling. ~5d _(closed by forge)_
 
 - 2026-04-23 — (TASK / Platform) **PARITY-A5-WEB-EXTERNAL-URL** — callback-ссылки в нотификациях. ~0.5d _(closed by forge)_
 
 - 2026-04-22 — (TASK / Platform) **PARITY-A4-ADVANCED-FILTERING** — `filter` query param для alerts и silences. ~3d _(closed by forge)_
 - 2026-04-17 — (TASK / Platform) **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval`/`repeat_interval` таймеры не триггерят нотификации. ~3d _(closed by forge)_
--16
+- 2026-04-16 — (TASK / Platform) **PUBLISHING-HEALTH-REFRESH-DRIFT** — health/refresh logic-level assertions стабилизированы. _(closed by forge)_
+- 2026-04-16 — (TASK / Platform) **PARITY-A3-EMAIL-PUBLISHER** — SMTP client + EmailPublisher в factory. ~2-3d _(closed by forge)_
+- 2026-04-16 — (TASK / Platform) **PARITY-A2-INHIBITION-PIPELINE** — InhibitionMatcher подключён в AlertProcessor pipeline. ~2d _(closed by forge)_
+
+## 2026-03-16
+
 - **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT** — завершен как атомарный SQL + test-fixture fix без изменения публичного контракта `GetFlappingAlerts`.
 - В `go-app/internal/infrastructure/repository/postgres_history.go` добавлен тайбрейкер `id` в window function: `LAG(status) OVER (PARTITION BY fingerprint ORDER BY starts_at, id)` — детерминированный порядок для строк с одинаковым `starts_at`.
 - В `go-app/internal/infrastructure/repository/postgres_history_test.go` фикстура `TestGetFlappingAlerts_MultipleTransitions` исправлена: каждая из 4 строк получила уникальный `starts_at` (+10m каждая), `created_at` синхронизирован с `starts_at`, assertion исправлен с `>= 4` на `>= 3` (N строк → N−1 переходов).
@@ -106,10 +112,3 @@
 - **PHASE-0: Baseline and Contract Lock** — route inventory и baseline contract tests добавлены для активного runtime.
 - Источник фиксации: `.plans/phase0-baseline-report.md`.
 
-## 2026-04
-
-- 2026-04-16 — (TASK / Platform) **PUBLISHING-HEALTH-REFRESH-DRIFT** — PUBLISHING-HEALTH-REFRESH-DRIFT _(closed by forge)_
-
-- 2026-04-16 — (TASK / Platform) **PARITY-A3-EMAIL-PUBLISHER** — SMTP client + EmailPublisher в factory. ~2-3d _(closed by forge)_
-
-- 2026-04-16 — (TASK / Platform) **PARITY-A2-INHIBITION-PIPELINE** — InhibitionMatcher не подключён в AlertProcessor pipeline. ~2d _(closed by forge)_

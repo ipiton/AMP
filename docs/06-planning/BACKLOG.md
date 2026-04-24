@@ -117,10 +117,7 @@
        - Если есть active intervals и ни один не active → suppress
   - Оценка: ~5d
 
-- [ ] **PARITY-B2-OPSGENIE-PUBLISHER** — enterprise receiver:
-  - `OpsGenieConfig` определён (api_key, api_url, message, description, responders, tags)
-  - Нет publisher implementation
-  - Оценка: ~1-2d
+- [~] **PARITY-B2-OPSGENIE-PUBLISHER** — SKIPPED (2026-04-24): Atlassian объявил EOL OpsGenie — April 2027, прием новых клиентов закрыт. Реализация publisher потеряла смысл. `OpsGenieConfig` в коде можно оставить как no-op или удалить в отдельной cleanup-задаче.
 
 - [ ] **PARITY-B3-TELEGRAM-PUBLISHER** — популярен в СНГ:
   - Полностью отсутствует (ни config, ни publisher)
