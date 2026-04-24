@@ -149,7 +149,7 @@ func (t *KubernetesTool) getEvents(ctx context.Context, namespace, involvedObjec
 	if involvedObject != "" {
 		opts.FieldSelector = fmt.Sprintf("involvedObject.name=%s", involvedObject)
 	} else if fieldSelector != "" {
-		opts.FieldSelector = fieldSelector
+		opts.LabelSelector = fieldSelector
 	}
 	list, err := t.clientset.CoreV1().Events(namespace).List(ctx, opts)
 	if err != nil {
@@ -238,12 +238,12 @@ type deploymentSummary struct {
 }
 
 func summarizePod(p *corev1.Pod) podSummary {
-	ready := false
+	ready := len(p.Status.ContainerStatuses) > 0
 	var restarts int32
 	for _, cs := range p.Status.ContainerStatuses {
 		restarts += cs.RestartCount
-		if cs.Ready {
-			ready = true
+		if !cs.Ready {
+			ready = false
 		}
 	}
 	return podSummary{
