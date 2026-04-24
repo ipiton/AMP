@@ -71,6 +71,25 @@ llm:
   max_retries: 3
   temperature: 0.0
   max_tokens: 500
+  # agent_mode: true enables PHASE-5B agentic loop with tool calling.
+  # When false, investigation uses a single-shot LLM call.
+  agent_mode: false
+
+# ============================================================================
+# Investigation Pipeline (PHASE-5A / 5B)
+# ============================================================================
+# Async "Phase 2" pipeline: classify → publish happens immediately, an LLM
+# investigation runs in the background and is persisted for later retrieval
+# via GET /api/v1/alerts/{fingerprint}/investigation.
+# Requires: standard profile + Postgres + llm.enabled=true.
+investigation:
+  enabled: false         # master switch for the pipeline
+  worker_count: 3        # concurrent investigation workers
+  queue_size: 500        # in-memory job buffer; overflow → drop + metric
+  max_retries: 3         # transient LLM errors retried with exp backoff
+  retry_interval: 5s     # base backoff
+  llm_timeout: 60s       # per-investigation LLM call timeout
+  only_firing: true      # skip resolved alerts (no value in investigating recovery)
 
 # ============================================================================
 # Logging Configuration

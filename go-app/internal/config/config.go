@@ -33,7 +33,21 @@ type Config struct {
 	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
 	Publishing PublishingConfig  `mapstructure:"publishing"`
 	Inhibition InhibitionConfig  `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
+	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
 	Receivers  []ReceiverConfig `mapstructure:"receivers"`
+}
+
+// InvestigationConfig controls the PHASE-5A async investigation pipeline.
+// When disabled, no queue is started and AlertProcessor skips the Submit call.
+type InvestigationConfig struct {
+	Enabled       bool          `mapstructure:"enabled"`
+	WorkerCount   int           `mapstructure:"worker_count"`
+	QueueSize     int           `mapstructure:"queue_size"`
+	MaxRetries    int           `mapstructure:"max_retries"`
+	RetryInterval time.Duration `mapstructure:"retry_interval"`
+	LLMTimeout    time.Duration `mapstructure:"llm_timeout"`
+	// OnlyFiring: when true, resolved alerts are not submitted for investigation.
+	OnlyFiring bool `mapstructure:"only_firing"`
 }
 
 // InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)
@@ -462,6 +476,15 @@ func setDefaults() {
 	viper.SetDefault("llm.temperature", 0.7)
 	viper.SetDefault("llm.timeout", "30s")
 	viper.SetDefault("llm.max_retries", 3)
+
+	// Investigation pipeline defaults (PHASE-5A)
+	viper.SetDefault("investigation.enabled", false)
+	viper.SetDefault("investigation.worker_count", 3)
+	viper.SetDefault("investigation.queue_size", 500)
+	viper.SetDefault("investigation.max_retries", 3)
+	viper.SetDefault("investigation.retry_interval", "5s")
+	viper.SetDefault("investigation.llm_timeout", "60s")
+	viper.SetDefault("investigation.only_firing", true)
 
 	// Log defaults
 	viper.SetDefault("log.level", "info")

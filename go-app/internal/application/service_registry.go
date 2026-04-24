@@ -514,6 +514,10 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 	if r.database == nil || r.database.Pool() == nil {
 		return fmt.Errorf("postgres pool not available for investigation pipeline")
 	}
+	if !r.config.Investigation.Enabled {
+		r.logger.Info("Skipping investigation pipeline (investigation.enabled=false)")
+		return nil
+	}
 	if !r.config.LLM.Enabled {
 		r.logger.Info("Skipping investigation pipeline (LLM disabled)")
 		return nil
@@ -536,6 +540,22 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 	llmClient := llm.NewHTTPLLMClient(llmCfg, r.logger)
 
 	qCfg := investigationinfra.DefaultQueueConfig()
+	if r.config.Investigation.WorkerCount > 0 {
+		qCfg.WorkerCount = r.config.Investigation.WorkerCount
+	}
+	if r.config.Investigation.QueueSize > 0 {
+		qCfg.QueueSize = r.config.Investigation.QueueSize
+	}
+	if r.config.Investigation.MaxRetries > 0 {
+		qCfg.MaxRetries = r.config.Investigation.MaxRetries
+	}
+	if r.config.Investigation.RetryInterval > 0 {
+		qCfg.RetryInterval = r.config.Investigation.RetryInterval
+	}
+	if r.config.Investigation.LLMTimeout > 0 {
+		qCfg.LLMTimeout = r.config.Investigation.LLMTimeout
+	}
+	qCfg.OnlyFiring = r.config.Investigation.OnlyFiring
 	r.investigationQueue = investigationinfra.NewInvestigationQueue(
 		r.investigationRepo,
 		llmClient,

@@ -1,5 +1,7 @@
 # Tasks: PHASE-5A — Двухфазный Async Investigation Pipeline
 
+**Статус**: закрыто 2026-04-24 (хвост PHASE-5A-TAIL). Все слайсы выполнены, код в main. Финальные доработки: `InvestigationConfig` в `config.go`, секции в `config.yaml.example` и `helm/amp/values.yaml`, `OnlyFiring` в `QueueConfig`.
+
 ## Вертикальные слайсы
 
 Каждый слайс — рабочий, тестируемый инкремент. Реализация строго в этом порядке.
@@ -10,20 +12,20 @@
 
 **Цель**: персистентный слой готов, тесты проходят.
 
-- [ ] **1.1** Написать миграцию `go-app/migrations/20260422000000_create_investigation_table.sql`
+- [x] **1.1** Написать миграцию `go-app/migrations/20260422000000_create_investigation_table.sql`
   - Таблица `alert_investigations` по схеме из Spec.md §1
   - Проверить: `goose up` проходит на dev БД
 
-- [ ] **1.2** Добавить core-типы в `go-app/internal/core/`
+- [x] **1.2** Добавить core-типы в `go-app/internal/core/`
   - `InvestigationStatus` constants
   - `InvestigationJob`, `InvestigationResult`, `Investigation` structs
   - Новый файл: `go-app/internal/core/investigation.go`
 
-- [ ] **1.3** Определить `InvestigationRepository` интерфейс
+- [x] **1.3** Определить `InvestigationRepository` интерфейс
   - Файл: `go-app/internal/core/investigation_repository.go`
   - Методы: Create, UpdateStatus, SaveResult, SaveError, GetLatestByFingerprint, MoveToDLQ
 
-- [ ] **1.4** Реализовать PostgreSQL repository
+- [x] **1.4** Реализовать PostgreSQL repository
   - Файл: `go-app/internal/infrastructure/repository/investigation_repository.go`
   - По образцу соседних файлов в том же пакете
   - Тест: `investigation_repository_test.go` (integration, реальная БД)
@@ -38,21 +40,21 @@
 
 **Цель**: LLM умеет расследовать алерт, есть mock для тестов.
 
-- [ ] **2.1** Добавить `InvestigateAlert()` в интерфейс `LLMClient`
+- [x] **2.1** Добавить `InvestigateAlert()` в интерфейс `LLMClient`
   - Файл: `go-app/internal/core/services/alert_processor.go` (интерфейс)
   - Сигнатура: `InvestigateAlert(ctx, alert, classification) (*InvestigationResult, error)`
 
-- [ ] **2.2** Реализовать `InvestigateAlert()` в `HTTPLLMClient`
+- [x] **2.2** Реализовать `InvestigateAlert()` в `HTTPLLMClient`
   - Файл: `go-app/internal/infrastructure/llm/client.go`
   - Режим `openai-compatible`: POST `/chat/completions` с investigation-промптом (Spec §4)
   - Structured JSON output: системный промпт + JSON schema в `response_format`
   - Маппинг ответа в `InvestigationResult`
 
-- [ ] **2.3** Добавить mock/dry-run реализацию
+- [x] **2.3** Добавить mock/dry-run реализацию
   - Файл: `go-app/internal/infrastructure/llm/` (dry-run client)
   - `DryRunLLMClient.InvestigateAlert()` → фиксированный ответ для тестов
 
-- [ ] **2.4** Unit-тест `InvestigateAlert()`
+- [x] **2.4** Unit-тест `InvestigateAlert()`
   - Mock HTTP server, проверить формирование промпта
   - Проверить маппинг JSON-ответа в `InvestigationResult`
   - Проверить обработку ошибок (timeout, invalid JSON, 429)
@@ -63,18 +65,18 @@
 
 **Цель**: очередь принимает задания и обрабатывает через LLM.
 
-- [ ] **3.1** Создать пакет `go-app/internal/infrastructure/investigation/`
+- [x] **3.1** Создать пакет `go-app/internal/infrastructure/investigation/`
   - `queue.go` — `InvestigationQueue` struct, `Submit()`, `Start()`, `Stop()`
   - `QueueConfig` с defaults
   - Submit: если канал полон → drop + increment `amp_investigations_dropped_total`
 
-- [ ] **3.2** Реализовать worker loop
+- [x] **3.2** Реализовать worker loop
   - `runWorker()` — select на jobs channel и ctx.Done()
   - `processJob()` — UpdateStatus → InvestigateAlert → SaveResult/SaveError
   - Error classification: transient (timeout, 429, 5xx) → retry с backoff; permanent → failed
   - Exponential backoff: `min(retryInterval * 2^retryCount, 60s)`
 
-- [ ] **3.3** Метрики
+- [x] **3.3** Метрики
   - Файл: `go-app/internal/infrastructure/investigation/metrics.go`
   - `amp_investigation_queue_depth` (Gauge)
   - `amp_investigations_submitted_total` (Counter)
@@ -82,10 +84,10 @@
   - `amp_investigations_dropped_total` (Counter)
   - `amp_investigation_duration_seconds` (Histogram, buckets: 1s, 5s, 15s, 30s, 60s)
 
-- [ ] **3.4** Graceful shutdown
+- [x] **3.4** Graceful shutdown
   - `Stop()`: выставить `stopped=true`, close done channel, `wg.Wait()` с timeout 30s
 
-- [ ] **3.5** Unit-тесты queue
+- [x] **3.5** Unit-тесты queue
   - Submit happy path: задание попадает в очередь
   - Submit при full queue: дропается без паники
   - processJob success: SaveResult вызван, status=completed
@@ -100,19 +102,19 @@
 
 **Цель**: Phase 2 стартует автоматически после Phase 1 Classification.
 
-- [ ] **4.1** Добавить `InvestigationQueue` interface в `services` пакет
+- [x] **4.1** Добавить `InvestigationQueue` interface в `services` пакет
   - В `go-app/internal/core/services/alert_processor.go`
   - `type InvestigationQueue interface { Submit(*core.Alert, *core.ClassificationResult) error }`
 
-- [ ] **4.2** Добавить `InvestigationQueue` в `AlertProcessorConfig`
+- [x] **4.2** Добавить `InvestigationQueue` в `AlertProcessorConfig`
   - Опциональное поле, nil = investigation disabled
 
-- [ ] **4.3** Вставить submit в `processEnrichedMode()` или inline
+- [x] **4.3** Вставить submit в `processEnrichedMode()` или inline
   - После `ClassifyAlert()`, только если `alert.Status == StatusFiring`
   - Fire-and-forget: ошибка submit → Warn-лог, НЕ ошибка обработки
   - Добавить метрику: если submit fails → increment dropped
 
-- [ ] **4.4** Тест интеграции в AlertProcessor
+- [x] **4.4** Тест интеграции в AlertProcessor
   - Mock `InvestigationQueue`: проверить что Submit вызван после ClassifyAlert
   - Submit error не должна прерывать ProcessAlert
   - Для resolved-алерта: Submit НЕ вызывается
@@ -123,17 +125,17 @@
 
 **Цель**: investigation включается через конфиг.
 
-- [ ] **5.1** Добавить `InvestigationConfig` в `go-app/internal/config/config.go`
+- [x] **5.1** Добавить `InvestigationConfig` в `go-app/internal/config/config.go`
   - Поля: Enabled, WorkerCount, QueueSize, MaxRetries, RetryInterval, OnlyFiring
   - Дефолты: false, 3, 200, 3, 5s, true
 
-- [ ] **5.2** Wiring в `ServiceRegistry.initializeAlertProcessor()`
+- [x] **5.2** Wiring в `ServiceRegistry.initializeAlertProcessor()`
   - Файл: `go-app/internal/application/service_registry.go`
   - Если `config.Investigation.Enabled`: создать `InvestigationQueue`, вызвать `Start()`
   - Передать в `AlertProcessorConfig.InvestigationQueue`
   - Добавить в shutdown sequence: `invQueue.Stop()`
 
-- [ ] **5.3** Обновить config-файлы примеров (если есть в `examples/` или `helm/`)
+- [x] **5.3** Обновить config-файлы примеров (если есть в `examples/` или `helm/`)
   - Добавить секцию `investigation:` с комментариями
 
 ---
@@ -142,18 +144,18 @@
 
 **Цель**: результаты расследования доступны по API.
 
-- [ ] **6.1** Handler `GET /api/v1/alerts/{fingerprint}/investigation`
+- [x] **6.1** Handler `GET /api/v1/alerts/{fingerprint}/investigation`
   - Файл: `go-app/internal/application/handlers/investigation_handler.go`
   - `InvestigationRepository.GetLatestByFingerprint()`
   - 404 если не найдено
   - 200 с partial response если status=queued/processing (без findings)
   - 200 с full response если status=completed
 
-- [ ] **6.2** Регистрация маршрута в router
+- [x] **6.2** Регистрация маршрута в router
   - Файл: `go-app/internal/application/router.go`
   - `GET /api/v1/alerts/{fingerprint}/investigation`
 
-- [ ] **6.3** Unit-тест handler
+- [x] **6.3** Unit-тест handler
   - 404 для несуществующего fingerprint
   - 200 queued: нет findings в ответе
   - 200 completed: полный ответ с findings
@@ -169,12 +171,12 @@
   - Дождаться investigation completed (polling или sleep)
   - GET /api/v1/alerts/{fingerprint}/investigation → status=completed
 
-- [ ] **7.2** `go vet ./...` + `go test ./...` проходят без новых ошибок
+- [x] **7.2** `go vet ./...` + `go test ./...` проходят без новых ошибок
 
-- [ ] **7.3** Обновить `docs/06-planning/NEXT.md`
+- [x] **7.3** Обновить `docs/06-planning/NEXT.md`
   - Перевести PHASE-5A из Queue в Done (или WIP)
 
-- [ ] **7.4** Обновить `docs/06-planning/DONE.md`
+- [x] **7.4** Обновить `docs/06-planning/DONE.md`
   - Добавить PHASE-5A запись
 
 ---

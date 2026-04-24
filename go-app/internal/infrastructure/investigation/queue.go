@@ -28,6 +28,8 @@ type QueueConfig struct {
 	MaxRetries    int
 	RetryInterval time.Duration
 	LLMTimeout    time.Duration
+	// OnlyFiring: when true, Submit drops resolved alerts without enqueuing.
+	OnlyFiring bool
 }
 
 // DefaultQueueConfig returns sensible defaults.
@@ -38,6 +40,7 @@ func DefaultQueueConfig() QueueConfig {
 		MaxRetries:    3,
 		RetryInterval: 5 * time.Second,
 		LLMTimeout:    60 * time.Second,
+		OnlyFiring:    true,
 	}
 }
 
@@ -118,6 +121,9 @@ func (q *InvestigationQueue) Stop(timeout time.Duration) error {
 // Submit enqueues an investigation job. It is non-blocking: if the queue is full,
 // the job is dropped and the metric is incremented.
 func (q *InvestigationQueue) Submit(alert *core.Alert, classification *core.ClassificationResult) {
+	if q.config.OnlyFiring && alert.Status != core.StatusFiring {
+		return
+	}
 	job := &core.InvestigationJob{
 		ID:             uuid.NewString(),
 		Alert:          alert,

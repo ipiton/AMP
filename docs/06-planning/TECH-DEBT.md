@@ -3,8 +3,8 @@
 Список архитектурных проблем, требующих исправления. Отсортировано по приоритету (Critical → High → Medium → Low).
 
 ## Critical
-- [ ] **GOD-OBJECT-MAIN** — `go-app/cmd/server/main.go` (~3900 строк) смешивает логику, инициализацию и роутинг. ~3d
-- [ ] **STATE-STORE-LEAK** — `alert_state_store.go` и `silence_state_store.go` находятся в `cmd/server/`. ~1d
+- [x] ~~**GOD-OBJECT-MAIN**~~ — закрыто через PHASE-2 Bootstrap Consolidation. `main.go` теперь ~125 строк, логика в `ServiceRegistry`, `Router`, `handlers`.
+- [x] ~~**STATE-STORE-LEAK**~~ — закрыто через PHASE-2. State stores вынесены из `cmd/server/`.
 - [ ] **SPLIT-BRAIN-RISK** — Отсутствие транзакционной консистентности между In-Memory Store и БД. ~3d
 
 ## High
@@ -15,8 +15,8 @@
 ## Medium
 - [ ] **ERROR-REINVENTION** — Свои типы ошибок в каждом модуле вместо `pkg/httperror`. ~0.5d
 - [ ] **GLOBAL-LOCK-CONTENTION** — Глобальный мьютекс в Store при высокой нагрузке. Нужно шардирование. ~1d
-- [ ] **NOTIFICATION-TIMER-STUBS** — `group_interval` и `repeat_interval` таймеры в `grouping/manager_impl.go` имеют TODO вместо реального triggering нотификаций (lines 804, 825, 870). Первая нотификация (group_wait) работает, повторные — нет. Связано с PARITY-A1. ~included в PARITY-A1
-- [ ] **INHIBITION-DEAD-WIRING** — `InhibitionMatcher` полностью реализован (matcher + parser + cache + metrics), но не вызывается в alert processing pipeline. Код написан и протестирован, но не подключён. Связано с PARITY-A2. ~included в PARITY-A2
+- [x] ~~**NOTIFICATION-TIMER-STUBS**~~ — закрыто через PARITY-A1 (2026-04-17).
+- [x] ~~**INHIBITION-DEAD-WIRING**~~ — закрыто через PARITY-A2 (2026-04-16). `ShouldInhibit` вызывается в `alert_processor.go:154-155`.
 - [ ] **DEDUP-STATE-STUB** — `filter_engine.go:98-99` — deduplication marked TODO, state tracking не реализован. Dedup-фильтр в FilterEngine заявлен но не работает. ~1d
 - [ ] **CORS-TODO** — `middleware.go:77` — CORS конфигурация отсутствует, помечена TODO. ~0.5d
 
