@@ -14,6 +14,7 @@ import (
 	"github.com/ipiton/AMP/internal/core/services"
 	dbmigrations "github.com/ipiton/AMP/internal/database"
 	"github.com/ipiton/AMP/internal/database/postgres"
+	"github.com/jackc/pgx/v5/stdlib"
 	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
 	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
@@ -567,7 +568,33 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 	// Phase 5B: wire agentic loop if AgentMode is enabled.
 	if r.config.LLM.AgentMode {
 		registry := coreinv.NewToolRegistry()
-		registry.Register(invtools.EchoTool{})
+		toolsCfg := r.config.Investigation.Tools
+
+		if toolsCfg.Prometheus != nil && toolsCfg.Prometheus.Endpoint != "" {
+			registry.Register(invtools.NewPrometheusTool(toolsCfg.Prometheus))
+			r.logger.Info("Prometheus investigation tool registered", "endpoint", toolsCfg.Prometheus.Endpoint)
+		}
+
+		if toolsCfg.Loki != nil && toolsCfg.Loki.Endpoint != "" {
+			registry.Register(invtools.NewLokiTool(toolsCfg.Loki))
+			r.logger.Info("Loki investigation tool registered", "endpoint", toolsCfg.Loki.Endpoint)
+		}
+
+		if toolsCfg.Kubernetes != nil && toolsCfg.Kubernetes.Enabled {
+			k8sTool, err := invtools.NewKubernetesToolFromConfig(toolsCfg.Kubernetes.Kubeconfig)
+			if err != nil {
+				r.logger.Warn("Kubernetes investigation tool init failed, skipping", "error", err)
+			} else {
+				registry.Register(k8sTool)
+				r.logger.Info("Kubernetes investigation tool registered")
+			}
+		}
+
+		if toolsCfg.Database != nil && toolsCfg.Database.Enabled && r.database != nil && r.database.Pool() != nil {
+			sqlDB := stdlib.OpenDBFromPool(r.database.Pool())
+			registry.Register(invtools.NewDatabaseTool(sqlDB))
+			r.logger.Info("Database investigation tool registered")
+		}
 
 		agentLoop := coreinv.NewAgentLoop(llmClient, registry, coreinv.DefaultAgentLoopConfig())
 		r.investigationQueue.SetAgentLoop(agentLoop)
