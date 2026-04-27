@@ -90,6 +90,23 @@ investigation:
   retry_interval: 5s     # base backoff
   llm_timeout: 60s       # per-investigation LLM call timeout
   only_firing: true      # skip resolved alerts (no value in investigating recovery)
+  # Built-in investigation tools (PHASE-6A). Requires llm.agent_mode=true.
+  tools:
+    prometheus:
+      endpoint: http://prometheus:9090   # Prometheus HTTP API base URL
+      timeout: 30s
+      # username: ""  # optional basic auth
+      # password: ""
+    loki:
+      endpoint: http://loki:3100         # Loki HTTP API base URL
+      timeout: 30s
+      # username: ""  # optional basic auth
+      # password: ""
+    kubernetes:
+      enabled: false    # set true when running inside k8s or with kubeconfig
+      kubeconfig: ""    # empty = in-cluster; or path like /home/user/.kube/config
+    database:
+      enabled: false    # set true to expose pg_stat_activity / pg_stat_statements
 
 # ============================================================================
 # Logging Configuration
