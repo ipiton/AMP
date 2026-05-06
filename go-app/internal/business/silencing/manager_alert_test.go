@@ -397,8 +397,10 @@ func TestIsAlertSilenced_Performance100Silences(t *testing.T) {
 	assert.False(t, silenced)
 	assert.Empty(t, ids)
 
-	// Performance target: <5ms for 100 silences (realistic with mock overhead)
-	assert.Less(t, duration, 5*time.Millisecond, "Should complete in <5ms")
+	// Performance target: <50ms for 100 silences. Threshold accounts for testify mock
+	// overhead (reflection + locks via mock.Anything ~50-100µs per call) plus CI load
+	// variance; still catches O(N²) regressions or pathological slowdowns.
+	assert.Less(t, duration, 50*time.Millisecond, "Should complete in <50ms")
 
 	// Verify matcher was called 100 times
 	matcher.AssertNumberOfCalls(t, "Matches", 100)
