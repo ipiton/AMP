@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -25,6 +26,7 @@ import (
 	investigationrepo "github.com/ipiton/AMP/internal/infrastructure/repository"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // alertCacheWithLifecycle extends ActiveAlertCache with lifecycle management (Stop).
@@ -93,6 +95,10 @@ type ServiceRegistry struct {
 	// Investigation pipeline (PHASE-5A)
 	investigationRepo  core.InvestigationRepository
 	investigationQueue *investigationinfra.InvestigationQueue
+	// investigationToolsDB is a *sql.DB wrapper around the pgx pool used by
+	// the database investigation tool. We retain the handle so Shutdown can
+	// close it cleanly and avoid a leak if the pool is ever reinitialised.
+	investigationToolsDB *sql.DB
 
 	// State
 	startTime         time.Time
@@ -567,7 +573,37 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 	// Phase 5B: wire agentic loop if AgentMode is enabled.
 	if r.config.LLM.AgentMode {
 		registry := coreinv.NewToolRegistry()
-		registry.Register(invtools.EchoTool{})
+		toolsCfg := r.config.Investigation.Tools
+
+		if toolsCfg.Prometheus != nil && toolsCfg.Prometheus.Endpoint != "" {
+			registry.Register(invtools.NewPrometheusTool(toolsCfg.Prometheus))
+			r.logger.Info("Prometheus investigation tool registered", "endpoint", toolsCfg.Prometheus.Endpoint)
+		}
+
+		if toolsCfg.Loki != nil && toolsCfg.Loki.Endpoint != "" {
+			registry.Register(invtools.NewLokiTool(toolsCfg.Loki))
+			r.logger.Info("Loki investigation tool registered", "endpoint", toolsCfg.Loki.Endpoint)
+		}
+
+		if toolsCfg.Kubernetes != nil && toolsCfg.Kubernetes.Enabled {
+			k8sTool, err := invtools.NewKubernetesToolFromConfig(toolsCfg.Kubernetes.Kubeconfig)
+			if err != nil {
+				r.logger.Warn("Kubernetes investigation tool init failed, skipping", "error", err)
+			} else {
+				registry.Register(k8sTool)
+				r.logger.Info("Kubernetes investigation tool registered")
+			}
+		}
+
+		if toolsCfg.Database != nil && toolsCfg.Database.Enabled && r.database != nil && r.database.Pool() != nil {
+			// stdlib.OpenDBFromPool returns a fresh *sql.DB that wraps the
+			// underlying pgx pool. We keep the handle on the registry so
+			// Shutdown can close it deterministically; without this it
+			// would leak if the pool is replaced (e.g. on hot-reload).
+			r.investigationToolsDB = stdlib.OpenDBFromPool(r.database.Pool())
+			registry.Register(invtools.NewDatabaseTool(r.investigationToolsDB))
+			r.logger.Info("Database investigation tool registered")
+		}
 
 		agentLoop := coreinv.NewAgentLoop(llmClient, registry, coreinv.DefaultAgentLoopConfig())
 		r.investigationQueue.SetAgentLoop(agentLoop)
@@ -640,6 +676,16 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		if err := r.investigationQueue.Stop(5 * time.Second); err != nil {
 			r.logger.Warn("Investigation queue stop warning", "error", err)
 		}
+	}
+
+	// Close the *sql.DB handle owned by the database investigation tool.
+	// This is a stdlib wrapper around the pgx pool; the pool itself is
+	// closed below when the postgres pool is disconnected.
+	if r.investigationToolsDB != nil {
+		if err := r.investigationToolsDB.Close(); err != nil {
+			r.logger.Warn("Investigation tools DB close warning", "error", err)
+		}
+		r.investigationToolsDB = nil
 	}
 
 	// Shutdown Inhibition cache background worker
