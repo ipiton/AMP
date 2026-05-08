@@ -6,7 +6,6 @@
 > Цель: AI-powered alert investigation — главный USP AMP. Phase 5A/5B закрыты, осталось наполнить агента реальными tools.
 > Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-6A-BUILTIN-TOOLS** — Prometheus (PromQL) + Loki (LogQL) + K8s (pods/events/logs) + DB tools. ~7d
 - [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. ~2d
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d
 
@@ -26,6 +25,7 @@
 
 _пусто — есть слот для старта следующей задачи_
 
+- [ ] **PHASE-6A-BUILTIN-TOOLS** — Prometheus (PromQL) + Loki (LogQL) + K8s (pods/events/logs) + DB tools. ~7d (started: 2026-04-24)
 ## Notes
 - Очередь обновлена 2026-04-23 после аудита: Parity Phase A закрыта полностью, PHASE-5A реализован на ~90% (остался config surface), PHASE-5B закрыт.
 - **Приоритет 1**: PHASE-5A-TAIL — закрыть хвост и снять с WIP.
