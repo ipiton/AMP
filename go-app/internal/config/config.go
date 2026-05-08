@@ -48,6 +48,8 @@ type InvestigationConfig struct {
 	LLMTimeout    time.Duration `mapstructure:"llm_timeout"`
 	// OnlyFiring: when true, resolved alerts are not submitted for investigation.
 	OnlyFiring bool `mapstructure:"only_firing"`
+	// Tools configures built-in investigation tools (PHASE-6A).
+	Tools InvestigationToolsConfig `mapstructure:"tools" yaml:"tools,omitempty"`
 }
 
 // InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)

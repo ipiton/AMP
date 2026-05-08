@@ -366,10 +366,26 @@ func TestIsAlertSilenced_GetActiveSilencesError(t *testing.T) {
 	repo.AssertExpectations(t)
 }
 
+// stubFalseMatcher is a zero-overhead SilenceMatcher used by the performance
+// test below. testify mock.Called adds ~50–100µs of reflection+lock overhead
+// per invocation, which dominates the timing at 100 calls and makes any tight
+// threshold flaky; a plain struct lets the assertion measure the cache
+// iteration itself rather than the mock plumbing.
+type stubFalseMatcher struct{ matches int }
+
+func (m *stubFalseMatcher) Matches(_ context.Context, _ silencing.Alert, _ *silencing.Silence) (bool, error) {
+	m.matches++
+	return false, nil
+}
+
+func (m *stubFalseMatcher) MatchesAny(_ context.Context, _ silencing.Alert, _ []*silencing.Silence) ([]string, error) {
+	return nil, nil
+}
+
 // TestIsAlertSilenced_Performance100Silences tests performance with 100 silences.
 func TestIsAlertSilenced_Performance100Silences(t *testing.T) {
 	repo := new(mockRepository)
-	matcher := new(configurableMockMatcher)
+	matcher := &stubFalseMatcher{}
 	manager := NewDefaultSilenceManager(repo, matcher, nil, nil)
 	manager.started.Store(true)
 
@@ -386,9 +402,6 @@ func TestIsAlertSilenced_Performance100Silences(t *testing.T) {
 		"instance":  "server-01",
 	})
 
-	// Mock matcher to return false for all (worst case)
-	matcher.On("Matches", mock.Anything, *alert, mock.Anything).Return(false, nil)
-
 	start := time.Now()
 	silenced, ids, err := manager.IsAlertSilenced(ctx, alert)
 	duration := time.Since(start)
@@ -397,11 +410,13 @@ func TestIsAlertSilenced_Performance100Silences(t *testing.T) {
 	assert.False(t, silenced)
 	assert.Empty(t, ids)
 
-	// Performance target: <5ms for 100 silences (realistic with mock overhead)
+	// Performance target: <5ms for 100 silences with a zero-overhead matcher.
+	// The algorithm runs in well under 1ms; the slack absorbs CI scheduling
+	// jitter while still catching O(N²) regressions or pathological copies.
 	assert.Less(t, duration, 5*time.Millisecond, "Should complete in <5ms")
 
-	// Verify matcher was called 100 times
-	matcher.AssertNumberOfCalls(t, "Matches", 100)
+	// Verify matcher was called once per cached silence.
+	assert.Equal(t, 100, matcher.matches, "matcher invoked once per silence")
 }
 
 // TestAlertFiltering_Integration tests end-to-end alert filtering.
