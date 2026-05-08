@@ -1,5 +1,9 @@
 # DONE
 
+## 2026-05
+
+- 2026-05-08 — (TASK / Platform) **PHASE-6A-BUILTIN-TOOLS** — четыре built-in tools для investigation-агента: `prometheus_query_range` (PromQL через HTTP API с авто-окном ±15min от alert time через `context.Context`), `loki_query_range` (LogQL, ns→ISO timestamp), `kubernetes` (один tool с action-dispatch: list_pods/get_pod/get_events/get_logs/get_deployments) и `database_diagnostics` (read-only: active_queries/slow_queries/replication_lag/connection_stats через `stdlib.OpenDBFromPool` поверх существующего pgx-пула, `*sql.DB` хранится в `ServiceRegistry` и закрывается в `Shutdown`). Результат — JSON в `ToolResult.Content` для function calling. Wiring в `ServiceRegistry` через новый `investigation.tools.*` config-блок. ~7d. Тесты: `internal/core/investigation`, `internal/infrastructure/investigation/tools`, `internal/application` и `internal/business/silencing` зелёные. Preexisting fails задокументированы: `infrastructure/repository` падает на testcontainers (Docker недоступен), `business/publishing.TestEdgeCase_DuplicateMetricKeys` flaky при параллельном запуске (PASS изолированно).
+
 ## 2026-04
 
 - 2026-04-24 — (TASK / Platform) **PHASE-5A-TAIL** — хвост PHASE-5A: `InvestigationConfig` в `config.go` (Enabled/WorkerCount/QueueSize/MaxRetries/RetryInterval/LLMTimeout/OnlyFiring) + viper defaults, `OnlyFiring` в `QueueConfig.Submit`, wiring через `r.config.Investigation.*`, секции `investigation:` в `config.yaml.example` и `helm/amp/values.yaml`. ~0.5d. Проверка: `go vet ./...` чист, `go test ./internal/config/... ./internal/core/services/... ./internal/infrastructure/investigation/...` зелёные.

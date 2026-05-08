@@ -25,11 +25,10 @@
 
 _пусто — есть слот для старта следующей задачи_
 
-- [ ] **PHASE-6A-BUILTIN-TOOLS** — Prometheus (PromQL) + Loki (LogQL) + K8s (pods/events/logs) + DB tools. ~7d (started: 2026-04-24)
 ## Notes
-- Очередь обновлена 2026-04-23 после аудита: Parity Phase A закрыта полностью, PHASE-5A реализован на ~90% (остался config surface), PHASE-5B закрыт.
-- **Приоритет 1**: PHASE-5A-TAIL — закрыть хвост и снять с WIP.
-- **Приоритет 2**: PHASE-6A built-in tools — главный блокер полезности LLM-агента (без tools 5B-агент работает только с alert labels).
+- Очередь обновлена 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.
+- **Приоритет 1**: PHASE-6B-RUNBOOK-ENGINE — markdown KB с auto-matching по alert labels, дополняет 6A tools и завершает Investigation Toolset.
+- **Приоритет 2**: PHASE-5C-PROVIDER-FALLBACK — primary→fallback chain для LLM, повышает устойчивость 5B/6A.
 - **Приоритет 3**: Operations (reloadable + sidecar) — закрывает hot reload story.
 - **Приоритет 4**: Parity Phase B — по запросу, не критично.
 - Parity Phase C (clustering, remaining receivers) и Intelligence Phase 6C/6D/7 остаются в BACKLOG.
