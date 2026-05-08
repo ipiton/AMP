@@ -204,27 +204,7 @@
 
 ## Intelligence — PHASE-6: Investigation Toolset + Runbooks
 
-- [ ] **PHASE-6A-BUILTIN-TOOLS** — Infrastructure tools для LLM-агента:
-  - `internal/investigation/tools/prometheus.go` — PromQL queries:
-    - Query метрик вокруг alert time window (±15min)
-    - Rate, increase, histogram_quantile для SLI/SLO
-    - Auto-suggest related metrics по alert labels
-  - `internal/investigation/tools/loki.go` — LogQL queries:
-    - Логи related pods/services за time window
-    - Error/warning filtering
-    - Pattern detection
-  - `internal/investigation/tools/kubernetes.go` — расширить existing K8s client:
-    - Pod status, restarts, OOMKills
-    - Recent events (FailedScheduling, ImagePullBackOff, etc.)
-    - Container logs (last N lines)
-    - Recent deployments/rollouts (что менялось?)
-    - Resource usage vs limits
-  - `internal/investigation/tools/database.go` — PostgreSQL diagnostics:
-    - `pg_stat_activity` — active queries, locks
-    - `pg_stat_statements` — slow queries
-    - Replication lag
-    - Connection pool stats
-  - Оценка: ~7d (Prometheus 2d, Loki 2d, K8s 1.5d, DB 1.5d)
+- [x] **PHASE-6A-BUILTIN-TOOLS** — закрыт 2026-05-08. См. `DONE.md` и `CHANGELOG.md` (раздел Added). Реализация лежит в `go-app/internal/infrastructure/investigation/tools/` (prometheus, loki, kubernetes, database) + wiring через `investigation.tools.*` в `config.yaml.example`.
 
 - [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base:
   - `internal/investigation/runbooks/engine.go`

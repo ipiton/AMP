@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **PHASE-6A-BUILTIN-TOOLS** (2026-05-08): four built-in investigation tools wired into the agentic loop so the LLM can inspect production data instead of only seeing alert labels.
+  - `prometheus_query_range` (`internal/infrastructure/investigation/tools/prometheus.go`): PromQL via Prometheus HTTP API; time window resolved from `alert_time` carried through `context.Context` (default `-15m`/`+15m`/`step=1m`).
+  - `loki_query_range` (`tools/loki.go`): LogQL via Loki HTTP API with optional Basic Auth; nanosecond stream timestamps normalised to ISO-8601.
+  - `kubernetes` (`tools/kubernetes.go`): single tool dispatched by `action`: `list_pods`, `get_pod`, `get_events`, `get_logs`, `get_deployments`; wraps the existing `infrastructure/k8s` client.
+  - `database_diagnostics` (`tools/database.go`): read-only PostgreSQL diagnostics via `stdlib.OpenDBFromPool` on the existing pgx pool — `query_type` ∈ {`active_queries`, `slow_queries`, `replication_lag`, `connection_stats`}.
+  - All tools return JSON in `ToolResult.Content` so the LLM can reference specific fields during function calling.
+  - `investigation.tools.*` configuration block added to `config.yaml.example` (`prometheus`, `loki`, `kubernetes`, `database` with per-tool `enabled` / `endpoint` / `timeout` / optional auth).
+  - `ServiceRegistry.initializeInvestigation` registers each tool conditionally based on config; the `*sql.DB` returned by `stdlib.OpenDBFromPool` is retained on the registry and closed in `Shutdown` to avoid leaking on hot-reload.
+  - New helpers: `internal/core/investigation/context.go` (`WithAlertTime` / `AlertTimeFromCtx`), `internal/core/investigation/README.md` documenting the contract, smoke test (`tools/all_tools_test.go`) asserting `ToolRegistry.Definitions()` exposes each enabled tool.
+  - Test fixtures hardened: `tools/database_test.go` replaces package-level `globalFakeCols`/`globalFakeRows` with a per-call `fakeConnector` (race-safe under `t.Parallel`); `silencing/manager_alert_test.go` swaps the testify mock for a zero-overhead stub matcher so the 100-silences perf threshold reflects algorithm cost rather than mock plumbing.
 - **Restored operational Alertmanager-compatible endpoints (2026-03-09)**:
   - `GET /api/v2/status`: returns current config text, version metadata, and runtime start time.
   - `GET /api/v2/receivers`: returns receiver names from the active config snapshot.
