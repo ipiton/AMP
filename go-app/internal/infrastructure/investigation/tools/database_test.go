@@ -21,7 +21,9 @@ type fakeQuerier struct {
 }
 
 // QueryContext for fakeQuerier returns a *sql.Rows from an in-memory query.
-// We use a trick: open a real SQLite-like driver (or the already-registered test driver).
+// We use a per-call sql.DB built from a connector that captures the data;
+// this keeps every test self-contained — no package-level shared state, so
+// tests are safe under t.Parallel().
 func (f *fakeQuerier) QueryContext(ctx context.Context, _ string, _ ...any) (*sql.Rows, error) {
 	if f.err != nil {
 		return nil, f.err
@@ -29,10 +31,11 @@ func (f *fakeQuerier) QueryContext(ctx context.Context, _ string, _ ...any) (*sq
 	return makeInMemoryRows(ctx, f.result)
 }
 
-// makeInMemoryRows builds *sql.Rows from a slice of maps using a registered fake driver.
-func makeInMemoryRows(_ context.Context, data []map[string]any) (*sql.Rows, error) {
+// makeInMemoryRows builds *sql.Rows from a slice of maps using a fresh
+// connector that owns its own (cols, rows) — no globals.
+func makeInMemoryRows(ctx context.Context, data []map[string]any) (*sql.Rows, error) {
 	if len(data) == 0 {
-		return openFakeRows(nil, nil)
+		return openFakeRows(ctx, nil, nil)
 	}
 	cols := make([]string, 0, len(data[0]))
 	for k := range data[0] {
@@ -46,53 +49,55 @@ func makeInMemoryRows(_ context.Context, data []map[string]any) (*sql.Rows, erro
 		}
 		rows[i] = vals
 	}
-	return openFakeRows(cols, rows)
+	return openFakeRows(ctx, cols, rows)
 }
 
-// openFakeRows uses the registered fakeDriver to return pre-set rows.
-func openFakeRows(cols []string, rows [][]driver.Value) (*sql.Rows, error) {
-	setFakeDriverData(cols, rows)
-	db, err := sql.Open("fakedriver", "")
-	if err != nil {
-		return nil, err
-	}
-	return db.QueryContext(context.Background(), "SELECT 1")
+// openFakeRows opens a sql.DB backed by a per-call connector with the given
+// canned data and runs a no-op query to materialise *sql.Rows.
+func openFakeRows(ctx context.Context, cols []string, rows [][]driver.Value) (*sql.Rows, error) {
+	db := sql.OpenDB(&fakeConnector{cols: cols, rows: rows})
+	return db.QueryContext(ctx, "SELECT 1")
 }
 
-// --- Fake SQL driver implementation ---
+// --- Fake SQL driver implementation (per-instance, no globals) ---
 
-func init() {
-	sql.Register("fakedriver", &fakeDriver{})
+// fakeConnector implements driver.Connector and carries the canned data so
+// each test owns its own state. Safe to use from parallel tests.
+type fakeConnector struct {
+	cols []string
+	rows [][]driver.Value
 }
 
-var (
-	globalFakeCols []string
-	globalFakeRows [][]driver.Value
-)
+func (c *fakeConnector) Connect(_ context.Context) (driver.Conn, error) {
+	return &fakeConn{cols: c.cols, rows: c.rows}, nil
+}
 
-func setFakeDriverData(cols []string, rows [][]driver.Value) {
-	globalFakeCols = cols
-	globalFakeRows = rows
+func (c *fakeConnector) Driver() driver.Driver {
+	// A non-nil Driver is required by the contract; the value is unused
+	// because tests open via sql.OpenDB(connector), not sql.Open(name, dsn).
+	return fakeDriver{}
 }
 
 type fakeDriver struct{}
 
-func (d *fakeDriver) Open(_ string) (driver.Conn, error) {
-	return &fakeConn{}, nil
+func (fakeDriver) Open(_ string) (driver.Conn, error) {
+	return nil, errors.New("fakeDriver.Open is not supported; use fakeConnector via sql.OpenDB")
 }
 
-type fakeConn struct{}
+type fakeConn struct {
+	cols []string
+	rows [][]driver.Value
+}
 
 func (c *fakeConn) Prepare(_ string) (driver.Stmt, error) {
-	return &fakeStmt{cols: globalFakeCols, rows: globalFakeRows}, nil
+	return &fakeStmt{cols: c.cols, rows: c.rows}, nil
 }
-func (c *fakeConn) Close() error  { return nil }
+func (c *fakeConn) Close() error              { return nil }
 func (c *fakeConn) Begin() (driver.Tx, error) { return nil, errors.New("not supported") }
 
 type fakeStmt struct {
 	cols []string
 	rows [][]driver.Value
-	pos  int
 }
 
 func (s *fakeStmt) Close() error  { return nil }
@@ -111,7 +116,7 @@ type fakeRows struct {
 }
 
 func (r *fakeRows) Columns() []string { return r.cols }
-func (r *fakeRows) Close() error       { return nil }
+func (r *fakeRows) Close() error      { return nil }
 func (r *fakeRows) Next(dest []driver.Value) error {
 	if r.pos >= len(r.rows) {
 		return io.EOF
