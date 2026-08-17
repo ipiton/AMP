@@ -254,3 +254,4 @@ go-app/configvalidator
 .plans/
 data
 .forge
+.superpowers/
