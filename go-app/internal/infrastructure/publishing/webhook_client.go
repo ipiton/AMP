@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/ipiton/AMP/pkg/httperror"
 )
 
 // WebhookHTTPClient handles HTTP requests to webhook endpoints with retry logic
@@ -68,15 +70,15 @@ func (c *WebhookHTTPClient) Post(ctx context.Context, url string, payload map[st
 	// Marshal payload to JSON
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
-		return nil, NewWebhookErrorWithType(ErrorTypeValidation,
-			fmt.Sprintf("failed to marshal payload: %v", err), err)
+		return nil, httperror.NewHTTPErrorWithCause(http.StatusBadRequest,
+			fmt.Sprintf("failed to marshal payload: %v", err), ProviderWebhook, err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	if err != nil {
-		return nil, NewWebhookErrorWithType(ErrorTypeValidation,
-			fmt.Sprintf("failed to create request: %v", err), err)
+		return nil, httperror.NewHTTPErrorWithCause(http.StatusBadRequest,
+			fmt.Sprintf("failed to create request: %v", err), ProviderWebhook, err)
 	}
 
 	// Set Content-Type header
@@ -93,8 +95,8 @@ func (c *WebhookHTTPClient) Post(ctx context.Context, url string, payload map[st
 	// Apply authentication
 	if authConfig != nil {
 		if err := c.authManager.ApplyAuth(req, *authConfig); err != nil {
-			return nil, NewWebhookErrorWithType(ErrorTypeAuth,
-				fmt.Sprintf("authentication failed: %v", err), err)
+			return nil, httperror.NewHTTPErrorWithCause(http.StatusUnauthorized,
+				fmt.Sprintf("authentication failed: %v", err), ProviderWebhook, err)
 		}
 	}
 
@@ -132,8 +134,8 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 			// Wait before retry (with context cancellation support)
 			select {
 			case <-ctx.Done():
-				return nil, NewWebhookErrorWithType(ErrorTypeTimeout,
-					"context cancelled during retry", ctx.Err())
+				return nil, httperror.NewHTTPErrorWithCause(http.StatusGatewayTimeout,
+					"context cancelled during retry", ProviderWebhook, ctx.Err())
 			case <-time.After(backoff):
 				// Continue with retry
 			}
@@ -151,8 +153,9 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 
 		// Handle network errors
 		if err != nil {
-			lastErr = NewWebhookErrorWithType(ErrorTypeNetwork,
-				fmt.Sprintf("HTTP request failed: %v", err), err)
+			// Network errors don't have an HTTP status code (StatusCode 0)
+			lastErr = httperror.NewHTTPErrorWithCause(0,
+				fmt.Sprintf("HTTP request failed: %v", err), ProviderWebhook, err)
 
 			// Log network error
 			c.logger.ErrorContext(ctx, "Network error",
@@ -161,7 +164,7 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 				slog.String("error", err.Error()))
 
 			// Retry network errors if retryable
-			if IsWebhookRetryableError(lastErr) && attempt < c.retryConfig.MaxRetries {
+			if httperror.IsRetryable(lastErr) && attempt < c.retryConfig.MaxRetries {
 				backoff = c.calculateBackoff(backoff)
 				continue
 			}

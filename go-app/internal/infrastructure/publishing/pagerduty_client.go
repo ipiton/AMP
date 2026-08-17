@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"golang.org/x/time/rate"
 )
@@ -469,11 +470,11 @@ func (c *pagerDutyEventsClientImpl) calculateBackoff(attempt int) time.Duration 
 }
 
 // parseError parses error response from PagerDuty API
-func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *PagerDutyAPIError {
+func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *httperror.HTTPAPIError {
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return NewPagerDutyAPIError(resp.StatusCode, "failed to read error response", []string{err.Error()})
+		return httperror.NewHTTPErrorWithDetails(resp.StatusCode, "failed to read error response", ProviderPagerDuty, []string{err.Error()})
 	}
 
 	// Try to parse JSON error
@@ -485,8 +486,8 @@ func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *PagerDutyAP
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse JSON, return raw body
-		return NewPagerDutyAPIError(resp.StatusCode, string(body), nil)
+		return httperror.NewHTTPError(resp.StatusCode, string(body), ProviderPagerDuty)
 	}
 
-	return NewPagerDutyAPIError(resp.StatusCode, errorResp.Message, errorResp.Errors)
+	return httperror.NewHTTPErrorWithDetails(resp.StatusCode, errorResp.Message, ProviderPagerDuty, errorResp.Errors)
 }

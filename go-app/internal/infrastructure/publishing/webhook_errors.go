@@ -8,19 +8,13 @@ import (
 
 // Webhook Error Types
 //
-// NOTE: This file is being migrated to use pkg/httperror.
-// New code should use httperror.HTTPAPIError and the unified error
-// functions from errors.go.
+// Webhook API errors are represented by httperror.HTTPAPIError with
+// Provider set to ProviderWebhook. See errors.go for unified helpers.
 
-// WebhookError represents a webhook operation error.
-//
-// Deprecated: Use httperror.HTTPAPIError with ProviderWebhook instead.
-// This type is kept for backward compatibility.
-type WebhookError = httperror.HTTPAPIError
-
-// ErrorType categorizes webhook errors for retry decision and metrics.
+// ErrorType categorizes webhook errors for logging and metrics.
 //
 // Deprecated: Use httperror.HTTPAPIError.Type() method instead.
+// Still used internally by classifyErrorType for log labels.
 type ErrorType int
 
 const (
@@ -90,11 +84,6 @@ var (
 	ErrMissingAPIKey               = errors.New("API key is required but not provided")
 	ErrNoCustomHeaders             = errors.New("custom headers are required but not provided")
 )
-
-// IsWebhookRetryableError checks if a webhook error should be retried.
-func IsWebhookRetryableError(err error) bool {
-	return httperror.IsRetryable(err)
-}
 
 // IsWebhookPermanentError checks if an error is permanent (not retryable).
 func IsWebhookPermanentError(err error) bool {

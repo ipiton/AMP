@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"log/slog"
@@ -133,8 +134,8 @@ func TestCreateIncident_RateLimitError(t *testing.T) {
 	_, err := client.CreateIncident(context.Background(), req)
 	assert.Error(t, err)
 
-	assert.True(t, IsRootlyAPIError(err))
-	rootlyErr := err.(*RootlyAPIError)
+	assert.Equal(t, ProviderRootly, httperror.GetProvider(err))
+	rootlyErr := err.(*httperror.HTTPAPIError)
 	assert.Equal(t, http.StatusTooManyRequests, rootlyErr.StatusCode)
 	assert.True(t, rootlyErr.IsRateLimit())
 	assert.True(t, rootlyErr.IsRetryable())
