@@ -10,6 +10,7 @@ import (
 
 	handlers "github.com/ipiton/AMP/internal/application/handlers"
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
+	businessrouting "github.com/ipiton/AMP/internal/business/routing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
@@ -87,6 +88,11 @@ type ServiceRegistry struct {
 	inhibitionCache   alertCacheWithLifecycle              // two-tier cache of firing alerts (includes Stop)
 	inhibitionMatcher inhibitionpkg.InhibitionMatcher      // rule engine
 	inhibitionState   inhibitionpkg.InhibitionStateManager // active inhibition tracking
+
+	// Routing engine (task 1.4, alertmanager-parity). Both nil when
+	// cfg.Routing is nil (no `route:` section — lite/legacy mode).
+	routeTreeManager *businessrouting.RouteTreeManager // hot-reloadable route tree
+	routeEvaluator   services.RouteEvaluator           // wired into AlertProcessorConfig.RouteEvaluator
 
 	// Business Services
 	k8sClient                  k8s.K8sClient
@@ -181,6 +187,13 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 		r.logger.Warn("Inhibition subsystem initialization failed, continuing without inhibition",
 			"error", err)
 		r.addDegradedReason("inhibition unavailable: %v", err)
+	}
+
+	// Step 2.6: Initialize routing engine (non-fatal — graceful degradation)
+	if err := r.initializeRouting(ctx); err != nil {
+		r.logger.Warn("Routing engine initialization failed, continuing without route-tree evaluation",
+			"error", err)
+		r.addDegradedReason("routing engine unavailable: %v", err)
 	}
 
 	// Step 3: Initialize Business Services
@@ -662,6 +675,99 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 	return nil
 }
 
+// initializeRouting builds the Alertmanager-compatible route tree from
+// cfg.Routing (task 1.3: `route:`/`receivers:` parsing via routing.Parse())
+// and wires a hot-reload-capable RouteEvaluator into the alert processor
+// (task 1.4).
+//
+// Non-fatal — mirrors initializeInhibition/initializeInvestigation above:
+//   - Absent route tree (cfg.Routing == nil) is the expected lite/legacy
+//     state: routeTreeManager/routeEvaluator stay nil and AlertProcessor
+//     skips route evaluation entirely, no error.
+//   - A present-but-malformed tree degrades gracefully instead of blocking
+//     startup. routing.Parse() (task 1.3) already validated field-level/
+//     structural constraints; a TreeBuilder failure here (cycle, dangling
+//     receiver reference, duplicate matcher, ...) is a deeper config
+//     authoring bug best surfaced via the degraded-reasons/health path
+//     rather than a crash loop.
+func (r *ServiceRegistry) initializeRouting(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before routing init: %w", err)
+	}
+
+	if !r.config.HasRouteTree() {
+		r.logger.Info("No route tree configured (route:/receivers: absent), routing engine disabled")
+		return nil
+	}
+
+	r.logger.Info("Initializing routing engine...", "receivers", len(r.config.Routing.Receivers))
+
+	tree, err := businessrouting.NewTreeBuilder(r.config.Routing, businessrouting.DefaultBuildOptions()).Build()
+	if err != nil {
+		return fmt.Errorf("route tree build failed: %w", err)
+	}
+
+	manager, err := businessrouting.NewRouteTreeManager(tree)
+	if err != nil {
+		return fmt.Errorf("route tree manager init failed: %w", err)
+	}
+
+	// No pre-compiled regex patterns to preload; the matcher compiles and
+	// caches them lazily on first use. The matcher is tree-independent
+	// (regex cache + options only) so it is safe to keep across reloads —
+	// only the manager's tree is swapped by Reload.
+	//
+	// EnableMetrics is forced off (unlike DefaultMatcherOptions()):
+	// MatcherMetrics registers via promauto against the default Prometheus
+	// registry, which panics on double-registration. initializeRouting can
+	// run more than once per process (tests construct a fresh
+	// ServiceRegistry per case; a future re-init path could too), so a
+	// metrics-enabled matcher is not safe to construct here. Same reasoning
+	// as routeTreeEvaluator's EnableMetrics:false — see route_evaluator.go.
+	matcherOpts := businessrouting.DefaultMatcherOptions()
+	matcherOpts.EnableMetrics = false
+	matcher := businessrouting.NewRouteMatcher(nil, matcherOpts)
+
+	r.routeTreeManager = manager
+	r.routeEvaluator = newRouteTreeEvaluator(manager, matcher)
+
+	stats := tree.GetStats()
+	r.logger.Info("Routing engine initialized",
+		"nodes", stats.NodeCount,
+		"depth", stats.MaxDepth,
+		"receivers", stats.ReceiverCount)
+	return nil
+}
+
+// reloadRoutingTree hot-reloads the route tree manager from r.config.Routing
+// (task 1.4). Extracted from ReloadConfig so it can be unit-tested directly
+// without going through the full file-based reload pipeline.
+//
+// Unlike the inhibition-matcher hot-reload branch in ReloadConfig (which
+// fails open — logs a warning and continues), a route tree reload failure
+// is returned to the caller: routing.Parse() already validated the config
+// structurally at load time, so a Reload() failure here means something is
+// wrong that the operator must see immediately (per task 1.4: "Reload
+// errors must propagate").
+func (r *ServiceRegistry) reloadRoutingTree() error {
+	if r.routeTreeManager == nil {
+		if r.config.HasRouteTree() {
+			r.logger.Warn("route: section added but routing engine was disabled at startup; restart required to enable routing")
+		}
+		return nil
+	}
+
+	if r.config.Routing == nil {
+		r.logger.Warn("route: section removed from config; routing engine keeps the last-known tree until restart")
+		return nil
+	}
+
+	if err := r.routeTreeManager.Reload(r.config.Routing); err != nil {
+		return fmt.Errorf("route tree reload failed: %w", err)
+	}
+	return nil
+}
+
 // initializeInvestigation sets up the async investigation pipeline (PHASE-5B).
 // Only available in standard profile with a live PostgreSQL pool.
 func (r *ServiceRegistry) initializeInvestigation() error {
@@ -786,6 +892,7 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		InhibitionState:    r.inhibitionState,
 		InhibitionCache:    r.inhibitionCache,
 		BusinessMetrics:    r.metrics,
+		RouteEvaluator:     r.routeEvaluator, // task 1.4: may be nil (lite/legacy mode, no route: section)
 		Logger:             r.logger,
 		Metrics:            nil, // TODO: MetricsManager
 	}
@@ -983,6 +1090,15 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 		// Matcher was never initialized (no rules at startup); wiring it into the
 		// already-running alert processor needs a restart.
 		r.logger.Warn("Inhibition rules added but engine was disabled at startup; restart required to enable inhibition")
+	}
+
+	// Task 1.4: hot-reload the route tree. reload_coordinator's
+	// identifyAffectedComponents already flags affected["routing"] when
+	// route:/receivers: fields change; unlike that (currently-unused)
+	// Reloadable-registry path, ServiceRegistry applies live-component
+	// updates directly here — same pattern as the inhibition matcher above.
+	if err := r.reloadRoutingTree(); err != nil {
+		return err
 	}
 
 	return nil
