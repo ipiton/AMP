@@ -212,3 +212,38 @@ func TestMatchesSilenceMatchers(t *testing.T) {
 		}
 	})
 }
+
+// Value-aware semantics (SILENCE-MATCHER-VALUE-IGNORED fix): the filter must
+// match the silence matcher's VALUE, not just its name.
+func TestMatchesSilenceMatchers_ValueSemantics(t *testing.T) {
+	silenceMatchers := []core.APISilenceMatcher{
+		{Name: "service", Value: "api", IsRegex: false, IsEqual: true},
+	}
+
+	cases := []struct {
+		name   string
+		filter string
+		want   bool
+	}{
+		{"equal matches same value", `service="api"`, true},
+		{"equal rejects different value", `service="web"`, false},
+		{"not-equal rejects same value", `service!="api"`, false},
+		{"not-equal matches different value", `service!="web"`, true},
+		{"not-equal matches absent name (empty value)", `region!="eu"`, true},
+		{"equal rejects absent name", `region="eu"`, false},
+		{"regex runs against the value", `service=~"a.*"`, true},
+		{"regex rejects non-matching value", `service=~"^web$"`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filters, err := ParseLabelMatchers([]string{tc.filter})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := MatchesSilenceMatchers(filters, silenceMatchers); got != tc.want {
+				t.Errorf("filter %s: got %v, want %v", tc.filter, got, tc.want)
+			}
+		})
+	}
+}

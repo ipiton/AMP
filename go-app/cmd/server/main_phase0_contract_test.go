@@ -1250,11 +1250,11 @@ receivers:
 	receiverNames := make([]string, 0, len(receivers))
 	receiverSet := make(map[string]struct{}, len(receivers))
 	for _, receiver := range receivers {
-		// ADR-002: the active runtime serializes config.ReceiverConfig without
-		// json tags, so the field is exported as "Name" (not upstream "name").
-		name, ok := receiver["Name"].(string)
+		// RECEIVERS-JSON-CASE fixed: config.ReceiverConfig now carries a json
+		// tag, so the field matches the upstream Alertmanager schema ("name").
+		name, ok := receiver["name"].(string)
 		if !ok {
-			t.Fatalf("receiver.Name expected string, got %T", receiver["Name"])
+			t.Fatalf("receiver.Name expected string, got %T", receiver["name"])
 		}
 		receiverNames = append(receiverNames, name)
 		receiverSet[name] = struct{}{}
@@ -1619,15 +1619,16 @@ func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
 	if err := json.Unmarshal(serviceRec.Body.Bytes(), &serviceSilences); err != nil {
 		t.Fatalf("failed to decode service-filter silences: %v", err)
 	}
-	// ADR-002: the active runtime filters silences by matcher NAME only
-	// (MatchesSilenceMatchers ignores value and equality), so every silence
-	// carrying a "service" matcher passes the filter.
+	// Upstream semantics: the filter matches silence-matcher VALUES. All three
+	// silences carrying service=api pass; the regex-only silence does not.
 	if len(serviceSilences) != 3 {
 		t.Fatalf("expected 3 silences with a service matcher, got %d", len(serviceSilences))
 	}
 
 	queryRegex := url.Values{}
-	queryRegex.Add("filter", `alertname=~"^High.*"`)
+	// The filter regex runs against the silence matcher's raw VALUE string
+	// ("^High.*"), so match by substring rather than by anchor.
+	queryRegex.Add("filter", `alertname=~".*High.*"`)
 	regexReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryRegex.Encode(), nil)
 	regexRec := httptest.NewRecorder()
 	mux.ServeHTTP(regexRec, regexReq)
@@ -1639,7 +1640,7 @@ func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
 		t.Fatalf("failed to decode regex-filter silences: %v", err)
 	}
 	if len(regexSilences) != 2 {
-		t.Fatalf("expected 2 silences for alertname=~^High.*, got %d", len(regexSilences))
+		t.Fatalf("expected 2 silences for alertname=~.*High.*, got %d", len(regexSilences))
 	}
 
 	queryNotEqual := url.Values{}
@@ -1654,14 +1655,16 @@ func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
 	if err := json.Unmarshal(notEqualRec.Body.Bytes(), &notEqualSilences); err != nil {
 		t.Fatalf("failed to decode not-equal-filter silences: %v", err)
 	}
-	// Name-only semantics: != behaves identically to = for the active runtime.
-	if len(notEqualSilences) != 3 {
-		t.Fatalf("expected 3 silences with a service matcher for service!=api, got %d", len(notEqualSilences))
+	// Upstream semantics: != excludes silences whose service matcher value is
+	// "api"; a silence without a service matcher counts as empty value and
+	// therefore matches.
+	if len(notEqualSilences) != 1 {
+		t.Fatalf("expected 1 silence for service!=api, got %d", len(notEqualSilences))
 	}
 
 	queryMulti := url.Values{}
 	queryMulti.Add("filter", `service="api"`)
-	queryMulti.Add("filter", `alertname=~"^High.*"`)
+	queryMulti.Add("filter", `alertname=~".*High.*"`)
 	multiReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryMulti.Encode(), nil)
 	multiRec := httptest.NewRecorder()
 	mux.ServeHTTP(multiRec, multiReq)

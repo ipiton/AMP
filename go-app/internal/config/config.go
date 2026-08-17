@@ -72,9 +72,11 @@ type InhibitionRuleConfig struct {
 	Name          string            `mapstructure:"name"            yaml:"name,omitempty"`
 }
 
-// ReceiverConfig holds configuration for a notification receiver
+// ReceiverConfig holds configuration for a notification receiver.
+// The json tag matters: /api/v2/receivers marshals this directly and the
+// Alertmanager API v2 schema requires lowercase "name".
 type ReceiverConfig struct {
-	Name string `mapstructure:"name"`
+	Name string `mapstructure:"name" json:"name"`
 }
 
 // DeploymentProfile represents the deployment profile type
