@@ -1,0 +1,64 @@
+package application
+
+import (
+	businessrouting "github.com/ipiton/AMP/internal/business/routing"
+	"github.com/ipiton/AMP/internal/core/services"
+)
+
+// routeTreeEvaluator adapts a hot-reloadable business/routing route tree
+// (RouteTreeManager + RouteMatcher) into the core/services.RouteEvaluator
+// interface consumed by AlertProcessor (task 1.4: alertmanager-parity
+// route wiring).
+//
+// Hot reload: RouteTreeManager.Reload (invoked from
+// ServiceRegistry.reloadRoutingTree, called by ReloadConfig) atomically
+// swaps the manager's tree. This adapter re-reads manager.GetTree() on
+// every Evaluate call, so a reload takes effect on the very next alert
+// with no extra wiring — there is nothing to "refresh" on the AlertProcessor
+// side.
+//
+// Metrics note: business/routing.RouteEvaluator's metrics
+// (EvaluatorMetrics) are registered via promauto against the default
+// Prometheus registry, which panics on double-registration. Because this
+// adapter builds a fresh RouteEvaluator on every single Evaluate call (to
+// pick up manager.GetTree() cheaply and safely), those metrics are
+// deliberately disabled here (EnableMetrics: false) — constructing them
+// once per alert would panic on the second alert. Structured logging in
+// AlertProcessor.evaluateRoute covers observability for task 1.4; per-
+// evaluation Prometheus metrics are out of scope.
+type routeTreeEvaluator struct {
+	manager *businessrouting.RouteTreeManager
+	matcher *businessrouting.RouteMatcher
+	opts    businessrouting.EvaluatorOptions
+}
+
+// newRouteTreeEvaluator creates a routeTreeEvaluator wrapping the given
+// manager and matcher. matcher may be shared/long-lived (it is
+// tree-independent); manager owns the hot-reloadable tree.
+func newRouteTreeEvaluator(manager *businessrouting.RouteTreeManager, matcher *businessrouting.RouteMatcher) *routeTreeEvaluator {
+	opts := businessrouting.DefaultEvaluatorOptions()
+	opts.EnableMetrics = false
+	return &routeTreeEvaluator{manager: manager, matcher: matcher, opts: opts}
+}
+
+// Evaluate implements services.RouteEvaluator.
+func (e *routeTreeEvaluator) Evaluate(labels map[string]string) (*services.RoutingDecision, error) {
+	tree := e.manager.GetTree()
+	evaluator := businessrouting.NewRouteEvaluator(tree, e.matcher, e.opts)
+
+	decision, err := evaluator.Evaluate(&businessrouting.Alert{Labels: labels})
+	if err != nil {
+		return nil, err
+	}
+
+	return &services.RoutingDecision{
+		Receiver:       decision.Receiver,
+		GroupBy:        decision.GroupBy,
+		GroupWait:      decision.GroupWait,
+		GroupInterval:  decision.GroupInterval,
+		RepeatInterval: decision.RepeatInterval,
+		MatchedRoute:   decision.MatchedRoute,
+	}, nil
+}
+
+var _ services.RouteEvaluator = (*routeTreeEvaluator)(nil)

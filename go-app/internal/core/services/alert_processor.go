@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -45,8 +46,16 @@ type AlertProcessor struct {
 	inhibitionMatcher  inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
 	inhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
 	businessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
+	routeEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
 	logger             *slog.Logger
 	metrics            *metrics.MetricsManager
+
+	// lastRoutingDecision holds the most recently computed RoutingDecision
+	// (task 1.4). Observability/testing only: Phase 2 (task 2.3) will carry
+	// per-alert-group decisions into grouping/timers/publishing instead of
+	// this single latest value. Holds *RoutingDecision; nil until the first
+	// alert is evaluated (or forever, if routeEvaluator is nil).
+	lastRoutingDecision atomic.Value
 }
 
 // AlertProcessorConfig holds configuration for AlertProcessor
@@ -61,6 +70,7 @@ type AlertProcessorConfig struct {
 	InhibitionMatcher  inhibition.InhibitionMatcher      // TN-130 Phase 6: optional, recommended for inhibition
 	InhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: optional, for state tracking
 	BusinessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
+	RouteEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
 	Logger             *slog.Logger
 	Metrics            *metrics.MetricsManager
 }
@@ -90,9 +100,52 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 		inhibitionMatcher:  config.InhibitionMatcher,  // TN-130 Phase 6
 		inhibitionState:    config.InhibitionState,    // TN-130 Phase 6
 		businessMetrics:    config.BusinessMetrics,    // TN-130 Phase 6
+		routeEvaluator:     config.RouteEvaluator,     // task 1.4
 		logger:             config.Logger,
 		metrics:            config.Metrics,
 	}, nil
+}
+
+// LastRoutingDecision returns the most recently computed routing decision
+// (task 1.4), or nil if no route tree is configured (routeEvaluator is nil)
+// or no alert has been evaluated yet. Intended for observability and tests;
+// it is not part of the publish path.
+func (p *AlertProcessor) LastRoutingDecision() *RoutingDecision {
+	v := p.lastRoutingDecision.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(*RoutingDecision)
+}
+
+// evaluateRoute computes and logs a RoutingDecision for the alert, when a
+// RouteEvaluator is configured (task 1.4). Errors are non-fatal (fail open,
+// same posture as the inhibition check above): routing is additive
+// observability in this task, publishing is unaffected either way.
+func (p *AlertProcessor) evaluateRoute(alert *core.Alert) {
+	if p.routeEvaluator == nil {
+		return
+	}
+
+	decision, err := p.routeEvaluator.Evaluate(alert.Labels)
+	if err != nil {
+		p.logger.Warn("Route evaluation failed, continuing without a routing decision",
+			"error", err,
+			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint)
+		return
+	}
+
+	p.lastRoutingDecision.Store(decision)
+	p.logger.Info("Routing decision computed",
+		"alert", alert.AlertName,
+		"fingerprint", alert.Fingerprint,
+		"receiver", decision.Receiver,
+		"matched_route", decision.MatchedRoute,
+		"group_by", decision.GroupBy,
+		"group_wait", decision.GroupWait,
+		"group_interval", decision.GroupInterval,
+		"repeat_interval", decision.RepeatInterval)
 }
 
 // ProcessAlert processes an alert based on current enrichment mode
@@ -207,6 +260,12 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 			}
 		}
 	}
+
+	// Task 1.4 (alertmanager-parity route wiring): compute — but do not act
+	// on — a routing decision from the full route tree, when configured.
+	// The publish path below is unchanged; task 2.3 wires GroupBy/timers/
+	// receiver into grouping and publishing.
+	p.evaluateRoute(alert)
 
 	// Get current enrichment mode
 	mode, err := p.enrichmentManager.GetMode(ctx)
