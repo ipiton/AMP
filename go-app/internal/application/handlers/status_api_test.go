@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/buildinfo"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
@@ -74,16 +75,47 @@ func TestStatusAPIHandler(t *testing.T) {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	if resp.ConfigOriginal != configContent {
-		t.Errorf("got config content %q, want %q", resp.ConfigOriginal, configContent)
+	if resp.Config.Original != configContent {
+		t.Errorf("got config content %q, want %q", resp.Config.Original, configContent)
 	}
 
 	if resp.Uptime.Unix() != startTime.Unix() {
 		t.Errorf("got uptime %v, want %v", resp.Uptime, startTime)
 	}
 
-	if resp.VersionInfo.Version != "0.0.1" {
-		t.Errorf("got version %q, want 0.0.1", resp.VersionInfo.Version)
+	if resp.VersionInfo.Version != buildinfo.Version {
+		t.Errorf("got version %q, want %q (buildinfo default)", resp.VersionInfo.Version, buildinfo.Version)
+	}
+	if resp.VersionInfo.GoVersion == "" {
+		t.Error("got empty goVersion")
+	}
+
+	if resp.Cluster.Status != "disabled" {
+		t.Errorf("got cluster.status %q, want %q (no clustering yet)", resp.Cluster.Status, "disabled")
+	}
+
+	// Verify the wire shape is actually nested (config: {original: ...}),
+	// not the old flat "config.original" key.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("failed to unmarshal raw response: %v", err)
+	}
+	configObj, ok := raw["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level \"config\" to be a nested object, got %T", raw["config"])
+	}
+	if configObj["original"] != configContent {
+		t.Errorf("got config.original %v, want %q", configObj["original"], configContent)
+	}
+	if _, hasFlatKey := raw["config.original"]; hasFlatKey {
+		t.Error("response still has the old flat \"config.original\" key")
+	}
+	clusterObj, ok := raw["cluster"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level \"cluster\" to be a nested object, got %T", raw["cluster"])
+	}
+	if clusterObj["status"] != "disabled" {
+		t.Errorf("got cluster.status %v, want disabled", clusterObj["status"])
 	}
 }
 

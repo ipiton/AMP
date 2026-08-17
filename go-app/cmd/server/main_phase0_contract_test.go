@@ -243,17 +243,27 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("status response is not valid json: %v", err)
 		}
-		// ADR-002: the active /api/v2/status payload is config.original +
-		// versionInfo + uptime; cluster/stats/runtime were part of the
-		// historical surface and are not exposed by the active runtime.
+		// PARITY-4.2: /api/v2/status now matches upstream's nested shape —
+		// cluster{status}, versionInfo, config{original}, uptime.
 		if _, ok := payload["versionInfo"]; !ok {
 			t.Fatalf("status response missing versionInfo field")
 		}
 		if _, ok := payload["uptime"]; !ok {
 			t.Fatalf("status response missing uptime field")
 		}
-		if _, ok := payload["config.original"].(string); !ok {
-			t.Fatalf("status response missing config.original string, got %T", payload["config.original"])
+		configObj, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("status response missing nested config object, got %T", payload["config"])
+		}
+		if _, ok := configObj["original"].(string); !ok {
+			t.Fatalf("status response missing config.original string, got %T", configObj["original"])
+		}
+		clusterObj, ok := payload["cluster"].(map[string]any)
+		if !ok {
+			t.Fatalf("status response missing nested cluster object, got %T", payload["cluster"])
+		}
+		if clusterObj["status"] != "disabled" {
+			t.Fatalf("status cluster.status expected %q (no clustering yet), got %v", "disabled", clusterObj["status"])
 		}
 
 		versionInfo, ok := payload["versionInfo"].(map[string]any)

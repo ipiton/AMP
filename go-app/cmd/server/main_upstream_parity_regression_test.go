@@ -32,10 +32,9 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 		t.Fatalf("status response is not valid json: %v", err)
 	}
 
-	// ADR-002: the active runtime is the source of truth. The active
-	// /api/v2/status contract exposes config.original, versionInfo and uptime;
-	// upstream's cluster/config objects are not part of the active surface.
-	requiredTopLevel := []string{"config.original", "versionInfo", "uptime"}
+	// PARITY-4.2: /api/v2/status now matches upstream's nested shape —
+	// cluster{status}, versionInfo, config{original}, uptime.
+	requiredTopLevel := []string{"cluster", "versionInfo", "config", "uptime"}
 	for _, field := range requiredTopLevel {
 		if _, ok := payload[field]; !ok {
 			t.Fatalf("status response missing required field %q", field)
@@ -53,8 +52,21 @@ func TestUpstreamParity_StatusRequiredShape(t *testing.T) {
 		}
 	}
 
-	if _, ok := payload["config.original"].(string); !ok {
-		t.Fatalf("status config.original expected string, got %T", payload["config.original"])
+	configObj, ok := payload["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("status config expected nested object, got %T", payload["config"])
+	}
+	if _, ok := configObj["original"].(string); !ok {
+		t.Fatalf("status config.original expected string, got %T", configObj["original"])
+	}
+
+	clusterObj, ok := payload["cluster"].(map[string]any)
+	if !ok {
+		t.Fatalf("status cluster expected nested object, got %T", payload["cluster"])
+	}
+	// No clustering yet (separate parity phase): stub value is "disabled".
+	if clusterObj["status"] != "disabled" {
+		t.Fatalf("status cluster.status expected %q, got %v", "disabled", clusterObj["status"])
 	}
 
 	uptimeRaw, ok := payload["uptime"].(string)
