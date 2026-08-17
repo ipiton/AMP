@@ -137,9 +137,10 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	r.logger.Info("Initializing service registry...")
 
 	// Initialize Reload Coordinator (TN-152)
-	// We use defaults for validator and comparator for now
-	validator := &appconfig.DefaultConfigValidator{}
-	comparator := &appconfig.DefaultConfigComparator{}
+	// Constructors are required: bare struct literals leave the underlying
+	// go-playground validator nil and /-/reload panics on first use.
+	validator := appconfig.NewConfigValidator()
+	comparator := appconfig.NewConfigComparator()
 	reloader := appconfig.NewConfigReloader(r.logger)
 	// storage and lockManager can be nil for basic reload
 	configPath := os.Getenv("AMP_CONFIG_FILE")
@@ -809,9 +810,23 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	// Update local config pointer
 	r.config = r.reloadCoordinator.GetCurrentConfig()
 
-	// TODO(PARITY-A2): hot-reload inhibition rules — currently the matcher keeps the old rules
-	// after a config reload. To apply new inhibit_rules without restart, call initializeInhibition
-	// and replace r.inhibitionMatcher atomically (requires mutex on the matcher field).
+	// PARITY-A2: hot-reload inhibition rules into the live matcher. The alert
+	// processor holds the same matcher instance, so an in-place update is the
+	// only way to propagate new rules without a restart.
+	if r.inhibitionMatcher != nil {
+		rules := r.config.Inhibition.ToInhibitionRules()
+		if updater, ok := r.inhibitionMatcher.(interface {
+			UpdateRules([]inhibitionpkg.InhibitionRule)
+		}); ok {
+			updater.UpdateRules(rules)
+		} else {
+			r.logger.Warn("Inhibition matcher does not support hot-reload; new inhibit_rules require restart")
+		}
+	} else if len(r.config.Inhibition.ToInhibitionRules()) > 0 {
+		// Matcher was never initialized (no rules at startup); wiring it into the
+		// already-running alert processor needs a restart.
+		r.logger.Warn("Inhibition rules added but engine was disabled at startup; restart required to enable inhibition")
+	}
 
 	return nil
 }
