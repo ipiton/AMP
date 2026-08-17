@@ -209,6 +209,16 @@ retry:
   jitter_ratio: 0.15    # Jitter ratio (0.15 = 15% random jitter)
 
 # ============================================================================
+# Telemetry (OpenTelemetry tracing)
+# ============================================================================
+telemetry:
+  enabled: false
+  endpoint: localhost:4317   # OTLP gRPC collector
+  sampling_ratio: 1.0
+  insecure: false            # true = plaintext gRPC (dev only); default TLS
+  # ca_cert_file: /etc/amp/otlp-ca.pem  # optional CA for collector verification
+
+# ============================================================================
 # Inhibition Rules (Alertmanager parity, PARITY-A2)
 # Suppress target alerts while a source alert is firing on the same labels.
 # Compatible with Alertmanager inhibit_rules format.
