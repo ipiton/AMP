@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,7 @@ func NewAlertFormatter(externalURL string) AlertFormatter {
 	formatter.formatters[core.FormatPagerDuty] = formatter.formatPagerDuty
 	formatter.formatters[core.FormatSlack] = formatter.formatSlack
 	formatter.formatters[core.FormatWebhook] = formatter.formatWebhook
+	formatter.formatters[core.FormatTelegram] = formatter.formatTelegram
 
 	return formatter
 }
@@ -478,6 +480,53 @@ func (f *DefaultAlertFormatter) formatSlack(enrichedAlert *core.EnrichedAlert) (
 			"fields": fields,
 		},
 	}
+
+	return result, nil
+}
+
+// formatTelegram formats alert as HTML-formatted text for the Telegram Bot
+// API (sendMessage with parse_mode=HTML). Returns a payload with a single
+// "text" key. All alert-controlled values (alert name, labels, annotations,
+// AI classification) are HTML-escaped here since the message is sent with
+// HTML parse mode. Callers are responsible for truncating the returned text
+// to Telegram's message size limit before sending (MaxTelegramMessageLength).
+func (f *DefaultAlertFormatter) formatTelegram(enrichedAlert *core.EnrichedAlert) (map[string]any, error) {
+	alert := enrichedAlert.Alert
+	classification := enrichedAlert.Classification
+
+	icon, statusText := "🔥", "FIRING"
+	if alert.Status == core.StatusResolved {
+		icon, statusText = "✅", "RESOLVED"
+	}
+
+	b := getBuilder()
+	defer putBuilder(b)
+
+	fmt.Fprintf(b, "%s <b>%s</b>: %s\n", icon, statusText, html.EscapeString(alert.AlertName))
+
+	if severity, ok := alert.Labels["severity"]; ok && severity != "" {
+		fmt.Fprintf(b, "Severity: %s\n", html.EscapeString(severity))
+	}
+	if namespace, ok := alert.Labels["namespace"]; ok && namespace != "" {
+		fmt.Fprintf(b, "Namespace: %s\n", html.EscapeString(namespace))
+	}
+
+	if summary, ok := alert.Annotations["summary"]; ok && summary != "" {
+		fmt.Fprintf(b, "%s\n", html.EscapeString(summary))
+	} else if description, ok := alert.Annotations["description"]; ok && description != "" {
+		fmt.Fprintf(b, "%s\n", html.EscapeString(description))
+	}
+
+	if classification != nil {
+		fmt.Fprintf(b, "AI Severity: %s (%.0f%% confidence)\n",
+			html.EscapeString(string(classification.Severity)), classification.Confidence*100)
+	}
+
+	text := strings.TrimRight(b.String(), "\n")
+
+	// Get result map from pool (optimization: 0 allocations)
+	result := getFormatterResult()
+	result["text"] = text
 
 	return result, nil
 }

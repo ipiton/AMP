@@ -26,6 +26,7 @@ const (
 	ProviderPagerDuty = "pagerduty"
 	ProviderRootly    = "rootly"
 	ProviderWebhook   = "webhook"
+	ProviderTelegram  = "telegram"
 )
 
 // ============================================================================

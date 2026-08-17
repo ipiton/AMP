@@ -22,6 +22,7 @@ const (
 	TargetTypeWebhook      TargetType = "webhook"
 	TargetTypeAlertmanager TargetType = "alertmanager"
 	TargetTypeEmail        TargetType = "email"
+	TargetTypeTelegram     TargetType = "telegram"
 )
 
 // ParseTargetType converts string to TargetType
@@ -39,6 +40,8 @@ func ParseTargetType(s string) TargetType {
 		return TargetTypeAlertmanager
 	case "email":
 		return TargetTypeEmail
+	case "telegram":
+		return TargetTypeTelegram
 	default:
 		return TargetTypeWebhook // Default to generic webhook
 	}

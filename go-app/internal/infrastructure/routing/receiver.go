@@ -51,6 +51,11 @@ type Receiver struct {
 	// Uses global SMTP settings from GlobalConfig
 	EmailConfigs []*EmailConfig `yaml:"email_configs,omitempty" validate:"dive"`
 
+	// TelegramConfigs defines Telegram receivers
+	// Uses Telegram Bot API (sendMessage) for notifications
+	// Integrates with PARITY-B3 (Telegram Publisher)
+	TelegramConfigs []*TelegramConfig `yaml:"telegram_configs,omitempty" validate:"dive"`
+
 	// Internal: Referenced tracks if receiver is used by any route
 	// Set to true during validation if route references this receiver
 	// Used to detect unused receivers (warning only)
@@ -65,7 +70,8 @@ func (r *Receiver) Validate() error {
 	if len(r.WebhookConfigs) == 0 &&
 		len(r.PagerDutyConfigs) == 0 &&
 		len(r.SlackConfigs) == 0 &&
-		len(r.EmailConfigs) == 0 {
+		len(r.EmailConfigs) == 0 &&
+		len(r.TelegramConfigs) == 0 {
 		return fmt.Errorf("receiver '%s' must have at least one config type defined", r.Name)
 	}
 	return nil
@@ -77,7 +83,8 @@ func (r *Receiver) GetConfigCount() int {
 	return len(r.WebhookConfigs) +
 		len(r.PagerDutyConfigs) +
 		len(r.SlackConfigs) +
-		len(r.EmailConfigs)
+		len(r.EmailConfigs) +
+		len(r.TelegramConfigs)
 }
 
 // Clone creates a deep copy of the receiver.
@@ -88,6 +95,7 @@ func (r *Receiver) Clone() *Receiver {
 		PagerDutyConfigs: make([]*PagerDutyConfig, len(r.PagerDutyConfigs)),
 		SlackConfigs:     make([]*SlackConfig, len(r.SlackConfigs)),
 		EmailConfigs:     make([]*EmailConfig, len(r.EmailConfigs)),
+		TelegramConfigs:  make([]*TelegramConfig, len(r.TelegramConfigs)),
 		Referenced:       r.Referenced,
 	}
 
@@ -102,6 +110,9 @@ func (r *Receiver) Clone() *Receiver {
 	}
 	for i, cfg := range r.EmailConfigs {
 		clone.EmailConfigs[i] = cfg.Clone()
+	}
+	for i, cfg := range r.TelegramConfigs {
+		clone.TelegramConfigs[i] = cfg.Clone()
 	}
 
 	return clone
@@ -128,6 +139,9 @@ func (r *Receiver) Sanitize() *Receiver {
 	}
 	for i, cfg := range clone.EmailConfigs {
 		clone.EmailConfigs[i] = cfg.Sanitize()
+	}
+	for i, cfg := range clone.TelegramConfigs {
+		clone.TelegramConfigs[i] = cfg.Sanitize()
 	}
 
 	return clone
@@ -554,4 +568,108 @@ func maskEmail(email string) string {
 		return "**@" + parts[1]
 	}
 	return local[:2] + "***@" + parts[1]
+}
+
+// TelegramConfig represents a Telegram receiver configuration.
+// Uses the Telegram Bot API (sendMessage) for notifications.
+// Integrates with PARITY-B3 (Telegram Publisher).
+//
+// Note: this struct is this layer's config schema (parsed/validated from
+// route YAML). The runtime publisher (internal/infrastructure/publishing)
+// is target-based and does not currently consume TelegramConfig directly -
+// same as SlackConfig/PagerDutyConfig today. See Message below.
+//
+// Example:
+//
+//	telegram_configs:
+//	  - bot_token: "${TELEGRAM_BOT_TOKEN}"
+//	    chat_id: "-1001234567890"
+//	    parse_mode: HTML
+type TelegramConfig struct {
+	// BotToken is the Telegram bot API token (required)
+	// Obtained from @BotFather. Should use a secret reference: ${TELEGRAM_BOT_TOKEN}
+	// NEVER logged in plaintext - see Sanitize().
+	BotToken string `yaml:"bot_token" validate:"required"`
+
+	// ChatID is the target chat/channel/group identifier (required)
+	// Format: numeric chat id (may be negative for groups/channels) or "@channelusername"
+	ChatID string `yaml:"chat_id" validate:"required,telegram_chat_id"`
+
+	// MessageThreadID targets a specific forum topic thread (optional)
+	MessageThreadID int `yaml:"message_thread_id,omitempty" validate:"omitempty,min=0"`
+
+	// ParseMode specifies message formatting
+	// Values: HTML, Markdown, MarkdownV2
+	// Default: HTML
+	ParseMode string `yaml:"parse_mode,omitempty" validate:"omitempty,oneof=HTML Markdown MarkdownV2"`
+
+	// APIURL is the Telegram Bot API base URL
+	// Default: https://api.telegram.org
+	APIURL string `yaml:"api_url,omitempty" validate:"omitempty,url,https_production"`
+
+	// Message is reserved for a future notification message template
+	// override. NOT YET WIRED to the runtime publisher - the publisher
+	// currently always renders via the shared AlertFormatter
+	// (core.FormatTelegram), same as Slack's own Text/Title/Pretext fields
+	// here are parsed but not consumed by the runtime publisher today.
+	Message string `yaml:"message,omitempty"`
+
+	// DisableNotifications sends the message silently (no sound/vibration)
+	DisableNotifications bool `yaml:"disable_notifications,omitempty"`
+
+	// SendResolved determines if resolved notifications are sent
+	// Default: true
+	SendResolved *bool `yaml:"send_resolved,omitempty"`
+
+	// HTTPConfig specifies HTTP client configuration
+	HTTPConfig *HTTPConfig `yaml:"http_config,omitempty"`
+}
+
+// Defaults applies default values to the Telegram config.
+func (t *TelegramConfig) Defaults() {
+	if t.APIURL == "" {
+		t.APIURL = "https://api.telegram.org"
+	}
+	if t.ParseMode == "" {
+		t.ParseMode = "HTML"
+	}
+	if t.SendResolved == nil {
+		sendResolved := true
+		t.SendResolved = &sendResolved
+	}
+	if t.HTTPConfig != nil {
+		t.HTTPConfig.Defaults()
+	}
+}
+
+// Clone creates a deep copy.
+func (t *TelegramConfig) Clone() *TelegramConfig {
+	clone := &TelegramConfig{
+		BotToken:             t.BotToken,
+		ChatID:               t.ChatID,
+		MessageThreadID:      t.MessageThreadID,
+		ParseMode:            t.ParseMode,
+		APIURL:               t.APIURL,
+		Message:              t.Message,
+		DisableNotifications: t.DisableNotifications,
+	}
+
+	if t.HTTPConfig != nil {
+		clone.HTTPConfig = t.HTTPConfig.Clone()
+	}
+	if t.SendResolved != nil {
+		sendResolved := *t.SendResolved
+		clone.SendResolved = &sendResolved
+	}
+
+	return clone
+}
+
+// Sanitize redacts the bot token (never logged in plaintext).
+func (t *TelegramConfig) Sanitize() *TelegramConfig {
+	clone := t.Clone()
+	if clone.BotToken != "" {
+		clone.BotToken = "[REDACTED]"
+	}
+	return clone
 }
