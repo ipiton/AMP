@@ -18,8 +18,8 @@ profile: "standard"  # Options: "lite" | "standard"
 # Container Image Configuration
 # ===============================
 image:
-  repository: ipiton/amp-llm
-  tag: "1.1.9"
+  repository: ghcr.io/ipiton/amp
+  tag: "0.0.1"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
