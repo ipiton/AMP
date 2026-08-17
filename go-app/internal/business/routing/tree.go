@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"time"
+
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 )
 
 // RouteTree represents an immutable routing tree built from RouteConfig.
@@ -50,7 +52,7 @@ type RouteTree struct {
 	// receivers is a map of receiver name → receiver config.
 	// Pre-built at tree construction time for O(1) receiver lookup.
 	// Used to resolve ReceiverConfig pointers in RouteNode.
-	receivers map[string]*Receiver
+	receivers map[string]*infraroute.Receiver
 
 	// stats contains cached statistics about the tree.
 	// Calculated once at tree construction time.
@@ -99,7 +101,7 @@ func (t *RouteTree) GetBuildTime() time.Time {
 // Returns nil if receiver not found (should be caught by validation).
 //
 // Complexity: O(1)
-func (t *RouteTree) GetReceiver(name string) *Receiver {
+func (t *RouteTree) GetReceiver(name string) *infraroute.Receiver {
 	return t.receivers[name]
 }
 
@@ -230,7 +232,7 @@ func (t *RouteTree) Clone() *RouteTree {
 	}
 
 	// Clone receiver map (shallow copy, Receiver pointers are shared but immutable)
-	receiversClone := make(map[string]*Receiver, len(t.receivers))
+	receiversClone := make(map[string]*infraroute.Receiver, len(t.receivers))
 	for name, receiver := range t.receivers {
 		receiversClone[name] = receiver
 	}

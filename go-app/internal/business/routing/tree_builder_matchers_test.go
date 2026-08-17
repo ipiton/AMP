@@ -52,6 +52,18 @@ func TestParseMatcherExpr(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			name:   "unmatched trailing quote is preserved, not stripped",
+			expr:   `service=files"`,
+			want:   Matcher{Name: "service", Value: `files"`},
+			wantOK: true,
+		},
+		{
+			name:   "unmatched leading quote is preserved, not stripped",
+			expr:   `service="files`,
+			want:   Matcher{Name: "service", Value: `"files`},
+			wantOK: true,
+		},
+		{
 			name:   "malformed: no operator",
 			expr:   "not-a-matcher",
 			wantOK: false,

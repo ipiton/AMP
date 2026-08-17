@@ -68,6 +68,13 @@ type Route struct {
 	// Example: match_re: {service: "^(api|web)$"}
 	MatchRE map[string]string `yaml:"match_re,omitempty"`
 
+	// Matchers holds the `matchers:` list syntax: free-form expressions such
+	// as `severity="critical"`, `severity != critical`, or `sev =~ "a|b"`.
+	// This is the only syntax that can express negative matchers (!=, !~),
+	// since Match/MatchRE have no way to encode negation.
+	// Example: matchers: ['severity != critical', 'namespace =~ "prod.*"']
+	Matchers []string `yaml:"matchers,omitempty"`
+
 	// Continue indicates whether to continue matching after this route matches.
 	// If true, the alert will be sent to multiple receivers.
 	// Default: false
@@ -251,6 +258,11 @@ func (r *Route) Clone() *Route {
 		for k, v := range r.MatchRE {
 			clone.MatchRE[k] = v
 		}
+	}
+
+	if r.Matchers != nil {
+		clone.Matchers = make([]string, len(r.Matchers))
+		copy(clone.Matchers, r.Matchers)
 	}
 
 	if r.Routes != nil {
