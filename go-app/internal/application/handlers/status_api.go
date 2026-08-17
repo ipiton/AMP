@@ -6,14 +6,30 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ipiton/AMP/internal/buildinfo"
 	appconfig "github.com/ipiton/AMP/internal/config"
 )
 
-// StatusResponse represents the response for /api/v2/status
+// StatusResponse represents the response for /api/v2/status, matching the
+// upstream Alertmanager API v2 shape: a nested `config` object (not a flat
+// "config.original" key), `versionInfo`, `cluster` and `uptime`.
 type StatusResponse struct {
-	ConfigOriginal string      `json:"config.original"`
-	VersionInfo    VersionInfo `json:"versionInfo"`
-	Uptime         time.Time   `json:"uptime"`
+	Cluster     ClusterStatus `json:"cluster"`
+	VersionInfo VersionInfo   `json:"versionInfo"`
+	Config      StatusConfig  `json:"config"`
+	Uptime      time.Time     `json:"uptime"`
+}
+
+// StatusConfig is the nested `config` object in /api/v2/status: `{"original": "..."}`.
+type StatusConfig struct {
+	Original string `json:"original"`
+}
+
+// ClusterStatus is a stub for the `cluster` field. AMP has no clustering yet
+// (that lands in a later phase); "disabled" is upstream's own value for a
+// non-clustered Alertmanager instance.
+type ClusterStatus struct {
+	Status string `json:"status"`
 }
 
 // VersionInfo represents the version information
@@ -39,21 +55,15 @@ func StatusAPIHandler(registry RegistryProvider) http.HandlerFunc {
 			configContent = []byte("# config file not found")
 		}
 
-		// Hardcoded for now, should be injected or from build tags
-		version := "0.0.1"
-		revision := "unknown"
-		branch := "main"
-		buildUser := "ipiton"
-		buildDate := time.Now().Format(time.RFC3339)
-
 		resp := StatusResponse{
-			ConfigOriginal: string(configContent),
+			Cluster: ClusterStatus{Status: "disabled"},
+			Config:  StatusConfig{Original: string(configContent)},
 			VersionInfo: VersionInfo{
-				Version:   version,
-				Revision:  revision,
-				Branch:    branch,
-				BuildUser: buildUser,
-				BuildDate: buildDate,
+				Version:   buildinfo.Version,
+				Revision:  buildinfo.Revision,
+				Branch:    buildinfo.Branch,
+				BuildUser: buildinfo.BuildUser,
+				BuildDate: buildinfo.BuildDate,
 				GoVersion: runtime.Version(),
 			},
 			Uptime: registry.StartTime(),

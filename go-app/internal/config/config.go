@@ -153,7 +153,13 @@ type ServerConfig struct {
 	// ExternalURL is the public URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
 	// Used in notification callbacks: email footer, silence links, webhook externalURL field.
 	// Empty string disables callback links (graceful degradation).
-	ExternalURL string                `mapstructure:"external_url"`
+	ExternalURL string `mapstructure:"external_url"`
+	// RoutePrefix mounts all HTTP routes under this path prefix, mirroring
+	// upstream Alertmanager's --web.route-prefix (PARITY-B6). Empty string
+	// (the default) or "/" means no prefix. Overridable via the
+	// -web.route-prefix CLI flag (see cmd/server/main.go); the flag takes
+	// precedence over this config value when set.
+	RoutePrefix string                `mapstructure:"route_prefix"`
 	WebSocket   WebSocketServerConfig `mapstructure:"websocket"`
 	// CORS controls cross-origin headers for the whole HTTP API
 	// (reuses the same config shape as webhook.cors).
@@ -536,6 +542,7 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", "120s")
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
 	viper.SetDefault("server.external_url", "")
+	viper.SetDefault("server.route_prefix", "")
 	viper.SetDefault("server.websocket.allowed_origins", "")
 	viper.SetDefault("server.cors.enabled", false)
 	viper.SetDefault("server.cors.allowed_origins", "")

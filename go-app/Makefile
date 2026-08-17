@@ -26,16 +26,31 @@ MAIN_PATH=./cmd/server
 BINARY_NAME=server
 BINARY_UNIX=$(BINARY_NAME)_unix
 
+# Build-time version metadata (PARITY-4.2: internal/buildinfo, exposed via
+# GET /api/v2/status versionInfo). Override any of these on the command line
+# (e.g. `make build VERSION=1.2.3`) or leave them to the git-derived defaults.
+BUILDINFO_PKG=github.com/ipiton/AMP/internal/buildinfo
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+REVISION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+BUILD_USER ?= $(shell whoami 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS_VERSION=-X $(BUILDINFO_PKG).Version=$(VERSION) \
+	-X $(BUILDINFO_PKG).Revision=$(REVISION) \
+	-X $(BUILDINFO_PKG).Branch=$(BRANCH) \
+	-X $(BUILDINFO_PKG).BuildUser=$(BUILD_USER) \
+	-X $(BUILDINFO_PKG).BuildDate=$(BUILD_DATE)
+
 # Build the project
 build:
-	@echo "Building $(BINARY_NAME)..."
-	$(GOBUILD) -o $(BINARY_NAME) -v $(MAIN_PATH)
+	@echo "Building $(BINARY_NAME) (version=$(VERSION) revision=$(REVISION))..."
+	$(GOBUILD) -o $(BINARY_NAME) -ldflags "$(LDFLAGS_VERSION)" -v $(MAIN_PATH)
 	@echo "Build complete: $(BINARY_NAME)"
 
 # Build for Linux (for Docker)
 build-linux:
-	@echo "Building $(BINARY_NAME) for Linux..."
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v $(MAIN_PATH)
+	@echo "Building $(BINARY_NAME) for Linux (version=$(VERSION) revision=$(REVISION))..."
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -ldflags "$(LDFLAGS_VERSION)" -v $(MAIN_PATH)
 	@echo "Linux build complete: $(BINARY_UNIX)"
 
 # Run tests

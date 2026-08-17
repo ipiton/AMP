@@ -112,6 +112,32 @@ log:
 	assert.Equal(t, "debug", cfg.Log.Level)
 }
 
+func TestLoadConfig_RoutePrefixDefaultAndOverrides(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_ROUTE_PREFIX")
+
+	cfg, err := LoadConfigFromEnv()
+	require.NoError(t, err)
+	assert.Equal(t, "", cfg.Server.RoutePrefix, "route_prefix defaults to empty (no prefix)")
+
+	resetViper()
+	yaml := `
+server:
+  route_prefix: "/amp"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err = LoadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/amp", cfg.Server.RoutePrefix)
+
+	resetViper()
+	require.NoError(t, os.Setenv("SERVER_ROUTE_PREFIX", "/env-amp"))
+	t.Cleanup(func() { unsetEnvKeys("SERVER_ROUTE_PREFIX") })
+	cfg, err = LoadConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/env-amp", cfg.Server.RoutePrefix, "env should override file")
+}
+
 func TestLoadConfig_EnvOverridesFile(t *testing.T) {
 	resetViper()
 	// Base file values
