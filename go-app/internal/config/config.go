@@ -36,6 +36,7 @@ type Config struct {
 	Publishing    PublishingConfig    `mapstructure:"publishing"`
 	Inhibition    InhibitionConfig    `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
+	Grouping      GroupingConfig      `mapstructure:"grouping" yaml:"grouping,omitempty"`
 	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
 
 	// Routing holds the full Alertmanager-compatible route tree and receiver
@@ -85,6 +86,25 @@ type InvestigationConfig struct {
 	OnlyFiring bool `mapstructure:"only_firing"`
 	// Tools configures built-in investigation tools (PHASE-6A).
 	Tools InvestigationToolsConfig `mapstructure:"tools" yaml:"tools,omitempty"`
+}
+
+// GroupingConfig controls the alert grouping subsystem (task 2.2,
+// alertmanager-parity): GroupManager (group lifecycle) + TimerManager
+// (group_wait/group_interval/repeat_interval timers).
+//
+// Grouping defaults — group_by, group_wait, group_interval, repeat_interval —
+// are intentionally NOT duplicated here. They come from the `route:` tree
+// (task 1.3/1.4, Config.Routing) via BuildGroupingConfig (grouping_adapter.go):
+// infraroute.RouteConfig.Route already IS a *grouping.Route (TN-121 backward
+// compatibility), so the adapter reuses it directly instead of re-parsing a
+// second copy of the same fields.
+type GroupingConfig struct {
+	// Enabled turns on the grouping subsystem (group manager + timers).
+	// Defaults to false: this task (2.2) only wires storage + timer
+	// lifecycle (start/restore/shutdown); the alert ingest pipeline does not
+	// consult the grouping subsystem yet — that lands in task 2.3, which
+	// flips this flag's effect on the request path.
+	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
 }
 
 // InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)
@@ -587,6 +607,9 @@ func setDefaults() {
 	viper.SetDefault("llm.temperature", 0.7)
 	viper.SetDefault("llm.timeout", "30s")
 	viper.SetDefault("llm.max_retries", 3)
+
+	// Grouping subsystem defaults (task 2.2, alertmanager-parity)
+	viper.SetDefault("grouping.enabled", false)
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)
