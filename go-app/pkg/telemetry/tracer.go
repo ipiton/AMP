@@ -3,8 +3,11 @@ package telemetry
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+
+	"google.golang.org/grpc/credentials"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -37,6 +40,14 @@ type TracerConfig struct {
 	// SamplingRatio is the sampling ratio (0.0 to 1.0)
 	// 1.0 = trace all requests, 0.1 = trace 10% of requests
 	SamplingRatio float64
+
+	// Insecure disables transport security for the OTLP exporter (plaintext gRPC).
+	// Default false = TLS with system roots (or CACertFile if set).
+	Insecure bool
+
+	// CACertFile is an optional path to a PEM CA certificate used to verify
+	// the OTLP collector. Empty uses the system root pool. Ignored when Insecure.
+	CACertFile string
 
 	// Logger for error reporting
 	Logger *slog.Logger
@@ -88,13 +99,23 @@ func NewTracer(config *TracerConfig) (*Tracer, error) {
 	}
 
 	// Create OTLP exporter
-	exporter, err := otlptrace.New(
-		context.Background(),
-		otlptracegrpc.NewClient(
-			otlptracegrpc.WithEndpoint(config.Endpoint),
-			otlptracegrpc.WithInsecure(), // TODO: Add TLS support
-		),
-	)
+	clientOpts := []otlptracegrpc.Option{
+		otlptracegrpc.WithEndpoint(config.Endpoint),
+	}
+	if config.Insecure {
+		clientOpts = append(clientOpts, otlptracegrpc.WithInsecure())
+	} else if config.CACertFile != "" {
+		creds, err := credentials.NewClientTLSFromFile(config.CACertFile, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to load OTLP CA certificate: %w", err)
+		}
+		clientOpts = append(clientOpts, otlptracegrpc.WithTLSCredentials(creds))
+	} else {
+		clientOpts = append(clientOpts, otlptracegrpc.WithTLSCredentials(
+			credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})))
+	}
+
+	exporter, err := otlptrace.New(context.Background(), otlptracegrpc.NewClient(clientOpts...))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}

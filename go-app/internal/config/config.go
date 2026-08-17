@@ -305,6 +305,14 @@ type TelemetryConfig struct {
 
 	// SamplingRatio is the sampling ratio (0.0 to 1.0)
 	SamplingRatio float64 `mapstructure:"sampling_ratio"`
+
+	// Insecure disables transport security for the OTLP exporter (plaintext gRPC).
+	// Default false = TLS.
+	Insecure bool `mapstructure:"insecure"`
+
+	// CACertFile is an optional PEM CA certificate path for verifying the OTLP
+	// collector. Empty uses system roots. Ignored when Insecure is true.
+	CACertFile string `mapstructure:"ca_cert_file"`
 }
 
 // PublishingConfig holds runtime publishing configuration.
