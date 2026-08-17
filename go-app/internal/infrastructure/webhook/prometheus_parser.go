@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 )
 
 // prometheusParser implements WebhookParser for Prometheus alerts.
@@ -273,10 +274,10 @@ func (p *prometheusParser) convertSingleAlert(amAlert *AlertmanagerAlert, index 
 		return nil, fmt.Errorf("alert[%d]: %w", index, err)
 	}
 
-	// Generate or use existing fingerprint
+	// Generate or use existing fingerprint (canonical algorithm: alertconv)
 	fingerprint := amAlert.Fingerprint
 	if fingerprint == "" {
-		fingerprint = generateFingerprint(alertName, amAlert.Labels)
+		fingerprint = alertconv.Fingerprint(amAlert.Labels)
 	}
 
 	// Validate timestamps
@@ -343,5 +344,6 @@ func mapPrometheusState(state string) string {
 	}
 }
 
-// Note: mapAlertStatus and generateFingerprint are defined in parser.go (TN-41)
+// Note: mapAlertStatus is defined in parser.go (TN-41); the fingerprint
+// algorithm lives in internal/core/alertconv (DTO-FRAGMENTATION).
 // We reuse those implementations for consistency and DRY principle.

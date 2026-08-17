@@ -1,14 +1,12 @@
 package webhook
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 )
 
 // WebhookParser defines the interface for parsing webhook payloads.
@@ -121,10 +119,10 @@ func (p *alertmanagerParser) convertSingleAlert(amAlert *AlertmanagerAlert, inde
 		return nil, fmt.Errorf("alert[%d]: %w", index, err)
 	}
 
-	// Generate or use existing fingerprint
+	// Generate or use existing fingerprint (canonical algorithm: alertconv)
 	fingerprint := amAlert.Fingerprint
 	if fingerprint == "" {
-		fingerprint = generateFingerprint(alertName, amAlert.Labels)
+		fingerprint = alertconv.Fingerprint(amAlert.Labels)
 	}
 
 	// Validate timestamps
@@ -170,38 +168,6 @@ func mapAlertStatus(status string) (core.AlertStatus, error) {
 	default:
 		return "", fmt.Errorf("invalid alert status '%s', must be 'firing' or 'resolved'", status)
 	}
-}
-
-// generateFingerprint generates a deterministic fingerprint for an alert.
-//
-// The fingerprint is generated from:
-//   - alertname
-//   - sorted labels (key=value pairs)
-//
-// This ensures the same alert generates the same fingerprint consistently.
-func generateFingerprint(alertName string, labels map[string]string) string {
-	// Sort labels by key for deterministic output
-	keys := make([]string, 0, len(labels))
-	for k := range labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	// Build fingerprint string
-	var builder strings.Builder
-	builder.WriteString(alertName)
-	builder.WriteString("|")
-
-	for _, k := range keys {
-		builder.WriteString(k)
-		builder.WriteString("=")
-		builder.WriteString(labels[k])
-		builder.WriteString("|")
-	}
-
-	// Hash the fingerprint string
-	hash := sha256.Sum256([]byte(builder.String()))
-	return fmt.Sprintf("%x", hash)
 }
 
 // ParseAndValidate is a convenience method that parses and validates in one call.

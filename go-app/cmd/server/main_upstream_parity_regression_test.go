@@ -606,11 +606,15 @@ func TestUpstreamParity_PostAlertsErrorPayloadContracts(t *testing.T) {
 	}
 }
 
-func TestUpstreamParity_PostAlertsDateOnlyTimestampsAreRejected(t *testing.T) {
+func TestUpstreamParity_PostAlertsDateOnlyTimestampsAccepted(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
-	// ADR-002: the active runtime requires RFC3339 timestamps; upstream's
-	// lenient date-only form ("2099-02-26") is rejected with 400.
+	// DTO-FRAGMENTATION consolidation: the ingest edge and the memory store now
+	// share one lenient time parser (internal/core/alertconv.ParseAlertTime:
+	// RFC3339/RFC3339Nano + date-only YYYY-MM-DD, matching upstream
+	// Alertmanager leniency). Date-only timestamps are therefore ACCEPTED on
+	// every ingest path — the previous 400 expectation documented a divergence
+	// between the handler and the store parsers that no longer exists.
 	postReq := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v2/alerts",
@@ -618,17 +622,8 @@ func TestUpstreamParity_PostAlertsDateOnlyTimestampsAreRejected(t *testing.T) {
 	)
 	postRec := httptest.NewRecorder()
 	mux.ServeHTTP(postRec, postReq)
-	if postRec.Code != http.StatusBadRequest {
-		t.Fatalf("POST /api/v2/alerts with date-only timestamps expected 400, got %d", postRec.Code)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(postRec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("date-only rejection expected JSON object body, got %q (%v)", postRec.Body.String(), err)
-	}
-	message, _ := payload["error"].(string)
-	if !strings.Contains(message, "invalid startsAt") {
-		t.Fatalf("date-only rejection expected invalid startsAt error, got %q", message)
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v2/alerts with date-only timestamps expected 200 (lenient parser), got %d", postRec.Code)
 	}
 }
 

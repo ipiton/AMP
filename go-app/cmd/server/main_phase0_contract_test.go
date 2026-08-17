@@ -374,10 +374,13 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		// ADR-002: the active runtime requires RFC3339 timestamps and rejects
-		// upstream's lenient date-only form.
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/alerts with date-only startsAt/endsAt expected 400, got %d", rec.Code)
+		// DTO-FRAGMENTATION consolidation: handler and memory store now share
+		// one lenient parser (internal/core/alertconv.ParseAlertTime), which —
+		// like upstream Alertmanager — accepts date-only YYYY-MM-DD
+		// timestamps. The previous 400 documented parser divergence between
+		// the two ingest layers; that divergence is gone.
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v2/alerts with date-only startsAt/endsAt expected 200 (lenient parser), got %d", rec.Code)
 		}
 	})
 

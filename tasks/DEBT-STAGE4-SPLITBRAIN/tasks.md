@@ -8,7 +8,7 @@
 - [x] 6. ERROR-REINVENTION: миграция на pkg/httperror (70e9279)
 - [x] 7. DUPLICATED-DB-ADAPTERS: мёртвый PG-адаптер удалён, sentinel/SQL-фиксы (d89ef16)
 - [x] 8. GLOBAL-LOCK-CONTENTION: закрыт бенчмарком, шардирование не нужно (c4a9a90)
-- [ ] 9. DTO-FRAGMENTATION: разведка запущена; решение по итогам (консолидация или закрытие как distinct roles)
+- [x] 9. DTO-FRAGMENTATION: конверсии консолидированы в `core/alertconv`, единый fingerprint, groups видит сайленсы, −3004 строк
 
 ## Follow-ups вне scope (в BACKLOG.md)
 - Runtime gaps из futureparity-закрытия (receivers JSON case, matcher value, method enforcement, silencedBy null, GroupAlerts receiver)
