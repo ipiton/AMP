@@ -14,7 +14,7 @@
 
 ## Medium
 - [x] ~~**ERROR-REINVENTION**~~ — закрыто 2026-08-17. Все вызыватели deprecated-шимов в `infrastructure/publishing` мигрированы на `pkg/httperror` (NewHTTPError*/PublishingClassifier/Is*), шимы с 0 ссылок удалены (`rootly_errors.go` целиком, Legacy*-алиасы, `NewWebhookErrorWithType`, поле `Workers`). Остался только живой `ErrorType`-классификатор webhook_client (лейблы метрик не 1:1 с httperror).
-- [ ] **GLOBAL-LOCK-CONTENTION** — Глобальный мьютекс в Store при высокой нагрузке. Нужно шардирование. ~1d
+- [x] ~~**GLOBAL-LOCK-CONTENTION**~~ — закрыто 2026-08-17 измерением: шардирование не нужно. Бенчмарк `alert_store_bench_test.go` (M1 Pro, 8 потоков): параллельный IngestBatch = 1.4 µs/op (~720K алертов/с) — на порядки выше целевой нагрузки. Дорогая операция — `List()` (O(n)-копия всего стора, 1.2 мс на 5000 алертов), и её шардирование мьютекса не ускоряет. Revisit только при профилировании реальной контенции.
 - [x] ~~**NOTIFICATION-TIMER-STUBS**~~ — закрыто через PARITY-A1 (2026-04-17).
 - [x] ~~**INHIBITION-DEAD-WIRING**~~ — закрыто через PARITY-A2 (2026-04-16). `ShouldInhibit` вызывается в `alert_processor.go:154-155`.
 - [x] ~~**DEDUP-STATE-STUB**~~ — закрыто 2026-08-17. Rule 7 реализован в `SimpleFilterEngine`: fingerprint+status в окне (default 1m, `SetDedupWindow`), lazy sweep, потокобезопасно. Смена статуса firing→resolved не блокируется. Тесты: `filter_engine_dedup_test.go` (включая -race).
