@@ -16,6 +16,7 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
+	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/internal/infrastructure/webhook"
 )
@@ -25,6 +26,10 @@ import (
 type RegistryProvider interface {
 	AlertStore() *memory.AlertStore
 	SilenceStore() *memory.SilenceStore
+	// SilenceRepository returns the persistent silence repository, or nil when
+	// running without one (lite profile). With a nil repository the silence
+	// handlers fall back to the legacy memory-only behavior.
+	SilenceRepository() infrasilencing.SilenceRepository
 	AlertProcessor() *services.AlertProcessor
 	Config() *appconfig.Config
 	StartTime() time.Time

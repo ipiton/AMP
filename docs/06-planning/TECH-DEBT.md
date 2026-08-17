@@ -5,7 +5,7 @@
 ## Critical
 - [x] ~~**GOD-OBJECT-MAIN**~~ — закрыто через PHASE-2 Bootstrap Consolidation. `main.go` теперь ~125 строк, логика в `ServiceRegistry`, `Router`, `handlers`.
 - [x] ~~**STATE-STORE-LEAK**~~ — закрыто через PHASE-2. State stores вынесены из `cmd/server/`.
-- [ ] **SPLIT-BRAIN-RISK** — Отсутствие транзакционной консистентности между In-Memory Store и БД. ~3d
+- [x] ~~**SPLIT-BRAIN-RISK**~~ — закрыто 2026-08-17 двумя слайсами (research: `tasks/DEBT-STAGE4-SPLITBRAIN/research.md`). Слайс 1 (алерты): ProcessAlert больше не глотает ошибку персиста — БД-fail валит алерт до записи в память; rehydration firing-алертов на старте. Слайс 2 (silences — реальная находка: БД-путь был мёртв, рестарт терял все silences): DB-first POST/DELETE через postgres-репозиторий (standard), память как read-кэш, rehydration active+pending, ID генерит только БД; gc_worker теперь инвалидирует кэш после ExpireSilences. Lite-профиль: silences memory-only с явным Warn. За скобками: wiring SilenceManager/sync_worker (двойной write-path), grouping/inhibition-потоки (модули не в рантайме).
 
 ## High
 - [x] ~~**DUPLICATED-DB-ADAPTERS**~~ — закрыто 2026-08-17 удалением, не Query Builder'ом: `postgres_adapter.go` (915 строк) и интерфейс `Database` + `NewDatabase` были мёртвым кодом с 0 prod-вызывателей (Standard живёт на `PostgresStorageAdapter`, Lite — на `SQLiteDatabase`). Удалены также 6 мёртвых методов SQLite (~185 строк). Попутно: sentinel-ошибки выровнены (`core.ErrAlertNotFound` в обоих профилях), закрыта SQL-инъекция label-ключа в sqlite `ListAlerts` (json path теперь параметр), добавлены `rows.Err()`-проверки во все scan-циклы. −~1250 строк.

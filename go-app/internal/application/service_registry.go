@@ -8,11 +8,13 @@ import (
 	"os"
 	"time"
 
+	handlers "github.com/ipiton/AMP/internal/application/handlers"
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
 	"github.com/ipiton/AMP/internal/core/services"
+	coresilencing "github.com/ipiton/AMP/internal/core/silencing"
 	dbmigrations "github.com/ipiton/AMP/internal/database"
 	"github.com/ipiton/AMP/internal/database/postgres"
 	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
@@ -24,6 +26,7 @@ import (
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	investigationrepo "github.com/ipiton/AMP/internal/infrastructure/repository"
+	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 	"github.com/jackc/pgx/v5/stdlib"
@@ -67,6 +70,11 @@ type ServiceRegistry struct {
 	// Memory Stores (for Alertmanager compatibility mode)
 	alertStore   *memory.AlertStore
 	silenceStore *memory.SilenceStore
+
+	// Silence persistence (SPLIT-BRAIN-RISK slice 2): DB-first write path for
+	// silences in the standard profile. Nil in the lite profile — silences
+	// then stay memory-only and are lost on restart.
+	silenceRepo infrasilencing.SilenceRepository
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -233,6 +241,14 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 			"error", err)
 	}
 
+	// SPLIT-BRAIN-RISK slice 2: DB-first silence persistence + rehydration of
+	// the in-memory silence store. Non-fatal: boot continues on failure, but
+	// silences stay memory-only until the next restart.
+	if err := r.initializeSilencePersistence(ctx); err != nil {
+		r.logger.Error("Silence persistence initialization failed; silences are memory-only and will be lost on restart",
+			"error", err)
+	}
+
 	// Initialize Cache (Redis or Memory based on profile)
 	if err := r.initializeCache(ctx); err != nil {
 		r.logger.Error("Cache initialization failed", "error", err)
@@ -307,6 +323,89 @@ func persistedAlertToAPIAlert(alert *core.Alert) core.APIAlert {
 		api.GeneratorURL = *alert.GeneratorURL
 	}
 	return api
+}
+
+// initializeSilencePersistence wires the persistent silence repository and
+// rehydrates the in-memory silence store from it (SPLIT-BRAIN-RISK slice 2).
+//
+// Standard profile: silences become DB-first — the HTTP handlers commit to
+// PostgreSQL before touching memory, and a restart restores active + pending
+// silences from the database.
+//
+// Lite profile: there is no SQLite silence repository yet (the postgres
+// implementation requires pgx), so silences stay memory-only. This is logged
+// explicitly so operators know restarts drop all silences.
+func (r *ServiceRegistry) initializeSilencePersistence(ctx context.Context) error {
+	if r.config.Profile == appconfig.ProfileLite {
+		r.logger.Warn("silences are memory-only in lite profile and will be lost on restart")
+		return nil
+	}
+
+	if r.database == nil || r.database.Pool() == nil {
+		return fmt.Errorf("postgres pool not available for silence repository")
+	}
+
+	r.silenceRepo = infrasilencing.NewPostgresSilenceRepository(r.database.Pool(), r.logger)
+	r.logger.Info("Silence repository initialized (DB-first silence writes enabled)")
+
+	if err := r.rehydrateSilenceStore(ctx); err != nil {
+		// Non-fatal: writes still reach the database; the read cache starts
+		// empty until silences are re-created or the service restarts.
+		r.logger.Error("Silence store rehydration failed; silences API starts empty",
+			"error", err)
+	}
+	return nil
+}
+
+// rehydrateSilenceStore loads active and pending silences from the persistent
+// repository into the in-memory SilenceStore after a restart. The database is
+// the source of truth; memory is a read cache for the API. Expired silences
+// are intentionally skipped — the memory store recomputes state from
+// timestamps on every read, so they would be dead weight.
+func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
+	if r.silenceRepo == nil || r.silenceStore == nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	restored := 0
+
+	const pageSize = 1000
+	for offset := 0; ; offset += pageSize {
+		list, err := r.silenceRepo.ListSilences(ctx, infrasilencing.SilenceFilter{
+			Statuses: []coresilencing.SilenceStatus{
+				coresilencing.SilenceStatusActive,
+				coresilencing.SilenceStatusPending,
+			},
+			Limit:   pageSize,
+			Offset:  offset,
+			OrderBy: "created_at",
+		})
+		if err != nil {
+			return fmt.Errorf("list silences for rehydration: %w", err)
+		}
+		if len(list) == 0 {
+			break
+		}
+
+		apiSilences := make([]core.APISilence, 0, len(list))
+		for _, silence := range list {
+			apiSilences = append(apiSilences, handlers.DomainSilenceToAPI(silence, now))
+		}
+		if err := r.silenceStore.RestoreFromPersistence(apiSilences, now); err != nil {
+			return fmt.Errorf("restore silences into memory store: %w", err)
+		}
+		restored += len(apiSilences)
+
+		if len(list) < pageSize {
+			break
+		}
+	}
+
+	if restored > 0 {
+		r.logger.Info("Silence store rehydrated from persistent storage", "silences", restored)
+	}
+	return nil
 }
 
 // initializeDatabase initializes the database connection.
@@ -842,6 +941,12 @@ func (r *ServiceRegistry) AlertStore() *memory.AlertStore {
 
 func (r *ServiceRegistry) SilenceStore() *memory.SilenceStore {
 	return r.silenceStore
+}
+
+// SilenceRepository returns the persistent silence repository, or nil when
+// running memory-only (lite profile or persistence init failure).
+func (r *ServiceRegistry) SilenceRepository() infrasilencing.SilenceRepository {
+	return r.silenceRepo
 }
 
 func (r *ServiceRegistry) StartTime() time.Time {
