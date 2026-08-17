@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -395,15 +396,18 @@ func TestMapAlertStatus(t *testing.T) {
 	}
 }
 
+// DTO-FRAGMENTATION: the fingerprint algorithm moved to internal/core/alertconv
+// (full SHA-256 over "alertname|k=v|...", alertname taken from labels).
 func TestGenerateFingerprint_Deterministic(t *testing.T) {
 	labels := map[string]string{
-		"severity": "critical",
-		"instance": "server1",
-		"job":      "api",
+		"alertname": "TestAlert",
+		"severity":  "critical",
+		"instance":  "server1",
+		"job":       "api",
 	}
 
-	fp1 := generateFingerprint("TestAlert", labels)
-	fp2 := generateFingerprint("TestAlert", labels)
+	fp1 := alertconv.Fingerprint(labels)
+	fp2 := alertconv.Fingerprint(labels)
 
 	assert.Equal(t, fp1, fp2, "fingerprints should be identical for same input")
 	assert.Len(t, fp1, 64, "SHA256 fingerprint should be 64 hex chars")
@@ -412,29 +416,29 @@ func TestGenerateFingerprint_Deterministic(t *testing.T) {
 func TestGenerateFingerprint_OrderIndependent(t *testing.T) {
 	// Labels in different order should generate same fingerprint
 	labels1 := map[string]string{
-		"a": "1",
-		"b": "2",
-		"c": "3",
+		"alertname": "TestAlert",
+		"a":         "1",
+		"b":         "2",
+		"c":         "3",
 	}
 
 	labels2 := map[string]string{
-		"c": "3",
-		"a": "1",
-		"b": "2",
+		"c":         "3",
+		"a":         "1",
+		"b":         "2",
+		"alertname": "TestAlert",
 	}
 
-	fp1 := generateFingerprint("TestAlert", labels1)
-	fp2 := generateFingerprint("TestAlert", labels2)
+	fp1 := alertconv.Fingerprint(labels1)
+	fp2 := alertconv.Fingerprint(labels2)
 
 	assert.Equal(t, fp1, fp2, "label order should not affect fingerprint")
 }
 
 func TestGenerateFingerprint_DifferentForDifferentInputs(t *testing.T) {
-	labels := map[string]string{"severity": "critical"}
-
-	fp1 := generateFingerprint("Alert1", labels)
-	fp2 := generateFingerprint("Alert2", labels)
-	fp3 := generateFingerprint("Alert1", map[string]string{"severity": "warning"})
+	fp1 := alertconv.Fingerprint(map[string]string{"alertname": "Alert1", "severity": "critical"})
+	fp2 := alertconv.Fingerprint(map[string]string{"alertname": "Alert2", "severity": "critical"})
+	fp3 := alertconv.Fingerprint(map[string]string{"alertname": "Alert1", "severity": "warning"})
 
 	assert.NotEqual(t, fp1, fp2, "different alertnames should have different fingerprints")
 	assert.NotEqual(t, fp1, fp3, "different labels should have different fingerprints")
@@ -604,6 +608,6 @@ func BenchmarkGenerateFingerprint(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = generateFingerprint("TestAlert", labels)
+		_ = alertconv.Fingerprint(labels)
 	}
 }

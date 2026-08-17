@@ -1,15 +1,14 @@
 # 🐦 Migration System
 
-Production-ready система управления миграциями базы данных с использованием **Goose** для Alert History Service.
+Система управления миграциями базы данных с использованием **Goose** для AMP.
 
 ## 🎯 **Обзор**
 
 Система миграций обеспечивает:
-- ✅ **Версионированное управление схемой БД**
-- ✅ **Безопасное развертывание** с backup и rollback
-- ✅ **Много-платформенную поддержку** (PostgreSQL, SQLite)
-- ✅ **Production-grade надежность** с health checks
-- ✅ **Полный аудит и мониторинг**
+- **Версионированное управление схемой БД**
+- **Backup и rollback**
+- **Поддержку PostgreSQL и SQLite**
+- **Health checks** до и после миграций
 
 ## 📋 **Архитектура**
 
@@ -39,9 +38,6 @@ Production-ready система управления миграциями баз
 ```bash
 # Установка goose
 go install github.com/pressly/goose/v3/cmd/goose@latest
-
-# Или через make
-make -f Makefile.migrations install-goose
 ```
 
 ### 2. Настройка переменных окружения
@@ -65,16 +61,16 @@ export BACKUP_ENABLED=true
 
 ```bash
 # Просмотр статуса миграций
-make -f Makefile.migrations migrate-status
+goose -dir ./migrations postgres "$MIGRATION_DSN" status
 
 # Применение всех миграций
-make -f Makefile.migrations migrate-up
+goose -dir ./migrations postgres "$MIGRATION_DSN" up
 
 # Создание новой миграции
-make -f Makefile.migrations migrate-create name=add_user_table
+goose -dir ./migrations postgres "$MIGRATION_DSN" create add_user_table sql
 
-# Откат миграций
-make -f Makefile.migrations migrate-down
+# Откат последней миграции
+goose -dir ./migrations postgres "$MIGRATION_DSN" down
 ```
 
 ## 📁 **Структура файлов**
@@ -147,28 +143,6 @@ goose -dir ./migrations postgres "dsn" create add_users_table sql
 
 # Показать версию
 goose -dir ./migrations postgres "dsn" version
-```
-
-### Make команды
-
-```bash
-# Полная справка
-make -f Makefile.migrations help
-
-# Применить миграции
-make -f Makefile.migrations migrate-up
-
-# Статус миграций
-make -f Makefile.migrations migrate-status
-
-# Создать миграцию
-make -f Makefile.migrations migrate-create name=add_indexes
-
-# Health check
-make -f Makefile.migrations health-check
-
-# Backup
-make -f Makefile.migrations backup-create
 ```
 
 ## 📝 **Создание миграций**
@@ -326,15 +300,12 @@ func (hc *HealthChecker) checkCustomLogic(ctx context.Context) error {
 
 ```bash
 # Решение: применить хотя бы одну миграцию
-make migrate-up
+goose -dir ./migrations postgres "$MIGRATION_DSN" up
 ```
 
 #### "Permission denied"
 
-```bash
-# Проверить права пользователя БД
-make health-check
-```
+Проверить права пользователя БД.
 
 #### "Connection timeout"
 
@@ -348,7 +319,6 @@ export MIGRATION_TIMEOUT=10m
 ```bash
 export MIGRATION_VERBOSE=true
 export MIGRATION_DRY_RUN=true
-make migrate-status
 ```
 
 ## 📚 **Примеры использования**
@@ -376,15 +346,11 @@ if err := manager.Up(context.Background()); err != nil {
 ### В CI/CD pipeline
 
 ```yaml
-# .github/workflows/deploy.yml
+# Пример шага pipeline
 - name: Run Migrations
   run: |
-    make -f Makefile.migrations migrate-up
-    make -f Makefile.migrations health-check
-
-- name: Create Backup
-  run: |
-    make -f Makefile.migrations backup-create
+    goose -dir ./migrations postgres "$MIGRATION_DSN" up
+    goose -dir ./migrations postgres "$MIGRATION_DSN" status
 ```
 
 ## 🤝 **Contributing**
@@ -403,14 +369,6 @@ if err := manager.Up(context.Background()); err != nil {
 - Добавлять тесты для всех публичных функций
 - Следовать принципам SOLID
 - Использовать structured logging
-
----
-
-## 📞 **Поддержка**
-
-- 📧 **Email**: dev@company.com
-- 💬 **Slack**: #database-migrations
-- 📖 **Docs**: [Internal Wiki](https://wiki.company.com/database/migrations)
 
 ---
 

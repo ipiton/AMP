@@ -30,7 +30,9 @@ func setupTestDB(t *testing.T) *pgxpool.Pool {
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
-				WithStartupTimeout(5*time.Second)),
+				// 60s: cold image pull / slow container start blew the old 5s
+				// budget and made the test flaky.
+				WithStartupTimeout(60*time.Second)),
 	)
 	if err != nil {
 		t.Fatalf("failed to start postgres container: %s", err)

@@ -63,9 +63,7 @@ func (r *PostgresSilenceRepository) buildListQuery(filter SilenceFilter) (string
 	// Uses @> operator: matchers @> '[{"name":"alertname"}]'
 	if filter.MatcherName != "" {
 		query += fmt.Sprintf(" AND matchers @> $%d::jsonb", argIdx)
-		// Build JSONB array with partial matcher (name only)
-		jsonbFilter := fmt.Sprintf(`[{"name":"%s"}]`, filter.MatcherName)
-		args = append(args, jsonbFilter)
+		args = append(args, buildJSONBContainmentFilter("name", filter.MatcherName))
 		argIdx++
 	}
 
@@ -73,9 +71,7 @@ func (r *PostgresSilenceRepository) buildListQuery(filter SilenceFilter) (string
 	// Uses @> operator: matchers @> '[{"value":"HighCPU"}]'
 	if filter.MatcherValue != "" {
 		query += fmt.Sprintf(" AND matchers @> $%d::jsonb", argIdx)
-		// Build JSONB array with partial matcher (value only)
-		jsonbFilter := fmt.Sprintf(`[{"value":"%s"}]`, filter.MatcherValue)
-		args = append(args, jsonbFilter)
+		args = append(args, buildJSONBContainmentFilter("value", filter.MatcherValue))
 		argIdx++
 	}
 
@@ -125,8 +121,11 @@ func (r *PostgresSilenceRepository) buildListQuery(filter SilenceFilter) (string
 	orderBy := filter.OrderBy
 	isDefaultOrder := (filter.OrderBy == "" || filter.OrderBy == "created_at")
 
-	if orderBy == "" {
+	// Defense-in-depth: OrderBy is interpolated into SQL, so it must match the
+	// whitelist even if the caller skipped SilenceFilter.Validate().
+	if !sanitizeOrderBy(orderBy) {
 		orderBy = "created_at"
+		isDefaultOrder = true
 	}
 
 	direction := "DESC" // Default to DESC (newest first)
@@ -202,16 +201,14 @@ func (r *PostgresSilenceRepository) buildCountQuery(filter SilenceFilter) (strin
 	// Filter by matcher name
 	if filter.MatcherName != "" {
 		query += fmt.Sprintf(" AND matchers @> $%d::jsonb", argIdx)
-		jsonbFilter := fmt.Sprintf(`[{"name":"%s"}]`, filter.MatcherName)
-		args = append(args, jsonbFilter)
+		args = append(args, buildJSONBContainmentFilter("name", filter.MatcherName))
 		argIdx++
 	}
 
 	// Filter by matcher value
 	if filter.MatcherValue != "" {
 		query += fmt.Sprintf(" AND matchers @> $%d::jsonb", argIdx)
-		jsonbFilter := fmt.Sprintf(`[{"value":"%s"}]`, filter.MatcherValue)
-		args = append(args, jsonbFilter)
+		args = append(args, buildJSONBContainmentFilter("value", filter.MatcherValue))
 		argIdx++
 	}
 
@@ -238,7 +235,6 @@ func (r *PostgresSilenceRepository) buildCountQuery(filter SilenceFilter) (strin
 	if filter.EndsBefore != nil {
 		query += fmt.Sprintf(" AND ends_at <= $%d", argIdx)
 		args = append(args, *filter.EndsBefore)
-		argIdx++
 	}
 
 	// No ORDER BY, LIMIT, or OFFSET for COUNT queries

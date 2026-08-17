@@ -242,7 +242,7 @@ func (v *DefaultTemplateValidator) parseTemplateError(err error) domain.Validati
 	// Extract line number
 	if len(parts) >= 2 {
 		var line int
-		fmt.Sscanf(parts[1], "%d", &line)
+		_, _ = fmt.Sscanf(parts[1], "%d", &line)
 		if line > 0 {
 			validationErr.Line = line
 		}
@@ -251,7 +251,7 @@ func (v *DefaultTemplateValidator) parseTemplateError(err error) domain.Validati
 	// Extract column number
 	if len(parts) >= 3 {
 		var col int
-		fmt.Sscanf(parts[2], "%d", &col)
+		_, _ = fmt.Sscanf(parts[2], "%d", &col)
 		if col > 0 {
 			validationErr.Column = col
 		}
@@ -389,7 +389,7 @@ func isValidTemplateName(name string) bool {
 	}
 
 	for _, ch := range name {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_') {
+		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '_' {
 			return false
 		}
 	}

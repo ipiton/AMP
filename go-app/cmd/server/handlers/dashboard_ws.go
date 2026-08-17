@@ -20,7 +20,6 @@ type DashboardWebSocketHub struct {
 	logger        *slog.Logger
 	metrics       *realtime.RealtimeMetrics
 	subscriber    *WebSocketBroadcastSubscriber
-	mu            sync.RWMutex
 }
 
 // NewDashboardWebSocketHub creates a new dashboard WebSocket hub.

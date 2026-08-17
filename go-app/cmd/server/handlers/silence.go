@@ -42,7 +42,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/business/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics/DatabaseMetrics have no direct pkg/metrics/v2 equivalent yet; migration tracked separately
 )
 
 // SilenceHandler handles HTTP requests for silence management.
@@ -544,7 +544,7 @@ func (h *SilenceHandler) sendError(w http.ResponseWriter, message string, code i
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // sendJSON sends a JSON response with the given data and HTTP status code.

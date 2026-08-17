@@ -187,7 +187,7 @@ func TestStartStop_AlreadyStarted(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAlreadyStarted)
 
 	// Cleanup
-	manager.Stop(1 * time.Second)
+	_ = manager.Stop(1 * time.Second)
 }
 
 // TestStartStop_NotStarted tests stop before start.
@@ -212,7 +212,7 @@ func TestRefreshNow_Success(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup
 	time.Sleep(20 * time.Millisecond)
@@ -249,7 +249,7 @@ func TestRefreshNow_RateLimit(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup
 	time.Sleep(20 * time.Millisecond)
@@ -286,7 +286,7 @@ func TestRefreshNow_RefreshInProgress(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup and initial background refresh to complete
 	time.Sleep(20 * time.Millisecond)
@@ -331,7 +331,7 @@ func TestGetStatus_Accuracy(t *testing.T) {
 	// Start and wait for first refresh
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	time.Sleep(50 * time.Millisecond) // Wait for warmup + first refresh
 
@@ -363,7 +363,7 @@ func TestGetStatus_FailureTracking(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup + first refresh attempt (will fail)
 	time.Sleep(100 * time.Millisecond)
@@ -379,7 +379,7 @@ func TestGetStatus_FailureTracking(t *testing.T) {
 
 	// Trigger another refresh (will fail again)
 	time.Sleep(60 * time.Millisecond) // Wait for rate limit
-	manager.RefreshNow()
+	_ = manager.RefreshNow()
 	waitForRefresh(t, manager, 2*time.Second)
 
 	// Check consecutive failures incremented
@@ -400,7 +400,7 @@ func TestGetStatus_ThreadSafety(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Concurrent GetStatus calls (should not panic or race)
 	done := make(chan bool)

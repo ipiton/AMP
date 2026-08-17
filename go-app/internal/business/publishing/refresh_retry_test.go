@@ -22,7 +22,7 @@ func TestRefreshWithRetry_FirstAttemptSuccess(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for first refresh
 	time.Sleep(30 * time.Millisecond)
@@ -51,7 +51,7 @@ func TestRefreshWithRetry_TransientError(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for first refresh (will retry)
 	time.Sleep(50 * time.Millisecond)
@@ -83,7 +83,7 @@ func TestRefreshWithRetry_PermanentError(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for first refresh
 	time.Sleep(50 * time.Millisecond)
@@ -115,7 +115,7 @@ func TestRefreshWithRetry_MaxRetriesExceeded(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for first refresh (will retry until max retries)
 	time.Sleep(100 * time.Millisecond)
@@ -194,7 +194,7 @@ func TestRefreshWithRetry_BackoffSchedule(t *testing.T) {
 	startTime := time.Now()
 	err = manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for refresh with retries
 	time.Sleep(500 * time.Millisecond)

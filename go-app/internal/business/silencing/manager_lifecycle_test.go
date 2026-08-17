@@ -87,7 +87,7 @@ func TestStart_Success(t *testing.T) {
 	// Cleanup
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	manager.Stop(shutdownCtx)
+	_ = manager.Stop(shutdownCtx)
 
 	mockRepo.AssertExpectations(t)
 }
@@ -124,7 +124,7 @@ func TestStart_AlreadyStarted(t *testing.T) {
 	// Cleanup
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	manager.Stop(shutdownCtx)
+	_ = manager.Stop(shutdownCtx)
 
 	mockRepo.AssertExpectations(t)
 }
@@ -351,7 +351,7 @@ func TestGetStats_Success(t *testing.T) {
 	// Cleanup
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	manager.Stop(shutdownCtx)
+	_ = manager.Stop(shutdownCtx)
 
 	mockRepo.AssertExpectations(t)
 }

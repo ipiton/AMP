@@ -102,7 +102,7 @@ func httpConnectivityTest(
 
 		return false, nil, &latency, &msg, errType
 	}
-	conn.Close() // Close TCP connection (we'll use HTTP client)
+	_ = conn.Close() // Close TCP connection (we will use HTTP client)
 
 	// Step 3: HTTP Request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
@@ -126,7 +126,7 @@ func httpConnectivityTest(
 
 		return false, nil, &latency, &msg, errType
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Measure latency
 	latency := time.Since(startTime).Milliseconds()

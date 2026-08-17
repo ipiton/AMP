@@ -28,7 +28,7 @@ func setupTestRedis(t *testing.T) (*redis.Client, *miniredis.Miniredis) {
 func TestDistributedLock_Acquire(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -83,7 +83,7 @@ func TestDistributedLock_Acquire(t *testing.T) {
 func TestDistributedLock_Release(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "test_lock"
@@ -129,7 +129,7 @@ func TestDistributedLock_Release(t *testing.T) {
 func TestDistributedLock_Extend(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "test_lock"
@@ -165,7 +165,7 @@ func TestDistributedLock_Extend(t *testing.T) {
 func TestDistributedLock_Concurrency(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "concurrent_lock"
@@ -216,7 +216,7 @@ func TestDistributedLock_Concurrency(t *testing.T) {
 func TestDistributedLock_TTL(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "ttl_lock"
@@ -247,7 +247,7 @@ func TestDistributedLock_TTL(t *testing.T) {
 func TestLockManager(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	manager := NewLockManager(client, nil, nil)
@@ -297,7 +297,7 @@ func TestLockManager(t *testing.T) {
 func TestDistributedLock_Retry(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "retry_lock"
@@ -329,7 +329,7 @@ func TestDistributedLock_Retry(t *testing.T) {
 func TestDistributedLock_Configuration(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	key := "config_lock"
 
@@ -353,7 +353,7 @@ func TestDistributedLock_Configuration(t *testing.T) {
 func BenchmarkDistributedLock_Acquire(b *testing.B) {
 	client, mr := setupTestRedis(nil)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "bench_lock"
@@ -367,7 +367,7 @@ func BenchmarkDistributedLock_Acquire(b *testing.B) {
 			b.Fatal(err)
 		}
 		if acquired {
-			lock.Release(ctx)
+			_ = lock.Release(ctx)
 		}
 	}
 }
@@ -375,7 +375,7 @@ func BenchmarkDistributedLock_Acquire(b *testing.B) {
 func BenchmarkDistributedLock_Concurrent(b *testing.B) {
 	client, mr := setupTestRedis(nil)
 	defer mr.Close()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 	key := "bench_concurrent_lock"
@@ -390,7 +390,7 @@ func BenchmarkDistributedLock_Concurrent(b *testing.B) {
 				b.Fatal(err)
 			}
 			if acquired {
-				lock.Release(ctx)
+				_ = lock.Release(ctx)
 			}
 		}
 	})

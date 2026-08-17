@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -25,8 +26,11 @@ import (
 //	matcher := inhibition.NewMatcher(cache, rules, logger)
 //	result, err := matcher.ShouldInhibit(ctx, targetAlert)
 type DefaultInhibitionMatcher struct {
-	cache  ActiveAlertCache
+	cache ActiveAlertCache
+	// rules is guarded by mu: read via snapshot in matching methods,
+	// replaced wholesale by UpdateRules on config hot-reload (PARITY-A2).
 	rules  []InhibitionRule
+	mu     sync.RWMutex
 	logger *slog.Logger
 }
 
@@ -96,9 +100,14 @@ func (m *DefaultInhibitionMatcher) ShouldInhibit(
 	// Pre-compute target fingerprint for self-inhibition check (avoid repeated string comparison)
 	targetFP := targetAlert.Fingerprint
 
+	// Snapshot rules so a concurrent UpdateRules can't race the iteration
+	m.mu.RLock()
+	rules := m.rules
+	m.mu.RUnlock()
+
 	// Check each rule (early exit on first match)
-	for i := range m.rules {
-		rule := &m.rules[i]
+	for i := range rules {
+		rule := &rules[i]
 
 		// Pre-filter optimization: if rule has source_match.alertname, only check alerts with that alertname
 		var candidateAlerts []*core.Alert
@@ -184,13 +193,18 @@ func (m *DefaultInhibitionMatcher) FindInhibitors(
 		return []*MatchResult{}, nil
 	}
 
+	// Snapshot rules so a concurrent UpdateRules can't race the iteration
+	m.mu.RLock()
+	rules := m.rules
+	m.mu.RUnlock()
+
 	// Pre-allocate results slice (estimate: 5% of rules might match)
-	results := make([]*MatchResult, 0, len(m.rules)/20+1)
+	results := make([]*MatchResult, 0, len(rules)/20+1)
 	targetFP := targetAlert.Fingerprint
 
 	// Check each rule (collect ALL matches, no early return)
-	for i := range m.rules {
-		rule := &m.rules[i]
+	for i := range rules {
+		rule := &rules[i]
 
 		// Pre-filter optimization: if rule has source_match.alertname, only check alerts with that alertname
 		var candidateAlerts []*core.Alert
@@ -232,6 +246,23 @@ func (m *DefaultInhibitionMatcher) FindInhibitors(
 	}
 
 	return results, nil
+}
+
+// UpdateRules atomically replaces the rule set (PARITY-A2 config hot-reload).
+// In-flight ShouldInhibit/FindInhibitors calls finish on their snapshot of the
+// old rules; subsequent calls see the new set. The input slice is copied so
+// the caller cannot mutate matcher state afterwards.
+func (m *DefaultInhibitionMatcher) UpdateRules(rules []InhibitionRule) {
+	snapshot := make([]InhibitionRule, len(rules))
+	copy(snapshot, rules)
+
+	m.mu.Lock()
+	m.rules = snapshot
+	m.mu.Unlock()
+
+	if m.logger != nil {
+		m.logger.Info("Inhibition rules updated", "rules", len(snapshot))
+	}
 }
 
 // MatchRule implements InhibitionMatcher.MatchRule.

@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/ipiton/AMP/pkg/httperror"
 )
 
 // slack_bench_test.go - Performance benchmarks for Slack publisher
@@ -184,7 +186,7 @@ func BenchmarkPublisher_Name(b *testing.B) {
 // BenchmarkClassifySlackError benchmarks error classification
 // Target: <100ns per operation
 func BenchmarkClassifySlackError(b *testing.B) {
-	err := NewSlackAPIError(429, "rate_limited", 0)
+	err := httperror.NewHTTPError(429, "rate_limited", ProviderSlack)
 
 	b.ResetTimer()
 	b.ReportAllocs()

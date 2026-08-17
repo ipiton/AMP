@@ -383,7 +383,7 @@ func (s *DefaultConfigUpdateService) atomicApply(
 			CurrentVersion: s.GetCurrentVersion(),
 		}
 	}
-	defer lock.Release(ctx)
+	defer func() { _ = lock.Release(ctx) }()
 
 	s.logger.Info("distributed lock acquired", "lock_key", lockKey)
 

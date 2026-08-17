@@ -283,12 +283,12 @@ func (r *InhibitionRule) String() string {
 	sb.WriteString("InhibitionRule{")
 
 	if r.Name != "" {
-		sb.WriteString(fmt.Sprintf("name=%q, ", r.Name))
+		fmt.Fprintf(&sb, "name=%q, ", r.Name)
 	}
 
-	sb.WriteString(fmt.Sprintf("source=%d matchers, ", len(r.SourceMatch)+len(r.SourceMatchRE)))
-	sb.WriteString(fmt.Sprintf("target=%d matchers, ", len(r.TargetMatch)+len(r.TargetMatchRE)))
-	sb.WriteString(fmt.Sprintf("equal=%v", r.Equal))
+	fmt.Fprintf(&sb, "source=%d matchers, ", len(r.SourceMatch)+len(r.SourceMatchRE))
+	fmt.Fprintf(&sb, "target=%d matchers, ", len(r.TargetMatch)+len(r.TargetMatchRE))
+	fmt.Fprintf(&sb, "equal=%v", r.Equal)
 	sb.WriteString("}")
 
 	return sb.String()

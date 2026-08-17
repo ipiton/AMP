@@ -221,7 +221,7 @@ func (bm *BackupManager) VerifyBackup(ctx context.Context, backupFile string) er
 	if err != nil {
 		return fmt.Errorf("backup file is not readable: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Читаем первые несколько байт для проверки
 	buffer := make([]byte, 1024)

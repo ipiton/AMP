@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics/DatabaseMetrics have no direct pkg/metrics/v2 equivalent yet; migration tracked separately
 )
 
 // ProcessAction represents the action taken by deduplication service

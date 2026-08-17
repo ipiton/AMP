@@ -34,7 +34,7 @@ func TestIsExecuteError(t *testing.T) {
 
 	// Try to execute template that will fail during execution
 	// (not parse error - parse errors we already test)
-	_, err = engine.Execute(ctx, "{{ .NonExistent.Field.Deep }}", data)
+	_, _ = engine.Execute(ctx, "{{ .NonExistent.Field.Deep }}", data)
 
 	// This might be a parse error or execution error depending on implementation
 	// Let's test IsExecuteError directly with a known execute error

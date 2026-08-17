@@ -236,7 +236,7 @@ func (hc *HealthChecker) checkExistingMigrations(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to query migration status: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var lastVersion int64 = 0
 	for rows.Next() {
@@ -290,7 +290,7 @@ func (hc *HealthChecker) checkForeignKeys(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("foreign key check failed: %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		violations := 0
 		for rows.Next() {
@@ -325,7 +325,7 @@ func (hc *HealthChecker) checkIndexes(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to check indexes: %w", err)
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		for rows.Next() {
 			var seq int

@@ -231,7 +231,6 @@ func (r *PostgreSQLDLQRepository) Read(ctx context.Context, filters DLQFilters) 
 	if filters.Offset > 0 {
 		query += fmt.Sprintf(" OFFSET $%d", argCount)
 		args = append(args, filters.Offset)
-		argCount++
 	}
 
 	// Execute query
@@ -424,10 +423,10 @@ func (r *PostgreSQLDLQRepository) GetStats(ctx context.Context) (*DLQStats, erro
 	}
 
 	// Oldest/newest entries
-	r.db.QueryRow(ctx, "SELECT MIN(failed_at), MAX(failed_at) FROM publishing_dlq").Scan(&stats.OldestEntry, &stats.NewestEntry)
+	_ = r.db.QueryRow(ctx, "SELECT MIN(failed_at), MAX(failed_at) FROM publishing_dlq").Scan(&stats.OldestEntry, &stats.NewestEntry)
 
 	// Replayed count
-	r.db.QueryRow(ctx, "SELECT COUNT(*) FROM publishing_dlq WHERE replayed = TRUE").Scan(&stats.ReplayedCount)
+	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM publishing_dlq WHERE replayed = TRUE").Scan(&stats.ReplayedCount)
 
 	return stats, nil
 }

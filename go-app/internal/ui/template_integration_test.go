@@ -320,7 +320,7 @@ func TestIntegration_Concurrency(t *testing.T) {
 				"UserID": userID,
 			},
 		}
-		engine.Render(w, "concurrent", data)
+		_ = engine.Render(w, "concurrent", data)
 	})
 
 	// Concurrent requests

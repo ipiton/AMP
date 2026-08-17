@@ -15,7 +15,7 @@ import (
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/database/postgres"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
-	"github.com/ipiton/AMP/pkg/metrics"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // DashboardHealthHandler handles dashboard health check endpoint.
@@ -32,7 +32,7 @@ type DashboardHealthHandler struct {
 
 	// Observability
 	logger        *slog.Logger
-	metrics       *metrics.MetricsRegistry
+	metrics       *v2.Registry
 	healthMetrics *DashboardHealthMetrics
 
 	// Configuration
@@ -47,13 +47,10 @@ func NewDashboardHealthHandler(
 	targetDiscovery publishing.TargetDiscoveryManager,
 	healthMonitor publishing.HealthMonitor,
 	logger *slog.Logger,
-	metricsRegistry *metrics.MetricsRegistry,
+	metricsRegistry *v2.Registry,
 ) *DashboardHealthHandler {
 	if logger == nil {
 		logger = slog.Default()
-	}
-	if metricsRegistry == nil {
-		metricsRegistry = metrics.NewMetricsRegistry()
 	}
 
 	return &DashboardHealthHandler{
@@ -197,21 +194,22 @@ func (h *DashboardHealthHandler) GetHealth(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Log completion with detailed information
-	if response.Status == "unhealthy" {
+	switch response.Status {
+	case "unhealthy":
 		h.logger.Error("Dashboard health check completed - unhealthy",
 			"status", response.Status,
 			"status_code", statusCode,
 			"services_checked", len(response.Services),
 			"timestamp", response.Timestamp,
 		)
-	} else if response.Status == "degraded" {
+	case "degraded":
 		h.logger.Warn("Dashboard health check completed - degraded",
 			"status", response.Status,
 			"status_code", statusCode,
 			"services_checked", len(response.Services),
 			"timestamp", response.Timestamp,
 		)
-	} else {
+	default:
 		h.logger.Info("Dashboard health check completed - healthy",
 			"status", response.Status,
 			"status_code", statusCode,

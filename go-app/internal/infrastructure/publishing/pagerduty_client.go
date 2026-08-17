@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"golang.org/x/time/rate"
 )
@@ -142,7 +143,7 @@ func (c *pagerDutyEventsClientImpl) TriggerEvent(ctx context.Context, req *Trigg
 		)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	var eventResp EventResponse
@@ -182,7 +183,7 @@ func (c *pagerDutyEventsClientImpl) AcknowledgeEvent(ctx context.Context, req *A
 		)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	var eventResp EventResponse
@@ -222,7 +223,7 @@ func (c *pagerDutyEventsClientImpl) ResolveEvent(ctx context.Context, req *Resol
 		)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	var eventResp EventResponse
@@ -255,7 +256,7 @@ func (c *pagerDutyEventsClientImpl) SendChangeEvent(ctx context.Context, req *Ch
 		)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	var changeResp ChangeEventResponse
@@ -289,7 +290,7 @@ func (c *pagerDutyEventsClientImpl) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Any response (even 400/401) means API is reachable
 	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
@@ -395,7 +396,7 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 				"status", resp.StatusCode,
 				"error", apiErr,
 			)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			backoff := c.calculateBackoff(attempt)
 			// Level guard: avoid expensive logging in production
@@ -407,7 +408,7 @@ func (c *pagerDutyEventsClientImpl) doRequest(ctx context.Context, method string
 		}
 
 		// Permanent error - no retry
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if c.metrics != nil {
 			c.metrics.RecordAPIError(v2.ProviderPagerDuty, endpoint, apiErr.Type())
 		}
@@ -469,11 +470,11 @@ func (c *pagerDutyEventsClientImpl) calculateBackoff(attempt int) time.Duration 
 }
 
 // parseError parses error response from PagerDuty API
-func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *PagerDutyAPIError {
+func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *httperror.HTTPAPIError {
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return NewPagerDutyAPIError(resp.StatusCode, "failed to read error response", []string{err.Error()})
+		return httperror.NewHTTPErrorWithDetails(resp.StatusCode, "failed to read error response", ProviderPagerDuty, []string{err.Error()})
 	}
 
 	// Try to parse JSON error
@@ -485,8 +486,8 @@ func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *PagerDutyAP
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse JSON, return raw body
-		return NewPagerDutyAPIError(resp.StatusCode, string(body), nil)
+		return httperror.NewHTTPError(resp.StatusCode, string(body), ProviderPagerDuty)
 	}
 
-	return NewPagerDutyAPIError(resp.StatusCode, errorResp.Message, errorResp.Errors)
+	return httperror.NewHTTPErrorWithDetails(resp.StatusCode, errorResp.Message, ProviderPagerDuty, errorResp.Errors)
 }

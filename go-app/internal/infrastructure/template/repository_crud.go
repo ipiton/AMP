@@ -53,7 +53,7 @@ func (r *DefaultTemplateRepository) Create(ctx context.Context, template *domain
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Set timestamps if not set
 	now := time.Now()
@@ -225,8 +225,12 @@ func (r *DefaultTemplateRepository) List(ctx context.Context, filters domain.Lis
 	// Filter by tag (metadata JSONB query)
 	if filters.Tag != "" {
 		whereClause += fmt.Sprintf(" AND metadata @> $%d", argIndex)
-		tagJSON := fmt.Sprintf(`{"tags": ["%s"]}`, filters.Tag)
-		args = append(args, tagJSON)
+		// json.Marshal escapes the tag so it cannot alter the containment filter
+		tagJSON, err := json.Marshal(map[string][]string{"tags": {filters.Tag}})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to build tag filter: %w", err)
+		}
+		args = append(args, string(tagJSON))
 		argIndex++
 	}
 
@@ -248,9 +252,16 @@ func (r *DefaultTemplateRepository) List(ctx context.Context, filters domain.Lis
 		return nil, 0, fmt.Errorf("failed to count templates: %w", err)
 	}
 
-	// Build ORDER BY clause
+	// Build ORDER BY clause.
+	// Sort is interpolated into SQL, so it must match the whitelist
+	// (mirrors the validate tag on domain.ListFilters.Sort).
+	validSortFields := map[string]bool{
+		"name":       true,
+		"created_at": true,
+		"updated_at": true,
+	}
 	orderBy := "ORDER BY name ASC"
-	if filters.Sort != "" {
+	if validSortFields[filters.Sort] {
 		direction := "ASC"
 		if filters.Order == "desc" {
 			direction = "DESC"
@@ -275,7 +286,7 @@ func (r *DefaultTemplateRepository) List(ctx context.Context, filters domain.Lis
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query templates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Scan results
 	templates := make([]*domain.Template, 0, filters.Limit)
@@ -333,7 +344,7 @@ func (r *DefaultTemplateRepository) Update(ctx context.Context, template *domain
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Increment version
 	template.Version = current.Version + 1

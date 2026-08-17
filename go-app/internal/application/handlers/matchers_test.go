@@ -8,11 +8,11 @@ import (
 
 func TestParseLabelMatcher_Valid(t *testing.T) {
 	cases := []struct {
-		raw     string
-		name    string
-		op      MatcherOp
-		value   string
-		hasRe   bool
+		raw   string
+		name  string
+		op    MatcherOp
+		value string
+		hasRe bool
 	}{
 		{`alertname="Watchdog"`, "alertname", MatcherOpEqual, "Watchdog", false},
 		{`severity!="critical"`, "severity", MatcherOpNotEqual, "critical", false},
@@ -49,8 +49,8 @@ func TestParseLabelMatcher_Invalid(t *testing.T) {
 	cases := []string{
 		`bad`,
 		`bad:syntax`,
-		`name=value`,     // missing quotes
-		`=~"value"`,      // missing name
+		`name=value`,       // missing quotes
+		`=~"value"`,        // missing name
 		`name=~"[invalid"`, // invalid regex
 	}
 
@@ -71,10 +71,10 @@ func TestMatchesLabels(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		raw     string
-		labels  map[string]string
-		want    bool
+		name   string
+		raw    string
+		labels map[string]string
+		want   bool
 	}{
 		{
 			name:   "equal match",
@@ -211,4 +211,39 @@ func TestMatchesSilenceMatchers(t *testing.T) {
 			t.Error("empty filter should match all silences")
 		}
 	})
+}
+
+// Value-aware semantics (SILENCE-MATCHER-VALUE-IGNORED fix): the filter must
+// match the silence matcher's VALUE, not just its name.
+func TestMatchesSilenceMatchers_ValueSemantics(t *testing.T) {
+	silenceMatchers := []core.APISilenceMatcher{
+		{Name: "service", Value: "api", IsRegex: false, IsEqual: true},
+	}
+
+	cases := []struct {
+		name   string
+		filter string
+		want   bool
+	}{
+		{"equal matches same value", `service="api"`, true},
+		{"equal rejects different value", `service="web"`, false},
+		{"not-equal rejects same value", `service!="api"`, false},
+		{"not-equal matches different value", `service!="web"`, true},
+		{"not-equal matches absent name (empty value)", `region!="eu"`, true},
+		{"equal rejects absent name", `region="eu"`, false},
+		{"regex runs against the value", `service=~"a.*"`, true},
+		{"regex rejects non-matching value", `service=~"^web$"`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			filters, err := ParseLabelMatchers([]string{tc.filter})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := MatchesSilenceMatchers(filters, silenceMatchers); got != tc.want {
+				t.Errorf("filter %s: got %v, want %v", tc.filter, got, tc.want)
+			}
+		})
+	}
 }

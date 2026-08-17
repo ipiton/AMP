@@ -2,27 +2,34 @@ package services
 
 import (
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // FilterMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 )
+
+// DefaultDedupWindow is the default window for Rule 7 (duplicate suppression).
+// It is far below any sane Alertmanager repeat_interval, so legitimate repeat
+// notifications are never suppressed — only redundant re-deliveries are.
+const DefaultDedupWindow = time.Minute
 
 // SimpleFilterEngine is a basic implementation of FilterEngine
 type SimpleFilterEngine struct {
 	logger  *slog.Logger
 	metrics *metrics.FilterMetrics
+
+	// Deduplication state (Rule 7): fingerprint|status -> last seen.
+	// Guarded by dedupMu; entries older than dedupWindow are swept lazily.
+	dedupWindow time.Duration
+	dedupMu     sync.Mutex
+	dedupSeen   map[string]time.Time
+	dedupSweep  time.Time
 }
 
 // NewSimpleFilterEngine creates a new simple filter engine
 func NewSimpleFilterEngine(logger *slog.Logger) *SimpleFilterEngine {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &SimpleFilterEngine{
-		logger:  logger,
-		metrics: metrics.NewFilterMetrics(),
-	}
+	return NewSimpleFilterEngineWithMetrics(logger, metrics.NewFilterMetrics())
 }
 
 // NewSimpleFilterEngineWithMetrics creates a new simple filter engine with custom metrics
@@ -33,9 +40,20 @@ func NewSimpleFilterEngineWithMetrics(logger *slog.Logger, filterMetrics *metric
 	}
 	// Don't create metrics if nil is passed - allow disabling metrics
 	return &SimpleFilterEngine{
-		logger:  logger,
-		metrics: filterMetrics,
+		logger:      logger,
+		metrics:     filterMetrics,
+		dedupWindow: DefaultDedupWindow,
+		dedupSeen:   make(map[string]time.Time),
+		dedupSweep:  time.Now(),
 	}
+}
+
+// SetDedupWindow overrides the duplicate-suppression window (Rule 7).
+// A non-positive window disables deduplication.
+func (f *SimpleFilterEngine) SetDedupWindow(window time.Duration) {
+	f.dedupMu.Lock()
+	defer f.dedupMu.Unlock()
+	f.dedupWindow = window
 }
 
 // ShouldBlock determines if an alert should be blocked
@@ -95,11 +113,49 @@ func (f *SimpleFilterEngine) shouldBlockInternal(alert *core.Alert, classificati
 	}
 
 	// Rule 7: Block duplicate fingerprints within short time window
-	// (This would require state tracking, marked as TODO)
-	// TODO: Implement deduplication logic with time window
+	if f.isDuplicate(alert) {
+		return true, "duplicate"
+	}
 
 	// Default: allow
 	return false, ""
+}
+
+// isDuplicate implements Rule 7: the same fingerprint+status seen again within
+// dedupWindow is a redundant re-delivery and gets blocked. A status change
+// (firing -> resolved) uses a different key, so transitions always pass.
+func (f *SimpleFilterEngine) isDuplicate(alert *core.Alert) bool {
+	if alert.Fingerprint == "" {
+		return false
+	}
+
+	f.dedupMu.Lock()
+	defer f.dedupMu.Unlock()
+
+	if f.dedupWindow <= 0 {
+		return false
+	}
+
+	now := time.Now()
+
+	// Lazy sweep: at most once per window, drop expired entries so the map
+	// stays bounded by the number of distinct alerts per window.
+	if now.Sub(f.dedupSweep) >= f.dedupWindow {
+		for key, seenAt := range f.dedupSeen {
+			if now.Sub(seenAt) >= f.dedupWindow {
+				delete(f.dedupSeen, key)
+			}
+		}
+		f.dedupSweep = now
+	}
+
+	key := alert.Fingerprint + "|" + string(alert.Status)
+	if seenAt, ok := f.dedupSeen[key]; ok && now.Sub(seenAt) < f.dedupWindow {
+		return true
+	}
+
+	f.dedupSeen[key] = now
+	return false
 }
 
 // isDisabledNamespace checks if alert is from a disabled namespace

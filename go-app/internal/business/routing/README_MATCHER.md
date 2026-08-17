@@ -1,9 +1,6 @@
 # Route Matcher — README
 
 **Package**: `internal/business/routing`
-**Task**: TN-139
-**Status**: Production-Ready (150%+ Quality, Grade A+)
-**Version**: 1.0
 
 ---
 
@@ -12,19 +9,12 @@
 The **RouteMatcher** evaluates if alerts match routing rules with support for 4 Alertmanager-compatible operators: `=`, `!=`, `=~`, `!~`.
 
 **Features**:
-- 🎯 4 matcher operators (full Alertmanager compatibility)
-- ⚡ Regex caching with O(1) lookup
-- 🚀 Early exit optimization (stop on first non-match)
-- 📊 Full observability (5 Prometheus metrics + structured logging)
-- 🔒 Thread-safe concurrent matching
-- ⏱️ Context cancellation support
-- 🏎️ Zero allocations in hot path
-
-**Performance**:
-- MatchesNode: <100ns per node
-- FindMatchingRoutes: <50µs for 100 routes
-- Regex match (cached): <50ns
-- Throughput: >10K alerts/sec per core
+- 4 matcher operators (Alertmanager-compatible semantics)
+- Regex caching with O(1) lookup
+- Early exit optimization (stop on first non-match)
+- Prometheus metrics + structured logging
+- Thread-safe concurrent matching
+- Context cancellation support
 
 ---
 
@@ -82,7 +72,7 @@ matches := matcher.MatchesNode(node, alert)
 ### 3. Find Matching Routes in a Tree
 
 ```go
-// Build a route tree (from TN-138)
+// Build a route tree (tree_builder.go)
 tree, _ := routing.NewTreeBuilder(config, opts).Build()
 
 // Find all matching routes
@@ -392,31 +382,17 @@ alert_history_routing_regex_cache_size
 
 ## Performance Guide
 
-### Expected Performance
-
-| Operation | Target | Typical | Hardware |
-|-----------|--------|---------|----------|
-| MatchesNode | <100ns | ~80ns | AWS c6i.xlarge |
-| FindMatchingRoutes (10) | <10µs | ~5µs | AWS c6i.xlarge |
-| FindMatchingRoutes (100) | <50µs | ~30µs | AWS c6i.xlarge |
-| FindMatchingRoutes (1000) | <500µs | ~300µs | AWS c6i.xlarge |
-| Regex match (cached) | <50ns | ~30ns | AWS c6i.xlarge |
-| Throughput | >10K/sec | ~30K/sec | AWS c6i.xlarge |
+Run `go test -bench=. -benchmem ./internal/business/routing/...` for current numbers.
 
 ### Optimization Tips
 
 **1. Pre-populate Regex Cache**
 
 ```go
-// Extract patterns from RouteConfig
-patterns := make(map[string]*regexp.Regexp)
-for _, routePatterns := range config.CompiledRegex {
-    for pattern, regex := range routePatterns {
-        patterns[pattern] = regex
-    }
+// Create matcher with pre-compiled patterns
+patterns := map[string]*regexp.Regexp{
+    "prod.*": regexp.MustCompile("prod.*"),
 }
-
-// Create matcher with pre-populated cache
 matcher := routing.NewRouteMatcher(patterns, opts)
 // First match will be fast (no compilation overhead)
 ```
@@ -427,7 +403,7 @@ matcher := routing.NewRouteMatcher(patterns, opts)
 opts := routing.MatcherOptions{
     EnableOptimizations: true, // Default
 }
-// 2-5x faster for typical configs (70% filter by alertname)
+// Pre-filter by alertname сокращает число проверяемых matchers
 ```
 
 **3. Use continue=false When Possible**
@@ -463,32 +439,18 @@ opts := routing.MatcherOptions{
 
 ## Integration Examples
 
-### With TN-138 (Route Tree Builder)
+### With the Route Tree Builder
 
 ```go
-// Parse config (TN-137)
-config, err := routing.ParseRouteConfig(data)
-if err != nil {
-    return err
-}
-
-// Build tree (TN-138)
+// Build tree from a RouteConfig
 builder := routing.NewTreeBuilder(config, routing.DefaultBuildOptions())
 tree, err := builder.Build()
 if err != nil {
     return err
 }
 
-// Extract compiled regex patterns
-patterns := make(map[string]*regexp.Regexp)
-for _, routePatterns := range config.CompiledRegex {
-    for pattern, regex := range routePatterns {
-        patterns[pattern] = regex
-    }
-}
-
-// Create matcher (TN-139)
-matcher := routing.NewRouteMatcher(patterns, routing.DefaultMatcherOptions())
+// Create matcher
+matcher := routing.NewRouteMatcher(nil, routing.DefaultMatcherOptions())
 
 // Match alerts
 result := matcher.FindMatchingRoutes(tree, alert)
@@ -551,7 +513,7 @@ histogram_quantile(0.95, rate(alert_history_routing_match_duration_seconds_bucke
 
 **Solutions**:
 1. Increase cache size: `opts.CacheSize = 2000`
-2. Pre-populate cache from config.CompiledRegex
+2. Pre-populate cache via `NewRouteMatcher(patterns, opts)` or `RegexCache.Preload`
 3. Check for duplicate patterns (consolidate)
 
 ### Problem: High Memory Usage
@@ -586,40 +548,22 @@ go test -v ./... -run TestMatcher
 go test -bench=. -benchmem
 ```
 
-**Expected Results**:
-```
-BenchmarkMatchesNode/equality-8              15000000    80 ns/op    0 B/op   0 allocs/op
-BenchmarkMatchesNode/regex_cached-8          10000000   120 ns/op    0 B/op   0 allocs/op
-BenchmarkFindMatchingRoutes/100_routes-8       50000  30000 ns/op    0 B/op   0 allocs/op
-BenchmarkRegexCache/hit-8                    20000000    50 ns/op    0 B/op   0 allocs/op
-```
-
 ### Check Test Coverage
 
 ```bash
 go test -cover
 ```
 
-**Expected**: >85% coverage
-
 ---
 
 ## References
 
-### Related Tasks
-- **TN-137**: Route Config Parser (152.3%, Grade A+)
-- **TN-138**: Route Tree Builder (152.1%, Grade A+)
-- **TN-140**: Route Evaluator (Future)
-- **TN-141**: Multi-Receiver Support (Future)
+### Related Components (same package)
+- Route Tree Builder (`tree_builder.go`, см. [README.md](./README.md))
+- Route Evaluator (`evaluator*.go`)
+- Multi-Receiver Support (`multi_receiver*.go`)
 
 ### External Documentation
 - [Alertmanager Routing](https://prometheus.io/docs/alerting/latest/configuration/#route)
 - [Prometheus Label Matching](https://prometheus.io/docs/prometheus/latest/querying/basics/#time-series-selectors)
 - [Go regexp Package](https://pkg.go.dev/regexp)
-
----
-
-**Document Version**: 1.0
-**Last Updated**: 2025-11-17
-**Status**: Production-Ready
-**Quality**: 150%+ Grade A+ Production

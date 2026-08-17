@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"log/slog"
@@ -57,7 +58,7 @@ func TestCreateIncident_Success(t *testing.T) {
 		response.Data.ID = "incident-123"
 		response.Data.Type = "incidents"
 		response.Data.Attributes.Status = "started"
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -103,7 +104,7 @@ func TestCreateIncident_RateLimitError(t *testing.T) {
 	// Create mock server that returns 429
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"errors": []map[string]interface{}{
 				{
 					"status": "429",
@@ -133,8 +134,8 @@ func TestCreateIncident_RateLimitError(t *testing.T) {
 	_, err := client.CreateIncident(context.Background(), req)
 	assert.Error(t, err)
 
-	assert.True(t, IsRootlyAPIError(err))
-	rootlyErr := err.(*RootlyAPIError)
+	assert.Equal(t, ProviderRootly, httperror.GetProvider(err))
+	rootlyErr := err.(*httperror.HTTPAPIError)
 	assert.Equal(t, http.StatusTooManyRequests, rootlyErr.StatusCode)
 	assert.True(t, rootlyErr.IsRateLimit())
 	assert.True(t, rootlyErr.IsRetryable())
@@ -148,7 +149,7 @@ func TestUpdateIncident_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		response := IncidentResponse{}
 		response.Data.ID = "incident-123"
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -175,7 +176,7 @@ func TestResolveIncident_Success(t *testing.T) {
 		response := IncidentResponse{}
 		response.Data.ID = "incident-123"
 		response.Data.Attributes.Status = "resolved"
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -207,7 +208,7 @@ func TestRetryLogic_ExponentialBackoff(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		response := IncidentResponse{}
 		response.Data.ID = "incident-123"
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -243,7 +244,7 @@ func BenchmarkCreateIncident(b *testing.B) {
 		w.WriteHeader(http.StatusCreated)
 		response := IncidentResponse{}
 		response.Data.ID = "incident-123"
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 

@@ -18,23 +18,23 @@ type Config struct {
 	// Storage backend configuration (TN-201)
 	Storage StorageConfig `mapstructure:"storage"`
 
-	Server     ServerConfig     `mapstructure:"server"`
-	Database   DatabaseConfig   `mapstructure:"database"`
-	Redis      RedisConfig      `mapstructure:"redis"`
-	LLM        LLMConfig        `mapstructure:"llm"`
-	Log        LogConfig        `mapstructure:"log"`
-	Cache      CacheConfig      `mapstructure:"cache"`
-	Lock       LockConfig       `mapstructure:"lock"`
-	App        AppConfig        `mapstructure:"app"`
-	Metrics    MetricsConfig    `mapstructure:"metrics"`
-	Webhook    WebhookConfig    `mapstructure:"webhook"`
-	HTTPClient HTTPClientConfig `mapstructure:"http_client"`
-	Retry      RetryConfig      `mapstructure:"retry"`
-	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
-	Publishing PublishingConfig  `mapstructure:"publishing"`
-	Inhibition InhibitionConfig  `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	LLM           LLMConfig           `mapstructure:"llm"`
+	Log           LogConfig           `mapstructure:"log"`
+	Cache         CacheConfig         `mapstructure:"cache"`
+	Lock          LockConfig          `mapstructure:"lock"`
+	App           AppConfig           `mapstructure:"app"`
+	Metrics       MetricsConfig       `mapstructure:"metrics"`
+	Webhook       WebhookConfig       `mapstructure:"webhook"`
+	HTTPClient    HTTPClientConfig    `mapstructure:"http_client"`
+	Retry         RetryConfig         `mapstructure:"retry"`
+	Telemetry     TelemetryConfig     `mapstructure:"telemetry"`
+	Publishing    PublishingConfig    `mapstructure:"publishing"`
+	Inhibition    InhibitionConfig    `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
-	Receivers  []ReceiverConfig `mapstructure:"receivers"`
+	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
 }
 
 // InvestigationConfig controls the PHASE-5A async investigation pipeline.
@@ -72,9 +72,11 @@ type InhibitionRuleConfig struct {
 	Name          string            `mapstructure:"name"            yaml:"name,omitempty"`
 }
 
-// ReceiverConfig holds configuration for a notification receiver
+// ReceiverConfig holds configuration for a notification receiver.
+// The json tag matters: /api/v2/receivers marshals this directly and the
+// Alertmanager API v2 schema requires lowercase "name".
 type ReceiverConfig struct {
-	Name string `mapstructure:"name"`
+	Name string `mapstructure:"name" json:"name"`
 }
 
 // DeploymentProfile represents the deployment profile type
@@ -116,7 +118,19 @@ type ServerConfig struct {
 	// ExternalURL is the public URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
 	// Used in notification callbacks: email footer, silence links, webhook externalURL field.
 	// Empty string disables callback links (graceful degradation).
-	ExternalURL string `mapstructure:"external_url"`
+	ExternalURL string                `mapstructure:"external_url"`
+	WebSocket   WebSocketServerConfig `mapstructure:"websocket"`
+	// CORS controls cross-origin headers for the whole HTTP API
+	// (reuses the same config shape as webhook.cors).
+	CORS CORSWebhookConfig `mapstructure:"cors"`
+}
+
+// WebSocketServerConfig holds WebSocket endpoint configuration
+type WebSocketServerConfig struct {
+	// AllowedOrigins is a comma-separated list of origins allowed to open
+	// WebSocket connections (e.g. "https://amp.example.com, https://grafana.example.com").
+	// Empty string restricts to same-origin requests; "*" allows any origin.
+	AllowedOrigins string `mapstructure:"allowed_origins"`
 }
 
 // DatabaseConfig holds database-related configuration
@@ -296,6 +310,14 @@ type TelemetryConfig struct {
 
 	// SamplingRatio is the sampling ratio (0.0 to 1.0)
 	SamplingRatio float64 `mapstructure:"sampling_ratio"`
+
+	// Insecure disables transport security for the OTLP exporter (plaintext gRPC).
+	// Default false = TLS.
+	Insecure bool `mapstructure:"insecure"`
+
+	// CACertFile is an optional PEM CA certificate path for verifying the OTLP
+	// collector. Empty uses system roots. Ignored when Insecure is true.
+	CACertFile string `mapstructure:"ca_cert_file"`
 }
 
 // PublishingConfig holds runtime publishing configuration.
@@ -439,6 +461,11 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", "120s")
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
 	viper.SetDefault("server.external_url", "")
+	viper.SetDefault("server.websocket.allowed_origins", "")
+	viper.SetDefault("server.cors.enabled", false)
+	viper.SetDefault("server.cors.allowed_origins", "")
+	viper.SetDefault("server.cors.allowed_methods", "GET, POST, PUT, DELETE, OPTIONS")
+	viper.SetDefault("server.cors.allowed_headers", "Content-Type, Authorization, X-Request-ID")
 
 	// Database defaults
 	viper.SetDefault("database.driver", "postgres")
@@ -652,14 +679,9 @@ func (c *Config) Validate() error {
 	}
 
 	// Redis is optional for both profiles (TN-202)
-	// Validation only if Redis addr is provided
-	if c.Redis.Addr != "" {
-		// Redis config provided, validate it
-		if c.Profile == ProfileLite {
-			// Warning: Redis not recommended for Lite profile
-			// but allow it for testing/development
-		}
-	}
+	// Validation only if Redis addr is provided.
+	// Note: Redis is not recommended for Lite profile,
+	// but it is allowed for testing/development.
 
 	if c.Log.Level == "" {
 		return fmt.Errorf("log level cannot be empty")
@@ -788,10 +810,8 @@ func (c *Config) validateProfile() error {
 			return fmt.Errorf("lite profile requires storage.filesystem_path (e.g., /data/alerthistory.db)")
 		}
 
-		// Warning: Postgres not used in Lite (but don't fail)
-		if c.Database.Host != "" && c.Database.Host != "localhost" {
-			// Log warning but don't fail (allows testing)
-		}
+		// Note: Postgres is not used in Lite profile; a non-local
+		// database host is tolerated to allow testing.
 
 	case ProfileStandard:
 		// Standard profile: require postgres storage

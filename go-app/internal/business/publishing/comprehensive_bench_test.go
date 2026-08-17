@@ -41,7 +41,7 @@ func BenchmarkHealthCheck_SingleTarget(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		monitor.CheckNow(ctx, "bench-target")
+		_, _ = monitor.CheckNow(ctx, "bench-target")
 	}
 }
 
@@ -81,14 +81,14 @@ func benchmarkHealthCheckParallel(b *testing.B, targetCount int) {
 	config.MaxConcurrentChecks = 50
 
 	monitor, _ := NewHealthMonitor(discovery, config, nil, metrics)
-	monitor.Start()
-	defer monitor.Stop(time.Second)
+	_ = monitor.Start()
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	ctx := context.Background()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		monitor.GetHealth(ctx)
+		_, _ = monitor.GetHealth(ctx)
 	}
 }
 
@@ -114,7 +114,7 @@ func BenchmarkGetHealth_ConcurrentReads(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			monitor.GetHealth(ctx)
+			_, _ = monitor.GetHealth(ctx)
 		}
 	})
 }
@@ -138,16 +138,16 @@ func BenchmarkHealthStatusCache_Lookup(b *testing.B) {
 
 	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
 	monitor, _ := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
-	monitor.Start()
+	_ = monitor.Start()
 	time.Sleep(200 * time.Millisecond) // Let initial checks complete
-	defer monitor.Stop(time.Second)
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	ctx := context.Background()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		targetName := fmt.Sprintf("target-%d", i%100)
-		monitor.GetHealthByName(ctx, targetName)
+		_, _ = monitor.GetHealthByName(ctx, targetName)
 	}
 }
 
@@ -185,7 +185,7 @@ func benchmarkDiscoverTargets(b *testing.B, secretCount int) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		discovery.DiscoverTargets(ctx)
+		_ = discovery.DiscoverTargets(ctx)
 	}
 }
 
@@ -205,7 +205,7 @@ func BenchmarkGetTarget_CacheLookup(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		targetName := fmt.Sprintf("target-%d", i%1000)
-		discovery.GetTarget(targetName)
+		_, _ = discovery.GetTarget(targetName)
 	}
 }
 
@@ -235,7 +235,7 @@ func BenchmarkMetricsCollection_HealthOnly(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		collector.Collect(ctx)
+		_, _ = collector.Collect(ctx)
 	}
 }
 
@@ -317,7 +317,7 @@ func BenchmarkConcurrent_HealthChecks(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			targetName := fmt.Sprintf("target-%d", b.N%10)
-			monitor.CheckNow(ctx, targetName)
+			_, _ = monitor.CheckNow(ctx, targetName)
 		}
 	})
 }
@@ -345,7 +345,7 @@ func BenchmarkConcurrent_MetricsCollection(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			collector.Collect(ctx)
+			_, _ = collector.Collect(ctx)
 		}
 	})
 }
@@ -412,7 +412,7 @@ func BenchmarkLatency_HealthCheck_Fast(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		monitor.CheckNow(ctx, "fast-target")
+		_, _ = monitor.CheckNow(ctx, "fast-target")
 	}
 }
 
@@ -441,7 +441,7 @@ func BenchmarkLatency_HealthCheck_Slow(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		monitor.CheckNow(ctx, "slow-target")
+		_, _ = monitor.CheckNow(ctx, "slow-target")
 	}
 }
 
@@ -495,6 +495,6 @@ func benchmarkScalability(b *testing.B, targetCount int) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		monitor.GetHealth(ctx)
+		_, _ = monitor.GetHealth(ctx)
 	}
 }

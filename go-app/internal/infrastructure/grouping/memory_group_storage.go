@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
 // MemoryGroupStorage provides in-memory volatile storage for AlertGroup.

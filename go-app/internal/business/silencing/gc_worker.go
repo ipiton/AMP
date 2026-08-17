@@ -215,10 +215,22 @@ func (w *gcWorker) expireActiveSilences(ctx context.Context) (int64, error) {
 	}()
 
 	// Call repository ExpireSilences (deleteExpired=false for status update)
-	count, err := w.repo.ExpireSilences(ctx, time.Now(), false)
+	now := time.Now()
+	count, err := w.repo.ExpireSilences(ctx, now, false)
 	if err != nil {
 		w.logger.Error("ExpireSilences failed", "error", err)
 		return 0, err
+	}
+
+	// Invalidate the cache immediately (SPLIT-BRAIN-RISK slice 2): without
+	// this, silences expired in the database keep status=active in the cache
+	// and continue suppressing alerts until the next full sync (up to the
+	// sync worker interval).
+	if w.cache != nil {
+		if invalidated := w.cache.MarkExpired(now); invalidated > 0 {
+			w.logger.Info("Cache entries marked expired after GC expire phase",
+				"invalidated", invalidated)
+		}
 	}
 
 	// Record metrics
@@ -262,6 +274,15 @@ func (w *gcWorker) deleteOldExpired(ctx context.Context) (int64, error) {
 	if err != nil {
 		w.logger.Error("DeleteOldExpired failed", "error", err)
 		return 0, err
+	}
+
+	// Drop the corresponding cache entries so the cache does not keep rows
+	// that were hard-deleted from the database (SPLIT-BRAIN-RISK slice 2).
+	if w.cache != nil {
+		if removed := w.cache.DeleteExpiredBefore(before); removed > 0 {
+			w.logger.Info("Cache entries removed after GC delete phase",
+				"removed", removed)
+		}
 	}
 
 	// Record metrics

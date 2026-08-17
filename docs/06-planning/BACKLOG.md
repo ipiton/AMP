@@ -2,6 +2,15 @@
 
 Не в активной очереди, но учтено и перенесено из `.plans`.
 
+## Runtime gaps (найдены при закрытии FUTUREPARITY-GAP, 2026-08-17) — ВСЕ ЗАКРЫТЫ 2026-08-17
+
+- [x] ~~**RECEIVERS-JSON-CASE**~~ — json-тег на `ReceiverConfig`, `/api/v2/receivers` отдаёт `{"name":...}`.
+- [x] ~~**SILENCE-MATCHER-VALUE-IGNORED**~~ — `MatchesSilenceMatchers` матчит значение silence-matcher'а оператором фильтра (upstream-семантика); отсутствующее имя = пустое значение.
+- [x] ~~**NO-METHOD-ENFORCEMENT**~~ — `getOnly`-guard: status/receivers/groups/healthy/ready отвечают 405 на не-GET/HEAD.
+- [x] ~~**SILENCEDBY-NULL**~~ — закрыт консолидацией alertconv: `SilencedBy/InhibitedBy/MutedBy` всегда `[]`.
+- [x] ~~**GROUPALERTS-HARDCODED-RECEIVER**~~ — receiver из конфига (первый, fallback "default"), resolved-алерты в группы не входят.
+- Persistence/rehydration gap закрыт в SPLIT-BRAIN-RISK (tasks/DEBT-STAGE4-SPLITBRAIN/research.md).
+
 ## Near-term (из AMP-OSS)
 > Фичи, реализованные в AMP-OSS и отсутствующие в AMP.
 > Примечание: AMP уже имеет ReloadCoordinator (TN-152) с полным 6-фазным pipeline (load → validate → diff → apply → reload → health check). Задачи ниже — дополнения к существующей инфраструктуре.

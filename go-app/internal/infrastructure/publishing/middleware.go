@@ -150,9 +150,9 @@ func ValidationMiddleware() FormatterMiddleware {
 //   - Refill rate: tokens per second
 //
 // Returns: RateLimitError if rate limit exceeded
-type RateLimitMiddleware struct {
-	limiter RateLimiter
-}
+//
+// Construct via NewRateLimitMiddleware; the middleware closes over its limiter.
+type RateLimitMiddleware struct{}
 
 // RateLimiter interface for rate limiting
 type RateLimiter interface {

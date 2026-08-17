@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
-	"github.com/ipiton/AMP/pkg/metrics"
+	// v2 has no BusinessMetrics inhibition methods yet; callers outside this
+	// package still pass *metrics.BusinessMetrics. Migration tracked separately.
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration
 )
 
 // InhibitionState represents the state of an inhibition relationship between alerts.

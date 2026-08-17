@@ -8,7 +8,7 @@ import (
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics/DatabaseMetrics have no direct pkg/metrics/v2 equivalent yet; migration tracked separately
 )
 
 // ClassificationConfig holds classification service configuration.

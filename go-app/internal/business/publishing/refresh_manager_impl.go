@@ -344,13 +344,14 @@ func (m *DefaultRefreshManager) updateState(
 	m.state = state
 	m.refreshDuration = duration
 
-	if state == RefreshStateSuccess {
+	switch state {
+	case RefreshStateSuccess:
 		m.lastRefresh = lastRefresh
 		m.lastError = nil
 		m.consecutiveFailures = 0
 		m.targetStats = targetStats
 		m.nextRefresh = lastRefresh.Add(m.config.Interval)
-	} else if state == RefreshStateFailed {
+	case RefreshStateFailed:
 		m.lastError = lastError
 		m.consecutiveFailures++
 		// Next refresh scheduled at regular interval (no exponential backoff for scheduled refreshes)

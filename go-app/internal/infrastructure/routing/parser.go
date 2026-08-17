@@ -48,11 +48,11 @@ func NewRouteConfigParser() *RouteConfigParser {
 	v := validator.New()
 
 	// Register custom validators
-	v.RegisterValidation("alphanum_hyphen", validateAlphanumHyphen)
-	v.RegisterValidation("https_production", validateHTTPSProduction)
-	v.RegisterValidation("slack_channel", validateSlackChannel)
-	v.RegisterValidation("emoji", validateEmoji)
-	v.RegisterValidation("slack_color", validateSlackColor)
+	_ = v.RegisterValidation("alphanum_hyphen", validateAlphanumHyphen)
+	_ = v.RegisterValidation("https_production", validateHTTPSProduction)
+	_ = v.RegisterValidation("slack_channel", validateSlackChannel)
+	_ = v.RegisterValidation("emoji", validateEmoji)
+	_ = v.RegisterValidation("slack_color", validateSlackColor)
 
 	return &RouteConfigParser{
 		validator: v,
@@ -360,10 +360,10 @@ func validateAlphanumHyphen(fl validator.FieldLevel) bool {
 	}
 
 	for _, r := range value {
-		if !((r >= 'a' && r <= 'z') ||
-			(r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') ||
-			r == '-' || r == '_') {
+		if (r < 'a' || r > 'z') &&
+			(r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') &&
+			r != '-' && r != '_' {
 			return false
 		}
 	}
@@ -420,9 +420,9 @@ func validateSlackColor(fl validator.FieldLevel) bool {
 	// Hex color
 	if len(value) == 7 && value[0] == '#' {
 		for _, r := range value[1:] {
-			if !((r >= '0' && r <= '9') ||
-				(r >= 'a' && r <= 'f') ||
-				(r >= 'A' && r <= 'F')) {
+			if (r < '0' || r > '9') &&
+				(r < 'a' || r > 'f') &&
+				(r < 'A' || r > 'F') {
 				return false
 			}
 		}

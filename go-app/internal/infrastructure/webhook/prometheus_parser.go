@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 )
 
 // prometheusParser implements WebhookParser for Prometheus alerts.
@@ -91,19 +92,20 @@ func (p *prometheusParser) Parse(data []byte) (*AlertmanagerWebhook, error) {
 
 	// Parse Prometheus JSON based on detected format
 	var webhook PrometheusWebhook
-	if format == PrometheusFormatV1 {
+	switch format {
+	case PrometheusFormatV1:
 		// v1 format: array of alerts
 		var alerts []PrometheusAlert
 		if err := json.Unmarshal(data, &alerts); err != nil {
 			return nil, fmt.Errorf("failed to parse Prometheus v1 webhook JSON: %w", err)
 		}
 		webhook.Alerts = alerts
-	} else if format == PrometheusFormatV2 {
+	case PrometheusFormatV2:
 		// v2 format: object with groups
 		if err := json.Unmarshal(data, &webhook); err != nil {
 			return nil, fmt.Errorf("failed to parse Prometheus v2 webhook JSON: %w", err)
 		}
-	} else {
+	default:
 		return nil, fmt.Errorf("unsupported Prometheus format: %s", format)
 	}
 
@@ -272,10 +274,10 @@ func (p *prometheusParser) convertSingleAlert(amAlert *AlertmanagerAlert, index 
 		return nil, fmt.Errorf("alert[%d]: %w", index, err)
 	}
 
-	// Generate or use existing fingerprint
+	// Generate or use existing fingerprint (canonical algorithm: alertconv)
 	fingerprint := amAlert.Fingerprint
 	if fingerprint == "" {
-		fingerprint = generateFingerprint(alertName, amAlert.Labels)
+		fingerprint = alertconv.Fingerprint(amAlert.Labels)
 	}
 
 	// Validate timestamps
@@ -342,5 +344,6 @@ func mapPrometheusState(state string) string {
 	}
 }
 
-// Note: mapAlertStatus and generateFingerprint are defined in parser.go (TN-41)
+// Note: mapAlertStatus is defined in parser.go (TN-41); the fingerprint
+// algorithm lives in internal/core/alertconv (DTO-FRAGMENTATION).
 // We reuse those implementations for consistency and DRY principle.

@@ -71,6 +71,9 @@ func initTemplates() {
 	if err != nil {
 		slog.Warn("Failed to load embedded legacy dashboard templates, trying disk", "error", err)
 		templates, err = template.New("").ParseGlob("templates/legacy/*.html")
+		if err != nil {
+			slog.Error("Failed to load legacy dashboard templates from disk", "error", err)
+		}
 	}
 }
 

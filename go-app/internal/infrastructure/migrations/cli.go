@@ -295,7 +295,7 @@ func (cli *CLI) resetCommand() *cobra.Command {
 			// Требуем подтверждения для опасной операции
 			fmt.Print("WARNING: This will reset ALL migrations and potentially lose data. Continue? (yes/no): ")
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response)
 
 			if strings.ToLower(response) != "yes" {
 				fmt.Println("Operation cancelled")

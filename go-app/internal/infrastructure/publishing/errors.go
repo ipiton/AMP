@@ -3,13 +3,8 @@
 // This file consolidates error types from Slack, PagerDuty, Rootly, and Webhook
 // publishers into a single, unified interface using pkg/httperror.
 //
-// Migration guide:
+// Usage:
 //
-//	// Old way (deprecated):
-//	var slackErr *SlackAPIError
-//	if errors.As(err, &slackErr) { ... }
-//
-//	// New way:
 //	import "github.com/ipiton/AMP/pkg/httperror"
 //	if httperror.IsRetryable(err) { ... }
 //	if httperror.IsRateLimit(err) { ... }
@@ -50,93 +45,6 @@ func NewPublishingErrorWithDetails(statusCode int, message, provider string, det
 // NewPublishingErrorWithCause creates a publishing error wrapping an underlying error.
 func NewPublishingErrorWithCause(statusCode int, message, provider string, cause error) *httperror.HTTPAPIError {
 	return httperror.NewHTTPErrorWithCause(statusCode, message, provider, cause)
-}
-
-// ============================================================================
-// Slack-specific Factories (use ProviderSlack)
-// ============================================================================
-
-// NewSlackAPIError creates a Slack-specific HTTP error.
-//
-// Deprecated: Use httperror.NewHTTPError with ProviderSlack instead.
-func NewSlackAPIError(statusCode int, message string, retryAfter int) *httperror.HTTPAPIError {
-	return &httperror.HTTPAPIError{
-		StatusCode: statusCode,
-		Message:    message,
-		Provider:   ProviderSlack,
-		RetryAfter: retryAfter,
-	}
-}
-
-// ============================================================================
-// PagerDuty-specific Factories (use ProviderPagerDuty)
-// ============================================================================
-
-// NewPagerDutyAPIError creates a PagerDuty-specific HTTP error.
-//
-// Deprecated: Use httperror.NewHTTPError with ProviderPagerDuty instead.
-func NewPagerDutyAPIError(statusCode int, message string, details []string) *httperror.HTTPAPIError {
-	return httperror.NewHTTPErrorWithDetails(statusCode, message, ProviderPagerDuty, details)
-}
-
-// ============================================================================
-// Rootly-specific Factories (use ProviderRootly)
-// ============================================================================
-
-// NewRootlyAPIError creates a Rootly-specific HTTP error.
-//
-// Deprecated: Use httperror.NewHTTPError with ProviderRootly instead.
-func NewRootlyAPIError(statusCode int, title, detail, source string) *httperror.HTTPAPIError {
-	message := title
-	if detail != "" {
-		message = title + " - " + detail
-	}
-
-	var details []string
-	if source != "" {
-		details = []string{"field: " + source}
-	}
-
-	return httperror.NewHTTPErrorWithDetails(statusCode, message, ProviderRootly, details)
-}
-
-// ============================================================================
-// Webhook-specific Factories (use ProviderWebhook)
-// ============================================================================
-
-// NewWebhookError creates a webhook-specific HTTP error.
-//
-// Deprecated: Use httperror.NewHTTPError with ProviderWebhook instead.
-func NewGenericWebhookError(statusCode int, message string, cause error) *httperror.HTTPAPIError {
-	return httperror.NewHTTPErrorWithCause(statusCode, message, ProviderWebhook, cause)
-}
-
-// NewWebhookErrorWithType creates a webhook error with a specific error type.
-// This is for backward compatibility with code that uses ErrorType enum.
-func NewWebhookErrorWithType(errType ErrorType, message string, cause error) *httperror.HTTPAPIError {
-	// Map ErrorType to HTTP status code
-	statusCode := 0
-	switch errType {
-	case ErrorTypeValidation:
-		statusCode = 400
-	case ErrorTypeAuth:
-		statusCode = 401
-	case ErrorTypeNetwork:
-		statusCode = 0 // Network errors don't have HTTP status
-	case ErrorTypeTimeout:
-		statusCode = 504
-	case ErrorTypeRateLimit:
-		statusCode = 429
-	case ErrorTypeServer:
-		statusCode = 500
-	}
-
-	return &httperror.HTTPAPIError{
-		StatusCode: statusCode,
-		Message:    message,
-		Provider:   ProviderWebhook,
-		Cause:      cause,
-	}
 }
 
 // ============================================================================
@@ -190,42 +98,6 @@ func GetPublishingProvider(err error) string {
 func GetPublishingErrorType(err error) string {
 	return httperror.GetErrorType(err)
 }
-
-// ============================================================================
-// Backward Compatibility Notes
-// ============================================================================
-//
-// The following deprecated functions are defined in their respective files:
-// - IsSlackRetryableError: slack_errors.go
-// - IsPagerDutyRetryable: pagerduty_errors.go
-// - IsRootlyRetryableError: rootly_errors.go
-// - IsWebhookRetryableError: webhook_errors.go
-//
-// Use IsPublishingRetryable or httperror.IsRetryable instead.
-
-// ============================================================================
-// Legacy Type Aliases - For Backward Compatibility
-// ============================================================================
-
-// LegacySlackAPIError is a compatibility alias.
-//
-// Deprecated: Use httperror.HTTPAPIError instead.
-type LegacySlackAPIError = httperror.HTTPAPIError
-
-// LegacyPagerDutyAPIError is a compatibility alias.
-//
-// Deprecated: Use httperror.HTTPAPIError instead.
-type LegacyPagerDutyAPIError = httperror.HTTPAPIError
-
-// LegacyRootlyAPIError is a compatibility alias.
-//
-// Deprecated: Use httperror.HTTPAPIError instead.
-type LegacyRootlyAPIError = httperror.HTTPAPIError
-
-// LegacyWebhookError is a compatibility alias.
-//
-// Deprecated: Use httperror.HTTPAPIError instead.
-type LegacyWebhookError = httperror.HTTPAPIError
 
 // ============================================================================
 // Helper: Extract HTTPAPIError from any error

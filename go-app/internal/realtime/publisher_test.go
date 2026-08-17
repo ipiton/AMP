@@ -20,7 +20,7 @@ func TestEventPublisher_PublishAlertEvent(t *testing.T) {
 
 	err := eventBus.Start(ctx)
 	require.NoError(t, err)
-	defer eventBus.Stop(context.Background())
+	defer func() { _ = eventBus.Stop(context.Background()) }()
 
 	publisher := NewEventPublisher(eventBus, slog.Default(), nil)
 
@@ -44,7 +44,7 @@ func TestEventPublisher_PublishStatsEvent(t *testing.T) {
 
 	err := eventBus.Start(ctx)
 	require.NoError(t, err)
-	defer eventBus.Stop(context.Background())
+	defer func() { _ = eventBus.Stop(context.Background()) }()
 
 	publisher := NewEventPublisher(eventBus, slog.Default(), nil)
 
@@ -67,7 +67,7 @@ func TestEventPublisher_PublishHealthEvent(t *testing.T) {
 
 	err := eventBus.Start(ctx)
 	require.NoError(t, err)
-	defer eventBus.Stop(context.Background())
+	defer func() { _ = eventBus.Stop(context.Background()) }()
 
 	publisher := NewEventPublisher(eventBus, slog.Default(), nil)
 
@@ -83,7 +83,7 @@ func TestEventPublisher_PublishSystemNotification(t *testing.T) {
 
 	err := eventBus.Start(ctx)
 	require.NoError(t, err)
-	defer eventBus.Stop(context.Background())
+	defer func() { _ = eventBus.Stop(context.Background()) }()
 
 	publisher := NewEventPublisher(eventBus, slog.Default(), nil)
 

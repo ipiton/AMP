@@ -141,7 +141,6 @@ type PublishingQueueConfig struct {
 	RetryInterval           time.Duration
 	CircuitTimeout          time.Duration
 	Metrics                 *v2.PublishingMetrics // v2 metrics (optional, will create if nil)
-	Workers                 int                   // Deprecated: use WorkerCount
 }
 
 // DefaultPublishingQueueConfig returns default configuration

@@ -340,9 +340,10 @@ func (r *PostgresHistoryRepository) GetAggregatedStats(ctx context.Context, time
 			return nil, fmt.Errorf("failed to scan status: %w", err)
 		}
 		stats.AlertsByStatus[status] = count
-		if status == "firing" {
+		switch status {
+		case "firing":
 			stats.FiringAlerts = count
-		} else if status == "resolved" {
+		case "resolved":
 			stats.ResolvedAlerts = count
 		}
 	}

@@ -24,6 +24,16 @@ server:
   write_timeout: 30s
   idle_timeout: 120s
   graceful_shutdown_timeout: 30s
+  websocket:
+    # Comma-separated list of origins allowed to open WebSocket connections.
+    # Empty = same-origin only (secure default); "*" = allow any origin (dev only).
+    allowed_origins: ""
+  cors:
+    # CORS for the whole HTTP API (same shape as webhook.cors).
+    enabled: false
+    allowed_origins: ""   # comma-separated; "*" = any origin (dev only)
+    allowed_methods: "GET, POST, PUT, DELETE, OPTIONS"
+    allowed_headers: "Content-Type, Authorization, X-Request-ID"
 
 # ============================================================================
 # Database Configuration (PostgreSQL)
@@ -203,6 +213,16 @@ retry:
   max_delay: 30s        # Maximum delay between retries
   multiplier: 2.0       # Backoff multiplier (2.0 = exponential)
   jitter_ratio: 0.15    # Jitter ratio (0.15 = 15% random jitter)
+
+# ============================================================================
+# Telemetry (OpenTelemetry tracing)
+# ============================================================================
+telemetry:
+  enabled: false
+  endpoint: localhost:4317   # OTLP gRPC collector
+  sampling_ratio: 1.0
+  insecure: false            # true = plaintext gRPC (dev only); default TLS
+  # ca_cert_file: /etc/amp/otlp-ca.pem  # optional CA for collector verification
 
 # ============================================================================
 # Inhibition Rules (Alertmanager parity, PARITY-A2)

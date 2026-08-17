@@ -44,7 +44,7 @@ func Example() {
 	if err != nil {
 		log.Fatalf("Failed to create database connection: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// 3. Создаем менеджер миграций
 	manager, err := NewMigrationManager(migrationConfig)
@@ -147,11 +147,11 @@ func ExampleWithPostgres() {
 	logger.Info("🐘 PostgreSQL Migration Example")
 
 	// Устанавливаем переменные окружения для PostgreSQL
-	os.Setenv("MIGRATION_DRIVER", "postgres")
-	os.Setenv("MIGRATION_DSN", "postgres://user:password@localhost:5432/alert_history?sslmode=disable")
-	os.Setenv("MIGRATION_DIALECT", "postgres")
-	os.Setenv("MIGRATION_DIR", "migrations")
-	os.Setenv("MIGRATION_VERBOSE", "true")
+	_ = os.Setenv("MIGRATION_DRIVER", "postgres")
+	_ = os.Setenv("MIGRATION_DSN", "postgres://user:password@localhost:5432/alert_history?sslmode=disable")
+	_ = os.Setenv("MIGRATION_DIALECT", "postgres")
+	_ = os.Setenv("MIGRATION_DIR", "migrations")
+	_ = os.Setenv("MIGRATION_VERBOSE", "true")
 
 	// Запускаем пример
 	Example()
@@ -166,11 +166,11 @@ func ExampleWithSQLite() {
 	logger.Info("📱 SQLite Migration Example")
 
 	// Устанавливаем переменные окружения для SQLite
-	os.Setenv("MIGRATION_DRIVER", "sqlite")
-	os.Setenv("MIGRATION_DSN", "file:./alert_history.db?cache=shared&mode=rwc")
-	os.Setenv("MIGRATION_DIALECT", "sqlite")
-	os.Setenv("MIGRATION_DIR", "migrations")
-	os.Setenv("MIGRATION_VERBOSE", "true")
+	_ = os.Setenv("MIGRATION_DRIVER", "sqlite")
+	_ = os.Setenv("MIGRATION_DSN", "file:./alert_history.db?cache=shared&mode=rwc")
+	_ = os.Setenv("MIGRATION_DIALECT", "sqlite")
+	_ = os.Setenv("MIGRATION_DIR", "migrations")
+	_ = os.Setenv("MIGRATION_VERBOSE", "true")
 
 	// Запускаем пример
 	Example()
@@ -222,7 +222,7 @@ func ExampleDryRun() {
 	logger.Info("🔍 Migration Dry Run Example")
 
 	// Устанавливаем dry-run режим
-	os.Setenv("MIGRATION_DRY_RUN", "true")
+	_ = os.Setenv("MIGRATION_DRY_RUN", "true")
 
 	// Загружаем конфигурацию
 	config, err := LoadConfig()
@@ -292,7 +292,7 @@ func ExampleBackupWorkflow() {
 	if err != nil {
 		log.Fatalf("Failed to create database connection: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// 3. Создаем все компоненты
 	manager, err := NewMigrationManager(migrationConfig)

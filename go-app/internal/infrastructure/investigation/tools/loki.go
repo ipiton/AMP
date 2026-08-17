@@ -109,7 +109,7 @@ func (t *LokiTool) Execute(ctx context.Context, params map[string]any) (investig
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("loki: request failed: %v", err)}, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

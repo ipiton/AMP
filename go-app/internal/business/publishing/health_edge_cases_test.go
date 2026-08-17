@@ -157,9 +157,9 @@ func TestHealthMonitor_TLSErrors(t *testing.T) {
 			})
 
 			config := DefaultHealthConfig()
-			config.WarmupDelay = 0       // Skip warmup for tests
-			config.FailureThreshold = 1  // Mark unhealthy immediately
-			config.TLSSkipVerify = true  // Trust test server self-signed cert
+			config.WarmupDelay = 0      // Skip warmup for tests
+			config.FailureThreshold = 1 // Mark unhealthy immediately
+			config.TLSSkipVerify = true // Trust test server self-signed cert
 			monitor, err := NewHealthMonitor(discovery, config, nil, metrics)
 			if err != nil {
 				t.Fatalf("Failed to create monitor: %v", err)
@@ -360,7 +360,7 @@ func TestHealthMonitor_ConcurrentStarts(t *testing.T) {
 	}
 
 	// Cleanup
-	monitor.Stop(time.Second)
+	_ = monitor.Stop(time.Second)
 }
 
 // TestHealthMonitor_StopDuringCheck tests Stop() during active checks
@@ -427,8 +427,8 @@ func TestHealthMonitor_ConnectionRefused(t *testing.T) {
 	})
 
 	config := DefaultHealthConfig()
-	config.WarmupDelay = 0       // Skip warmup for tests
-	config.FailureThreshold = 1  // Mark unhealthy immediately
+	config.WarmupDelay = 0      // Skip warmup for tests
+	config.FailureThreshold = 1 // Mark unhealthy immediately
 	monitor, err := NewHealthMonitor(discovery, config, nil, metrics)
 	if err != nil {
 		t.Fatalf("Failed to create monitor: %v", err)
