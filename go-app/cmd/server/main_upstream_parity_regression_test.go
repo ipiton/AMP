@@ -194,11 +194,11 @@ receivers:
 
 	names := []string{}
 	for _, receiver := range receivers {
-		// ADR-002: the active runtime serializes config.ReceiverConfig without
-		// json tags, so the field is exported as "Name" (not upstream "name").
-		name, ok := receiver["Name"].(string)
+		// RECEIVERS-JSON-CASE fixed: config.ReceiverConfig now carries a json
+		// tag, so the field matches the upstream Alertmanager schema ("name").
+		name, ok := receiver["name"].(string)
 		if !ok || strings.TrimSpace(name) == "" {
-			t.Fatalf("receiver.Name expected non-empty string, got %v", receiver["Name"])
+			t.Fatalf("receiver.Name expected non-empty string, got %v", receiver["name"])
 		}
 		names = append(names, name)
 	}
@@ -677,11 +677,10 @@ func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &filtered); err != nil {
 		t.Fatalf("failed to decode filtered silences response: %v", err)
 	}
-	// ADR-002: the active runtime filters silences by matcher NAME only
-	// (MatchesSilenceMatchers ignores the matcher value), so all three
-	// silences with an alertname matcher pass the filter.
-	if len(filtered) != 3 {
-		t.Fatalf("expected all three silences with alertname matcher, got %d", len(filtered))
+	// Upstream semantics: the filter matches the silence matcher VALUE, so
+	// only the ActiveSoonParity silence passes.
+	if len(filtered) != 1 {
+		t.Fatalf("expected exactly one silence for alertname=ActiveSoonParity, got %d", len(filtered))
 	}
 	foundTarget := false
 	for _, silence := range filtered {

@@ -90,18 +90,29 @@ func matchOne(m *LabelMatcher, val string) bool {
 	return false
 }
 
-// MatchesSilenceMatchers returns true if every filter matcher finds at least one silence
-// matcher with the same Name. This implements Alertmanager-compatible silence filtering.
+// MatchesSilenceMatchers returns true if every filter matcher matches the
+// VALUE of at least one silence matcher with the same name (upstream
+// Alertmanager semantics). A name absent from the silence is treated as the
+// empty value, so negative filters like service!="api" match silences that
+// don't mention service at all.
 func MatchesSilenceMatchers(filters []*LabelMatcher, silenceMatchers []core.APISilenceMatcher) bool {
 	for _, f := range filters {
-		found := false
+		matched := false
+		nameSeen := false
 		for _, sm := range silenceMatchers {
-			if sm.Name == f.Name {
-				found = true
+			if sm.Name != f.Name {
+				continue
+			}
+			nameSeen = true
+			if matchOne(f, sm.Value) {
+				matched = true
 				break
 			}
 		}
-		if !found {
+		if !nameSeen && matchOne(f, "") {
+			matched = true
+		}
+		if !matched {
 			return false
 		}
 	}
