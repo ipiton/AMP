@@ -28,6 +28,12 @@ server:
     # Comma-separated list of origins allowed to open WebSocket connections.
     # Empty = same-origin only (secure default); "*" = allow any origin (dev only).
     allowed_origins: ""
+  cors:
+    # CORS for the whole HTTP API (same shape as webhook.cors).
+    enabled: false
+    allowed_origins: ""   # comma-separated; "*" = any origin (dev only)
+    allowed_methods: "GET, POST, PUT, DELETE, OPTIONS"
+    allowed_headers: "Content-Type, Authorization, X-Request-ID"
 
 # ============================================================================
 # Database Configuration (PostgreSQL)

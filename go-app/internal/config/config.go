@@ -118,6 +118,9 @@ type ServerConfig struct {
 	// Empty string disables callback links (graceful degradation).
 	ExternalURL string                `mapstructure:"external_url"`
 	WebSocket   WebSocketServerConfig `mapstructure:"websocket"`
+	// CORS controls cross-origin headers for the whole HTTP API
+	// (reuses the same config shape as webhook.cors).
+	CORS CORSWebhookConfig `mapstructure:"cors"`
 }
 
 // WebSocketServerConfig holds WebSocket endpoint configuration
@@ -457,6 +460,10 @@ func setDefaults() {
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
 	viper.SetDefault("server.external_url", "")
 	viper.SetDefault("server.websocket.allowed_origins", "")
+	viper.SetDefault("server.cors.enabled", false)
+	viper.SetDefault("server.cors.allowed_origins", "")
+	viper.SetDefault("server.cors.allowed_methods", "GET, POST, PUT, DELETE, OPTIONS")
+	viper.SetDefault("server.cors.allowed_headers", "Content-Type, Authorization, X-Request-ID")
 
 	// Database defaults
 	viper.SetDefault("database.driver", "postgres")
