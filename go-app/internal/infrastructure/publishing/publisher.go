@@ -163,6 +163,28 @@ func (p *SlackPublisher) Name() string {
 	return "Slack"
 }
 
+// TelegramPublisher publishes alerts to Telegram (basic, no enhanced client)
+type TelegramPublisher struct {
+	*HTTPPublisher
+}
+
+// NewTelegramPublisher creates a new basic Telegram publisher
+func NewTelegramPublisher(formatter AlertFormatter, logger *slog.Logger) AlertPublisher {
+	return &TelegramPublisher{
+		HTTPPublisher: NewHTTPPublisher(formatter, logger),
+	}
+}
+
+// Publish publishes alert to Telegram
+func (p *TelegramPublisher) Publish(ctx context.Context, enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) error {
+	return p.publish(ctx, enrichedAlert, target)
+}
+
+// Name returns publisher name
+func (p *TelegramPublisher) Name() string {
+	return "Telegram"
+}
+
 // WebhookPublisher publishes alerts to generic webhooks
 type WebhookPublisher struct {
 	*HTTPPublisher
@@ -199,6 +221,7 @@ type PublisherFactory struct {
 	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
 	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
 	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
+	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by bot token
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
@@ -221,6 +244,7 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics 
 		slackClientMap:     make(map[string]SlackWebhookClient),
 		slackCleanupWorker: slackCleanupWorker,
 		emailClientMap:     make(map[string]SMTPClient),
+		telegramClientMap:  make(map[string]TelegramClient),
 		metrics:            metrics, // Unified v2 metrics
 	}
 }
@@ -244,6 +268,8 @@ func (f *PublisherFactory) CreatePublisher(targetType string) (AlertPublisher, e
 			f.logger,
 			f.externalURL,
 		), nil
+	case TargetTypeTelegram:
+		return NewTelegramPublisher(f.formatter, f.logger), nil
 	default:
 		return NewWebhookPublisher(f.formatter, f.logger), nil // Default to webhook
 	}
@@ -262,6 +288,8 @@ func (f *PublisherFactory) CreatePublisherForTarget(target *core.PublishingTarge
 		return f.createEnhancedWebhookPublisher(target)
 	case TargetTypeEmail:
 		return f.createEnhancedEmailPublisher(target)
+	case TargetTypeTelegram:
+		return f.createEnhancedTelegramPublisher(target)
 	default:
 		return f.createEnhancedWebhookPublisher(target) // Default to enhanced webhook
 	}
@@ -376,6 +404,55 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 	return NewEnhancedSlackPublisher(
 		client,
 		f.slackCache,
+		f.metrics,
+		f.formatter,
+		f.logger,
+	), nil
+}
+
+// createEnhancedTelegramPublisher creates an EnhancedTelegramPublisher with full Telegram Bot API integration
+func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.PublishingTarget) (AlertPublisher, error) {
+	// Extract bot token from target headers (bot_token, falling back to Authorization: Bearer)
+	botToken := target.Headers["bot_token"]
+	if botToken == "" {
+		if auth, ok := target.Headers["Authorization"]; ok {
+			botToken = strings.TrimPrefix(auth, "Bearer ")
+		}
+	}
+
+	chatID := target.Headers["chat_id"]
+
+	if botToken == "" || chatID == "" {
+		f.logger.Warn("Telegram target missing bot_token or chat_id, falling back to HTTP publisher", "target", target.Name)
+		return NewTelegramPublisher(f.formatter, f.logger), nil
+	}
+
+	apiURL := target.URL
+	if apiURL == "" {
+		apiURL = DefaultTelegramAPIURL
+	}
+
+	// Get or create Telegram client for this bot token
+	client, ok := f.telegramClientMap[botToken]
+	if !ok {
+		client = NewHTTPTelegramClient(apiURL, botToken, f.logger)
+		f.telegramClientMap[botToken] = client
+	}
+
+	messageThreadID := 0
+	if raw, ok := target.Headers["message_thread_id"]; ok {
+		if v, err := strconv.Atoi(raw); err == nil {
+			messageThreadID = v
+		}
+	}
+	disableNotifications := target.Headers["disable_notifications"] == "true"
+
+	// Create EnhancedTelegramPublisher with unified metrics
+	return NewEnhancedTelegramPublisher(
+		client,
+		chatID,
+		messageThreadID,
+		disableNotifications,
 		f.metrics,
 		f.formatter,
 		f.logger,

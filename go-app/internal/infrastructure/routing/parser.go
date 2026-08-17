@@ -53,6 +53,7 @@ func NewRouteConfigParser() *RouteConfigParser {
 	_ = v.RegisterValidation("slack_channel", validateSlackChannel)
 	_ = v.RegisterValidation("emoji", validateEmoji)
 	_ = v.RegisterValidation("slack_color", validateSlackColor)
+	_ = v.RegisterValidation("telegram_chat_id", validateTelegramChatID)
 
 	return &RouteConfigParser{
 		validator: v,
@@ -201,6 +202,9 @@ func (p *RouteConfigParser) applyDefaults(config *RouteConfig) {
 		for _, cfg := range receiver.EmailConfigs {
 			cfg.Defaults()
 		}
+		for _, cfg := range receiver.TelegramConfigs {
+			cfg.Defaults()
+		}
 	}
 }
 
@@ -226,7 +230,7 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 			errors.Add(
 				fmt.Sprintf("receivers[%d]", i),
 				err.Error(),
-				"Add at least one config: webhook_configs, pagerduty_configs, or slack_configs",
+				"Add at least one config: webhook_configs, pagerduty_configs, slack_configs, email_configs, or telegram_configs",
 			)
 		}
 	}
@@ -430,6 +434,34 @@ func validateSlackColor(fl validator.FieldLevel) bool {
 	}
 
 	return false
+}
+
+// validateTelegramChatID validates a Telegram chat_id.
+// Accepted formats: "@channelusername" or a numeric id (optionally negative
+// for groups/channels, e.g. "-1001234567890").
+func validateTelegramChatID(fl validator.FieldLevel) bool {
+	value := fl.Field().String()
+	if value == "" {
+		return true
+	}
+
+	if value[0] == '@' {
+		return len(value) > 1
+	}
+
+	start := 0
+	if value[0] == '-' {
+		start = 1
+	}
+	if start >= len(value) {
+		return false
+	}
+	for _, r := range value[start:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Helper functions

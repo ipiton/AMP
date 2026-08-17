@@ -335,3 +335,115 @@ func TestSlackConfig_Defaults(t *testing.T) {
 	require.NotNil(t, config.SendResolved)
 	assert.True(t, *config.SendResolved)
 }
+
+func TestTelegramConfig_Defaults(t *testing.T) {
+	config := &TelegramConfig{
+		BotToken: "test-bot-token-fixture",
+		ChatID:   "-1001234567890",
+		// APIURL, ParseMode, SendResolved not set
+	}
+
+	config.Defaults()
+
+	assert.Equal(t, "https://api.telegram.org", config.APIURL)
+	assert.Equal(t, "HTML", config.ParseMode)
+	require.NotNil(t, config.SendResolved)
+	assert.True(t, *config.SendResolved)
+}
+
+func TestTelegramConfig_Defaults_PreservesExplicitValues(t *testing.T) {
+	sendResolved := false
+	chatID := "channelfixture"
+	config := &TelegramConfig{
+		BotToken:     "test-bot-token-fixture",
+		ChatID:       chatID,
+		APIURL:       "https://custom.telegram.example",
+		ParseMode:    "MarkdownV2",
+		SendResolved: &sendResolved,
+	}
+
+	config.Defaults()
+
+	assert.Equal(t, "https://custom.telegram.example", config.APIURL)
+	assert.Equal(t, "MarkdownV2", config.ParseMode)
+	require.NotNil(t, config.SendResolved)
+	assert.False(t, *config.SendResolved)
+}
+
+func TestTelegramConfig_Clone(t *testing.T) {
+	sendResolved := true
+	original := &TelegramConfig{
+		BotToken:             "test-bot-token-fixture",
+		ChatID:               "-1001234567890",
+		MessageThreadID:      42,
+		ParseMode:            "HTML",
+		APIURL:               "https://api.telegram.org",
+		Message:              "{{ .GroupLabels.alertname }}",
+		DisableNotifications: true,
+		SendResolved:         &sendResolved,
+	}
+
+	clone := original.Clone()
+
+	require.NotNil(t, clone)
+	assert.Equal(t, original.BotToken, clone.BotToken)
+	assert.Equal(t, original.ChatID, clone.ChatID)
+	assert.Equal(t, original.MessageThreadID, clone.MessageThreadID)
+	require.NotNil(t, clone.SendResolved)
+	assert.Equal(t, *original.SendResolved, *clone.SendResolved)
+
+	// Verify deep copy - pointer independence
+	assert.NotSame(t, original.SendResolved, clone.SendResolved)
+	*clone.SendResolved = false
+	assert.True(t, *original.SendResolved)
+}
+
+func TestTelegramConfig_Sanitize(t *testing.T) {
+	config := &TelegramConfig{
+		BotToken: "test-bot-token-fixture-value",
+		ChatID:   "-1001234567890",
+	}
+
+	sanitized := config.Sanitize()
+
+	require.NotNil(t, sanitized)
+	assert.Equal(t, "[REDACTED]", sanitized.BotToken)
+	// ChatID is not a secret, must remain intact
+	assert.Equal(t, "-1001234567890", sanitized.ChatID)
+
+	// Original must be unchanged
+	assert.Equal(t, "test-bot-token-fixture-value", config.BotToken)
+}
+
+func TestReceiver_TelegramConfigs_Validate(t *testing.T) {
+	receiver := &Receiver{
+		Name: "telegram-oncall",
+		TelegramConfigs: []*TelegramConfig{
+			{BotToken: "test-bot-token-fixture", ChatID: "-1001234567890"},
+		},
+	}
+
+	assert.NoError(t, receiver.Validate())
+	assert.Equal(t, 1, receiver.GetConfigCount())
+}
+
+func TestReceiver_TelegramConfigs_Clone_Sanitize(t *testing.T) {
+	fixtureToken := "test-bot-token-fixture-value"
+	receiver := &Receiver{
+		Name: "telegram-oncall",
+		TelegramConfigs: []*TelegramConfig{
+			{BotToken: fixtureToken, ChatID: "channelfixture"},
+		},
+	}
+
+	cloned := receiver.Clone()
+	require.Len(t, cloned.TelegramConfigs, 1)
+	assert.Equal(t, fixtureToken, cloned.TelegramConfigs[0].BotToken)
+	assert.NotSame(t, receiver.TelegramConfigs[0], cloned.TelegramConfigs[0])
+
+	sanitized := receiver.Sanitize()
+	require.Len(t, sanitized.TelegramConfigs, 1)
+	assert.Equal(t, "[REDACTED]", sanitized.TelegramConfigs[0].BotToken)
+	// Original untouched
+	assert.Equal(t, fixtureToken, receiver.TelegramConfigs[0].BotToken)
+}

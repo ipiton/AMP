@@ -218,6 +218,68 @@ func TestFormatAlert_Webhook(t *testing.T) {
 	assert.Contains(t, classification, "recommendations")
 }
 
+func TestFormatAlert_Telegram(t *testing.T) {
+	formatter := NewAlertFormatter("")
+	enrichedAlert := createTestEnrichedAlert()
+
+	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatTelegram)
+
+	require.NoError(t, err)
+	assert.NotNil(t, result)
+
+	text, ok := result["text"].(string)
+	require.True(t, ok)
+	assert.Contains(t, text, "FIRING")
+	assert.Contains(t, text, "TestAlert")
+	assert.Contains(t, text, "warning")    // severity label
+	assert.Contains(t, text, "production") // namespace label
+	assert.Contains(t, text, "Test alert summary")
+	assert.Contains(t, text, "AI Severity")
+}
+
+func TestFormatAlert_Telegram_Resolved(t *testing.T) {
+	formatter := NewAlertFormatter("")
+	enrichedAlert := createTestEnrichedAlert()
+	enrichedAlert.Alert.Status = core.StatusResolved
+
+	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatTelegram)
+
+	require.NoError(t, err)
+	text, ok := result["text"].(string)
+	require.True(t, ok)
+	assert.Contains(t, text, "RESOLVED")
+	assert.NotContains(t, text, "FIRING")
+}
+
+func TestFormatAlert_Telegram_HTMLEscaping(t *testing.T) {
+	formatter := NewAlertFormatter("")
+	enrichedAlert := createTestEnrichedAlert()
+	enrichedAlert.Alert.AlertName = "<script>alert(1)</script>"
+	enrichedAlert.Alert.Annotations["summary"] = "5 < 10 & 10 > 5"
+
+	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatTelegram)
+
+	require.NoError(t, err)
+	text, ok := result["text"].(string)
+	require.True(t, ok)
+	assert.NotContains(t, text, "<script>")
+	assert.Contains(t, text, "&lt;script&gt;")
+	assert.Contains(t, text, "&lt; 10 &amp; 10 &gt; 5")
+}
+
+func TestFormatAlert_Telegram_NoClassification(t *testing.T) {
+	formatter := NewAlertFormatter("")
+	enrichedAlert := createTestEnrichedAlert()
+	enrichedAlert.Classification = nil
+
+	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatTelegram)
+
+	require.NoError(t, err)
+	text, ok := result["text"].(string)
+	require.True(t, ok)
+	assert.NotContains(t, text, "AI Severity")
+}
+
 func TestFormatAlert_NilAlert(t *testing.T) {
 	formatter := NewAlertFormatter("")
 
