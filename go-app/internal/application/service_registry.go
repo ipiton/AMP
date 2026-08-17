@@ -107,12 +107,15 @@ type ServiceRegistry struct {
 
 	// Grouping subsystem (task 2.2, alertmanager-parity): GroupManager (group
 	// lifecycle) + TimerManager (group_wait/group_interval/repeat_interval
-	// timers). Both nil unless cfg.Grouping.Enabled is true AND a route: tree
-	// is configured (grouping.enabled defaults to false; task 2.3 wires this
-	// into the alert ingest pipeline — until then it only runs background
-	// lifecycle: storage selection, timer restore, graceful shutdown).
+	// timers). All three nil unless cfg.Grouping.Enabled is true AND a
+	// route: tree is configured (grouping.enabled defaults to false).
+	// groupKeyGenerator is the SAME instance passed to both
+	// DefaultGroupManagerConfig.KeyGenerator (below) and
+	// AlertProcessorConfig.GroupKeyGenerator (task 2.3) — a single source of
+	// truth for key-generation options/behavior between the two.
 	groupManager      *grouping.DefaultGroupManager
 	groupTimerManager *grouping.DefaultTimerManager
+	groupKeyGenerator *grouping.GroupKeyGenerator
 
 	// Business Services
 	k8sClient                  k8s.K8sClient
@@ -909,12 +912,19 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		return fmt.Errorf("timer manager init failed: %w", err)
 	}
 
-	// Publisher is left nil: timer callbacks only log until task 2.3 wires
-	// the alert ingest pipeline through this subsystem (see
-	// GroupNotificationPublisher's doc comment in manager.go — nil is
-	// explicitly backwards-compatible: "no alerts are sent").
+	// Stored on the registry (r.groupKeyGenerator) so task 2.3's
+	// AlertProcessor wiring uses the exact same generator instance/options
+	// as the GroupManager below, instead of a second independently-configured
+	// one.
+	keyGenerator := grouping.NewGroupKeyGenerator()
+
+	// Publisher is left nil: timer callbacks only log until task 2.4 wires
+	// the notify chain through this subsystem (see GroupNotificationPublisher's
+	// doc comment in manager.go — nil is explicitly backwards-compatible: "no
+	// alerts are sent"). Task 2.3 wires the INGEST side (AddAlertToGroup);
+	// nil Publisher here means group timer expiry still no-ops as before.
 	groupManager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
-		KeyGenerator: grouping.NewGroupKeyGenerator(),
+		KeyGenerator: keyGenerator,
 		Config:       groupingCfg,
 		Storage:      groupStorage,
 		TimerManager: timerManager,
@@ -945,6 +955,7 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 
 	r.groupManager = groupManager
 	r.groupTimerManager = timerManager
+	r.groupKeyGenerator = keyGenerator
 
 	r.logger.Info("Grouping subsystem initialized")
 	return nil
@@ -1123,6 +1134,20 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 	r.logger.Info("Initializing Alert Processor...")
 
+	// Task 2.3: only wire a non-nil GroupManager when r.groupManager is
+	// actually set. Assigning a nil *grouping.DefaultGroupManager straight
+	// into the services.GroupManager interface field would produce a
+	// non-nil interface wrapping a nil pointer (classic Go typed-nil
+	// gotcha) — AlertProcessor's shouldGroup() nil-check on the interface
+	// would then see "non-nil" and later panic calling AddAlertToGroup on a
+	// nil receiver. r.groupManager/r.groupKeyGenerator are always set or
+	// cleared together (initializeGrouping / Shutdown), matching
+	// NewAlertProcessor's "both or neither" validation.
+	var groupManager services.GroupManager
+	if r.groupManager != nil {
+		groupManager = r.groupManager
+	}
+
 	config := services.AlertProcessorConfig{
 		FilterEngine:       r.filterEngine,
 		LLMClient:          r.classificationSvc,
@@ -1133,7 +1158,10 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		InhibitionState:    r.inhibitionState,
 		InhibitionCache:    r.inhibitionCache,
 		BusinessMetrics:    r.metrics,
-		RouteEvaluator:     r.routeEvaluator, // task 1.4: may be nil (lite/legacy mode, no route: section)
+		RouteEvaluator:     r.routeEvaluator,          // task 1.4: may be nil (lite/legacy mode, no route: section)
+		GroupingEnabled:    r.config.Grouping.Enabled, // task 2.3
+		GroupManager:       groupManager,              // task 2.3: nil unless grouping subsystem initialized (route tree required)
+		GroupKeyGenerator:  r.groupKeyGenerator,       // task 2.3: nil unless grouping subsystem initialized
 		Logger:             r.logger,
 		Metrics:            nil, // TODO: MetricsManager
 	}
@@ -1213,6 +1241,7 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		r.groupTimerManager = nil
 	}
 	r.groupManager = nil
+	r.groupKeyGenerator = nil
 
 	// Shutdown Inhibition cache background worker
 	if r.inhibitionCache != nil {
