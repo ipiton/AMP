@@ -1,9 +1,6 @@
-# Route Tree Builder (TN-138)
+# Route Tree Builder
 
 **Package**: `github.com/ipiton/AMP/internal/business/routing`
-**Version**: 1.0
-**Quality**: 152%+ (Grade A+ Production)
-**Status**: ✅ PRODUCTION-READY
 
 ---
 
@@ -200,15 +197,15 @@ if len(errors) > 0 {
 
 ## Performance
 
-| Operation | Complexity | Expected Time |
-|-----------|-----------|---------------|
-| Build (100 routes) | O(N) | ~500 µs |
-| Walk (100 routes) | O(N) | ~50 µs |
-| Clone (100 routes) | O(N) | ~500 µs |
-| GetTree() | O(1) | ~5 ns (atomic) |
-| Validate (100 routes) | O(N + E) | ~200 µs |
+| Operation | Complexity |
+|-----------|-----------|
+| Build | O(N) |
+| Walk | O(N) |
+| Clone | O(N) |
+| GetTree() | O(1) (atomic read) |
+| Validate | O(N + E) |
 
-**Memory**: <100 bytes overhead per node
+Run `go test -bench=. -benchmem ./internal/business/routing/...` for current numbers.
 
 ---
 
@@ -442,35 +439,14 @@ go test -race ./internal/business/routing/...
 
 ---
 
-## Dependencies
+## Related Components (same package)
 
-### Upstream
-- **TN-137**: Route Config Parser (152.3%, Grade A+)
-- **TN-121**: Grouping Configuration Parser (150%, Grade A+)
-
-### Downstream
-- **TN-139**: Route Matcher (will use RouteTree)
-- **TN-140**: Route Evaluator (will use RouteTree)
-- **TN-141**: Multi-Receiver Support (will use RouteTree)
-
----
-
-## Contributing
-
-See `tasks/go-migration-analysis/TN-138-route-tree-builder/` for:
-- requirements.md (3,000+ LOC)
-- design.md (2,500+ LOC)
-- tasks.md (1,500+ LOC)
+- Route Matcher (`matcher*.go`, см. [README_MATCHER.md](./README_MATCHER.md))
+- Route Evaluator (`evaluator*.go`)
+- Multi-Receiver Support (`multi_receiver*.go`)
 
 ---
 
 ## License
 
-Internal use only.
-
----
-
-**Last Updated**: 2025-11-17
-**Maintainer**: AI Assistant
-**Quality**: 152%+ (Grade A+ Production)
-**Status**: ✅ PRODUCTION-READY
+Part of AMP. See `LICENSE` in the repository root.

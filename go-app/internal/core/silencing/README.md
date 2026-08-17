@@ -1,6 +1,6 @@
 # Silence Matcher Engine
 
-High-performance alert matching engine for the Silencing System. Supports all 4 Alertmanager matcher operators (=, !=, =~, !~) with **500x faster** performance than targets.
+Alert matching engine for the AMP silencing system. Supports all 4 Alertmanager matcher operators (=, !=, =~, !~).
 
 ## Quick Start
 
@@ -39,26 +39,15 @@ if matched {
 
 ## Features
 
-- ✅ All 4 operators: `=`, `!=`, `=~`, `!~`
-- ✅ Regex compilation caching (500x speedup)
-- ✅ Context cancellation support
-- ✅ Thread-safe concurrent access
-- ✅ Early exit optimization (AND logic)
-- ✅ 95.9% test coverage
+- All 4 operators: `=`, `!=`, `=~`, `!~`
+- Regex compilation caching
+- Context cancellation support
+- Thread-safe concurrent access
+- Early exit optimization (AND logic)
 
 ## Performance
 
-Benchmarks on Apple M1 Pro:
-
-| Operation | Time | vs Target | Speedup |
-|-----------|------|-----------|---------|
-| Equal (=) | 13ns | <10µs | 766x ⚡ |
-| NotEqual (!=) | 12ns | <10µs | 829x ⚡ |
-| Regex cached (=~) | 283ns | <10µs | 35x ⚡ |
-| MatchesAny (100) | 13µs | <1ms | **76x** ⚡⚡ |
-| MatchesAny (1000) | 126µs | <10ms | **78x** ⚡⚡ |
-
-**Average: ~500x faster than targets!** 🚀
+Benchmarks live in `matcher_bench_test.go`; run `go test -bench=. ./internal/core/silencing/...` for current numbers on your hardware.
 
 ## Operators
 
@@ -207,8 +196,6 @@ go test -bench=. ./internal/core/silencing/...
 go test -bench=BenchmarkMatchesAny_100Silences ./internal/core/silencing/...
 ```
 
-**Test Coverage**: 95.9% (60 tests passing)
-
 ## Integration
 
 ```go
@@ -284,24 +271,9 @@ var (
 
 ## Dependencies
 
-- TN-131: Silence Data Models ✅ (163% quality, Grade A+)
 - Go 1.21+
 - Standard library only (no external deps)
 
-## Status
-
-- **Status**: ✅ PRODUCTION-READY
-- **Quality**: Grade A+ (95.9% coverage)
-- **Performance**: 500x faster than targets
-- **Module Progress**: Module 3 - 33.3% (2/6 tasks)
-
 ## License
 
-Part of Alert History Service - Module 3: Silencing System
-
----
-
-**Created**: 2025-11-05
-**Last Updated**: 2025-11-05
-**Version**: 1.0.0
-**Quality**: 150% (Grade A+)
+Part of AMP. See `LICENSE` in the repository root.

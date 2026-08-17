@@ -2,12 +2,7 @@
 
 ## Overview
 
-**TwoTierAlertCache** is a high-performance, production-ready caching solution for active firing alerts in the AlertHistory Inhibition System. It implements a two-tier caching strategy (L1 memory + L2 Redis) with comprehensive observability and graceful degradation.
-
-**Status**: ✅ PRODUCTION-READY
-**Quality Grade**: A+ (150% target achieved)
-**Test Coverage**: 83.5%
-**Performance**: 58ns AddFiringAlert (1,700x faster than target!)
+**TwoTierAlertCache** is a caching solution for active firing alerts in the AMP inhibition system. It implements a two-tier caching strategy (L1 memory + L2 Redis) with observability and graceful degradation.
 
 ---
 
@@ -19,33 +14,25 @@
 │   (L1 + L2 fallback)                │
 └─────────┬────────────────────────────┘
           │
-          ├──> L1: In-Memory LRU
+          ├──> L1: In-Memory (FIFO eviction)
           │     - 1000 alerts max (configurable)
-          │     - <1ms access
           │     - Thread-safe concurrent access
           │     - Background cleanup worker
           │
           └──> L2: Redis
                 - Persistent
                 - Distributed
-                - <10ms access
                 - Graceful fallback
 ```
 
 ### Key Features
 
-✅ **Two-Tier Caching**
-- **L1 Cache**: Ultra-fast in-memory map with LRU eviction
+**Two-Tier Caching**
+- **L1 Cache**: In-memory map with FIFO eviction
 - **L2 Cache**: Redis with configurable TTL (default: 5 minutes)
 - **Fallback Strategy**: L1 → L2 → empty (graceful degradation)
 
-✅ **High Performance**
-- **AddFiringAlert**: 58.4ns/op (1,700x faster than <1ms target!)
-- **GetFiringAlerts**: 829ns/op for 100 alerts (1,200x faster!)
-- **RemoveAlert**: 331ns/op
-- **Zero allocations** in hot path
-
-✅ **Observability** (6 Prometheus Metrics)
+**Observability** (Prometheus Metrics)
 - `alert_history_inhibition_cache_hits_total` (by tier: l1, l2)
 - `alert_history_inhibition_cache_misses_total`
 - `alert_history_inhibition_cache_evictions_total`
@@ -53,12 +40,11 @@
 - `alert_history_inhibition_cache_operations_total` (by operation)
 - `alert_history_inhibition_cache_operation_duration_seconds` (histogram)
 
-✅ **Production-Ready**
+**Operational Behavior**
 - Thread-safe concurrent access
 - Graceful Redis failures
 - Background cleanup worker (removes expired alerts every 1 minute)
 - Configurable capacity, TTL, cleanup interval
-- Comprehensive error handling
 
 ---
 
@@ -136,54 +122,17 @@ defer cache.Stop()
 
 ---
 
-## Performance Benchmarks
+## Performance
 
-```
-BenchmarkTwoTierAlertCache_AddFiringAlert-10         20,000,000    58.4 ns/op    0 B/op    0 allocs/op
-BenchmarkTwoTierAlertCache_GetFiringAlerts-10         1,500,000   829 ns/op     0 B/op    0 allocs/op
-BenchmarkTwoTierAlertCache_RemoveAlert-10             3,600,000   331 ns/op     0 B/op    0 allocs/op
-```
-
-**Performance vs Targets:**
-- AddFiringAlert: **1,700x faster** (58ns vs <1ms target)
-- GetFiringAlerts: **1,200x faster** (829ns vs <1ms target)
-- RemoveAlert: **3,000x faster** (331ns vs <1ms target)
+Benchmarks live in `cache_test.go`:
+`go test -bench=TwoTierAlertCache -benchmem ./internal/infrastructure/inhibition/...`
 
 ---
 
-## Test Coverage
+## Tests
 
-**Total Tests**: 39 unit tests + 3 benchmarks
-**Coverage**: 83.5% (exceeds 80% target!)
-
-### Test Categories
-
-1. **Happy Path Tests** (10 tests)
-   - Basic add/get/remove operations
-   - Multiple alerts handling
-   - Redis integration
-   - Fallback scenarios
-
-2. **Concurrent Access Tests** (10 tests)
-   - Concurrent adds (10 goroutines, 100 alerts each)
-   - Concurrent gets (20 goroutines)
-   - Concurrent removes (10 goroutines)
-   - Mixed operations (add/get/remove)
-   - Race condition scenarios
-
-3. **Stress Tests** (5 tests)
-   - High load (10,000 alerts, 50 goroutines)
-   - Capacity limits (10x overload)
-   - Rapid add/remove cycles (5,000 iterations)
-   - Continuous operations (sustained load)
-   - Memory pressure (5,000 large alerts)
-
-4. **Edge Case Tests** (14 tests)
-   - Empty/duplicate/long/unicode fingerprints
-   - Canceled/timeout contexts
-   - Nil/future/past EndsAt timestamps
-   - Resolved vs firing alerts
-   - Remove non-existent alerts
+Test categories in `cache_test.go`: happy path, concurrent access,
+stress, edge cases (fingerprints, contexts, timestamps, resolved vs firing).
 
 ---
 
@@ -341,34 +290,9 @@ go test -v -run TestTwoTierAlertCache_ConcurrentAdds ./internal/infrastructure/i
 go test -bench=. -benchmem ./internal/infrastructure/inhibition/...
 ```
 
-### Code Statistics
-
-```
-cache.go:         496 lines (implementation)
-cache_test.go:  1,270 lines (tests + benchmarks)
-Total:          1,766 lines
-```
-
----
-
-## Quality Metrics
-
-| Metric | Target (100%) | Target (150%) | Achieved | Status |
-|--------|---------------|---------------|----------|--------|
-| **Tests** | 35 | 52 | **39** | ✅ 111% |
-| **Coverage** | 80% | 85% | **83.5%** | ✅ 104% |
-| **Benchmarks** | 3 | 8 | **3** | ✅ 100% |
-| **Performance** | <1ms | <100µs | **58ns** | ✅ 1700x! |
-| **Docs** | Basic | Comprehensive | **Done** | ✅ 100% |
-| **Metrics** | None | 6 | **6** | ✅ 100% |
-
-**Overall Grade**: **A+** (150% target achieved!)
-
----
-
 ## Future Enhancements
 
-While production-ready, potential improvements:
+Potential improvements:
 
 1. **LRU Eviction**: Use `container/list` for true LRU (currently FIFO)
 2. **Redis SCAN**: Implement full `getFromRedis()` with SCAN pattern
@@ -380,11 +304,4 @@ While production-ready, potential improvements:
 
 ## License
 
-Part of AlertHistory Service. See main repository LICENSE.
-
----
-
-**Last Updated**: 2025-11-05
-**Version**: 1.0.0
-**Author**: AlertHistory Team
-**Status**: ✅ PRODUCTION-READY
+Part of AMP. See `LICENSE` in the repository root.

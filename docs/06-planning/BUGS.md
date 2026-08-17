@@ -1,10 +1,10 @@
 # BUGS
 
 ## Open
-- [ ] **INTERNAL-README-HISTORICAL-DRIFT** — в `go-app/internal/**` остается крупный кластер README/manual drift (`k8s`, `grouping`, `repository`, `deduplication`, `silencing`, `migrations` и др.) с `Production-Ready`, benchmark/coverage overclaims, historical naming и местами stale API/runtime narratives. Это уже требует отдельного README-heavy cleanup pass, а не текущего Helm slice.
 - [ ] **FUTUREPARITY-HISTORICAL-RUNTIME-GAP** — full opt-in run `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -tags=futureparity -count=1` по-прежнему red уже не на helper drift, а на residual historical/runtime mismatch: stale expectations для `/dashboard/silences`, `/dashboard/llm`, `/dashboard/routing` все еще ждут `500` после `UI-PLACEHOLDER-REMOVAL`; широкий historical surface (`/api/v2/status`, `/api/v2/config*`, `/history*`, `/-/reload`, `/api/v1/alerts`, `/api/v2/receivers`, `/api/v2/alerts/groups`, `/api/dashboard/*`, `/webhook`, `/debug/pprof/`, `/script.js`) заменен на active runtime, но historical harness может требовать обновления.
 
 ## Resolved
+- [x] ~~**INTERNAL-README-HISTORICAL-DRIFT**~~ — закрыт полным README-cleanup pass: 23 из 24 md-файлов в `go-app/internal/**` очищены от `Production-Ready`/«150%»/фиктивных benchmark- и coverage-клеймов, historical naming (`Alert History Service` → AMP) и stale API narratives (несуществующие endpoints `/history*`, `/api/v2/templates*`, `/api/v2/publishing/targets/*` помечены historical; сигнатуры конструкторов и имена метрик сверены с кодом). Проверка: `grep -ri "production-ready|150%" go-app/internal --include="*.md"` → 0. Закрыто 2026-08-17.
 - [x] ~~**GRAFANA-DASHBOARD-IDENTITY-DRIFT**~~ — закрыт как decision, не rename: `uid = amp-alert-history` и filename `alert-history-service.json` объявлены стабильным import/provisioning contract (смена uid ломает существующие provisioning references ради косметики). Зафиксировано в `DECISIONS.md` ADR-007; миграция возможна отдельной задачей при явном provisioning owner. Закрыто 2026-08-17.
 - [x] ~~**PUBLISHING-HEALTH-REFRESH-DRIFT**~~ — logic-level assertions стабилизированы. Закрыто 2026-04-16 (closed by forge).
 - [x] ~~**REPOSITORY-FLAPPING-TRANSITIONS-DRIFT**~~ — SQL tiebreaker `ORDER BY starts_at, id` + fixture distinct starts_at + assertion `>= 3`. Закрыто 2026-03-16 (closed by forge).

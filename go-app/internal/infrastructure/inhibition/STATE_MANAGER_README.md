@@ -1,9 +1,4 @@
-# Inhibition State Manager - Comprehensive Guide
-
-**Version**: 1.0
-**Module**: TN-129 (Alertmanager++ Module 2)
-**Status**: Production-Ready ✅
-**Last Updated**: 2025-11-05
+# Inhibition State Manager - Guide
 
 ---
 
@@ -23,14 +18,13 @@
 
 ## Overview
 
-The **Inhibition State Manager** tracks active inhibition relationships between alerts in real-time. It provides:
+The **Inhibition State Manager** tracks active inhibition relationships between alerts. It provides:
 
-- 🚀 **Ultra-fast lookups** (<50ns with sync.Map)
-- 💾 **Optional Redis persistence** for High Availability
-- 🧹 **Automatic cleanup** of expired states
-- 📊 **Comprehensive metrics** (6 Prometheus metrics)
-- 🔄 **Thread-safe** concurrent access
-- 🎯 **Zero allocations** for hot paths
+- **In-memory lookups** via `sync.Map`
+- **Optional Redis persistence** for High Availability
+- **Automatic cleanup** of expired states
+- **Prometheus metrics**
+- **Thread-safe** concurrent access
 
 ### What is an Inhibition State?
 
@@ -489,26 +483,13 @@ groups:
 
 ## Performance
 
-### Benchmarks
-
-| Operation | Target | Achieved | Improvement |
-|-----------|--------|----------|-------------|
-| RecordInhibition | <10µs | **~5µs** | ✅ 2x better |
-| IsInhibited | <100ns | **~50ns** | ✅ 2x better |
-| RemoveInhibition | <5µs | **~2µs** | ✅ 2.5x better |
-| GetActiveInhibitions (100) | <50µs | **~30µs** | ✅ 1.7x better |
-
-### Memory Usage
-
-- **Per state**: ~80 bytes (struct + map overhead)
-- **1000 states**: ~80 KB
-- **10,000 states**: ~800 KB
+Run package benchmarks for current numbers:
+`go test -bench=. -benchmem ./internal/infrastructure/inhibition/...`
 
 ### Scalability
 
 - **Concurrent operations**: Thread-safe with `sync.Map`
-- **Max states**: Limited by memory (millions possible)
-- **Cleanup overhead**: <1ms per 100 expired states
+- **Max states**: Limited by memory
 
 ---
 
@@ -529,21 +510,6 @@ go test ./internal/infrastructure/inhibition/ -v -run="TestCleanup"
 # With coverage
 go test ./internal/infrastructure/inhibition/ -coverprofile=coverage.out
 go tool cover -html=coverage.out
-```
-
-### Test Coverage
-
-```
-state_manager.go Coverage:
-- RecordInhibition: 65%
-- RemoveInhibition: 53%
-- GetActiveInhibitions: 83%
-- GetInhibitedAlerts: 100% ✅
-- IsInhibited: 64%
-- GetInhibitionState: 50%
-- countActiveStates: 100% ✅
-
-Overall: ~60-65% (90%+ with integration tests)
 ```
 
 ### Race Detector
@@ -768,12 +734,5 @@ err := sm.RecordInhibition(ctx, state)
 ## Related Documentation
 
 - [InhibitionMatcher README](./README.md) - Matcher engine
-- [Cache README](./CACHE_README.md) - Active Alert Cache (TN-128)
-- [Inhibition Config Parser](./PARSER_README.md) - Rule parsing (TN-126)
-
----
-
-**Version**: 1.0
-**Author**: TN-129 Implementation Team
-**Last Updated**: 2025-11-05
-**Status**: Production-Ready ✅
+- [Cache README](./CACHE_README.md) - Active Alert Cache
+- Rule parsing: `parser.go` in this package

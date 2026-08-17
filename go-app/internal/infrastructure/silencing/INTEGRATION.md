@@ -1,6 +1,10 @@
 # Integration Guide: Wiring Silence Repository in main.go
 
-This document describes how to integrate `PostgresSilenceRepository` into the Alert History service's `main.go`.
+This document describes how to integrate `PostgresSilenceRepository` into an AMP-style service `main.go`.
+
+> **Note**: в active runtime silence CRUD уже смонтирован через
+> `internal/application/router.go` (`/api/v2/silences`). Этот документ —
+> standalone integration guide для использования repository напрямую.
 
 ## Integration Points
 
@@ -11,43 +15,28 @@ import (
     // ... existing imports ...
 
     "github.com/ipiton/AMP/internal/infrastructure/silencing"
-    "github.com/ipiton/AMP/internal/core/silencing as coresilencing"
+    coresilencing "github.com/ipiton/AMP/internal/core/silencing"
 )
 ```
 
-### 2. Initialize Silence Metrics
-
-```go
-// In main() function, after initializing BusinessMetrics
-func main() {
-    // ... existing initialization ...
-
-    // Initialize silence metrics
-    silenceMetrics := silencing.NewSilenceMetrics()
-
-    logger.Info("silence metrics initialized")
-}
-```
-
-### 3. Initialize Silence Repository
+### 2. Initialize Silence Repository
 
 ```go
 // After PostgreSQL pool initialization
 func main() {
     // ... existing pool initialization ...
 
-    // Initialize silence repository
+    // Initialize silence repository (Prometheus metrics создаются внутри)
     silenceRepo := silencing.NewPostgresSilenceRepository(
         pgPool,
         logger,
-        silenceMetrics,
     )
 
     logger.Info("silence repository initialized")
 }
 ```
 
-### 4. Start Silence Cleanup Worker
+### 3. Start Silence Cleanup Worker
 
 ```go
 // Start background workers
@@ -105,36 +94,13 @@ func startSilenceCleanupWorker(
 }
 ```
 
-### 5. Register Silence API Endpoints (Future - TN-134)
+### 4. Silence API Endpoints
 
-```go
-// After HTTP router initialization
-func main() {
-    // ... existing HTTP handlers ...
+В active runtime silence CRUD endpoint уже смонтирован:
+`/api/v2/silences` в `internal/application/router.go`. Для standalone-сервиса
+зарегистрируйте собственные handlers поверх repository.
 
-    // Silence API endpoints (TN-134: Silence Manager Service)
-    // TODO: Implement in TN-135 (Silence API Endpoints)
-
-    // POST /api/v2/silences - Create silence
-    // router.POST("/api/v2/silences", silenceHandler.CreateSilence)
-
-    // GET /api/v2/silences - List silences
-    // router.GET("/api/v2/silences", silenceHandler.ListSilences)
-
-    // GET /api/v2/silences/:id - Get silence by ID
-    // router.GET("/api/v2/silences/:id", silenceHandler.GetSilence)
-
-    // PUT /api/v2/silences/:id - Update silence
-    // router.PUT("/api/v2/silences/:id", silenceHandler.UpdateSilence)
-
-    // DELETE /api/v2/silences/:id - Delete silence
-    // router.DELETE("/api/v2/silences/:id", silenceHandler.DeleteSilence)
-
-    logger.Info("silence API endpoints registered (pending TN-135)")
-}
-```
-
-### 6. Graceful Shutdown
+### 5. Graceful Shutdown
 
 ```go
 // Graceful shutdown (already handled by context cancellation)
@@ -188,29 +154,21 @@ func main() {
     }
     defer pgPool.Close()
 
-    // 4. Initialize silence metrics
-    silenceMetrics := silencing.NewSilenceMetrics()
-    logger.Info("silence metrics initialized")
-
-    // 5. Initialize silence repository
+    // 4. Initialize silence repository (metrics создаются внутри)
     silenceRepo := silencing.NewPostgresSilenceRepository(
         pgPool,
         logger,
-        silenceMetrics,
     )
     logger.Info("silence repository initialized")
 
-    // 6. Start silence cleanup worker
+    // 5. Start silence cleanup worker
     go startSilenceCleanupWorker(ctx, silenceRepo, logger)
     logger.Info("silence cleanup worker started")
 
-    // 7. Initialize HTTP server (placeholder for TN-135)
+    // 6. Initialize HTTP server
     router := http.NewServeMux()
 
-    // TODO: Register silence API endpoints (TN-135)
-    // silenceHandler := handlers.NewSilenceHandler(silenceRepo, logger)
-    // router.HandleFunc("/api/v2/silences", silenceHandler.HandleSilences)
-    // router.HandleFunc("/api/v2/silences/", silenceHandler.HandleSilenceByID)
+    // Зарегистрируйте свои silence handlers поверх silenceRepo при необходимости
 
     server := &http.Server{
         Addr:    ":8080",
@@ -284,18 +242,8 @@ func startSilenceCleanupWorker(
 
 ## Configuration
 
-### Environment Variables
-
-```bash
-# Database connection
-export DATABASE_URL="postgres://user:password@localhost:5432/alerthistory"
-
-# Cleanup worker interval (optional, default: 1h)
-export SILENCE_CLEANUP_INTERVAL="1h"
-
-# TTL for old silences (optional, default: 30d)
-export SILENCE_TTL_DAYS="30"
-```
+Cleanup interval и TTL задаются в коде вашего worker'а (repository сам их
+из env не читает). Database connection — стандартный `DATABASE_URL`.
 
 ### Configuration File (config.yaml)
 
@@ -378,11 +326,10 @@ Run:
 go mod tidy
 ```
 
-## Next Steps
+## Related Components
 
-1. **TN-134: Silence Manager Service** - Business logic layer on top of repository
-2. **TN-135: Silence API Endpoints** - REST API handlers for silence CRUD operations
-3. **TN-136: Silence Matching Integration** - Integrate silence matching into alert processing pipeline
+- **Silence Manager Service** (`internal/business/silencing`) - business logic layer on top of repository
+- **Silence matching** (`internal/core/silencing`) - matcher engine
 
 ## Testing Integration
 
@@ -405,7 +352,6 @@ go run cmd/server/main.go
 
 # 4. Check logs for initialization
 # Expected output:
-#   level=INFO msg="silence metrics initialized"
 #   level=INFO msg="silence repository initialized"
 #   level=INFO msg="silence cleanup worker started"
 ```
@@ -470,22 +416,8 @@ func TestSilenceRepositoryIntegration(t *testing.T) {
 2. **Cleanup worker not running**
    - Check logs for "silence cleanup worker started"
    - Verify context is not cancelled prematurely
-   - Check `SILENCE_CLEANUP_INTERVAL` configuration
+   - Check cleanup interval configuration в вашем worker'е
 
 3. **Metrics not exposed**
    - Verify `/metrics` endpoint is registered
    - Check Prometheus scrape configuration
-   - Verify `silenceMetrics` is initialized before repository
-
-## Status
-
-- ✅ **Phase 9: Integration Points Documented**
-- ⏳ **TN-134: Silence Manager Service** (pending)
-- ⏳ **TN-135: Silence API Endpoints** (pending)
-- ⏳ **TN-136: Silence Matching Integration** (pending)
-
-## Version
-
-**Version:** 1.0.0
-**Status:** Integration-Ready
-**Date:** 2025-11-06

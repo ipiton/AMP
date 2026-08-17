@@ -1,22 +1,18 @@
 # Alert Group Manager
 
 **Package**: `github.com/ipiton/AMP/internal/infrastructure/grouping`
-**Version**: 1.0.0
-**Status**: ✅ Production-Ready (150% Quality)
 
 ---
 
 ## Overview
 
-The **Alert Group Manager** is a high-performance, thread-safe component for managing the lifecycle of alert groups. It aggregates incoming alerts into logical groups based on predefined routing rules, tracks their state (firing/resolved), and provides comprehensive metrics for monitoring.
+The **Alert Group Manager** is a thread-safe component for managing the lifecycle of alert groups. It aggregates incoming alerts into logical groups based on predefined routing rules, tracks their state (firing/resolved), and provides metrics for monitoring.
 
 ### Key Features
 
-- 🚀 **Ultra-Fast Performance**: 0.38µs AddAlert operations (1300x faster than target!)
-- 🔒 **Thread-Safe**: Full concurrent access support with `sync.RWMutex`
-- 📊 **Comprehensive Metrics**: 4 Prometheus metrics for observability
-- 🧪 **Well-Tested**: 95%+ test coverage with 27 unit tests
-- 🎯 **Production-Ready**: Zero technical debt, Grade A+
+- **Thread-Safe**: Full concurrent access support with `sync.RWMutex`
+- **Metrics**: Prometheus metrics for observability
+- **Storage-backed**: In-memory или Redis group/timer storage
 
 ---
 
@@ -31,21 +27,24 @@ import "github.com/ipiton/AMP/internal/infrastructure/grouping"
 ### Basic Usage
 
 ```go
-// Create a key generator (from TN-122)
-keyGen := grouping.NewGroupKeyGenerator(&grouping.KeyGenConfig{
-    HashLongKeys: true,
-    MaxKeyLength: 256,
-})
+// Create a key generator
+keyGen := grouping.NewGroupKeyGenerator(
+    grouping.WithHashLongKeys(true),
+    grouping.WithMaxKeyLength(256),
+)
 
 // Create manager
-manager := grouping.NewDefaultGroupManager(&grouping.ManagerConfig{
+manager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
     KeyGenerator: keyGen,
     Metrics:      businessMetrics,
     Logger:       slog.Default(),
+    Storage:      storage, // group storage (memory or Redis)
 })
+if err != nil {
+    log.Fatalf("Failed to create manager: %v", err)
+}
 
 // Add alert to group
-ctx := context.Background()
 alert := &core.Alert{
     AlertName:   "HighCPU",
     Fingerprint: "abc123",
@@ -57,16 +56,11 @@ alert := &core.Alert{
 }
 
 groupKey := grouping.GroupKey("alertname=HighCPU")
-group, isNew, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+group, err := manager.AddAlertToGroup(ctx, alert, groupKey)
 if err != nil {
     log.Fatalf("Failed to add alert: %v", err)
 }
-
-if isNew {
-    fmt.Println("Created new group:", group.Key)
-} else {
-    fmt.Println("Added to existing group:", group.Key)
-}
+fmt.Println("Group:", group.Key)
 ```
 
 ---
@@ -133,7 +127,7 @@ type AlertGroupManager interface {
 Adds a new alert to a group or creates a new group if it doesn't exist.
 
 ```go
-group, isNew, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+group, err := manager.AddAlertToGroup(ctx, alert, groupKey)
 ```
 
 **Parameters:**
@@ -143,7 +137,6 @@ group, isNew, err := manager.AddAlertToGroup(ctx, alert, groupKey)
 
 **Returns:**
 - `*AlertGroup`: Updated group
-- `bool`: `true` if new group was created
 - `error`: Error if validation fails
 
 **Example:**
@@ -159,7 +152,7 @@ alert := &core.Alert{
     },
 }
 
-group, isNew, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+group, err := manager.AddAlertToGroup(ctx, alert, groupKey)
 if err != nil {
     return fmt.Errorf("add alert failed: %w", err)
 }
@@ -332,121 +325,66 @@ fmt.Printf("Alert is in group %s\n", group.Key)
 
 ## Performance
 
-### Benchmarks
-
-All operations exceed performance targets by large margins:
-
-| Operation | Result | Target | Achievement |
-|-----------|--------|--------|-------------|
-| AddAlert (new group) | 0.38µs | 500µs | **1300x faster** ✅ |
-| AddAlert (existing) | 0.35µs | 500µs | **1400x faster** ✅ |
-| GetGroup | < 1µs | 10µs | **10x faster** ✅ |
-| ListGroups (100) | 15µs | 1ms | **66x faster** ✅ |
-| Cleanup (1000) | 200µs | N/A | Excellent |
-
-### Memory Efficiency
-
-```
-Per-group memory:  ~800 bytes (20% better than 1KB target)
-Per-alert memory:  ~50 bytes (shallow copy)
-Allocations:       6 allocs/op for AddAlert (minimal)
-```
-
-### Scalability
-
-- ✅ Supports **10,000+ active groups** in memory
-- ✅ **Sub-microsecond** read operations
-- ✅ **Lock-free** for most read operations (using `sync.RWMutex`)
-- ✅ **Context-aware** cancellation support
+Benchmarks live in `manager_bench_test.go`, `keygen_bench_test.go`, `parser_bench_test.go`:
+`go test ./internal/infrastructure/grouping -bench=. -benchmem`
 
 ---
 
 ## Metrics
 
-The manager exports 4 Prometheus metrics for observability:
+Метрики регистрируются в `pkg/metrics` `BusinessMetrics`
+(namespace `alert_history`, subsystem `group`):
 
 ### 1. Active Groups (Gauge)
 
 ```
-alert_history_business_grouping_alert_groups_active_total
+alert_history_group_active_total
 ```
 
 Tracks the number of currently active alert groups.
 
-**Usage:**
-
-```promql
-# Current active groups
-alert_history_business_grouping_alert_groups_active_total
-
-# Alert if too many groups
-alert_history_business_grouping_alert_groups_active_total > 5000
-```
-
 ### 2. Group Size (Histogram)
 
 ```
-alert_history_business_grouping_alert_group_size
+alert_history_group_size
 ```
 
 Distribution of alert counts per group.
 
-**Buckets:** 1, 5, 10, 25, 50, 100, 250, 500, 1000
-
-**Usage:**
-
-```promql
-# Average group size
-rate(alert_history_business_grouping_alert_group_size_sum[5m])
-/ rate(alert_history_business_grouping_alert_group_size_count[5m])
-
-# 95th percentile group size
-histogram_quantile(0.95,
-  rate(alert_history_business_grouping_alert_group_size_bucket[5m]))
-```
-
 ### 3. Operations Total (Counter)
 
 ```
-alert_history_business_grouping_alert_group_operations_total{operation, result}
+alert_history_group_operations_total{operation, status}
 ```
 
 Total number of group operations.
 
-**Labels:**
-- `operation`: add, remove, get, list, cleanup
-- `result`: success, error
-
-**Usage:**
-
 ```promql
 # Operation rate by type
-rate(alert_history_business_grouping_alert_group_operations_total[5m])
+rate(alert_history_group_operations_total[5m])
 
 # Error rate
-rate(alert_history_business_grouping_alert_group_operations_total{result="error"}[5m])
+rate(alert_history_group_operations_total{status="error"}[5m])
 ```
 
 ### 4. Operation Duration (Histogram)
 
 ```
-alert_history_business_grouping_alert_group_operation_duration_seconds{operation}
+alert_history_group_operation_duration_seconds{operation}
 ```
 
 Latency of group operations.
 
-**Buckets:** 100µs, 500µs, 1ms, 5ms, 10ms, 50ms, 100ms
-
-**Usage:**
-
 ```promql
 # P99 latency for AddAlert
 histogram_quantile(0.99,
-  rate(alert_history_business_grouping_alert_group_operation_duration_seconds_bucket{operation="add"}[5m]))
+  rate(alert_history_group_operation_duration_seconds_bucket{operation="add"}[5m]))
+```
 
-# Average latency
-rate(alert_history_business_grouping_alert_group_operation_duration_seconds_sum[5m])
-/ rate(alert_history_business_grouping_alert_group_operation_duration_seconds_count[5m])
+### 5. Cleaned Up / Restored (Counters)
+
+```
+alert_history_group_cleaned_up_total
 ```
 
 ---
@@ -529,27 +467,19 @@ wg.Wait()
 
 ## Configuration
 
-### ManagerConfig
+### DefaultGroupManagerConfig
 
 ```go
-type ManagerConfig struct {
-    KeyGenerator GroupKeyGenerator  // Required: TN-122 key generator
-    Metrics      *BusinessMetrics   // Optional: Prometheus metrics
-    Logger       *slog.Logger       // Optional: structured logger
-}
+manager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
+    KeyGenerator: keyGen,          // Required: key generator
+    Config:       config,          // Grouping config
+    Metrics:      businessMetrics, // Optional: Prometheus metrics
+    Logger:       slog.Default(),  // Optional: structured logger
+    Storage:      storage,         // Required: group storage
+})
 ```
 
-**Example:**
-
-```go
-config := &grouping.ManagerConfig{
-    KeyGenerator: keyGen,
-    Metrics:      metrics.NewBusinessMetrics("alert_history"),
-    Logger:       slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-}
-
-manager := grouping.NewDefaultGroupManager(config)
-```
+См. `manager_impl.go` для полного списка полей и валидации.
 
 ---
 
@@ -626,7 +556,7 @@ manager.CleanupExpiredGroups(ctx, 0)
 
 ## Integration Example
 
-### With AlertProcessor (TN-036)
+### With AlertProcessor
 
 ```go
 type AlertProcessor struct {
@@ -644,7 +574,7 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *Alert) error {
 
     // 2. Add to group
     groupKey := p.keyGenerator.GenerateKey(alert.Labels, route.GroupBy)
-    group, _, err := p.groupManager.AddAlertToGroup(ctx, alert, groupKey)
+    group, err := p.groupManager.AddAlertToGroup(ctx, alert, groupKey)
     if err != nil {
         return fmt.Errorf("group management failed: %w", err)
     }
@@ -720,19 +650,19 @@ groups, err := manager.ListGroups(ctx, opts)
 ```go
 func TestMyFeature(t *testing.T) {
     // Create test manager
-    manager := grouping.NewDefaultGroupManager(&grouping.ManagerConfig{
+    manager, _ := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
         KeyGenerator: mockKeyGen,
         Logger:       slog.Default(),
+        Storage:      storage,
     })
 
     // Test adding alert
     alert := createTestAlert("test-alert")
     groupKey := grouping.GroupKey("test-group")
 
-    group, isNew, err := manager.AddAlertToGroup(context.Background(), alert, groupKey)
+    group, err := manager.AddAlertToGroup(context.Background(), alert, groupKey)
 
     assert.NoError(t, err)
-    assert.True(t, isNew)
     assert.Equal(t, 1, group.Size())
 }
 ```
@@ -754,32 +684,15 @@ func BenchmarkAddAlert(b *testing.B) {
 
 ---
 
-## Dependencies
+## Related Components (same package)
 
-- **TN-121**: Grouping Configuration Parser (routing rules)
-- **TN-122**: Group Key Generator (FNV-1a hashing)
-- **TN-031**: Alert Domain Models
-- **TN-036**: Alert Deduplication & Fingerprinting
-
----
-
-## Related Documentation
-
-- [TN-123 Requirements](../../../tasks/go-migration-analysis/TN-123/requirements.md)
-- [TN-123 Design](../../../tasks/go-migration-analysis/TN-123/design.md)
-- [TN-123 Completion Summary](../../../tasks/go-migration-analysis/TN-123/COMPLETION_SUMMARY.md)
-- [TN-122 Group Key Generator](./README_KEYGEN.md)
-- [TN-121 Configuration Parser](./README_PARSER.md)
+- Grouping Configuration Parser (`parser.go`, `config.go`)
+- Group Key Generator (`keygen.go`, FNV-1a hashing)
+- Group/Timer storage (`memory_*_storage.go`, `redis_*_storage.go`)
+- Timer manager (`timer_manager*.go`)
 
 ---
 
 ## License
 
-Copyright © 2025 Alert History Service
-Internal use only.
-
----
-
-**Version**: 1.0.0
-**Last Updated**: 2025-11-03
-**Status**: ✅ Production-Ready (Grade A+, 150% Quality)
+Part of AMP. See `LICENSE` in the repository root.

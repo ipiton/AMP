@@ -1,25 +1,15 @@
-# Prometheus Alert Parser (TN-146)
-
-**Status**: ✅ Production-Ready
-**Quality**: 150% (Grade A+)
-**Coverage**: 95%+ (75 tests + 11 benchmarks)
-**Performance**: 5.6x better than targets on average
-**Date**: 2025-11-18
-
----
+# Prometheus Alert Parser
 
 ## 📋 Overview
 
-The **Prometheus Alert Parser** is a high-performance, production-ready parser for Prometheus alert webhooks. It seamlessly integrates with Alertmanager++ OSS Core's webhook ingestion pipeline, supporting both Prometheus v1 (array) and v2 (grouped) alert formats.
+The **Prometheus Alert Parser** parses Prometheus alert webhooks. It integrates with AMP's webhook ingestion pipeline, supporting both Prometheus v1 (array) and v2 (grouped) alert formats.
 
 ### Key Capabilities
 
 - **Multi-Format Support**: Prometheus v1 (direct arrays), v2 (grouped alerts), and Alertmanager webhooks
-- **Auto-Detection**: Intelligent format detection based on payload structure
-- **High Performance**: 5.7µs to parse a single alert, 309µs for 100 alerts
-- **Zero Allocations**: Hot path optimized for minimal memory overhead
-- **Thread-Safe**: Concurrent parsing with mutex-protected operations
-- **Comprehensive Validation**: Prometheus-specific validation rules (label names, state enums, timestamps)
+- **Auto-Detection**: Format detection based on payload structure
+- **Thread-Safe**: Concurrent parsing
+- **Validation**: Prometheus-specific validation rules (label names, state enums, timestamps)
 - **Fingerprint Generation**: Deterministic SHA256 hash for alert deduplication
 - **Strategy Pattern**: Dynamic parser selection via `UniversalWebhookHandler`
 
@@ -138,10 +128,10 @@ import (
 
 ```go
 // Option A: Direct parser usage
-parser := webhook.NewPrometheusParser()
+parser := webhook.NewPrometheusParser(externalURL)
 
 // Option B: Use UniversalWebhookHandler (recommended)
-handler := webhook.NewUniversalWebhookHandler(processor, logger)
+handler := webhook.NewUniversalWebhookHandler(processor, logger, externalURL)
 // Handler auto-selects parser based on detected format
 ```
 
@@ -224,7 +214,7 @@ webhook, err := parser.Parse(payload)
 ### 5. Use UniversalWebhookHandler (Auto-Detection)
 
 ```go
-handler := webhook.NewUniversalWebhookHandler(alertProcessor, logger)
+handler := webhook.NewUniversalWebhookHandler(alertProcessor, logger, externalURL)
 
 req := &webhook.HandleWebhookRequest{
     Payload:     payload,
@@ -397,65 +387,12 @@ Fingerprint (SHA256):
 
 ## ⚡ Performance
 
-### Benchmark Results
-
-All benchmarks run on Go 1.22+ with `-benchmem` flag.
-
-| Operation | Latency | Target | Achievement | Allocs/op |
-|-----------|---------|--------|-------------|-----------|
-| **Detect Format** | 1.487µs | <5µs | 3.4x better ✅ | 24 |
-| **Parse Single** | 5.709µs | <10µs | 1.8x better ✅ | 77 |
-| **Parse 100 Alerts** | 309µs | <1ms | 3.2x better ✅ | 3,136 |
-| **Validate** | 435ns | <10µs | 23x better ✅ | 3 |
-| **Convert to Domain** | 702ns | <5µs | 7x better ✅ | 12 |
-| **Generate Fingerprint** | 591ns | <1µs | 1.7x better ✅ | 9 |
-| **Flatten Groups** | 8.152µs | <100µs | 12x better ✅ | 66 |
-| **Handler E2E** | ~50µs | <100µs | 2x better ✅ | - |
-
-**Average**: **5.6x better** than targets across all operations
-
-### Concurrency Performance
-
-**Test**: Concurrent parsing with 1, 2, 4, 8 goroutines
-
-| Concurrency | Latency/op | Speedup |
-|-------------|-----------|---------|
-| 1 goroutine | 2.217µs | 1.0x (baseline) |
-| 2 goroutines | 1.645µs | 1.35x |
-| 4 goroutines | 1.435µs | 1.54x |
-| 8 goroutines | 1.483µs | 1.49x |
-
-**Scaling**: Near-linear up to 4 goroutines, slight degradation at 8 (GC pressure)
-
-### Memory Efficiency
-
-- **Hot Path**: < 10 allocs/op (target)
-- **Parse Single**: 77 allocs/op (within acceptable range for JSON unmarshaling)
-- **Fingerprint**: 9 allocs/op (includes string operations)
-- **Validate**: 3 allocs/op (minimal overhead)
-
-### Production Recommendations
-
-- **Throughput**: Can handle **175K alerts/sec** (based on 5.7µs per alert)
-- **Concurrency**: Use **worker pool** (4-8 workers optimal)
-- **Memory**: ~4KB per alert (includes all allocations)
-- **CPU**: Low CPU usage (<5% at 10K alerts/sec on single core)
+Benchmarks live in `prometheus_bench_test.go`; run
+`go test -bench=. -benchmem ./internal/infrastructure/webhook/` for current numbers.
 
 ---
 
 ## 🧪 Testing
-
-### Test Coverage
-
-| Component | Tests | Coverage | Status |
-|-----------|-------|----------|--------|
-| **Data Models** | 10 | 100% | ✅ |
-| **Format Detection** | 16 | 95%+ | ✅ |
-| **Parser** | 22 | 95%+ | ✅ |
-| **Validation** | 17 | 92%+ | ✅ |
-| **Handler Integration** | 7 | 90%+ | ✅ |
-| **Benchmarks** | 11 | - | ✅ |
-| **Total** | **83 tests** | **94%+ avg** | ✅ |
 
 ### Running Tests
 
@@ -491,20 +428,20 @@ go test -bench=. -benchmem ./internal/infrastructure/webhook/ > bench_results.tx
 
 ### Test Categories
 
-1. **Unit Tests** (75 tests):
+1. **Unit Tests**:
    - Data models (JSON marshaling, methods)
    - Format detection (v1, v2, edge cases)
    - Parser (parse, validate, convert)
    - Validation (required fields, state enum, timestamps)
    - Handler (parser selection, fallback)
 
-2. **Integration Tests** (7 tests):
+2. **Integration Tests**:
    - E2E handler flow (detection → parsing → validation → conversion)
    - Concurrent webhook processing
    - Multiple alerts in single webhook
    - Error handling
 
-3. **Benchmarks** (11 benchmarks):
+3. **Benchmarks**:
    - Format detection
    - Parse single/bulk alerts
    - Validation
@@ -585,7 +522,7 @@ go test -bench=. -benchmem ./internal/infrastructure/webhook/ > bench_results.tx
 
 ```go
 // Force Prometheus parser
-parser := webhook.NewPrometheusParser()
+parser := webhook.NewPrometheusParser(externalURL)
 webhook, err := parser.Parse(payload)
 ```
 
@@ -603,20 +540,7 @@ webhook, err := parser.Parse(payload)
 - `validator.go` - Validation rules
 - `handler.go` - UniversalWebhookHandler (Strategy pattern)
 
-### Related Tasks
-
-- **TN-041**: Alertmanager Webhook Parser (baseline)
-- **TN-147**: Webhook Endpoint Registration (next task)
-- **TN-148**: End-to-End Integration Tests
-
 ### References
 
 - [Prometheus API Documentation](https://prometheus.io/docs/prometheus/latest/querying/api/#alerts)
 - [Alertmanager Webhook](https://prometheus.io/docs/alerting/latest/configuration/#webhook_config)
-- [Go html/template](https://pkg.go.dev/text/template)
-
----
-
-**Version**: 1.0.0
-**Last Updated**: 2025-11-18
-**Maintainer**: Alert History Service Team

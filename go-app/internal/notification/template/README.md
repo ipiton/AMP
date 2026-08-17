@@ -2,20 +2,17 @@
 
 **Package**: `internal/notification/template`
 **Purpose**: Go text/template engine for notification messages (Slack, PagerDuty, Email)
-**Quality**: 150%+ Production Grade A+ EXCEPTIONAL
-**Compatibility**: 100% Alertmanager-compatible
 
 ---
 
 ## 📖 Overview
 
-Production-grade template engine for processing Go `text/template` in notification receiver configs, providing:
+Template engine for processing Go `text/template` in notification receiver configs, providing:
 
-- **50+ Template Functions**: Alertmanager-compatible functions for formatting
-- **LRU Caching**: 1000 templates cached with SHA256 keys
+- **Template Functions**: Alertmanager-compatible functions for formatting
+- **LRU Caching**: parsed templates cached with SHA256 keys
 - **Parallel Execution**: ExecuteMultiple() for batch processing
 - **Thread-Safe**: Safe for concurrent use
-- **Performance**: < 5ms p95 for cached execution
 - **Graceful Degradation**: Fallback to raw template on errors
 - **Hot Reload**: Cache invalidation on SIGHUP
 
@@ -65,7 +62,7 @@ result, err := engine.Execute(ctx, tmpl, data)
 
 ## 📚 Template Functions
 
-### Time Functions (20)
+### Time Functions
 
 ```go
 {{ .StartsAt | humanizeTimestamp }}  // "2 hours ago"
@@ -74,7 +71,7 @@ result, err := engine.Execute(ctx, tmpl, data)
 {{ .Duration | humanizeDuration }}   // "1h 30m"
 ```
 
-### String Functions (15)
+### String Functions
 
 ```go
 {{ .Labels.alertname | toUpper }}           // "HIGHCPU"
@@ -82,7 +79,7 @@ result, err := engine.Execute(ctx, tmpl, data)
 {{ .Labels | sortedPairs | join ", " }}     // "alertname=HighCPU, severity=critical"
 ```
 
-### Math Functions (10)
+### Math Functions
 
 ```go
 {{ .Value | humanize }}      // "1.23k"
@@ -91,7 +88,7 @@ result, err := engine.Execute(ctx, tmpl, data)
 {{ round .Value }}           // rounding
 ```
 
-### Conditional Functions (5)
+### Conditional Functions
 
 ```go
 {{ .Labels.severity | default "unknown" }}
@@ -99,14 +96,14 @@ result, err := engine.Execute(ctx, tmpl, data)
 {{ ternary "CRITICAL" "OK" (gt .Value 100) }}
 ```
 
-### URL Functions (5)
+### URL Functions
 
 ```go
 {{ .Labels.instance | urlEncode }}
 {{ .ExternalURL | pathJoin "/alerts" .Fingerprint }}
 ```
 
-### Collection Functions (10)
+### Collection Functions
 
 ```go
 {{ .Labels | sortAlpha }}
@@ -114,7 +111,7 @@ result, err := engine.Execute(ctx, tmpl, data)
 {{ .Labels | uniq }}
 ```
 
-### Encoding Functions (5)
+### Encoding Functions
 
 ```go
 {{ .Labels.alertname | b64enc }}
@@ -160,7 +157,7 @@ config := &template.PagerDutyConfig{
 processed, err := template.ProcessPagerDutyConfig(ctx, engine, config, data)
 ```
 
-### Email (FUTURE - TN-154)
+### Email
 
 ```go
 config := &template.EmailConfig{
@@ -179,13 +176,7 @@ processed, err := template.ProcessEmailConfig(ctx, engine, config, data)
 
 ## ⚡ Performance
 
-### Benchmarks
-
-```
-BenchmarkTemplateParse-8         100000    10000 ns/op  (< 10ms target)
-BenchmarkExecuteCached-8         500000     2000 ns/op  (< 5ms target)
-BenchmarkExecuteUncached-8        50000    20000 ns/op  (< 20ms target)
-```
+Benchmarks live in `benchmarks_test.go`; run `go test ./internal/notification/template -bench=. -benchmem` for current numbers.
 
 ### Cache Statistics
 
@@ -257,12 +248,12 @@ if template.IsTimeoutError(err) {
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  Template Executor                                    │  │
 │  │  • Execute with TemplateData                          │  │
-│  │  • Apply 50+ custom functions                         │  │
+│  │  • Apply custom functions                             │  │
 │  │  • Handle errors gracefully                           │  │
 │  │  • Context timeout support (5s)                       │  │
 │  └───────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  Function Library (50+ functions)                     │  │
+│  │  Function Library                                     │  │
 │  │  • Time: humanizeTimestamp, since, date               │  │
 │  │  • String: toUpper, truncate, join                    │  │
 │  │  • Math: humanize, add, round                         │  │
@@ -280,10 +271,12 @@ if template.IsTimeoutError(err) {
 internal/notification/template/
 ├── engine.go          # NotificationTemplateEngine interface + impl
 ├── data.go            # TemplateData struct
-├── functions.go       # 50+ template functions
+├── alert.go           # Alert data helpers
+├── functions.go       # Template functions
 ├── cache.go           # LRU template cache
 ├── errors.go          # Error types
 ├── integration.go     # Receiver integration helpers
+├── defaults/          # Default receiver templates
 └── README.md          # This file
 ```
 
@@ -383,13 +376,4 @@ func TestTemplateExecution(t *testing.T) {
 
 ## 📚 Additional Resources
 
-- [requirements.md](../../../tasks/alertmanager-plus-plus-oss/TN-153-template-engine/requirements.md) - Detailed requirements
-- [design.md](../../../tasks/alertmanager-plus-plus-oss/TN-153-template-engine/design.md) - Technical architecture
 - [Alertmanager Templates](https://prometheus.io/docs/alerting/latest/notifications/) - Upstream documentation
-
----
-
-**Package Version**: 1.0
-**Last Updated**: 2025-11-22
-**Author**: AI Assistant
-**Quality**: 150% (Grade A+ EXCEPTIONAL)
