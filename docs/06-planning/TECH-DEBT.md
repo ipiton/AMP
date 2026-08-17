@@ -8,7 +8,7 @@
 - [ ] **SPLIT-BRAIN-RISK** — Отсутствие транзакционной консистентности между In-Memory Store и БД. ~3d
 
 ## High
-- [ ] **DUPLICATED-DB-ADAPTERS** — `PostgresDatabase` и `SQLiteDatabase` дублируют 80% логики. Нужен Query Builder. ~3d
+- [x] ~~**DUPLICATED-DB-ADAPTERS**~~ — закрыто 2026-08-17 удалением, не Query Builder'ом: `postgres_adapter.go` (915 строк) и интерфейс `Database` + `NewDatabase` были мёртвым кодом с 0 prod-вызывателей (Standard живёт на `PostgresStorageAdapter`, Lite — на `SQLiteDatabase`). Удалены также 6 мёртвых методов SQLite (~185 строк). Попутно: sentinel-ошибки выровнены (`core.ErrAlertNotFound` в обоих профилях), закрыта SQL-инъекция label-ключа в sqlite `ListAlerts` (json path теперь параметр), добавлены `rows.Err()`-проверки во все scan-циклы. −~1250 строк.
 - [ ] **DTO-FRAGMENTATION** — Избыток структур `apiAlert`, `storedAlert`, `core.Alert`. Нужна консолидация. ~1d
 - [x] ~~**MANUAL-SQL-RISK**~~ — закрыто 2026-08-17. Все фильтры параметризованы (`$N` + args); реальные векторы устранены: `ORDER BY` whitelist в `silencing/filter_builder.go` и `template/repository_crud.go`, JSONB-экранирование через `buildJSONBContainmentFilter`/`json.Marshal`, имя таблицы в `migrations/manager.go` параметризовано. Регресс-тесты: `filter_builder_injection_test.go`.
 
