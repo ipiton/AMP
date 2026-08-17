@@ -4,14 +4,20 @@ package routing
 //
 // These are the first tests of this package. The tree fixture below
 // mirrors the canonical routing example from the Prometheus Alertmanager
-// configuration docs (https://prometheus.io/docs/alerting/latest/configuration/#route):
+// configuration docs (https://prometheus.io/docs/alerting/latest/configuration/#route),
+// with one deliberate deviation from upstream's literal example: the
+// service=~ pattern is left unanchored ("foo1|foo2|baz" instead of
+// "^(foo1|foo2|baz)$") and its route has its own receiver name distinct
+// from root's, specifically so the anchoring tests below can actually
+// distinguish "anchored correctly" from "anchoring regressed" (see
+// TestFindMatchingRoutes_RegexAnchoring_SubstringMustNotMatch).
 //
 //	route:
 //	  receiver: 'team-X-mails'
 //	  routes:
 //	  - match_re:
-//	      service: ^(foo1|foo2|baz)$
-//	    receiver: 'team-X-mails'
+//	      service: foo1|foo2|baz
+//	    receiver: 'team-X-mails-svc'
 //	    routes:
 //	    - match:
 //	        severity: critical
@@ -76,8 +82,10 @@ func buildAlertmanagerDocsFixtureTree() *RouteTree {
 		Matchers: []Matcher{{Name: "severity", Value: "critical"}},
 	}
 	teamXMailsNested := &RouteNode{
-		Receiver: "team-X-mails",
-		Matchers: []Matcher{{Name: "service", Value: "^(foo1|foo2|baz)$", IsRegex: true}},
+		// Deliberately unanchored pattern + a receiver distinct from root's
+		// "team-X-mails" — see the package doc comment above for why.
+		Receiver: "team-X-mails-svc",
+		Matchers: []Matcher{{Name: "service", Value: "foo1|foo2|baz", IsRegex: true}},
 		Children: []*RouteNode{teamXPager},
 	}
 	root := &RouteNode{
@@ -115,9 +123,9 @@ func TestFindMatchingRoutes_RootFallback(t *testing.T) {
 }
 
 func TestFindMatchingRoutes_NestedDescent_ParentReceiverSuppressed(t *testing.T) {
-	// service=foo2 matches the team-X-mails branch (regex), and within it
-	// severity=critical matches team-X-pager. The parent's own receiver
-	// (team-X-mails) must NOT be returned once its child matched.
+	// service=foo2 matches the team-X-mails-svc branch (regex), and within
+	// it severity=critical matches team-X-pager. The parent's own receiver
+	// (team-X-mails-svc) must NOT be returned once its child matched.
 	tree := buildAlertmanagerDocsFixtureTree()
 	m := testMatcher()
 
@@ -131,9 +139,9 @@ func TestFindMatchingRoutes_NestedDescent_ParentReceiverSuppressed(t *testing.T)
 }
 
 func TestFindMatchingRoutes_NestedDescent_OneLevel_NoChildMatch(t *testing.T) {
-	// service=foo1 matches the team-X-mails branch, but severity is unset
-	// so the nested team-X-pager child does not match. The matched parent
-	// itself becomes the result.
+	// service=foo1 matches the team-X-mails-svc branch, but severity is
+	// unset so the nested team-X-pager child does not match. The matched
+	// parent itself becomes the result.
 	tree := buildAlertmanagerDocsFixtureTree()
 	m := testMatcher()
 
@@ -141,8 +149,8 @@ func TestFindMatchingRoutes_NestedDescent_OneLevel_NoChildMatch(t *testing.T) {
 	result := m.FindMatchingRoutes(tree, alert)
 
 	got := receiverNames(result.Matches)
-	if len(got) != 1 || got[0] != "team-X-mails" {
-		t.Fatalf("expected exactly [team-X-mails], got %v", got)
+	if len(got) != 1 || got[0] != "team-X-mails-svc" {
+		t.Fatalf("expected exactly [team-X-mails-svc], got %v", got)
 	}
 }
 
@@ -180,10 +188,18 @@ func TestFindMatchingRoutes_SiblingOrder_FirstMatchWinsWithoutContinue(t *testin
 }
 
 func TestFindMatchingRoutes_RegexAnchoring_SubstringMustNotMatch(t *testing.T) {
-	// The team-X-mails branch matcher is service=~"^(foo1|foo2|baz)$".
-	// Without anchoring, "foo10" or "xfoo1" would incorrectly match as a
-	// substring. With anchoring (^(?:...)$), only exact "foo1"/"foo2"/"baz"
-	// match.
+	// The team-X-mails-svc branch matcher is service=~"foo1|foo2|baz" — the
+	// pattern itself is deliberately UNANCHORED here (no ^$ in the pattern
+	// string), so this test actually exercises anchorRegex's own ^(?:...)$
+	// wrapping rather than relying on the pattern already being anchored.
+	// The nested route's receiver ("team-X-mails-svc") is also deliberately
+	// distinct from root's ("team-X-mails"): if anchoring regresses and the
+	// regex substring-matches, the result flips to team-X-mails-svc instead
+	// of staying at the root-fallback team-X-mails, so the assertion below
+	// actually discriminates broken-vs-fixed anchoring (see fix report for
+	// task 1.1: the original version of this test used an
+	// already-anchored pattern with the same receiver on both nodes, so it
+	// could not detect an anchoring regression).
 	tree := buildAlertmanagerDocsFixtureTree()
 	m := testMatcher()
 
@@ -203,8 +219,8 @@ func TestFindMatchingRoutes_RegexAnchoring_SubstringMustNotMatch(t *testing.T) {
 		result := m.FindMatchingRoutes(tree, alert)
 
 		got := receiverNames(result.Matches)
-		if len(got) != 1 || got[0] != "team-X-mails" {
-			t.Fatalf("service=%q: expected [team-X-mails] via exact regex match, got %v", service, got)
+		if len(got) != 1 || got[0] != "team-X-mails-svc" {
+			t.Fatalf("service=%q: expected [team-X-mails-svc] via exact regex match, got %v", service, got)
 		}
 	}
 }
