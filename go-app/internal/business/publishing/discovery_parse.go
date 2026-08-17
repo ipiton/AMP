@@ -4,10 +4,34 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ipiton/AMP/internal/core"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// AmpReceiverLabel is the K8s Secret annotation/label key used to scope a
+// publishing target to one or more Alertmanager receivers.
+//
+// Two sources, same key, different rules:
+//   - ANNOTATION `amp.receiver` (primary source): comma-separated list of
+//     receiver names, e.g. "slack-critical,pagerduty-oncall". Annotation
+//     values accept arbitrary characters, so this is the only form that
+//     supports multiple receivers.
+//   - LABEL `amp.receiver` (fallback source): a SINGLE receiver name only.
+//     K8s label values must match `(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?`
+//     — commas are illegal, so a comma-separated list here would be
+//     rejected by the API server on Secret creation/update.
+//
+// Precedence: if BOTH are present on the same Secret, the ANNOTATION wins
+// outright (the label is ignored, not merged).
+//
+// A target Secret with NEITHER present is unscoped: it belongs to ALL
+// receivers (backward compatibility with targets predating receiver-based
+// routing). See PublishingCoordinator.targetMatchesReceiver for the
+// filtering rules that consume this field (matching is case-sensitive —
+// receiver names are compared with exact string equality).
+const AmpReceiverLabel = "amp.receiver"
 
 // parseSecret extracts PublishingTarget from K8s secret.
 //
@@ -99,7 +123,40 @@ func parseSecret(secret corev1.Secret) (*core.PublishingTarget, error) {
 	// Apply defaults
 	applyDefaults(&target)
 
+	// Receiver scoping: `amp.receiver` annotation (primary, multi-name) or
+	// label (fallback, single-name) — see AmpReceiverLabel doc. Annotation
+	// wins if both are present. Neither present -> target.Receivers stays
+	// nil (belongs to all receivers).
+	if raw, ok := secret.Annotations[AmpReceiverLabel]; ok {
+		target.Receivers = parseReceiverNames(raw)
+	} else if raw, ok := secret.Labels[AmpReceiverLabel]; ok {
+		target.Receivers = parseReceiverNames(raw)
+	}
+
 	return &target, nil
+}
+
+// parseReceiverNames splits a comma-separated `amp.receiver` value (from
+// either the annotation or the label) into trimmed, non-empty receiver
+// names. Shared by both sources — the label form just happens to only ever
+// contain a single segment in practice (K8s rejects commas in label
+// values), so splitting on "," is a no-op for it. Returns nil if no names
+// remain (e.g. value present but blank), which is treated the same as an
+// absent annotation/label by the coordinator's filtering logic (target
+// belongs to all receivers).
+func parseReceiverNames(raw string) []string {
+	parts := strings.Split(raw, ",")
+	receivers := make([]string, 0, len(parts))
+	for _, p := range parts {
+		name := strings.TrimSpace(p)
+		if name != "" {
+			receivers = append(receivers, name)
+		}
+	}
+	if len(receivers) == 0 {
+		return nil
+	}
+	return receivers
 }
 
 // isBase64Encoded checks if data looks like base64-encoded string.
