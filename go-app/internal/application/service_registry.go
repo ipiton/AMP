@@ -11,6 +11,7 @@ import (
 	handlers "github.com/ipiton/AMP/internal/application/handlers"
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	businessrouting "github.com/ipiton/AMP/internal/business/routing"
+	businesssilencing "github.com/ipiton/AMP/internal/business/silencing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
@@ -76,6 +77,15 @@ type ServiceRegistry struct {
 	// silences in the standard profile. Nil in the lite profile — silences
 	// then stay memory-only and are lost on restart.
 	silenceRepo infrasilencing.SilenceRepository
+
+	// Silence manager (task 2.1, alertmanager-parity): background GC/stats
+	// worker over silenceRepo — periodic expiry of active->expired silences,
+	// deletion of old expired rows past retention, and periodic cache
+	// resync + stats. This is NOT the read-path API for alert filtering;
+	// that stays memory.SilenceStore (silenceStore above), rehydrated at
+	// boot and kept current by the HTTP handlers' DB-first writes. Nil when
+	// silenceRepo is nil (lite profile or persistence init failure).
+	silenceManager businesssilencing.SilenceManager
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -175,6 +185,16 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	// Step 1: Initialize Infrastructure
 	if err := r.initializeInfrastructure(ctx); err != nil {
 		return fmt.Errorf("infrastructure initialization failed: %w", err)
+	}
+
+	// Step 1.5: Initialize silence manager (GC/stats worker, task 2.1;
+	// non-fatal — mirrors initializeInhibition/initializeRouting below).
+	// The read path for alert filtering keeps using memory.SilenceStore
+	// regardless of whether this succeeds.
+	if err := r.initializeSilenceManager(ctx); err != nil {
+		r.logger.Warn("Silence manager initialization failed, continuing without background GC/stats worker",
+			"error", err)
+		r.addDegradedReason("silence manager unavailable: %v", err)
 	}
 
 	// Step 2: Initialize Core Services
@@ -396,6 +416,48 @@ func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 	if restored > 0 {
 		r.logger.Info("Silence store rehydrated from persistent storage", "silences", restored)
 	}
+	return nil
+}
+
+// initializeSilenceManager wires the READY DefaultSilenceManager as a
+// background GC/stats worker over the persistent silence repository (task
+// 2.1, alertmanager-parity). It does NOT become the read-path API for alert
+// filtering — that stays memory.SilenceStore (rehydrateSilenceStore above),
+// which the alert processor and HTTP handlers already read/write today.
+// This manager only owns:
+//   - GC worker: expires active->expired silences past EndsAt, then deletes
+//     expired rows past the retention window.
+//   - Sync worker: periodically rebuilds its own internal cache from the
+//     repository (used by GetStats/IsAlertSilenced if this manager's own
+//     API is used elsewhere later — not by the current read path).
+//
+// Skip conditions (clean skip, no degradation of the existing read path):
+//   - Lite profile: no persistent silence repository exists yet, matching
+//     initializeSilencePersistence's lite-profile skip above.
+//   - Nil silenceRepo: persistence init failed or was skipped for another
+//     reason. NewDefaultSilenceManager panics on a nil repository, so this
+//     guard is required, not just an optimization.
+func (r *ServiceRegistry) initializeSilenceManager(ctx context.Context) error {
+	if r.config.Profile == appconfig.ProfileLite {
+		r.logger.Info("Silence manager disabled in lite profile (no persistent silence repository)")
+		return nil
+	}
+	if r.silenceRepo == nil {
+		r.logger.Warn("Silence manager disabled: no silence repository available")
+		return nil
+	}
+
+	r.logger.Info("Initializing silence manager (GC/stats worker)...")
+
+	matcher := coresilencing.NewSilenceMatcher()
+	manager := businesssilencing.NewDefaultSilenceManager(r.silenceRepo, matcher, r.logger, nil)
+
+	if err := manager.Start(ctx); err != nil {
+		return fmt.Errorf("silence manager start failed: %w", err)
+	}
+
+	r.silenceManager = manager
+	r.logger.Info("Silence manager started (GC/stats worker running)")
 	return nil
 }
 
@@ -947,6 +1009,17 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		r.investigationToolsDB = nil
 	}
 
+	// Shutdown Silence manager background workers (task 2.1). Stop before
+	// the database connection is torn down below — the manager's GC/sync
+	// workers still read/write through silenceRepo during graceful stop.
+	if r.silenceManager != nil {
+		r.logger.Info("Shutting down silence manager...")
+		if err := r.silenceManager.Stop(ctx); err != nil {
+			r.logger.Warn("Silence manager stop warning", "error", err)
+		}
+		r.silenceManager = nil
+	}
+
 	// Shutdown Inhibition cache background worker
 	if r.inhibitionCache != nil {
 		r.logger.Info("Shutting down inhibition cache...")
@@ -1032,6 +1105,13 @@ func (r *ServiceRegistry) SilenceStore() *memory.SilenceStore {
 // running memory-only (lite profile or persistence init failure).
 func (r *ServiceRegistry) SilenceRepository() infrasilencing.SilenceRepository {
 	return r.silenceRepo
+}
+
+// SilenceManager returns the background GC/stats worker manager, or nil when
+// running memory-only (lite profile or persistence init failure). It is not
+// the read-path API for alert filtering — see memory.SilenceStore / SilenceStore().
+func (r *ServiceRegistry) SilenceManager() businesssilencing.SilenceManager {
+	return r.silenceManager
 }
 
 func (r *ServiceRegistry) StartTime() time.Time {
