@@ -205,6 +205,28 @@ func silenceMatcher(s *memory.SilenceStore) alertconv.SilenceMatcher {
 	return s
 }
 
+// V1AlertsHandler aliases POST /api/v1/alerts to the v2 ingest pipeline
+// (PARITY-4.3). Upstream's v1 ingest payload is the same alert JSON array as
+// v2 (docs even for the retired v1 API describe an identical body), so no
+// conversion layer is needed — this delegates straight into AlertsHandler's
+// POST path.
+//
+// GET is deliberately not implemented: upstream's v1 GET /api/v1/alerts
+// response shape differs from v2 (a different, legacy DTO) and restoring it
+// is out of scope for this task; it returns 405 like any other method this
+// alias doesn't support.
+func V1AlertsHandler(registry RegistryProvider) http.HandlerFunc {
+	v2Handler := AlertsHandler(registry)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		v2Handler(w, r)
+	}
+}
+
 func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		queryParams := r.URL.Query()

@@ -495,6 +495,68 @@ func TestAlertsHandler_InvalidReceiverRegex_Returns400(t *testing.T) {
 	}
 }
 
+func TestV1AlertsHandler_PostAliasesV2Ingest(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := V1AlertsHandler(registry)
+
+	payload := `[{"labels":{"alertname":"V1Alias","service":"amp"},"startsAt":"2026-03-08T10:00:00Z","status":"firing"}]`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/alerts status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if len(publisher.published) != 1 {
+		t.Fatalf("expected 1 published alert via v1 alias, got %d", len(publisher.published))
+	}
+	if total, _, _ := registry.alertStore.Stats(); total != 1 {
+		t.Fatalf("expected 1 stored alert via v1 alias, got %d", total)
+	}
+}
+
+func TestV1AlertsHandler_PostInvalidPayload_Returns400(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(`[]`))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v1/alerts (empty array) status = %d, want 400", rec.Code)
+	}
+}
+
+func TestV1AlertsHandler_Get_Returns405(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /api/v1/alerts status = %d, want 405", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "POST" {
+		t.Errorf("Allow header = %q, want %q", allow, "POST")
+	}
+}
+
 func TestAlertsHandler_OldStatusResolvedAliasCombinedWithNewParams(t *testing.T) {
 	publisher := &fakePublisher{}
 	registry := &fakeRegistry{

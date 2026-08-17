@@ -100,8 +100,9 @@ func TestPhase0RouteInventory(t *testing.T) {
 	// ADR-002: the route inventory documents the ACTIVE runtime surface
 	// (internal/application/router.go + registerLegacyDashboardRoutes).
 	// Endpoints removed by the controlled replacement (config API, history,
-	// dashboard JSON API, webhook, pprof, classification, /script.js,
-	// POST /api/v1/alerts alias) intentionally return 404.
+	// dashboard JSON API, webhook, pprof, classification, /script.js)
+	// intentionally return 404. PARITY-4.3 restored POST /api/v1/alerts as a
+	// real alias to the v2 ingest handler — it is no longer in that list.
 	probes := []routeProbe{
 		{name: "root", method: http.MethodGet, path: "/", allowedStatus: []int{http.StatusOK, http.StatusInternalServerError}},
 		{name: "dashboard", method: http.MethodGet, path: "/dashboard", allowedStatus: []int{http.StatusOK, http.StatusInternalServerError}},
@@ -123,7 +124,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "alertmanager reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, allowedStatus: []int{http.StatusOK}},
 		{name: "debug removed", method: http.MethodGet, path: "/debug/pprof/", allowedStatus: []int{http.StatusNotFound}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
-		{name: "alerts v1 post removed", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusNotFound}},
+		{name: "alerts v1 post alias", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", allowedStatus: []int{http.StatusOK}},
@@ -913,21 +914,33 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 	})
 
 	t.Run("alerts v1 ingest compatibility contract", func(t *testing.T) {
-		// ADR-002: the /api/v1/alerts ingest alias was removed; the exact path
-		// is a deliberate 404 so the /api/v1/alerts/ investigation subtree
-		// (PHASE-5B) owns the prefix.
+		// PARITY-4.3: POST /api/v1/alerts now aliases the v2 ingest handler
+		// (same alert JSON array payload as v2). An empty array is not a
+		// valid ingest payload, so it 400s the same way POST /api/v2/alerts
+		// would; a real payload succeeds (see "alerts v1 post alias" probe
+		// above). The exact path still takes priority over the
+		// /api/v1/alerts/ investigation subtree (PHASE-5B).
 		postReq := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(`[]`))
 		postRec := httptest.NewRecorder()
 		mux.ServeHTTP(postRec, postReq)
-		if postRec.Code != http.StatusNotFound {
-			t.Fatalf("POST /api/v1/alerts expected 404, got %d", postRec.Code)
+		if postRec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v1/alerts (empty array) expected 400, got %d", postRec.Code)
 		}
 
+		validPostReq := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(validAlertPayload))
+		validPostRec := httptest.NewRecorder()
+		mux.ServeHTTP(validPostRec, validPostReq)
+		if validPostRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v1/alerts (valid payload) expected 200, got %d body=%q", validPostRec.Code, validPostRec.Body.String())
+		}
+
+		// GET is not implemented for the v1 alias (upstream's v1 GET response
+		// shape differs from v2 and restoring it is out of scope here).
 		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
 		getRec := httptest.NewRecorder()
 		mux.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusNotFound {
-			t.Fatalf("GET /api/v1/alerts expected 404, got %d", getRec.Code)
+		if getRec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("GET /api/v1/alerts expected 405, got %d", getRec.Code)
 		}
 	})
 }
