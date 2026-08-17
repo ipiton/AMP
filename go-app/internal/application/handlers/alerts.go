@@ -131,9 +131,12 @@ func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertSto
 	}
 
 	if len(successfulInputs) > 0 {
+		// These alerts are already committed to the database (dedup path inside
+		// ProcessAlert). A memory-store failure here is an internal inconsistency,
+		// not a client error — report 500, never 400.
 		if err := store.IngestBatch(successfulInputs, now); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": err.Error(),
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "alerts persisted but in-memory store rejected batch: " + err.Error(),
 			})
 			return
 		}
