@@ -23,6 +23,66 @@ func TestNormalizeRoutePrefix(t *testing.T) {
 	}
 }
 
+func TestResolveRoutePrefix(t *testing.T) {
+	cases := []struct {
+		name        string
+		routePrefix string
+		externalURL string
+		want        string
+	}{
+		{
+			name: "both unset -> no prefix",
+			want: "",
+		},
+		{
+			name:        "external_url with path, no route_prefix -> inherited",
+			externalURL: "https://amp.example.com/monitoring",
+			want:        "/monitoring",
+		},
+		{
+			name:        "external_url without path -> no prefix",
+			externalURL: "https://amp.example.com",
+			want:        "",
+		},
+		{
+			name:        "external_url root path -> no prefix",
+			externalURL: "https://amp.example.com/",
+			want:        "",
+		},
+		{
+			name:        "explicit route_prefix wins over external_url path",
+			routePrefix: "/custom",
+			externalURL: "https://amp.example.com/monitoring",
+			want:        "/custom",
+		},
+		{
+			name:        "explicit route_prefix / opts out of inheritance",
+			routePrefix: "/",
+			externalURL: "https://amp.example.com/monitoring",
+			want:        "",
+		},
+		{
+			name:        "malformed external_url falls back to no prefix",
+			externalURL: "://not a url",
+			want:        "",
+		},
+		{
+			name:        "route_prefix set without external_url",
+			routePrefix: "/amp",
+			want:        "/amp",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveRoutePrefix(tc.routePrefix, tc.externalURL)
+			if got != tc.want {
+				t.Errorf("ResolveRoutePrefix(%q, %q) = %q, want %q", tc.routePrefix, tc.externalURL, got, tc.want)
+			}
+		})
+	}
+}
+
 func newRoutePrefixInner() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v2/status", func(w http.ResponseWriter, r *http.Request) {

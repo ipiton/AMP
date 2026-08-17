@@ -51,6 +51,11 @@ func main() {
 			Server: config.ServerConfig{Port: 9093},
 		}
 	}
+	// PARITY-B6: effective route prefix — explicit -web.route-prefix flag
+	// wins; otherwise use server.route_prefix, falling back to inheriting
+	// the path component of server.external_url (upstream's own default
+	// derivation for --web.route-prefix), or no prefix if neither is set.
+	cfg.Server.RoutePrefix = application.ResolveRoutePrefix(cfg.Server.RoutePrefix, cfg.Server.ExternalURL)
 	if *routePrefixFlag != "" {
 		cfg.Server.RoutePrefix = *routePrefixFlag
 	}
