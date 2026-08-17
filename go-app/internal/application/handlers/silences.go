@@ -77,7 +77,7 @@ func handleSilencesGet(store *memory.SilenceStore, w http.ResponseWriter, r *htt
 }
 
 func handleSilencePost(store *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024*1024))
 	if err != nil {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "payload too large"})

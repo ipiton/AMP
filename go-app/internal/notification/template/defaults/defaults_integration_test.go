@@ -431,7 +431,7 @@ func BenchmarkSlackTitleIntegration(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		engine.Execute(ctx, registry.Slack.Title, data)
+		_, _ = engine.Execute(ctx, registry.Slack.Title, data)
 	}
 }
 
@@ -443,7 +443,7 @@ func BenchmarkEmailHTMLIntegration(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		engine.Execute(ctx, registry.Email.HTML, data)
+		_, _ = engine.Execute(ctx, registry.Email.HTML, data)
 	}
 }
 
@@ -461,6 +461,6 @@ func BenchmarkExecuteMultipleIntegration(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		engine.ExecuteMultiple(ctx, templates, data)
+		_, _ = engine.ExecuteMultiple(ctx, templates, data)
 	}
 }

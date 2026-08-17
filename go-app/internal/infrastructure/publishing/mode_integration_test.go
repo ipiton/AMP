@@ -23,7 +23,7 @@ func TestModeManager_MetricsOnlyBehavior(t *testing.T) {
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
 
 	// Trigger initial mode check to update state
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Verify metrics-only mode
 	if !modeManager.IsMetricsOnly() {
@@ -45,7 +45,7 @@ func TestModeManager_MetricsOnlyBehavior(t *testing.T) {
 		Type:    "webhook",
 		Enabled: true,
 	})
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	if modeManager.IsMetricsOnly() {
 		t.Error("Expected normal mode after adding target")
@@ -71,7 +71,7 @@ func TestModeManager_NormalModeBehavior(t *testing.T) {
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
 
 	// Trigger initial mode check to update state
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Verify normal mode
 	if modeManager.IsMetricsOnly() {
@@ -89,7 +89,7 @@ func TestModeManager_NormalModeBehavior(t *testing.T) {
 
 	// Remove all targets and verify metrics-only mode
 	stubDiscovery.ClearTargets()
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	if !modeManager.IsMetricsOnly() {
 		t.Error("Expected metrics-only mode after removing targets")
@@ -112,7 +112,7 @@ func TestModeTransition_EndToEnd(t *testing.T) {
 	if err := modeManager.Start(ctx); err != nil {
 		t.Fatalf("Failed to start mode manager: %v", err)
 	}
-	defer modeManager.Stop()
+	defer func() { _ = modeManager.Stop() }()
 
 	// Track mode changes via callback for verification
 	var callbackCalled int32 // Use atomic for thread-safety
@@ -122,7 +122,7 @@ func TestModeTransition_EndToEnd(t *testing.T) {
 	})
 
 	// Trigger initial check to set proper mode (transition #1: normal->metrics-only)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Initial state: metrics-only (no targets)
 	if mode := modeManager.GetCurrentMode(); mode != ModeMetricsOnly {
@@ -212,7 +212,7 @@ func TestQueueWorker_SkipsJobsInMetricsOnlyMode(t *testing.T) {
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
 
 	// Trigger initial mode check
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Verify metrics-only mode
 	if !modeManager.IsMetricsOnly() {
@@ -231,7 +231,7 @@ func TestQueueWorker_SkipsJobsInMetricsOnlyMode(t *testing.T) {
 		Type:    "webhook",
 		Enabled: true,
 	})
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Now worker should process jobs
 	shouldSkip = modeManager.IsMetricsOnly()
@@ -248,7 +248,7 @@ func TestGetPublishingMode_EnhancedResponse(t *testing.T) {
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
 
 	// Trigger initial mode check to populate metrics (normal->metrics-only)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Then add target to trigger second transition (metrics-only->normal)
 	stubDiscovery.AddTarget(&core.PublishingTarget{
@@ -256,7 +256,7 @@ func TestGetPublishingMode_EnhancedResponse(t *testing.T) {
 		Type:    "webhook",
 		Enabled: true,
 	})
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Create handlers
 	handlers := &PublishingHandlers{
@@ -322,7 +322,7 @@ func TestModeManager_PerformanceUnderLoad(t *testing.T) {
 			Enabled: true,
 		})
 	}
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	// Concurrent goroutines checking mode
 	const goroutines = 100

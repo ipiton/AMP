@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // FilterMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 )
 
 // SimpleFilterEngine is a basic implementation of FilterEngine

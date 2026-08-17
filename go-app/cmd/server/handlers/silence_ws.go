@@ -146,7 +146,7 @@ func (h *WebSocketHub) Start(ctx context.Context) {
 			clientCount := len(h.clients)
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				client.Close()
+				_ = client.Close()
 				clientCount = len(h.clients)
 			}
 			h.mu.Unlock()
@@ -188,7 +188,7 @@ func (h *WebSocketHub) Start(ctx context.Context) {
 // sendToClient sends an event to a specific client.
 func (h *WebSocketHub) sendToClient(client *websocket.Conn, event SilenceEvent) {
 	// Set write deadline
-	client.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	_ = client.SetWriteDeadline(time.Now().Add(10 * time.Second))
 
 	if err := client.WriteJSON(event); err != nil {
 		h.logger.Warn("Failed to send WebSocket message",
@@ -251,11 +251,11 @@ func (h *WebSocketHub) readPump(conn *websocket.Conn) {
 	}()
 
 	// Set initial read deadline
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	// Set pong handler
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
@@ -268,7 +268,7 @@ func (h *WebSocketHub) readPump(conn *websocket.Conn) {
 		select {
 		case <-ticker.C:
 			// Send ping
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				h.logger.Debug("Ping failed, closing connection", "error", err)
 				return
@@ -295,7 +295,7 @@ func (h *WebSocketHub) closeAllConnections() {
 	defer h.mu.Unlock()
 
 	for client := range h.clients {
-		client.Close()
+		_ = client.Close()
 	}
 
 	h.clients = make(map[*websocket.Conn]bool)

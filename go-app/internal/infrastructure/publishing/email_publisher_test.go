@@ -19,10 +19,10 @@ import (
 // ============================================================================
 
 type MockSMTPClient struct {
-	SendEmailCalls  []*EmailMessage
-	SendEmailErr    error
-	HealthErr       error
-	CloseCalled     bool
+	SendEmailCalls []*EmailMessage
+	SendEmailErr   error
+	HealthErr      error
+	CloseCalled    bool
 }
 
 func (m *MockSMTPClient) SendEmail(_ context.Context, msg *EmailMessage) error {
@@ -402,10 +402,8 @@ func TestRenderEmailContent_DefaultTemplates(t *testing.T) {
 
 func TestRenderEmailContent_BadTemplate(t *testing.T) {
 	data := &emailTemplateData{Status: "firing"}
-	_, _, _, err := renderEmailContent(data, "{{ .Unknown.Field }}", "", "")
 	// text/template may not error on missing fields (zero value), but bad syntax should
-	// Test bad syntax instead
-	_, _, _, err = renderEmailContent(data, "{{ unclosed", "", "")
+	_, _, _, err := renderEmailContent(data, "{{ unclosed", "", "")
 	if err == nil {
 		t.Error("expected error for bad template syntax, got nil")
 	}
@@ -626,7 +624,7 @@ func TestEncodeRFC2047Words_SingleNonASCII(t *testing.T) {
 // не создаёт невалидный Message-ID с trailing '>'.
 func TestGenerateMessageID_DisplayName(t *testing.T) {
 	inputs := []struct {
-		from   string
+		from       string
 		wantDomain string
 	}{
 		{"alerts@example.com", "example.com"},

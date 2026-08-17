@@ -356,6 +356,7 @@ func (p *DefaultParallelPublisher) PublishToMultiple(
 
 	// 5. Fan-in: Collect results from all goroutines
 	results := make([]TargetPublishResult, 0, len(targets))
+collect:
 	for i := 0; i < len(targets); i++ {
 		select {
 		case result := <-resultChan:
@@ -369,7 +370,7 @@ func (p *DefaultParallelPublisher) PublishToMultiple(
 				"error", ctx.Err(),
 			)
 			// Collect partial results
-			break
+			break collect
 		}
 	}
 
@@ -542,13 +543,9 @@ func (p *DefaultParallelPublisher) publishToTarget(
 		"alert_fingerprint", alert.Alert.Fingerprint,
 	)
 
-	// Check circuit breaker (optional)
-	if p.options.RespectCircuitBreakers {
-		// Check if queue has circuit breaker for this target
-		// Circuit breakers are managed by the queue, not by parallel publisher
-		// This is a placeholder for future integration
-		// For now, we always allow publishing (queue will handle circuit breakers)
-	}
+	// Circuit breakers (p.options.RespectCircuitBreakers) are managed by the
+	// queue, not by the parallel publisher. Placeholder for future integration:
+	// for now we always allow publishing (queue will handle circuit breakers).
 
 	// Create publisher
 	publisher, err := p.factory.CreatePublisherForTarget(target)

@@ -35,7 +35,7 @@ func RunMigrations(ctx context.Context, pool postgres.DatabaseConnection, logger
 		logger.Error("Failed to create SQL DB from pool", "error", err)
 		return fmt.Errorf("failed to create SQL DB: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Устанавливаем диалект PostgreSQL для goose
 	if err := goose.SetDialect("postgres"); err != nil {
@@ -71,7 +71,7 @@ func RunMigrationsDown(ctx context.Context, pool postgres.DatabaseConnection, st
 		logger.Error("Failed to create SQL DB from pool", "error", err)
 		return fmt.Errorf("failed to create SQL DB: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := goose.SetDialect("postgres"); err != nil {
 		logger.Error("Failed to set goose dialect", "error", err)
@@ -103,7 +103,7 @@ func GetMigrationStatus(ctx context.Context, pool postgres.DatabaseConnection, l
 		logger.Error("Failed to create SQL DB from pool", "error", err)
 		return fmt.Errorf("failed to create SQL DB: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := goose.SetDialect("postgres"); err != nil {
 		logger.Error("Failed to set goose dialect", "error", err)

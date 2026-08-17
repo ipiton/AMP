@@ -53,7 +53,7 @@ func (r *DefaultTemplateRepository) Create(ctx context.Context, template *domain
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Set timestamps if not set
 	now := time.Now()
@@ -286,7 +286,7 @@ func (r *DefaultTemplateRepository) List(ctx context.Context, filters domain.Lis
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query templates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Scan results
 	templates := make([]*domain.Template, 0, filters.Limit)
@@ -344,7 +344,7 @@ func (r *DefaultTemplateRepository) Update(ctx context.Context, template *domain
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Increment version
 	template.Version = current.Version + 1

@@ -21,7 +21,7 @@ func TestBackgroundWorker_WarmupPeriod(t *testing.T) {
 	startTime := time.Now()
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait a bit less than warmup period (10ms in test config)
 	time.Sleep(5 * time.Millisecond)
@@ -50,7 +50,7 @@ func TestBackgroundWorker_PeriodicRefresh(t *testing.T) {
 	// Start manager
 	err := manager.Start()
 	require.NoError(t, err)
-	defer manager.Stop(1 * time.Second)
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup + first refresh
 	time.Sleep(30 * time.Millisecond)

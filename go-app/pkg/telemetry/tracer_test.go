@@ -45,7 +45,7 @@ func TestTracer_StartSpan_Disabled(t *testing.T) {
 	assert.NoError(t, err)
 
 	ctx := context.Background()
-	ctx, span := tracer.StartSpan(ctx, "test-operation")
+	_, span := tracer.StartSpan(ctx, "test-operation")
 	defer span.End()
 
 	// Should return no-op span

@@ -62,15 +62,12 @@ func classifyPublishingError(err error) QueueErrorType {
 		return errType
 	}
 
-	// Network errors (transient)
+	// Network errors (transient).
+	// net.Error.Temporary is deprecated (Go 1.18): most "temporary" errors are
+	// timeouts; the rest are covered by the DNS/OpError/syscall checks below.
 	var netErr net.Error
-	if errors.As(err, &netErr) {
-		if netErr.Timeout() {
-			return QueueErrorTypeTransient // Network timeout
-		}
-		if netErr.Temporary() {
-			return QueueErrorTypeTransient // Temporary network error
-		}
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return QueueErrorTypeTransient // Network timeout
 	}
 
 	// DNS errors (transient)

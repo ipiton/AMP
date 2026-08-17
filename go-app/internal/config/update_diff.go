@@ -319,31 +319,31 @@ func CalculateDiff(oldCfg *Config, newCfg *Config, sections []string) (*ConfigDi
 func DiffToString(diff *ConfigDiff) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Summary: %s\n", diff.Summary))
+	fmt.Fprintf(&sb, "Summary: %s\n", diff.Summary)
 
 	if len(diff.Added) > 0 {
 		sb.WriteString("\nAdded:\n")
 		for field, value := range diff.Added {
-			sb.WriteString(fmt.Sprintf("  + %s: %v\n", field, value))
+			fmt.Fprintf(&sb, "  + %s: %v\n", field, value)
 		}
 	}
 
 	if len(diff.Modified) > 0 {
 		sb.WriteString("\nModified:\n")
 		for field, entry := range diff.Modified {
-			sb.WriteString(fmt.Sprintf("  ~ %s: %v → %v\n", field, entry.OldValue, entry.NewValue))
+			fmt.Fprintf(&sb, "  ~ %s: %v → %v\n", field, entry.OldValue, entry.NewValue)
 		}
 	}
 
 	if len(diff.Deleted) > 0 {
 		sb.WriteString("\nDeleted:\n")
 		for _, field := range diff.Deleted {
-			sb.WriteString(fmt.Sprintf("  - %s\n", field))
+			fmt.Fprintf(&sb, "  - %s\n", field)
 		}
 	}
 
 	if len(diff.Affected) > 0 {
-		sb.WriteString(fmt.Sprintf("\nAffected Components: %s\n", strings.Join(diff.Affected, ", ")))
+		fmt.Fprintf(&sb, "\nAffected Components: %s\n", strings.Join(diff.Affected, ", "))
 	}
 
 	if diff.IsCritical {

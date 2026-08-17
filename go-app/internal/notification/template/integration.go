@@ -208,7 +208,7 @@ func ProcessPagerDutyConfig(
 	}
 
 	// Render details map
-	if config.Details != nil && len(config.Details) > 0 {
+	if len(config.Details) > 0 {
 		// Execute all detail templates in parallel
 		results, err := engine.ExecuteMultiple(ctx, config.Details, data)
 		if err != nil {
@@ -322,7 +322,7 @@ func ProcessWebhookConfig(
 	}
 
 	// Render fields map
-	if config.Fields != nil && len(config.Fields) > 0 {
+	if len(config.Fields) > 0 {
 		results, err := engine.ExecuteMultiple(ctx, config.Fields, data)
 		if err != nil {
 			return nil, fmt.Errorf("failed to render webhook fields: %w", err)

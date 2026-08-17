@@ -235,7 +235,6 @@ func (r *PostgresSilenceRepository) buildCountQuery(filter SilenceFilter) (strin
 	if filter.EndsBefore != nil {
 		query += fmt.Sprintf(" AND ends_at <= $%d", argIdx)
 		args = append(args, *filter.EndsBefore)
-		argIdx++
 	}
 
 	// No ORDER BY, LIMIT, or OFFSET for COUNT queries

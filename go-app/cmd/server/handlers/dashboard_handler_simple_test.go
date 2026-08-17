@@ -344,11 +344,3 @@ func BenchmarkSimpleDashboardHandler_getMockDashboardData(b *testing.B) {
 		}
 	}
 }
-
-// Helper function (avoiding conflict with template_funcs.go min)
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

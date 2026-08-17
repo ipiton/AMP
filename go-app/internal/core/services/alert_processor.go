@@ -8,7 +8,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics/MetricsManager have no pkg/metrics/v2 equivalent yet; migration tracked separately
 )
 
 // LLMClient defines the interface for LLM classification
@@ -35,24 +35,24 @@ type InvestigationSubmitter interface {
 
 // AlertProcessor handles alert processing with enrichment mode support
 type AlertProcessor struct {
-	enrichmentManager   EnrichmentModeManager
-	llmClient           LLMClient
-	filterEngine        FilterEngine
-	publisher           Publisher
-	deduplication       DeduplicationService              // TN-036 Phase 3: Deduplication service
-	investigationQueue  InvestigationSubmitter            // PHASE-5A: async investigation pipeline
-	inhibitionCache     inhibition.ActiveAlertCache       // TN-130 PARITY-A2: cache of firing alerts
-	inhibitionMatcher   inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
-	inhibitionState     inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
-	businessMetrics     *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
-	logger              *slog.Logger
-	metrics             *metrics.MetricsManager
+	enrichmentManager  EnrichmentModeManager
+	llmClient          LLMClient
+	filterEngine       FilterEngine
+	publisher          Publisher
+	deduplication      DeduplicationService              // TN-036 Phase 3: Deduplication service
+	investigationQueue InvestigationSubmitter            // PHASE-5A: async investigation pipeline
+	inhibitionCache    inhibition.ActiveAlertCache       // TN-130 PARITY-A2: cache of firing alerts
+	inhibitionMatcher  inhibition.InhibitionMatcher      // TN-130 Phase 6: Inhibition checking
+	inhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
+	businessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
+	logger             *slog.Logger
+	metrics            *metrics.MetricsManager
 }
 
 // AlertProcessorConfig holds configuration for AlertProcessor
 type AlertProcessorConfig struct {
 	EnrichmentManager  EnrichmentModeManager
-	LLMClient          LLMClient             // optional, required only for enriched mode
+	LLMClient          LLMClient // optional, required only for enriched mode
 	FilterEngine       FilterEngine
 	Publisher          Publisher
 	Deduplication      DeduplicationService              // TN-036 Phase 3: optional, recommended for production

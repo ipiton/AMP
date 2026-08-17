@@ -296,7 +296,7 @@ func TestRegexCache_Size(t *testing.T) {
 
 	patterns := []string{"a", "b", "c", "d", "e"}
 	for i, pattern := range patterns {
-		cache.Get(pattern)
+		_, _ = cache.Get(pattern)
 		expectedSize := i + 1
 		if cache.Size() != expectedSize {
 			t.Errorf("size after %d insertions = %d, want %d", expectedSize, cache.Size(), expectedSize)
@@ -344,7 +344,7 @@ func BenchmarkRegexCache_Get_CacheHit(b *testing.B) {
 	pattern := ".*-prod-.*"
 
 	// Pre-cache the pattern
-	cache.Get(pattern)
+	_, _ = cache.Get(pattern)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -377,7 +377,7 @@ func BenchmarkRegexCache_Get_ConcurrentReads(b *testing.B) {
 	pattern := ".*-prod-.*"
 
 	// Pre-cache the pattern
-	cache.Get(pattern)
+	_, _ = cache.Get(pattern)
 
 	b.ResetTimer()
 	b.ReportAllocs()

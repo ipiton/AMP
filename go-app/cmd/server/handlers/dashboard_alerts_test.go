@@ -215,7 +215,7 @@ func TestDashboardAlertsHandler_GetRecentAlerts_WithLimit(t *testing.T) {
 	handler.GetRecentAlerts(w, req)
 
 	var response DashboardAlertResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	if response.Limit != 2 {
 		t.Errorf("Expected limit 2, got %d", response.Limit)
@@ -237,7 +237,7 @@ func TestDashboardAlertsHandler_GetRecentAlerts_WithStatusFilter(t *testing.T) {
 	handler.GetRecentAlerts(w, req)
 
 	var response DashboardAlertResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// Should have 2 firing alerts
 	firingCount := 0
@@ -268,7 +268,7 @@ func TestDashboardAlertsHandler_GetRecentAlerts_WithSeverityFilter(t *testing.T)
 	handler.GetRecentAlerts(w, req)
 
 	var response DashboardAlertResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// All returned alerts should have critical severity
 	for _, alert := range response.Alerts {
@@ -312,7 +312,7 @@ func TestDashboardAlertsHandler_GetRecentAlerts_WithClassification(t *testing.T)
 	handler.GetRecentAlerts(w, req)
 
 	var response DashboardAlertResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// First alert should have classification
 	if response.Alerts[0].Classification == nil {
@@ -432,7 +432,7 @@ func TestDashboardAlertsHandler_GetRecentAlerts_ClassificationError(t *testing.T
 	}
 
 	var response DashboardAlertResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// Should still have alerts, just without classification
 	if len(response.Alerts) == 0 {

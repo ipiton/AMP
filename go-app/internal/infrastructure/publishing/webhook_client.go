@@ -172,7 +172,7 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 
 		// Read response body
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			c.logger.WarnContext(ctx, "Failed to read response body",
 				slog.String("error", err.Error()))

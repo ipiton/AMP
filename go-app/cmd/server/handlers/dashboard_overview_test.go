@@ -275,7 +275,7 @@ func TestDashboardOverviewHandler_GetOverview_WithClassification(t *testing.T) {
 	handler.GetOverview(w, req)
 
 	var response DashboardOverviewResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	if !response.ClassificationEnabled {
 		t.Error("Expected classification enabled")
@@ -311,7 +311,7 @@ func TestDashboardOverviewHandler_GetOverview_WithPublishing(t *testing.T) {
 	handler.GetOverview(w, req)
 
 	var response DashboardOverviewResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	if response.PublishingTargets != 3 {
 		t.Errorf("Expected 3 publishing targets, got %d", response.PublishingTargets)
@@ -385,7 +385,7 @@ func TestDashboardOverviewHandler_GetOverview_RepositoryError(t *testing.T) {
 	}
 
 	var response DashboardOverviewResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// Should have defaults
 	if response.TotalAlerts != 0 {
@@ -409,7 +409,7 @@ func TestDashboardOverviewHandler_GetOverview_GracefulDegradation(t *testing.T) 
 	}
 
 	var response DashboardOverviewResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// Should have alert stats
 	if response.TotalAlerts == 0 {
@@ -456,7 +456,7 @@ func TestDashboardOverviewHandler_GetOverview_AllComponents(t *testing.T) {
 	}
 
 	var response DashboardOverviewResponse
-	json.Unmarshal(w.Body.Bytes(), &response)
+	_ = json.Unmarshal(w.Body.Bytes(), &response)
 
 	// Verify all components are present
 	if response.TotalAlerts == 0 {

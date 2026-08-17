@@ -412,9 +412,10 @@ func TestGetDuplicateStats(t *testing.T) {
 		result, err := service.ProcessAlert(ctx, alert)
 		require.NoError(t, err, "alert %d failed", i)
 
-		if i == 0 {
+		switch i {
+		case 0:
 			fingerprint1 = result.Alert.Fingerprint
-		} else if i == 2 {
+		case 2:
 			// Reuse fingerprint for duplicate
 			alert.Fingerprint = fingerprint1
 		}

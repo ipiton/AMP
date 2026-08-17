@@ -12,7 +12,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
-	"github.com/ipiton/AMP/pkg/metrics"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // DefaultTargetDiscoveryManager is production implementation of TargetDiscoveryManager.
@@ -135,14 +135,14 @@ type DiscoveryMetrics struct {
 //	    os.Getenv("K8S_NAMESPACE"),        // from env
 //	    "publishing-target=true,env=prod", // multi-label selector
 //	    slog.Default(),
-//	    metrics.GlobalRegistry,
+//	    v2.NewRegistry(),
 //	)
 func NewTargetDiscoveryManager(
 	k8sClient k8s.K8sClient,
 	namespace string,
 	labelSelector string,
 	logger *slog.Logger,
-	metricsRegistry *metrics.MetricsRegistry,
+	metricsRegistry *v2.Registry,
 ) (TargetDiscoveryManager, error) {
 	// Validate required parameters
 	if k8sClient == nil {
@@ -419,7 +419,7 @@ func (m *DefaultTargetDiscoveryManager) Health(ctx context.Context) error {
 }
 
 // registerDiscoveryMetrics registers Prometheus metrics for target discovery.
-func registerDiscoveryMetrics(reg *metrics.MetricsRegistry) *DiscoveryMetrics {
+func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 	return &DiscoveryMetrics{
 		TargetsTotal: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{

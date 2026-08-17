@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/Masterminds/sprig/v3"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // ================================================================================
@@ -110,7 +112,9 @@ func createTemplateFuncs() template.FuncMap {
 	funcs["toLower"] = strings.ToLower
 
 	// title converts string to title case
-	funcs["title"] = strings.Title
+	funcs["title"] = func(s string) string {
+		return cases.Title(language.Und, cases.NoLower).String(s)
+	}
 
 	// truncate truncates string to max length
 	funcs["truncate"] = func(max int, s string) string {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -66,7 +65,6 @@ type DefaultSilenceManager struct {
 	// Lifecycle management
 	started  atomic.Bool        // True if manager has been started
 	shutdown atomic.Bool        // True if manager is shutting down
-	wg       sync.WaitGroup     // Tracks background goroutines
 	ctx      context.Context    // Manager context (cancelled on Stop)
 	cancel   context.CancelFunc // Cancels manager context
 }

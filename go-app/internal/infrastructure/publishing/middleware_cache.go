@@ -24,9 +24,9 @@ import (
 //   - Cache hit rate (target: 30%+)
 //   - Cache miss count
 //   - Cache eviction count
-type CachingMiddleware struct {
-	cache FormatterCache
-}
+//
+// Construct via NewCachingMiddleware; the middleware closes over its cache.
+type CachingMiddleware struct{}
 
 // FormatterCache defines caching interface for formatted alerts.
 type FormatterCache interface {

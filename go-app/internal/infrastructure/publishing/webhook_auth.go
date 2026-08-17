@@ -1,7 +1,6 @@
 package publishing
 
 import (
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -180,28 +179,4 @@ func maskURL(urlStr string) string {
 	}
 
 	return urlStr
-}
-
-// maskToken masks authentication token for logging
-func maskToken(token string) string {
-	if len(token) <= 8 {
-		return "***"
-	}
-	// Show first 4 and last 4 characters
-	return fmt.Sprintf("%s...%s", token[:4], token[len(token)-4:])
-}
-
-// maskCredentials masks username/password for logging
-func maskCredentials(username, password string) string {
-	maskedPassword := "***"
-	if len(password) > 0 {
-		maskedPassword = fmt.Sprintf("%d chars", len(password))
-	}
-	return fmt.Sprintf("%s:%s", username, maskedPassword)
-}
-
-// encodeBasicAuth encodes username:password to base64 (for logging/debugging)
-func encodeBasicAuth(username, password string) string {
-	auth := username + ":" + password
-	return base64.StdEncoding.EncodeToString([]byte(auth))
 }

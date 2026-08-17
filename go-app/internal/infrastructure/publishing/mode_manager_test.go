@@ -92,7 +92,7 @@ func TestModeManager_GetCurrentMode(t *testing.T) {
 
 	// Test metrics-only mode
 	mockDiscovery.setTargets([]*core.PublishingTarget{})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 	if mode := manager.GetCurrentMode(); mode != ModeMetricsOnly {
 		t.Errorf("Expected ModeMetricsOnly, got %v", mode)
 	}
@@ -107,14 +107,14 @@ func TestModeManager_IsMetricsOnly(t *testing.T) {
 		Name:    "test-target",
 		Enabled: true,
 	})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 	if manager.IsMetricsOnly() {
 		t.Error("Expected IsMetricsOnly() to return false in normal mode")
 	}
 
 	// Test metrics-only mode
 	mockDiscovery.clearTargets()
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 	if !manager.IsMetricsOnly() {
 		t.Error("Expected IsMetricsOnly() to return true in metrics-only mode")
 	}
@@ -175,7 +175,7 @@ func TestModeManager_OnTargetsChanged(t *testing.T) {
 		Name:    "test-target",
 		Enabled: true,
 	})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 
 	// Change to metrics-only
 	mockDiscovery.clearTargets()
@@ -193,7 +193,7 @@ func TestModeManager_Subscribe(t *testing.T) {
 
 	// Set initial state to metrics-only
 	mockDiscovery.setTargets([]*core.PublishingTarget{})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 
 	// Subscribe to mode changes
 	callbackCh := make(chan struct {
@@ -215,7 +215,7 @@ func TestModeManager_Subscribe(t *testing.T) {
 		Name:    "test-target",
 		Enabled: true,
 	})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 
 	// Wait for callback (with timeout)
 	select {
@@ -238,7 +238,7 @@ func TestModeManager_Subscribe(t *testing.T) {
 
 	// Trigger another change
 	mockDiscovery.clearTargets()
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 
 	// Wait for callback (should not be called)
 	select {
@@ -255,7 +255,7 @@ func TestModeManager_GetModeMetrics(t *testing.T) {
 
 	// Set initial state
 	mockDiscovery.setTargets([]*core.PublishingTarget{})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 
 	metrics := manager.GetModeMetrics()
 
@@ -301,7 +301,7 @@ func TestModeManager_Caching(t *testing.T) {
 
 	// Set initial state
 	mockDiscovery.setTargets([]*core.PublishingTarget{})
-	manager.CheckModeTransition()
+	_, _, _ = manager.CheckModeTransition()
 
 	// Get mode multiple times (should use cache)
 	start := time.Now()
@@ -344,7 +344,7 @@ func TestModeManager_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				manager.CheckModeTransition()
+				_, _, _ = manager.CheckModeTransition()
 			}
 		}()
 	}

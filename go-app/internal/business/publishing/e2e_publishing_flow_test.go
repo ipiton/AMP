@@ -26,36 +26,36 @@ func TestE2E_FullPublishingFlow(t *testing.T) {
 	// Rootly mock
 	rootlyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var alert map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&alert)
+		_ = json.NewDecoder(r.Body).Decode(&alert)
 		mu.Lock()
 		receivedAlerts["rootly"] = append(receivedAlerts["rootly"], alert)
 		mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"id": "incident-123"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "incident-123"})
 	}))
 	defer rootlyServer.Close()
 
 	// PagerDuty mock
 	pagerdutyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var alert map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&alert)
+		_ = json.NewDecoder(r.Body).Decode(&alert)
 		mu.Lock()
 		receivedAlerts["pagerduty"] = append(receivedAlerts["pagerduty"], alert)
 		mu.Unlock()
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{"dedup_key": "alert-456"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"dedup_key": "alert-456"})
 	}))
 	defer pagerdutyServer.Close()
 
 	// Slack mock
 	slackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var alert map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&alert)
+		_ = json.NewDecoder(r.Body).Decode(&alert)
 		mu.Lock()
 		receivedAlerts["slack"] = append(receivedAlerts["slack"], alert)
 		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"ts": "1234567890.123456"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"ts": "1234567890.123456"})
 	}))
 	defer slackServer.Close()
 
@@ -101,7 +101,7 @@ func TestE2E_FullPublishingFlow(t *testing.T) {
 	if err := healthMonitor.Start(); err != nil {
 		t.Fatalf("Failed to start health monitor: %v", err)
 	}
-	defer healthMonitor.Stop(time.Second)
+	defer func() { _ = healthMonitor.Stop(time.Second) }()
 
 	// Wait for initial health checks
 	time.Sleep(500 * time.Millisecond)
@@ -208,7 +208,7 @@ func TestE2E_HealthAwareRouting(t *testing.T) {
 	if err := monitor.Start(); err != nil {
 		t.Fatalf("Failed to start monitor: %v", err)
 	}
-	defer monitor.Stop(time.Second)
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	// Wait for health checks to complete
 	time.Sleep(500 * time.Millisecond)
@@ -289,7 +289,7 @@ func TestE2E_ParallelPublishing(t *testing.T) {
 	if err := monitor.Start(); err != nil {
 		t.Fatalf("Failed to start monitor: %v", err)
 	}
-	defer monitor.Stop(time.Second)
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	// Wait for initial health checks
 	time.Sleep(300 * time.Millisecond)
@@ -355,7 +355,7 @@ func TestE2E_TargetRecovery(t *testing.T) {
 	if err := monitor.Start(); err != nil {
 		t.Fatalf("Failed to start monitor: %v", err)
 	}
-	defer monitor.Stop(time.Second)
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	ctx := context.Background()
 
@@ -407,7 +407,7 @@ func TestE2E_DynamicTargetDiscovery(t *testing.T) {
 	if err := monitor.Start(); err != nil {
 		t.Fatalf("Failed to start monitor: %v", err)
 	}
-	defer monitor.Stop(time.Second)
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	// Wait for initial health checks
 	time.Sleep(300 * time.Millisecond)

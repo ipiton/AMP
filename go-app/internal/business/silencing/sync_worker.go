@@ -218,12 +218,3 @@ func (w *syncWorker) Stop() {
 	<-w.doneCh // Block until worker stopped
 	w.logger.Debug("Sync worker stopped")
 }
-
-// max returns the maximum of two integers.
-// TODO: Use built-in max() when upgrading to Go 1.21+
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

@@ -50,25 +50,6 @@ func IsSlackRetryableError(err error) bool {
 	return classifier.IsRetryable(err)
 }
 
-// isSlackRetryableErrorOld is the old implementation (kept for reference, can be removed)
-// nolint:unused,deadcode
-func isSlackRetryableErrorOld(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for Slack API error
-	var apiErr *SlackAPIError
-	if errors.As(err, &apiErr) {
-		// Retry 429 (rate limit) and 503 (service unavailable)
-		return apiErr.StatusCode == http.StatusTooManyRequests ||
-			apiErr.StatusCode == http.StatusServiceUnavailable
-	}
-
-	// Check for network errors (timeout, connection refused, DNS)
-	return isRetryableNetworkError(err)
-}
-
 // IsSlackRateLimitError checks if Slack error is a rate limit error (429)
 // Rate limit: 1 message per second per webhook URL
 func IsSlackRateLimitError(err error) bool {

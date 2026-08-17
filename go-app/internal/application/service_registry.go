@@ -25,7 +25,7 @@ import (
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	investigationrepo "github.com/ipiton/AMP/internal/infrastructure/repository"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 	"github.com/jackc/pgx/v5/stdlib"
 )
 

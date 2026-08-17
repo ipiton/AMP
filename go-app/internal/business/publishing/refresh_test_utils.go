@@ -437,24 +437,3 @@ func assertRefreshStatus(
 		}
 	}
 }
-
-// assertMetrics asserts Prometheus metrics values.
-//
-// This helper validates metric values after operations.
-//
-// Parameters:
-//   - t: Test instance
-//   - mockReg: MockPrometheusRegisterer used during manager creation
-//   - expectedRegistered: Expected number of registered metrics (5 for RefreshMetrics)
-//
-// Example:
-//
-//	manager, mockReg := createTestManager(t, mock)
-//	assertMetrics(t, mockReg, 5)  // 5 metrics registered
-func assertMetrics(t *testing.T, mockReg *MockPrometheusRegisterer, expectedRegistered int) {
-	t.Helper()
-
-	if mockReg.RegisteredCount() != expectedRegistered {
-		t.Errorf("Expected %d metrics registered, got %d", expectedRegistered, mockReg.RegisteredCount())
-	}
-}

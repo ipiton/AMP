@@ -35,7 +35,7 @@ func setupTestRedisStorage(t *testing.T) (*RedisTimerStorage, *miniredis.Minired
 	require.NoError(t, err)
 
 	cleanup := func() {
-		redisCache.Close()
+		_ = redisCache.Close()
 		mr.Close()
 	}
 
@@ -271,7 +271,7 @@ func TestRedisTimerStorage_AcquireLock_Conflict(t *testing.T) {
 	// First lock acquisition
 	lockID1, release1, err := storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	require.NoError(t, err)
-	defer release1()
+	defer func() { _ = release1() }()
 
 	// Second lock acquisition (should fail)
 	_, _, err = storage.AcquireLock(ctx, "test-group", 30*time.Second)
@@ -297,7 +297,7 @@ func TestRedisTimerStorage_AcquireLock_Release(t *testing.T) {
 	// Should be able to acquire again after release
 	_, release2, err := storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	assert.NoError(t, err)
-	defer release2()
+	defer func() { _ = release2() }()
 }
 
 // TestRedisTimerStorage_AcquireLock_AutoExpire tests lock auto-expiration
@@ -317,7 +317,7 @@ func TestRedisTimerStorage_AcquireLock_AutoExpire(t *testing.T) {
 	// Should be able to acquire lock after expiration
 	_, release, err := storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	assert.NoError(t, err)
-	defer release()
+	defer func() { _ = release() }()
 }
 
 // TestRedisTimerStorage_SaveLoad_PreservesMetadata tests metadata preservation

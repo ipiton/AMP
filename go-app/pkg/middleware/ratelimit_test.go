@@ -22,7 +22,7 @@ func TestRateLimiter_PerIPLimit(t *testing.T) {
 	// Create test handler
 	handler := limiter.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}))
 
 	// First 2 requests should succeed
@@ -59,7 +59,7 @@ func TestRateLimiter_GlobalLimit(t *testing.T) {
 	// Create test handler
 	handler := limiter.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}))
 
 	// First 3 requests from different IPs should succeed

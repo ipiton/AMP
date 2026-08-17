@@ -87,7 +87,7 @@ func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 		}
 		tlsConn := tls.Client(rawConn, tlsCfg)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			rawConn.Close()
+			_ = rawConn.Close()
 			return nil, fmt.Errorf("email: TLS handshake: %w", err)
 		}
 		// Apply context deadline to TLS connection for SMTP commands (mirrors plaintext path)
@@ -96,7 +96,7 @@ func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 		}
 		client, err := smtp.NewClient(tlsConn, d.config.Host)
 		if err != nil {
-			tlsConn.Close()
+			_ = tlsConn.Close()
 			return nil, fmt.Errorf("email: smtp.NewClient (direct TLS): %w", err)
 		}
 		return client, nil
@@ -112,7 +112,7 @@ func (d *SMTPDialer) dialSMTP(ctx context.Context) (*smtp.Client, error) {
 	}
 	client, err := smtp.NewClient(conn, d.config.Host)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("email: smtp.NewClient: %w", err)
 	}
 	return client, nil
@@ -208,11 +208,11 @@ func (d *SMTPDialer) SendEmail(ctx context.Context, msg *EmailMessage) error {
 	// Собрать MIME-сообщение с уже отфильтрованным списком получателей
 	mimeBytes, err := buildMIMEMessage(msg, from, validTo)
 	if err != nil {
-		wc.Close()
+		_ = wc.Close()
 		return fmt.Errorf("email: build MIME: %w", err)
 	}
 	if _, err := wc.Write(mimeBytes); err != nil {
-		wc.Close()
+		_ = wc.Close()
 		return fmt.Errorf("email: write message: %w", err)
 	}
 	if err := wc.Close(); err != nil {
@@ -242,7 +242,7 @@ func (d *SMTPDialer) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("email health: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if err := d.setupSMTPSession(client); err != nil {
 		return fmt.Errorf("email health: %w", err)
@@ -417,7 +417,7 @@ func encodeQP(s string) string {
 		if r == ' ' {
 			b.WriteByte('_')
 		} else if r > 127 || r == '=' || r == '?' || r == '_' {
-			b.WriteString(fmt.Sprintf("=%02X", r))
+			fmt.Fprintf(&b, "=%02X", r)
 		} else {
 			b.WriteByte(r)
 		}

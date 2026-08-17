@@ -132,10 +132,9 @@ func (p *PeriodicHealthChecker) Start(ctx context.Context) {
 				// Выполняем health check в фоне
 				checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
-				if err := p.checker.CheckHealth(checkCtx); err != nil {
-					// Логируем ошибку, но продолжаем
-					// (логирование будет добавлено позже)
-				}
+				// Ошибка игнорируется намеренно: периодическая проверка продолжается
+				// (логирование будет добавлено позже)
+				_ = p.checker.CheckHealth(checkCtx)
 
 				cancel()
 			}

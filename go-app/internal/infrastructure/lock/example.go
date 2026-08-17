@@ -88,7 +88,7 @@ func ExampleLockManager() {
 	_, err = manager.AcquireLock(ctx, "resource_2")
 	if err != nil {
 		fmt.Printf("Failed to acquire lock2: %v\n", err)
-		manager.ReleaseLock(ctx, "resource_1")
+		_ = manager.ReleaseLock(ctx, "resource_1")
 		return
 	}
 

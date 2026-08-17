@@ -16,7 +16,7 @@ import (
 func testHandler(statusCode int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statusCode)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}
 }
 
@@ -51,8 +51,8 @@ func TestEnhancedWebhookPublisher_Name(t *testing.T) {
 		BlockedHosts:    []string{},
 		AllowPrivateIPs: true,
 		MaxPayloadSize:  1024 * 1024,
-		MaxHeaders:     100,
-		MaxHeaderSize:  4096,
+		MaxHeaders:      100,
+		MaxHeaderSize:   4096,
 	}, nil)
 	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
@@ -75,8 +75,8 @@ func TestEnhancedWebhookPublisher_Publish_Success(t *testing.T) {
 		BlockedHosts:    []string{},
 		AllowPrivateIPs: true,
 		MaxPayloadSize:  1024 * 1024,
-		MaxHeaders:     100,
-		MaxHeaderSize:  4096,
+		MaxHeaders:      100,
+		MaxHeaderSize:   4096,
 	}, nil)
 	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
@@ -117,8 +117,8 @@ func TestEnhancedWebhookPublisher_Publish_ValidationError(t *testing.T) {
 		BlockedHosts:    []string{},
 		AllowPrivateIPs: true,
 		MaxPayloadSize:  1024 * 1024,
-		MaxHeaders:     100,
-		MaxHeaderSize:  4096,
+		MaxHeaders:      100,
+		MaxHeaderSize:   4096,
 	}, nil)
 	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
@@ -159,8 +159,8 @@ func TestEnhancedWebhookPublisher_Publish_WithBearerAuth(t *testing.T) {
 		BlockedHosts:    []string{},
 		AllowPrivateIPs: true,
 		MaxPayloadSize:  1024 * 1024,
-		MaxHeaders:     100,
-		MaxHeaderSize:  4096,
+		MaxHeaders:      100,
+		MaxHeaderSize:   4096,
 	}, nil)
 	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics
@@ -203,8 +203,8 @@ func TestEnhancedWebhookPublisher_Publish_WithCustomHeaders(t *testing.T) {
 		BlockedHosts:    []string{},
 		AllowPrivateIPs: true,
 		MaxPayloadSize:  1024 * 1024,
-		MaxHeaders:     100,
-		MaxHeaderSize:  4096,
+		MaxHeaders:      100,
+		MaxHeaderSize:   4096,
 	}, nil)
 	formatter := NewAlertFormatter("")
 	var metrics *v2.PublishingMetrics

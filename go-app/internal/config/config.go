@@ -670,14 +670,9 @@ func (c *Config) Validate() error {
 	}
 
 	// Redis is optional for both profiles (TN-202)
-	// Validation only if Redis addr is provided
-	if c.Redis.Addr != "" {
-		// Redis config provided, validate it
-		if c.Profile == ProfileLite {
-			// Warning: Redis not recommended for Lite profile
-			// but allow it for testing/development
-		}
-	}
+	// Validation only if Redis addr is provided.
+	// Note: Redis is not recommended for Lite profile,
+	// but it is allowed for testing/development.
 
 	if c.Log.Level == "" {
 		return fmt.Errorf("log level cannot be empty")
@@ -806,10 +801,8 @@ func (c *Config) validateProfile() error {
 			return fmt.Errorf("lite profile requires storage.filesystem_path (e.g., /data/alerthistory.db)")
 		}
 
-		// Warning: Postgres not used in Lite (but don't fail)
-		if c.Database.Host != "" && c.Database.Host != "localhost" {
-			// Log warning but don't fail (allows testing)
-		}
+		// Note: Postgres is not used in Lite profile; a non-local
+		// database host is tolerated to allow testing.
 
 	case ProfileStandard:
 		// Standard profile: require postgres storage

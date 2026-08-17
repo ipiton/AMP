@@ -20,20 +20,3 @@ type EventSubscriber interface {
 	// Context returns the subscriber context (for cancellation).
 	Context() context.Context
 }
-
-// baseSubscriber provides common functionality for subscribers.
-type baseSubscriber struct {
-	id      string
-	ctx     context.Context
-	onClose func()
-}
-
-// ID returns the subscriber ID.
-func (s *baseSubscriber) ID() string {
-	return s.id
-}
-
-// Context returns the subscriber context.
-func (s *baseSubscriber) Context() context.Context {
-	return s.ctx
-}

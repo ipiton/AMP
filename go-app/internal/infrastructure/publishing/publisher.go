@@ -79,7 +79,7 @@ func (p *HTTPPublisher) publish(ctx context.Context, enrichedAlert *core.Enriche
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body for error details
 	body, _ := io.ReadAll(resp.Body)
