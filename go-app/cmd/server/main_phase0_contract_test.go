@@ -802,9 +802,9 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "silences put not allowed", method: http.MethodPut, path: "/api/v2/silences", status: http.StatusMethodNotAllowed},
 			{name: "silence by id post not allowed", method: http.MethodPost, path: "/api/v2/silence/any-id", status: http.StatusMethodNotAllowed},
 			{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
-			{name: "status post falls through", method: http.MethodPost, path: "/api/v2/status", status: http.StatusOK},
-			{name: "receivers post falls through", method: http.MethodPost, path: "/api/v2/receivers", status: http.StatusOK},
-			{name: "alert groups post falls through", method: http.MethodPost, path: "/api/v2/alerts/groups", status: http.StatusOK},
+			{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status", status: http.StatusMethodNotAllowed},
+			{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers", status: http.StatusMethodNotAllowed},
+			{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups", status: http.StatusMethodNotAllowed},
 			{name: "config removed", method: http.MethodPut, path: "/api/v2/config", status: http.StatusNotFound},
 			{name: "history removed", method: http.MethodPost, path: "/history", status: http.StatusNotFound},
 		}
@@ -836,10 +836,10 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "healthy head", method: http.MethodHead, path: "/-/healthy", status: http.StatusOK},
 			{name: "ready get", method: http.MethodGet, path: "/-/ready", status: http.StatusOK, textOK: true},
 			{name: "ready head", method: http.MethodHead, path: "/-/ready", status: http.StatusOK},
-			// ADR-002: the active probe handlers do not enforce methods (POST
-			// falls through to the GET path) and reload answers with "OK".
-			{name: "healthy post falls through", method: http.MethodPost, path: "/-/healthy", status: http.StatusOK, textOK: true},
-			{name: "ready post falls through", method: http.MethodPost, path: "/-/ready", status: http.StatusOK, textOK: true},
+			// NO-METHOD-ENFORCEMENT fixed: probes reject POST with 405; reload
+			// still answers "OK" to POST.
+			{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed, empty: true},
+			{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed, empty: true},
 			{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK, textOK: true},
 			{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
 		}

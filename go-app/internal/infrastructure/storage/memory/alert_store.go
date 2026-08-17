@@ -198,14 +198,23 @@ func (s *AlertStore) Stats() (total, firing, resolved int) {
 // GroupAlerts groups the stored alerts by the given label names. The silences
 // matcher (nil-tolerant) is used so groups report the same state/silencedBy
 // as GET /api/v2/alerts.
-func (s *AlertStore) GroupAlerts(groupBy []string, silences alertconv.SilenceMatcher) []core.APIGettableAlertGroup {
+func (s *AlertStore) GroupAlerts(groupBy []string, receiver string, silences alertconv.SilenceMatcher) []core.APIGettableAlertGroup {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if receiver == "" {
+		receiver = "default"
+	}
 
 	groups := make(map[string]*core.APIGettableAlertGroup)
 	now := time.Now().UTC()
 
 	for _, a := range s.all {
+		// Upstream groups cover active alerts only; resolved entries are kept
+		// in the store for /api/v2/alerts?resolved=true but not grouped.
+		if a.Status == "resolved" {
+			continue
+		}
 		// Calculate grouping labels and key
 		groupLabels := make(map[string]string)
 		var keyBuilder strings.Builder
@@ -228,7 +237,7 @@ func (s *AlertStore) GroupAlerts(groupBy []string, silences alertconv.SilenceMat
 		if !ok {
 			group = &core.APIGettableAlertGroup{
 				Labels:   groupLabels,
-				Receiver: core.APIReceiver{Name: "default"},
+				Receiver: core.APIReceiver{Name: receiver},
 				Alerts:   make([]core.APIGettableAlert, 0),
 			}
 			groups[key] = group

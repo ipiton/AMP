@@ -53,7 +53,7 @@ func InternalErrorHandler(w http.ResponseWriter, message string) {
 
 // Alertmanager compatible health endpoints
 func AlertmanagerHealthyHandler(provider HealthStatusProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		if provider == nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprint(w, "NOT OK")
@@ -68,11 +68,11 @@ func AlertmanagerHealthyHandler(provider HealthStatusProvider) http.HandlerFunc 
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, "OK")
-	}
+	})
 }
 
 func AlertmanagerReadyHandler(provider HealthStatusProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		if provider == nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprint(w, "NOT READY")
@@ -87,5 +87,5 @@ func AlertmanagerReadyHandler(provider HealthStatusProvider) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprint(w, "OK")
-	}
+	})
 }

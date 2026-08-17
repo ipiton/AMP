@@ -88,13 +88,19 @@ func silenceMatcher(s *memory.SilenceStore) alertconv.SilenceMatcher {
 }
 
 func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		queryParams := r.URL.Query()
 		groupBy := queryParams["group_by"]
 
-		groups := registry.AlertStore().GroupAlerts(groupBy, silenceMatcher(registry.SilenceStore()))
+		// Active runtime has no routing tree yet: groups carry the first
+		// configured receiver (or "default") instead of a hardcoded value.
+		receiver := "default"
+		if receivers := registry.Config().Receivers; len(receivers) > 0 {
+			receiver = receivers[0].Name
+		}
+		groups := registry.AlertStore().GroupAlerts(groupBy, receiver, silenceMatcher(registry.SilenceStore()))
 		writeJSON(w, http.StatusOK, groups)
-	}
+	})
 }
 
 func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, externalURL string, w http.ResponseWriter, r *http.Request) {

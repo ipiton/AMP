@@ -89,21 +89,20 @@ func TestUpstreamParity_CoreEndpointMethodMatrix(t *testing.T) {
 		body   string
 		status int
 	}{
-		// ADR-002: active runtime handlers for status/receivers/groups and the
-		// Alertmanager health probes do not enforce the HTTP method, so POST
-		// falls through to the GET path and returns 200.
+		// NO-METHOD-ENFORCEMENT fixed: read-only endpoints (status, receivers,
+		// groups, health probes) now reject non-GET/HEAD with 405.
 		{name: "status get", method: http.MethodGet, path: "/api/v2/status", status: http.StatusOK},
-		{name: "status post falls through", method: http.MethodPost, path: "/api/v2/status", status: http.StatusOK},
+		{name: "status post not allowed", method: http.MethodPost, path: "/api/v2/status", status: http.StatusMethodNotAllowed},
 
 		{name: "receivers get", method: http.MethodGet, path: "/api/v2/receivers", status: http.StatusOK},
-		{name: "receivers post falls through", method: http.MethodPost, path: "/api/v2/receivers", status: http.StatusOK},
+		{name: "receivers post not allowed", method: http.MethodPost, path: "/api/v2/receivers", status: http.StatusMethodNotAllowed},
 
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", status: http.StatusOK},
 		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: alertPayload, status: http.StatusOK},
 		{name: "alerts put not allowed", method: http.MethodPut, path: "/api/v2/alerts", status: http.StatusMethodNotAllowed},
 
 		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", status: http.StatusOK},
-		{name: "alert groups post falls through", method: http.MethodPost, path: "/api/v2/alerts/groups", status: http.StatusOK},
+		{name: "alert groups post not allowed", method: http.MethodPost, path: "/api/v2/alerts/groups", status: http.StatusMethodNotAllowed},
 
 		{name: "silences get", method: http.MethodGet, path: "/api/v2/silences", status: http.StatusOK},
 		{name: "silences post", method: http.MethodPost, path: "/api/v2/silences", body: silencePayload, status: http.StatusOK},
@@ -114,11 +113,11 @@ func TestUpstreamParity_CoreEndpointMethodMatrix(t *testing.T) {
 
 		{name: "healthy get", method: http.MethodGet, path: "/-/healthy", status: http.StatusOK},
 		{name: "healthy head", method: http.MethodHead, path: "/-/healthy", status: http.StatusOK},
-		{name: "healthy post falls through", method: http.MethodPost, path: "/-/healthy", status: http.StatusOK},
+		{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed},
 
 		{name: "ready get", method: http.MethodGet, path: "/-/ready", status: http.StatusOK},
 		{name: "ready head", method: http.MethodHead, path: "/-/ready", status: http.StatusOK},
-		{name: "ready post falls through", method: http.MethodPost, path: "/-/ready", status: http.StatusOK},
+		{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed},
 
 		{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK},
 		{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
