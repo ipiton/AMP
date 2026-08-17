@@ -6,14 +6,20 @@ import (
 	"log/slog"
 
 	"github.com/ipiton/AMP/internal/alertmanager/config"
+	realrouting "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/ipiton/AMP/pkg/configvalidator/matcher"
 	"github.com/ipiton/AMP/pkg/configvalidator/types"
 )
 
-// MaxRouteDepth mirrors internal/infrastructure/routing/parser.go's limit:
-// route trees deeper than this are rejected as a YAML-bomb / footgun guard
-// rather than a functional need.
-const MaxRouteDepth = 100
+// MaxRouteDepth is sourced directly from the real loader
+// (internal/infrastructure/routing/parser.go), not copied, so the two
+// can never drift apart again: a config this validator calls "valid"
+// must also be a config the loader that runs at startup actually
+// accepts. A previous version of this file hardcoded 100 here against
+// a comment claiming it mirrored the loader, while the loader's actual
+// limit was 10 - meaning routes at depth 11-100 validated clean here
+// and were then rejected at startup. Fix round 1 (Phase 5 review).
+const MaxRouteDepth = realrouting.MaxRouteDepth
 
 // RouteValidator validates the routing tree: matcher syntax (legacy
 // match/match_re maps and the AMP matchers: list syntax), receiver
