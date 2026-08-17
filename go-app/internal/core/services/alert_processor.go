@@ -55,6 +55,13 @@ type AlertProcessor struct {
 	// per-alert-group decisions into grouping/timers/publishing instead of
 	// this single latest value. Holds *RoutingDecision; nil until the first
 	// alert is evaluated (or forever, if routeEvaluator is nil).
+	//
+	// Single shared slot, NOT safe under concurrent ProcessAlert calls: two
+	// alerts processed at the same time race on this value and the "last"
+	// one observed via LastRoutingDecision() may not correspond to either
+	// call's own alert. This is fine for observability/testing scaffolding
+	// but must not be extended into real routing state — Phase 2 needs a
+	// per-group decision store, not a bigger version of this field.
 	lastRoutingDecision atomic.Value
 }
 
@@ -110,6 +117,13 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 // (task 1.4), or nil if no route tree is configured (routeEvaluator is nil)
 // or no alert has been evaluated yet. Intended for observability and tests;
 // it is not part of the publish path.
+//
+// Single shared slot: NOT safe to rely on under concurrent ProcessAlert
+// calls — with alerts in flight on multiple goroutines, the value returned
+// here can belong to any of them, not necessarily the caller's own alert.
+// This is observability/testing scaffolding only; do not extend it into a
+// real per-alert or per-group decision store — Phase 2 (task 2.3) must
+// build that separately.
 func (p *AlertProcessor) LastRoutingDecision() *RoutingDecision {
 	v := p.lastRoutingDecision.Load()
 	if v == nil {
