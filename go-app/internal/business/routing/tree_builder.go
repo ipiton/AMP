@@ -2,6 +2,8 @@ package routing
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -173,8 +175,8 @@ func (b *TreeBuilder) buildNode(
 		Level:  level,
 	}
 
-	// 1. Parse matchers (match + match_re)
-	node.Matchers = b.parseMatchers(route.Match, route.MatchRE)
+	// 1. Parse matchers (match + match_re + matchers list syntax)
+	node.Matchers = b.parseMatchers(route.Match, route.MatchRE, route.Matchers)
 
 	// 2. Set receiver name
 	node.Receiver = route.Receiver
@@ -206,29 +208,96 @@ func (b *TreeBuilder) buildNode(
 	return node
 }
 
-// parseMatchers converts match and match_re maps to Matcher list.
-func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]string) []Matcher {
-	matchers := make([]Matcher, 0, len(match)+len(matchRE))
+// matcherExprPattern parses a single entry of the `matchers:` list syntax,
+// e.g. `severity="critical"`, `severity != critical`, `sev =~ "a|b"`.
+//
+// Group 1: label name
+// Group 2: operator (=, !=, =~, !~)
+// Group 3: value (quotes, if any, stripped separately)
+var matcherExprPattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(!=|=~|!~|=)\s*(.*)$`)
 
-	// Equality matchers
+// parseMatchers converts match, match_re, and the `matchers:` list syntax
+// into a unified Matcher list.
+//
+//   - match: equality matchers (=), never negative.
+//   - match_re: regex matchers (=~), never negative.
+//   - matchers: free-form expressions supporting all 4 operators
+//     (=, !=, =~, !~), the only syntax that can express negative matchers
+//     (IsNegative=true), since match/match_re have no way to encode negation.
+//
+// Malformed entries in matchers are skipped (best-effort parsing; full
+// validation is out of scope here).
+func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]string, matcherExprs []string) []Matcher {
+	matchers := make([]Matcher, 0, len(match)+len(matchRE)+len(matcherExprs))
+
+	// Equality matchers (match: label -> value)
 	for name, value := range match {
 		matchers = append(matchers, Matcher{
-			Name:    name,
-			Value:   value,
-			IsRegex: false,
+			Name:       name,
+			Value:      value,
+			IsRegex:    false,
+			IsNegative: false,
 		})
 	}
 
-	// Regex matchers
+	// Regex matchers (match_re: label -> pattern)
 	for name, pattern := range matchRE {
 		matchers = append(matchers, Matcher{
-			Name:    name,
-			Value:   pattern,
-			IsRegex: true,
+			Name:       name,
+			Value:      pattern,
+			IsRegex:    true,
+			IsNegative: false,
 		})
+	}
+
+	// matchers: list syntax (free-form expressions, all 4 operators)
+	for _, expr := range matcherExprs {
+		if m, ok := parseMatcherExpr(expr); ok {
+			matchers = append(matchers, m)
+		}
 	}
 
 	return matchers
+}
+
+// parseMatcherExpr parses one `matchers:` list entry into a Matcher.
+//
+// Supported forms (whitespace around the operator is optional):
+//
+//	label=value
+//	label="value"
+//	label!=value
+//	label=~"regex"
+//	label!~"regex"
+//
+// Returns ok=false if expr doesn't match the expected grammar.
+func parseMatcherExpr(expr string) (Matcher, bool) {
+	groups := matcherExprPattern.FindStringSubmatch(expr)
+	if groups == nil {
+		return Matcher{}, false
+	}
+
+	name := groups[1]
+	op := groups[2]
+	value := strings.TrimSpace(groups[3])
+	value = strings.Trim(value, `"`)
+
+	m := Matcher{Name: name, Value: value}
+	switch op {
+	case "=":
+		// IsRegex=false, IsNegative=false (zero values)
+	case "!=":
+		m.IsNegative = true
+	case "=~":
+		m.IsRegex = true
+	case "!~":
+		m.IsRegex = true
+		m.IsNegative = true
+	default:
+		return Matcher{}, false
+	}
+
+	return m, true
 }
 
 // inheritGroupBy applies inheritance logic for group_by parameter.
@@ -412,6 +481,12 @@ type Route struct {
 
 	// MatchRE regex conditions (label name → regex pattern)
 	MatchRE map[string]string
+
+	// Matchers holds the `matchers:` list syntax: free-form expressions
+	// such as `severity="critical"`, `severity != critical`, or
+	// `sev =~ "a|b"`. This is the only syntax that can express negative
+	// matchers (!=, !~) — see parseMatcherExpr.
+	Matchers []string
 
 	// Grouping parameters
 	GroupBy        []string
