@@ -17,7 +17,7 @@
 - [ ] **GLOBAL-LOCK-CONTENTION** — Глобальный мьютекс в Store при высокой нагрузке. Нужно шардирование. ~1d
 - [x] ~~**NOTIFICATION-TIMER-STUBS**~~ — закрыто через PARITY-A1 (2026-04-17).
 - [x] ~~**INHIBITION-DEAD-WIRING**~~ — закрыто через PARITY-A2 (2026-04-16). `ShouldInhibit` вызывается в `alert_processor.go:154-155`.
-- [ ] **DEDUP-STATE-STUB** — `filter_engine.go:98-99` — deduplication marked TODO, state tracking не реализован. Dedup-фильтр в FilterEngine заявлен но не работает. ~1d
+- [x] ~~**DEDUP-STATE-STUB**~~ — закрыто 2026-08-17. Rule 7 реализован в `SimpleFilterEngine`: fingerprint+status в окне (default 1m, `SetDedupWindow`), lazy sweep, потокобезопасно. Смена статуса firing→resolved не блокируется. Тесты: `filter_engine_dedup_test.go` (включая -race).
 - [ ] **CORS-TODO** — `middleware.go:77` — CORS конфигурация отсутствует, помечена TODO. ~0.5d
 
 ## Low
