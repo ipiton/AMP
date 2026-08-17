@@ -19,13 +19,15 @@ import (
 //
 // Metrics note: business/routing.RouteEvaluator's metrics
 // (EvaluatorMetrics) are registered via promauto against the default
-// Prometheus registry, which panics on double-registration. Because this
-// adapter builds a fresh RouteEvaluator on every single Evaluate call (to
-// pick up manager.GetTree() cheaply and safely), those metrics are
-// deliberately disabled here (EnableMetrics: false) — constructing them
-// once per alert would panic on the second alert. Structured logging in
-// AlertProcessor.evaluateRoute covers observability for task 1.4; per-
-// evaluation Prometheus metrics are out of scope.
+// Prometheus registry, which panics on double-registration. This adapter
+// builds a fresh RouteEvaluator on every single Evaluate call — see
+// Evaluate below for why that's cheap — so EnableMetrics is forced off
+// (opts.EnableMetrics = false in newRouteTreeEvaluator): constructing
+// EvaluatorMetrics once per alert would panic on the second alert.
+// Structured logging in AlertProcessor.evaluateRoute covers observability
+// for task 1.4. Restoring per-evaluation Prometheus metrics is tracked as
+// a follow-up: it needs a custom (non-default) registry scoped to this
+// adapter's lifetime, not promauto's global one — out of scope here.
 type routeTreeEvaluator struct {
 	manager *businessrouting.RouteTreeManager
 	matcher *businessrouting.RouteMatcher
@@ -42,6 +44,15 @@ func newRouteTreeEvaluator(manager *businessrouting.RouteTreeManager, matcher *b
 }
 
 // Evaluate implements services.RouteEvaluator.
+//
+// Rebuilding a business/routing.RouteEvaluator on every call is a cheap
+// pointer-wrap, not real work: NewRouteEvaluator just assigns e.tree/
+// e.matcher/e.opts on a new struct (with EnableMetrics: false, it doesn't
+// even touch promauto — see the type doc above). It does NOT rebuild the
+// tree (manager.GetTree() is an atomic.Value load of the already-built
+// tree) and does NOT recompile any regexes (matcher owns its own
+// long-lived RegexCache across calls, untouched by this rebuild). This is
+// what makes per-call reconstruction safe to do on every single alert.
 func (e *routeTreeEvaluator) Evaluate(labels map[string]string) (*services.RoutingDecision, error) {
 	tree := e.manager.GetTree()
 	evaluator := businessrouting.NewRouteEvaluator(tree, e.matcher, e.opts)
