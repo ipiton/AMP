@@ -285,14 +285,12 @@ func (r *ServiceRegistry) rehydrateAlertStore(ctx context.Context) error {
 			break
 		}
 
-		apiAlerts := make([]core.APIAlert, 0, len(list.Alerts))
-		for _, alert := range list.Alerts {
-			apiAlerts = append(apiAlerts, persistedAlertToAPIAlert(alert))
-		}
-		if err := r.alertStore.RestoreFromPersistence(apiAlerts, now); err != nil {
+		// DTO-FRAGMENTATION item 3: restore takes []*core.Alert directly —
+		// no core.Alert → APIAlert → AlertIngestInput string round-trip.
+		if err := r.alertStore.RestoreFromPersistence(list.Alerts, now); err != nil {
 			return fmt.Errorf("restore alerts into memory store: %w", err)
 		}
-		restored += len(apiAlerts)
+		restored += len(list.Alerts)
 
 		if len(list.Alerts) < pageSize {
 			break
@@ -303,26 +301,6 @@ func (r *ServiceRegistry) rehydrateAlertStore(ctx context.Context) error {
 		r.logger.Info("Alert store rehydrated from persistent storage", "alerts", restored)
 	}
 	return nil
-}
-
-// persistedAlertToAPIAlert converts a stored core.Alert into the APIAlert
-// shape expected by AlertStore.RestoreFromPersistence.
-func persistedAlertToAPIAlert(alert *core.Alert) core.APIAlert {
-	api := core.APIAlert{
-		Labels:      alert.Labels,
-		Annotations: alert.Annotations,
-		StartsAt:    alert.StartsAt.UTC().Format(time.RFC3339Nano),
-		Fingerprint: alert.Fingerprint,
-		Status:      string(alert.Status),
-	}
-	if alert.EndsAt != nil {
-		endsAt := alert.EndsAt.UTC().Format(time.RFC3339Nano)
-		api.EndsAt = &endsAt
-	}
-	if alert.GeneratorURL != nil {
-		api.GeneratorURL = *alert.GeneratorURL
-	}
-	return api
 }
 
 // initializeSilencePersistence wires the persistent silence repository and

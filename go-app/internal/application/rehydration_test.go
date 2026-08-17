@@ -66,20 +66,37 @@ func TestRehydrateAlertStore_NilStorageIsNoop(t *testing.T) {
 	}
 }
 
-func TestPersistedAlertToAPIAlert_Mapping(t *testing.T) {
+// TestRehydrateAlertStore_FieldMapping replaces the old
+// TestPersistedAlertToAPIAlert_Mapping: rehydration now flows []*core.Alert
+// straight into the store, so the mapping is asserted on the store output.
+func TestRehydrateAlertStore_FieldMapping(t *testing.T) {
 	starts := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
 	ends := starts.Add(30 * time.Minute)
 	url := "http://prom/graph"
 
-	api := persistedAlertToAPIAlert(&core.Alert{
+	stored := &core.Alert{
 		Fingerprint:  "fp",
 		Status:       core.StatusResolved,
 		Labels:       map[string]string{"a": "b"},
 		StartsAt:     starts,
 		EndsAt:       &ends,
 		GeneratorURL: &url,
-	})
+	}
 
+	r := &ServiceRegistry{
+		logger:     slog.Default(),
+		alertStore: memory.NewAlertStore(),
+		storage:    &fakeAlertStorage{alerts: []*core.Alert{stored}},
+	}
+	if err := r.rehydrateAlertStore(context.Background()); err != nil {
+		t.Fatalf("rehydrateAlertStore: %v", err)
+	}
+
+	alerts := r.alertStore.List("", true)
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 restored alert, got %d", len(alerts))
+	}
+	api := alerts[0]
 	if api.StartsAt != "2026-08-17T10:00:00Z" {
 		t.Fatalf("StartsAt = %q", api.StartsAt)
 	}
