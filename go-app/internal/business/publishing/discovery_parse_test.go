@@ -139,6 +139,112 @@ func TestParseSecret_InvalidJSON(t *testing.T) {
 	assert.Contains(t, formatErr.Reason, "JSON")
 }
 
+func TestParseSecret_ReceiverLabel_SingleName(t *testing.T) {
+	target := core.PublishingTarget{
+		Name:   "test-target",
+		Type:   "webhook",
+		URL:    "https://example.com",
+		Format: "webhook",
+	}
+	configJSON, _ := json.Marshal(target)
+
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			Labels: map[string]string{
+				AmpReceiverLabel: "slack-critical",
+			},
+		},
+		Data: map[string][]byte{
+			"config": configJSON,
+		},
+	}
+
+	parsed, err := parseSecret(secret)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"slack-critical"}, parsed.Receivers)
+}
+
+func TestParseSecret_ReceiverLabel_MultipleNamesWithSpaces(t *testing.T) {
+	target := core.PublishingTarget{
+		Name:   "test-target",
+		Type:   "webhook",
+		URL:    "https://example.com",
+		Format: "webhook",
+	}
+	configJSON, _ := json.Marshal(target)
+
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			Labels: map[string]string{
+				AmpReceiverLabel: "slack-critical, pagerduty-oncall ,  team-b ",
+			},
+		},
+		Data: map[string][]byte{
+			"config": configJSON,
+		},
+	}
+
+	parsed, err := parseSecret(secret)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"slack-critical", "pagerduty-oncall", "team-b"}, parsed.Receivers)
+}
+
+func TestParseSecret_ReceiverLabel_AbsentMeansNoScoping(t *testing.T) {
+	target := core.PublishingTarget{
+		Name:   "test-target",
+		Type:   "webhook",
+		URL:    "https://example.com",
+		Format: "webhook",
+	}
+	configJSON, _ := json.Marshal(target)
+
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			// No amp.receiver label at all
+		},
+		Data: map[string][]byte{
+			"config": configJSON,
+		},
+	}
+
+	parsed, err := parseSecret(secret)
+	require.NoError(t, err)
+	assert.Empty(t, parsed.Receivers)
+}
+
+func TestParseSecret_ReceiverLabel_EmptyValueYieldsNoReceivers(t *testing.T) {
+	target := core.PublishingTarget{
+		Name:   "test-target",
+		Type:   "webhook",
+		URL:    "https://example.com",
+		Format: "webhook",
+	}
+	configJSON, _ := json.Marshal(target)
+
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			Labels: map[string]string{
+				AmpReceiverLabel: "  , ,",
+			},
+		},
+		Data: map[string][]byte{
+			"config": configJSON,
+		},
+	}
+
+	parsed, err := parseSecret(secret)
+	require.NoError(t, err)
+	assert.Empty(t, parsed.Receivers)
+}
+
 func TestParseSecret_RawJSON(t *testing.T) {
 	// Test parsing raw JSON (not base64-encoded)
 	// This happens when K8s client-go auto-decodes

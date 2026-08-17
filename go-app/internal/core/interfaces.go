@@ -82,6 +82,15 @@ type PublishingTarget struct {
 	FilterConfig map[string]any    `json:"filter_config"`
 	Headers      map[string]string `json:"headers"`
 	Format       PublishingFormat  `json:"format" validate:"required,oneof=alertmanager rootly pagerduty slack webhook"`
+
+	// Receivers holds the Alertmanager receiver names this target is scoped
+	// to, sourced from the `amp.receiver` label on the target's K8s Secret
+	// (comma-separated list, e.g. "slack-critical,pagerduty-oncall").
+	//
+	// Empty/nil means the target has NO receiver scoping: it belongs to
+	// ALL receivers (backward compatibility with targets predating
+	// receiver-based routing). See PublishingCoordinator.PublishToTargets.
+	Receivers []string `json:"receivers,omitempty"`
 }
 
 // EnrichedAlert represents alert enriched with classification data

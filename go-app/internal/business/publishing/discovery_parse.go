@@ -4,10 +4,21 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/ipiton/AMP/internal/core"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// AmpReceiverLabel is the K8s Secret label used to scope a publishing target
+// to one or more Alertmanager receivers. Value is a comma-separated list of
+// receiver names, e.g. "amp.receiver: slack-critical,pagerduty-oncall".
+//
+// A target Secret WITHOUT this label is unscoped: it belongs to ALL
+// receivers (backward compatibility with targets predating receiver-based
+// routing). See PublishingCoordinator.PublishToTargets for the filtering
+// rules that consume this field.
+const AmpReceiverLabel = "amp.receiver"
 
 // parseSecret extracts PublishingTarget from K8s secret.
 //
@@ -99,7 +110,32 @@ func parseSecret(secret corev1.Secret) (*core.PublishingTarget, error) {
 	// Apply defaults
 	applyDefaults(&target)
 
+	// Receiver scoping: `amp.receiver` K8s label (comma-separated names)
+	// takes precedence over anything unmarshalled from the config JSON.
+	if raw, ok := secret.Labels[AmpReceiverLabel]; ok {
+		target.Receivers = parseReceiverLabel(raw)
+	}
+
 	return &target, nil
+}
+
+// parseReceiverLabel splits a comma-separated `amp.receiver` label value
+// into trimmed, non-empty receiver names. Returns nil if none remain
+// (e.g. label present but blank), which is treated the same as an absent
+// label by the coordinator's filtering logic (target belongs to all).
+func parseReceiverLabel(raw string) []string {
+	parts := strings.Split(raw, ",")
+	receivers := make([]string, 0, len(parts))
+	for _, p := range parts {
+		name := strings.TrimSpace(p)
+		if name != "" {
+			receivers = append(receivers, name)
+		}
+	}
+	if len(receivers) == 0 {
+		return nil
+	}
+	return receivers
 }
 
 // isBase64Encoded checks if data looks like base64-encoded string.
