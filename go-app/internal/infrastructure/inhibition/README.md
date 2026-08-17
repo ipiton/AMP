@@ -1,10 +1,5 @@
 # Inhibition Rules Engine
 
-**Version**: 1.0
-**Status**: ✅ PRODUCTION-READY
-**Quality**: 155% (Grade A+, Production-Grade)
-**Test Coverage**: 82.6% (137 tests, 100% passing)
-
 ---
 
 ## Overview
@@ -15,14 +10,13 @@ The Inhibition Rules Engine provides a powerful mechanism for suppressing (inhib
 
 ### Key Features
 
-- ✅ **100% Alertmanager Compatible** (v0.25+)
-- ✅ **YAML Configuration** - standard Alertmanager format
-- ✅ **Exact & Regex Matching** - flexible label matching
-- ✅ **Pre-compiled Regex** - ultra-fast performance (128.6ns per match)
-- ✅ **Two-Tier Cache** - in-memory + Redis for distributed state
-- ✅ **Thread-Safe** - safe for concurrent use
-- ✅ **6 Prometheus Metrics** - full observability
-- ✅ **Zero Allocations** - hot path optimized
+- **Alertmanager-compatible rule semantics**
+- **YAML Configuration** - standard Alertmanager format
+- **Exact & Regex Matching** - flexible label matching
+- **Pre-compiled Regex** - patterns compiled once at parse time
+- **Two-Tier Cache** - in-memory + Redis for distributed state
+- **Thread-Safe** - safe for concurrent use
+- **Prometheus Metrics** - observability
 
 ---
 
@@ -71,12 +65,12 @@ log.Printf("Loaded %d inhibition rules", config.RuleCount())
 ### 4. Create Matcher
 
 ```go
-// Create matcher with parsed rules
-matcher := inhibition.NewMatcher(config.Rules)
-
 // Create cache for active alerts
 cache := inhibition.NewTwoTierAlertCache(redisCache, logger)
 defer cache.Stop()
+
+// Create matcher with parsed rules
+matcher := inhibition.NewMatcher(cache, config.Rules, logger)
 ```
 
 ### 5. Check Inhibition
@@ -367,52 +361,28 @@ inhibit_rules:
 
 ## Performance
 
-### Benchmarks
+Benchmarks live in the package tests:
+`go test -bench=. -benchmem ./internal/infrastructure/inhibition/...`
 
-| Operation | Performance | Target | Achievement |
-|-----------|-------------|--------|-------------|
-| **Parse single rule** | 9.28µs | <10µs | ✅ 1.1x better |
-| **Parse 100 rules** | 764µs | <1ms | ✅ 1.3x better |
-| **MatchRule** | 128.6ns | <10µs | ✅ **780x faster** |
-| **ShouldInhibit (single)** | 3.35µs | <1ms | ✅ **300x faster** |
-| **ShouldInhibit (100×10)** | 35.4µs | <1ms | ✅ **28x faster** |
-| **AddFiringAlert** | 58.4ns | <1ms | ✅ **1,700x faster** |
-| **GetFiringAlerts (100)** | 829ns | <1ms | ✅ **1,200x faster** |
-
-**Performance Highlights:**
-- ⚡ Zero allocations in hot path
-- ⚡ Pre-compiled regex patterns
-- ⚡ Optimized label matching
-- ⚡ LRU cache with background cleanup
+Design highlights:
+- Pre-compiled regex patterns
+- Optimized label matching
+- Cache with background cleanup
 
 ---
 
 ## Prometheus Metrics
 
-### Inhibition Metrics
+Метрики регистрируются в `pkg/metrics` `BusinessMetrics`
+(namespace `alert_history`):
 
-1. **alert_history_business_inhibition_checks_total** (CounterVec)
-   - Labels: `result` (`inhibited` or `allowed`)
-   - Description: Total number of inhibition checks performed
+1. **alert_history_inhibition_check_total** (CounterVec) — inhibition checks
+2. **alert_history_inhibition_match_total** (CounterVec) — matches per rule
+3. **alert_history_inhibition_duration_seconds** (HistogramVec) — operation duration
+4. **alert_history_inhibition_cache_hits_total** / **misses_total** / **evictions_total** — cache metrics (subsystem `inhibition_cache`)
+5. **alert_history_inhibition_state_*** — state manager metrics (active, operations, records, removals, redis_errors)
 
-2. **alert_history_business_inhibition_matches_total** (CounterVec)
-   - Labels: `rule_name`
-   - Description: Total number of matches per inhibition rule
-
-3. **alert_history_business_inhibition_rules_loaded** (Gauge)
-   - Description: Number of currently loaded inhibition rules
-
-4. **alert_history_business_inhibition_duration_seconds** (HistogramVec)
-   - Labels: `operation` (`check`, `match`, `cache_get`, `cache_add`)
-   - Description: Duration of inhibition operations
-
-5. **alert_history_business_inhibition_cache_hits_total** (CounterVec)
-   - Labels: `cache_level` (`L1` or `L2`)
-   - Description: Cache hits by level
-
-6. **alert_history_business_inhibition_errors_total** (CounterVec)
-   - Labels: `error_type`
-   - Description: Total number of errors by type
+Точные имена и label-схемы см. в `pkg/metrics/metrics.go`.
 
 ---
 
@@ -601,12 +571,6 @@ sum(rate(alert_history_business_inhibition_cache_hits_total[5m])) by (cache_leve
 
 ## Testing
 
-### Test Coverage
-
-- **Total Coverage**: 82.6% (production-grade)
-- **Tests**: 137 unit tests (100% passing)
-- **Benchmarks**: 12 performance benchmarks
-
 ### Running Tests
 
 ```bash
@@ -781,45 +745,6 @@ for _, rule := range inhibitors {
 
 ---
 
-## Changelog
-
-### v1.0 (2025-11-05)
-
-**Status**: ✅ PRODUCTION-READY
-
-**Features:**
-- Initial release with full Alertmanager compatibility
-- Parser with YAML support
-- Matcher with exact and regex matching
-- Two-tier cache (in-memory + Redis)
-- 6 Prometheus metrics
-- 137 unit tests (82.6% coverage)
-- Production-grade performance (50-1,700x faster than targets)
-
----
-
-## Contributing
-
-See [CONTRIBUTING-GO.md](../../../../CONTRIBUTING-GO.md) for Go development guidelines.
-
----
-
 ## License
 
 See [LICENSE](../../../../LICENSE) for license information.
-
----
-
-## Support
-
-For issues or questions:
-- **Issues**: Create a GitHub issue
-- **Docs**: See [design.md](tasks/go-migration-analysis/TN-126-inhibition-rule-parser/design.md)
-- **Examples**: See [config/inhibition.yaml](../../../../config/inhibition.yaml)
-
----
-
-**Last Updated**: 2025-11-05
-**Version**: 1.0
-**Status**: PRODUCTION-READY ✅
-**Quality**: 155% (Grade A+) ⭐⭐⭐⭐⭐

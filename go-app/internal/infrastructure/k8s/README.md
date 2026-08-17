@@ -2,15 +2,13 @@
 
 ## Overview
 
-This package provides a simplified Kubernetes client wrapper for the Alert History Publishing System. It enables dynamic discovery of publishing targets stored in Kubernetes Secrets, eliminating the need for static configuration and enabling GitOps workflows.
+This package provides a simplified Kubernetes client wrapper for the AMP publishing system. It enables dynamic discovery of publishing targets stored in Kubernetes Secrets, eliminating the need for static configuration and enabling GitOps workflows.
 
 **Key Features:**
-- 🔐 **Secure**: Uses Kubernetes ServiceAccount authentication
-- 🔄 **Dynamic**: Discovers targets from K8s Secrets with label selectors
-- 🚀 **Reliable**: Exponential backoff retry logic for transient errors
-- 📊 **Observable**: Structured logging with slog
-- 🧪 **Tested**: 72.8% test coverage, 45+ tests, 4 benchmarks
-- ⚡ **Fast**: Optimized for low latency (<500ms p95)
+- **Secure**: Uses Kubernetes ServiceAccount authentication
+- **Dynamic**: Discovers targets from K8s Secrets with label selectors
+- **Reliable**: Exponential backoff retry logic for transient errors
+- **Observable**: Structured logging with slog
 
 ## Table of Contents
 
@@ -59,7 +57,7 @@ func main() {
 
 ## Installation
 
-This package is part of the Alert History Service. No separate installation is required if you're using the service.
+This package is part of AMP. No separate installation is required if you're using the service.
 
 ### Dependencies
 
@@ -253,13 +251,13 @@ The service must run with a ServiceAccount that has permissions to list and get 
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: alert-history-service
+  name: amp
   namespace: default
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: alert-history-secrets-reader
+  name: amp-secrets-reader
   namespace: default
 rules:
 - apiGroups: [""]
@@ -271,15 +269,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: alert-history-secrets-reader-binding
+  name: amp-secrets-reader-binding
   namespace: default
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: alert-history-secrets-reader
+  name: amp-secrets-reader
 subjects:
 - kind: ServiceAccount
-  name: alert-history-service
+  name: amp
   namespace: default
 ```
 
@@ -289,14 +287,14 @@ subjects:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: alert-history-service
+  name: amp
 spec:
   template:
     spec:
-      serviceAccountName: alert-history-service
+      serviceAccountName: amp
       containers:
-      - name: alert-history
-        image: alert-history:latest
+      - name: amp
+        image: amp:latest
         # Service will automatically use in-cluster config
 ```
 
@@ -304,10 +302,10 @@ spec:
 
 ```bash
 # Check ServiceAccount permissions
-kubectl auth can-i list secrets --as=system:serviceaccount:default:alert-history-service -n default
+kubectl auth can-i list secrets --as=system:serviceaccount:default:amp -n default
 
 # Test secret access
-kubectl get secrets -n default --as=system:serviceaccount:default:alert-history-service
+kubectl get secrets -n default --as=system:serviceaccount:default:amp
 ```
 
 ## Error Handling
@@ -372,16 +370,8 @@ if err != nil {
 
 ## Performance
 
-### Benchmarks
-
-Measured on fake clientset (production performance may vary):
-
-| Operation | Latency | Allocations | Target |
-|-----------|---------|-------------|--------|
-| ListSecrets (10 secrets) | ~2-5ms | ~500 B/op | <500ms p95 |
-| ListSecrets (100 secrets) | ~10-20ms | ~5 KB/op | <2s p95 |
-| GetSecret | ~1-2ms | ~200 B/op | <200ms p95 |
-| Health check | ~5-10ms | ~100 B/op | <100ms p95 |
+Benchmarks live in `client_test.go`; run
+`go test ./internal/infrastructure/k8s -bench=. -benchmem` for current numbers.
 
 ### Performance Tips
 
@@ -438,7 +428,7 @@ Measured on fake clientset (production performance may vary):
 2. Check ServiceAccount mount:
    ```yaml
    spec:
-     serviceAccountName: alert-history-service
+     serviceAccountName: amp
      automountServiceAccountToken: true  # Must be true
    ```
 
@@ -450,7 +440,7 @@ Measured on fake clientset (production performance may vary):
 1. Verify RBAC configuration (see [RBAC Requirements](#rbac-requirements))
 2. Test permissions:
    ```bash
-   kubectl auth can-i list secrets --as=system:serviceaccount:default:alert-history-service
+   kubectl auth can-i list secrets --as=system:serviceaccount:default:amp
    ```
 3. Apply missing permissions:
    ```bash
@@ -566,19 +556,8 @@ func DefaultK8sClientConfig() *K8sClientConfig
 
 ## Related Documentation
 
-- [TN-046 Requirements](../../../tasks/go-migration-analysis/TN-046-k8s-secrets-client/requirements.md)
-- [TN-046 Design](../../../tasks/go-migration-analysis/TN-046-k8s-secrets-client/design.md)
-- [TN-047 Target Discovery Manager](../../../tasks/go-migration-analysis/TN-047-target-discovery-manager/)
 - [Publishing System Overview](../../business/publishing/)
 
 ## License
 
-Copyright (c) 2025 Alert History Service. All rights reserved.
-
----
-
-**Version**: 1.0.0
-**Status**: Production-Ready
-**Coverage**: 72.8%
-**Tests**: 45+ tests, 4 benchmarks
-**Last Updated**: 2025-11-07
+Part of AMP. See `LICENSE` in the repository root.

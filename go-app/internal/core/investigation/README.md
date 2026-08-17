@@ -22,7 +22,7 @@ type Tool interface {
 Return `ToolResult{IsError: true, Error: "..."}` instead. Errors are reserved for
 unrecoverable panics or context cancellation propagation.
 
-## Built-in Tools (PHASE-6A)
+## Built-in Tools
 
 | Tool name               | Package file    | Config key                     |
 |-------------------------|-----------------|--------------------------------|

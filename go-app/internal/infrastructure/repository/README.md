@@ -1,260 +1,71 @@
 # Alert History Repository
 
-Production-ready alert history repository with advanced querying, analytics, and observability.
+Alert history repository with querying, analytics, and observability.
+
+> **Historical note**: ранние ревизии этого документа описывали HTTP endpoints
+> (`GET /history`, `/history/recent`, `/history/stats`, `/history/top`,
+> `/history/flapping`) и handler `HistoryHandlerV2`. Эти routes не смонтированы
+> в текущем active router, а handler отсутствует в коде. Repository доступен
+> программно через интерфейс `core.AlertHistoryRepository`.
 
 ## Features
 
-✅ **Pagination** - Efficient pagination with configurable page sizes
-✅ **Sorting** - Sort by created_at, starts_at, ends_at, status, severity
-✅ **Advanced Filtering** - By status, severity, namespace, labels, time range
-✅ **Analytics** - Aggregated stats, top alerts, flapping detection
-✅ **Prometheus Metrics** - 4 metric types for complete observability
-✅ **Performance** - Optimized SQL queries with indexes
-✅ **Type Safety** - Comprehensive validation and error handling
+- **Pagination** - Pagination with configurable page sizes
+- **Sorting** - Sort by created_at, starts_at, ends_at, status, severity
+- **Filtering** - By status, severity, namespace, labels, time range
+- **Analytics** - Aggregated stats, top alerts, flapping detection
+- **Prometheus Metrics** - Query duration, errors, result counts, cache hits
+- **SQL** - Queries designed around существующие индексы
 
 ---
 
 ## Architecture
 
 ```
-HistoryHandlerV2 → AlertHistoryRepository → AlertStorage → PostgreSQL
-                                                         ↘ SQLite
+AlertHistoryRepository → AlertStorage → PostgreSQL
 ```
 
 - **AlertHistoryRepository**: High-level interface for history operations
 - **AlertStorage**: Low-level CRUD operations
 - **Metrics**: Prometheus metrics for all operations
 
----
+## Repository Methods
 
-## API Endpoints
-
-### 1. GET /history
-
-Paginated alert history with filtering and sorting.
-
-**Query Parameters:**
-- `page` (int, default: 1) - Page number
-- `per_page` (int, default: 50, max: 1000) - Results per page
-- `status` (string) - Filter by status: `firing`, `resolved`
-- `severity` (string) - Filter by severity: `critical`, `warning`, `info`, `noise`
-- `namespace` (string) - Filter by Kubernetes namespace
-- `from` (RFC3339) - Start time for time range filter
-- `to` (RFC3339) - End time for time range filter
-- `sort_field` (string) - Sort field: `created_at`, `starts_at`, `ends_at`, `status`, `severity`
-- `sort_order` (string) - Sort order: `asc`, `desc` (default: `desc`)
-
-**Example Request:**
-```bash
-curl "http://localhost:8080/history?page=1&per_page=50&status=firing&severity=critical&sort_field=starts_at&sort_order=desc"
-```
-
-**Response:**
-```json
-{
-  "alerts": [
-    {
-      "fingerprint": "abc123",
-      "alert_name": "HighCPU",
-      "status": "firing",
-      "labels": {
-        "severity": "critical",
-        "namespace": "production"
-      },
-      "annotations": {
-        "summary": "High CPU usage"
-      },
-      "starts_at": "2025-10-09T10:00:00Z"
-    }
-  ],
-  "total": 1250,
-  "page": 1,
-  "per_page": 50,
-  "total_pages": 25,
-  "has_next": true,
-  "has_prev": false
-}
-```
-
----
-
-### 2. GET /history/recent
-
-Get the most recent alerts across all fingerprints.
-
-**Query Parameters:**
-- `limit` (int, default: 50, max: 1000) - Number of alerts to return
-
-**Example:**
-```bash
-curl "http://localhost:8080/history/recent?limit=10"
-```
-
-**Response:**
-```json
-{
-  "alerts": [...],
-  "count": 10,
-  "limit": 10,
-  "timestamp": "2025-10-09T12:00:00Z"
-}
-```
-
----
-
-### 3. GET /history/stats
-
-Get aggregated statistics over a time range.
-
-**Query Parameters:**
-- `from` (RFC3339) - Start time
-- `to` (RFC3339) - End time
-
-**Example:**
-```bash
-curl "http://localhost:8080/history/stats?from=2025-10-01T00:00:00Z&to=2025-10-09T23:59:59Z"
-```
-
-**Response:**
-```json
-{
-  "time_range": {
-    "from": "2025-10-01T00:00:00Z",
-    "to": "2025-10-09T23:59:59Z"
-  },
-  "total_alerts": 15420,
-  "firing_alerts": 3840,
-  "resolved_alerts": 11580,
-  "alerts_by_status": {
-    "firing": 3840,
-    "resolved": 11580
-  },
-  "alerts_by_severity": {
-    "critical": 1250,
-    "warning": 8920,
-    "info": 5250
-  },
-  "alerts_by_namespace": {
-    "production": 8420,
-    "staging": 4920,
-    "development": 2080
-  },
-  "unique_fingerprints": 342,
-  "avg_resolution_time": "45m30s"
-}
-```
-
----
-
-### 4. GET /history/top
-
-Get top N most frequently firing alerts.
-
-**Query Parameters:**
-- `limit` (int, default: 10, max: 100) - Number of alerts
-- `from` (RFC3339) - Start time
-- `to` (RFC3339) - End time
-
-**Example:**
-```bash
-curl "http://localhost:8080/history/top?limit=5"
-```
-
-**Response:**
-```json
-{
-  "alerts": [
-    {
-      "fingerprint": "abc123",
-      "alert_name": "HighCPU",
-      "namespace": "production",
-      "fire_count": 142,
-      "last_fired_at": "2025-10-09T11:30:00Z",
-      "avg_duration": 1800.5
-    }
-  ],
-  "count": 5,
-  "limit": 5,
-  "timestamp": "2025-10-09T12:00:00Z"
-}
-```
-
----
-
-### 5. GET /history/flapping
-
-Detect alerts that frequently transition between states.
-
-**Query Parameters:**
-- `threshold` (int, default: 3) - Minimum number of transitions
-- `from` (RFC3339) - Start time
-- `to` (RFC3339) - End time
-
-**Example:**
-```bash
-curl "http://localhost:8080/history/flapping?threshold=5"
-```
-
-**Response:**
-```json
-{
-  "alerts": [
-    {
-      "fingerprint": "def456",
-      "alert_name": "ServiceDown",
-      "namespace": "staging",
-      "transition_count": 12,
-      "flapping_score": 8.5,
-      "last_transition_at": "2025-10-09T11:45:00Z"
-    }
-  ],
-  "count": 1,
-  "threshold": 5,
-  "timestamp": "2025-10-09T12:00:00Z"
-}
+```go
+GetHistory(ctx, req *core.HistoryRequest) (*core.HistoryResponse, error)
+GetAlertsByFingerprint(ctx, fingerprint string, limit int) ([]*core.Alert, error)
+GetRecentAlerts(ctx, limit int) ([]*core.Alert, error)
+GetAggregatedStats(ctx, timeRange *core.TimeRange) (*core.AggregatedStats, error)
+GetTopAlerts(ctx, timeRange *core.TimeRange, limit int) ([]*core.TopAlert, error)
+GetFlappingAlerts(ctx, timeRange *core.TimeRange, threshold int) ([]*core.FlappingAlert, error)
 ```
 
 ---
 
 ## Prometheus Metrics
 
-All operations emit Prometheus metrics for observability:
+All operations emit Prometheus metrics (namespace `alert_history`,
+subsystem `infra_repository` / `infra_cache`):
 
-### 1. `alert_history_query_duration_seconds`
+### 1. `alert_history_infra_repository_query_duration_seconds`
 **Type**: Histogram
 **Labels**: `operation`, `status`
 **Description**: Duration of alert history queries
 
-```
-alert_history_query_duration_seconds{operation="get_history",status="success"} 0.042
-```
-
-### 2. `alert_history_query_errors_total`
+### 2. `alert_history_infra_repository_query_errors_total`
 **Type**: Counter
 **Labels**: `operation`, `error_type`
 **Description**: Total number of query errors
 
-```
-alert_history_query_errors_total{operation="get_history",error_type="validation"} 15
-```
-
-### 3. `alert_history_query_results_total`
+### 3. `alert_history_infra_repository_query_results_total`
 **Type**: Histogram
 **Labels**: `operation`
 **Description**: Number of results returned
 
-```
-alert_history_query_results_total{operation="get_history"} 50
-```
-
-### 4. `alert_history_cache_hits_total`
+### 4. `alert_history_infra_cache_hits_total`
 **Type**: Counter
 **Labels**: `cache_type`
 **Description**: Cache hit statistics
-
-```
-alert_history_cache_hits_total{cache_type="recent_alerts"} 142
-```
 
 ---
 
@@ -269,7 +80,6 @@ import (
     "log/slog"
     "github.com/jackc/pgx/v5/pgxpool"
     "github.com/ipiton/AMP/internal/core"
-    "github.com/ipiton/AMP/internal/infrastructure"
     "github.com/ipiton/AMP/internal/infrastructure/repository"
 )
 
@@ -281,34 +91,10 @@ func main() {
     }
     defer pool.Close()
 
-    // Create storage
-    storage := infrastructure.NewPostgresDatabase(pool, slog.Default())
+    // storage — любая реализация core.AlertStorage поверх той же БД
 
     // Create repository
     historyRepo := repository.NewPostgresHistoryRepository(pool, storage, slog.Default())
-}
-```
-
-### Using in Handler
-
-```go
-package main
-
-import (
-    "net/http"
-    "github.com/ipiton/AMP/cmd/server/handlers"
-)
-
-func setupRoutes(historyRepo core.AlertHistoryRepository, logger *slog.Logger) {
-    // Create handler
-    historyHandler := handlers.NewHistoryHandlerV2(historyRepo, logger)
-
-    // Register routes
-    http.HandleFunc("/history", historyHandler.HandleHistory)
-    http.HandleFunc("/history/recent", historyHandler.HandleRecentAlerts)
-    http.HandleFunc("/history/stats", historyHandler.HandleStats)
-    http.HandleFunc("/history/top", historyHandler.HandleTopAlerts)
-    http.HandleFunc("/history/flapping", historyHandler.HandleFlappingAlerts)
 }
 ```
 
@@ -388,18 +174,9 @@ All queries are optimized with:
 - COUNT optimization with early exit
 - Efficient pagination with LIMIT/OFFSET
 
-### Benchmarks
-
-```
-BenchmarkGetHistory-8              5000    240000 ns/op    4800 B/op    45 allocs/op
-BenchmarkGetRecentAlerts-8        10000    180000 ns/op    3200 B/op    30 allocs/op
-BenchmarkGetAggregatedStats-8      2000    680000 ns/op    8400 B/op    95 allocs/op
-```
-
 ### Recommended Indexes
 
 ```sql
--- Already created by TN-035
 CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
 CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON alerts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_starts_at ON alerts(starts_at DESC);
@@ -431,12 +208,6 @@ go test ./internal/core/... -bench=. -benchmem
 go test ./internal/core/... -coverprofile=coverage.out
 go tool cover -html=coverage.out
 ```
-
-### Test Coverage
-
-- **Unit tests**: 90%+ coverage
-- **Integration tests**: PostgreSQL + SQLite
-- **Benchmark tests**: Performance regression detection
 
 ---
 
@@ -521,37 +292,6 @@ Watch these Prometheus metrics:
 
 ---
 
-## Roadmap
-
-### Completed ✅
-- [x] AlertHistoryRepository interface
-- [x] PostgreSQL implementation
-- [x] Advanced filtering & sorting
-- [x] Pagination with metadata
-- [x] Aggregated statistics
-- [x] Top alerts detection
-- [x] Flapping detection
-- [x] Prometheus metrics
-- [x] Comprehensive tests
-- [x] Documentation
-
-### Future Enhancements
-- [ ] Redis caching layer
-- [ ] SQLite support
-- [ ] Time-series trends (hourly/daily/weekly)
-- [ ] Alert correlation detection
-- [ ] Custom aggregation functions
-- [ ] Export to CSV/JSON
-- [ ] GraphQL API
-- [ ] WebSocket streaming
-
----
-
 ## License
 
-Part of Alert History Service - Intelligent Alert Proxy
-
-**Author**: Vitalii Semenov
-**Date**: 2025-10-09
-**Version**: 1.0.0
-**Status**: Production-Ready ✅
+Part of AMP. See `LICENSE` in the repository root.

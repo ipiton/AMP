@@ -1,10 +1,4 @@
-# TN-036: Alert Deduplication & Fingerprinting
-
-**Status:** Production-Ready (150% Quality)
-**Date:** 2025-11-03
-**Test Coverage:** 98.14%
-
----
+# Alert Deduplication & Fingerprinting
 
 ## Overview
 
@@ -12,12 +6,11 @@ Deduplication service обеспечивает идемпотентную обр
 
 ### Key Features
 
-- ✅ **Alertmanager-compatible fingerprinting** (FNV-1a algorithm)
-- ✅ **Automatic deduplication** (create/update/ignore logic)
-- ✅ **High performance** (81.75ns fingerprint, 3.2µs deduplication)
-- ✅ **Prometheus metrics** (4 metrics для monitoring)
-- ✅ **Graceful degradation** (continues работа при errors)
-- ✅ **Thread-safe** (concurrent processing verified)
+- **Alertmanager-compatible fingerprinting** (FNV-1a algorithm)
+- **Automatic deduplication** (create/update/ignore logic)
+- **Prometheus metrics** (4 metrics для monitoring)
+- **Graceful degradation** (continues работа при errors)
+- **Thread-safe** (concurrent processing)
 
 ---
 
@@ -99,7 +92,6 @@ if p.deduplication != nil {
 ### FNV-1a Algorithm (Recommended)
 
 **Properties:**
-- Fast: ~82ns/op
 - Deterministic: same labels → same fingerprint
 - Alertmanager-compatible
 - Output: 16 hex characters
@@ -122,7 +114,7 @@ fingerprint := generator.GenerateFromLabels(labels)
 
 ### SHA-256 Algorithm (Legacy)
 
-- Slower: ~720ns/op
+- Slower than FNV-1a
 - Output: 64 hex characters
 - Use for backward compatibility only
 
@@ -238,24 +230,11 @@ rate(alert_history_business_deduplication_updated_total{
 
 ## Performance
 
-### Benchmarks
+Benchmarks live in `fingerprint_bench_test.go` and `deduplication_bench_test.go`:
 
+```bash
+go test ./internal/core/services -bench=. -benchmem
 ```
-BenchmarkFingerprintGenerator_FNV1a         298.0 ns/op    104 B/op   3 allocs/op
-BenchmarkFingerprintGenerator_Parallel       81.75 ns/op     88 B/op   3 allocs/op
-BenchmarkProcessAlert_CreateNew            3406 ns/op      824 B/op  21 allocs/op
-BenchmarkProcessAlert_UpdateExisting       3207 ns/op      345 B/op  13 allocs/op
-BenchmarkProcessAlert_IgnoreDuplicate      3197 ns/op      152 B/op   8 allocs/op
-BenchmarkGetDuplicateStats                 23.39 ns/op      64 B/op   1 allocs/op
-```
-
-### Performance Targets
-
-| Operation | Target | Achieved | Status |
-|-----------|--------|----------|--------|
-| Fingerprint | <1µs | 81.75ns | ✅ 12.2x |
-| Deduplication | <10µs | 3.2µs | ✅ 3x |
-| Stats | <1ms | 23ns | ✅ Excellent |
 
 ---
 
@@ -284,23 +263,20 @@ if err != nil {
 
 ## Testing
 
-### Test Coverage: 98.14%
-
 **Test Files:**
-- `deduplication_test.go` (11 unit tests)
-- `fingerprint_test.go` (13 unit tests)
-- `TN036_suite_test.go` (8 comprehensive tests)
-- `deduplication_integration_test.go` (6 integration tests)
-- `*_bench_test.go` (21 benchmarks)
+- `deduplication_test.go`
+- `fingerprint_test.go`
+- `deduplication_integration_test.go`
+- `*_bench_test.go`
 
 ### Run Tests
 
 ```bash
 # Unit tests only
-go test ./internal/core/services -run "(TestTN036|TestNewDeduplication|TestProcessAlert|TestNewFingerprint)"
+go test ./internal/core/services -run "(TestNewDeduplication|TestProcessAlert|TestNewFingerprint)"
 
 # With coverage
-go test ./internal/core/services -run "(TestTN036|TestDedup|TestFinger)" -coverprofile=coverage.out
+go test ./internal/core/services -run "(TestDedup|TestFinger)" -coverprofile=coverage.out
 go tool cover -html=coverage.out
 
 # Benchmarks
@@ -443,42 +419,12 @@ type ProcessResult struct {
 3. **Use FNV-1a algorithm** (Alertmanager-compatible)
 4. **Handle graceful degradation** (service continues при errors)
 5. **Index fingerprint column** в database для fast lookups
-6. **Test with concurrent load** (verified with 100 goroutines)
-
----
-
-## Changelog
-
-### 2025-11-03: Phase 1-2 Enhanced (150% Quality)
-- ✅ Comprehensive Audit Report (600+ lines)
-- ✅ Test Coverage 98.14% (+18.14% over target)
-- ✅ TN036_suite_test.go created (8 comprehensive tests)
-- ✅ 34 total tests (all passing)
-- ✅ Documentation complete
-
-### 2025-10-10: Phase 3 Integration Complete
-- ✅ Integrated into AlertProcessor
-- ✅ 4 Prometheus metrics added
-- ✅ main.go initialization
-- ✅ Graceful degradation implemented
-
-### 2025-10-10: Core Implementation (Phase 1-2)
-- ✅ FingerprintGenerator (FNV-1a + SHA-256)
-- ✅ DeduplicationService (create/update/ignore)
-- ✅ 24 unit tests + 21 benchmarks
-- ✅ Performance targets achieved
 
 ---
 
 ## Support
 
-**Documentation:**
-- [AUDIT_REPORT_2025-11-03.md](../../tasks/go-migration-analysis/TN-036/AUDIT_REPORT_2025-11-03.md)
-- [PHASE2_COMPLETION_SUMMARY.md](../../tasks/go-migration-analysis/TN-036/PHASE2_COMPLETION_SUMMARY.md)
-
 **Code:**
 - Implementation: `deduplication.go`, `fingerprint.go`
 - Tests: `*_test.go`, `*_bench_test.go`
-- Integration: `main.go:323-349`, `alert_processor.go:84-107`
-
-**Contact:** [GitHub Issues](https://github.com/ipiton/alert-history-service/issues)
+- Integration: `alert_processor.go`

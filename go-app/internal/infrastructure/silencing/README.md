@@ -2,18 +2,17 @@
 
 **Package:** `github.com/ipiton/AMP/internal/infrastructure/silencing`
 
-Production-grade PostgreSQL implementation of the Silence Storage system, providing CRUD operations, advanced filtering, TTL management, and analytics for alerting silence periods.
+PostgreSQL implementation of the Silence Storage system, providing CRUD operations, filtering, TTL management, and analytics for alerting silence periods.
 
 ## Features
 
-✅ **Alertmanager API v2 Compatible** - Drop-in replacement for Alertmanager's silence API
-✅ **High Performance** - <5ms writes, <2ms reads, <20ms complex queries
-✅ **Advanced Filtering** - 8 filter types (status, creator, matcher, time ranges)
-✅ **TTL Management** - Automatic silence expiration and cleanup
-✅ **Bulk Operations** - Update 1000+ silences in <100ms
-✅ **Analytics** - Aggregate statistics by status and creator
-✅ **Observability** - 6 Prometheus metrics tracking operations
-✅ **Production-Ready** - Thread-safe, graceful degradation, comprehensive error handling
+- **Alertmanager-compatible silence model**
+- **Filtering** - status, creator, matcher, time ranges
+- **TTL Management** - Automatic silence expiration and cleanup
+- **Bulk Operations**
+- **Analytics** - Aggregate statistics by status and creator
+- **Observability** - Prometheus metrics tracking operations
+- **Thread-safe**, graceful degradation, structured error handling
 
 ## Installation
 
@@ -39,14 +38,10 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Initialize metrics
-metrics := silencing.NewSilenceMetrics()
-
-// Create repository
+// Create repository (metrics инициализируются внутри)
 repo := silencing.NewPostgresSilenceRepository(
     pool,
     slog.Default(),
-    metrics,
 )
 ```
 
@@ -238,37 +233,42 @@ type SilenceStats struct {
 
 ## Prometheus Metrics
 
-The repository exposes 6 Prometheus metrics:
+The repository exposes Prometheus metrics
+(namespace `alert_history`, subsystem `infra_silence_repo`, см. `metrics.go`):
 
 ```go
 // Operations counter
-alert_history_business_silence_operations_total{operation="create|get|update|delete|list|count|expire|get_expiring_soon|bulk_update_status|get_stats", status="success|error"}
+alert_history_infra_silence_repo_operations_total{operation="...", status="success|error"}
 
 // Errors counter
-alert_history_business_silence_errors_total{operation="...", error_type="validation|query|scan|unmarshal|not_found"}
+alert_history_infra_silence_repo_errors_total{operation="...", error_type="..."}
 
 // Operation duration histogram
-alert_history_business_silence_operation_duration_seconds{operation="...", status="success"}
+alert_history_infra_silence_repo_operation_duration_seconds{operation="...", status="success"}
 
 // Active silences gauge
-alert_history_business_silence_active_total{status="active|pending|expired"}
+alert_history_infra_silence_repo_active_total{status="active|pending|expired"}
+
+// Cleanup metrics
+alert_history_infra_silence_repo_cleanup_deleted_total
+alert_history_infra_silence_repo_cleanup_duration_seconds
 ```
 
 ### Monitoring with Prometheus
 
 ```promql
 # Success rate
-rate(alert_history_business_silence_operations_total{status="success"}[5m])
-/ rate(alert_history_business_silence_operations_total[5m])
+rate(alert_history_infra_silence_repo_operations_total{status="success"}[5m])
+/ rate(alert_history_infra_silence_repo_operations_total[5m])
 
 # P95 latency
-histogram_quantile(0.95, rate(alert_history_business_silence_operation_duration_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(alert_history_infra_silence_repo_operation_duration_seconds_bucket[5m]))
 
 # Error rate by type
-rate(alert_history_business_silence_errors_total[5m])
+rate(alert_history_infra_silence_repo_errors_total[5m])
 
 # Active silences count
-alert_history_business_silence_active_total{status="active"}
+alert_history_infra_silence_repo_active_total{status="active"}
 ```
 
 ## Database Schema
@@ -460,17 +460,10 @@ go test -v -tags=integration ./internal/infrastructure/silencing
 
 ### Benchmarks
 
-Performance benchmarks validate targets:
+Benchmarks live in `repository_bench_test.go`:
 
 ```bash
 go test -bench=. -benchmem ./internal/infrastructure/silencing
-```
-
-Expected results:
-```
-BenchmarkCreateSilence-8       250    4.2ms/op    <5ms target ✅
-BenchmarkGetSilenceByID-8      600    1.8ms/op    <2ms target ✅
-BenchmarkListSilences-8        100   18.5ms/op   <20ms target ✅
 ```
 
 ## Production Deployment
@@ -526,22 +519,6 @@ func main() {
 - `github.com/prometheus/client_golang` - Prometheus metrics
 - `log/slog` - Structured logging
 
-## Contributing
-
-See [CONTRIBUTING-GO.md](../../../../CONTRIBUTING-GO.md) for development guidelines.
-
 ## License
 
-MIT License - see [LICENSE](../../../../LICENSE) for details.
-
-## Support
-
-- **Documentation**: https://github.com/ipiton/AMP/docs
-- **Issues**: https://github.com/ipiton/AMP/issues
-- **Slack**: #alert-history channel
-
----
-
-**Version:** 1.0.0
-**Status:** ✅ Production-Ready
-**Quality Grade:** A+ (150% target achieved)
+See [LICENSE](../../../../LICENSE) for details (AGPL-3.0).
