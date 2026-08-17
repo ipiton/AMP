@@ -8,11 +8,11 @@ import (
 
 func TestParseLabelMatcher_Valid(t *testing.T) {
 	cases := []struct {
-		raw     string
-		name    string
-		op      MatcherOp
-		value   string
-		hasRe   bool
+		raw   string
+		name  string
+		op    MatcherOp
+		value string
+		hasRe bool
 	}{
 		{`alertname="Watchdog"`, "alertname", MatcherOpEqual, "Watchdog", false},
 		{`severity!="critical"`, "severity", MatcherOpNotEqual, "critical", false},
@@ -49,8 +49,8 @@ func TestParseLabelMatcher_Invalid(t *testing.T) {
 	cases := []string{
 		`bad`,
 		`bad:syntax`,
-		`name=value`,     // missing quotes
-		`=~"value"`,      // missing name
+		`name=value`,       // missing quotes
+		`=~"value"`,        // missing name
 		`name=~"[invalid"`, // invalid regex
 	}
 
@@ -71,10 +71,10 @@ func TestMatchesLabels(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		raw     string
-		labels  map[string]string
-		want    bool
+		name   string
+		raw    string
+		labels map[string]string
+		want   bool
 	}{
 		{
 			name:   "equal match",

@@ -13,11 +13,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	application "github.com/ipiton/AMP/internal/application"
 	appconfig "github.com/ipiton/AMP/internal/config"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -27,11 +27,6 @@ const (
 	runtimeClusterNameEnv             = "AMP_CLUSTER_NAME"
 )
 
-var (
-	futureParityRegistryOnce sync.Once
-	futureParityRegistry     *application.ServiceRegistry
-	futureParityRegistryErr  error
-)
 
 type runtimeClusterContext struct {
 	status      string
@@ -48,7 +43,11 @@ func registerRoutes(mux *http.ServeMux) {
 		return
 	}
 
-	registry, err := futureParityCompatibilityRegistry()
+	// Build a fresh registry per mux so each test gets isolated state and its
+	// own AMP_CONFIG_FILE/AMP_RUNTIME_STATE_FILE environment (ADR-002: the
+	// active runtime is the source of truth; the compat seam must not leak
+	// state between historical suites).
+	registry, err := newFutureParityCompatibilityRegistry()
 	if err != nil {
 		registerFutureParityBootstrapFailure(mux, err)
 		return
@@ -96,15 +95,13 @@ func buildRuntimeClusterStatusPayload(clusterCtx *runtimeClusterContext, now tim
 	return payload
 }
 
-func futureParityCompatibilityRegistry() (*application.ServiceRegistry, error) {
-	futureParityRegistryOnce.Do(func() {
-		futureParityRegistry, futureParityRegistryErr = newFutureParityCompatibilityRegistry()
-	})
-
-	return futureParityRegistry, futureParityRegistryErr
-}
-
 func newFutureParityCompatibilityRegistry() (*application.ServiceRegistry, error) {
+	// Registry initialization registers prometheus collectors via promauto on
+	// the process-global registerer. Swap in a fresh registerer per compat
+	// registry so per-test isolation does not panic with duplicate collector
+	// registration. Tests in this package do not run in parallel.
+	prometheus.DefaultRegisterer = prometheus.NewRegistry()
+
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := loadFutureParityCompatibilityConfig(logger)
 

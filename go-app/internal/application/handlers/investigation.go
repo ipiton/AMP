@@ -104,4 +104,3 @@ func extractFingerprintFromPath(path string) string {
 	}
 	return path[idx+1:]
 }
-
