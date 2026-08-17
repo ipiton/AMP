@@ -2,14 +2,14 @@
 
 Не в активной очереди, но учтено и перенесено из `.plans`.
 
-## Runtime gaps (найдены при закрытии FUTUREPARITY-GAP, 2026-08-17)
+## Runtime gaps (найдены при закрытии FUTUREPARITY-GAP, 2026-08-17) — ВСЕ ЗАКРЫТЫ 2026-08-17
 
-- [ ] **RECEIVERS-JSON-CASE** — `config.ReceiverConfig` без json-тегов: `/api/v2/receivers` отдаёт `{"Name":...}` вместо Alertmanager-совместимого `{"name":...}` (`handlers/status_api.go:85`). ~0.5h
-- [ ] **SILENCE-MATCHER-VALUE-IGNORED** — `MatchesSilenceMatchers` фильтрует только по имени matcher'а, игнорирует value/op/isEqual: `service!="api"` ≡ `service="api"` (`handlers/matchers.go:95`). ~0.5d
-- [ ] **NO-METHOD-ENFORCEMENT** — Status/Receivers/AlertGroups/Healthy/Ready handlers выполняют POST как GET; тестовая method-matrix в phase0-сьюте укажет места. ~0.5d
-- [ ] **SILENCEDBY-NULL** — `silencedBy` маршалится `null` вместо `[]` при nil-слайсе (`handlers/alerts.go:342`). ~0.5h
-- [ ] **GROUPALERTS-HARDCODED-RECEIVER** — `GroupAlerts` хардкодит receiver "default" и включает resolved-алерты (`memory/alert_store.go:233`). ~0.5d
-- Persistence/rehydration gap учтён в SPLIT-BRAIN-RISK (tasks/DEBT-STAGE4-SPLITBRAIN/research.md).
+- [x] ~~**RECEIVERS-JSON-CASE**~~ — json-тег на `ReceiverConfig`, `/api/v2/receivers` отдаёт `{"name":...}`.
+- [x] ~~**SILENCE-MATCHER-VALUE-IGNORED**~~ — `MatchesSilenceMatchers` матчит значение silence-matcher'а оператором фильтра (upstream-семантика); отсутствующее имя = пустое значение.
+- [x] ~~**NO-METHOD-ENFORCEMENT**~~ — `getOnly`-guard: status/receivers/groups/healthy/ready отвечают 405 на не-GET/HEAD.
+- [x] ~~**SILENCEDBY-NULL**~~ — закрыт консолидацией alertconv: `SilencedBy/InhibitedBy/MutedBy` всегда `[]`.
+- [x] ~~**GROUPALERTS-HARDCODED-RECEIVER**~~ — receiver из конфига (первый, fallback "default"), resolved-алерты в группы не входят.
+- Persistence/rehydration gap закрыт в SPLIT-BRAIN-RISK (tasks/DEBT-STAGE4-SPLITBRAIN/research.md).
 
 ## Near-term (из AMP-OSS)
 > Фичи, реализованные в AMP-OSS и отсутствующие в AMP.
