@@ -22,4 +22,4 @@
 
 ## Low
 - [x] ~~**DEAD-CODE-MAIN-FULL**~~ — Legacy `main.go.full` удалён. Закрыто 2026-03-08.
-- [ ] **SIMPLE-PUBLISHER-PANIC** — `core/services/publisher.go` — `SimplePublisher` паникует в prod (fail-safe). Реальные publishers в `infrastructure/publishing/`. Сам stub безвреден (panics предотвращают silent data loss), но должен быть удалён после полной интеграции. ~0.5d
+- [x] ~~**SIMPLE-PUBLISHER-PANIC**~~ — закрыто 2026-08-17. `core/services/publisher.go` удалён: ссылок на `SimplePublisher` не осталось (runtime на real publishing path с SERVICE-REGISTRY-STUB-PATH).
