@@ -245,7 +245,10 @@ func TestActiveRuntimeContract_StillAbsentHistoricalSurface(t *testing.T) {
 		path   string
 		status int
 	}{
-		{name: "alerts v1 alias not mounted", method: http.MethodPost, path: "/api/v1/alerts", status: http.StatusNotFound},
+		// PARITY-4.3: POST /api/v1/alerts now aliases the v2 ingest handler.
+		// An empty request body is not a valid alert payload, so this is a
+		// 400 (malformed input), not a 404 (unmounted route).
+		{name: "alerts v1 alias mounted", method: http.MethodPost, path: "/api/v1/alerts", status: http.StatusBadRequest},
 		{name: "config api not mounted", method: http.MethodGet, path: "/api/v2/config", status: http.StatusNotFound},
 		{name: "classification api not mounted", method: http.MethodGet, path: "/api/v2/classification/health", status: http.StatusNotFound},
 		{name: "history api not mounted", method: http.MethodGet, path: "/history", status: http.StatusNotFound},

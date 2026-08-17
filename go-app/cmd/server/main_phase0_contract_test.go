@@ -105,8 +105,9 @@ func TestPhase0RouteInventory(t *testing.T) {
 	// ADR-002: the route inventory documents the ACTIVE runtime surface
 	// (internal/application/router.go + registerLegacyDashboardRoutes).
 	// Endpoints removed by the controlled replacement (config API, history,
-	// dashboard JSON API, webhook, pprof, classification, /script.js,
-	// POST /api/v1/alerts alias) intentionally return 404.
+	// dashboard JSON API, webhook, pprof, classification, /script.js)
+	// intentionally return 404. PARITY-4.3 restored POST /api/v1/alerts as a
+	// real alias to the v2 ingest handler — it is no longer in that list.
 	probes := []routeProbe{
 		{name: "root", method: http.MethodGet, path: "/", allowedStatus: []int{http.StatusOK, http.StatusInternalServerError}},
 		{name: "dashboard", method: http.MethodGet, path: "/dashboard", allowedStatus: []int{http.StatusOK, http.StatusInternalServerError}},
@@ -128,7 +129,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "alertmanager reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, allowedStatus: []int{http.StatusOK}},
 		{name: "debug removed", method: http.MethodGet, path: "/debug/pprof/", allowedStatus: []int{http.StatusNotFound}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
-		{name: "alerts v1 post removed", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusNotFound}},
+		{name: "alerts v1 post alias", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", allowedStatus: []int{http.StatusOK}},
@@ -248,17 +249,27 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("status response is not valid json: %v", err)
 		}
-		// ADR-002: the active /api/v2/status payload is config.original +
-		// versionInfo + uptime; cluster/stats/runtime were part of the
-		// historical surface and are not exposed by the active runtime.
+		// PARITY-4.2: /api/v2/status now matches upstream's nested shape —
+		// cluster{status}, versionInfo, config{original}, uptime.
 		if _, ok := payload["versionInfo"]; !ok {
 			t.Fatalf("status response missing versionInfo field")
 		}
 		if _, ok := payload["uptime"]; !ok {
 			t.Fatalf("status response missing uptime field")
 		}
-		if _, ok := payload["config.original"].(string); !ok {
-			t.Fatalf("status response missing config.original string, got %T", payload["config.original"])
+		configObj, ok := payload["config"].(map[string]any)
+		if !ok {
+			t.Fatalf("status response missing nested config object, got %T", payload["config"])
+		}
+		if _, ok := configObj["original"].(string); !ok {
+			t.Fatalf("status response missing config.original string, got %T", configObj["original"])
+		}
+		clusterObj, ok := payload["cluster"].(map[string]any)
+		if !ok {
+			t.Fatalf("status response missing nested cluster object, got %T", payload["cluster"])
+		}
+		if clusterObj["status"] != "disabled" {
+			t.Fatalf("status cluster.status expected %q (no clustering yet), got %v", "disabled", clusterObj["status"])
 		}
 
 		versionInfo, ok := payload["versionInfo"].(map[string]any)
@@ -328,10 +339,10 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		// ADR-002: the active runtime ignores the upstream receiver query
-		// parameter entirely, so even a malformed regex is not an error.
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts with invalid receiver regex expected 200 (param ignored), got %d", rec.Code)
+		// PARITY-4.1: the active runtime now evaluates the upstream receiver
+		// query parameter as a regex, so a malformed pattern is a 400.
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid receiver regex expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -340,8 +351,10 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts with invalid active expected 200, got %d", rec.Code)
+		// PARITY-4.1: active/silenced/inhibited/unprocessed are now validated
+		// booleans, matching upstream's 400-on-malformed-query-param behavior.
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid active expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -760,22 +773,26 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 200, got %d", recResolved.Code)
 		}
 
-		// ADR-002: the active groups handler ignores the receiver parameter,
-		// so even a malformed regex is not an error.
+		// PARITY-4.1: the groups handler now evaluates the receiver parameter
+		// as a regex, so a malformed pattern is a 400.
 		reqReceiver := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=[", nil)
 		recReceiver := httptest.NewRecorder()
 		mux.ServeHTTP(recReceiver, reqReceiver)
-		if recReceiver.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 200 (param ignored), got %d", recReceiver.Code)
+		if recReceiver.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 400, got %d", recReceiver.Code)
 		}
 
+		// PARITY-4.1: active/silenced/inhibited/unprocessed are now validated
+		// booleans on the groups endpoint too.
 		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
 		recActive := httptest.NewRecorder()
 		mux.ServeHTTP(recActive, reqActive)
-		if recActive.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 200, got %d", recActive.Code)
+		if recActive.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 400, got %d", recActive.Code)
 		}
 
+		// "muted" is not part of this parity slice (upstream's mutedBy is a
+		// separate, unimplemented concept); it stays ignored.
 		reqMuted := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?muted=not-bool", nil)
 		recMuted := httptest.NewRecorder()
 		mux.ServeHTTP(recMuted, reqMuted)
@@ -902,21 +919,33 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 	})
 
 	t.Run("alerts v1 ingest compatibility contract", func(t *testing.T) {
-		// ADR-002: the /api/v1/alerts ingest alias was removed; the exact path
-		// is a deliberate 404 so the /api/v1/alerts/ investigation subtree
-		// (PHASE-5B) owns the prefix.
+		// PARITY-4.3: POST /api/v1/alerts now aliases the v2 ingest handler
+		// (same alert JSON array payload as v2). An empty array is not a
+		// valid ingest payload, so it 400s the same way POST /api/v2/alerts
+		// would; a real payload succeeds (see "alerts v1 post alias" probe
+		// above). The exact path still takes priority over the
+		// /api/v1/alerts/ investigation subtree (PHASE-5B).
 		postReq := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(`[]`))
 		postRec := httptest.NewRecorder()
 		mux.ServeHTTP(postRec, postReq)
-		if postRec.Code != http.StatusNotFound {
-			t.Fatalf("POST /api/v1/alerts expected 404, got %d", postRec.Code)
+		if postRec.Code != http.StatusBadRequest {
+			t.Fatalf("POST /api/v1/alerts (empty array) expected 400, got %d", postRec.Code)
 		}
 
+		validPostReq := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(validAlertPayload))
+		validPostRec := httptest.NewRecorder()
+		mux.ServeHTTP(validPostRec, validPostReq)
+		if validPostRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v1/alerts (valid payload) expected 200, got %d body=%q", validPostRec.Code, validPostRec.Body.String())
+		}
+
+		// GET is not implemented for the v1 alias (upstream's v1 GET response
+		// shape differs from v2 and restoring it is out of scope here).
 		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
 		getRec := httptest.NewRecorder()
 		mux.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusNotFound {
-			t.Fatalf("GET /api/v1/alerts expected 404, got %d", getRec.Code)
+		if getRec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("GET /api/v1/alerts expected 405, got %d", getRec.Code)
 		}
 	})
 }
