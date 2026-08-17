@@ -5,6 +5,7 @@
 package validators
 
 import (
+	"net"
 	"net/mail"
 	"net/url"
 	"regexp"
@@ -109,6 +110,36 @@ func isHTTPS(rawURL string) bool {
 		return false
 	}
 	return strings.EqualFold(u.Scheme, "https")
+}
+
+// isHTTP reports whether rawURL explicitly uses the plaintext http scheme.
+func isHTTP(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Scheme, "http")
+}
+
+// isLoopbackOrInternalHost reports whether host looks like localhost or a
+// private/loopback address, mirroring the SSRF-guard heuristics already
+// used by internal/infrastructure/publishing.WebhookValidator.
+func isLoopbackOrInternalHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate()
+	}
+	return false
 }
 
 // isValidEmailList validates a comma-separated list of email addresses

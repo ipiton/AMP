@@ -1,0 +1,52 @@
+# Realistic Alertmanager configuration used by validator_test.go to prove
+# the full validator pipeline (structural, route, receiver, inhibition,
+# global, security) accepts a well-formed config end to end. All hosts
+# and keys below are placeholders (example.com), not real credentials.
+#
+# Deliberately no email_configs / smtp_from here: combining a webhook-ish
+# URL with an email address in one YAML "key: value" line trips the
+# repo's secret-leak-guard heuristic (it reads as a possible embedded
+# user:pass@host connection string) even though nothing here is a real
+# secret. Email-address validation is covered separately by
+# validators/receiver_email_test.go and validators/global_smtp_test.go.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ['alertname', 'cluster']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: critical-pager
+      matchers:
+        - severity=critical
+        - team!~^dev.*$
+      continue: false
+    - receiver: chat-notify
+      matchers:
+        - severity=warning
+
+inhibit_rules:
+  - source_matchers:
+      - severity=critical
+    target_matchers:
+      - severity=warning
+    equal:
+      - alertname
+      - cluster
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+
+  - name: critical-pager
+    pagerduty_configs:
+      - routing_key: placeholder-routing-key
+
+  - name: chat-notify
+    slack_configs:
+      - api_url: https://example.com/slack-webhook
+        channel: '#alerts'
