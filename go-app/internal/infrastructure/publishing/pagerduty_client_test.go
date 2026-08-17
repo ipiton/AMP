@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -142,7 +143,7 @@ func TestTriggerEvent(t *testing.T) {
 		_, err := client.TriggerEvent(ctx, req)
 
 		assert.Error(t, err)
-		var apiErr *PagerDutyAPIError
+		var apiErr *httperror.HTTPAPIError
 		assert.ErrorAs(t, err, &apiErr)
 		assert.Equal(t, 400, apiErr.StatusCode)
 		assert.Contains(t, apiErr.Message, "Invalid request")
@@ -177,7 +178,7 @@ func TestTriggerEvent(t *testing.T) {
 		_, err := client.TriggerEvent(ctx, req)
 
 		assert.Error(t, err)
-		var apiErr *PagerDutyAPIError
+		var apiErr *httperror.HTTPAPIError
 		assert.ErrorAs(t, err, &apiErr)
 		assert.Equal(t, 401, apiErr.StatusCode)
 	})

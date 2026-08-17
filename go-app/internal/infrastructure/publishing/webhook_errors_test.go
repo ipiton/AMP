@@ -8,14 +8,13 @@ import (
 	"github.com/ipiton/AMP/pkg/httperror"
 )
 
-// ==================== WebhookError Tests ====================
+// ==================== Webhook Error Tests ====================
 
 func TestWebhookError_Creation(t *testing.T) {
-	// WebhookError is now an alias for httperror.HTTPAPIError
-	// Create using factory function
-	err := NewWebhookErrorWithType(ErrorTypeValidation, "invalid URL", nil)
+	// Webhook errors are httperror.HTTPAPIError with ProviderWebhook
+	err := httperror.NewHTTPError(400, "invalid URL", ProviderWebhook)
 
-	if err.StatusCode != 400 { // ErrorTypeValidation maps to 400
+	if err.StatusCode != 400 {
 		t.Errorf("Expected status 400, got %d", err.StatusCode)
 	}
 	if err.Message != "invalid URL" {
@@ -24,7 +23,7 @@ func TestWebhookError_Creation(t *testing.T) {
 }
 
 func TestWebhookError_Error(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeAuth, "authentication failed", nil)
+	err := httperror.NewHTTPError(401, "authentication failed", ProviderWebhook)
 
 	// Error message should contain the message
 	if err.Error() == "" {
@@ -160,65 +159,65 @@ func TestSentinelErrors_NoCustomHeaders(t *testing.T) {
 
 // ==================== Error Classification Tests ====================
 
-func TestIsWebhookRetryableError_NetworkError(t *testing.T) {
+func TestWebhookRetryable_NetworkError(t *testing.T) {
 	// Network errors need an underlying net.Error with Timeout()=true or specific syscall error
 	netErr := &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
-	err := NewWebhookErrorWithType(ErrorTypeNetwork, "network error", netErr)
-	if !IsWebhookRetryableError(err) {
+	err := httperror.NewHTTPErrorWithCause(0, "network error", ProviderWebhook, netErr)
+	if !httperror.IsRetryable(err) {
 		t.Error("Network error should be retryable")
 	}
 }
 
-func TestIsWebhookRetryableError_TimeoutError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeTimeout, "request timeout", nil)
+func TestWebhookRetryable_TimeoutError(t *testing.T) {
+	err := httperror.NewHTTPError(504, "request timeout", ProviderWebhook)
 
-	if !IsWebhookRetryableError(err) {
+	if !httperror.IsRetryable(err) {
 		t.Error("Timeout error should be retryable")
 	}
 }
 
-func TestIsWebhookRetryableError_RateLimitError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeRateLimit, "rate limit exceeded", nil)
+func TestWebhookRetryable_RateLimitError(t *testing.T) {
+	err := httperror.NewHTTPError(429, "rate limit exceeded", ProviderWebhook)
 
-	if !IsWebhookRetryableError(err) {
+	if !httperror.IsRetryable(err) {
 		t.Error("Rate limit error should be retryable")
 	}
 }
 
-func TestIsWebhookRetryableError_ServerError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeServer, "internal server error", nil)
+func TestWebhookRetryable_ServerError(t *testing.T) {
+	err := httperror.NewHTTPError(500, "internal server error", ProviderWebhook)
 
-	if !IsWebhookRetryableError(err) {
+	if !httperror.IsRetryable(err) {
 		t.Error("Server error should be retryable")
 	}
 }
 
-func TestIsWebhookRetryableError_ValidationError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeValidation, "invalid payload", nil)
+func TestWebhookRetryable_ValidationError(t *testing.T) {
+	err := httperror.NewHTTPError(400, "invalid payload", ProviderWebhook)
 
-	if IsWebhookRetryableError(err) {
+	if httperror.IsRetryable(err) {
 		t.Error("Validation error should NOT be retryable")
 	}
 }
 
-func TestIsWebhookRetryableError_AuthError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeAuth, "unauthorized", nil)
+func TestWebhookRetryable_AuthError(t *testing.T) {
+	err := httperror.NewHTTPError(401, "unauthorized", ProviderWebhook)
 
-	if IsWebhookRetryableError(err) {
+	if httperror.IsRetryable(err) {
 		t.Error("Auth error should NOT be retryable")
 	}
 }
 
-func TestIsWebhookRetryableError_NonWebhookError(t *testing.T) {
+func TestWebhookRetryable_NonWebhookError(t *testing.T) {
 	err := errors.New("generic error")
 
-	if IsWebhookRetryableError(err) {
+	if httperror.IsRetryable(err) {
 		t.Error("Non-webhook error should NOT be retryable")
 	}
 }
 
 func TestIsWebhookPermanentError_ValidationError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeValidation, "invalid URL", nil)
+	err := httperror.NewHTTPError(400, "invalid URL", ProviderWebhook)
 
 	if !IsWebhookPermanentError(err) {
 		t.Error("Validation error should be permanent")
@@ -226,7 +225,7 @@ func TestIsWebhookPermanentError_ValidationError(t *testing.T) {
 }
 
 func TestIsWebhookPermanentError_AuthError(t *testing.T) {
-	err := NewWebhookErrorWithType(ErrorTypeAuth, "unauthorized", nil)
+	err := httperror.NewHTTPError(401, "unauthorized", ProviderWebhook)
 
 	if !IsWebhookPermanentError(err) {
 		t.Error("Auth error should be permanent")
@@ -235,7 +234,7 @@ func TestIsWebhookPermanentError_AuthError(t *testing.T) {
 
 func TestIsWebhookPermanentError_NetworkError(t *testing.T) {
 	netErr := &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{IsTimeout: true}}
-	err := NewWebhookErrorWithType(ErrorTypeNetwork, "network error", netErr)
+	err := httperror.NewHTTPErrorWithCause(0, "network error", ProviderWebhook, netErr)
 	if IsWebhookPermanentError(err) {
 		t.Error("Network error should NOT be permanent")
 	}
@@ -267,7 +266,7 @@ func TestClassifyHTTPError_400(t *testing.T) {
 		t.Errorf("Status 400 should map to validation, got %v", errType)
 	}
 	// Check it's permanent via HTTPAPIError
-	err := NewWebhookErrorWithType(errType, "test", nil)
+	err := httperror.NewHTTPError(400, "test", ProviderWebhook)
 	if !IsWebhookPermanentError(err) {
 		t.Error("400 should be permanent")
 	}
@@ -278,7 +277,7 @@ func TestClassifyHTTPError_401(t *testing.T) {
 	if errType != ErrorTypeAuth {
 		t.Errorf("Status 401 should map to auth, got %v", errType)
 	}
-	err := NewWebhookErrorWithType(errType, "test", nil)
+	err := httperror.NewHTTPError(401, "test", ProviderWebhook)
 	if !IsWebhookPermanentError(err) {
 		t.Error("401 should be permanent")
 	}
@@ -289,7 +288,7 @@ func TestClassifyHTTPError_403(t *testing.T) {
 	if errType != ErrorTypeAuth {
 		t.Errorf("Status 403 should map to auth, got %v", errType)
 	}
-	err := NewWebhookErrorWithType(errType, "test", nil)
+	err := httperror.NewHTTPError(403, "test", ProviderWebhook)
 	if !IsWebhookPermanentError(err) {
 		t.Error("403 should be permanent")
 	}
@@ -300,7 +299,7 @@ func TestClassifyHTTPError_404(t *testing.T) {
 	if errType != ErrorTypeValidation {
 		t.Errorf("Status 404 should map to validation, got %v", errType)
 	}
-	err := NewWebhookErrorWithType(errType, "test", nil)
+	err := httperror.NewHTTPError(404, "test", ProviderWebhook)
 	if !IsWebhookPermanentError(err) {
 		t.Error("404 should be permanent")
 	}
@@ -311,8 +310,8 @@ func TestClassifyHTTPError_429(t *testing.T) {
 	if errType != ErrorTypeRateLimit {
 		t.Errorf("Status 429 should map to rate_limit, got %v", errType)
 	}
-	err := NewWebhookErrorWithType(errType, "test", nil)
-	if !IsWebhookRetryableError(err) {
+	err := httperror.NewHTTPError(429, "test", ProviderWebhook)
+	if !httperror.IsRetryable(err) {
 		t.Error("429 should be retryable")
 	}
 }
@@ -324,8 +323,8 @@ func TestClassifyHTTPError_5xx(t *testing.T) {
 		if errType != ErrorTypeServer {
 			t.Errorf("Status %d should map to server, got %v", code, errType)
 		}
-		err := NewWebhookErrorWithType(errType, "test", nil)
-		if !IsWebhookRetryableError(err) {
+		err := httperror.NewHTTPError(code, "test", ProviderWebhook)
+		if !httperror.IsRetryable(err) {
 			t.Errorf("%d should be retryable", code)
 		}
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	"golang.org/x/time/rate"
 )
 
@@ -152,7 +153,7 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 		httpResp, err := c.httpClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("HTTP request failed: %w", err)
-			if !isRetryableNetworkError(err) {
+			if !httperror.IsRetryableNetworkError(err) {
 				return nil, lastErr // Don't retry network errors
 			}
 			c.logger.WarnContext(ctx, "Retrying after network error",
@@ -183,7 +184,7 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 
 			if !slackResp.OK {
 				// Slack returned ok=false (error in response body)
-				return nil, NewSlackAPIError(httpResp.StatusCode, slackResp.Error, 0)
+				return nil, httperror.NewHTTPError(httpResp.StatusCode, slackResp.Error, ProviderSlack)
 			}
 
 			return &slackResp, nil
@@ -194,7 +195,7 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 		lastErr = apiErr
 
 		// Check if retryable
-		if !IsSlackRetryableError(apiErr) {
+		if !(&httperror.PublishingClassifier{}).IsRetryable(apiErr) {
 			c.logger.ErrorContext(ctx, "Permanent error, not retrying",
 				slog.Int("status_code", httpResp.StatusCode),
 				slog.String("error", apiErr.Error()))

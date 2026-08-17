@@ -13,7 +13,7 @@
 - [x] ~~**MANUAL-SQL-RISK**~~ — закрыто 2026-08-17. Все фильтры параметризованы (`$N` + args); реальные векторы устранены: `ORDER BY` whitelist в `silencing/filter_builder.go` и `template/repository_crud.go`, JSONB-экранирование через `buildJSONBContainmentFilter`/`json.Marshal`, имя таблицы в `migrations/manager.go` параметризовано. Регресс-тесты: `filter_builder_injection_test.go`.
 
 ## Medium
-- [ ] **ERROR-REINVENTION** — Свои типы ошибок в каждом модуле вместо `pkg/httperror`. ~0.5d
+- [x] ~~**ERROR-REINVENTION**~~ — закрыто 2026-08-17. Все вызыватели deprecated-шимов в `infrastructure/publishing` мигрированы на `pkg/httperror` (NewHTTPError*/PublishingClassifier/Is*), шимы с 0 ссылок удалены (`rootly_errors.go` целиком, Legacy*-алиасы, `NewWebhookErrorWithType`, поле `Workers`). Остался только живой `ErrorType`-классификатор webhook_client (лейблы метрик не 1:1 с httperror).
 - [ ] **GLOBAL-LOCK-CONTENTION** — Глобальный мьютекс в Store при высокой нагрузке. Нужно шардирование. ~1d
 - [x] ~~**NOTIFICATION-TIMER-STUBS**~~ — закрыто через PARITY-A1 (2026-04-17).
 - [x] ~~**INHIBITION-DEAD-WIRING**~~ — закрыто через PARITY-A2 (2026-04-16). `ShouldInhibit` вызывается в `alert_processor.go:154-155`.
