@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	appconfig "github.com/ipiton/AMP/internal/config"
 )
@@ -74,10 +75,10 @@ func (s *MiddlewareStack) buildStack() {
 	// 3. Metrics collection
 	s.middlewares = append(s.middlewares, s.metricsMiddleware())
 
-	// 4. CORS (if enabled) - TODO: Add CORS config to ServerConfig
-	// if s.config.Server.CORS.Enabled {
-	//     s.middlewares = append(s.middlewares, s.corsMiddleware())
-	// }
+	// 4. CORS (if enabled via server.cors.*)
+	if s.config.Server.CORS.Enabled {
+		s.middlewares = append(s.middlewares, s.corsMiddleware())
+	}
 
 	// TODO: Add more middleware
 	// - Authentication
@@ -125,6 +126,46 @@ func (s *MiddlewareStack) loggingMiddleware() Middleware {
 				"method", r.Method,
 				"path", r.URL.Path,
 				"remote_addr", r.RemoteAddr)
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// corsMiddleware sets cross-origin headers per server.cors.* config and
+// answers OPTIONS preflight requests. Origins are matched exactly against
+// the comma-separated whitelist; "*" allows any origin.
+func (s *MiddlewareStack) corsMiddleware() Middleware {
+	cfg := s.config.Server.CORS
+
+	allowAll := false
+	allowed := make(map[string]bool)
+	for _, o := range strings.Split(cfg.AllowedOrigins, ",") {
+		o = strings.TrimSpace(strings.ToLower(strings.TrimSuffix(o, "/")))
+		switch o {
+		case "":
+		case "*":
+			allowAll = true
+		default:
+			allowed[o] = true
+		}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin != "" && (allowAll || allowed[strings.ToLower(strings.TrimSuffix(origin, "/"))]) {
+				h := w.Header()
+				h.Set("Access-Control-Allow-Origin", origin)
+				h.Add("Vary", "Origin")
+				h.Set("Access-Control-Allow-Methods", cfg.AllowedMethods)
+				h.Set("Access-Control-Allow-Headers", cfg.AllowedHeaders)
+
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+			}
 
 			next.ServeHTTP(w, r)
 		})

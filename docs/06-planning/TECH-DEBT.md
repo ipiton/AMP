@@ -18,7 +18,7 @@
 - [x] ~~**NOTIFICATION-TIMER-STUBS**~~ — закрыто через PARITY-A1 (2026-04-17).
 - [x] ~~**INHIBITION-DEAD-WIRING**~~ — закрыто через PARITY-A2 (2026-04-16). `ShouldInhibit` вызывается в `alert_processor.go:154-155`.
 - [x] ~~**DEDUP-STATE-STUB**~~ — закрыто 2026-08-17. Rule 7 реализован в `SimpleFilterEngine`: fingerprint+status в окне (default 1m, `SetDedupWindow`), lazy sweep, потокобезопасно. Смена статуса firing→resolved не блокируется. Тесты: `filter_engine_dedup_test.go` (включая -race).
-- [ ] **CORS-TODO** — `middleware.go:77` — CORS конфигурация отсутствует, помечена TODO. ~0.5d
+- [x] ~~**CORS-TODO**~~ — закрыто 2026-08-17. `server.cors.*` (enabled/origins/methods/headers, default off) + `corsMiddleware` в стеке с preflight 204. Тесты: `middleware_cors_test.go`.
 
 ## Low
 - [x] ~~**DEAD-CODE-MAIN-FULL**~~ — Legacy `main.go.full` удалён. Закрыто 2026-03-08.
