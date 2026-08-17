@@ -1,11 +1,13 @@
 package publishing
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,4 +248,55 @@ func TestHTTPTelegramClient_Health(t *testing.T) {
 		err := client.Health(context.Background())
 		assert.Error(t, err)
 	})
+
+	t.Run("network error does not leak bot token", func(t *testing.T) {
+		const secretToken = "SECRET-BOT-TOKEN-DO-NOT-LEAK-98765"
+
+		var logBuf bytes.Buffer
+		logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+		// Unroutable loopback port - connection refused, classified as a
+		// retryable network error by httperror.IsRetryableNetworkError.
+		client := NewHTTPTelegramClient("http://127.0.0.1:1", secretToken, logger)
+
+		err := client.Health(context.Background())
+
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secretToken,
+			"returned error must not contain the raw bot token")
+		assert.NotContains(t, logBuf.String(), secretToken,
+			"log output must not contain the raw bot token")
+	})
+}
+
+// TestHTTPTelegramClient_SendMessage_NetworkErrorDoesNotLeakToken verifies
+// that a *url.Error from http.Client.Do (which embeds the full request URL,
+// including the bot token from endpoint()) never reaches a log line or a
+// returned error message unmasked - across every retry attempt.
+func TestHTTPTelegramClient_SendMessage_NetworkErrorDoesNotLeakToken(t *testing.T) {
+	const secretToken = "SECRET-BOT-TOKEN-DO-NOT-LEAK-13579"
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Unroutable loopback port - connection refused, retried up to
+	// maxRetries times before doRequestWithRetry gives up.
+	client := NewHTTPTelegramClient("http://127.0.0.1:1", secretToken, logger)
+
+	_, err := client.SendMessage(context.Background(), &TelegramMessage{
+		ChatID: "-1001234567890",
+		Text:   "hello",
+	})
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), secretToken,
+		"returned error must not contain the raw bot token")
+
+	logOutput := logBuf.String()
+	assert.NotContains(t, logOutput, secretToken,
+		"log output must not contain the raw bot token")
+	// Sanity check the log actually captured the retry path (otherwise this
+	// test would pass vacuously because nothing was logged at all).
+	assert.True(t, strings.Contains(logOutput, "Retrying after network error"),
+		"expected at least one retry log line to assert masking against")
 }
