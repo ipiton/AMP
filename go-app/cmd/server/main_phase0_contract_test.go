@@ -1227,11 +1227,16 @@ func TestPhase0ReloadInvalidConfigReturns500(t *testing.T) {
 func TestPhase0ReceiversIncludeConfiguredNames(t *testing.T) {
 	// task 1.3: route:/receivers: parse via infrastructure/routing.Parse(),
 	// which requires every route.receiver to resolve in receivers: and every
-	// receiver to define at least one notification config. The nested
-	// "team-db"/"team-nested" child routes from the pre-1.3 fixture
-	// referenced receivers absent from receivers: on purpose (to prove they
-	// are excluded from /api/v2/receivers) — dropped here since an unknown
-	// receiver reference is now a load error rather than a silent no-op.
+	// receiver to define at least one notification config. The pre-1.3
+	// fixture's nested "team-db"/"team-nested" child routes referenced
+	// receivers absent from receivers: — that is now a load error rather
+	// than a silent no-op, so it can no longer be used to prove
+	// /api/v2/receivers sources from the flat receivers: list.
+	//
+	// "team-alpha" is deliberately NOT referenced by any route below. That
+	// restores the real invariant from the receivers: side: the endpoint
+	// must list every configured receiver regardless of route-tree
+	// reachability, not just the ones a route happens to point at.
 	configPath := writeTestConfigFile(t, `
 route:
   receiver: "team-zeta"
@@ -1278,13 +1283,17 @@ receivers:
 			t.Fatalf("expected configured receiver %q in /api/v2/receivers, got %v", name, receiverNames)
 		}
 	}
+	// "team-alpha" is unreferenced by any route (see fixture comment above):
+	// its presence here proves the list is NOT filtered down to
+	// route-reachable receivers only.
+	if _, ok := receiverSet["team-alpha"]; !ok {
+		t.Fatalf("expected route-unreferenced receiver %q in /api/v2/receivers (list must source from receivers:, not route-tree reachability), got %v", "team-alpha", receiverNames)
+	}
 	if len(receiverNames) != 2 || receiverNames[0] != "team-zeta" || receiverNames[1] != "team-alpha" {
 		t.Fatalf("expected receivers to preserve config order [team-zeta team-alpha], got %v", receiverNames)
 	}
-	for _, excluded := range []string{"default", "team-db", "team-nested"} {
-		if _, ok := receiverSet[excluded]; ok {
-			t.Fatalf("did not expect non-receiver-list value %q in /api/v2/receivers, got %v", excluded, receiverNames)
-		}
+	if _, ok := receiverSet["default"]; ok {
+		t.Fatalf("did not expect legacy fallback receiver %q in /api/v2/receivers when receivers: is configured, got %v", "default", receiverNames)
 	}
 }
 

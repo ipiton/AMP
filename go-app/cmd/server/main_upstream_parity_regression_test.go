@@ -167,8 +167,14 @@ func TestUpstreamParity_ReceiversConfiguredListOnly(t *testing.T) {
 	// which requires every route.receiver to resolve in receivers: and
 	// every receiver to define at least one notification config. The
 	// pre-1.3 fixture's nested "team-db" child route referenced a receiver
-	// absent from receivers: — dropped here since that is now a load error
-	// rather than a silent no-op.
+	// absent from receivers: — that is now a load error rather than a
+	// silent no-op, so it can no longer be used to prove /api/v2/receivers
+	// sources from the flat receivers: list.
+	//
+	// "team-alpha" is deliberately NOT referenced by any route below. That
+	// restores the real invariant from the receivers: side: the endpoint
+	// must list every configured receiver regardless of route-tree
+	// reachability, not just the ones a route happens to point at.
 	configPath := writeTestConfigFile(t, `
 route:
   receiver: "team-zeta"
@@ -200,6 +206,7 @@ receivers:
 	}
 
 	names := []string{}
+	nameSet := make(map[string]struct{}, len(receivers))
 	for _, receiver := range receivers {
 		// RECEIVERS-JSON-CASE fixed: config.ReceiverConfig now carries a json
 		// tag, so the field matches the upstream Alertmanager schema ("name").
@@ -208,10 +215,17 @@ receivers:
 			t.Fatalf("receiver.Name expected non-empty string, got %v", receiver["name"])
 		}
 		names = append(names, name)
+		nameSet[name] = struct{}{}
 	}
 
 	if names[0] != "team-zeta" || names[1] != "team-alpha" {
 		t.Fatalf("unexpected receiver list order/content (must preserve config order): %v", names)
+	}
+	// "team-alpha" is unreferenced by any route (see fixture comment above):
+	// its presence here proves the list is NOT filtered down to
+	// route-reachable receivers only.
+	if _, ok := nameSet["team-alpha"]; !ok {
+		t.Fatalf("expected route-unreferenced receiver %q in /api/v2/receivers (list must source from receivers:, not route-tree reachability), got %v", "team-alpha", names)
 	}
 }
 
