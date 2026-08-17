@@ -3,9 +3,11 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/spf13/viper"
 )
 
@@ -35,6 +37,39 @@ type Config struct {
 	Inhibition    InhibitionConfig    `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
 	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
+
+	// Routing holds the full Alertmanager-compatible route tree and receiver
+	// definitions (top-level `route:` + `receivers:` + `global:` YAML
+	// sections), parsed via the existing infrastructure/routing.Parse()
+	// (task 1.3: alertmanager-parity).
+	//
+	// It is populated only when the loaded config file has a `route:`
+	// section. Absent `route:` keeps the legacy single-receiver behavior:
+	// Routing stays nil and the Receivers field above (name-only) remains
+	// authoritative — no error.
+	//
+	// Excluded from mapstructure/json/validator processing on purpose:
+	//   - mapstructure:"-": populated manually by loadRouteConfig, not by
+	//     viper's generic unmarshal (the nested types only carry yaml tags).
+	//   - json:"-": RouteConfig carries internal fields (e.g. compiled
+	//     regex keyed by *grouping.Route) that encoding/json cannot marshal;
+	//     it also isn't meant to appear in the config-diff/update API.
+	//   - validate:"-": already fully validated inside routing.Parse();
+	//     re-validating via go-playground/validator here would recurse into
+	//     custom tag names (alphanum_hyphen, https_production, ...) that are
+	//     only registered on routing's own validator instance and would
+	//     panic on cv.v.Struct(cfg).
+	//
+	// Wiring this into the routing/notification engine happens in task 1.4
+	// (service_registry).
+	Routing *infraroute.RouteConfig `mapstructure:"-" json:"-" validate:"-"`
+}
+
+// HasRouteTree reports whether the config loaded a full `route:` +
+// `receivers:` tree (task 1.3). When false, callers should fall back to the
+// legacy single-receiver Receivers field.
+func (c *Config) HasRouteTree() bool {
+	return c.Routing != nil
 }
 
 // InvestigationConfig controls the PHASE-5A async investigation pipeline.
@@ -421,7 +456,47 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Parse optional route:/receivers:/global: sections (task 1.3).
+	// No-op (cfg.Routing stays nil) when the file has no route: section.
+	if err := loadRouteConfig(configPath, &cfg); err != nil {
+		return nil, fmt.Errorf("route config validation failed: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+// loadRouteConfig parses the optional `route:` + `receivers:` + `global:`
+// top-level YAML sections via the existing infrastructure/routing.Parse()
+// (task 1.3: alertmanager-parity).
+//
+// It intentionally re-reads the raw file bytes: the nested route/receiver
+// types only carry `yaml` tags (no `mapstructure`), so they cannot be
+// populated by viper.Unmarshal — they need their own gopkg.in/yaml.v3 pass,
+// which is exactly what routing.Parse() does.
+//
+// Absent `route:` section is not an error: it means the config still uses
+// the legacy single-receiver model, and cfg.Routing is left nil.
+func loadRouteConfig(configPath string, cfg *Config) error {
+	if configPath == "" || !viper.IsSet("route") {
+		return nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Consistent with LoadConfig's tolerant handling of a missing file.
+			return nil
+		}
+		return fmt.Errorf("failed to read config file for route parsing: %w", err)
+	}
+
+	parsed, err := infraroute.NewRouteConfigParser().Parse(data)
+	if err != nil {
+		return fmt.Errorf("invalid route/receivers configuration: %w", err)
+	}
+
+	cfg.Routing = parsed
+	return nil
 }
 
 // LoadConfigFromEnv loads configuration from environment variables only
