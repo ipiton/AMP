@@ -429,3 +429,94 @@ func TestValidateAlphanumHyphen(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateTelegramChatID(t *testing.T) {
+	parser := NewRouteConfigParser()
+
+	type TestChatID struct {
+		ChatID string `validate:"telegram_chat_id"`
+	}
+
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"valid numeric", "123456789", false},
+		{"valid negative (group)", "-1001234567890", false},
+		{"valid channel username", "@my_channel", false},
+		{"empty (allowed, required is separate)", "", false},
+		{"invalid bare at", "@", true},
+		{"invalid alpha", "not-a-chat-id", true},
+		{"invalid lone dash", "-", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := TestChatID{ChatID: tt.value}
+			err := parser.validator.Struct(c)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestRouteConfigParser_Parse_TelegramReceiver(t *testing.T) {
+	yamlConfig := `
+route:
+  receiver: default
+  routes:
+    - receiver: telegram
+      match:
+        severity: critical
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+  - name: telegram
+    telegram_configs:
+      - bot_token: "test-bot-token-fixture"
+        chat_id: "-1001234567890"
+`
+
+	parser := NewRouteConfigParser()
+	config, err := parser.Parse([]byte(yamlConfig))
+
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
+	receiver, ok := config.GetReceiver("telegram")
+	require.True(t, ok)
+	require.Len(t, receiver.TelegramConfigs, 1)
+
+	tgCfg := receiver.TelegramConfigs[0]
+	assert.Equal(t, "test-bot-token-fixture", tgCfg.BotToken)
+	assert.Equal(t, "-1001234567890", tgCfg.ChatID)
+	// Defaults should be applied
+	assert.Equal(t, "https://api.telegram.org", tgCfg.APIURL)
+	assert.Equal(t, "HTML", tgCfg.ParseMode)
+	require.NotNil(t, tgCfg.SendResolved)
+	assert.True(t, *tgCfg.SendResolved)
+}
+
+func TestRouteConfigParser_Parse_TelegramReceiver_MissingBotToken(t *testing.T) {
+	yamlConfig := `
+route:
+  receiver: telegram
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - chat_id: "-1001234567890"
+`
+
+	parser := NewRouteConfigParser()
+	_, err := parser.Parse([]byte(yamlConfig))
+
+	assert.Error(t, err)
+}
