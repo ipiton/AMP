@@ -18,23 +18,23 @@ type Config struct {
 	// Storage backend configuration (TN-201)
 	Storage StorageConfig `mapstructure:"storage"`
 
-	Server     ServerConfig     `mapstructure:"server"`
-	Database   DatabaseConfig   `mapstructure:"database"`
-	Redis      RedisConfig      `mapstructure:"redis"`
-	LLM        LLMConfig        `mapstructure:"llm"`
-	Log        LogConfig        `mapstructure:"log"`
-	Cache      CacheConfig      `mapstructure:"cache"`
-	Lock       LockConfig       `mapstructure:"lock"`
-	App        AppConfig        `mapstructure:"app"`
-	Metrics    MetricsConfig    `mapstructure:"metrics"`
-	Webhook    WebhookConfig    `mapstructure:"webhook"`
-	HTTPClient HTTPClientConfig `mapstructure:"http_client"`
-	Retry      RetryConfig      `mapstructure:"retry"`
-	Telemetry  TelemetryConfig  `mapstructure:"telemetry"`
-	Publishing PublishingConfig  `mapstructure:"publishing"`
-	Inhibition InhibitionConfig  `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	LLM           LLMConfig           `mapstructure:"llm"`
+	Log           LogConfig           `mapstructure:"log"`
+	Cache         CacheConfig         `mapstructure:"cache"`
+	Lock          LockConfig          `mapstructure:"lock"`
+	App           AppConfig           `mapstructure:"app"`
+	Metrics       MetricsConfig       `mapstructure:"metrics"`
+	Webhook       WebhookConfig       `mapstructure:"webhook"`
+	HTTPClient    HTTPClientConfig    `mapstructure:"http_client"`
+	Retry         RetryConfig         `mapstructure:"retry"`
+	Telemetry     TelemetryConfig     `mapstructure:"telemetry"`
+	Publishing    PublishingConfig    `mapstructure:"publishing"`
+	Inhibition    InhibitionConfig    `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
-	Receivers  []ReceiverConfig `mapstructure:"receivers"`
+	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
 }
 
 // InvestigationConfig controls the PHASE-5A async investigation pipeline.
@@ -116,7 +116,16 @@ type ServerConfig struct {
 	// ExternalURL is the public URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
 	// Used in notification callbacks: email footer, silence links, webhook externalURL field.
 	// Empty string disables callback links (graceful degradation).
-	ExternalURL string `mapstructure:"external_url"`
+	ExternalURL string                `mapstructure:"external_url"`
+	WebSocket   WebSocketServerConfig `mapstructure:"websocket"`
+}
+
+// WebSocketServerConfig holds WebSocket endpoint configuration
+type WebSocketServerConfig struct {
+	// AllowedOrigins is a comma-separated list of origins allowed to open
+	// WebSocket connections (e.g. "https://amp.example.com, https://grafana.example.com").
+	// Empty string restricts to same-origin requests; "*" allows any origin.
+	AllowedOrigins string `mapstructure:"allowed_origins"`
 }
 
 // DatabaseConfig holds database-related configuration
@@ -439,6 +448,7 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", "120s")
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
 	viper.SetDefault("server.external_url", "")
+	viper.SetDefault("server.websocket.allowed_origins", "")
 
 	// Database defaults
 	viper.SetDefault("database.driver", "postgres")

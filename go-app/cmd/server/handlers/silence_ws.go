@@ -6,20 +6,58 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// TODO: Implement proper origin check based on config
-		// For now, allow all origins (development mode)
-		return true
-	},
+// newOriginChecker builds a CheckOrigin function from a comma-separated
+// whitelist (config: server.websocket.allowed_origins). Empty list restricts
+// to same-origin requests; "*" allows any origin. Requests without an Origin
+// header (non-browser clients) are always allowed, matching gorilla defaults.
+func newOriginChecker(allowedOrigins string) func(r *http.Request) bool {
+	allowed := make(map[string]bool)
+	allowAll := false
+	for _, o := range strings.Split(allowedOrigins, ",") {
+		o = strings.TrimSpace(strings.ToLower(strings.TrimSuffix(o, "/")))
+		switch o {
+		case "":
+		case "*":
+			allowAll = true
+		default:
+			allowed[o] = true
+		}
+	}
+
+	return func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		if allowAll {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		if allowed[strings.ToLower(u.Scheme+"://"+u.Host)] {
+			return true
+		}
+		// Same-origin fallback: Origin host matches the request Host.
+		return strings.EqualFold(u.Host, r.Host)
+	}
+}
+
+func newUpgrader(allowedOrigins string) websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     newOriginChecker(allowedOrigins),
+	}
 }
 
 // WebSocketHub manages WebSocket connections and broadcasts events.
@@ -44,6 +82,9 @@ type WebSocketHub struct {
 
 	// Metrics (Phase 14 enhancement)
 	metrics *SilenceUIMetrics
+
+	// WebSocket upgrader with origin whitelist (config: server.websocket.allowed_origins)
+	upgrader websocket.Upgrader
 }
 
 // SilenceEvent represents a WebSocket event.
@@ -54,7 +95,9 @@ type SilenceEvent struct {
 }
 
 // NewWebSocketHub creates a new WebSocketHub.
-func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
+// allowedOrigins is a comma-separated origin whitelist
+// (config: server.websocket.allowed_origins); empty means same-origin only.
+func NewWebSocketHub(logger *slog.Logger, allowedOrigins string) *WebSocketHub {
 	return &WebSocketHub{
 		clients:    make(map[*websocket.Conn]bool),
 		broadcast:  make(chan SilenceEvent, 256), // Buffered channel
@@ -62,6 +105,7 @@ func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
 		unregister: make(chan *websocket.Conn),
 		logger:     logger,
 		metrics:    nil, // Will be set by SetMetrics if needed
+		upgrader:   newUpgrader(allowedOrigins),
 	}
 }
 
@@ -179,7 +223,7 @@ func (h *WebSocketHub) Broadcast(eventType string, data map[string]interface{}) 
 // GET /ws/silences
 func (h *WebSocketHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Upgrade HTTP connection to WebSocket
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("Failed to upgrade WebSocket connection",
 			"error", err,
