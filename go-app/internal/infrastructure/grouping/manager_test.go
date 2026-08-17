@@ -230,8 +230,8 @@ func TestRemoveAlertFromGroup_Success(t *testing.T) {
 	alert1 := createTestAlert("HighCPU-1", core.StatusFiring, map[string]string{})
 	alert2 := createTestAlert("HighCPU-2", core.StatusFiring, map[string]string{})
 
-	manager.AddAlertToGroup(ctx, alert1, groupKey)
-	manager.AddAlertToGroup(ctx, alert2, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert1, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert2, groupKey)
 
 	// Remove first alert
 	removed, err := manager.RemoveAlertFromGroup(ctx, alert1.Fingerprint, groupKey)
@@ -254,7 +254,7 @@ func TestRemoveAlertFromGroup_DeletesEmptyGroup(t *testing.T) {
 
 	// Add one alert
 	alert := createTestAlert("HighCPU", core.StatusFiring, map[string]string{})
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Remove alert
 	removed, err := manager.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
@@ -275,7 +275,7 @@ func TestRemoveAlertFromGroup_NotFound(t *testing.T) {
 
 	// Add alert
 	alert := createTestAlert("HighCPU", core.StatusFiring, map[string]string{})
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Try to remove non-existent alert
 	removed, err := manager.RemoveAlertFromGroup(ctx, "nonexistent", groupKey)
@@ -307,7 +307,7 @@ func TestGetGroup_Success(t *testing.T) {
 	alert := createTestAlert("HighCPU", core.StatusFiring, map[string]string{})
 
 	// Add alert
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Get group
 	group, err := manager.GetGroup(ctx, groupKey)
@@ -334,7 +334,7 @@ func TestGetGroup_ReturnsCopy(t *testing.T) {
 	alert := createTestAlert("HighCPU", core.StatusFiring, map[string]string{})
 
 	// Add alert
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Get group twice
 	group1, err1 := manager.GetGroup(ctx, groupKey)
@@ -375,8 +375,8 @@ func TestListGroups_MultipleGroups(t *testing.T) {
 	alert1 := createTestAlert("HighCPU", core.StatusFiring, map[string]string{})
 	alert2 := createTestAlert("DiskFull", core.StatusFiring, map[string]string{})
 
-	manager.AddAlertToGroup(ctx, alert1, GroupKey("alertname=HighCPU"))
-	manager.AddAlertToGroup(ctx, alert2, GroupKey("alertname=DiskFull"))
+	_, _ = manager.AddAlertToGroup(ctx, alert1, GroupKey("alertname=HighCPU"))
+	_, _ = manager.AddAlertToGroup(ctx, alert2, GroupKey("alertname=DiskFull"))
 
 	// List all groups
 	groups, err := manager.ListGroups(ctx, nil)
@@ -393,8 +393,8 @@ func TestListGroups_WithStateFilter(t *testing.T) {
 	firingAlert := createTestAlert("Firing", core.StatusFiring, map[string]string{})
 	resolvedAlert := createTestAlert("Resolved", core.StatusResolved, map[string]string{})
 
-	manager.AddAlertToGroup(ctx, firingAlert, GroupKey("alertname=Firing"))
-	manager.AddAlertToGroup(ctx, resolvedAlert, GroupKey("alertname=Resolved"))
+	_, _ = manager.AddAlertToGroup(ctx, firingAlert, GroupKey("alertname=Firing"))
+	_, _ = manager.AddAlertToGroup(ctx, resolvedAlert, GroupKey("alertname=Resolved"))
 
 	// Filter for firing groups
 	firingState := GroupStateFiring
@@ -416,7 +416,7 @@ func TestListGroups_WithPagination(t *testing.T) {
 	// Add 5 groups
 	for i := 0; i < 5; i++ {
 		alert := createTestAlert("Alert"+string(rune(i)), core.StatusFiring, map[string]string{})
-		manager.AddAlertToGroup(ctx, alert, GroupKey("group_"+string(rune(i))))
+		_, _ = manager.AddAlertToGroup(ctx, alert, GroupKey("group_"+string(rune(i))))
 	}
 
 	// Get first page (limit 2)
@@ -450,7 +450,7 @@ func TestGetGroupByFingerprint_Success(t *testing.T) {
 	alert := createTestAlert("HighCPU", core.StatusFiring, map[string]string{})
 
 	// Add alert
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Find group by fingerprint
 	foundKey, group, err := manager.GetGroupByFingerprint(ctx, alert.Fingerprint)
@@ -478,13 +478,13 @@ func TestCleanupExpiredGroups_ExpiredByResolvedTime(t *testing.T) {
 	alert := createTestAlert("Expired", core.StatusResolved, map[string]string{})
 
 	// Add resolved alert
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Manually set resolved time to 2 hours ago (TN-125: use storage)
 	group, _ := manager.storage.Load(ctx, groupKey)
 	twoHoursAgo := time.Now().Add(-2 * time.Hour)
 	group.Metadata.ResolvedAt = &twoHoursAgo
-	manager.storage.Store(ctx, group)
+	_ = manager.storage.Store(ctx, group)
 
 	// Cleanup with maxAge=1 hour
 	deleted, err := manager.CleanupExpiredGroups(ctx, 1*time.Hour)
@@ -504,12 +504,12 @@ func TestCleanupExpiredGroups_ExpiredByUpdateTime(t *testing.T) {
 	alert := createTestAlert("Stale", core.StatusFiring, map[string]string{})
 
 	// Add alert
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	// Manually set updated time to 2 hours ago (TN-125: use storage)
 	group, _ := manager.storage.Load(ctx, groupKey)
 	group.Metadata.UpdatedAt = time.Now().Add(-2 * time.Hour)
-	manager.storage.Store(ctx, group)
+	_ = manager.storage.Store(ctx, group)
 
 	// Cleanup with maxAge=1 hour
 	deleted, err := manager.CleanupExpiredGroups(ctx, 1*time.Hour)
@@ -523,7 +523,7 @@ func TestCleanupExpiredGroups_NoExpiredGroups(t *testing.T) {
 
 	// Add fresh group
 	alert := createTestAlert("Fresh", core.StatusFiring, map[string]string{})
-	manager.AddAlertToGroup(ctx, alert, GroupKey("alertname=Fresh"))
+	_, _ = manager.AddAlertToGroup(ctx, alert, GroupKey("alertname=Fresh"))
 
 	// Cleanup with maxAge=1 hour
 	deleted, err := manager.CleanupExpiredGroups(ctx, 1*time.Hour)
@@ -547,8 +547,8 @@ func TestUpdateGroupState_AllFiring(t *testing.T) {
 	alert1 := createTestAlert("Test-1", core.StatusFiring, map[string]string{})
 	alert2 := createTestAlert("Test-2", core.StatusFiring, map[string]string{})
 
-	manager.AddAlertToGroup(ctx, alert1, groupKey)
-	manager.AddAlertToGroup(ctx, alert2, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert1, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert2, groupKey)
 
 	// Update state
 	group, err := manager.UpdateGroupState(ctx, groupKey)
@@ -568,8 +568,8 @@ func TestUpdateGroupState_AllResolved(t *testing.T) {
 	alert1 := createTestAlert("Test-1", core.StatusResolved, map[string]string{})
 	alert2 := createTestAlert("Test-2", core.StatusResolved, map[string]string{})
 
-	manager.AddAlertToGroup(ctx, alert1, groupKey)
-	manager.AddAlertToGroup(ctx, alert2, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert1, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert2, groupKey)
 
 	// Update state
 	group, err := manager.UpdateGroupState(ctx, groupKey)
@@ -589,8 +589,8 @@ func TestUpdateGroupState_Mixed(t *testing.T) {
 	firingAlert := createTestAlert("Firing", core.StatusFiring, map[string]string{})
 	resolvedAlert := createTestAlert("Resolved", core.StatusResolved, map[string]string{})
 
-	manager.AddAlertToGroup(ctx, firingAlert, groupKey)
-	manager.AddAlertToGroup(ctx, resolvedAlert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, firingAlert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, resolvedAlert, groupKey)
 
 	// Update state
 	group, err := manager.UpdateGroupState(ctx, groupKey)
@@ -619,7 +619,7 @@ func TestGetMetrics_WithGroups(t *testing.T) {
 	// Add groups with different sizes
 	for i := 0; i < 3; i++ {
 		alert := createTestAlert("Alert"+string(rune(i)), core.StatusFiring, map[string]string{})
-		manager.AddAlertToGroup(ctx, alert, GroupKey("group_"+string(rune(i))))
+		_, _ = manager.AddAlertToGroup(ctx, alert, GroupKey("group_"+string(rune(i))))
 	}
 
 	metrics, err := manager.GetMetrics(ctx)
@@ -639,8 +639,8 @@ func TestGetStats_WithOperations(t *testing.T) {
 	alert := createTestAlert("Test", core.StatusFiring, map[string]string{})
 	groupKey := GroupKey("alertname=Test")
 
-	manager.AddAlertToGroup(ctx, alert, groupKey)
-	manager.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
 
 	// Get stats
 	stats, err := manager.GetStats(ctx)
@@ -669,10 +669,10 @@ func createTestManagerWithPublisher(t *testing.T, pub GroupNotificationPublisher
 	keyGen := NewGroupKeyGenerator()
 	config := &GroupingConfig{
 		Route: &Route{
-			Receiver:      "default",
-			GroupBy:       []string{"alertname"},
-			GroupWait:     &Duration{10 * time.Millisecond},
-			GroupInterval: &Duration{10 * time.Millisecond},
+			Receiver:       "default",
+			GroupBy:        []string{"alertname"},
+			GroupWait:      &Duration{10 * time.Millisecond},
+			GroupInterval:  &Duration{10 * time.Millisecond},
 			RepeatInterval: &Duration{10 * time.Millisecond},
 		},
 	}
@@ -725,8 +725,8 @@ func TestPublishGroupAlerts_CallsPublisherForEachAlert(t *testing.T) {
 	alert1 := createTestAlert("A1", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
 	alert2 := createTestAlert("A2", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
 
-	manager.AddAlertToGroup(ctx, alert1, groupKey)
-	manager.AddAlertToGroup(ctx, alert2, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert1, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert2, groupKey)
 
 	group, err := manager.GetGroup(ctx, groupKey)
 	require.NoError(t, err)
@@ -744,7 +744,7 @@ func TestPublishGroupAlerts_NilPublisher(t *testing.T) {
 
 	groupKey := GroupKey("alertname=TestAlert")
 	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	group, err := manager.GetGroup(ctx, groupKey)
 	require.NoError(t, err)
@@ -764,7 +764,7 @@ func TestOnGroupWaitExpired_TriggersNotification(t *testing.T) {
 
 	groupKey := GroupKey("alertname=TestAlert")
 	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	group, err := manager.GetGroup(ctx, groupKey)
 	require.NoError(t, err)
@@ -784,7 +784,7 @@ func TestOnGroupIntervalExpired_TriggersNotification(t *testing.T) {
 
 	groupKey := GroupKey("alertname=TestAlert")
 	alert := createTestAlert("B", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	group, err := manager.GetGroup(ctx, groupKey)
 	require.NoError(t, err)
@@ -804,7 +804,7 @@ func TestOnRepeatIntervalExpired_TriggersNotification(t *testing.T) {
 
 	groupKey := GroupKey("alertname=TestAlert")
 	alert := createTestAlert("C", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
-	manager.AddAlertToGroup(ctx, alert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 	group, err := manager.GetGroup(ctx, groupKey)
 	require.NoError(t, err)

@@ -15,8 +15,8 @@ import (
 
 // openAIFunction maps an investigation ToolDefinition to the OpenAI function object.
 type openAIFunction struct {
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
 	Parameters  inv.JSONSchemaObject `json:"parameters"`
 }
 
@@ -28,11 +28,11 @@ type openAITool struct {
 
 // openAIChatMessage is a single message in the OpenAI chat format.
 type openAIChatMessage struct {
-	Role       string              `json:"role"`
-	Content    string              `json:"content,omitempty"`
-	ToolCalls  []openAIToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID string              `json:"tool_call_id,omitempty"`
-	Name       string              `json:"name,omitempty"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Name       string           `json:"name,omitempty"`
 }
 
 type openAIToolCall struct {
@@ -111,7 +111,7 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	if err != nil {
 		return nil, fmt.Errorf("tools request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

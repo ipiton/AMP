@@ -70,7 +70,7 @@ func BenchmarkAddAlertToGroup_ExistingGroup(b *testing.B) {
 	// Pre-create a group
 	firstAlert := createBenchmarkAlert("Base", core.StatusFiring)
 	groupKey := GroupKey("alertname=Base,namespace=prod")
-	manager.AddAlertToGroup(ctx, firstAlert, groupKey)
+	_, _ = manager.AddAlertToGroup(ctx, firstAlert, groupKey)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -90,7 +90,7 @@ func BenchmarkGetGroup(b *testing.B) {
 	for i := 0; i < 100; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	targetKey := GroupKey("alertname=Alert50,namespace=prod")
@@ -111,7 +111,7 @@ func BenchmarkListGroups_Small(b *testing.B) {
 	for i := 0; i < 100; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	b.ResetTimer()
@@ -130,7 +130,7 @@ func BenchmarkListGroups_Large(b *testing.B) {
 	for i := 0; i < 1000; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	b.ResetTimer()
@@ -153,7 +153,7 @@ func BenchmarkListGroups_WithFilters(b *testing.B) {
 		}
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), status)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	firingState := GroupStateFiring
@@ -179,7 +179,7 @@ func BenchmarkRemoveAlertFromGroup(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		alert.Fingerprint = fmt.Sprintf("fp_remove_%d", i)
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	b.ResetTimer()
@@ -199,14 +199,14 @@ func BenchmarkCleanupExpiredGroups(b *testing.B) {
 	for i := 0; i < 100; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusResolved)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 		// Mark as expired (TN-125: use storage)
 		group, _ := manager.storage.Load(ctx, groupKey)
 		twoHoursAgo := time.Now().Add(-2 * time.Hour)
 		group.Metadata.ResolvedAt = &twoHoursAgo
 		group.Metadata.UpdatedAt = twoHoursAgo
-		manager.storage.Store(ctx, group)
+		_ = manager.storage.Store(ctx, group)
 	}
 
 	b.ResetTimer()
@@ -227,7 +227,7 @@ func BenchmarkGetGroupByFingerprint(b *testing.B) {
 	for i := 0; i < 1000; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 
 		if i == 500 {
 			targetFingerprint = alert.Fingerprint
@@ -255,7 +255,7 @@ func BenchmarkGetMetrics(b *testing.B) {
 		for j := 0; j < alertsPerGroup; j++ {
 			alert := createBenchmarkAlert(fmt.Sprintf("Alert%d-%d", i, j), core.StatusFiring)
 			alert.Fingerprint = fmt.Sprintf("fp_%d_%d", i, j)
-			manager.AddAlertToGroup(ctx, alert, groupKey)
+			_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 		}
 	}
 
@@ -276,7 +276,7 @@ func BenchmarkGetStats(b *testing.B) {
 	for i := 0; i < 500; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	b.ResetTimer()
@@ -315,7 +315,7 @@ func BenchmarkConcurrentReads_Parallel(b *testing.B) {
 	for i := 0; i < 100; i++ {
 		alert := createBenchmarkAlert(fmt.Sprintf("Alert%d", i), core.StatusFiring)
 		groupKey := GroupKey(fmt.Sprintf("alertname=Alert%d,namespace=prod", i))
-		manager.AddAlertToGroup(ctx, alert, groupKey)
+		_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
 	}
 
 	b.RunParallel(func(pb *testing.PB) {

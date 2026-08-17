@@ -20,18 +20,6 @@ func newTestStateManager(t *testing.T) *DefaultStateManager {
 	return NewDefaultStateManager(nil, logger, nil)
 }
 
-// Helper function to create a test state manager with a unique namespace (for metrics tests)
-func newTestStateManagerWithMetrics(t *testing.T, namespace string) *DefaultStateManager {
-	t.Helper()
-
-	logger := slog.Default()
-
-	// Note: We skip metrics here to avoid duplicate registration issues
-	// In integration tests, we can test metrics properly
-	_ = namespace // Prevent unused variable warning
-	return NewDefaultStateManager(nil, logger, nil)
-}
-
 // Helper function to create a test inhibition state
 func newTestState(targetFP, sourceFP, ruleName string) *InhibitionState {
 	return &InhibitionState{

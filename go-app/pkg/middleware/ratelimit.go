@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -129,7 +130,7 @@ func (rl *RateLimiter) cleanup() {
 		}
 	}
 
-	if rl.logger.Enabled(nil, slog.LevelDebug) {
+	if rl.logger.Enabled(context.Background(), slog.LevelDebug) {
 		rl.logger.Debug("Rate limiter cleanup completed", "active_ips", len(rl.ipLimiters))
 	}
 }

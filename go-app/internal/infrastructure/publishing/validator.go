@@ -490,12 +490,12 @@ func FormatValidationErrors(errors []ValidationError) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Validation failed with %d error(s):\n", len(errors)))
+	fmt.Fprintf(&sb, "Validation failed with %d error(s):\n", len(errors))
 
 	for i, err := range errors {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, err.Error()))
+		fmt.Fprintf(&sb, "%d. %s\n", i+1, err.Error())
 		if err.Suggestion != "" {
-			sb.WriteString(fmt.Sprintf("   Suggestion: %s\n", err.Suggestion))
+			fmt.Fprintf(&sb, "   Suggestion: %s\n", err.Suggestion)
 		}
 	}
 

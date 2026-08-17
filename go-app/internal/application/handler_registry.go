@@ -152,14 +152,14 @@ func (r *HandlerRegistry) registerHealthHandlers(mux *http.ServeMux) {
 	// GET /healthz (liveness probe)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
 
 	// GET /readyz (readiness probe)
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		// TODO: Check if services are ready
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Ready"))
+		_, _ = w.Write([]byte("Ready"))
 	})
 
 	r.logger.Info("✅ Health endpoints registered (GET /healthz, GET /readyz)")

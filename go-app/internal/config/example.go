@@ -29,10 +29,10 @@ func ExampleLoadConfig() {
 // ExampleLoadConfigFromEnv demonstrates loading config from environment only
 func ExampleLoadConfigFromEnv() {
 	// Set some environment variables
-	os.Setenv("SERVER_PORT", "9090")
-	os.Setenv("DATABASE_HOST", "prod-db.example.com")
-	os.Setenv("APP_ENVIRONMENT", "production")
-	os.Setenv("APP_DEBUG", "false")
+	_ = os.Setenv("SERVER_PORT", "9090")
+	_ = os.Setenv("DATABASE_HOST", "prod-db.example.com")
+	_ = os.Setenv("APP_ENVIRONMENT", "production")
+	_ = os.Setenv("APP_DEBUG", "false")
 
 	// Load configuration from environment
 	cfg, err := LoadConfigFromEnv()
@@ -139,9 +139,9 @@ func ExampleConfigWithDefaults() {
 // ExampleConfigOverride demonstrates how environment variables override file values
 func ExampleConfigOverride() {
 	// Set environment variables
-	os.Setenv("SERVER_PORT", "9090")
-	os.Setenv("DATABASE_HOST", "env-override.example.com")
-	os.Setenv("REDIS_ADDR", "env-redis.example.com:6380")
+	_ = os.Setenv("SERVER_PORT", "9090")
+	_ = os.Setenv("DATABASE_HOST", "env-override.example.com")
+	_ = os.Setenv("REDIS_ADDR", "env-redis.example.com:6380")
 
 	// Load config from file (env vars will override)
 	cfg, err := LoadConfig("config.yaml")

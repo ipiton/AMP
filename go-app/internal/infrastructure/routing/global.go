@@ -112,9 +112,7 @@ func (h *HTTPConfig) Defaults() {
 	if h.RequestTimeout == 0 {
 		h.RequestTimeout = 30 * time.Second
 	}
-	if h.TLSConfig != nil {
-		// No defaults for TLSConfig currently
-	}
+	// No defaults for h.TLSConfig currently
 }
 
 // Clone creates a deep copy.

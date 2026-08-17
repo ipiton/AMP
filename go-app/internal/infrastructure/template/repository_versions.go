@@ -121,7 +121,7 @@ func (r *DefaultTemplateRepository) ListVersions(
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query versions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Scan results
 	versions := make([]*domain.TemplateVersion, 0, filters.Limit)
@@ -206,7 +206,7 @@ func (r *DefaultTemplateRepository) CountByType(ctx context.Context) (map[string
 	if err != nil {
 		return nil, fmt.Errorf("failed to count by type: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]int)
 	for rows.Next() {

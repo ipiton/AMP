@@ -86,7 +86,7 @@ func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 }
 
 func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, externalURL string, w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	if processor == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{

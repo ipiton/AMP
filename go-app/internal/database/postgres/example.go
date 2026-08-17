@@ -76,10 +76,10 @@ func ExampleUsage() {
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM pg_stat_activity").Scan(&count)
 		if err != nil {
 			log.Printf("Transaction query failed: %v", err)
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx)
 		} else {
 			fmt.Printf("📊 Active connections in database: %d\n", count)
-			tx.Commit(ctx)
+			_ = tx.Commit(ctx)
 		}
 	}
 
@@ -139,7 +139,7 @@ func ExampleWithRetry() {
 		}
 	}
 
-	pool.Disconnect(ctx)
+	_ = pool.Disconnect(ctx)
 }
 
 // ExampleWithCircuitBreaker демонстрирует использование circuit breaker
@@ -194,6 +194,6 @@ func ExampleWithCircuitBreaker() {
 	fmt.Printf("Failure count: %d\n", cb.GetFailureCount())
 
 	if pool.IsConnected() {
-		pool.Disconnect(ctx)
+		_ = pool.Disconnect(ctx)
 	}
 }

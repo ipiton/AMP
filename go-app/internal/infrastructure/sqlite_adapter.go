@@ -76,7 +76,7 @@ func (s *SQLiteDatabase) Connect(ctx context.Context) error {
 
 	// Включаем foreign keys
 	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
@@ -87,7 +87,7 @@ func (s *SQLiteDatabase) Connect(ctx context.Context) error {
 
 	// Тестируем соединение
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to ping SQLite database: %w", err)
 	}
 
@@ -451,7 +451,7 @@ func (s *SQLiteDatabase) ListAlerts(ctx context.Context, filters *core.AlertFilt
 	if err != nil {
 		return nil, fmt.Errorf("failed to query alerts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var alerts []*core.Alert
 	for rows.Next() {
@@ -612,7 +612,7 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get status stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var status string
@@ -633,7 +633,7 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get severity stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var severity string
@@ -654,7 +654,7 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get namespace stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var namespace string
@@ -831,7 +831,7 @@ func (s *SQLiteDatabase) GetPublishingHistory(ctx context.Context, fingerprint s
 	if err != nil {
 		return nil, fmt.Errorf("failed to query publishing history: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []*core.PublishingLog
 	for rows.Next() {

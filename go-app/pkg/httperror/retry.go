@@ -275,12 +275,6 @@ func AsHTTPError(err error, target **HTTPAPIError) bool {
 
 // asHTTPErrorImpl does the actual errors.As call
 func asHTTPErrorImpl(err error, target **HTTPAPIError) bool {
-	type httpAPIError interface {
-		error
-		IsRetryable() bool
-		IsRateLimit() bool
-	}
-
 	// First try direct assertion
 	if e, ok := err.(*HTTPAPIError); ok {
 		*target = e

@@ -131,7 +131,7 @@ func (c *defaultRootlyIncidentsClient) CreateIncident(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	if resp.StatusCode != http.StatusCreated {
@@ -192,7 +192,7 @@ func (c *defaultRootlyIncidentsClient) UpdateIncident(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	if resp.StatusCode != http.StatusOK {
@@ -253,7 +253,7 @@ func (c *defaultRootlyIncidentsClient) ResolveIncident(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response (200 OK or 409 Conflict if already resolved)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {

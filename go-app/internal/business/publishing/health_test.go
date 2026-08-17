@@ -494,7 +494,7 @@ func TestHealthMonitor_DegradedState(t *testing.T) {
 	if err := monitor.Start(); err != nil {
 		t.Fatalf("Failed to start monitor: %v", err)
 	}
-	defer monitor.Stop(time.Second)
+	defer func() { _ = monitor.Stop(time.Second) }()
 
 	// Wait for checks to complete
 	time.Sleep(300 * time.Millisecond)
@@ -618,13 +618,4 @@ func createTestDiscoveryManager(t *testing.T, targets map[string]*core.Publishin
 	discovery.SetTargets(targetList)
 
 	return discovery
-}
-
-// createTestHealthMonitorWith creates health monitor with custom discovery and config.
-func createTestHealthMonitorWith(discoveryMgr TargetDiscoveryManager, config HealthConfig) (HealthMonitor, error) {
-	// Create metrics manually to avoid nil pointer
-	promReg := prometheus.NewRegistry()
-	registry := v2.NewRegistry(v2.WithPrometheusRegisterer(promReg))
-	metrics := registry.Publishing
-	return NewHealthMonitor(discoveryMgr, config, slog.Default(), metrics)
 }

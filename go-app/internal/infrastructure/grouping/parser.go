@@ -320,7 +320,4 @@ func validateDurationRangeTag(fl validator.FieldLevel) bool {
 const (
 	// maxRouteDepth is the maximum allowed nesting depth for routes
 	maxRouteDepth = 10
-
-	// maxConfigSize is the maximum allowed size for config files (10MB)
-	maxConfigSize = 10 * 1024 * 1024
 )

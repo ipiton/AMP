@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
 // DefaultTimerManager implements GroupTimerManager using Go timers + Redis persistence.

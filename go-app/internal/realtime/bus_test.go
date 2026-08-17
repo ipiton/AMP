@@ -88,7 +88,7 @@ func TestDefaultEventBus_Subscribe(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	subscriber := newMockSubscriber("test-1")
 	err = bus.Subscribe(subscriber)
@@ -103,7 +103,7 @@ func TestDefaultEventBus_Unsubscribe(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	subscriber := newMockSubscriber("test-1")
 	err = bus.Subscribe(subscriber)
@@ -122,7 +122,7 @@ func TestDefaultEventBus_Publish(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	subscriber := newMockSubscriber("test-1")
 	err = bus.Subscribe(subscriber)
@@ -148,7 +148,7 @@ func TestDefaultEventBus_MultipleSubscribers(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	subscriber1 := newMockSubscriber("test-1")
 	subscriber2 := newMockSubscriber("test-2")
@@ -182,7 +182,7 @@ func TestDefaultEventBus_EventSequence(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	subscriber := newMockSubscriber("test-1")
 	err = bus.Subscribe(subscriber)
@@ -214,7 +214,7 @@ func TestDefaultEventBus_ChannelFull(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	// Fill the channel (capacity 1000)
 	// We'll publish events slowly to fill the channel
@@ -262,7 +262,7 @@ func TestDefaultEventBus_ConcurrentSubscribe(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	var wg sync.WaitGroup
 	subscribers := make([]*mockSubscriber, 100)
@@ -290,7 +290,7 @@ func TestDefaultEventBus_ConcurrentPublish(t *testing.T) {
 
 	err := bus.Start(ctx)
 	require.NoError(t, err)
-	defer bus.Stop(context.Background())
+	defer func() { _ = bus.Stop(context.Background()) }()
 
 	subscriber := newMockSubscriber("test-1")
 	err = bus.Subscribe(subscriber)

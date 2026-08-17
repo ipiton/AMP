@@ -101,7 +101,7 @@ func TestSQLiteDatabase_Migrate(t *testing.T) {
 
 	err = db.Connect(ctx)
 	require.NoError(t, err)
-	defer db.Disconnect(ctx)
+	defer func() { _ = db.Disconnect(ctx) }()
 
 	// Выполняем миграцию
 	err = db.MigrateUp(ctx)
@@ -120,7 +120,7 @@ func TestSQLiteDatabase_Migrate(t *testing.T) {
 	// Проверяем, что индексы созданы для alerts
 	rows, err := db.Query(ctx, "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='alerts'")
 	require.NoError(t, err)
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var indexes []string
 	for rows.Next() {
@@ -153,7 +153,7 @@ func TestSQLiteDatabase_CRUD(t *testing.T) {
 
 	err = db.Connect(ctx)
 	require.NoError(t, err)
-	defer db.Disconnect(ctx)
+	defer func() { _ = db.Disconnect(ctx) }()
 
 	err = db.MigrateUp(ctx)
 	require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestSQLiteDatabase_Transaction(t *testing.T) {
 
 	err = db.Connect(ctx)
 	require.NoError(t, err)
-	defer db.Disconnect(ctx)
+	defer func() { _ = db.Disconnect(ctx) }()
 
 	err = db.MigrateUp(ctx)
 	require.NoError(t, err)
@@ -313,7 +313,7 @@ func TestSQLiteDatabase_Health(t *testing.T) {
 
 	err = db.Connect(ctx)
 	require.NoError(t, err)
-	defer db.Disconnect(ctx)
+	defer func() { _ = db.Disconnect(ctx) }()
 
 	// Health должен работать после подключения
 	err = db.Health(ctx)
@@ -337,7 +337,7 @@ func TestSQLiteDatabase_Query(t *testing.T) {
 
 	err = db.Connect(ctx)
 	require.NoError(t, err)
-	defer db.Disconnect(ctx)
+	defer func() { _ = db.Disconnect(ctx) }()
 
 	err = db.MigrateUp(ctx)
 	require.NoError(t, err)
@@ -412,7 +412,7 @@ func BenchmarkSQLiteDatabase_CRUD(b *testing.B) {
 	ctx := context.Background()
 	err = db.Connect(ctx)
 	require.NoError(b, err)
-	defer db.Disconnect(ctx)
+	defer func() { _ = db.Disconnect(ctx) }()
 
 	err = db.MigrateUp(ctx)
 	require.NoError(b, err)

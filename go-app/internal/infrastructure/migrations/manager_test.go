@@ -18,13 +18,13 @@ func TestMigrationManager_Connect(t *testing.T) {
 	// Создаем временную SQLite базу данных для тестов
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -49,13 +49,13 @@ func TestMigrationManager_Status(t *testing.T) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -69,7 +69,7 @@ func TestMigrationManager_Status(t *testing.T) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(t, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	// Получаем статус миграций
 	statuses, err := manager.Status(ctx)
@@ -85,13 +85,13 @@ func TestMigrationManager_Version(t *testing.T) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -105,7 +105,7 @@ func TestMigrationManager_Version(t *testing.T) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(t, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	// Получаем версию
 	version, err := manager.Version(ctx)
@@ -121,13 +121,13 @@ func TestMigrationManager_Up(t *testing.T) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -141,7 +141,7 @@ func TestMigrationManager_Up(t *testing.T) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(t, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	// Применяем миграции
 	err = manager.Up(ctx)
@@ -158,13 +158,13 @@ func TestMigrationManager_Down(t *testing.T) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -178,7 +178,7 @@ func TestMigrationManager_Down(t *testing.T) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(t, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	// Сначала применяем миграции
 	err = manager.Up(ctx)
@@ -204,13 +204,13 @@ func TestMigrationManager_Validate(t *testing.T) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -224,7 +224,7 @@ func TestMigrationManager_Validate(t *testing.T) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(t, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	// Валидируем миграции
 	err = manager.Validate(ctx)
@@ -236,13 +236,13 @@ func TestMigrationManager_List(t *testing.T) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelWarn,
 		})),
@@ -256,7 +256,7 @@ func TestMigrationManager_List(t *testing.T) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(t, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	// Получаем список миграций
 	migrations, err := manager.List(ctx)
@@ -365,18 +365,18 @@ func TestLoadConfig(t *testing.T) {
 		// Восстанавливаем оригинальные переменные
 		for key, value := range originalEnv {
 			if value == "" {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key)
 			} else {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			}
 		}
 	}()
 
 	// Устанавливаем тестовые переменные окружения
-	os.Setenv("MIGRATION_DRIVER", "sqlite")
-	os.Setenv("MIGRATION_DSN", ":memory:")
-	os.Setenv("MIGRATION_DIR", "test_migrations")
-	os.Setenv("MIGRATION_VERBOSE", "true")
+	_ = os.Setenv("MIGRATION_DRIVER", "sqlite")
+	_ = os.Setenv("MIGRATION_DSN", ":memory:")
+	_ = os.Setenv("MIGRATION_DIR", "test_migrations")
+	_ = os.Setenv("MIGRATION_VERBOSE", "true")
 
 	config, err := LoadConfig()
 	assert.NoError(t, err)
@@ -392,13 +392,13 @@ func BenchmarkMigrationManager_Up(b *testing.B) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(b, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelError,
 		})),
@@ -412,13 +412,13 @@ func BenchmarkMigrationManager_Up(b *testing.B) {
 	// Подключаемся к БД
 	err = manager.Connect(ctx)
 	require.NoError(b, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		// Откатываем миграции для чистого состояния
-		manager.Down(ctx)
+		_ = manager.Down(ctx)
 
 		// Применяем миграции
 		err = manager.Up(ctx)
@@ -431,13 +431,13 @@ func BenchmarkMigrationManager_Status(b *testing.B) {
 	// Создаем временную SQLite базу данных
 	db, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(b, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	config := &MigrationConfig{
 		Driver:  "sqlite3",
 		Dialect: "sqlite3",
 		DSN:     ":memory:",
-		Dir:    "./testdata/migrations",
+		Dir:     "./testdata/migrations",
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelError,
 		})),
@@ -451,7 +451,7 @@ func BenchmarkMigrationManager_Status(b *testing.B) {
 	// Подключаемся к БД и применяем миграции
 	err = manager.Connect(ctx)
 	require.NoError(b, err)
-	defer manager.Disconnect(ctx)
+	defer func() { _ = manager.Disconnect(ctx) }()
 
 	err = manager.Up(ctx)
 	require.NoError(b, err)

@@ -140,6 +140,9 @@ func benchmarkConcurrentProcessing(b *testing.B, numTargets int) {
 		for result := range results {
 			collected = append(collected, result)
 		}
+		if len(collected) != len(targets) {
+			b.Fatalf("collected %d results, want %d", len(collected), len(targets))
+		}
 	}
 }
 
@@ -243,6 +246,9 @@ func benchmarkChannelOperations(b *testing.B, numItems int) {
 		collected := make([]TargetPublishResult, 0, numItems)
 		for result := range results {
 			collected = append(collected, result)
+		}
+		if len(collected) != numItems {
+			b.Fatalf("collected %d results, want %d", len(collected), numItems)
 		}
 	}
 }

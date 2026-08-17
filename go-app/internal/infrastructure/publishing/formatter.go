@@ -508,7 +508,7 @@ func (f *DefaultAlertFormatter) formatWebhook(enrichedAlert *core.EnrichedAlert)
 	if enrichedAlert.Classification != nil {
 		classificationJSON, _ := json.Marshal(enrichedAlert.Classification)
 		var classificationMap map[string]any
-		json.Unmarshal(classificationJSON, &classificationMap)
+		_ = json.Unmarshal(classificationJSON, &classificationMap)
 		payload["classification"] = classificationMap
 	}
 

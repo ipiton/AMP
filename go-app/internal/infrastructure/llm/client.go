@@ -249,7 +249,7 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body
 	body, err := io.ReadAll(resp.Body)
@@ -352,7 +352,7 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -418,7 +418,7 @@ func (c *HTTPLLMClient) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("LLM service unhealthy: status %d", resp.StatusCode)
@@ -537,7 +537,7 @@ Return ONLY valid JSON with these keys:
 	if err != nil {
 		return nil, fmt.Errorf("investigation request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

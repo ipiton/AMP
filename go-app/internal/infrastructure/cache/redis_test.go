@@ -36,7 +36,7 @@ func setupTestRedis(t *testing.T) (*RedisCache, *miniredis.Miniredis) {
 func TestRedisCache_Get(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "test_key"
@@ -65,7 +65,7 @@ func TestRedisCache_Get(t *testing.T) {
 func TestRedisCache_Set(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -125,7 +125,7 @@ func TestRedisCache_Set(t *testing.T) {
 func TestRedisCache_Delete(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "delete_key"
@@ -156,7 +156,7 @@ func TestRedisCache_Delete(t *testing.T) {
 func TestRedisCache_Exists(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "exists_key"
@@ -182,7 +182,7 @@ func TestRedisCache_Exists(t *testing.T) {
 func TestRedisCache_TTL(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "ttl_key"
@@ -210,7 +210,7 @@ func TestRedisCache_TTL(t *testing.T) {
 func TestRedisCache_Expire(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 	key := "expire_key"
@@ -242,7 +242,7 @@ func TestRedisCache_Expire(t *testing.T) {
 func TestRedisCache_HealthCheck(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -260,7 +260,7 @@ func TestRedisCache_HealthCheck(t *testing.T) {
 func TestRedisCache_Flush(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -296,7 +296,7 @@ func TestRedisCache_Flush(t *testing.T) {
 func TestRedisCache_GetStats(t *testing.T) {
 	cache, mr := setupTestRedis(t)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -398,7 +398,7 @@ func TestCacheConfig_Validate(t *testing.T) {
 func BenchmarkRedisCache_Get(b *testing.B) {
 	cache, mr := setupTestRedis(nil)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 
@@ -420,7 +420,7 @@ func BenchmarkRedisCache_Get(b *testing.B) {
 func BenchmarkRedisCache_Set(b *testing.B) {
 	cache, mr := setupTestRedis(nil)
 	defer mr.Close()
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	ctx := context.Background()
 

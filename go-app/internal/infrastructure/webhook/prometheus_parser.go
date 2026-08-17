@@ -91,19 +91,20 @@ func (p *prometheusParser) Parse(data []byte) (*AlertmanagerWebhook, error) {
 
 	// Parse Prometheus JSON based on detected format
 	var webhook PrometheusWebhook
-	if format == PrometheusFormatV1 {
+	switch format {
+	case PrometheusFormatV1:
 		// v1 format: array of alerts
 		var alerts []PrometheusAlert
 		if err := json.Unmarshal(data, &alerts); err != nil {
 			return nil, fmt.Errorf("failed to parse Prometheus v1 webhook JSON: %w", err)
 		}
 		webhook.Alerts = alerts
-	} else if format == PrometheusFormatV2 {
+	case PrometheusFormatV2:
 		// v2 format: object with groups
 		if err := json.Unmarshal(data, &webhook); err != nil {
 			return nil, fmt.Errorf("failed to parse Prometheus v2 webhook JSON: %w", err)
 		}
-	} else {
+	default:
 		return nil, fmt.Errorf("unsupported Prometheus format: %s", format)
 	}
 

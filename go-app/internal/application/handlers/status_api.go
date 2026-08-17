@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"os"
 	"runtime"
@@ -91,9 +89,4 @@ func ReceiversHandler(registry RegistryProvider) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, receivers)
 	}
-}
-
-func configSHA256(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(sum[:])
 }

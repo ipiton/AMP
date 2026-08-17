@@ -18,7 +18,7 @@ func TestWebhookHTTPClient_Post_Success(t *testing.T) {
 			t.Errorf("Expected POST, got %s", r.Method)
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	defer server.Close()
 

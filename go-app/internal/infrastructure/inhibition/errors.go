@@ -208,7 +208,7 @@ func (e *ConfigError) DetailedError() string {
 	sb.WriteString(":\n")
 
 	for i, err := range e.Errors {
-		sb.WriteString(fmt.Sprintf("  %d. %v\n", i+1, err))
+		fmt.Fprintf(&sb, "  %d. %v\n", i+1, err)
 	}
 
 	return sb.String()

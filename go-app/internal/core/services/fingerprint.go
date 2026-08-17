@@ -297,7 +297,7 @@ func ValidateFingerprint(fingerprint string, algorithm FingerprintAlgorithm) boo
 
 	// Check if all characters are valid hex
 	for _, c := range fingerprint {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return false
 		}
 	}

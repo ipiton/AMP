@@ -192,7 +192,7 @@ func TestInMemoryTimerStorage_AcquireLock_Conflict(t *testing.T) {
 
 	lockID1, release1, err := storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	require.NoError(t, err)
-	defer release1()
+	defer func() { _ = release1() }()
 
 	_, _, err = storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	assert.ErrorIs(t, err, ErrLockAlreadyAcquired)
@@ -213,7 +213,7 @@ func TestInMemoryTimerStorage_AcquireLock_Release(t *testing.T) {
 	// Should be able to acquire again after release
 	_, release2, err := storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	assert.NoError(t, err)
-	defer release2()
+	defer func() { _ = release2() }()
 }
 
 // TestInMemoryTimerStorage_AcquireLock_Expired tests expired lock replacement
@@ -231,7 +231,7 @@ func TestInMemoryTimerStorage_AcquireLock_Expired(t *testing.T) {
 	// Should be able to acquire after expiration
 	_, release, err := storage.AcquireLock(ctx, "test-group", 30*time.Second)
 	assert.NoError(t, err)
-	defer release()
+	defer func() { _ = release() }()
 }
 
 // TestInMemoryTimerStorage_CleanupExpiredLocks tests lock cleanup
@@ -243,7 +243,7 @@ func TestInMemoryTimerStorage_CleanupExpiredLocks(t *testing.T) {
 	_, _, _ = storage.AcquireLock(ctx, "group-1", 1*time.Millisecond)
 	_, _, _ = storage.AcquireLock(ctx, "group-2", 1*time.Millisecond)
 	_, release3, _ := storage.AcquireLock(ctx, "group-3", 30*time.Second)
-	defer release3()
+	defer func() { _ = release3() }()
 
 	// Wait for expiration of first 2
 	time.Sleep(10 * time.Millisecond)
@@ -273,12 +273,12 @@ func TestInMemoryTimerStorage_Stats(t *testing.T) {
 			ExpiresAt: now.Add(30 * time.Second),
 			State:     TimerStateActive,
 		}
-		storage.SaveTimer(ctx, timer)
+		_ = storage.SaveTimer(ctx, timer)
 	}
 
 	// Add locks
-	storage.AcquireLock(ctx, "lock-1", 30*time.Second)
-	storage.AcquireLock(ctx, "lock-2", 30*time.Second)
+	_, _, _ = storage.AcquireLock(ctx, "lock-1", 30*time.Second)
+	_, _, _ = storage.AcquireLock(ctx, "lock-2", 30*time.Second)
 
 	stats := storage.Stats()
 	assert.Equal(t, 5, stats["timers"])
@@ -303,7 +303,7 @@ func TestInMemoryTimerStorage_ThreadSafety(t *testing.T) {
 				ExpiresAt: now.Add(30 * time.Second),
 				State:     TimerStateActive,
 			}
-			storage.SaveTimer(ctx, timer)
+			_ = storage.SaveTimer(ctx, timer)
 			done <- true
 		}(i)
 	}
@@ -407,7 +407,7 @@ func BenchmarkInMemoryTimerStorage_AcquireLock(b *testing.B) {
 		groupKey := GroupKey(string(rune('a' + (i % 26))))
 		lockID, release, err := storage.AcquireLock(ctx, groupKey, 30*time.Second)
 		if err == nil {
-			release()
+			_ = release()
 		}
 		_ = lockID
 	}

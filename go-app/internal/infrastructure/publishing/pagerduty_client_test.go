@@ -63,7 +63,7 @@ func TestTriggerEvent(t *testing.T) {
 				Message:  "Event processed",
 				DedupKey: "test-dedup-key",
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}))
 		defer server.Close()
 
@@ -119,7 +119,7 @@ func TestTriggerEvent(t *testing.T) {
 	t.Run("error - 400 bad request (no retry)", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":  "error",
 				"message": "Invalid request",
 				"errors":  []string{"Summary is required"},
@@ -151,7 +151,7 @@ func TestTriggerEvent(t *testing.T) {
 	t.Run("error - 401 unauthorized (no retry)", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":  "error",
 				"message": "Invalid routing key",
 			})
@@ -188,13 +188,13 @@ func TestTriggerEvent(t *testing.T) {
 			attempts++
 			if attempts <= 2 {
 				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"status":  "error",
 					"message": "Rate limit exceeded",
 				})
 			} else {
 				w.WriteHeader(http.StatusAccepted)
-				json.NewEncoder(w).Encode(EventResponse{
+				_ = json.NewEncoder(w).Encode(EventResponse{
 					Status:   "success",
 					DedupKey: "test-dedup",
 				})
@@ -230,7 +230,7 @@ func TestTriggerEvent(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts++
 			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":  "error",
 				"message": "Internal server error",
 			})
@@ -263,7 +263,7 @@ func TestTriggerEvent(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(100 * time.Millisecond)
 			w.WriteHeader(http.StatusAccepted)
-			json.NewEncoder(w).Encode(EventResponse{Status: "success"})
+			_ = json.NewEncoder(w).Encode(EventResponse{Status: "success"})
 		}))
 		defer server.Close()
 
@@ -298,13 +298,13 @@ func TestAcknowledgeEvent(t *testing.T) {
 			assert.Equal(t, "POST", r.Method)
 
 			var req AcknowledgeEventRequest
-			json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewDecoder(r.Body).Decode(&req)
 
 			assert.Equal(t, "acknowledge", req.EventAction)
 			assert.Equal(t, "test-dedup-key", req.DedupKey)
 
 			w.WriteHeader(http.StatusAccepted)
-			json.NewEncoder(w).Encode(EventResponse{
+			_ = json.NewEncoder(w).Encode(EventResponse{
 				Status:   "success",
 				DedupKey: req.DedupKey,
 			})
@@ -348,12 +348,12 @@ func TestResolveEvent(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ResolveEventRequest
-			json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewDecoder(r.Body).Decode(&req)
 
 			assert.Equal(t, "resolve", req.EventAction)
 
 			w.WriteHeader(http.StatusAccepted)
-			json.NewEncoder(w).Encode(EventResponse{
+			_ = json.NewEncoder(w).Encode(EventResponse{
 				Status:   "success",
 				DedupKey: req.DedupKey,
 			})
@@ -384,7 +384,7 @@ func TestSendChangeEvent(t *testing.T) {
 			assert.Equal(t, "/v2/change/enqueue", r.URL.Path)
 
 			w.WriteHeader(http.StatusAccepted)
-			json.NewEncoder(w).Encode(ChangeEventResponse{
+			_ = json.NewEncoder(w).Encode(ChangeEventResponse{
 				Status:  "success",
 				Message: "Change event processed",
 			})

@@ -89,7 +89,7 @@ func (t *DatabaseTool) Execute(ctx context.Context, params map[string]any) (inve
 		}
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("database: %s: %v", queryType, err)}, nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	results, err := scanRowsToMaps(rows)
 	if err != nil {

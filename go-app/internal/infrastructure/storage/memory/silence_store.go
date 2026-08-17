@@ -313,12 +313,7 @@ func normalizeSilenceInput(in *core.SilenceInput, now time.Time, allowPastEndsAt
 func toAPISilence(in *core.StoredSilenceState, now time.Time) core.APISilence {
 	matchers := make([]core.APISilenceMatcher, 0, len(in.Matchers))
 	for _, matcher := range in.Matchers {
-		matchers = append(matchers, core.APISilenceMatcher{
-			Name:    matcher.Name,
-			Value:   matcher.Value,
-			IsRegex: matcher.IsRegex,
-			IsEqual: matcher.IsEqual,
-		})
+		matchers = append(matchers, core.APISilenceMatcher(matcher))
 	}
 
 	return core.APISilence{

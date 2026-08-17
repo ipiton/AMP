@@ -79,7 +79,7 @@ func (s *PostgreSQLConfigStorage) Save(ctx context.Context, cfg *Config) (int64,
 	if err != nil {
 		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) // Rollback if not committed
+	defer func() { _ = tx.Rollback(ctx) }() // Rollback if not committed
 
 	// Get current max version
 	var currentVersion int64

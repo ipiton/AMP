@@ -19,7 +19,7 @@ func BenchmarkGetCurrentMode(b *testing.B) {
 	})
 
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -40,7 +40,7 @@ func BenchmarkIsMetricsOnly(b *testing.B) {
 	})
 
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -81,7 +81,7 @@ func BenchmarkGetModeMetrics(b *testing.B) {
 	})
 
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -102,7 +102,7 @@ func BenchmarkConcurrentGetCurrentMode(b *testing.B) {
 	})
 
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -125,7 +125,7 @@ func BenchmarkConcurrentIsMetricsOnly(b *testing.B) {
 	})
 
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -148,7 +148,7 @@ func BenchmarkModeManagerWithCaching(b *testing.B) {
 	})
 
 	modeManager := NewModeManager(stubDiscovery, logger, nil)
-	modeManager.CheckModeTransition()
+	_, _, _ = modeManager.CheckModeTransition()
 
 	b.Run("Sequential", func(b *testing.B) {
 		b.ReportAllocs()
