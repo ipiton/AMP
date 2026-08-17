@@ -103,8 +103,12 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 	if p.deduplication != nil {
 		dedupResult, err := p.deduplication.ProcessAlert(ctx, alert)
 		if err != nil {
+			// SPLIT-BRAIN-RISK: dedup owns the database write. Swallowing this
+			// error used to let the alert continue into the in-memory store and
+			// publishers while the DB had nothing — the two stores diverged
+			// silently. Fail the alert instead so the sender retries.
 			p.logger.Error("Deduplication failed", "error", err, "alert", alert.AlertName)
-			// Continue with processing even if deduplication fails (graceful degradation)
+			return fmt.Errorf("alert persistence failed: %w", err)
 		} else {
 			p.logger.Info("Deduplication result",
 				"action", dedupResult.Action,

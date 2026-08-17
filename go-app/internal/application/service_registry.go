@@ -225,6 +225,14 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 		return fmt.Errorf("storage initialization failed: %w", err)
 	}
 
+	// SPLIT-BRAIN-RISK: repopulate the in-memory alert store from the database
+	// so a restart doesn't serve an empty API while dedup silently drops
+	// re-fired alerts as duplicates. Non-fatal: boot continues on failure.
+	if err := r.rehydrateAlertStore(ctx); err != nil {
+		r.logger.Error("Alert store rehydration failed; API starts empty until alerts re-fire",
+			"error", err)
+	}
+
 	// Initialize Cache (Redis or Memory based on profile)
 	if err := r.initializeCache(ctx); err != nil {
 		r.logger.Error("Cache initialization failed", "error", err)
@@ -233,6 +241,72 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 
 	r.logger.Info("Infrastructure services initialized")
 	return nil
+}
+
+// rehydrateAlertStore loads firing alerts from persistent storage into the
+// in-memory AlertStore after a restart (SPLIT-BRAIN-RISK). The database is the
+// source of truth; memory is a read cache for the API.
+func (r *ServiceRegistry) rehydrateAlertStore(ctx context.Context) error {
+	if r.storage == nil || r.alertStore == nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	firing := core.StatusFiring
+	restored := 0
+
+	const pageSize = 1000
+	for offset := 0; ; offset += pageSize {
+		list, err := r.storage.ListAlerts(ctx, &core.AlertFilters{
+			Status: &firing,
+			Limit:  pageSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return fmt.Errorf("list alerts for rehydration: %w", err)
+		}
+		if list == nil || len(list.Alerts) == 0 {
+			break
+		}
+
+		apiAlerts := make([]core.APIAlert, 0, len(list.Alerts))
+		for _, alert := range list.Alerts {
+			apiAlerts = append(apiAlerts, persistedAlertToAPIAlert(alert))
+		}
+		if err := r.alertStore.RestoreFromPersistence(apiAlerts, now); err != nil {
+			return fmt.Errorf("restore alerts into memory store: %w", err)
+		}
+		restored += len(apiAlerts)
+
+		if len(list.Alerts) < pageSize {
+			break
+		}
+	}
+
+	if restored > 0 {
+		r.logger.Info("Alert store rehydrated from persistent storage", "alerts", restored)
+	}
+	return nil
+}
+
+// persistedAlertToAPIAlert converts a stored core.Alert into the APIAlert
+// shape expected by AlertStore.RestoreFromPersistence.
+func persistedAlertToAPIAlert(alert *core.Alert) core.APIAlert {
+	api := core.APIAlert{
+		Labels:      alert.Labels,
+		Annotations: alert.Annotations,
+		StartsAt:    alert.StartsAt.UTC().Format(time.RFC3339Nano),
+		Fingerprint: alert.Fingerprint,
+		Status:      string(alert.Status),
+	}
+	if alert.EndsAt != nil {
+		endsAt := alert.EndsAt.UTC().Format(time.RFC3339Nano)
+		api.EndsAt = &endsAt
+	}
+	if alert.GeneratorURL != nil {
+		api.GeneratorURL = *alert.GeneratorURL
+	}
+	return api
 }
 
 // initializeDatabase initializes the database connection.
