@@ -166,7 +166,10 @@ func TestParseSecret_ReceiverLabel_SingleName(t *testing.T) {
 	assert.Equal(t, []string{"slack-critical"}, parsed.Receivers)
 }
 
-func TestParseSecret_ReceiverLabel_MultipleNamesWithSpaces(t *testing.T) {
+func TestParseSecret_ReceiverAnnotation_MultipleNamesWithSpaces(t *testing.T) {
+	// Annotation is the primary, multi-name source: K8s label values can't
+	// contain commas, so this is the only way to scope a target to several
+	// receivers.
 	target := core.PublishingTarget{
 		Name:   "test-target",
 		Type:   "webhook",
@@ -179,7 +182,7 @@ func TestParseSecret_ReceiverLabel_MultipleNamesWithSpaces(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-secret",
 			Namespace: "default",
-			Labels: map[string]string{
+			Annotations: map[string]string{
 				AmpReceiverLabel: "slack-critical, pagerduty-oncall ,  team-b ",
 			},
 		},
@@ -193,7 +196,7 @@ func TestParseSecret_ReceiverLabel_MultipleNamesWithSpaces(t *testing.T) {
 	assert.Equal(t, []string{"slack-critical", "pagerduty-oncall", "team-b"}, parsed.Receivers)
 }
 
-func TestParseSecret_ReceiverLabel_AbsentMeansNoScoping(t *testing.T) {
+func TestParseSecret_ReceiverAnnotationWinsOverLabel(t *testing.T) {
 	target := core.PublishingTarget{
 		Name:   "test-target",
 		Type:   "webhook",
@@ -206,7 +209,37 @@ func TestParseSecret_ReceiverLabel_AbsentMeansNoScoping(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-secret",
 			Namespace: "default",
-			// No amp.receiver label at all
+			Annotations: map[string]string{
+				AmpReceiverLabel: "slack-critical,pagerduty-oncall",
+			},
+			Labels: map[string]string{
+				AmpReceiverLabel: "team-b",
+			},
+		},
+		Data: map[string][]byte{
+			"config": configJSON,
+		},
+	}
+
+	parsed, err := parseSecret(secret)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"slack-critical", "pagerduty-oncall"}, parsed.Receivers)
+}
+
+func TestParseSecret_ReceiverLabel_NeitherAnnotationNorLabelMeansNoScoping(t *testing.T) {
+	target := core.PublishingTarget{
+		Name:   "test-target",
+		Type:   "webhook",
+		URL:    "https://example.com",
+		Format: "webhook",
+	}
+	configJSON, _ := json.Marshal(target)
+
+	secret := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-secret",
+			Namespace: "default",
+			// No amp.receiver annotation or label at all
 		},
 		Data: map[string][]byte{
 			"config": configJSON,

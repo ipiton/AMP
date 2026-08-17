@@ -52,6 +52,14 @@ func TestTargetMatchesReceiver_LabelPresentNoMatchNoFallback(t *testing.T) {
 	assert.False(t, targetMatchesReceiver(target, "team-b"))
 }
 
+func TestTargetMatchesReceiver_CaseSensitive(t *testing.T) {
+	// Matching is exact/case-sensitive by design: "Slack-Critical" must NOT
+	// match a Receivers list containing "slack-critical", and (Name being
+	// unrelated to either casing) must not match via the name fallback.
+	target := &core.PublishingTarget{Name: "webhook-1", Receivers: []string{"slack-critical"}}
+	assert.False(t, targetMatchesReceiver(target, "Slack-Critical"))
+}
+
 // Test Suite: PublishingCoordinator.PublishToTargets receiver filtering (integration)
 
 func newTestCoordinator(t *testing.T, discovery TargetDiscoveryManager) *PublishingCoordinator {

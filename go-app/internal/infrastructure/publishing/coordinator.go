@@ -168,6 +168,11 @@ func (c *PublishingCoordinator) PublishToAll(ctx context.Context, enrichedAlert 
 //  3. Target has NO Receivers list at all (no label on the Secret) ->
 //     matches unconditionally. Backward compatibility: targets predating
 //     receiver-based routing keep receiving every alert.
+//
+// Matching is exact and case-SENSITIVE (both the Receivers-list membership
+// check and the Name fallback): "Slack-Critical" does NOT match
+// "slack-critical". This is intentional — Alertmanager receiver names are
+// case-sensitive — not an oversight.
 func targetMatchesReceiver(target *core.PublishingTarget, receiverName string) bool {
 	if receiverName == "" {
 		return true
