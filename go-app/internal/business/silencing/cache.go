@@ -257,6 +257,63 @@ func (c *silenceCache) Rebuild(silences []*silencing.Silence) {
 	c.size = len(c.silences)
 }
 
+// MarkExpired transitions cached entries whose EndsAt has passed to
+// SilenceStatusExpired (thread-safe write).
+//
+// Used by the GC worker right after repository.ExpireSilences so that expired
+// silences stop suppressing alerts immediately instead of lingering as
+// "active" in the cache until the next full sync (SPLIT-BRAIN-RISK slice 2).
+//
+// Entries are replaced with copies rather than mutated in place: readers may
+// still hold pointers returned by Get/GetByStatus/GetAll.
+//
+// Returns the number of entries transitioned.
+func (c *silenceCache) MarkExpired(now time.Time) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	updated := 0
+	for id, silence := range c.silences {
+		if silence.Status != silencing.SilenceStatusExpired && !now.Before(silence.EndsAt) {
+			clone := *silence
+			clone.Status = silencing.SilenceStatusExpired
+			c.silences[id] = &clone
+			updated++
+		}
+	}
+
+	if updated > 0 {
+		c.rebuildStatusIndex()
+	}
+	return updated
+}
+
+// DeleteExpiredBefore removes expired entries whose EndsAt is before the
+// cutoff (thread-safe write).
+//
+// Used by the GC worker after the hard-delete phase so the cache does not
+// keep rows that no longer exist in the database.
+//
+// Returns the number of entries removed.
+func (c *silenceCache) DeleteExpiredBefore(cutoff time.Time) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	removed := 0
+	for id, silence := range c.silences {
+		if silence.Status == silencing.SilenceStatusExpired && silence.EndsAt.Before(cutoff) {
+			delete(c.silences, id)
+			removed++
+		}
+	}
+
+	if removed > 0 {
+		c.rebuildStatusIndex()
+		c.size = len(c.silences)
+	}
+	return removed
+}
+
 // rebuildStatusIndex rebuilds the status index from scratch.
 //
 // This is an internal helper method that MUST be called with c.mu.Lock() held.
