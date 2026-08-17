@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,11 @@ func TestInitializeGrouping_LiteUsesMemoryStorageAndIsFunctional(t *testing.T) {
 	if r.groupTimerManager == nil {
 		t.Fatalf("groupTimerManager must be initialized in lite profile with grouping enabled")
 	}
+	// Lite is memory-by-design, not a degradation from an expected Redis
+	// path — no degraded reason should be recorded for it.
+	if len(r.degradedReasons) != 0 {
+		t.Fatalf("degradedReasons = %v, want empty for lite profile (memory storage is by design)", r.degradedReasons)
+	}
 
 	// Functional round-trip: memory storage actually works end to end.
 	alert := &core.Alert{
@@ -140,6 +146,75 @@ func TestInitializeGrouping_StandardWithoutRedisCacheFallsBackToMemory(t *testin
 	}
 	if r.groupTimerManager == nil {
 		t.Fatalf("groupTimerManager must still be initialized via memory-storage fallback")
+	}
+	// This fallback is by-design (no Redis cache configured at all) and
+	// already covered by Step 1's initializeCache degraded reason when it
+	// happens for real — newGroupingStorage must not add a second, redundant
+	// reason for the same underlying situation.
+	if len(r.degradedReasons) != 0 {
+		t.Fatalf("degradedReasons = %v, want empty for the by-design no-Redis-cache fallback", r.degradedReasons)
+	}
+}
+
+// TestInitializeGrouping_StandardRedisStorageFailureAddsDegradedReason
+// verifies the fix-round-1 finding: when the cache backend IS a live
+// *cache.RedisCache (so Step 1's initializeCache degraded reason was never
+// recorded) but the grouping-specific Redis storage fails to initialize
+// anyway, initializeGrouping must add its own degraded reason so the
+// resulting "no timer persistence across restart" state is visible via
+// /health//readiness instead of vanishing into a Warn log only.
+func TestInitializeGrouping_StandardRedisStorageFailureAddsDegradedReason(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run() error = %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	redisCache, err := infracache.NewRedisCache(&infracache.CacheConfig{
+		Addr:        mr.Addr(),
+		PoolSize:    5,
+		DialTimeout: time.Second,
+		ReadTimeout: time.Second,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewRedisCache() error = %v", err)
+	}
+	defer func() { _ = redisCache.Close() }()
+
+	// Kill the backing Redis server AFTER the cache was constructed
+	// successfully: r.cache is still a live *cache.RedisCache (branch 1's
+	// type check passes, so Step 1's degraded reason path is not in play),
+	// but grouping's own NewRedisGroupStorage — which pings Redis during
+	// construction — now fails.
+	mr.Close()
+
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileStandard,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing:  minimalRouteTree(),
+	}
+	r := newTestRegistryForGrouping(cfg)
+	r.cache = redisCache
+
+	if err := r.initializeGrouping(context.Background()); err != nil {
+		t.Fatalf("initializeGrouping() error = %v, want graceful fallback to memory storage", err)
+	}
+	if r.groupManager == nil || r.groupTimerManager == nil {
+		t.Fatalf("groupManager/groupTimerManager must still be initialized via memory-storage fallback")
+	}
+
+	if len(r.degradedReasons) == 0 {
+		t.Fatalf("degradedReasons must be non-empty: a healthy-cache-typed but failing Redis storage init must be reported")
+	}
+	found := false
+	for _, reason := range r.degradedReasons {
+		if strings.Contains(reason, "grouping storage degraded") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("degradedReasons = %v, want an entry containing %q", r.degradedReasons, "grouping storage degraded")
 	}
 }
 

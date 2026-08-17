@@ -888,7 +888,15 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 
 	r.logger.Info("Initializing grouping subsystem...")
 
-	groupStorage, timerStorage := r.newGroupingStorage(ctx)
+	groupStorage, timerStorage, storageErr := r.newGroupingStorage(ctx)
+	if storageErr != nil {
+		// Redis cache itself is healthy (otherwise Step 1's initializeCache
+		// already recorded a degraded reason and newGroupingStorage returns
+		// nil here) — this is a grouping-specific storage failure that would
+		// otherwise be invisible in /health//readiness: timers won't survive
+		// a restart until Redis-backed storage comes back.
+		r.addDegradedReason("grouping storage degraded: Redis init failed, using in-memory (no timer persistence across restart): %v", storageErr)
+	}
 
 	// Build the TimerManager first, without a GroupManager reference — see
 	// SetGroupManager below for why.
@@ -947,12 +955,19 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 // already-initialized cache client) for standard, in-memory for lite.
 //
 // The standard profile degrades to in-memory storage — rather than failing
-// grouping init outright — when the cache backend isn't a live
-// *cache.RedisCache: initializeCache (Step 1) already falls back to
-// infrastructurecache.NewMemoryCache on Redis failure and records a degraded
-// reason there, so grouping following the same fallback is consistent
-// graceful degradation, not a second silent failure mode.
-func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.GroupStorage, grouping.TimerStorage) {
+// grouping init outright — for two distinct reasons, only one of which is
+// already visible elsewhere:
+//
+//   - Cache backend isn't a live *cache.RedisCache: initializeCache (Step 1)
+//     already fell back to infrastructurecache.NewMemoryCache on Redis
+//     failure and recorded its own degraded reason there. Returning a nil
+//     error here avoids a duplicate report for the same underlying failure.
+//   - Redis cache IS healthy, but the grouping-specific RedisGroupStorage or
+//     RedisTimerStorage failed to initialize anyway (e.g. ACL/permission
+//     issue scoped to those keys). Step 1 has no visibility into this, so it
+//     would otherwise vanish silently — the non-nil error return lets
+//     initializeGrouping add a degraded reason for /health//readiness.
+func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.GroupStorage, grouping.TimerStorage, error) {
 	if r.config.Profile == appconfig.ProfileStandard {
 		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
 			groupStorage, err := grouping.NewRedisGroupStorage(ctx, &grouping.RedisGroupStorageConfig{
@@ -962,20 +977,31 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 			})
 			if err != nil {
 				r.logger.Warn("Redis group storage init failed, grouping falls back to in-memory storage", "error", err)
-			} else {
-				timerStorage, err := grouping.NewRedisTimerStorage(redisCache, r.logger)
-				if err != nil {
-					r.logger.Warn("Redis timer storage init failed, grouping falls back to in-memory storage", "error", err)
-				} else {
-					r.logger.Info("Grouping subsystem using Redis storage")
-					return groupStorage, timerStorage
-				}
+				groupStorage, timerStorage := r.memoryGroupingStorage()
+				return groupStorage, timerStorage, fmt.Errorf("redis group storage init failed: %w", err)
 			}
-		} else {
-			r.logger.Warn("Standard profile without a Redis cache backend, grouping falls back to in-memory storage")
+
+			timerStorage, err := grouping.NewRedisTimerStorage(redisCache, r.logger)
+			if err != nil {
+				r.logger.Warn("Redis timer storage init failed, grouping falls back to in-memory storage", "error", err)
+				memGroupStorage, memTimerStorage := r.memoryGroupingStorage()
+				return memGroupStorage, memTimerStorage, fmt.Errorf("redis timer storage init failed: %w", err)
+			}
+
+			r.logger.Info("Grouping subsystem using Redis storage")
+			return groupStorage, timerStorage, nil
 		}
+
+		r.logger.Warn("Standard profile without a Redis cache backend, grouping falls back to in-memory storage")
 	}
 
+	groupStorage, timerStorage := r.memoryGroupingStorage()
+	return groupStorage, timerStorage, nil
+}
+
+// memoryGroupingStorage builds the in-memory group + timer storage pair used
+// by the lite profile and by every standard-profile fallback path above.
+func (r *ServiceRegistry) memoryGroupingStorage() (grouping.GroupStorage, grouping.TimerStorage) {
 	r.logger.Info("Grouping subsystem using in-memory storage")
 	return grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{
 		Logger:  r.logger,
