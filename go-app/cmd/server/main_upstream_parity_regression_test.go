@@ -163,14 +163,22 @@ func TestUpstreamParity_StatusClusterSettlingWindow(t *testing.T) {
 }
 
 func TestUpstreamParity_ReceiversConfiguredListOnly(t *testing.T) {
+	// task 1.3: route:/receivers: parse via infrastructure/routing.Parse(),
+	// which requires every route.receiver to resolve in receivers: and
+	// every receiver to define at least one notification config. The
+	// pre-1.3 fixture's nested "team-db" child route referenced a receiver
+	// absent from receivers: — dropped here since that is now a load error
+	// rather than a silent no-op.
 	configPath := writeTestConfigFile(t, `
 route:
   receiver: "team-zeta"
-  routes:
-    - receiver: "team-db"
 receivers:
   - name: "team-zeta"
+    webhook_configs:
+      - url: https://example.com/webhook
   - name: "team-alpha"
+    webhook_configs:
+      - url: https://example.com/webhook
 `)
 	t.Setenv(runtimeConfigFileEnv, configPath)
 
@@ -285,9 +293,16 @@ func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {
 }
 
 func TestUpstreamParity_ReloadSuccessReturnsOKBody(t *testing.T) {
+	// task 1.3: route:/receivers: parse via infrastructure/routing.Parse(),
+	// which requires the root route's receiver to resolve in receivers: and
+	// that receiver to define at least one notification config.
 	configPath := writeTestConfigFile(t, `
 route:
   receiver: "initial-receiver"
+receivers:
+  - name: "initial-receiver"
+    webhook_configs:
+      - url: https://example.com/webhook
 `)
 	t.Setenv(runtimeConfigFileEnv, configPath)
 

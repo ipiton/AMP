@@ -36,12 +36,17 @@ const validSilencePayload = `{
 	"comment": "maintenance window"
 }`
 
+// webhook_configs on "default" is required (task 1.3): route:/receivers:
+// now parse via infrastructure/routing.Parse(), which enforces that every
+// receiver defines at least one notification config.
 const validConfigPayload = `
 route:
   receiver: "default"
   group_by: ["alertname", "service", "namespace"]
 receivers:
   - name: "default"
+    webhook_configs:
+      - url: https://example.com/webhook
 `
 
 const unknownSilenceUUID = "00000000-0000-0000-0000-000000000001"
@@ -1220,16 +1225,23 @@ func TestPhase0ReloadInvalidConfigReturns500(t *testing.T) {
 }
 
 func TestPhase0ReceiversIncludeConfiguredNames(t *testing.T) {
+	// task 1.3: route:/receivers: parse via infrastructure/routing.Parse(),
+	// which requires every route.receiver to resolve in receivers: and every
+	// receiver to define at least one notification config. The nested
+	// "team-db"/"team-nested" child routes from the pre-1.3 fixture
+	// referenced receivers absent from receivers: on purpose (to prove they
+	// are excluded from /api/v2/receivers) — dropped here since an unknown
+	// receiver reference is now a load error rather than a silent no-op.
 	configPath := writeTestConfigFile(t, `
 route:
   receiver: "team-zeta"
-  routes:
-    - receiver: "team-db"
-      routes:
-        - receiver: "team-nested"
 receivers:
   - name: "team-zeta"
+    webhook_configs:
+      - url: https://example.com/webhook
   - name: "team-alpha"
+    webhook_configs:
+      - url: https://example.com/webhook
 `)
 	t.Setenv(runtimeConfigFileEnv, configPath)
 

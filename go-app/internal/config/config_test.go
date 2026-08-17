@@ -212,6 +212,187 @@ func TestLoadConfigFromEnv_PublishingEnvMapping(t *testing.T) {
 	assert.Equal(t, 45*time.Second, cfg.Publishing.Refresh.Timeout)
 }
 
+// ================================================================================
+// Task 1.3: route: + receivers: sections (parsed via infrastructure/routing.Parse)
+// ================================================================================
+
+func TestLoadConfig_RouteAndReceivers_Valid(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	yaml := `
+server:
+  port: 8080
+
+route:
+  receiver: default
+  group_by: [alertname, cluster]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: pagerduty-critical
+      match:
+        severity: critical
+      continue: true
+    - receiver: slack-warnings
+      matchers:
+        - 'severity =~ "warning|info"'
+      group_wait: 10s
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key: "01234567890123456789012345678901"
+  - name: slack-warnings
+    slack_configs:
+      - api_url: https://hooks.slack.example.com/services/x
+        channel: "#alerts"
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	require.True(t, cfg.HasRouteTree())
+	require.NotNil(t, cfg.Routing)
+	require.NotNil(t, cfg.Routing.Route)
+
+	assert.Equal(t, "default", cfg.Routing.Route.Receiver)
+	require.Len(t, cfg.Routing.Route.Routes, 2)
+	assert.Equal(t, "pagerduty-critical", cfg.Routing.Route.Routes[0].Receiver)
+	assert.True(t, cfg.Routing.Route.Routes[0].Continue)
+	assert.Equal(t, "slack-warnings", cfg.Routing.Route.Routes[1].Receiver)
+	assert.Equal(t, []string{`severity =~ "warning|info"`}, cfg.Routing.Route.Routes[1].Matchers)
+
+	require.Len(t, cfg.Routing.Receivers, 3)
+	recv, ok := cfg.Routing.GetReceiver("pagerduty-critical")
+	require.True(t, ok)
+	require.Len(t, recv.PagerDutyConfigs, 1)
+
+	// Legacy name-only Receivers field stays populated too (backward compat
+	// for callers like status_api/alerts handlers that only read names).
+	names := make([]string, 0, len(cfg.Receivers))
+	for _, r := range cfg.Receivers {
+		names = append(names, r.Name)
+	}
+	assert.ElementsMatch(t, []string{"default", "pagerduty-critical", "slack-warnings"}, names)
+}
+
+func TestLoadConfig_RouteAndReceivers_Absent(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	yaml := `
+server:
+  port: 8080
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	assert.False(t, cfg.HasRouteTree())
+	assert.Nil(t, cfg.Routing)
+
+	// Legacy single-receiver default stays intact.
+	require.Len(t, cfg.Receivers, 1)
+	assert.Equal(t, "default", cfg.Receivers[0].Name)
+}
+
+func TestLoadConfig_Route_UnknownReceiverRef(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	yaml := `
+route:
+  receiver: nonexistent
+  group_by: [alertname]
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "receiver 'nonexistent' not found")
+}
+
+func TestLoadConfig_Route_BadMatcherSyntax(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	// match_re carries an invalid regex — the one matcher-syntax error the
+	// existing routing.Parse() actually detects (free-form `matchers:`
+	// expression strings are not syntax-checked at parse time).
+	yaml := `
+route:
+  receiver: default
+  group_by: [alertname]
+  match_re:
+    service: "[invalid regex"
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "invalid regex")
+}
+
+func TestLoadConfig_Route_BadDuration(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	yaml := `
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: notaduration
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+}
+
+func TestLoadConfig_Route_MissingReceivers(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	yaml := `
+route:
+  receiver: default
+  group_by: [alertname]
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.Error(t, err)
+	assert.Nil(t, cfg)
+	assert.Contains(t, err.Error(), "at least one receiver")
+}
+
 func TestLoadConfig_ValidationError_PublishingQueue(t *testing.T) {
 	resetViper()
 
