@@ -17,11 +17,13 @@ func runInhibitionValidator(cfg *config.AlertmanagerConfig) *types.Result {
 
 func TestInhibitionValidator(t *testing.T) {
 	tests := []struct {
-		name         string
-		cfg          *config.AlertmanagerConfig
-		wantErrCode  string
-		wantWarnCode string
-		wantNoIssues bool
+		name           string
+		cfg            *config.AlertmanagerConfig
+		wantErrCode    string
+		wantErrCodes   []string // when a case needs to assert more than one error code
+		wantWarnCode   string
+		dontWantErrors bool // assert zero errors without requiring zero warnings too
+		wantNoIssues   bool
 	}{
 		{
 			name: "valid rule with equal labels",
@@ -37,7 +39,14 @@ func TestInhibitionValidator(t *testing.T) {
 			wantNoIssues: true,
 		},
 		{
-			name: "valid rule using new matchers list syntax",
+			// Fix round 1 (Phase 5 review, finding 2): source_matchers/
+			// target_matchers alone are NOT sufficient - the runtime
+			// inhibition loader (internal/infrastructure/inhibition) has
+			// no such fields and silently drops them, so a rule defined
+			// only this way would validate "clean" here and then load as
+			// a no-op rule at runtime. Both E150/E151 must fire, plus a
+			// W155 warning per side noting the list is unwired.
+			name: "matchers list syntax alone is not sufficient (not wired at runtime)",
 			cfg: &config.AlertmanagerConfig{
 				InhibitRules: []*config.InhibitRule{
 					{
@@ -47,7 +56,26 @@ func TestInhibitionValidator(t *testing.T) {
 					},
 				},
 			},
-			wantNoIssues: true,
+			wantErrCodes: []string{"E150", "E151"},
+			wantWarnCode: "W155",
+		},
+		{
+			// Matchers list alongside the legacy maps that actually
+			// satisfy E150/E151: no errors, but still warn per-side that
+			// the list content itself is inert at runtime.
+			name: "matchers list alongside legacy fields warns but does not block",
+			cfg: &config.AlertmanagerConfig{
+				InhibitRules: []*config.InhibitRule{
+					{
+						SourceMatch:    map[string]string{"alertname": "NodeDown"},
+						SourceMatchers: []string{"alertname=NodeDown"},
+						TargetMatch:    map[string]string{"alertname": "InstanceDown"},
+						Equal:          []string{"node"},
+					},
+				},
+			},
+			wantWarnCode:   "W155",
+			dontWantErrors: true,
 		},
 		{
 			name: "missing source matchers",
@@ -129,6 +157,14 @@ func TestInhibitionValidator(t *testing.T) {
 			}
 			if tt.wantErrCode != "" && !hasErrorCode(result, tt.wantErrCode) {
 				t.Fatalf("expected error code %s, got %+v", tt.wantErrCode, result.Errors)
+			}
+			for _, code := range tt.wantErrCodes {
+				if !hasErrorCode(result, code) {
+					t.Fatalf("expected error code %s, got %+v", code, result.Errors)
+				}
+			}
+			if tt.dontWantErrors && len(result.Errors) != 0 {
+				t.Fatalf("expected no errors, got %+v", result.Errors)
 			}
 			if tt.wantWarnCode != "" && !hasWarningCode(result, tt.wantWarnCode) {
 				t.Fatalf("expected warning code %s, got %+v", tt.wantWarnCode, result.Warnings)

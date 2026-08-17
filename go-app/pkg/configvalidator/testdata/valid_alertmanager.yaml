@@ -29,8 +29,20 @@ route:
         - severity=warning
 
 inhibit_rules:
-  - source_matchers:
+  # source_matchers/target_matchers are included to exercise the
+  # matchers:-list syntax parse path, but source_match/target_match are
+  # required alongside them: the runtime inhibition loader
+  # (internal/infrastructure/inhibition.InhibitionRule) has no
+  # matchers-list fields at all, so those two lines are what actually
+  # takes effect - this rule intentionally also triggers the W155
+  # "not wired at runtime" warning on both sides (warnings don't affect
+  # result.Valid, unlike errors).
+  - source_match:
+      severity: critical
+    source_matchers:
       - severity=critical
+    target_match:
+      severity: warning
     target_matchers:
       - severity=warning
     equal:

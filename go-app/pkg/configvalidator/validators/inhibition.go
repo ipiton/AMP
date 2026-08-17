@@ -15,6 +15,26 @@ import (
 // source_matchers/target_matchers list syntax), equal-label names, and the
 // "at least one condition per side" rule mirrored from
 // internal/infrastructure/inhibition/parser.go's validateSemantics.
+//
+// Runtime gap (fix round 1, Phase 5 review, ruling: do not add runtime
+// support in this batch): the real runtime type,
+// internal/infrastructure/inhibition.InhibitionRule, has no
+// SourceMatchers/TargetMatchers fields. yaml.Unmarshal against that type
+// silently drops matchers:-list content, InhibitionParser.Parse's
+// validateSemantics then errors ("at least one of source_match or
+// source_match_re required"), and internal/config/inhibition_adapter.go
+// swallows that error - so a rule expressed only via
+// source_matchers/target_matchers is silently missing at runtime even
+// though it looks structurally fine. (The swallowed-error path itself is
+// ledgered for task 5.4, not fixed here.)
+//
+// To avoid this validator saying "valid" for a config the runtime then
+// drops, source_matchers/target_matchers alone do NOT satisfy E150/E151
+// here - only the legacy source_match/source_match_re (target_match/
+// target_match_re) maps do, matching what the runtime loader actually
+// requires. The list-syntax fields are still syntax-checked (E153/E154)
+// and, whenever present, get a W155 warning noting they aren't wired to
+// the runtime loader yet.
 type InhibitionValidator struct {
 	options types.Options
 	logger  *slog.Logger
@@ -40,22 +60,30 @@ func (v *InhibitionValidator) Validate(_ context.Context, cfg *config.Alertmanag
 		}
 		path := fmt.Sprintf("inhibit_rules[%d]", i)
 
-		hasSource := len(rule.SourceMatch) > 0 || len(rule.SourceMatchRE) > 0 || len(rule.SourceMatchers) > 0
-		hasTarget := len(rule.TargetMatch) > 0 || len(rule.TargetMatchRE) > 0 || len(rule.TargetMatchers) > 0
+		// Only the legacy maps count toward "has a condition": they're the
+		// only forms internal/infrastructure/inhibition.InhibitionRule
+		// actually loads (see type doc above).
+		hasLegacySource := len(rule.SourceMatch) > 0 || len(rule.SourceMatchRE) > 0
+		hasLegacyTarget := len(rule.TargetMatch) > 0 || len(rule.TargetMatchRE) > 0
+		hasSourceMatchers := len(rule.SourceMatchers) > 0
+		hasTargetMatchers := len(rule.TargetMatchers) > 0
 
-		if !hasSource {
+		if !hasLegacySource {
 			result.AddError(newError("E150", "inhibit_rules", path,
-				"inhibit rule must specify source matchers",
-				"Define 'source_matchers' or 'source_match'/'source_match_re'"))
+				"inhibit rule must specify source_match or source_match_re",
+				"Define 'source_match' or 'source_match_re' (source_matchers is accepted for syntax checking but is not wired into the runtime inhibition loader yet)"))
 		}
-		if !hasTarget {
+		if !hasLegacyTarget {
 			result.AddError(newError("E151", "inhibit_rules", path,
-				"inhibit rule must specify target matchers",
-				"Define 'target_matchers' or 'target_match'/'target_match_re'"))
+				"inhibit rule must specify target_match or target_match_re",
+				"Define 'target_match' or 'target_match_re' (target_matchers is accepted for syntax checking but is not wired into the runtime inhibition loader yet)"))
 		}
 
 		v.validateSide(rule.SourceMatch, rule.SourceMatchRE, rule.SourceMatchers, path, "source", "E153", result)
 		v.validateSide(rule.TargetMatch, rule.TargetMatchRE, rule.TargetMatchers, path, "target", "E154", result)
+
+		v.noteMatchersNotWired(hasSourceMatchers, path+".source_matchers", result)
+		v.noteMatchersNotWired(hasTargetMatchers, path+".target_matchers", result)
 
 		for _, label := range rule.Equal {
 			if !isValidLabelName(label) {
@@ -65,7 +93,7 @@ func (v *InhibitionValidator) Validate(_ context.Context, cfg *config.Alertmanag
 			}
 		}
 
-		if hasSource && hasTarget && len(rule.Equal) == 0 {
+		if hasLegacySource && hasLegacyTarget && len(rule.Equal) == 0 {
 			result.AddWarning(newWarning("W154", "inhibit_rules", path+".equal",
 				"inhibit rule has no 'equal' labels",
 				"Add 'equal' labels to scope inhibition to matching alert instances"))
@@ -79,6 +107,20 @@ func (v *InhibitionValidator) Validate(_ context.Context, cfg *config.Alertmanag
 			}
 		}
 	}
+}
+
+// noteMatchersNotWired flags W155 whenever source_matchers/target_matchers
+// is present at all - even alongside a legacy match/match_re map that
+// already satisfies E150/E151 - because the list-syntax value is still
+// silently ignored by the runtime loader (see type doc above), which is
+// easy to miss if a legacy field happens to also be present.
+func (v *InhibitionValidator) noteMatchersNotWired(present bool, field string, result *types.Result) {
+	if !present {
+		return
+	}
+	result.AddWarning(newWarning("W155", "inhibit_rules", field,
+		"matchers list is accepted structurally but not wired into the runtime inhibition loader",
+		"Rule must also define the equivalent source_match/source_match_re (or target_match/target_match_re) for this condition to take effect at runtime"))
 }
 
 // validateSide validates one side (source or target) of an inhibit rule:

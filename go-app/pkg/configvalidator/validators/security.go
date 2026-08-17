@@ -11,12 +11,19 @@ import (
 
 // SecurityValidator scans the configuration for security best-practice
 // issues: disabled TLS verification, secrets written directly into the
-// config (mirroring internal/config/sanitizer.go's notion of which
-// fields are secret-shaped) and insecure plaintext webhook URLs
-// (mirroring internal/infrastructure/publishing/webhook_validator.go's
-// scheme/host checks). All findings here are warnings/suggestions, never
-// hard errors: EnableSecurity only gates whether this validator runs at
-// all (see validator.go), not the severity of what it finds.
+// config, and insecure plaintext webhook URLs (mirroring
+// internal/infrastructure/publishing/webhook_validator.go's scheme/host
+// checks). All findings here are warnings/suggestions, never hard
+// errors: EnableSecurity only gates whether this validator runs at all
+// (see validator.go), not the severity of what it finds.
+//
+// Note on the secret-field list below: internal/config/sanitizer.go only
+// redacts DB/Redis/LLM/webhook-auth passwords for the unrelated app
+// Config type (a different struct from Alertmanager's), so it isn't
+// literally reused here - the field list below (SMTP auth password,
+// PagerDuty service_key, OpsGenie/VictorOps api_key, WeChat api_secret)
+// is this validator's own, chosen using the same "flag values with no
+// *_file/env-var alternative" approach sanitizer.go takes.
 //
 // Scope decision: Slack/PagerDuty/OpsGenie/VictorOps webhook-style URLs
 // legitimately embed their auth token in the URL/api_key field itself
