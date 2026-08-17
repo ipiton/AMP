@@ -52,8 +52,17 @@ type DefaultTimerManager struct {
 	callbacks   []TimerCallback
 	callbacksMu sync.RWMutex
 
-	// Group manager for retrieving group snapshots
-	groupManager *DefaultGroupManager
+	// Group manager for retrieving group snapshots.
+	//
+	// May be nil after construction — see SetGroupManager (Task 2.2,
+	// alertmanager-parity), which breaks the GroupManager<->TimerManager
+	// construction cycle: TimerManager must exist before GroupManager can be
+	// built with it injected, but TimerManager needs a GroupManager reference
+	// for onTimerExpired's group snapshot lookup. Protected by groupManagerMu
+	// since it is written once after construction but read concurrently by
+	// timer-expiration goroutines.
+	groupManager   *DefaultGroupManager
+	groupManagerMu sync.RWMutex
 
 	// Configuration
 	config *TimerManagerConfig
@@ -110,7 +119,15 @@ type TimerManagerConfig struct {
 	// Storage implementation (Redis or in-memory)
 	Storage TimerStorage
 
-	// GroupManager for retrieving alert group snapshots
+	// GroupManager for retrieving alert group snapshots.
+	//
+	// Optional at construction time (Task 2.2, alertmanager-parity): pass nil
+	// here and call SetGroupManager once the GroupManager has been built with
+	// this TimerManager injected into DefaultGroupManagerConfig.TimerManager.
+	// This breaks the construction-time cycle between the two managers. It
+	// MUST be set (via this field or SetGroupManager) before any timer can
+	// expire — onTimerExpired logs an error and skips callback dispatch if it
+	// is still nil when a timer fires.
 	GroupManager *DefaultGroupManager
 
 	// Default durations (used if not specified in StartTimer)
@@ -151,9 +168,11 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 	if config.Storage == nil {
 		return nil, fmt.Errorf("storage is required")
 	}
-	if config.GroupManager == nil {
-		return nil, fmt.Errorf("group manager is required")
-	}
+	// GroupManager is optional here (Task 2.2): the caller may construct the
+	// TimerManager first and inject the GroupManager afterwards via
+	// SetGroupManager, breaking the GroupManager<->TimerManager construction
+	// cycle. A nil GroupManager at this point is not an error, only a
+	// deferred wiring step; onTimerExpired guards against it.
 
 	// Apply defaults
 	if config.DefaultGroupWait == 0 {
@@ -203,6 +222,32 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 		"max_concurrent_timers", config.MaxConcurrentTimers)
 
 	return manager, nil
+}
+
+// SetGroupManager injects the GroupManager after construction, breaking the
+// GroupManager<->TimerManager construction cycle (Task 2.2,
+// alertmanager-parity): GroupManager's constructor accepts an already-built
+// TimerManager (DefaultGroupManagerConfig.TimerManager, optional), but
+// TimerManager needs a GroupManager reference for onTimerExpired's group
+// snapshot lookup. Expected construction order:
+//
+//  1. timerManager, _  := NewDefaultTimerManager(TimerManagerConfig{...})       // GroupManager left nil
+//  2. groupManager, _  := NewDefaultGroupManager(ctx, DefaultGroupManagerConfig{TimerManager: timerManager, ...})
+//  3. _ = timerManager.SetGroupManager(groupManager)
+//
+// Must be called before RestoreTimers or any timer can expire; onTimerExpired
+// logs an error and skips callback dispatch (without panicking) if a timer
+// fires while groupManager is still nil.
+//
+// Thread-safe: safe to call concurrently with StartTimer/onTimerExpired.
+func (tm *DefaultTimerManager) SetGroupManager(gm *DefaultGroupManager) error {
+	if gm == nil {
+		return fmt.Errorf("group manager cannot be nil")
+	}
+	tm.groupManagerMu.Lock()
+	tm.groupManager = gm
+	tm.groupManagerMu.Unlock()
+	return nil
 }
 
 // StartTimer creates and starts a new timer for a group.
@@ -595,7 +640,25 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 	groupCtx, groupCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer groupCancel()
 
-	group, err := tm.groupManager.GetGroup(groupCtx, groupKey)
+	tm.groupManagerMu.RLock()
+	gm := tm.groupManager
+	tm.groupManagerMu.RUnlock()
+
+	if gm == nil {
+		// SetGroupManager (Task 2.2) was never called — the manager was
+		// either constructed with a nil GroupManager and never wired, or a
+		// timer fired before initialization completed. Log and skip rather
+		// than panic; the timer is still removed from active state below.
+		tm.logger.Error("Timer expired but no group manager is configured, skipping callback dispatch",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		tm.timersMu.Lock()
+		delete(tm.timers, groupKey)
+		tm.timersMu.Unlock()
+		return
+	}
+
+	group, err := gm.GetGroup(groupCtx, groupKey)
 	if err != nil {
 		tm.logger.Error("Failed to get group for timer expiration",
 			"group_key", groupKey,

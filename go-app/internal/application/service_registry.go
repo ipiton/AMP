@@ -21,6 +21,7 @@ import (
 	"github.com/ipiton/AMP/internal/database/postgres"
 	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	investigationinfra "github.com/ipiton/AMP/internal/infrastructure/investigation"
 	invtools "github.com/ipiton/AMP/internal/infrastructure/investigation/tools"
@@ -103,6 +104,15 @@ type ServiceRegistry struct {
 	// cfg.Routing is nil (no `route:` section — lite/legacy mode).
 	routeTreeManager *businessrouting.RouteTreeManager // hot-reloadable route tree
 	routeEvaluator   services.RouteEvaluator           // wired into AlertProcessorConfig.RouteEvaluator
+
+	// Grouping subsystem (task 2.2, alertmanager-parity): GroupManager (group
+	// lifecycle) + TimerManager (group_wait/group_interval/repeat_interval
+	// timers). Both nil unless cfg.Grouping.Enabled is true AND a route: tree
+	// is configured (grouping.enabled defaults to false; task 2.3 wires this
+	// into the alert ingest pipeline — until then it only runs background
+	// lifecycle: storage selection, timer restore, graceful shutdown).
+	groupManager      *grouping.DefaultGroupManager
+	groupTimerManager *grouping.DefaultTimerManager
 
 	// Business Services
 	k8sClient                  k8s.K8sClient
@@ -214,6 +224,15 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 		r.logger.Warn("Routing engine initialization failed, continuing without route-tree evaluation",
 			"error", err)
 		r.addDegradedReason("routing engine unavailable: %v", err)
+	}
+
+	// Step 2.7: Initialize grouping subsystem (non-fatal — graceful
+	// degradation). Task 2.2, alertmanager-parity. Disabled by default
+	// (grouping.enabled=false) and a clean skip without a route: tree.
+	if err := r.initializeGrouping(ctx); err != nil {
+		r.logger.Warn("Grouping subsystem initialization failed, continuing without alert grouping",
+			"error", err)
+		r.addDegradedReason("grouping subsystem unavailable: %v", err)
 	}
 
 	// Step 3: Initialize Business Services
@@ -830,6 +849,140 @@ func (r *ServiceRegistry) reloadRoutingTree() error {
 	return nil
 }
 
+// initializeGrouping wires the alert grouping subsystem (task 2.2,
+// alertmanager-parity): GroupManager (group lifecycle, storage-backed) +
+// TimerManager (group_wait/group_interval/repeat_interval timers), with
+// storage selected by deployment profile (Redis for standard, in-memory for
+// lite — newGroupingStorage below).
+//
+// Construction order breaks the GroupManager<->TimerManager cycle via
+// SetGroupManager (Task 2.2): the TimerManager is built first without a
+// GroupManager reference, then the GroupManager is built with the
+// TimerManager injected, then SetGroupManager wires the TimerManager's
+// reference back to the GroupManager.
+//
+// Non-fatal — mirrors initializeInhibition/initializeRouting: any failure
+// here degrades to "no grouping" rather than blocking startup. This method
+// does NOT touch the alert ingest pipeline — task 2.3 wires that. Today it
+// only starts background lifecycle: storage selection, timer restore
+// (RestoreTimers, HA recovery after a restart), and — via Shutdown in
+// ServiceRegistry.Shutdown — graceful teardown.
+//
+// Skip conditions (clean skip, no degradation):
+//   - cfg.Grouping.Enabled == false (default): subsystem fully disabled.
+//   - No route: tree configured (cfg.Routing == nil): BuildGroupingConfig
+//     returns ErrGroupingRequiresRouteTree — the grouping package has no
+//     config of its own for group_by/group_wait/group_interval/
+//     repeat_interval, so there is nothing to build it from.
+func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
+	if !r.config.Grouping.Enabled {
+		r.logger.Info("Grouping subsystem disabled (grouping.enabled=false)")
+		return nil
+	}
+
+	groupingCfg, err := r.config.BuildGroupingConfig()
+	if err != nil {
+		r.logger.Info("Grouping subsystem disabled: no route tree configured", "error", err)
+		return nil
+	}
+
+	r.logger.Info("Initializing grouping subsystem...")
+
+	groupStorage, timerStorage := r.newGroupingStorage(ctx)
+
+	// Build the TimerManager first, without a GroupManager reference — see
+	// SetGroupManager below for why.
+	timerManager, err := grouping.NewDefaultTimerManager(grouping.TimerManagerConfig{
+		Storage: timerStorage,
+		Logger:  r.logger,
+		Metrics: r.metrics,
+	})
+	if err != nil {
+		return fmt.Errorf("timer manager init failed: %w", err)
+	}
+
+	// Publisher is left nil: timer callbacks only log until task 2.3 wires
+	// the alert ingest pipeline through this subsystem (see
+	// GroupNotificationPublisher's doc comment in manager.go — nil is
+	// explicitly backwards-compatible: "no alerts are sent").
+	groupManager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
+		KeyGenerator: grouping.NewGroupKeyGenerator(),
+		Config:       groupingCfg,
+		Storage:      groupStorage,
+		TimerManager: timerManager,
+		Logger:       r.logger,
+		Metrics:      r.metrics,
+	})
+	if err != nil {
+		return fmt.Errorf("group manager init failed: %w", err)
+	}
+
+	// Break the GroupManager<->TimerManager construction cycle (Task 2.2):
+	// inject the now-built GroupManager into the already-built TimerManager.
+	if err := timerManager.SetGroupManager(groupManager); err != nil {
+		return fmt.Errorf("timer manager group manager injection failed: %w", err)
+	}
+
+	// Restore persisted timers after a restart (HA recovery). Harmless no-op
+	// for in-memory timer storage (nothing survives process restart there);
+	// meaningful for Redis-backed storage in the standard profile.
+	restoreCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	restored, missed, err := timerManager.RestoreTimers(restoreCtx)
+	cancel()
+	if err != nil {
+		r.logger.Warn("Timer restoration failed, continuing with no restored timers", "error", err)
+	} else {
+		r.logger.Info("Timer restoration completed", "restored", restored, "missed", missed)
+	}
+
+	r.groupManager = groupManager
+	r.groupTimerManager = timerManager
+
+	r.logger.Info("Grouping subsystem initialized")
+	return nil
+}
+
+// newGroupingStorage selects group + timer storage backends for the grouping
+// subsystem by deployment profile (task 2.2): Redis (reusing the
+// already-initialized cache client) for standard, in-memory for lite.
+//
+// The standard profile degrades to in-memory storage — rather than failing
+// grouping init outright — when the cache backend isn't a live
+// *cache.RedisCache: initializeCache (Step 1) already falls back to
+// infrastructurecache.NewMemoryCache on Redis failure and records a degraded
+// reason there, so grouping following the same fallback is consistent
+// graceful degradation, not a second silent failure mode.
+func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.GroupStorage, grouping.TimerStorage) {
+	if r.config.Profile == appconfig.ProfileStandard {
+		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
+			groupStorage, err := grouping.NewRedisGroupStorage(ctx, &grouping.RedisGroupStorageConfig{
+				Client:  redisCache.GetClient(),
+				Logger:  r.logger,
+				Metrics: r.metrics,
+			})
+			if err != nil {
+				r.logger.Warn("Redis group storage init failed, grouping falls back to in-memory storage", "error", err)
+			} else {
+				timerStorage, err := grouping.NewRedisTimerStorage(redisCache, r.logger)
+				if err != nil {
+					r.logger.Warn("Redis timer storage init failed, grouping falls back to in-memory storage", "error", err)
+				} else {
+					r.logger.Info("Grouping subsystem using Redis storage")
+					return groupStorage, timerStorage
+				}
+			}
+		} else {
+			r.logger.Warn("Standard profile without a Redis cache backend, grouping falls back to in-memory storage")
+		}
+	}
+
+	r.logger.Info("Grouping subsystem using in-memory storage")
+	return grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{
+		Logger:  r.logger,
+		Metrics: r.metrics,
+	}), grouping.NewInMemoryTimerStorage(r.logger)
+}
+
 // initializeInvestigation sets up the async investigation pipeline (PHASE-5B).
 // Only available in standard profile with a live PostgreSQL pool.
 func (r *ServiceRegistry) initializeInvestigation() error {
@@ -1019,6 +1172,21 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		}
 		r.silenceManager = nil
 	}
+
+	// Shutdown Grouping subsystem timer manager (task 2.2). Placed alongside
+	// the silence manager above: both are background workers independent of
+	// the request path, safe to stop before Publishing/Storage/Database
+	// teardown below. GroupManager itself owns no goroutines/connections of
+	// its own to close — only the TimerManager's timer goroutines need
+	// Shutdown.
+	if r.groupTimerManager != nil {
+		r.logger.Info("Shutting down grouping timer manager...")
+		if err := r.groupTimerManager.Shutdown(ctx); err != nil {
+			r.logger.Warn("Grouping timer manager stop warning", "error", err)
+		}
+		r.groupTimerManager = nil
+	}
+	r.groupManager = nil
 
 	// Shutdown Inhibition cache background worker
 	if r.inhibitionCache != nil {
