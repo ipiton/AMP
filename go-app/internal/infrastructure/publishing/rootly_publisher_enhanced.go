@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/pkg/httperror"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
@@ -155,7 +156,7 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 	_, err := p.client.UpdateIncident(ctx, incidentID, req)
 	if err != nil {
 		// If 404 Not Found, incident was deleted in Rootly
-		if IsRootlyNotFoundError(err) {
+		if httperror.IsNotFound(err) {
 			p.GetLogger().Warn("Incident not found (deleted in Rootly), recreating",
 				"incident_id", incidentID,
 				"fingerprint", enrichedAlert.Alert.Fingerprint,
@@ -218,7 +219,8 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 	_, err := p.client.ResolveIncident(ctx, incidentID, req)
 	if err != nil {
 		// If 404 Not Found or 409 Conflict, handle gracefully
-		if IsRootlyNotFoundError(err) || IsRootlyConflictError(err) {
+		httpErr := AsPublishingError(err)
+		if httperror.IsNotFound(err) || (httpErr != nil && httpErr.IsConflict()) {
 			p.GetLogger().Info("Incident already resolved or deleted",
 				"incident_id", incidentID,
 				"fingerprint", enrichedAlert.Alert.Fingerprint,

@@ -276,17 +276,6 @@ const (
 	// Member: groupKey
 	// Used for: ZRANGE (list all), ZRANGEBYSCORE (find expired)
 	groupIndexKey = "group:index"
-
-	// groupCountKey is the cached size counter (optional optimization).
-	// TTL: 60s
-	// Used for: Fast Size() queries without ZCARD
-	groupCountKey = "group:count"
-
-	// groupLockPrefix is the prefix for distributed locks.
-	// Format: "lock:group:{groupKey}" → stores lock ID (UUID)
-	// TTL: 30s
-	// Used for: Optimistic locking during concurrent updates
-	groupLockPrefix = "lock:group:"
 )
 
 // TTL settings for groups and locks.
@@ -300,10 +289,6 @@ const (
 	// Prevents race conditions during cleanup.
 	// Total TTL = calculated TTL + grace period
 	groupTTLGracePeriod = 60 * time.Second
-
-	// groupCountCacheTTL is the TTL for cached Size() result.
-	// Optional optimization to avoid ZCARD on every call.
-	groupCountCacheTTL = 60 * time.Second
 
 	// Note: lockTTL constant is already defined in redis_timer_storage.go (30s)
 	// and is shared across timer and group storage for consistency.

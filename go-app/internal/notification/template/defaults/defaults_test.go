@@ -169,7 +169,7 @@ func BenchmarkGetDefaultTemplates(b *testing.B) {
 
 func BenchmarkValidateAllTemplates(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		ValidateAllTemplates()
+		_ = ValidateAllTemplates()
 	}
 }
 

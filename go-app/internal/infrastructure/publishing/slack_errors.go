@@ -11,15 +11,8 @@ import (
 
 // slack_errors.go - Slack webhook API error types and classification helpers
 //
-// NOTE: This file is being migrated to use pkg/httperror.
-// New code should use httperror.HTTPAPIError and the unified error
-// functions from errors.go.
-
-// SlackAPIError represents a Slack webhook API error.
-//
-// Deprecated: Use httperror.HTTPAPIError with ProviderSlack instead.
-// This type is kept for backward compatibility.
-type SlackAPIError = httperror.HTTPAPIError
+// Slack API errors are represented by httperror.HTTPAPIError with
+// Provider set to ProviderSlack. See errors.go for unified helpers.
 
 // Sentinel errors for common failure scenarios
 var (
@@ -35,40 +28,6 @@ var (
 	ErrMessageTooLarge = errors.New("message payload exceeds Slack size limits")
 )
 
-// IsSlackRetryableError checks if Slack error is retryable (transient failure).
-//
-// MIGRATED: This function now uses pkg/httperror.PublishingClassifier for consistent error classification.
-//
-// Deprecated: Use httperror.PublishingClassifier directly in retry strategies instead.
-func IsSlackRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Use unified classifier
-	classifier := &httperror.PublishingClassifier{}
-	return classifier.IsRetryable(err)
-}
-
-// isSlackRetryableErrorOld is the old implementation (kept for reference, can be removed)
-// nolint:unused,deadcode
-func isSlackRetryableErrorOld(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check for Slack API error
-	var apiErr *SlackAPIError
-	if errors.As(err, &apiErr) {
-		// Retry 429 (rate limit) and 503 (service unavailable)
-		return apiErr.StatusCode == http.StatusTooManyRequests ||
-			apiErr.StatusCode == http.StatusServiceUnavailable
-	}
-
-	// Check for network errors (timeout, connection refused, DNS)
-	return isRetryableNetworkError(err)
-}
-
 // IsSlackRateLimitError checks if Slack error is a rate limit error (429)
 // Rate limit: 1 message per second per webhook URL
 func IsSlackRateLimitError(err error) bool {
@@ -76,7 +35,7 @@ func IsSlackRateLimitError(err error) bool {
 		return false
 	}
 
-	var apiErr *SlackAPIError
+	var apiErr *httperror.HTTPAPIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusTooManyRequests
 	}
@@ -90,7 +49,7 @@ func IsSlackPermanentError(err error) bool {
 		return false
 	}
 
-	var apiErr *SlackAPIError
+	var apiErr *httperror.HTTPAPIError
 	if errors.As(err, &apiErr) {
 		// Don't retry client errors (4xx except 429) and server errors (5xx)
 		return apiErr.StatusCode == http.StatusBadRequest ||
@@ -109,7 +68,7 @@ func IsSlackAuthError(err error) bool {
 		return false
 	}
 
-	var apiErr *SlackAPIError
+	var apiErr *httperror.HTTPAPIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusForbidden ||
 			apiErr.StatusCode == http.StatusNotFound
@@ -124,7 +83,7 @@ func IsSlackBadRequestError(err error) bool {
 		return false
 	}
 
-	var apiErr *SlackAPIError
+	var apiErr *httperror.HTTPAPIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusBadRequest
 	}
@@ -139,7 +98,7 @@ func IsSlackServerError(err error) bool {
 		return false
 	}
 
-	var apiErr *SlackAPIError
+	var apiErr *httperror.HTTPAPIError
 	if errors.As(err, &apiErr) {
 		return apiErr.StatusCode == http.StatusInternalServerError ||
 			apiErr.StatusCode == http.StatusServiceUnavailable
@@ -173,14 +132,6 @@ func parseSlackError(resp *http.Response, body []byte) *httperror.HTTPAPIError {
 	}
 
 	return apiErr
-}
-
-// isRetryableNetworkError checks if network error is retryable.
-//
-// Deprecated: Use httperror.IsRetryableNetworkError instead.
-// This function delegates to the centralized implementation in pkg/httperror.
-func isRetryableNetworkError(err error) bool {
-	return httperror.IsRetryableNetworkError(err)
 }
 
 // unmarshalJSON is a helper to unmarshal JSON

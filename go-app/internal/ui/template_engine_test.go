@@ -177,8 +177,8 @@ func TestLoadTemplates_NestedDirectories(t *testing.T) {
 	// Create nested structure
 	layoutsDir := filepath.Join(tmpDir, "layouts")
 	pagesDir := filepath.Join(tmpDir, "pages")
-	os.MkdirAll(layoutsDir, 0755)
-	os.MkdirAll(pagesDir, 0755)
+	_ = os.MkdirAll(layoutsDir, 0755)
+	_ = os.MkdirAll(pagesDir, 0755)
 
 	createTestTemplate(t, layoutsDir, "base.html", `{{ define "base" }}Layout{{ end }}`)
 	createTestTemplate(t, pagesDir, "home.html", `{{ define "home" }}Home{{ end }}`)

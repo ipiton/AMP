@@ -35,7 +35,7 @@ func setupTestTimerManager(t *testing.T) (*DefaultTimerManager, *InMemoryTimerSt
 			UpdatedAt: time.Now(),
 		},
 	}
-	groupManager.storage.Store(ctx, testGroup)
+	_ = groupManager.storage.Store(ctx, testGroup)
 
 	config := TimerManagerConfig{
 		Storage:               storage,
@@ -99,7 +99,7 @@ func TestNewDefaultTimerManager_MissingGroupManager(t *testing.T) {
 // TestDefaultTimerManager_StartTimer tests starting timers
 func TestDefaultTimerManager_StartTimer(t *testing.T) {
 	manager, storage, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -120,7 +120,7 @@ func TestDefaultTimerManager_StartTimer(t *testing.T) {
 // TestDefaultTimerManager_StartTimer_InvalidType tests validation
 func TestDefaultTimerManager_StartTimer_InvalidType(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -132,7 +132,7 @@ func TestDefaultTimerManager_StartTimer_InvalidType(t *testing.T) {
 // TestDefaultTimerManager_StartTimer_ZeroDuration tests validation
 func TestDefaultTimerManager_StartTimer_ZeroDuration(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -144,7 +144,7 @@ func TestDefaultTimerManager_StartTimer_ZeroDuration(t *testing.T) {
 // TestDefaultTimerManager_StartTimer_EmptyGroupKey tests validation
 func TestDefaultTimerManager_StartTimer_EmptyGroupKey(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -155,7 +155,7 @@ func TestDefaultTimerManager_StartTimer_EmptyGroupKey(t *testing.T) {
 // TestDefaultTimerManager_StartTimer_ReplacesExisting tests timer replacement
 func TestDefaultTimerManager_StartTimer_ReplacesExisting(t *testing.T) {
 	manager, storage, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -178,7 +178,7 @@ func TestDefaultTimerManager_StartTimer_ReplacesExisting(t *testing.T) {
 // TestDefaultTimerManager_CancelTimer tests cancelling timers
 func TestDefaultTimerManager_CancelTimer(t *testing.T) {
 	manager, storage, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -199,7 +199,7 @@ func TestDefaultTimerManager_CancelTimer(t *testing.T) {
 // TestDefaultTimerManager_CancelTimer_NotFound tests cancelling non-existent timer
 func TestDefaultTimerManager_CancelTimer_NotFound(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -211,7 +211,7 @@ func TestDefaultTimerManager_CancelTimer_NotFound(t *testing.T) {
 // TestDefaultTimerManager_ResetTimer tests resetting timers
 func TestDefaultTimerManager_ResetTimer(t *testing.T) {
 	manager, storage, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -239,7 +239,7 @@ func TestDefaultTimerManager_ResetTimer(t *testing.T) {
 // TestDefaultTimerManager_ResetTimer_NotFound tests resetting non-existent timer
 func TestDefaultTimerManager_ResetTimer_NotFound(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -251,7 +251,7 @@ func TestDefaultTimerManager_ResetTimer_NotFound(t *testing.T) {
 // TestDefaultTimerManager_GetTimer tests retrieving timers
 func TestDefaultTimerManager_GetTimer(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -269,7 +269,7 @@ func TestDefaultTimerManager_GetTimer(t *testing.T) {
 // TestDefaultTimerManager_GetTimer_NotFound tests error handling
 func TestDefaultTimerManager_GetTimer_NotFound(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -280,14 +280,14 @@ func TestDefaultTimerManager_GetTimer_NotFound(t *testing.T) {
 // TestDefaultTimerManager_ListActiveTimers tests listing timers
 func TestDefaultTimerManager_ListActiveTimers(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
 	// Start multiple timers
-	manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
-	manager.StartTimer(ctx, "group-2", GroupIntervalTimer, 5*time.Minute)
-	manager.StartTimer(ctx, "group-3", RepeatIntervalTimer, 4*time.Hour)
+	_, _ = manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
+	_, _ = manager.StartTimer(ctx, "group-2", GroupIntervalTimer, 5*time.Minute)
+	_, _ = manager.StartTimer(ctx, "group-3", RepeatIntervalTimer, 4*time.Hour)
 
 	// List all timers
 	timers, err := manager.ListActiveTimers(ctx, nil)
@@ -298,14 +298,14 @@ func TestDefaultTimerManager_ListActiveTimers(t *testing.T) {
 // TestDefaultTimerManager_ListActiveTimers_WithFilters tests filtering
 func TestDefaultTimerManager_ListActiveTimers_WithFilters(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
 	// Start timers
-	manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
-	manager.StartTimer(ctx, "group-2", GroupWaitTimer, 30*time.Second)
-	manager.StartTimer(ctx, "group-3", GroupIntervalTimer, 5*time.Minute)
+	_, _ = manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
+	_, _ = manager.StartTimer(ctx, "group-2", GroupWaitTimer, 30*time.Second)
+	_, _ = manager.StartTimer(ctx, "group-3", GroupIntervalTimer, 5*time.Minute)
 
 	// Filter by type
 	filters := &TimerFilters{
@@ -323,7 +323,7 @@ func TestDefaultTimerManager_ListActiveTimers_WithFilters(t *testing.T) {
 // TestDefaultTimerManager_OnTimerExpired tests callback registration
 func TestDefaultTimerManager_OnTimerExpired(t *testing.T) {
 	manager, _, groupManager := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -337,7 +337,7 @@ func TestDefaultTimerManager_OnTimerExpired(t *testing.T) {
 			UpdatedAt: time.Now(),
 		},
 	}
-	groupManager.storage.Store(ctx, testGroup)
+	_ = groupManager.storage.Store(ctx, testGroup)
 
 	// Register callback
 	callbackCalled := atomic.Bool{}
@@ -362,7 +362,7 @@ func TestDefaultTimerManager_OnTimerExpired(t *testing.T) {
 // TestDefaultTimerManager_OnTimerExpired_MultipleCallbacks tests multiple callbacks
 func TestDefaultTimerManager_OnTimerExpired_MultipleCallbacks(t *testing.T) {
 	manager, _, groupManager := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
@@ -376,7 +376,7 @@ func TestDefaultTimerManager_OnTimerExpired_MultipleCallbacks(t *testing.T) {
 			UpdatedAt: time.Now(),
 		},
 	}
-	groupManager.storage.Store(ctx, testGroup)
+	_ = groupManager.storage.Store(ctx, testGroup)
 
 	// Register multiple callbacks
 	called1 := atomic.Bool{}
@@ -393,7 +393,7 @@ func TestDefaultTimerManager_OnTimerExpired_MultipleCallbacks(t *testing.T) {
 	})
 
 	// Start and wait for expiration
-	manager.StartTimer(ctx, "test-group", GroupWaitTimer, 50*time.Millisecond)
+	_, _ = manager.StartTimer(ctx, "test-group", GroupWaitTimer, 50*time.Millisecond)
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify both callbacks called
@@ -416,7 +416,7 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 		ExpiresAt: now.Add(30 * time.Second), // Future
 		State:     TimerStateActive,
 	}
-	storage.SaveTimer(ctx, activeTimer)
+	_ = storage.SaveTimer(ctx, activeTimer)
 
 	expiredTimer := &GroupTimer{
 		GroupKey:  "expired-group",
@@ -426,7 +426,7 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 		ExpiresAt: now.Add(-30 * time.Second), // Past
 		State:     TimerStateActive,
 	}
-	storage.SaveTimer(ctx, expiredTimer)
+	_ = storage.SaveTimer(ctx, expiredTimer)
 
 	// Create manager and restore (TN-125: use storage)
 	groupManager := &DefaultGroupManager{
@@ -436,7 +436,7 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 	}
 
 	// Add test groups to storage
-	groupManager.storage.Store(ctx, &AlertGroup{
+	_ = groupManager.storage.Store(ctx, &AlertGroup{
 		Key:    "active-group",
 		Alerts: make(map[string]*core.Alert),
 		Metadata: &GroupMetadata{
@@ -445,7 +445,7 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 			UpdatedAt: time.Now(),
 		},
 	})
-	groupManager.storage.Store(ctx, &AlertGroup{
+	_ = groupManager.storage.Store(ctx, &AlertGroup{
 		Key:    "expired-group",
 		Alerts: make(map[string]*core.Alert),
 		Metadata: &GroupMetadata{
@@ -463,7 +463,7 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 
 	manager, err := NewDefaultTimerManager(config)
 	require.NoError(t, err)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	// Restore timers
 	restored, missed, err := manager.RestoreTimers(ctx)
@@ -477,13 +477,13 @@ func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 // TestDefaultTimerManager_GetStats tests statistics
 func TestDefaultTimerManager_GetStats(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
 	// Start timers
-	manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
-	manager.StartTimer(ctx, "group-2", GroupIntervalTimer, 5*time.Minute)
+	_, _ = manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
+	_, _ = manager.StartTimer(ctx, "group-2", GroupIntervalTimer, 5*time.Minute)
 
 	// Get stats
 	stats, err := manager.GetStats(ctx)
@@ -500,8 +500,8 @@ func TestDefaultTimerManager_Shutdown(t *testing.T) {
 	ctx := context.Background()
 
 	// Start some timers
-	manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
-	manager.StartTimer(ctx, "group-2", GroupWaitTimer, 30*time.Second)
+	_, _ = manager.StartTimer(ctx, "group-1", GroupWaitTimer, 30*time.Second)
+	_, _ = manager.StartTimer(ctx, "group-2", GroupWaitTimer, 30*time.Second)
 
 	// Shutdown
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -518,7 +518,7 @@ func TestDefaultTimerManager_Shutdown(t *testing.T) {
 // TestDefaultTimerManager_ConcurrentOperations tests thread-safety
 func TestDefaultTimerManager_ConcurrentOperations(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -529,7 +529,7 @@ func TestDefaultTimerManager_ConcurrentOperations(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			groupKey := GroupKey(string(rune('a' + id)))
-			manager.StartTimer(ctx, groupKey, GroupWaitTimer, 30*time.Second)
+			_, _ = manager.StartTimer(ctx, groupKey, GroupWaitTimer, 30*time.Second)
 		}(i)
 	}
 
@@ -540,7 +540,7 @@ func TestDefaultTimerManager_ConcurrentOperations(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(10 * time.Millisecond)
 			groupKey := GroupKey(string(rune('a' + id)))
-			manager.CancelTimer(ctx, groupKey)
+			_, _ = manager.CancelTimer(ctx, groupKey)
 		}(i)
 	}
 
@@ -555,33 +555,33 @@ func TestDefaultTimerManager_ConcurrentOperations(t *testing.T) {
 // BenchmarkDefaultTimerManager_StartTimer benchmarks starting timers
 func BenchmarkDefaultTimerManager_StartTimer(b *testing.B) {
 	manager, _, _ := setupTestTimerManager(&testing.T{})
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		groupKey := GroupKey(string(rune('a' + (i % 26))))
-		manager.StartTimer(ctx, groupKey, GroupWaitTimer, 30*time.Second)
+		_, _ = manager.StartTimer(ctx, groupKey, GroupWaitTimer, 30*time.Second)
 	}
 }
 
 // BenchmarkDefaultTimerManager_CancelTimer benchmarks cancelling timers
 func BenchmarkDefaultTimerManager_CancelTimer(b *testing.B) {
 	manager, _, _ := setupTestTimerManager(&testing.T{})
-	defer manager.Shutdown(context.Background())
+	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
 	// Pre-populate timers
 	for i := 0; i < b.N; i++ {
 		groupKey := GroupKey(string(rune('a' + (i % 26))))
-		manager.StartTimer(ctx, groupKey, GroupWaitTimer, 30*time.Second)
+		_, _ = manager.StartTimer(ctx, groupKey, GroupWaitTimer, 30*time.Second)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		groupKey := GroupKey(string(rune('a' + (i % 26))))
-		manager.CancelTimer(ctx, groupKey)
+		_, _ = manager.CancelTimer(ctx, groupKey)
 	}
 }

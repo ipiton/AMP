@@ -19,10 +19,10 @@ func BenchmarkStart(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		manager, _ := createTestManager(b, mock)
 
-		manager.Start()
+		_ = manager.Start()
 
 		// Immediate stop (don't let it run)
-		manager.Stop(100 * time.Millisecond)
+		_ = manager.Stop(100 * time.Millisecond)
 	}
 }
 
@@ -41,12 +41,12 @@ func BenchmarkStop(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		manager, _ := createTestManager(b, mock)
-		manager.Start()
+		_ = manager.Start()
 
 		time.Sleep(20 * time.Millisecond) // Let warmup + first refresh start
 
 		b.StartTimer()
-		manager.Stop(5 * time.Second)
+		_ = manager.Stop(5 * time.Second)
 		b.StopTimer()
 	}
 }
@@ -62,8 +62,8 @@ func BenchmarkRefreshNow(b *testing.B) {
 	}
 
 	manager, _ := createTestManager(b, mock)
-	manager.Start()
-	defer manager.Stop(1 * time.Second)
+	_ = manager.Start()
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup
 	time.Sleep(20 * time.Millisecond)
@@ -75,7 +75,7 @@ func BenchmarkRefreshNow(b *testing.B) {
 			time.Sleep(60 * time.Millisecond) // Wait for rate limit
 		}
 
-		manager.RefreshNow()
+		_ = manager.RefreshNow()
 
 		// Wait for refresh to complete
 		time.Sleep(10 * time.Millisecond)
@@ -93,8 +93,8 @@ func BenchmarkGetStatus(b *testing.B) {
 	}
 
 	manager, _ := createTestManager(b, mock)
-	manager.Start()
-	defer manager.Stop(1 * time.Second)
+	_ = manager.Start()
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for first refresh
 	time.Sleep(50 * time.Millisecond)
@@ -119,8 +119,8 @@ func BenchmarkFullRefresh(b *testing.B) {
 	}
 
 	manager, _ := createTestManager(b, mock)
-	manager.Start()
-	defer manager.Stop(1 * time.Second)
+	_ = manager.Start()
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for warmup
 	time.Sleep(20 * time.Millisecond)
@@ -133,7 +133,7 @@ func BenchmarkFullRefresh(b *testing.B) {
 		}
 
 		b.StartTimer()
-		manager.RefreshNow()
+		_ = manager.RefreshNow()
 
 		// Wait for completion
 		waitForRefresh(b, manager, 5*time.Second)
@@ -152,8 +152,8 @@ func BenchmarkConcurrentGetStatus(b *testing.B) {
 	}
 
 	manager, _ := createTestManager(b, mock)
-	manager.Start()
-	defer manager.Stop(1 * time.Second)
+	_ = manager.Start()
+	defer func() { _ = manager.Stop(1 * time.Second) }()
 
 	// Wait for first refresh
 	time.Sleep(50 * time.Millisecond)

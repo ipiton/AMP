@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"os"
 	"runtime"
@@ -29,7 +27,7 @@ type VersionInfo struct {
 }
 
 func StatusAPIHandler(registry RegistryProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		configPath := os.Getenv("AMP_CONFIG_FILE")
 		if configPath == "" {
 			configPath = "config.yaml"
@@ -62,7 +60,7 @@ func StatusAPIHandler(registry RegistryProvider) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, resp)
-	}
+	})
 }
 
 func ReloadHandler(registry RegistryProvider) http.HandlerFunc {
@@ -83,17 +81,12 @@ func ReloadHandler(registry RegistryProvider) http.HandlerFunc {
 }
 
 func ReceiversHandler(registry RegistryProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		receivers := registry.Config().Receivers
 		if len(receivers) == 0 {
 			// Fallback to default if empty
 			receivers = []appconfig.ReceiverConfig{{Name: "default"}}
 		}
 		writeJSON(w, http.StatusOK, receivers)
-	}
-}
-
-func configSHA256(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(sum[:])
+	})
 }

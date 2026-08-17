@@ -117,7 +117,7 @@ func NewRouteMatcher(
 	}
 
 	// Pre-populate regex cache from compiled patterns
-	if compiledPatterns != nil && len(compiledPatterns) > 0 {
+	if len(compiledPatterns) > 0 {
 		m.regexCache.Preload(compiledPatterns)
 		if opts.EnableLogging {
 			slog.Debug("regex cache pre-populated",
@@ -290,7 +290,7 @@ func (m *RouteMatcher) FindMatchingRoutes(
 	initialStats := m.regexCache.Stats()
 
 	// DFS traversal with early exit
-	tree.Walk(func(node *RouteNode) bool {
+	_ = tree.Walk(func(node *RouteNode) bool {
 		if stopped {
 			return false
 		}

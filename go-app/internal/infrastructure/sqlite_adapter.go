@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -76,7 +75,7 @@ func (s *SQLiteDatabase) Connect(ctx context.Context) error {
 
 	// Включаем foreign keys
 	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
@@ -87,7 +86,7 @@ func (s *SQLiteDatabase) Connect(ctx context.Context) error {
 
 	// Тестируем соединение
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return fmt.Errorf("failed to ping SQLite database: %w", err)
 	}
 
@@ -332,7 +331,9 @@ func (s *SQLiteDatabase) GetAlertByFingerprint(ctx context.Context, fingerprint 
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // Alert not found
+			// Same sentinel as PostgresStorageAdapter so callers can errors.Is
+			// regardless of profile (Lite vs Standard).
+			return nil, core.ErrAlertNotFound
 		}
 		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
@@ -416,10 +417,11 @@ func (s *SQLiteDatabase) ListAlerts(ctx context.Context, filters *core.AlertFilt
 		}
 	}
 
-	// Фильтры по labels (JSON contains - упрощённая версия для SQLite)
+	// Фильтры по labels (JSON contains - упрощённая версия для SQLite).
+	// JSON path передаётся параметром: конкатенация ключа в SQL — инъекция.
 	for key, value := range filters.Labels {
-		whereClause += " AND json_extract(labels, '$." + key + "') = ?"
-		args = append(args, value)
+		whereClause += " AND json_extract(labels, ?) = ?"
+		args = append(args, "$."+key, value)
 	}
 
 	// Получаем общее количество
@@ -451,7 +453,7 @@ func (s *SQLiteDatabase) ListAlerts(ctx context.Context, filters *core.AlertFilt
 	if err != nil {
 		return nil, fmt.Errorf("failed to query alerts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var alerts []*core.Alert
 	for rows.Next() {
@@ -497,6 +499,9 @@ func (s *SQLiteDatabase) ListAlerts(ctx context.Context, filters *core.AlertFilt
 		}
 
 		alerts = append(alerts, alert)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate alerts: %w", err)
 	}
 
 	return &core.AlertList{
@@ -558,7 +563,7 @@ func (s *SQLiteDatabase) UpdateAlert(ctx context.Context, alert *core.Alert) err
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("alert not found: %s", alert.Fingerprint)
+		return fmt.Errorf("update alert %s: %w", alert.Fingerprint, core.ErrAlertNotFound)
 	}
 
 	return nil
@@ -583,7 +588,7 @@ func (s *SQLiteDatabase) DeleteAlert(ctx context.Context, fingerprint string) er
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("alert not found: %s", fingerprint)
+		return fmt.Errorf("delete alert %s: %w", fingerprint, core.ErrAlertNotFound)
 	}
 
 	return nil
@@ -612,7 +617,7 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get status stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var status string
@@ -621,6 +626,9 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 			return nil, fmt.Errorf("failed to scan status stats: %w", err)
 		}
 		stats.AlertsByStatus[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stats rows: %w", err)
 	}
 
 	// Статистика по severity (из labels)
@@ -633,7 +641,7 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get severity stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var severity string
@@ -642,6 +650,9 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 			return nil, fmt.Errorf("failed to scan severity stats: %w", err)
 		}
 		stats.AlertsBySeverity[severity] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stats rows: %w", err)
 	}
 
 	// Статистика по namespace
@@ -654,7 +665,7 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to get namespace stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var namespace string
@@ -663,6 +674,9 @@ func (s *SQLiteDatabase) GetAlertStats(ctx context.Context) (*core.AlertStats, e
 			return nil, fmt.Errorf("failed to scan namespace stats: %w", err)
 		}
 		stats.AlertsByNamespace[namespace] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stats rows: %w", err)
 	}
 
 	// Самый старый и новый алерты
@@ -702,223 +716,4 @@ func (s *SQLiteDatabase) CleanupOldAlerts(ctx context.Context, retentionDays int
 		"deleted_count", int(rowsAffected))
 
 	return int(rowsAffected), nil
-}
-
-// SaveClassification сохраняет результат классификации
-func (s *SQLiteDatabase) SaveClassification(ctx context.Context, fingerprint string, result *core.ClassificationResult) error {
-	if s.db == nil {
-		return fmt.Errorf("not connected")
-	}
-
-	metadataJSON, err := json.Marshal(result.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	recommendationsJSON, err := json.Marshal(result.Recommendations)
-	if err != nil {
-		return fmt.Errorf("failed to marshal recommendations: %w", err)
-	}
-
-	query := `
-		INSERT OR REPLACE INTO classifications (
-			id, alert_fingerprint, category, confidence, reasoning,
-			recommendations, metadata, processing_time, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-	id := fmt.Sprintf("%s_classification", fingerprint)
-	now := time.Now()
-
-	_, err = s.db.ExecContext(ctx, query,
-		id, fingerprint, string(result.Severity), result.Confidence,
-		result.Reasoning, string(recommendationsJSON),
-		string(metadataJSON), result.ProcessingTime, now,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to save classification: %w", err)
-	}
-
-	return nil
-}
-
-// GetClassification получает результат классификации
-func (s *SQLiteDatabase) GetClassification(ctx context.Context, fingerprint string) (*core.ClassificationResult, error) {
-	if s.db == nil {
-		return nil, fmt.Errorf("not connected")
-	}
-
-	query := `
-		SELECT category, confidence, reasoning, recommendations, metadata, processing_time
-		FROM classifications WHERE alert_fingerprint = ?`
-
-	row := s.db.QueryRowContext(ctx, query, fingerprint)
-
-	result := &core.ClassificationResult{}
-	var recommendationsJSON, metadataJSON string
-
-	err := row.Scan(
-		&result.Severity, &result.Confidence, &result.Reasoning,
-		&recommendationsJSON, &metadataJSON, &result.ProcessingTime,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil // Classification not found
-		}
-		return nil, fmt.Errorf("failed to get classification: %w", err)
-	}
-
-	// Десериализуем JSON поля
-	if err := json.Unmarshal([]byte(recommendationsJSON), &result.Recommendations); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal recommendations: %w", err)
-	}
-
-	if err := json.Unmarshal([]byte(metadataJSON), &result.Metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
-
-	return result, nil
-}
-
-// LogPublishingAttempt логирует попытку публикации
-func (s *SQLiteDatabase) LogPublishingAttempt(ctx context.Context, fingerprint, targetName string, success bool, errorMessage *string, processingTime *float64) error {
-	if s.db == nil {
-		return fmt.Errorf("not connected")
-	}
-
-	query := `
-		INSERT INTO publishing (
-			id, alert_fingerprint, channel, status, error_message,
-			processing_time, sent_at, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-
-	id := fmt.Sprintf("%s_%s_%d", fingerprint, targetName, time.Now().Unix())
-	status := "failed"
-	var sentAt *time.Time
-
-	if success {
-		status = "sent"
-		now := time.Now()
-		sentAt = &now
-	}
-
-	_, err := s.db.ExecContext(ctx, query,
-		id, fingerprint, targetName, status, errorMessage,
-		processingTime, sentAt, time.Now(),
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to log publishing attempt: %w", err)
-	}
-
-	return nil
-}
-
-// GetPublishingHistory получает историю публикаций для алерта
-func (s *SQLiteDatabase) GetPublishingHistory(ctx context.Context, fingerprint string) ([]*core.PublishingLog, error) {
-	if s.db == nil {
-		return nil, fmt.Errorf("not connected")
-	}
-
-	query := `
-		SELECT id, alert_fingerprint, channel, status, error_message,
-			   processing_time, sent_at, created_at
-		FROM publishing WHERE alert_fingerprint = ?
-		ORDER BY created_at DESC`
-
-	rows, err := s.db.QueryContext(ctx, query, fingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query publishing history: %w", err)
-	}
-	defer rows.Close()
-
-	var logs []*core.PublishingLog
-	for rows.Next() {
-		log := &core.PublishingLog{}
-		var sentAt interface{}
-
-		var status string
-		err := rows.Scan(
-			&log.ID, &log.Fingerprint, &log.TargetName, &status,
-			&log.ErrorMessage, &log.ProcessingTime, &sentAt, &log.CreatedAt,
-		)
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan publishing log: %w", err)
-		}
-
-		// Конвертируем статус в bool
-		log.Success = strings.ToLower(status) == "sent"
-
-		logs = append(logs, log)
-	}
-
-	return logs, nil
-}
-
-// MigrateDown выполняет откат миграций (упрощенная версия для SQLite)
-func (s *SQLiteDatabase) MigrateDown(ctx context.Context, steps int) error {
-	if s.db == nil {
-		return fmt.Errorf("not connected")
-	}
-
-	s.logger.Info("SQLite doesn't support complex migrations rollback",
-		"steps", steps,
-		"recommendation", "Use backup/restore for rollback")
-
-	return fmt.Errorf("SQLite doesn't support complex migrations rollback")
-}
-
-// GetStats возвращает статистику базы данных
-func (s *SQLiteDatabase) GetStats(ctx context.Context) (map[string]interface{}, error) {
-	if s.db == nil {
-		return nil, fmt.Errorf("not connected")
-	}
-
-	stats := make(map[string]interface{})
-
-	// Общая статистика
-	row := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM alerts")
-	var alertCount int
-	if err := row.Scan(&alertCount); err != nil {
-		return nil, fmt.Errorf("failed to get alert count: %w", err)
-	}
-	stats["alerts_count"] = alertCount
-
-	// Статистика по классификациям
-	row = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM classifications")
-	var classificationCount int
-	if err := row.Scan(&classificationCount); err != nil {
-		return nil, fmt.Errorf("failed to get classification count: %w", err)
-	}
-	stats["classifications_count"] = classificationCount
-
-	// Статистика по публикациям
-	row = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM publishing")
-	var publishingCount int
-	if err := row.Scan(&publishingCount); err != nil {
-		return nil, fmt.Errorf("failed to get publishing count: %w", err)
-	}
-	stats["publishing_count"] = publishingCount
-
-	// Размер базы данных
-	row = s.db.QueryRowContext(ctx, "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()")
-	var dbSize int64
-	if err := row.Scan(&dbSize); err != nil {
-		s.logger.Warn("Failed to get database size", "error", err)
-		stats["database_size"] = "unknown"
-	} else {
-		stats["database_size"] = fmt.Sprintf("%d bytes", dbSize)
-	}
-
-	// Connection pool stats
-	dbStats := s.db.Stats()
-	stats["open_connections"] = dbStats.OpenConnections
-	stats["in_use_connections"] = dbStats.InUse
-	stats["idle_connections"] = dbStats.Idle
-	stats["wait_count"] = dbStats.WaitCount
-	stats["wait_duration"] = dbStats.WaitDuration.String()
-
-	return stats, nil
 }

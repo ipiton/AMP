@@ -39,22 +39,6 @@ func createTestSilence() *silencing.Silence {
 	}
 }
 
-// assertSilenceEqual asserts that two silences are equal (ignoring timestamps).
-func assertSilenceEqual(t *testing.T, expected, actual *silencing.Silence) {
-	assert.Equal(t, expected.ID, actual.ID, "ID mismatch")
-	assert.Equal(t, expected.CreatedBy, actual.CreatedBy, "CreatedBy mismatch")
-	assert.Equal(t, expected.Comment, actual.Comment, "Comment mismatch")
-	assert.WithinDuration(t, expected.StartsAt, actual.StartsAt, time.Second, "StartsAt mismatch")
-	assert.WithinDuration(t, expected.EndsAt, actual.EndsAt, time.Second, "EndsAt mismatch")
-	assert.Equal(t, expected.Status, actual.Status, "Status mismatch")
-	assert.Len(t, actual.Matchers, len(expected.Matchers), "Matchers count mismatch")
-	for i, matcher := range expected.Matchers {
-		assert.Equal(t, matcher.Name, actual.Matchers[i].Name, "Matcher name mismatch")
-		assert.Equal(t, matcher.Value, actual.Matchers[i].Value, "Matcher value mismatch")
-		assert.Equal(t, matcher.Type, actual.Matchers[i].Type, "Matcher type mismatch")
-	}
-}
-
 // ===========================
 // CreateSilence Tests (8)
 // ===========================

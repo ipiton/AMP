@@ -179,7 +179,7 @@ func (t *KubernetesTool) getLogs(ctx context.Context, namespace, name, container
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("kubernetes: get_logs: %v", err)}, nil
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, stream); err != nil {

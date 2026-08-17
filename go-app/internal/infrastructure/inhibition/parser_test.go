@@ -62,14 +62,14 @@ func generateLargeConfig(numRules int) []byte {
 	sb.WriteString("inhibit_rules:\n")
 
 	for i := 0; i < numRules; i++ {
-		sb.WriteString(fmt.Sprintf(`  - name: "rule-%d"
+		fmt.Fprintf(&sb, `  - name: "rule-%d"
     source_match:
       alertname: "Alert%d"
     target_match:
       alertname: "Target%d"
     equal:
       - cluster
-`, i, i, i))
+`, i, i, i)
 	}
 
 	return []byte(sb.String())

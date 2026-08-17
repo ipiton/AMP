@@ -367,7 +367,7 @@ func TestValidateAllTemplates_ReturnsErrorOnInvalidSize(t *testing.T) {
 func BenchmarkValidateAllTemplates_Comprehensive(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ValidateAllTemplates()
+		_ = ValidateAllTemplates()
 	}
 }
 

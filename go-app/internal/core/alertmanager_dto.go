@@ -67,13 +67,6 @@ type APIGettableAlert struct {
 	Status       APIAlertStatus    `json:"status"`
 }
 
-// APIAlertGroup represents a group of alerts in GET /api/v2/alerts/groups
-type APIAlertGroup struct {
-	Labels   map[string]string `json:"labels"`
-	Receiver APIReceiver       `json:"receiver"`
-	Alerts   []APIAlert        `json:"alerts"`
-}
-
 // APIGettableAlertGroup is the full Alertmanager API v2 alert group
 type APIGettableAlertGroup struct {
 	Labels   map[string]string  `json:"labels"`

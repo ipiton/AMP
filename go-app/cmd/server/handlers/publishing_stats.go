@@ -805,15 +805,16 @@ func (h *PublishingStatsHandler) applyFilter(snapshot *publishing.MetricsSnapsho
 			}
 		case "status":
 			// Filter by health status
-			if filterValue == "healthy" {
+			switch filterValue {
+			case "healthy":
 				if strings.Contains(key, "health_status") && value == 1.0 {
 					shouldInclude = true
 				}
-			} else if filterValue == "unhealthy" {
+			case "unhealthy":
 				if strings.Contains(key, "health_status") && value == 3.0 {
 					shouldInclude = true
 				}
-			} else if filterValue == "degraded" {
+			case "degraded":
 				if strings.Contains(key, "health_status") && value == 2.0 {
 					shouldInclude = true
 				}
@@ -899,29 +900,29 @@ func (h *PublishingStatsHandler) sendPrometheusFormat(w http.ResponseWriter, res
 	w.WriteHeader(http.StatusOK)
 
 	// Write Prometheus format
-	fmt.Fprintf(w, "# HELP publishing_stats_total_targets Total number of publishing targets\n")
-	fmt.Fprintf(w, "# TYPE publishing_stats_total_targets gauge\n")
-	fmt.Fprintf(w, "publishing_stats_total_targets %d\n", response.System.TotalTargets)
+	_, _ = fmt.Fprintf(w, "# HELP publishing_stats_total_targets Total number of publishing targets\n")
+	_, _ = fmt.Fprintf(w, "# TYPE publishing_stats_total_targets gauge\n")
+	_, _ = fmt.Fprintf(w, "publishing_stats_total_targets %d\n", response.System.TotalTargets)
 
-	fmt.Fprintf(w, "# HELP publishing_stats_healthy_targets Number of healthy targets\n")
-	fmt.Fprintf(w, "# TYPE publishing_stats_healthy_targets gauge\n")
-	fmt.Fprintf(w, "publishing_stats_healthy_targets %d\n", response.System.HealthyTargets)
+	_, _ = fmt.Fprintf(w, "# HELP publishing_stats_healthy_targets Number of healthy targets\n")
+	_, _ = fmt.Fprintf(w, "# TYPE publishing_stats_healthy_targets gauge\n")
+	_, _ = fmt.Fprintf(w, "publishing_stats_healthy_targets %d\n", response.System.HealthyTargets)
 
-	fmt.Fprintf(w, "# HELP publishing_stats_unhealthy_targets Number of unhealthy targets\n")
-	fmt.Fprintf(w, "# TYPE publishing_stats_unhealthy_targets gauge\n")
-	fmt.Fprintf(w, "publishing_stats_unhealthy_targets %d\n", response.System.UnhealthyTargets)
+	_, _ = fmt.Fprintf(w, "# HELP publishing_stats_unhealthy_targets Number of unhealthy targets\n")
+	_, _ = fmt.Fprintf(w, "# TYPE publishing_stats_unhealthy_targets gauge\n")
+	_, _ = fmt.Fprintf(w, "publishing_stats_unhealthy_targets %d\n", response.System.UnhealthyTargets)
 
-	fmt.Fprintf(w, "# HELP publishing_stats_success_rate_percent Overall success rate percentage\n")
-	fmt.Fprintf(w, "# TYPE publishing_stats_success_rate_percent gauge\n")
-	fmt.Fprintf(w, "publishing_stats_success_rate_percent %.2f\n", response.System.SuccessRate)
+	_, _ = fmt.Fprintf(w, "# HELP publishing_stats_success_rate_percent Overall success rate percentage\n")
+	_, _ = fmt.Fprintf(w, "# TYPE publishing_stats_success_rate_percent gauge\n")
+	_, _ = fmt.Fprintf(w, "publishing_stats_success_rate_percent %.2f\n", response.System.SuccessRate)
 
-	fmt.Fprintf(w, "# HELP publishing_stats_queue_size Current queue size\n")
-	fmt.Fprintf(w, "# TYPE publishing_stats_queue_size gauge\n")
-	fmt.Fprintf(w, "publishing_stats_queue_size %d\n", response.System.QueueSize)
+	_, _ = fmt.Fprintf(w, "# HELP publishing_stats_queue_size Current queue size\n")
+	_, _ = fmt.Fprintf(w, "# TYPE publishing_stats_queue_size gauge\n")
+	_, _ = fmt.Fprintf(w, "publishing_stats_queue_size %d\n", response.System.QueueSize)
 
-	fmt.Fprintf(w, "# HELP publishing_stats_queue_capacity Queue capacity\n")
-	fmt.Fprintf(w, "# TYPE publishing_stats_queue_capacity gauge\n")
-	fmt.Fprintf(w, "publishing_stats_queue_capacity %d\n", response.System.QueueCapacity)
+	_, _ = fmt.Fprintf(w, "# HELP publishing_stats_queue_capacity Queue capacity\n")
+	_, _ = fmt.Fprintf(w, "# TYPE publishing_stats_queue_capacity gauge\n")
+	_, _ = fmt.Fprintf(w, "publishing_stats_queue_capacity %d\n", response.System.QueueCapacity)
 }
 
 // sendError sends error response.

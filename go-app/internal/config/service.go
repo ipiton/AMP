@@ -88,9 +88,7 @@ func (s *DefaultConfigService) GetConfig(
 	if opts.Format == "" {
 		opts.Format = "json"
 	}
-	if opts.Sanitize {
-		// Default is true, so if not explicitly false, sanitize
-	}
+	// opts.Sanitize defaults to true; sanitization is applied downstream.
 
 	// Check cache
 	cacheKey := s.buildCacheKey(opts)

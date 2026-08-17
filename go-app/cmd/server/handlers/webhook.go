@@ -124,7 +124,7 @@ func (h *WebhookHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	// Log raw payload for debugging
 	h.logger.Debug("Webhook payload received", "payload", string(body))
@@ -266,7 +266,7 @@ func WebhookHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	// Log raw payload for debugging
 	slog.Debug("Webhook payload received", "payload", string(body))

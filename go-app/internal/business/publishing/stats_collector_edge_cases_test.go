@@ -49,7 +49,7 @@ func TestEdgeCase_NilContext(t *testing.T) {
 	collector.RegisterCollector(mockCollector)
 
 	// This should panic (context.Background() is used internally)
-	collector.CollectAll(nil)
+	collector.CollectAll(nil) //nolint:staticcheck // SA1012: nil Context passed intentionally to verify panic behavior
 }
 
 // TestEdgeCase_UnavailableCollectors tests collectors with IsAvailable() = false
@@ -117,7 +117,7 @@ func TestEdgeCase_VeryLargeMetricValues(t *testing.T) {
 			"very_large":    1e308,  // Near float64 max
 			"very_small":    1e-308, // Near float64 min
 			"zero":          0.0,
-			"negative_zero": -0.0,
+			"negative_zero": math.Copysign(0, -1),
 			"infinity":      math.Inf(1), // Positive infinity
 		},
 	}

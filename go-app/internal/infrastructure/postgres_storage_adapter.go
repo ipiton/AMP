@@ -293,6 +293,9 @@ func (p *PostgresStorageAdapter) ListAlerts(ctx context.Context, filters *core.A
 
 		alerts = append(alerts, alert)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate alerts: %w", err)
+	}
 
 	return &core.AlertList{
 		Alerts: alerts,
@@ -401,6 +404,9 @@ func (p *PostgresStorageAdapter) GetAlertStats(ctx context.Context) (*core.Alert
 		}
 		stats.AlertsByStatus[status] = count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stats rows: %w", err)
+	}
 
 	rows, err = p.pool.Query(ctx, `
 		SELECT labels->>'severity' as severity, COUNT(*)
@@ -420,6 +426,9 @@ func (p *PostgresStorageAdapter) GetAlertStats(ctx context.Context) (*core.Alert
 		}
 		stats.AlertsBySeverity[severity] = count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stats rows: %w", err)
+	}
 
 	rows, err = p.pool.Query(ctx, `
 		SELECT namespace, COUNT(*)
@@ -438,6 +447,9 @@ func (p *PostgresStorageAdapter) GetAlertStats(ctx context.Context) (*core.Alert
 			return nil, fmt.Errorf("failed to scan namespace stats: %w", err)
 		}
 		stats.AlertsByNamespace[namespace] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate stats rows: %w", err)
 	}
 
 	var oldestAlert, newestAlert *time.Time

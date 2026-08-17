@@ -1,0 +1,17 @@
+# Pins the linter set so `make lint` results don't drift with golangci-lint
+# defaults. Matches the v2 default set the codebase was cleaned against
+# (DEBT-STAGE2, 2026-08-17).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

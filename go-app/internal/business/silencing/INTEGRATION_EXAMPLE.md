@@ -1,6 +1,6 @@
 # SilenceManager Integration Example
 
-This document provides a complete integration example for the Silence Manager Service (TN-134).
+This document provides a complete integration example for the Silence Manager Service.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -23,8 +23,8 @@ The Silence Manager Service provides centralized management of alert silences wi
 ## Prerequisites
 
 1. PostgreSQL database (for silence storage)
-2. Existing SilenceMatcher implementation (from TN-132)
-3. Alert History application structure
+2. SilenceMatcher implementation (`internal/core/silencing`)
+3. AMP application structure
 
 ## Basic Integration
 
@@ -40,10 +40,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/ipiton/AMP/internal/business/silencing"
-	"github.com/ipiton/AMP/internal/core/silencing" as coresilencing
+	coresilencing "github.com/ipiton/AMP/internal/core/silencing"
 	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
-	"github.com/ipiton/AMP/internal/database/postgres"
 )
 
 func main() {
@@ -52,8 +53,8 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	// 2. Initialize PostgreSQL connection pool
-	pool, err := postgres.NewPool(context.Background(), os.Getenv("DATABASE_URL"))
+	// 2. Initialize PostgreSQL connection pool (pgxpool)
+	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatalf("Failed to create PostgreSQL pool: %v", err)
 	}
@@ -62,8 +63,8 @@ func main() {
 	// 3. Initialize SilenceRepository
 	silenceRepo := infrasilencing.NewPostgresSilenceRepository(pool, logger)
 
-	// 4. Initialize SilenceMatcher (from TN-132)
-	silenceMatcher := coresilencing.NewDefaultSilenceMatcher(logger)
+	// 4. Initialize SilenceMatcher
+	silenceMatcher := coresilencing.NewSilenceMatcher()
 
 	// 5. Create SilenceManager
 	silenceManager := silencing.NewDefaultSilenceManager(
@@ -109,7 +110,7 @@ Add the following to your existing `main.go`:
 
 // Initialize Silence Manager
 silenceRepo := infrasilencing.NewPostgresSilenceRepository(pool, logger)
-silenceMatcher := coresilencing.NewDefaultSilenceMatcher(logger)
+silenceMatcher := coresilencing.NewSilenceMatcher()
 silenceManager := silencing.NewDefaultSilenceManager(silenceRepo, silenceMatcher, logger, nil)
 
 if err := silenceManager.Start(ctx); err != nil {
@@ -213,22 +214,8 @@ func (p *AlertProcessor) sendNotifications(ctx context.Context, alert *Alert) er
 
 ## Configuration
 
-### Environment Variables
-
-Configure Silence Manager via environment variables (12-factor app):
-
-```bash
-# GC Worker Settings
-export SILENCE_GC_INTERVAL="5m"           # How often to run GC
-export SILENCE_GC_RETENTION="24h"         # Keep expired silences for this long
-export SILENCE_GC_BATCH_SIZE="1000"       # Max silences per GC run
-
-# Sync Worker Settings
-export SILENCE_SYNC_INTERVAL="1m"         # How often to sync cache
-
-# Shutdown Settings
-export SILENCE_SHUTDOWN_TIMEOUT="30s"     # Max time for graceful shutdown
-```
+Silence Manager конфигурируется программно через `SilenceManagerConfig`
+(env-переменные для этих настроек в коде не читаются):
 
 ### Custom Configuration
 
@@ -256,25 +243,25 @@ manager := silencing.NewDefaultSilenceManager(repo, matcher, logger, &config)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: alert-history
+  name: amp
   namespace: monitoring
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: alert-history
+      app: amp
   template:
     metadata:
       labels:
-        app: alert-history
+        app: amp
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
       containers:
-      - name: alert-history
-        image: alert-history:latest
+      - name: amp
+        image: amp:latest
         ports:
         - containerPort: 8080
           name: http
@@ -284,12 +271,6 @@ spec:
             secretKeyRef:
               name: postgres-credentials
               key: connection-url
-        - name: SILENCE_GC_INTERVAL
-          value: "5m"
-        - name: SILENCE_GC_RETENTION
-          value: "24h"
-        - name: SILENCE_SYNC_INTERVAL
-          value: "1m"
         resources:
           requests:
             memory: "256Mi"
@@ -317,11 +298,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: alert-history
+  name: amp
   namespace: monitoring
 spec:
   selector:
-    app: alert-history
+    app: amp
   ports:
   - port: 80
     targetPort: 8080
@@ -330,18 +311,18 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: alert-history
+  name: amp
   namespace: monitoring
 spec:
   rules:
-  - host: alert-history.example.com
+  - host: amp.example.com
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: alert-history
+            name: amp
             port:
               number: 80
 ```
@@ -497,35 +478,21 @@ logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 1. **Cache Size**: Keep active silences <10,000 for optimal performance
 2. **GC Interval**: Default 5m is good for most cases
 3. **Sync Interval**: 1m ensures cache freshness without overhead
-4. **Database Indexes**: Ensure TN-133 indexes are created
-
-### Expected Performance
-
-| Operation | Target | Typical |
-|-----------|--------|---------|
-| CreateSilence | <15ms | ~3-4ms |
-| GetSilence (cached) | <100µs | ~50ns |
-| GetSilence (uncached) | <5ms | ~1-1.5ms |
-| IsAlertSilenced (100 silences) | <500µs | ~100-200µs |
-| GC Cleanup (1000 silences) | <2s | ~40-90ms |
-| Sync (1000 silences) | <500ms | ~100-200ms |
+4. **Database Indexes**: Ensure silence table indexes are created (см. миграции)
 
 ## Production Checklist
 
-- [ ] PostgreSQL indexes created (from TN-133)
-- [ ] Silence Manager started in main.go
+- [ ] PostgreSQL indexes created (silence migrations applied)
+- [ ] Silence Manager started at application startup
 - [ ] AlertProcessor integrated with IsAlertSilenced
 - [ ] Prometheus metrics exported
 - [ ] Graceful shutdown configured
-- [ ] Environment variables set
 - [ ] Kubernetes deployment configured
 - [ ] Health checks configured
 - [ ] Monitoring dashboard created
 - [ ] Alerts configured (cache hit rate, error rate, etc.)
 
-## Support
+## Related Documentation
 
-For issues or questions:
-- See TN-134 requirements.md and design.md
-- Check COMPLETION_REPORT.md for implementation details
-- Review TN-131 (Data Models), TN-132 (Matcher), TN-133 (Storage) docs
+- Data models and matcher: `internal/core/silencing`
+- Storage repository: `internal/infrastructure/silencing`

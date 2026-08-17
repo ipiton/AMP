@@ -492,8 +492,8 @@ func (mm *MigrationManager) HealthCheck(ctx context.Context) error {
 	// Проверяем, что таблица версий существует
 	if mm.config.Driver == "postgres" {
 		var exists bool
-		query := fmt.Sprintf("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '%s')", mm.config.Table)
-		if err := mm.db.QueryRowContext(ctx, query).Scan(&exists); err != nil {
+		query := "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)"
+		if err := mm.db.QueryRowContext(ctx, query, mm.config.Table).Scan(&exists); err != nil {
 			return fmt.Errorf("failed to check migration table: %w", err)
 		}
 

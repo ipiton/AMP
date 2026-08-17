@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ipiton/AMP/pkg/httperror"
 	"golang.org/x/time/rate"
 )
 
@@ -131,7 +132,7 @@ func (c *defaultRootlyIncidentsClient) CreateIncident(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	if resp.StatusCode != http.StatusCreated {
@@ -192,7 +193,7 @@ func (c *defaultRootlyIncidentsClient) UpdateIncident(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response
 	if resp.StatusCode != http.StatusOK {
@@ -253,7 +254,7 @@ func (c *defaultRootlyIncidentsClient) ResolveIncident(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Parse response (200 OK or 409 Conflict if already resolved)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
@@ -374,16 +375,29 @@ func (c *defaultRootlyIncidentsClient) parseError(resp *http.Response) error {
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse error JSON, return generic error
-		return NewRootlyAPIError(resp.StatusCode, "Unknown Error", string(body), "")
+		return httperror.NewHTTPError(resp.StatusCode, rootlyErrorMessage("Unknown Error", string(body)), ProviderRootly)
 	}
 
 	if len(errorResp.Errors) == 0 {
-		return NewRootlyAPIError(resp.StatusCode, "Unknown Error", string(body), "")
+		return httperror.NewHTTPError(resp.StatusCode, rootlyErrorMessage("Unknown Error", string(body)), ProviderRootly)
 	}
 
 	// Return first error
 	firstError := errorResp.Errors[0]
-	return NewRootlyAPIError(resp.StatusCode, firstError.Title, firstError.Detail, firstError.Source.Pointer)
+	var details []string
+	if firstError.Source.Pointer != "" {
+		details = []string{"field: " + firstError.Source.Pointer}
+	}
+	return httperror.NewHTTPErrorWithDetails(resp.StatusCode,
+		rootlyErrorMessage(firstError.Title, firstError.Detail), ProviderRootly, details)
+}
+
+// rootlyErrorMessage builds an error message from Rootly API title and detail.
+func rootlyErrorMessage(title, detail string) string {
+	if detail != "" {
+		return title + " - " + detail
+	}
+	return title
 }
 
 // Helper functions

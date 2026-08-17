@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/pkg/httperror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -479,22 +480,22 @@ func TestClassifySlackError(t *testing.T) {
 		},
 		{
 			name:     "rate limit error",
-			err:      NewSlackAPIError(429, "rate_limited", 0),
+			err:      httperror.NewHTTPError(429, "rate_limited", ProviderSlack),
 			expected: "rate_limit",
 		},
 		{
 			name:     "server error",
-			err:      NewSlackAPIError(503, "service_unavailable", 0),
+			err:      httperror.NewHTTPError(503, "service_unavailable", ProviderSlack),
 			expected: "server_error",
 		},
 		{
 			name:     "auth error",
-			err:      NewSlackAPIError(403, "forbidden", 0),
+			err:      httperror.NewHTTPError(403, "forbidden", ProviderSlack),
 			expected: "auth_error",
 		},
 		{
 			name:     "bad request error",
-			err:      NewSlackAPIError(400, "invalid_payload", 0),
+			err:      httperror.NewHTTPError(400, "invalid_payload", ProviderSlack),
 			expected: "bad_request",
 		},
 		{

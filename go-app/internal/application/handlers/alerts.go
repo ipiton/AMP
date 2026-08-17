@@ -2,20 +2,19 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 	"github.com/ipiton/AMP/internal/core/services"
+	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/internal/infrastructure/webhook"
 )
@@ -25,6 +24,10 @@ import (
 type RegistryProvider interface {
 	AlertStore() *memory.AlertStore
 	SilenceStore() *memory.SilenceStore
+	// SilenceRepository returns the persistent silence repository, or nil when
+	// running without one (lite profile). With a nil repository the silence
+	// handlers fall back to the legacy memory-only behavior.
+	SilenceRepository() infrasilencing.SilenceRepository
 	AlertProcessor() *services.AlertProcessor
 	Config() *appconfig.Config
 	StartTime() time.Time
@@ -69,24 +72,39 @@ func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w 
 		if !MatchesLabels(filters, alert.Labels) {
 			continue
 		}
-		gettableAlerts = append(gettableAlerts, toGettableAlert(alert, silences, now))
+		gettableAlerts = append(gettableAlerts, alertconv.ToGettableAlert(alert, silenceMatcher(silences), now))
 	}
 
 	writeJSON(w, http.StatusOK, gettableAlerts)
 }
 
+// silenceMatcher converts a possibly-nil *memory.SilenceStore into the
+// alertconv.SilenceMatcher interface without producing a typed-nil interface.
+func silenceMatcher(s *memory.SilenceStore) alertconv.SilenceMatcher {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
 func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return getOnly(func(w http.ResponseWriter, r *http.Request) {
 		queryParams := r.URL.Query()
 		groupBy := queryParams["group_by"]
 
-		groups := registry.AlertStore().GroupAlerts(groupBy)
+		// Active runtime has no routing tree yet: groups carry the first
+		// configured receiver (or "default") instead of a hardcoded value.
+		receiver := "default"
+		if receivers := registry.Config().Receivers; len(receivers) > 0 {
+			receiver = receivers[0].Name
+		}
+		groups := registry.AlertStore().GroupAlerts(groupBy, receiver, silenceMatcher(registry.SilenceStore()))
 		writeJSON(w, http.StatusOK, groups)
-	}
+	})
 }
 
 func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, externalURL string, w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 
 	if processor == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
@@ -131,9 +149,12 @@ func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertSto
 	}
 
 	if len(successfulInputs) > 0 {
+		// These alerts are already committed to the database (dedup path inside
+		// ProcessAlert). A memory-store failure here is an internal inconsistency,
+		// not a client error — report 500, never 400.
 		if err := store.IngestBatch(successfulInputs, now); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": err.Error(),
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "alerts persisted but in-memory store rejected batch: " + err.Error(),
 			})
 			return
 		}
@@ -202,7 +223,7 @@ func parseLegacyAlerts(body []byte, now time.Time) ([]*core.Alert, error) {
 }
 
 func convertIngestInputToAlert(in core.AlertIngestInput, now time.Time) (*core.Alert, error) {
-	startsAt, err := parseAlertTime(in.StartsAt)
+	startsAt, err := alertconv.ParseAlertTime(in.StartsAt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid startsAt: %w", err)
 	}
@@ -210,7 +231,7 @@ func convertIngestInputToAlert(in core.AlertIngestInput, now time.Time) (*core.A
 		startsAt = now
 	}
 
-	endsAt, err := parseOptionalAlertTime(in.EndsAt)
+	endsAt, err := alertconv.ParseOptionalAlertTime(in.EndsAt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid endsAt: %w", err)
 	}
@@ -220,10 +241,10 @@ func convertIngestInputToAlert(in core.AlertIngestInput, now time.Time) (*core.A
 		return nil, fmt.Errorf("missing required label alertname")
 	}
 
-	status := normalizeAlertStatus(in.Status, endsAt, now)
+	status := alertconv.NormalizeStatus(in.Status, endsAt, now)
 	fingerprint := strings.TrimSpace(in.Fingerprint)
 	if fingerprint == "" {
-		fingerprint = labelsFingerprint(in.Labels)
+		fingerprint = alertconv.Fingerprint(in.Labels)
 	}
 
 	var generatorURL *string
@@ -235,8 +256,8 @@ func convertIngestInputToAlert(in core.AlertIngestInput, now time.Time) (*core.A
 		Fingerprint:  fingerprint,
 		AlertName:    alertName,
 		Status:       core.AlertStatus(status),
-		Labels:       cloneStringMap(in.Labels),
-		Annotations:  cloneStringMap(in.Annotations),
+		Labels:       alertconv.CloneStringMap(in.Labels),
+		Annotations:  alertconv.CloneStringMap(in.Annotations),
 		StartsAt:     startsAt,
 		EndsAt:       endsAt,
 		GeneratorURL: generatorURL,
@@ -246,8 +267,8 @@ func convertIngestInputToAlert(in core.AlertIngestInput, now time.Time) (*core.A
 
 func toAlertIngestInput(alert *core.Alert) core.AlertIngestInput {
 	in := core.AlertIngestInput{
-		Labels:      cloneStringMap(alert.Labels),
-		Annotations: cloneStringMap(alert.Annotations),
+		Labels:      alertconv.CloneStringMap(alert.Labels),
+		Annotations: alertconv.CloneStringMap(alert.Annotations),
 		StartsAt:    alert.StartsAt.UTC().Format(time.RFC3339),
 		Status:      string(alert.Status),
 		Fingerprint: alert.Fingerprint,
@@ -260,114 +281,6 @@ func toAlertIngestInput(alert *core.Alert) core.AlertIngestInput {
 	}
 
 	return in
-}
-
-func parseAlertTime(raw string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}, nil
-	}
-
-	t, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return t.UTC(), nil
-}
-
-func parseOptionalAlertTime(raw string) (*time.Time, error) {
-	t, err := parseAlertTime(raw)
-	if err != nil {
-		return nil, err
-	}
-	if t.IsZero() {
-		return nil, nil
-	}
-	return &t, nil
-}
-
-func normalizeAlertStatus(raw string, endsAt *time.Time, now time.Time) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "firing":
-		return "firing"
-	case "resolved":
-		return "resolved"
-	}
-	if endsAt != nil && !endsAt.After(now) {
-		return "resolved"
-	}
-	return "firing"
-}
-
-func labelsFingerprint(labels map[string]string) string {
-	if len(labels) == 0 {
-		return ""
-	}
-
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var builder strings.Builder
-	for _, key := range keys {
-		builder.WriteString(key)
-		builder.WriteByte('=')
-		builder.WriteString(labels[key])
-		builder.WriteByte('|')
-	}
-
-	sum := sha256.Sum256([]byte(builder.String()))
-	return hex.EncodeToString(sum[:16])
-}
-
-func cloneStringMap(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return map[string]string{}
-	}
-
-	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
-}
-
-// Helpers (temporarily here, should move to internal/application/handlers/common.go)
-
-func toGettableAlert(alert core.APIAlert, silences *memory.SilenceStore, now time.Time) core.APIGettableAlert {
-	silencedBy := make([]string, 0)
-	if alert.Status == "firing" && silences != nil {
-		silencedBy = silences.ActiveMatchingSilenceIDs(alert.Labels, now)
-	}
-
-	state := "active"
-	if len(silencedBy) > 0 {
-		state = "suppressed"
-	} else if alert.Status == "resolved" {
-		state = "unprocessed" // Simplification for now
-	}
-
-	endsAt := alert.UpdatedAt
-	if alert.EndsAt != nil && *alert.EndsAt != "" {
-		endsAt = *alert.EndsAt
-	}
-
-	return core.APIGettableAlert{
-		Labels:       alert.Labels,
-		Annotations:  alert.Annotations,
-		Receivers:    alert.Receivers,
-		StartsAt:     alert.StartsAt,
-		UpdatedAt:    alert.UpdatedAt,
-		EndsAt:       endsAt,
-		GeneratorURL: alert.GeneratorURL,
-		Fingerprint:  alert.Fingerprint,
-		Status: core.APIAlertStatus{
-			State:      state,
-			SilencedBy: silencedBy,
-		},
-	}
 }
 
 func parseAlertsStatusQuery(raw string) string {

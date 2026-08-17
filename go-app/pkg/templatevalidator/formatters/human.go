@@ -130,11 +130,11 @@ func (f *HumanFormatter) formatErrors(errors []templatevalidator.ValidationError
 		}
 
 		// Format error
-		sb.WriteString(fmt.Sprintf("  %s %s %s\n", icon, f.colorize(loc, colorYellow), err.Message))
+		fmt.Fprintf(&sb, "  %s %s %s\n", icon, f.colorize(loc, colorYellow), err.Message)
 
 		// Suggestion
 		if err.Suggestion != "" {
-			sb.WriteString(fmt.Sprintf("      💡 %s\n", f.colorize(err.Suggestion, colorCyan)))
+			fmt.Fprintf(&sb, "      💡 %s\n", f.colorize(err.Suggestion, colorCyan))
 		}
 	}
 
@@ -153,10 +153,10 @@ func (f *HumanFormatter) formatWarnings(warnings []templatevalidator.ValidationW
 			loc = "unknown"
 		}
 
-		sb.WriteString(fmt.Sprintf("  ⚠ %s %s\n", f.colorize(loc, colorYellow), warning.Message))
+		fmt.Fprintf(&sb, "  ⚠ %s %s\n", f.colorize(loc, colorYellow), warning.Message)
 
 		if warning.Suggestion != "" {
-			sb.WriteString(fmt.Sprintf("      💡 %s\n", f.colorize(warning.Suggestion, colorCyan)))
+			fmt.Fprintf(&sb, "      💡 %s\n", f.colorize(warning.Suggestion, colorCyan))
 		}
 	}
 
@@ -175,9 +175,9 @@ func (f *HumanFormatter) formatSuggestions(suggestions []templatevalidator.Valid
 			loc = "unknown"
 		}
 
-		sb.WriteString(fmt.Sprintf("  💡 %s %s\n", loc, suggestion.Message))
+		fmt.Fprintf(&sb, "  💡 %s %s\n", loc, suggestion.Message)
 		if suggestion.Suggestion != "" {
-			sb.WriteString(fmt.Sprintf("      → %s\n", suggestion.Suggestion))
+			fmt.Fprintf(&sb, "      → %s\n", suggestion.Suggestion)
 		}
 	}
 
@@ -214,9 +214,9 @@ func (f *HumanFormatter) formatSummary(results []templatevalidator.ValidationRes
 		sb.WriteString(f.colorize(status, colorRed))
 	}
 
-	sb.WriteString(fmt.Sprintf("  Errors: %d\n", totalErrors))
-	sb.WriteString(fmt.Sprintf("  Warnings: %d\n", totalWarnings))
-	sb.WriteString(fmt.Sprintf("  Suggestions: %d\n", totalSuggestions))
+	fmt.Fprintf(&sb, "  Errors: %d\n", totalErrors)
+	fmt.Fprintf(&sb, "  Warnings: %d\n", totalWarnings)
+	fmt.Fprintf(&sb, "  Suggestions: %d\n", totalSuggestions)
 
 	return sb.String()
 }

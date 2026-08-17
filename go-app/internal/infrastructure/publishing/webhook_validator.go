@@ -174,7 +174,7 @@ func (v *WebhookValidator) ValidateFormat(payload interface{}) error {
 
 	// Check for nil pointer in interface
 	val := reflect.ValueOf(payload)
-	if val.Kind() == reflect.Ptr && val.IsNil() {
+	if val.Kind() == reflect.Pointer && val.IsNil() {
 		return ErrInvalidFormat
 	}
 

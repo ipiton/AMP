@@ -362,7 +362,7 @@ func (rc *ReloadCoordinator) atomicApply(
 		if err != nil {
 			return fmt.Errorf("failed to acquire lock: %w", err)
 		}
-		defer lock.Release(ctx)
+		defer func() { _ = lock.Release(ctx) }()
 	}
 
 	// Backup old config to storage (if available)

@@ -8,10 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipiton/AMP/internal/core"
-	"github.com/ipiton/AMP/internal/infrastructure"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/infrastructure"
 )
 
 // TestDeduplicationIntegration_RealPostgres tests deduplication with real PostgreSQL database.
@@ -34,18 +36,12 @@ func TestDeduplicationIntegration_RealPostgres(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	config := &infrastructure.Config{
-		DSN:             dsn,
-		MaxOpenConns:    10,
-		MaxIdleConns:    5,
-		ConnMaxLifetime: 30 * time.Minute,
-		ConnMaxIdleTime: 5 * time.Minute,
-		Logger:          logger,
-	}
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err, "Failed to create pgx pool")
+	t.Cleanup(pool.Close)
 
-	storage, err := infrastructure.NewPostgresDatabase(config)
-	require.NoError(t, err, "Failed to connect to PostgreSQL")
-	// Note: PostgresDatabase doesn't expose Close() - connection is managed internally
+	storage, err := infrastructure.NewPostgresStorageAdapter(pool, logger)
+	require.NoError(t, err, "Failed to create postgres storage adapter")
 
 	// Ensure alerts table exists (migrations should be run beforehand)
 	// For testing, we'll assume the schema is already created

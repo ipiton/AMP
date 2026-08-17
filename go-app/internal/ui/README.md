@@ -1,19 +1,22 @@
 # Template Engine — Dashboard UI
 
 **Package**: `internal/ui`
-**Purpose**: Server-side HTML template engine for Alertmanager++ dashboard
-**Quality**: 150%+ Production Grade A+
+**Purpose**: Server-side HTML template engine for the AMP dashboard
+
+> **Note**: this package is not the active owner of the `/dashboard/*` pages.
+> The active dashboard is served from `cmd/server` (see ADR-005 in
+> `docs/06-planning/DECISIONS.md`).
 
 ---
 
 ## Overview
 
-Production-grade template engine built on Go's `html/template` with:
+Template engine built on Go's `html/template` with:
 - **Layouts & Partials**: Modular template composition
-- **15+ Custom Functions**: Time formatting, CSS helpers, utilities
+- **Custom Functions**: Time formatting, CSS helpers, utilities
 - **Hot Reload**: Development mode with live template updates
-- **Template Caching**: Production mode with zero disk I/O
-- **Observability**: 3 Prometheus metrics
+- **Template Caching**: Cached mode without per-request disk I/O
+- **Observability**: Prometheus metrics via `pkg/metrics/v2` `HTTPMetrics`
 - **XSS Protection**: Auto-escaping via html/template
 - **Thread-Safe**: Concurrent rendering support
 
@@ -62,12 +65,14 @@ func HandleDashboard(w http.ResponseWriter, r *http.Request) {
 ### Components
 
 1. **TemplateEngine** - Core engine (`template_engine.go`)
-2. **Custom Functions** - 15+ helpers (`template_funcs.go`)
-3. **TemplateMetrics** - Prometheus metrics (`template_metrics.go`)
+2. **Custom Functions** - Template helpers (`template_funcs.go`)
+3. **Metrics** - Prometheus metrics via `pkg/metrics/v2` (`HTTPMetrics`)
 4. **PageData** - Standard data structure (`page_data.go`)
-5. **Template Files** - HTML templates (`templates/`)
+5. **Template Files** - HTML templates loaded from `TemplateDir` (default `templates/`)
 
 ### Template Structure
+
+Expected layout under `TemplateDir` (this package does not ship these files itself):
 
 ```
 templates/
@@ -91,7 +96,7 @@ templates/
 
 ---
 
-## Custom Functions (15+)
+## Custom Functions
 
 ### Time Functions
 
@@ -186,7 +191,7 @@ pageData.Data = alertData
 **1. Create template file**: `templates/pages/mypage.html`
 
 ```html
-{{ define "title" }}My Page - Alertmanager++{{ end }}
+{{ define "title" }}My Page - AMP{{ end }}
 
 {{ define "content" }}
 <div class="my-page">
@@ -230,27 +235,17 @@ Edit templates → Refresh browser → See changes immediately!
 
 ## Performance
 
-### Production Mode (Cache=true)
+### Cached Mode (Cache=true)
 
-- **Initial Load**: Templates loaded once at startup
-- **Render Time**: <20ms (cached templates)
-- **Memory**: ~2MB for 50 templates
-- **Disk I/O**: Zero per request
+- Templates loaded once at startup
+- No disk I/O per request
 
 ### Development Mode (HotReload=true)
 
-- **Render Time**: <50ms (reload + render)
-- **Disk I/O**: Read templates on each request
-- **Use Case**: Local development only
+- Templates re-read from disk on each request
+- Use case: local development only
 
-### Benchmarks
-
-| Operation | Time | Allocations |
-|-----------|------|-------------|
-| Render dashboard (cached) | ~15ms | ~50 |
-| Render alert list (100 items) | ~30ms | ~200 |
-| Custom function call | <1µs | 0 |
-| Template cache hit | >99% | 0 |
+Benchmarks live in `template_bench_test.go`; run them locally for current numbers.
 
 ---
 
@@ -258,35 +253,24 @@ Edit templates → Refresh browser → See changes immediately!
 
 ### Prometheus Metrics
 
+Template metrics are part of `pkg/metrics/v2` `HTTPMetrics` (namespace `alert_history`, subsystem `http`).
+
 **1. Template Renders** (Counter)
 ```promql
 # Total renders by template and status
-alert_history_template_render_total{template="pages/dashboard", status="success"}
+alert_history_http_template_render_total{template="pages/dashboard", status="success"}
 ```
 
 **2. Render Duration** (Histogram)
 ```promql
 # p95 render duration
-histogram_quantile(0.95, rate(alert_history_template_render_duration_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(alert_history_http_template_render_duration_seconds_bucket[5m]))
 ```
 
 **3. Cache Hits** (Counter)
 ```promql
 # Cache hit rate
-rate(alert_history_template_cache_hits_total[5m])
-```
-
-### Example Queries
-
-```promql
-# Slowest templates (p95)
-topk(5, histogram_quantile(0.95,
-  rate(alert_history_template_render_duration_seconds_bucket[10m])
-))
-
-# Template error rate
-rate(alert_history_template_render_total{status="error"}[5m]) /
-rate(alert_history_template_render_total[5m])
+rate(alert_history_http_template_cache_hits_total[5m])
 ```
 
 ---
@@ -455,7 +439,10 @@ func (e *TemplateEngine) RenderWithFallback(
 )
 
 // GetMetrics returns the metrics instance
-func (e *TemplateEngine) GetMetrics() *TemplateMetrics
+func (e *TemplateEngine) GetMetrics() *v2.HTTPMetrics
+
+// SetMetrics sets the metrics instance
+func (e *TemplateEngine) SetMetrics(metrics *v2.HTTPMetrics)
 ```
 
 ### PageData
@@ -526,42 +513,17 @@ opts.HotReload = true  // Performance hit!
 
 ## Files
 
-### Go Code (735 LOC)
-- `template_engine.go` (320 LOC) - Core engine
-- `template_funcs.go` (220 LOC) - 15+ custom functions
-- `template_metrics.go` (80 LOC) - Prometheus metrics
-- `template_errors.go` (15 LOC) - Error types
-- `page_data.go` (100 LOC) - Data structures
-
-### Templates (410 LOC)
-- `layouts/base.html` (60 LOC)
-- `pages/dashboard.html` (150 LOC)
-- `partials/header.html` (40 LOC)
-- `partials/footer.html` (15 LOC)
-- `partials/sidebar.html` (40 LOC)
-- `partials/breadcrumbs.html` (20 LOC)
-- `partials/flash.html` (15 LOC)
-- `errors/500.html` (70 LOC)
-
-**Total**: 1,145 LOC (138% of 830 LOC target)
+- `template_engine.go` - Core engine
+- `template_funcs.go` - Custom template functions
+- `template_errors.go` - Error types
+- `page_data.go` - Data structures
+- `classification_display.go`, `classification_enricher.go` - Classification display helpers
+- `testdata/` - Test fixtures
 
 ---
 
 ## References
 
-### External
 - [Go html/template](https://pkg.go.dev/html/template)
 - [Template Actions](https://pkg.go.dev/text/template#hdr-Actions)
 - [XSS Prevention](https://golang.org/pkg/html/template/#hdr-Security_Model)
-
-### Internal
-- TN-77: Modern dashboard page
-- TN-78: Real-time updates (WebSocket)
-- TN-79: Alert list with filtering
-
----
-
-**Document Version**: 1.0
-**Status**: ✅ PRODUCTION-READY
-**Quality**: 150%+ Production Grade A+
-**Last Updated**: 2025-11-17

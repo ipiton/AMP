@@ -92,15 +92,15 @@ func TestPostgresConfig_LoadFromEnv(t *testing.T) {
 
 	defer func() {
 		// Восстанавливаем оригинальные значения
-		os.Setenv("DB_HOST", originalHost)
-		os.Setenv("DB_PORT", originalPort)
-		os.Setenv("DB_NAME", originalDB)
+		_ = os.Setenv("DB_HOST", originalHost)
+		_ = os.Setenv("DB_PORT", originalPort)
+		_ = os.Setenv("DB_NAME", originalDB)
 	}()
 
 	// Устанавливаем тестовые значения
-	os.Setenv("DB_HOST", "testhost")
-	os.Setenv("DB_PORT", "5433")
-	os.Setenv("DB_NAME", "testdb")
+	_ = os.Setenv("DB_HOST", "testhost")
+	_ = os.Setenv("DB_PORT", "5433")
+	_ = os.Setenv("DB_NAME", "testdb")
 
 	config := LoadFromEnv()
 
@@ -351,7 +351,7 @@ func BenchmarkPostgresPool_Query(b *testing.B) {
 	// Подключаемся (предполагаем, что база доступна)
 	err := pool.Connect(ctx)
 	require.NoError(b, err)
-	defer pool.Disconnect(ctx)
+	defer func() { _ = pool.Disconnect(ctx) }()
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

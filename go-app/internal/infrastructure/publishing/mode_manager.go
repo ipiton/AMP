@@ -289,7 +289,7 @@ func (m *DefaultModeManager) periodicCheck(ctx context.Context) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.CheckModeTransition()
+			_, _, _ = m.CheckModeTransition()
 		}
 	}
 }

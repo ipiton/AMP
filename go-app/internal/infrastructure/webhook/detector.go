@@ -345,12 +345,6 @@ func hasPrometheusV1Fields(alert map[string]interface{}) bool {
 	return true
 }
 
-// hasField checks if a map contains a specific key.
-func hasField(data map[string]interface{}, field string) bool {
-	_, ok := data[field]
-	return ok
-}
-
 // prometheusFormatDetector implements PrometheusFormatDetector.
 type prometheusFormatDetector struct{}
 

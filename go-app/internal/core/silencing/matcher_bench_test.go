@@ -69,7 +69,7 @@ func BenchmarkMatcherRegex_CacheHit(b *testing.B) {
 	})
 
 	// Pre-warm cache
-	matcher.Matches(ctx, alert, silence)
+	_, _ = matcher.Matches(ctx, alert, silence)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -120,7 +120,7 @@ func BenchmarkMatcherNotRegex(b *testing.B) {
 	})
 
 	// Pre-warm cache
-	matcher.Matches(ctx, alert, silence)
+	_, _ = matcher.Matches(ctx, alert, silence)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -215,7 +215,7 @@ func BenchmarkMatchesAny_100Silences(b *testing.B) {
 	}
 
 	// Pre-warm regex cache
-	matcher.MatchesAny(ctx, alert, silences[:1])
+	_, _ = matcher.MatchesAny(ctx, alert, silences[:1])
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -249,7 +249,7 @@ func BenchmarkMatchesAny_1000Silences(b *testing.B) {
 	}
 
 	// Pre-warm regex cache
-	matcher.MatchesAny(ctx, alert, silences[:1])
+	_, _ = matcher.MatchesAny(ctx, alert, silences[:1])
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -288,7 +288,7 @@ func BenchmarkMatchesAny_MixedOperators(b *testing.B) {
 	}
 
 	// Pre-warm cache
-	matcher.MatchesAny(ctx, alert, silences[:1])
+	_, _ = matcher.MatchesAny(ctx, alert, silences[:1])
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -314,7 +314,7 @@ func BenchmarkRegexCache_ConcurrentAccess(b *testing.B) {
 	})
 
 	// Pre-warm cache
-	matcher.Matches(ctx, alert, silence)
+	_, _ = matcher.Matches(ctx, alert, silence)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -348,7 +348,7 @@ func BenchmarkMatcherEqual_vs_Regex(b *testing.B) {
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			matcher.Matches(ctx, alert, silence)
+			_, _ = matcher.Matches(ctx, alert, silence)
 		}
 	})
 
@@ -358,13 +358,13 @@ func BenchmarkMatcherEqual_vs_Regex(b *testing.B) {
 		})
 
 		// Pre-warm cache
-		matcher.Matches(ctx, alert, silence)
+		_, _ = matcher.Matches(ctx, alert, silence)
 
 		b.ResetTimer()
 		b.ReportAllocs()
 
 		for i := 0; i < b.N; i++ {
-			matcher.Matches(ctx, alert, silence)
+			_, _ = matcher.Matches(ctx, alert, silence)
 		}
 	})
 }

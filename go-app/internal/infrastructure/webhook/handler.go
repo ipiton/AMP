@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
-	"github.com/ipiton/AMP/pkg/metrics"
+	// v2 has no WebhookMetrics equivalent yet. Migration tracked separately.
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration
 	"github.com/prometheus/client_golang/prometheus"
 )
 

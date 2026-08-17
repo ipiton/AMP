@@ -53,9 +53,6 @@ type Registry struct {
 
 	// registerer is the Prometheus registerer to use
 	registerer prometheus.Registerer
-
-	// mu protects initialization
-	mu sync.Mutex
 }
 
 // Option configures the Registry.

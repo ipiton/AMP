@@ -448,10 +448,6 @@ func (h *DashboardOverviewHandler) collectPublishingStats(ctx context.Context) p
 		return stats // Graceful degradation
 	}
 
-	// Create context with timeout (5 seconds)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	stats.targets = h.publishingStats.GetTargetCount()
 	stats.mode = h.publishingStats.GetPublishingMode()
 	stats.successfulPublishes = h.publishingStats.GetSuccessfulPublishes()

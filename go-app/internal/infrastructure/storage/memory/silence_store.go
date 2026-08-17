@@ -28,6 +28,15 @@ func (s *SilenceStore) CreateOrUpdate(in *core.SilenceInput, now time.Time) (str
 	return s.createOrUpdateInternal(in, now, true, true, false)
 }
 
+// Upsert inserts or replaces a silence with a caller-provided ID without
+// requiring the ID to already exist in the store. It is used by the DB-first
+// write path (SPLIT-BRAIN-RISK slice 2): the persistent repository generates
+// the silence ID, and the memory store mirrors it so that memory and database
+// always agree on identifiers.
+func (s *SilenceStore) Upsert(in *core.SilenceInput, now time.Time) (string, error) {
+	return s.createOrUpdateInternal(in, now, true, false, false)
+}
+
 func (s *SilenceStore) createOrUpdateInternal(in *core.SilenceInput, now time.Time, notify, enforceExistingID, allowPastEndsAt bool) (string, error) {
 	if in == nil {
 		return "", fmt.Errorf("silence payload is required")
@@ -313,12 +322,7 @@ func normalizeSilenceInput(in *core.SilenceInput, now time.Time, allowPastEndsAt
 func toAPISilence(in *core.StoredSilenceState, now time.Time) core.APISilence {
 	matchers := make([]core.APISilenceMatcher, 0, len(in.Matchers))
 	for _, matcher := range in.Matchers {
-		matchers = append(matchers, core.APISilenceMatcher{
-			Name:    matcher.Name,
-			Value:   matcher.Value,
-			IsRegex: matcher.IsRegex,
-			IsEqual: matcher.IsEqual,
-		})
+		matchers = append(matchers, core.APISilenceMatcher(matcher))
 	}
 
 	return core.APISilence{

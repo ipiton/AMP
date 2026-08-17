@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ipiton/AMP/pkg/metrics"
+	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics/DatabaseMetrics have no direct pkg/metrics/v2 equivalent yet; migration tracked separately
 )
 
 // PoolStatsProvider is an interface for providing pool statistics.
@@ -135,11 +135,9 @@ func (e *PrometheusExporter) exportMetrics() {
 	// Export query counters
 	// Note: Simplified - tracking all queries as "all" operation type
 	// Production: Would track SELECT/INSERT/UPDATE/DELETE separately
-	if stats.TotalQueries > 0 {
-		// This is cumulative, so we'd need to track delta
-		// For now, just using as gauge-like metric
-		// TODO: Implement delta tracking
-	}
+	// stats.TotalQueries is cumulative, so we'd need to track delta
+	// For now, just using as gauge-like metric
+	// TODO: Implement delta tracking
 
 	// Export error metrics (Counters)
 	if stats.ConnectionErrors > 0 {

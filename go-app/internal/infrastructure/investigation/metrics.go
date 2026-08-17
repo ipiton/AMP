@@ -7,10 +7,10 @@ import (
 
 // Metrics holds Prometheus metrics for the investigation pipeline.
 type Metrics struct {
-	QueueDepth       prometheus.Gauge
+	QueueDepth          prometheus.Gauge
 	InvestigationsTotal *prometheus.CounterVec
-	DroppedTotal     prometheus.Counter
-	ProcessingTime   prometheus.Histogram
+	DroppedTotal        prometheus.Counter
+	ProcessingTime      prometheus.Histogram
 }
 
 // NewMetrics registers and returns investigation metrics.

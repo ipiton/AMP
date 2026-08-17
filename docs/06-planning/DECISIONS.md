@@ -65,3 +65,14 @@
   - public docs и compatibility matrix больше не должны описывать эти четыре endpoints как backlog-only;
   - planning/tests не должны продолжать фиксировать их отсутствие в active router contract;
   - restoration этого operational surface не отменяет active-runtime-first policy и не возвращает repo к broad historical parity claim.
+
+## ADR-007: Grafana Dashboard Identity (uid, filename) Is Stable On Purpose
+- **Дата**: 2026-08-17
+- **Контекст**: После `GRAFANA-DASHBOARD-BRANDING-DRIFT` (visible title → `AMP - Operations Dashboard`) остались identity-shaped поля: `uid = amp-alert-history` и путь `grafana/dashboards/alert-history-service.json`. `GRAFANA-DASHBOARD-IDENTITY-DRIFT` требовал явного решения, а не механического rename.
+- **Решение**:
+  - `uid` и filename — стабильный import/provisioning contract, не branding surface; они НЕ меняются без явного provisioning owner;
+  - смена `uid` ломает существующие Grafana provisioning references и dashboard links у всех, кто уже импортировал дашборд, ради чисто косметической консистентности — trade-off отвергнут;
+  - при появлении provisioning owner (Helm-managed provisioning или отдельный dashboards repo) допустима миграция с alias/redirect-планом отдельной задачей.
+- **Следствие**:
+  - `GRAFANA-DASHBOARD-IDENTITY-DRIFT` закрывается как «working as intended, документировано»;
+  - historical naming в uid/filename не считается drift и не должен попадать в новые BUGS-записи.

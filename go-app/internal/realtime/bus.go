@@ -99,7 +99,12 @@ func (b *DefaultEventBus) Unsubscribe(subscriber EventSubscriber) error {
 
 	if _, ok := b.subscribers[subscriber]; ok {
 		delete(b.subscribers, subscriber)
-		subscriber.Close()
+		if err := subscriber.Close(); err != nil {
+			b.logger.Warn("Failed to close subscriber",
+				"subscriber_id", subscriber.ID(),
+				"error", err,
+			)
+		}
 
 		b.logger.Info("Subscriber removed",
 			"subscriber_id", subscriber.ID(),
@@ -240,7 +245,7 @@ func (b *DefaultEventBus) broadcastEvent(event Event) {
 			select {
 			case <-sub.Context().Done():
 				// Subscriber disconnected, remove it
-				b.Unsubscribe(sub)
+				_ = b.Unsubscribe(sub)
 				return
 			default:
 			}
@@ -254,7 +259,7 @@ func (b *DefaultEventBus) broadcastEvent(event Event) {
 					"error", err,
 				)
 				// Remove failed subscriber
-				b.Unsubscribe(sub)
+				_ = b.Unsubscribe(sub)
 			} else {
 				atomic.AddInt64(&successCount, 1)
 			}

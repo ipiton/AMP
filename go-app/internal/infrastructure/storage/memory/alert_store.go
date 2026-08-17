@@ -4,13 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 )
 
 type AlertStore struct {
@@ -90,8 +90,8 @@ func (s *AlertStore) apply(in *core.StoredAlertState, now time.Time) {
 		return // exact duplicate
 	}
 
-	existing.Labels = cloneStringMap(in.Labels)
-	existing.Annotations = cloneStringMap(in.Annotations)
+	existing.Labels = alertconv.CloneStringMap(in.Labels)
+	existing.Annotations = alertconv.CloneStringMap(in.Annotations)
 	existing.StartsAt = in.StartsAt
 	existing.EndsAt = cloneTimePtr(in.EndsAt)
 	existing.GeneratorURL = in.GeneratorURL
@@ -134,7 +134,7 @@ func (s *AlertStore) resolveAlertLocked(in *core.StoredAlertState, now time.Time
 		existing.Status = "resolved"
 		existing.EndsAt = cloneTimePtr(endsAt)
 		if len(in.Annotations) > 0 {
-			existing.Annotations = cloneStringMap(in.Annotations)
+			existing.Annotations = alertconv.CloneStringMap(in.Annotations)
 		}
 		if in.GeneratorURL != "" {
 			existing.GeneratorURL = in.GeneratorURL
@@ -179,10 +179,6 @@ func (s *AlertStore) List(statusFilter string, includeResolved bool) []core.APIA
 	return out
 }
 
-func (s *AlertStore) ExportForPersistence() []core.APIAlert {
-	return s.List("", true)
-}
-
 func (s *AlertStore) Stats() (total, firing, resolved int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -199,14 +195,26 @@ func (s *AlertStore) Stats() (total, firing, resolved int) {
 	return total, firing, resolved
 }
 
-func (s *AlertStore) GroupAlerts(groupBy []string) []core.APIGettableAlertGroup {
+// GroupAlerts groups the stored alerts by the given label names. The silences
+// matcher (nil-tolerant) is used so groups report the same state/silencedBy
+// as GET /api/v2/alerts.
+func (s *AlertStore) GroupAlerts(groupBy []string, receiver string, silences alertconv.SilenceMatcher) []core.APIGettableAlertGroup {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	if receiver == "" {
+		receiver = "default"
+	}
 
 	groups := make(map[string]*core.APIGettableAlertGroup)
 	now := time.Now().UTC()
 
 	for _, a := range s.all {
+		// Upstream groups cover active alerts only; resolved entries are kept
+		// in the store for /api/v2/alerts?resolved=true but not grouped.
+		if a.Status == "resolved" {
+			continue
+		}
 		// Calculate grouping labels and key
 		groupLabels := make(map[string]string)
 		var keyBuilder strings.Builder
@@ -229,13 +237,13 @@ func (s *AlertStore) GroupAlerts(groupBy []string) []core.APIGettableAlertGroup 
 		if !ok {
 			group = &core.APIGettableAlertGroup{
 				Labels:   groupLabels,
-				Receiver: core.APIReceiver{Name: "default"},
+				Receiver: core.APIReceiver{Name: receiver},
 				Alerts:   make([]core.APIGettableAlert, 0),
 			}
 			groups[key] = group
 		}
 
-		gettable := toGettableAlert(toAPIAlert(a), now)
+		gettable := alertconv.ToGettableAlert(toAPIAlert(a), silences, now)
 		group.Alerts = append(group.Alerts, gettable)
 	}
 
@@ -245,71 +253,66 @@ func (s *AlertStore) GroupAlerts(groupBy []string) []core.APIGettableAlertGroup 
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		return labelsFingerprint(out[i].Labels) < labelsFingerprint(out[j].Labels)
+		return alertconv.Fingerprint(out[i].Labels) < alertconv.Fingerprint(out[j].Labels)
 	})
 
 	return out
 }
 
-func toGettableAlert(alert core.APIAlert, now time.Time) core.APIGettableAlert {
-	state := "active"
-	if alert.Status == "resolved" {
-		state = "unprocessed"
-	}
-
-	endsAt := alert.UpdatedAt
-	if alert.EndsAt != nil && *alert.EndsAt != "" {
-		endsAt = *alert.EndsAt
-	}
-
-	return core.APIGettableAlert{
-		Labels:       alert.Labels,
-		Annotations:  alert.Annotations,
-		Receivers:    alert.Receivers,
-		StartsAt:     alert.StartsAt,
-		UpdatedAt:    alert.UpdatedAt,
-		EndsAt:       endsAt,
-		GeneratorURL: alert.GeneratorURL,
-		Fingerprint:  alert.Fingerprint,
-		Status: core.APIAlertStatus{
-			State:      state,
-			SilencedBy: []string{},
-		},
-	}
-}
-
-func (s *AlertStore) RestoreFromPersistence(alerts []core.APIAlert, now time.Time) error {
-	if len(alerts) == 0 {
-		return nil
-	}
-
-	inputs := make([]core.AlertIngestInput, 0, len(alerts))
+// RestoreFromPersistence rehydrates the in-memory store from persisted domain
+// alerts after a restart. It intentionally skips onChange notifications and
+// takes []*core.Alert directly — no APIAlert/AlertIngestInput string
+// round-trip (DTO-FRAGMENTATION item 3).
+func (s *AlertStore) RestoreFromPersistence(alerts []*core.Alert, now time.Time) error {
 	for i, alert := range alerts {
-		if strings.TrimSpace(alert.StartsAt) == "" {
+		if alert == nil {
+			continue
+		}
+		if alert.StartsAt.IsZero() {
 			return fmt.Errorf("persisted alert[%d]: startsAt is required", i)
 		}
+		s.apply(storedStateFromAlert(alert, now), now)
+	}
+	return nil
+}
 
-		in := core.AlertIngestInput{
-			Labels:       cloneStringMap(alert.Labels),
-			Annotations:  cloneStringMap(alert.Annotations),
-			StartsAt:     alert.StartsAt,
-			GeneratorURL: alert.GeneratorURL,
-			Fingerprint:  alert.Fingerprint,
-			Status:       alert.Status,
-		}
-		if alert.EndsAt != nil {
-			in.EndsAt = *alert.EndsAt
-		}
-		inputs = append(inputs, in)
+// storedStateFromAlert converts a persisted domain alert into the internal
+// stored state, applying the same normalization as normalizeIngestInput.
+func storedStateFromAlert(alert *core.Alert, now time.Time) *core.StoredAlertState {
+	labels := alertconv.CloneStringMap(alert.Labels)
+	annotations := alertconv.CloneStringMap(alert.Annotations)
+
+	baseFingerprint := strings.TrimSpace(alert.Fingerprint)
+	if baseFingerprint == "" {
+		baseFingerprint = alertconv.Fingerprint(labels)
+	}
+	if baseFingerprint == "" {
+		baseFingerprint = shortHash(alert.StartsAt.UTC().Format(time.RFC3339Nano))
 	}
 
-	return s.ingestBatchInternal(inputs, now, false)
+	endsAt := cloneTimePtr(alert.EndsAt)
+	generatorURL := ""
+	if alert.GeneratorURL != nil {
+		generatorURL = strings.TrimSpace(*alert.GeneratorURL)
+	}
+
+	return &core.StoredAlertState{
+		DedupKey:        dedupKey(baseFingerprint, alert.StartsAt),
+		BaseFingerprint: baseFingerprint,
+		Labels:          labels,
+		Annotations:     annotations,
+		StartsAt:        alert.StartsAt.UTC(),
+		EndsAt:          endsAt,
+		GeneratorURL:    generatorURL,
+		Status:          alertconv.NormalizeStatus(string(alert.Status), endsAt, now),
+		UpdatedAt:       now.UTC(),
+	}
 }
 
 // Internal helpers
 
 func normalizeIngestInput(in core.AlertIngestInput, now time.Time) (*core.StoredAlertState, error) {
-	startsAt, err := parseAlertTime(in.StartsAt)
+	startsAt, err := alertconv.ParseAlertTime(in.StartsAt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid startsAt: %w", err)
 	}
@@ -317,39 +320,30 @@ func normalizeIngestInput(in core.AlertIngestInput, now time.Time) (*core.Stored
 		startsAt = now
 	}
 
-	endsAt, err := parseOptionalAlertTime(in.EndsAt)
+	endsAt, err := alertconv.ParseOptionalAlertTime(in.EndsAt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid endsAt: %w", err)
 	}
 
-	status := normalizeStatus(in.Status, endsAt, now)
-	labels := cloneStringMap(in.Labels)
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	annotations := cloneStringMap(in.Annotations)
-	if annotations == nil {
-		annotations = map[string]string{}
-	}
+	status := alertconv.NormalizeStatus(in.Status, endsAt, now)
+	labels := alertconv.CloneStringMap(in.Labels)
+	annotations := alertconv.CloneStringMap(in.Annotations)
 
 	baseFingerprint := strings.TrimSpace(in.Fingerprint)
 	if baseFingerprint == "" {
-		baseFingerprint = labelsFingerprint(labels)
+		baseFingerprint = alertconv.Fingerprint(labels)
 	}
 	if baseFingerprint == "" {
 		baseFingerprint = shortHash(startsAt.UTC().Format(time.RFC3339Nano))
 	}
 
+	// GeneratorURL is stored as-is (trimmed). The database persists it
+	// unvalidated, so silently dropping an unparsable URL here would make the
+	// memory view lie about the persisted data.
 	generatorURL := strings.TrimSpace(in.GeneratorURL)
-	if generatorURL != "" {
-		if _, err := url.ParseRequestURI(generatorURL); err != nil {
-			generatorURL = ""
-		}
-	}
 
-	dedupKey := dedupKey(baseFingerprint, startsAt)
 	return &core.StoredAlertState{
-		DedupKey:        dedupKey,
+		DedupKey:        dedupKey(baseFingerprint, startsAt),
 		BaseFingerprint: baseFingerprint,
 		Labels:          labels,
 		Annotations:     annotations,
@@ -359,69 +353,6 @@ func normalizeIngestInput(in core.AlertIngestInput, now time.Time) (*core.Stored
 		Status:          status,
 		UpdatedAt:       now.UTC(),
 	}, nil
-}
-
-func parseAlertTime(raw string) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}, nil
-	}
-	t, err := time.Parse(time.RFC3339, raw)
-	if err == nil {
-		return t, nil
-	}
-
-	// Alertmanager accepts date-only timestamps (YYYY-MM-DD) in ingest payloads.
-	t, dateErr := time.Parse("2006-01-02", raw)
-	if dateErr != nil {
-		return time.Time{}, dateErr
-	}
-	return t, nil
-}
-
-func parseOptionalAlertTime(raw string) (*time.Time, error) {
-	t, err := parseAlertTime(raw)
-	if err != nil {
-		return nil, err
-	}
-	if t.IsZero() {
-		return nil, nil
-	}
-	tt := t.UTC()
-	return &tt, nil
-}
-
-func normalizeStatus(raw string, endsAt *time.Time, now time.Time) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "firing":
-		return "firing"
-	case "resolved":
-		return "resolved"
-	}
-	if endsAt != nil && !endsAt.After(now) {
-		return "resolved"
-	}
-	return "firing"
-}
-
-func labelsFingerprint(labels map[string]string) string {
-	if len(labels) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(labels))
-	for k := range labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var b strings.Builder
-	for _, k := range keys {
-		b.WriteString(k)
-		b.WriteByte('=')
-		b.WriteString(labels[k])
-		b.WriteByte('|')
-	}
-	return shortHash(b.String())
 }
 
 func dedupKey(baseFingerprint string, startsAt time.Time) string {
@@ -444,8 +375,8 @@ func toAPIAlert(a *core.StoredAlertState) core.APIAlert {
 		receiverName = "default"
 	}
 	return core.APIAlert{
-		Labels:       cloneStringMap(a.Labels),
-		Annotations:  cloneStringMap(a.Annotations),
+		Labels:       alertconv.CloneStringMap(a.Labels),
+		Annotations:  alertconv.CloneStringMap(a.Annotations),
 		Receivers:    []core.APIReceiver{{Name: receiverName}},
 		StartsAt:     a.StartsAt.UTC().Format(time.RFC3339),
 		UpdatedAt:    a.UpdatedAt.UTC().Format(time.RFC3339),
@@ -495,17 +426,6 @@ func timePtrEqual(a, b *time.Time) bool {
 		return false
 	}
 	return a.Equal(*b)
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func cloneTimePtr(t *time.Time) *time.Time {

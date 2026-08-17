@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
+	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 )
 
@@ -40,15 +41,19 @@ func (f *fakeFilterEngine) ShouldBlock(_ *core.Alert, _ *core.ClassificationResu
 type fakeRegistry struct {
 	alertStore   *memory.AlertStore
 	silenceStore *memory.SilenceStore
+	silenceRepo  infrasilencing.SilenceRepository
 	processor    *services.AlertProcessor
 }
 
-func (r *fakeRegistry) AlertStore() *memory.AlertStore   { return r.alertStore }
+func (r *fakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
 func (r *fakeRegistry) SilenceStore() *memory.SilenceStore { return r.silenceStore }
+func (r *fakeRegistry) SilenceRepository() infrasilencing.SilenceRepository {
+	return r.silenceRepo
+}
 func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
-func (r *fakeRegistry) Config() *appconfig.Config        { return &appconfig.Config{} }
-func (r *fakeRegistry) StartTime() time.Time             { return time.Now() }
-func (r *fakeRegistry) ReloadConfig(_ context.Context) error { return nil }
+func (r *fakeRegistry) Config() *appconfig.Config                { return &appconfig.Config{} }
+func (r *fakeRegistry) StartTime() time.Time                     { return time.Now() }
+func (r *fakeRegistry) ReloadConfig(_ context.Context) error     { return nil }
 
 func newTestProcessor(t *testing.T, publisher *fakePublisher) *services.AlertProcessor {
 	t.Helper()

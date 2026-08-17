@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/pkg/httperror"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
@@ -285,7 +286,7 @@ func classifySlackError(err error) string {
 	}
 
 	// Check for Slack API error
-	if IsSlackRetryableError(err) {
+	if (&httperror.PublishingClassifier{}).IsRetryable(err) {
 		if IsSlackRateLimitError(err) {
 			return "rate_limit"
 		}

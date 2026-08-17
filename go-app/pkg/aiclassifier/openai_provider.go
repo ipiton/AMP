@@ -82,7 +82,7 @@ func (p *OpenAIProvider) Classify(ctx context.Context, alert *core.Alert) (*Clas
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -131,7 +131,7 @@ func (p *OpenAIProvider) Health(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check failed: status=%d", resp.StatusCode)

@@ -102,7 +102,7 @@ func (t *PrometheusTool) Execute(ctx context.Context, params map[string]any) (in
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("prometheus: request failed: %v", err)}, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

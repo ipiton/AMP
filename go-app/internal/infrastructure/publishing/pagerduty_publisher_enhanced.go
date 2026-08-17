@@ -118,48 +118,6 @@ func (p *EnhancedPagerDutyPublisher) triggerEvent(ctx context.Context, enrichedA
 	return nil
 }
 
-// acknowledgeEvent acknowledges an event in PagerDuty
-func (p *EnhancedPagerDutyPublisher) acknowledgeEvent(ctx context.Context, enrichedAlert *core.EnrichedAlert, routingKey string) error {
-	alert := enrichedAlert.Alert
-
-	// Lookup dedup key from cache
-	dedupKey, found := p.cache.Get(alert.Fingerprint)
-	if !found {
-		p.GetLogger().Warn("Cannot acknowledge event: not tracked in cache",
-			"fingerprint", alert.Fingerprint,
-			"alert_name", alert.AlertName,
-		)
-		return ErrEventNotTracked
-	}
-
-	// Build acknowledge request
-	req := &AcknowledgeEventRequest{
-		RoutingKey:  routingKey,
-		EventAction: EventActionAcknowledge,
-		DedupKey:    dedupKey,
-	}
-
-	// Send to PagerDuty
-	_, err := p.client.AcknowledgeEvent(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to acknowledge event: %w", err)
-	}
-
-	// Record metrics
-	if p.GetMetrics() != nil {
-		p.GetMetrics().RecordEventAcknowledged()
-	}
-
-	p.GetLogger().Info("PagerDuty event acknowledged",
-		"fingerprint", alert.Fingerprint,
-		"dedup_key", dedupKey,
-		"routing_key", routingKey,
-		"alert_name", alert.AlertName,
-	)
-
-	return nil
-}
-
 // resolveEvent resolves an event in PagerDuty
 func (p *EnhancedPagerDutyPublisher) resolveEvent(ctx context.Context, enrichedAlert *core.EnrichedAlert, routingKey string) error {
 	alert := enrichedAlert.Alert

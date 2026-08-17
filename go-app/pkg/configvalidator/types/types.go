@@ -196,23 +196,23 @@ func (r *Result) Summary() string {
 	}
 
 	if len(r.Errors) > 0 {
-		sb.WriteString(fmt.Sprintf("  Errors: %d\n", len(r.Errors)))
+		fmt.Fprintf(&sb, "  Errors: %d\n", len(r.Errors))
 	}
 
 	if len(r.Warnings) > 0 {
-		sb.WriteString(fmt.Sprintf("  Warnings: %d\n", len(r.Warnings)))
+		fmt.Fprintf(&sb, "  Warnings: %d\n", len(r.Warnings))
 	}
 
 	if len(r.Info) > 0 {
-		sb.WriteString(fmt.Sprintf("  Info: %d\n", len(r.Info)))
+		fmt.Fprintf(&sb, "  Info: %d\n", len(r.Info))
 	}
 
 	if len(r.Suggestions) > 0 {
-		sb.WriteString(fmt.Sprintf("  Suggestions: %d\n", len(r.Suggestions)))
+		fmt.Fprintf(&sb, "  Suggestions: %d\n", len(r.Suggestions))
 	}
 
 	if r.Duration > 0 {
-		sb.WriteString(fmt.Sprintf("  Duration: %v\n", r.Duration))
+		fmt.Fprintf(&sb, "  Duration: %v\n", r.Duration)
 	}
 
 	return sb.String()

@@ -12,6 +12,7 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
+	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 )
 
@@ -24,8 +25,11 @@ type extendedFakeRegistry struct {
 	reloadErr    error
 }
 
-func (r *extendedFakeRegistry) AlertStore() *memory.AlertStore                     { return r.alertStore }
-func (r *extendedFakeRegistry) SilenceStore() *memory.SilenceStore                 { return r.silenceStore }
+func (r *extendedFakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
+func (r *extendedFakeRegistry) SilenceStore() *memory.SilenceStore { return r.silenceStore }
+func (r *extendedFakeRegistry) SilenceRepository() infrasilencing.SilenceRepository {
+	return nil
+}
 func (r *extendedFakeRegistry) AlertProcessor() *services.AlertProcessor           { return r.processor }
 func (r *extendedFakeRegistry) Config() *appconfig.Config                          { return r.config }
 func (r *extendedFakeRegistry) StartTime() time.Time                               { return r.startTime }
@@ -38,16 +42,16 @@ func TestStatusAPIHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	configContent := "profile: lite\nserver:\n  port: 9093"
 	if _, err := tmpFile.WriteString(configContent); err != nil {
 		t.Fatal(err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
-	os.Setenv("AMP_CONFIG_FILE", tmpFile.Name())
-	defer os.Unsetenv("AMP_CONFIG_FILE")
+	_ = os.Setenv("AMP_CONFIG_FILE", tmpFile.Name())
+	defer func() { _ = os.Unsetenv("AMP_CONFIG_FILE") }()
 
 	startTime := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
 	registry := &extendedFakeRegistry{

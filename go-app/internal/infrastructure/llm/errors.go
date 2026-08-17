@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"syscall"
 
 	"github.com/ipiton/AMP/pkg/httperror"
 )
@@ -42,53 +41,6 @@ func (e *HTTPError) Error() string {
 func IsRetryableError(err error) bool {
 	classifier := &httperror.LLMClassifier{}
 	return classifier.IsRetryable(err)
-}
-
-// isTransientNetworkError determines if network error is transient and retryable.
-// 150% Enhancement: Detailed network error classification
-func isTransientNetworkError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// DNS errors - temporary failures are retryable
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
-		return dnsErr.Temporary()
-	}
-
-	// Operation errors - check for specific syscall errors
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		// Connection refused - service might be restarting (retryable)
-		if errors.Is(opErr.Err, syscall.ECONNREFUSED) {
-			return true
-		}
-		// Connection reset - transient network issue (retryable)
-		if errors.Is(opErr.Err, syscall.ECONNRESET) {
-			return true
-		}
-		// Network unreachable - might be temporary (retryable)
-		if errors.Is(opErr.Err, syscall.ENETUNREACH) {
-			return true
-		}
-	}
-
-	// Timeout errors - always retryable
-	if isTimeoutError(err) {
-		return true
-	}
-
-	// Generic check for "temporary" errors
-	type temporary interface {
-		Temporary() bool
-	}
-	if te, ok := err.(temporary); ok {
-		return te.Temporary()
-	}
-
-	// Default: don't retry unknown errors
-	return false
 }
 
 // isTimeoutError checks if error is a timeout.

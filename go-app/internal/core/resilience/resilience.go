@@ -97,24 +97,6 @@ func (a *errorCheckerAdapter) IsRetryable(err error) bool {
 	return a.checker.IsRetryable(err)
 }
 
-// calculateDelay is deprecated - use pkg/retry instead.
-//
-// Deprecated: This function is kept for backward compatibility only.
-// New code should use pkg/retry.Strategy.
-// Note: Jitter is now handled by pkg/retry, not here.
-func calculateDelay(attempt int, policy *RetryPolicy) time.Duration {
-	// This function is no longer used internally but kept for API compatibility
-	// Simplified implementation (jitter now handled by pkg/retry)
-	delay := float64(policy.BaseDelay) * float64(attempt+1)
-
-	// Cap at max delay
-	if delay > float64(policy.MaxDelay) {
-		delay = float64(policy.MaxDelay)
-	}
-
-	return time.Duration(delay)
-}
-
 // ================================================================================
 // Circuit Breaker (stub for future implementation)
 // ================================================================================

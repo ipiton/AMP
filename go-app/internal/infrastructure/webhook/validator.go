@@ -512,14 +512,14 @@ func isValidPrometheusLabelName(name string) bool {
 
 	// First character must be [a-zA-Z_]
 	first := name[0]
-	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_') {
+	if (first < 'a' || first > 'z') && (first < 'A' || first > 'Z') && first != '_' {
 		return false
 	}
 
 	// Remaining characters must be [a-zA-Z0-9_]
 	for i := 1; i < len(name); i++ {
 		c := name[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' {
 			return false
 		}
 	}

@@ -1,14 +1,13 @@
 # PostgreSQL Connection Pool
 
-Высокопроизводительный PostgreSQL connection pool для Alert History Service, построенный на базе [pgx v5](https://github.com/jackc/pgx).
+PostgreSQL connection pool для AMP, построенный на базе [pgx v5](https://github.com/jackc/pgx).
 
-## 🚀 Особенности
+## Особенности
 
-- **Высокая производительность**: Оптимизирован для высоконагруженных приложений
-- **Надежность**: Встроенная обработка ошибок и автоматическое восстановление
-- **Наблюдаемость**: Подробные метрики и health checks
-- **Безопасность**: Поддержка SSL/TLS и защита от SQL-инъекций
-- **Масштабируемость**: Конфигурируемые параметры connection pool
+- **Обработка ошибок**: Типизированные ошибки, retry и circuit breaker
+- **Наблюдаемость**: Метрики pool и health checks
+- **Безопасность**: Поддержка SSL/TLS, parameterized queries
+- **Конфигурируемость**: Параметры connection pool через env-переменные
 
 ## 📋 Быстрый старт
 
@@ -344,12 +343,6 @@ config := &postgres.PostgresConfig{
 }
 ```
 
-### Бенчмарки
-
-```
-BenchmarkPostgresPool_Query-8    10000    120341 ns/op    456 B/op    12 allocs/op
-```
-
 ## 🔒 Безопасность
 
 ### SQL Injection защита
@@ -375,16 +368,7 @@ config := &postgres.PostgresConfig{
 
 - [pgx Documentation](https://pkg.go.dev/github.com/jackc/pgx/v5)
 - [PostgreSQL Connection Pooling](https://www.postgresql.org/docs/current/libpq-connect.html)
-- [Go Database Patterns](https://github.com/Masterminds/go-db-patterns)
-
-## 🤝 Вклад в развитие
-
-1. Fork репозиторий
-2. Создайте feature branch
-3. Добавьте тесты для новых функций
-4. Убедитесь, что все тесты проходят
-5. Создайте Pull Request
 
 ## 📄 Лицензия
 
-Этот проект лицензирован под MIT License.
+См. `LICENSE` в корне репозитория (AGPL-3.0).
