@@ -42,4 +42,7 @@ USER appuser
 
 EXPOSE 9093
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:9093/healthz || exit 1
+
 CMD ["/app/amp"]
