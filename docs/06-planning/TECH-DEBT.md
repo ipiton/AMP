@@ -10,7 +10,7 @@
 ## High
 - [ ] **DUPLICATED-DB-ADAPTERS** — `PostgresDatabase` и `SQLiteDatabase` дублируют 80% логики. Нужен Query Builder. ~3d
 - [ ] **DTO-FRAGMENTATION** — Избыток структур `apiAlert`, `storedAlert`, `core.Alert`. Нужна консолидация. ~1d
-- [ ] **MANUAL-SQL-RISK** — Прямая конкатенация SQL строк при построении фильтров. Риск ошибок и инъекций. ~2d
+- [x] ~~**MANUAL-SQL-RISK**~~ — закрыто 2026-08-17. Все фильтры параметризованы (`$N` + args); реальные векторы устранены: `ORDER BY` whitelist в `silencing/filter_builder.go` и `template/repository_crud.go`, JSONB-экранирование через `buildJSONBContainmentFilter`/`json.Marshal`, имя таблицы в `migrations/manager.go` параметризовано. Регресс-тесты: `filter_builder_injection_test.go`.
 
 ## Medium
 - [ ] **ERROR-REINVENTION** — Свои типы ошибок в каждом модуле вместо `pkg/httperror`. ~0.5d
