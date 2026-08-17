@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,13 +55,29 @@ func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
 }
 
 func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
-	status := parseAlertsStatusQuery(r.URL.Query().Get("status"))
-	includeResolved := parseBoolQueryLenient(r.URL.Query().Get("resolved"), false)
+	query := r.URL.Query()
+
+	// Legacy params (kept as aliases): status=firing|resolved, resolved=bool.
+	// They filter at the store level, exactly as before this task.
+	status := parseAlertsStatusQuery(query.Get("status"))
+	includeResolved := parseBoolQueryLenient(query.Get("resolved"), false)
 	if status == "resolved" {
 		includeResolved = true
 	}
 
-	filters, err := ParseLabelMatchers(r.URL.Query()["filter"])
+	filters, err := ParseLabelMatchers(query["filter"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Upstream params: active/silenced/inhibited/unprocessed/receiver.
+	stateFilter, err := parseAlertStateFilters(query)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	receiverRe, err := parseReceiverFilter(query.Get("receiver"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -72,10 +91,109 @@ func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w 
 		if !MatchesLabels(filters, alert.Labels) {
 			continue
 		}
-		gettableAlerts = append(gettableAlerts, alertconv.ToGettableAlert(alert, silenceMatcher(silences), now))
+		gettable := alertconv.ToGettableAlert(alert, silenceMatcher(silences), now)
+		if !stateFilter.matches(gettable.Status) {
+			continue
+		}
+		if receiverRe != nil && !matchesAnyReceiver(receiverRe, gettable.Receivers) {
+			continue
+		}
+		gettableAlerts = append(gettableAlerts, gettable)
 	}
 
 	writeJSON(w, http.StatusOK, gettableAlerts)
+}
+
+// alertStateFilter mirrors upstream Alertmanager's GET /api/v2/alerts state
+// query params. Each flag defaults to true (include); setting one to false
+// excludes alerts matching that specific criterion, independently of the
+// others — an alert can be both silenced and inhibited at once, and
+// active/unprocessed are mutually exclusive states computed by
+// alertconv.ToGettableAlert.
+//
+// LIMITATION: the inhibition pipeline is a separate parity track (not yet
+// wired into alertconv.ToGettableAlert), so Status.InhibitedBy is always
+// empty today. The `inhibited` param is implemented structurally — it will
+// start filtering real data once inhibition populates InhibitedBy — but is
+// currently a no-op in practice.
+type alertStateFilter struct {
+	active      bool
+	silenced    bool
+	inhibited   bool
+	unprocessed bool
+}
+
+func (f alertStateFilter) matches(status core.APIAlertStatus) bool {
+	if !f.active && status.State == "active" {
+		return false
+	}
+	if !f.silenced && len(status.SilencedBy) > 0 {
+		return false
+	}
+	if !f.inhibited && len(status.InhibitedBy) > 0 {
+		return false
+	}
+	if !f.unprocessed && status.State == "unprocessed" {
+		return false
+	}
+	return true
+}
+
+func parseAlertStateFilters(query url.Values) (alertStateFilter, error) {
+	var f alertStateFilter
+	var err error
+	if f.active, err = parseBoolQueryStrict(query, "active", true); err != nil {
+		return f, err
+	}
+	if f.silenced, err = parseBoolQueryStrict(query, "silenced", true); err != nil {
+		return f, err
+	}
+	if f.inhibited, err = parseBoolQueryStrict(query, "inhibited", true); err != nil {
+		return f, err
+	}
+	if f.unprocessed, err = parseBoolQueryStrict(query, "unprocessed", true); err != nil {
+		return f, err
+	}
+	return f, nil
+}
+
+// parseBoolQueryStrict parses a boolean query param, returning def when the
+// param is absent/empty and an error when it is present but not a valid
+// boolean (upstream returns 400 for malformed query params).
+func parseBoolQueryStrict(query url.Values, key string, def bool) (bool, error) {
+	raw := strings.TrimSpace(query.Get(key))
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return def, fmt.Errorf("invalid %s query parameter: %q", key, raw)
+	}
+	return v, nil
+}
+
+// parseReceiverFilter compiles the receiver query param into a regex, per
+// upstream semantics (unanchored substring match against receiver name).
+// An empty param returns a nil regex (no filtering).
+func parseReceiverFilter(raw string) (*regexp.Regexp, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	re, err := regexp.Compile(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid receiver query parameter: %w", err)
+	}
+	return re, nil
+}
+
+func matchesAnyReceiver(re *regexp.Regexp, receivers []core.APIReceiver) bool {
+	for _, r := range receivers {
+		if re.MatchString(r.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 // silenceMatcher converts a possibly-nil *memory.SilenceStore into the
@@ -92,6 +210,17 @@ func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 		queryParams := r.URL.Query()
 		groupBy := queryParams["group_by"]
 
+		stateFilter, err := parseAlertStateFilters(queryParams)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		receiverRe, err := parseReceiverFilter(queryParams.Get("receiver"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
 		// Active runtime has no routing tree yet: groups carry the first
 		// configured receiver (or "default") instead of a hardcoded value.
 		receiver := "default"
@@ -99,8 +228,35 @@ func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 			receiver = receivers[0].Name
 		}
 		groups := registry.AlertStore().GroupAlerts(groupBy, receiver, silenceMatcher(registry.SilenceStore()))
+		groups = filterAlertGroups(groups, stateFilter, receiverRe)
 		writeJSON(w, http.StatusOK, groups)
 	})
+}
+
+// filterAlertGroups applies the active/silenced/inhibited/unprocessed state
+// filter and the receiver regex filter to grouped alerts. A group whose
+// receiver does not match is dropped entirely; a group whose alerts are all
+// filtered out by the state filter is also dropped (an empty group carries
+// no information a caller could act on).
+func filterAlertGroups(groups []core.APIGettableAlertGroup, stateFilter alertStateFilter, receiverRe *regexp.Regexp) []core.APIGettableAlertGroup {
+	out := make([]core.APIGettableAlertGroup, 0, len(groups))
+	for _, g := range groups {
+		if receiverRe != nil && !receiverRe.MatchString(g.Receiver.Name) {
+			continue
+		}
+		filteredAlerts := make([]core.APIGettableAlert, 0, len(g.Alerts))
+		for _, a := range g.Alerts {
+			if stateFilter.matches(a.Status) {
+				filteredAlerts = append(filteredAlerts, a)
+			}
+		}
+		if len(filteredAlerts) == 0 {
+			continue
+		}
+		g.Alerts = filteredAlerts
+		out = append(out, g)
+	}
+	return out
 }
 
 func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, externalURL string, w http.ResponseWriter, r *http.Request) {

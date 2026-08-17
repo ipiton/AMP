@@ -323,10 +323,10 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		// ADR-002: the active runtime ignores the upstream receiver query
-		// parameter entirely, so even a malformed regex is not an error.
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts with invalid receiver regex expected 200 (param ignored), got %d", rec.Code)
+		// PARITY-4.1: the active runtime now evaluates the upstream receiver
+		// query parameter as a regex, so a malformed pattern is a 400.
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid receiver regex expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -335,8 +335,10 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts with invalid active expected 200, got %d", rec.Code)
+		// PARITY-4.1: active/silenced/inhibited/unprocessed are now validated
+		// booleans, matching upstream's 400-on-malformed-query-param behavior.
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts with invalid active expected 400, got %d", rec.Code)
 		}
 	})
 
@@ -755,22 +757,26 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 200, got %d", recResolved.Code)
 		}
 
-		// ADR-002: the active groups handler ignores the receiver parameter,
-		// so even a malformed regex is not an error.
+		// PARITY-4.1: the groups handler now evaluates the receiver parameter
+		// as a regex, so a malformed pattern is a 400.
 		reqReceiver := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=[", nil)
 		recReceiver := httptest.NewRecorder()
 		mux.ServeHTTP(recReceiver, reqReceiver)
-		if recReceiver.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 200 (param ignored), got %d", recReceiver.Code)
+		if recReceiver.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 400, got %d", recReceiver.Code)
 		}
 
+		// PARITY-4.1: active/silenced/inhibited/unprocessed are now validated
+		// booleans on the groups endpoint too.
 		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
 		recActive := httptest.NewRecorder()
 		mux.ServeHTTP(recActive, reqActive)
-		if recActive.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 200, got %d", recActive.Code)
+		if recActive.Code != http.StatusBadRequest {
+			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 400, got %d", recActive.Code)
 		}
 
+		// "muted" is not part of this parity slice (upstream's mutedBy is a
+		// separate, unimplemented concept); it stays ignored.
 		reqMuted := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?muted=not-bool", nil)
 		recMuted := httptest.NewRecorder()
 		mux.ServeHTTP(recMuted, reqMuted)

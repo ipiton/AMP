@@ -420,12 +420,10 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
 	}
 
-	// ADR-002: the active alert-groups handler ignores the upstream receiver
-	// query parameter and does not evaluate route-based receivers; every group
-	// carries the static "default" receiver.
-	filterQuery := url.Values{}
-	filterQuery.Set("receiver", "^team-ops$")
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+filterQuery.Encode(), nil)
+	// No routing tree yet: groups carry the static "default" receiver (see
+	// ADR-002 active-runtime scope). Verify the plain (unfiltered) shape
+	// first, then verify PARITY-4.1's receiver regex filter against it.
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -437,7 +435,7 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 		t.Fatalf("failed to decode groups response: %v", err)
 	}
 	if len(groups) != 1 {
-		t.Fatalf("expected 1 group (receiver param ignored by active runtime), got %d", len(groups))
+		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
 
 	groupReceiver, ok := groups[0]["receiver"].(map[string]any)
@@ -462,6 +460,41 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 		if _, ok := alert[field]; !ok {
 			t.Fatalf("nested alert missing required field %q", field)
 		}
+	}
+
+	// PARITY-4.1: receiver is now a real regex filter — a pattern that does
+	// not match the group's "default" receiver drops the group entirely.
+	noMatchQuery := url.Values{}
+	noMatchQuery.Set("receiver", "^team-ops$")
+	noMatchReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+noMatchQuery.Encode(), nil)
+	noMatchRec := httptest.NewRecorder()
+	mux.ServeHTTP(noMatchRec, noMatchReq)
+	if noMatchRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups (no-match receiver) expected 200, got %d", noMatchRec.Code)
+	}
+	var noMatchGroups []map[string]any
+	if err := json.Unmarshal(noMatchRec.Body.Bytes(), &noMatchGroups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(noMatchGroups) != 0 {
+		t.Fatalf("expected 0 groups for a non-matching receiver regex, got %d", len(noMatchGroups))
+	}
+
+	// A pattern that does match the group's receiver keeps it.
+	matchQuery := url.Values{}
+	matchQuery.Set("receiver", "^default$")
+	matchReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?"+matchQuery.Encode(), nil)
+	matchRec := httptest.NewRecorder()
+	mux.ServeHTTP(matchRec, matchReq)
+	if matchRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts/groups (matching receiver) expected 200, got %d", matchRec.Code)
+	}
+	var matchGroups []map[string]any
+	if err := json.Unmarshal(matchRec.Body.Bytes(), &matchGroups); err != nil {
+		t.Fatalf("failed to decode groups response: %v", err)
+	}
+	if len(matchGroups) != 1 {
+		t.Fatalf("expected 1 group for a matching receiver regex, got %d", len(matchGroups))
 	}
 }
 
@@ -531,14 +564,15 @@ receivers:
 func TestUpstreamParity_AlertsAndGroupsInvalidQueryContract(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
-	// ADR-002 active-runtime contract:
-	//   - the upstream receiver query parameter is ignored (no validation, 200);
+	// Active-runtime contract:
+	//   - PARITY-4.1: the upstream receiver query parameter is now validated
+	//     as a regex on both /api/v2/alerts and /api/v2/alerts/groups (400 on
+	//     a malformed pattern);
 	//   - /api/v2/alerts validates filter matchers and returns 400 with an
 	//     {"error": ...} object (upstream returned a bare JSON string);
-	//   - /api/v2/alerts/groups does not parse the filter parameter at all.
+	//   - /api/v2/alerts/groups does not parse the label `filter` parameter
+	//     at all (that param is /api/v2/alerts-only, per upstream).
 	okCases := []string{
-		"/api/v2/alerts?receiver=[",
-		"/api/v2/alerts/groups?receiver=[",
 		"/api/v2/alerts/groups?filter=broken-matcher",
 	}
 	for _, path := range okCases {
@@ -547,6 +581,19 @@ func TestUpstreamParity_AlertsAndGroupsInvalidQueryContract(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("GET %s expected 200 (param ignored by active runtime), got %d", path, rec.Code)
+		}
+	}
+
+	badReceiverRegexCases := []string{
+		"/api/v2/alerts?receiver=[",
+		"/api/v2/alerts/groups?receiver=[",
+	}
+	for _, path := range badReceiverRegexCases {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET %s expected 400 (invalid receiver regex), got %d", path, rec.Code)
 		}
 	}
 
