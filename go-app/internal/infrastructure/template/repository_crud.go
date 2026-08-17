@@ -225,8 +225,12 @@ func (r *DefaultTemplateRepository) List(ctx context.Context, filters domain.Lis
 	// Filter by tag (metadata JSONB query)
 	if filters.Tag != "" {
 		whereClause += fmt.Sprintf(" AND metadata @> $%d", argIndex)
-		tagJSON := fmt.Sprintf(`{"tags": ["%s"]}`, filters.Tag)
-		args = append(args, tagJSON)
+		// json.Marshal escapes the tag so it cannot alter the containment filter
+		tagJSON, err := json.Marshal(map[string][]string{"tags": {filters.Tag}})
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to build tag filter: %w", err)
+		}
+		args = append(args, string(tagJSON))
 		argIndex++
 	}
 
@@ -248,9 +252,16 @@ func (r *DefaultTemplateRepository) List(ctx context.Context, filters domain.Lis
 		return nil, 0, fmt.Errorf("failed to count templates: %w", err)
 	}
 
-	// Build ORDER BY clause
+	// Build ORDER BY clause.
+	// Sort is interpolated into SQL, so it must match the whitelist
+	// (mirrors the validate tag on domain.ListFilters.Sort).
+	validSortFields := map[string]bool{
+		"name":       true,
+		"created_at": true,
+		"updated_at": true,
+	}
 	orderBy := "ORDER BY name ASC"
-	if filters.Sort != "" {
+	if validSortFields[filters.Sort] {
 		direction := "ASC"
 		if filters.Order == "desc" {
 			direction = "DESC"
