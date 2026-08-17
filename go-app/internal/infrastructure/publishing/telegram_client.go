@@ -87,6 +87,18 @@ func (c *HTTPTelegramClient) endpoint(method string) string {
 	return fmt.Sprintf("%s/bot%s/%s", c.apiURL, c.botToken, method)
 }
 
+// maskBotToken redacts the client's bot token wherever it appears in s.
+// Network-layer failures from http.Client.Do surface as *url.Error, whose
+// Error() message embeds the full request URL - including the bot token
+// from endpoint(). Any error string derived from such a failure must be
+// masked before it is logged or returned to a caller that might log it.
+func (c *HTTPTelegramClient) maskBotToken(s string) string {
+	if c.botToken == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, c.botToken, "***")
+}
+
 // SendMessage sends a text message to Telegram
 // Blocks until a rate limit token is available.
 // Retries transient errors (429, 5xx, network) with exponential backoff.
@@ -130,7 +142,10 @@ func (c *HTTPTelegramClient) Health(ctx context.Context) error {
 
 	httpResp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("health check request failed: %w", err)
+		// Same token-in-URL exposure risk as doRequestWithRetry: err may be
+		// a *url.Error embedding the full request URL. Mask before it can
+		// reach any caller's logs via this error's message.
+		return fmt.Errorf("health check request failed: %s", c.maskBotToken(err.Error()))
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
@@ -171,13 +186,18 @@ func (c *HTTPTelegramClient) doRequestWithRetry(ctx context.Context, req *http.R
 		// Execute HTTP request
 		httpResp, err := c.httpClient.Do(req)
 		if err != nil {
-			lastErr = fmt.Errorf("HTTP request failed: %w", err)
+			// err may be a *url.Error embedding the full request URL (which
+			// contains the bot token) - mask before it enters lastErr's
+			// message or any log line. Retryability is still checked
+			// against the original err, not the masked message.
+			maskedErr := c.maskBotToken(err.Error())
+			lastErr = fmt.Errorf("HTTP request failed: %s", maskedErr)
 			if !httperror.IsRetryableNetworkError(err) {
 				return nil, lastErr // Don't retry non-network-transient errors
 			}
 			c.logger.WarnContext(ctx, "Retrying after network error",
 				slog.Int("attempt", i+1),
-				slog.String("error", err.Error()))
+				slog.String("error", maskedErr))
 			time.Sleep(backoff)
 			backoff *= 2
 			if backoff > 5*time.Second {

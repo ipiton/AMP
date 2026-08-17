@@ -574,13 +574,17 @@ func maskEmail(email string) string {
 // Uses the Telegram Bot API (sendMessage) for notifications.
 // Integrates with PARITY-B3 (Telegram Publisher).
 //
+// Note: this struct is this layer's config schema (parsed/validated from
+// route YAML). The runtime publisher (internal/infrastructure/publishing)
+// is target-based and does not currently consume TelegramConfig directly -
+// same as SlackConfig/PagerDutyConfig today. See Message below.
+//
 // Example:
 //
 //	telegram_configs:
 //	  - bot_token: "${TELEGRAM_BOT_TOKEN}"
 //	    chat_id: "-1001234567890"
 //	    parse_mode: HTML
-//	    message: "{{ .GroupLabels.alertname }}"
 type TelegramConfig struct {
 	// BotToken is the Telegram bot API token (required)
 	// Obtained from @BotFather. Should use a secret reference: ${TELEGRAM_BOT_TOKEN}
@@ -603,7 +607,11 @@ type TelegramConfig struct {
 	// Default: https://api.telegram.org
 	APIURL string `yaml:"api_url,omitempty" validate:"omitempty,url,https_production"`
 
-	// Message is the notification message template (default: alert summary)
+	// Message is reserved for a future notification message template
+	// override. NOT YET WIRED to the runtime publisher - the publisher
+	// currently always renders via the shared AlertFormatter
+	// (core.FormatTelegram), same as Slack's own Text/Title/Pretext fields
+	// here are parsed but not consumed by the runtime publisher today.
 	Message string `yaml:"message,omitempty"`
 
 	// DisableNotifications sends the message silently (no sound/vibration)

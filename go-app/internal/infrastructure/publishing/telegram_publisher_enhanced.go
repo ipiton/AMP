@@ -3,9 +3,7 @@ package publishing
 import (
 	"context"
 	"fmt"
-	"html"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -19,7 +17,10 @@ import (
 //
 // Unlike the Slack publisher, Telegram notifications are not threaded:
 // upstream Alertmanager's telegram_config sends one independent message per
-// notification, so no message-id cache is required here.
+// notification, so no message-id cache is required here. Rendering itself
+// goes through the shared AlertFormatter (core.FormatTelegram), same as
+// Slack's primary postMessage path uses core.FormatSlack - this publisher
+// only truncates the formatter's output to Telegram's message size limit.
 
 // EnhancedTelegramPublisher implements AlertPublisher with full Telegram Bot API support
 type EnhancedTelegramPublisher struct {
@@ -37,7 +38,7 @@ type EnhancedTelegramPublisher struct {
 // messageThreadID: forum topic thread id (0 to omit).
 // disableNotifications: send messages silently when true.
 // metrics: Prometheus metrics recorder.
-// formatter: Alert formatter (kept for interface parity with other publishers; unused here).
+// formatter: Alert formatter used to render the message body (core.FormatTelegram).
 func NewEnhancedTelegramPublisher(
 	client TelegramClient,
 	chatID string,
@@ -76,7 +77,13 @@ func (p *EnhancedTelegramPublisher) Publish(ctx context.Context, enrichedAlert *
 
 	startTime := time.Now()
 
-	message := p.buildMessage(enrichedAlert)
+	message, err := p.buildMessage(ctx, enrichedAlert)
+	if err != nil {
+		if p.GetMetrics() != nil {
+			p.GetMetrics().RecordAPIError(ProviderTelegram, "send_message", "format_error")
+		}
+		return err
+	}
 
 	resp, err := p.client.SendMessage(ctx, message)
 	if err != nil {
@@ -109,9 +116,18 @@ func (p *EnhancedTelegramPublisher) Name() string {
 }
 
 // buildMessage renders the enriched alert as a TelegramMessage.
-// The rendered text is truncated to Telegram's 4096-character limit.
-func (p *EnhancedTelegramPublisher) buildMessage(enrichedAlert *core.EnrichedAlert) *TelegramMessage {
-	text := TruncateTelegramMessage(p.buildText(enrichedAlert))
+// Rendering (including HTML-escaping) goes through the shared AlertFormatter
+// (core.FormatTelegram) - same primary-path pattern as Slack's postMessage,
+// which formats via core.FormatSlack. The formatter's output text is then
+// truncated to Telegram's 4096-character limit.
+func (p *EnhancedTelegramPublisher) buildMessage(ctx context.Context, enrichedAlert *core.EnrichedAlert) (*TelegramMessage, error) {
+	payload, err := p.GetFormatter().FormatAlert(ctx, enrichedAlert, core.FormatTelegram)
+	if err != nil {
+		return nil, fmt.Errorf("failed to format alert: %w", err)
+	}
+
+	text, _ := payload["text"].(string)
+	text = TruncateTelegramMessage(text)
 
 	return &TelegramMessage{
 		ChatID:              p.chatID,
@@ -119,43 +135,7 @@ func (p *EnhancedTelegramPublisher) buildMessage(enrichedAlert *core.EnrichedAle
 		ParseMode:           p.parseMode,
 		MessageThreadID:     p.messageThreadID,
 		DisableNotification: p.disableNotifications,
-	}
-}
-
-// buildText renders the alert body as HTML-formatted text.
-// All alert-controlled values are HTML-escaped since the default parse
-// mode is HTML.
-func (p *EnhancedTelegramPublisher) buildText(enrichedAlert *core.EnrichedAlert) string {
-	alert := enrichedAlert.Alert
-
-	icon, statusText := "🔥", "FIRING"
-	if alert.Status == core.StatusResolved {
-		icon, statusText = "✅", "RESOLVED"
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s <b>%s</b>: %s\n", icon, statusText, html.EscapeString(alert.AlertName))
-
-	if severity, ok := alert.Labels["severity"]; ok && severity != "" {
-		fmt.Fprintf(&b, "Severity: %s\n", html.EscapeString(severity))
-	}
-	if namespace, ok := alert.Labels["namespace"]; ok && namespace != "" {
-		fmt.Fprintf(&b, "Namespace: %s\n", html.EscapeString(namespace))
-	}
-
-	if summary, ok := alert.Annotations["summary"]; ok && summary != "" {
-		fmt.Fprintf(&b, "%s\n", html.EscapeString(summary))
-	} else if description, ok := alert.Annotations["description"]; ok && description != "" {
-		fmt.Fprintf(&b, "%s\n", html.EscapeString(description))
-	}
-
-	if enrichedAlert.Classification != nil {
-		c := enrichedAlert.Classification
-		fmt.Fprintf(&b, "AI Severity: %s (%.0f%% confidence)\n",
-			html.EscapeString(string(c.Severity)), c.Confidence*100)
-	}
-
-	return strings.TrimRight(b.String(), "\n")
+	}, nil
 }
 
 // classifyTelegramError classifies error for metrics labeling

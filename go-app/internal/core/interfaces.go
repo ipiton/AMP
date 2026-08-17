@@ -32,6 +32,7 @@ const (
 	FormatPagerDuty    PublishingFormat = "pagerduty"
 	FormatSlack        PublishingFormat = "slack"
 	FormatWebhook      PublishingFormat = "webhook"
+	FormatTelegram     PublishingFormat = "telegram"
 )
 
 // Alert represents alert data model
@@ -81,7 +82,7 @@ type PublishingTarget struct {
 	Enabled      bool              `json:"enabled"`
 	FilterConfig map[string]any    `json:"filter_config"`
 	Headers      map[string]string `json:"headers"`
-	Format       PublishingFormat  `json:"format" validate:"required,oneof=alertmanager rootly pagerduty slack webhook"`
+	Format       PublishingFormat  `json:"format" validate:"required,oneof=alertmanager rootly pagerduty slack webhook telegram"`
 }
 
 // EnrichedAlert represents alert enriched with classification data

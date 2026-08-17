@@ -520,3 +520,20 @@ receivers:
 
 	assert.Error(t, err)
 }
+
+func TestRouteConfigParser_Parse_TelegramReceiver_MissingChatID(t *testing.T) {
+	yamlConfig := `
+route:
+  receiver: telegram
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: "test-bot-token-fixture"
+`
+
+	parser := NewRouteConfigParser()
+	_, err := parser.Parse([]byte(yamlConfig))
+
+	assert.Error(t, err)
+}

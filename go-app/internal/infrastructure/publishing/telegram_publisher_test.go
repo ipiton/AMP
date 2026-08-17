@@ -42,7 +42,12 @@ func setupTelegramPublisher(t *testing.T) (*EnhancedTelegramPublisher, *mockTele
 	client := new(mockTelegramClient)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	publisher := NewEnhancedTelegramPublisher(client, "-1001234567890", 0, false, nil, nil, logger).(*EnhancedTelegramPublisher)
+	// Real formatter (not mocked) - the publisher's primary path renders
+	// via the shared AlertFormatter (core.FormatTelegram), same as Slack's
+	// postMessage path uses core.FormatSlack.
+	formatter := NewAlertFormatter("")
+
+	publisher := NewEnhancedTelegramPublisher(client, "-1001234567890", 0, false, nil, formatter, logger).(*EnhancedTelegramPublisher)
 
 	return publisher, client
 }
@@ -152,16 +157,56 @@ func TestTelegramName(t *testing.T) {
 func TestTelegramBuildMessage_Fields(t *testing.T) {
 	client := new(mockTelegramClient)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	publisher := NewEnhancedTelegramPublisher(client, "@my_channel", 55, true, nil, nil, logger).(*EnhancedTelegramPublisher)
+	publisher := NewEnhancedTelegramPublisher(client, "@my_channel", 55, true, nil, NewAlertFormatter(""), logger).(*EnhancedTelegramPublisher)
 
 	alert := createTelegramTestAlert("fp1", "alert1", core.StatusFiring)
-	message := publisher.buildMessage(alert)
+	message, err := publisher.buildMessage(context.Background(), alert)
 
+	require.NoError(t, err)
 	require.NotNil(t, message)
 	assert.Equal(t, "@my_channel", message.ChatID)
 	assert.Equal(t, 55, message.MessageThreadID)
 	assert.True(t, message.DisableNotification)
 	assert.Equal(t, TelegramParseModeHTML, message.ParseMode)
+}
+
+// TestTelegramBuildMessage_FormatterError tests formatter error propagation
+func TestTelegramBuildMessage_FormatterError(t *testing.T) {
+	client := new(mockTelegramClient)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	publisher := NewEnhancedTelegramPublisher(client, "-1001234567890", 0, false, nil, &erroringTelegramFormatter{}, logger).(*EnhancedTelegramPublisher)
+
+	alert := createTelegramTestAlert("fp1", "alert1", core.StatusFiring)
+	message, err := publisher.buildMessage(context.Background(), alert)
+
+	require.Error(t, err)
+	assert.Nil(t, message)
+	assert.Contains(t, err.Error(), "failed to format alert")
+}
+
+// TestTelegramPublish_FormatterError tests that a formatter error on the
+// primary send path is surfaced without ever calling the Telegram client.
+func TestTelegramPublish_FormatterError(t *testing.T) {
+	client := new(mockTelegramClient)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	publisher := NewEnhancedTelegramPublisher(client, "-1001234567890", 0, false, nil, &erroringTelegramFormatter{}, logger).(*EnhancedTelegramPublisher)
+
+	alert := createTelegramTestAlert("fp1", "alert1", core.StatusFiring)
+	target := createTelegramTestTarget()
+
+	err := publisher.Publish(context.Background(), alert, target)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to format alert")
+	client.AssertNotCalled(t, "SendMessage")
+}
+
+// erroringTelegramFormatter is an AlertFormatter stub that always errors,
+// used to test the format-error path on EnhancedTelegramPublisher.
+type erroringTelegramFormatter struct{}
+
+func (f *erroringTelegramFormatter) FormatAlert(_ context.Context, _ *core.EnrichedAlert, _ core.PublishingFormat) (map[string]any, error) {
+	return nil, errors.New("formatter boom")
 }
 
 // TestTelegramBuildText_Truncation tests message truncation at 4096 characters
@@ -179,8 +224,9 @@ func TestTelegramBuildText_Truncation(t *testing.T) {
 		},
 	}
 
-	message := publisher.buildMessage(alert)
+	message, err := publisher.buildMessage(context.Background(), alert)
 
+	require.NoError(t, err)
 	require.NotNil(t, message)
 	assert.LessOrEqual(t, len([]rune(message.Text)), MaxTelegramMessageLength)
 	assert.Contains(t, message.Text, "[truncated]")
@@ -191,14 +237,19 @@ func TestTelegramBuildText_NoTruncationForShortMessages(t *testing.T) {
 	publisher, _ := setupTelegramPublisher(t)
 
 	alert := createTelegramTestAlert("fp1", "ShortAlert", core.StatusFiring)
-	message := publisher.buildMessage(alert)
+	message, err := publisher.buildMessage(context.Background(), alert)
 
+	require.NoError(t, err)
 	require.NotNil(t, message)
 	assert.NotContains(t, message.Text, "[truncated]")
 	assert.Contains(t, message.Text, "ShortAlert")
 }
 
-// TestTelegramBuildText_HTMLEscaping verifies alert-controlled values are escaped
+// TestTelegramBuildText_HTMLEscaping is an integration check that the
+// publisher's primary send path (buildMessage -> shared AlertFormatter via
+// core.FormatTelegram) still escapes alert-controlled values end-to-end.
+// The escaping logic itself is unit-tested at the formatter level in
+// formatter_test.go (TestFormatTelegram_HTMLEscaping).
 func TestTelegramBuildText_HTMLEscaping(t *testing.T) {
 	publisher, _ := setupTelegramPublisher(t)
 
@@ -212,8 +263,9 @@ func TestTelegramBuildText_HTMLEscaping(t *testing.T) {
 		},
 	}
 
-	message := publisher.buildMessage(alert)
+	message, err := publisher.buildMessage(context.Background(), alert)
 
+	require.NoError(t, err)
 	require.NotNil(t, message)
 	assert.NotContains(t, message.Text, "<script>")
 	assert.Contains(t, message.Text, "&lt;script&gt;")
