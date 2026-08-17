@@ -2,6 +2,7 @@ package application
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -22,6 +23,37 @@ func NormalizeRoutePrefix(prefix string) string {
 		return ""
 	}
 	return prefix
+}
+
+// ResolveRoutePrefix computes the effective web route prefix the way
+// upstream Alertmanager does: --web.route-prefix defaults to the path
+// component of --web.external-url when not explicitly set.
+//
+// LIMITATION: this repo's config layer (viper, unmarshaled into a plain
+// string field) cannot distinguish "route prefix left unset" from "route
+// prefix explicitly set to the empty string" — both come out as "". So the
+// rule here is: an empty routePrefix means "unset, inherit from
+// externalURL's path"; a non-empty routePrefix (including the explicit
+// value "/") always wins and skips inheritance — "/" is upstream's own
+// spelling for "root, no prefix", so it doubles as the escape hatch for a
+// deployment that sets external_url with a path but wants no route prefix.
+// A malformed externalURL is treated the same as an absent one (no prefix)
+// rather than erroring, since this only affects routing, not correctness.
+func ResolveRoutePrefix(routePrefix, externalURL string) string {
+	routePrefix = strings.TrimSpace(routePrefix)
+	if routePrefix != "" {
+		return NormalizeRoutePrefix(routePrefix)
+	}
+
+	externalURL = strings.TrimSpace(externalURL)
+	if externalURL == "" {
+		return ""
+	}
+	u, err := url.Parse(externalURL)
+	if err != nil {
+		return ""
+	}
+	return NormalizeRoutePrefix(u.Path)
 }
 
 // WithRoutePrefix mounts handler under prefix, mirroring upstream
