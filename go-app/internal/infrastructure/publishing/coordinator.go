@@ -153,44 +153,117 @@ func (c *PublishingCoordinator) PublishToAll(ctx context.Context, enrichedAlert 
 	return results, nil
 }
 
-// PublishToTargets publishes alert to specific targets by name
-func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAlert *core.EnrichedAlert, targetNames []string) ([]*PublishingResult, error) {
+// targetMatchesReceiver decides whether a publishing target should receive
+// alerts routed to receiverName. Rules (Task 1.5 — receiver → publishing
+// targets mapping):
+//
+//  1. Empty receiverName -> matches everything (caller wants all enabled
+//     targets; preserves pre-receiver-routing behavior for callers that
+//     don't yet know about receivers).
+//  2. Target has a non-empty Receivers list (i.e. its Secret carries the
+//     `amp.receiver` label) -> matches only if receiverName is in that
+//     list, OR the target's own Name equals receiverName (name fallback:
+//     lets a target still serve "its" receiver even if a label lists
+//     other receivers instead/additionally).
+//  3. Target has NO Receivers list at all (no label on the Secret) ->
+//     matches unconditionally. Backward compatibility: targets predating
+//     receiver-based routing keep receiving every alert.
+func targetMatchesReceiver(target *core.PublishingTarget, receiverName string) bool {
+	if receiverName == "" {
+		return true
+	}
+
+	if len(target.Receivers) == 0 {
+		return true
+	}
+
+	for _, r := range target.Receivers {
+		if r == receiverName {
+			return true
+		}
+	}
+
+	return target.Name == receiverName
+}
+
+// PublishToTargets publishes alert either to explicitly named targets, or —
+// when targetNames is empty — to all targets belonging to receiverName per
+// targetMatchesReceiver. An empty receiverName in that second mode means
+// "all enabled targets" (current/legacy behavior, no receiver filtering).
+//
+// Explicit targetNames resolution (used by the manual per-target test
+// endpoint) is unaffected by receiverName — it is a distinct, exact-name
+// lookup mode kept for backward compatibility.
+//
+// If receiver-based filtering matches zero targets, this returns an error
+// and publishes to nothing. It deliberately does NOT fall back to
+// publishing to all targets — a receiver with no matching target is a
+// configuration gap that should be visible (logged + surfaced as an
+// error), not silently masked by a broad fan-out.
+func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAlert *core.EnrichedAlert, targetNames []string, receiverName string) ([]*PublishingResult, error) {
 	// TN-060: Check mode before publishing (metrics-only mode fallback)
 	if c.modeManager != nil && c.modeManager.IsMetricsOnly() {
 		c.logger.Info("Publishing skipped (metrics-only mode)",
 			"fingerprint", enrichedAlert.Alert.Fingerprint,
 			"targets", targetNames,
+			"receiver", receiverName,
 		)
 		// Return empty results (no publishing attempts)
 		return []*PublishingResult{}, nil
 	}
 
-	if len(targetNames) == 0 {
-		return nil, fmt.Errorf("no target names provided")
-	}
+	var targets []*core.PublishingTarget
 
-	// Resolve targets
-	targets := make([]*core.PublishingTarget, 0, len(targetNames))
-	for _, name := range targetNames {
-		target, err := c.discoveryManager.GetTarget(name)
-		if err != nil {
-			c.logger.Warn("Target not found", "name", name)
-			continue
+	if len(targetNames) > 0 {
+		// Explicit target-name resolution (existing behavior).
+		targets = make([]*core.PublishingTarget, 0, len(targetNames))
+		for _, name := range targetNames {
+			target, err := c.discoveryManager.GetTarget(name)
+			if err != nil {
+				c.logger.Warn("Target not found", "name", name)
+				continue
+			}
+			if target.Enabled {
+				targets = append(targets, target)
+			}
 		}
-		if target.Enabled {
-			targets = append(targets, target)
+
+		if len(targets) == 0 {
+			return nil, fmt.Errorf("no valid targets found")
 		}
-	}
 
-	if len(targets) == 0 {
-		return nil, fmt.Errorf("no valid targets found")
-	}
+		c.logger.Info("Publishing to specific targets",
+			"requested", len(targetNames),
+			"found", len(targets),
+			"fingerprint", enrichedAlert.Alert.Fingerprint,
+		)
+	} else {
+		// Receiver-based selection over all discovered targets.
+		all := c.discoveryManager.ListTargets()
+		targets = make([]*core.PublishingTarget, 0, len(all))
+		for _, t := range all {
+			if !t.Enabled {
+				continue
+			}
+			if targetMatchesReceiver(t, receiverName) {
+				targets = append(targets, t)
+			}
+		}
 
-	c.logger.Info("Publishing to specific targets",
-		"requested", len(targetNames),
-		"found", len(targets),
-		"fingerprint", enrichedAlert.Alert.Fingerprint,
-	)
+		if len(targets) == 0 {
+			c.logger.Warn("No publishing targets matched receiver; publishing to none",
+				"receiver", receiverName,
+				"fingerprint", enrichedAlert.Alert.Fingerprint,
+			)
+			return []*PublishingResult{}, fmt.Errorf("no targets found for receiver %q", receiverName)
+		}
+
+		c.logger.Info("Publishing to receiver-scoped targets",
+			"receiver", receiverName,
+			"found", len(targets),
+			"fingerprint", enrichedAlert.Alert.Fingerprint,
+		)
+	}
 
 	// Publish concurrently
 	results := make([]*PublishingResult, len(targets))

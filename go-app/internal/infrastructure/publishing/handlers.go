@@ -354,7 +354,7 @@ func (h *PublishingHandlers) TestTarget(w http.ResponseWriter, r *http.Request) 
 	testAlert := h.createTestAlert(req.AlertName)
 
 	// Try to publish
-	results, err := h.coordinator.PublishToTargets(r.Context(), testAlert, []string{name})
+	results, err := h.coordinator.PublishToTargets(r.Context(), testAlert, []string{name}, "")
 	if err != nil {
 		h.sendError(w, http.StatusInternalServerError, "Test failed", err.Error())
 		return
