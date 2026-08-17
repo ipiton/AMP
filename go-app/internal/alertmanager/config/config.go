@@ -10,6 +10,14 @@ type AlertmanagerConfig struct {
 	InhibitRules []*InhibitRule `yaml:"inhibit_rules,omitempty" json:"inhibit_rules,omitempty"`
 	Receivers    []*Receiver    `yaml:"receivers,omitempty" json:"receivers,omitempty"`
 	Templates    []string       `yaml:"templates,omitempty" json:"templates,omitempty"`
+
+	// TimeIntervals and MuteTimeIntervals are Alertmanager sections planned
+	// for a later AMP phase (not yet resolved/validated against route
+	// references). They are decoded generically (rather than omitted) so
+	// that configs adopting them upstream do not fail strict parsing here;
+	// configvalidator only checks structural presence, not their contents.
+	TimeIntervals     []map[string]any `yaml:"time_intervals,omitempty" json:"time_intervals,omitempty"`
+	MuteTimeIntervals []map[string]any `yaml:"mute_time_intervals,omitempty" json:"mute_time_intervals,omitempty"`
 }
 
 // GlobalConfig contains global configuration options
@@ -62,8 +70,21 @@ type Route struct {
 	RepeatInterval time.Duration     `yaml:"repeat_interval,omitempty" json:"repeat_interval,omitempty"`
 	Match          map[string]string `yaml:"match,omitempty" json:"match,omitempty"`
 	MatchRE        map[string]string `yaml:"match_re,omitempty" json:"match_re,omitempty"`
-	Continue       bool              `yaml:"continue,omitempty" json:"continue,omitempty"`
-	Routes         []*Route          `yaml:"routes,omitempty" json:"routes,omitempty"`
+
+	// Matchers is the AMP/upstream-Alertmanager "matchers:" list syntax
+	// (e.g. ["severity=critical", "team!~^dev.*$"]), added since Phase 1
+	// as the successor to Match/MatchRE. Parsed via pkg/configvalidator/matcher.
+	Matchers []string `yaml:"matchers,omitempty" json:"matchers,omitempty"`
+
+	// MuteTimeIntervals/ActiveTimeIntervals reference named intervals from
+	// the top-level time_intervals/mute_time_intervals sections. Resolution
+	// against those sections is planned for a later AMP phase; accepted
+	// structurally here so configs adopting them do not fail parsing.
+	MuteTimeIntervals   []string `yaml:"mute_time_intervals,omitempty" json:"mute_time_intervals,omitempty"`
+	ActiveTimeIntervals []string `yaml:"active_time_intervals,omitempty" json:"active_time_intervals,omitempty"`
+
+	Continue bool     `yaml:"continue,omitempty" json:"continue,omitempty"`
+	Routes   []*Route `yaml:"routes,omitempty" json:"routes,omitempty"`
 }
 
 // InhibitRule defines an inhibition rule
@@ -72,7 +93,13 @@ type InhibitRule struct {
 	SourceMatchRE map[string]string `yaml:"source_match_re,omitempty" json:"source_match_re,omitempty"`
 	TargetMatch   map[string]string `yaml:"target_match,omitempty" json:"target_match,omitempty"`
 	TargetMatchRE map[string]string `yaml:"target_match_re,omitempty" json:"target_match_re,omitempty"`
-	Equal         []string          `yaml:"equal,omitempty" json:"equal,omitempty"`
+
+	// SourceMatchers/TargetMatchers are the "matchers:" list syntax
+	// successor to source_match/source_match_re and target_match/target_match_re.
+	SourceMatchers []string `yaml:"source_matchers,omitempty" json:"source_matchers,omitempty"`
+	TargetMatchers []string `yaml:"target_matchers,omitempty" json:"target_matchers,omitempty"`
+
+	Equal []string `yaml:"equal,omitempty" json:"equal,omitempty"`
 }
 
 // Receiver defines a notification receiver
