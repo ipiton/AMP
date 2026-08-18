@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 )
 
@@ -136,6 +138,33 @@ func TestMetricsOnlyPublisher_Noops(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("test_reason", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err := publisher.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}); err != nil {
 		t.Fatalf("PublishToAll() error = %v", err)
+	}
+}
+
+// TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery is the contract half
+// of final review finding 4. DefaultGroupManager.publishGroupAlerts records the
+// group in the SHARED, cross-replica notification log (TTL = repeat_interval)
+// whenever PublishGroup returns nil. This publisher delivers nothing, so a nil
+// return silenced the group on every HEALTHY replica for a full
+// repeat_interval; it must return grouping.ErrDeliveryNotConfirmed instead.
+//
+// The consuming side (publishGroupAlerts skipping RecordSent for this sentinel)
+// is covered in internal/infrastructure/grouping/metrics_only_nflog_test.go.
+func TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery(t *testing.T) {
+	publisher := NewMetricsOnlyPublisher("publishing_disabled", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	alerts := []*core.Alert{{Fingerprint: "abc", AlertName: "Test"}}
+
+	err := publisher.PublishGroup(context.Background(), alerts, "default")
+	if !errors.Is(err, grouping.ErrDeliveryNotConfirmed) {
+		t.Fatalf("PublishGroup() error = %v, want it to wrap grouping.ErrDeliveryNotConfirmed", err)
+	}
+	if !strings.Contains(err.Error(), "publishing_disabled") {
+		t.Fatalf("PublishGroup() error = %q, want it to carry the degradation reason", err)
+	}
+
+	// Empty alert set is genuinely nothing to deliver, not a suppressed send.
+	if err := publisher.PublishGroup(context.Background(), nil, "default"); err != nil {
+		t.Fatalf("PublishGroup(no alerts) error = %v, want nil", err)
 	}
 }
 

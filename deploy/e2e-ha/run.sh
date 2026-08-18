@@ -33,22 +33,25 @@
 # publishing.enabled: false explicitly to make that fallback deterministic
 # (no in-cluster-detection delay/log noise) rather than incidental.
 #
-# So "exactly one notification arrived" is proven by two independent
+# So "exactly one replica reached delivery" is proven by two independent
 # observable side effects of that same code path, neither requiring a real
 # webhook hit:
-#   - MetricsOnlyPublisher.PublishGroup logs exactly
-#     "Group publishing skipped (metrics-only publisher)" once per
-#     successful claim -> dedup -> "publish" pass -- note this log line
-#     does NOT carry the alertname/group_key (see PublishGroup in
-#     go-app/internal/application/publishing_metrics_only.go), so it is
-#     counted per replica/time-window rather than grepped by alertname.
-#     Each step below only has one alert in flight, so a bare count is an
-#     exact, unambiguous signal.
-#   - internal/infrastructure/grouping.RedisNotifyLog.RecordSent then
-#     writes nflog:entry:<groupKey> in the shared Redis, keyed by the
-#     EXACT group ("receiver=<name>/alertname=<alertname>") -- this is
-#     the alert-specific corroboration the log-line count above can't
-#     provide on its own.
+#   - DefaultGroupManager.publishGroupAlerts logs "group notification not
+#     delivered ..." exactly once per successful claim -> dedup -> publish
+#     pass, WITH group_key ("receiver=<name>/alertname=<alertname>"), so it
+#     is an exact per-alert signal. The claim loser returns before the
+#     publish step, so only the claim winner can emit it.
+#     (MetricsOnlyPublisher's own "Group publishing skipped" line is also
+#     counted, but it carries no group_key -- see PublishGroup in
+#     go-app/internal/application/publishing_metrics_only.go -- so it only
+#     works as a bare per-replica count.)
+#   - The SHARED nflog entry (nflog:entry:<groupKey>) must be ABSENT.
+#     Final review finding 4: MetricsOnlyPublisher.PublishGroup used to
+#     return nil, which publishGroupAlerts read as "delivered" and recorded
+#     via RedisNotifyLog.RecordSent with TTL = repeat_interval -- silencing
+#     the group on every HEALTHY replica for that entire interval. It now
+#     returns grouping.ErrDeliveryNotConfirmed, so nothing is recorded, and
+#     this script asserts the key does NOT exist.
 #
 # This is the fallback the brief calls for when webhook delivery is
 # impossible outside k8s: nflog/redis state + logs standing in for a real
@@ -137,12 +140,34 @@ else:
 
 nflog_entry_exists() {
   # nflog_entry_exists <receiver> <alertname>
+  #
+  # NOTE (final review finding 4): with a metrics-only publisher this key must
+  # NOT exist. MetricsOnlyPublisher.PublishGroup now returns
+  # grouping.ErrDeliveryNotConfirmed instead of nil, so publishGroupAlerts
+  # deliberately skips RecordSent — nothing was delivered, so nothing may be
+  # recorded in the SHARED cross-replica notification log (TTL =
+  # repeat_interval), which would otherwise silence the group on every healthy
+  # replica. This helper is therefore asserted NEGATIVELY below; it is kept
+  # (rather than deleted) precisely so a regression that starts writing the key
+  # again fails loudly.
   local key="nflog:entry:receiver=${1}/alertname=${2}"
   local redis_container
   redis_container="$("${COMPOSE[@]}" ps -q redis)"
   local hits
   hits=$(docker exec "$redis_container" redis-cli EXISTS "$key" | tr -d '\r')
   [[ "$hits" == "1" ]]
+}
+
+undelivered_count() {
+  # undelivered_count <service> <alertname>: how many times <service> reached
+  # the publish step for this specific group and reported "delivered nothing"
+  # (the metrics-only outcome). Unlike publish_skip_count, this log line comes
+  # from DefaultGroupManager.publishGroupAlerts and DOES carry group_key, so it
+  # is an exact per-alert signal — the claim loser returns before publishing, so
+  # only the replica that won the nflog claim can emit it.
+  "${COMPOSE[@]}" logs "$1" 2>/dev/null |
+    grep "group notification not delivered" |
+    grep -c "receiver=default/alertname=${2}" || true
 }
 
 post_alert() {
@@ -199,8 +224,21 @@ total=$((matches_a + matches_b))
 [[ "$total" -eq 1 ]] || fail "expected exactly 1 total publish-skip log across both replicas after posting $ALERT_1, got $total (a=$matches_a b=$matches_b)"
 log "PASS: exactly one replica published '$ALERT_1' (metrics-only log line, a=$matches_a b=$matches_b)"
 
-nflog_entry_exists "default" "$ALERT_1" || fail "expected nflog:entry:receiver=default/alertname=$ALERT_1 to exist in Redis"
-log "PASS: nflog:entry:receiver=default/alertname=$ALERT_1 present in shared Redis -- RecordSent completed"
+# Exactly one replica reached the publish step FOR THIS GROUP (group_key-scoped,
+# unlike publish_skip_count above).
+undelivered_a=$(undelivered_count amp-a "$ALERT_1")
+undelivered_b=$(undelivered_count amp-b "$ALERT_1")
+undelivered_total=$((undelivered_a + undelivered_b))
+[[ "$undelivered_total" -eq 1 ]] || fail "expected exactly 1 replica to reach the publish step for $ALERT_1, got $undelivered_total (a=$undelivered_a b=$undelivered_b)"
+log "PASS: exactly one replica reached the publish step for '$ALERT_1' (a=$undelivered_a b=$undelivered_b)"
+
+# Finding 4: a metrics-only publish delivered NOTHING, so it must NOT record a
+# shared nflog entry. Before the fix it did, and every healthy replica then
+# skipped this group for a full repeat_interval.
+if nflog_entry_exists "default" "$ALERT_1"; then
+  fail "nflog:entry:receiver=default/alertname=$ALERT_1 exists, but nothing was delivered -- a metrics-only publish must never record a send (finding 4)"
+fi
+log "PASS: no nflog:entry recorded for '$ALERT_1' -- metrics-only publish did not poison the shared dedup log"
 
 # --- Step 4: kill replica A; replica B alone still delivers exactly once -
 log "killing replica A"
@@ -214,12 +252,12 @@ post_alert "$PORT_B" "$ALERT_2" >/dev/null
 
 sleep "$GROUP_WAIT_MARGIN"
 
-# amp-b's cumulative count was 0 before this step (amp-a alone published
-# $ALERT_1) -- so this being exactly 1 now proves $ALERT_2 was published
-# exactly once, with no double-publish on B alone.
-matches_b2=$(publish_skip_count amp-b)
-[[ "$matches_b2" -eq 1 ]] || fail "expected replica B alone to publish exactly once after A's death, got $matches_b2 cumulative"
-nflog_entry_exists "default" "$ALERT_2" || fail "expected nflog:entry:receiver=default/alertname=$ALERT_2 to exist in Redis"
+# group_key-scoped, so this is exact regardless of what else B has published.
+undelivered_b2=$(undelivered_count amp-b "$ALERT_2")
+[[ "$undelivered_b2" -eq 1 ]] || fail "expected replica B alone to publish exactly once for $ALERT_2 after A's death, got $undelivered_b2"
+if nflog_entry_exists "default" "$ALERT_2"; then
+  fail "nflog:entry:receiver=default/alertname=$ALERT_2 exists, but nothing was delivered -- a metrics-only publish must never record a send (finding 4)"
+fi
 log "PASS: replica B alone still delivers exactly once after replica A's death (failover)"
 
 log "ALL PASS"

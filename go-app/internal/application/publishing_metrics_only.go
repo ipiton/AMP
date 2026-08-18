@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -38,7 +39,22 @@ func (p *MetricsOnlyPublisher) PublishToAll(ctx context.Context, alert *core.Ale
 }
 
 // PublishGroup implements grouping.GroupNotificationPublisher (task 2.4):
-// no-op, same posture as PublishToAll in degraded/metrics-only runtime modes.
+// no-op delivery, same posture as PublishToAll in degraded/metrics-only
+// runtime modes.
+//
+// Returns grouping.ErrDeliveryNotConfirmed (final review finding 4). A nil
+// return here meant "delivered" to
+// DefaultGroupManager.publishGroupAlerts, which then wrote the group into the
+// SHARED cross-replica notification log with TTL = repeat_interval — so a
+// single replica running in metrics-only mode (publishing.enabled: false, the
+// lite profile, or a transient Kubernetes failure at startup) silenced the
+// group on every HEALTHY replica for a full repeat_interval. The sentinel
+// keeps this a non-error, non-delivery outcome: no dedup entry is recorded, and
+// the next replica to fire the group's timer publishes for real.
+//
+// The empty-alerts early return stays nil: there is genuinely nothing to
+// deliver, and publishGroupAlerts never reaches the publisher with an empty
+// slice anyway.
 func (p *MetricsOnlyPublisher) PublishGroup(ctx context.Context, alerts []*core.Alert, receiver string) error {
 	if len(alerts) == 0 {
 		return nil
@@ -50,7 +66,7 @@ func (p *MetricsOnlyPublisher) PublishGroup(ctx context.Context, alerts []*core.
 			"alert_count", len(alerts),
 		)
 	}
-	return nil
+	return fmt.Errorf("%w: %s", grouping.ErrDeliveryNotConfirmed, p.reason)
 }
 
 func (p *MetricsOnlyPublisher) PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error {
