@@ -7,6 +7,7 @@ import (
 	"time"
 
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 )
 
 // RouteTree represents an immutable routing tree built from RouteConfig.
@@ -61,6 +62,28 @@ type RouteTree struct {
 	// built is the timestamp when this tree was constructed.
 	// Used for tracking tree age and hot reload debugging.
 	built time.Time
+
+	// timeIntervals is this tree's build-time snapshot of the config's
+	// named time_intervals (task 3.2, from
+	// infraroute.RouteConfig.TimeIntervalIndex), keyed by name. Looked up
+	// by RouteNode.MuteTimeIntervals/ActiveTimeIntervals at notify-chain
+	// TimeMute time (grouping.GroupTimeIntervalLookup). Rebuilt on every
+	// TreeBuilder.Build call, so a RouteTreeManager.Reload's new tree
+	// always carries the CURRENT config's definitions — the lookup never
+	// serves a startup snapshot after a hot reload.
+	timeIntervals map[string]timeinterval.TimeInterval
+}
+
+// GetTimeInterval returns the named time_intervals group build into this
+// tree (task 3.2). ok is false if name isn't defined in the config this
+// tree was built from — callers must treat that as "does not match" (see
+// grouping.DefaultGroupManager's TimeMute step for the documented fail-open
+// posture), not as a fatal error.
+//
+// Complexity: O(1)
+func (t *RouteTree) GetTimeInterval(name string) (timeinterval.TimeInterval, bool) {
+	ti, ok := t.timeIntervals[name]
+	return ti, ok
 }
 
 // TreeStats contains statistics about the routing tree.
@@ -237,11 +260,20 @@ func (t *RouteTree) Clone() *RouteTree {
 		receiversClone[name] = receiver
 	}
 
+	// Clone time interval index (task 3.2). Values are copied deeply
+	// (TimeInterval.Clone) since they contain slices; map keys/entries
+	// themselves need no independent copy beyond that.
+	timeIntervalsClone := make(map[string]timeinterval.TimeInterval, len(t.timeIntervals))
+	for name, ti := range t.timeIntervals {
+		timeIntervalsClone[name] = ti.Clone()
+	}
+
 	return &RouteTree{
-		Root:      t.Root.Clone(), // Deep clone root node and subtree
-		receivers: receiversClone,
-		stats:     t.stats,    // Copy struct value
-		built:     time.Now(), // Update build time for clone
+		Root:          t.Root.Clone(), // Deep clone root node and subtree
+		receivers:     receiversClone,
+		stats:         t.stats,    // Copy struct value
+		built:         time.Now(), // Update build time for clone
+		timeIntervals: timeIntervalsClone,
 	}
 }
 

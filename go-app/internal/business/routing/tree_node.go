@@ -62,6 +62,20 @@ type RouteNode struct {
 	// Override: specify in route config
 	RepeatInterval time.Duration
 
+	// MuteTimeIntervals references named time_intervals (by name, resolved
+	// later via RouteTree.GetTimeInterval) during which this route must NOT
+	// send notifications (task 3.2). Deliberately NOT inherited from Parent
+	// — upstream Alertmanager applies mute_time_intervals/active_time_intervals
+	// only to the route node that declares them, unlike GroupBy/timings which
+	// do inherit. Set verbatim from this node's own grouping.Route field by
+	// TreeBuilder.buildNode; nil/empty means this route has none of its own.
+	MuteTimeIntervals []string
+
+	// ActiveTimeIntervals references named time_intervals during which this
+	// route IS allowed to send; outside all of them, the route is muted
+	// (task 3.2). Same non-inherited semantics as MuteTimeIntervals above.
+	ActiveTimeIntervals []string
+
 	// Receiver Configuration
 
 	// Receiver is the name of the receiver to send notifications to.
@@ -213,6 +227,11 @@ func (n *RouteNode) Clone() *RouteNode {
 
 		// Copy pointer (shared, but ReceiverConfig is immutable)
 		ReceiverConfig: n.ReceiverConfig,
+
+		// Copy slices (task 3.2, not inherited so each node's own value
+		// must survive Clone independently)
+		MuteTimeIntervals:   append([]string(nil), n.MuteTimeIntervals...),
+		ActiveTimeIntervals: append([]string(nil), n.ActiveTimeIntervals...),
 
 		// Parent will be set by caller
 		Parent: nil,

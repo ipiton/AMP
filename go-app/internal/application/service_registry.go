@@ -938,15 +938,27 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		silenceChecker = r.silenceStore
 	}
 
+	// TimeIntervalLookup (task 3.2, notify-chain TimeMute step) — available
+	// here for the same reason InhibitionChecker/SilenceChecker are:
+	// r.routeTreeManager (step 2.6, initializeRouting) runs before grouping
+	// init (step 2.7). nil (no route tree configured, or routing engine
+	// init failed/degraded) means the chain skips TimeMute entirely — same
+	// backwards-compatible posture as every other optional checker here.
+	var timeIntervalLookup grouping.GroupTimeIntervalLookup
+	if r.routeTreeManager != nil {
+		timeIntervalLookup = newRouteTreeTimeIntervalLookup(r.routeTreeManager)
+	}
+
 	groupManager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
-		KeyGenerator:      keyGenerator,
-		Config:            groupingCfg,
-		Storage:           groupStorage,
-		TimerManager:      timerManager,
-		InhibitionChecker: r.inhibitionMatcher,
-		SilenceChecker:    silenceChecker,
-		Logger:            r.logger,
-		Metrics:           r.metrics,
+		KeyGenerator:       keyGenerator,
+		Config:             groupingCfg,
+		Storage:            groupStorage,
+		TimerManager:       timerManager,
+		InhibitionChecker:  r.inhibitionMatcher,
+		SilenceChecker:     silenceChecker,
+		TimeIntervalLookup: timeIntervalLookup,
+		Logger:             r.logger,
+		Metrics:            r.metrics,
 	})
 	if err != nil {
 		return fmt.Errorf("group manager init failed: %w", err)

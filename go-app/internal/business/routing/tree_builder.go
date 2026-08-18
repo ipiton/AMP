@@ -133,6 +133,12 @@ func (b *TreeBuilder) Build() (*RouteTree, error) {
 		b.tree.receivers[receiver.Name] = receiver
 	}
 
+	// 3b. Snapshot the config's named time_intervals for this tree (task
+	// 3.2). config.TimeIntervalIndex may be nil (no time_intervals: section)
+	// — a nil map still reads safely (zero value, ok=false) via
+	// RouteTree.GetTimeInterval, so no special-casing is needed here.
+	b.tree.timeIntervals = b.config.TimeIntervalIndex
+
 	// 4. Build root node (recursively builds entire tree)
 	b.tree.Root = b.buildNode(nil, b.config.Route, "route", 0)
 
@@ -205,6 +211,12 @@ func (b *TreeBuilder) buildNode(
 	node.GroupWait = b.inheritDuration(parent, durationOrZero(route.GroupWait), "group_wait")
 	node.GroupInterval = b.inheritDuration(parent, durationOrZero(route.GroupInterval), "group_interval")
 	node.RepeatInterval = b.inheritDuration(parent, durationOrZero(route.RepeatInterval), "repeat_interval")
+
+	// 5b. mute_time_intervals/active_time_intervals (task 3.2) are
+	// deliberately NOT inherited from parent — set verbatim from this
+	// node's own route config, unlike every field above.
+	node.MuteTimeIntervals = route.MuteTimeIntervals
+	node.ActiveTimeIntervals = route.ActiveTimeIntervals
 
 	// 6. Build children recursively
 	for i, childRoute := range route.Routes {

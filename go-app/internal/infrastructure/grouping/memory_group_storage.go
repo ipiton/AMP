@@ -219,6 +219,14 @@ func (m *MemoryGroupStorage) copyMetadata(meta *GroupMetadata) *GroupMetadata {
 	// tagged field.
 	copy.Timings = meta.Timings.Clone()
 
+	// Copy per-group time-interval name references (task 3.2) — same
+	// round-trip gap as Timings above would otherwise reopen: without this,
+	// a freshly-loaded group would lose its matched route's
+	// mute_time_intervals/active_time_intervals names on every Store/Load
+	// through in-memory storage, silently disabling the TimeMute step for
+	// every group after its very first in-process publish.
+	copy.TimeIntervalNames = meta.TimeIntervalNames.Clone()
+
 	return copy
 }
 

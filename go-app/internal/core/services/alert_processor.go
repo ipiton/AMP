@@ -312,7 +312,13 @@ func (p *AlertProcessor) routeAlertToGroup(ctx context.Context, alert *core.Aler
 	// when the alert lands in an already-existing group.
 	timings := grouping.WithGroupTimings(decision.GroupWait, decision.GroupInterval, decision.RepeatInterval)
 
-	if _, err := p.groupManager.AddAlertToGroup(ctx, alert, key, timings); err != nil {
+	// task 3.2: thread the matched route's own mute_time_intervals/
+	// active_time_intervals NAMES onto a group this call creates (see
+	// WithMuteTimeIntervals) — resolved to actual definitions later, at
+	// notify-chain TimeMute time, not here.
+	muteIntervals := grouping.WithMuteTimeIntervals(decision.MuteTimeIntervals, decision.ActiveTimeIntervals)
+
+	if _, err := p.groupManager.AddAlertToGroup(ctx, alert, key, timings, muteIntervals); err != nil {
 		p.logger.Error("Failed to add alert to group, falling back to direct publish (fail-open)",
 			"error", err,
 			"alert", alert.AlertName,

@@ -47,6 +47,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
@@ -147,6 +148,16 @@ type GroupMetadata struct {
 	// matched the alert.
 	Timings *GroupTimings `json:"timings,omitempty"`
 
+	// TimeIntervalNames holds optional per-group mute_time_intervals/
+	// active_time_intervals route references (task 3.2, alertmanager-parity),
+	// captured from the matched route's RoutingDecision at group-CREATION
+	// time (AddAlertToGroup, via WithMuteTimeIntervals) — same capture
+	// timing and non-update-on-existing-group semantics as Timings above.
+	// nil means "this route referenced no time_intervals," the common
+	// case, in which the notify-chain's TimeMute step is a no-op for this
+	// group regardless of whether a TimeIntervalLookup is wired.
+	TimeIntervalNames *TimeIntervalNames `json:"time_interval_names,omitempty"`
+
 	// Version is used for optimistic locking (future: Redis storage in TN-125)
 	Version int64 `json:"version"`
 }
@@ -166,6 +177,35 @@ func (t *GroupTimings) Clone() *GroupTimings {
 	}
 	c := *t
 	return &c
+}
+
+// TimeIntervalNames holds a group's own mute_time_intervals/
+// active_time_intervals NAME references (task 3.2) — not the resolved
+// timeinterval.TimeInterval definitions themselves, which are looked up
+// fresh at TimeMute time via GroupTimeIntervalLookup so a config hot
+// reload is picked up without re-creating the group. See
+// GroupMetadata.TimeIntervalNames for when this is captured.
+type TimeIntervalNames struct {
+	Mute   []string `json:"mute,omitempty"`
+	Active []string `json:"active,omitempty"`
+}
+
+// Clone returns a deep copy of n, or nil if n is nil.
+func (n *TimeIntervalNames) Clone() *TimeIntervalNames {
+	if n == nil {
+		return nil
+	}
+	return &TimeIntervalNames{
+		Mute:   append([]string(nil), n.Mute...),
+		Active: append([]string(nil), n.Active...),
+	}
+}
+
+// IsEmpty reports whether n carries no interval names at all (nil n counts
+// as empty). Used by the TimeMute step to skip evaluation entirely for the
+// common case of a route that references no time_intervals.
+func (n *TimeIntervalNames) IsEmpty() bool {
+	return n == nil || (len(n.Mute) == 0 && len(n.Active) == 0)
 }
 
 // Size returns the total number of alerts in the group (firing + resolved).
@@ -248,6 +288,9 @@ func (g *AlertGroup) Clone() *AlertGroup {
 
 	// Copy per-group timing overrides (task 2.4)
 	metadataCopy.Timings = g.Metadata.Timings.Clone()
+
+	// Copy per-group time-interval name references (task 3.2)
+	metadataCopy.TimeIntervalNames = g.Metadata.TimeIntervalNames.Clone()
 
 	return &AlertGroup{
 		Key:      g.Key,
@@ -581,7 +624,8 @@ type GroupNotificationPublisher interface {
 type AddAlertOption func(*addAlertOptions)
 
 type addAlertOptions struct {
-	timings *GroupTimings
+	timings           *GroupTimings
+	timeIntervalNames *TimeIntervalNames
 }
 
 // WithGroupTimings overrides group_wait/group_interval/repeat_interval for
@@ -595,6 +639,21 @@ func WithGroupTimings(groupWait, groupInterval, repeatInterval time.Duration) Ad
 			GroupInterval:  groupInterval,
 			RepeatInterval: repeatInterval,
 		}
+	}
+}
+
+// WithMuteTimeIntervals carries a matched route's own
+// mute_time_intervals/active_time_intervals NAMES (task 3.2) onto a group
+// CREATED by this AddAlertToGroup call, sourced from the matched route's
+// RoutingDecision — same capture-at-creation-only semantics as
+// WithGroupTimings (has no effect when the alert lands in an
+// already-existing group). A nil/empty mute and active pair still records
+// an explicit (non-nil) *TimeIntervalNames so the intent "this route has no
+// time_intervals" is distinguishable from "no option was passed at all";
+// either way TimeIntervalNames.IsEmpty() makes the TimeMute step a no-op.
+func WithMuteTimeIntervals(mute, active []string) AddAlertOption {
+	return func(o *addAlertOptions) {
+		o.timeIntervalNames = &TimeIntervalNames{Mute: mute, Active: active}
 	}
 }
 
@@ -618,6 +677,28 @@ type GroupInhibitionChecker interface {
 // diverge from).
 type GroupSilenceChecker interface {
 	HasActiveMatch(labels map[string]string, now time.Time) bool
+}
+
+// GroupTimeIntervalLookup is the send-time named-time_intervals definition
+// lookup used by the notify-stage chain (task 3.2, Step 3: TimeMute — order
+// Inhibit -> Silence -> TimeMute -> Dedup, matching upstream Alertmanager).
+// Resolves a name captured on GroupMetadata.TimeIntervalNames (from the
+// matched route at group-creation time) to its current
+// timeinterval.TimeInterval definition.
+//
+// Must read the CURRENT config's index on every call, not a construction-
+// time snapshot: a hot config reload can rename/redefine/delete a
+// time_intervals entry, and the very next group-timer fire must see that
+// change (businessrouting.RouteTree.GetTimeInterval / RouteTreeManager.
+// GetTree satisfies this automatically — see the application package's
+// wiring for the concrete adapter).
+//
+// ok=false (name not found) is NOT treated as an error by the TimeMute
+// step — see DefaultGroupManager.isTimeMuted's doc comment for the
+// documented fail-open decision (log + treat as "not matched", never abort
+// delivery).
+type GroupTimeIntervalLookup interface {
+	GetTimeInterval(name string) (timeinterval.TimeInterval, bool)
 }
 
 // DefaultGroupManagerConfig holds configuration for DefaultGroupManager.
@@ -651,6 +732,12 @@ type DefaultGroupManagerConfig struct {
 	// SilenceChecker is the notify-chain's Silence step (task 2.4,
 	// optional). If nil, the chain skips silence filtering entirely.
 	SilenceChecker GroupSilenceChecker
+
+	// TimeIntervalLookup is the notify-chain's TimeMute step (task 3.2,
+	// optional). If nil, the chain skips time-interval mute filtering
+	// entirely (backwards compatible — same posture as InhibitionChecker/
+	// SilenceChecker being optional).
+	TimeIntervalLookup GroupTimeIntervalLookup
 
 	// Logger for structured logging (optional, defaults to slog.Default())
 	Logger *slog.Logger

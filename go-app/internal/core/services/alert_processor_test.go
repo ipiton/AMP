@@ -484,3 +484,108 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_SameLabelsDifferentReceiver
 
 	assert.Zero(t, publisher.publishToAllCalls+publisher.publishWithClassificationCalls)
 }
+
+// --- task 3.2: mute_time_intervals/active_time_intervals wiring ----------
+
+// TestAlertProcessor_ProcessAlert_GroupingEnabled_CapturesTimeIntervalNamesOnNewGroup
+// covers task 3.2: routeAlertToGroup must thread the matched route's own
+// mute_time_intervals/active_time_intervals NAMES onto a newly created
+// group (GroupMetadata.TimeIntervalNames via WithMuteTimeIntervals),
+// mirroring how it already threads GroupWait/GroupInterval/RepeatInterval
+// (task 2.4's WithGroupTimings). Uses the real grouping.DefaultGroupManager
+// + in-memory storage (not fakeGroupManager, which discards its opts) so
+// the captured metadata can actually be inspected afterward.
+func TestAlertProcessor_ProcessAlert_GroupingEnabled_CapturesTimeIntervalNamesOnNewGroup(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	keyGen := grouping.NewGroupKeyGenerator()
+	groupStorage := grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{Logger: logger})
+	groupingCfg := &grouping.GroupingConfig{Route: &grouping.Route{Receiver: "default", GroupBy: []string{"alertname"}}}
+	groupingCfg.Route.Defaults()
+
+	groupMgr, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
+		KeyGenerator: keyGen,
+		Config:       groupingCfg,
+		Storage:      groupStorage,
+		Logger:       logger,
+	})
+	require.NoError(t, err)
+
+	publisher := &fakePublisher{}
+	decision := &RoutingDecision{
+		Receiver:            "default",
+		GroupBy:             []string{"alertname"},
+		MuteTimeIntervals:   []string{"weekends"},
+		ActiveTimeIntervals: []string{"business-hours"},
+	}
+	evaluator := &fakeRouteEvaluator{decision: decision}
+
+	cfg := newTestProcessorConfig(t, evaluator, publisher)
+	cfg.GroupingEnabled = true
+	cfg.GroupManager = groupMgr
+	cfg.GroupKeyGenerator = keyGen
+
+	processor, err := NewAlertProcessor(cfg)
+	require.NoError(t, err)
+
+	require.NoError(t, processor.ProcessAlert(ctx, testAlert()))
+
+	baseKey, err := keyGen.GenerateKey(map[string]string{"alertname": "HighCPU"}, decision.GroupBy)
+	require.NoError(t, err)
+	key := grouping.GroupKey("receiver=" + decision.Receiver + "/" + string(baseKey))
+
+	group, err := groupMgr.GetGroup(ctx, key)
+	require.NoError(t, err)
+	require.NotNil(t, group.Metadata.TimeIntervalNames)
+	assert.Equal(t, []string{"weekends"}, group.Metadata.TimeIntervalNames.Mute)
+	assert.Equal(t, []string{"business-hours"}, group.Metadata.TimeIntervalNames.Active)
+}
+
+// TestAlertProcessor_ProcessAlert_GroupingEnabled_NoTimeIntervals_CapturesEmptyNames
+// covers the common case: a matched route with no mute_time_intervals/
+// active_time_intervals must not break group creation, and must record an
+// empty (not nil) *TimeIntervalNames — see WithMuteTimeIntervals's doc
+// comment on why it always sets a non-nil value.
+func TestAlertProcessor_ProcessAlert_GroupingEnabled_NoTimeIntervals_CapturesEmptyNames(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	keyGen := grouping.NewGroupKeyGenerator()
+	groupStorage := grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{Logger: logger})
+	groupingCfg := &grouping.GroupingConfig{Route: &grouping.Route{Receiver: "default", GroupBy: []string{"alertname"}}}
+	groupingCfg.Route.Defaults()
+
+	groupMgr, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
+		KeyGenerator: keyGen,
+		Config:       groupingCfg,
+		Storage:      groupStorage,
+		Logger:       logger,
+	})
+	require.NoError(t, err)
+
+	publisher := &fakePublisher{}
+	decision := &RoutingDecision{Receiver: "default", GroupBy: []string{"alertname"}}
+	evaluator := &fakeRouteEvaluator{decision: decision}
+
+	cfg := newTestProcessorConfig(t, evaluator, publisher)
+	cfg.GroupingEnabled = true
+	cfg.GroupManager = groupMgr
+	cfg.GroupKeyGenerator = keyGen
+
+	processor, err := NewAlertProcessor(cfg)
+	require.NoError(t, err)
+
+	require.NoError(t, processor.ProcessAlert(ctx, testAlert()))
+
+	baseKey, err := keyGen.GenerateKey(map[string]string{"alertname": "HighCPU"}, decision.GroupBy)
+	require.NoError(t, err)
+	key := grouping.GroupKey("receiver=" + decision.Receiver + "/" + string(baseKey))
+
+	group, err := groupMgr.GetGroup(ctx, key)
+	require.NoError(t, err)
+	if group.Metadata.TimeIntervalNames != nil {
+		assert.Empty(t, group.Metadata.TimeIntervalNames.Mute)
+		assert.Empty(t, group.Metadata.TimeIntervalNames.Active)
+	}
+}

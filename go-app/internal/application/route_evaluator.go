@@ -3,6 +3,8 @@ package application
 import (
 	businessrouting "github.com/ipiton/AMP/internal/business/routing"
 	"github.com/ipiton/AMP/internal/core/services"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 )
 
 // routeTreeEvaluator adapts a hot-reloadable business/routing route tree
@@ -63,13 +65,41 @@ func (e *routeTreeEvaluator) Evaluate(labels map[string]string) (*services.Routi
 	}
 
 	return &services.RoutingDecision{
-		Receiver:       decision.Receiver,
-		GroupBy:        decision.GroupBy,
-		GroupWait:      decision.GroupWait,
-		GroupInterval:  decision.GroupInterval,
-		RepeatInterval: decision.RepeatInterval,
-		MatchedRoute:   decision.MatchedRoute,
+		Receiver:            decision.Receiver,
+		GroupBy:             decision.GroupBy,
+		GroupWait:           decision.GroupWait,
+		GroupInterval:       decision.GroupInterval,
+		RepeatInterval:      decision.RepeatInterval,
+		MuteTimeIntervals:   decision.MuteTimeIntervals,
+		ActiveTimeIntervals: decision.ActiveTimeIntervals,
+		MatchedRoute:        decision.MatchedRoute,
 	}, nil
 }
 
 var _ services.RouteEvaluator = (*routeTreeEvaluator)(nil)
+
+// routeTreeTimeIntervalLookup adapts the hot-reloadable RouteTreeManager
+// into grouping.GroupTimeIntervalLookup (task 3.2) — the notify-chain's
+// TimeMute step's send-time interval-definition read path.
+//
+// Hot reload: like routeTreeEvaluator above, this re-reads
+// manager.GetTree() on every single GetTimeInterval call rather than
+// caching the tree, so a RouteTreeManager.Reload (config hot reload) takes
+// effect on the very next group-timer fire that calls it — never a
+// construction-time snapshot.
+type routeTreeTimeIntervalLookup struct {
+	manager *businessrouting.RouteTreeManager
+}
+
+// newRouteTreeTimeIntervalLookup creates a routeTreeTimeIntervalLookup
+// wrapping manager.
+func newRouteTreeTimeIntervalLookup(manager *businessrouting.RouteTreeManager) *routeTreeTimeIntervalLookup {
+	return &routeTreeTimeIntervalLookup{manager: manager}
+}
+
+// GetTimeInterval implements grouping.GroupTimeIntervalLookup.
+func (l *routeTreeTimeIntervalLookup) GetTimeInterval(name string) (timeinterval.TimeInterval, bool) {
+	return l.manager.GetTree().GetTimeInterval(name)
+}
+
+var _ grouping.GroupTimeIntervalLookup = (*routeTreeTimeIntervalLookup)(nil)
