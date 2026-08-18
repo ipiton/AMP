@@ -390,6 +390,118 @@ func TestDeleteSilence_DatabaseError(t *testing.T) {
 }
 
 // ===========================
+// ExpireSilence Tests (alertmanager-parity amtool audit F3, standard profile)
+// ===========================
+// Unlike DeleteSilence, ExpireSilence must NEVER remove the row — it forces
+// an early expiry (ends_at moved to now via LEAST, status set to expired)
+// so the silence stays queryable via GET /api/v2/silences with
+// status.state == "expired" until the GC retention worker removes it.
+//
+// Round-2 review fix: for a silence that is still PENDING (starts_at in the
+// future), starts_at is ALSO moved to now via the same LEAST — upstream
+// Alertmanager's expire() (silence/silence.go, v0.34.0) does both for a
+// pending silence so it becomes "expired" immediately, not "pending" until
+// the original starts_at arrives. See TestExpireSilence_PendingBecomesExpiredImmediately.
+
+// TestExpireSilence_Success tests successful forced expiry of an ACTIVE
+// silence (starts_at already in the past — only ends_at should move).
+func TestExpireSilence_Success(t *testing.T) {
+	t.Skip("Requires database connection - see integration tests")
+
+	// Expected behavior:
+	// 1. Create a test silence with StartsAt in the past, EndsAt in the
+	//    future (active, not pending)
+	// 2. Call ExpireSilence(ctx, id, now)
+	// 3. GetSilenceByID should show starts_at UNCHANGED, ends_at == now (not
+	//    the original future value), and status == expired
+	// 4. The row must still exist — GetSilenceByID must NOT return
+	//    ErrSilenceNotFound
+}
+
+// TestExpireSilence_PendingBecomesExpiredImmediately tests forced expiry of
+// a PENDING silence (starts_at still in the future): both starts_at and
+// ends_at must move to now, matching upstream's expire() — otherwise the
+// silence would keep reporting status.state == "pending" (state priority
+// checks starts_at before ends_at) until its original starts_at arrives.
+func TestExpireSilence_PendingBecomesExpiredImmediately(t *testing.T) {
+	t.Skip("Requires database connection - see integration tests")
+
+	// Expected behavior:
+	// 1. Create a test silence with StartsAt AND EndsAt both in the future
+	//    (pending)
+	// 2. Call ExpireSilence(ctx, id, now)
+	// 3. GetSilenceByID should show BOTH starts_at == now AND ends_at == now
+	//    (not the original future values), and status == expired
+	// 4. CalculateStatus()/the API read path must report "expired", not
+	//    "pending", immediately — no need to wait for the original
+	//    starts_at to elapse
+}
+
+// TestExpireSilence_AlreadyExpired_DoesNotExtendEndsAt tests idempotency:
+// calling ExpireSilence on an already-expired silence must never move
+// ends_at later (LEAST(ends_at, now) only ever moves it earlier or leaves
+// it unchanged).
+func TestExpireSilence_AlreadyExpired_DoesNotExtendEndsAt(t *testing.T) {
+	t.Skip("Requires database connection - see integration tests")
+
+	// Expected behavior:
+	// 1. Create a silence whose ends_at is already in the past
+	// 2. Call ExpireSilence(ctx, id, now) where now > ends_at
+	// 3. ends_at must be unchanged (LEAST picks the smaller/earlier value)
+	// 4. status remains expired
+}
+
+// TestExpireSilence_NotFound tests forced expiry of a non-existent silence.
+func TestExpireSilence_NotFound(t *testing.T) {
+	t.Skip("Requires database connection - see integration tests")
+
+	// Expected behavior:
+	// 1. Generate random UUID that doesn't exist
+	// 2. Call ExpireSilence
+	// 3. Should return ErrSilenceNotFound (0 rows affected)
+	// 4. Metrics error counter should increment with error_type="not_found"
+}
+
+// TestExpireSilence_InvalidUUID tests invalid UUID error handling — mirrors
+// TestDeleteSilence_InvalidUUID, runs without a database.
+func TestExpireSilence_InvalidUUID(t *testing.T) {
+	repo := &PostgresSilenceRepository{
+		logger:  slog.Default(),
+		metrics: nil,
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"empty string", ""},
+		{"invalid format", "not-a-uuid"},
+		{"partial uuid", "550e8400-e29b"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := repo.ExpireSilence(ctx, tt.id, now)
+
+			assert.ErrorIs(t, err, ErrInvalidUUID, "Expected ErrInvalidUUID")
+		})
+	}
+}
+
+// TestExpireSilence_DatabaseError tests database error handling.
+func TestExpireSilence_DatabaseError(t *testing.T) {
+	t.Skip("Requires mock/testcontainers - see integration tests")
+
+	// Expected behavior:
+	// If the database update fails:
+	// 1. Should return error with "expire silence" prefix
+	// 2. Metrics error counter should increment with error_type="update"
+}
+
+// ===========================
 // Helper method tests
 // ===========================
 

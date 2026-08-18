@@ -147,6 +147,37 @@ type InhibitionRuleConfig struct {
 	TargetMatchRE map[string]string `mapstructure:"target_match_re" yaml:"target_match_re,omitempty"`
 	Equal         []string          `mapstructure:"equal"           yaml:"equal,omitempty"`
 	Name          string            `mapstructure:"name"            yaml:"name,omitempty"`
+
+	// SourceMatchers/TargetMatchers are upstream Alertmanager's `matchers:`
+	// list syntax for inhibit rules (e.g. ['severity="critical"']). They are
+	// captured here but NOT converted into runtime rules by
+	// ToInhibitionRules — the inhibition engine only understands the
+	// source_match/source_match_re map form.
+	//
+	// Final review finding 10: these fields did not exist on this struct at
+	// all, so a config using them loaded cleanly and inhibited NOTHING. The
+	// configvalidator's W155 warning covers `amp check-config`, but the
+	// running server was silent. Capturing them lets ToInhibitionRules log an
+	// Error naming the affected rule — see UnwiredMatcherFields.
+	SourceMatchers []string `mapstructure:"source_matchers" yaml:"source_matchers,omitempty"`
+	TargetMatchers []string `mapstructure:"target_matchers" yaml:"target_matchers,omitempty"`
+}
+
+// UnwiredMatcherFields returns the names of the `matchers:`-syntax fields this
+// rule sets that the runtime inhibition engine does not implement, or nil when
+// there are none.
+//
+// A non-empty result means the rule will not inhibit what the operator wrote
+// (final review finding 10).
+func (r InhibitionRuleConfig) UnwiredMatcherFields() []string {
+	var fields []string
+	if len(r.SourceMatchers) > 0 {
+		fields = append(fields, "source_matchers")
+	}
+	if len(r.TargetMatchers) > 0 {
+		fields = append(fields, "target_matchers")
+	}
+	return fields
 }
 
 // ReceiverConfig holds configuration for a notification receiver.
@@ -661,7 +692,14 @@ func setDefaults() {
 	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc
 	// comment (config.go) for why the lite profile ignores this.
 	viper.SetDefault("grouping.reconciliation_interval", "45s")
-	viper.SetDefault("grouping.reconciliation_grace", "60s")
+	// 20s, NOT 60s (final review finding 2): the shared timer record's own
+	// Redis TTL is ExpiresAt + grouping's timerTTLGracePeriod. A 60s
+	// adoption grace equalled that TTL grace, so a timer became eligible for
+	// adoption at the exact moment its key expired — ListOverdueTimers
+	// always came back empty and a dead replica's groups never notified
+	// again. Keep in sync with grouping.defaultReconciliationGracePeriod,
+	// which enforces the same relationship at compile time.
+	viper.SetDefault("grouping.reconciliation_grace", "20s")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)

@@ -464,17 +464,20 @@ func (r *ServiceRegistry) initializeSilencePersistence(ctx context.Context) erro
 	return nil
 }
 
-// rehydrateSilenceStore loads active and pending silences from the persistent
-// repository into the in-memory SilenceStore after a restart. The database is
-// the source of truth; memory is a read cache for the API. Expired silences
-// are intentionally skipped — the memory store recomputes state from
-// timestamps on every read, so they would be dead weight.
+// rehydrateSilenceStore loads active, pending, and (per the F3 fix below)
+// expired silences from the persistent repository into the in-memory
+// SilenceStore after a restart. The database is the source of truth; memory
+// is a read cache for the API — including expired silences keeps
+// GET /api/v2/silences (status.state == "expired") correct immediately after
+// a restart, not just until the next resync evicts them again. Row removal
+// stays owned exclusively by the GC retention worker, which naturally bounds
+// how many expired rows exist to fetch.
 func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 	if r.silenceRepo == nil || r.silenceStore == nil {
 		return nil
 	}
 
-	apiSilences, err := r.fetchActiveAndPendingSilences(ctx)
+	apiSilences, err := r.fetchSilencesForReadCache(ctx)
 	if err != nil {
 		return fmt.Errorf("list silences for rehydration: %w", err)
 	}
@@ -490,12 +493,23 @@ func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 	return nil
 }
 
-// fetchActiveAndPendingSilences pages through the persistent repository for
-// every active+pending silence, converted to the API DTO shape
-// memory.SilenceStore consumes. Shared by rehydrateSilenceStore (boot-time,
-// additive into an empty store) and resyncSilenceStore (task 6.3, full
-// resync into a possibly-non-empty store via SilenceStore.Rebuild).
-func (r *ServiceRegistry) fetchActiveAndPendingSilences(ctx context.Context) ([]core.APISilence, error) {
+// fetchSilencesForReadCache pages through the persistent repository for
+// every active, pending, AND expired silence, converted to the API DTO
+// shape memory.SilenceStore consumes. Shared by rehydrateSilenceStore
+// (boot-time, additive into an empty store) and resyncSilenceStore (task
+// 6.3, full resync into a possibly-non-empty store via SilenceStore.Rebuild).
+//
+// Expired silences are included (alertmanager-parity amtool audit F3):
+// memory.SilenceStore's own read path (List/Get) already recomputes state
+// from StartsAt/EndsAt live on every call rather than trusting a cached
+// state label, so holding expired rows here is correct, not "dead weight" —
+// excluding them would make GET /api/v2/silences flip an already-fixed
+// expired silence back to invisible on the next periodic resync (every 5m,
+// see runSilencePeriodicResync) or on any other replica's next reconnect
+// resync, undoing handleSilenceDelete's expire-in-place fix. Row removal
+// remains exclusively the GC retention worker's job (ExpireSilences with
+// deleteExpired=true), which bounds how many expired rows this ever fetches.
+func (r *ServiceRegistry) fetchSilencesForReadCache(ctx context.Context) ([]core.APISilence, error) {
 	now := time.Now().UTC()
 	var apiSilences []core.APISilence
 
@@ -505,6 +519,7 @@ func (r *ServiceRegistry) fetchActiveAndPendingSilences(ctx context.Context) ([]
 			Statuses: []coresilencing.SilenceStatus{
 				coresilencing.SilenceStatusActive,
 				coresilencing.SilenceStatusPending,
+				coresilencing.SilenceStatusExpired,
 			},
 			Limit:   pageSize,
 			Offset:  offset,
@@ -870,9 +885,11 @@ func (r *ServiceRegistry) runSilencePeriodicResync(ctx context.Context) {
 // store known to be empty), this uses SilenceStore.Rebuild so entries
 // deleted elsewhere while this replica's view was stale — subscription
 // down, or simply between fallback ticks — are actually evicted, not just
-// left behind.
+// left behind. fetchSilencesForReadCache includes expired silences (F3), so
+// a resync converges an expired-in-place silence the same way it converges
+// everything else, instead of wiping it back out of the cache.
 func (r *ServiceRegistry) resyncSilenceStore(ctx context.Context) {
-	apiSilences, err := r.fetchActiveAndPendingSilences(ctx)
+	apiSilences, err := r.fetchSilencesForReadCache(ctx)
 	if err != nil {
 		r.logger.Warn("Silence store resync failed; cache may be stale until the next resync or event", "error", err)
 		return
@@ -892,6 +909,14 @@ func (r *ServiceRegistry) resyncSilenceStore(ctx context.Context) {
 // current row from silenceRepo rather than trusting a payload that may have
 // raced with a subsequent write, so the database stays the single source of
 // truth (see redis_event_bus.go's package doc for the full rationale).
+//
+// F3 fix: an Upsert event whose fetched row is already "expired" (either
+// because it naturally elapsed, or because it was forced there by
+// handleSilenceDelete's ExpireSilence call) is mirrored in AS EXPIRED, not
+// evicted. memory.SilenceStore's read path (List/Get) recomputes state from
+// StartsAt/EndsAt live on every call, so caching an expired row is correct,
+// not "dead weight" — evicting it here would silently undo the expire-in-
+// place fix on every replica except the one that issued the DELETE.
 func (r *ServiceRegistry) applySilenceEvent(ctx context.Context, event infrasilencing.SilenceEvent) {
 	if event.ID == "" {
 		return
@@ -917,15 +942,6 @@ func (r *ServiceRegistry) applySilenceEvent(ctx context.Context, event infrasile
 
 	now := time.Now().UTC()
 	api := handlers.DomainSilenceToAPI(silence, now)
-	if api.Status.State == "expired" {
-		// Rare (the event fired before EndsAt passed, and time moved on by
-		// the time this replica got to it): expired silences don't belong in
-		// the active/pending read cache, matching rehydrateSilenceStore's
-		// own filter.
-		r.silenceStore.Delete(event.ID)
-		return
-	}
-
 	if _, err := r.silenceStore.UpsertFromAPI(api, now); err != nil {
 		r.logger.Warn("Silence event apply: memory upsert failed", "silence_id", event.ID, "error", err)
 	}
@@ -1257,19 +1273,21 @@ func (r *ServiceRegistry) initializeRouting(ctx context.Context) error {
 	// (regex cache + options only) so it is safe to keep across reloads —
 	// only the manager's tree is swapped by Reload.
 	//
-	// EnableMetrics is forced off (unlike DefaultMatcherOptions()):
-	// MatcherMetrics registers via promauto against the default Prometheus
-	// registry, which panics on double-registration. initializeRouting can
-	// run more than once per process (tests construct a fresh
-	// ServiceRegistry per case; a future re-init path could too), so a
-	// metrics-enabled matcher is not safe to construct here. Same reasoning
-	// as routeTreeEvaluator's EnableMetrics:false — see route_evaluator.go.
+	// Metrics are injected rather than left to MatcherOptions'/
+	// EvaluatorOptions' own promauto construction: routingMatcherMetricsOnce/
+	// routingEvaluatorMetricsOnce (route_evaluator.go) build each metrics
+	// instance exactly once per process via sync.OnceValue, so
+	// initializeRouting running more than once per process (tests construct
+	// a fresh ServiceRegistry per case; a future re-init path could too)
+	// reuses the same instances instead of double-registering against the
+	// default Prometheus registry.
 	matcherOpts := businessrouting.DefaultMatcherOptions()
-	matcherOpts.EnableMetrics = false
+	matcherOpts.EnableMetrics = true
+	matcherOpts.Metrics = routingMatcherMetricsOnce()
 	matcher := businessrouting.NewRouteMatcher(nil, matcherOpts)
 
 	r.routeTreeManager = manager
-	r.routeEvaluator = newRouteTreeEvaluator(manager, matcher)
+	r.routeEvaluator = newRouteTreeEvaluator(manager, matcher, routingEvaluatorMetricsOnce())
 
 	stats := tree.GetStats()
 	r.logger.Info("Routing engine initialized",
@@ -1978,6 +1996,20 @@ func (r *ServiceRegistry) StartTime() time.Time {
 
 func (r *ServiceRegistry) ReloadCoordinator() *appconfig.ReloadCoordinator {
 	return r.reloadCoordinator
+}
+
+// RouteEvaluator returns the live route-tree evaluator, or nil when running
+// without a `route:` section (lite/legacy single-receiver mode). It follows
+// config reloads, because initializeRouting wires a hot-reload-capable
+// evaluator over routeTreeManager.
+//
+// Exposed for /api/v2/alerts/groups (final review finding 17), which needs the
+// per-alert receiver and group_by that only the route tree can answer.
+func (r *ServiceRegistry) RouteEvaluator() services.RouteEvaluator {
+	if r.routeEvaluator == nil {
+		return nil
+	}
+	return r.routeEvaluator
 }
 
 // InhibitionState returns the inhibition state manager (may be nil if not configured).

@@ -68,6 +68,20 @@ type EvaluatorOptions struct {
 	// When true: no matches → use root receiver
 	// When false: no matches → return error
 	FallbackToRoot bool
+
+	// Metrics, if non-nil, is used as-is instead of constructing a new
+	// *EvaluatorMetrics via NewEvaluatorMetrics(). Ignored when
+	// EnableMetrics is false.
+	//
+	// This exists for callers that construct more than one RouteEvaluator
+	// over a process's lifetime — e.g. an adapter that rebuilds the
+	// evaluator on every call for hot-reload safety. NewEvaluatorMetrics
+	// registers via promauto against the default Prometheus registry,
+	// which panics on double registration; building the metrics once and
+	// injecting the same instance into every RouteEvaluator avoids that
+	// while still recording real counts (see
+	// application.routeTreeEvaluator).
+	Metrics *EvaluatorMetrics
 }
 
 // DefaultEvaluatorOptions returns default evaluator options.
@@ -113,9 +127,15 @@ func NewRouteEvaluator(
 		opts:    opts,
 	}
 
-	// Initialize metrics if enabled
+	// Initialize metrics if enabled. A caller-supplied instance (see
+	// EvaluatorOptions.Metrics doc) is reused as-is; otherwise a fresh one
+	// is registered against the default Prometheus registry.
 	if opts.EnableMetrics {
-		e.metrics = NewEvaluatorMetrics()
+		if opts.Metrics != nil {
+			e.metrics = opts.Metrics
+		} else {
+			e.metrics = NewEvaluatorMetrics()
+		}
 	}
 
 	if opts.EnableLogging {

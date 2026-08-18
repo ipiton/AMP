@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -135,6 +136,58 @@ func (c *HTTPSlackWebhookClient) Health(ctx context.Context) error {
 	return err
 }
 
+// maskWebhookURL redacts this client's webhook URL wherever it appears in s.
+//
+// A Slack incoming-webhook URL is itself the credential — anyone holding
+// https://hooks.slack.com/services/T000/B000/<token> can post to the channel.
+// Network-layer failures from http.Client.Do surface as *url.Error, whose
+// Error() message embeds the full request URL, so any error string derived from
+// such a failure must be masked before it is logged or handed to a caller that
+// might log it (final review finding 13).
+//
+// Also masks the path-only form, so a masker change in the URL scheme/host
+// cannot silently let the secret path through.
+func (c *HTTPSlackWebhookClient) maskWebhookURL(s string) string {
+	if c.webhookURL == "" {
+		return s
+	}
+	masked := strings.ReplaceAll(s, c.webhookURL, slackWebhookURLPlaceholder)
+	if parsed, err := url.Parse(c.webhookURL); err == nil && parsed.Path != "" && parsed.Path != "/" {
+		masked = strings.ReplaceAll(masked, parsed.Path, slackWebhookURLPlaceholder)
+	}
+	return masked
+}
+
+// slackWebhookURLPlaceholder is what maskWebhookURL substitutes for the secret.
+const slackWebhookURLPlaceholder = "***"
+
+// maskedError carries a pre-masked message for an error whose own text must
+// never be printed verbatim.
+//
+// WHY (wave re-review, Minor 3): masking with
+// `fmt.Errorf("...: %s", mask(err.Error()))` removed the secret but also broke
+// the error chain — the returned error no longer wrapped the original, so
+// callers lost `errors.Is(err, context.DeadlineExceeded)` and
+// `errors.As(err, &netErr)`. This type keeps both properties: Error() returns
+// only the masked text, while Unwrap() exposes the cause for inspection.
+//
+// Trade-off, stated plainly: a caller that deliberately unwraps to the original
+// and prints THAT can still surface the secret. The guarantee here is narrower
+// and is the one that matters in practice — the default `%v`/`%s`/`%w` path on
+// the error we return cannot.
+type maskedError struct {
+	masked string
+	cause  error
+}
+
+func newMaskedError(masked string, cause error) error {
+	return &maskedError{masked: masked, cause: cause}
+}
+
+func (e *maskedError) Error() string { return e.masked }
+
+func (e *maskedError) Unwrap() error { return e.cause }
+
 // doRequestWithRetry executes HTTP request with retry logic
 // Retries transient errors (429, 503, network) up to 3 times
 // Uses exponential backoff: 100ms → 200ms → 400ms → ... → 5s max
@@ -152,13 +205,22 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 		// Execute HTTP request
 		httpResp, err := c.httpClient.Do(req)
 		if err != nil {
-			lastErr = fmt.Errorf("HTTP request failed: %w", err)
+			// Final review finding 13: http.Client.Do returns *url.Error,
+			// whose Error() embeds the FULL request URL — for Slack that URL
+			// IS the credential (hooks.slack.com/services/T.../B.../<token>).
+			// Mask before the string can be returned to a caller that logs it,
+			// or logged here. Ports HTTPTelegramClient.maskBotToken.
+			//
+			// Wrapped with %w through maskedError (wave re-review, Minor 3) so
+			// the message is masked AND the chain survives: callers keep
+			// errors.Is/errors.As against the underlying *url.Error.
+			lastErr = fmt.Errorf("HTTP request failed: %w", newMaskedError(c.maskWebhookURL(err.Error()), err))
 			if !httperror.IsRetryableNetworkError(err) {
 				return nil, lastErr // Don't retry network errors
 			}
 			c.logger.WarnContext(ctx, "Retrying after network error",
 				slog.Int("attempt", i+1),
-				slog.String("error", err.Error()))
+				slog.String("error", c.maskWebhookURL(err.Error())))
 			time.Sleep(backoff)
 			backoff *= 2
 			if backoff > 5*time.Second {

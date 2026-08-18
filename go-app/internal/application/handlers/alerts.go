@@ -45,6 +45,12 @@ type RegistryProvider interface {
 	// 6.5). See ClusterStatus's own doc comment (status_api.go) for the
 	// disabled/ready contract.
 	ClusterStatus(ctx context.Context) ClusterStatus
+	// RouteEvaluator returns the live route-tree evaluator, or nil when
+	// running without a `route:` section (lite/legacy single-receiver mode).
+	// /api/v2/alerts/groups uses it for the per-alert receiver and group_by
+	// (final review finding 17); a nil evaluator falls back to the configured
+	// root route, then to the first legacy receiver.
+	RouteEvaluator() services.RouteEvaluator
 }
 
 func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
@@ -65,8 +71,25 @@ func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
 }
 
 func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
+	gettableAlerts, errMsg := collectGettableAlerts(store, silences, r.URL.Query())
+	if errMsg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg})
+		return
+	}
 
+	writeJSON(w, http.StatusOK, gettableAlerts)
+}
+
+// collectGettableAlerts applies every GET /api/v2/alerts query-param filter
+// (legacy status/resolved, filter=, and the upstream
+// active/silenced/inhibited/unprocessed/receiver params) and returns the
+// resulting v2 gettable alerts. Shared by the v2 GET handler above and the
+// legacy v1 GET handler (handleV1AlertsGet) below, which reuses the same
+// param names since upstream's v1 and v2 alert-listing filters overlap.
+//
+// A non-empty second return value is an error message the caller must
+// surface as 400 Bad Request; the alerts slice is nil in that case.
+func collectGettableAlerts(store *memory.AlertStore, silences *memory.SilenceStore, query url.Values) ([]core.APIGettableAlert, string) {
 	// Legacy params (kept as aliases): status=firing|resolved, resolved=bool.
 	// They filter at the store level, exactly as before this task.
 	status := parseAlertsStatusQuery(query.Get("status"))
@@ -77,20 +100,17 @@ func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w 
 
 	filters, err := ParseLabelMatchers(query["filter"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, err.Error()
 	}
 
 	// Upstream params: active/silenced/inhibited/unprocessed/receiver.
 	stateFilter, err := parseAlertStateFilters(query)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, err.Error()
 	}
 	receiverRe, err := parseReceiverFilter(query.Get("receiver"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		return nil, err.Error()
 	}
 
 	alerts := store.List(status, includeResolved)
@@ -111,7 +131,35 @@ func handleAlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w 
 		gettableAlerts = append(gettableAlerts, gettable)
 	}
 
-	writeJSON(w, http.StatusOK, gettableAlerts)
+	return gettableAlerts, ""
+}
+
+// handleV1AlertsGet implements the legacy GET /api/v1/alerts: a thin wrapper
+// around the v2 listing (collectGettableAlerts) whose response is re-shaped
+// into the v1 envelope ({"status":"success","data":[...]}) via
+// alertconv.ToV1Alert. It accepts the same query params as v2 — see
+// V1AlertsHandler's doc comment.
+//
+// Errors use the v1 envelope too ({"status":"error","errorType":"bad_data",
+// "error":"..."}), NOT the bare {"error":"..."} shape v2 uses — every v1
+// response, success or failure, carries "status".
+func handleV1AlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
+	gettableAlerts, errMsg := collectGettableAlerts(store, silences, r.URL.Query())
+	if errMsg != "" {
+		writeJSON(w, http.StatusBadRequest, core.APIV1ErrorResponse{
+			Status:    "error",
+			ErrorType: core.APIV1ErrorTypeBadData,
+			Error:     errMsg,
+		})
+		return
+	}
+
+	data := make([]core.APIV1Alert, 0, len(gettableAlerts))
+	for _, alert := range gettableAlerts {
+		data = append(data, alertconv.ToV1Alert(alert))
+	}
+
+	writeJSON(w, http.StatusOK, core.APIV1AlertsResponse{Status: "success", Data: data})
 }
 
 // alertStateFilter mirrors upstream Alertmanager's GET /api/v2/alerts state
@@ -215,25 +263,33 @@ func silenceMatcher(s *memory.SilenceStore) alertconv.SilenceMatcher {
 	return s
 }
 
-// V1AlertsHandler aliases POST /api/v1/alerts to the v2 ingest pipeline
-// (PARITY-4.3). Upstream's v1 ingest payload is the same alert JSON array as
-// v2 (docs even for the retired v1 API describe an identical body), so no
-// conversion layer is needed — this delegates straight into AlertsHandler's
-// POST path.
+// V1AlertsHandler serves the legacy /api/v1/alerts endpoint (PARITY-4.3,
+// amtool audit backlog item 3):
 //
-// GET is deliberately not implemented: upstream's v1 GET /api/v1/alerts
-// response shape differs from v2 (a different, legacy DTO) and restoring it
-// is out of scope for this task; it returns 405 like any other method this
-// alias doesn't support.
+//   - POST aliases the v2 ingest pipeline. Upstream's v1 ingest payload is
+//     the same alert JSON array as v2 (docs even for the retired v1 API
+//     describe an identical body), so no conversion layer is needed — this
+//     delegates straight into AlertsHandler's POST path.
+//   - GET is a thin read-side wrapper: it reuses v2's alert listing/filtering
+//     (collectGettableAlerts — same query param names: status, resolved,
+//     filter, active, silenced, inhibited, unprocessed, receiver) and
+//     re-shapes the result into the legacy v1 envelope
+//     ({"status":"success","data":[...]}, receivers as bare name strings,
+//     no mutedBy) via alertconv.ToV1Alert.
+//
+// Any other method returns 405.
 func V1AlertsHandler(registry RegistryProvider) http.HandlerFunc {
 	v2Handler := AlertsHandler(registry)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", "POST")
+		switch r.Method {
+		case http.MethodPost:
+			v2Handler(w, r)
+		case http.MethodGet:
+			handleV1AlertsGet(registry.AlertStore(), registry.SilenceStore(), w, r)
+		default:
+			w.Header().Set("Allow", "GET, POST")
 			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
 		}
-		v2Handler(w, r)
 	}
 }
 
@@ -253,16 +309,64 @@ func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 			return
 		}
 
-		// Active runtime has no routing tree yet: groups carry the first
-		// configured receiver (or "default") instead of a hardcoded value.
-		receiver := "default"
-		if receivers := registry.Config().Receivers; len(receivers) > 0 {
-			receiver = receivers[0].Name
-		}
-		groups := registry.AlertStore().GroupAlerts(groupBy, receiver, silenceMatcher(registry.SilenceStore()))
+		resolver := alertGroupingResolver(registry, groupBy)
+		groups := registry.AlertStore().GroupAlerts(resolver, silenceMatcher(registry.SilenceStore()))
 		groups = filterAlertGroups(groups, stateFilter, receiverRe)
 		writeJSON(w, http.StatusOK, groups)
 	})
+}
+
+// alertGroupingResolver builds the per-alert grouping identity (receiver +
+// group_by) that /api/v2/alerts/groups reports.
+//
+// Final review finding 17: every group used to report `labels: {}` unless the
+// caller passed `?group_by=` (upstream has no such parameter — group labels come
+// from the matched ROUTE's group_by), and every group reported the FIRST
+// configured receiver regardless of where its alerts actually route.
+//
+// Resolution order, per alert:
+//  1. The live route tree (registry.RouteEvaluator) — the authoritative answer,
+//     and the only one that can differ per alert.
+//  2. The root route's own receiver/group_by, when a `route:` tree exists but
+//     evaluation fails (fail-open, matching AlertProcessor.evaluateRoute).
+//  3. The first configured legacy receiver, then "default" — lite/legacy mode
+//     with no route tree at all.
+//
+// queryGroupBy (the `?group_by=` parameter, an AMP extension kept for backwards
+// compatibility) overrides the group_by from every source when present, so a
+// caller can still ask "how would these alerts group by X".
+func alertGroupingResolver(registry RegistryProvider, queryGroupBy []string) memory.AlertGroupingResolver {
+	cfg := registry.Config()
+
+	fallback := memory.AlertGrouping{Receiver: "default"}
+	if cfg != nil {
+		if cfg.Routing != nil && cfg.Routing.Route != nil {
+			fallback.Receiver = cfg.Routing.Route.Receiver
+			fallback.GroupBy = cfg.Routing.Route.GroupBy
+		} else if len(cfg.Receivers) > 0 {
+			fallback.Receiver = cfg.Receivers[0].Name
+		}
+	}
+	if fallback.Receiver == "" {
+		fallback.Receiver = "default"
+	}
+
+	evaluator := registry.RouteEvaluator()
+
+	return func(labels map[string]string) memory.AlertGrouping {
+		grouping := fallback
+
+		if evaluator != nil {
+			if decision, err := evaluator.Evaluate(labels); err == nil && decision != nil && decision.Receiver != "" {
+				grouping = memory.AlertGrouping{Receiver: decision.Receiver, GroupBy: decision.GroupBy}
+			}
+		}
+
+		if len(queryGroupBy) > 0 {
+			grouping.GroupBy = queryGroupBy
+		}
+		return grouping
+	}
 }
 
 // filterAlertGroups applies the active/silenced/inhibited/unprocessed state

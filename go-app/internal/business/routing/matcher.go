@@ -67,6 +67,16 @@ type MatcherOptions struct {
 	// EnableOptimizations enables alertname pre-filter (default: true)
 	// Improves performance for typical routing configs.
 	EnableOptimizations bool
+
+	// Metrics, if non-nil, is used as-is instead of constructing a new
+	// *MatcherMetrics via NewMatcherMetrics(). Ignored when EnableMetrics
+	// is false.
+	//
+	// Same rationale as EvaluatorOptions.Metrics: lets a caller that may
+	// construct more than one RouteMatcher per process share a single
+	// promauto-registered metrics instance instead of double-registering
+	// against the default Prometheus registry.
+	Metrics *MatcherMetrics
 }
 
 // DefaultMatcherOptions returns default RouteMatcher options.
@@ -111,9 +121,15 @@ func NewRouteMatcher(
 		opts:       opts,
 	}
 
-	// Initialize metrics if enabled
+	// Initialize metrics if enabled. A caller-supplied instance (see
+	// MatcherOptions.Metrics doc) is reused as-is; otherwise a fresh one is
+	// registered against the default Prometheus registry.
 	if opts.EnableMetrics {
-		m.metrics = NewMatcherMetrics()
+		if opts.Metrics != nil {
+			m.metrics = opts.Metrics
+		} else {
+			m.metrics = NewMatcherMetrics()
+		}
 	}
 
 	// Pre-populate regex cache from compiled patterns

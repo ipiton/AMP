@@ -461,9 +461,12 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 		t.Fatalf("POST /api/v2/alerts expected 200, got %d", postRec.Code)
 	}
 
-	// No routing tree yet: groups carry the static "default" receiver (see
-	// ADR-002 active-runtime scope). Verify the plain (unfiltered) shape
-	// first, then verify PARITY-4.1's receiver regex filter against it.
+	// Final review finding 17: groups are aggregated by the CONFIGURED route's
+	// group_by (validConfigPayload: ["alertname","service","namespace"]) and
+	// report that route's receiver. The two alerts differ in alertname, so they
+	// are two groups — previously group_by was read only from the `?group_by=`
+	// query parameter, so a plain request collapsed everything into one group
+	// with `labels: {}` regardless of configuration.
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -475,21 +478,36 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &groups); err != nil {
 		t.Fatalf("failed to decode groups response: %v", err)
 	}
-	if len(groups) != 1 {
-		t.Fatalf("expected 1 group, got %d", len(groups))
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups (route.group_by includes alertname, which differs), got %d", len(groups))
 	}
 
-	groupReceiver, ok := groups[0]["receiver"].(map[string]any)
-	if !ok {
-		t.Fatalf("group receiver expected object, got %T", groups[0]["receiver"])
-	}
-	if groupReceiver["name"] != "default" {
-		t.Fatalf("group receiver.name expected default, got %v", groupReceiver["name"])
+	for i, group := range groups {
+		groupReceiver, ok := group["receiver"].(map[string]any)
+		if !ok {
+			t.Fatalf("group[%d] receiver expected object, got %T", i, group["receiver"])
+		}
+		if groupReceiver["name"] != "default" {
+			t.Fatalf("group[%d] receiver.name expected default, got %v", i, groupReceiver["name"])
+		}
+
+		labels, ok := group["labels"].(map[string]any)
+		if !ok {
+			t.Fatalf("group[%d] labels expected object, got %T", i, group["labels"])
+		}
+		for _, want := range []string{"alertname", "service", "namespace"} {
+			if _, present := labels[want]; !present {
+				t.Fatalf("group[%d] labels missing %q from route.group_by: %v", i, want, labels)
+			}
+		}
+		if labels["service"] != "api" || labels["namespace"] != "prod" {
+			t.Fatalf("group[%d] labels carry wrong values: %v", i, labels)
+		}
 	}
 
 	alerts, ok := groups[0]["alerts"].([]any)
-	if !ok || len(alerts) != 2 {
-		t.Fatalf("group alerts expected array with two entries, got %v", groups[0]["alerts"])
+	if !ok || len(alerts) != 1 {
+		t.Fatalf("group alerts expected array with one entry per alertname group, got %v", groups[0]["alerts"])
 	}
 	alert, ok := alerts[0].(map[string]any)
 	if !ok {
@@ -534,8 +552,8 @@ func TestUpstreamParity_AlertGroupsShapeAndFilters(t *testing.T) {
 	if err := json.Unmarshal(matchRec.Body.Bytes(), &matchGroups); err != nil {
 		t.Fatalf("failed to decode groups response: %v", err)
 	}
-	if len(matchGroups) != 1 {
-		t.Fatalf("expected 1 group for a matching receiver regex, got %d", len(matchGroups))
+	if len(matchGroups) != 2 {
+		t.Fatalf("expected both groups for a matching receiver regex, got %d", len(matchGroups))
 	}
 }
 

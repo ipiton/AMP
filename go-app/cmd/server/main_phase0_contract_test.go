@@ -130,6 +130,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "debug removed", method: http.MethodGet, path: "/debug/pprof/", allowedStatus: []int{http.StatusNotFound}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts v1 post alias", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
+		{name: "alerts v1 get alias", method: http.MethodGet, path: "/api/v1/alerts", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", allowedStatus: []int{http.StatusOK}},
@@ -939,13 +940,41 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("POST /api/v1/alerts (valid payload) expected 200, got %d body=%q", validPostRec.Code, validPostRec.Body.String())
 		}
 
-		// GET is not implemented for the v1 alias (upstream's v1 GET response
-		// shape differs from v2 and restoring it is out of scope here).
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+		// GET /api/v1/alerts (amtool audit backlog item 3): a thin wrapper
+		// around the v2 listing, re-shaped into the legacy v1 envelope. The
+		// mux/store is shared across this test's other subtests, so filter
+		// down to the alert just ingested above instead of assuming an
+		// exact total count.
+		getReq := httptest.NewRequest(http.MethodGet, `/api/v1/alerts?filter=alertname%3D"TestAlert"`, nil)
 		getRec := httptest.NewRecorder()
 		mux.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("GET /api/v1/alerts expected 405, got %d", getRec.Code)
+		if getRec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v1/alerts expected 200, got %d body=%q", getRec.Code, getRec.Body.String())
+		}
+		var v1Resp struct {
+			Status string           `json:"status"`
+			Data   []map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(getRec.Body.Bytes(), &v1Resp); err != nil {
+			t.Fatalf("decode v1 envelope: %v", err)
+		}
+		if v1Resp.Status != "success" {
+			t.Fatalf("v1 envelope status = %q, want %q", v1Resp.Status, "success")
+		}
+		if len(v1Resp.Data) != 1 {
+			t.Fatalf("v1 envelope data length = %d, want 1 (the alert ingested above, matched by filter)", len(v1Resp.Data))
+		}
+		gotLabels, _ := v1Resp.Data[0]["labels"].(map[string]any)
+		if gotLabels["alertname"] != "TestAlert" {
+			t.Fatalf("v1 envelope data[0].labels[alertname] = %v, want %q", gotLabels["alertname"], "TestAlert")
+		}
+
+		// Method still not supported for anything other than GET/POST.
+		deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/alerts", nil)
+		deleteRec := httptest.NewRecorder()
+		mux.ServeHTTP(deleteRec, deleteReq)
+		if deleteRec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("DELETE /api/v1/alerts expected 405, got %d", deleteRec.Code)
 		}
 	})
 }
@@ -1525,11 +1554,52 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 		t.Fatalf("DELETE /api/v2/silence/{id} expected empty body, got %q", deleteRec.Body.String())
 	}
 
+	// DELETE forces early expiry (matching upstream Alertmanager and amtool's
+	// `silence expire`), it does not remove the row: GET must keep returning
+	// it (alertmanager-parity amtool audit F3 — see
+	// memory.SilenceStore.Expire's doc comment). validSilencePayload's
+	// startsAt is 2099, i.e. still PENDING at delete time — and upstream's
+	// own expire() (silence/silence.go, v0.34.0) moves BOTH StartsAt and
+	// EndsAt to now for a pending silence specifically so it flips straight
+	// to "expired", never sitting in "pending" until the original startsAt
+	// arrives. (An earlier version of this comment claimed the opposite —
+	// that upstream's state priority would keep this fixture "pending"
+	// after delete; that was verified wrong against upstream source and
+	// corrected here, alongside the actual StartsAt-forcing fix in
+	// memory.SilenceStore.Expire / SilenceRepository.ExpireSilence.)
 	getAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
 	getAfterDeleteRec := httptest.NewRecorder()
 	mux.ServeHTTP(getAfterDeleteRec, getAfterDeleteReq)
-	if getAfterDeleteRec.Code != http.StatusNotFound {
-		t.Fatalf("GET /api/v2/silence/{id} after delete expected 404, got %d", getAfterDeleteRec.Code)
+	if getAfterDeleteRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silence/{id} after delete expected 200 (expired-in-place, not removed), got %d", getAfterDeleteRec.Code)
+	}
+	var afterDeleteByID map[string]any
+	if err := json.Unmarshal(getAfterDeleteRec.Body.Bytes(), &afterDeleteByID); err != nil {
+		t.Fatalf("failed to decode silence by id after delete: %v", err)
+	}
+	afterDeleteStatus, _ := afterDeleteByID["status"].(map[string]any)
+	if state, _ := afterDeleteStatus["state"].(string); state != "expired" {
+		t.Fatalf("GET /api/v2/silence/{id} after delete: status.state = %v, want %q (a pending silence must expire immediately on delete)", afterDeleteStatus["state"], "expired")
+	}
+
+	// GET /api/v2/silences (the amtool `silence query --expired` read path)
+	// must also keep listing it, with the same immediate "expired" state.
+	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
+	listAfterDeleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(listAfterDeleteRec, listAfterDeleteReq)
+	if listAfterDeleteRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences after delete expected 200, got %d", listAfterDeleteRec.Code)
+	}
+	var silencesAfterDelete []map[string]any
+	if err := json.Unmarshal(listAfterDeleteRec.Body.Bytes(), &silencesAfterDelete); err != nil {
+		t.Fatalf("failed to decode silences list after delete: %v", err)
+	}
+	if len(silencesAfterDelete) != 1 {
+		t.Fatalf("expected 1 silence still listed after delete, got %d", len(silencesAfterDelete))
+	}
+	listedStatus, _ := silencesAfterDelete[0]["status"].(map[string]any)
+	if state, _ := listedStatus["state"].(string); state != "expired" {
+		t.Fatalf("GET /api/v2/silences after delete: status.state = %v, want %q", listedStatus["state"], "expired")
 	}
 }
 

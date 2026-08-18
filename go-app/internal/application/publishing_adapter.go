@@ -94,12 +94,19 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, alerts 
 		return fmt.Errorf("group publish for receiver %q produced no results (no confirmed delivery)", receiver)
 	}
 
+	// counted is the number of NON-NIL results (wave re-review, Minor 4). The
+	// comparisons below must be against this, not len(results): a nil entry
+	// carries no target and no outcome, so counting it as a denominator would
+	// synthesize a "partial failure" out of a run where every real target
+	// succeeded.
+	counted := 0
 	successful := 0
 	var lastErr error
 	for _, result := range results {
 		if result == nil {
 			continue
 		}
+		counted++
 		if result.Success {
 			successful++
 			continue
@@ -115,11 +122,18 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, alerts 
 		}
 	}
 
-	if successful < len(results) {
+	if counted == 0 {
+		// Every entry was nil: same posture as the len(results) == 0 check
+		// above — nothing confirmed delivery, so the caller must not record a
+		// send.
+		return fmt.Errorf("group publish for receiver %q produced no usable results (no confirmed delivery)", receiver)
+	}
+
+	if successful < counted {
 		// Partial or total failure — never nil here, so the caller never
 		// records this group notification as delivered (see doc comment).
 		if lastErr == nil {
-			lastErr = fmt.Errorf("group publish for receiver %q confirmed only %d/%d targets", receiver, successful, len(results))
+			lastErr = fmt.Errorf("group publish for receiver %q confirmed only %d/%d targets", receiver, successful, counted)
 		}
 		return lastErr
 	}
@@ -146,12 +160,16 @@ func (p *ApplicationPublishingAdapter) publish(ctx context.Context, alert *core.
 		return err
 	}
 
+	// counted: non-nil results only — see the same note in PublishGroup above
+	// (wave re-review, Minor 4).
+	counted := 0
 	successful := 0
 	var lastErr error
 	for _, result := range results {
 		if result == nil {
 			continue
 		}
+		counted++
 		if result.Success {
 			successful++
 			continue
@@ -166,9 +184,27 @@ func (p *ApplicationPublishingAdapter) publish(ctx context.Context, alert *core.
 		}
 	}
 
-	if len(results) > 0 && successful == 0 && lastErr != nil {
+	// Final review finding 11: this used to return nil whenever at least ONE
+	// target succeeded, diverging from PublishGroup, which treats any
+	// unconfirmed target as a failure. Aligned: a partial failure is a failure
+	// here too, so the caller (AlertProcessor -> the webhook handler) answers
+	// 5xx and Prometheus/Alertmanager retries the alert, rather than the failed
+	// targets being silently dropped.
+	if successful < counted {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("publish for alert %q confirmed only %d/%d targets", alert.Fingerprint, successful, counted)
+		}
 		return lastErr
 	}
 
+	// DELIBERATE DIVERGENCE from PublishGroup: an empty result set — or one
+	// holding only nil entries, which is the same thing — stays nil here. PublishGroup must error on it because its caller records the group
+	// in the shared, cross-replica notification log on nil and would then
+	// suppress the group for a whole repeat_interval (see that method's doc
+	// comment). This single-alert path has no such log to poison, while "no
+	// targets resolved" is a legitimate steady state — an operator who has not
+	// yet created any amp.receiver-scoped Secret, or metrics-only mode. Erroring
+	// would make every ingested alert answer 5xx and put Prometheus into a
+	// permanent retry loop over a working, deliberately-configured deployment.
 	return nil
 }

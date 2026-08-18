@@ -207,21 +207,42 @@ func (p *WebhookPublisher) Name() string {
 	return "Webhook"
 }
 
-// PublisherFactory creates publishers based on target type
+// PublisherFactory creates publishers based on target type.
+//
+// Thread-safety: CreatePublisher/CreatePublisherForTarget are called
+// concurrently by the publishing queue's worker pool (one call per job, see
+// PublishingQueue.processJob), so every per-target client cache below MUST be
+// guarded. Before final review finding 6 only emailClientMap was — the Rootly,
+// PagerDuty, Slack and Telegram maps were written unguarded from
+// CreatePublisherForTarget. That path had no non-test caller at the time, which
+// is the only reason it had not produced a "concurrent map writes" fatal;
+// routing the live queue through it (same finding) makes the guard mandatory,
+// not optional.
 type PublisherFactory struct {
-	formatter          AlertFormatter
-	logger             *slog.Logger
-	externalURL        string                           // AMP public URL for callback links
+	formatter   AlertFormatter
+	logger      *slog.Logger
+	externalURL string // AMP public URL for callback links
+
+	// clientMu guards rootlyClientMap, pagerDutyClientMap, slackClientMap and
+	// telegramClientMap. One mutex for all four: these maps are only touched
+	// on the get-or-create path of publisher construction, so contention is
+	// negligible compared to the cost of the HTTP publish that follows, and a
+	// single lock is far harder to get wrong than four.
+	//
+	// emailClientMap keeps its own pre-existing emailClientMu rather than being
+	// folded in here, to keep this change to the minimum needed.
+	clientMu sync.RWMutex
+
 	rootlyCache        IncidentIDCache                  // Shared Rootly incident cache
-	rootlyClientMap    map[string]RootlyIncidentsClient // Cache of Rootly clients by API key
+	rootlyClientMap    map[string]RootlyIncidentsClient // Cache of Rootly clients by API key (clientMu)
 	pagerDutyCache     EventKeyCache                    // Shared PagerDuty event key cache
-	pagerDutyClientMap map[string]PagerDutyEventsClient // Cache of PagerDuty clients by routing key
+	pagerDutyClientMap map[string]PagerDutyEventsClient // Cache of PagerDuty clients by routing key (clientMu)
 	slackCache         MessageIDCache                   // Shared Slack message cache (for threading)
-	slackClientMap     map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL
+	slackClientMap     map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL (clientMu)
 	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
 	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
 	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
-	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by bot token
+	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by "api_url|bot_token" (clientMu)
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
@@ -309,17 +330,23 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		return NewRootlyPublisher(f.formatter, f.logger), nil
 	}
 
-	// Get or create Rootly client for this API key
+	// Get or create Rootly client for this API key (clientMu — see
+	// PublisherFactory's doc comment; read-lock fast path, double-check after
+	// upgrading, same pattern as createEnhancedEmailPublisher).
+	f.clientMu.RLock()
 	client, ok := f.rootlyClientMap[apiKey]
+	f.clientMu.RUnlock()
 	if !ok {
-		// Create new client with configuration
-		config := ClientConfig{
-			BaseURL: target.URL,
-			APIKey:  apiKey,
-			Timeout: 10 * time.Second,
+		f.clientMu.Lock()
+		if client, ok = f.rootlyClientMap[apiKey]; !ok {
+			client = NewRootlyIncidentsClient(ClientConfig{
+				BaseURL: target.URL,
+				APIKey:  apiKey,
+				Timeout: 10 * time.Second,
+			}, f.logger)
+			f.rootlyClientMap[apiKey] = client
 		}
-		client = NewRootlyIncidentsClient(config, f.logger)
-		f.rootlyClientMap[apiKey] = client
+		f.clientMu.Unlock()
 	}
 
 	// Create EnhancedRootlyPublisher with shared cache and unified metrics
@@ -356,21 +383,27 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		return NewPagerDutyPublisher(f.formatter, f.logger), nil
 	}
 
-	// Get or create PagerDuty client for this routing key
+	// Get or create PagerDuty client for this routing key (clientMu — see
+	// PublisherFactory's doc comment).
+	f.clientMu.RLock()
 	client, ok := f.pagerDutyClientMap[routingKey]
+	f.clientMu.RUnlock()
 	if !ok {
-		// Create new client with configuration
-		config := PagerDutyClientConfig{
-			BaseURL:    target.URL,
-			Timeout:    10 * time.Second,
-			MaxRetries: 3,
-			RateLimit:  120.0, // 120 req/min
+		f.clientMu.Lock()
+		if client, ok = f.pagerDutyClientMap[routingKey]; !ok {
+			config := PagerDutyClientConfig{
+				BaseURL:    target.URL,
+				Timeout:    10 * time.Second,
+				MaxRetries: 3,
+				RateLimit:  120.0, // 120 req/min
+			}
+			if config.BaseURL == "" {
+				config.BaseURL = "https://events.pagerduty.com"
+			}
+			client = NewPagerDutyEventsClient(config, f.logger)
+			f.pagerDutyClientMap[routingKey] = client
 		}
-		if config.BaseURL == "" {
-			config.BaseURL = "https://events.pagerduty.com"
-		}
-		client = NewPagerDutyEventsClient(config, f.logger)
-		f.pagerDutyClientMap[routingKey] = client
+		f.clientMu.Unlock()
 	}
 
 	// Create EnhancedPagerDutyPublisher with shared cache and unified metrics
@@ -392,12 +425,18 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 		return NewSlackPublisher(f.formatter, f.logger), nil
 	}
 
-	// Get or create Slack client for this webhook URL
+	// Get or create Slack client for this webhook URL (clientMu — see
+	// PublisherFactory's doc comment).
+	f.clientMu.RLock()
 	client, ok := f.slackClientMap[webhookURL]
+	f.clientMu.RUnlock()
 	if !ok {
-		// Create new Slack webhook client
-		client = NewHTTPSlackWebhookClient(webhookURL, f.logger)
-		f.slackClientMap[webhookURL] = client
+		f.clientMu.Lock()
+		if client, ok = f.slackClientMap[webhookURL]; !ok {
+			client = NewHTTPSlackWebhookClient(webhookURL, f.logger)
+			f.slackClientMap[webhookURL] = client
+		}
+		f.clientMu.Unlock()
 	}
 
 	// Create EnhancedSlackPublisher with shared cache and unified metrics
@@ -432,11 +471,29 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 		apiURL = DefaultTelegramAPIURL
 	}
 
-	// Get or create Telegram client for this bot token
-	client, ok := f.telegramClientMap[botToken]
+	// Get or create Telegram client for this (api_url, bot_token) pair
+	// (clientMu — see PublisherFactory's doc comment; MANDATORY now that the
+	// live queue path reaches this function concurrently, per final review
+	// finding 6).
+	//
+	// The cache key is COMPOUND because NewHTTPTelegramClient bakes BOTH values
+	// in (wave re-review, Minor 5). Keying on botToken alone meant the first
+	// target to be built for a token pinned its api_url for every later target
+	// sharing that token — so a second target pointing the same bot at a
+	// different API base (a proxy, or a test server) silently reused the first
+	// one's endpoint. Same shape as the SMTP cache's "host:port" key.
+	clientKey := apiURL + "|" + botToken
+
+	f.clientMu.RLock()
+	client, ok := f.telegramClientMap[clientKey]
+	f.clientMu.RUnlock()
 	if !ok {
-		client = NewHTTPTelegramClient(apiURL, botToken, f.logger)
-		f.telegramClientMap[botToken] = client
+		f.clientMu.Lock()
+		if client, ok = f.telegramClientMap[clientKey]; !ok {
+			client = NewHTTPTelegramClient(apiURL, botToken, f.logger)
+			f.telegramClientMap[clientKey] = client
+		}
+		f.clientMu.Unlock()
 	}
 
 	messageThreadID := 0

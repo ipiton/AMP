@@ -104,6 +104,15 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
+	// SIGHUP → hot config reload, matching upstream Alertmanager (which
+	// reloads on SIGHUP as well as on POST /-/reload). Final review finding
+	// 1: internal/config/reload_coordinator.go and the compatibility docs
+	// both described SIGHUP as the reload trigger, but no handler was ever
+	// installed — only the HTTP endpoint worked.
+	hupChan := make(chan os.Signal, 1)
+	signal.Notify(hupChan, syscall.SIGHUP)
+	go watchReloadSignal(ctx, hupChan, registry, slog.Default())
+
 	// Graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -135,6 +144,51 @@ func main() {
 	}
 
 	slog.Info("Server stopped gracefully")
+}
+
+// configReloader is the slice of ServiceRegistry that watchReloadSignal needs.
+// Declared as an interface purely so the SIGHUP loop is unit-testable without
+// standing up a full registry.
+type configReloader interface {
+	ReloadConfig(ctx context.Context) error
+}
+
+// watchReloadSignal reloads configuration once per signal received on sigChan,
+// until ctx is cancelled or the channel is closed. Reload failures are logged
+// and the loop continues: a bad config on disk must not stop the process from
+// picking up a later, fixed one (and the previous config stays active, per the
+// reload pipeline's rollback semantics).
+//
+// Runs for the process lifetime because SIGHUP is repeatable, unlike the
+// one-shot shutdown signals.
+func watchReloadSignal(ctx context.Context, sigChan <-chan os.Signal, reloader configReloader, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-sigChan:
+			if !ok {
+				return
+			}
+
+			logger.Info("SIGHUP received, reloading configuration")
+			// Bounded: a wedged reload must not block the next SIGHUP
+			// forever. 30s matches the reload pipeline's own lock TTL.
+			reloadCtx, reloadCancel := context.WithTimeout(ctx, 30*time.Second)
+			err := reloader.ReloadConfig(reloadCtx)
+			reloadCancel()
+
+			if err != nil {
+				logger.Error("SIGHUP config reload failed; previous configuration remains active", "error", err)
+				continue
+			}
+			logger.Info("SIGHUP config reload applied")
+		}
+	}
 }
 
 func resolveRuntimeConfigPath() string {

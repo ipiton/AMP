@@ -941,6 +941,38 @@ func receiverFromGroupKey(key GroupKey) string {
 	return rest
 }
 
+// groupTimings returns group's per-route timing overrides, or nil when the
+// group carries no metadata at all.
+//
+// AlertGroup.Metadata is a POINTER that every constructor in this package
+// populates — but not every AlertGroup reaching the notify chain comes from a
+// constructor: groups are also rehydrated from JSON by the storage layer (a
+// pre-metadata or hand-written record deserializes with Metadata == nil), and
+// built directly by tests. effectiveRepeatInterval already guarded against
+// that; the notify chain and the three timer callbacks did not, so one such
+// group panicked mid-chain and — because the panic unwound the timer
+// callback — wedged the group (final review finding 12).
+//
+// nil is a valid return: startGroupIntervalTimer/startRepeatIntervalTimer both
+// document nil timings as "use the root Route.* defaults".
+func groupTimings(group *AlertGroup) *GroupTimings {
+	if group == nil || group.Metadata == nil {
+		return nil
+	}
+	return group.Metadata.Timings
+}
+
+// groupTimeIntervalNames returns group's captured mute/active time-interval
+// names, or nil when the group carries no metadata (see groupTimings for why
+// that is possible). nil means "no time-interval muting for this group", which
+// is exactly how isTimeMuted already treats an empty value.
+func groupTimeIntervalNames(group *AlertGroup) *TimeIntervalNames {
+	if group == nil || group.Metadata == nil {
+		return nil
+	}
+	return group.Metadata.TimeIntervalNames
+}
+
 // effectiveRepeatInterval returns the dedup TTL for group: its own
 // per-route override (task 2.4, GroupMetadata.Timings) if one was captured
 // at group-creation time, else the grouping config's root
@@ -1175,7 +1207,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// per-alert (see isTimeMuted's doc comment for semantics). Checked
 	// against the group's own MuteTimeIntervals/ActiveTimeIntervals NAMES,
 	// captured from the matched route at group-creation time.
-	if m.isTimeMuted(group.Key, group.Metadata.TimeIntervalNames, time.Now()) {
+	if m.isTimeMuted(group.Key, groupTimeIntervalNames(group), time.Now()) {
 		m.logger.Debug("group notification suppressed by time-interval mute",
 			"group_key", group.Key,
 			"receiver", receiver)
@@ -1254,6 +1286,26 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// single PublishGroup call carrying all of alerts, not one PublishToAll
 	// call per alert).
 	if err := publisher.PublishGroup(ctx, alerts, receiver); err != nil {
+		// ErrDeliveryNotConfirmed (final review finding 4): the publisher
+		// deliberately delivered nothing — degraded/metrics-only mode. NOT a
+		// failure, but crucially NOT a send either, so the RecordSent below
+		// must be skipped: the notification log is SHARED across replicas
+		// with TTL = repeat_interval, so recording it here would make every
+		// healthy replica skip this group for a full repeat_interval.
+		// Logged at Warn, not Error, because `publishing.enabled: false` is
+		// a legitimate deliberate configuration, not an incident.
+		if errors.Is(err, ErrDeliveryNotConfirmed) {
+			m.logger.Warn("group notification not delivered (publisher confirmed no delivery); dedup log deliberately NOT updated",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"alert_count", len(alerts),
+				"reason", err)
+			if m.metrics != nil {
+				m.metrics.RecordGroupOperation("publish", "not_delivered")
+			}
+			return
+		}
+
 		// "No targets for receiver" and any other publish error: log +
 		// metric, do NOT retry-loop here — the next scheduled timer
 		// (group_interval/repeat_interval) will naturally retry with the
@@ -1284,6 +1336,114 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	if m.metrics != nil {
 		m.metrics.RecordGroupOperation("publish", "success")
 	}
+
+	// Step 6: drop the alerts that were resolved in the notification we just
+	// delivered (final review finding 8) — see pruneResolvedAlerts.
+	m.pruneResolvedAlerts(ctx, group.Key, alerts)
+}
+
+// pruneResolvedAlerts removes from the group every alert that was RESOLVED in
+// the notification just confirmed delivered, deleting the group entirely once
+// that empties it.
+//
+// Upstream parity: this is exactly what Alertmanager's aggrGroup.flush does
+// after a successful notify — resolved alerts are deleted from the aggregation
+// group, so the resolved notification goes out ONCE.
+//
+// WHY IT WAS MISSING (final review finding 8): RemoveAlertFromGroup has no
+// non-test caller, and nothing else pruned resolved alerts. A group whose
+// alerts had all resolved therefore kept re-publishing the same resolved
+// notification on every repeat_interval — forever, until CleanupExpiredGroups
+// eventually reaped it. Operators saw a resolved alert paging them every
+// repeat_interval.
+//
+// Only called after a CONFIRMED delivery (publisher returned nil and RecordSent
+// was reached): pruning before that would drop the resolved state before anyone
+// was told about it.
+//
+// alerts is the post-filter set actually sent, so alerts suppressed by
+// inhibition/silence are deliberately left in place — they were not announced
+// as resolved, so they must not be forgotten. Errors are logged, never fatal:
+// the worst case is the pre-fix behaviour for one more interval.
+func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey GroupKey, alerts []*core.Alert) {
+	pruned := 0
+	for _, alert := range alerts {
+		if alert == nil || alert.Status != core.StatusResolved {
+			continue
+		}
+
+		// RemoveAlertFromGroup handles the whole teardown when this empties
+		// the group: storage delete, DecActiveGroups, cancelGroupTimers and
+		// notifyLog.Forget.
+		removed, err := m.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
+		if err != nil {
+			m.logger.Warn("failed to prune resolved alert after successful group notification",
+				"group_key", groupKey,
+				"fingerprint", alert.Fingerprint,
+				"error", err)
+			continue
+		}
+		if removed {
+			pruned++
+		}
+	}
+
+	if pruned > 0 {
+		m.logger.Info("pruned resolved alerts after group notification (upstream aggrGroup.flush semantics)",
+			"group_key", groupKey,
+			"pruned", pruned)
+	}
+}
+
+// groupStillExists reports whether groupKey is still present in storage, and
+// therefore whether the caller should schedule the group's next timer.
+//
+// Used by the three timer callbacks after publishGroupAlerts: that call may
+// have deleted the group (all its alerts resolved — see pruneResolvedAlerts),
+// and scheduling the next group_interval/repeat_interval timer for a deleted
+// group would resurrect the very notification loop finding 8 is about.
+//
+// FAIL-OPEN on transient errors (wave re-review, Important 1). Only a
+// CONFIRMED absence (GroupNotFoundError) may return false. The first version
+// treated every Load error as "gone", which recreated finding 3's wedge from
+// the other end: on a Redis blip the callback returned early, so
+// onTimerExpired's tail then ran its normal cleanup and deleted the SHARED
+// storage entry as well as the local handle — leaving nothing for
+// reconcileOrphanedTimers to adopt, and the group permanently silent. A
+// transient error must instead behave exactly as it did before pruning
+// existed: assume the group is alive and let the next timer be armed. Arming
+// a timer for a group that turns out to be gone is self-correcting (the very
+// next fire hits onTimerExpired's confirmed-GroupNotFound branch, which
+// cleans up once, at Warn); losing the group is not.
+func (m *DefaultGroupManager) groupStillExists(ctx context.Context, groupKey GroupKey) bool {
+	group, err := m.storage.Load(ctx, groupKey)
+	if err != nil {
+		var notFound *GroupNotFoundError
+		if errors.As(err, &notFound) {
+			return false
+		}
+		m.logger.Warn("could not confirm group still exists after publishing; assuming it does and continuing the timer chain",
+			"group_key", groupKey,
+			"error", err)
+		return true
+	}
+	return alertCount(group) > 0
+}
+
+// alertCount returns len(group.Alerts) under the group's own RWMutex.
+//
+// AlertGroup.mu exists precisely because Alerts is mutated concurrently
+// (AddAlertToGroup writes it while a timer callback reads it), and
+// MemoryGroupStorage.Load can hand back a group sharing that map with the live
+// object — so an unlocked `len(group.Alerts)` is a genuine data race, caught by
+// `go test -race` on TestTimerChain_GroupWaitToRepeatInterval.
+func alertCount(group *AlertGroup) int {
+	if group == nil {
+		return 0
+	}
+	group.mu.RLock()
+	defer group.mu.RUnlock()
+	return len(group.Alerts)
 }
 
 // startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
@@ -1369,9 +1529,20 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 	// Publish all alerts in the current group snapshot as the first notification
 	m.publishGroupAlerts(ctx, currentGroup)
 
+	// The publish above may have deleted the group entirely: all its alerts
+	// were resolved and got pruned (finding 8). Scheduling the next timer for
+	// a deleted group would resurrect the endless resolved-notification loop
+	// that pruning exists to stop.
+	if !m.groupStillExists(ctx, groupKey) {
+		m.logger.Debug("group fully resolved and removed after notification, not scheduling the next timer",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		return nil
+	}
+
 	// Start group_interval timer for subsequent notifications, honoring this
 	// group's own timing override if one was supplied (task 2.4).
-	if err := m.startGroupIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
+	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
 		m.logger.Error("failed to start group_interval timer after group_wait",
 			"group_key", groupKey,
 			"error", err)
@@ -1407,10 +1578,21 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 	// Publish update notification for all alerts in the current group snapshot
 	m.publishGroupAlerts(ctx, currentGroup)
 
+	// The publish above may have deleted the group entirely: all its alerts
+	// were resolved and got pruned (finding 8). Scheduling the next timer for
+	// a deleted group would resurrect the endless resolved-notification loop
+	// that pruning exists to stop.
+	if !m.groupStillExists(ctx, groupKey) {
+		m.logger.Debug("group fully resolved and removed after notification, not scheduling the next timer",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		return nil
+	}
+
 	// Switch to repeat_interval for periodic reminders.
 	// group_interval fires once after a notification is sent; subsequent reminders
 	// use repeat_interval (Alertmanager-compatible behaviour).
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
+	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
 		m.logger.Error("failed to start repeat_interval timer after group_interval",
 			"group_key", groupKey,
 			"error", err)
@@ -1446,8 +1628,19 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 	// Publish reminder notification for all alerts
 	m.publishGroupAlerts(ctx, currentGroup)
 
+	// The publish above may have deleted the group entirely: all its alerts
+	// were resolved and got pruned (finding 8). Scheduling the next timer for
+	// a deleted group would resurrect the endless resolved-notification loop
+	// that pruning exists to stop.
+	if !m.groupStillExists(ctx, groupKey) {
+		m.logger.Debug("group fully resolved and removed after notification, not scheduling the next timer",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		return nil
+	}
+
 	// Restart repeat_interval for the next reminder
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
+	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
 		m.logger.Error("failed to restart repeat_interval timer",
 			"group_key", groupKey,
 			"error", err)

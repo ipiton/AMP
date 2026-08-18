@@ -44,6 +44,8 @@ type fakeRegistry struct {
 	silenceRepo     infrasilencing.SilenceRepository
 	silenceEventPub infrasilencing.SilenceEventPublisher
 	processor       *services.AlertProcessor
+	config          *appconfig.Config
+	routeEvaluator  services.RouteEvaluator
 }
 
 func (r *fakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
@@ -55,12 +57,21 @@ func (r *fakeRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublis
 	return r.silenceEventPub
 }
 func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
-func (r *fakeRegistry) Config() *appconfig.Config                { return &appconfig.Config{} }
+func (r *fakeRegistry) Config() *appconfig.Config {
+	if r.config != nil {
+		return r.config
+	}
+	return &appconfig.Config{}
+}
 func (r *fakeRegistry) StartTime() time.Time                     { return time.Now() }
 func (r *fakeRegistry) ReloadConfig(_ context.Context) error     { return nil }
 func (r *fakeRegistry) ClusterStatus(_ context.Context) ClusterStatus {
 	return ClusterStatus{Status: "disabled"}
 }
+
+// RouteEvaluator returns nil unless a test injects one — nil is the
+// lite/legacy posture (no `route:` section).
+func (r *fakeRegistry) RouteEvaluator() services.RouteEvaluator { return r.routeEvaluator }
 
 func newTestProcessor(t *testing.T, publisher *fakePublisher) *services.AlertProcessor {
 	t.Helper()
@@ -545,9 +556,23 @@ func TestV1AlertsHandler_PostInvalidPayload_Returns400(t *testing.T) {
 	}
 }
 
-func TestV1AlertsHandler_Get_Returns405(t *testing.T) {
+// TestV1AlertsHandler_Get_ReturnsV1Envelope covers amtool audit backlog item
+// 3: GET /api/v1/alerts previously 405'd; it must now return the legacy v1
+// envelope ({"status":"success","data":[...]}) as a thin wrapper around the
+// v2 alert listing.
+func TestV1AlertsHandler_Get_ReturnsV1Envelope(t *testing.T) {
+	store := memory.NewAlertStore()
+	now := time.Now().UTC()
+	if err := store.IngestBatch([]core.AlertIngestInput{{
+		Labels:   map[string]string{"alertname": "V1Get", "severity": "critical"},
+		StartsAt: now.Format(time.RFC3339),
+		Status:   "firing",
+	}}, now); err != nil {
+		t.Fatalf("seed alert store: %v", err)
+	}
+
 	registry := &fakeRegistry{
-		alertStore:   memory.NewAlertStore(),
+		alertStore:   store,
 		silenceStore: memory.NewSilenceStore(),
 	}
 	handler := V1AlertsHandler(registry)
@@ -556,11 +581,157 @@ func TestV1AlertsHandler_Get_Returns405(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET /api/v1/alerts status = %d, want 405", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/alerts status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
-	if allow := rec.Header().Get("Allow"); allow != "POST" {
-		t.Errorf("Allow header = %q, want %q", allow, "POST")
+
+	var resp core.APIV1AlertsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode v1 envelope: %v", err)
+	}
+	if resp.Status != "success" {
+		t.Fatalf("envelope status = %q, want %q", resp.Status, "success")
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("envelope data length = %d, want 1", len(resp.Data))
+	}
+	got := resp.Data[0]
+	if got.Labels["alertname"] != "V1Get" {
+		t.Fatalf("data[0].labels[alertname] = %q, want %q", got.Labels["alertname"], "V1Get")
+	}
+	if len(got.Fingerprint) != 16 {
+		t.Fatalf("data[0].fingerprint = %q, want 16 hex chars (upstream shape)", got.Fingerprint)
+	}
+	if got.Status.State == "" {
+		t.Fatalf("data[0].status.state is empty")
+	}
+
+	// Raw JSON: v1 has no "receivers":[{"name":...}] objects and no mutedBy —
+	// only bare receiver name strings.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw json: %v", err)
+	}
+	dataArr, _ := raw["data"].([]any)
+	if len(dataArr) != 1 {
+		t.Fatalf("raw data length = %d, want 1", len(dataArr))
+	}
+	firstAlert, _ := dataArr[0].(map[string]any)
+	if _, hasMutedBy := firstAlert["status"].(map[string]any)["mutedBy"]; hasMutedBy {
+		t.Fatalf("v1 alert status must not have mutedBy (v2-only field): %+v", firstAlert["status"])
+	}
+	receivers, ok := firstAlert["receivers"].([]any)
+	if !ok {
+		t.Fatalf("receivers field is not a bare array: %T", firstAlert["receivers"])
+	}
+	if len(receivers) > 0 {
+		if _, isString := receivers[0].(string); !isString {
+			t.Fatalf("v1 receivers[0] = %T, want a bare string", receivers[0])
+		}
+	}
+}
+
+// TestV1AlertsHandler_Get_RespectsFilters checks that the v1 GET wrapper
+// applies the same query-param filters as v2 (active/silenced/inhibited/
+// unprocessed, per the overlap the task calls for), not just an unfiltered
+// dump of everything in the store.
+func TestV1AlertsHandler_Get_RespectsFilters(t *testing.T) {
+	store := memory.NewAlertStore()
+	now := time.Now().UTC()
+	if err := store.IngestBatch([]core.AlertIngestInput{
+		{Labels: map[string]string{"alertname": "Keep"}, StartsAt: now.Format(time.RFC3339), Status: "firing"},
+		{Labels: map[string]string{"alertname": "AlsoKeep"}, StartsAt: now.Format(time.RFC3339), Status: "firing"},
+	}, now); err != nil {
+		t.Fatalf("seed alert store: %v", err)
+	}
+
+	registry := &fakeRegistry{
+		alertStore:   store,
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, `/api/v1/alerts?filter=alertname%3D"Keep"`, nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/alerts?filter=... status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var resp core.APIV1AlertsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode v1 envelope: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].Labels["alertname"] != "Keep" {
+		t.Fatalf("filtered v1 data = %+v, want exactly the 'Keep' alert", resp.Data)
+	}
+}
+
+// TestV1AlertsHandler_Get_BadFilter_Returns400 mirrors v2's 400 status
+// contract for a malformed filter= param, but the BODY must use the v1
+// error envelope ({"status":"error","errorType":"bad_data","error":"..."}),
+// not v2's bare {"error":"..."} shape — every v1 response carries "status".
+func TestV1AlertsHandler_Get_BadFilter_Returns400(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/alerts?filter=bad", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /api/v1/alerts?filter=bad status = %d, want 400", rec.Code)
+	}
+
+	var envelope core.APIV1ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode v1 error envelope: %v; body: %s", err, rec.Body.String())
+	}
+	if envelope.Status != "error" {
+		t.Fatalf("envelope.Status = %q, want %q", envelope.Status, "error")
+	}
+	if envelope.ErrorType != "bad_data" {
+		t.Fatalf("envelope.ErrorType = %q, want %q", envelope.ErrorType, "bad_data")
+	}
+	if envelope.Error == "" {
+		t.Fatal("envelope.Error is empty, want a description of the bad filter")
+	}
+
+	// Bare v2-shape leakage guard: the body must not be a plain
+	// {"error":"..."} object without "status"/"errorType".
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw json: %v", err)
+	}
+	if _, hasStatus := raw["status"]; !hasStatus {
+		t.Fatal("v1 error body missing \"status\" field")
+	}
+	if _, hasErrorType := raw["errorType"]; !hasErrorType {
+		t.Fatal("v1 error body missing \"errorType\" field")
+	}
+}
+
+// TestV1AlertsHandler_Delete_Returns405 keeps the "unsupported method" 405
+// contract for methods other than GET/POST.
+func TestV1AlertsHandler_Delete_Returns405(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/alerts", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("DELETE /api/v1/alerts status = %d, want 405", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "GET, POST" {
+		t.Errorf("Allow header = %q, want %q", allow, "GET, POST")
 	}
 }
 

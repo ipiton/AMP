@@ -27,6 +27,28 @@ import (
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
+// Reconciliation (orphan-adoption) tuning constants. See
+// timerTTLGracePeriod in redis_timer_storage.go for the invariant tying
+// these to the storage TTL, and the compile-time check that enforces it.
+const (
+	// defaultReconciliationGracePeriod is how far past a timer's ExpiresAt
+	// reconcileOrphanedTimers waits before treating it as orphaned rather
+	// than "still being processed by its owning replica". Used as the
+	// fallback when grouping.reconciliation_grace is unset but the loop is
+	// enabled; keep it in sync with config.setDefaults.
+	//
+	// MUST stay well below timerTTLGracePeriod: the difference between the
+	// two IS the adoption window (final review finding 2).
+	defaultReconciliationGracePeriod = 20 * time.Second
+
+	// defaultReconciliationInterval mirrors config.setDefaults'
+	// grouping.reconciliation_interval default. Referenced here only by the
+	// compile-time adoption-window invariant, which requires the window to
+	// fit several reconciliation ticks so one missed tick cannot lose a
+	// group.
+	defaultReconciliationInterval = 45 * time.Second
+)
+
 // DefaultTimerManager implements GroupTimerManager using Go timers + Redis persistence.
 //
 // Architecture:
@@ -235,7 +257,11 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 	// ReconciliationInterval left at 0 is still fully disabled, not "enabled
 	// with a custom grace."
 	if config.ReconciliationInterval > 0 && config.ReconciliationGrace <= 0 {
-		config.ReconciliationGrace = timerTTLGracePeriod
+		// NOT timerTTLGracePeriod (final review finding 2): using the
+		// storage TTL grace as the adoption grace made a timer eligible for
+		// adoption at the exact moment its Redis key expired, so nothing
+		// was ever adoptable.
+		config.ReconciliationGrace = defaultReconciliationGracePeriod
 	}
 
 	// Create context for lifecycle management
@@ -739,6 +765,44 @@ func (tm *DefaultTimerManager) handleTimerExpiration(handle *timerHandle, timer 
 // If nothing replaced it (no callback restarted a timer — e.g. the group
 // was empty, or this is the terminal branch of some future timer type),
 // the old entry is still stale and must be deleted exactly as before.
+// dropLocalHandle removes groupKey's entry from tm.timers, but only if it is
+// still the handle that just fired. Used by onTimerExpired's early-return
+// paths (final review finding 3).
+//
+// WHY: a timerHandle in tm.timers means "this replica has a live Go timer for
+// this group". Once onTimerExpired has been entered for a handle, that Go
+// timer has already fired and will never fire again — so any early return that
+// leaves the handle behind creates a permanently dead entry. That dead entry is
+// not merely garbage: reconcileOrphanedTimers treats tm.timers membership
+// (trackedLocally) as proof that this replica will handle the group itself, so
+// it skips it forever, and AddAlertToGroup only arms group_wait for BRAND NEW
+// groups. Net effect before this fix: three distinct early returns (lock held
+// elsewhere, lock-store error, transient group-load error) each silently
+// wedged a group into never notifying again.
+//
+// The shared storage entry is deliberately NOT touched: it is exactly what
+// lets this replica's reconciliation loop (or another replica's) pick the
+// group up again on a later tick.
+//
+// The identity guard mirrors the continuation-takeover logic at the end of
+// onTimerExpired: if some callback installed a DIFFERENT handle for this
+// groupKey (a continuation timer), that handle is live and must survive.
+// firedHandle == nil means there was no local handle to begin with (the
+// RestoreTimers "missed timer" branch and reconciliation's orphan adoption
+// both call onTimerExpired with nil), so there is nothing to drop.
+func (tm *DefaultTimerManager) dropLocalHandle(firedHandle *timerHandle, groupKey GroupKey) {
+	if firedHandle == nil {
+		return
+	}
+
+	tm.timersMu.Lock()
+	defer tm.timersMu.Unlock()
+
+	if current, ok := tm.timers[groupKey]; ok && current == firedHandle {
+		delete(tm.timers, groupKey)
+	}
+}
+
 func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey GroupKey, timerType TimerType) {
 	tm.logger.Info("Timer expired",
 		"group_key", groupKey,
@@ -753,11 +817,20 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 		if err == ErrLockAlreadyAcquired {
 			tm.logger.Debug("Lock already acquired by another instance",
 				"group_key", groupKey)
-			return // Another instance will process
+			// Another instance owns this fire. Drop OUR dead handle (final
+			// review finding 3) — see dropLocalHandle. Keeping it would make
+			// reconcileOrphanedTimers skip this group forever if the other
+			// replica then dies mid-fire.
+			tm.dropLocalHandle(firedHandle, groupKey)
+			return
 		}
 		tm.logger.Error("Failed to acquire lock",
 			"group_key", groupKey,
 			"error", err)
+		// Transient lock-store failure: this fire is lost, so the local
+		// handle is dead too. Drop it so reconciliation can retry from
+		// shared storage (finding 3).
+		tm.dropLocalHandle(firedHandle, groupKey)
 		return
 	}
 	defer func() {
@@ -826,11 +899,18 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 
 		// Any other error (Redis timeout, network blip, etc.) is transient
 		// — the group may well still exist, just unreachable right now.
-		// Deliberately NOT deleting the timer here: doing so on a transient
-		// error would risk dropping a live group's timer entirely.
+		// Deliberately NOT deleting the timer from STORAGE here: doing so on
+		// a transient error would drop a live group's timer entirely.
+		//
+		// The LOCAL handle is a different matter (final review finding 3):
+		// this fire is over and its Go timer will never fire again, so
+		// leaving the handle in tm.timers only makes trackedLocally() lie to
+		// reconcileOrphanedTimers and wedge the group permanently. Drop it
+		// and let reconciliation retry against the surviving storage entry.
 		tm.logger.Error("Failed to get group for timer expiration",
 			"group_key", groupKey,
 			"error", err)
+		tm.dropLocalHandle(firedHandle, groupKey)
 		return
 	}
 
