@@ -5,12 +5,40 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
+
+// notifyLogClaimTTL bounds how long a cross-replica publish claim
+// (GroupNotifyLog.TryClaim, task 6.1) is held before it expires
+// automatically. Deliberately short — seconds, NOT repeat_interval — so a
+// replica that crashes mid-publish (before its deferred release runs)
+// self-heals quickly instead of blocking every replica's retries for that
+// group. Reuses lockTTL (redis_timer_storage.go, 30s), the same
+// distributed-lock duration RedisTimerStorage.AcquireLock already uses, per
+// storage.go's note that lockTTL is meant to be shared across timer/group/
+// notify-log storage for consistency.
+//
+// Sizing assumption (fix round 1, Finding 1) — this is NOT renewed/extended
+// while a claim is held, unlike RedisTimerStorage's lock (no Extend call
+// anywhere in publishGroupAlerts). It is safe at 30s ONLY because
+// publisher.PublishGroup (see the call below) returns as soon as
+// ApplicationPublishingAdapter.PublishGroup's coordinator call enqueues
+// each target job onto the publishing queue (PublishingCoordinator.
+// PublishGroupToTargets -> c.queue.Submit) — actual delivery (HTTP POST to
+// the target, retries, etc.) happens out-of-band on the queue's own
+// workers, not inside this call. If PublishGroup or whatever it delegates
+// to is ever changed to block until delivery is confirmed (a synchronous
+// webhook call with no queue, say), a slow/hanging target could keep the
+// claim held past claimTTL, letting it expire mid-publish and reopening the
+// double-publish window this claim exists to close. Re-derive
+// notifyLogClaimTTL from the publishing stack's own max per-attempt
+// timeout (not repeat_interval) if that assumption ever stops holding.
+const notifyLogClaimTTL = lockTTL
 
 // DefaultGroupManager is an in-memory implementation of AlertGroupManager.
 //
@@ -49,9 +77,36 @@ type DefaultGroupManager struct {
 	// Optional: can be nil for backwards compatibility
 	timerManager GroupTimerManager
 
-	// publisher sends alert notifications when group timers fire (TN-124)
-	// Optional: can be nil for backwards compatibility (only logs)
+	// publisher sends alert notifications when group timers fire (TN-124).
+	// Optional: can be nil for backwards compatibility (only logs). Read
+	// under mu (task 2.4, SetPublisher can update it after construction).
 	publisher GroupNotificationPublisher
+
+	// inhibitionChecker is the notify-chain's Inhibit step (task 2.4).
+	// Optional: nil skips inhibition filtering.
+	inhibitionChecker GroupInhibitionChecker
+
+	// silenceChecker is the notify-chain's Silence step (task 2.4).
+	// Optional: nil skips silence filtering.
+	silenceChecker GroupSilenceChecker
+
+	// timeIntervalLookup is the notify-chain's TimeMute step (task 3.2).
+	// Optional: nil skips time-interval mute filtering.
+	timeIntervalLookup GroupTimeIntervalLookup
+
+	// notifyLog is the notify-chain's Dedup step + cross-replica publish
+	// claim (task 2.4 Step 4; Redis-backed variant task 6.1). Always
+	// non-nil: defaults to an in-memory notifyDedupLog when
+	// DefaultGroupManagerConfig.NotifyLog is nil — see GroupNotifyLog's doc
+	// comment (manager.go) for the interface contract and
+	// RedisNotifyLog's (redis_notify_log.go) for the cross-replica
+	// protocol.
+	notifyLog GroupNotifyLog
+
+	// publishLocks serializes the whole notify-stage chain per GroupKey
+	// (task 2.4 fix round 1, Finding 4 — see publish_lock.go). Always
+	// non-nil.
+	publishLocks *groupPublishLocks
 
 	// logger for structured logging
 	logger *slog.Logger
@@ -101,16 +156,30 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		return nil, fmt.Errorf("storage cannot be nil (TN-125 requirement)")
 	}
 
+	// NotifyLog defaults to the in-memory implementation (task 2.4 behavior)
+	// when the caller doesn't inject one — always non-nil either way (task
+	// 6.1: standard profile injects a *RedisNotifyLog here via
+	// ServiceRegistry.newNotifyLog).
+	notifyLog := cfg.NotifyLog
+	if notifyLog == nil {
+		notifyLog = newNotifyDedupLog()
+	}
+
 	mgr := &DefaultGroupManager{
-		storage:          cfg.Storage,
-		fingerprintIndex: make(map[string]GroupKey),
-		keyGenerator:     cfg.KeyGenerator,
-		config:           cfg.Config,
-		timerManager:     cfg.TimerManager, // Optional (TN-124)
-		publisher:        cfg.Publisher,    // Optional (TN-124)
-		logger:           cfg.Logger,
-		metrics:          cfg.Metrics,
-		stats:            &groupStats{},
+		storage:            cfg.Storage,
+		fingerprintIndex:   make(map[string]GroupKey),
+		keyGenerator:       cfg.KeyGenerator,
+		config:             cfg.Config,
+		timerManager:       cfg.TimerManager,       // Optional (TN-124)
+		publisher:          cfg.Publisher,          // Optional (TN-124), may also arrive later via SetPublisher (task 2.4)
+		inhibitionChecker:  cfg.InhibitionChecker,  // Optional (task 2.4)
+		silenceChecker:     cfg.SilenceChecker,     // Optional (task 2.4)
+		timeIntervalLookup: cfg.TimeIntervalLookup, // Optional (task 3.2)
+		notifyLog:          notifyLog,              // task 2.4/6.1: always-on dedup + cross-replica claim
+		publishLocks:       &groupPublishLocks{},   // task 2.4 fix round 1: serialize per group key
+		logger:             cfg.Logger,
+		metrics:            cfg.Metrics,
+		stats:              &groupStats{},
 	}
 
 	// Register timer callbacks if timer manager is configured (TN-124)
@@ -133,8 +202,14 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 	ctx context.Context,
 	alert *core.Alert,
 	groupKey GroupKey,
+	opts ...AddAlertOption,
 ) (*AlertGroup, error) {
 	startTime := time.Now()
+
+	options := &addAlertOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
 
 	// Validation
 	if alert == nil {
@@ -164,18 +239,31 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 		// Create new group
 		group = m.createNewGroupUnsafe(groupKey)
 
+		// task 2.4: apply per-route timing overrides (RoutingDecision), if
+		// the caller supplied any — see WithGroupTimings and
+		// GroupMetadata.Timings.
+		group.Metadata.Timings = options.timings.Clone()
+
+		// task 3.2: capture the matched route's own mute/active
+		// time_interval NAMES onto this group at creation time — see
+		// WithMuteTimeIntervals and GroupMetadata.TimeIntervalNames.
+		group.Metadata.TimeIntervalNames = options.timeIntervalNames.Clone()
+
 		m.logger.Info("created new alert group",
 			"group_key", groupKey,
 			"alert", alert.AlertName,
-			"fingerprint", alert.Fingerprint)
+			"fingerprint", alert.Fingerprint,
+			"timings", group.Metadata.Timings,
+			"time_interval_names", group.Metadata.TimeIntervalNames)
 
 		// Metric: new group created
 		if m.metrics != nil {
 			m.metrics.IncActiveGroups()
 		}
 
-		// Start group_wait timer for new group (TN-124)
-		if startErr := m.startGroupWaitTimer(ctx, groupKey); startErr != nil {
+		// Start group_wait timer for new group (TN-124), honoring this
+		// group's own timing override if one was supplied (task 2.4).
+		if startErr := m.startGroupWaitTimer(ctx, groupKey, group.Metadata.Timings); startErr != nil {
 			// Log error but don't fail the operation (timer is optional)
 			m.logger.Warn("failed to start group_wait timer for new group",
 				"group_key", groupKey,
@@ -283,6 +371,16 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 
 		// Cancel all timers for this group (TN-124)
 		m.cancelGroupTimers(ctx, groupKey)
+
+		// Forget this group's dedup entry (task 2.4) — otherwise the
+		// notify-log would grow independent of active groups. Best-effort:
+		// a failure here (Redis down) just means the entry outlives the
+		// group until its own TTL expires — not fatal.
+		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
+			m.logger.Warn("failed to forget nflog entry for deleted group",
+				"group_key", groupKey,
+				"error", forgetErr)
+		}
 	} else {
 		// Update group state
 		m.updateGroupStateUnsafe(group)
@@ -404,6 +502,15 @@ func (m *DefaultGroupManager) CleanupExpiredGroups(
 				"group_key", groupKey,
 				"error", delErr)
 			continue // Skip this group if delete fails
+		}
+
+		// Forget this group's dedup entry (task 2.4). Best-effort — see the
+		// same Forget call in RemoveAlertFromGroup for why a failure here
+		// isn't fatal.
+		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
+			m.logger.Warn("failed to forget nflog entry for expired group",
+				"group_key", groupKey,
+				"error", forgetErr)
 		}
 
 		deletedCount++
@@ -720,16 +827,24 @@ func (m *DefaultGroupManager) recordCleanupMetrics(deletedCount int, duration ti
 // startGroupWaitTimer starts a group_wait timer for a newly created group.
 // This timer delays the first notification until group_wait duration elapses.
 //
+// timings is the group's own per-route override (task 2.4, from
+// AddAlertToGroup's WithGroupTimings), or nil to use the grouping config's
+// root Route.group_wait.
+//
 // Called when a new group is created in AddAlertToGroup.
-func (m *DefaultGroupManager) startGroupWaitTimer(ctx context.Context, groupKey GroupKey) error {
+func (m *DefaultGroupManager) startGroupWaitTimer(ctx context.Context, groupKey GroupKey, timings *GroupTimings) error {
 	if m.timerManager == nil {
 		return nil // Timer functionality disabled (backwards compatible)
 	}
 
-	// Get group_wait duration from config (default: 30s)
+	// Get group_wait duration: per-group override (task 2.4) takes
+	// precedence over the root Route.* default (default: 30s).
 	duration := 30 * time.Second
 	if m.config != nil && m.config.Route != nil && m.config.Route.GroupWait != nil {
 		duration = m.config.Route.GroupWait.Duration
+	}
+	if timings != nil && timings.GroupWait > 0 {
+		duration = timings.GroupWait
 	}
 
 	// Start group_wait timer
@@ -752,16 +867,23 @@ func (m *DefaultGroupManager) startGroupWaitTimer(ctx context.Context, groupKey 
 // startGroupIntervalTimer starts a group_interval timer for an existing group.
 // This timer ensures minimum time between notifications for the same group.
 //
+// timings is the group's own per-route override (task 2.4), or nil to use
+// the grouping config's root Route.group_interval.
+//
 // Called after a notification is sent for a group.
-func (m *DefaultGroupManager) startGroupIntervalTimer(ctx context.Context, groupKey GroupKey) error {
+func (m *DefaultGroupManager) startGroupIntervalTimer(ctx context.Context, groupKey GroupKey, timings *GroupTimings) error {
 	if m.timerManager == nil {
 		return nil // Timer functionality disabled
 	}
 
-	// Get group_interval duration from config (default: 5m)
+	// Get group_interval duration: per-group override (task 2.4) takes
+	// precedence over the root Route.* default (default: 5m).
 	duration := 5 * time.Minute
 	if m.config != nil && m.config.Route != nil && m.config.Route.GroupInterval != nil {
 		duration = m.config.Route.GroupInterval.Duration
+	}
+	if timings != nil && timings.GroupInterval > 0 {
+		duration = timings.GroupInterval
 	}
 
 	// Start group_interval timer
@@ -781,14 +903,246 @@ func (m *DefaultGroupManager) startGroupIntervalTimer(ctx context.Context, group
 	return nil
 }
 
-// publishGroupAlerts publishes all alerts in the group via the configured publisher.
+// SetPublisher wires (or clears, if nil) the notify-stage publisher used by
+// group timer callbacks (task 2.4).
 //
-// If publisher is nil, this is a no-op (backwards compatible).
-// Errors are logged but do not abort iteration so all alerts get a publish attempt.
+// Exists because ServiceRegistry.initializeGrouping runs BEFORE
+// initializePublishing (see that method's doc comment) — the publishing
+// stack, and therefore a GroupNotificationPublisher, does not exist yet at
+// GroupManager construction time. SetPublisher lets the registry wire it in
+// afterward, once it does — mirrors DefaultTimerManager.SetGroupManager's
+// same construction-order workaround. Safe to call at any time; publisher
+// reads in publishGroupAlerts take the same lock.
+//
+// Thread-safe.
+func (m *DefaultGroupManager) SetPublisher(pub GroupNotificationPublisher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.publisher = pub
+}
+
+// receiverFromGroupKey recovers the receiver name from a GroupKey built by
+// AlertProcessor.groupKeyFor (task 2.3): "receiver=<name>/<rest>". Returns
+// "" if key doesn't have that prefix (e.g. a key built directly by a test,
+// or by any future caller that doesn't go through groupKeyFor) — an empty
+// receiver means "no receiver-scoped filtering" to PublishToTargets
+// (publish to every enabled target), matching that function's pre-task-1.5
+// fallback semantics.
+func receiverFromGroupKey(key GroupKey) string {
+	const prefix = "receiver="
+	s := string(key)
+	if !strings.HasPrefix(s, prefix) {
+		return ""
+	}
+	rest := s[len(prefix):]
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		return rest[:idx]
+	}
+	return rest
+}
+
+// effectiveRepeatInterval returns the dedup TTL for group: its own
+// per-route override (task 2.4, GroupMetadata.Timings) if one was captured
+// at group-creation time, else the grouping config's root
+// Route.repeat_interval (default: 4h).
+func (m *DefaultGroupManager) effectiveRepeatInterval(group *AlertGroup) time.Duration {
+	duration := 4 * time.Hour
+	if m.config != nil && m.config.Route != nil {
+		duration = m.config.Route.GetEffectiveRepeatInterval()
+	}
+	if group != nil && group.Metadata != nil && group.Metadata.Timings != nil && group.Metadata.Timings.RepeatInterval > 0 {
+		duration = group.Metadata.Timings.RepeatInterval
+	}
+	return duration
+}
+
+// filterInhibited drops alerts currently matched by an inhibition rule
+// (notify-chain Step 1). Checked against CURRENT state (send time), not
+// ingest time — see GroupInhibitionChecker's doc comment. No-op (returns
+// alerts unchanged) if no inhibitionChecker is wired, or if alert.Status
+// isn't firing (resolved alerts are never inhibited — mirrors the ingest-
+// time check in AlertProcessor.ProcessAlert).
+func (m *DefaultGroupManager) filterInhibited(ctx context.Context, groupKey GroupKey, alerts []*core.Alert) []*core.Alert {
+	if m.inhibitionChecker == nil {
+		return alerts
+	}
+
+	kept := make([]*core.Alert, 0, len(alerts))
+	for _, alert := range alerts {
+		if alert.Status != core.StatusFiring {
+			kept = append(kept, alert)
+			continue
+		}
+
+		result, err := m.inhibitionChecker.ShouldInhibit(ctx, alert)
+		if err != nil {
+			// Fail-open: same posture as the ingest-time check in
+			// AlertProcessor.ProcessAlert — an inhibition-check error must
+			// not silently drop a notification.
+			m.logger.Warn("inhibition check failed at send time, keeping alert",
+				"group_key", groupKey,
+				"fingerprint", alert.Fingerprint,
+				"error", err)
+			kept = append(kept, alert)
+			continue
+		}
+
+		if result != nil && result.Matched {
+			m.logger.Info("alert dropped from group notification: inhibited at send time",
+				"group_key", groupKey,
+				"fingerprint", alert.Fingerprint)
+			continue
+		}
+
+		kept = append(kept, alert)
+	}
+	return kept
+}
+
+// filterSilenced drops alerts currently matching an active silence
+// (notify-chain Step 2). Checked against CURRENT state (send time) — a
+// silence created AFTER the alert entered its group still suppresses the
+// notification. No-op if no silenceChecker is wired.
+func (m *DefaultGroupManager) filterSilenced(groupKey GroupKey, alerts []*core.Alert) []*core.Alert {
+	if m.silenceChecker == nil {
+		return alerts
+	}
+
+	now := time.Now()
+	kept := make([]*core.Alert, 0, len(alerts))
+	for _, alert := range alerts {
+		if m.silenceChecker.HasActiveMatch(alert.Labels, now) {
+			m.logger.Info("alert dropped from group notification: silenced at send time",
+				"group_key", groupKey,
+				"fingerprint", alert.Fingerprint)
+			continue
+		}
+		kept = append(kept, alert)
+	}
+	return kept
+}
+
+// isTimeMuted evaluates the notify-chain's TimeMute step (task 3.2, Step 3:
+// Inhibit -> Silence -> TimeMute -> Dedup). Unlike filterInhibited/
+// filterSilenced, which drop individual alerts, a time-interval mute
+// suppresses the WHOLE group notification — upstream Alertmanager applies
+// mute_time_intervals/active_time_intervals per ROUTE, not per alert.
+//
+// Mute semantics (mirrors upstream):
+//   - muted if ActiveTimeIntervals is non-empty and NO name in it matches
+//     now (outside every allowed window), OR
+//   - muted if ANY name in MuteTimeIntervals matches now.
+//
+// Mute wins: if both lists are set and the current time both matches a
+// mute interval AND falls inside an active interval, the group is still
+// muted.
+//
+// No-op (never muted) when no timeIntervalLookup is wired (backwards
+// compatible, same posture as inhibitionChecker/silenceChecker being
+// optional), or when names is nil/empty (the common case — the matched
+// route referenced no time_intervals at all).
+//
+// Fail-open per name (task 3.2 documented decision): if a referenced
+// interval name is no longer defined in the CURRENT config — e.g. it was
+// renamed or removed between alert ingest and this group-timer fire — that
+// name is logged as an error and treated as "did not match" rather than
+// aborting delivery. This matches filterInhibited's existing fail-open
+// posture: an internal lookup gap must never silently drop a notification
+// that would otherwise have gone out.
+func (m *DefaultGroupManager) isTimeMuted(groupKey GroupKey, names *TimeIntervalNames, now time.Time) bool {
+	if m.timeIntervalLookup == nil || names.IsEmpty() {
+		return false
+	}
+
+	if len(names.Active) > 0 {
+		anyActiveMatched := false
+		for _, name := range names.Active {
+			interval, ok := m.timeIntervalLookup.GetTimeInterval(name)
+			if !ok {
+				m.logger.Error("active_time_intervals: interval name undefined in current config at fire time, treating as not matched",
+					"group_key", groupKey,
+					"interval", name)
+				continue
+			}
+			if interval.Matches(now) {
+				anyActiveMatched = true
+				break
+			}
+		}
+		if !anyActiveMatched {
+			return true // outside every active window: muted
+		}
+	}
+
+	for _, name := range names.Mute {
+		interval, ok := m.timeIntervalLookup.GetTimeInterval(name)
+		if !ok {
+			m.logger.Error("mute_time_intervals: interval name undefined in current config at fire time, treating as not matched",
+				"group_key", groupKey,
+				"interval", name)
+			continue
+		}
+		if interval.Matches(now) {
+			return true // mute wins, even if an active window also matched
+		}
+	}
+
+	return false
+}
+
+// publishGroupAlerts runs the notify-stage chain (task 2.4-3.2,
+// alertmanager-parity) for a group snapshot when a group timer fires:
+//
+//	Inhibit -> Silence -> TimeMute -> Dedup -> publish (ONE grouped notification)
+//
+// This order matches upstream Alertmanager's notification pipeline. Inhibit
+// and Silence are evaluated against CURRENT state (send time), not ingest
+// time — see filterInhibited/filterSilenced. TimeMute (task 3.2) is also
+// send-time, but — unlike Inhibit/Silence — suppresses the WHOLE group at
+// once rather than filtering individual alerts (see isTimeMuted). If
+// filtering removes every alert, TimeMute applies, or Dedup finds this
+// exact alert set was already sent within repeat_interval, nothing is
+// published — that is the normal "suppressed" case, not a failure, and is
+// only logged at Debug. Suppression at any step means RecordSent is never
+// called, so the group's already-scheduled group_interval/repeat_interval
+// timer keeps ticking and will retry with the group's then-current state
+// (e.g. once a mute window ends).
+//
+// The publisher is read under m.mu (SetPublisher can update it after
+// construction — see its doc comment for why).
+//
+// Concurrency (task 2.4 fix round 1, Finding 4): the whole
+// check-then-publish-then-record sequence below is serialized per
+// group.Key via m.publishLocks — see its doc comment for why the Dedup
+// check and record alone aren't enough to prevent a double-send from two
+// concurrent callers.
+//
+// Cross-replica concurrency (task 6.1): m.publishLocks only serializes
+// callers within THIS process. In an HA deployment, another replica
+// process can be running the exact same sequence for the exact same group
+// at the exact same time (both fired the same group_interval timer, say).
+// The Dedup step's IsDuplicate/RecordSent alone don't prevent that — two
+// replicas can both observe "not a duplicate" before either records
+// success, exactly the same race publishLocks fixes locally. m.notifyLog's
+// TryClaim (GroupNotifyLog, see manager.go's doc comment) closes this gap
+// for a Redis-backed notifyLog: only the replica that wins the claim
+// proceeds past this point; the other returns immediately and lets its own
+// next-scheduled timer retry later. The in-memory notifyDedupLog's TryClaim
+// is a no-op (always wins) — there is no other replica to race against in
+// that deployment shape, and publishLocks already covers same-process
+// races.
 func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *AlertGroup) {
-	if m.publisher == nil {
+	m.mu.RLock()
+	publisher := m.publisher
+	m.mu.RUnlock()
+
+	if publisher == nil {
 		return
 	}
+
+	lock := m.publishLocks.lockFor(group.Key)
+	lock.Lock()
+	defer lock.Unlock()
 
 	group.mu.RLock()
 	alerts := make([]*core.Alert, 0, len(group.Alerts))
@@ -797,29 +1151,161 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	}
 	group.mu.RUnlock()
 
-	for _, alert := range alerts {
-		if err := m.publisher.PublishToAll(ctx, alert); err != nil {
-			m.logger.Error("failed to publish alert from group timer",
-				"group_key", group.Key,
-				"fingerprint", alert.Fingerprint,
-				"error", err)
+	if len(alerts) == 0 {
+		return
+	}
+
+	receiver := receiverFromGroupKey(group.Key)
+
+	// Step 1: Inhibit (send-time)
+	alerts = m.filterInhibited(ctx, group.Key, alerts)
+	if len(alerts) == 0 {
+		m.logger.Debug("group notification fully suppressed by inhibition", "group_key", group.Key)
+		return
+	}
+
+	// Step 2: Silence (send-time)
+	alerts = m.filterSilenced(group.Key, alerts)
+	if len(alerts) == 0 {
+		m.logger.Debug("group notification fully suppressed by silence", "group_key", group.Key)
+		return
+	}
+
+	// Step 3: TimeMute (send-time, task 3.2) — whole-group suppression, not
+	// per-alert (see isTimeMuted's doc comment for semantics). Checked
+	// against the group's own MuteTimeIntervals/ActiveTimeIntervals NAMES,
+	// captured from the matched route at group-creation time.
+	if m.isTimeMuted(group.Key, group.Metadata.TimeIntervalNames, time.Now()) {
+		m.logger.Debug("group notification suppressed by time-interval mute",
+			"group_key", group.Key,
+			"receiver", receiver)
+		if m.metrics != nil {
+			m.metrics.RecordGroupOperation("publish", "muted")
 		}
+		return
+	}
+
+	// Step 4a: cross-replica publish claim (task 6.1 — see this function's
+	// doc comment above). A no-op ("always wins") for the in-memory
+	// notifyLog. claimTTL is deliberately short (notifyLogClaimTTL, seconds)
+	// so a replica that crashes before releasing self-heals quickly instead
+	// of blocking every replica's retries for this group.
+	//
+	// This claim is held across the publisher.PublishGroup call below with
+	// NO renewal/extension — see notifyLogClaimTTL's doc comment (fix round
+	// 1, Finding 1) for the sizing assumption that makes a fixed 30s safe
+	// today: PublishGroup returns once delivery is enqueued, not once it is
+	// confirmed delivered. If that ever changes (a blocking/synchronous
+	// publisher), this claim can expire mid-publish and the double-publish
+	// window reopens silently — re-check that assumption before touching
+	// the publisher call below.
+	claimed, releaseClaim, claimErr := m.notifyLog.TryClaim(ctx, group.Key, notifyLogClaimTTL)
+	switch {
+	case claimErr != nil:
+		// Fail-open (Redis down): proceed without a claim, matching the
+		// chain's Inhibit/Silence fail-open posture. Accepts a duplicate-
+		// across-replicas risk while Redis is unavailable — documented
+		// trade-off, see redis_notify_log.go's package doc comment.
+		m.logger.Error("nflog publish-claim check failed, proceeding fail-open (duplicate-across-replicas risk accepted)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"error", claimErr)
+	case !claimed:
+		m.logger.Debug("group notification claim held by another replica, skipping this fire",
+			"group_key", group.Key,
+			"receiver", receiver)
+		return
+	default:
+		defer func() {
+			if relErr := releaseClaim(); relErr != nil {
+				m.logger.Warn("failed to release nflog publish-claim",
+					"group_key", group.Key,
+					"receiver", receiver,
+					"error", relErr)
+			}
+		}()
+	}
+
+	// Step 4b: Dedup (notification-log semantics, task 2.4 Step 4 — see
+	// dedup.go for the in-memory implementation and redis_notify_log.go for
+	// the cross-replica one).
+	signature := alertSetSignature(alerts)
+	repeatInterval := m.effectiveRepeatInterval(group)
+	ttl := time.Now().Add(-repeatInterval)
+	dup, err := m.notifyLog.IsDuplicate(ctx, group.Key, signature, ttl)
+	if err != nil {
+		// Fail-open (Redis down): proceed as not-a-duplicate — same
+		// documented trade-off as the claim check above.
+		m.logger.Error("nflog duplicate check failed, proceeding fail-open (duplicate-across-replicas risk accepted)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"error", err)
+		dup = false
+	}
+	if dup {
+		m.logger.Debug("group notification suppressed by dedup (already sent within repeat_interval)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"repeat_interval", repeatInterval)
+		return // claim (if any) is released by the deferred call above
+	}
+
+	// Step 5: publish ONE grouped notification (task 2.4's core change: a
+	// single PublishGroup call carrying all of alerts, not one PublishToAll
+	// call per alert).
+	if err := publisher.PublishGroup(ctx, alerts, receiver); err != nil {
+		// "No targets for receiver" and any other publish error: log +
+		// metric, do NOT retry-loop here — the next scheduled timer
+		// (group_interval/repeat_interval) will naturally retry with the
+		// group's then-current state (task 2.4 dispatch decision, carried
+		// from task 1.5's "no targets" semantics note).
+		m.logger.Error("failed to publish group notification",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"alert_count", len(alerts),
+			"error", err)
+		if m.metrics != nil {
+			m.metrics.RecordGroupOperation("publish", "error")
+		}
+		return
+	}
+
+	if err := m.notifyLog.RecordSent(ctx, group.Key, signature, time.Now(), repeatInterval); err != nil {
+		// Confirmed delivery already happened — a failure here only means
+		// the NEXT fire (this or another replica) might not see this send
+		// recorded and could re-publish. Logged, not fatal: matches the
+		// chain's overall fail-open posture.
+		m.logger.Error("failed to record nflog sent entry (duplicate-across-replicas risk on next fire)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"error", err)
+	}
+
+	if m.metrics != nil {
+		m.metrics.RecordGroupOperation("publish", "success")
 	}
 }
 
 // startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
 // This timer provides periodic reminders for ongoing alert groups with no new changes.
 //
+// timings is the group's own per-route override (task 2.4), or nil to use
+// the grouping config's root Route.repeat_interval.
+//
 // Called after the group_interval notification is sent (when switching to "steady" mode).
-func (m *DefaultGroupManager) startRepeatIntervalTimer(ctx context.Context, groupKey GroupKey) error {
+func (m *DefaultGroupManager) startRepeatIntervalTimer(ctx context.Context, groupKey GroupKey, timings *GroupTimings) error {
 	if m.timerManager == nil {
 		return nil // Timer functionality disabled
 	}
 
-	// Get repeat_interval duration from config via helper (default: 4h)
+	// Get repeat_interval duration: per-group override (task 2.4) takes
+	// precedence over the root Route.* default (default: 4h, via helper).
 	duration := 4 * time.Hour
 	if m.config != nil && m.config.Route != nil {
 		duration = m.config.Route.GetEffectiveRepeatInterval()
+	}
+	if timings != nil && timings.RepeatInterval > 0 {
+		duration = timings.RepeatInterval
 	}
 
 	// Start repeat_interval timer
@@ -883,8 +1369,9 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 	// Publish all alerts in the current group snapshot as the first notification
 	m.publishGroupAlerts(ctx, currentGroup)
 
-	// Start group_interval timer for subsequent notifications
-	if err := m.startGroupIntervalTimer(ctx, groupKey); err != nil {
+	// Start group_interval timer for subsequent notifications, honoring this
+	// group's own timing override if one was supplied (task 2.4).
+	if err := m.startGroupIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
 		m.logger.Error("failed to start group_interval timer after group_wait",
 			"group_key", groupKey,
 			"error", err)
@@ -923,7 +1410,7 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 	// Switch to repeat_interval for periodic reminders.
 	// group_interval fires once after a notification is sent; subsequent reminders
 	// use repeat_interval (Alertmanager-compatible behaviour).
-	if err := m.startRepeatIntervalTimer(ctx, groupKey); err != nil {
+	if err := m.startRepeatIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
 		m.logger.Error("failed to start repeat_interval timer after group_interval",
 			"group_key", groupKey,
 			"error", err)
@@ -960,7 +1447,7 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 	m.publishGroupAlerts(ctx, currentGroup)
 
 	// Restart repeat_interval for the next reminder
-	if err := m.startRepeatIntervalTimer(ctx, groupKey); err != nil {
+	if err := m.startRepeatIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
 		m.logger.Error("failed to restart repeat_interval timer",
 			"group_key", groupKey,
 			"error", err)

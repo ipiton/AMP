@@ -122,15 +122,12 @@ route:
 **Description**: Route duration fields must be positive.
 **Solution**: Set `group_wait`, `group_interval`, `repeat_interval` to positive durations.
 
-### E027: Inhibit Rule Source Match Required
-**Severity**: Error
-**Description**: Inhibit rule must specify source matchers.
-**Solution**: Define `source_matchers` or `source_match`/`source_match_re`.
-
-### E028: Inhibit Rule Target Match Required
-**Severity**: Error
-**Description**: Inhibit rule must specify target matchers.
-**Solution**: Define `target_matchers` or `target_match`/`target_match_re`.
+### E027/E028: superseded by E150/E151
+See "Inhibition Errors" below - implemented under E150 (source) and E151
+(target), not E027/E028. `source_matchers`/`target_matchers` alone do
+NOT satisfy either: only `source_match`/`source_match_re` (`target_match`/
+`target_match_re`) do, since that's what the runtime loader reads (see
+W155).
 
 ---
 
@@ -318,13 +315,17 @@ route:
 
 ## **Inhibition Errors** (E150-E154)
 
-### E150: Source Matchers Required
+### E150: Source Match Required
 **Severity**: Error
-**Solution**: Define `source_matchers`.
+**Solution**: Define `source_match` or `source_match_re`. `source_matchers`
+(list syntax) is syntax-checked but does NOT satisfy this on its own -
+see W155.
 
-### E151: Target Matchers Required
+### E151: Target Match Required
 **Severity**: Error
-**Solution**: Define `target_matchers`.
+**Solution**: Define `target_match` or `target_match_re`. `target_matchers`
+(list syntax) is syntax-checked but does NOT satisfy this on its own -
+see W155.
 
 ### E152: Invalid Label in 'Equal'
 **Severity**: Error
@@ -400,9 +401,18 @@ route:
 **Severity**: Warning
 **Solution**: Use `routing_key` for Events API v2.
 
-#### W150-W153: Deprecated Inhibition Fields
+#### W155: Inhibition matchers list not wired at runtime
 **Severity**: Warning
-**Solution**: Migrate to `source_matchers` and `target_matchers`.
+**Description**: `source_matchers`/`target_matchers` (the AMP list-syntax
+successor to `source_match`/`source_match_re` and `target_match`/
+`target_match_re`) is accepted and syntax-checked here, but the runtime
+inhibition loader (`internal/infrastructure/inhibition.InhibitionRule`)
+has no such fields yet and silently drops it. **Do not rely on this
+field alone** - `source_match`/`source_match_re` (or `target_match`/
+`target_match_re`) is still required for E150/E151 and is what actually
+takes effect at runtime, as of Phase 5.
+**Solution**: Also define the equivalent `source_match`/`source_match_re`
+(or `target_match`/`target_match_re`) alongside the list-syntax field.
 
 ### Security Warnings (W300-W311)
 

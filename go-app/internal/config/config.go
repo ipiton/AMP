@@ -3,9 +3,11 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/spf13/viper"
 )
 
@@ -34,7 +36,41 @@ type Config struct {
 	Publishing    PublishingConfig    `mapstructure:"publishing"`
 	Inhibition    InhibitionConfig    `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
+	Grouping      GroupingConfig      `mapstructure:"grouping" yaml:"grouping,omitempty"`
 	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
+
+	// Routing holds the full Alertmanager-compatible route tree and receiver
+	// definitions (top-level `route:` + `receivers:` + `global:` YAML
+	// sections), parsed via the existing infrastructure/routing.Parse()
+	// (task 1.3: alertmanager-parity).
+	//
+	// It is populated only when the loaded config file has a `route:`
+	// section. Absent `route:` keeps the legacy single-receiver behavior:
+	// Routing stays nil and the Receivers field above (name-only) remains
+	// authoritative — no error.
+	//
+	// Excluded from mapstructure/json/validator processing on purpose:
+	//   - mapstructure:"-": populated manually by loadRouteConfig, not by
+	//     viper's generic unmarshal (the nested types only carry yaml tags).
+	//   - json:"-": RouteConfig carries internal fields (e.g. compiled
+	//     regex keyed by *grouping.Route) that encoding/json cannot marshal;
+	//     it also isn't meant to appear in the config-diff/update API.
+	//   - validate:"-": already fully validated inside routing.Parse();
+	//     re-validating via go-playground/validator here would recurse into
+	//     custom tag names (alphanum_hyphen, https_production, ...) that are
+	//     only registered on routing's own validator instance and would
+	//     panic on cv.v.Struct(cfg).
+	//
+	// Wiring this into the routing/notification engine happens in task 1.4
+	// (service_registry).
+	Routing *infraroute.RouteConfig `mapstructure:"-" json:"-" validate:"-"`
+}
+
+// HasRouteTree reports whether the config loaded a full `route:` +
+// `receivers:` tree (task 1.3). When false, callers should fall back to the
+// legacy single-receiver Receivers field.
+func (c *Config) HasRouteTree() bool {
+	return c.Routing != nil
 }
 
 // InvestigationConfig controls the PHASE-5A async investigation pipeline.
@@ -50,6 +86,47 @@ type InvestigationConfig struct {
 	OnlyFiring bool `mapstructure:"only_firing"`
 	// Tools configures built-in investigation tools (PHASE-6A).
 	Tools InvestigationToolsConfig `mapstructure:"tools" yaml:"tools,omitempty"`
+}
+
+// GroupingConfig controls the alert grouping subsystem (task 2.2,
+// alertmanager-parity): GroupManager (group lifecycle) + TimerManager
+// (group_wait/group_interval/repeat_interval timers).
+//
+// Grouping defaults — group_by, group_wait, group_interval, repeat_interval —
+// are intentionally NOT duplicated here. They come from the `route:` tree
+// (task 1.3/1.4, Config.Routing) via BuildGroupingConfig (grouping_adapter.go):
+// infraroute.RouteConfig.Route already IS a *grouping.Route (TN-121 backward
+// compatibility), so the adapter reuses it directly instead of re-parsing a
+// second copy of the same fields.
+type GroupingConfig struct {
+	// Enabled turns on the grouping subsystem (group manager + timers).
+	// Defaults to false: this task (2.2) only wires storage + timer
+	// lifecycle (start/restore/shutdown); the alert ingest pipeline does not
+	// consult the grouping subsystem yet — that lands in task 2.3, which
+	// flips this flag's effect on the request path.
+	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
+
+	// ReconciliationInterval controls the standard profile's periodic
+	// orphan-adoption loop (task 6.2, distributed timer liveness — see
+	// grouping.TimerManagerConfig.ReconciliationInterval for the mechanism).
+	// ServiceRegistry.initializeGrouping only forwards this value to the
+	// TimerManager when running the standard profile with a live
+	// Redis-backed TimerStorage; every other case (lite profile, or a
+	// standard-profile Redis failure that fell back to in-memory storage)
+	// leaves the TimerManager's loop disabled regardless of this setting —
+	// InMemoryTimerStorage is never shared across replicas, so scanning it
+	// for orphans left by ANOTHER replica is meaningless.
+	//
+	// Defaults to 45s (see setDefaults) in the standard profile with Redis;
+	// 0 disables the loop.
+	ReconciliationInterval time.Duration `mapstructure:"reconciliation_interval" yaml:"reconciliation_interval,omitempty"`
+
+	// ReconciliationGrace is how far past a timer's ExpiresAt the
+	// reconciliation loop waits before treating it as orphaned rather than
+	// possibly still being processed by its owning replica. Only consulted
+	// when ReconciliationInterval is positive; left at 0 here means "use
+	// grouping.TimerManagerConfig's own default" (60s).
+	ReconciliationGrace time.Duration `mapstructure:"reconciliation_grace" yaml:"reconciliation_grace,omitempty"`
 }
 
 // InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)
@@ -118,7 +195,13 @@ type ServerConfig struct {
 	// ExternalURL is the public URL of this AMP instance (env: AMP_SERVER_EXTERNAL_URL).
 	// Used in notification callbacks: email footer, silence links, webhook externalURL field.
 	// Empty string disables callback links (graceful degradation).
-	ExternalURL string                `mapstructure:"external_url"`
+	ExternalURL string `mapstructure:"external_url"`
+	// RoutePrefix mounts all HTTP routes under this path prefix, mirroring
+	// upstream Alertmanager's --web.route-prefix (PARITY-B6). Empty string
+	// (the default) or "/" means no prefix. Overridable via the
+	// -web.route-prefix CLI flag (see cmd/server/main.go); the flag takes
+	// precedence over this config value when set.
+	RoutePrefix string                `mapstructure:"route_prefix"`
 	WebSocket   WebSocketServerConfig `mapstructure:"websocket"`
 	// CORS controls cross-origin headers for the whole HTTP API
 	// (reuses the same config shape as webhook.cors).
@@ -421,7 +504,66 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Task 5.4 (carried fix): fail fast if the external inhibition rules
+	// file (inhibition.config_file) is missing or malformed, instead of
+	// silently dropping all file-based inhibition rules at startup/reload
+	// time (see internal/config/inhibition_adapter.go).
+	if _, err := cfg.Inhibition.ToInhibitionRules(); err != nil {
+		return nil, fmt.Errorf("inhibition config validation failed: %w", err)
+	}
+
+	// Parse optional route:/receivers:/global: sections (task 1.3).
+	// No-op (cfg.Routing stays nil) when the file has no route: section.
+	if err := loadRouteConfig(configPath, &cfg); err != nil {
+		return nil, fmt.Errorf("route config validation failed: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+// loadRouteConfig parses the optional `route:` + `receivers:` + `global:`
+// top-level YAML sections via the existing infrastructure/routing.Parse()
+// (task 1.3: alertmanager-parity).
+//
+// It intentionally re-reads the raw file bytes: the nested route/receiver
+// types only carry `yaml` tags (no `mapstructure`), so they cannot be
+// populated by viper.Unmarshal — they need their own gopkg.in/yaml.v3 pass,
+// which is exactly what routing.Parse() does.
+//
+// Absent `route:` section is not an error: it means the config still uses
+// the legacy single-receiver model, and cfg.Routing is left nil.
+//
+// Task 5.4: runs pkg/configvalidator's broader Alertmanager-parity checks
+// (receiver integration shapes, inhibition, global, security - see
+// alertmanager_validation.go) on the same raw bytes BEFORE
+// infraroute.Parse() below, so a config failing both surfaces
+// configvalidator's more detailed message first; routing.Parse() remains
+// a backstop for anything configvalidator does not (yet) check.
+func loadRouteConfig(configPath string, cfg *Config) error {
+	if configPath == "" || !viper.IsSet("route") {
+		return nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Consistent with LoadConfig's tolerant handling of a missing file.
+			return nil
+		}
+		return fmt.Errorf("failed to read config file for route parsing: %w", err)
+	}
+
+	if err := validateAlertmanagerSubset(data, cfg); err != nil {
+		return err
+	}
+
+	parsed, err := infraroute.NewRouteConfigParser().Parse(data)
+	if err != nil {
+		return fmt.Errorf("invalid route/receivers configuration: %w", err)
+	}
+
+	cfg.Routing = parsed
+	return nil
 }
 
 // LoadConfigFromEnv loads configuration from environment variables only
@@ -443,6 +585,11 @@ func LoadConfigFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Task 5.4 (carried fix): same fail-fast as LoadConfig - see there.
+	if _, err := cfg.Inhibition.ToInhibitionRules(); err != nil {
+		return nil, fmt.Errorf("inhibition config validation failed: %w", err)
+	}
+
 	return &cfg, nil
 }
 
@@ -461,6 +608,7 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", "120s")
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
 	viper.SetDefault("server.external_url", "")
+	viper.SetDefault("server.route_prefix", "")
 	viper.SetDefault("server.websocket.allowed_origins", "")
 	viper.SetDefault("server.cors.enabled", false)
 	viper.SetDefault("server.cors.allowed_origins", "")
@@ -505,6 +653,15 @@ func setDefaults() {
 	viper.SetDefault("llm.temperature", 0.7)
 	viper.SetDefault("llm.timeout", "30s")
 	viper.SetDefault("llm.max_retries", 3)
+
+	// Grouping subsystem defaults (task 2.2, alertmanager-parity)
+	viper.SetDefault("grouping.enabled", false)
+	// Distributed timer reconciliation defaults (task 6.2). Only takes
+	// effect in the standard profile with a live Redis-backed TimerStorage
+	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc
+	// comment (config.go) for why the lite profile ignores this.
+	viper.SetDefault("grouping.reconciliation_interval", "45s")
+	viper.SetDefault("grouping.reconciliation_grace", "60s")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)

@@ -7,6 +7,7 @@
 -- ============================================================================
 -- UP Migration
 -- ============================================================================
+-- +goose Up
 
 -- Create silences table
 CREATE TABLE IF NOT EXISTS silences (
@@ -185,6 +186,7 @@ COMMENT ON COLUMN silences.updated_at IS
 -- ============================================================================
 -- DOWN Migration (Rollback)
 -- ============================================================================
+-- +goose Down
 
 -- To rollback this migration, uncomment and run:
 

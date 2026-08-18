@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -54,6 +55,23 @@ type DefaultSilenceManager struct {
 	// Background workers
 	gcWorker   *gcWorker   // Garbage collection worker
 	syncWorker *syncWorker // Cache synchronization worker
+
+	// GC worker leadership gating (task 6.4, alertmanager-parity): gcWorker
+	// mutates shared PostgreSQL rows (expire active->expired, delete old
+	// expired), so on a multi-replica deployment it must run on exactly one
+	// replica at a time. gcMu/gcRunning make StartGC/StopGC idempotent and
+	// safe to call from a LeaderElector's OnAcquired/OnLost, from Start/Stop
+	// below, or from both (e.g. Stop() always calls StopGC as a backstop,
+	// whether or not a LeaderElector already called it on leadership loss).
+	// gcLeaderGated, once set via EnableLeaderGatedGC, makes Start() below
+	// skip its own unconditional StartGC call — the elected leader is then
+	// the only thing that ever starts it. syncWorker has no such gating: it
+	// only rebuilds THIS replica's own local cache from the repository (a
+	// read-only, per-replica resource), so every replica needs it regardless
+	// of leadership.
+	gcMu          sync.Mutex
+	gcRunning     bool
+	gcLeaderGated bool
 
 	// Observability
 	metrics *SilenceMetrics
@@ -142,16 +160,10 @@ func NewDefaultSilenceManager(
 		cancel:  cancel,
 	}
 
-	// Initialize workers (not started yet)
-	sm.gcWorker = newGCWorker(
-		repo,
-		sm.cache,
-		config.GCInterval,
-		config.GCRetention,
-		config.GCBatchSize,
-		logger,
-		sm.metrics,
-	)
+	// Initialize workers (not started yet). gcWorker is deliberately NOT
+	// created here — see StartGC's doc comment: it is (re)created fresh on
+	// every StartGC call so repeated leadership acquire/lose cycles don't
+	// reuse a worker whose channels a prior StopGC already closed.
 	sm.syncWorker = newSyncWorker(
 		repo,
 		sm.cache,
@@ -575,6 +587,88 @@ func (sm *DefaultSilenceManager) IsAlertSilenced(
 
 // ==================== Lifecycle Management Implementation ====================
 
+// ==================== GC Leader Gating (task 6.4) ====================
+
+// EnableLeaderGatedGC marks the GC worker as externally controlled: Start()
+// below will no longer start it automatically. Must be called before
+// Start(). Intended for ServiceRegistry.initializeSilenceManager, which
+// calls it before wiring a lock.LeaderElector whose OnAcquired/OnLost
+// callbacks are StartGC/StopGC — the GC worker mutates shared PostgreSQL
+// rows (expire active->expired, then delete old expired rows past
+// retention), so on a multi-replica deployment it must run on exactly one
+// replica at a time, unlike the sync worker (see the gcMu/gcRunning field
+// doc comment for why that one is never gated).
+func (sm *DefaultSilenceManager) EnableLeaderGatedGC() {
+	sm.gcLeaderGated = true
+}
+
+// StartGC starts the GC worker. Idempotent: a no-op if already running.
+// Exposed for a lock.LeaderElector's OnAcquired callback (task 6.4) — once
+// EnableLeaderGatedGC has been called, Start() no longer starts the GC
+// worker itself, and only the elected leader replica calls this (via the
+// elector, the instant it wins the lock). Also safe to call directly (e.g.
+// tests, or Start() below on the no-election default path).
+//
+// A fresh gcWorker is built on every call rather than reusing one across
+// calls: gcWorker.Stop() permanently closes its internal channels, so
+// reusing the same instance across a StartGC/StopGC/StartGC cycle
+// (leadership flip-flopping between replicas over time) would panic on the
+// second Stop.
+func (sm *DefaultSilenceManager) StartGC(ctx context.Context) {
+	sm.gcMu.Lock()
+	defer sm.gcMu.Unlock()
+
+	if sm.gcRunning {
+		return
+	}
+
+	sm.gcWorker = newGCWorker(
+		sm.repo,
+		sm.cache,
+		sm.config.GCInterval,
+		sm.config.GCRetention,
+		sm.config.GCBatchSize,
+		sm.logger,
+		sm.metrics,
+	)
+	sm.gcWorker.Start(ctx)
+	sm.gcRunning = true
+}
+
+// StopGC stops the GC worker. Idempotent: a no-op if not currently running.
+// Exposed for a lock.LeaderElector's OnLost callback (task 6.4); see
+// StartGC's doc comment. Also called unconditionally as a backstop from
+// Stop() below, regardless of whether leader election is wired.
+//
+// Waits for an in-flight runCleanup pass to finish rather than cancelling
+// it mid-flight (gcWorker.Stop() only signals via stopCh/ctx between
+// ticks, not inside a running pass — see gc_worker.go's run/Stop). This
+// means the old leader's OnLost can briefly overlap with the new leader's
+// first pass if leadership changes hands mid-cleanup. That overlap is
+// harmless: both passes run the same idempotent
+// `WHERE ends_at < cutoff LIMIT batchSize` expire/delete, so a second pass
+// racing the first just finds fewer (or zero) rows left to touch — never
+// double-deletes or corrupts state.
+func (sm *DefaultSilenceManager) StopGC() {
+	sm.gcMu.Lock()
+	defer sm.gcMu.Unlock()
+
+	if !sm.gcRunning {
+		return
+	}
+
+	sm.gcWorker.Stop()
+	sm.gcRunning = false
+}
+
+// IsGCRunning reports whether the GC worker is currently active on this
+// replica. Safe for concurrent use.
+func (sm *DefaultSilenceManager) IsGCRunning() bool {
+	sm.gcMu.Lock()
+	defer sm.gcMu.Unlock()
+	return sm.gcRunning
+}
+
 // Start initializes and starts the SilenceManager and its background workers.
 //
 // This method:
@@ -633,8 +727,12 @@ func (sm *DefaultSilenceManager) Start(ctx context.Context) error {
 	// Step 3: Create manager context (cancelled on Stop)
 	sm.ctx, sm.cancel = context.WithCancel(context.Background())
 
-	// Step 4: Start background workers
-	sm.gcWorker.Start(sm.ctx)
+	// Step 4: Start background workers. GC is skipped here when leader
+	// election owns it (task 6.4) — EnableLeaderGatedGC must have been
+	// called before Start() for that; see its doc comment.
+	if !sm.gcLeaderGated {
+		sm.StartGC(sm.ctx)
+	}
 	sm.syncWorker.Start(sm.ctx)
 
 	// Step 5: Mark as started
@@ -693,10 +791,13 @@ func (sm *DefaultSilenceManager) Stop(ctx context.Context) error {
 		sm.cancel()
 	}
 
-	// Step 4: Stop workers (blocks until workers stopped)
+	// Step 4: Stop workers (blocks until workers stopped). StopGC is called
+	// unconditionally as a backstop: if a LeaderElector's OnLost already
+	// stopped it, this is a no-op (see StopGC's gcRunning guard); if this
+	// replica never became leader, it was never running either way.
 	doneCh := make(chan struct{})
 	go func() {
-		sm.gcWorker.Stop()
+		sm.StopGC()
 		sm.syncWorker.Stop()
 		close(doneCh)
 	}()

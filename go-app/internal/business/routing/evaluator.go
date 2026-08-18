@@ -210,15 +210,17 @@ func (e *RouteEvaluator) Evaluate(alert *Alert) (*RoutingDecision, error) {
 
 	// Step 5: Build decision
 	decision := &RoutingDecision{
-		Receiver:        node.Receiver,
-		GroupBy:         node.GroupBy,
-		GroupWait:       node.GroupWait,
-		GroupInterval:   node.GroupInterval,
-		RepeatInterval:  node.RepeatInterval,
-		MatchedRoute:    matchedPath,
-		MatchDuration:   matchResult.Duration,
-		RoutesEvaluated: matchResult.MatchersEvaluated,
-		CacheHitRate:    matchResult.CacheHitRate(),
+		Receiver:            node.Receiver,
+		GroupBy:             node.GroupBy,
+		GroupWait:           node.GroupWait,
+		GroupInterval:       node.GroupInterval,
+		RepeatInterval:      node.RepeatInterval,
+		MuteTimeIntervals:   node.MuteTimeIntervals,
+		ActiveTimeIntervals: node.ActiveTimeIntervals,
+		MatchedRoute:        matchedPath,
+		MatchDuration:       matchResult.Duration,
+		RoutesEvaluated:     matchResult.MatchersEvaluated,
+		CacheHitRate:        matchResult.CacheHitRate(),
 	}
 
 	// Validate receiver is not empty
@@ -423,15 +425,17 @@ func (e *RouteEvaluator) buildDecision(
 	matchResult *MatchResult,
 ) *RoutingDecision {
 	return &RoutingDecision{
-		Receiver:        node.Receiver,
-		GroupBy:         node.GroupBy,
-		GroupWait:       node.GroupWait,
-		GroupInterval:   node.GroupInterval,
-		RepeatInterval:  node.RepeatInterval,
-		MatchedRoute:    path,
-		MatchDuration:   matchResult.Duration,
-		RoutesEvaluated: matchResult.MatchersEvaluated,
-		CacheHitRate:    matchResult.CacheHitRate(),
+		Receiver:            node.Receiver,
+		GroupBy:             node.GroupBy,
+		GroupWait:           node.GroupWait,
+		GroupInterval:       node.GroupInterval,
+		RepeatInterval:      node.RepeatInterval,
+		MuteTimeIntervals:   node.MuteTimeIntervals,
+		ActiveTimeIntervals: node.ActiveTimeIntervals,
+		MatchedRoute:        path,
+		MatchDuration:       matchResult.Duration,
+		RoutesEvaluated:     matchResult.MatchersEvaluated,
+		CacheHitRate:        matchResult.CacheHitRate(),
 	}
 }
 

@@ -171,6 +171,47 @@ func TestInMemoryTimerStorage_ListTimers_Empty(t *testing.T) {
 	assert.Empty(t, timers)
 }
 
+// TestInMemoryTimerStorage_ListOverdueTimers verifies the mixed-set
+// filtering contract (task 6.2, fix round 1, Finding 1) matches
+// RedisTimerStorage.ListOverdueTimers: only timers with ExpiresAt <= cutoff
+// come back.
+func TestInMemoryTimerStorage_ListOverdueTimers(t *testing.T) {
+	storage := NewInMemoryTimerStorage(nil)
+	ctx := context.Background()
+	now := time.Now()
+
+	timers := []*GroupTimer{
+		{
+			GroupKey:  "overdue-1",
+			TimerType: GroupWaitTimer,
+			Duration:  time.Minute,
+			StartedAt: now.Add(-10 * time.Minute),
+			ExpiresAt: now.Add(-9 * time.Minute),
+			State:     TimerStateActive,
+		},
+		{
+			GroupKey:  "future-1",
+			TimerType: GroupIntervalTimer,
+			Duration:  5 * time.Minute,
+			StartedAt: now,
+			ExpiresAt: now.Add(5 * time.Minute),
+			State:     TimerStateActive,
+		},
+	}
+	for _, timer := range timers {
+		require.NoError(t, storage.SaveTimer(ctx, timer))
+	}
+
+	overdue, err := storage.ListOverdueTimers(ctx, now)
+	require.NoError(t, err)
+	require.Len(t, overdue, 1)
+	assert.Equal(t, GroupKey("overdue-1"), overdue[0].GroupKey)
+
+	none, err := storage.ListOverdueTimers(ctx, now.Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
 // TestInMemoryTimerStorage_AcquireLock tests lock acquisition
 func TestInMemoryTimerStorage_AcquireLock(t *testing.T) {
 	storage := NewInMemoryTimerStorage(nil)

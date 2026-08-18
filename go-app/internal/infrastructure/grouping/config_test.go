@@ -345,6 +345,25 @@ func TestRoute_Clone(t *testing.T) {
 	assert.NotContains(t, original.Match, "new")
 }
 
+func TestRoute_Clone_TimeIntervals(t *testing.T) {
+	original := &Route{
+		Receiver:            "test",
+		MuteTimeIntervals:   []string{"weekends"},
+		ActiveTimeIntervals: []string{"business-hours"},
+	}
+
+	clone := original.Clone()
+
+	assert.Equal(t, original.MuteTimeIntervals, clone.MuteTimeIntervals)
+	assert.Equal(t, original.ActiveTimeIntervals, clone.ActiveTimeIntervals)
+	assert.NotEqual(t, fmt.Sprintf("%p", original.MuteTimeIntervals), fmt.Sprintf("%p", clone.MuteTimeIntervals))
+	assert.NotEqual(t, fmt.Sprintf("%p", original.ActiveTimeIntervals), fmt.Sprintf("%p", clone.ActiveTimeIntervals))
+
+	// Modifying the clone must not affect the original.
+	clone.MuteTimeIntervals[0] = "modified"
+	assert.Equal(t, "weekends", original.MuteTimeIntervals[0])
+}
+
 func TestRoute_String(t *testing.T) {
 	route := &Route{
 		Receiver:       "test",

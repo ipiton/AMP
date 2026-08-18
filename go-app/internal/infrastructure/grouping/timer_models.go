@@ -347,6 +347,16 @@ type TimerStats struct {
 	// Tracked during RestoreTimers operation after service restart.
 	MissedTimers int64 `json:"missed_timers"`
 
+	// ReconciledTimers is the count of orphaned group timers adopted by the
+	// periodic reconciliation loop (task 6.2, distributed timer liveness):
+	// timers whose ExpiresAt passed while running (not just at startup, the
+	// RestoreTimers/MissedTimers case above) with no replica holding the
+	// timer lock, most commonly because the replica that owned them crashed
+	// mid-interval. Always 0 when reconciliation is disabled (lite profile,
+	// or standard profile with ReconciliationInterval left at its zero-value
+	// default — see TimerManagerConfig.ReconciliationInterval).
+	ReconciledTimers int64 `json:"reconciled_timers"`
+
 	// AverageDuration is the average duration of timers by type.
 	// Useful for understanding typical timing patterns.
 	AverageDuration map[TimerType]time.Duration `json:"average_duration"`
@@ -362,11 +372,12 @@ func (s *TimerStats) Clone() *TimerStats {
 	}
 
 	clone := &TimerStats{
-		ExpiredTimers:   s.ExpiredTimers,
-		CancelledTimers: s.CancelledTimers,
-		ResetCount:      s.ResetCount,
-		MissedTimers:    s.MissedTimers,
-		Timestamp:       s.Timestamp,
+		ExpiredTimers:    s.ExpiredTimers,
+		CancelledTimers:  s.CancelledTimers,
+		ResetCount:       s.ResetCount,
+		MissedTimers:     s.MissedTimers,
+		ReconciledTimers: s.ReconciledTimers,
+		Timestamp:        s.Timestamp,
 	}
 
 	// Deep copy maps

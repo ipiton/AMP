@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"sort"
 	"time"
+
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 )
 
 // RouteTree represents an immutable routing tree built from RouteConfig.
@@ -50,7 +53,7 @@ type RouteTree struct {
 	// receivers is a map of receiver name → receiver config.
 	// Pre-built at tree construction time for O(1) receiver lookup.
 	// Used to resolve ReceiverConfig pointers in RouteNode.
-	receivers map[string]*Receiver
+	receivers map[string]*infraroute.Receiver
 
 	// stats contains cached statistics about the tree.
 	// Calculated once at tree construction time.
@@ -59,6 +62,28 @@ type RouteTree struct {
 	// built is the timestamp when this tree was constructed.
 	// Used for tracking tree age and hot reload debugging.
 	built time.Time
+
+	// timeIntervals is this tree's build-time snapshot of the config's
+	// named time_intervals (task 3.2, from
+	// infraroute.RouteConfig.TimeIntervalIndex), keyed by name. Looked up
+	// by RouteNode.MuteTimeIntervals/ActiveTimeIntervals at notify-chain
+	// TimeMute time (grouping.GroupTimeIntervalLookup). Rebuilt on every
+	// TreeBuilder.Build call, so a RouteTreeManager.Reload's new tree
+	// always carries the CURRENT config's definitions — the lookup never
+	// serves a startup snapshot after a hot reload.
+	timeIntervals map[string]timeinterval.TimeInterval
+}
+
+// GetTimeInterval returns the named time_intervals group build into this
+// tree (task 3.2). ok is false if name isn't defined in the config this
+// tree was built from — callers must treat that as "does not match" (see
+// grouping.DefaultGroupManager's TimeMute step for the documented fail-open
+// posture), not as a fatal error.
+//
+// Complexity: O(1)
+func (t *RouteTree) GetTimeInterval(name string) (timeinterval.TimeInterval, bool) {
+	ti, ok := t.timeIntervals[name]
+	return ti, ok
 }
 
 // TreeStats contains statistics about the routing tree.
@@ -99,7 +124,7 @@ func (t *RouteTree) GetBuildTime() time.Time {
 // Returns nil if receiver not found (should be caught by validation).
 //
 // Complexity: O(1)
-func (t *RouteTree) GetReceiver(name string) *Receiver {
+func (t *RouteTree) GetReceiver(name string) *infraroute.Receiver {
 	return t.receivers[name]
 }
 
@@ -230,16 +255,25 @@ func (t *RouteTree) Clone() *RouteTree {
 	}
 
 	// Clone receiver map (shallow copy, Receiver pointers are shared but immutable)
-	receiversClone := make(map[string]*Receiver, len(t.receivers))
+	receiversClone := make(map[string]*infraroute.Receiver, len(t.receivers))
 	for name, receiver := range t.receivers {
 		receiversClone[name] = receiver
 	}
 
+	// Clone time interval index (task 3.2). Values are copied deeply
+	// (TimeInterval.Clone) since they contain slices; map keys/entries
+	// themselves need no independent copy beyond that.
+	timeIntervalsClone := make(map[string]timeinterval.TimeInterval, len(t.timeIntervals))
+	for name, ti := range t.timeIntervals {
+		timeIntervalsClone[name] = ti.Clone()
+	}
+
 	return &RouteTree{
-		Root:      t.Root.Clone(), // Deep clone root node and subtree
-		receivers: receiversClone,
-		stats:     t.stats,    // Copy struct value
-		built:     time.Now(), // Update build time for clone
+		Root:          t.Root.Clone(), // Deep clone root node and subtree
+		receivers:     receiversClone,
+		stats:         t.stats,    // Copy struct value
+		built:         time.Now(), // Update build time for clone
+		timeIntervals: timeIntervalsClone,
 	}
 }
 

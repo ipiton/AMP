@@ -87,3 +87,105 @@ func TestSilenceStore_Upsert_NotifiesOnChange(t *testing.T) {
 		t.Fatalf("onChange fired %d times, want 1", notified)
 	}
 }
+
+// Rebuild and UpsertFromAPI back task 6.3's cross-replica resync/apply path
+// (see ServiceRegistry.resyncSilenceStore / applySilenceEvent).
+
+func TestSilenceStore_Rebuild_EvictsStaleEntries(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+
+	// Seed with an entry that will NOT be present in the rebuild set —
+	// mirroring a silence deleted on another replica while this replica's
+	// pub/sub subscription was down.
+	if _, err := store.Upsert(&core.SilenceInput{
+		ID:        "550e8400-e29b-41d4-a716-446655440000",
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "Stale"}},
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "will be evicted",
+	}, now); err != nil {
+		t.Fatalf("seed Upsert() error = %v", err)
+	}
+
+	keep := core.APISilence{
+		ID:        "660e8400-e29b-41d4-a716-446655440001",
+		Matchers:  []core.APISilenceMatcher{{Name: "alertname", Value: "Keep", IsEqual: true}},
+		StartsAt:  now.Add(-time.Minute).Format(time.RFC3339),
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "survives rebuild",
+	}
+
+	if err := store.Rebuild([]core.APISilence{keep}, now); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	if _, ok := store.Get("550e8400-e29b-41d4-a716-446655440000", now); ok {
+		t.Fatal("stale entry not in the rebuild set must be evicted")
+	}
+	got, ok := store.Get(keep.ID, now)
+	if !ok {
+		t.Fatal("entry present in the rebuild set must survive")
+	}
+	if got.Comment != keep.Comment {
+		t.Fatalf("comment = %q, want %q", got.Comment, keep.Comment)
+	}
+}
+
+func TestSilenceStore_Rebuild_NotifiesOnChange(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+
+	notified := 0
+	store.SetOnChange(func() { notified++ })
+
+	if err := store.Rebuild(nil, now); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if notified != 1 {
+		t.Fatalf("onChange fired %d times, want 1", notified)
+	}
+}
+
+func TestSilenceStore_Rebuild_InvalidItemIsError(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+
+	bad := core.APISilence{
+		ID:       "550e8400-e29b-41d4-a716-446655440000",
+		Matchers: nil, // at least 1 matcher is required
+		EndsAt:   now.Add(time.Hour).Format(time.RFC3339),
+	}
+
+	if err := store.Rebuild([]core.APISilence{bad}, now); err == nil {
+		t.Fatal("expected error for a silence with no matchers")
+	}
+}
+
+func TestSilenceStore_UpsertFromAPI_InsertsUnderSameID(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+
+	item := core.APISilence{
+		ID:        "550e8400-e29b-41d4-a716-446655440000",
+		Matchers:  []core.APISilenceMatcher{{Name: "alertname", Value: "X", IsEqual: true}},
+		StartsAt:  now.Add(-time.Minute).Format(time.RFC3339),
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "from api",
+	}
+
+	gotID, err := store.UpsertFromAPI(item, now)
+	if err != nil {
+		t.Fatalf("UpsertFromAPI() error = %v", err)
+	}
+	if gotID != item.ID {
+		t.Fatalf("UpsertFromAPI() id = %q, want %q", gotID, item.ID)
+	}
+
+	got, ok := store.Get(item.ID, now)
+	if !ok || got.Comment != "from api" {
+		t.Fatalf("silence not mirrored correctly: %+v (found=%v)", got, ok)
+	}
+}

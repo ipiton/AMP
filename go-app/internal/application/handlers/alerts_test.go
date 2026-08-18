@@ -39,10 +39,11 @@ func (f *fakeFilterEngine) ShouldBlock(_ *core.Alert, _ *core.ClassificationResu
 }
 
 type fakeRegistry struct {
-	alertStore   *memory.AlertStore
-	silenceStore *memory.SilenceStore
-	silenceRepo  infrasilencing.SilenceRepository
-	processor    *services.AlertProcessor
+	alertStore      *memory.AlertStore
+	silenceStore    *memory.SilenceStore
+	silenceRepo     infrasilencing.SilenceRepository
+	silenceEventPub infrasilencing.SilenceEventPublisher
+	processor       *services.AlertProcessor
 }
 
 func (r *fakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
@@ -50,10 +51,16 @@ func (r *fakeRegistry) SilenceStore() *memory.SilenceStore { return r.silenceSto
 func (r *fakeRegistry) SilenceRepository() infrasilencing.SilenceRepository {
 	return r.silenceRepo
 }
+func (r *fakeRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublisher {
+	return r.silenceEventPub
+}
 func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
 func (r *fakeRegistry) Config() *appconfig.Config                { return &appconfig.Config{} }
 func (r *fakeRegistry) StartTime() time.Time                     { return time.Now() }
 func (r *fakeRegistry) ReloadConfig(_ context.Context) error     { return nil }
+func (r *fakeRegistry) ClusterStatus(_ context.Context) ClusterStatus {
+	return ClusterStatus{Status: "disabled"}
+}
 
 func newTestProcessor(t *testing.T, publisher *fakePublisher) *services.AlertProcessor {
 	t.Helper()
@@ -332,5 +339,257 @@ func TestAlertsHandler_SilencedAlertIsSuppressed(t *testing.T) {
 	}
 	if total, _, _ := registry.alertStore.Stats(); total != 0 {
 		t.Fatalf("expected no stored alerts, got %d", total)
+	}
+}
+
+// setupSilencedAlert posts a firing alert, then creates a silence matching it
+// (added after ingest, so the alert reaches the store unsilenced and only
+// becomes "suppressed" when GET computes state against the current silences).
+func setupSilencedAlertRegistry(t *testing.T) (*fakeRegistry, http.HandlerFunc) {
+	t.Helper()
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	postAlert(t, handler, map[string]string{"alertname": "Muted", "receiver": "team-a"})
+	postAlert(t, handler, map[string]string{"alertname": "NotMuted", "receiver": "team-b"})
+
+	now := time.Now().UTC()
+	_, err := registry.silenceStore.CreateOrUpdate(&core.SilenceInput{
+		Matchers: []core.SilenceMatcherInput{
+			{Name: "alertname", Value: "Muted"},
+		},
+		StartsAt:  now.Add(-time.Minute).Format(time.RFC3339),
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "test",
+		Comment:   "mute",
+	}, now)
+	if err != nil {
+		t.Fatalf("CreateOrUpdate() error = %v", err)
+	}
+
+	return registry, handler
+}
+
+func TestAlertsHandler_ActiveParamExcludesActiveAlerts(t *testing.T) {
+	_, handler := setupSilencedAlertRegistry(t)
+
+	alerts := getAlerts(t, handler, "active=false")
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert (the suppressed one), got %d", len(alerts))
+	}
+	if alerts[0].Status.State != "suppressed" {
+		t.Fatalf("expected remaining alert to be suppressed, got state %q", alerts[0].Status.State)
+	}
+}
+
+func TestAlertsHandler_SilencedParamExcludesSuppressedAlerts(t *testing.T) {
+	_, handler := setupSilencedAlertRegistry(t)
+
+	alerts := getAlerts(t, handler, "silenced=false")
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert (the active one), got %d", len(alerts))
+	}
+	if alerts[0].Status.State != "active" {
+		t.Fatalf("expected remaining alert to be active, got state %q", alerts[0].Status.State)
+	}
+}
+
+func TestAlertsHandler_DefaultParams_ReturnsAllStates(t *testing.T) {
+	_, handler := setupSilencedAlertRegistry(t)
+
+	alerts := getAlerts(t, handler, "")
+	if len(alerts) != 2 {
+		t.Fatalf("expected 2 alerts with default active/silenced/inhibited/unprocessed=true, got %d", len(alerts))
+	}
+}
+
+func TestAlertsHandler_InhibitedParamIsStructuralNoop(t *testing.T) {
+	// LIMITATION: InhibitedBy is always empty until the inhibition pipeline
+	// (separate parity track) populates it, so inhibited=false must not
+	// exclude anything today — it is wired but has no data to act on yet.
+	_, handler := setupSilencedAlertRegistry(t)
+
+	alerts := getAlerts(t, handler, "inhibited=false")
+	if len(alerts) != 2 {
+		t.Fatalf("expected inhibited=false to be a no-op today, got %d alerts", len(alerts))
+	}
+}
+
+func TestAlertsHandler_UnprocessedParam(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	// A resolved alert (never fired through this store) computes state
+	// "unprocessed" per alertconv.ToGettableAlert.
+	payload := `[{"labels":{"alertname":"ResolvedOnIngest"},"startsAt":"2026-03-08T10:00:00Z","status":"resolved"}]`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	alerts := getAlerts(t, handler, "resolved=true")
+	if len(alerts) != 1 || alerts[0].Status.State != "unprocessed" {
+		t.Fatalf("expected 1 unprocessed alert, got %+v", alerts)
+	}
+
+	excluded := getAlerts(t, handler, "resolved=true&unprocessed=false")
+	if len(excluded) != 0 {
+		t.Fatalf("expected unprocessed=false to exclude the resolved alert, got %d", len(excluded))
+	}
+}
+
+func TestAlertsHandler_ReceiverParamRegexMatch(t *testing.T) {
+	registry, handler := setupSilencedAlertRegistry(t)
+	_ = registry
+
+	teamA := getAlerts(t, handler, `receiver=team-a`)
+	if len(teamA) != 1 || teamA[0].Labels["alertname"] != "Muted" {
+		t.Fatalf("expected receiver=team-a to match only the team-a alert, got %+v", teamA)
+	}
+
+	anyTeam := getAlerts(t, handler, `receiver=team-.*`)
+	if len(anyTeam) != 2 {
+		t.Fatalf("expected receiver=team-.* to match both alerts, got %d", len(anyTeam))
+	}
+
+	none := getAlerts(t, handler, `receiver=team-c`)
+	if len(none) != 0 {
+		t.Fatalf("expected receiver=team-c to match nothing, got %d", len(none))
+	}
+}
+
+func TestAlertsHandler_InvalidBoolParam_Returns400(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := AlertsHandler(registry)
+
+	for _, param := range []string{"active", "silenced", "inhibited", "unprocessed"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?"+param+"=notabool", nil)
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s=notabool: got status %d, want 400", param, rec.Code)
+		}
+	}
+}
+
+func TestAlertsHandler_InvalidReceiverRegex_Returns400(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?receiver=%5B", nil) // "[" — unbalanced class
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
+
+func TestV1AlertsHandler_PostAliasesV2Ingest(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := V1AlertsHandler(registry)
+
+	payload := `[{"labels":{"alertname":"V1Alias","service":"amp"},"startsAt":"2026-03-08T10:00:00Z","status":"firing"}]`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/alerts status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if len(publisher.published) != 1 {
+		t.Fatalf("expected 1 published alert via v1 alias, got %d", len(publisher.published))
+	}
+	if total, _, _ := registry.alertStore.Stats(); total != 1 {
+		t.Fatalf("expected 1 stored alert via v1 alias, got %d", total)
+	}
+}
+
+func TestV1AlertsHandler_PostInvalidPayload_Returns400(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/alerts", bytes.NewBufferString(`[]`))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/v1/alerts (empty array) status = %d, want 400", rec.Code)
+	}
+}
+
+func TestV1AlertsHandler_Get_Returns405(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := V1AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /api/v1/alerts status = %d, want 405", rec.Code)
+	}
+	if allow := rec.Header().Get("Allow"); allow != "POST" {
+		t.Errorf("Allow header = %q, want %q", allow, "POST")
+	}
+}
+
+func TestAlertsHandler_OldStatusResolvedAliasCombinedWithNewParams(t *testing.T) {
+	publisher := &fakePublisher{}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+		processor:    newTestProcessor(t, publisher),
+	}
+	handler := AlertsHandler(registry)
+
+	payload := `[{"labels":{"alertname":"OldAlias"},"startsAt":"2026-03-08T10:00:00Z","status":"resolved"}]`
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	// status=resolved is still a working alias for resolved=true.
+	alerts := getAlerts(t, handler, "status=resolved")
+	if len(alerts) != 1 {
+		t.Fatalf("expected status=resolved alias to still work, got %d alerts", len(alerts))
+	}
+
+	// Combined with the new unprocessed=false, the resolved alert is excluded.
+	excluded := getAlerts(t, handler, "status=resolved&unprocessed=false")
+	if len(excluded) != 0 {
+		t.Fatalf("expected status=resolved&unprocessed=false to exclude it, got %d", len(excluded))
 	}
 }

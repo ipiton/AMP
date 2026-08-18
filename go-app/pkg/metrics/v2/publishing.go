@@ -17,6 +17,7 @@ const (
 	ProviderRootly    = "rootly"
 	ProviderWebhook   = "webhook"
 	ProviderEmail     = "email"
+	ProviderTelegram  = "telegram"
 )
 
 // PublishingMetrics provides consolidated metrics for all publishing operations.
