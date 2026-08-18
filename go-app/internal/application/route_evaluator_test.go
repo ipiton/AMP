@@ -11,6 +11,7 @@ import (
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -297,4 +298,126 @@ func TestRouteTreeTimeIntervalLookup_HotReloadReflectsNewDefinition(t *testing.T
 
 	_, ok = lookup.GetTimeInterval("renamed")
 	assert.True(t, ok, "after reload, the SAME lookup instance must see the new definition")
+}
+
+// --- routing metrics (follow-up to task 1.4's EnableMetrics:false blind
+// spot) ------------------------------------------------------------------
+//
+// initializeRouting now injects routingMatcherMetricsOnce()/
+// routingEvaluatorMetricsOnce() (route_evaluator.go) instead of leaving
+// EnableMetrics off. Both are built via sync.OnceValue against the
+// process-wide default Prometheus registry, so every test below shares
+// them with every OTHER test in this file/binary that also calls
+// initializeRouting — assertions here use deltas (before/after a specific
+// Evaluate call) rather than absolute values, to stay correct regardless
+// of test run order or `-run` filtering.
+
+func TestRouteTreeEvaluator_MetricsIncrementOnEvaluate(t *testing.T) {
+	registry := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfig()},
+		logger: testLogger(),
+	}
+	require.NoError(t, registry.initializeRouting(context.Background()))
+
+	adapter, ok := registry.routeEvaluator.(*routeTreeEvaluator)
+	require.True(t, ok, "routeEvaluator must be a *routeTreeEvaluator")
+	require.NotNil(t, adapter.opts.Metrics, "metrics must be injected by initializeRouting")
+
+	before := testutil.ToFloat64(adapter.opts.Metrics.EvaluationsTotal.WithLabelValues("critical-pagerduty"))
+
+	_, err := registry.routeEvaluator.Evaluate(map[string]string{
+		"alertname": "HighCPU",
+		"severity":  "critical",
+	})
+	require.NoError(t, err)
+
+	after := testutil.ToFloat64(adapter.opts.Metrics.EvaluationsTotal.WithLabelValues("critical-pagerduty"))
+	assert.Greater(t, after, before, "EvaluationsTotal must increment on a real Evaluate call")
+}
+
+// TestReloadRoutingTree_MetricsSurviveReloadAndKeepCounting proves the two
+// hot-reload guarantees the follow-up required: reloading the tree must
+// not panic (it would, pre-fix, if metrics were constructed per reload),
+// and the SAME metrics instance — not a fresh one — keeps counting after
+// the swap.
+func TestReloadRoutingTree_MetricsSurviveReloadAndKeepCounting(t *testing.T) {
+	registry := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfig()},
+		logger: testLogger(),
+	}
+	require.NoError(t, registry.initializeRouting(context.Background()))
+
+	adapter := registry.routeEvaluator.(*routeTreeEvaluator)
+	metricsBeforeReload := adapter.opts.Metrics
+	require.NotNil(t, metricsBeforeReload)
+
+	_, err := registry.routeEvaluator.Evaluate(map[string]string{"severity": "critical"})
+	require.NoError(t, err)
+
+	registry.config.Routing = buildAlternateFixtureRouteConfig()
+	require.NoError(t, registry.reloadRoutingTree())
+
+	// Tree swap must not touch the adapter's metrics: same instance, no
+	// re-registration.
+	assert.Same(t, metricsBeforeReload, adapter.opts.Metrics,
+		"reload must not rebuild/replace the metrics instance")
+
+	before := testutil.ToFloat64(metricsBeforeReload.EvaluationsTotal.WithLabelValues("reloaded-receiver"))
+
+	decision, err := registry.routeEvaluator.Evaluate(map[string]string{"severity": "critical"})
+	require.NoError(t, err)
+	require.Equal(t, "reloaded-receiver", decision.Receiver)
+
+	after := testutil.ToFloat64(metricsBeforeReload.EvaluationsTotal.WithLabelValues("reloaded-receiver"))
+	assert.Greater(t, after, before, "the same metrics instance must keep counting after reload")
+}
+
+// TestInitializeRouting_MultipleRegistries_ShareMetricsNoDoubleRegistrationPanic
+// constructs and initializes TWO independent ServiceRegistry instances in
+// one test (mirroring what already happens across this whole test file,
+// just made explicit): pre-fix, giving both a metrics-enabled matcher/
+// evaluator would panic on the second initializeRouting call because
+// NewMatcherMetrics/NewEvaluatorMetrics promauto-register against the
+// shared default registry. routingMatcherMetricsOnce/
+// routingEvaluatorMetricsOnce (sync.OnceValue) make both registries share
+// one metrics instance instead.
+func TestInitializeRouting_MultipleRegistries_ShareMetricsNoDoubleRegistrationPanic(t *testing.T) {
+	regA := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfig()},
+		logger: testLogger(),
+	}
+	regB := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfig()},
+		logger: testLogger(),
+	}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, regA.initializeRouting(context.Background()))
+		require.NoError(t, regB.initializeRouting(context.Background()))
+	})
+
+	adapterA := regA.routeEvaluator.(*routeTreeEvaluator)
+	adapterB := regB.routeEvaluator.(*routeTreeEvaluator)
+	assert.Same(t, adapterA.opts.Metrics, adapterB.opts.Metrics,
+		"both registries must share the single process-wide EvaluatorMetrics instance")
+
+	_, err := regA.routeEvaluator.Evaluate(map[string]string{"severity": "critical"})
+	require.NoError(t, err)
+	_, err = regB.routeEvaluator.Evaluate(map[string]string{"severity": "critical"})
+	require.NoError(t, err)
+}
+
+// TestRoutingMetricsSingletons_ReturnSameInstanceAcrossCalls is a direct
+// proof that routingMatcherMetricsOnce/routingEvaluatorMetricsOnce
+// construct their promauto-registered metrics exactly once: repeated calls
+// return the identical pointer, so NewMatcherMetrics()/NewEvaluatorMetrics()
+// (and therefore promauto registration) run at most once per process.
+func TestRoutingMetricsSingletons_ReturnSameInstanceAcrossCalls(t *testing.T) {
+	m1 := routingMatcherMetricsOnce()
+	m2 := routingMatcherMetricsOnce()
+	assert.Same(t, m1, m2)
+
+	e1 := routingEvaluatorMetricsOnce()
+	e2 := routingEvaluatorMetricsOnce()
+	assert.Same(t, e1, e2)
 }
