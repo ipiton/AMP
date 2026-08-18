@@ -172,7 +172,14 @@ func TestApplySilenceEvent_UpsertNotFoundEvictsStaleLocalEntry(t *testing.T) {
 	}
 }
 
-func TestApplySilenceEvent_UpsertExpiredEvictsLocalEntry(t *testing.T) {
+// TestApplySilenceEvent_UpsertExpiredIsMirroredNotEvicted is the F3
+// (alertmanager-parity amtool audit) regression guard: an Upsert event whose
+// fetched row is already expired — whether it elapsed naturally, or a
+// replica just forced it there via handleSilenceDelete's ExpireSilence —
+// must be mirrored into the local cache AS EXPIRED, not evicted. Evicting it
+// would make GET /api/v2/silences on this replica silently disagree with
+// the replica that handled the DELETE.
+func TestApplySilenceEvent_UpsertExpiredIsMirroredNotEvicted(t *testing.T) {
 	now := time.Now().UTC()
 	repo := newFakeSharedSilenceRepo()
 	// EndsAt already in the past: expired by the time this replica applies it.
@@ -180,6 +187,8 @@ func TestApplySilenceEvent_UpsertExpiredEvictsLocalEntry(t *testing.T) {
 	repo.put(s)
 
 	store := memory.NewSilenceStore()
+	// Pre-seed as still-active locally, so this test proves a real
+	// active -> expired transition, not just a fresh insert.
 	if _, err := store.Upsert(coreSilenceInputFor(t, s.ID, now), now); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
@@ -192,8 +201,17 @@ func TestApplySilenceEvent_UpsertExpiredEvictsLocalEntry(t *testing.T) {
 
 	r.applySilenceEvent(context.Background(), infrasilencing.SilenceEvent{ID: s.ID, Op: infrasilencing.SilenceEventUpsert})
 
-	if _, ok := store.Get(s.ID, now); ok {
-		t.Fatal("expired silence must not remain in the active/pending read cache")
+	got, ok := store.Get(s.ID, now)
+	if !ok {
+		t.Fatal("expired silence must still be mirrored into the read cache, not evicted")
+	}
+	if got.Status.State != "expired" {
+		t.Fatalf("Status.State = %q, want %q", got.Status.State, "expired")
+	}
+	// Must not silence anything (it's expired, not active) — the important
+	// thing is that it stays *queryable*, not that it stays *effective*.
+	if store.HasActiveMatch(map[string]string{"alertname": "NodeDown"}, now) {
+		t.Fatal("an expired silence must not suppress alerts")
 	}
 }
 

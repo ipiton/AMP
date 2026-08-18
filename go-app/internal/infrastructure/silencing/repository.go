@@ -78,6 +78,20 @@ type SilenceRepository interface {
 	//   - ErrDatabaseConnection for database errors
 	DeleteSilence(ctx context.Context, id string) error
 
+	// ExpireSilence forces a single silence into the "expired" state by ID —
+	// the API-triggered counterpart to DELETE /api/v2/silence/{id}, matching
+	// upstream Alertmanager semantics: it does NOT remove the row (unlike
+	// DeleteSilence above). EndsAt is moved to "now" only if it hasn't
+	// already passed (idempotent — never extends EndsAt), Status is set to
+	// expired, UpdatedAt is bumped. Row removal stays owned exclusively by
+	// the GC retention worker (ExpireSilences with deleteExpired=true).
+	//
+	// Errors:
+	//   - ErrSilenceNotFound if the silence does not exist
+	//   - ErrInvalidUUID if id is not a valid UUID
+	//   - ErrDatabaseConnection for database errors
+	ExpireSilence(ctx context.Context, id string, now time.Time) error
+
 	// CountSilences returns the total number of silences matching the filter.
 	// Useful for pagination (total pages = count / limit).
 	//
