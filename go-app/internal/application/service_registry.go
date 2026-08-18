@@ -117,6 +117,17 @@ type ServiceRegistry struct {
 	// same as before this task — see initializeSilenceGCElection's doc
 	// comment). LeaderElector() below is the read-only hook task 6.5's
 	// status endpoint uses; it treats nil the same as "always leader."
+	//
+	// Write-once invariant: set at most once, during Initialize (before any
+	// concurrent reader — e.g. 6.5's status endpoint — exists), and never
+	// reset back to nil afterward, including by Shutdown. This is
+	// deliberate, not an oversight: 6.5's status handler calls
+	// LeaderElector()/IsLeader() concurrently with the request-serving
+	// goroutines, so a Shutdown that nil'd this field out from under a
+	// concurrent read would be a data race. Elector.Stop() already leaves
+	// IsLeader() reporting false (a real, correct answer — this replica no
+	// longer holds leadership), so there's nothing Shutdown needs the field
+	// cleared for; it just keeps pointing at a stopped, inert Elector.
 	leaderElector lock.Elector
 
 	// Core Services
@@ -1692,6 +1703,13 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 	// synchronously — that must happen while the manager is still alive,
 	// and releases the Redis lock so another replica can take over
 	// immediately instead of waiting out the full TTL.
+	//
+	// Deliberately NOT setting r.leaderElector = nil afterward (see the
+	// field's own doc comment): 6.5's status endpoint reads it
+	// concurrently with Shutdown, and Elector.Stop() already leaves
+	// IsLeader() reporting false, which is the correct answer post-shutdown
+	// anyway — nil-ing the field here would only add a data race, not a
+	// more correct one.
 	if r.leaderElector != nil {
 		r.logger.Info("Shutting down silence GC leader election...")
 		stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1699,7 +1717,6 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 			r.logger.Warn("Silence GC leader election stop warning", "error", err)
 		}
 		cancel()
-		r.leaderElector = nil
 	}
 
 	// Shutdown Silence manager background workers (task 2.1). Stop before

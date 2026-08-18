@@ -639,6 +639,16 @@ func (sm *DefaultSilenceManager) StartGC(ctx context.Context) {
 // Exposed for a lock.LeaderElector's OnLost callback (task 6.4); see
 // StartGC's doc comment. Also called unconditionally as a backstop from
 // Stop() below, regardless of whether leader election is wired.
+//
+// Waits for an in-flight runCleanup pass to finish rather than cancelling
+// it mid-flight (gcWorker.Stop() only signals via stopCh/ctx between
+// ticks, not inside a running pass — see gc_worker.go's run/Stop). This
+// means the old leader's OnLost can briefly overlap with the new leader's
+// first pass if leadership changes hands mid-cleanup. That overlap is
+// harmless: both passes run the same idempotent
+// `WHERE ends_at < cutoff LIMIT batchSize` expire/delete, so a second pass
+// racing the first just finds fewer (or zero) rows left to touch — never
+// double-deletes or corrupts state.
 func (sm *DefaultSilenceManager) StopGC() {
 	sm.gcMu.Lock()
 	defer sm.gcMu.Unlock()
