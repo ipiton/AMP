@@ -464,17 +464,20 @@ func (r *ServiceRegistry) initializeSilencePersistence(ctx context.Context) erro
 	return nil
 }
 
-// rehydrateSilenceStore loads active and pending silences from the persistent
-// repository into the in-memory SilenceStore after a restart. The database is
-// the source of truth; memory is a read cache for the API. Expired silences
-// are intentionally skipped — the memory store recomputes state from
-// timestamps on every read, so they would be dead weight.
+// rehydrateSilenceStore loads active, pending, and (per the F3 fix below)
+// expired silences from the persistent repository into the in-memory
+// SilenceStore after a restart. The database is the source of truth; memory
+// is a read cache for the API — including expired silences keeps
+// GET /api/v2/silences (status.state == "expired") correct immediately after
+// a restart, not just until the next resync evicts them again. Row removal
+// stays owned exclusively by the GC retention worker, which naturally bounds
+// how many expired rows exist to fetch.
 func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 	if r.silenceRepo == nil || r.silenceStore == nil {
 		return nil
 	}
 
-	apiSilences, err := r.fetchActiveAndPendingSilences(ctx)
+	apiSilences, err := r.fetchSilencesForReadCache(ctx)
 	if err != nil {
 		return fmt.Errorf("list silences for rehydration: %w", err)
 	}
@@ -490,12 +493,23 @@ func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 	return nil
 }
 
-// fetchActiveAndPendingSilences pages through the persistent repository for
-// every active+pending silence, converted to the API DTO shape
-// memory.SilenceStore consumes. Shared by rehydrateSilenceStore (boot-time,
-// additive into an empty store) and resyncSilenceStore (task 6.3, full
-// resync into a possibly-non-empty store via SilenceStore.Rebuild).
-func (r *ServiceRegistry) fetchActiveAndPendingSilences(ctx context.Context) ([]core.APISilence, error) {
+// fetchSilencesForReadCache pages through the persistent repository for
+// every active, pending, AND expired silence, converted to the API DTO
+// shape memory.SilenceStore consumes. Shared by rehydrateSilenceStore
+// (boot-time, additive into an empty store) and resyncSilenceStore (task
+// 6.3, full resync into a possibly-non-empty store via SilenceStore.Rebuild).
+//
+// Expired silences are included (alertmanager-parity amtool audit F3):
+// memory.SilenceStore's own read path (List/Get) already recomputes state
+// from StartsAt/EndsAt live on every call rather than trusting a cached
+// state label, so holding expired rows here is correct, not "dead weight" —
+// excluding them would make GET /api/v2/silences flip an already-fixed
+// expired silence back to invisible on the next periodic resync (every 5m,
+// see runSilencePeriodicResync) or on any other replica's next reconnect
+// resync, undoing handleSilenceDelete's expire-in-place fix. Row removal
+// remains exclusively the GC retention worker's job (ExpireSilences with
+// deleteExpired=true), which bounds how many expired rows this ever fetches.
+func (r *ServiceRegistry) fetchSilencesForReadCache(ctx context.Context) ([]core.APISilence, error) {
 	now := time.Now().UTC()
 	var apiSilences []core.APISilence
 
@@ -505,6 +519,7 @@ func (r *ServiceRegistry) fetchActiveAndPendingSilences(ctx context.Context) ([]
 			Statuses: []coresilencing.SilenceStatus{
 				coresilencing.SilenceStatusActive,
 				coresilencing.SilenceStatusPending,
+				coresilencing.SilenceStatusExpired,
 			},
 			Limit:   pageSize,
 			Offset:  offset,
@@ -870,9 +885,11 @@ func (r *ServiceRegistry) runSilencePeriodicResync(ctx context.Context) {
 // store known to be empty), this uses SilenceStore.Rebuild so entries
 // deleted elsewhere while this replica's view was stale — subscription
 // down, or simply between fallback ticks — are actually evicted, not just
-// left behind.
+// left behind. fetchSilencesForReadCache includes expired silences (F3), so
+// a resync converges an expired-in-place silence the same way it converges
+// everything else, instead of wiping it back out of the cache.
 func (r *ServiceRegistry) resyncSilenceStore(ctx context.Context) {
-	apiSilences, err := r.fetchActiveAndPendingSilences(ctx)
+	apiSilences, err := r.fetchSilencesForReadCache(ctx)
 	if err != nil {
 		r.logger.Warn("Silence store resync failed; cache may be stale until the next resync or event", "error", err)
 		return
@@ -892,6 +909,14 @@ func (r *ServiceRegistry) resyncSilenceStore(ctx context.Context) {
 // current row from silenceRepo rather than trusting a payload that may have
 // raced with a subsequent write, so the database stays the single source of
 // truth (see redis_event_bus.go's package doc for the full rationale).
+//
+// F3 fix: an Upsert event whose fetched row is already "expired" (either
+// because it naturally elapsed, or because it was forced there by
+// handleSilenceDelete's ExpireSilence call) is mirrored in AS EXPIRED, not
+// evicted. memory.SilenceStore's read path (List/Get) recomputes state from
+// StartsAt/EndsAt live on every call, so caching an expired row is correct,
+// not "dead weight" — evicting it here would silently undo the expire-in-
+// place fix on every replica except the one that issued the DELETE.
 func (r *ServiceRegistry) applySilenceEvent(ctx context.Context, event infrasilencing.SilenceEvent) {
 	if event.ID == "" {
 		return
@@ -917,15 +942,6 @@ func (r *ServiceRegistry) applySilenceEvent(ctx context.Context, event infrasile
 
 	now := time.Now().UTC()
 	api := handlers.DomainSilenceToAPI(silence, now)
-	if api.Status.State == "expired" {
-		// Rare (the event fired before EndsAt passed, and time moved on by
-		// the time this replica got to it): expired silences don't belong in
-		// the active/pending read cache, matching rehydrateSilenceStore's
-		// own filter.
-		r.silenceStore.Delete(event.ID)
-		return
-	}
-
 	if _, err := r.silenceStore.UpsertFromAPI(api, now); err != nil {
 		r.logger.Warn("Silence event apply: memory upsert failed", "silence_id", event.ID, "error", err)
 	}

@@ -426,6 +426,99 @@ func (r *PostgresSilenceRepository) DeleteSilence(ctx context.Context, id string
 	return nil
 }
 
+// ExpireSilence implements SilenceRepository.ExpireSilence.
+//
+// Unlike DeleteSilence (hard delete), this forces early expiry in place: the
+// row survives with ends_at moved to now (via LEAST, so an already-past
+// ends_at is never extended backwards-in-time — i.e. never extended at all),
+// starts_at ALSO moved to now via the same LEAST when the silence was still
+// pending (matching upstream Alertmanager's expire() semantics — see
+// PostgresSilenceRepository's caller-facing doc, or memory.SilenceStore.
+// Expire's doc comment, for why a pending silence needs starts_at forced
+// too: without it, a deleted pending silence would keep reporting
+// status.state == "pending" until its original starts_at arrives, instead
+// of "expired" immediately), and status set to 'expired'. This is what
+// DELETE /api/v2/silence/{id} calls on the standard/Postgres profile so that
+// amtool's `silence expire` leaves the silence queryable (status.state ==
+// "expired") until the GC worker's retention window removes it — see
+// ExpireSilences(deleteExpired: true) for that removal step, which this
+// method never performs.
+//
+// Idempotent: calling it twice on the same silence is a no-op the second
+// time (ends_at/status are already at their expired values), matching the
+// idempotency of ExpireSilences itself.
+//
+// Performance target: <5ms for single update (same as DeleteSilence).
+//
+// Example:
+//
+//	err := repo.ExpireSilence(ctx, silenceID, time.Now().UTC())
+//	if err == ErrSilenceNotFound {
+//	    // already gone (hard-deleted by GC, or never existed)
+//	}
+func (r *PostgresSilenceRepository) ExpireSilence(ctx context.Context, id string, now time.Time) error {
+	start := time.Now()
+	operation := "expire_single"
+
+	defer func() {
+		if r.metrics != nil {
+			duration := time.Since(start).Seconds()
+			r.metrics.OperationDuration.WithLabelValues(operation, "success").Observe(duration)
+		}
+	}()
+
+	// Step 1: Validate UUID format
+	if _, err := uuid.Parse(id); err != nil {
+		if r.metrics != nil {
+			r.metrics.Errors.WithLabelValues(operation, "invalid_uuid").Inc()
+		}
+		return fmt.Errorf("%w: %s", ErrInvalidUUID, err)
+	}
+
+	// Step 2: Execute the forced-expiry UPDATE. LEAST(..., $2) on BOTH
+	// columns means neither can move later than now — only earlier or
+	// unchanged. This matters for starts_at specifically: upstream
+	// Alertmanager's expire() (silence/silence.go, v0.34.0) moves BOTH
+	// StartsAt and EndsAt to now when the silence is still pending
+	// (starts_at in the future), so a deleted pending silence becomes
+	// "expired" immediately instead of sitting in "pending" until its
+	// original starts_at arrives. For an already-active silence,
+	// LEAST(starts_at, $2) is a no-op (starts_at is already <= now), so
+	// only ends_at actually moves — same net effect as before, just
+	// expressed uniformly for both states in one UPDATE.
+	query := `
+		UPDATE silences
+		SET starts_at = LEAST(starts_at, $2),
+		    ends_at = LEAST(ends_at, $2),
+		    status = $3,
+		    updated_at = NOW()
+		WHERE id = $1
+	`
+
+	result, err := r.pool.Exec(ctx, query, id, now.UTC(), silencing.SilenceStatusExpired)
+	if err != nil {
+		if r.metrics != nil {
+			r.metrics.Errors.WithLabelValues(operation, "update").Inc()
+		}
+		return fmt.Errorf("expire silence: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		if r.metrics != nil {
+			r.metrics.Errors.WithLabelValues(operation, "not_found").Inc()
+		}
+		return fmt.Errorf("%w: silence with ID %s", ErrSilenceNotFound, id)
+	}
+
+	if r.metrics != nil {
+		r.metrics.Operations.WithLabelValues(operation, "success").Inc()
+	}
+
+	r.logger.Info("silence expired in place", "silence_id", id)
+
+	return nil
+}
+
 // silenceExists checks if a silence with the given ID exists in the database.
 // This is a helper method used by UpdateSilence to distinguish between
 // "not found" and "optimistic lock conflict" errors.

@@ -198,12 +198,38 @@ func persistSilenceDBFirst(ctx context.Context, repo infrasilencing.SilenceRepos
 	return domain.ID, http.StatusOK, nil
 }
 
+// handleSilenceDelete implements DELETE /api/v2/silence/{id}.
+//
+// F3 fix (alertmanager-parity amtool audit): upstream Alertmanager's DELETE
+// forces the silence into the "expired" state rather than removing it —
+// amtool's `silence expire` relies on the expired silence staying queryable
+// via GET /api/v2/silences (status.state == "expired") afterwards. This
+// includes a pending silence (StartsAt still in the future): upstream moves
+// BOTH StartsAt and EndsAt to now for that case so it becomes "expired"
+// immediately rather than staying "pending" — see memory.SilenceStore.
+// Expire's and SilenceRepository.ExpireSilence's doc comments for the exact
+// mechanics. Both profiles now implement that:
+//   - repo == nil (lite profile): memory.SilenceStore.Expire mutates the
+//     cached row in place (see its doc comment for the GC/retention
+//     posture in this profile — there is none, matching pre-existing
+//     lifetime behavior for naturally-elapsed silences).
+//   - repo != nil (standard/Postgres profile): SilenceRepository.ExpireSilence
+//     does the same UPDATE-not-DELETE in the database; row removal is left
+//     exclusively to the GC retention worker (ExpireSilences with
+//     deleteExpired=true). This is an UPDATE, not a delete-from-store, so
+//     the cross-replica event published on success is SilenceEventUpsert
+//     (not Delete) — other replicas' applySilenceEvent re-fetch by ID and
+//     mirror the new (expired) state into their own read cache rather than
+//     evicting it, since the read path already computes state from
+//     timestamps live on every read.
 func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo infrasilencing.SilenceRepository, publisher infrasilencing.SilenceEventPublisher, id string, w http.ResponseWriter) {
+	now := time.Now().UTC()
+
 	if repo == nil {
 		// Memory-only fallback (lite profile / repository unavailable). No
 		// persistent source of truth exists for other replicas, so no event
 		// is published (same reasoning as handleSilencePost's repo==nil path).
-		if !store.Delete(id) {
+		if !store.Expire(id, now) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -211,18 +237,33 @@ func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo i
 		return
 	}
 
-	err := repo.DeleteSilence(ctx, id)
+	err := repo.ExpireSilence(ctx, id, now)
 	switch {
 	case err == nil:
-		// DB commit succeeded; evict from the read cache (best effort) and
-		// tell other replicas to do the same.
-		store.Delete(id)
-		publishSilenceEvent(ctx, publisher, id, infrasilencing.SilenceEventDelete)
+		// DB commit succeeded — the row survives, forced into "expired".
+		// Re-fetch it (rather than trusting a locally-derived value) so the
+		// cache mirrors exactly what's now in the database, same posture as
+		// applySilenceEvent's fetch-by-ID-then-mirror flow; this also
+		// correctly populates the cache on a replica that never had this
+		// silence cached in the first place (e.g. it was created on another
+		// replica and this one hasn't resynced yet).
+		if fresh, ferr := repo.GetSilenceByID(ctx, id); ferr == nil {
+			if _, uerr := store.UpsertFromAPI(DomainSilenceToAPI(fresh, now), now); uerr != nil {
+				slog.Default().Warn("silence cache update failed after expire; cache repaired on next resync",
+					"silence_id", id, "error", uerr)
+			}
+		} else {
+			slog.Default().Warn("silence expired in db but re-fetch for cache mirror failed; cache repaired on next resync",
+				"silence_id", id, "error", ferr)
+		}
+		publishSilenceEvent(ctx, publisher, id, infrasilencing.SilenceEventUpsert)
 		w.WriteHeader(http.StatusOK)
 	case errors.Is(err, infrasilencing.ErrSilenceNotFound), errors.Is(err, infrasilencing.ErrInvalidUUID):
-		// Not in the database. Evict a stale cache entry if one exists so
-		// memory converges back to the database state, and let other
-		// replicas evict their own stale copy too.
+		// Not in the database (already hard-deleted by GC retention, or
+		// never existed). This genuinely is a deletion, not an expiry: evict
+		// a stale cache entry if one exists so memory converges back to the
+		// database state, and let other replicas evict their own stale copy
+		// too.
 		if store.Delete(id) {
 			publishSilenceEvent(ctx, publisher, id, infrasilencing.SilenceEventDelete)
 			w.WriteHeader(http.StatusOK)
@@ -230,7 +271,7 @@ func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo i
 		}
 		w.WriteHeader(http.StatusNotFound)
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete silence"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to expire silence"})
 	}
 }
 

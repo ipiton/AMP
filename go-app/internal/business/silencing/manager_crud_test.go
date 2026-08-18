@@ -46,6 +46,11 @@ func (m *mockRepository) DeleteSilence(ctx context.Context, id string) error {
 	return args.Error(0)
 }
 
+func (m *mockRepository) ExpireSilence(ctx context.Context, id string, now time.Time) error {
+	args := m.Called(ctx, id, now)
+	return args.Error(0)
+}
+
 func (m *mockRepository) ListSilences(ctx context.Context, filter infrasilencing.SilenceFilter) ([]*silencing.Silence, error) {
 	args := m.Called(ctx, filter)
 	if args.Get(0) == nil {
