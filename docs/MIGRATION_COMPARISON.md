@@ -3,7 +3,16 @@
 **Last Updated**: 2026-08-18
 **Alertmanager Version**: v0.27+
 **Alertmanager++ Version**: v0.0.1
-**Status**: AMP now implements upstream's core notification *mechanics* (routing tree, grouping/dispatch, notify chain, HA clustering) via branch `feat/alertmanager-parity` — not just a compatible API surface. This is a **mid-to-late-stage parity candidate**, not the earlier "controlled replacement slice" baseline. A short list of gaps remains open; see below and `docs/ALERTMANAGER_COMPATIBILITY.md`'s Known Gaps section. The `amtool`/Grafana live-audit half of task 7.4 (running separately) is the final acceptance check before any "drop-in" claim.
+**Status**: AMP now implements upstream's core notification *mechanics* (routing tree, grouping/dispatch, notify chain, HA clustering) via branch `feat/alertmanager-parity` — not just a compatible API surface. This is a **mid-to-late-stage parity candidate**, not the earlier "controlled replacement slice" baseline.
+
+**AMP is NOT a config-level drop-in.** Its control plane (routing/grouping/timing/inhibition semantics) is
+parity-level, but its data plane is different by design: delivery endpoints come from `amp.receiver`-scoped
+Kubernetes Secrets, **not** from `receivers[].*_configs`, which AMP parses and validates but never
+auto-provisions. Dropping in an upstream `alertmanager.yml` yields correct routing and **zero deliveries** until
+those Secrets exist — with no error, no warning, and a clean startup. Plan that step explicitly; see
+[Config Migration](#config-migration) below and `docs/ALERTMANAGER_COMPATIBILITY.md`'s "control plane vs data plane"
+section. A short list of other gaps remains open; see below and that document's Known Gaps section. The
+`amtool`/Grafana live-audit half of task 7.4 (running separately) is the final acceptance check.
 
 ---
 
@@ -24,6 +33,16 @@ Treat AMP as a strong parity candidate for the great majority of standard Alertm
   `GET /api/v2/alerts/groups`, `GET /api/v2/inhibitions`
 - `--web.route-prefix` for reverse-proxy deployments
 
+What is **different**, not just narrower:
+- **Delivery targets are not built from `receivers[].*_configs`.** They come from Kubernetes Secrets annotated
+  `amp.receiver: <receiver-name>`. This is the one migration step that fails silently if skipped.
+- Receiver names may contain anything except `/` (AMP reserves it as the group-key separator). Upstream has no
+  restriction; rename any receiver containing a slash.
+- `inhibit_rules[].source_matchers`/`target_matchers` (the `matchers:` list syntax) are **not evaluated** — only the
+  `source_match`/`match_re` map form is. Such rules are logged as an `ERROR` at load/reload but do not inhibit.
+- `GET /api/v2/status`'s `config.original` is the Alertmanager-shaped, secret-redacted subset of your config, not a
+  byte copy of the file.
+
 What's still narrower than upstream: a handful of niche receiver integrations, wire-level webhook batching shape,
 and the config-write/`/history` APIs (explicitly out of scope for this task). See the gap list below.
 
@@ -41,7 +60,9 @@ and the config-write/`/history` APIs (explicitly out of scope for this task). Se
 | Config validation | Mature | Wired into startup + `/-/reload` when a `route:` section is present | Legacy single-receiver configs still skip this validation path |
 | HA / clustering | Gossip-based | Redis-based (nflog, timer liveness, leader election, heartbeat); 2-replica e2e demonstrated via standalone script | Functionally equivalent goal, different mechanism; e2e script not CI-gated |
 | Operational API (`status`/`receivers`/`groups`/`reload`) | Available | Available, with upstream query params | Parity-level |
-| Receiver integrations | Full set incl. OpsGenie/VictorOps/WeChat/Pushover/SNS/Webex | webhook/email/PagerDuty/Slack/Telegram fully wired; Discord/Teams via webhook templates; OpsGenie/VictorOps/WeChat validate-but-not-wired; Pushover/SNS/Webex absent | Check the receiver matrix in `ALERTMANAGER_COMPATIBILITY.md` against your actual receiver list |
+| **Receiver → delivery endpoint provisioning** | Built directly from `receivers[].*_configs` | **Not built from config.** Targets discovered from `amp.receiver`-scoped Kubernetes Secrets; `*_configs` parsed/validated only | **Highest-impact difference.** Create one Secret per endpoint before cutting over, or you route correctly and deliver nothing |
+| Receiver integrations (publisher availability) | Full set incl. OpsGenie/VictorOps/WeChat/Pushover/SNS/Webex | webhook/email/PagerDuty/Slack/Telegram/Rootly publishers wired (Telegram's enhanced publisher became runtime-reachable in the final fix wave); Discord/Teams via webhook templates; OpsGenie/VictorOps/WeChat validate-but-not-wired; Pushover/SNS/Webex absent | Check the receiver matrix in `ALERTMANAGER_COMPATIBILITY.md` against your actual receiver list |
+| Hot reload trigger | `SIGHUP` + `POST /-/reload` | Both. Routing-only edits are applied (they were silently discarded before the final fix wave) | Parity-level |
 | Wire-level webhook payload | One POST per target with a full `alerts` JSON array per group | One POST per `(target × alert)` pair | Different request shape/count; functionally delivers all alerts, but a downstream integration parsing the exact payload shape needs to be checked |
 | Config write API / `/history*` | Available | Not implemented | Explicitly out of scope for this task; stays backlog |
 | Benchmarks / resource claims | Well-known operational profile | Intentionally withheld pending reproducible current benchmarks | Do not make sizing assumptions from old marketing numbers |
@@ -103,7 +124,8 @@ Use AMP if:
 - you need HA delivery guarantees across multiple replicas
 - your receiver set matches the 🟢 rows in the compatibility matrix (webhook, email, PagerDuty, Slack, Telegram,
   Discord/Teams-via-webhook)
-- you can validate the specific gaps above (groups-endpoint receiver field, webhook wire shape) against your own
+- you can create the `amp.receiver`-scoped Secrets that actually carry delivery (see step 3 of the rollout below)
+- you can validate the specific gaps above (webhook wire shape, unwired receiver types) against your own
   integrations before cutover
 
 ---
@@ -130,12 +152,19 @@ Suggested rollout shape:
 1. deploy AMP with the repo-local chart `./helm/amp`
 2. bring your real `route:`/`receivers:` config (or a representative subset) — this is now meaningfully exercised,
    unlike the earlier flat-receiver baseline
-3. validate ingest → grouping → notify-chain behavior end to end: group_wait, a repeat past group_interval, a
-   silence suppressing an in-flight group, an inhibition rule, a mute_time_interval window
-4. if running multi-replica, validate exactly-once delivery and failover (see `deploy/e2e-ha/run.sh` for a
-   reference script)
-5. cross-check your receiver list and any downstream webhook payload parsing against the gaps above
-6. keep rollback to Alertmanager straightforward until your covered slice is proven
+3. <a id="config-migration"></a>**provision delivery targets — the step that has no config equivalent.** For every
+   receiver name your routes reference, create a Kubernetes Secret annotated
+   `amp.receiver: <receiver-name>` (comma-separated list for multiple receivers, or the `amp.receiver` *label* for a
+   single name) carrying that endpoint's `type`, `url` and credentials. AMP will not derive these from your
+   `receivers[].*_configs`; without them the pipeline runs green and delivers nothing. Confirm with
+   `GET /api/v2/alerts/groups` that groups report the receivers you expect, then confirm an actual delivery.
+4. validate ingest → grouping → notify-chain behavior end to end: group_wait, a repeat past group_interval, a
+   silence suppressing an in-flight group, an inhibition rule, a mute_time_interval window, and a resolve (the
+   resolved notification must arrive exactly once and then stop)
+5. if running multi-replica, validate exactly-once delivery, failover, and adoption of in-flight timers after a
+   replica dies (see `deploy/e2e-ha/run.sh` for a reference script covering all three)
+6. cross-check your receiver list and any downstream webhook payload parsing against the gaps above
+7. keep rollback to Alertmanager straightforward until your covered slice is proven
 
 See:
 

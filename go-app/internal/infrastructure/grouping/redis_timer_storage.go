@@ -45,10 +45,36 @@ const (
 	timerIndexKey  = "timers:index"
 	lockKeyPrefix  = "lock:timer:"
 
-	// TTL settings
-	timerTTLGracePeriod = 60 * time.Second // Extra TTL beyond expiration
-	lockTTL             = 30 * time.Second // Distributed lock duration
+	// timerTTLGracePeriod is how much longer than its own ExpiresAt a timer
+	// record survives in Redis (SaveTimer sets TTL = time.Until(ExpiresAt) +
+	// this). It is therefore the hard upper bound on the reconciliation
+	// ADOPTION WINDOW: once the key is gone, no replica can ever discover
+	// that the group still needs a notification.
+	//
+	// INVARIANT (final review finding 2): this MUST stay comfortably larger
+	// than defaultReconciliationGracePeriod, which is how long the
+	// reconciliation loop waits past ExpiresAt before treating a timer as
+	// orphaned. Both were 60s, which collapsed the adoption window to ~0s:
+	// a timer became eligible for adoption at the exact moment its Redis key
+	// expired, so ListOverdueTimers always came back empty and a dead
+	// replica's groups were never adopted — the group simply never notified
+	// again. Enforced at compile time just below.
+	//
+	// 10m also has to leave room for reconciliationInterval (45s default) to
+	// tick at least a few times inside the window, so a single missed tick
+	// (slow Redis, GC pause) does not lose the group.
+	timerTTLGracePeriod = 10 * time.Minute
+
+	lockTTL = 30 * time.Second // Distributed lock duration
 )
+
+// Compile-time enforcement of the adoption-window invariant documented on
+// timerTTLGracePeriod: converting a negative untyped constant to uint64 is a
+// compile error ("constant … overflows uint64"), so shrinking
+// timerTTLGracePeriod below the reconciliation grace period (plus room for a
+// few reconciliation ticks) breaks the build instead of silently reintroducing
+// finding 2.
+const _ = uint64(timerTTLGracePeriod - defaultReconciliationGracePeriod - 4*defaultReconciliationInterval)
 
 // RedisTimerStorage implements TimerStorage using Redis.
 //

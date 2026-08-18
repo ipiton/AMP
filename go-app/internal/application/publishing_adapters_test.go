@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 )
 
@@ -132,10 +134,153 @@ func TestApplicationPublishingAdapter_ReturnsErrorWhenAllTargetsFail(t *testing.
 	}
 }
 
+// TestApplicationPublishingAdapter_PartialFailureReturnsError is final review
+// finding 11: the single-alert path returned nil as soon as ONE target
+// succeeded, while PublishGroup treats any unconfirmed target as a failure.
+// The failed target's notification was simply dropped. Now aligned, so the
+// webhook handler answers 5xx and Prometheus retries.
+func TestApplicationPublishingAdapter_PartialFailureReturnsError(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			{Target: &core.PublishingTarget{Name: "paging"}, Success: false, Error: errors.New("queue full")},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	err = adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"})
+	if err == nil {
+		t.Fatal("expected an error when only some targets confirmed the enqueue")
+	}
+	if !strings.Contains(err.Error(), "queue full") {
+		t.Fatalf("error should carry the failing target's cause, got %v", err)
+	}
+}
+
+// TestApplicationPublishingAdapter_PartialFailureWithoutCauseStillErrors covers
+// a result marked unsuccessful but carrying no Error — the adapter must still
+// refuse to report success.
+func TestApplicationPublishingAdapter_PartialFailureWithoutCauseStillErrors(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			{Target: &core.PublishingTarget{Name: "paging"}, Success: false},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err == nil {
+		t.Fatal("expected an error when a target is unsuccessful without an explicit cause")
+	}
+}
+
+// TestApplicationPublishingAdapter_NoTargetsIsNotAnError pins the DELIBERATE
+// divergence from PublishGroup documented in publish(): an empty result set is a
+// legitimate steady state on this path (no amp.receiver Secrets provisioned yet,
+// or metrics-only mode) and there is no shared notification log to poison.
+// Erroring would 5xx every ingested alert on a working deployment.
+func TestApplicationPublishingAdapter_NoTargetsIsNotAnError(t *testing.T) {
+	adapter, err := NewApplicationPublishingAdapter(&fakePublishingCoordinator{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err != nil {
+		t.Fatalf("empty results must stay non-error on the single-alert path, got %v", err)
+	}
+}
+
+// TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure is
+// wave re-review Minor 4: the partial-failure comparison ran against
+// len(results), which counts nil entries. A run where every REAL target
+// succeeded but the coordinator returned a padded slice therefore reported a
+// partial failure — a spurious 5xx and a Prometheus retry for a delivery that
+// fully succeeded.
+func TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			nil,
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			nil,
+		},
+		groupResults: []*infrapublishing.PublishingResult{
+			nil,
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			nil,
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err != nil {
+		t.Fatalf("single-alert path: nil padding must not read as a partial failure, got %v", err)
+	}
+
+	if err := adapter.PublishGroup(context.Background(), []*core.Alert{{Fingerprint: "abc"}}, "default"); err != nil {
+		t.Fatalf("group path: nil padding must not read as a partial failure, got %v", err)
+	}
+}
+
+// TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed
+// keeps the group path's "nil must never mean sent" contract intact for the
+// degenerate all-nil case, which counts as zero confirmations.
+func TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{nil, nil},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishGroup(context.Background(), []*core.Alert{{Fingerprint: "abc"}}, "default"); err == nil {
+		t.Fatal("a result set with no usable entries must not be reported as delivered")
+	}
+}
+
 func TestMetricsOnlyPublisher_Noops(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("test_reason", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err := publisher.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}); err != nil {
 		t.Fatalf("PublishToAll() error = %v", err)
+	}
+}
+
+// TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery is the contract half
+// of final review finding 4. DefaultGroupManager.publishGroupAlerts records the
+// group in the SHARED, cross-replica notification log (TTL = repeat_interval)
+// whenever PublishGroup returns nil. This publisher delivers nothing, so a nil
+// return silenced the group on every HEALTHY replica for a full
+// repeat_interval; it must return grouping.ErrDeliveryNotConfirmed instead.
+//
+// The consuming side (publishGroupAlerts skipping RecordSent for this sentinel)
+// is covered in internal/infrastructure/grouping/metrics_only_nflog_test.go.
+func TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery(t *testing.T) {
+	publisher := NewMetricsOnlyPublisher("publishing_disabled", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	alerts := []*core.Alert{{Fingerprint: "abc", AlertName: "Test"}}
+
+	err := publisher.PublishGroup(context.Background(), alerts, "default")
+	if !errors.Is(err, grouping.ErrDeliveryNotConfirmed) {
+		t.Fatalf("PublishGroup() error = %v, want it to wrap grouping.ErrDeliveryNotConfirmed", err)
+	}
+	if !strings.Contains(err.Error(), "publishing_disabled") {
+		t.Fatalf("PublishGroup() error = %q, want it to carry the degradation reason", err)
+	}
+
+	// Empty alert set is genuinely nothing to deliver, not a suppressed send.
+	if err := publisher.PublishGroup(context.Background(), nil, "default"); err != nil {
+		t.Fatalf("PublishGroup(no alerts) error = %v, want nil", err)
 	}
 }
 

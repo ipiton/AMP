@@ -198,6 +198,31 @@ func (cc *DefaultConfigComparator) configToMap(cfg *Config) (map[string]interfac
 		return nil, fmt.Errorf("failed to unmarshal config to map: %w", err)
 	}
 
+	// A nil *Config marshals to JSON "null", which unmarshals into a nil
+	// map — assigning into it below would panic.
+	if configMap == nil {
+		configMap = make(map[string]interface{})
+	}
+
+	// The Alertmanager-shaped routing section (`route:`, `receivers:`,
+	// `inhibit_rules:`, `time_intervals:`, `global:`) lives in
+	// Config.Routing, which is `json:"-"` and therefore absent from the JSON
+	// round-trip above. Without this injected fingerprint, routing-only
+	// config edits diff as "no changes" and are silently discarded by the
+	// reload pipeline — see RoutingFingerprint's doc comment for the full
+	// failure chain.
+	//
+	// The synthetic key is "routing" (not "route") so it can never collide
+	// with a real Config JSON field, while still prefix-matching the
+	// "route" check in ReloadCoordinator.identifyAffectedComponents.
+	routingFP := routingFingerprintNone
+	if cfg != nil {
+		routingFP = RoutingFingerprint(cfg.Routing)
+	}
+	configMap["routing"] = map[string]interface{}{
+		"fingerprint": routingFP,
+	}
+
 	return configMap, nil
 }
 

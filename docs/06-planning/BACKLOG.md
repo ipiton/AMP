@@ -86,83 +86,49 @@
 
 ## Alertmanager Full Parity — Phase B (feature parity)
 
-- [ ] **PARITY-B1-MUTE-TIME-INTERVALS** — maintenance windows:
-  - `mute_time_intervals` / `active_time_intervals` — 0% реализации
-  - Alertmanager: поддерживает с v0.22+
-  - **Config формат** (Alertmanager-compatible):
-    ```yaml
-    time_intervals:
-      - name: business-hours
-        time_intervals:
-          - weekdays: ['monday:friday']
-            times:
-              - start_time: '09:00'
-                end_time: '17:00'
-      - name: maintenance-window
-        time_intervals:
-          - weekdays: ['saturday']
-            times:
-              - start_time: '02:00'
-                end_time: '06:00'
-    route:
-      routes:
-        - receiver: oncall
-          mute_time_intervals: [maintenance-window]
-          active_time_intervals: [business-hours]
-    ```
-  - **Реализация (5 компонентов)**:
-    1. **Time interval parser** — структуры `TimeInterval`, `TimePeriod`:
-       - fields: `weekdays` (monday:friday range), `days_of_month` (1-31, negative for end-of-month), `months` (january:march range), `years` (2026:2028 range), `times` (start_time/end_time HH:MM)
-       - Парсинг range-нотации: `monday:friday`, `1:15`, `january:march`
-    2. **Timezone support** — `location: Europe/Moscow` per interval, time.LoadLocation()
-    3. **Matcher** — `func (ti *TimeInterval) IsActive(t time.Time) bool`:
-       - Проверяет все условия (weekday AND time AND month AND day AND year)
-       - Empty field = always matches (как в Alertmanager)
-    4. **Route integration** — два новых поля в route config:
-       - `mute_time_intervals: []string` — ссылки на named intervals, нотификация подавляется
-       - `active_time_intervals: []string` — ссылки на named intervals, нотификация ТОЛЬКО в это время
-    5. **Wiring в routing evaluator** — перед отправкой нотификации:
-       - Если любой mute interval active → suppress
-       - Если есть active intervals и ни один не active → suppress
-  - Оценка: ~5d
+- [x] ~~**PARITY-B1-MUTE-TIME-INTERVALS**~~ — maintenance windows _(closed by feat/alertmanager-parity, 2026-08-18)_
 
 - [~] **PARITY-B2-OPSGENIE-PUBLISHER** — SKIPPED (2026-04-24): Atlassian объявил EOL OpsGenie — April 2027, прием новых клиентов закрыт. Реализация publisher потеряла смысл. `OpsGenieConfig` в коде можно оставить как no-op или удалить в отдельной cleanup-задаче.
 
-- [ ] **PARITY-B3-TELEGRAM-PUBLISHER** — популярен в СНГ:
-  - Полностью отсутствует (ни config, ни publisher)
-  - Нужно: TelegramConfig + TelegramPublisher (Bot API)
-  - Оценка: ~1-2d
+- [x] ~~**PARITY-B3-TELEGRAM-PUBLISHER**~~ — popularен в СНГ _(closed by feat/alertmanager-parity, 2026-08-18)_
 
-- [ ] **PARITY-B6-WEB-ROUTE-PREFIX** — reverse proxy:
-  - Alertmanager: `--web.route-prefix` для prefix routing за reverse proxy
-  - AMP: отсутствует
-  - Оценка: ~0.5d
+- [x] ~~**PARITY-B6-WEB-ROUTE-PREFIX**~~ — reverse proxy _(closed by feat/alertmanager-parity, 2026-08-18)_
 
 ## Alertmanager Full Parity — Phase C (enterprise HA)
 
-- [ ] **PARITY-C1-CLUSTERING** — высокая доступность:
-  - Нет gossip/memberlist/peer sync — single-instance only
-  - Потеря in-memory state при crash (Redis спасает partially)
-  - **Что синхронизируется в Alertmanager**:
-    1. **Silences** — создание/удаление реплицируется на все ноды
-    2. **Notification log (nflog)** — кто какой alert group отправил → предотвращает дубли
-    3. **Alert state** — resolved/firing статус
-  - **Вариант A: Hashicorp memberlist** (как Alertmanager) ~15d:
-    - Плюс: совместимость с `--cluster.peer` флагами
-    - Минус: сложный gossip протокол, UDP/TCP, flaky в K8s (mesh networking)
-    - Минус: нужен service discovery для peers
-  - **Вариант B: Redis-based state sync** (рекомендуется для AMP) ~10d:
-    - Плюс: AMP уже использует Redis (group state, locks, cache) — инфраструктура есть
-    - Плюс: проще в K8s (нет gossip, нет UDP)
-    - Минус: Redis = SPOF (нужен Redis Sentinel или Cluster)
-    - **Реализация**:
-      1. **Notification log в Redis** — key: `nflog:{group_key}:{receiver}`, value: timestamp последней отправки. TTL = repeat_interval * 2. Перед отправкой: проверить nflog → если другой инстанс уже отправил → skip
-      2. **Silences** — уже в PostgreSQL, реплицируются на уровне DB. In-memory cache синхронизируется через Redis pub/sub: `silence:created`, `silence:deleted` events
-      3. **Alert state** — firing/resolved уже в PostgreSQL. In-memory sync через Redis pub/sub канал `alert:state`
-      4. **Leader election для group timers** — Redis distributed lock на group_key. Только leader триггерит group_wait/group_interval. При потере лидера — automatic failover через lock expiry
-      5. **Health check** — каждый инстанс пишет heartbeat в Redis (`instance:{id}:heartbeat`, TTL 30s). Readiness probe учитывает peer count
-  - **Решение**: Вариант B — Redis-based. Естественно ложится на существующую архитектуру AMP
-  - Оценка: ~10d
+- [x] ~~**PARITY-C1-CLUSTERING**~~ — высокая доступность _(closed by feat/alertmanager-parity Phase 6, 2026-08-18)_
+
+## Alertmanager Full Parity — Follow-ups from Phase 1-7 delivery (2026-08-18)
+> Дефериты и потенциальные оптимизации из final-review и progress.md; не блокируют production deployment.
+
+- [ ] **FU-WEBHOOK-BATCHING** — wire-level webhook batching: one POST with alerts array vs N per-alert jobs. Interface-level ONE notification satisfied; follow-up optimizes delivery. ~2d
+- [ ] **FU-NFLOG-DEDUP** — per-target nflog dedup granularity (current: per-group-receiver); enable finer deduplication at publisher target level. ~1d
+- [ ] **FU-TELEGRAM-RATE-LIMIT** — per-chat rate limit for Telegram (~1msg/s per chat vs global 30/s). Operational risk noted during Phase 7.1. ~1-2d
+- [ ] **FU-MIGRATION-ADVISORY-LOCK** — migration advisory lock mechanism. In progress on sdd/fu-miglock; track coordination. See final-review blocking #2. ~2d
+- [ ] **FU-ROUTING-METRICS** — routing metrics restoration (currently disabled due to promauto double-registration). Per-evaluator custom registry. In progress on sdd/fu-routing-metrics. ~2d
+- [ ] **FU-RECEIVERS-INTEGRATION** — receivers: integration auto-provisioning (data-plane follow-up; current state: control-plane parity only, delivery via K8s Secrets). See final-review #5. ~5-7d
+- [ ] **FU-FINGERPRINT-HEX-FORMAT** — fingerprint 16-hex upstream format (F2 compatibility). ~0.5d
+- [ ] **FU-SILENCES-EXPIRED-QUERY** — silences --expired query support. ~0.5d
+- [ ] **FU-GET-ALERTS-V1** — GET /api/v1/alerts endpoint (parity gap, brief asked POST alias only). ~0.5d
+- [ ] **FU-SILENCE-SYNC-INTERVALS** — configurable silence-sync intervals (currently: 2s backoff / 5min resync constants hardcoded). ~0.5d
+- [ ] **FU-STORAGEMANAGER-FAILBACK** — StorageManager runtime Redis failback (startup-only decision currently; potential graceful degradation). ~1-2d
+- [ ] **FU-SLACK-PAGERDUTY-QUEUE-PATH** — enhanced slack/pagerduty publishers unreachable via queue path (same class as telegram fix in Phase 7.2). Mutex guards for client maps. ~1d
+- [ ] **FU-PARSEARGUMENT-QUOTE-HANDLING** — parseMatcherExpr quote handling edge cases (third matcher grammar divergence vs configvalidator). ~0.5d
+- [ ] **FU-GLOB-DEFAULT-VALUES** — GlobalConfig fallback fields for group_by/duration. ~0.5d
+- [ ] **FU-DOUBLE-NORMALIZE-ROUTES** — double NormalizeRoutePrefix call cleanup. ~0.25d
+- [ ] **FU-PARSEBOOL-EMPTY-DEFAULT** — parseBoolQueryStrict silently defaults on empty param value. ~0.25d
+- [ ] **FU-MICRO-CLEANUPS** — minor code/test hygiene from final-review backlog:
+  - matcherErrorCode classification via error-string substring (fragile); clarify or fix
+  - GetStats TODOs (GCLastRun, etc., pre-existing)
+  - TimerManagerConfig dead config defaults (startup-only decision)
+  - warnGroupingFallback per-alert log rate-limit at volume
+  - copyMetadata shallow-copies timer pointers (pre-existing, flagged by re-reviewer)
+  - DefaultFormatRegistry comment stale ("5 formats" now outdated)
+  - sleep-poll e2e test flakiness (registry e2e uses poll)
+  - TimeIntervalNames Redis round-trip test gap
+  - telegram field-level validator missing in configvalidator (backstopped by routing.Parse)
+  - configurable silence-sync intervals (2s backoff / 5min resync hardcoded constants)
+  - ~0.25d each
 
 - [ ] **PARITY-C2-REMAINING-RECEIVERS** — нишевые:
   - VictorOps/Splunk On-Call — config определён (`VictorOpsConfig`)

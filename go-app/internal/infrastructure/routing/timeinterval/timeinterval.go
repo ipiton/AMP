@@ -278,6 +278,33 @@ func (w *WeekdayRange) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+// MarshalYAML serializes the range back to the upstream scalar form —
+// "monday" for a single day, "monday:friday" for a span.
+//
+// WHY (final review finding 15): /api/v2/status's `config.original` re-emits
+// the parsed Alertmanager config as YAML, and `amtool config routes show`
+// re-parses that output. Without a MarshalYAML, yaml.Marshal fell back to the
+// struct's exported fields and produced `{begin: 1, end: 5}`, which
+// UnmarshalYAML then rejected ("expected a string or number, got map") — the
+// emitted config was not re-parsable at all. Same reason for MonthRange,
+// DayOfMonthRange and YearRange below; TimeRange and Location already had one.
+func (w WeekdayRange) MarshalYAML() (interface{}, error) {
+	return formatRange(weekdayName(w.Begin), weekdayName(w.End)), nil
+}
+
+func weekdayName(wd time.Weekday) string {
+	return strings.ToLower(wd.String())
+}
+
+// formatRange renders "begin" when the endpoints are equal and "begin:end"
+// otherwise, matching upstream's own accepted input forms.
+func formatRange(begin, end string) string {
+	if begin == end {
+		return begin
+	}
+	return begin + ":" + end
+}
+
 // Contains reports whether wd falls within [Begin, End] (inclusive).
 func (w WeekdayRange) Contains(wd time.Weekday) bool {
 	return int(wd) >= int(w.Begin) && int(wd) <= int(w.End)
@@ -326,6 +353,14 @@ func (d *DayOfMonthRange) UnmarshalYAML(unmarshal func(interface{}) error) error
 	}
 	d.Begin, d.End = begin, end
 	return nil
+}
+
+// MarshalYAML serializes the range back to the upstream scalar form, e.g. "1",
+// "1:5" or "20:-1" — see WeekdayRange.MarshalYAML for why. Quoted as a string
+// so a negative bound cannot be re-read as a YAML integer, which
+// UnmarshalYAML's range parser would then have to special-case.
+func (d DayOfMonthRange) MarshalYAML() (interface{}, error) {
+	return formatRange(strconv.Itoa(d.Begin), strconv.Itoa(d.End)), nil
 }
 
 // Contains reports whether day (1..daysInMonth) falls within the range,
@@ -406,6 +441,12 @@ func (m *MonthRange) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	return nil
 }
 
+// MarshalYAML serializes the range back to the upstream scalar form, e.g.
+// "march" or "january:march" — see WeekdayRange.MarshalYAML for why.
+func (m MonthRange) MarshalYAML() (interface{}, error) {
+	return formatRange(strings.ToLower(m.Begin.String()), strings.ToLower(m.End.String())), nil
+}
+
 // Contains reports whether month falls within [Begin, End] (inclusive).
 func (m MonthRange) Contains(month time.Month) bool {
 	return int(month) >= int(m.Begin) && int(month) <= int(m.End)
@@ -443,6 +484,12 @@ func (y *YearRange) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 	y.Begin, y.End = begin, end
 	return nil
+}
+
+// MarshalYAML serializes the range back to the upstream scalar form, e.g.
+// "2024" or "2020:2022" — see WeekdayRange.MarshalYAML for why.
+func (y YearRange) MarshalYAML() (interface{}, error) {
+	return formatRange(strconv.Itoa(y.Begin), strconv.Itoa(y.End)), nil
 }
 
 // Contains reports whether year falls within [Begin, End] (inclusive).

@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,13 +23,14 @@ import (
 )
 
 type extendedFakeRegistry struct {
-	alertStore    *memory.AlertStore
-	silenceStore  *memory.SilenceStore
-	processor     *services.AlertProcessor
-	config        *appconfig.Config
-	startTime     time.Time
-	reloadErr     error
-	clusterStatus ClusterStatus
+	alertStore     *memory.AlertStore
+	silenceStore   *memory.SilenceStore
+	processor      *services.AlertProcessor
+	config         *appconfig.Config
+	startTime      time.Time
+	reloadErr      error
+	clusterStatus  ClusterStatus
+	routeEvaluator services.RouteEvaluator
 }
 
 func (r *extendedFakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
@@ -43,6 +46,11 @@ func (r *extendedFakeRegistry) Config() *appconfig.Config                       
 func (r *extendedFakeRegistry) StartTime() time.Time                               { return r.startTime }
 func (r *extendedFakeRegistry) ReloadConfig(_ context.Context) error               { return r.reloadErr }
 func (r *extendedFakeRegistry) InhibitionState() inhibition.InhibitionStateManager { return nil }
+
+// RouteEvaluator returns nil unless a test injects one — nil is the
+// lite/legacy posture (no `route:` section).
+func (r *extendedFakeRegistry) RouteEvaluator() services.RouteEvaluator { return r.routeEvaluator }
+
 func (r *extendedFakeRegistry) ClusterStatus(_ context.Context) ClusterStatus {
 	if r.clusterStatus.Status == "" {
 		return ClusterStatus{Status: "disabled"}
@@ -88,8 +96,14 @@ func TestStatusAPIHandler(t *testing.T) {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	if resp.Config.Original != configContent {
-		t.Errorf("got config content %q, want %q", resp.Config.Original, configContent)
+	// Final review finding 15: config.original must NOT be the raw config
+	// file (it is served unauthenticated and would leak every credential in
+	// it), and must be Alertmanager-shaped so amtool can re-parse it.
+	if resp.Config.Original == configContent {
+		t.Error("config.original returned the raw config file verbatim; it must be the Alertmanager-shaped redacted view")
+	}
+	if !strings.Contains(resp.Config.Original, "route:") {
+		t.Errorf("config.original is not Alertmanager-shaped (no route:): %q", resp.Config.Original)
 	}
 
 	if resp.Uptime.Unix() != startTime.Unix() {
@@ -117,8 +131,12 @@ func TestStatusAPIHandler(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected top-level \"config\" to be a nested object, got %T", raw["config"])
 	}
-	if configObj["original"] != configContent {
-		t.Errorf("got config.original %v, want %q", configObj["original"], configContent)
+	original, ok := configObj["original"].(string)
+	if !ok {
+		t.Fatalf("expected config.original to be a string, got %T", configObj["original"])
+	}
+	if strings.Contains(original, "profile:") {
+		t.Errorf("config.original leaked non-Alertmanager config sections: %q", original)
 	}
 	if _, hasFlatKey := raw["config.original"]; hasFlatKey {
 		t.Error("response still has the old flat \"config.original\" key")
@@ -213,6 +231,22 @@ func TestReloadHandler(t *testing.T) {
 		if rec.Code != http.StatusInternalServerError {
 			t.Errorf("got status %d, want 500", rec.Code)
 		}
+	})
+
+	// Final review finding 16: the failure body used to echo err.Error(), which
+	// embeds the config file path (and, on validation failure, values from it)
+	// on an unauthenticated endpoint.
+	t.Run("FailureDoesNotEchoConfigPath", func(t *testing.T) {
+		registry.reloadErr = errors.New("failed to read config file /etc/amp/secrets/config.yaml: permission denied")
+		req := httptest.NewRequest(http.MethodPost, "/-/reload", nil)
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+
+		body := rec.Body.String()
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.NotContains(t, body, "/etc/amp/secrets/config.yaml", "the response must not echo the config path")
+		assert.NotContains(t, body, "permission denied", "the response must not echo internal error detail")
+		assert.Contains(t, body, "see server logs", "the response should point the operator at the logs")
 	})
 }
 

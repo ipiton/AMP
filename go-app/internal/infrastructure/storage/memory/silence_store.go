@@ -90,6 +90,46 @@ func (s *SilenceStore) Get(id string, now time.Time) (core.APISilence, bool) {
 	return toAPISilence(silence, now), true
 }
 
+// Expire transitions a silence to the "expired" state in place, instead of
+// removing it, matching upstream Alertmanager's DELETE /api/v2/silence/{id}
+// semantics (silence/silence.go's expire(), v0.34.0): it forces early expiry
+// by moving EndsAt to now if it hasn't already passed, AND — this is the
+// part easy to get wrong — ALSO moves StartsAt to now if the silence was
+// still pending (StartsAt in the future). Upstream does both unconditionally
+// on expire() specifically so a pending silence becomes "expired"
+// immediately instead of sitting in "pending" until its original StartsAt
+// arrives and only then flipping to "expired". Both moves use the
+// "never later than current value" direction (min), so an already-active or
+// already-expired silence is left alone — this is naturally idempotent.
+//
+// The silence stays in the store, so it remains queryable via GET
+// /api/v2/silences with status.state == "expired" until the store's
+// retention/GC policy removes it (there is none for the memory-only/lite
+// profile: an already-expired-by-time silence was never evicted here either
+// — only an explicit Delete call removed entries, so this keeps that same
+// lifetime characteristic). Returns false if the ID does not exist.
+func (s *SilenceStore) Expire(id string, now time.Time) bool {
+	s.mu.Lock()
+	silence, ok := s.silences[id]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+
+	now = now.UTC()
+	if now.Before(silence.StartsAt) {
+		silence.StartsAt = now
+	}
+	if now.Before(silence.EndsAt) {
+		silence.EndsAt = now
+	}
+	silence.UpdatedAt = now
+	s.mu.Unlock()
+
+	s.notifyChange()
+	return true
+}
+
 func (s *SilenceStore) Delete(id string) bool {
 	s.mu.Lock()
 	if _, ok := s.silences[id]; !ok {
@@ -129,8 +169,17 @@ func (s *SilenceStore) ExportForPersistence(now time.Time) []core.APISilence {
 // which derives one from repo.GetSilenceByID + handlers.DomainSilenceToAPI —
 // and would otherwise have to hand-build a core.SilenceInput just to call
 // Upsert.
+//
+// Unlike Upsert, this allows an EndsAt already in the past (F3,
+// alertmanager-parity amtool audit): item is a direct mirror of a row the
+// database already accepted, which may legitimately be expired-in-place
+// (handleSilenceDelete's ExpireSilence) or naturally elapsed by the time
+// this replica applies the event/resync. Rejecting it here would silently
+// re-introduce the very bug the expire-in-place fix closes — the mirror
+// would just fail (see the caller's error log) and the local cache would
+// disagree with the database until the next resync.
 func (s *SilenceStore) UpsertFromAPI(item core.APISilence, now time.Time) (string, error) {
-	return s.Upsert(apiSilenceToInput(item), now)
+	return s.createOrUpdateInternal(apiSilenceToInput(item), now, true, false, true)
 }
 
 // Rebuild replaces the entire in-memory silence set with items in a single
@@ -308,7 +357,22 @@ func normalizeSilenceInput(in *core.SilenceInput, now time.Time, allowPastEndsAt
 		}
 		endsAt = parsedEndsAt.UTC()
 	}
-	if !endsAt.After(startsAt) {
+	// allowPastEndsAt marks a "mirror an already-persisted/already-forced
+	// row" call site (UpsertFromAPI, Rebuild, RestoreFromPersistence) rather
+	// than a genuine user-submitted create/update. Those trusted-mirror
+	// paths must tolerate EndsAt == StartsAt: Expire (this package) and
+	// PostgresSilenceRepository.ExpireSilence both force BOTH timestamps to
+	// the same "now" for a pending silence, matching upstream Alertmanager's
+	// expire() (silence/silence.go, v0.34.0) — a real, valid state that a
+	// strict "must be strictly after" check would otherwise reject and
+	// silently fail to mirror. A genuine create/update (allowPastEndsAt
+	// false) keeps the strict rule: a zero-duration silence can't be
+	// created via the API.
+	if allowPastEndsAt {
+		if endsAt.Before(startsAt) {
+			return nil, fmt.Errorf("start time must be before end time")
+		}
+	} else if !endsAt.After(startsAt) {
 		return nil, fmt.Errorf("start time must be before end time")
 	}
 	if !allowPastEndsAt && endsAt.Before(now.UTC()) {

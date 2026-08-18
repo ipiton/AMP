@@ -34,9 +34,15 @@ type MatcherMetrics struct {
 	RegexCacheSize prometheus.Gauge
 }
 
-// NewMatcherMetrics creates Prometheus metrics for RouteMatcher.
+// NewMatcherMetrics creates Prometheus metrics for RouteMatcher,
+// auto-registered with the default Prometheus registry
+// (prometheus.DefaultRegisterer).
 //
-// All metrics are auto-registered with the default Prometheus registry.
+// Call this AT MOST ONCE per process (per registerer — see
+// NewMatcherMetricsWithRegisterer): promauto panics on double registration.
+// Build a single *MatcherMetrics once and inject it via
+// MatcherOptions.Metrics if more than one RouteMatcher may be constructed
+// over a process's lifetime.
 //
 // Returns:
 //   - *MatcherMetrics: A new metrics instance
@@ -46,8 +52,18 @@ type MatcherMetrics struct {
 //	metrics := NewMatcherMetrics()
 //	metrics.RecordMatch("/routes[0]", 50*time.Microsecond)
 func NewMatcherMetrics() *MatcherMetrics {
+	return NewMatcherMetricsWithRegisterer(prometheus.DefaultRegisterer)
+}
+
+// NewMatcherMetricsWithRegisterer creates Prometheus metrics for
+// RouteMatcher, registered against the given registerer instead of the
+// process-wide default. Tests use this with a fresh prometheus.NewRegistry()
+// per test to get isolated, panic-free metrics without touching the global
+// default registry.
+func NewMatcherMetricsWithRegisterer(reg prometheus.Registerer) *MatcherMetrics {
+	factory := promauto.With(reg)
 	return &MatcherMetrics{
-		MatchesTotal: promauto.NewCounterVec(
+		MatchesTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -57,7 +73,7 @@ func NewMatcherMetrics() *MatcherMetrics {
 			[]string{"route_path"},
 		),
 
-		MatchDuration: promauto.NewHistogram(
+		MatchDuration: factory.NewHistogram(
 			prometheus.HistogramOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -68,7 +84,7 @@ func NewMatcherMetrics() *MatcherMetrics {
 			},
 		),
 
-		RegexCacheHits: promauto.NewCounter(
+		RegexCacheHits: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -77,7 +93,7 @@ func NewMatcherMetrics() *MatcherMetrics {
 			},
 		),
 
-		RegexCacheMisses: promauto.NewCounter(
+		RegexCacheMisses: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -86,7 +102,7 @@ func NewMatcherMetrics() *MatcherMetrics {
 			},
 		),
 
-		RegexCacheSize: promauto.NewGauge(
+		RegexCacheSize: factory.NewGauge(
 			prometheus.GaugeOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",

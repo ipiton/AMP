@@ -40,6 +40,7 @@ package grouping
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -616,6 +617,28 @@ type AlertGroupManager interface {
 type GroupNotificationPublisher interface {
 	PublishGroup(ctx context.Context, alerts []*core.Alert, receiver string) error
 }
+
+// ErrDeliveryNotConfirmed is the sentinel a GroupNotificationPublisher must
+// return (wrapped is fine) when it deliberately did NOT attempt real delivery
+// — the degraded/metrics-only runtime modes. It says: "this call is not a
+// failure, but nothing was delivered either."
+//
+// WHY IT EXISTS (final review finding 4 — silent notification loss):
+// publishGroupAlerts records the notification in the SHARED, cross-replica
+// notification log (RecordSent, TTL = repeat_interval) whenever PublishGroup
+// returns nil. application.MetricsOnlyPublisher — the publisher installed when
+// publishing.enabled is false, in the lite profile, or after a transient
+// Kubernetes failure during startup — returned plain nil, so a replica running
+// in that mode poisoned the shared nflog for every healthy replica: they saw a
+// send that never happened and skipped the group for a full repeat_interval.
+// This is the exact twin of the ApplicationPublishingAdapter empty-results bug
+// fixed in task 2.4.
+//
+// A plain error would also stop RecordSent, but would log at Error and count as
+// a publish failure on every group fire in what is a deliberate configuration
+// (`publishing.enabled: false`). The sentinel lets publishGroupAlerts
+// distinguish "not delivered on purpose" from "delivery broke".
+var ErrDeliveryNotConfirmed = errors.New("group notification not delivered: publisher confirmed no delivery (metrics-only/degraded mode)")
 
 // AddAlertOption customizes a single AddAlertToGroup call (task 2.4).
 // Currently only used to carry a matched route's per-route timings
