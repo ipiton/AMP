@@ -41,6 +41,10 @@ type RegistryProvider interface {
 	Config() *appconfig.Config
 	StartTime() time.Time
 	ReloadConfig(ctx context.Context) error
+	// ClusterStatus returns the `cluster` field for /api/v2/status (task
+	// 6.5). See ClusterStatus's own doc comment (status_api.go) for the
+	// disabled/ready contract.
+	ClusterStatus(ctx context.Context) ClusterStatus
 }
 
 func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
