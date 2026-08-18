@@ -708,12 +708,9 @@ func createTestManagerWithPublisher(t *testing.T, pub GroupNotificationPublisher
 	}
 
 	timerMgr, err := NewDefaultTimerManager(TimerManagerConfig{
-		Storage:               timerStorage,
-		GroupManager:          stubGroupMgr,
-		DefaultGroupWait:      10 * time.Millisecond,
-		DefaultGroupInterval:  10 * time.Millisecond,
-		DefaultRepeatInterval: 10 * time.Millisecond,
-		Logger:                slog.Default(),
+		Storage:      timerStorage,
+		GroupManager: stubGroupMgr,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 
@@ -762,12 +759,9 @@ func createTestManagerWithLongRootTimings(t *testing.T, pub GroupNotificationPub
 	}
 
 	timerMgr, err := NewDefaultTimerManager(TimerManagerConfig{
-		Storage:               timerStorage,
-		GroupManager:          stubGroupMgr,
-		DefaultGroupWait:      time.Hour,
-		DefaultGroupInterval:  time.Hour,
-		DefaultRepeatInterval: time.Hour,
-		Logger:                slog.Default(),
+		Storage:      timerStorage,
+		GroupManager: stubGroupMgr,
+		Logger:       slog.Default(),
 	})
 	require.NoError(t, err)
 

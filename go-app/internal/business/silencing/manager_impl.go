@@ -870,10 +870,10 @@ func (sm *DefaultSilenceManager) GetStats(ctx context.Context) (*SilenceManagerS
 		ExpiredSilences: int64(cacheStats.ByStatus[silencing.SilenceStatusExpired]),
 
 		// Worker statistics (from metrics)
-		GCLastRun:      time.Time{}, // TODO: Track last run time
+		GCLastRun:      sm.metrics.GetGCLastRun(),
 		GCTotalRuns:    int64(sm.metrics.GetGCTotalRuns()),
-		GCTotalCleaned: 0,           // TODO: Track total cleaned
-		SyncLastRun:    time.Time{}, // TODO: Track last run time
+		GCTotalCleaned: sm.metrics.GetGCTotalCleaned(),
+		SyncLastRun:    sm.metrics.GetSyncLastRun(),
 		SyncTotalRuns:  int64(sm.metrics.GetSyncTotalRuns()),
 	}
 
