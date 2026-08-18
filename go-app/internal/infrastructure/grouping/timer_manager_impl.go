@@ -16,6 +16,7 @@ package grouping
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -721,6 +722,41 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 
 	group, err := gm.GetGroup(groupCtx, groupKey)
 	if err != nil {
+		var notFoundErr *GroupNotFoundError
+		if errors.As(err, &notFoundErr) {
+			// fix round 1, Finding 2: the group is CONFIRMED gone (not a
+			// transient storage error), most likely deleted by
+			// RemoveAlertFromGroup/CleanupExpiredGroups after this timer
+			// was scheduled but before it fired. Previously this returned
+			// here without deleting the timer from storage or tm.timers,
+			// which was harmless for a normal one-shot fire (the timer's
+			// own Redis TTL eventually reaps it) but became a repeating
+			// Error log every reconciliation tick — reconcileOrphanedTimers
+			// keeps re-adopting the same still-overdue-in-storage entry
+			// until that TTL expires. Clean it up now, once, at Warn
+			// (expected condition, not a failure) instead.
+			tm.logger.Warn("group no longer exists for timer expiration, removing leftover timer",
+				"group_key", groupKey,
+				"timer_type", timerType)
+
+			tm.timersMu.Lock()
+			delete(tm.timers, groupKey)
+			tm.timersMu.Unlock()
+
+			deleteCtx, deleteCancel := context.WithTimeout(ctx, 5*time.Second)
+			if delErr := tm.storage.DeleteTimer(deleteCtx, groupKey); delErr != nil {
+				tm.logger.Warn("failed to delete leftover timer for a confirmed-deleted group",
+					"group_key", groupKey,
+					"error", delErr)
+			}
+			deleteCancel()
+			return
+		}
+
+		// Any other error (Redis timeout, network blip, etc.) is transient
+		// — the group may well still exist, just unreachable right now.
+		// Deliberately NOT deleting the timer here: doing so on a transient
+		// error would risk dropping a live group's timer entirely.
 		tm.logger.Error("Failed to get group for timer expiration",
 			"group_key", groupKey,
 			"error", err)
@@ -955,18 +991,22 @@ func (tm *DefaultTimerManager) reconcileOrphanedTimers() {
 	ctx, cancel := context.WithTimeout(tm.ctx, 10*time.Second)
 	defer cancel()
 
-	timers, err := tm.storage.ListTimers(ctx)
+	// fix round 1, Finding 1: ListOverdueTimers pushes the "ExpiresAt <=
+	// cutoff" filter into storage (a ZRANGEBYSCORE against the
+	// ExpiresAt-scored index for RedisTimerStorage), so this tick costs
+	// O(overdue timers) against Redis, not O(all timers up to
+	// MaxConcurrentTimers) on every replica, every tick. Previously this
+	// called ListTimers (full ZRANGE(0,-1) + MGET of everything) and
+	// filtered the grace check below in Go.
+	now := time.Now()
+	cutoff := now.Add(-tm.reconciliationGrace)
+	timers, err := tm.storage.ListOverdueTimers(ctx, cutoff)
 	if err != nil {
-		tm.logger.Warn("reconciliation: failed to list timers from storage", "error", err)
+		tm.logger.Warn("reconciliation: failed to list overdue timers from storage", "error", err)
 		return
 	}
 
-	now := time.Now()
 	for _, timer := range timers {
-		if timer.ExpiresAt.Add(tm.reconciliationGrace).After(now) {
-			continue // not overdue enough yet — could still be legitimately in flight
-		}
-
 		tm.timersMu.RLock()
 		_, trackedLocally := tm.timers[timer.GroupKey]
 		tm.timersMu.RUnlock()

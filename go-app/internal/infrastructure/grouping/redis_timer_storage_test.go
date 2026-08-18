@@ -243,6 +243,77 @@ func TestRedisTimerStorage_ListTimers_Empty(t *testing.T) {
 	assert.Empty(t, timers)
 }
 
+// TestRedisTimerStorage_ListOverdueTimers verifies the targeted
+// ZRANGEBYSCORE-based query (task 6.2, fix round 1, Finding 1) against a
+// mixed timer set: only timers whose ExpiresAt is at or before cutoff must
+// be returned, not the full timer set filtered elsewhere.
+func TestRedisTimerStorage_ListOverdueTimers(t *testing.T) {
+	storage, _, cleanup := setupTestRedisStorage(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now()
+
+	// Deliberately mixed: two overdue (well in the past), two not (future).
+	timers := []*GroupTimer{
+		{
+			GroupKey:  "overdue-1",
+			TimerType: GroupWaitTimer,
+			Duration:  time.Minute,
+			StartedAt: now.Add(-10 * time.Minute),
+			ExpiresAt: now.Add(-9 * time.Minute),
+			State:     TimerStateActive,
+		},
+		{
+			GroupKey:  "overdue-2",
+			TimerType: GroupIntervalTimer,
+			Duration:  time.Minute,
+			StartedAt: now.Add(-5 * time.Minute),
+			ExpiresAt: now.Add(-4 * time.Minute),
+			State:     TimerStateActive,
+		},
+		{
+			GroupKey:  "future-1",
+			TimerType: GroupWaitTimer,
+			Duration:  30 * time.Second,
+			StartedAt: now,
+			ExpiresAt: now.Add(30 * time.Second),
+			State:     TimerStateActive,
+		},
+		{
+			GroupKey:  "future-2",
+			TimerType: RepeatIntervalTimer,
+			Duration:  4 * time.Hour,
+			StartedAt: now,
+			ExpiresAt: now.Add(4 * time.Hour),
+			State:     TimerStateActive,
+		},
+	}
+
+	for _, timer := range timers {
+		require.NoError(t, storage.SaveTimer(ctx, timer))
+	}
+
+	overdue, err := storage.ListOverdueTimers(ctx, now)
+	require.NoError(t, err)
+
+	gotKeys := make(map[GroupKey]bool, len(overdue))
+	for _, timer := range overdue {
+		gotKeys[timer.GroupKey] = true
+	}
+
+	assert.Len(t, overdue, 2, "only the two overdue timers must be returned")
+	assert.True(t, gotKeys["overdue-1"])
+	assert.True(t, gotKeys["overdue-2"])
+	assert.False(t, gotKeys["future-1"], "a timer not yet due must not be returned as overdue")
+	assert.False(t, gotKeys["future-2"], "a timer not yet due must not be returned as overdue")
+
+	// A cutoff before every timer's ExpiresAt must return nothing.
+	none, err := storage.ListOverdueTimers(ctx, now.Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
 // TestRedisTimerStorage_AcquireLock tests distributed lock acquisition
 func TestRedisTimerStorage_AcquireLock(t *testing.T) {
 	storage, _, cleanup := setupTestRedisStorage(t)
