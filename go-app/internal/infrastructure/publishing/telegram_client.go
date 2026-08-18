@@ -2,6 +2,7 @@ package publishing
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/pkg/httperror"
@@ -18,6 +20,24 @@ import (
 )
 
 // telegram_client.go - Telegram Bot API client with rate limiting and retry logic
+
+const (
+	// defaultChatRateLimit is the steady-state per-chat send rate. Telegram
+	// tolerates roughly 1 msg/sec sustained to a single chat before it
+	// starts returning 429 Too Many Requests for that chat.
+	defaultChatRateLimit = rate.Limit(1)
+
+	// defaultChatBurst allows a short burst to a single chat (e.g. several
+	// related alerts firing at once) before per-chat throttling kicks in.
+	// Chosen conservatively inside Telegram's observed 5-20 message burst
+	// tolerance per chat.
+	defaultChatBurst = 3
+
+	// maxTrackedChatLimiters bounds the memory used by the per-chat rate
+	// limiter registry. See chatRateLimiterStore's doc comment for why a
+	// bound is needed and how eviction works.
+	maxTrackedChatLimiters = 1000
+)
 
 // TelegramClient defines the interface for Telegram Bot API operations
 type TelegramClient interface {
@@ -34,11 +54,98 @@ type TelegramClient interface {
 // Provides rate limiting, retry logic with exponential backoff, and
 // comprehensive error handling for the Telegram Bot API.
 type HTTPTelegramClient struct {
-	httpClient  *http.Client
-	apiURL      string // Telegram Bot API base URL (e.g. https://api.telegram.org), no trailing slash
-	botToken    string
-	rateLimiter *rate.Limiter
-	logger      *slog.Logger
+	httpClient   *http.Client
+	apiURL       string // Telegram Bot API base URL (e.g. https://api.telegram.org), no trailing slash
+	botToken     string
+	rateLimiter  *rate.Limiter         // global limiter: bounds aggregate throughput across all chats
+	chatLimiters *chatRateLimiterStore // per-chat limiters: smooths bursts to a single chat
+	logger       *slog.Logger
+}
+
+// chatRateLimiterStore is a bounded, thread-safe registry of per-chat rate
+// limiters, keyed by Telegram chat ID. It exists because HTTPTelegramClient's
+// global rate.Limiter only bounds aggregate throughput across all chats: a
+// storm of alerts routed to one chat can pass the global limiter's burst
+// allowance and still trip Telegram's per-chat ~1 msg/sec limit, producing
+// 429s that eat into the client's fixed retry budget.
+//
+// Bounding strategy: LRU eviction with a fixed capacity
+// (maxTrackedChatLimiters). Chat ID cardinality is not bounded by anything
+// in this client - alert routing can address any chat the bot has ever been
+// added to - so an unbounded map would leak memory for the life of a
+// long-running process. LRU (via container/list, same approach as
+// LRUCache in this package) evicts the least-recently-used chat in O(1)
+// when a new chat needs a limiter and the store is at capacity. This was
+// chosen over an idle-TTL sweep because it needs no background goroutine
+// and bounds worst-case memory deterministically regardless of traffic
+// pattern; the trade-off is that a chat evicted while idle gets a fresh
+// (fully-bursted) limiter on its next message, which is acceptable since
+// that is also the state a brand-new chat starts in.
+type chatRateLimiterStore struct {
+	mu       sync.Mutex
+	capacity int
+	rate     rate.Limit
+	burst    int
+	items    map[string]*list.Element
+	order    *list.List // front = most recently used, back = least recently used
+}
+
+// chatLimiterEntry is the value stored in chatRateLimiterStore.order.
+type chatLimiterEntry struct {
+	chatID  string
+	limiter *rate.Limiter
+}
+
+// newChatRateLimiterStore creates a per-chat limiter registry bounded to
+// capacity entries. Each newly created limiter allows r events/sec with the
+// given burst. capacity <= 0 is a constructor misuse (it would make the
+// store unbounded, defeating the whole point of the LRU cap) and is
+// clamped to maxTrackedChatLimiters rather than silently accepted.
+func newChatRateLimiterStore(capacity int, r rate.Limit, burst int) *chatRateLimiterStore {
+	if capacity <= 0 {
+		capacity = maxTrackedChatLimiters
+	}
+	return &chatRateLimiterStore{
+		capacity: capacity,
+		rate:     r,
+		burst:    burst,
+		items:    make(map[string]*list.Element, capacity),
+		order:    list.New(),
+	}
+}
+
+// getOrCreate returns the rate.Limiter for chatID, creating one lazily on
+// first use. If the store is at capacity, the least-recently-used chat's
+// limiter is evicted to make room.
+func (s *chatRateLimiterStore) getOrCreate(chatID string) *rate.Limiter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if el, ok := s.items[chatID]; ok {
+		s.order.MoveToFront(el)
+		return el.Value.(*chatLimiterEntry).limiter
+	}
+
+	// capacity is always > 0 here: newChatRateLimiterStore clamps it.
+	if s.order.Len() >= s.capacity {
+		if oldest := s.order.Back(); oldest != nil {
+			s.order.Remove(oldest)
+			delete(s.items, oldest.Value.(*chatLimiterEntry).chatID)
+		}
+	}
+
+	limiter := rate.NewLimiter(s.rate, s.burst)
+	el := s.order.PushFront(&chatLimiterEntry{chatID: chatID, limiter: limiter})
+	s.items[chatID] = el
+	return limiter
+}
+
+// len returns the number of chats currently tracked. Used by tests to
+// assert the store stays within capacity.
+func (s *chatRateLimiterStore) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.order.Len()
 }
 
 // NewHTTPTelegramClient creates a new Telegram Bot API client.
@@ -73,10 +180,11 @@ func NewHTTPTelegramClient(
 				}).DialContext,
 			},
 		},
-		apiURL:      strings.TrimRight(apiURL, "/"),
-		botToken:    botToken,
-		rateLimiter: rate.NewLimiter(rate.Limit(30), 5), // Telegram global limit: ~30 msg/sec, burst 5
-		logger:      logger.With("component", "telegram_client"),
+		apiURL:       strings.TrimRight(apiURL, "/"),
+		botToken:     botToken,
+		rateLimiter:  rate.NewLimiter(rate.Limit(30), 5), // Telegram global limit: ~30 msg/sec, burst 5
+		chatLimiters: newChatRateLimiterStore(maxTrackedChatLimiters, defaultChatRateLimit, defaultChatBurst),
+		logger:       logger.With("component", "telegram_client"),
 	}
 }
 
@@ -106,7 +214,19 @@ func (c *HTTPTelegramClient) SendMessage(ctx context.Context, message *TelegramM
 	c.logger.DebugContext(ctx, "Sending message to Telegram",
 		slog.String("api_url", c.apiURL))
 
-	// Rate limit check (blocks until token available)
+	// Rate limit check (blocks until tokens available). Per-chat first: it
+	// smooths bursts to a single chat, then the global limiter bounds
+	// aggregate throughput across all chats. Both honor ctx cancellation.
+	//
+	// Note: if ctx is canceled between the two Waits (chat token consumed,
+	// global Wait then fails), that per-chat token is spent on a message
+	// that never sends. Accepted: worst case is one wasted token per
+	// cancellation, and defaultChatBurst=3 with a 1/s refill makes the
+	// effect on that chat's next legitimate send negligible.
+	chatLimiter := c.chatLimiters.getOrCreate(message.ChatID)
+	if err := chatLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("per-chat rate limiter wait failed: %w", err)
+	}
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limiter wait failed: %w", err)
 	}
