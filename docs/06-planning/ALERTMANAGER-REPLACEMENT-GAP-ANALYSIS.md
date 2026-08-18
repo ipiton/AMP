@@ -1,160 +1,110 @@
 # Анализ: может ли AMP заменить Alertmanager?
 
-**Дата**: 2026-03-08
-**Статус**: AMP пока не готов к честному позиционированию как полный `drop-in replacement` для Alertmanager.
+**Дата**: 2026-08-18 (предыдущая версия: 2026-03-08 — устарела, ниже полностью переписан статус)
+**Статус**: После ветки `feat/alertmanager-parity` AMP реализует основную механику upstream Alertmanager
+(routing tree, grouping/dispatch, notify chain, HA-clustering), а не только совместимую по форме API-поверхность.
+Честная формулировка теперь: **AMP — сильный parity-кандидат с коротким списком явных, отслеживаемых пробелов**,
+а не controlled replacement slice. Финальное подтверждение — вторая половина задачи 7.4 (`amtool` live-audit),
+которая идёт отдельно и не входит в этот docs-пасс.
 
-## Статус После Truth-Alignment Slice
+## Что закрыто этой веткой
 
-На задаче `ALERTMANAGER-REPLACEMENT-SCOPE` выбран и зафиксирован путь:
+Всё ниже проверено против кода на branch `feat/alertmanager-parity` (base `ff6accc`), не принято на слово:
 
-- **active runtime first**
-- **current claim = controlled replacement**
-- **wide runtime/API restoration = отдельный backlog**
+- **Routing tree** (`internal/business/routing/`): рекурсивный matcher (`FindMatchingRoutes`, дети имеют приоритет
+  над родителем, `continue: true` — multi-match), anchored regex (`^(?:re)$`, `anchorRegex`), все 4 оператора
+  матчера (`=`, `!=`, `=~`, `!~`), `matchers:` list syntax наравне с legacy `match`/`match_re`. `route:`/`receivers:`
+  парсятся через `infrastructure/routing.Parse()` (гейт: top-level `route:` секция). `RouteEvaluator` подключён в
+  `AlertProcessor.evaluateRoute` на каждый alert при ingest (nil в lite/legacy режиме без `route:`).
+  Receiver-scoped targets через аннотацию/лейбл `amp.receiver` (`internal/business/publishing/discovery_parse.go`)
+  — это AMP-нативный механизм, не апстримный, но функционально эквивалентный.
+- **Dispatcher/grouping** (`internal/infrastructure/grouping/`): группировка по маршрутному `group_by`,
+  тайминги (`group_wait`/`group_interval`/`repeat_interval`) берутся из `RoutingDecision` конкретного маршрута, а
+  не только из глобальных default. Notify-chain на send-time (`manager_impl.go` `publishGroupAlerts`), порядок
+  Inhibit → Silence → TimeMute → Dedup, задокументирован явно как соответствующий апстриму. Одна логическая
+  нотификация на группу на срабатывание (`PublishGroup` вызывается один раз) — но см. пробел #2 ниже про
+  wire-level batching.
+- **time_intervals / mute_time_intervals / active_time_intervals**: `internal/infrastructure/routing/timeinterval/`
+  проверен against upstream'овский fixture corpus (`upstream_fixtures_test.go`), route-level имена резолвятся
+  send-time через `routeTreeTimeIntervalLookup` (подавление целой группы, не отдельных алертов).
+- **API parity**: `GET /api/v2/alerts` — полный набор апстримных query-параметров
+  (`active`/`silenced`/`inhibited`/`unprocessed`/`receiver`/`filter`) + legacy `status=`/`resolved=` как алиасы;
+  `POST /api/v1/alerts` алиасится на v2 ingest; `GET /api/v2/status` отдаёт вложенные `versionInfo` (из ldflags) и
+  `cluster` (Redis heartbeat); `--web.route-prefix` наследует путь из `external_url`, когда не задан явно
+  (`internal/application/route_prefix.go`).
+- **Config validation**: `pkg/configvalidator` подключён в `internal/config.LoadConfig`, используется и при старте
+  процесса, и на `/-/reload` (тот же код-путь). Работает только для конфигов с top-level `route:` секцией — legacy
+  single-receiver конфиги эту проверку пропускают, как и раньше.
+- **HA clustering**: Redis-backed nflog + send-claim для межреплик дедупа нотификаций (task 6.1); distributed
+  timer liveness reconciliation с targeted overdue-scan и очисткой orphaned timers (task 6.2, коммиты `84df74f`,
+  `dec49e7`); silence cache invalidation через Redis pub/sub (task 6.3); leader-elected GC для silence-очистки
+  (task 6.4, `internal/infrastructure/lock/election.go`); peer heartbeat + поле `cluster` в `/api/v2/status`
+  (task 6.5). 2-реплика e2e (exactly-once delivery + failover при потере реплики) воспроизведена в
+  `deploy/e2e-ha/run.sh` (коммит `ff6accc`) — рабочий standalone-скрипт, **не в CI-гейте**.
+- **Receivers**: telegram теперь нативно поддержан (`internal/infrastructure/publishing/telegram_*.go`, глобальный
+  rate-limiter 30 msg/s + retry/backoff). Остальная матрица приёмников — см. `docs/ALERTMANAGER_COMPATIBILITY.md`.
+- **Helm/Docker**: `Dockerfile` — `HEALTHCHECK` на `:8080/healthz`, `-ldflags` прокидывает версию/build info,
+  `EXPOSE 8080`; `helm/amp/values.yaml` — canonical image `ghcr.io/ipiton/amp`.
 
-Где это зафиксировано:
+## Что осталось (известные, отслеживаемые пробелы)
 
-- decision record: `docs/06-planning/DECISIONS.md`
-- open drift/blockers: `docs/06-planning/BUGS.md`
-- future runtime restoration: `docs/06-planning/BACKLOG.md`
-- queued broader docs cleanup: `docs/06-planning/NEXT.md` (`DOCS-HONESTY-PASS`)
+Ничего из списка ниже не скрыто — каждый пункт имеет код-адрес и, где применимо, backlog-ссылку.
 
-## Короткий вывод
+1. **`GET /api/v2/alerts/groups` не использует routing tree для receiver-поля** — группирует над
+   `memory.AlertStore` независимо от реального ingest-пайплайна и присваивает каждой группе первый
+   сконфигурированный receiver (или `"default"`). Реальный notify-путь (ingest → `RouteEvaluator` → dispatcher)
+   корректен; это read-only query-эндпоинт для UI/дашбордов — нет. Закрыт как принятое поведение
+   (`GROUPALERTS-HARDCODED-RECEIVER` в `BACKLOG.md`), не как полная синхронизация с деревом.
+2. **Wire-level webhook batching**: `PublishingCoordinator.PublishGroupToTargets` фанит одну группу в один HTTP
+   запрос на пару `(target × alert)`, а не в один POST с JSON-массивом `alerts` на target, как у апстрима.
+   Функционально каждый алерт доставляется, но количество и форма запросов отличаются — вопрос для интеграций,
+   которые парсят конкретную форму payload.
+3. **OpsGenie / VictorOps / WeChat** — конфиг валидируется (E126-E141), но нет runtime publisher — ноль
+   нотификаций. Осознанно отложено «по потребности» (задача 7.2).
+4. **Pushover / AWS SNS / Webex** — нет поддержки ни на одном уровне (config/template/publisher). Discord/Teams
+   закрыты через generic webhook-шаблоны, это не блокер.
+5. **Config write API (`POST/PUT /api/v2/config*`)** и **`/history*`** — не реализованы, явно вне scope задачи 7.4.
+6. **Per-chat Telegram rate-limit** — сейчас только глобальный лимитер (30 msg/s), без учёта отдельных chat_id.
+   Отложено.
+7. **Cross-replica DB migration advisory lock** — при одновременном старте нескольких реплик миграции не
+   координируются advisory-локом. Отложено.
+8. **Reloadable-sidecar** (`CONFIG-RELOADER-SIDECAR`) — K8s sidecar для ConfigMap-driven SIGHUP. После Ф5 ценность
+   ниже (`/-/reload` уже покрывает основной кейс); backlog.
+9. **`inhibited` query-параметр на `/api/v2/alerts`** структурно реализован, но пока no-op — inhibition state ещё
+   не протянут в `alertconv.ToGettableAlert`'s `InhibitedBy`. Сам notify-chain Inhibit-step на это не влияет — там
+   инхибиция реально работает.
+10. **Repeat/group-interval continuation под restart реплики** — `PARITY-A1-NOTIFICATION-TRIGGERING` закрыт,
+    task 6.2 добавил reconciliation loop специально для восстановления таймеров после падения/рестарта. В
+    git log этой ветки не найден отдельный коммит, оформленный как фикс «timer stops after first fire»
+    (context-cancellation-shaped P0) — если такой баг репортился отдельно, идентифицировать его в истории не
+    удалось на момент написания. Считать continuation реализованным и укреплённым, но требующим эмпирической
+    проверки (`amtool` + ожидание за `group_interval`, наблюдение повторной нотификации) во время live-audit
+    половины задачи 7.4 — не как окончательно закрытый цикл с long-duration регрессионным тестом.
 
-- **Да, ограниченно**: AMP уже можно использовать как controlled replacement для узкого production-сценария `ingest -> silence CRUD -> publish to targets`, если клиентская сторона подстроена под фактический API surface AMP.
-- **Нет, не полностью**: текущий active runtime не соответствует части заявлений в README, migration docs, compatibility matrix и parity tests, поэтому общий тезис "может заменить Alertmanager без оговорок" пока недостоверен.
+## Как это было проверено
 
-## Что уже реально работает
+Ничего из раздела «закрыто» не принято на слово из брифа задачи — каждый пункт сверен с кодом на этой ветке:
+`grep`/`find` по соответствующим пакетам, чтение ключевых файлов (`evaluator.go`, `manager_impl.go`,
+`route_evaluator.go`, `alerts.go`, `coordinator.go`, `status_api.go`, `route_prefix.go`, `heartbeat.go`,
+`election.go`, `Dockerfile`, `values.yaml`), проверка `git log` на заявленные фикс-коммиты.
 
-- Active runtime поднимает `ServiceRegistry` и использует реальный publishing path, а не `SimplePublisher` stub.
-- `POST /api/v2/alerts` идет через `AlertProcessor` и publishing adapter/coordinator/queue.
-- Работают `GET/POST /api/v2/silences` и `GET/DELETE /api/v2/silence/{id}`.
-- Работают health/readiness probes и `/metrics`.
-- Есть explicit `metrics-only` fallback для publishing runtime.
+## Решение по позиционированию
 
-Это означает, что AMP уже годится для узких сценариев приема и доставки алертов, но не для общего обещания "заменяет Alertmanager" на уровне всей совместимости и операционных ожиданий.
-
-## Что блокирует честный replacement claim
-
-### 1. Active runtime уже уже, чем заявлено в docs/tests
-
-В `go-app/internal/application/router.go` active runtime сейчас монтирует только:
-
-- `/api/v2/alerts`
-- `/api/v2/silences`
-- `/api/v2/silence/{id}`
-- `/health`, `/ready`, `/healthz`, `/readyz`, `/-/healthy`, `/-/ready`
-- `/metrics`
-
-При этом в `docs/ALERTMANAGER_COMPATIBILITY.md`, `README.md` и `go-app/cmd/server/main_upstream_parity_regression_test.go` заявлены или ожидаются более широкие active routes:
-
-- `GET /api/v2/status`
-- `GET /api/v2/receivers`
-- `GET /api/v2/alerts/groups`
-- `POST /-/reload`
-- alias `POST /api/v1/alerts`
-- debug/static compatibility endpoints
-
-Это главный зазор между текущим кодом и replacement narrative.
-
-### 2. Даже реализованные endpoints еще не дотягивают до полной parity
-
-`GET /api/v2/alerts` в active handler помечен как `simple list`, а advanced filtering и matcher semantics прямо оставлены "на потом". Значит даже там, где route существует, semantic parity еще не зафиксирована для общего replacement claim.
-
-### 3. Quality gates остаются красными
-
-Пока остаются открытыми:
-
-- drift в `go-app/cmd/server/main_phase0_contract_test.go`
-- red full `go test ./...` вне scope последнего slice
-
-Это не всегда блокирует узкий controlled rollout, но блокирует сильные формулировки вроде `production-ready drop-in replacement`.
-
-### 4. Public docs historically overstated состояние проекта
-
-На момент первоначального анализа были найдены как минимум такие расхождения:
-
-- `README.md` обещал `Production-Ready`
-- `README.md` заявлял `Plugin system`, хотя в коде видны extension points, а не полноценный runtime plugin loader
-- `README.md` и migration docs подавали AMP как легкую замену Alertmanager за несколько минут
-- `docs/ALERTMANAGER_COMPATIBILITY.md` описывал active runtime шире, чем его реально монтирует код
-- `README.md` конфликтовал по лицензии: badge/LICENSE указывали на AGPL, а нижняя секция README писала `Apache 2.0`
-
-Статус после `DOCS-HONESTY-PASS`:
-
-- core public/docs surface и chart metadata по этой теме выровнены;
-- open residual cleanup теперь относится в основном к более глубоким internal/subpackage docs, а не к top-level replacement narrative.
-
-## Решение по позиционированию до исправлений
-
-До закрытия зазоров AMP стоит описывать так:
-
-- **Alertmanager-compatible core runtime with phased parity**
-- **real publishing path is active**
-- **usable for controlled / scoped replacement scenarios**
-- **not yet a general-purpose drop-in replacement claim**
-
-## Инкрементальный план исправления
-
-### Slice 1. Scope decision for replacement story
-
-Статус: **закрыто** через `ALERTMANAGER-REPLACEMENT-SCOPE`.
-
-Нужно выбрать один из двух путей:
-
-1. **Дотянуть active runtime до заявленного scope**:
-   вернуть/смонтировать `status`, `receivers`, `alerts/groups`, `/-/reload` и решить судьбу `/api/v1/alerts`.
-2. **Сузить публичный scope до фактического runtime**:
-   поправить ADR, docs и parity expectations под реально поддерживаемую поверхность.
-
-Без этого следующий docs pass будет косметическим.
-
-### Slice 2. Honest docs pass
-
-Статус: **в основном закрыто** через `DOCS-HONESTY-PASS`.
-
-Выполнено для:
-
-- `README.md`
-- `docs/MIGRATION_QUICK_START.md`
-- `docs/MIGRATION_COMPARISON.md`
-- `docs/ALERTMANAGER_COMPATIBILITY.md`
-
-Результат:
-
-- убраны `drop-in`, `100%` и прямые current overclaims из core public/docs scope;
-- benchmark/resource claims и install narrative приведены к honest wording;
-- chart README и metadata больше не обещают verified full parity;
-- residual cleanup остался в internal/subpackage docs и вынесен в отдельный follow-up.
-
-### Slice 3. Verification hardening
-
-Статус: **частично начато**.
-
-Нужно восстановить доверие к replacement claim:
-
-- починить `main_phase0_contract_test.go` / `futureparity` suite
-- явно определить, какие тесты являются gating для replacement story
-- получить зеленый минимум для active runtime parity matrix
-
-### Slice 4. Replacement acceptance criteria
-
-Статус: **частично закрыто**: active-runtime contract tests уже выделены, но полный future replacement checklist ещё не оформлен как отдельный reproducible smoke document.
-
-Добавить один короткий acceptance checklist для future claim "AMP can replace Alertmanager":
-
-- Prometheus/VMAlert ingest smoke
-- `amtool` read-path smoke
-- silence CRUD smoke
-- publishing smoke against real targets or stable stubs
-- rollback/runbook smoke
+- **Alertmanager parity core is real**: routing/grouping/silences/inhibition/time-windows/HA — не заглушки, а
+  рабочая механика с честными, локализованными пробелами.
+- **Не general-purpose drop-in без оговорок** — пока не закрыты пробелы #1–2 (receiver-поле в groups-эндпоинте,
+  webhook wire shape) и не пройден финальный `amtool`/Grafana live-audit (вторая половина задачи 7.4).
+- **Формулировка для внешних docs**: "AMP реализует ключевую механику Alertmanager (routing, grouping, dispatch,
+  silences, inhibition, time-based muting, HA) с коротким списком задокументированных пробелов" — не
+  `drop-in replacement` до завершения live-audit.
 
 ## Что считать закрытием темы
 
-Тезис "AMP может заменить Alertmanager" можно считать честно подтвержденным только когда одновременно выполнены условия:
+Тезис "AMP может заменить Alertmanager" будет подтверждён, когда:
 
-- active runtime и публичные docs говорят об одном и том же scope
-- parity tests компилируются и проходят на выбранном scope
-- migration docs не обещают больше, чем реально поддерживается
-- replacement story проверяется коротким reproducible smoke path
+- пройдёт финальный `amtool`/Grafana smoke (вторая половина задачи 7.4): `alert add`/`silence add`/`config show`
+  против AMP, Grafana Alertmanager datasource smoke
+- пробелы #1–2 (groups-эндпоинт, webhook batching) либо закрыты, либо явно приняты как постоянное ограничение
+- 2-реплика e2e (`deploy/e2e-ha/`) либо остаётся подтверждённым manual runbook, либо переведён в CI-гейт
 
-До этого момента формулировка должна оставаться ограниченной: AMP пригоден для частичной и контролируемой замены, но не для безоговорочного `drop-in replacement` claim.
+До этого — позиционирование ограничено формулировкой выше, без безоговорочного `drop-in replacement` claim.
