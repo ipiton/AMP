@@ -279,19 +279,23 @@ func (m *DefaultRefreshManager) RefreshNow() error {
 	}
 	m.lifecycleMu.Unlock()
 
-	// Check if refresh in progress (before rate limit: in-progress is a state-machine blocker)
-	m.mu.RLock()
-	if m.inProgress {
-		m.mu.RUnlock()
+	// Check if refresh in progress (before rate limit: in-progress is a state-machine blocker).
+	// Acquire the single-flight slot synchronously (not inside the spawned goroutine) so
+	// there is no race window between RefreshNow() returning and the background goroutine
+	// actually setting inProgress. Without this, a caller that immediately issues a second
+	// RefreshNow() could observe inProgress still false purely due to goroutine scheduling
+	// delay, not because the first refresh actually finished.
+	if !m.tryAcquireRefreshSlot() {
 		m.logger.Debug("Manual refresh skipped (refresh in progress)")
 		return ErrRefreshInProgress
 	}
-	m.mu.RUnlock()
 
 	// Check rate limit
 	m.rateMu.Lock()
 	if time.Since(m.lastManualRefresh) < m.config.RateLimitPer {
 		m.rateMu.Unlock()
+		// Roll back the slot we just acquired: no refresh will actually run.
+		m.releaseRefreshSlot()
 		m.logger.Warn("Manual refresh rate limit exceeded",
 			"last_refresh", m.lastManualRefresh,
 			"rate_limit", m.config.RateLimitPer)
@@ -302,10 +306,40 @@ func (m *DefaultRefreshManager) RefreshNow() error {
 
 	m.logger.Info("Manual refresh triggered")
 
-	// Trigger async refresh (spawn goroutine)
-	go m.executeRefresh(true) // isManual=true
+	// Trigger async refresh (spawn goroutine). The slot is already acquired above,
+	// so doRefresh runs the work directly without re-checking/re-acquiring inProgress.
+	go m.doRefresh(true) // isManual=true
 
 	return nil
+}
+
+// tryAcquireRefreshSlot atomically checks-and-sets the single-flight refresh slot.
+//
+// Returns true and marks state=in_progress if no refresh was running.
+// Returns false (leaving state untouched) if a refresh was already in progress.
+//
+// This must be the ONLY way inProgress is set to true, so that acquisition and
+// the in-progress check are always a single atomic operation under mu — never
+// "check under RLock, then set true later/elsewhere".
+func (m *DefaultRefreshManager) tryAcquireRefreshSlot() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.inProgress {
+		return false
+	}
+	m.inProgress = true
+	m.state = RefreshStateInProgress
+	return true
+}
+
+// releaseRefreshSlot releases the single-flight refresh slot acquired via
+// tryAcquireRefreshSlot. Safe to call even if the refresh was rolled back
+// before doing any work (e.g. rejected by rate limiting).
+func (m *DefaultRefreshManager) releaseRefreshSlot() {
+	m.mu.Lock()
+	m.inProgress = false
+	m.mu.Unlock()
 }
 
 // GetStatus returns current refresh state.
@@ -331,6 +365,16 @@ func (m *DefaultRefreshManager) GetStatus() RefreshStatus {
 }
 
 // updateState updates internal state (thread-safe).
+//
+// updateState is only called with terminal outcomes (Success/Failed) from
+// doRefresh, after the refresh work has finished. It clears inProgress in
+// the SAME locked section as the state transition, so the two are always
+// observed atomically together by readers (GetStatus, RefreshNow's
+// tryAcquireRefreshSlot). Clearing inProgress separately later (e.g. via a
+// defer that runs after updateState returns) would open a window where
+// state already reads as Success/Failed but inProgress is still true,
+// causing a spurious ErrRefreshInProgress for anyone racing on the
+// "refresh just finished" signal.
 func (m *DefaultRefreshManager) updateState(
 	state RefreshState,
 	lastRefresh time.Time,
@@ -342,6 +386,7 @@ func (m *DefaultRefreshManager) updateState(
 	defer m.mu.Unlock()
 
 	m.state = state
+	m.inProgress = false
 	m.refreshDuration = duration
 
 	switch state {
