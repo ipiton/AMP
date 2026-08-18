@@ -267,6 +267,18 @@ func (e *LeaderElector) becomeLeader(ctx context.Context) {
 
 // loseLeadership is idempotent: safe to call whether or not this replica is
 // currently leader.
+//
+// onLost is called synchronously and this function returns only once it
+// does — i.e. this WAITS for onLost to finish rather than forcing it to
+// abandon whatever it's doing. leaderCancel is cancelled first so
+// long-running work watching it can start winding down, but onLost itself
+// (e.g. DefaultSilenceManager.StopGC) is free to block until an in-flight
+// pass completes rather than interrupting it. A caller that just became
+// leader elsewhere can therefore briefly overlap with this replica's
+// leader-only work finishing up; that's only safe because such work is
+// expected to be idempotent (see StopGC's own doc comment for the concrete
+// GC case) — this package has no way to enforce that for callback-supplied
+// work in general.
 func (e *LeaderElector) loseLeadership() {
 	if !e.isLeader.CompareAndSwap(true, false) {
 		return
