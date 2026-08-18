@@ -101,11 +101,13 @@
 ## Alertmanager Full Parity — Follow-ups from Phase 1-7 delivery (2026-08-18)
 > Дефериты и потенциальные оптимизации из final-review и progress.md; не блокируют production deployment.
 
-- [ ] **FU-WEBHOOK-BATCHING** — wire-level webhook batching: one POST with alerts array vs N per-alert jobs. Interface-level ONE notification satisfied; follow-up optimizes delivery. ~2d
-- [ ] **FU-NFLOG-DEDUP** — per-target nflog dedup granularity (current: per-group-receiver); enable finer deduplication at publisher target level. ~1d
-- [ ] **FU-TELEGRAM-RATE-LIMIT** — per-chat rate limit for Telegram (~1msg/s per chat vs global 30/s). Operational risk noted during Phase 7.1. ~1-2d
-- [ ] **FU-MIGRATION-ADVISORY-LOCK** — migration advisory lock mechanism. In progress on sdd/fu-miglock; track coordination. See final-review blocking #2. ~2d
-- [ ] **FU-ROUTING-METRICS** — routing metrics restoration (currently disabled due to promauto double-registration). Per-evaluator custom registry. In progress on sdd/fu-routing-metrics. ~2d
+- [ ] **FU-RECORDSENT-DELIVERY-CONFIRMATION** — move nflog `RecordSent` to a job-completion callback: today `TargetPublishOutcome.Success` = successful queue enqueue, not HTTP delivery; a 500 after enqueue is not retried until repeat_interval. ~2-3d
+- [ ] **FU-WAVE3-RELIABILITY** — wave-3 candidates from wave-2 reviews: duplicate metrics collector panic in queue metrics v2 on repeated package runs; goroutine leaks in pagerduty/slack/rootly_cache.go (drown full-pkg -race); TestHealthMonitor_ConcurrentStarts single-flight race; postgres_history_test.go 8 unguarded testcontainers tests; compile-guard vs runtime-validator boundary-equality mismatch for reconciliation grace. ~2d
+- [x] **FU-WEBHOOK-BATCHING** _(closed by wave 2, 2026-08-18)_ — wire-level webhook batching: one POST with alerts array vs N per-alert jobs. Interface-level ONE notification satisfied; follow-up optimizes delivery. ~2d
+- [x] **FU-NFLOG-DEDUP** _(closed by wave 2, 2026-08-18)_ — — per-target nflog dedup granularity (current: per-group-receiver); enable finer deduplication at publisher target level. ~1d
+- [x] **FU-TELEGRAM-RATE-LIMIT** _(closed by wave 2, 2026-08-18)_ — — per-chat rate limit for Telegram (~1msg/s per chat vs global 30/s). Operational risk noted during Phase 7.1. ~1-2d
+- [x] **FU-MIGRATION-ADVISORY-LOCK** _(shipped 2026-08-18, goose Provider session lock)_ — — migration advisory lock mechanism. In progress on sdd/fu-miglock; track coordination. See final-review blocking #2. ~2d
+- [x] **FU-ROUTING-METRICS** _(shipped 2026-08-18, injected singleton metrics)_ — — routing metrics restoration (currently disabled due to promauto double-registration). Per-evaluator custom registry. In progress on sdd/fu-routing-metrics. ~2d
 - [ ] **FU-RECEIVERS-INTEGRATION** — receivers: integration auto-provisioning (data-plane follow-up; current state: control-plane parity only, delivery via K8s Secrets). See final-review #5. ~5-7d
 - [ ] **FU-FINGERPRINT-HEX-FORMAT** — fingerprint 16-hex upstream format (F2 compatibility). ~0.5d
 - [ ] **FU-SILENCES-EXPIRED-QUERY** — silences --expired query support. ~0.5d
@@ -117,7 +119,7 @@
 - [ ] **FU-GLOB-DEFAULT-VALUES** — GlobalConfig fallback fields for group_by/duration. ~0.5d
 - [ ] **FU-DOUBLE-NORMALIZE-ROUTES** — double NormalizeRoutePrefix call cleanup. ~0.25d
 - [ ] **FU-PARSEBOOL-EMPTY-DEFAULT** — parseBoolQueryStrict silently defaults on empty param value. ~0.25d
-- [ ] **FU-MICRO-CLEANUPS** — minor code/test hygiene from final-review backlog:
+- [x] **FU-MICRO-CLEANUPS** _(closed by wave 2, 2026-08-18)_ — — minor code/test hygiene from final-review backlog:
   - matcherErrorCode classification via error-string substring (fragile); clarify or fix
   - GetStats TODOs (GCLastRun, etc., pre-existing)
   - TimerManagerConfig dead config defaults (startup-only decision)

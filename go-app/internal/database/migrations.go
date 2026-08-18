@@ -21,8 +21,7 @@ import (
 // migrationLockID is the Postgres advisory-lock key goose uses to serialize
 // migrations across replicas. It's a fixed, arbitrary int64 distinct from
 // goose's own lock.DefaultLockID so this doesn't collide with any other
-// goose-based locking elsewhere in the process (see
-// internal/infrastructure/migrations for a separate, unlocked manager).
+// goose-based locking elsewhere in the process.
 const migrationLockID int64 = 8823647501982361
 
 // migrationLockPeriodSeconds/migrationLockFailureThreshold bound how long

@@ -43,7 +43,7 @@ Source of truth:
 | **Grouping** by route's `group_by` | 🟢 Supported | `internal/core/services/alert_processor.go` `groupKeyFor` derives group keys from the `RoutingDecision.GroupBy` computed per alert. |
 | Per-route `group_wait` / `group_interval` / `repeat_interval` | 🟢 Supported | Timings come from the matched route via `RoutingDecision`, not global defaults only — `internal/infrastructure/grouping/manager_impl.go`. |
 | Notify-chain order: Inhibit → Silence → TimeMute → Dedup | 🟢 Supported | `manager_impl.go` `publishGroupAlerts`, explicitly ordered and commented as matching upstream's pipeline; send-time evaluation, not ingest-time. |
-| One notification per group per fire | 🟢 Supported (logical); see gap note | `publishGroupAlerts` makes exactly one `publisher.PublishGroup` call per group per successful fire. **Wire-level caveat**: see [Known Gaps](#known-gaps-honesty-notes) — this is not yet one HTTP POST per target. |
+| One notification per group per fire, wire-level batching for webhook/alertmanager targets | 🟢 Supported | `publishGroupAlerts` makes exactly one `publisher.PublishGroup` call per group per successful fire. Webhook/alertmanager targets now deliver that as a single HTTP POST per `(group, target)` carrying an upstream-v4-shaped `alerts` JSON array (`BatchAlertPublisher.PublishBatch` / `GroupAlertFormatter.FormatGroup`, `internal/infrastructure/publishing/{publisher,formatter}.go`), with `groupLabels` resolved from the route's `group_by`. Publishers without a batch wire shape (Slack, Telegram, PagerDuty, Email) still get one job per target and iterate `Publish` once per alert within it. **Enqueue-vs-delivery caveat**: see [Known Gaps](#known-gaps-honesty-notes) #2. |
 | Cross-replica notification dedup | 🟢 Supported | Redis-backed `notifyLog.TryClaim` + `IsDuplicate` (task 6.1); in-memory fallback is a same-process-only no-op claim. Fail-open on Redis errors (documented trade-off). |
 | `time_intervals:` / `mute_time_intervals:` / `active_time_intervals:` | 🟢 Supported | `internal/infrastructure/routing/timeinterval/` + `upstream_fixtures_test.go` — ported upstream's own fixture corpus. Route-level names resolved via `routeTreeTimeIntervalLookup` at send time (whole-group suppression, not per-alert). |
 | `GET /api/v2/alerts` upstream query params (`active`/`silenced`/`inhibited`/`unprocessed`/`receiver`/`filter`) | 🟢 Supported | `internal/application/handlers/alerts.go` `parseAlertStateFilters`/`parseReceiverFilter`; legacy `status=`/`resolved=` kept as aliases. `inhibited` param is structurally implemented but currently a no-op — inhibition isn't wired into `alertconv.ToGettableAlert`'s `InhibitedBy` yet. |
@@ -182,7 +182,7 @@ this validation.
 | `email_configs` | ✅ | ✅ | 🟢 Supported | SMTP, enhanced publisher |
 | `pagerduty_configs` | ✅ | ✅ | 🟢 Supported | Events API v2 |
 | `slack_configs` | ✅ | ✅ | 🟢 Supported | Incoming Webhooks, message threading cache |
-| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Config side fixed in Task 5.4 (`internal/alertmanager/config.Receiver` carries a `TelegramConfig`, `hasAnyIntegration()`/E024 check it). Runtime side fixed in the final fix wave: the publishing queue built publishers with `CreatePublisher(type)`, which cannot pass per-target credentials, so `EnhancedTelegramPublisher` (bot token, `chat_id`, `message_thread_id`, Bot API `sendMessage`) was **unreachable at runtime** despite being implemented. Integration types now go through `CreatePublisherForTarget` — see `createPublisherForJob` in `internal/infrastructure/publishing/queue.go` |
+| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Config side fixed in Task 5.4 (`internal/alertmanager/config.Receiver` carries a `TelegramConfig`, `hasAnyIntegration()`/E024 check it). Runtime side fixed in the final fix wave: the publishing queue built publishers with `CreatePublisher(type)`, which cannot pass per-target credentials, so `EnhancedTelegramPublisher` (bot token, `chat_id`, `message_thread_id`, Bot API `sendMessage`) was **unreachable at runtime** despite being implemented. Integration types now go through `CreatePublisherForTarget` — see `createPublisherForJob` in `internal/infrastructure/publishing/queue.go`. Wave 2: added a per-chat rate limiter (bounded LRU, cap 1000, 1 msg/s burst 3) waited on before the existing global 30/s limiter in `SendMessage`, so an alert storm to one chat no longer trips Telegram's per-chat 429s (`internal/infrastructure/publishing/telegram_client.go`). |
 | Rootly (`alertmanager`/`rootly` target type) | N/A (AMP-native target, not an upstream receiver type) | ✅ | 🟢 Supported | AMP-specific addition, not part of upstream Alertmanager |
 | `opsgenie_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E126-E129); no `OpsGenieConfigs` field on the runtime receiver and no publisher target type — zero notifications sent |
 | `victorops_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E130-E134); same gap as OpsGenie. Deferred "по потребности" (on demand) — build only if a concrete need arises |
@@ -216,22 +216,20 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
    group labels come from the matched route's `group_by` and the receiver is resolved per group from the live route
    tree. The remaining AMP-only behaviour there is the extra `?group_by=` query override.)*
-2. **Notification is one *logical* group send, not one *wire-level* POST per group.** `publishGroupAlerts` makes
-   exactly one `PublishGroup` call per group per fire, matching upstream's semantic grouping. But
-   `PublishingCoordinator.PublishGroupToTargets` (`internal/infrastructure/publishing/coordinator.go`) then fans
-   that out into one goroutine — and one outbound HTTP request — per `(target × alert)` pair, not upstream's single
-   HTTP POST carrying an `alerts` JSON array per target. Functionally each alert is still delivered, but wire
-   behavior (request count, webhook payload shape) differs from upstream and from what "one notification" implies.
-   Tracked as a known deferred item (see gap-analysis doc).
-3. **Repeat/group-interval notification continuation is implemented but not exhaustively proven under restart.**
-   `PARITY-A1-NOTIFICATION-TRIGGERING` (group_wait/group_interval/repeat_interval firing) is closed, and task 6.2
-   added a distributed-timer reconciliation loop specifically to recover in-flight timers after a replica restart
-   or crash (commits `84df74f`, `dec49e7`). No commit in this branch's history is framed as fixing a
-   context-cancellation-shaped "timer stops after first fire" bug specifically — if such a P0 was reported
-   elsewhere, it is not separately identifiable in `git log` as of this writing. Treat repeat-notification
-   continuation as implemented and hardened, but re-confirm empirically (e.g. amtool `silence add` + wait past
-   `group_interval`, watch for the second notification) during the live-audit half of task 7.4 rather than as a
-   fully closed loop backed by a long-duration regression test.
+2. **Per-target dedup records on *enqueue*, not on confirmed HTTP delivery.** Wire-level batching itself shipped
+   in wave 2: webhook/alertmanager targets get one HTTP POST per `(group, target)` with an upstream-v4 `alerts`
+   array, and the nflog is keyed per `(group, receiver, target)` so a failed target retries alone. The remaining
+   gap: `TargetPublishOutcome.Success` (and therefore `RecordSent`) is set when the job is successfully *enqueued*
+   onto the publishing queue — the actual HTTP call happens later, asynchronously. A webhook returning 500 after a
+   successful enqueue is NOT retried by the dedup machinery until `repeat_interval` elapses; only local
+   queue-congestion failures are isolated per target today. Tracked as `FU-RECORDSENT-DELIVERY-CONFIRMATION`
+   in the backlog (move `RecordSent` to a job-completion callback).
+3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
+   The original timer-continuation code cancelled its own context when arming the next interval timer
+   (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `c6cfadc` (contexts
+   rooted in the manager lifetime, continuation-handle identity check) with red→green regression tests including
+   a full wait→interval→repeat chain (`≥3` publishes asserted) and no-`context canceled` log assertions; hardened
+   further in `985abb4`. Task 6.2's reconciliation loop (`84df74f`, `dec49e7`) covers replica-crash recovery.
 4. **`inhibited` query param on `/api/v2/alerts` is structurally present but currently a no-op.** Inhibition state
    isn't yet threaded into `alertconv.ToGettableAlert`'s `InhibitedBy` field, so filtering on it can't yet change
    results — the notify-chain's own Inhibit step (which actually suppresses notifications) is unaffected by this.
