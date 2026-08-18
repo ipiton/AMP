@@ -211,13 +211,23 @@ func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, sign
 	return nil
 }
 
-// Forget implements GroupNotifyLog: removes both the entry and any
-// lingering claim for groupKey.
+// Forget implements GroupNotifyLog: removes the entry for groupKey.
+//
+// Deliberately does NOT touch the claim key (fix round 1, Finding 2):
+// Forget is called from RemoveAlertFromGroup/CleanupExpiredGroups, which
+// run under DefaultGroupManager.mu — a DIFFERENT lock than the per-GroupKey
+// m.publishLocks that guards the claim -> check -> publish -> record
+// sequence in publishGroupAlerts. A group can legitimately be deleted (e.g.
+// emptied by RemoveAlertFromGroup) while another replica is mid-publish for
+// the very same GroupKey — deleting its claim early would let a THIRD
+// replica acquire a claim and publish concurrently with the one still in
+// flight, reopening exactly the double-publish window TryClaim exists to
+// close. The claim key is short-lived by design (claimTTL, seconds — see
+// notifyLogClaimTTL) and self-expires on its own; there is no correctness
+// reason to force it out early, only a minor "unused key sits around for
+// up to claimTTL after Forget" cost.
 func (l *RedisNotifyLog) Forget(ctx context.Context, groupKey GroupKey) error {
-	if err := l.client.Del(ctx,
-		notifyLogEntryKeyPrefix+string(groupKey),
-		notifyLogClaimKeyPrefix+string(groupKey),
-	).Err(); err != nil {
+	if err := l.client.Del(ctx, notifyLogEntryKeyPrefix+string(groupKey)).Err(); err != nil {
 		return fmt.Errorf("nflog del %s: %w", groupKey, err)
 	}
 	return nil
