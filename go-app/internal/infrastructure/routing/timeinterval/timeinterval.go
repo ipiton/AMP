@@ -291,8 +291,14 @@ type DayOfMonthRange struct {
 	End   int
 }
 
-// UnmarshalYAML parses a day-of-month value or range, e.g. "1", "1:5", or
-// "-3:-1".
+// UnmarshalYAML parses a day-of-month value or range, e.g. "1", "1:5",
+// "-3:-1", or a positive-to-negative span such as "1:-1" (the whole month) or
+// "20:-1" (day 20 through the last day). Mirrors upstream Alertmanager's
+// day_of_month validation: a negative Begin paired with a positive End is
+// always rejected (ambiguous), but a positive Begin with a negative End is
+// allowed as long as it cannot be reversed in the shortest possible month
+// (28 days) — begin/end are otherwise clamped to the actual month length at
+// match time by Contains.
 func (d *DayOfMonthRange) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	s, err := decodeScalarToString(unmarshal)
 	if err != nil {
@@ -302,11 +308,21 @@ func (d *DayOfMonthRange) UnmarshalYAML(unmarshal func(interface{}) error) error
 	if err != nil {
 		return fmt.Errorf("days_of_month: %w", err)
 	}
-	if (begin < 0) != (end < 0) {
-		return fmt.Errorf("days_of_month: range %q mixes positive and negative days", s)
+	if begin < 0 && end > 0 {
+		return fmt.Errorf("days_of_month: range %q has a negative begin day with a positive end day (end day must be negative if begin day is negative)", s)
 	}
-	if begin > end {
-		return fmt.Errorf("days_of_month: reversed range %q", s)
+	// Compare using the shortest possible month (28 days) as a common frame
+	// so a positive begin / negative end pair (e.g. "1:-1") is not rejected
+	// by a naive raw-integer comparison (1 > -1) even though it is valid.
+	checkBegin, checkEnd := begin, end
+	if begin < 0 {
+		checkBegin = 28 + begin
+	}
+	if end < 0 {
+		checkEnd = 28 + end
+	}
+	if checkBegin > checkEnd {
+		return fmt.Errorf("days_of_month: reversed range %q (end day %d is always before begin day %d)", s, end, begin)
 	}
 	d.Begin, d.End = begin, end
 	return nil
