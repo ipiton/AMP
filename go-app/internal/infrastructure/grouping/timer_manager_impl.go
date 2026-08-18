@@ -655,8 +655,14 @@ func (tm *DefaultTimerManager) handleTimerExpiration(handle *timerHandle, timer 
 
 	select {
 	case <-handle.timer.C:
-		// Timer expired naturally
-		tm.onTimerExpired(handle.ctx, handle.groupKey, handle.timerType)
+		// Timer expired naturally. Deliberately NOT passing handle.ctx into
+		// onTimerExpired (P0 fix, task 6.2 fix round 2) — see that method's
+		// doc comment for why: onTimerExpired's own work must outlive THIS
+		// handle, which StartTimer is about to cancel as part of the very
+		// continuation this fire triggers. handle itself IS passed, purely
+		// as an identity token — see onTimerExpired's doc comment for the
+		// second half of this same fix round.
+		tm.onTimerExpired(handle, handle.groupKey, handle.timerType)
 
 	case <-handle.ctx.Done():
 		// Timer cancelled (manual cancel or shutdown)
@@ -668,13 +674,78 @@ func (tm *DefaultTimerManager) handleTimerExpiration(handle *timerHandle, timer 
 }
 
 // onTimerExpired handles timer expiration with distributed lock.
-func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey GroupKey, timerType TimerType) {
+//
+// P0 fix (task 6.2 fix round 2): every internal operation here is bounded
+// by a context derived from tm.ctx (the manager's own lifetime context,
+// only cancelled by Shutdown), never by a caller-supplied context tied to
+// the specific timerHandle that triggered this fire. This method used to
+// take a ctx parameter — handleTimerExpiration passed handle.ctx, the
+// context of the JUST-FIRED timer — which broke every group_wait->
+// group_interval and group_interval->repeat_interval continuation:
+//
+//  1. onTimerExpired(handle.ctx, ...) invokes the registered TimerCallback
+//     (e.g. onGroupWaitExpired) with a callbackCtx derived from handle.ctx.
+//  2. That callback calls startGroupIntervalTimer -> StartTimer for the
+//     SAME groupKey, still carrying callbackCtx.
+//  3. StartTimer finds the existing (still-registered — it isn't removed
+//     from tm.timers until AFTER the callback loop below returns) handle
+//     for this group and calls existing.cancel() — which is exactly the
+//     handle whose ctx is callbackCtx's ancestor. That cancels callbackCtx
+//     out from under the very call using it.
+//  4. StartTimer's SaveTimer(callbackCtx, ...) receives an already-
+//     cancelled context and fails with "context canceled" — StartTimer
+//     returns an error BEFORE creating the new Go timer or registering its
+//     handle. The continuation timer is silently never created.
+//
+// Result: the very first notification for a group always went out (it
+// only depends on group_wait firing, no continuation involved), but no
+// group ever got a second one — group_interval/repeat_interval timers
+// were never scheduled. Rooting everything here in tm.ctx instead breaks
+// that self-cancellation: a StartTimer call cancelling some OTHER
+// (expiring) handle can never cancel tm.ctx itself, so this fire's own
+// work — lock, group load, callbacks (including any StartTimer they
+// trigger), final delete — proceeds independently of whichever handle
+// happened to trigger it. Shutdown still stops everything, because every
+// timerHandle's ctx AND every bounded context created below are both
+// ultimately children of tm.ctx.
+//
+// firedHandle is the timerHandle whose Go timer just fired (nil when
+// there is no such handle: RestoreTimers' startup "missed timer" branch
+// and the reconciliation loop's orphan adoption both call this for a
+// timer with no LOCAL handle at all — that absence is exactly what makes
+// it "missed"/"orphaned"). It exists purely as an identity token for the
+// second half of this same fix round: fixing the context-cancellation
+// self-cancel above (see above) surfaced a SECOND bug that it had been
+// silently masking. Once StartTimer for a continuation (e.g.
+// group_interval, started by the TimerCallback invoked below) started
+// actually succeeding, the unconditional cleanup this method runs AFTER
+// the callback loop —
+//
+//	delete(tm.timers, groupKey)
+//	tm.storage.DeleteTimer(ctx, groupKey)
+//
+// — deleted that BRAND NEW continuation from both tm.timers and storage
+// milliseconds after StartTimer created it, because TimerStorage keys
+// entries by GroupKey alone (not GroupKey+TimerType): the continuation's
+// SaveTimer and this cleanup's DeleteTimer target the exact same storage
+// key. Before the context-cancellation fix this was unreachable (the
+// continuation's StartTimer always failed first, so there was nothing yet
+// to accidentally delete); fixing that alone would have replaced a hard
+// failure with an equally silent one. The cleanup below now compares
+// tm.timers[groupKey] against firedHandle by pointer identity: if a
+// callback installed a DIFFERENT handle for this groupKey while it ran
+// (the continuation case), that handle owns this groupKey now and the
+// cleanup skips it entirely — both the delete and the DeleteTimer call.
+// If nothing replaced it (no callback restarted a timer — e.g. the group
+// was empty, or this is the terminal branch of some future timer type),
+// the old entry is still stale and must be deleted exactly as before.
+func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey GroupKey, timerType TimerType) {
 	tm.logger.Info("Timer expired",
 		"group_key", groupKey,
 		"timer_type", timerType)
 
 	// Acquire distributed lock for exactly-once delivery
-	lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
+	lockCtx, lockCancel := context.WithTimeout(tm.ctx, 5*time.Second)
 	defer lockCancel()
 
 	lockID, release, err := tm.storage.AcquireLock(lockCtx, groupKey, lockTTL)
@@ -699,7 +770,7 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 	}()
 
 	// Get group snapshot
-	groupCtx, groupCancel := context.WithTimeout(ctx, 5*time.Second)
+	groupCtx, groupCancel := context.WithTimeout(tm.ctx, 5*time.Second)
 	defer groupCancel()
 
 	tm.groupManagerMu.RLock()
@@ -743,7 +814,7 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 			delete(tm.timers, groupKey)
 			tm.timersMu.Unlock()
 
-			deleteCtx, deleteCancel := context.WithTimeout(ctx, 5*time.Second)
+			deleteCtx, deleteCancel := context.WithTimeout(tm.ctx, 5*time.Second)
 			if delErr := tm.storage.DeleteTimer(deleteCtx, groupKey); delErr != nil {
 				tm.logger.Warn("failed to delete leftover timer for a confirmed-deleted group",
 					"group_key", groupKey,
@@ -770,24 +841,39 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 	tm.callbacksMu.RUnlock()
 
 	for i, callback := range callbacks {
-		callbackCtx, callbackCancel := context.WithTimeout(ctx, 30*time.Second)
+		callbackCtx, callbackCancel := context.WithTimeout(tm.ctx, 30*time.Second)
 		tm.invokeCallbackSafely(callbackCtx, callback, i, groupKey, timerType, group)
 		callbackCancel()
 	}
 
-	// Remove from active timers
+	// Remove from active timers — but ONLY if nothing replaced firedHandle
+	// for this groupKey while the callbacks above ran (P0 fix, task 6.2 fix
+	// round 2 — see this method's doc comment). A callback that started a
+	// continuation (e.g. onGroupWaitExpired -> startGroupIntervalTimer)
+	// already installed a NEW handle at tm.timers[groupKey] and a NEW
+	// storage entry under the same key; deleting either here would erase
+	// that continuation seconds after creating it.
 	tm.timersMu.Lock()
-	delete(tm.timers, groupKey)
+	currentHandle, stillPresent := tm.timers[groupKey]
+	continuationTookOver := stillPresent && currentHandle != firedHandle
+	if !continuationTookOver {
+		delete(tm.timers, groupKey)
+	}
 	tm.timersMu.Unlock()
 
-	// Delete from storage
-	deleteCtx, deleteCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer deleteCancel()
-
-	if err := tm.storage.DeleteTimer(deleteCtx, groupKey); err != nil {
-		tm.logger.Warn("Failed to delete expired timer from storage",
+	if continuationTookOver {
+		tm.logger.Debug("timer continuation replaced the fired handle during callback dispatch, skipping stale cleanup",
 			"group_key", groupKey,
-			"error", err)
+			"timer_type", timerType)
+	} else {
+		// Delete from storage
+		deleteCtx, deleteCancel := context.WithTimeout(tm.ctx, 5*time.Second)
+		if err := tm.storage.DeleteTimer(deleteCtx, groupKey); err != nil {
+			tm.logger.Warn("Failed to delete expired timer from storage",
+				"group_key", groupKey,
+				"error", err)
+		}
+		deleteCancel()
 	}
 
 	// Update statistics
@@ -886,7 +972,19 @@ func (tm *DefaultTimerManager) RestoreTimers(ctx context.Context) (restored int,
 				"delay", now.Sub(timer.ExpiresAt))
 
 			timer.State = TimerStateMissed
-			go tm.onTimerExpired(ctx, timer.GroupKey, timer.TimerType)
+			// Not passing the RestoreTimers ctx parameter here (P0 fix, task
+			// 6.2 fix round 2): this goroutine is dispatched via `go` and can
+			// still be running after RestoreTimers itself returns, at which
+			// point ServiceRegistry.initializeGrouping calls the matching
+			// cancel() for its bounded restoreCtx — which would otherwise
+			// cancel this fire's own work out from under it, same failure
+			// shape onTimerExpired's own doc comment describes. onTimerExpired
+			// roots its internal work in tm.ctx unconditionally now, so there
+			// is nothing caller-scoped left to pass.
+			// firedHandle is nil: there is no local timerHandle for a timer
+			// found already-expired at restore time — that absence is what
+			// makes it "missed" in the first place.
+			go tm.onTimerExpired(nil, timer.GroupKey, timer.TimerType)
 			missed++
 		} else {
 			// Timer still valid - restore it
@@ -1038,8 +1136,12 @@ func (tm *DefaultTimerManager) reconcileOrphanedTimers() {
 		// relative to that interval in practice; RestoreTimers' "missed"
 		// branch dispatches via `go` instead because it runs once at
 		// startup against a potentially large backlog and must not block
-		// the rest of restoration on it.
-		tm.onTimerExpired(ctx, timer.GroupKey, timer.TimerType)
+		// the rest of restoration on it. No ctx to pass here either (P0
+		// fix, task 6.2 fix round 2) — onTimerExpired roots its own work in
+		// tm.ctx, not this tick's bounded reconciliation ctx. firedHandle is
+		// nil for the same reason as RestoreTimers' missed branch: an
+		// orphan has no local timerHandle by definition.
+		tm.onTimerExpired(nil, timer.GroupKey, timer.TimerType)
 	}
 }
 
