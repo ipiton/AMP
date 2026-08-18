@@ -306,8 +306,19 @@ func (m *DefaultRefreshManager) RefreshNow() error {
 
 	m.logger.Info("Manual refresh triggered")
 
-	// Trigger async refresh (spawn goroutine). The slot is already acquired above,
-	// so doRefresh runs the work directly without re-checking/re-acquiring inProgress.
+	// The refresh is now certain to run (slot held, rate limit passed): flip the
+	// visible state to in_progress synchronously, in THIS goroutine, before
+	// returning. If this were deferred into the spawned goroutine below (as an
+	// earlier version of this fix did), an immediate GetStatus()/waitForRefresh()
+	// call right after RefreshNow() returns could still observe the *previous*
+	// terminal state (success/failed) — mistaking "goroutine hasn't started yet"
+	// for "refresh already finished" — and race a second RefreshNow() in while
+	// the first is genuinely still running.
+	m.markRefreshStarted()
+
+	// Trigger async refresh (spawn goroutine). The slot and in_progress state are
+	// already set above, so doRefresh runs the work directly without
+	// re-checking/re-acquiring either.
 	go m.doRefresh(true) // isManual=true
 
 	return nil
@@ -315,8 +326,22 @@ func (m *DefaultRefreshManager) RefreshNow() error {
 
 // tryAcquireRefreshSlot atomically checks-and-sets the single-flight refresh slot.
 //
-// Returns true and marks state=in_progress if no refresh was running.
-// Returns false (leaving state untouched) if a refresh was already in progress.
+// Returns true if no refresh was running (and reserves the slot by setting
+// inProgress=true). Returns false if a refresh was already in progress.
+//
+// This deliberately does NOT touch m.state. RefreshNow() calls this before
+// the rate-limit check, i.e. before it's certain a refresh will actually run
+// — if the rate limit then rejects the request, the slot is rolled back via
+// releaseRefreshSlot() with nothing further to undo. Setting state here (as
+// an earlier version of this code did) meant a rate-limited RefreshNow left
+// m.state stuck at RefreshStateInProgress until the next real refresh ran,
+// even though no refresh was actually in progress.
+//
+// Once the caller is certain the refresh will actually run (slot held, and —
+// for the manual path — the rate limit has already passed), it must call
+// markRefreshStarted() to flip the visible state to in_progress. Callers must
+// do this synchronously, in their own goroutine, before spawning any async
+// worker — see RefreshNow and executeRefresh.
 //
 // This must be the ONLY way inProgress is set to true, so that acquisition and
 // the in-progress check are always a single atomic operation under mu — never
@@ -329,8 +354,22 @@ func (m *DefaultRefreshManager) tryAcquireRefreshSlot() bool {
 		return false
 	}
 	m.inProgress = true
-	m.state = RefreshStateInProgress
 	return true
+}
+
+// markRefreshStarted flips the visible state to RefreshStateInProgress.
+//
+// Must only be called after tryAcquireRefreshSlot() has returned true, and
+// only once the refresh is certain to actually run (i.e. after any further
+// gating checks — like RefreshNow's rate limit — have already passed).
+// Called synchronously by the triggering goroutine, never from inside the
+// spawned worker goroutine, so that GetStatus()/waitForRefresh() can never
+// observe a stale terminal state for a refresh that has, in fact, already
+// started.
+func (m *DefaultRefreshManager) markRefreshStarted() {
+	m.mu.Lock()
+	m.state = RefreshStateInProgress
+	m.mu.Unlock()
 }
 
 // releaseRefreshSlot releases the single-flight refresh slot acquired via
