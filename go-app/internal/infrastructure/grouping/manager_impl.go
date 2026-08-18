@@ -68,6 +68,11 @@ type DefaultGroupManager struct {
 	// deliberately minimal substitute for upstream's Redis-backed nflog).
 	notifyLog *notifyDedupLog
 
+	// publishLocks serializes the whole notify-stage chain per GroupKey
+	// (task 2.4 fix round 1, Finding 4 — see publish_lock.go). Always
+	// non-nil.
+	publishLocks *groupPublishLocks
+
 	// logger for structured logging
 	logger *slog.Logger
 
@@ -126,6 +131,7 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		inhibitionChecker: cfg.InhibitionChecker, // Optional (task 2.4)
 		silenceChecker:    cfg.SilenceChecker,    // Optional (task 2.4)
 		notifyLog:         newNotifyDedupLog(),   // task 2.4: always-on minimal dedup
+		publishLocks:      &groupPublishLocks{},  // task 2.4 fix round 1: serialize per group key
 		logger:            cfg.Logger,
 		metrics:           cfg.Metrics,
 		stats:             &groupStats{},
@@ -967,6 +973,12 @@ func (m *DefaultGroupManager) filterSilenced(groupKey GroupKey, alerts []*core.A
 //
 // The publisher is read under m.mu (SetPublisher can update it after
 // construction — see its doc comment for why).
+//
+// Concurrency (task 2.4 fix round 1, Finding 4): the whole
+// check-then-publish-then-record sequence below is serialized per
+// group.Key via m.publishLocks — see its doc comment for why the Dedup
+// check and record alone aren't enough to prevent a double-send from two
+// concurrent callers.
 func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *AlertGroup) {
 	m.mu.RLock()
 	publisher := m.publisher
@@ -975,6 +987,10 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	if publisher == nil {
 		return
 	}
+
+	lock := m.publishLocks.lockFor(group.Key)
+	lock.Lock()
+	defer lock.Unlock()
 
 	group.mu.RLock()
 	alerts := make([]*core.Alert, 0, len(group.Alerts))

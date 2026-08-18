@@ -733,6 +733,94 @@ func createTestManagerWithPublisher(t *testing.T, pub GroupNotificationPublisher
 	return manager, timerStorage
 }
 
+// createTestManagerWithLongRootTimings is like createTestManagerWithPublisher
+// but the grouping config's ROOT Route.* timings are deliberately long
+// (1 hour) — used by TestAddAlertToGroup_PerRouteTimingsOverrideRootDefaults
+// below to prove a per-call WithGroupTimings override actually takes effect
+// (a group_wait firing observed within the test's timeout is only possible
+// via the override; the 1-hour root default would never fire in time).
+func createTestManagerWithLongRootTimings(t *testing.T, pub GroupNotificationPublisher) *DefaultGroupManager {
+	t.Helper()
+	keyGen := NewGroupKeyGenerator()
+	config := &GroupingConfig{
+		Route: &Route{
+			Receiver:       "default",
+			GroupBy:        []string{"alertname"},
+			GroupWait:      &Duration{time.Hour},
+			GroupInterval:  &Duration{time.Hour},
+			RepeatInterval: &Duration{time.Hour},
+		},
+	}
+
+	storage := NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()})
+	timerStorage := NewInMemoryTimerStorage(nil)
+
+	stubGroupMgr := &DefaultGroupManager{
+		storage:          storage,
+		fingerprintIndex: make(map[string]GroupKey),
+		logger:           slog.Default(),
+	}
+
+	timerMgr, err := NewDefaultTimerManager(TimerManagerConfig{
+		Storage:               timerStorage,
+		GroupManager:          stubGroupMgr,
+		DefaultGroupWait:      time.Hour,
+		DefaultGroupInterval:  time.Hour,
+		DefaultRepeatInterval: time.Hour,
+		Logger:                slog.Default(),
+	})
+	require.NoError(t, err)
+
+	manager, err := NewDefaultGroupManager(context.Background(), DefaultGroupManagerConfig{
+		KeyGenerator: keyGen,
+		Config:       config,
+		Logger:       slog.Default(),
+		Storage:      storage,
+		TimerManager: timerMgr,
+		Publisher:    pub,
+	})
+	require.NoError(t, err)
+
+	timerMgr.groupManager = manager
+
+	return manager
+}
+
+// TestAddAlertToGroup_PerRouteTimingsOverrideRootDefaults is the red->green
+// test for the task 2.3 carry-over gap fixed in task 2.4: without
+// WithGroupTimings actually being honored by startGroupWaitTimer, this
+// group's group_wait timer would use the grouping config's root Route.*
+// default (1 hour, see createTestManagerWithLongRootTimings) and never fire
+// within this test's short deadline. Passing WithGroupTimings with a 20ms
+// group_wait must make it fire almost immediately instead.
+func TestAddAlertToGroup_PerRouteTimingsOverrideRootDefaults(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithLongRootTimings(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=TestAlert")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey,
+		WithGroupTimings(20*time.Millisecond, time.Hour, time.Hour))
+	require.NoError(t, err)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(pub.calls()) < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	require.Len(t, pub.calls(), 1,
+		"a 20ms per-route group_wait override must fire well within 2s — the 1-hour root default never would")
+
+	// Confirms the override was actually captured on the group, not just
+	// coincidentally timed right.
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+	require.NotNil(t, group.Metadata.Timings)
+	assert.Equal(t, 20*time.Millisecond, group.Metadata.Timings.GroupWait)
+}
+
 // TestPublishGroupAlerts_OneCallCarriesAllAlerts verifies that
 // publishGroupAlerts makes exactly ONE PublishGroup call for the whole
 // group, carrying every alert in it (task 2.4: one grouped notification

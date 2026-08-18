@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -674,13 +675,7 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 
 	for i, callback := range callbacks {
 		callbackCtx, callbackCancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := callback(callbackCtx, groupKey, timerType, group); err != nil {
-			tm.logger.Error("Timer callback failed",
-				"group_key", groupKey,
-				"timer_type", timerType,
-				"callback_index", i,
-				"error", err)
-		}
+		tm.invokeCallbackSafely(callbackCtx, callback, i, groupKey, timerType, group)
 		callbackCancel()
 	}
 
@@ -714,6 +709,54 @@ func (tm *DefaultTimerManager) onTimerExpired(ctx context.Context, groupKey Grou
 		"group_key", groupKey,
 		"timer_type", timerType,
 		"lock_id", lockID)
+}
+
+// invokeCallbackSafely runs a single timer-expiration callback with panic
+// recovery (task 2.4 fix round 1, Finding 3).
+//
+// handleTimerExpiration/onTimerExpired run in their own unsupervised
+// background goroutine (one per timer) — there is no request-scoped
+// recover() anywhere above this call. Before task 2.4, registered
+// callbacks only ever logged; the notify-stage chain wired in by task 2.4
+// (Inhibit/Silence/Dedup + publish) does real work — network-adjacent
+// queue submission, a user-injected InhibitionChecker/SilenceChecker — and
+// a panic anywhere in that chain would otherwise crash the whole process.
+// One recover() here covers every registered TimerCallback, not just the
+// grouping package's own.
+//
+// A panicking callback is logged with its stack and otherwise treated like
+// a callback that returned an error: the loop in onTimerExpired continues
+// to the next callback, and this timer is still removed from active state
+// below as usual (so a permanently-panicking callback can't wedge a group
+// forever — timer_wait/interval/repeat_interval get rescheduled from
+// scratch next time an alert lands in this group, same as after a normal
+// error return).
+func (tm *DefaultTimerManager) invokeCallbackSafely(
+	ctx context.Context,
+	callback TimerCallback,
+	index int,
+	groupKey GroupKey,
+	timerType TimerType,
+	group *AlertGroup,
+) {
+	defer func() {
+		if r := recover(); r != nil {
+			tm.logger.Error("Timer callback panicked",
+				"group_key", groupKey,
+				"timer_type", timerType,
+				"callback_index", index,
+				"panic", r,
+				"stack", string(debug.Stack()))
+		}
+	}()
+
+	if err := callback(ctx, groupKey, timerType, group); err != nil {
+		tm.logger.Error("Timer callback failed",
+			"group_key", groupKey,
+			"timer_type", timerType,
+			"callback_index", index,
+			"error", err)
+	}
 }
 
 // RestoreTimers recovers timers from storage after restart.
