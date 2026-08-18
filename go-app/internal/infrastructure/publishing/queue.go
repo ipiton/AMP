@@ -402,6 +402,42 @@ func (q *PublishingQueue) worker(id int) {
 	}
 }
 
+// createPublisherForJob builds the publisher for one queued job.
+//
+// WHY THIS ISN'T JUST CreatePublisher (final review finding 6): this queue is
+// the ONLY live publish path in the process — everything eventually funnels
+// through PublishingQueue.Submit -> processJob. It called
+// CreatePublisher(job.Target.Type), which is type-only and therefore cannot
+// build any publisher that needs per-target credentials or settings. The
+// consequence for Telegram was total: NewTelegramPublisher is a bare generic
+// HTTPPublisher, so EnhancedTelegramPublisher (bot token, chat_id,
+// message_thread_id, disable_notifications, Telegram Bot API sendMessage) was
+// unreachable at runtime — its only non-test caller was
+// CreatePublisherForTarget, whose only caller was parallel_publisher.go, which
+// has no non-test constructor. The same held for the enhanced Slack, PagerDuty
+// and Rootly publishers. The docs claimed runtime support for all of them.
+//
+// Integration types are therefore routed through CreatePublisherForTarget,
+// which reads job.Target.Headers. Note that each createEnhanced*Publisher
+// already falls back to the basic HTTP publisher (with a Warn) when the target
+// lacks the credentials it needs, so a misconfigured target degrades exactly as
+// before rather than failing the job.
+//
+// TargetTypeWebhook/TargetTypeAlertmanager deliberately stay on
+// CreatePublisher: EnhancedWebhookPublisher additionally runs
+// WebhookValidator.ValidateTarget (URL scheme/host and header rules) against
+// every target, which would reject target configurations the basic publisher
+// accepts today. Turning that validation on is a separate, deliberate behaviour
+// change, not something to bundle into a wiring fix.
+func (q *PublishingQueue) createPublisherForJob(job *PublishingJob) (AlertPublisher, error) {
+	switch TargetType(job.Target.Type) {
+	case TargetTypeRootly, TargetTypePagerDuty, TargetTypeSlack, TargetTypeTelegram, TargetTypeEmail:
+		return q.factory.CreatePublisherForTarget(job.Target)
+	default:
+		return q.factory.CreatePublisher(job.Target.Type)
+	}
+}
+
 // processJob processes a single publishing job with retry logic
 func (q *PublishingQueue) processJob(job *PublishingJob) {
 	// Update job state to Processing
@@ -425,7 +461,7 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	}
 
 	// Create publisher
-	publisher, err := q.factory.CreatePublisher(job.Target.Type)
+	publisher, err := q.createPublisherForJob(job)
 	if err != nil {
 		job.State = JobStateFailed
 		now := time.Now()
