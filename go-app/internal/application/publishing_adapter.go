@@ -16,7 +16,9 @@ type publishingCoordinator interface {
 	PublishToAll(ctx context.Context, enrichedAlert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error)
 	// PublishGroupToTargets is the notify-stage chain's batch publish call
 	// (task 2.4) — see grouping.GroupNotificationPublisher.PublishGroup.
-	PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string) ([]*infrapublishing.PublishingResult, error)
+	// skipTarget implements task fwb's per-target nflog dedup (called once
+	// per candidate target before a job is submitted for it).
+	PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, skipTarget func(target string) bool) ([]*infrapublishing.PublishingResult, error)
 }
 
 // ApplicationPublishingAdapter bridges AlertProcessor and the queue-based publishing stack.
@@ -49,70 +51,53 @@ func (p *ApplicationPublishingAdapter) PublishToAll(ctx context.Context, alert *
 	return p.publish(ctx, alert, nil)
 }
 
-// PublishGroup implements grouping.GroupNotificationPublisher (task 2.4):
-// delivers alerts (already filtered by the notify-chain's Inhibit/Silence/
-// Dedup steps) for one alert group as a single logical group notification.
+// PublishGroup implements grouping.GroupNotificationPublisher (task 2.4,
+// per-target outcomes added by task fwb): delivers alerts (already filtered
+// by the notify-chain's Inhibit/Silence/Dedup steps) for one alert group as
+// a single logical group notification.
 //
-// Contract (task 2.4 fix round 1, Findings 1+2): the caller
-// (grouping.DefaultGroupManager.publishGroupAlerts) records this
-// notification as "sent" in its Dedup log ONLY when PublishGroup returns a
-// nil error — so nil must mean "every resolved target confirmed the
-// enqueue," not merely "the coordinator call itself didn't error."
-// Concretely:
+// Contract (task fwb): the caller
+// (grouping.DefaultGroupManager.publishGroupAlerts) records an nflog entry
+// per TARGET, scoped to exactly the outcomes with Success == true — so a
+// non-nil error here must mean "nothing usable happened at all" (no target
+// even got a chance to report an outcome — e.g. metrics-only mode, or "no
+// targets found for receiver"), while a partial result (some targets
+// succeeded, some didn't) is reported through outcomes with a nil error,
+// letting the caller record the successes and retry only the failures on
+// the next scheduled fire. This replaces task 2.4's all-or-nothing
+// contract, where a partial failure had to be surfaced as a whole-call
+// error because the dedup log had no per-target granularity to record a
+// partial success into.
 //
-//   - Empty results with a nil error (coordinator's metrics-only-mode
-//     fallback — see PublishingCoordinator.PublishGroupToTargets) used to
-//     read as "success" here, so Dedup recorded a send that never actually
-//     happened. Once metrics-only mode ends, the group would stay silent
-//     for a full repeat_interval. Now treated as a failure.
-//   - Partial failure (N of M targets succeeded) used to return nil as
-//     long as at least one target succeeded, which also let Dedup record
-//     "sent" — starving the failed target(s) until repeat_interval elapses
-//     instead of retrying on the next timer tick like every other publish
-//     path in this codebase. Now treated as a failure too.
-//
-// This is the minimal, honest fix, not per-target dedup (deferred — see
-// task 2.4 report): the dedup log is still one entry per GroupKey, not per
-// (GroupKey, target). The trade-off is that a partial failure causes the
-// NEXT tick to resend to every target again, including the ones that
-// already succeeded (a possible duplicate for those, in exchange for never
-// silently dropping the ones that failed). A per-target notification log
-// would avoid that duplicate but is a larger change, deferred.
-func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, alerts []*core.Alert, receiver string) error {
+// skipTarget is forwarded to PublishingCoordinator.PublishGroupToTargets
+// unchanged — see grouping.GroupNotificationPublisher's doc comment for the
+// per-target dedup protocol it implements.
+func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, skipTarget func(target string) bool) ([]grouping.TargetPublishOutcome, error) {
 	if len(alerts) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	results, err := p.coordinator.PublishGroupToTargets(ctx, alerts, receiver)
+	results, err := p.coordinator.PublishGroupToTargets(ctx, alerts, receiver, groupKey, skipTarget)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if len(results) == 0 {
-		// No result to confirm delivery against (e.g. metrics-only mode) —
-		// do not let the caller treat this as "sent".
-		return fmt.Errorf("group publish for receiver %q produced no results (no confirmed delivery)", receiver)
-	}
-
-	// counted is the number of NON-NIL results (wave re-review, Minor 4). The
-	// comparisons below must be against this, not len(results): a nil entry
-	// carries no target and no outcome, so counting it as a denominator would
-	// synthesize a "partial failure" out of a run where every real target
-	// succeeded.
-	counted := 0
-	successful := 0
-	var lastErr error
+	outcomes := make([]grouping.TargetPublishOutcome, 0, len(results))
 	for _, result := range results {
-		if result == nil {
+		if result == nil || result.Target == nil {
+			// A nil entry (or one with no target) carries no outcome to
+			// report — skip it rather than synthesizing a target-less
+			// failure (wave re-review, Minor 4's same concern, carried
+			// forward).
 			continue
 		}
-		counted++
-		if result.Success {
-			successful++
-			continue
-		}
-		if result.Error != nil {
-			lastErr = result.Error
+
+		outcomes = append(outcomes, grouping.TargetPublishOutcome{
+			Target:  result.Target.Name,
+			Success: result.Success,
+		})
+
+		if !result.Success && result.Error != nil {
 			p.logger.Warn("Group publishing enqueue failed",
 				"target", result.Target.Name,
 				"receiver", receiver,
@@ -122,23 +107,7 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, alerts 
 		}
 	}
 
-	if counted == 0 {
-		// Every entry was nil: same posture as the len(results) == 0 check
-		// above — nothing confirmed delivery, so the caller must not record a
-		// send.
-		return fmt.Errorf("group publish for receiver %q produced no usable results (no confirmed delivery)", receiver)
-	}
-
-	if successful < counted {
-		// Partial or total failure — never nil here, so the caller never
-		// records this group notification as delivered (see doc comment).
-		if lastErr == nil {
-			lastErr = fmt.Errorf("group publish for receiver %q confirmed only %d/%d targets", receiver, successful, counted)
-		}
-		return lastErr
-	}
-
-	return nil
+	return outcomes, nil
 }
 
 func (p *ApplicationPublishingAdapter) PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error {

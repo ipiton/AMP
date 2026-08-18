@@ -164,12 +164,19 @@ nflog_entry_exists() {
   # replica. This helper is therefore asserted NEGATIVELY below; it is kept
   # (rather than deleted) precisely so a regression that starts writing the key
   # again fails loudly.
-  local key="nflog:entry:receiver=${1}/alertname=${2}"
+  #
+  # Key format changed (task fwb, alertmanager-parity wave 2: per-target nflog
+  # granularity): entries are now "nflog:entry:<groupKey>:<target>", one per
+  # target that confirmed delivery, instead of one bare "nflog:entry:<groupKey>"
+  # key covering the whole group+receiver. This checks a wildcard/prefix match
+  # rather than an exact key so the assertion still catches a regression
+  # regardless of which target segment would be appended.
+  local prefix="nflog:entry:receiver=${1}/alertname=${2}"
   local redis_container
   redis_container="$("${COMPOSE[@]}" ps -q redis)"
   local hits
-  hits=$(docker exec "$redis_container" redis-cli EXISTS "$key" | tr -d '\r')
-  [[ "$hits" == "1" ]]
+  hits=$(docker exec "$redis_container" redis-cli --scan --pattern "${prefix}*" | wc -l | tr -d ' \r')
+  [[ "$hits" -gt 0 ]]
 }
 
 log_count() {

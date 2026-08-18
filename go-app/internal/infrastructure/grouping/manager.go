@@ -597,6 +597,25 @@ type AlertGroupManager interface {
 	GetStats(ctx context.Context) (*GroupStats, error)
 }
 
+// TargetPublishOutcome reports one target's publish outcome for a single
+// group notification (task fwb: wire-level group batching + per-target
+// nflog). GroupNotificationPublisher.PublishGroup returns one of these per
+// target it actually attempted delivery to — a target skipped via the
+// skipTarget callback (already delivered this cycle) is omitted entirely,
+// not reported as an outcome.
+type TargetPublishOutcome struct {
+	// Target is the publishing target's name (core.PublishingTarget.Name),
+	// used as the nflog dedup key's target segment — see GroupNotifyLog.
+	Target string
+
+	// Success reports whether this target confirmed delivery (its queue job
+	// enqueued/sent without error). DefaultGroupManager.publishGroupAlerts
+	// records an nflog entry only for Success == true outcomes, so a failed
+	// target is retried on the group's next scheduled timer fire while a
+	// successful one is skipped (via skipTarget) on that retry.
+	Success bool
+}
+
 // GroupNotificationPublisher publishes a resolved batch of alerts belonging
 // to ONE alert group as a single logical group notification (task 2.4,
 // alertmanager-parity), when a group timer fires — one call per group
@@ -609,13 +628,30 @@ type AlertGroupManager interface {
 // receiverFromGroupKey), passed through so the implementation can do
 // receiver-scoped target selection (task 1.5's PublishToTargets).
 //
+// groupKey is the group's own key (group.Key) as a plain string — passed
+// through (not as the grouping.GroupKey type) so implementations can forward
+// it into the wire payload's "groupKey" field (upstream Alertmanager webhook
+// shape) without this package depending on infrastructure/publishing, and
+// vice versa.
+//
+// skipTarget implements task fwb's per-target notification-log dedup:
+// PublishGroup's implementation resolves its own receiver-scoped target list
+// internally (as it always has) and MUST call skipTarget(target.Name) once
+// per candidate target BEFORE attempting delivery to it. A true result means
+// "this target already received this exact alert set within
+// repeat_interval — do not send, and do not include it in the returned
+// outcomes." This is what makes a retry after a partial failure resend ONLY
+// the targets that failed last time: the ones that already succeeded report
+// skipTarget == true on the next fire (their nflog entry was recorded) and
+// are silently excluded.
+//
 // This interface is intentionally NOT a subset of services.Publisher (which
 // is strictly per-alert) to avoid import cycles between infrastructure/
 // grouping and core/services, and because the batch signature is the point.
 // application.ApplicationPublishingAdapter and application.MetricsOnlyPublisher
 // both implement it.
 type GroupNotificationPublisher interface {
-	PublishGroup(ctx context.Context, alerts []*core.Alert, receiver string) error
+	PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, skipTarget func(target string) bool) ([]TargetPublishOutcome, error)
 }
 
 // ErrDeliveryNotConfirmed is the sentinel a GroupNotificationPublisher must
@@ -759,29 +795,44 @@ type GroupTimeIntervalLookup interface {
 // claim.
 type GroupNotifyLog interface {
 	// IsDuplicate reports whether a notification for groupKey carrying
-	// exactly this alert set was already sent within ttl (a cutoff time:
-	// "sent after ttl" counts as duplicate). Does not record anything.
-	IsDuplicate(ctx context.Context, groupKey GroupKey, signature string, ttl time.Time) (bool, error)
+	// exactly this alert set was already sent to target within ttl (a
+	// cutoff time: "sent after ttl" counts as duplicate). Does not record
+	// anything.
+	//
+	// target scopes the check to one publishing target (task fwb,
+	// alertmanager-parity wave 2 — mirrors upstream nflog's
+	// group:receiver:integration key). Before this, a single entry covered
+	// the whole group+receiver, so a partial delivery failure (M of N
+	// targets) had no way to record "N succeeded" without also recording
+	// the M that didn't — the next tick re-sent to every target,
+	// duplicating the N that already got it. Per-target keys let
+	// DefaultGroupManager.publishGroupAlerts (via the skipTarget callback
+	// passed to GroupNotificationPublisher.PublishGroup) retry ONLY the
+	// targets that failed.
+	IsDuplicate(ctx context.Context, groupKey GroupKey, target string, signature string, ttl time.Time) (bool, error)
 
 	// RecordSent records that a notification carrying signature for
-	// groupKey was just sent successfully, at now. repeatInterval is used
-	// by Redis-backed implementations as the entry's TTL (plus a grace
-	// period) so an abandoned group's entry doesn't outlive it indefinitely;
-	// the in-memory implementation ignores it (IsDuplicate recomputes
-	// freshness against a caller-supplied cutoff on every call instead).
-	RecordSent(ctx context.Context, groupKey GroupKey, signature string, now time.Time, repeatInterval time.Duration) error
+	// groupKey was just sent successfully to target, at now. repeatInterval
+	// is used by Redis-backed implementations as the entry's TTL (plus a
+	// grace period) so an abandoned group's entry doesn't outlive it
+	// indefinitely; the in-memory implementation ignores it (IsDuplicate
+	// recomputes freshness against a caller-supplied cutoff on every call
+	// instead).
+	RecordSent(ctx context.Context, groupKey GroupKey, target string, signature string, now time.Time, repeatInterval time.Duration) error
 
-	// Forget removes the dedup entry for groupKey. Called when a group is
-	// deleted so the log doesn't grow unbounded independent of active
-	// groups. Must NOT clear any in-flight TryClaim claim for groupKey
-	// (fix round 1, Finding 2): Forget's callers (RemoveAlertFromGroup/
-	// CleanupExpiredGroups) run under a different lock than the claim ->
-	// check -> publish -> record sequence in publishGroupAlerts, so a group
-	// can be deleted while another replica still holds a live claim for it
-	// — deleting that claim early would let a third replica race in and
-	// publish concurrently, reopening the double-publish window TryClaim
-	// exists to close. Implementations must let any claim self-expire via
-	// its own claimTTL instead.
+	// Forget removes every per-target dedup entry for groupKey (task fwb:
+	// there can be more than one now — one per target that ever received
+	// this group's notification within its current repeat_interval). Called
+	// when a group is deleted so the log doesn't grow unbounded independent
+	// of active groups. Must NOT clear any in-flight TryClaim claim for
+	// groupKey (fix round 1, Finding 2): Forget's callers
+	// (RemoveAlertFromGroup/CleanupExpiredGroups) run under a different
+	// lock than the claim -> check -> publish -> record sequence in
+	// publishGroupAlerts, so a group can be deleted while another replica
+	// still holds a live claim for it — deleting that claim early would let
+	// a third replica race in and publish concurrently, reopening the
+	// double-publish window TryClaim exists to close. Implementations must
+	// let any claim self-expire via its own claimTTL instead.
 	Forget(ctx context.Context, groupKey GroupKey) error
 
 	// TryClaim attempts to acquire a short-lived cross-replica publish

@@ -77,6 +77,27 @@ type AlertFormatter interface {
 	FormatAlert(ctx context.Context, enrichedAlert *core.EnrichedAlert, format core.PublishingFormat) (map[string]any, error)
 }
 
+// GroupAlertFormatter formats a whole alert GROUP as ONE wire-level payload
+// (task fwb: wire-level group batching) — upstream Alertmanager's webhook
+// shape sends exactly one POST per group per target, carrying every alert
+// in an "alerts" array, rather than the one-POST-per-alert shape
+// FormatAlert produces. Optional: implemented by DefaultAlertFormatter for
+// the formats that model a whole-group payload natively (alertmanager and
+// webhook — see FormatGroup); a formatter that doesn't implement this
+// interface, or returns an error for the requested format, signals "no
+// wire-level batching for this format" to the caller (BatchAlertPublisher
+// implementations), which is expected to be the only thing that calls it.
+type GroupAlertFormatter interface {
+	// FormatGroup formats alerts (every alert in one group notification,
+	// already filtered by the notify-stage chain — see
+	// grouping.DefaultGroupManager.publishGroupAlerts) as a single payload.
+	// groupKey and receiver populate the payload's "groupKey"/"receiver"
+	// fields (upstream Alertmanager webhook shape); format selects which
+	// wire shape to produce — only core.FormatAlertmanager and
+	// core.FormatWebhook are supported by DefaultAlertFormatter today.
+	FormatGroup(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, format core.PublishingFormat) (map[string]any, error)
+}
+
 // DefaultAlertFormatter implements AlertFormatter using strategy pattern
 type DefaultAlertFormatter struct {
 	formatters  map[core.PublishingFormat]formatFunc
@@ -119,6 +140,125 @@ func (f *DefaultAlertFormatter) FormatAlert(ctx context.Context, enrichedAlert *
 	}
 
 	return formatFn(enrichedAlert)
+}
+
+// FormatGroup implements GroupAlertFormatter (task fwb): the true upstream
+// Alertmanager webhook wire shape — one payload per group per target,
+// carrying every alert of the group in an "alerts" array, plus
+// groupLabels/commonLabels/commonAnnotations/groupKey/receiver/externalURL
+// — for the two formats that model it (alertmanager and webhook; both
+// share the same upstream v4 shape once batched — the pre-fwb formatWebhook
+// used a bespoke simplified single-alert shape, but there is no reason for
+// the GROUP payload to diverge from the alertmanager one AlertFormatter
+// already produces per-alert). Any other format returns an error: those
+// integrations (Slack, Telegram, PagerDuty, Email) are inherently
+// one-message-per-alert and are driven by PublishingQueue iterating
+// FormatAlert per alert within the same job instead — see
+// PublishingQueue.publishJob.
+func (f *DefaultAlertFormatter) FormatGroup(_ context.Context, alerts []*core.Alert, groupKey string, receiver string, format core.PublishingFormat) (map[string]any, error) {
+	if len(alerts) == 0 {
+		return nil, fmt.Errorf("cannot format an empty alert group")
+	}
+
+	switch format {
+	case core.FormatAlertmanager, core.FormatWebhook:
+		return f.formatGroupUpstream(alerts, groupKey, receiver), nil
+	default:
+		return nil, fmt.Errorf("wire-level group batching not supported for format %q", format)
+	}
+}
+
+// formatGroupUpstream builds the upstream Alertmanager v4 webhook payload
+// for a whole group: {"version":"4","groupKey":...,"status":...,
+// "alerts":[...],"groupLabels":...,"commonLabels":...,
+// "commonAnnotations":...,"receiver":...,"externalURL":...}.
+//
+// status is "firing" if any alert in the group is still firing, "resolved"
+// only when every alert has resolved — matching upstream's aggrGroup
+// status semantics. commonLabels/commonAnnotations are the intersection of
+// every alert's labels/annotations where both key AND value match across
+// the whole set (upstream's CommonLabels/CommonAnnotations semantics).
+// groupLabels is intentionally left empty: the GroupBy label NAMES aren't
+// available at this layer (this package doesn't depend on
+// infrastructure/grouping — see GroupNotificationPublisher's doc comment
+// for why that boundary exists), only their resolved values would need
+// looking up per alert; upstream operators primarily key off commonLabels/
+// groupKey in webhook receivers, so this is a documented simplification,
+// not a bug.
+func (f *DefaultAlertFormatter) formatGroupUpstream(alerts []*core.Alert, groupKey string, receiver string) map[string]any {
+	amAlerts := make([]map[string]any, 0, len(alerts))
+	var commonLabels, commonAnnotations map[string]string
+	anyFiring := false
+
+	for i, alert := range alerts {
+		amAlert := map[string]any{
+			"labels":      alert.Labels,
+			"annotations": alert.Annotations,
+			"startsAt":    alert.StartsAt.Format(time.RFC3339),
+			"fingerprint": alert.Fingerprint,
+			"status":      string(alert.Status),
+		}
+		if alert.EndsAt != nil {
+			amAlert["endsAt"] = alert.EndsAt.Format(time.RFC3339)
+		}
+		if alert.GeneratorURL != nil {
+			amAlert["generatorURL"] = *alert.GeneratorURL
+		}
+		amAlerts = append(amAlerts, amAlert)
+
+		if alert.Status == core.StatusFiring {
+			anyFiring = true
+		}
+
+		if i == 0 {
+			commonLabels = cloneStringMap(alert.Labels)
+			commonAnnotations = cloneStringMap(alert.Annotations)
+			continue
+		}
+		intersectStringMap(commonLabels, alert.Labels)
+		intersectStringMap(commonAnnotations, alert.Annotations)
+	}
+
+	status := string(core.StatusResolved)
+	if anyFiring {
+		status = string(core.StatusFiring)
+	}
+
+	result := getFormatterResult()
+	result["version"] = "4"
+	result["groupKey"] = groupKey
+	result["status"] = status
+	result["alerts"] = amAlerts
+	result["groupLabels"] = map[string]string{}
+	result["commonLabels"] = commonLabels
+	result["commonAnnotations"] = commonAnnotations
+	result["receiver"] = receiver
+	result["externalURL"] = f.externalURL
+	result["truncatedAlerts"] = 0
+
+	return result
+}
+
+// cloneStringMap returns a shallow copy of m (never nil, so the caller can
+// safely narrow it in place via intersectStringMap without mutating the
+// source alert's own map).
+func cloneStringMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// intersectStringMap narrows acc in place to only the keys whose value in
+// m matches exactly, deleting every other key — used to fold
+// commonLabels/commonAnnotations down across every alert in a group.
+func intersectStringMap(acc map[string]string, m map[string]string) {
+	for k, v := range acc {
+		if m[k] != v {
+			delete(acc, k)
+		}
+	}
 }
 
 // formatAlertmanager formats alert in Alertmanager v4 webhook format

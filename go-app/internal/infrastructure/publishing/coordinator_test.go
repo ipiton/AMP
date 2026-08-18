@@ -191,11 +191,15 @@ func TestPublishGroupToTargets_EmptyAlertsIsNoop(t *testing.T) {
 	discovery := NewStubTargetDiscoveryManager(slog.Default())
 	coordinator := newTestCoordinator(t, discovery)
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), nil, "critical")
+	results, err := coordinator.PublishGroupToTargets(context.Background(), nil, "critical", "gk", nil)
 	require.NoError(t, err)
 	assert.Nil(t, results)
 }
 
+// TestPublishGroupToTargets_ReceiverFiltering_ResolvesTargetsOnce covers
+// task fwb's wire-level batching change: ONE PublishingResult PER matching
+// TARGET now (one queue job carrying every alert), not one per (target,
+// alert) pair as the pre-fwb one-job-per-alert shape produced.
 func TestPublishGroupToTargets_ReceiverFiltering_ResolvesTargetsOnce(t *testing.T) {
 	discovery := NewStubTargetDiscoveryManager(slog.Default())
 	discovery.AddTarget(&core.PublishingTarget{Name: "slack-critical", Type: "webhook", URL: "http://example.com", Enabled: true, Receivers: []string{"critical"}})
@@ -203,16 +207,14 @@ func TestPublishGroupToTargets_ReceiverFiltering_ResolvesTargetsOnce(t *testing.
 
 	coordinator := newTestCoordinator(t, discovery)
 
-	// One group notification of 3 alerts, one matching target: expect one
-	// PublishingResult PER (target, alert) pair — 3 results, all against
-	// "slack-critical" — not against "pagerduty-oncall".
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(3), "critical")
+	// One group notification of 3 alerts, one matching target: expect
+	// exactly ONE PublishingResult, for "slack-critical" — not one per
+	// alert, and nothing for "pagerduty-oncall".
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(3), "critical", "gk", nil)
 	require.NoError(t, err)
-	require.Len(t, results, 3)
-	for _, r := range results {
-		assert.Equal(t, "slack-critical", r.Target.Name)
-		assert.True(t, r.Success)
-	}
+	require.Len(t, results, 1)
+	assert.Equal(t, "slack-critical", results[0].Target.Name)
+	assert.True(t, results[0].Success)
 }
 
 func TestPublishGroupToTargets_NoMatchingTargetsReturnsError(t *testing.T) {
@@ -221,7 +223,7 @@ func TestPublishGroupToTargets_NoMatchingTargetsReturnsError(t *testing.T) {
 
 	coordinator := newTestCoordinator(t, discovery)
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(2), "no-such-receiver")
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(2), "no-such-receiver", "gk", nil)
 	require.Error(t, err)
 	assert.Empty(t, results)
 }
@@ -234,7 +236,32 @@ func TestPublishGroupToTargets_EmptyReceiverMeansAllEnabled(t *testing.T) {
 
 	coordinator := newTestCoordinator(t, discovery)
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "")
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", nil)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"a", "b"}, resultNames(results))
+}
+
+// TestPublishGroupToTargets_SkipTarget_ExcludesAlreadyDeliveredTargets
+// covers task fwb's per-target nflog dedup hook: a target for which
+// skipTarget returns true must be excluded entirely — no job submitted, no
+// result reported — while a target it doesn't skip still gets its result.
+func TestPublishGroupToTargets_SkipTarget_ExcludesAlreadyDeliveredTargets(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	discovery.AddTarget(&core.PublishingTarget{Name: "a", Type: "webhook", URL: "http://example.com", Enabled: true})
+	discovery.AddTarget(&core.PublishingTarget{Name: "b", Type: "webhook", URL: "http://example.com", Enabled: true})
+
+	coordinator := newTestCoordinator(t, discovery)
+
+	asked := map[string]bool{}
+	skipTarget := func(target string) bool {
+		asked[target] = true
+		return target == "a"
+	}
+
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", skipTarget)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "b", results[0].Target.Name)
+	assert.True(t, asked["a"], "skipTarget must be consulted for target a")
+	assert.True(t, asked["b"], "skipTarget must be consulted for target b")
 }
