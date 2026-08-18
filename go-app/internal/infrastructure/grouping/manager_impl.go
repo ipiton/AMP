@@ -941,6 +941,38 @@ func receiverFromGroupKey(key GroupKey) string {
 	return rest
 }
 
+// groupTimings returns group's per-route timing overrides, or nil when the
+// group carries no metadata at all.
+//
+// AlertGroup.Metadata is a POINTER that every constructor in this package
+// populates — but not every AlertGroup reaching the notify chain comes from a
+// constructor: groups are also rehydrated from JSON by the storage layer (a
+// pre-metadata or hand-written record deserializes with Metadata == nil), and
+// built directly by tests. effectiveRepeatInterval already guarded against
+// that; the notify chain and the three timer callbacks did not, so one such
+// group panicked mid-chain and — because the panic unwound the timer
+// callback — wedged the group (final review finding 12).
+//
+// nil is a valid return: startGroupIntervalTimer/startRepeatIntervalTimer both
+// document nil timings as "use the root Route.* defaults".
+func groupTimings(group *AlertGroup) *GroupTimings {
+	if group == nil || group.Metadata == nil {
+		return nil
+	}
+	return group.Metadata.Timings
+}
+
+// groupTimeIntervalNames returns group's captured mute/active time-interval
+// names, or nil when the group carries no metadata (see groupTimings for why
+// that is possible). nil means "no time-interval muting for this group", which
+// is exactly how isTimeMuted already treats an empty value.
+func groupTimeIntervalNames(group *AlertGroup) *TimeIntervalNames {
+	if group == nil || group.Metadata == nil {
+		return nil
+	}
+	return group.Metadata.TimeIntervalNames
+}
+
 // effectiveRepeatInterval returns the dedup TTL for group: its own
 // per-route override (task 2.4, GroupMetadata.Timings) if one was captured
 // at group-creation time, else the grouping config's root
@@ -1175,7 +1207,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// per-alert (see isTimeMuted's doc comment for semantics). Checked
 	// against the group's own MuteTimeIntervals/ActiveTimeIntervals NAMES,
 	// captured from the matched route at group-creation time.
-	if m.isTimeMuted(group.Key, group.Metadata.TimeIntervalNames, time.Now()) {
+	if m.isTimeMuted(group.Key, groupTimeIntervalNames(group), time.Now()) {
 		m.logger.Debug("group notification suppressed by time-interval mute",
 			"group_key", group.Key,
 			"receiver", receiver)
@@ -1371,7 +1403,7 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 
 	// Start group_interval timer for subsequent notifications, honoring this
 	// group's own timing override if one was supplied (task 2.4).
-	if err := m.startGroupIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
+	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
 		m.logger.Error("failed to start group_interval timer after group_wait",
 			"group_key", groupKey,
 			"error", err)
@@ -1410,7 +1442,7 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 	// Switch to repeat_interval for periodic reminders.
 	// group_interval fires once after a notification is sent; subsequent reminders
 	// use repeat_interval (Alertmanager-compatible behaviour).
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
+	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
 		m.logger.Error("failed to start repeat_interval timer after group_interval",
 			"group_key", groupKey,
 			"error", err)
@@ -1447,7 +1479,7 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 	m.publishGroupAlerts(ctx, currentGroup)
 
 	// Restart repeat_interval for the next reminder
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, currentGroup.Metadata.Timings); err != nil {
+	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
 		m.logger.Error("failed to restart repeat_interval timer",
 			"group_key", groupKey,
 			"error", err)
