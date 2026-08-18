@@ -70,7 +70,7 @@ func (v *ReceiverValidator) Validate(_ context.Context, cfg *config.Alertmanager
 			result.AddError(newError(
 				"E024", "receivers", path,
 				fmt.Sprintf("receiver '%s' has no integrations configured", receiverLabel(r)),
-				"Add at least one of: webhook_configs, email_configs, slack_configs, pagerduty_configs, opsgenie_configs, wechat_configs, victorops_configs",
+				"Add at least one of: webhook_configs, email_configs, slack_configs, pagerduty_configs, opsgenie_configs, wechat_configs, victorops_configs, telegram_configs",
 			))
 		}
 
@@ -98,7 +98,8 @@ func (v *ReceiverValidator) hasAnyIntegration(r *config.Receiver) bool {
 		len(r.WebhookConfigs) > 0 ||
 		len(r.OpsGenieConfigs) > 0 ||
 		len(r.WeChatConfigs) > 0 ||
-		len(r.VictorOpsConfigs) > 0
+		len(r.VictorOpsConfigs) > 0 ||
+		len(r.TelegramConfigs) > 0
 }
 
 // validateEmailConfigs checks E118 (to required), E119 (invalid to

@@ -350,7 +350,14 @@ receivers:
 	cfg, err := LoadConfig(path)
 	require.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "receiver 'nonexistent' not found")
+	// Asserting on the error CODE (E102), not configvalidator's message
+	// text: since task 5.4, configvalidator runs before routing.Parse()'s
+	// own backstop error, so this is exercising configvalidator's
+	// wording, not the parser's - a message-only assert would silently
+	// start failing on unrelated wording changes in receiver.go/route.go.
+	// See formatConfigValidatorErrors (alertmanager_validation.go), which
+	// always prefixes each line with "[<code>]".
+	assert.Contains(t, err.Error(), "[E102]")
 }
 
 func TestLoadConfig_Route_BadMatcherSyntax(t *testing.T) {
@@ -416,7 +423,12 @@ route:
 	cfg, err := LoadConfig(path)
 	require.Error(t, err)
 	assert.Nil(t, cfg)
-	assert.Contains(t, err.Error(), "at least one receiver")
+	// Code, not message text - see the comment in
+	// TestLoadConfig_Route_UnknownReceiverRef above. This is
+	// configvalidator's StructuralValidator E021 ("no receivers
+	// defined"), not routing.Parse()'s own "at least one receiver is
+	// required" backstop message, since configvalidator now runs first.
+	assert.Contains(t, err.Error(), "[E021]")
 }
 
 func TestLoadConfig_ValidationError_PublishingQueue(t *testing.T) {

@@ -198,6 +198,60 @@ func TestRouteValidator_DepthLimit(t *testing.T) {
 	}
 }
 
+// buildRouteChain builds a linear route tree (root -> child -> ... ) of
+// exactly nodeCount nodes, each receiver-less except the root (children
+// inherit), all referencing "default".
+func buildRouteChain(nodeCount int) *config.Route {
+	var root *config.Route
+	var current *config.Route
+	for i := 0; i < nodeCount; i++ {
+		node := &config.Route{Receiver: "default"}
+		if root == nil {
+			root = node
+			current = node
+			continue
+		}
+		current.Routes = []*config.Route{node}
+		current = node
+	}
+	return root
+}
+
+// TestRouteValidator_DepthBoundary is the explicit boundary regression for
+// MaxRouteDepth (sourced from internal/infrastructure/routing.MaxRouteDepth,
+// currently 10, see the const doc comment above): exactly at the limit
+// must pass clean, one node past it must fail with E101. A previous
+// version of this file hardcoded a depth limit of 100 against the real
+// loader's 10 (Phase 5 review round 1) - this pins both edges of that
+// fix so it cannot silently regress again.
+func TestRouteValidator_DepthBoundary(t *testing.T) {
+	t.Run("exactly at MaxRouteDepth passes", func(t *testing.T) {
+		root := buildRouteChain(MaxRouteDepth)
+		cfg := &config.AlertmanagerConfig{
+			Route:     root,
+			Receivers: []*config.Receiver{{Name: "default", WebhookConfigs: []*config.WebhookConfig{{URL: "https://example.com"}}}},
+		}
+
+		result := runRouteValidator(cfg)
+		if hasErrorCode(result, "E101") {
+			t.Fatalf("depth == MaxRouteDepth (%d) must not report E101, got %+v", MaxRouteDepth, result.Errors)
+		}
+	})
+
+	t.Run("one past MaxRouteDepth fails", func(t *testing.T) {
+		root := buildRouteChain(MaxRouteDepth + 1)
+		cfg := &config.AlertmanagerConfig{
+			Route:     root,
+			Receivers: []*config.Receiver{{Name: "default", WebhookConfigs: []*config.WebhookConfig{{URL: "https://example.com"}}}},
+		}
+
+		result := runRouteValidator(cfg)
+		if !hasErrorCode(result, "E101") {
+			t.Fatalf("depth == MaxRouteDepth+1 (%d) must report E101, got %+v", MaxRouteDepth+1, result.Errors)
+		}
+	})
+}
+
 func TestRouteValidator_MuteTimeIntervalsAccepted(t *testing.T) {
 	cfg := minimalValidConfig()
 	cfg.Route.MuteTimeIntervals = []string{"weekends"}

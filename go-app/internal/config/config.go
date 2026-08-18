@@ -482,6 +482,14 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	// Task 5.4 (carried fix): fail fast if the external inhibition rules
+	// file (inhibition.config_file) is missing or malformed, instead of
+	// silently dropping all file-based inhibition rules at startup/reload
+	// time (see internal/config/inhibition_adapter.go).
+	if _, err := cfg.Inhibition.ToInhibitionRules(); err != nil {
+		return nil, fmt.Errorf("inhibition config validation failed: %w", err)
+	}
+
 	// Parse optional route:/receivers:/global: sections (task 1.3).
 	// No-op (cfg.Routing stays nil) when the file has no route: section.
 	if err := loadRouteConfig(configPath, &cfg); err != nil {
@@ -502,6 +510,13 @@ func LoadConfig(configPath string) (*Config, error) {
 //
 // Absent `route:` section is not an error: it means the config still uses
 // the legacy single-receiver model, and cfg.Routing is left nil.
+//
+// Task 5.4: runs pkg/configvalidator's broader Alertmanager-parity checks
+// (receiver integration shapes, inhibition, global, security - see
+// alertmanager_validation.go) on the same raw bytes BEFORE
+// infraroute.Parse() below, so a config failing both surfaces
+// configvalidator's more detailed message first; routing.Parse() remains
+// a backstop for anything configvalidator does not (yet) check.
 func loadRouteConfig(configPath string, cfg *Config) error {
 	if configPath == "" || !viper.IsSet("route") {
 		return nil
@@ -514,6 +529,10 @@ func loadRouteConfig(configPath string, cfg *Config) error {
 			return nil
 		}
 		return fmt.Errorf("failed to read config file for route parsing: %w", err)
+	}
+
+	if err := validateAlertmanagerSubset(data, cfg); err != nil {
+		return err
 	}
 
 	parsed, err := infraroute.NewRouteConfigParser().Parse(data)
@@ -542,6 +561,11 @@ func LoadConfigFromEnv() (*Config, error) {
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Task 5.4 (carried fix): same fail-fast as LoadConfig - see there.
+	if _, err := cfg.Inhibition.ToInhibitionRules(); err != nil {
+		return nil, fmt.Errorf("inhibition config validation failed: %w", err)
 	}
 
 	return &cfg, nil

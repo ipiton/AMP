@@ -739,7 +739,15 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 		return fmt.Errorf("context cancelled before inhibition init: %w", err)
 	}
 
-	rules := r.config.Inhibition.ToInhibitionRules()
+	rules, err := r.config.Inhibition.ToInhibitionRules()
+	if err != nil {
+		// Task 5.4 (carried fix): a broken inhibition.config_file is
+		// normally already caught at LoadConfig time (fail-fast); this is
+		// a defense-in-depth path (e.g. the file changed on disk between
+		// LoadConfig and here) reported as an error rather than silently
+		// dropping the file-based rules.
+		return fmt.Errorf("failed to load inhibition rules: %w", err)
+	}
 	if len(rules) == 0 {
 		r.logger.Warn("No inhibition rules configured, inhibition engine disabled")
 		return nil
@@ -1428,16 +1436,24 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	// PARITY-A2: hot-reload inhibition rules into the live matcher. The alert
 	// processor holds the same matcher instance, so an in-place update is the
 	// only way to propagate new rules without a restart.
-	if r.inhibitionMatcher != nil {
-		rules := r.config.Inhibition.ToInhibitionRules()
+	// Task 5.4 (carried fix): ToInhibitionRules() now returns an error
+	// instead of swallowing a broken inhibition.config_file. By this point
+	// LoadConfig has already fail-fast validated the same file (Phase 1 of
+	// ReloadFromFile, before the atomic config swap above), so an error
+	// here would only come from the file changing on disk in that narrow
+	// window; report it rather than silently keeping stale rules.
+	newRules, rulesErr := r.config.Inhibition.ToInhibitionRules()
+	if rulesErr != nil {
+		r.logger.Error("Failed to load inhibition rules after config reload; live matcher rules unchanged", "error", rulesErr)
+	} else if r.inhibitionMatcher != nil {
 		if updater, ok := r.inhibitionMatcher.(interface {
 			UpdateRules([]inhibitionpkg.InhibitionRule)
 		}); ok {
-			updater.UpdateRules(rules)
+			updater.UpdateRules(newRules)
 		} else {
 			r.logger.Warn("Inhibition matcher does not support hot-reload; new inhibit_rules require restart")
 		}
-	} else if len(r.config.Inhibition.ToInhibitionRules()) > 0 {
+	} else if len(newRules) > 0 {
 		// Matcher was never initialized (no rules at startup); wiring it into the
 		// already-running alert processor needs a restart.
 		r.logger.Warn("Inhibition rules added but engine was disabled at startup; restart required to enable inhibition")
