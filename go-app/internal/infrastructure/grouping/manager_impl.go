@@ -13,6 +13,17 @@ import (
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
+// notifyLogClaimTTL bounds how long a cross-replica publish claim
+// (GroupNotifyLog.TryClaim, task 6.1) is held before it expires
+// automatically. Deliberately short — seconds, NOT repeat_interval — so a
+// replica that crashes mid-publish (before its deferred release runs)
+// self-heals quickly instead of blocking every replica's retries for that
+// group. Reuses lockTTL (redis_timer_storage.go, 30s), the same
+// distributed-lock duration RedisTimerStorage.AcquireLock already uses, per
+// storage.go's note that lockTTL is meant to be shared across timer/group/
+// notify-log storage for consistency.
+const notifyLogClaimTTL = lockTTL
+
 // DefaultGroupManager is an in-memory implementation of AlertGroupManager.
 //
 // Thread-safety: All methods are thread-safe via sync.RWMutex.
@@ -67,10 +78,14 @@ type DefaultGroupManager struct {
 	// Optional: nil skips time-interval mute filtering.
 	timeIntervalLookup GroupTimeIntervalLookup
 
-	// notifyLog is the minimal in-memory dedup log for the notify-chain's
-	// Dedup step (task 2.4). Always non-nil (see dedup.go for why this is a
-	// deliberately minimal substitute for upstream's Redis-backed nflog).
-	notifyLog *notifyDedupLog
+	// notifyLog is the notify-chain's Dedup step + cross-replica publish
+	// claim (task 2.4 Step 4; Redis-backed variant task 6.1). Always
+	// non-nil: defaults to an in-memory notifyDedupLog when
+	// DefaultGroupManagerConfig.NotifyLog is nil — see GroupNotifyLog's doc
+	// comment (manager.go) for the interface contract and
+	// RedisNotifyLog's (redis_notify_log.go) for the cross-replica
+	// protocol.
+	notifyLog GroupNotifyLog
 
 	// publishLocks serializes the whole notify-stage chain per GroupKey
 	// (task 2.4 fix round 1, Finding 4 — see publish_lock.go). Always
@@ -125,6 +140,15 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		return nil, fmt.Errorf("storage cannot be nil (TN-125 requirement)")
 	}
 
+	// NotifyLog defaults to the in-memory implementation (task 2.4 behavior)
+	// when the caller doesn't inject one — always non-nil either way (task
+	// 6.1: standard profile injects a *RedisNotifyLog here via
+	// ServiceRegistry.newNotifyLog).
+	notifyLog := cfg.NotifyLog
+	if notifyLog == nil {
+		notifyLog = newNotifyDedupLog()
+	}
+
 	mgr := &DefaultGroupManager{
 		storage:            cfg.Storage,
 		fingerprintIndex:   make(map[string]GroupKey),
@@ -135,7 +159,7 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		inhibitionChecker:  cfg.InhibitionChecker,  // Optional (task 2.4)
 		silenceChecker:     cfg.SilenceChecker,     // Optional (task 2.4)
 		timeIntervalLookup: cfg.TimeIntervalLookup, // Optional (task 3.2)
-		notifyLog:          newNotifyDedupLog(),    // task 2.4: always-on minimal dedup
+		notifyLog:          notifyLog,              // task 2.4/6.1: always-on dedup + cross-replica claim
 		publishLocks:       &groupPublishLocks{},   // task 2.4 fix round 1: serialize per group key
 		logger:             cfg.Logger,
 		metrics:            cfg.Metrics,
@@ -333,8 +357,14 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 		m.cancelGroupTimers(ctx, groupKey)
 
 		// Forget this group's dedup entry (task 2.4) — otherwise the
-		// notify-log would grow independent of active groups.
-		m.notifyLog.Forget(groupKey)
+		// notify-log would grow independent of active groups. Best-effort:
+		// a failure here (Redis down) just means the entry outlives the
+		// group until its own TTL expires — not fatal.
+		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
+			m.logger.Warn("failed to forget nflog entry for deleted group",
+				"group_key", groupKey,
+				"error", forgetErr)
+		}
 	} else {
 		// Update group state
 		m.updateGroupStateUnsafe(group)
@@ -458,8 +488,14 @@ func (m *DefaultGroupManager) CleanupExpiredGroups(
 			continue // Skip this group if delete fails
 		}
 
-		// Forget this group's dedup entry (task 2.4)
-		m.notifyLog.Forget(groupKey)
+		// Forget this group's dedup entry (task 2.4). Best-effort — see the
+		// same Forget call in RemoveAlertFromGroup for why a failure here
+		// isn't fatal.
+		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
+			m.logger.Warn("failed to forget nflog entry for expired group",
+				"group_key", groupKey,
+				"error", forgetErr)
+		}
 
 		deletedCount++
 	}
@@ -1064,6 +1100,21 @@ func (m *DefaultGroupManager) isTimeMuted(groupKey GroupKey, names *TimeInterval
 // group.Key via m.publishLocks — see its doc comment for why the Dedup
 // check and record alone aren't enough to prevent a double-send from two
 // concurrent callers.
+//
+// Cross-replica concurrency (task 6.1): m.publishLocks only serializes
+// callers within THIS process. In an HA deployment, another replica
+// process can be running the exact same sequence for the exact same group
+// at the exact same time (both fired the same group_interval timer, say).
+// The Dedup step's IsDuplicate/RecordSent alone don't prevent that — two
+// replicas can both observe "not a duplicate" before either records
+// success, exactly the same race publishLocks fixes locally. m.notifyLog's
+// TryClaim (GroupNotifyLog, see manager.go's doc comment) closes this gap
+// for a Redis-backed notifyLog: only the replica that wins the claim
+// proceeds past this point; the other returns immediately and lets its own
+// next-scheduled timer retry later. The in-memory notifyDedupLog's TryClaim
+// is a no-op (always wins) — there is no other replica to race against in
+// that deployment shape, and publishLocks already covers same-process
+// races.
 func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *AlertGroup) {
 	m.mu.RLock()
 	publisher := m.publisher
@@ -1118,17 +1169,60 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	// Step 4: Dedup (notification-log semantics, task 2.4 minimal in-memory
-	// substitute for upstream nflog — see dedup.go)
+	// Step 4a: cross-replica publish claim (task 6.1 — see this function's
+	// doc comment above). A no-op ("always wins") for the in-memory
+	// notifyLog. claimTTL is deliberately short (notifyLogClaimTTL, seconds)
+	// so a replica that crashes before releasing self-heals quickly instead
+	// of blocking every replica's retries for this group.
+	claimed, releaseClaim, claimErr := m.notifyLog.TryClaim(ctx, group.Key, notifyLogClaimTTL)
+	switch {
+	case claimErr != nil:
+		// Fail-open (Redis down): proceed without a claim, matching the
+		// chain's Inhibit/Silence fail-open posture. Accepts a duplicate-
+		// across-replicas risk while Redis is unavailable — documented
+		// trade-off, see redis_notify_log.go's package doc comment.
+		m.logger.Error("nflog publish-claim check failed, proceeding fail-open (duplicate-across-replicas risk accepted)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"error", claimErr)
+	case !claimed:
+		m.logger.Debug("group notification claim held by another replica, skipping this fire",
+			"group_key", group.Key,
+			"receiver", receiver)
+		return
+	default:
+		defer func() {
+			if relErr := releaseClaim(); relErr != nil {
+				m.logger.Warn("failed to release nflog publish-claim",
+					"group_key", group.Key,
+					"receiver", receiver,
+					"error", relErr)
+			}
+		}()
+	}
+
+	// Step 4b: Dedup (notification-log semantics, task 2.4 Step 4 — see
+	// dedup.go for the in-memory implementation and redis_notify_log.go for
+	// the cross-replica one).
 	signature := alertSetSignature(alerts)
 	repeatInterval := m.effectiveRepeatInterval(group)
 	ttl := time.Now().Add(-repeatInterval)
-	if m.notifyLog.IsDuplicate(group.Key, signature, ttl) {
+	dup, err := m.notifyLog.IsDuplicate(ctx, group.Key, signature, ttl)
+	if err != nil {
+		// Fail-open (Redis down): proceed as not-a-duplicate — same
+		// documented trade-off as the claim check above.
+		m.logger.Error("nflog duplicate check failed, proceeding fail-open (duplicate-across-replicas risk accepted)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"error", err)
+		dup = false
+	}
+	if dup {
 		m.logger.Debug("group notification suppressed by dedup (already sent within repeat_interval)",
 			"group_key", group.Key,
 			"receiver", receiver,
 			"repeat_interval", repeatInterval)
-		return
+		return // claim (if any) is released by the deferred call above
 	}
 
 	// Step 5: publish ONE grouped notification (task 2.4's core change: a
@@ -1151,7 +1245,16 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	m.notifyLog.RecordSent(group.Key, signature, time.Now())
+	if err := m.notifyLog.RecordSent(ctx, group.Key, signature, time.Now(), repeatInterval); err != nil {
+		// Confirmed delivery already happened — a failure here only means
+		// the NEXT fire (this or another replica) might not see this send
+		// recorded and could re-publish. Logged, not fatal: matches the
+		// chain's overall fail-open posture.
+		m.logger.Error("failed to record nflog sent entry (duplicate-across-replicas risk on next fire)",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"error", err)
+	}
 
 	if m.metrics != nil {
 		m.metrics.RecordGroupOperation("publish", "success")

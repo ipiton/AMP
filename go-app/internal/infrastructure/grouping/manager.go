@@ -701,6 +701,71 @@ type GroupTimeIntervalLookup interface {
 	GetTimeInterval(name string) (timeinterval.TimeInterval, bool)
 }
 
+// GroupNotifyLog is the notify-stage chain's Dedup step (task 2.4, Step 4;
+// Redis-backed cross-replica variant added by task 6.1). It answers the
+// same question upstream Alertmanager's nflog answers: "did we already
+// send a notification for this exact alert set, for this group+receiver,
+// within repeat_interval?" — and, since task 6.1, additionally arbitrates
+// which of several concurrently-firing replicas is allowed to publish.
+//
+// Implementations:
+//   - notifyDedupLog (dedup.go): single-process, in-memory. Always used in
+//     the lite profile and as the standard-profile fallback when Redis is
+//     unavailable at grouping-init time.
+//   - RedisNotifyLog (redis_notify_log.go): Redis-backed, shared across
+//     replicas. Selected for the standard profile when a live Redis cache
+//     is available (mirrors task 2.2's GroupStorage selection).
+//
+// IsDuplicate/RecordSent/Forget carry ctx and return an error so a
+// Redis-backed implementation can surface backend failures; callers must
+// treat a non-nil error as "assume not a duplicate" (fail-open — see
+// DefaultGroupManager.publishGroupAlerts), matching the chain's existing
+// Inhibit/Silence fail-open posture.
+//
+// TryClaim/release (the *_ release func() error, mirroring
+// TimerStorage.AcquireLock's existing convention) implement the
+// cross-replica publish-claim protocol task 6.1 adds on top of dedup:
+// claim -> check dedup log -> publish -> record -> release (or let the
+// claim expire on crash). claimTTL must be short (seconds, NOT
+// repeat_interval) so a crashed replica's claim self-heals quickly — see
+// RedisNotifyLog.TryClaim's doc comment for the exact protocol. The
+// in-memory implementation's TryClaim is a no-op that always succeeds:
+// DefaultGroupManager's own per-GroupKey publishLocks (publish_lock.go)
+// already fully serialize same-process callers, so no additional claim is
+// needed there — only cross-process/cross-replica callers need Redis's
+// claim.
+type GroupNotifyLog interface {
+	// IsDuplicate reports whether a notification for groupKey carrying
+	// exactly this alert set was already sent within ttl (a cutoff time:
+	// "sent after ttl" counts as duplicate). Does not record anything.
+	IsDuplicate(ctx context.Context, groupKey GroupKey, signature string, ttl time.Time) (bool, error)
+
+	// RecordSent records that a notification carrying signature for
+	// groupKey was just sent successfully, at now. repeatInterval is used
+	// by Redis-backed implementations as the entry's TTL (plus a grace
+	// period) so an abandoned group's entry doesn't outlive it indefinitely;
+	// the in-memory implementation ignores it (IsDuplicate recomputes
+	// freshness against a caller-supplied cutoff on every call instead).
+	RecordSent(ctx context.Context, groupKey GroupKey, signature string, now time.Time, repeatInterval time.Duration) error
+
+	// Forget removes any dedup entry (and any lingering claim, for
+	// Redis-backed implementations) for groupKey. Called when a group is
+	// deleted so the log doesn't grow unbounded independent of active
+	// groups.
+	Forget(ctx context.Context, groupKey GroupKey) error
+
+	// TryClaim attempts to acquire a short-lived cross-replica publish
+	// claim for groupKey, valid for at most claimTTL. acquired == false
+	// means another replica currently holds the claim — the caller must
+	// skip this fire (the group's own group_interval/repeat_interval timer
+	// will retry later). release must be called exactly once after a
+	// successful (acquired == true) claim, as soon as the check-publish-
+	// record sequence finishes (success OR failure) — do not hold it for
+	// claimTTL. release is always non-nil when err == nil, even if
+	// acquired == false (a no-op in that case).
+	TryClaim(ctx context.Context, groupKey GroupKey, claimTTL time.Duration) (acquired bool, release func() error, err error)
+}
+
 // DefaultGroupManagerConfig holds configuration for DefaultGroupManager.
 type DefaultGroupManagerConfig struct {
 	// KeyGenerator generates group keys from alert labels (required, from TN-122)
@@ -738,6 +803,14 @@ type DefaultGroupManagerConfig struct {
 	// entirely (backwards compatible — same posture as InhibitionChecker/
 	// SilenceChecker being optional).
 	TimeIntervalLookup GroupTimeIntervalLookup
+
+	// NotifyLog is the notify-chain's Dedup step + cross-replica publish
+	// claim (task 2.4 Step 4, Redis-backed variant task 6.1). Optional: if
+	// nil, defaults to a fresh in-memory notifyDedupLog (the task 2.4
+	// behavior) — see NewDefaultGroupManager. Pass a *RedisNotifyLog in the
+	// standard profile for cross-replica notification dedup; leave nil (or
+	// pass a *notifyDedupLog) for a single-process/lite deployment.
+	NotifyLog GroupNotifyLog
 
 	// Logger for structured logging (optional, defaults to slog.Default())
 	Logger *slog.Logger
