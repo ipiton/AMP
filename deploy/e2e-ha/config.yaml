@@ -82,11 +82,21 @@ publishing:
 # regardless of the route: tree below.
 grouping:
   enabled: true
+  # Short reconciliation so the orphan-adoption scenario in run.sh (kill a
+  # replica AFTER ingest but BEFORE group_wait expiry) completes in seconds
+  # instead of the 45s/20s production defaults. The grace stays far below
+  # grouping.timerTTLGracePeriod (10m), which is what keeps the adoption
+  # window open at all — see final review finding 2.
+  reconciliation_interval: 5s
+  reconciliation_grace: 3s
 
 route:
   receiver: default
   group_by: [alertname]
-  group_wait: 5s
+  # 8s, not 5s: run.sh's adoption scenario has to POST an alert and then kill
+  # the ingesting replica BEFORE this elapses. 5s left no margin for
+  # `docker compose kill` on a loaded machine.
+  group_wait: 8s
   group_interval: 30s
   repeat_interval: 1h
 
