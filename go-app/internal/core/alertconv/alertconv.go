@@ -190,3 +190,29 @@ func ToGettableAlert(alert core.APIAlert, silences SilenceMatcher, now time.Time
 		},
 	}
 }
+
+// ToV1Alert converts a v2 gettable alert into the legacy v1 API shape used by
+// GET /api/v1/alerts (thin wrapper: {"status":"success","data":[...]})  —
+// v1 predates mutedBy (a v2-only addition) and encodes receivers as bare
+// names rather than {"name": ...} objects.
+func ToV1Alert(g core.APIGettableAlert) core.APIV1Alert {
+	receivers := make([]string, 0, len(g.Receivers))
+	for _, r := range g.Receivers {
+		receivers = append(receivers, r.Name)
+	}
+
+	return core.APIV1Alert{
+		Labels:       g.Labels,
+		Annotations:  g.Annotations,
+		StartsAt:     g.StartsAt,
+		EndsAt:       g.EndsAt,
+		GeneratorURL: g.GeneratorURL,
+		Fingerprint:  g.Fingerprint,
+		Receivers:    receivers,
+		Status: core.APIV1AlertStatus{
+			State:       g.Status.State,
+			SilencedBy:  g.Status.SilencedBy,
+			InhibitedBy: g.Status.InhibitedBy,
+		},
+	}
+}

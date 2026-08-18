@@ -74,6 +74,36 @@ type APIGettableAlertGroup struct {
 	Alerts   []APIGettableAlert `json:"alerts"`
 }
 
+// APIV1AlertStatus is the legacy v1 alert status shape. Unlike
+// APIAlertStatus (v2), it has no MutedBy field — muting is a v2-only concept
+// upstream added after the v1 API was retired.
+type APIV1AlertStatus struct {
+	State       string   `json:"state"`
+	SilencedBy  []string `json:"silencedBy"`
+	InhibitedBy []string `json:"inhibitedBy"`
+}
+
+// APIV1Alert is a single alert in the legacy GET /api/v1/alerts response.
+// Receivers is a bare list of names ([]string), not the v2 []APIReceiver
+// object list.
+type APIV1Alert struct {
+	Labels       map[string]string `json:"labels"`
+	Annotations  map[string]string `json:"annotations"`
+	StartsAt     string            `json:"startsAt"`
+	EndsAt       string            `json:"endsAt,omitempty"`
+	GeneratorURL string            `json:"generatorURL,omitempty"`
+	Fingerprint  string            `json:"fingerprint"`
+	Receivers    []string          `json:"receivers"`
+	Status       APIV1AlertStatus  `json:"status"`
+}
+
+// APIV1AlertsResponse is the legacy v1 envelope for GET /api/v1/alerts:
+// {"status":"success","data":[...]}.
+type APIV1AlertsResponse struct {
+	Status string       `json:"status"`
+	Data   []APIV1Alert `json:"data"`
+}
+
 // Silence DTOs
 
 // SilenceMatcherInput represents a label matcher in silence creation/update
