@@ -161,6 +161,33 @@ func (c *HTTPSlackWebhookClient) maskWebhookURL(s string) string {
 // slackWebhookURLPlaceholder is what maskWebhookURL substitutes for the secret.
 const slackWebhookURLPlaceholder = "***"
 
+// maskedError carries a pre-masked message for an error whose own text must
+// never be printed verbatim.
+//
+// WHY (wave re-review, Minor 3): masking with
+// `fmt.Errorf("...: %s", mask(err.Error()))` removed the secret but also broke
+// the error chain — the returned error no longer wrapped the original, so
+// callers lost `errors.Is(err, context.DeadlineExceeded)` and
+// `errors.As(err, &netErr)`. This type keeps both properties: Error() returns
+// only the masked text, while Unwrap() exposes the cause for inspection.
+//
+// Trade-off, stated plainly: a caller that deliberately unwraps to the original
+// and prints THAT can still surface the secret. The guarantee here is narrower
+// and is the one that matters in practice — the default `%v`/`%s`/`%w` path on
+// the error we return cannot.
+type maskedError struct {
+	masked string
+	cause  error
+}
+
+func newMaskedError(masked string, cause error) error {
+	return &maskedError{masked: masked, cause: cause}
+}
+
+func (e *maskedError) Error() string { return e.masked }
+
+func (e *maskedError) Unwrap() error { return e.cause }
+
 // doRequestWithRetry executes HTTP request with retry logic
 // Retries transient errors (429, 503, network) up to 3 times
 // Uses exponential backoff: 100ms → 200ms → 400ms → ... → 5s max
@@ -183,7 +210,11 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 			// IS the credential (hooks.slack.com/services/T.../B.../<token>).
 			// Mask before the string can be returned to a caller that logs it,
 			// or logged here. Ports HTTPTelegramClient.maskBotToken.
-			lastErr = fmt.Errorf("HTTP request failed: %s", c.maskWebhookURL(err.Error()))
+			//
+			// Wrapped with %w through maskedError (wave re-review, Minor 3) so
+			// the message is masked AND the chain survives: callers keep
+			// errors.Is/errors.As against the underlying *url.Error.
+			lastErr = fmt.Errorf("HTTP request failed: %w", newMaskedError(c.maskWebhookURL(err.Error()), err))
 			if !httperror.IsRetryableNetworkError(err) {
 				return nil, lastErr // Don't retry network errors
 			}

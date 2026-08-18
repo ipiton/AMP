@@ -48,13 +48,22 @@ receivers:
     slack_configs:
       - api_url: https://hooks.slack.com/services/T000/B000/sup3r-secret-slack
         channel: "#alerts"
+    webhook_configs:
+      # Upstream types WebhookConfig.URL as SecretURL: the URL itself is the
+      # credential (wave re-review, Important 2).
+      - url: https://hooks.example.com/ingest/sup3r-secret-webhook-path
   - name: pager
     pagerduty_configs:
-      # 32 chars: AMP's PagerDutyConfig.RoutingKey carries validate:"len=32"
+      # 32 chars: AMP's PagerDutyConfig.RoutingKey carries validate:"len=32".
+      # NOTE: the url below is the PUBLIC Events API endpoint (upstream: plain URL),
+      # and must stay visible — see sectionSecretKeys.
       - routing_key: sup3rsecretpdkey0123456789abcdef
+        url: https://events.pagerduty.com/v2/enqueue
     telegram_configs:
       - bot_token: 123456:sup3r-secret-bot-token
         chat_id: "-1001234567890"
+        # Public Bot API base (upstream: plain URL) — must stay visible.
+        api_url: https://api.telegram.org
 
 inhibit_rules:
   - source_match:
@@ -77,6 +86,7 @@ var allSecrets = []string{
 	"sup3r-secret-slack",
 	"sup3rsecretpdkey0123456789abcdef",
 	"sup3r-secret-bot-token",
+	"sup3r-secret-webhook-path",
 }
 
 func loadStatusTestConfig(t *testing.T) *appconfig.Config {
@@ -147,6 +157,14 @@ func TestAlertmanagerConfigYAML_KeepsNonSecretStructure(t *testing.T) {
 	assert.Contains(t, out, "#alerts", "a Slack channel is not a secret and must stay visible")
 	assert.Contains(t, out, "-1001234567890", "a Telegram chat_id is not a secret and must stay visible")
 	assert.Contains(t, out, `severity="critical"`, "route matchers must stay visible")
+
+	// Context-aware redaction (wave re-review, Important 2): `url`/`api_url` are
+	// secret only where upstream types them SecretURL. Over-redacting these two
+	// public endpoints would hide routing detail for no security gain.
+	assert.Contains(t, out, "https://events.pagerduty.com/v2/enqueue",
+		"the PagerDuty Events API endpoint is public and must stay visible")
+	assert.Contains(t, out, "https://api.telegram.org",
+		"the Telegram Bot API base is public (the credential is bot_token) and must stay visible")
 }
 
 func TestAlertmanagerConfigYAML_NoRoutingTreeSynthesizesParsableDoc(t *testing.T) {
@@ -186,7 +204,7 @@ func TestRedactSecrets_DescendsIntoSecretNamedContainers(t *testing.T) {
 		},
 	}
 
-	redactSecrets(doc)
+	redactSecrets(doc, "")
 
 	auth := doc["http_config"].(map[string]any)["authorization"].(map[string]any)
 	assert.Equal(t, "Bearer", auth["type"], "structure under a secret-named container must stay visible")
@@ -198,15 +216,29 @@ func TestRedactSecrets_DescendsIntoSecretNamedContainers(t *testing.T) {
 }
 
 func TestIsSecretKey(t *testing.T) {
+	// Always secret, wherever they appear.
 	for _, key := range []string{
 		"password", "auth_password", "api_key", "apiKey", "bot_token",
-		"routing_key", "service_key", "api_url", "webhook_url",
+		"routing_key", "service_key", "webhook_url",
 		"credentials", "api_key_file", "authorization", "bearer_token",
 	} {
-		assert.True(t, isSecretKey(key), "%q must be treated as secret-bearing", key)
+		assert.True(t, isSecretKey(key, ""), "%q must be treated as secret-bearing anywhere", key)
+		assert.True(t, isSecretKey(key, "pagerduty_configs"), "%q must stay secret inside any section", key)
 	}
 
+	// Never secret, wherever they appear.
 	for _, key := range []string{"name", "channel", "chat_id", "severity", "group_by", "send_resolved"} {
-		assert.False(t, isSecretKey(key), "%q is not a secret and must stay visible", key)
+		assert.False(t, isSecretKey(key, ""), "%q is not a secret and must stay visible", key)
+		assert.False(t, isSecretKey(key, "webhook_configs"), "%q is not a secret in any section", key)
 	}
+
+	// Section-dependent (wave re-review, Important 2), mirroring upstream's
+	// SecretURL typing.
+	assert.True(t, isSecretKey("url", "webhook_configs"), "webhook_configs[].url IS the credential")
+	assert.False(t, isSecretKey("url", "pagerduty_configs"), "pagerduty_configs[].url is the public Events API endpoint")
+	assert.False(t, isSecretKey("url", ""), "a bare url outside a known section must not be blanket-redacted")
+
+	assert.True(t, isSecretKey("api_url", "slack_configs"), "a Slack incoming-webhook URL embeds the token")
+	assert.True(t, isSecretKey("slack_api_url", "global"), "global.slack_api_url is upstream SecretURL")
+	assert.False(t, isSecretKey("api_url", "telegram_configs"), "the Telegram Bot API base is public")
 }

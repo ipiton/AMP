@@ -2,6 +2,8 @@ package grouping
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,4 +170,86 @@ func TestOnRepeatIntervalExpired_FullyResolvedGroup_DoesNotRescheduleTimer(t *te
 	_, err = timerStorage.LoadTimer(ctx, groupKey)
 	require.ErrorIs(t, err, ErrTimerNotFound,
 		"no follow-up timer may be armed for a group that was just fully resolved and removed")
+}
+
+// Wave re-review, Important 1: groupStillExists treated EVERY storage error as
+// "the group is gone". That recreated finding 3's wedge from the other end — on
+// a transient Redis error the timer callback returned early, so onTimerExpired's
+// tail then ran its normal cleanup and deleted the SHARED storage entry along
+// with the local handle, leaving nothing for reconcileOrphanedTimers to adopt
+// and the group permanently silent. Only a CONFIRMED absence may return false.
+func TestGroupStillExists_FailsOpenOnTransientError(t *testing.T) {
+	ctx := context.Background()
+	manager := createTestManagerWithChain(t, &mockPublisher{}, nil, nil)
+	groupKey := GroupKey("receiver=default/alertname=TransientProbe")
+
+	// Confirmed absence -> false (this is the case pruning relies on).
+	assert.False(t, manager.groupStillExists(ctx, groupKey),
+		"a confirmed GroupNotFoundError must report the group as gone")
+
+	// Present with alerts -> true.
+	_, err := manager.AddAlertToGroup(ctx, createTestAlert("P1", core.StatusFiring,
+		map[string]string{"alertname": "TransientProbe"}), groupKey)
+	require.NoError(t, err)
+	assert.True(t, manager.groupStillExists(ctx, groupKey))
+
+	// Transient error -> true (fail open).
+	failing := &loadFailingGroupStorage{GroupStorage: manager.storage}
+	loadErr := errors.New("redis: i/o timeout")
+	failing.loadErr.Store(&loadErr)
+	manager.storage = failing
+
+	assert.True(t, manager.groupStillExists(ctx, groupKey),
+		"a transient storage error must NOT be read as 'group gone' — that deletes the shared timer entry and wedges the group")
+}
+
+// TestTimerCallback_TransientLoadErrorAfterPublish_KeepsTimerChain is the
+// behavioural half: a transient error at the post-publish existence probe must
+// still leave the group's next timer armed, so the chain continues.
+func TestTimerCallback_TransientLoadErrorAfterPublish_KeepsTimerChain(t *testing.T) {
+	ctx := context.Background()
+	pub := &mockPublisher{}
+	manager, timerStorage := createTestManagerWithPublisher(t, pub)
+
+	groupKey := GroupKey("receiver=default/alertname=ChainSurvives")
+	labels := map[string]string{"alertname": "ChainSurvives"}
+	_, err := manager.AddAlertToGroup(ctx, createTestAlert("C1", core.StatusFiring, labels), groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	// The group is loaded fine for the publish itself; the probe afterwards is
+	// what fails. Simulate the worst case: Load broken for everything after the
+	// callback's own initial load, by wrapping storage in a counter that starts
+	// failing on the second call.
+	failing := &loadFailingAfterNGroupStorage{GroupStorage: manager.storage, failAfter: 1}
+	manager.storage = failing
+
+	require.NoError(t, manager.onGroupIntervalExpired(ctx, groupKey, GroupIntervalTimer, group))
+	require.Len(t, pub.calls(), 1, "the notification must still go out")
+
+	timer, err := timerStorage.LoadTimer(ctx, groupKey)
+	require.NoError(t, err, "a transient probe error must not stop the timer chain")
+	require.NotNil(t, timer)
+	// Must be the NEXT timer in the chain, not the leftover group_wait entry
+	// AddAlertToGroup created — that distinction is what makes this assertion
+	// prove the callback continued rather than returned early.
+	assert.Equal(t, RepeatIntervalTimer, timer.TimerType,
+		"onGroupIntervalExpired must have armed repeat_interval despite the transient probe error")
+}
+
+// loadFailingAfterNGroupStorage passes the first failAfter Load calls through,
+// then fails every later one with a transient error.
+type loadFailingAfterNGroupStorage struct {
+	GroupStorage
+	failAfter int
+	calls     atomic.Int64
+}
+
+func (s *loadFailingAfterNGroupStorage) Load(ctx context.Context, key GroupKey) (*AlertGroup, error) {
+	if s.calls.Add(1) > int64(s.failAfter) {
+		return nil, errors.New("redis: i/o timeout")
+	}
+	return s.GroupStorage.Load(ctx, key)
 }

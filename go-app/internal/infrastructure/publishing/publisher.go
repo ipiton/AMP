@@ -242,7 +242,7 @@ type PublisherFactory struct {
 	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
 	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
 	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
-	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by bot token (clientMu)
+	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by "api_url|bot_token" (clientMu)
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
 }
 
@@ -471,17 +471,27 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 		apiURL = DefaultTelegramAPIURL
 	}
 
-	// Get or create Telegram client for this bot token (clientMu — see
-	// PublisherFactory's doc comment; MANDATORY now that the live queue path
-	// reaches this function concurrently, per final review finding 6).
+	// Get or create Telegram client for this (api_url, bot_token) pair
+	// (clientMu — see PublisherFactory's doc comment; MANDATORY now that the
+	// live queue path reaches this function concurrently, per final review
+	// finding 6).
+	//
+	// The cache key is COMPOUND because NewHTTPTelegramClient bakes BOTH values
+	// in (wave re-review, Minor 5). Keying on botToken alone meant the first
+	// target to be built for a token pinned its api_url for every later target
+	// sharing that token — so a second target pointing the same bot at a
+	// different API base (a proxy, or a test server) silently reused the first
+	// one's endpoint. Same shape as the SMTP cache's "host:port" key.
+	clientKey := apiURL + "|" + botToken
+
 	f.clientMu.RLock()
-	client, ok := f.telegramClientMap[botToken]
+	client, ok := f.telegramClientMap[clientKey]
 	f.clientMu.RUnlock()
 	if !ok {
 		f.clientMu.Lock()
-		if client, ok = f.telegramClientMap[botToken]; !ok {
+		if client, ok = f.telegramClientMap[clientKey]; !ok {
 			client = NewHTTPTelegramClient(apiURL, botToken, f.logger)
-			f.telegramClientMap[botToken] = client
+			f.telegramClientMap[clientKey] = client
 		}
 		f.clientMu.Unlock()
 	}

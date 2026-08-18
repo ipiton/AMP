@@ -234,3 +234,95 @@ func TestCreatePublisherForTarget_ConcurrentIsRaceFree(t *testing.T) {
 	assert.Len(t, f.pagerDutyClientMap, 1)
 	assert.Len(t, f.rootlyClientMap, 1)
 }
+
+// TestCreatePublisherForTarget_TelegramCacheKeyIncludesAPIURL is wave re-review
+// Minor 5: the Telegram client cache was keyed on bot_token alone, while
+// NewHTTPTelegramClient bakes in BOTH the api_url and the token. The first
+// target built for a token therefore pinned its api_url for every later target
+// sharing that token — a second target pointing the same bot at a different API
+// base silently reused the first endpoint.
+func TestCreatePublisherForTarget_TelegramCacheKeyIncludesAPIURL(t *testing.T) {
+	const botToken = "123456:shared-token"
+
+	newTarget := func(name, apiURL string) *core.PublishingTarget {
+		return &core.PublishingTarget{
+			Name:    name,
+			Type:    string(TargetTypeTelegram),
+			URL:     apiURL,
+			Headers: map[string]string{"bot_token": botToken, "chat_id": "-100"},
+		}
+	}
+
+	f := newTestPublisherFactory(t)
+
+	_, err := f.CreatePublisherForTarget(newTarget("tg-primary", "https://api.telegram.example"))
+	require.NoError(t, err)
+	_, err = f.CreatePublisherForTarget(newTarget("tg-proxy", "https://telegram-proxy.internal"))
+	require.NoError(t, err)
+
+	// Read the cache size under the same lock the factory uses. Must not be held
+	// across a CreatePublisherForTarget call — that takes the lock itself.
+	telegramClients := func() int {
+		f.clientMu.RLock()
+		defer f.clientMu.RUnlock()
+		return len(f.telegramClientMap)
+	}
+
+	assert.Equal(t, 2, telegramClients(),
+		"the same bot token behind two different API bases must yield two clients, not one pinned to the first base")
+
+	// Re-requesting an existing pair must reuse, not grow the cache.
+	_, err = f.CreatePublisherForTarget(newTarget("tg-primary-again", "https://api.telegram.example"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, telegramClients(), "an identical (api_url, bot_token) pair must reuse its cached client")
+}
+
+// TestCreatePublisherForJob_TelegramHonoursTargetAPIURL is the behavioural half:
+// two targets sharing a bot token must each hit their OWN API base.
+func TestCreatePublisherForJob_TelegramHonoursTargetAPIURL(t *testing.T) {
+	const botToken = "123456:shared-token"
+
+	var mu sync.Mutex
+	hits := map[string]int{}
+	handler := func(label string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			hits[label]++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+		}
+	}
+	srvA := httptest.NewServer(handler("a"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(handler("b"))
+	defer srvB.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	alert := &core.EnrichedAlert{Alert: &core.Alert{
+		Fingerprint: "fp-shared-token",
+		AlertName:   "SharedToken",
+		Status:      core.StatusFiring,
+		StartsAt:    time.Now(),
+		Labels:      map[string]string{"severity": "warning"},
+	}}
+
+	for _, srv := range []*httptest.Server{srvA, srvB} {
+		target := &core.PublishingTarget{
+			Name:    "tg-" + srv.URL,
+			Type:    string(TargetTypeTelegram),
+			URL:     srv.URL,
+			Headers: map[string]string{"bot_token": botToken, "chat_id": "-100"},
+		}
+		publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+		require.NoError(t, err)
+		require.NoError(t, publisher.Publish(context.Background(), alert, target))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, hits["a"], "the first target's own API base must be used")
+	assert.Equal(t, 1, hits["b"], "the second target must NOT be silently redirected to the first target's API base")
+}
