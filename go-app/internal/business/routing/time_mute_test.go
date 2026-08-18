@@ -85,6 +85,57 @@ func TestTreeBuilder_TimeIntervalNames_NotInherited(t *testing.T) {
 	}
 }
 
+// TestTreeBuilder_TimeIntervalNames_ParentDoesNotLeakDownToChild covers the
+// brief's exact non-inheritance scenario (fix round 1): the PARENT route
+// declares mute_time_intervals/active_time_intervals, and a child that
+// declares NEITHER must end up with NONE of its own — not inherit the
+// parent's, unlike GroupBy/timings which DO inherit.
+func TestTreeBuilder_TimeIntervalNames_ParentDoesNotLeakDownToChild(t *testing.T) {
+	plainChild := &grouping.Route{
+		Receiver: "child-receiver",
+		Match:    map[string]string{"team": "sre"},
+		// Deliberately no MuteTimeIntervals/ActiveTimeIntervals of its own.
+	}
+	root := &grouping.Route{
+		Receiver:            "default",
+		MuteTimeIntervals:   []string{"weekends"},
+		ActiveTimeIntervals: []string{"business-hours"},
+		Routes:              []*grouping.Route{plainChild},
+	}
+
+	receivers := []*infraroute.Receiver{
+		{Name: "default", WebhookConfigs: []*infraroute.WebhookConfig{{URL: "https://example.com/default"}}},
+		{Name: "child-receiver", WebhookConfigs: []*infraroute.WebhookConfig{{URL: "https://example.com/child"}}},
+	}
+	config := &infraroute.RouteConfig{Route: root, Receivers: receivers}
+
+	tree, err := NewTreeBuilder(config, BuildOptions{ValidateOnBuild: false}).Build()
+	if err != nil {
+		t.Fatalf("Build() error: %v", err)
+	}
+
+	// Sanity: the parent itself does carry its own declared names.
+	if got := tree.Root.MuteTimeIntervals; len(got) != 1 || got[0] != "weekends" {
+		t.Fatalf("root.MuteTimeIntervals = %v, want [weekends]", got)
+	}
+	if got := tree.Root.ActiveTimeIntervals; len(got) != 1 || got[0] != "business-hours" {
+		t.Fatalf("root.ActiveTimeIntervals = %v, want [business-hours]", got)
+	}
+
+	children := tree.Root.Children
+	if len(children) != 1 {
+		t.Fatalf("expected 1 child, got %d", len(children))
+	}
+	child := children[0]
+
+	if got := child.MuteTimeIntervals; len(got) != 0 {
+		t.Fatalf("child must NOT inherit parent's MuteTimeIntervals, got %v", got)
+	}
+	if got := child.ActiveTimeIntervals; len(got) != 0 {
+		t.Fatalf("child must NOT inherit parent's ActiveTimeIntervals, got %v", got)
+	}
+}
+
 func TestRouteNode_Clone_PreservesTimeIntervalNames(t *testing.T) {
 	config := buildTimeMuteFixtureConfig()
 	tree, err := NewTreeBuilder(config, BuildOptions{ValidateOnBuild: false}).Build()
