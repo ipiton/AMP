@@ -467,6 +467,53 @@ func TestDefaultTimerManager_OnTimerExpired_MultipleCallbacks(t *testing.T) {
 	assert.True(t, called2.Load())
 }
 
+// TestDefaultTimerManager_OnTimerExpired_CallbackPanicIsRecovered covers
+// task 2.4 fix round 1, Finding 3: a panicking callback (e.g. a bug in the
+// notify-stage chain, or in a caller-supplied InhibitionChecker/
+// SilenceChecker) must not crash the process. If invokeCallbackSafely's
+// recover() were missing, this whole test binary would crash instead of
+// reporting a test failure — reaching the assertions below at all is part
+// of the proof. A second, non-panicking callback registered after the
+// panicking one must still run (panic isolation is per-callback, not
+// per-timer-expiration).
+func TestDefaultTimerManager_OnTimerExpired_CallbackPanicIsRecovered(t *testing.T) {
+	manager, _, groupManager := setupTestTimerManager(t)
+	defer func() { _ = manager.Shutdown(context.Background()) }()
+
+	ctx := context.Background()
+
+	testGroup := &AlertGroup{
+		Key:    "test-group",
+		Alerts: make(map[string]*core.Alert),
+		Metadata: &GroupMetadata{
+			State:     GroupStateFiring,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+	_ = groupManager.storage.Store(ctx, testGroup)
+
+	panicked := atomic.Bool{}
+	afterPanicCalled := atomic.Bool{}
+
+	manager.OnTimerExpired(func(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
+		panicked.Store(true)
+		panic("simulated callback panic (task 2.4 fix round 1, Finding 3)")
+	})
+	manager.OnTimerExpired(func(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
+		afterPanicCalled.Store(true)
+		return nil
+	})
+
+	_, err := manager.StartTimer(ctx, "test-group", GroupWaitTimer, 50*time.Millisecond)
+	require.NoError(t, err)
+
+	time.Sleep(300 * time.Millisecond)
+
+	assert.True(t, panicked.Load(), "the panicking callback must have run")
+	assert.True(t, afterPanicCalled.Load(), "a later callback must still run after an earlier one panics")
+}
+
 // TestDefaultTimerManager_RestoreTimers tests timer restoration
 func TestDefaultTimerManager_RestoreTimers(t *testing.T) {
 	storage := NewInMemoryTimerStorage(nil)

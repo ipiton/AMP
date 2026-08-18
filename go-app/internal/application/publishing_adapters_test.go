@@ -249,3 +249,55 @@ func TestApplicationPublishingAdapter_PublishGroup_NoTargetsForReceiverReturnsEr
 		t.Fatal("expected an error when no targets match the receiver")
 	}
 }
+
+// --- task 2.4 fix round 1, Findings 1+2: PublishGroup must not report
+// success unless every resolved target confirmed the enqueue, or the
+// caller's Dedup step records a send that never happened. -------------
+
+// TestApplicationPublishingAdapter_PublishGroup_EmptyResultsReturnsError
+// covers Finding 1: PublishingCoordinator.PublishGroupToTargets's
+// metrics-only-mode fallback returns (empty results, nil error) — this
+// must NOT read as success here, or the notify-chain's Dedup log records
+// "sent" for a notification that was actually skipped, and the group goes
+// silent for a full repeat_interval once metrics-only mode ends.
+func TestApplicationPublishingAdapter_PublishGroup_EmptyResultsReturnsError(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{}, // e.g. metrics-only mode
+		groupErr:     nil,
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
+	if err := adapter.PublishGroup(context.Background(), alerts, "any-receiver"); err == nil {
+		t.Fatal("expected an error for empty results with a nil coordinator error (no confirmed delivery)")
+	}
+}
+
+// TestApplicationPublishingAdapter_PublishGroup_PartialFailureReturnsError
+// covers Finding 2: previously, as long as at least one of N targets
+// succeeded, PublishGroup returned nil — so Dedup recorded "sent" and the
+// failed target(s) would not be retried until repeat_interval elapsed
+// (every other publish path in this codebase retries on the very next
+// tick). Now a partial failure must return a non-nil error too.
+func TestApplicationPublishingAdapter_PublishGroup_PartialFailureReturnsError(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops-a"}, Success: true},
+			{Target: &core.PublishingTarget{Name: "ops-b"}, Success: false, Error: errors.New("ops-b unreachable")},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
+	if err := adapter.PublishGroup(context.Background(), alerts, "multi-target-receiver"); err == nil {
+		t.Fatal("expected an error when 1 of 2 targets fails, so the caller does not record this as fully delivered")
+	}
+}

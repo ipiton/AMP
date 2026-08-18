@@ -3,6 +3,7 @@ package grouping
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -251,3 +252,72 @@ func TestPublishGroupAlerts_Dedup_ChangedAlertSetPublishesImmediately(t *testing
 type assertErr string
 
 func (e assertErr) Error() string { return string(e) }
+
+// === Fix round 1, Findings 1+2: Dedup must not record a send that wasn't
+// confirmed (metrics-only mode / partial target failure) ===
+
+// TestPublishGroupAlerts_FailedPublishDoesNotPoisonDedup covers both ruled
+// scenarios generically at the point that matters to publishGroupAlerts:
+// whatever the reason (metrics-only mode returning empty results, or N-of-M
+// targets failing — both fixed in ApplicationPublishingAdapter.PublishGroup
+// to surface as a non-nil error instead of a silent "success"), a
+// PublishGroup call that returns an error must NOT be recorded in the
+// Dedup log. The very next fire, still well within repeat_interval, must
+// attempt delivery again rather than being silently suppressed.
+func TestPublishGroupAlerts_FailedPublishDoesNotPoisonDedup(t *testing.T) {
+	pub := &mockPublisher{err: assertErr("simulated failure: metrics-only mode or partial target failure")}
+	manager := createTestManagerWithChain(t, pub, nil, nil) // repeat_interval = 50ms
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=TestAlert")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	manager.publishGroupAlerts(ctx, group) // fails — must NOT RecordSent
+	pub.err = nil                          // e.g. metrics-only mode ends / the failed target recovers
+	manager.publishGroupAlerts(ctx, group) // immediate re-fire, well within repeat_interval
+
+	calls := pub.calls()
+	require.Len(t, calls, 2,
+		"a failed/unconfirmed publish must not be recorded as sent — the next fire must still attempt delivery, not be deduped")
+}
+
+// === Fix round 1, Finding 4: check-then-publish-then-record must be
+// atomic per group, not just the dedup log's own internal locking ===
+
+// TestPublishGroupAlerts_ConcurrentFiringsForSameGroupAreSerialized proves
+// the per-GroupKey publish lock actually prevents the double-send this
+// finding described: without it, N concurrent publishGroupAlerts calls for
+// the SAME unchanged group could all observe "not a duplicate" before any
+// of them records success. With the lock, they run one at a time, so only
+// the first can ever reach the publisher — every later one dedups against
+// the first's now-recorded entry.
+func TestPublishGroupAlerts_ConcurrentFiringsForSameGroupAreSerialized(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithChain(t, pub, nil, nil) // repeat_interval = 50ms
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=TestAlert")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	_, _ = manager.AddAlertToGroup(ctx, alert, groupKey)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			manager.publishGroupAlerts(ctx, group)
+		}()
+	}
+	wg.Wait()
+
+	assert.Len(t, pub.calls(), 1,
+		"concurrent firings for the same unchanged group must serialize and dedup down to exactly one publish")
+}
