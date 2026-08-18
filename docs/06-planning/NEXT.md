@@ -16,14 +16,13 @@
 
 ### 3. Alertmanager Parity — Phase B (feature parity)
 > Необязательно для controlled replacement, но закрывает полный feature set Alertmanager.
+> DELIVERED via feat/alertmanager-parity (Phase 1-7, 2026-08-18): PARITY-B1/B3/B6 shipped; deferred follow-ups in BACKLOG.
 
-- [ ] **PARITY-B1-MUTE-TIME-INTERVALS** — maintenance windows (time interval parser, timezone, route wiring). ~5d
-- [ ] **PARITY-B3-TELEGRAM-PUBLISHER** — популярен в СНГ. ~1-2d
-- [ ] **PARITY-B6-WEB-ROUTE-PREFIX** — reverse proxy. ~0.5d
+- (absorbed by AMP-PARITY, see DONE.md 2026-08-18)
 
 ## WIP (Max 2)
 
-- [ ] **AMP-PARITY** — drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). План: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Поглощает PARITY-B1/B3/B6 из Queue.
+- [ ] **AMP-PARITY** — implementation complete, final fix wave in flight. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
 - Очередь обновлена 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.
