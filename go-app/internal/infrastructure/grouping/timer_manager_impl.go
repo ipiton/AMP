@@ -984,7 +984,19 @@ func (tm *DefaultTimerManager) RestoreTimers(ctx context.Context) (restored int,
 			// firedHandle is nil: there is no local timerHandle for a timer
 			// found already-expired at restore time — that absence is what
 			// makes it "missed" in the first place.
-			go tm.onTimerExpired(nil, timer.GroupKey, timer.TimerType)
+			//
+			// tm.wg.Add(1)/defer tm.wg.Done() (fix round 3): mirrors the
+			// sibling "still valid" branch below (tm.wg.Add(1) before its
+			// own `go handleTimerExpiration`) — without this, Shutdown's
+			// tm.wg.Wait() does not track this goroutine at all, so a
+			// Shutdown racing a missed-timer restore could return "done"
+			// while this onTimerExpired call is still running, contradicting
+			// the shutdown-safety claim in onTimerExpired's own doc comment.
+			tm.wg.Add(1)
+			go func(groupKey GroupKey, timerType TimerType) {
+				defer tm.wg.Done()
+				tm.onTimerExpired(nil, groupKey, timerType)
+			}(timer.GroupKey, timer.TimerType)
 			missed++
 		} else {
 			// Timer still valid - restore it
