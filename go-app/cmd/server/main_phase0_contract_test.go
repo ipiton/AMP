@@ -130,6 +130,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "debug removed", method: http.MethodGet, path: "/debug/pprof/", allowedStatus: []int{http.StatusNotFound}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts v1 post alias", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
+		{name: "alerts v1 get alias", method: http.MethodGet, path: "/api/v1/alerts", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts get", method: http.MethodGet, path: "/api/v2/alerts", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts post", method: http.MethodPost, path: "/api/v2/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alert groups get", method: http.MethodGet, path: "/api/v2/alerts/groups", allowedStatus: []int{http.StatusOK}},
@@ -939,13 +940,41 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			t.Fatalf("POST /api/v1/alerts (valid payload) expected 200, got %d body=%q", validPostRec.Code, validPostRec.Body.String())
 		}
 
-		// GET is not implemented for the v1 alias (upstream's v1 GET response
-		// shape differs from v2 and restoring it is out of scope here).
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
+		// GET /api/v1/alerts (amtool audit backlog item 3): a thin wrapper
+		// around the v2 listing, re-shaped into the legacy v1 envelope. The
+		// mux/store is shared across this test's other subtests, so filter
+		// down to the alert just ingested above instead of assuming an
+		// exact total count.
+		getReq := httptest.NewRequest(http.MethodGet, `/api/v1/alerts?filter=alertname%3D"TestAlert"`, nil)
 		getRec := httptest.NewRecorder()
 		mux.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("GET /api/v1/alerts expected 405, got %d", getRec.Code)
+		if getRec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v1/alerts expected 200, got %d body=%q", getRec.Code, getRec.Body.String())
+		}
+		var v1Resp struct {
+			Status string           `json:"status"`
+			Data   []map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(getRec.Body.Bytes(), &v1Resp); err != nil {
+			t.Fatalf("decode v1 envelope: %v", err)
+		}
+		if v1Resp.Status != "success" {
+			t.Fatalf("v1 envelope status = %q, want %q", v1Resp.Status, "success")
+		}
+		if len(v1Resp.Data) != 1 {
+			t.Fatalf("v1 envelope data length = %d, want 1 (the alert ingested above, matched by filter)", len(v1Resp.Data))
+		}
+		gotLabels, _ := v1Resp.Data[0]["labels"].(map[string]any)
+		if gotLabels["alertname"] != "TestAlert" {
+			t.Fatalf("v1 envelope data[0].labels[alertname] = %v, want %q", gotLabels["alertname"], "TestAlert")
+		}
+
+		// Method still not supported for anything other than GET/POST.
+		deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/alerts", nil)
+		deleteRec := httptest.NewRecorder()
+		mux.ServeHTTP(deleteRec, deleteReq)
+		if deleteRec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("DELETE /api/v1/alerts expected 405, got %d", deleteRec.Code)
 		}
 	})
 }
