@@ -218,7 +218,7 @@ func (r *RedisGroupStorage) Store(ctx context.Context, group *AlertGroup) error 
 			pipe.Set(ctx, redisKey, data, ttl)
 
 			// Update index (sorted by UpdatedAt)
-			score := float64(group.Metadata.UpdatedAt.Unix())
+			score := groupIndexScore(group)
 			pipe.ZAdd(ctx, groupIndexKey, redis.Z{
 				Score:  score,
 				Member: groupKeyStr,
@@ -263,6 +263,24 @@ func (r *RedisGroupStorage) Store(ctx context.Context, group *AlertGroup) error 
 	}
 
 	return nil
+}
+
+// groupIndexScore is the sorted-set score used for the group index: the
+// group's last-update time as a Unix timestamp.
+//
+// AlertGroup.Metadata is a pointer and is nil for any group that did not come
+// from a constructor in this package — notably a record rehydrated from a
+// pre-metadata or hand-written JSON blob (final review finding 12). Reading
+// .UpdatedAt through it panicked inside the Store/StoreAll pipeline, taking
+// down whatever goroutine was persisting the group. Falling back to "now"
+// keeps such a group at the fresh end of the index, which is the safe side:
+// index order only drives cleanup/listing recency, so a metadata-less group
+// gets listed rather than prematurely reaped.
+func groupIndexScore(group *AlertGroup) float64 {
+	if group != nil && group.Metadata != nil {
+		return float64(group.Metadata.UpdatedAt.Unix())
+	}
+	return float64(time.Now().Unix())
 }
 
 // calculateTTL determines TTL for a group.
@@ -612,7 +630,7 @@ func (r *RedisGroupStorage) StoreAll(ctx context.Context, groups []*AlertGroup) 
 		pipe.Set(ctx, redisKey, data, ttl)
 
 		// ZADD to index
-		score := float64(group.Metadata.UpdatedAt.Unix())
+		score := groupIndexScore(group)
 		pipe.ZAdd(ctx, groupIndexKey, redis.Z{
 			Score:  score,
 			Member: groupKeyStr,

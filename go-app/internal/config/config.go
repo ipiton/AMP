@@ -661,7 +661,14 @@ func setDefaults() {
 	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc
 	// comment (config.go) for why the lite profile ignores this.
 	viper.SetDefault("grouping.reconciliation_interval", "45s")
-	viper.SetDefault("grouping.reconciliation_grace", "60s")
+	// 20s, NOT 60s (final review finding 2): the shared timer record's own
+	// Redis TTL is ExpiresAt + grouping's timerTTLGracePeriod. A 60s
+	// adoption grace equalled that TTL grace, so a timer became eligible for
+	// adoption at the exact moment its key expired — ListOverdueTimers
+	// always came back empty and a dead replica's groups never notified
+	// again. Keep in sync with grouping.defaultReconciliationGracePeriod,
+	// which enforces the same relationship at compile time.
+	viper.SetDefault("grouping.reconciliation_grace", "20s")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)
