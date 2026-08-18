@@ -23,6 +23,7 @@ import (
 	"github.com/ipiton/AMP/internal/database/postgres"
 	infrastructure "github.com/ipiton/AMP/internal/infrastructure"
 	infrastructurecache "github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/ipiton/AMP/internal/infrastructure/cluster"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	investigationinfra "github.com/ipiton/AMP/internal/infrastructure/investigation"
@@ -129,6 +130,20 @@ type ServiceRegistry struct {
 	// longer holds leadership), so there's nothing Shutdown needs the field
 	// cleared for; it just keeps pointing at a stopped, inert Elector.
 	leaderElector lock.Elector
+
+	// Cluster heartbeat (task 6.5, alertmanager-parity): Redis peer
+	// registration backing the `cluster` field of /api/v2/status. Nil when:
+	// lite profile (no clustering concept — see initializeClusterHeartbeat),
+	// or standard profile without a live Redis cache backend. Same
+	// write-once posture as leaderElector above and for the identical
+	// reason — ClusterStatus() below is read concurrently with Shutdown by
+	// request-serving goroutines, so Shutdown must not nil this out from
+	// under a concurrent read. HeartbeatRegistry.Stop() already flips
+	// IsRegistered() to false, which ClusterStatus() reports as "disabled"
+	// — a correct post-shutdown answer — so there is nothing nil-ing the
+	// field would buy beyond reintroducing the race task 6.4 already fixed
+	// once for leaderElector.
+	clusterHeartbeat *cluster.HeartbeatRegistry
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -258,6 +273,15 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	if err := r.initializeSilenceEventSync(ctx); err != nil {
 		r.logger.Warn("Silence event sync initialization failed, continuing without cross-replica invalidation",
 			"error", err)
+	}
+
+	// Step 1.7: Initialize cluster heartbeat (task 6.5; non-fatal — mirrors
+	// Step 1.5/1.6 above). Populates the /api/v2/status `cluster` field;
+	// nothing else in AMP depends on it.
+	if err := r.initializeClusterHeartbeat(ctx); err != nil {
+		r.logger.Warn("Cluster heartbeat initialization failed, /api/v2/status will report cluster.status=disabled",
+			"error", err)
+		r.addDegradedReason("cluster heartbeat unavailable: %v", err)
 	}
 
 	// Step 2: Initialize Core Services
@@ -618,6 +642,72 @@ func (r *ServiceRegistry) IsLeader() bool {
 		return true
 	}
 	return r.leaderElector.IsLeader()
+}
+
+// initializeClusterHeartbeat wires the Redis peer heartbeat (task 6.5,
+// alertmanager-parity Phase 6) that backs /api/v2/status's `cluster`
+// field. Lite profile has no clustering concept at all — a single replica
+// with no coordination backend, matching every other Phase 6 feature's
+// lite-profile posture (leader election's AlwaysLeader, silence event
+// sync's nil bus). Standard profile without a live *cache.RedisCache backend
+// (Step 1's initializeCache already recorded its own degraded reason for
+// that) also leaves r.clusterHeartbeat nil — ClusterStatus() then reports
+// "disabled", the safe fallback, not a new failure mode.
+//
+// Registration happens synchronously inside HeartbeatRegistry.Start, so a
+// non-nil error here means the FIRST heartbeat SET itself failed (e.g.
+// Redis briefly unreachable at boot) — logged and degraded by the caller,
+// same as every other non-fatal Initialize step.
+func (r *ServiceRegistry) initializeClusterHeartbeat(ctx context.Context) error {
+	if r.config.Profile != appconfig.ProfileStandard {
+		return nil
+	}
+
+	redisCache, ok := r.cache.(*infrastructurecache.RedisCache)
+	if !ok {
+		r.logger.Warn("No Redis cache backend, cluster heartbeat disabled (status endpoint reports cluster.status=disabled)")
+		return nil
+	}
+
+	address := r.config.Server.ExternalURL
+	registry := cluster.NewHeartbeatRegistry(redisCache.GetClient(), "", address, 0, 0, r.logger)
+	if err := registry.Start(ctx); err != nil {
+		return fmt.Errorf("cluster heartbeat start failed: %w", err)
+	}
+
+	r.clusterHeartbeat = registry
+	r.logger.Info("Cluster heartbeat registered", "self_id", registry.SelfID())
+	return nil
+}
+
+// ClusterStatus returns the `cluster` field for /api/v2/status (task 6.5).
+// "disabled" (Name/Peers omitted, matching the pre-6.5 stub's wire shape)
+// when clusterHeartbeat was never wired or this replica's own registration
+// isn't currently active — lite profile, standard profile without a live
+// Redis backend, or after Shutdown. "ready" with this replica's self ID
+// and the full live peer list otherwise. A Peers() lookup failure (Redis
+// hiccup after a successful registration) degrades to "ready" with just
+// this replica's own name and an empty peer list rather than failing the
+// whole /api/v2/status response — the same fail-open posture Phase 6's
+// other Redis-backed features (nflog, silence sync) already use.
+func (r *ServiceRegistry) ClusterStatus(ctx context.Context) handlers.ClusterStatus {
+	if r.clusterHeartbeat == nil || !r.clusterHeartbeat.IsRegistered() {
+		return handlers.ClusterStatus{Status: "disabled"}
+	}
+
+	selfID := r.clusterHeartbeat.SelfID()
+	peers, err := r.clusterHeartbeat.Peers(ctx)
+	if err != nil {
+		r.logger.Warn("cluster status: peers listing failed, reporting self only", "error", err)
+		return handlers.ClusterStatus{Status: "ready", Name: selfID}
+	}
+
+	clusterPeers := make([]handlers.ClusterPeer, 0, len(peers))
+	for _, p := range peers {
+		clusterPeers = append(clusterPeers, handlers.ClusterPeer{Name: p.Name, Address: p.Address})
+	}
+
+	return handlers.ClusterStatus{Status: "ready", Name: selfID, Peers: clusterPeers}
 }
 
 // newSilenceEventBus selects the cross-replica silence cache invalidation
@@ -1715,6 +1805,20 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := r.leaderElector.Stop(stopCtx); err != nil {
 			r.logger.Warn("Silence GC leader election stop warning", "error", err)
+		}
+		cancel()
+	}
+
+	// Shutdown cluster heartbeat (task 6.5). Deliberately NOT setting
+	// r.clusterHeartbeat = nil afterward — same write-once rationale as
+	// leaderElector just above: ClusterStatus() reads it concurrently with
+	// Shutdown, and Stop() already leaves IsRegistered() reporting false,
+	// which ClusterStatus() correctly reports as "disabled" post-shutdown.
+	if r.clusterHeartbeat != nil {
+		r.logger.Info("Shutting down cluster heartbeat...")
+		stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := r.clusterHeartbeat.Stop(stopCtx); err != nil {
+			r.logger.Warn("Cluster heartbeat stop warning", "error", err)
 		}
 		cancel()
 	}

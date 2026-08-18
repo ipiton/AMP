@@ -25,11 +25,32 @@ type StatusConfig struct {
 	Original string `json:"original"`
 }
 
-// ClusterStatus is a stub for the `cluster` field. AMP has no clustering yet
-// (that lands in a later phase); "disabled" is upstream's own value for a
-// non-clustered Alertmanager instance.
+// ClusterStatus is the `cluster` field of /api/v2/status, matching
+// upstream's own shape: {"status", "name", "peers": [{"name","address"}]}.
+//
+// Task 6.5 (alertmanager-parity, Phase 6): AMP's clustering is a Redis peer
+// heartbeat (internal/infrastructure/cluster), not upstream's
+// memberlist/gossip — but the wire shape is upstream-compatible. "disabled"
+// (Name/Peers omitted) is reported for the lite profile, or a standard
+// profile deployment without a live Redis cache backend (no heartbeat
+// registry wired at all — see ServiceRegistry.initializeClusterHeartbeat).
+// "ready" is reported once this replica's own heartbeat has successfully
+// registered; there is no intermediate "settling" state because
+// registration is synchronous (the first SET happens inside Start, before
+// Initialize returns) — either it's registered by the time the HTTP server
+// starts serving, or the whole heartbeat is absent (registration failure
+// only logs a degraded reason, it does not fail startup).
 type ClusterStatus struct {
-	Status string `json:"status"`
+	Status string        `json:"status"`
+	Name   string        `json:"name,omitempty"`
+	Peers  []ClusterPeer `json:"peers,omitempty"`
+}
+
+// ClusterPeer is one entry of ClusterStatus.Peers, matching upstream's
+// {"name","address"} peer shape.
+type ClusterPeer struct {
+	Name    string `json:"name"`
+	Address string `json:"address,omitempty"`
 }
 
 // VersionInfo represents the version information
@@ -56,7 +77,7 @@ func StatusAPIHandler(registry RegistryProvider) http.HandlerFunc {
 		}
 
 		resp := StatusResponse{
-			Cluster: ClusterStatus{Status: "disabled"},
+			Cluster: registry.ClusterStatus(r.Context()),
 			Config:  StatusConfig{Original: string(configContent)},
 			VersionInfo: VersionInfo{
 				Version:   buildinfo.Version,
