@@ -67,6 +67,18 @@ GROUP_WAIT_MARGIN=10 # config.yaml route.group_wait is 5s
 log() { printf '[e2e-ha] %s\n' "$1"; }
 fail() { printf '[e2e-ha] FAIL: %s\n' "$1" >&2; exit 1; }
 
+# Pick a JSON parser for peer_count() up front (not inside the function
+# itself): peer_count runs inside a `$(...)` command substitution, and an
+# `exit` there would only kill that subshell, not the script -- so a
+# missing-parser failure has to be caught here, in the main shell, instead.
+if command -v jq >/dev/null 2>&1; then
+  JSON_PARSER="jq"
+elif command -v python3 >/dev/null 2>&1; then
+  JSON_PARSER="python3"
+else
+  fail "neither jq nor python3 available to parse cluster.peers -- install one (this script refuses to fall back to a substring-count heuristic that already caused a false-positive bug)"
+fi
+
 cleanup() {
   if [[ "$KEEP_UP" != "1" ]]; then
     log "tearing down stack"
@@ -98,6 +110,31 @@ publish_skip_count() {
   "${COMPOSE[@]}" logs "$1" 2>/dev/null | grep -c "Group publishing skipped" || true
 }
 
+peer_count() {
+  # peer_count <status_json>: exact count of cluster.peers[], via whichever
+  # parser JSON_PARSER picked above. Deliberately NOT a
+  # `grep -o '"name"' | wc -l` over the whole payload -- that also matches
+  # the top-level cluster.name field, so with exactly 1 real peer it
+  # miscounts 2 and a `-ge 2` check passed on that false positive (fix
+  # round 1 finding). On parse failure (malformed/empty JSON) both paths
+  # print 0 rather than erroring, so callers' `-eq 2` checks fail loudly
+  # with a real assertion message instead of a raw parser stack trace.
+  local json="$1"
+  if [[ "$JSON_PARSER" == "jq" ]]; then
+    printf '%s' "$json" | jq -r '(.cluster.peers // []) | length' 2>/dev/null || echo 0
+  else
+    printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(0)
+else:
+    print(len((data.get("cluster") or {}).get("peers") or []))
+' 2>/dev/null || echo 0
+  fi
+}
+
 nflog_entry_exists() {
   # nflog_entry_exists <receiver> <alertname>
   local key="nflog:entry:receiver=${1}/alertname=${2}"
@@ -125,28 +162,28 @@ wait_for_http "http://localhost:${PORT_A}/healthz" 90 || fail "replica A never b
 wait_for_http "http://localhost:${PORT_B}/healthz" 90 || fail "replica B never became healthy"
 log "both replicas healthy"
 
-# --- Step 2: cluster status shows 2 peers on both replicas ---------------
-log "waiting for cluster heartbeat convergence (both replicas see 2 peers)"
+# --- Step 2: cluster status shows exactly 2 peers on both replicas -------
+log "waiting for cluster heartbeat convergence (both replicas see 2 peers), using $JSON_PARSER"
 converged=0
 status_a=""
 for ((i = 0; i < 30; i++)); do
   status_a="$(curl -fsS "http://localhost:${PORT_A}/api/v2/status" 2>/dev/null || echo '{}')"
-  peers_a="$(printf '%s' "$status_a" | grep -o '"name"' | wc -l | tr -d ' ')"
-  if [[ "$peers_a" -ge 2 ]]; then
+  peers_a="$(peer_count "$status_a")"
+  if [[ "$peers_a" -eq 2 ]]; then
     converged=1
     break
   fi
   sleep 1
 done
-[[ "$converged" == "1" ]] || fail "replica A's /api/v2/status never showed 2 peers (last: $status_a)"
+[[ "$converged" == "1" ]] || fail "replica A's /api/v2/status never showed exactly 2 peers (last count: $peers_a, body: $status_a)"
 
 status_b="$(curl -fsS "http://localhost:${PORT_B}/api/v2/status")"
-peers_b="$(printf '%s' "$status_b" | grep -o '"name"' | wc -l | tr -d ' ')"
-[[ "$peers_b" -ge 2 ]] || fail "replica B's /api/v2/status never showed 2 peers (got: $status_b)"
+peers_b="$(peer_count "$status_b")"
+[[ "$peers_b" -eq 2 ]] || fail "replica B's /api/v2/status never showed exactly 2 peers (got: $peers_b, body: $status_b)"
 
 printf '%s' "$status_a" | grep -q '"status":"ready"' || fail "replica A cluster.status is not ready: $status_a"
 printf '%s' "$status_b" | grep -q '"status":"ready"' || fail "replica B cluster.status is not ready: $status_b"
-log "PASS: both replicas report cluster.status=ready with >=2 peers"
+log "PASS: both replicas report cluster.status=ready with exactly 2 peers"
 
 # --- Step 3: exactly one notification for an alert posted to replica A ---
 ALERT_1="E2EHaTestAlertOne"
