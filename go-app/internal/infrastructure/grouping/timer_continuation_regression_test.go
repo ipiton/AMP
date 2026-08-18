@@ -205,9 +205,14 @@ func TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer(t *testing.T) 
 
 // TestTimerContinuation_FullChainFiresRepeatIntervalTwice drives the whole
 // group_wait -> group_interval -> repeat_interval chain with short,
-// identical timings and asserts the fake publisher observes at least 2
-// publishes (group_wait's first notification, then at least one
-// group_interval/repeat_interval follow-up) — before the fix, every
+// identical timings and asserts the fake publisher observes at least 3
+// publishes: #1 is group_wait's first notification, #2 is
+// group_interval's follow-up, #3 is the first repeat_interval reminder —
+// the earliest publish count that actually proves the repeat_interval leg
+// itself fired, not just group_interval (fix round 3: with all three
+// timings equal, require.Eventually could satisfy a ">= 2" assertion as
+// soon as the group_interval leg alone completed, never reaching
+// repeat_interval, and still report green). Before the fix, every
 // continuation failed silently, so only the first publish ever happened,
 // no matter how long the test waited.
 func TestTimerContinuation_FullChainFiresRepeatIntervalTwice(t *testing.T) {
@@ -223,8 +228,8 @@ func TestTimerContinuation_FullChainFiresRepeatIntervalTwice(t *testing.T) {
 	_, err := groupManager.AddAlertToGroup(ctx, alert, groupKey)
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool { return len(pub.calls()) >= 2 }, 5*time.Second, 10*time.Millisecond,
-		"the full group_wait->group_interval->repeat_interval chain must keep publishing — "+
+	require.Eventually(t, func() bool { return len(pub.calls()) >= 3 }, 5*time.Second, 10*time.Millisecond,
+		"the full group_wait->group_interval->repeat_interval chain must keep publishing through the repeat_interval leg — "+
 			"before the fix, every continuation after the first notification failed silently")
 
 	logs := logBuf.String()
