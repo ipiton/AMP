@@ -740,8 +740,15 @@ func (m *DefaultGroupManager) GetStats(ctx context.Context) (*GroupStats, error)
 	for _, group := range allGroups {
 		group.mu.RLock()
 		totalAlerts += len(group.Alerts)
-		firingAlerts += group.Metadata.FiringCount
-		resolvedAlerts += group.Metadata.ResolvedCount
+		// Guard against nil Metadata (task fu2-d item 8): same
+		// rehydrated-without-metadata/test-built gap groupTimings and
+		// effectiveRepeatInterval already guard against elsewhere in this
+		// package — count such a group's alerts but skip its firing/resolved
+		// contribution rather than panic.
+		if group.Metadata != nil {
+			firingAlerts += group.Metadata.FiringCount
+			resolvedAlerts += group.Metadata.ResolvedCount
+		}
 		group.mu.RUnlock()
 	}
 
@@ -796,6 +803,13 @@ func (m *DefaultGroupManager) createNewGroupUnsafe(groupKey GroupKey) *AlertGrou
 func (m *DefaultGroupManager) updateGroupStateUnsafe(group *AlertGroup) {
 	group.mu.Lock()
 	defer group.mu.Unlock()
+
+	// Guard against nil Metadata (task fu2-d item 8): lazily initialize
+	// rather than skip, since the group needs metadata for every downstream
+	// step (notify chain, timers, GetStats) to work at all.
+	if group.Metadata == nil {
+		group.Metadata = &GroupMetadata{CreatedAt: time.Now()}
+	}
 
 	group.Metadata.UpdateState(group.Alerts)
 }

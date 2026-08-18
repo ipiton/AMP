@@ -5,6 +5,7 @@
 package validators
 
 import (
+	"errors"
 	"net"
 	"net/mail"
 	"net/url"
@@ -62,12 +63,11 @@ func isValidRegex(pattern string) bool {
 }
 
 // matcherErrorCode classifies a matcher.ParseError into E104 (bad syntax)
-// vs E105 (syntax fine, regex invalid) per ERROR_CODES.md. Parse only
-// reaches regex compilation after the label/operator/value are already
-// well-formed, so a message mentioning "regex" at that point means the
-// operator and label were fine and only the pattern itself is bad.
+// vs E105 (syntax fine, regex invalid) per ERROR_CODES.md, using the
+// typed matcher.ErrorKind rather than matching on the error string.
 func matcherErrorCode(err error) string {
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "regex") {
+	var perr *matcher.ParseError
+	if errors.As(err, &perr) && perr.Kind == matcher.ErrKindRegex {
 		return "E105"
 	}
 	return "E104"
