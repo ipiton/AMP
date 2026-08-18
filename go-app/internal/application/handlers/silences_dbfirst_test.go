@@ -366,6 +366,78 @@ func TestSilenceByIDHandler_DBFirstDelete_ExpiresInPlace_Success(t *testing.T) {
 	}
 }
 
+// TestSilenceByIDHandler_DBFirstDelete_PendingSilence_MirroredAsExpired is
+// the round-2 review regression guard for the DB-first (standard/Postgres)
+// path: the actual starts_at-forcing happens in
+// PostgresSilenceRepository.ExpireSilence's SQL (see its dedicated
+// skip-for-DB tests in postgres_silence_repository_test.go), but the
+// handler's re-fetch-and-mirror step must faithfully carry that result
+// (starts_at ALSO moved to now, not just ends_at) into the memory read
+// cache — a silence mirrored with its ORIGINAL far-future starts_at would
+// keep reporting "pending" (silenceState checks StartsAt before EndsAt)
+// even though the database already says "expired".
+func TestSilenceByIDHandler_DBFirstDelete_PendingSilence_MirroredAsExpired(t *testing.T) {
+	store := memory.NewSilenceStore()
+	now := time.Now().UTC()
+	farFuture := now.Add(24 * time.Hour)
+	if _, err := store.Upsert(&core.SilenceInput{
+		ID:        testRepoID,
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "X"}},
+		StartsAt:  farFuture.Format(time.RFC3339),
+		EndsAt:    farFuture.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "still pending",
+	}, now); err != nil {
+		t.Fatalf("seed memory store: %v", err)
+	}
+
+	// Precondition: before DELETE, this reads as pending.
+	preDelete, ok := store.Get(testRepoID, now)
+	if !ok || preDelete.Status.State != "pending" {
+		t.Fatalf("precondition failed: Status.State = %q (found=%v), want %q", preDelete.Status.State, ok, "pending")
+	}
+
+	repo := &mockSilenceRepo{
+		expireFn: func(_ context.Context, _ string, _ time.Time) error { return nil },
+		getFn: func(_ context.Context, id string) (*coresilencing.Silence, error) {
+			// Simulates what PostgresSilenceRepository.ExpireSilence's
+			// LEAST(starts_at, now)/LEAST(ends_at, now) UPDATE actually
+			// produces for a silence that was pending: BOTH timestamps
+			// forced to now, matching upstream's expire() semantics.
+			return &coresilencing.Silence{
+				ID:        id,
+				CreatedBy: "tester",
+				Comment:   "still pending",
+				StartsAt:  now,
+				EndsAt:    now,
+				Status:    coresilencing.SilenceStatusExpired,
+				Matchers:  []coresilencing.Matcher{{Name: "alertname", Value: "X", Type: coresilencing.MatcherTypeEqual}},
+			}, nil
+		},
+	}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: store,
+		silenceRepo:  repo,
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+testRepoID, nil)
+	rec := httptest.NewRecorder()
+	SilenceByIDHandler(registry)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, want 200", rec.Code)
+	}
+
+	got, ok := store.Get(testRepoID, time.Now().UTC())
+	if !ok {
+		t.Fatal("silence must still be present in memory after DB-first expire-in-place delete")
+	}
+	if got.Status.State != "expired" {
+		t.Fatalf("Status.State = %q, want %q (a pending silence must expire immediately on delete, matching upstream)", got.Status.State, "expired")
+	}
+}
+
 func TestSilenceByIDHandler_DBFirstDelete_RepoErrorKeepsMemory(t *testing.T) {
 	store := memory.NewSilenceStore()
 	now := time.Now().UTC()

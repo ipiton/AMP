@@ -1558,23 +1558,32 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	// `silence expire`), it does not remove the row: GET must keep returning
 	// it (alertmanager-parity amtool audit F3 — see
 	// memory.SilenceStore.Expire's doc comment). validSilencePayload's
-	// startsAt is 2099 (still pending "now"), and upstream's own state
-	// priority checks StartsAt before EndsAt (see silenceState/getState), so
-	// this fixture reports "pending" both before AND after the forced
-	// expiry — the state label itself isn't what this assertion is probing;
-	// the already-active -> expired transition is covered by
-	// TestSilenceStore_Expire_* and
-	// TestSilencesHandler_ExpiredSilenceStaysQueryable. What must hold here
-	// is that the row survives at all instead of 404'ing.
+	// startsAt is 2099, i.e. still PENDING at delete time — and upstream's
+	// own expire() (silence/silence.go, v0.34.0) moves BOTH StartsAt and
+	// EndsAt to now for a pending silence specifically so it flips straight
+	// to "expired", never sitting in "pending" until the original startsAt
+	// arrives. (An earlier version of this comment claimed the opposite —
+	// that upstream's state priority would keep this fixture "pending"
+	// after delete; that was verified wrong against upstream source and
+	// corrected here, alongside the actual StartsAt-forcing fix in
+	// memory.SilenceStore.Expire / SilenceRepository.ExpireSilence.)
 	getAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
 	getAfterDeleteRec := httptest.NewRecorder()
 	mux.ServeHTTP(getAfterDeleteRec, getAfterDeleteReq)
 	if getAfterDeleteRec.Code != http.StatusOK {
 		t.Fatalf("GET /api/v2/silence/{id} after delete expected 200 (expired-in-place, not removed), got %d", getAfterDeleteRec.Code)
 	}
+	var afterDeleteByID map[string]any
+	if err := json.Unmarshal(getAfterDeleteRec.Body.Bytes(), &afterDeleteByID); err != nil {
+		t.Fatalf("failed to decode silence by id after delete: %v", err)
+	}
+	afterDeleteStatus, _ := afterDeleteByID["status"].(map[string]any)
+	if state, _ := afterDeleteStatus["state"].(string); state != "expired" {
+		t.Fatalf("GET /api/v2/silence/{id} after delete: status.state = %v, want %q (a pending silence must expire immediately on delete)", afterDeleteStatus["state"], "expired")
+	}
 
 	// GET /api/v2/silences (the amtool `silence query --expired` read path)
-	// must also keep listing it.
+	// must also keep listing it, with the same immediate "expired" state.
 	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
 	listAfterDeleteRec := httptest.NewRecorder()
 	mux.ServeHTTP(listAfterDeleteRec, listAfterDeleteReq)
@@ -1587,6 +1596,10 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	}
 	if len(silencesAfterDelete) != 1 {
 		t.Fatalf("expected 1 silence still listed after delete, got %d", len(silencesAfterDelete))
+	}
+	listedStatus, _ := silencesAfterDelete[0]["status"].(map[string]any)
+	if state, _ := listedStatus["state"].(string); state != "expired" {
+		t.Fatalf("GET /api/v2/silences after delete: status.state = %v, want %q", listedStatus["state"], "expired")
 	}
 }
 

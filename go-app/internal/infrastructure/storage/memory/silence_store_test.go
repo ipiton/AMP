@@ -190,6 +190,62 @@ func TestSilenceStore_UpsertFromAPI_InsertsUnderSameID(t *testing.T) {
 	}
 }
 
+// TestSilenceStore_UpsertFromAPI_ZeroDurationExpiredMirrorAllowed is a
+// round-2 review regression guard, found while testing the pending-silence
+// expire fix: PostgresSilenceRepository.ExpireSilence (and
+// memory.SilenceStore.Expire itself) force StartsAt == EndsAt == now for a
+// silence that was pending, matching upstream's expire(). The DB-first
+// handler's re-fetch-and-mirror step feeds exactly that zero-duration
+// window into UpsertFromAPI — it must succeed and read back as "expired",
+// not be rejected by the "StartsAt must be strictly before EndsAt" rule
+// that a genuine create/update still enforces.
+func TestSilenceStore_UpsertFromAPI_ZeroDurationExpiredMirrorAllowed(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+
+	item := core.APISilence{
+		ID:        "550e8400-e29b-41d4-a716-446655440000",
+		Matchers:  []core.APISilenceMatcher{{Name: "alertname", Value: "X", IsEqual: true}},
+		StartsAt:  now.Format(time.RFC3339),
+		EndsAt:    now.Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "expired-while-pending mirror",
+	}
+
+	if _, err := store.UpsertFromAPI(item, now); err != nil {
+		t.Fatalf("UpsertFromAPI() with StartsAt == EndsAt error = %v, want success", err)
+	}
+
+	got, ok := store.Get(item.ID, now)
+	if !ok {
+		t.Fatal("zero-duration silence not mirrored")
+	}
+	if got.Status.State != "expired" {
+		t.Fatalf("Status.State = %q, want %q", got.Status.State, "expired")
+	}
+}
+
+// TestSilenceStore_CreateOrUpdate_ZeroDurationRejected guards the other
+// half: a GENUINE create/update (the POST /api/v2/silences path,
+// allowPastEndsAt=false) must still reject StartsAt == EndsAt — only the
+// trusted-mirror paths (UpsertFromAPI/Rebuild/RestoreFromPersistence) may
+// accept it.
+func TestSilenceStore_CreateOrUpdate_ZeroDurationRejected(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+
+	_, err := store.CreateOrUpdate(&core.SilenceInput{
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "X"}},
+		StartsAt:  now.Format(time.RFC3339),
+		EndsAt:    now.Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "zero duration create",
+	}, now)
+	if err == nil {
+		t.Fatal("CreateOrUpdate() with StartsAt == EndsAt succeeded, want a validation error")
+	}
+}
+
 // Expire (amtool audit F3): DELETE must force a silence into the "expired"
 // state, not remove it — expired silences stay queryable via List()/Get()
 // until something else (GC, an explicit Delete) removes them.
@@ -225,12 +281,79 @@ func TestSilenceStore_Expire_ActiveSilenceBecomesExpiredButStaysListed(t *testin
 	if endsAt, _ := time.Parse(time.RFC3339, got.EndsAt); !endsAt.Equal(wantEndsAt) {
 		t.Fatalf("EndsAt = %v, want forced to now (%v)", endsAt, wantEndsAt)
 	}
+	// StartsAt is already in the past (it was active, not pending) — Expire
+	// must leave it untouched. See
+	// TestSilenceStore_Expire_PendingSilenceBecomesExpiredImmediately for the
+	// pending case, where StartsAt DOES get forced to now.
+	wantStartsAt, _ := time.Parse(time.RFC3339, now.Add(-time.Minute).Format(time.RFC3339))
+	if startsAt, _ := time.Parse(time.RFC3339, got.StartsAt); !startsAt.Equal(wantStartsAt) {
+		t.Fatalf("StartsAt = %v, want unchanged %v (Expire must not perturb an already-started silence)", startsAt, wantStartsAt)
+	}
 
 	// Regression guard for F3 itself: List() (the GET /api/v2/silences read
 	// path) must include the now-expired silence.
 	all := store.List(now)
 	if len(all) != 1 || all[0].ID != id || all[0].Status.State != "expired" {
 		t.Fatalf("List() = %+v, want exactly 1 expired silence with id %q", all, id)
+	}
+}
+
+// TestSilenceStore_Expire_PendingSilenceBecomesExpiredImmediately is the
+// round-2 review regression guard: upstream Alertmanager's expire()
+// (silence/silence.go, v0.34.0) moves BOTH StartsAt and EndsAt to now for a
+// silence that hasn't started yet, so it flips straight to "expired". An
+// earlier version of Expire moved only EndsAt, so a deleted pending silence
+// incorrectly kept reporting "pending" (silenceState checks StartsAt before
+// EndsAt) until its original, possibly far-future, StartsAt arrived.
+func TestSilenceStore_Expire_PendingSilenceBecomesExpiredImmediately(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+	const id = "550e8400-e29b-41d4-a716-446655440000"
+
+	if _, err := store.Upsert(&core.SilenceInput{
+		ID:        id,
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "X"}},
+		StartsAt:  now.Add(time.Hour).Format(time.RFC3339), // still pending
+		EndsAt:    now.Add(2 * time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "delete while pending",
+	}, now); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Precondition: before Expire, this is "pending", not "active"/"expired".
+	before, ok := store.Get(id, now)
+	if !ok || before.Status.State != "pending" {
+		t.Fatalf("precondition failed: Status.State = %q (found=%v), want %q", before.Status.State, ok, "pending")
+	}
+
+	if ok := store.Expire(id, now); !ok {
+		t.Fatal("Expire() = false, want true for an existing silence")
+	}
+
+	got, ok := store.Get(id, now)
+	if !ok {
+		t.Fatal("silence must still be retrievable after Expire — it must not be removed")
+	}
+	if got.Status.State != "expired" {
+		t.Fatalf("Status.State = %q, want %q (a pending silence must expire immediately on delete, matching upstream)", got.Status.State, "expired")
+	}
+
+	wantNow, _ := time.Parse(time.RFC3339, now.Format(time.RFC3339))
+	startsAt, _ := time.Parse(time.RFC3339, got.StartsAt)
+	endsAt, _ := time.Parse(time.RFC3339, got.EndsAt)
+	if !startsAt.Equal(wantNow) {
+		t.Fatalf("StartsAt = %v, want forced to now (%v)", startsAt, wantNow)
+	}
+	if !endsAt.Equal(wantNow) {
+		t.Fatalf("EndsAt = %v, want forced to now (%v)", endsAt, wantNow)
+	}
+
+	// Also verify via the read path (List), matching how GET /api/v2/silences
+	// serves it.
+	all := store.List(now)
+	if len(all) != 1 || all[0].Status.State != "expired" {
+		t.Fatalf("List() = %+v, want exactly 1 expired silence", all)
 	}
 }
 

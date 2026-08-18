@@ -203,8 +203,12 @@ func persistSilenceDBFirst(ctx context.Context, repo infrasilencing.SilenceRepos
 // F3 fix (alertmanager-parity amtool audit): upstream Alertmanager's DELETE
 // forces the silence into the "expired" state rather than removing it —
 // amtool's `silence expire` relies on the expired silence staying queryable
-// via GET /api/v2/silences (status.state == "expired") afterwards. Both
-// profiles now implement that:
+// via GET /api/v2/silences (status.state == "expired") afterwards. This
+// includes a pending silence (StartsAt still in the future): upstream moves
+// BOTH StartsAt and EndsAt to now for that case so it becomes "expired"
+// immediately rather than staying "pending" — see memory.SilenceStore.
+// Expire's and SilenceRepository.ExpireSilence's doc comments for the exact
+// mechanics. Both profiles now implement that:
 //   - repo == nil (lite profile): memory.SilenceStore.Expire mutates the
 //     cached row in place (see its doc comment for the GC/retention
 //     posture in this profile — there is none, matching pre-existing
