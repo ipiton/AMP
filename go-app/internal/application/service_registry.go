@@ -3,9 +3,11 @@ package application
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	handlers "github.com/ipiton/AMP/internal/application/handlers"
@@ -87,6 +89,22 @@ type ServiceRegistry struct {
 	// boot and kept current by the HTTP handlers' DB-first writes. Nil when
 	// silenceRepo is nil (lite profile or persistence init failure).
 	silenceManager businesssilencing.SilenceManager
+
+	// Silence event bus (task 6.3, alertmanager-parity): Redis pub/sub used
+	// to invalidate OTHER replicas' memory.SilenceStore when this replica
+	// commits a silence write (see internal/infrastructure/silencing/
+	// redis_event_bus.go for the "why" — memory.SilenceStore has no other
+	// cross-replica sync mechanism at all). Nil in the lite profile or when
+	// the standard profile has no live Redis cache backend; in that case
+	// silences converge only on restart, same posture as nflog/grouping's
+	// Redis-optional fallbacks (newNotifyLog/newGroupingStorage).
+	silenceEventBus *infrasilencing.RedisSilenceEventBus
+
+	// Cancels/awaits the background subscribe+periodic-resync goroutines
+	// started by initializeSilenceEventSync. Both nil if that step never
+	// started them (lite profile, no Redis, or init failure).
+	silenceSyncCancel context.CancelFunc
+	silenceSyncDone   chan struct{}
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -208,6 +226,14 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 		r.logger.Warn("Silence manager initialization failed, continuing without background GC/stats worker",
 			"error", err)
 		r.addDegradedReason("silence manager unavailable: %v", err)
+	}
+
+	// Step 1.6: Initialize cross-replica silence cache invalidation (task
+	// 6.3; non-fatal — mirrors Step 1.5 above). Its own degraded reason (if
+	// any) is added inside initializeSilenceEventSync.
+	if err := r.initializeSilenceEventSync(ctx); err != nil {
+		r.logger.Warn("Silence event sync initialization failed, continuing without cross-replica invalidation",
+			"error", err)
 	}
 
 	// Step 2: Initialize Core Services
@@ -400,8 +426,30 @@ func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 		return nil
 	}
 
+	apiSilences, err := r.fetchActiveAndPendingSilences(ctx)
+	if err != nil {
+		return fmt.Errorf("list silences for rehydration: %w", err)
+	}
+
 	now := time.Now().UTC()
-	restored := 0
+	if err := r.silenceStore.RestoreFromPersistence(apiSilences, now); err != nil {
+		return fmt.Errorf("restore silences into memory store: %w", err)
+	}
+
+	if len(apiSilences) > 0 {
+		r.logger.Info("Silence store rehydrated from persistent storage", "silences", len(apiSilences))
+	}
+	return nil
+}
+
+// fetchActiveAndPendingSilences pages through the persistent repository for
+// every active+pending silence, converted to the API DTO shape
+// memory.SilenceStore consumes. Shared by rehydrateSilenceStore (boot-time,
+// additive into an empty store) and resyncSilenceStore (task 6.3, full
+// resync into a possibly-non-empty store via SilenceStore.Rebuild).
+func (r *ServiceRegistry) fetchActiveAndPendingSilences(ctx context.Context) ([]core.APISilence, error) {
+	now := time.Now().UTC()
+	var apiSilences []core.APISilence
 
 	const pageSize = 1000
 	for offset := 0; ; offset += pageSize {
@@ -415,30 +463,22 @@ func (r *ServiceRegistry) rehydrateSilenceStore(ctx context.Context) error {
 			OrderBy: "created_at",
 		})
 		if err != nil {
-			return fmt.Errorf("list silences for rehydration: %w", err)
+			return nil, fmt.Errorf("list silences: %w", err)
 		}
 		if len(list) == 0 {
 			break
 		}
 
-		apiSilences := make([]core.APISilence, 0, len(list))
 		for _, silence := range list {
 			apiSilences = append(apiSilences, handlers.DomainSilenceToAPI(silence, now))
 		}
-		if err := r.silenceStore.RestoreFromPersistence(apiSilences, now); err != nil {
-			return fmt.Errorf("restore silences into memory store: %w", err)
-		}
-		restored += len(apiSilences)
 
 		if len(list) < pageSize {
 			break
 		}
 	}
 
-	if restored > 0 {
-		r.logger.Info("Silence store rehydrated from persistent storage", "silences", restored)
-	}
-	return nil
+	return apiSilences, nil
 }
 
 // initializeSilenceManager wires the READY DefaultSilenceManager as a
@@ -481,6 +521,227 @@ func (r *ServiceRegistry) initializeSilenceManager(ctx context.Context) error {
 	r.silenceManager = manager
 	r.logger.Info("Silence manager started (GC/stats worker running)")
 	return nil
+}
+
+// newSilenceEventBus selects the cross-replica silence cache invalidation
+// backend (task 6.3) by deployment profile: Redis (reusing the
+// already-initialized cache client, same pattern as newGroupingStorage/
+// newNotifyLog) for standard, nothing for lite.
+//
+// Return contract mirrors newNotifyLog exactly, for the same reasons:
+//   - (nil, nil): use no cross-replica sync at all — silence writes stay
+//     local until the next restart. Either lite profile, or standard
+//     profile without a live *cache.RedisCache — the latter is NOT a new
+//     degraded reason, since Step 1's initializeCache already recorded one.
+//   - (nil, err): standard profile, cache backend IS a live *cache.RedisCache
+//     (so Step 1 saw no failure), but the event bus's own Redis check failed
+//     anyway. This is silence-sync-specific and would otherwise be invisible
+//     in /health//readiness, so initializeSilenceEventSync adds its own
+//     degraded reason for it.
+func (r *ServiceRegistry) newSilenceEventBus(ctx context.Context) (*infrasilencing.RedisSilenceEventBus, error) {
+	if r.config.Profile == appconfig.ProfileStandard {
+		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
+			bus, err := infrasilencing.NewRedisSilenceEventBus(ctx, &infrasilencing.SilenceEventBusConfig{
+				Client: redisCache.GetClient(),
+				Logger: r.logger,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("redis silence event bus init failed: %w", err)
+			}
+
+			r.logger.Info("Silence sync using Redis pub/sub (cross-replica cache invalidation)")
+			return bus, nil
+		}
+
+		r.logger.Warn("Standard profile without a Redis cache backend, cross-replica silence sync disabled")
+	}
+
+	return nil, nil
+}
+
+// initializeSilenceEventSync wires the cross-replica silence cache
+// invalidation subscriber (task 6.3): a background goroutine that applies
+// SilenceEvents published by ANY replica (including this one) to this
+// replica's memory.SilenceStore, plus a periodic full-resync fallback. See
+// internal/infrastructure/silencing/redis_event_bus.go for why this exists —
+// memory.SilenceStore otherwise has no cross-replica sync mechanism.
+//
+// Skip conditions (clean skip, no degradation of the existing single-replica
+// behavior):
+//   - No silence repository/store (lite profile, or persistence init
+//     failed): nothing to sync against.
+//   - No live Redis cache backend: logged by newSilenceEventBus, not
+//     repeated here as a degraded reason (mirrors newNotifyLog's own
+//     posture in initializeGrouping).
+func (r *ServiceRegistry) initializeSilenceEventSync(ctx context.Context) error {
+	if r.silenceRepo == nil || r.silenceStore == nil {
+		return nil
+	}
+
+	bus, err := r.newSilenceEventBus(ctx)
+	if err != nil {
+		r.logger.Warn("Redis silence event bus init failed, cross-replica silence sync disabled (converges only on restart)", "error", err)
+		r.addDegradedReason("silence sync degraded: Redis init failed, cross-replica silence invalidation disabled (converges only on restart): %v", err)
+		return nil
+	}
+	if bus == nil {
+		return nil
+	}
+
+	r.silenceEventBus = bus
+
+	syncCtx, cancel := context.WithCancel(context.Background())
+	r.silenceSyncCancel = cancel
+	r.silenceSyncDone = make(chan struct{})
+
+	go r.runSilenceEventSync(syncCtx)
+
+	r.logger.Info("Silence event subscriber started")
+	return nil
+}
+
+// runSilenceEventSync runs the subscribe loop and the periodic fallback
+// resync concurrently until ctx is cancelled, then signals silenceSyncDone
+// once both have actually stopped touching silenceStore/silenceRepo — this
+// is what Shutdown waits on before those fields are torn down.
+func (r *ServiceRegistry) runSilenceEventSync(ctx context.Context) {
+	defer close(r.silenceSyncDone)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		r.runSilenceSubscribeLoop(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		r.runSilencePeriodicResync(ctx)
+	}()
+
+	wg.Wait()
+}
+
+// runSilenceSubscribeLoop owns the RedisSilenceEventBus.Subscribe session:
+// it resubscribes with a fixed backoff whenever Subscribe returns a non-nil
+// error (a dropped/failed Redis connection), which naturally triggers
+// resyncSilenceStore again via onResync on every successful (re)subscribe —
+// see RedisSilenceEventBus.Subscribe's doc comment for why a full resync,
+// not just catching up on the missed messages, is the correct recovery.
+func (r *ServiceRegistry) runSilenceSubscribeLoop(ctx context.Context) {
+	const retryDelay = 2 * time.Second
+
+	for {
+		err := r.silenceEventBus.Subscribe(ctx, r.resyncSilenceStore, r.applySilenceEvent)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			r.logger.Warn("Silence event subscription lost, retrying", "error", err, "retry_in", retryDelay)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryDelay):
+		}
+	}
+}
+
+// runSilencePeriodicResync is a backstop independent of pub/sub health: even
+// with a fully healthy subscription, a Publish call on the WRITING replica
+// can fail without surfacing as an HTTP error (publishSilenceEvent in
+// internal/application/handlers/silences.go is deliberately best-effort, to
+// match persistSilenceDBFirst's existing "cache failure must not fail the
+// request" posture). Without this backstop, that single silence would never
+// converge on other replicas until they happen to restart. The interval is
+// deliberately the same order of magnitude as the silence GC worker's
+// default (5m, see DefaultSilenceManagerConfig) — frequent enough that a
+// silently-dropped publish is a minor, bounded staleness window rather than
+// a permanent one, without adding a steady background load comparable to
+// the pub/sub path itself.
+func (r *ServiceRegistry) runSilencePeriodicResync(ctx context.Context) {
+	const fallbackInterval = 5 * time.Minute
+
+	ticker := time.NewTicker(fallbackInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.resyncSilenceStore(ctx)
+		}
+	}
+}
+
+// resyncSilenceStore performs a full resync of memory.SilenceStore from the
+// persistent repository (task 6.3): the pub/sub (re)connect handler and the
+// periodic fallback backstop both call this directly. Unlike
+// rehydrateSilenceStore's boot-time RestoreFromPersistence (additive into a
+// store known to be empty), this uses SilenceStore.Rebuild so entries
+// deleted elsewhere while this replica's view was stale — subscription
+// down, or simply between fallback ticks — are actually evicted, not just
+// left behind.
+func (r *ServiceRegistry) resyncSilenceStore(ctx context.Context) {
+	apiSilences, err := r.fetchActiveAndPendingSilences(ctx)
+	if err != nil {
+		r.logger.Warn("Silence store resync failed; cache may be stale until the next resync or event", "error", err)
+		return
+	}
+
+	now := time.Now().UTC()
+	if err := r.silenceStore.Rebuild(apiSilences, now); err != nil {
+		r.logger.Warn("Silence store rebuild failed during resync", "error", err)
+		return
+	}
+
+	r.logger.Info("Silence store resynced (full)", "silences", len(apiSilences))
+}
+
+// applySilenceEvent mirrors a single SilenceEvent into memory.SilenceStore
+// (task 6.3). The event carries only {id, op} — it always re-fetches the
+// current row from silenceRepo rather than trusting a payload that may have
+// raced with a subsequent write, so the database stays the single source of
+// truth (see redis_event_bus.go's package doc for the full rationale).
+func (r *ServiceRegistry) applySilenceEvent(ctx context.Context, event infrasilencing.SilenceEvent) {
+	if event.ID == "" {
+		return
+	}
+
+	if event.Op == infrasilencing.SilenceEventDelete {
+		r.silenceStore.Delete(event.ID)
+		return
+	}
+
+	silence, err := r.silenceRepo.GetSilenceByID(ctx, event.ID)
+	if err != nil {
+		if errors.Is(err, infrasilencing.ErrSilenceNotFound) || errors.Is(err, infrasilencing.ErrInvalidUUID) {
+			// Deleted (or never valid) by the time we got around to fetching
+			// it — converge by evicting any local copy.
+			r.silenceStore.Delete(event.ID)
+			return
+		}
+		r.logger.Warn("Silence event apply: fetch by ID failed, cache entry may be stale until next resync",
+			"silence_id", event.ID, "error", err)
+		return
+	}
+
+	now := time.Now().UTC()
+	api := handlers.DomainSilenceToAPI(silence, now)
+	if api.Status.State == "expired" {
+		// Rare (the event fired before EndsAt passed, and time moved on by
+		// the time this replica got to it): expired silences don't belong in
+		// the active/pending read cache, matching rehydrateSilenceStore's
+		// own filter.
+		r.silenceStore.Delete(event.ID)
+		return
+	}
+
+	if _, err := r.silenceStore.UpsertFromAPI(api, now); err != nil {
+		r.logger.Warn("Silence event apply: memory upsert failed", "silence_id", event.ID, "error", err)
+	}
 }
 
 // initializeDatabase initializes the database connection.
@@ -1350,6 +1611,19 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 		r.silenceManager = nil
 	}
 
+	// Shutdown silence event subscriber (task 6.3). Cancel and wait for the
+	// subscribe+resync goroutines to actually stop before nil-ing out
+	// silenceEventBus/silenceRepo/silenceStore below — they read/write all
+	// three.
+	if r.silenceSyncCancel != nil {
+		r.logger.Info("Shutting down silence event subscriber...")
+		r.silenceSyncCancel()
+		<-r.silenceSyncDone
+		r.silenceSyncCancel = nil
+		r.silenceSyncDone = nil
+	}
+	r.silenceEventBus = nil
+
 	// Shutdown Grouping subsystem timer manager (task 2.2). Placed alongside
 	// the silence manager above: both are background workers independent of
 	// the request path, safe to stop before Publishing/Storage/Database
@@ -1458,6 +1732,21 @@ func (r *ServiceRegistry) SilenceRepository() infrasilencing.SilenceRepository {
 // the read-path API for alert filtering — see memory.SilenceStore / SilenceStore().
 func (r *ServiceRegistry) SilenceManager() businesssilencing.SilenceManager {
 	return r.silenceManager
+}
+
+// SilenceEventPublisher returns the cross-replica silence cache invalidation
+// publisher (task 6.3), or nil when running without one (lite profile, or a
+// standard-profile deployment without a live Redis cache backend). Explicit
+// nil check below: r.silenceEventBus is a concrete *RedisSilenceEventBus
+// field, and returning it directly through the interface-typed field/return
+// would otherwise produce a non-nil interface wrapping a nil pointer —
+// callers' "if publisher != nil" checks (see publishSilenceEvent) depend on
+// this being a genuine nil interface.
+func (r *ServiceRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublisher {
+	if r.silenceEventBus == nil {
+		return nil
+	}
+	return r.silenceEventBus
 }
 
 func (r *ServiceRegistry) StartTime() time.Time {

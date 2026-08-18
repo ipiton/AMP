@@ -31,6 +31,12 @@ type RegistryProvider interface {
 	// running without one (lite profile). With a nil repository the silence
 	// handlers fall back to the legacy memory-only behavior.
 	SilenceRepository() infrasilencing.SilenceRepository
+	// SilenceEventPublisher returns the cross-replica silence cache
+	// invalidation publisher (task 6.3), or nil when running without one
+	// (lite profile, or a standard-profile deployment without a live Redis
+	// cache backend). A nil publisher makes silence writes a no-op for
+	// cross-replica sync — other replicas converge only on restart.
+	SilenceEventPublisher() infrasilencing.SilenceEventPublisher
 	AlertProcessor() *services.AlertProcessor
 	Config() *appconfig.Config
 	StartTime() time.Time

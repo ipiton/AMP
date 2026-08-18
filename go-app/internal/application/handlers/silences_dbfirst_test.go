@@ -405,3 +405,170 @@ func TestSilenceByIDHandler_DBFirstDelete_StaleCacheEntryEvicted(t *testing.T) {
 		t.Fatal("stale cache entry must be evicted")
 	}
 }
+
+// fakeSilenceEventPublisher records Publish calls (task 6.3) for the
+// handler-level tests below, optionally failing to verify that a publish
+// error never surfaces as an HTTP error — the database write already
+// committed by the time Publish is called.
+type fakeSilenceEventPublisher struct {
+	published []infrasilencing.SilenceEvent
+	err       error
+}
+
+func (p *fakeSilenceEventPublisher) Publish(_ context.Context, event infrasilencing.SilenceEvent) error {
+	p.published = append(p.published, event)
+	return p.err
+}
+
+func TestSilencesHandler_DBFirstCreate_PublishesUpsertEvent(t *testing.T) {
+	store := memory.NewSilenceStore()
+	repo := &mockSilenceRepo{
+		createFn: func(_ context.Context, s *coresilencing.Silence) (*coresilencing.Silence, error) {
+			created := *s
+			created.ID = testRepoID
+			created.CreatedAt = time.Now().UTC()
+			return &created, nil
+		},
+	}
+	pub := &fakeSilenceEventPublisher{}
+	registry := &fakeRegistry{
+		alertStore:      memory.NewAlertStore(),
+		silenceStore:    store,
+		silenceRepo:     repo,
+		silenceEventPub: pub,
+	}
+
+	rec := postSilence(t, SilencesHandler(registry), validSilenceBody(t))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	if len(pub.published) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.published))
+	}
+	if pub.published[0] != (infrasilencing.SilenceEvent{ID: testRepoID, Op: infrasilencing.SilenceEventUpsert}) {
+		t.Fatalf("published event = %+v, want {%s upsert}", pub.published[0], testRepoID)
+	}
+}
+
+func TestSilencesHandler_DBFirstCreate_PublishErrorDoesNotFailRequest(t *testing.T) {
+	store := memory.NewSilenceStore()
+	repo := &mockSilenceRepo{
+		createFn: func(_ context.Context, s *coresilencing.Silence) (*coresilencing.Silence, error) {
+			created := *s
+			created.ID = testRepoID
+			created.CreatedAt = time.Now().UTC()
+			return &created, nil
+		},
+	}
+	pub := &fakeSilenceEventPublisher{err: errors.New("redis unreachable")}
+	registry := &fakeRegistry{
+		alertStore:      memory.NewAlertStore(),
+		silenceStore:    store,
+		silenceRepo:     repo,
+		silenceEventPub: pub,
+	}
+
+	rec := postSilence(t, SilencesHandler(registry), validSilenceBody(t))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200 even though publish failed; body: %s", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get(testRepoID, time.Now().UTC()); !ok {
+		t.Fatal("memory cache must still be updated even though the publish failed")
+	}
+}
+
+func TestSilencesHandler_DBFirstCreate_NilPublisherIsNoop(t *testing.T) {
+	store := memory.NewSilenceStore()
+	repo := &mockSilenceRepo{
+		createFn: func(_ context.Context, s *coresilencing.Silence) (*coresilencing.Silence, error) {
+			created := *s
+			created.ID = testRepoID
+			created.CreatedAt = time.Now().UTC()
+			return &created, nil
+		},
+	}
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: store,
+		silenceRepo:  repo,
+		// silenceEventPub deliberately left nil — lite profile / no Redis.
+	}
+
+	rec := postSilence(t, SilencesHandler(registry), validSilenceBody(t))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSilenceByIDHandler_DBFirstDelete_PublishesDeleteEvent(t *testing.T) {
+	store := memory.NewSilenceStore()
+	now := time.Now().UTC()
+	if _, err := store.Upsert(&core.SilenceInput{
+		ID:        testRepoID,
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "X"}},
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "delete me",
+	}, now); err != nil {
+		t.Fatalf("seed memory store: %v", err)
+	}
+
+	repo := &mockSilenceRepo{
+		deleteFn: func(_ context.Context, _ string) error { return nil },
+	}
+	pub := &fakeSilenceEventPublisher{}
+	registry := &fakeRegistry{
+		alertStore:      memory.NewAlertStore(),
+		silenceStore:    store,
+		silenceRepo:     repo,
+		silenceEventPub: pub,
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+testRepoID, nil)
+	rec := httptest.NewRecorder()
+	SilenceByIDHandler(registry)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, want 200", rec.Code)
+	}
+	if len(pub.published) != 1 || pub.published[0] != (infrasilencing.SilenceEvent{ID: testRepoID, Op: infrasilencing.SilenceEventDelete}) {
+		t.Fatalf("published events = %+v, want exactly one delete event for %s", pub.published, testRepoID)
+	}
+}
+
+func TestSilenceByIDHandler_DBFirstDelete_RepoErrorDoesNotPublish(t *testing.T) {
+	store := memory.NewSilenceStore()
+	now := time.Now().UTC()
+	if _, err := store.Upsert(&core.SilenceInput{
+		ID:        testRepoID,
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "X"}},
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "keep me",
+	}, now); err != nil {
+		t.Fatalf("seed memory store: %v", err)
+	}
+
+	repo := &mockSilenceRepo{
+		deleteFn: func(_ context.Context, _ string) error { return errors.New("connection refused") },
+	}
+	pub := &fakeSilenceEventPublisher{}
+	registry := &fakeRegistry{
+		alertStore:      memory.NewAlertStore(),
+		silenceStore:    store,
+		silenceRepo:     repo,
+		silenceEventPub: pub,
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/"+testRepoID, nil)
+	rec := httptest.NewRecorder()
+	SilenceByIDHandler(registry)(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("DELETE status = %d, want 500", rec.Code)
+	}
+	if len(pub.published) != 0 {
+		t.Fatalf("published %d events after a failed DB delete, want 0", len(pub.published))
+	}
+}

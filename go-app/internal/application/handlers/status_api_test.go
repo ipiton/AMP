@@ -31,6 +31,9 @@ func (r *extendedFakeRegistry) SilenceStore() *memory.SilenceStore { return r.si
 func (r *extendedFakeRegistry) SilenceRepository() infrasilencing.SilenceRepository {
 	return nil
 }
+func (r *extendedFakeRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublisher {
+	return nil
+}
 func (r *extendedFakeRegistry) AlertProcessor() *services.AlertProcessor           { return r.processor }
 func (r *extendedFakeRegistry) Config() *appconfig.Config                          { return r.config }
 func (r *extendedFakeRegistry) StartTime() time.Time                               { return r.startTime }
