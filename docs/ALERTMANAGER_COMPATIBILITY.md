@@ -94,10 +94,15 @@ has a matching field; "runtime wired" means
 actually dispatch notifications for it. A receiver can validate cleanly
 and still send zero notifications if it is config-accepted but not
 runtime-wired — see `pkg/configvalidator/doc.go` for the authoritative
-statement of this divergence, which this table mirrors. Note also that
-`pkg/configvalidator` itself is not yet wired into the running server's
-`/-/reload` path (Task 5.4, pending) — "config accepted" below is a
-static-validation claim only, not something the live server enforces today.
+statement of this divergence, which this table mirrors. Note also that,
+as of Task 5.4, `pkg/configvalidator` is wired into
+`internal/config.LoadConfig` (and therefore both process startup and the
+running server's `/-/reload` path, which reloads via the same function) —
+but only when the config file has a top-level `route:` section, matching
+`internal/config.loadRouteConfig`'s existing gate. "Config accepted" below
+now reflects what the live server actually enforces for such configs; a
+config with no `route:` section (legacy single-receiver mode) still skips
+this validation.
 
 | Integration | Config accepted | Runtime wired | Status | Notes |
 |-------------|:---:|:---:|--------|-------|
@@ -105,7 +110,7 @@ static-validation claim only, not something the live server enforces today.
 | `email_configs` | ✅ | ✅ | 🟢 Supported | SMTP, enhanced publisher |
 | `pagerduty_configs` | ✅ | ✅ | 🟢 Supported | Events API v2 |
 | `slack_configs` | ✅ | ✅ | 🟢 Supported | Incoming Webhooks, message threading cache |
-| `telegram_configs` | ❌ | ✅ | 🟠 Runtime-wired, not config-accepted | Inverse divergence: `internal/alertmanager/config.Receiver` has no `TelegramConfigs` field and `hasAnyIntegration()`/E024 doesn't check it, so a telegram-only receiver fails configvalidator (E024 "no integrations configured") even though `internal/infrastructure/routing.Receiver` and the publisher fully support it at runtime. See `pkg/configvalidator/doc.go`; fixing the validator is pending Task 5.4 |
+| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Fixed in Task 5.4: `internal/alertmanager/config.Receiver` now carries a minimal `TelegramConfig` and `hasAnyIntegration()`/E024 checks it, so a telegram-only receiver validates clean, matching `internal/infrastructure/routing.Receiver` and the publisher's existing runtime support |
 | Rootly (`alertmanager`/`rootly` target type) | N/A (AMP-native target, not an upstream receiver type) | ✅ | 🟢 Supported | AMP-specific addition, not part of upstream Alertmanager |
 | `opsgenie_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E126-E129); no `OpsGenieConfigs` field on the runtime receiver and no publisher target type — zero notifications sent |
 | `victorops_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E130-E134); same gap as OpsGenie. Deferred "по потребности" (on demand) — build only if a concrete need arises |
