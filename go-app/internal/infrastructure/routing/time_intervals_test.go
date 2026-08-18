@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -265,4 +267,46 @@ time_intervals:
 	clone.TimeIntervals[0].Name = "mutated"
 	assert.Equal(t, "maintenance", config.TimeIntervals[0].Name)
 	assert.NotEqual(t, config.TimeIntervals[0].Name, clone.TimeIntervals[0].Name)
+}
+
+// TestRouteConfig_Clone_TimeIntervalIndex_RebuiltWithoutParse guards against
+// a regression where Clone() copied TimeIntervalIndex conditionally (only
+// if already non-nil) instead of always rebuilding it from
+// TimeIntervals/MuteTimeIntervalsSection - same as ReceiverIndex is always
+// rebuilt from Receivers a few lines above it. A RouteConfig built by hand
+// (the ValidateConfig/hot-reload path, which never calls
+// buildTimeIntervalIndex) has TimeIntervals populated but
+// TimeIntervalIndex == nil; Clone() must still make lookups work on the
+// result.
+func TestRouteConfig_Clone_TimeIntervalIndex_RebuiltWithoutParse(t *testing.T) {
+	config := &RouteConfig{
+		Route: &grouping.Route{
+			Receiver:          "default",
+			MuteTimeIntervals: []string{"maintenance"},
+		},
+		Receivers: []*Receiver{
+			{Name: "default"},
+		},
+		TimeIntervals: []timeinterval.TimeInterval{
+			{
+				Name: "maintenance",
+				TimeIntervals: []timeinterval.Interval{
+					{Weekdays: []timeinterval.WeekdayRange{{Begin: time.Saturday, End: time.Saturday}}},
+				},
+			},
+		},
+		// TimeIntervalIndex intentionally left nil, as it would be for a
+		// config that was never run through Parse().
+	}
+	require.Nil(t, config.TimeIntervalIndex)
+
+	clone := config.Clone()
+
+	group, ok := clone.GetTimeInterval("maintenance")
+	require.True(t, ok, "Clone() must rebuild TimeIntervalIndex even when the source index was nil")
+	assert.Equal(t, "maintenance", group.Name)
+
+	saturday, err := time.Parse(time.RFC3339, "2024-06-15T12:00:00Z")
+	require.NoError(t, err)
+	assert.True(t, group.Matches(saturday))
 }
