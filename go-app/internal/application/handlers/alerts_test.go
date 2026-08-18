@@ -39,16 +39,20 @@ func (f *fakeFilterEngine) ShouldBlock(_ *core.Alert, _ *core.ClassificationResu
 }
 
 type fakeRegistry struct {
-	alertStore   *memory.AlertStore
-	silenceStore *memory.SilenceStore
-	silenceRepo  infrasilencing.SilenceRepository
-	processor    *services.AlertProcessor
+	alertStore      *memory.AlertStore
+	silenceStore    *memory.SilenceStore
+	silenceRepo     infrasilencing.SilenceRepository
+	silenceEventPub infrasilencing.SilenceEventPublisher
+	processor       *services.AlertProcessor
 }
 
 func (r *fakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
 func (r *fakeRegistry) SilenceStore() *memory.SilenceStore { return r.silenceStore }
 func (r *fakeRegistry) SilenceRepository() infrasilencing.SilenceRepository {
 	return r.silenceRepo
+}
+func (r *fakeRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublisher {
+	return r.silenceEventPub
 }
 func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
 func (r *fakeRegistry) Config() *appconfig.Config                { return &appconfig.Config{} }

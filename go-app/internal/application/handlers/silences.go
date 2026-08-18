@@ -21,6 +21,18 @@ import (
 // (returning 5xx). The memory store remains the read path; it is rehydrated
 // from the repository on startup (see ServiceRegistry.rehydrateSilenceStore).
 // With a nil repository (lite profile) the legacy memory-only behavior is kept.
+//
+// Cross-replica cache invalidation (task 6.3): after a successful local
+// mirror (store.Upsert/store.Delete), the write path also publishes a
+// SilenceEvent via registry.SilenceEventPublisher() so OTHER replicas'
+// memory.SilenceStore converge without waiting for a restart — see
+// internal/infrastructure/silencing/redis_event_bus.go for the pub/sub
+// mechanism and ServiceRegistry.applySilenceEvent for the subscriber side.
+// A nil publisher (lite profile, or standard profile without a live Redis
+// cache backend) makes this a no-op; a publish error is logged and
+// otherwise ignored — the database write already committed, and the
+// periodic fallback resync (ServiceRegistry.runSilencePeriodicResync) is the
+// backstop for a silently-dropped publish.
 
 func SilencesHandler(registry RegistryProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +41,7 @@ func SilencesHandler(registry RegistryProvider) http.HandlerFunc {
 		case http.MethodGet:
 			handleSilencesGet(store, w, r)
 		case http.MethodPost:
-			handleSilencePost(store, registry.SilenceRepository(), w, r)
+			handleSilencePost(store, registry.SilenceRepository(), registry.SilenceEventPublisher(), w, r)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -56,10 +68,24 @@ func SilenceByIDHandler(registry RegistryProvider) http.HandlerFunc {
 			}
 			writeJSON(w, http.StatusOK, silence)
 		case http.MethodDelete:
-			handleSilenceDelete(r.Context(), store, registry.SilenceRepository(), id, w)
+			handleSilenceDelete(r.Context(), store, registry.SilenceRepository(), registry.SilenceEventPublisher(), id, w)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
+	}
+}
+
+// publishSilenceEvent is a best-effort fire-and-forget helper: publish
+// failures are logged, never surfaced to the HTTP client (the database
+// write already committed) and never retried here (the periodic fallback
+// resync is the retry mechanism — see package doc comment above).
+func publishSilenceEvent(ctx context.Context, publisher infrasilencing.SilenceEventPublisher, id string, op infrasilencing.SilenceEventOp) {
+	if publisher == nil {
+		return
+	}
+	if err := publisher.Publish(ctx, infrasilencing.SilenceEvent{ID: id, Op: op}); err != nil {
+		slog.Default().Warn("silence event publish failed; other replicas converge on next fallback resync",
+			"silence_id", id, "op", op, "error", err)
 	}
 }
 
@@ -83,7 +109,7 @@ func handleSilencesGet(store *memory.SilenceStore, w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, result)
 }
 
-func handleSilencePost(store *memory.SilenceStore, repo infrasilencing.SilenceRepository, w http.ResponseWriter, r *http.Request) {
+func handleSilencePost(store *memory.SilenceStore, repo infrasilencing.SilenceRepository, publisher infrasilencing.SilenceEventPublisher, w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024*1024))
 	if err != nil {
@@ -100,7 +126,10 @@ func handleSilencePost(store *memory.SilenceStore, repo infrasilencing.SilenceRe
 	now := time.Now().UTC()
 
 	if repo == nil {
-		// Memory-only fallback (lite profile / repository unavailable).
+		// Memory-only fallback (lite profile / repository unavailable). No
+		// persistent source of truth exists for other replicas to converge
+		// against, so no event is published — matches "lite profile has no
+		// publisher anyway" (registry.SilenceEventPublisher() returns nil).
 		id, err := store.CreateOrUpdate(&in, now)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -115,6 +144,7 @@ func handleSilencePost(store *memory.SilenceStore, repo infrasilencing.SilenceRe
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
+	publishSilenceEvent(r.Context(), publisher, id, infrasilencing.SilenceEventUpsert)
 	writeJSON(w, http.StatusOK, map[string]string{"silenceID": id})
 }
 
@@ -168,9 +198,11 @@ func persistSilenceDBFirst(ctx context.Context, repo infrasilencing.SilenceRepos
 	return domain.ID, http.StatusOK, nil
 }
 
-func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo infrasilencing.SilenceRepository, id string, w http.ResponseWriter) {
+func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo infrasilencing.SilenceRepository, publisher infrasilencing.SilenceEventPublisher, id string, w http.ResponseWriter) {
 	if repo == nil {
-		// Memory-only fallback (lite profile / repository unavailable).
+		// Memory-only fallback (lite profile / repository unavailable). No
+		// persistent source of truth exists for other replicas, so no event
+		// is published (same reasoning as handleSilencePost's repo==nil path).
 		if !store.Delete(id) {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -182,13 +214,17 @@ func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo i
 	err := repo.DeleteSilence(ctx, id)
 	switch {
 	case err == nil:
-		// DB commit succeeded; evict from the read cache (best effort).
+		// DB commit succeeded; evict from the read cache (best effort) and
+		// tell other replicas to do the same.
 		store.Delete(id)
+		publishSilenceEvent(ctx, publisher, id, infrasilencing.SilenceEventDelete)
 		w.WriteHeader(http.StatusOK)
 	case errors.Is(err, infrasilencing.ErrSilenceNotFound), errors.Is(err, infrasilencing.ErrInvalidUUID):
 		// Not in the database. Evict a stale cache entry if one exists so
-		// memory converges back to the database state.
+		// memory converges back to the database state, and let other
+		// replicas evict their own stale copy too.
 		if store.Delete(id) {
+			publishSilenceEvent(ctx, publisher, id, infrasilencing.SilenceEventDelete)
 			w.WriteHeader(http.StatusOK)
 			return
 		}

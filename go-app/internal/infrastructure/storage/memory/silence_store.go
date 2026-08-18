@@ -123,6 +123,42 @@ func (s *SilenceStore) ExportForPersistence(now time.Time) []core.APISilence {
 	return s.List(now)
 }
 
+// UpsertFromAPI mirrors a single silence (already in its external API
+// shape) into the store. It exists for callers that already hold a
+// core.APISilence — e.g. the cross-replica event subscriber (task 6.3),
+// which derives one from repo.GetSilenceByID + handlers.DomainSilenceToAPI —
+// and would otherwise have to hand-build a core.SilenceInput just to call
+// Upsert.
+func (s *SilenceStore) UpsertFromAPI(item core.APISilence, now time.Time) (string, error) {
+	return s.Upsert(apiSilenceToInput(item), now)
+}
+
+// Rebuild replaces the entire in-memory silence set with items in a single
+// atomic swap (task 6.3: full resync after a subscription (re)connect).
+//
+// Unlike RestoreFromPersistence — additive, used once at boot when the store
+// is guaranteed empty — Rebuild also evicts entries NOT present in items, so
+// it correctly converges a store that may hold stale data (e.g. a silence
+// deleted on another replica while this replica's pub/sub subscription was
+// down).
+func (s *SilenceStore) Rebuild(items []core.APISilence, now time.Time) error {
+	fresh := make(map[string]*core.StoredSilenceState, len(items))
+	for i, item := range items {
+		normalized, err := normalizeSilenceInput(apiSilenceToInput(item), now, true)
+		if err != nil {
+			return fmt.Errorf("rebuild silence[%d]: %w", i, err)
+		}
+		fresh[normalized.ID] = normalized
+	}
+
+	s.mu.Lock()
+	s.silences = fresh
+	s.mu.Unlock()
+
+	s.notifyChange()
+	return nil
+}
+
 func (s *SilenceStore) Stats(now time.Time) (total, active, pending, expired int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -143,30 +179,36 @@ func (s *SilenceStore) Stats(now time.Time) (total, active, pending, expired int
 
 func (s *SilenceStore) RestoreFromPersistence(items []core.APISilence, now time.Time) error {
 	for i, item := range items {
-		matchers := make([]core.SilenceMatcherInput, 0, len(item.Matchers))
-		for _, matcher := range item.Matchers {
-			isEqual := matcher.IsEqual
-			matchers = append(matchers, core.SilenceMatcherInput{
-				Name:    matcher.Name,
-				Value:   matcher.Value,
-				IsRegex: matcher.IsRegex,
-				IsEqual: &isEqual,
-			})
-		}
-
-		in := &core.SilenceInput{
-			ID:        item.ID,
-			Matchers:  matchers,
-			StartsAt:  item.StartsAt,
-			EndsAt:    item.EndsAt,
-			CreatedBy: item.CreatedBy,
-			Comment:   item.Comment,
-		}
-		if _, err := s.createOrUpdateInternal(in, now, false, false, true); err != nil {
+		if _, err := s.createOrUpdateInternal(apiSilenceToInput(item), now, false, false, true); err != nil {
 			return fmt.Errorf("persisted silence[%d]: %w", i, err)
 		}
 	}
 	return nil
+}
+
+// apiSilenceToInput converts an external-shape core.APISilence back into a
+// core.SilenceInput, the shape normalizeSilenceInput/createOrUpdateInternal
+// consume. Shared by RestoreFromPersistence, UpsertFromAPI, and Rebuild.
+func apiSilenceToInput(item core.APISilence) *core.SilenceInput {
+	matchers := make([]core.SilenceMatcherInput, 0, len(item.Matchers))
+	for _, matcher := range item.Matchers {
+		isEqual := matcher.IsEqual
+		matchers = append(matchers, core.SilenceMatcherInput{
+			Name:    matcher.Name,
+			Value:   matcher.Value,
+			IsRegex: matcher.IsRegex,
+			IsEqual: &isEqual,
+		})
+	}
+
+	return &core.SilenceInput{
+		ID:        item.ID,
+		Matchers:  matchers,
+		StartsAt:  item.StartsAt,
+		EndsAt:    item.EndsAt,
+		CreatedBy: item.CreatedBy,
+		Comment:   item.Comment,
+	}
 }
 
 func (s *SilenceStore) ActiveMatchingSilenceIDs(labels map[string]string, now time.Time) []string {
