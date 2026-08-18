@@ -17,6 +17,31 @@ import (
 	dbpostgres "github.com/ipiton/AMP/internal/database/postgres"
 )
 
+// requireDocker skips the test when no Docker daemon is reachable (task
+// fu2-d item 11). Without this, a testcontainers-backed test FAILS instead
+// of SKIPPING in an environment with no Docker (e.g. a sandboxed CI runner
+// or a contributor's machine without Docker installed) — the wrong signal,
+// since a red result there means "no Docker here," not "this regression
+// reappeared." Uses testcontainers' own Docker client + Ping rather than
+// shelling out to `docker info`, so it works the same way testcontainers
+// itself decides whether it can start a container.
+func requireDocker(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cli, err := testcontainers.NewDockerClientWithOpts(ctx)
+	if err != nil {
+		t.Skipf("Skipping testcontainers-backed test: no Docker client available: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	if _, err := cli.Ping(ctx); err != nil {
+		t.Skipf("Skipping testcontainers-backed test: Docker daemon not reachable: %v", err)
+	}
+}
+
 // TestRunMigrations_ConcurrentReplicas_FreshDB is the regression test for the
 // 2-replica e2e race documented in deploy/e2e-ha/docker-compose.yml: two
 // replicas starting RunMigrations against the same brand-new database used
@@ -29,6 +54,7 @@ func TestRunMigrations_ConcurrentReplicas_FreshDB(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping testcontainers-backed test in short mode")
 	}
+	requireDocker(t)
 
 	ctx := context.Background()
 
