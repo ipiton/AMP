@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,10 +68,11 @@ func NewRouteConfigParser() *RouteConfigParser {
 //  2. Required fields validation
 //  3. Apply defaults recursively
 //  4. Structural validation
-//  5. Semantic validation
-//  6. Compile regex patterns
-//  7. Build receiver index
-//  8. Set metadata
+//  5. Semantic validation (incl. time interval name/reference checks)
+//  6. Build time interval index (merges deprecated top-level alias)
+//  7. Compile regex patterns
+//  8. Build receiver index
+//  9. Set metadata
 //
 // Returns ValidationErrors if validation fails.
 func (p *RouteConfigParser) Parse(data []byte) (*RouteConfig, error) {
@@ -103,15 +105,19 @@ func (p *RouteConfigParser) Parse(data []byte) (*RouteConfig, error) {
 		return nil, err
 	}
 
-	// Step 6: Compile regex patterns
+	// Step 6: Build time interval index (merges deprecated top-level
+	// mute_time_intervals: alias into time_intervals:, warns on its use)
+	p.buildTimeIntervalIndex(&config)
+
+	// Step 7: Compile regex patterns
 	if err := p.compileRegexPatterns(&config); err != nil {
 		return nil, err
 	}
 
-	// Step 7: Build receiver index
+	// Step 8: Build receiver index
 	p.buildReceiverIndex(&config)
 
-	// Step 8: Set metadata
+	// Step 9: Set metadata
 	config.Version = 1
 	config.LoadedAt = time.Now()
 
@@ -218,8 +224,37 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 		receiverIndex[receiver.Name] = true
 	}
 
+	// Build time interval name set (for route reference checking) and
+	// validate names are non-empty and unique across both the primary
+	// `time_intervals:` section and the deprecated top-level
+	// `mute_time_intervals:` alias.
+	timeIntervalNames := make(map[string]bool)
+	validateTimeIntervalNames := func(groups []timeinterval.TimeInterval, field string) {
+		for i, group := range groups {
+			if group.Name == "" {
+				errors.Add(
+					fmt.Sprintf("%s[%d]", field, i),
+					"time interval group is missing required 'name' field",
+					"Add a unique 'name' to this time_intervals entry",
+				)
+				continue
+			}
+			if timeIntervalNames[group.Name] {
+				errors.Add(
+					fmt.Sprintf("%s[%d]", field, i),
+					fmt.Sprintf("duplicate time interval name %q", group.Name),
+					"Time interval names must be unique across time_intervals and mute_time_intervals sections",
+				)
+				continue
+			}
+			timeIntervalNames[group.Name] = true
+		}
+	}
+	validateTimeIntervalNames(config.TimeIntervals, "time_intervals")
+	validateTimeIntervalNames(config.MuteTimeIntervalsSection, "mute_time_intervals")
+
 	// Validate route tree
-	if err := p.validateRouteTree(config.Route, receiverIndex, &errors); err != nil {
+	if err := p.validateRouteTree(config.Route, receiverIndex, timeIntervalNames, &errors); err != nil {
 		return err
 	}
 
@@ -242,6 +277,7 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 func (p *RouteConfigParser) validateRouteTree(
 	route *grouping.Route,
 	receiverIndex map[string]bool,
+	timeIntervalNames map[string]bool,
 	errors *ValidationErrors,
 ) error {
 	if route == nil {
@@ -268,9 +304,29 @@ func (p *RouteConfigParser) validateRouteTree(
 		)
 	}
 
+	// Validate mute_time_intervals / active_time_intervals references
+	for _, name := range route.MuteTimeIntervals {
+		if !timeIntervalNames[name] {
+			errors.Add(
+				fmt.Sprintf("route[mute_time_intervals=%s]", name),
+				fmt.Sprintf("time interval '%s' not found", name),
+				"Define it in the 'time_intervals' section",
+			)
+		}
+	}
+	for _, name := range route.ActiveTimeIntervals {
+		if !timeIntervalNames[name] {
+			errors.Add(
+				fmt.Sprintf("route[active_time_intervals=%s]", name),
+				fmt.Sprintf("time interval '%s' not found", name),
+				"Define it in the 'time_intervals' section",
+			)
+		}
+	}
+
 	// Recursively validate child routes
 	for i, child := range route.Routes {
-		if err := p.validateRouteTree(child, receiverIndex, errors); err != nil {
+		if err := p.validateRouteTree(child, receiverIndex, timeIntervalNames, errors); err != nil {
 			return err
 		}
 
@@ -332,6 +388,31 @@ func (p *RouteConfigParser) buildReceiverIndex(config *RouteConfig) {
 	config.ReceiverIndex = make(map[string]*Receiver, len(config.Receivers))
 	for _, receiver := range config.Receivers {
 		config.ReceiverIndex[receiver.Name] = receiver
+	}
+}
+
+// buildTimeIntervalIndex builds an O(1) name lookup map for named time
+// interval groups, merging the primary `time_intervals:` section with the
+// deprecated top-level `mute_time_intervals:` alias.
+//
+// Must run after validateSemantics, which already guarantees names are
+// non-empty and unique across both sections - so overwriting on collision
+// here is unreachable in practice, just defensive.
+func (p *RouteConfigParser) buildTimeIntervalIndex(config *RouteConfig) {
+	if len(config.MuteTimeIntervalsSection) > 0 {
+		slog.Warn("config uses deprecated top-level 'mute_time_intervals:' section; rename it to 'time_intervals:'")
+	}
+
+	config.TimeIntervalIndex = make(
+		map[string]timeinterval.TimeInterval,
+		len(config.TimeIntervals)+len(config.MuteTimeIntervalsSection),
+	)
+
+	for _, group := range config.TimeIntervals {
+		config.TimeIntervalIndex[group.Name] = group
+	}
+	for _, group := range config.MuteTimeIntervalsSection {
+		config.TimeIntervalIndex[group.Name] = group
 	}
 }
 
