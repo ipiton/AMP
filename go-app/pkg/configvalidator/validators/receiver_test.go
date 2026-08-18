@@ -62,6 +62,25 @@ func TestReceiverValidator(t *testing.T) {
 			wantErrCode: "E024",
 		},
 		{
+			// Task 5.4 regression: a telegram-only receiver used to fail
+			// E024 ("no integrations configured") because hasAnyIntegration()
+			// did not know about TelegramConfigs, even though the runtime
+			// (internal/infrastructure/routing.Receiver + the publisher)
+			// fully supports telegram_configs. Must validate clean now.
+			name: "telegram-only receiver has an integration",
+			cfg: &config.AlertmanagerConfig{
+				Receivers: []*config.Receiver{
+					{
+						Name: "default",
+						TelegramConfigs: []*config.TelegramConfig{
+							{BotToken: "placeholder-bot-token", ChatID: "-1001234567890"},
+						},
+					},
+				},
+			},
+			wantNoIssues: true,
+		},
+		{
 			name: "webhook url required",
 			cfg: &config.AlertmanagerConfig{
 				Receivers: []*config.Receiver{

@@ -112,6 +112,15 @@ type Receiver struct {
 	OpsGenieConfigs  []*OpsGenieConfig  `yaml:"opsgenie_configs,omitempty" json:"opsgenie_configs,omitempty"`
 	WeChatConfigs    []*WeChatConfig    `yaml:"wechat_configs,omitempty" json:"wechat_configs,omitempty"`
 	VictorOpsConfigs []*VictorOpsConfig `yaml:"victorops_configs,omitempty" json:"victorops_configs,omitempty"`
+
+	// TelegramConfigs defines Telegram receivers. Unlike OpsGenie/WeChat/
+	// VictorOps above (config-accepted, not runtime-wired), this is the
+	// inverse case: internal/infrastructure/routing.Receiver and the
+	// publisher fully support telegram_configs at runtime (PARITY-B3), but
+	// until task 5.4 this validator's Receiver type had no matching field,
+	// so hasAnyIntegration()/E024 rejected a telegram-only receiver the
+	// runtime would happily serve. See pkg/configvalidator/doc.go.
+	TelegramConfigs []*TelegramConfig `yaml:"telegram_configs,omitempty" json:"telegram_configs,omitempty"`
 }
 
 // EmailConfig defines email notification configuration
@@ -212,6 +221,24 @@ type WeChatConfig struct {
 	ToParty   string `yaml:"to_party,omitempty" json:"to_party,omitempty"`
 	ToTag     string `yaml:"to_tag,omitempty" json:"to_tag,omitempty"`
 	Message   string `yaml:"message,omitempty" json:"message,omitempty"`
+}
+
+// TelegramConfig defines Telegram notification configuration. Field shape
+// mirrors internal/infrastructure/routing.TelegramConfig (the runtime
+// schema this validator does not import directly, to avoid pulling this
+// lightweight config-modelling package into that much larger dependency
+// graph) - kept minimal to the fields this validator's own checks and
+// hasAnyIntegration() care about; runtime-only fields (Message,
+// HTTPConfig) are intentionally omitted here since they don't need
+// validation and would just be dead weight in this package.
+type TelegramConfig struct {
+	BotToken             string `yaml:"bot_token,omitempty" json:"bot_token,omitempty"`
+	ChatID               string `yaml:"chat_id,omitempty" json:"chat_id,omitempty"`
+	MessageThreadID      int    `yaml:"message_thread_id,omitempty" json:"message_thread_id,omitempty"`
+	ParseMode            string `yaml:"parse_mode,omitempty" json:"parse_mode,omitempty"`
+	APIURL               string `yaml:"api_url,omitempty" json:"api_url,omitempty"`
+	DisableNotifications bool   `yaml:"disable_notifications,omitempty" json:"disable_notifications,omitempty"`
+	SendResolved         *bool  `yaml:"send_resolved,omitempty" json:"send_resolved,omitempty"`
 }
 
 // VictorOpsConfig defines VictorOps notification configuration
