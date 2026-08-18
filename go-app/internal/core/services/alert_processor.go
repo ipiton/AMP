@@ -247,9 +247,32 @@ func (p *AlertProcessor) warnGroupingFallback(decision *RoutingDecision) {
 		"has_routing_decision", decision != nil)
 }
 
+// groupKeyFor computes the storage-scoped group key for alert under decision
+// (task 2.3 review round 1, Finding 2). GroupKeyGenerator's output is derived
+// from labels+groupBy only; grouping.GroupStorage is a single flat keyspace
+// with no receiver dimension of its own (AlertGroup carries no receiver
+// field), so two different routes sharing the same group_by AND matching
+// label values would otherwise collide into one group even though they're
+// headed to different receivers — a real misdelivery risk once task 2.4
+// wires per-receiver delivery on top of groups. Prefixing the generated key
+// with the matched route's receiver identity mirrors upstream Alertmanager's
+// per-route aggrGroups, with minimal API churn: no grouping-package schema
+// change, just a namespaced key at this call site. Task 2.4 owns
+// storing/parsing the receiver on the group itself, if/when it needs to.
+//
+// Key format: "receiver=<name>/<generated-key>", e.g.
+// "receiver=critical-pagerduty/alertname=HighCPU,severity=critical".
+func (p *AlertProcessor) groupKeyFor(alert *core.Alert, decision *RoutingDecision) grouping.GroupKey {
+	base := p.groupKeyGenerator.GenerateKeyOrDefault(alert.Labels, decision.GroupBy)
+	return grouping.GroupKey(fmt.Sprintf("receiver=%s/%s", decision.Receiver, base))
+}
+
 // routeAlertToGroup adds alert to its group instead of publishing it
 // directly (task 2.3). Callers must only invoke this when shouldGroup(decision)
-// is true.
+// is true. Returns true if the alert was successfully routed into a group
+// (mutual exclusion: the caller must NOT also publish it directly); false if
+// AddAlertToGroup itself failed, in which case the caller falls back to
+// direct publish for this alert (see the fail-open note below).
 //
 // Timer semantics — divergence from the task brief, documented per task
 // instructions: the brief asks for `ResetTimer` when the alert lands in an
@@ -268,11 +291,27 @@ func (p *AlertProcessor) warnGroupingFallback(decision *RoutingDecision) {
 // fires, so an existing group's already-running timer naturally picks up
 // the new alert at its next scheduled boundary — no extra timer call is
 // needed or correct here.
-func (p *AlertProcessor) routeAlertToGroup(ctx context.Context, alert *core.Alert, decision *RoutingDecision) error {
-	key := p.groupKeyGenerator.GenerateKeyOrDefault(alert.Labels, decision.GroupBy)
+//
+// Fail-open on AddAlertToGroup error (task 2.3 review round 1, Finding 1):
+// grouping.DefaultGroupManager.AddAlertToGroup only ever returns an error
+// from its initial storage.Load lookup — an unexpected, non-"group not
+// found" storage failure — BEFORE any alert is inserted into any group;
+// every later step (insert, index update, persist) either succeeds or only
+// logs internally. A false return here therefore always means "no group was
+// touched for this alert," so it is safe for the caller to fall back to
+// direct publish exactly once for it — never both — matching the fail-open
+// posture already used for route-evaluation/inhibition failures in this
+// file (a rare ungrouped notification beats a dropped one).
+func (p *AlertProcessor) routeAlertToGroup(ctx context.Context, alert *core.Alert, decision *RoutingDecision) bool {
+	key := p.groupKeyFor(alert, decision)
 
 	if _, err := p.groupManager.AddAlertToGroup(ctx, alert, key); err != nil {
-		return fmt.Errorf("add alert to group: %w", err)
+		p.logger.Error("Failed to add alert to group, falling back to direct publish (fail-open)",
+			"error", err,
+			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint,
+			"group_key", key)
+		return false
 	}
 
 	p.logger.Info("Alert routed to group",
@@ -283,7 +322,7 @@ func (p *AlertProcessor) routeAlertToGroup(ctx context.Context, alert *core.Aler
 		"group_wait", decision.GroupWait,
 		"group_interval", decision.GroupInterval)
 
-	return nil
+	return true
 }
 
 // ProcessAlert processes an alert based on current enrichment mode
@@ -469,11 +508,16 @@ func (p *AlertProcessor) processTransparentWithRecommendations(ctx context.Conte
 	// NO LLM classification
 	// NO filtering
 	// Task 2.3: grouping.enabled routes into a group instead of publishing
-	// directly (mutually exclusive — see shouldGroup).
+	// directly (mutually exclusive — see shouldGroup). A grouping failure
+	// falls through to direct publish below exactly once (fail-open, see
+	// routeAlertToGroup) — never both.
 	if p.shouldGroup(decision) {
-		return p.routeAlertToGroup(ctx, alert, decision)
+		if p.routeAlertToGroup(ctx, alert, decision) {
+			return nil
+		}
+	} else {
+		p.warnGroupingFallback(decision)
 	}
-	p.warnGroupingFallback(decision)
 
 	// Publish to ALL targets immediately
 	return p.publisher.PublishToAll(ctx, alert)
@@ -498,11 +542,16 @@ func (p *AlertProcessor) processTransparent(ctx context.Context, alert *core.Ale
 	}
 
 	// Task 2.3: grouping.enabled routes into a group instead of publishing
-	// directly (mutually exclusive — see shouldGroup).
+	// directly (mutually exclusive — see shouldGroup). A grouping failure
+	// falls through to direct publish below exactly once (fail-open, see
+	// routeAlertToGroup) — never both.
 	if p.shouldGroup(decision) {
-		return p.routeAlertToGroup(ctx, alert, decision)
+		if p.routeAlertToGroup(ctx, alert, decision) {
+			return nil
+		}
+	} else {
+		p.warnGroupingFallback(decision)
 	}
-	p.warnGroupingFallback(decision)
 
 	// Publish to ALL configured targets
 	return p.publisher.PublishToAll(ctx, alert)
@@ -560,11 +609,16 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert,
 	// notify chain built on top of groups (task 2.4) does not yet have a
 	// classification-aware path either, so this is a scoped, documented gap
 	// rather than a regression: today's direct-publish PublishWithClassification
-	// is unaffected when grouping is disabled.
+	// is unaffected when grouping is disabled. A grouping failure falls
+	// through to direct publish below exactly once (fail-open, see
+	// routeAlertToGroup) — never both.
 	if p.shouldGroup(decision) {
-		return p.routeAlertToGroup(ctx, alert, decision)
+		if p.routeAlertToGroup(ctx, alert, decision) {
+			return nil
+		}
+	} else {
+		p.warnGroupingFallback(decision)
 	}
-	p.warnGroupingFallback(decision)
 
 	// Step 3: Publish with classification (smart routing)
 	return p.publisher.PublishWithClassification(ctx, alert, classification)
