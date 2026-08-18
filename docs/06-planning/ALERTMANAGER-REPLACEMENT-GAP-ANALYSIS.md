@@ -11,7 +11,8 @@
 
 Всё ниже проверено против кода на branch `feat/alertmanager-parity` (base `ff6accc`), не принято на слово:
 
-- **Routing tree** (`internal/business/routing/`): рекурсивный matcher (`FindMatchingRoutes`, дети имеют приоритет
+- **Routing tree** (`internal/business/routing/`): рекурсивный matcher (`matcher.go` `RouteMatcher.FindMatchingRoutes`
+  — не `evaluator.go`, который его лишь оборачивает; дети имеют приоритет
   над родителем, `continue: true` — multi-match), anchored regex (`^(?:re)$`, `anchorRegex`), все 4 оператора
   матчера (`=`, `!=`, `=~`, `!~`), `matchers:` list syntax наравне с legacy `match`/`match_re`. `route:`/`receivers:`
   парсятся через `infrastructure/routing.Parse()` (гейт: top-level `route:` секция). `RouteEvaluator` подключён в
@@ -50,11 +51,19 @@
 
 Ничего из списка ниже не скрыто — каждый пункт имеет код-адрес и, где применимо, backlog-ссылку.
 
-1. **`GET /api/v2/alerts/groups` не использует routing tree для receiver-поля** — группирует над
-   `memory.AlertStore` независимо от реального ingest-пайплайна и присваивает каждой группе первый
-   сконфигурированный receiver (или `"default"`). Реальный notify-путь (ingest → `RouteEvaluator` → dispatcher)
-   корректен; это read-only query-эндпоинт для UI/дашбордов — нет. Закрыт как принятое поведение
-   (`GROUPALERTS-HARDCODED-RECEIVER` в `BACKLOG.md`), не как полная синхронизация с деревом.
+1. **`receivers[].*_configs` не создают delivery-эндпоинты — control plane != data plane.** Главное расхождение
+   с апстримом, и это дизайн, а не баг: ни один код-путь не строит `PublishingTarget` из `routing.Receiver`
+   (проверено grep'ом по всему дереву). Таргеты обнаруживаются исключительно из Kubernetes Secrets, скоупленных
+   аннотацией/лейблом `amp.receiver` (`internal/business/publishing/discovery_parse.go`). Блоки `*_configs`
+   парсятся и валидируются, но **не провижнятся**. Перенос апстримного `alertmanager.yml` даёт корректный routing
+   и **ноль доставок** до создания соответствующих Secret'ов — без ошибки, без warning'а, со чистым стартом.
+   Оператор обязан создать по одному Secret на эндпоинт; это отдельный шаг миграции, задокументированный в
+   `docs/MIGRATION_COMPARISON.md` (шаг 3 rollout) и `docs/ALERTMANAGER_COMPATIBILITY.md`
+   («control plane vs data plane»). Построение таргетов напрямую из `receivers:` — будущий эпик, не отгруженная
+   фича.
+   *(Раньше пунктом #1 здесь был «groups-эндпоинт присваивает hardcoded receiver» — этот пробел закрыт: labels
+   берутся из `group_by` сматчившегося маршрута, receiver резолвится на группу из живого route tree
+   (`alertGroupingResolver`). Остаётся только AMP-специфичный `?group_by=` override.)*
 2. **Wire-level webhook batching**: `PublishingCoordinator.PublishGroupToTargets` фанит одну группу в один HTTP
    запрос на пару `(target × alert)`, а не в один POST с JSON-массивом `alerts` на target, как у апстрима.
    Функционально каждый алерт доставляется, но количество и форма запросов отличаются — вопрос для интеграций,
@@ -88,15 +97,27 @@
 `route_evaluator.go`, `alerts.go`, `coordinator.go`, `status_api.go`, `route_prefix.go`, `heartbeat.go`,
 `election.go`, `Dockerfile`, `values.yaml`), проверка `git log` на заявленные фикс-коммиты.
 
+Дополнено после final fix wave (whole-branch review): исправлены и покрыты тестами silent-loss баги, которых этот
+документ раньше не знал — routing-only reload молча отбрасывался (`/-/reload` отвечал 200 OK), SIGHUP-хендлера не
+существовало вопреки docs, окно adoption у reconciliation было ~0s, три early-return в `onTimerExpired` навсегда
+заклинивали группу, metrics-only publisher писал в общий nflog и глушил здоровые реплики, resolved-группа
+нотифицировала бесконечно, `EnhancedTelegramPublisher` был недостижим в рантайме, а `config.original` на
+`/api/v2/status` отдавал сырой конфиг с паролями. Детали — `.superpowers/sdd/alertmanager-parity/`.
+
 ## Решение по позиционированию
 
 - **Alertmanager parity core is real**: routing/grouping/silences/inhibition/time-windows/HA — не заглушки, а
   рабочая механика с честными, локализованными пробелами.
-- **Не general-purpose drop-in без оговорок** — пока не закрыты пробелы #1–2 (receiver-поле в groups-эндпоинте,
-  webhook wire shape) и не пройден финальный `amtool`/Grafana live-audit (вторая половина задачи 7.4).
+- **НЕ config-level drop-in — и это постоянное свойство, а не временный пробел.** Control plane
+  (routing/grouping/timing/inhibition) — parity-level; data plane принципиально другой: доставка идёт через
+  `amp.receiver`-скоупленные Kubernetes Secrets, а не через `receivers[].*_configs` (пробел #1). Любая внешняя
+  формулировка обязана называть это явно: миграция конфига без создания Secret'ов даёт тихий ноль доставок.
+- Также не пройден финальный `amtool`/Grafana live-audit (вторая половина задачи 7.4), и остаётся пробел #2
+  (webhook wire shape).
 - **Формулировка для внешних docs**: "AMP реализует ключевую механику Alertmanager (routing, grouping, dispatch,
-  silences, inhibition, time-based muting, HA) с коротким списком задокументированных пробелов" — не
-  `drop-in replacement` до завершения live-audit.
+  silences, inhibition, time-based muting, HA) с коротким списком задокументированных пробелов; delivery-таргеты
+  провижнятся отдельно, через `amp.receiver`-скоупленные Kubernetes Secrets, а не из `receivers[].*_configs`" —
+  никогда не `drop-in replacement` без этой оговорки.
 
 ## Что считать закрытием темы
 
@@ -104,7 +125,9 @@
 
 - пройдёт финальный `amtool`/Grafana smoke (вторая половина задачи 7.4): `alert add`/`silence add`/`config show`
   против AMP, Grafana Alertmanager datasource smoke
-- пробелы #1–2 (groups-эндпоинт, webhook batching) либо закрыты, либо явно приняты как постоянное ограничение
+- пробел #1 (`receivers:` не провижнит доставку) явно принят как постоянное архитектурное ограничение во всех
+  внешних docs — либо закрыт отдельным эпиком, строящим `PublishingTarget` из `routing.Receiver`
+- пробел #2 (webhook batching) либо закрыт, либо явно принят как постоянное ограничение
 - 2-реплика e2e (`deploy/e2e-ha/`) либо остаётся подтверждённым manual runbook, либо переведён в CI-гейт
 
 До этого — позиционирование ограничено формулировкой выше, без безоговорочного `drop-in replacement` claim.
