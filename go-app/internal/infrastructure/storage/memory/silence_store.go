@@ -159,8 +159,17 @@ func (s *SilenceStore) ExportForPersistence(now time.Time) []core.APISilence {
 // which derives one from repo.GetSilenceByID + handlers.DomainSilenceToAPI —
 // and would otherwise have to hand-build a core.SilenceInput just to call
 // Upsert.
+//
+// Unlike Upsert, this allows an EndsAt already in the past (F3,
+// alertmanager-parity amtool audit): item is a direct mirror of a row the
+// database already accepted, which may legitimately be expired-in-place
+// (handleSilenceDelete's ExpireSilence) or naturally elapsed by the time
+// this replica applies the event/resync. Rejecting it here would silently
+// re-introduce the very bug the expire-in-place fix closes — the mirror
+// would just fail (see the caller's error log) and the local cache would
+// disagree with the database until the next resync.
 func (s *SilenceStore) UpsertFromAPI(item core.APISilence, now time.Time) (string, error) {
-	return s.Upsert(apiSilenceToInput(item), now)
+	return s.createOrUpdateInternal(apiSilenceToInput(item), now, true, false, true)
 }
 
 // Rebuild replaces the entire in-memory silence set with items in a single
