@@ -142,6 +142,14 @@ CREATE INDEX IF NOT EXISTS idx_publishing_targets_enabled ON publishing_targets(
 CREATE INDEX IF NOT EXISTS idx_system_metrics_name_time ON system_metrics(metric_name, timestamp DESC);
 
 -- Create triggers for updated_at
+--
+-- goose StatementBegin/StatementEnd (pressly/goose): without these markers
+-- goose's default statement splitter cuts on every ';', which breaks INSIDE
+-- this function's $$...$$ dollar-quoted body (the first ';' it hits is
+-- "NEW.updated_at = NOW();", well before the body actually ends) --
+-- surfaced by task 6.5's e2e HA test, the first time this migration ran
+-- against a real, empty PostgreSQL rather than a pre-seeded test fixture.
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -149,6 +157,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER update_alerts_updated_at
     BEFORE UPDATE ON alerts
@@ -199,6 +208,7 @@ FROM alert_publishing_history
 GROUP BY target_name, target_type, target_format;
 
 -- Create cleanup function
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION cleanup_old_data(retention_days integer DEFAULT 30)
 RETURNS integer AS $$
 DECLARE
@@ -217,6 +227,7 @@ BEGIN
     RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 -- Insert default filter rules
 INSERT INTO filter_rules (name, action, conditions, priority, enabled) VALUES

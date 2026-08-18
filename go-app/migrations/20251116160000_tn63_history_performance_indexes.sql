@@ -6,6 +6,7 @@
 -- ============================================================================
 -- UP Migration
 -- ============================================================================
+-- +goose Up
 
 -- Index 1: Composite index for status + severity + time range queries
 -- Used in: WHERE status = 'firing' AND labels->>'severity' = 'critical' AND starts_at >= ?
@@ -94,6 +95,7 @@ ANALYZE alerts;
 -- ============================================================================
 -- DOWN Migration (for rollback)
 -- ============================================================================
+-- +goose Down
 
 -- DROP INDEX IF EXISTS idx_alerts_status_severity_time;
 -- DROP INDEX IF EXISTS idx_alerts_namespace_status_time;

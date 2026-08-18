@@ -54,6 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_dlq_fingerprint ON publishing_dlq(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_dlq_job_id ON publishing_dlq(job_id);
 
 -- Trigger for updated_at
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_dlq_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -61,6 +62,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER trigger_dlq_updated_at
     BEFORE UPDATE ON publishing_dlq
