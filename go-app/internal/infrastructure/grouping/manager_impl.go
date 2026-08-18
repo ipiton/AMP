@@ -1286,6 +1286,26 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// single PublishGroup call carrying all of alerts, not one PublishToAll
 	// call per alert).
 	if err := publisher.PublishGroup(ctx, alerts, receiver); err != nil {
+		// ErrDeliveryNotConfirmed (final review finding 4): the publisher
+		// deliberately delivered nothing — degraded/metrics-only mode. NOT a
+		// failure, but crucially NOT a send either, so the RecordSent below
+		// must be skipped: the notification log is SHARED across replicas
+		// with TTL = repeat_interval, so recording it here would make every
+		// healthy replica skip this group for a full repeat_interval.
+		// Logged at Warn, not Error, because `publishing.enabled: false` is
+		// a legitimate deliberate configuration, not an incident.
+		if errors.Is(err, ErrDeliveryNotConfirmed) {
+			m.logger.Warn("group notification not delivered (publisher confirmed no delivery); dedup log deliberately NOT updated",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"alert_count", len(alerts),
+				"reason", err)
+			if m.metrics != nil {
+				m.metrics.RecordGroupOperation("publish", "not_delivered")
+			}
+			return
+		}
+
 		// "No targets for receiver" and any other publish error: log +
 		// metric, do NOT retry-loop here — the next scheduled timer
 		// (group_interval/repeat_interval) will naturally retry with the
