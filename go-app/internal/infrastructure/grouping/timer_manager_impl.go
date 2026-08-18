@@ -160,11 +160,6 @@ type TimerManagerConfig struct {
 	// is still nil when a timer fires.
 	GroupManager *DefaultGroupManager
 
-	// Default durations (used if not specified in StartTimer)
-	DefaultGroupWait      time.Duration
-	DefaultGroupInterval  time.Duration
-	DefaultRepeatInterval time.Duration
-
 	// Performance tuning
 	MaxConcurrentTimers int // Maximum active timers (default: 10000)
 
@@ -217,13 +212,10 @@ type TimerManagerConfig struct {
 // Example:
 //
 //	manager, err := NewDefaultTimerManager(TimerManagerConfig{
-//	    Storage:              redisStorage,
-//	    GroupManager:         groupManager,
-//	    DefaultGroupWait:     30 * time.Second,
-//	    DefaultGroupInterval: 5 * time.Minute,
-//	    DefaultRepeatInterval: 4 * time.Hour,
-//	    Logger:               slog.Default(),
-//	    Metrics:              businessMetrics,
+//	    Storage:      redisStorage,
+//	    GroupManager: groupManager,
+//	    Logger:       slog.Default(),
+//	    Metrics:      businessMetrics,
 //	})
 func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, error) {
 	// Validation
@@ -237,15 +229,6 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 	// deferred wiring step; onTimerExpired guards against it.
 
 	// Apply defaults
-	if config.DefaultGroupWait == 0 {
-		config.DefaultGroupWait = 30 * time.Second
-	}
-	if config.DefaultGroupInterval == 0 {
-		config.DefaultGroupInterval = 5 * time.Minute
-	}
-	if config.DefaultRepeatInterval == 0 {
-		config.DefaultRepeatInterval = 4 * time.Hour
-	}
 	if config.MaxConcurrentTimers == 0 {
 		config.MaxConcurrentTimers = 10000
 	}
@@ -292,9 +275,6 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 
 	manager.logger.Info("Timer manager initialized",
 		"instance_id", instanceID,
-		"default_group_wait", config.DefaultGroupWait,
-		"default_group_interval", config.DefaultGroupInterval,
-		"default_repeat_interval", config.DefaultRepeatInterval,
 		"max_concurrent_timers", config.MaxConcurrentTimers,
 		"reconciliation_interval", config.ReconciliationInterval,
 		"reconciliation_grace", config.ReconciliationGrace)

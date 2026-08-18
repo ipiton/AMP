@@ -216,17 +216,27 @@ func (g *AlertGroup) Size() int {
 	return len(g.Alerts)
 }
 
-// GetFiringCount returns the number of firing alerts in the group.
+// GetFiringCount returns the number of firing alerts in the group. Returns 0
+// for a group with nil Metadata (task fu2-d item 8: rehydrated-without-
+// metadata or test-built groups, same gap groupTimings/effectiveRepeatInterval
+// guard against elsewhere in this package).
 func (g *AlertGroup) GetFiringCount() int {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	if g.Metadata == nil {
+		return 0
+	}
 	return g.Metadata.FiringCount
 }
 
 // GetResolvedCount returns the number of resolved alerts in the group.
+// Returns 0 for a group with nil Metadata (see GetFiringCount).
 func (g *AlertGroup) GetResolvedCount() int {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	if g.Metadata == nil {
+		return 0
+	}
 	return g.Metadata.ResolvedCount
 }
 
@@ -235,9 +245,19 @@ func (g *AlertGroup) GetResolvedCount() int {
 // A group is expired if:
 //  1. All alerts are resolved AND resolved_at is older than maxAge, OR
 //  2. updated_at is older than maxAge (no activity)
+//
+// A group with nil Metadata (task fu2-d item 8, same rehydration/test-build
+// gap as GetFiringCount) is treated as expired: CleanupExpiredGroups is the
+// only caller, and a metadata-less group is exactly the kind of orphaned
+// record that loop should reap rather than let accumulate forever unable to
+// ever be cleaned up.
 func (g *AlertGroup) IsExpired(maxAge time.Duration) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	if g.Metadata == nil {
+		return true
+	}
 
 	cutoffTime := time.Now().Add(-maxAge)
 
@@ -387,9 +407,18 @@ type GroupFilters struct {
 }
 
 // Matches checks if a group matches the filters.
+//
+// A group with nil Metadata (task fu2-d item 8) can't be evaluated against
+// State/CreatedAt filters, so it's excluded whenever such a filter is set —
+// consistent with ListGroups treating it as data too incomplete to trust,
+// rather than panicking or surprise-including it in results.
 func (f *GroupFilters) Matches(group *AlertGroup) bool {
 	if f == nil {
 		return true // No filters, match all
+	}
+
+	if group.Metadata == nil {
+		return f.State == nil && f.MaxAge == nil
 	}
 
 	// Filter by state

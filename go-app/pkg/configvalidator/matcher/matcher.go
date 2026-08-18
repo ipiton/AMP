@@ -64,11 +64,27 @@ func (m *Matcher) IsRegex() bool {
 	return m.Type == MatchRegexp || m.Type == MatchNotRegexp
 }
 
+// ErrorKind classifies why a matcher failed to parse, so callers can map
+// errors to Alertmanager config error codes (E104 vs E105) without
+// resorting to substring matching on Message.
+type ErrorKind int
+
+const (
+	// ErrKindSyntax covers structural problems: empty matcher, missing
+	// operator, empty label/value, or an invalid label name.
+	ErrKindSyntax ErrorKind = iota
+
+	// ErrKindRegex means the label/operator/value were well-formed but the
+	// regex pattern itself failed to compile (only reachable for =~/!~).
+	ErrKindRegex
+)
+
 // ParseError represents a matcher parse error.
 type ParseError struct {
 	Matcher    string
 	Message    string
 	Suggestion string
+	Kind       ErrorKind
 }
 
 func (e *ParseError) Error() string {
@@ -181,6 +197,7 @@ func Parse(matcher string) (*Matcher, error) {
 				Matcher:    matcher,
 				Message:    fmt.Sprintf("invalid regex pattern '%s': %v", value, err),
 				Suggestion: "Check regex syntax. Common issues: unmatched parentheses, invalid character classes, unescaped special chars",
+				Kind:       ErrKindRegex,
 			}
 		}
 		m.CompiledRegex = re
