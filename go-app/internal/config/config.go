@@ -105,6 +105,28 @@ type GroupingConfig struct {
 	// consult the grouping subsystem yet — that lands in task 2.3, which
 	// flips this flag's effect on the request path.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
+
+	// ReconciliationInterval controls the standard profile's periodic
+	// orphan-adoption loop (task 6.2, distributed timer liveness — see
+	// grouping.TimerManagerConfig.ReconciliationInterval for the mechanism).
+	// ServiceRegistry.initializeGrouping only forwards this value to the
+	// TimerManager when running the standard profile with a live
+	// Redis-backed TimerStorage; every other case (lite profile, or a
+	// standard-profile Redis failure that fell back to in-memory storage)
+	// leaves the TimerManager's loop disabled regardless of this setting —
+	// InMemoryTimerStorage is never shared across replicas, so scanning it
+	// for orphans left by ANOTHER replica is meaningless.
+	//
+	// Defaults to 45s (see setDefaults) in the standard profile with Redis;
+	// 0 disables the loop.
+	ReconciliationInterval time.Duration `mapstructure:"reconciliation_interval" yaml:"reconciliation_interval,omitempty"`
+
+	// ReconciliationGrace is how far past a timer's ExpiresAt the
+	// reconciliation loop waits before treating it as orphaned rather than
+	// possibly still being processed by its owning replica. Only consulted
+	// when ReconciliationInterval is positive; left at 0 here means "use
+	// grouping.TimerManagerConfig's own default" (60s).
+	ReconciliationGrace time.Duration `mapstructure:"reconciliation_grace" yaml:"reconciliation_grace,omitempty"`
 }
 
 // InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)
@@ -634,6 +656,12 @@ func setDefaults() {
 
 	// Grouping subsystem defaults (task 2.2, alertmanager-parity)
 	viper.SetDefault("grouping.enabled", false)
+	// Distributed timer reconciliation defaults (task 6.2). Only takes
+	// effect in the standard profile with a live Redis-backed TimerStorage
+	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc
+	// comment (config.go) for why the lite profile ignores this.
+	viper.SetDefault("grouping.reconciliation_interval", "45s")
+	viper.SetDefault("grouping.reconciliation_grace", "60s")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)

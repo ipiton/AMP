@@ -921,11 +921,27 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 
 	// Build the TimerManager first, without a GroupManager reference — see
 	// SetGroupManager below for why.
-	timerManager, err := grouping.NewDefaultTimerManager(grouping.TimerManagerConfig{
+	timerManagerCfg := grouping.TimerManagerConfig{
 		Storage: timerStorage,
 		Logger:  r.logger,
 		Metrics: r.metrics,
-	})
+	}
+
+	// Distributed timer reconciliation (task 6.2) only makes sense when
+	// timerStorage is genuinely shared across replicas — i.e. actually
+	// backed by Redis, not just "standard profile was requested". This
+	// type assertion is what makes the standard-profile Redis-init-failure
+	// fallback (newGroupingStorage above, returns InMemoryTimerStorage on
+	// error) and the lite profile behave identically here: neither shares
+	// timer state with any other replica, so scanning for "orphans" left by
+	// another replica is meaningless and the loop stays off regardless of
+	// cfg.Grouping.ReconciliationInterval.
+	if _, redisBacked := timerStorage.(*grouping.RedisTimerStorage); redisBacked {
+		timerManagerCfg.ReconciliationInterval = r.config.Grouping.ReconciliationInterval
+		timerManagerCfg.ReconciliationGrace = r.config.Grouping.ReconciliationGrace
+	}
+
+	timerManager, err := grouping.NewDefaultTimerManager(timerManagerCfg)
 	if err != nil {
 		return fmt.Errorf("timer manager init failed: %w", err)
 	}

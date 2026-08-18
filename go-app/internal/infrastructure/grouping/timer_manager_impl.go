@@ -85,6 +85,11 @@ type DefaultTimerManager struct {
 
 	// Instance ID for distributed debugging
 	instanceID string
+
+	// Reconciliation loop settings (task 6.2). reconciliationInterval <= 0
+	// means the loop is disabled — see TimerManagerConfig.ReconciliationInterval.
+	reconciliationInterval time.Duration
+	reconciliationGrace    time.Duration
 }
 
 // timerHandle represents an active timer's runtime state.
@@ -104,11 +109,12 @@ type timerHandle struct {
 
 // timerStats tracks operation statistics.
 type timerStats struct {
-	totalStarted   int64
-	totalExpired   int64
-	totalCancelled int64
-	totalReset     int64
-	totalMissed    int64
+	totalStarted    int64
+	totalExpired    int64
+	totalCancelled  int64
+	totalReset      int64
+	totalMissed     int64
+	totalReconciled int64
 
 	// Duration tracking for average calculation
 	durationSum   map[TimerType]time.Duration
@@ -138,6 +144,38 @@ type TimerManagerConfig struct {
 
 	// Performance tuning
 	MaxConcurrentTimers int // Maximum active timers (default: 10000)
+
+	// ReconciliationInterval enables the periodic orphan-adoption loop (task
+	// 6.2, distributed timer liveness) when positive: every interval, this
+	// replica scans Storage.ListTimers for group timers whose ExpiresAt has
+	// passed by more than ReconciliationGrace and adopts them via the same
+	// onTimerExpired path RestoreTimers uses for timers missed at startup —
+	// acquiring Storage.AcquireLock first, so a timer still being processed
+	// by its rightful owner (lock held, not actually orphaned yet) is left
+	// alone. This is what lets a SURVIVING replica take over a group's
+	// firing after the replica that started its timer crashes mid-interval;
+	// RestoreTimers alone cannot help here because it only runs once, at
+	// each replica's OWN startup, not the crashed replica's.
+	//
+	// 0 (the default) disables the loop entirely — correct for the lite
+	// profile's InMemoryTimerStorage, which is never shared across replicas
+	// (there is only one replica by definition, so "orphaned" is
+	// meaningless), and is what ServiceRegistry leaves this field at unless
+	// the standard profile is running with a live Redis-backed
+	// TimerStorage.
+	ReconciliationInterval time.Duration
+
+	// ReconciliationGrace is how far past ExpiresAt a timer must be before
+	// the reconciliation loop treats it as orphaned rather than "still being
+	// processed by its owning replica right now." Fire processing (lock
+	// acquire, group load, notify-chain, storage delete) normally completes
+	// in well under a second — see onTimerExpired — so this only needs to
+	// absorb scheduling jitter and Redis latency, not notification delivery
+	// time (PublishGroup only enqueues, per notifyLogClaimTTL's doc
+	// comment in manager_impl.go). Defaults to 60s (timerTTLGracePeriod)
+	// when ReconciliationInterval is positive and this is left at its
+	// zero-value default.
+	ReconciliationGrace time.Duration
 
 	// Observability
 	Logger  *slog.Logger
@@ -191,6 +229,13 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
+	// Reconciliation loop (task 6.2): a grace period only makes sense once
+	// the loop itself is enabled — an explicit ReconciliationGrace with
+	// ReconciliationInterval left at 0 is still fully disabled, not "enabled
+	// with a custom grace."
+	if config.ReconciliationInterval > 0 && config.ReconciliationGrace <= 0 {
+		config.ReconciliationGrace = timerTTLGracePeriod
+	}
 
 	// Create context for lifecycle management
 	ctx, cancel := context.WithCancel(context.Background())
@@ -213,6 +258,9 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 		ctx:        ctx,
 		cancel:     cancel,
 		instanceID: instanceID,
+
+		reconciliationInterval: config.ReconciliationInterval,
+		reconciliationGrace:    config.ReconciliationGrace,
 	}
 
 	manager.logger.Info("Timer manager initialized",
@@ -220,7 +268,19 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 		"default_group_wait", config.DefaultGroupWait,
 		"default_group_interval", config.DefaultGroupInterval,
 		"default_repeat_interval", config.DefaultRepeatInterval,
-		"max_concurrent_timers", config.MaxConcurrentTimers)
+		"max_concurrent_timers", config.MaxConcurrentTimers,
+		"reconciliation_interval", config.ReconciliationInterval,
+		"reconciliation_grace", config.ReconciliationGrace)
+
+	// Start the orphan-adoption loop (task 6.2) if enabled. Safe to start
+	// before SetGroupManager/RestoreTimers run: onTimerExpired already
+	// guards against a nil groupManager (logs and skips), and the first
+	// tick only fires after reconciliationInterval elapses (time.Ticker,
+	// not immediately), which construction callers reach well before that.
+	if manager.reconciliationInterval > 0 {
+		manager.wg.Add(1)
+		go manager.reconciliationLoop()
+	}
 
 	return manager, nil
 }
@@ -850,6 +910,99 @@ func (tm *DefaultTimerManager) RestoreTimers(ctx context.Context) (restored int,
 	return restored, missed, nil
 }
 
+// reconciliationLoop periodically adopts orphaned group timers (task 6.2,
+// distributed timer liveness). Runs for the lifetime of the manager: exits
+// when tm.ctx is cancelled (Shutdown), same as every other background
+// goroutine here. Only started by NewDefaultTimerManager when
+// reconciliationInterval > 0.
+func (tm *DefaultTimerManager) reconciliationLoop() {
+	defer tm.wg.Done()
+
+	ticker := time.NewTicker(tm.reconciliationInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-tm.ctx.Done():
+			return
+		case <-ticker.C:
+			tm.reconcileOrphanedTimers()
+		}
+	}
+}
+
+// reconcileOrphanedTimers scans shared storage for group timers that are
+// overdue by more than reconciliationGrace and NOT tracked by this
+// replica's own in-memory timers map, then adopts each one via the exact
+// same onTimerExpired path RestoreTimers uses for timers found already
+// expired at startup (see that method's "missed timer" branch).
+//
+// "Adopting" here does not skip the exactly-once mechanism: onTimerExpired
+// still calls Storage.AcquireLock before doing anything else, so a timer
+// that LOOKS orphaned from this replica's point of view (no local Go timer
+// for it) but is actually still being processed by its rightful owner —
+// lock held, in flight — is left alone; onTimerExpired logs the skip and
+// returns, same as the concurrent-fire race case. This loop's only job is
+// liveness: without it, a group whose owning replica crashed mid-interval
+// would never fire again until that replica restarts and runs its own
+// RestoreTimers, which may never happen (e.g. the pod was rescheduled
+// elsewhere and a fresh replica took its place with an empty local timers
+// map, or simply comes up in a different order relative to other
+// replicas). Correctness (no double publish) was already guaranteed by
+// task 6.1's nflog claim plus this same AcquireLock; this loop only closes
+// the "nobody fires it at all" gap.
+func (tm *DefaultTimerManager) reconcileOrphanedTimers() {
+	ctx, cancel := context.WithTimeout(tm.ctx, 10*time.Second)
+	defer cancel()
+
+	timers, err := tm.storage.ListTimers(ctx)
+	if err != nil {
+		tm.logger.Warn("reconciliation: failed to list timers from storage", "error", err)
+		return
+	}
+
+	now := time.Now()
+	for _, timer := range timers {
+		if timer.ExpiresAt.Add(tm.reconciliationGrace).After(now) {
+			continue // not overdue enough yet — could still be legitimately in flight
+		}
+
+		tm.timersMu.RLock()
+		_, trackedLocally := tm.timers[timer.GroupKey]
+		tm.timersMu.RUnlock()
+
+		if trackedLocally {
+			// This replica already has its own local Go timer for this
+			// group (pending, or about to fire on its own) — reconciling it
+			// here too would just race itself. handleTimerExpiration will
+			// process it through the normal path.
+			continue
+		}
+
+		tm.logger.Warn("reconciliation: adopting orphaned group timer",
+			"group_key", timer.GroupKey,
+			"timer_type", timer.TimerType,
+			"expires_at", timer.ExpiresAt,
+			"overdue_by", now.Sub(timer.ExpiresAt))
+
+		tm.statsMu.Lock()
+		tm.stats.totalReconciled++
+		tm.statsMu.Unlock()
+
+		// onTimerExpired acquires the distributed lock itself and quietly
+		// skips if another replica already holds it (e.g. that replica's
+		// own reconciliation loop won the race, or — despite the
+		// overdue-by-more-than-grace check above — it was in fact still
+		// mid-flight). Runs synchronously: reconciliation ticks are
+		// infrequent (ReconciliationInterval) and timer counts are small
+		// relative to that interval in practice; RestoreTimers' "missed"
+		// branch dispatches via `go` instead because it runs once at
+		// startup against a potentially large backlog and must not block
+		// the rest of restoration on it.
+		tm.onTimerExpired(ctx, timer.GroupKey, timer.TimerType)
+	}
+}
+
 // GetStats returns current timer statistics.
 func (tm *DefaultTimerManager) GetStats(ctx context.Context) (*TimerStats, error) {
 	tm.statsMu.RLock()
@@ -873,13 +1026,14 @@ func (tm *DefaultTimerManager) GetStats(ctx context.Context) (*TimerStats, error
 	}
 
 	return &TimerStats{
-		ActiveTimers:    activeTimers,
-		ExpiredTimers:   tm.stats.totalExpired,
-		CancelledTimers: tm.stats.totalCancelled,
-		ResetCount:      tm.stats.totalReset,
-		MissedTimers:    tm.stats.totalMissed,
-		AverageDuration: avgDuration,
-		Timestamp:       time.Now(),
+		ActiveTimers:     activeTimers,
+		ExpiredTimers:    tm.stats.totalExpired,
+		CancelledTimers:  tm.stats.totalCancelled,
+		ResetCount:       tm.stats.totalReset,
+		MissedTimers:     tm.stats.totalMissed,
+		ReconciledTimers: tm.stats.totalReconciled,
+		AverageDuration:  avgDuration,
+		Timestamp:        time.Now(),
 	}, nil
 }
 
