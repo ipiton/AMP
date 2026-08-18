@@ -3,6 +3,7 @@ package publishing
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,19 +12,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockDiscoveryManagerForRefresh is a mock for testing refresh mechanism
+// mockDiscoveryManagerForRefresh is a mock for testing refresh mechanism.
+//
+// discoverCalled is written from the RefreshManager's background refresh
+// goroutine (DiscoverTargets) and read from the test goroutine (via
+// DiscoverCalled()), so it must be mutex-protected — a plain int here would
+// be a data race under -race, since the two goroutines are not otherwise
+// synchronized (the test only sleeps, it never joins the goroutine).
 type mockDiscoveryManagerForRefresh struct {
+	mu             sync.Mutex
 	discoverCalled int
 	shouldFail     bool
 	targetCount    int
 }
 
 func (m *mockDiscoveryManagerForRefresh) DiscoverTargets(ctx context.Context) error {
+	m.mu.Lock()
 	m.discoverCalled++
-	if m.shouldFail {
+	shouldFail := m.shouldFail
+	m.mu.Unlock()
+
+	if shouldFail {
 		return assert.AnError
 	}
 	return nil
+}
+
+// DiscoverCalled returns the current call count (thread-safe read).
+func (m *mockDiscoveryManagerForRefresh) DiscoverCalled() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.discoverCalled
 }
 
 func (m *mockDiscoveryManagerForRefresh) GetTarget(name string) (*core.PublishingTarget, error) {
@@ -65,7 +84,7 @@ func TestRefreshNow_Success(t *testing.T) {
 	err := manager.RefreshNow(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, 1, mockDM.discoverCalled)
+	assert.Equal(t, 1, mockDM.DiscoverCalled())
 }
 
 func TestRefreshNow_Failure(t *testing.T) {
@@ -76,7 +95,7 @@ func TestRefreshNow_Failure(t *testing.T) {
 	err := manager.RefreshNow(context.Background())
 
 	require.Error(t, err)
-	assert.Equal(t, 1, mockDM.discoverCalled)
+	assert.Equal(t, 1, mockDM.DiscoverCalled())
 }
 
 func TestStart_Success(t *testing.T) {
@@ -89,7 +108,7 @@ func TestStart_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	// Should have done initial discovery
-	assert.Greater(t, mockDM.discoverCalled, 0)
+	assert.Greater(t, mockDM.DiscoverCalled(), 0)
 }
 
 func TestStart_InitialDiscoveryFailure(t *testing.T) {
@@ -100,7 +119,7 @@ func TestStart_InitialDiscoveryFailure(t *testing.T) {
 	err := manager.Start(context.Background())
 
 	require.Error(t, err)
-	assert.Equal(t, 1, mockDM.discoverCalled)
+	assert.Equal(t, 1, mockDM.DiscoverCalled())
 }
 
 func TestPeriodicRefresh(t *testing.T) {
@@ -116,7 +135,7 @@ func TestPeriodicRefresh(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 
 	// Should have been called multiple times (initial + periodic)
-	assert.Greater(t, mockDM.discoverCalled, 1)
+	assert.Greater(t, mockDM.DiscoverCalled(), 1)
 
 	manager.Stop()
 }
@@ -132,14 +151,14 @@ func TestStop(t *testing.T) {
 
 	// Let it run for a bit
 	time.Sleep(120 * time.Millisecond)
-	initialCalls := mockDM.discoverCalled
+	initialCalls := mockDM.DiscoverCalled()
 
 	// Stop refresh
 	manager.Stop()
 
 	// Wait and check that no more calls happen
 	time.Sleep(100 * time.Millisecond)
-	finalCalls := mockDM.discoverCalled
+	finalCalls := mockDM.DiscoverCalled()
 
 	// Should have stopped (no new calls after Stop)
 	assert.Equal(t, initialCalls, finalCalls)
@@ -153,7 +172,7 @@ func TestStop_WithoutStart(t *testing.T) {
 	// Should not panic
 	manager.Stop()
 
-	assert.Equal(t, 0, mockDM.discoverCalled)
+	assert.Equal(t, 0, mockDM.DiscoverCalled())
 }
 
 func TestRefreshWithContext_Cancellation(t *testing.T) {
@@ -169,5 +188,5 @@ func TestRefreshWithContext_Cancellation(t *testing.T) {
 
 	// Should still work (context is passed to DiscoverTargets)
 	require.NoError(t, err)
-	assert.Equal(t, 1, mockDM.discoverCalled)
+	assert.Equal(t, 1, mockDM.DiscoverCalled())
 }
