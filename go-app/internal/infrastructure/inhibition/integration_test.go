@@ -49,11 +49,36 @@ func setupRedis(ctx context.Context) (*RedisContainer, error) {
 	return &RedisContainer{Container: container, URI: uri}, nil
 }
 
+// requireDocker skips the test when no Docker daemon is reachable (task
+// fu2-d item 11). Without this, setupRedis's testcontainers.GenericContainer
+// call FAILS the test (via t.Fatalf) instead of SKIPPING it in an
+// environment with no Docker — the wrong signal, since a red result there
+// means "no Docker here," not "Redis persistence regressed." Uses
+// testcontainers' own Docker client + Ping, the same way testcontainers
+// itself decides whether it can start a container.
+func requireDocker(t *testing.T) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cli, err := testcontainers.NewDockerClientWithOpts(ctx)
+	if err != nil {
+		t.Skipf("Skipping testcontainers-backed test: no Docker client available: %v", err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	if _, err := cli.Ping(ctx); err != nil {
+		t.Skipf("Skipping testcontainers-backed test: Docker daemon not reachable: %v", err)
+	}
+}
+
 // TestIntegration_InhibitionStateManager_Redis verifies Redis persistence
 func TestIntegration_InhibitionStateManager_Redis(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireDocker(t)
 
 	ctx := context.Background()
 
@@ -152,6 +177,7 @@ func TestIntegration_TwoTierAlertCache_Redis(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	requireDocker(t)
 
 	ctx := context.Background()
 
