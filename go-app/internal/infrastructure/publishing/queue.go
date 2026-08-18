@@ -107,9 +107,10 @@ type PublishingJob struct {
 	// PublishingQueue.publishJob for how a group job is actually
 	// dispatched (one wire batch, or a per-alert iteration loop, depending
 	// on whether the target's publisher implements BatchAlertPublisher).
-	Alerts   []*core.Alert
-	GroupKey string
-	Receiver string
+	Alerts      []*core.Alert
+	GroupKey    string
+	Receiver    string
+	GroupLabels map[string]string
 
 	// Extended fields for 150% quality
 	ID          string         // UUID v4
@@ -281,7 +282,7 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 // from the HIGHEST-priority alert in the set (PriorityHigh has the lowest
 // numeric value): a group containing even one critical firing alert must
 // not be queued behind an unrelated low-priority job.
-func (q *PublishingQueue) SubmitGroup(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string) error {
+func (q *PublishingQueue) SubmitGroup(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string, groupLabels map[string]string) error {
 	if len(alerts) == 0 {
 		return fmt.Errorf("cannot submit a group job with no alerts")
 	}
@@ -307,6 +308,7 @@ func (q *PublishingQueue) SubmitGroup(alerts []*core.Alert, target *core.Publish
 		Alerts:        alerts,
 		GroupKey:      groupKey,
 		Receiver:      receiver,
+		GroupLabels:   groupLabels,
 	}
 
 	return q.submitJob(job, priority, fmt.Sprintf("group:%s alerts=%d", groupKey, len(alerts)))
@@ -747,7 +749,7 @@ func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJo
 	}
 
 	if batchPublisher, ok := publisher.(BatchAlertPublisher); ok {
-		return batchPublisher.PublishBatch(q.ctx, job.Alerts, job.GroupKey, job.Receiver, job.Target)
+		return batchPublisher.PublishBatch(q.ctx, job.Alerts, job.GroupKey, job.Receiver, job.GroupLabels, job.Target)
 	}
 
 	now := time.Now().UTC()

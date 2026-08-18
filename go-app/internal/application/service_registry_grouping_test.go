@@ -138,7 +138,7 @@ type recordingGroupPublisher struct {
 	calls [][]*core.Alert
 }
 
-func (p *recordingGroupPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, skipTarget func(string) bool) ([]grouping.TargetPublishOutcome, error) {
+func (p *recordingGroupPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, skipTarget func(string) bool) ([]grouping.TargetPublishOutcome, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if skipTarget != nil && skipTarget("test") {

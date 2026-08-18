@@ -973,6 +973,37 @@ func groupTimeIntervalNames(group *AlertGroup) *TimeIntervalNames {
 	return group.Metadata.TimeIntervalNames
 }
 
+// groupLabelsFor resolves group's GroupMetadata.GroupBy names to their
+// actual values (review finding 1, fwb fix round 1: publishGroupAlerts
+// passes this through to GroupNotificationPublisher.PublishGroup for the
+// wire payload's "groupLabels" field, instead of the previously hardcoded
+// empty map).
+//
+// Sourced from alerts[0] when available: GroupKeyGenerator guarantees every
+// alert ever added to this group shares identical values for its own
+// GroupBy names (that is the definition of belonging to the group), so any
+// alert in the caller's already-filtered set is an equally valid source —
+// there is no need to consult the group's original, unfiltered Alerts map.
+//
+// Always returns a non-nil map (empty when group/Metadata is nil, GroupBy
+// is empty, alerts is empty, or a name isn't present on the source alert's
+// Labels — the last case is defensive; it should not happen for alerts
+// that legitimately belong to this group).
+func groupLabelsFor(group *AlertGroup, alerts []*core.Alert) map[string]string {
+	if group == nil || group.Metadata == nil || len(group.Metadata.GroupBy) == 0 || len(alerts) == 0 {
+		return map[string]string{}
+	}
+
+	source := alerts[0].Labels
+	labels := make(map[string]string, len(group.Metadata.GroupBy))
+	for _, name := range group.Metadata.GroupBy {
+		if v, ok := source[name]; ok {
+			labels[name] = v
+		}
+	}
+	return labels
+}
+
 // effectiveRepeatInterval returns the dedup TTL for group: its own
 // per-route override (task 2.4, GroupMetadata.Timings) if one was captured
 // at group-creation time, else the grouping config's root
@@ -1292,12 +1323,26 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return dup
 	}
 
+	// groupLabels (review finding 1, fwb fix round 1): the resolved
+	// {label_name: value} map for this group's own GroupBy names, e.g.
+	// {"alertname": "HighCPU", "cluster": "prod"} for
+	// group_by: [alertname, cluster]. Read unguarded, same as
+	// groupTimings/groupTimeIntervalNames above: GroupMetadata.GroupBy is
+	// set once at group creation (createNewGroupUnsafe) and never mutated
+	// afterward, so this is not a new race pattern. Sourced from alerts[0]
+	// (the already-filtered set) rather than the original unfiltered
+	// group.Alerts: GroupKeyGenerator guarantees every alert that was ever
+	// added to this group shares identical values for these names, so any
+	// alert still in scope is an equally valid source. Empty/nil GroupBy
+	// (or an empty alerts slice, defensively) yields an empty, non-nil map.
+	groupLabels := groupLabelsFor(group, alerts)
+
 	// Step 5: publish ONE grouped notification (task 2.4's core change: a
 	// single PublishGroup call carrying all of alerts, not one PublishToAll
 	// call per alert). outcomes reports per-target results (task fwb) so
 	// RecordSent below can be scoped to exactly the targets that confirmed
 	// delivery this cycle.
-	outcomes, err := publisher.PublishGroup(ctx, string(group.Key), alerts, receiver, skipTarget)
+	outcomes, err := publisher.PublishGroup(ctx, string(group.Key), alerts, receiver, groupLabels, skipTarget)
 	if err != nil {
 		// ErrDeliveryNotConfirmed (final review finding 4): the publisher
 		// deliberately delivered nothing — degraded/metrics-only mode. NOT a
@@ -1356,6 +1401,22 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 			continue
 		}
 		anySucceeded = true
+		// NOTE (review finding 2, fwb fix round 1 — enqueue vs. delivery):
+		// outcome.Success == true means the target's job was successfully
+		// ENQUEUED onto the publishing queue, not that its HTTP endpoint
+		// confirmed receipt — see TargetPublishOutcome.Success's doc
+		// comment (manager.go) for the full picture. RecordSent therefore
+		// fires before any actual delivery attempt for that target; a
+		// webhook 500/timeout discovered later, by the queue's own async
+		// worker/retry/DLQ machinery, is invisible here and will NOT cause
+		// this target to be retried by skipTarget on the group's next
+		// scheduled fire. This is an accepted, pre-existing gap carried
+		// forward from task 2.4 (the same "enqueue, not delivery" contract
+		// PublishGroup has always had) — task fwb narrows its scope from
+		// "affects the whole group" to "affects one target", but does not
+		// close it. Backlog follow-up: record on the queue job's own
+		// completion callback (success/failure of the actual HTTP publish)
+		// instead of on enqueue.
 		if recErr := m.notifyLog.RecordSent(ctx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see

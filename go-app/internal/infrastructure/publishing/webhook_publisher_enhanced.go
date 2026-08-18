@@ -161,7 +161,7 @@ func (p *EnhancedWebhookPublisher) Name() string {
 // job/one alert loop the pre-fwb PublishGroupToTargets used. Mirrors
 // Publish's validation/metrics/error-handling shape but calls
 // GroupAlertFormatter.FormatGroup instead of FormatAlert.
-func (p *EnhancedWebhookPublisher) PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, target *core.PublishingTarget) error {
+func (p *EnhancedWebhookPublisher) PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error {
 	startTime := time.Now()
 
 	p.GetLogger().InfoContext(ctx, "Publishing alert group to webhook",
@@ -185,7 +185,7 @@ func (p *EnhancedWebhookPublisher) PublishBatch(ctx context.Context, alerts []*c
 		return fmt.Errorf("formatter %T does not support wire-level group batching (GroupAlertFormatter)", p.formatter)
 	}
 
-	payload, err := groupFormatter.FormatGroup(ctx, alerts, groupKey, receiver, target.Format)
+	payload, err := groupFormatter.FormatGroup(ctx, alerts, groupKey, receiver, groupLabels, target.Format)
 	if err != nil {
 		p.GetLogger().ErrorContext(ctx, "Failed to format alert group",
 			slog.String("target", target.Name),

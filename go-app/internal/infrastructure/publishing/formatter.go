@@ -92,10 +92,13 @@ type GroupAlertFormatter interface {
 	// already filtered by the notify-stage chain — see
 	// grouping.DefaultGroupManager.publishGroupAlerts) as a single payload.
 	// groupKey and receiver populate the payload's "groupKey"/"receiver"
-	// fields (upstream Alertmanager webhook shape); format selects which
-	// wire shape to produce — only core.FormatAlertmanager and
+	// fields (upstream Alertmanager webhook shape); groupLabels populates
+	// "groupLabels" (review finding 1, fwb fix round 1) — the caller
+	// resolves this from grouping.GroupMetadata.GroupBy, since this
+	// package doesn't depend on infrastructure/grouping; format selects
+	// which wire shape to produce — only core.FormatAlertmanager and
 	// core.FormatWebhook are supported by DefaultAlertFormatter today.
-	FormatGroup(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, format core.PublishingFormat) (map[string]any, error)
+	FormatGroup(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, format core.PublishingFormat) (map[string]any, error)
 }
 
 // DefaultAlertFormatter implements AlertFormatter using strategy pattern
@@ -155,14 +158,14 @@ func (f *DefaultAlertFormatter) FormatAlert(ctx context.Context, enrichedAlert *
 // one-message-per-alert and are driven by PublishingQueue iterating
 // FormatAlert per alert within the same job instead — see
 // PublishingQueue.publishJob.
-func (f *DefaultAlertFormatter) FormatGroup(_ context.Context, alerts []*core.Alert, groupKey string, receiver string, format core.PublishingFormat) (map[string]any, error) {
+func (f *DefaultAlertFormatter) FormatGroup(_ context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, format core.PublishingFormat) (map[string]any, error) {
 	if len(alerts) == 0 {
 		return nil, fmt.Errorf("cannot format an empty alert group")
 	}
 
 	switch format {
 	case core.FormatAlertmanager, core.FormatWebhook:
-		return f.formatGroupUpstream(alerts, groupKey, receiver), nil
+		return f.formatGroupUpstream(alerts, groupKey, receiver, groupLabels), nil
 	default:
 		return nil, fmt.Errorf("wire-level group batching not supported for format %q", format)
 	}
@@ -178,14 +181,14 @@ func (f *DefaultAlertFormatter) FormatGroup(_ context.Context, alerts []*core.Al
 // status semantics. commonLabels/commonAnnotations are the intersection of
 // every alert's labels/annotations where both key AND value match across
 // the whole set (upstream's CommonLabels/CommonAnnotations semantics).
-// groupLabels is intentionally left empty: the GroupBy label NAMES aren't
-// available at this layer (this package doesn't depend on
-// infrastructure/grouping — see GroupNotificationPublisher's doc comment
-// for why that boundary exists), only their resolved values would need
-// looking up per alert; upstream operators primarily key off commonLabels/
-// groupKey in webhook receivers, so this is a documented simplification,
-// not a bug.
-func (f *DefaultAlertFormatter) formatGroupUpstream(alerts []*core.Alert, groupKey string, receiver string) map[string]any {
+// groupLabels is the caller-resolved {label_name: value} map for the
+// group's own GroupBy names (review finding 1, fwb fix round 1 — this
+// package still has no dependency on infrastructure/grouping; the caller,
+// grouping.DefaultGroupManager.publishGroupAlerts, resolves it from
+// GroupMetadata.GroupBy and forwards it as a plain map, same pattern as
+// groupKey/receiver). A nil groupLabels is normalized to an empty map
+// rather than emitted as JSON null.
+func (f *DefaultAlertFormatter) formatGroupUpstream(alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string) map[string]any {
 	amAlerts := make([]map[string]any, 0, len(alerts))
 	var commonLabels, commonAnnotations map[string]string
 	anyFiring := false
@@ -224,12 +227,16 @@ func (f *DefaultAlertFormatter) formatGroupUpstream(alerts []*core.Alert, groupK
 		status = string(core.StatusFiring)
 	}
 
+	if groupLabels == nil {
+		groupLabels = map[string]string{}
+	}
+
 	result := getFormatterResult()
 	result["version"] = "4"
 	result["groupKey"] = groupKey
 	result["status"] = status
 	result["alerts"] = amAlerts
-	result["groupLabels"] = map[string]string{}
+	result["groupLabels"] = groupLabels
 	result["commonLabels"] = commonLabels
 	result["commonAnnotations"] = commonAnnotations
 	result["receiver"] = receiver

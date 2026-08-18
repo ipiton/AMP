@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ type fakePublishingCoordinator struct {
 	groupAlerts   []*core.Alert
 	groupReceiver string
 	groupKey      string
+	groupLabels   map[string]string
 
 	// task fwb: records which target names the caller's skipTarget callback
 	// was asked about.
@@ -38,10 +40,11 @@ func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.
 	return f.results, f.err
 }
 
-func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string, groupKey string, skipTarget func(string) bool) ([]*infrapublishing.PublishingResult, error) {
+func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string, groupKey string, groupLabels map[string]string, skipTarget func(string) bool) ([]*infrapublishing.PublishingResult, error) {
 	f.groupAlerts = alerts
 	f.groupReceiver = receiver
 	f.groupKey = groupKey
+	f.groupLabels = groupLabels
 
 	if skipTarget == nil {
 		return f.groupResults, f.groupErr
@@ -252,7 +255,7 @@ func TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure(t 
 		t.Fatalf("single-alert path: nil padding must not read as a partial failure, got %v", err)
 	}
 
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", []*core.Alert{{Fingerprint: "abc"}}, "default", nil)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", []*core.Alert{{Fingerprint: "abc"}}, "default", nil, nil)
 	if err != nil {
 		t.Fatalf("group path: nil padding must not read as a partial failure, got %v", err)
 	}
@@ -277,7 +280,7 @@ func TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed(t
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", []*core.Alert{{Fingerprint: "abc"}}, "default", nil)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", []*core.Alert{{Fingerprint: "abc"}}, "default", nil, nil)
 	if err != nil {
 		t.Fatalf("PublishGroup() error = %v, want nil (the coordinator itself did not error)", err)
 	}
@@ -306,7 +309,7 @@ func TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("publishing_disabled", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	alerts := []*core.Alert{{Fingerprint: "abc", AlertName: "Test"}}
 
-	outcomes, err := publisher.PublishGroup(context.Background(), "gk", alerts, "default", nil)
+	outcomes, err := publisher.PublishGroup(context.Background(), "gk", alerts, "default", nil, nil)
 	if !errors.Is(err, grouping.ErrDeliveryNotConfirmed) {
 		t.Fatalf("PublishGroup() error = %v, want it to wrap grouping.ErrDeliveryNotConfirmed", err)
 	}
@@ -318,7 +321,7 @@ func TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery(t *testing.T) {
 	}
 
 	// Empty alert set is genuinely nothing to deliver, not a suppressed send.
-	if _, err := publisher.PublishGroup(context.Background(), "gk", nil, "default", nil); err != nil {
+	if _, err := publisher.PublishGroup(context.Background(), "gk", nil, "default", nil, nil); err != nil {
 		t.Fatalf("PublishGroup(no alerts) error = %v, want nil", err)
 	}
 }
@@ -387,8 +390,9 @@ func TestApplicationPublishingAdapter_PublishGroup_PropagatesAlertsAndReceiver(t
 		{Fingerprint: "a1", AlertName: "HighCPU"},
 		{Fingerprint: "a2", AlertName: "HighCPU"},
 	}
+	groupLabels := map[string]string{"alertname": "HighCPU"}
 
-	outcomes, err := adapter.PublishGroup(context.Background(), "receiver=critical-pagerduty/alertname=HighCPU", alerts, "critical-pagerduty", nil)
+	outcomes, err := adapter.PublishGroup(context.Background(), "receiver=critical-pagerduty/alertname=HighCPU", alerts, "critical-pagerduty", groupLabels, nil)
 	if err != nil {
 		t.Fatalf("PublishGroup() error = %v", err)
 	}
@@ -405,6 +409,9 @@ func TestApplicationPublishingAdapter_PublishGroup_PropagatesAlertsAndReceiver(t
 	if coordinator.groupKey != "receiver=critical-pagerduty/alertname=HighCPU" {
 		t.Fatalf("expected groupKey to be forwarded to the coordinator, got %q", coordinator.groupKey)
 	}
+	if !reflect.DeepEqual(coordinator.groupLabels, groupLabels) {
+		t.Fatalf("expected groupLabels to be forwarded to the coordinator, got %+v", coordinator.groupLabels)
+	}
 }
 
 func TestApplicationPublishingAdapter_PublishGroup_EmptyAlertsIsNoop(t *testing.T) {
@@ -415,7 +422,7 @@ func TestApplicationPublishingAdapter_PublishGroup_EmptyAlertsIsNoop(t *testing.
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", nil, "any", nil)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", nil, "any", nil, nil)
 	if err != nil {
 		t.Fatalf("PublishGroup() with no alerts should be a no-op, got error = %v", err)
 	}
@@ -439,7 +446,7 @@ func TestApplicationPublishingAdapter_PublishGroup_NoTargetsForReceiverReturnsEr
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	_, err = adapter.PublishGroup(context.Background(), "gk", alerts, "unknown-receiver", nil)
+	_, err = adapter.PublishGroup(context.Background(), "gk", alerts, "unknown-receiver", nil, nil)
 	if err == nil {
 		t.Fatal("expected an error when no targets match the receiver")
 	}
@@ -469,7 +476,7 @@ func TestApplicationPublishingAdapter_PublishGroup_EmptyResultsIsNotAnError(t *t
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "any-receiver", nil)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "any-receiver", nil, nil)
 	if err != nil {
 		t.Fatalf("PublishGroup() error = %v, want nil (the coordinator itself did not error)", err)
 	}
@@ -498,7 +505,7 @@ func TestApplicationPublishingAdapter_PublishGroup_PartialFailureReportsPerTarge
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil, nil)
 	if err != nil {
 		t.Fatalf("PublishGroup() error = %v, want nil (per-target outcomes carry the partial failure now)", err)
 	}
@@ -541,7 +548,7 @@ func TestApplicationPublishingAdapter_PublishGroup_ForwardsSkipTarget(t *testing
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", skipTarget)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil, skipTarget)
 	if err != nil {
 		t.Fatalf("PublishGroup() error = %v", err)
 	}

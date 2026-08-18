@@ -343,7 +343,9 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // batched targets (see GroupAlertFormatter.FormatGroup); it is passed
 // through as a plain string precisely so this package need not import
 // infrastructure/grouping (see GroupNotificationPublisher's doc comment on
-// that boundary).
+// that boundary). groupLabels (review finding 1, fwb fix round 1) is
+// forwarded the same way into the wire payload's "groupLabels" field — the
+// caller resolves it from grouping.GroupMetadata.GroupBy.
 //
 // Receiver-matching semantics mirror PublishToTargets: empty receiverName,
 // or a target with no Receivers list, matches everything. Zero alerts is a
@@ -353,7 +355,7 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // logged by the caller, NOT retried in a loop here (the caller's next
 // scheduled group timer will naturally retry with the group's then-current
 // state).
-func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, skipTarget func(target string) bool) ([]*PublishingResult, error) {
+func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, skipTarget func(target string) bool) ([]*PublishingResult, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}
@@ -423,7 +425,7 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 				return
 			}
 
-			err := c.queue.SubmitGroup(alerts, t, groupKey, receiverName)
+			err := c.queue.SubmitGroup(alerts, t, groupKey, receiverName, groupLabels)
 
 			mu.Lock()
 			results[idx] = &PublishingResult{

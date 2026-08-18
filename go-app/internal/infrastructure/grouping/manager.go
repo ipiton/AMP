@@ -608,11 +608,21 @@ type TargetPublishOutcome struct {
 	// used as the nflog dedup key's target segment — see GroupNotifyLog.
 	Target string
 
-	// Success reports whether this target confirmed delivery (its queue job
-	// enqueued/sent without error). DefaultGroupManager.publishGroupAlerts
-	// records an nflog entry only for Success == true outcomes, so a failed
-	// target is retried on the group's next scheduled timer fire while a
-	// successful one is skipped (via skipTarget) on that retry.
+	// Success reports whether this target's job was successfully ENQUEUED
+	// onto the publishing queue (infrastructure/publishing.PublishingQueue.
+	// SubmitGroup returning nil) — NOT whether the target's HTTP endpoint
+	// confirmed receipt. Actual delivery (the HTTP POST, retries, DLQ) runs
+	// asynchronously on the queue's own worker pool after this call
+	// returns; a webhook 500/timeout at that later stage is invisible here
+	// and is NOT retried by publishGroupAlerts's skipTarget mechanism (see
+	// its call site in manager_impl.go for the accepted-gap note and the
+	// follow-up this should eventually close: recording on the queue job's
+	// own completion callback instead of on enqueue). DefaultGroupManager.
+	// publishGroupAlerts records an nflog entry only for Success == true
+	// outcomes, so a target whose ENQUEUE failed (queue full, shutting
+	// down) is retried on the group's next scheduled timer fire, while one
+	// that enqueued successfully is skipped (via skipTarget) on that retry
+	// even if the actual HTTP delivery later fails.
 	Success bool
 }
 
@@ -634,6 +644,19 @@ type TargetPublishOutcome struct {
 // shape) without this package depending on infrastructure/publishing, and
 // vice versa.
 //
+// groupLabels is the resolved {label_name: value} map for this group's own
+// GroupMetadata.GroupBy names (review finding 1, fwb fix round 1) — e.g.
+// {"alertname": "HighCPU", "cluster": "prod"} for group_by:
+// [alertname, cluster]. The caller (publishGroupAlerts) computes this from
+// the group's own Metadata.GroupBy plus alerts[0].Labels: GroupKeyGenerator
+// guarantees every alert in a group shares identical values for its
+// GroupBy names, so any alert in the (already filtered) set is a valid
+// source, and an empty/nil GroupBy yields an empty map. Passed through as a
+// plain map (same non-coupling pattern as groupKey/receiver) so
+// implementations can forward it into the wire payload's "groupLabels"
+// field (upstream Alertmanager webhook shape) without a dependency in
+// either direction between this package and infrastructure/publishing.
+//
 // skipTarget implements task fwb's per-target notification-log dedup:
 // PublishGroup's implementation resolves its own receiver-scoped target list
 // internally (as it always has) and MUST call skipTarget(target.Name) once
@@ -651,7 +674,7 @@ type TargetPublishOutcome struct {
 // application.ApplicationPublishingAdapter and application.MetricsOnlyPublisher
 // both implement it.
 type GroupNotificationPublisher interface {
-	PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, skipTarget func(target string) bool) ([]TargetPublishOutcome, error)
+	PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, groupLabels map[string]string, skipTarget func(target string) bool) ([]TargetPublishOutcome, error)
 }
 
 // ErrDeliveryNotConfirmed is the sentinel a GroupNotificationPublisher must
