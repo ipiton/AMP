@@ -561,8 +561,21 @@ func TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if _, err := seedStorage.LoadTimer(ctx, groupKey); err == nil {
-		t.Fatalf("adopted orphan timer should have been deleted from storage after firing")
+	// The adopted timer was a group_wait orphan: firing it runs
+	// onGroupWaitExpired, which unconditionally schedules the
+	// group_interval continuation regardless of publish outcome (task 6.2
+	// fix round 2 — see DefaultTimerManager.onTimerExpired's doc comment).
+	// So the storage entry for this groupKey is NOT simply gone after
+	// adoption — it now holds that continuation. Asserting "nothing left"
+	// here would be checking the pre-fix-round-2 (broken) behavior, where
+	// the continuation's StartTimer always failed; the correct
+	// post-adoption state is "the group_interval continuation exists."
+	continuation, err := seedStorage.LoadTimer(ctx, groupKey)
+	if err != nil {
+		t.Fatalf("LoadTimer() after adoption error = %v, want the group_interval continuation the adopted group_wait orphan must have scheduled", err)
+	}
+	if continuation.TimerType != grouping.GroupIntervalTimer {
+		t.Fatalf("continuation timer type = %q, want %q", continuation.TimerType, grouping.GroupIntervalTimer)
 	}
 }
 
