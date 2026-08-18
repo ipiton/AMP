@@ -14,14 +14,14 @@
 //
 //	// Create timer manager
 //	timerManager, err := NewDefaultTimerManager(TimerManagerConfig{
-//	    Storage:              redisStorage,
-//	    GroupManager:         groupManager,
-//	    DefaultGroupWait:     30 * time.Second,
-//	    DefaultGroupInterval: 5 * time.Minute,
-//	    DefaultRepeatInterval: 4 * time.Hour,
-//	    Logger:               slog.Default(),
-//	    Metrics:              businessMetrics,
+//	    Storage:      redisStorage,
+//	    GroupManager: groupManager,
+//	    Logger:       slog.Default(),
+//	    Metrics:      businessMetrics,
 //	})
+//
+//	// group_wait / group_interval / repeat_interval are per-call durations
+//	// passed explicitly to StartTimer, not manager-level defaults.
 //
 //	// Register callback for notifications
 //	timerManager.OnTimerExpired(func(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {

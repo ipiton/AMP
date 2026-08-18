@@ -38,12 +38,9 @@ func setupTestTimerManager(t *testing.T) (*DefaultTimerManager, *InMemoryTimerSt
 	_ = groupManager.storage.Store(ctx, testGroup)
 
 	config := TimerManagerConfig{
-		Storage:               storage,
-		GroupManager:          groupManager,
-		DefaultGroupWait:      30 * time.Second,
-		DefaultGroupInterval:  5 * time.Minute,
-		DefaultRepeatInterval: 4 * time.Hour,
-		Logger:                slog.Default(),
+		Storage:      storage,
+		GroupManager: groupManager,
+		Logger:       slog.Default(),
 	}
 
 	manager, err := NewDefaultTimerManager(config)
@@ -69,9 +66,7 @@ func TestNewDefaultTimerManager(t *testing.T) {
 	manager, err := NewDefaultTimerManager(config)
 	require.NoError(t, err)
 	assert.NotNil(t, manager)
-	assert.Equal(t, 30*time.Second, manager.config.DefaultGroupWait)
-	assert.Equal(t, 5*time.Minute, manager.config.DefaultGroupInterval)
-	assert.Equal(t, 4*time.Hour, manager.config.DefaultRepeatInterval)
+	assert.Equal(t, 10000, manager.config.MaxConcurrentTimers)
 }
 
 // TestNewDefaultTimerManager_MissingStorage tests validation

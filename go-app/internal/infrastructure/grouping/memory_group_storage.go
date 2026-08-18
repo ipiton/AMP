@@ -201,10 +201,14 @@ func (m *MemoryGroupStorage) copyMetadata(meta *GroupMetadata) *GroupMetadata {
 		copy.ResolvedAt = &t
 	}
 
-	// Copy timer metadata (shallow copy is sufficient for pointers)
-	copy.GroupWaitTimer = meta.GroupWaitTimer
-	copy.GroupIntervalTimer = meta.GroupIntervalTimer
-	copy.RepeatIntervalTimer = meta.RepeatIntervalTimer
+	// Copy timer metadata (task fu2-d item 5: deep copy — a shallow pointer
+	// copy let a mutation of the *TimerMetadata via one AlertGroup handle
+	// (e.g. bumping ResetCount/LastResetAt on reset) silently mutate every
+	// other in-memory copy of the same group sharing the pointer, including
+	// ones already returned from a prior Load()).
+	copy.GroupWaitTimer = meta.GroupWaitTimer.Clone()
+	copy.GroupIntervalTimer = meta.GroupIntervalTimer.Clone()
+	copy.RepeatIntervalTimer = meta.RepeatIntervalTimer.Clone()
 
 	// Copy per-group timing overrides (task 2.4 fix round 1: this field was
 	// added to GroupMetadata after copyMetadata was last touched, and was
