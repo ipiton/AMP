@@ -196,6 +196,42 @@ func (ms *InMemoryTimerStorage) ListTimers(ctx context.Context) ([]*GroupTimer, 
 	return timers, nil
 }
 
+// ListOverdueTimers returns only timers whose ExpiresAt is at or before
+// cutoff (task 6.2, fix round 1, Finding 1) — mirrors
+// RedisTimerStorage.ListOverdueTimers' contract so callers (the
+// reconciliation loop) get identical filtering semantics regardless of
+// backend, even though there is no separate index to range-query here: a
+// single in-process map scan is already O(active timers) with no network
+// round-trip, so there is no "full scan" cost to avoid on this backend the
+// way there is against Redis.
+//
+// Parameters:
+//   - ctx: Context (not used, for interface compatibility)
+//   - cutoff: Only timers with ExpiresAt <= cutoff are returned
+//
+// Returns:
+//   - []*GroupTimer: Overdue timers only (possibly empty), as copies
+//   - error: Never returns error
+//
+// Performance: <10µs for 1000 timers
+func (ms *InMemoryTimerStorage) ListOverdueTimers(ctx context.Context, cutoff time.Time) ([]*GroupTimer, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	timers := make([]*GroupTimer, 0)
+	for _, timer := range ms.timers {
+		if !timer.ExpiresAt.After(cutoff) {
+			timers = append(timers, timer.Clone())
+		}
+	}
+
+	ms.logger.Debug("Listed overdue timers from memory",
+		"cutoff", cutoff,
+		"count", len(timers))
+
+	return timers, nil
+}
+
 // AcquireLock attempts to acquire an in-memory lock for a group.
 //
 // Note: This is NOT a distributed lock. It only works within a single process.

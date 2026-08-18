@@ -3,7 +3,9 @@ package grouping
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -403,4 +405,86 @@ func TestPublishCallbacks_FreshLoadAtFireTime_SeesAlertAddedByOtherReplica(t *te
 	require.Len(t, calls, 1)
 	require.Len(t, calls[0], 2,
 		"onGroupWaitExpired must re-Load the group from shared storage at fire time — B's alert, ingested on a different replica after the stale snapshot was captured, must be included")
+}
+
+// TestDefaultTimerManager_ReconciliationLoop_DeletedGroupCleansUpLeftoverTimer
+// covers fix round 1, Finding 2: a timer left behind in shared storage
+// after its group was already deleted (e.g. RemoveAlertFromGroup ran
+// before this timer fired) must be cleaned up ONCE — deleted from storage
+// and from tm.timers, logged at Warn — not left for the reconciliation
+// loop to keep re-adopting and Error-logging every tick until Redis's own
+// TTL eventually reaps it.
+func TestDefaultTimerManager_ReconciliationLoop_DeletedGroupCleansUpLeftoverTimer(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	var logBuf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	redisCache, err := cache.NewRedisCache(&cache.CacheConfig{
+		Addr:        mr.Addr(),
+		DB:          0,
+		PoolSize:    5,
+		DialTimeout: time.Second,
+		ReadTimeout: time.Second,
+	}, logger)
+	require.NoError(t, err)
+	defer func() { _ = redisCache.Close() }()
+
+	storage, err := NewRedisTimerStorage(redisCache, logger)
+	require.NoError(t, err)
+
+	const groupKey = GroupKey("alertname=DeletedGroup")
+	ctx := context.Background()
+
+	// Group manager whose storage does NOT contain groupKey — as if the
+	// group was already deleted before this leftover timer fired. Unlike
+	// newTimerStorageGroupManagerStub, deliberately do not seed a group.
+	gm := &DefaultGroupManager{
+		storage:          NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: logger}),
+		fingerprintIndex: make(map[string]GroupKey),
+		logger:           logger,
+	}
+
+	startedAt := time.Now().Add(-5 * time.Minute)
+	duration := 3 * time.Minute
+	require.NoError(t, storage.SaveTimer(ctx, &GroupTimer{
+		GroupKey:  groupKey,
+		TimerType: GroupWaitTimer,
+		Duration:  duration,
+		StartedAt: startedAt,
+		ExpiresAt: startedAt.Add(duration), // well overdue
+		State:     TimerStateActive,
+		Metadata:  &TimerMetadata{Version: 1, CreatedBy: "crashed-replica"},
+	}))
+
+	tm, err := NewDefaultTimerManager(TimerManagerConfig{
+		Storage:                storage,
+		GroupManager:           gm,
+		Logger:                 logger,
+		ReconciliationInterval: 40 * time.Millisecond,
+		ReconciliationGrace:    10 * time.Millisecond,
+	})
+	require.NoError(t, err)
+	defer func() { _ = tm.Shutdown(context.Background()) }()
+
+	require.Eventually(t, func() bool {
+		_, loadErr := storage.LoadTimer(ctx, groupKey)
+		return errors.Is(loadErr, ErrTimerNotFound)
+	}, 2*time.Second, 20*time.Millisecond,
+		"the leftover timer for a confirmed-deleted group must be removed from storage by the first reconciliation tick that adopts it")
+
+	// Let several more ticks pass. If the fix regressed (cleanup not
+	// actually removing the timer, or ListOverdueTimers somehow still
+	// surfacing it), this would keep re-triggering the cleanup/error path.
+	time.Sleep(200 * time.Millisecond)
+
+	logs := logBuf.String()
+	const cleanupMsg = "group no longer exists for timer expiration, removing leftover timer"
+	require.Contains(t, logs, cleanupMsg)
+	require.Equal(t, 1, strings.Count(logs, cleanupMsg),
+		"cleanup must happen exactly once — a repeat count means the loop is still re-adopting the same confirmed-deleted group's timer")
+	require.NotContains(t, logs, "Failed to get group for timer expiration",
+		"a confirmed not-found must take the Warn cleanup path, not the generic transient-error Error log")
 }

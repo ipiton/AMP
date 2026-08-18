@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -283,11 +284,43 @@ func (rs *RedisTimerStorage) ListTimers(ctx context.Context) ([]*GroupTimer, err
 		return nil, NewTimerStorageError("list_timers", err)
 	}
 
+	return rs.loadTimersByMembers(ctx, "list_timers", members)
+}
+
+// ListOverdueTimers returns only timers whose ExpiresAt is at or before
+// cutoff (task 6.2, fix round 1, Finding 1) — a ZRANGEBYSCORE against
+// timerIndexKey's ExpiresAt-scored sorted set, not a full ZRANGE(0,-1) +
+// Go-side filter. This is what lets the reconciliation loop's periodic tick
+// scale with the number of overdue timers instead of the total timer count
+// (up to MaxConcurrentTimers, 10000 by default) on every replica, every
+// tick.
+func (rs *RedisTimerStorage) ListOverdueTimers(ctx context.Context, cutoff time.Time) ([]*GroupTimer, error) {
+	members, err := rs.client.ZRangeByScore(ctx, timerIndexKey, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: strconv.FormatInt(cutoff.Unix(), 10),
+	}).Result()
+	if err != nil {
+		rs.logger.Error("Failed to list overdue timer keys",
+			"cutoff", cutoff,
+			"error", err)
+		return nil, NewTimerStorageError("list_overdue_timers", err)
+	}
+
+	return rs.loadTimersByMembers(ctx, "list_overdue_timers", members)
+}
+
+// loadTimersByMembers batch-loads and deserializes timer entries for the
+// given index members (MGET + JSON decode), shared by ListTimers and
+// ListOverdueTimers — both need identical "load, drop stale index entries,
+// skip corrupted values" handling, differing only in how members was
+// produced (ZRANGE vs ZRANGEBYSCORE).
+func (rs *RedisTimerStorage) loadTimersByMembers(ctx context.Context, op string, members []string) ([]*GroupTimer, error) {
 	if len(members) == 0 {
 		return []*GroupTimer{}, nil
 	}
 
-	rs.logger.Debug("Listing timers from Redis",
+	rs.logger.Debug("Loading timers from Redis by member list",
+		"op", op,
 		"count", len(members))
 
 	// Build keys for MGET
@@ -300,8 +333,9 @@ func (rs *RedisTimerStorage) ListTimers(ctx context.Context) ([]*GroupTimer, err
 	values, err := rs.client.MGet(ctx, keys...).Result()
 	if err != nil {
 		rs.logger.Error("Failed to load timers in batch",
+			"op", op,
 			"error", err)
-		return nil, NewTimerStorageError("list_timers", err)
+		return nil, NewTimerStorageError(op, err)
 	}
 
 	// Deserialize timers
@@ -334,6 +368,7 @@ func (rs *RedisTimerStorage) ListTimers(ctx context.Context) ([]*GroupTimer, err
 	}
 
 	rs.logger.Debug("Loaded timers from Redis",
+		"op", op,
 		"total", len(timers))
 
 	return timers, nil
