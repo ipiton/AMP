@@ -106,7 +106,7 @@
 - [ ] **FU-TELEGRAM-RATE-LIMIT** — per-chat rate limit for Telegram (~1msg/s per chat vs global 30/s). Operational risk noted during Phase 7.1. ~1-2d
 - [ ] **FU-MIGRATION-ADVISORY-LOCK** — migration advisory lock mechanism. In progress on sdd/fu-miglock; track coordination. See final-review blocking #2. ~2d
 - [ ] **FU-ROUTING-METRICS** — routing metrics restoration (currently disabled due to promauto double-registration). Per-evaluator custom registry. In progress on sdd/fu-routing-metrics. ~2d
-- [ ] **FU-RECEIVERS-INTEGRATION-EPIC** — receivers: integration→PublishingTarget auto-provisioning (data-plane drop-in epic). Docs-level caveat: currently control-plane parity only, data-plane via K8s Secrets. See final-review #5. ~5-7d
+- [ ] **FU-RECEIVERS-INTEGRATION** — receivers: integration auto-provisioning (data-plane follow-up; current state: control-plane parity only, delivery via K8s Secrets). See final-review #5. ~5-7d
 - [ ] **FU-FINGERPRINT-HEX-FORMAT** — fingerprint 16-hex upstream format (F2 compatibility). ~0.5d
 - [ ] **FU-SILENCES-EXPIRED-QUERY** — silences --expired query support. ~0.5d
 - [ ] **FU-GET-ALERTS-V1** — GET /api/v1/alerts endpoint (parity gap, brief asked POST alias only). ~0.5d
@@ -117,6 +117,18 @@
 - [ ] **FU-GLOB-DEFAULT-VALUES** — GlobalConfig fallback fields for group_by/duration. ~0.5d
 - [ ] **FU-DOUBLE-NORMALIZE-ROUTES** — double NormalizeRoutePrefix call cleanup. ~0.25d
 - [ ] **FU-PARSEBOOL-EMPTY-DEFAULT** — parseBoolQueryStrict silently defaults on empty param value. ~0.25d
+- [ ] **FU-MICRO-CLEANUPS** — minor code/test hygiene from final-review backlog:
+  - matcherErrorCode classification via error-string substring (fragile); clarify or fix
+  - GetStats TODOs (GCLastRun, etc., pre-existing)
+  - TimerManagerConfig dead config defaults (startup-only decision)
+  - warnGroupingFallback per-alert log rate-limit at volume
+  - copyMetadata shallow-copies timer pointers (pre-existing, flagged by re-reviewer)
+  - DefaultFormatRegistry comment stale ("5 formats" now outdated)
+  - sleep-poll e2e test flakiness (registry e2e uses poll)
+  - TimeIntervalNames Redis round-trip test gap
+  - telegram field-level validator missing in configvalidator (backstopped by routing.Parse)
+  - configurable silence-sync intervals (2s backoff / 5min resync hardcoded constants)
+  - ~0.25d each
 
 - [ ] **PARITY-C2-REMAINING-RECEIVERS** — нишевые:
   - VictorOps/Splunk On-Call — config определён (`VictorOpsConfig`)
