@@ -83,6 +83,46 @@ The endpoints below are **not** part of the current guaranteed replacement slice
 
 ---
 
+## Receiver Integration Compatibility Matrix
+
+This matrix covers `receivers[].*_configs` notification integrations, as
+distinct from the HTTP API surface above. "Config accepted" means
+`internal/alertmanager/config.Receiver` (parsed by `pkg/configvalidator`)
+has a matching field; "runtime wired" means
+`internal/infrastructure/routing.Receiver` and the publishing factory
+(`internal/infrastructure/publishing.PublisherFactory.CreatePublisher*`)
+actually dispatch notifications for it. A receiver can validate cleanly
+and still send zero notifications if it is config-accepted but not
+runtime-wired — see `pkg/configvalidator/doc.go` for the authoritative
+statement of this divergence, which this table mirrors.
+
+| Integration | Config accepted | Runtime wired | Status | Notes |
+|-------------|:---:|:---:|--------|-------|
+| `webhook_configs` | ✅ | ✅ | 🟢 Supported | Generic HTTP POST; also the delivery path for Discord/Teams (see below) |
+| `email_configs` | ✅ | ✅ | 🟢 Supported | SMTP, enhanced publisher |
+| `pagerduty_configs` | ✅ | ✅ | 🟢 Supported | Events API v2 |
+| `slack_configs` | ✅ | ✅ | 🟢 Supported | Incoming Webhooks, message threading cache |
+| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Bot API `sendMessage` |
+| Rootly (`alertmanager`/`rootly` target type) | N/A (AMP-native target, not an upstream receiver type) | ✅ | 🟢 Supported | AMP-specific addition, not part of upstream Alertmanager |
+| `opsgenie_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E126-E129); no `OpsGenieConfigs` field on the runtime receiver and no publisher target type — zero notifications sent |
+| `victorops_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E130-E134); same gap as OpsGenie. Deferred "по потребности" (on demand) — build only if a concrete need arises |
+| `wechat_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E138-E141); same gap. Deferred "по потребности" |
+| Discord (native receiver type) | ❌ | ❌ | 🟢 Effectively supported via webhook | No dedicated `discord_configs`; ships as a built-in Discord-embed template (`internal/notification/template/defaults/webhook.go`) rendered through `webhook_configs`. Not a blocker |
+| Microsoft Teams (native receiver type) | ❌ | ❌ | 🟢 Effectively supported via webhook | Same pattern: built-in Adaptive Card template via `webhook_configs`, not a dedicated receiver type. Not a blocker |
+| Pushover | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
+| AWS SNS | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
+| Webex | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
+
+**Decision (Task 7.2)**: VictorOps and WeChat publishers are not built in
+this task. Their config types and validators (Phase 5) already exist and
+are kept as-is; wiring a runtime publisher is deferred until a concrete
+need appears ("по потребности"). Pushover/SNS/Webex are fixed as
+unsupported and are not a blocker, since most third-party chat/incident
+tools (including Discord and Teams) integrate through the generic
+`webhook_configs` receiver instead of a bespoke native integration.
+
+---
+
 ## Replacement Guidance
 
 AMP now provides a stronger controlled-replacement foundation, covering core ingest, grouped queries, silence CRUD, status/receivers/reload operations, and runtime probes.
