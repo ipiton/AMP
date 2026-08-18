@@ -60,19 +60,16 @@ services:
     ports:
       - "18082:8080"
     depends_on:
+      # amp-a is no longer a startup dependency: internal/database.RunMigrations
+      # now takes a Postgres session advisory lock (see
+      # internal/database/migrations.go) before running goose migrations, so
+      # both replicas can start simultaneously against a fresh database. The
+      # second replica blocks on the lock until the first finishes, then
+      # no-ops (already applied) -- see
+      # TestRunMigrations_ConcurrentReplicas_FreshDB in
+      # internal/database/migrations_concurrent_test.go for the regression
+      # test covering this race directly against real Postgres.
       redis:
         condition: service_healthy
       postgres:
-        condition: service_healthy
-      # amp-a first, not just redis/postgres: internal/database.RunMigrations
-      # (goose.Up) takes no Postgres advisory lock, so two replicas racing
-      # to migrate a brand-new database both try to create goose's own
-      # goose_db_version tracking table and collide (23505 duplicate key on
-      # pg_type) -- a genuine pre-existing gap, surfaced by this e2e test,
-      # in migration startup safety under >1 replica. Out of scope for task
-      # 6.5 to fix in application code (unrelated to the heartbeat/status
-      # feature); sequencing amp-b after amp-a's first successful boot
-      # sidesteps the race for this test the same way a one-shot migration
-      # Job ahead of a Deployment would in a real multi-replica rollout.
-      amp-a:
         condition: service_healthy
