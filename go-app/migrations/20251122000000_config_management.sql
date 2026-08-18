@@ -172,6 +172,7 @@ COMMENT ON COLUMN config_locks.expires_at IS 'Lock auto-expires after this times
 -- ================================================================================
 
 -- Function: Auto-cleanup expired locks
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION cleanup_expired_config_locks()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -179,6 +180,7 @@ BEGIN
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 -- Trigger: Cleanup expired locks on insert
 CREATE TRIGGER trigger_cleanup_expired_locks
@@ -186,6 +188,7 @@ CREATE TRIGGER trigger_cleanup_expired_locks
     EXECUTE FUNCTION cleanup_expired_config_locks();
 
 -- Function: Auto-cleanup old audit logs (retention: 90 days)
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION cleanup_old_audit_logs()
 RETURNS INTEGER AS $$
 DECLARE
@@ -198,8 +201,10 @@ BEGIN
     RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 -- Function: Get latest config version
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION get_latest_config_version()
 RETURNS BIGINT AS $$
 BEGIN
@@ -209,6 +214,7 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 -- ================================================================================
 -- Initial Data (Optional)

@@ -5,6 +5,7 @@
 -- ============================================================================
 -- UP Migration
 -- ============================================================================
+-- +goose Up
 
 -- Index for filtering by status (firing/resolved)
 -- Used in: WHERE status = 'firing'
@@ -67,6 +68,7 @@ WHERE status = 'firing';
 -- ============================================================================
 -- DOWN Migration
 -- ============================================================================
+-- +goose Down
 
 -- To rollback, uncomment and run:
 -- DROP INDEX IF EXISTS idx_alerts_active;
