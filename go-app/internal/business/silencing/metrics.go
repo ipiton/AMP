@@ -62,6 +62,14 @@ type SilenceMetrics struct {
 	gcTotalRuns   atomic.Uint64
 	syncTotalRuns atomic.Uint64
 	startTime     time.Time
+
+	// GC/sync run bookkeeping for GetStats() (task fu2-d item 2): last-run
+	// timestamps stored as UnixNano (0 = never run) and a running total of
+	// silences cleaned by the GC worker, all updated atomically from the
+	// worker goroutines and read lock-free from GetStats().
+	gcLastRunUnixNano   atomic.Int64
+	gcTotalCleaned      atomic.Int64
+	syncLastRunUnixNano atomic.Int64
 }
 
 // NewSilenceMetrics creates and registers Prometheus metrics for SilenceManager.
@@ -202,12 +210,15 @@ func (m *SilenceMetrics) RecordGCRun(phase string, cleaned int64) {
 	m.GCRuns.WithLabelValues(phase).Inc()
 	m.GCCleaned.WithLabelValues(phase).Add(float64(cleaned))
 	m.gcTotalRuns.Add(1)
+	m.gcTotalCleaned.Add(cleaned)
+	m.gcLastRunUnixNano.Store(time.Now().UnixNano())
 }
 
 // RecordSyncRun records a sync worker run.
 func (m *SilenceMetrics) RecordSyncRun() {
 	m.SyncRuns.Inc()
 	m.syncTotalRuns.Add(1)
+	m.syncLastRunUnixNano.Store(time.Now().UnixNano())
 }
 
 // UpdateActiveSilencesGauge updates the active silences gauge.
@@ -247,4 +258,30 @@ func (m *SilenceMetrics) GetSyncTotalRuns() uint64 {
 // GetUptime returns manager uptime in seconds.
 func (m *SilenceMetrics) GetUptime() int {
 	return int(time.Since(m.startTime).Seconds())
+}
+
+// GetGCLastRun returns the timestamp of the most recent GC worker run, or
+// the zero time.Time if the GC worker has never run (for GetStats()).
+func (m *SilenceMetrics) GetGCLastRun() time.Time {
+	ns := m.gcLastRunUnixNano.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
+}
+
+// GetGCTotalCleaned returns the running total of silences cleaned (expired +
+// deleted) across all GC worker runs (for GetStats()).
+func (m *SilenceMetrics) GetGCTotalCleaned() int64 {
+	return m.gcTotalCleaned.Load()
+}
+
+// GetSyncLastRun returns the timestamp of the most recent sync worker run,
+// or the zero time.Time if the sync worker has never run (for GetStats()).
+func (m *SilenceMetrics) GetSyncLastRun() time.Time {
+	ns := m.syncLastRunUnixNano.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }

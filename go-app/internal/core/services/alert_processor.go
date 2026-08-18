@@ -89,7 +89,20 @@ type AlertProcessor struct {
 	// but must not be extended into real routing state — Phase 2 needs a
 	// per-group decision store, not a bigger version of this field.
 	lastRoutingDecision atomic.Value
+
+	// Fallback-warning rate limiting (task fu2-d item 4): under sustained
+	// alert volume with grouping misconfigured, every single alert taking
+	// the shouldGroup=false path would otherwise log its own Warn and drown
+	// other signal. lastFallbackWarnUnixNano/suppressedFallbackWarns cap
+	// warnGroupingFallback to one Warn per fallbackWarnWindow, folding the
+	// count of skipped occurrences into the next Warn instead of losing it.
+	lastFallbackWarnUnixNano atomic.Int64
+	suppressedFallbackWarns  atomic.Int64
 }
+
+// fallbackWarnWindow is the minimum spacing between Warn-level log lines
+// emitted by warnGroupingFallback for a single AlertProcessor instance.
+const fallbackWarnWindow = time.Minute
 
 // AlertProcessorConfig holds configuration for AlertProcessor
 type AlertProcessorConfig struct {
@@ -238,13 +251,43 @@ func (p *AlertProcessor) shouldGroup(decision *RoutingDecision) bool {
 // route evaluation failed/was never configured for this alert) — task 2.3
 // constraint: grouping.enabled=true without a usable routing decision falls
 // back to direct publish LOUDLY rather than silently.
+//
+// Rate-limited to one Warn per fallbackWarnWindow (task fu2-d item 4):
+// every other alert hitting the same misconfiguration within the window
+// logs at Debug instead, and the count of those suppressed occurrences is
+// folded into the next Warn's "suppressed_since_last_warn" field so the
+// operational signal ("this keeps happening, N times since last log") is
+// not lost, just batched.
 func (p *AlertProcessor) warnGroupingFallback(decision *RoutingDecision) {
 	if !p.groupingEnabled || p.shouldGroup(decision) {
 		return
 	}
+
+	hasGroupManager := p.groupManager != nil
+	hasRoutingDecision := decision != nil
+
+	now := time.Now()
+	last := p.lastFallbackWarnUnixNano.Load()
+	if last != 0 && now.Sub(time.Unix(0, last)) < fallbackWarnWindow {
+		p.suppressedFallbackWarns.Add(1)
+		p.logger.Debug("Grouping enabled but this alert has no usable routing decision/group manager; falling back to direct publish (rate-limited, see periodic Warn summary)",
+			"has_group_manager", hasGroupManager,
+			"has_routing_decision", hasRoutingDecision)
+		return
+	}
+
+	if !p.lastFallbackWarnUnixNano.CompareAndSwap(last, now.UnixNano()) {
+		// Another goroutine just won the race to emit the Warn; count this
+		// occurrence as suppressed rather than double-logging.
+		p.suppressedFallbackWarns.Add(1)
+		return
+	}
+
+	suppressed := p.suppressedFallbackWarns.Swap(0)
 	p.logger.Warn("Grouping enabled but this alert has no usable routing decision/group manager; falling back to direct publish",
-		"has_group_manager", p.groupManager != nil,
-		"has_routing_decision", decision != nil)
+		"has_group_manager", hasGroupManager,
+		"has_routing_decision", hasRoutingDecision,
+		"suppressed_since_last_warn", suppressed)
 }
 
 // groupKeyFor computes the storage-scoped group key for alert under decision
