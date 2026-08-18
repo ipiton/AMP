@@ -17,6 +17,13 @@
 //     PagerDuty, Slack, Email, and Telegram configs. A config using only
 //     an OpsGenie/VictorOps/WeChat receiver will validate clean here and
 //     then send zero notifications at runtime.
+//   - Inverse of the above: TelegramConfigs has no matching field on
+//     internal/alertmanager/config.Receiver, and hasAnyIntegration()
+//     (backing the E024 "no integrations configured" check) does not
+//     look at it either. A receiver defining only telegram_configs is
+//     fully supported by the runtime (internal/infrastructure/routing.
+//     Receiver and the publisher both wire it) but fails E024 here, so
+//     this package rejects a config the runtime would happily serve.
 //   - Inhibition matchers-list syntax: InhibitRule.SourceMatchers/
 //     TargetMatchers validate for syntax (and get a W155 warning when
 //     present) but internal/infrastructure/inhibition.InhibitionRule has
