@@ -653,25 +653,61 @@ func TestGetStats_WithOperations(t *testing.T) {
 
 // === Notification Triggering Tests (parity-a1-notification-triggering) ===
 
+// mockPublisherTarget is the single synthetic target name mockPublisher
+// reports outcomes for (task fwb) — it stands in for "the one downstream
+// receiver endpoint" the way manager-level tests have always modeled
+// GroupNotificationPublisher, without needing to know about real
+// core.PublishingTarget fan-out (that lives below ApplicationPublishingAdapter/
+// PublishingCoordinator, a different package these tests don't exercise).
+const mockPublisherTarget = "mock"
+
 // mockPublisher records PublishGroup calls for assertion in tests (task
 // 2.4: GroupNotificationPublisher is a batch interface — one call per group
 // notification, carrying every alert in that notification, not one call per
-// alert). published has one entry per PublishGroup call; receivers has the
-// matching receiver argument for each call. Thread-safe: timer callbacks run
-// on their own goroutine.
+// alert). published has one entry per actual send (skipped calls per
+// mockPublisherTarget's per-target dedup, task fwb, are not appended);
+// receivers has the matching receiver argument for each entry. Thread-safe:
+// timer callbacks run on their own goroutine.
 type mockPublisher struct {
-	mu        sync.Mutex
-	published [][]*core.Alert
-	receivers []string
-	err       error
+	mu          sync.Mutex
+	published   [][]*core.Alert
+	receivers   []string
+	groupLabels []map[string]string
+	err         error
 }
 
-func (p *mockPublisher) PublishGroup(_ context.Context, alerts []*core.Alert, receiver string) error {
+// PublishGroup implements grouping.GroupNotificationPublisher. When err is
+// set it always fails the whole call (mirrors a total/degraded-mode
+// failure, e.g. metrics-only mode or every target down). Otherwise it
+// consults skipTarget for its one synthetic target (task fwb's per-target
+// nflog dedup, exercised the same way a real multi-target publisher would
+// be) — a skip means this fire is fully deduped and nothing is appended or
+// reported. groupLabels (review finding 1) is recorded per call so tests
+// can assert the manager resolved it correctly from GroupMetadata.GroupBy.
+func (p *mockPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, receiver string, groupLabels map[string]string, skipTarget func(string) bool) ([]TargetPublishOutcome, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.err != nil {
+		// Record the attempt even though it fails — calls() measures publish
+		// ATTEMPTS (matching this mock's pre-task-fwb behavior), not confirmed
+		// deliveries; tests rely on seeing a failed attempt counted so they can
+		// tell "retried" apart from "wrongly deduped".
+		p.published = append(p.published, alerts)
+		p.receivers = append(p.receivers, receiver)
+		p.groupLabels = append(p.groupLabels, groupLabels)
+		return nil, p.err
+	}
+	if skipTarget != nil && skipTarget(mockPublisherTarget) {
+		// Fully deduped: no real attempt was made against the (one synthetic)
+		// target, so nothing is recorded — mirrors a real publisher that
+		// skips a target's HTTP call entirely because it already delivered
+		// this cycle.
+		return nil, nil
+	}
 	p.published = append(p.published, alerts)
 	p.receivers = append(p.receivers, receiver)
-	return p.err
+	p.groupLabels = append(p.groupLabels, groupLabels)
+	return []TargetPublishOutcome{{Target: mockPublisherTarget, Success: true}}, nil
 }
 
 func (p *mockPublisher) calls() [][]*core.Alert {
@@ -680,6 +716,59 @@ func (p *mockPublisher) calls() [][]*core.Alert {
 	out := make([][]*core.Alert, len(p.published))
 	copy(out, p.published)
 	return out
+}
+
+// lastGroupLabels returns the groupLabels argument from the most recent
+// PublishGroup call (review finding 1), or nil if PublishGroup was never
+// called.
+func (p *mockPublisher) lastGroupLabels() map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.groupLabels) == 0 {
+		return nil
+	}
+	return p.groupLabels[len(p.groupLabels)-1]
+}
+
+// === groupLabelsFor unit tests (review finding 1, fwb fix round 1) ===
+
+func TestGroupLabelsFor_ResolvesGroupByNamesFromFirstAlert(t *testing.T) {
+	group := &AlertGroup{Metadata: &GroupMetadata{GroupBy: []string{"alertname", "cluster"}}}
+	alerts := []*core.Alert{
+		createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU", "cluster": "prod", "instance": "host-1"}),
+	}
+
+	got := groupLabelsFor(group, alerts)
+	assert.Equal(t, map[string]string{"alertname": "HighCPU", "cluster": "prod"}, got)
+}
+
+func TestGroupLabelsFor_EmptyGroupByYieldsEmptyMap(t *testing.T) {
+	group := &AlertGroup{Metadata: &GroupMetadata{GroupBy: nil}}
+	alerts := []*core.Alert{createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU"})}
+
+	got := groupLabelsFor(group, alerts)
+	assert.Equal(t, map[string]string{}, got)
+	assert.NotNil(t, got)
+}
+
+func TestGroupLabelsFor_NilGroupOrMetadataYieldsEmptyMap(t *testing.T) {
+	alerts := []*core.Alert{createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU"})}
+
+	assert.Equal(t, map[string]string{}, groupLabelsFor(nil, alerts))
+	assert.Equal(t, map[string]string{}, groupLabelsFor(&AlertGroup{Metadata: nil}, alerts))
+}
+
+func TestGroupLabelsFor_EmptyAlertsYieldsEmptyMap(t *testing.T) {
+	group := &AlertGroup{Metadata: &GroupMetadata{GroupBy: []string{"alertname"}}}
+	assert.Equal(t, map[string]string{}, groupLabelsFor(group, nil))
+}
+
+func TestGroupLabelsFor_MissingLabelOnSourceAlertIsOmitted(t *testing.T) {
+	group := &AlertGroup{Metadata: &GroupMetadata{GroupBy: []string{"alertname", "missing"}}}
+	alerts := []*core.Alert{createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU"})}
+
+	got := groupLabelsFor(group, alerts)
+	assert.Equal(t, map[string]string{"alertname": "HighCPU"}, got)
 }
 
 // createTestManagerWithPublisher creates a manager with a publisher and timer manager wired up.

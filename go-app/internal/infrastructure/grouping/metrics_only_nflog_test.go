@@ -33,12 +33,12 @@ type nonDeliveringPublisher struct {
 	calls int
 }
 
-func (p *nonDeliveringPublisher) PublishGroup(_ context.Context, alerts []*core.Alert, _ string) error {
+func (p *nonDeliveringPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, _ func(string) bool) ([]TargetPublishOutcome, error) {
 	if len(alerts) == 0 {
-		return nil
+		return nil, nil
 	}
 	p.calls++
-	return fmt.Errorf("%w: publishing disabled", ErrDeliveryNotConfirmed)
+	return nil, fmt.Errorf("%w: publishing disabled", ErrDeliveryNotConfirmed)
 }
 
 func TestPublishGroupAlerts_MetricsOnlyPublisher_DoesNotRecordSent(t *testing.T) {
@@ -72,7 +72,7 @@ func TestPublishGroupAlerts_MetricsOnlyPublisher_DoesNotRecordSent(t *testing.T)
 	}
 
 	// And the group must still read as un-notified for any replica.
-	dup, err := notifyLog.IsDuplicate(ctx, groupKey, alertSetSignature([]*core.Alert{alert}), time.Now().Add(-time.Hour))
+	dup, err := notifyLog.IsDuplicate(ctx, groupKey, mockPublisherTarget, alertSetSignature([]*core.Alert{alert}), time.Now().Add(-time.Hour))
 	require.NoError(t, err)
 	assert.False(t, dup, "the group must not be deduped away for other replicas")
 }
