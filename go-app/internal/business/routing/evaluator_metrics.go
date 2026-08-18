@@ -34,9 +34,18 @@ type EvaluatorMetrics struct {
 	ErrorsTotal *prometheus.CounterVec
 }
 
-// NewEvaluatorMetrics creates Prometheus metrics for RouteEvaluator.
+// NewEvaluatorMetrics creates Prometheus metrics for RouteEvaluator,
+// auto-registered with the default Prometheus registry
+// (prometheus.DefaultRegisterer).
 //
-// All metrics are auto-registered with the default Prometheus registry.
+// Call this AT MOST ONCE per process (per registerer, really — see
+// NewEvaluatorMetricsWithRegisterer): promauto panics on double
+// registration. Callers that may construct more than one RouteEvaluator
+// over a process's lifetime (e.g. a hot-reloadable adapter that rebuilds
+// the evaluator on every call) must build a single *EvaluatorMetrics once
+// and inject it via EvaluatorOptions.Metrics rather than calling this
+// repeatedly — see application.routeTreeEvaluator for the production
+// example.
 //
 // Returns:
 //   - *EvaluatorMetrics: A new metrics instance
@@ -46,8 +55,18 @@ type EvaluatorMetrics struct {
 //	metrics := NewEvaluatorMetrics()
 //	metrics.RecordEvaluation("pagerduty", 50*time.Microsecond)
 func NewEvaluatorMetrics() *EvaluatorMetrics {
+	return NewEvaluatorMetricsWithRegisterer(prometheus.DefaultRegisterer)
+}
+
+// NewEvaluatorMetricsWithRegisterer creates Prometheus metrics for
+// RouteEvaluator, registered against the given registerer instead of the
+// process-wide default. Tests use this with a fresh prometheus.NewRegistry()
+// per test to get isolated, panic-free metrics without touching the global
+// default registry.
+func NewEvaluatorMetricsWithRegisterer(reg prometheus.Registerer) *EvaluatorMetrics {
+	factory := promauto.With(reg)
 	return &EvaluatorMetrics{
-		EvaluationsTotal: promauto.NewCounterVec(
+		EvaluationsTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -57,7 +76,7 @@ func NewEvaluatorMetrics() *EvaluatorMetrics {
 			[]string{"receiver"},
 		),
 
-		EvaluationDuration: promauto.NewHistogram(
+		EvaluationDuration: factory.NewHistogram(
 			prometheus.HistogramOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -68,7 +87,7 @@ func NewEvaluatorMetrics() *EvaluatorMetrics {
 			},
 		),
 
-		NoMatchTotal: promauto.NewCounter(
+		NoMatchTotal: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -77,7 +96,7 @@ func NewEvaluatorMetrics() *EvaluatorMetrics {
 			},
 		),
 
-		MultiReceiverTotal: promauto.NewCounter(
+		MultiReceiverTotal: factory.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",
@@ -86,7 +105,7 @@ func NewEvaluatorMetrics() *EvaluatorMetrics {
 			},
 		),
 
-		ErrorsTotal: promauto.NewCounterVec(
+		ErrorsTotal: factory.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "alert_history",
 				Subsystem: "routing",

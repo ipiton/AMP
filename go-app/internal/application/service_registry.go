@@ -1257,19 +1257,21 @@ func (r *ServiceRegistry) initializeRouting(ctx context.Context) error {
 	// (regex cache + options only) so it is safe to keep across reloads —
 	// only the manager's tree is swapped by Reload.
 	//
-	// EnableMetrics is forced off (unlike DefaultMatcherOptions()):
-	// MatcherMetrics registers via promauto against the default Prometheus
-	// registry, which panics on double-registration. initializeRouting can
-	// run more than once per process (tests construct a fresh
-	// ServiceRegistry per case; a future re-init path could too), so a
-	// metrics-enabled matcher is not safe to construct here. Same reasoning
-	// as routeTreeEvaluator's EnableMetrics:false — see route_evaluator.go.
+	// Metrics are injected rather than left to MatcherOptions'/
+	// EvaluatorOptions' own promauto construction: routingMatcherMetricsOnce/
+	// routingEvaluatorMetricsOnce (route_evaluator.go) build each metrics
+	// instance exactly once per process via sync.OnceValue, so
+	// initializeRouting running more than once per process (tests construct
+	// a fresh ServiceRegistry per case; a future re-init path could too)
+	// reuses the same instances instead of double-registering against the
+	// default Prometheus registry.
 	matcherOpts := businessrouting.DefaultMatcherOptions()
-	matcherOpts.EnableMetrics = false
+	matcherOpts.EnableMetrics = true
+	matcherOpts.Metrics = routingMatcherMetricsOnce()
 	matcher := businessrouting.NewRouteMatcher(nil, matcherOpts)
 
 	r.routeTreeManager = manager
-	r.routeEvaluator = newRouteTreeEvaluator(manager, matcher)
+	r.routeEvaluator = newRouteTreeEvaluator(manager, matcher, routingEvaluatorMetricsOnce())
 
 	stats := tree.GetStats()
 	r.logger.Info("Routing engine initialized",
