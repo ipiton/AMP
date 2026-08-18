@@ -63,6 +63,10 @@ type DefaultGroupManager struct {
 	// Optional: nil skips silence filtering.
 	silenceChecker GroupSilenceChecker
 
+	// timeIntervalLookup is the notify-chain's TimeMute step (task 3.2).
+	// Optional: nil skips time-interval mute filtering.
+	timeIntervalLookup GroupTimeIntervalLookup
+
 	// notifyLog is the minimal in-memory dedup log for the notify-chain's
 	// Dedup step (task 2.4). Always non-nil (see dedup.go for why this is a
 	// deliberately minimal substitute for upstream's Redis-backed nflog).
@@ -122,19 +126,20 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 	}
 
 	mgr := &DefaultGroupManager{
-		storage:           cfg.Storage,
-		fingerprintIndex:  make(map[string]GroupKey),
-		keyGenerator:      cfg.KeyGenerator,
-		config:            cfg.Config,
-		timerManager:      cfg.TimerManager,      // Optional (TN-124)
-		publisher:         cfg.Publisher,         // Optional (TN-124), may also arrive later via SetPublisher (task 2.4)
-		inhibitionChecker: cfg.InhibitionChecker, // Optional (task 2.4)
-		silenceChecker:    cfg.SilenceChecker,    // Optional (task 2.4)
-		notifyLog:         newNotifyDedupLog(),   // task 2.4: always-on minimal dedup
-		publishLocks:      &groupPublishLocks{},  // task 2.4 fix round 1: serialize per group key
-		logger:            cfg.Logger,
-		metrics:           cfg.Metrics,
-		stats:             &groupStats{},
+		storage:            cfg.Storage,
+		fingerprintIndex:   make(map[string]GroupKey),
+		keyGenerator:       cfg.KeyGenerator,
+		config:             cfg.Config,
+		timerManager:       cfg.TimerManager,       // Optional (TN-124)
+		publisher:          cfg.Publisher,          // Optional (TN-124), may also arrive later via SetPublisher (task 2.4)
+		inhibitionChecker:  cfg.InhibitionChecker,  // Optional (task 2.4)
+		silenceChecker:     cfg.SilenceChecker,     // Optional (task 2.4)
+		timeIntervalLookup: cfg.TimeIntervalLookup, // Optional (task 3.2)
+		notifyLog:          newNotifyDedupLog(),    // task 2.4: always-on minimal dedup
+		publishLocks:       &groupPublishLocks{},   // task 2.4 fix round 1: serialize per group key
+		logger:             cfg.Logger,
+		metrics:            cfg.Metrics,
+		stats:              &groupStats{},
 	}
 
 	// Register timer callbacks if timer manager is configured (TN-124)
@@ -199,11 +204,17 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 		// GroupMetadata.Timings.
 		group.Metadata.Timings = options.timings.Clone()
 
+		// task 3.2: capture the matched route's own mute/active
+		// time_interval NAMES onto this group at creation time — see
+		// WithMuteTimeIntervals and GroupMetadata.TimeIntervalNames.
+		group.Metadata.TimeIntervalNames = options.timeIntervalNames.Clone()
+
 		m.logger.Info("created new alert group",
 			"group_key", groupKey,
 			"alert", alert.AlertName,
 			"fingerprint", alert.Fingerprint,
-			"timings", group.Metadata.Timings)
+			"timings", group.Metadata.Timings,
+			"time_interval_names", group.Metadata.TimeIntervalNames)
 
 		// Metric: new group created
 		if m.metrics != nil {
@@ -959,17 +970,91 @@ func (m *DefaultGroupManager) filterSilenced(groupKey GroupKey, alerts []*core.A
 	return kept
 }
 
-// publishGroupAlerts runs the notify-stage chain (task 2.4,
+// isTimeMuted evaluates the notify-chain's TimeMute step (task 3.2, Step 3:
+// Inhibit -> Silence -> TimeMute -> Dedup). Unlike filterInhibited/
+// filterSilenced, which drop individual alerts, a time-interval mute
+// suppresses the WHOLE group notification — upstream Alertmanager applies
+// mute_time_intervals/active_time_intervals per ROUTE, not per alert.
+//
+// Mute semantics (mirrors upstream):
+//   - muted if ActiveTimeIntervals is non-empty and NO name in it matches
+//     now (outside every allowed window), OR
+//   - muted if ANY name in MuteTimeIntervals matches now.
+//
+// Mute wins: if both lists are set and the current time both matches a
+// mute interval AND falls inside an active interval, the group is still
+// muted.
+//
+// No-op (never muted) when no timeIntervalLookup is wired (backwards
+// compatible, same posture as inhibitionChecker/silenceChecker being
+// optional), or when names is nil/empty (the common case — the matched
+// route referenced no time_intervals at all).
+//
+// Fail-open per name (task 3.2 documented decision): if a referenced
+// interval name is no longer defined in the CURRENT config — e.g. it was
+// renamed or removed between alert ingest and this group-timer fire — that
+// name is logged as an error and treated as "did not match" rather than
+// aborting delivery. This matches filterInhibited's existing fail-open
+// posture: an internal lookup gap must never silently drop a notification
+// that would otherwise have gone out.
+func (m *DefaultGroupManager) isTimeMuted(groupKey GroupKey, names *TimeIntervalNames, now time.Time) bool {
+	if m.timeIntervalLookup == nil || names.IsEmpty() {
+		return false
+	}
+
+	if len(names.Active) > 0 {
+		anyActiveMatched := false
+		for _, name := range names.Active {
+			interval, ok := m.timeIntervalLookup.GetTimeInterval(name)
+			if !ok {
+				m.logger.Error("active_time_intervals: interval name undefined in current config at fire time, treating as not matched",
+					"group_key", groupKey,
+					"interval", name)
+				continue
+			}
+			if interval.Matches(now) {
+				anyActiveMatched = true
+				break
+			}
+		}
+		if !anyActiveMatched {
+			return true // outside every active window: muted
+		}
+	}
+
+	for _, name := range names.Mute {
+		interval, ok := m.timeIntervalLookup.GetTimeInterval(name)
+		if !ok {
+			m.logger.Error("mute_time_intervals: interval name undefined in current config at fire time, treating as not matched",
+				"group_key", groupKey,
+				"interval", name)
+			continue
+		}
+		if interval.Matches(now) {
+			return true // mute wins, even if an active window also matched
+		}
+	}
+
+	return false
+}
+
+// publishGroupAlerts runs the notify-stage chain (task 2.4-3.2,
 // alertmanager-parity) for a group snapshot when a group timer fires:
 //
-//	Inhibit -> Silence -> Dedup -> publish (ONE grouped notification)
+//	Inhibit -> Silence -> TimeMute -> Dedup -> publish (ONE grouped notification)
 //
 // This order matches upstream Alertmanager's notification pipeline. Inhibit
 // and Silence are evaluated against CURRENT state (send time), not ingest
-// time — see filterInhibited/filterSilenced. If filtering removes every
-// alert, or Dedup finds this exact alert set was already sent within
-// repeat_interval, nothing is published — that is the normal "suppressed"
-// case, not a failure, and is only logged at Debug.
+// time — see filterInhibited/filterSilenced. TimeMute (task 3.2) is also
+// send-time, but — unlike Inhibit/Silence — suppresses the WHOLE group at
+// once rather than filtering individual alerts (see isTimeMuted). If
+// filtering removes every alert, TimeMute applies, or Dedup finds this
+// exact alert set was already sent within repeat_interval, nothing is
+// published — that is the normal "suppressed" case, not a failure, and is
+// only logged at Debug. Suppression at any step means RecordSent is never
+// called, so the group's already-scheduled group_interval/repeat_interval
+// timer keeps ticking and will retry with the group's then-current state
+// (e.g. once a mute window ends).
 //
 // The publisher is read under m.mu (SetPublisher can update it after
 // construction — see its doc comment for why).
@@ -1019,7 +1104,21 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	// Step 3: Dedup (notification-log semantics, task 2.4 minimal in-memory
+	// Step 3: TimeMute (send-time, task 3.2) — whole-group suppression, not
+	// per-alert (see isTimeMuted's doc comment for semantics). Checked
+	// against the group's own MuteTimeIntervals/ActiveTimeIntervals NAMES,
+	// captured from the matched route at group-creation time.
+	if m.isTimeMuted(group.Key, group.Metadata.TimeIntervalNames, time.Now()) {
+		m.logger.Debug("group notification suppressed by time-interval mute",
+			"group_key", group.Key,
+			"receiver", receiver)
+		if m.metrics != nil {
+			m.metrics.RecordGroupOperation("publish", "muted")
+		}
+		return
+	}
+
+	// Step 4: Dedup (notification-log semantics, task 2.4 minimal in-memory
 	// substitute for upstream nflog — see dedup.go)
 	signature := alertSetSignature(alerts)
 	repeatInterval := m.effectiveRepeatInterval(group)
@@ -1032,7 +1131,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	// Step 4: publish ONE grouped notification (task 2.4's core change: a
+	// Step 5: publish ONE grouped notification (task 2.4's core change: a
 	// single PublishGroup call carrying all of alerts, not one PublishToAll
 	// call per alert).
 	if err := publisher.PublishGroup(ctx, alerts, receiver); err != nil {

@@ -10,6 +10,7 @@ import (
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -225,4 +226,75 @@ func TestReloadRoutingTree_RouteSectionRemoved_NoOp(t *testing.T) {
 	decision, err := registry.routeEvaluator.Evaluate(map[string]string{"severity": "critical"})
 	require.NoError(t, err)
 	assert.Equal(t, "critical-pagerduty", decision.Receiver)
+}
+
+// --- routeTreeTimeIntervalLookup (task 3.2) ---------------------------------
+
+// buildFixtureRouteConfigWithTimeIntervals reuses buildFixtureRouteConfig's
+// tree shape but adds a named time_intervals index, for the
+// GroupTimeIntervalLookup adapter tests below.
+func buildFixtureRouteConfigWithTimeIntervals() *infraroute.RouteConfig {
+	config := buildFixtureRouteConfig()
+	config.TimeIntervalIndex = map[string]timeinterval.TimeInterval{
+		"weekends": {Name: "weekends"},
+	}
+	return config
+}
+
+func TestRouteTreeTimeIntervalLookup_ResolvesDefinedName(t *testing.T) {
+	registry := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfigWithTimeIntervals()},
+		logger: testLogger(),
+	}
+	require.NoError(t, registry.initializeRouting(context.Background()))
+
+	lookup := newRouteTreeTimeIntervalLookup(registry.routeTreeManager)
+
+	ti, ok := lookup.GetTimeInterval("weekends")
+	require.True(t, ok)
+	assert.Equal(t, "weekends", ti.Name)
+}
+
+func TestRouteTreeTimeIntervalLookup_UndefinedNameReturnsNotOk(t *testing.T) {
+	registry := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfigWithTimeIntervals()},
+		logger: testLogger(),
+	}
+	require.NoError(t, registry.initializeRouting(context.Background()))
+
+	lookup := newRouteTreeTimeIntervalLookup(registry.routeTreeManager)
+
+	_, ok := lookup.GetTimeInterval("does-not-exist")
+	assert.False(t, ok)
+}
+
+// TestRouteTreeTimeIntervalLookup_HotReloadReflectsNewDefinition proves the
+// adapter never caches: it re-reads manager.GetTree() on every single call,
+// so a config hot-reload (RouteTreeManager.Reload) is visible on the very
+// next GetTimeInterval call — mirroring routeTreeEvaluator's same posture
+// for route decisions (TestReloadRoutingTree_SwapsTreeAtomically above).
+func TestRouteTreeTimeIntervalLookup_HotReloadReflectsNewDefinition(t *testing.T) {
+	registry := &ServiceRegistry{
+		config: &appconfig.Config{Routing: buildFixtureRouteConfigWithTimeIntervals()},
+		logger: testLogger(),
+	}
+	require.NoError(t, registry.initializeRouting(context.Background()))
+
+	lookup := newRouteTreeTimeIntervalLookup(registry.routeTreeManager)
+
+	_, ok := lookup.GetTimeInterval("weekends")
+	require.True(t, ok, "initial config must define 'weekends'")
+
+	reloaded := buildAlternateFixtureRouteConfig()
+	reloaded.TimeIntervalIndex = map[string]timeinterval.TimeInterval{
+		"renamed": {Name: "renamed"},
+	}
+	registry.config.Routing = reloaded
+	require.NoError(t, registry.reloadRoutingTree())
+
+	_, ok = lookup.GetTimeInterval("weekends")
+	assert.False(t, ok, "after reload, the old name must no longer resolve")
+
+	_, ok = lookup.GetTimeInterval("renamed")
+	assert.True(t, ok, "after reload, the SAME lookup instance must see the new definition")
 }

@@ -28,6 +28,18 @@ type RoutingDecision struct {
 	// RepeatInterval is the delay before re-sending an unchanged group.
 	RepeatInterval time.Duration
 
+	// MuteTimeIntervals are named time_intervals during which the matched
+	// route must NOT send notifications (task 3.2, PARITY-B1). Names
+	// only, NOT inherited from ancestor routes — mirrors
+	// business/routing.RoutingDecision.MuteTimeIntervals (see that field's
+	// doc comment for why this type doesn't just import it directly).
+	MuteTimeIntervals []string
+
+	// ActiveTimeIntervals are named time_intervals during which the
+	// matched route IS allowed to send; outside all of them, it is muted
+	// (task 3.2). Same non-inherited, names-only semantics.
+	ActiveTimeIntervals []string
+
 	// MatchedRoute is the route path that matched (debugging only).
 	MatchedRoute string
 }

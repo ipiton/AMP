@@ -15,6 +15,7 @@ import (
 	infracache "github.com/ipiton/AMP/internal/infrastructure/cache"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 )
 
 // newTestRegistryForGrouping builds a bare ServiceRegistry (no full
@@ -420,5 +421,88 @@ func TestServiceRegistryShutdown_GroupingTimerManagerStopsCleanly(t *testing.T) 
 	}
 	if r.groupTimerManager != nil {
 		t.Fatalf("groupTimerManager must be nil after Shutdown()")
+	}
+}
+
+// TestGroupingEndToEnd_TimeIntervalLookupWiredFromRouteTreeManager_MutesNotification
+// covers task 3.2's full wiring path: initializeRouting (step 2.6) builds
+// r.routeTreeManager with a time_intervals index, initializeGrouping (step
+// 2.7) wraps it into a routeTreeTimeIntervalLookup and passes it to
+// DefaultGroupManagerConfig.TimeIntervalLookup — and a group whose matched
+// route referenced that interval by name must have its group_wait
+// notification suppressed by the real (non-fake) wiring, not just the
+// grouping package's own unit tests.
+func TestGroupingEndToEnd_TimeIntervalLookupWiredFromRouteTreeManager_MutesNotification(t *testing.T) {
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileLite,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing: &infraroute.RouteConfig{
+			Route: &grouping.Route{
+				Receiver:      "default",
+				GroupBy:       []string{"alertname"},
+				GroupWait:     &grouping.Duration{Duration: 10 * time.Millisecond},
+				GroupInterval: &grouping.Duration{Duration: time.Hour}, // long enough to not fire during this test
+			},
+			Receivers: []*infraroute.Receiver{{Name: "default"}},
+			TimeIntervalIndex: map[string]timeinterval.TimeInterval{
+				"always-on-maintenance": {
+					Name:          "always-on-maintenance",
+					TimeIntervals: []timeinterval.Interval{{}}, // zero-value Interval matches every time
+				},
+			},
+		},
+	}
+	r := newTestRegistryForGrouping(cfg)
+	ctx := context.Background()
+
+	if err := r.initializeRouting(ctx); err != nil {
+		t.Fatalf("initializeRouting() error = %v", err)
+	}
+	if r.routeTreeManager == nil {
+		t.Fatalf("routeTreeManager must be initialized")
+	}
+
+	if err := r.initializeGrouping(ctx); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if r.groupManager == nil {
+		t.Fatalf("groupManager must be initialized")
+	}
+
+	pub := &recordingGroupPublisher{}
+	r.groupManager.SetPublisher(pub)
+
+	groupKey := grouping.GroupKey("receiver=default/alertname=HighCPU")
+	alert := &core.Alert{
+		Fingerprint: "fp-1",
+		AlertName:   "HighCPU",
+		Status:      core.StatusFiring,
+		Labels:      map[string]string{"alertname": "HighCPU"},
+		StartsAt:    time.Now(),
+	}
+
+	// Mirrors what AlertProcessor.routeAlertToGroup does with a matched
+	// route's decision.MuteTimeIntervals (task 3.2).
+	if _, err := r.groupManager.AddAlertToGroup(ctx, alert, groupKey,
+		grouping.WithMuteTimeIntervals([]string{"always-on-maintenance"}, nil)); err != nil {
+		t.Fatalf("AddAlertToGroup() error = %v", err)
+	}
+
+	// Give the group_wait timer time to fire. It must find nothing to
+	// publish: the wired TimeIntervalLookup resolves "always-on-maintenance"
+	// to an always-matching interval.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if pub.callCount() != 0 {
+		t.Fatalf("PublishGroup call count = %d, want 0 (muted via the wired TimeIntervalLookup)", pub.callCount())
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := r.groupTimerManager.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("groupTimerManager.Shutdown() error = %v", err)
 	}
 }
