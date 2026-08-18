@@ -189,3 +189,88 @@ func TestSilenceStore_UpsertFromAPI_InsertsUnderSameID(t *testing.T) {
 		t.Fatalf("silence not mirrored correctly: %+v (found=%v)", got, ok)
 	}
 }
+
+// Expire (amtool audit F3): DELETE must force a silence into the "expired"
+// state, not remove it — expired silences stay queryable via List()/Get()
+// until something else (GC, an explicit Delete) removes them.
+
+func TestSilenceStore_Expire_ActiveSilenceBecomesExpiredButStaysListed(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+	const id = "550e8400-e29b-41d4-a716-446655440000"
+
+	if _, err := store.Upsert(&core.SilenceInput{
+		ID:        id,
+		Matchers:  []core.SilenceMatcherInput{{Name: "alertname", Value: "X"}},
+		StartsAt:  now.Add(-time.Minute).Format(time.RFC3339),
+		EndsAt:    now.Add(time.Hour).Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "expire me",
+	}, now); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if ok := store.Expire(id, now); !ok {
+		t.Fatal("Expire() = false, want true for an existing silence")
+	}
+
+	got, ok := store.Get(id, now)
+	if !ok {
+		t.Fatal("silence must still be retrievable after Expire — it must not be removed")
+	}
+	if got.Status.State != "expired" {
+		t.Fatalf("Status.State = %q, want %q", got.Status.State, "expired")
+	}
+	wantEndsAt, _ := time.Parse(time.RFC3339, now.Format(time.RFC3339))
+	if endsAt, _ := time.Parse(time.RFC3339, got.EndsAt); !endsAt.Equal(wantEndsAt) {
+		t.Fatalf("EndsAt = %v, want forced to now (%v)", endsAt, wantEndsAt)
+	}
+
+	// Regression guard for F3 itself: List() (the GET /api/v2/silences read
+	// path) must include the now-expired silence.
+	all := store.List(now)
+	if len(all) != 1 || all[0].ID != id || all[0].Status.State != "expired" {
+		t.Fatalf("List() = %+v, want exactly 1 expired silence with id %q", all, id)
+	}
+}
+
+func TestSilenceStore_Expire_AlreadyExpired_DoesNotExtendEndsAt(t *testing.T) {
+	store := NewSilenceStore()
+	now := time.Now().UTC()
+	const id = "550e8400-e29b-41d4-a716-446655440000"
+
+	pastEndsAt := now.Add(-time.Hour)
+	if err := store.Rebuild([]core.APISilence{{
+		ID:        id,
+		Matchers:  []core.APISilenceMatcher{{Name: "alertname", Value: "X", IsEqual: true}},
+		StartsAt:  now.Add(-2 * time.Hour).Format(time.RFC3339),
+		EndsAt:    pastEndsAt.Format(time.RFC3339),
+		CreatedBy: "tester",
+		Comment:   "already expired",
+	}}, now); err != nil {
+		t.Fatalf("seed via Rebuild: %v", err)
+	}
+
+	if ok := store.Expire(id, now); !ok {
+		t.Fatal("Expire() = false, want true")
+	}
+
+	got, ok := store.Get(id, now)
+	if !ok {
+		t.Fatal("silence must still be retrievable")
+	}
+	wantEndsAt, _ := time.Parse(time.RFC3339, pastEndsAt.Format(time.RFC3339))
+	if endsAt, _ := time.Parse(time.RFC3339, got.EndsAt); !endsAt.Equal(wantEndsAt) {
+		t.Fatalf("EndsAt = %v, want unchanged past value %v (Expire must not extend it)", endsAt, wantEndsAt)
+	}
+	if got.Status.State != "expired" {
+		t.Fatalf("Status.State = %q, want %q", got.Status.State, "expired")
+	}
+}
+
+func TestSilenceStore_Expire_UnknownID_ReturnsFalse(t *testing.T) {
+	store := NewSilenceStore()
+	if ok := store.Expire("does-not-exist", time.Now().UTC()); ok {
+		t.Fatal("Expire() = true for an unknown ID, want false")
+	}
+}

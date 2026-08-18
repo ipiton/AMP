@@ -1525,11 +1525,39 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 		t.Fatalf("DELETE /api/v2/silence/{id} expected empty body, got %q", deleteRec.Body.String())
 	}
 
+	// DELETE forces early expiry (matching upstream Alertmanager and amtool's
+	// `silence expire`), it does not remove the row: GET must keep returning
+	// it (alertmanager-parity amtool audit F3 — see
+	// memory.SilenceStore.Expire's doc comment). validSilencePayload's
+	// startsAt is 2099 (still pending "now"), and upstream's own state
+	// priority checks StartsAt before EndsAt (see silenceState/getState), so
+	// this fixture reports "pending" both before AND after the forced
+	// expiry — the state label itself isn't what this assertion is probing;
+	// the already-active -> expired transition is covered by
+	// TestSilenceStore_Expire_* and
+	// TestSilencesHandler_ExpiredSilenceStaysQueryable. What must hold here
+	// is that the row survives at all instead of 404'ing.
 	getAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
 	getAfterDeleteRec := httptest.NewRecorder()
 	mux.ServeHTTP(getAfterDeleteRec, getAfterDeleteReq)
-	if getAfterDeleteRec.Code != http.StatusNotFound {
-		t.Fatalf("GET /api/v2/silence/{id} after delete expected 404, got %d", getAfterDeleteRec.Code)
+	if getAfterDeleteRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silence/{id} after delete expected 200 (expired-in-place, not removed), got %d", getAfterDeleteRec.Code)
+	}
+
+	// GET /api/v2/silences (the amtool `silence query --expired` read path)
+	// must also keep listing it.
+	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
+	listAfterDeleteRec := httptest.NewRecorder()
+	mux.ServeHTTP(listAfterDeleteRec, listAfterDeleteReq)
+	if listAfterDeleteRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/silences after delete expected 200, got %d", listAfterDeleteRec.Code)
+	}
+	var silencesAfterDelete []map[string]any
+	if err := json.Unmarshal(listAfterDeleteRec.Body.Bytes(), &silencesAfterDelete); err != nil {
+		t.Fatalf("failed to decode silences list after delete: %v", err)
+	}
+	if len(silencesAfterDelete) != 1 {
+		t.Fatalf("expected 1 silence still listed after delete, got %d", len(silencesAfterDelete))
 	}
 }
 
