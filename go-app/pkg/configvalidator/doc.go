@@ -17,13 +17,13 @@
 //     PagerDuty, Slack, Email, and Telegram configs. A config using only
 //     an OpsGenie/VictorOps/WeChat receiver will validate clean here and
 //     then send zero notifications at runtime.
-//   - Inverse of the above: TelegramConfigs has no matching field on
-//     internal/alertmanager/config.Receiver, and hasAnyIntegration()
-//     (backing the E024 "no integrations configured" check) does not
-//     look at it either. A receiver defining only telegram_configs is
-//     fully supported by the runtime (internal/infrastructure/routing.
-//     Receiver and the publisher both wire it) but fails E024 here, so
-//     this package rejects a config the runtime would happily serve.
+//   - (Fixed, task 5.4): TelegramConfigs used to have no matching field on
+//     internal/alertmanager/config.Receiver, so hasAnyIntegration() (the
+//     E024 "no integrations configured" check) rejected a telegram-only
+//     receiver the runtime would happily serve. Receiver now carries a
+//     minimal TelegramConfig (see config.go) mirroring the runtime-parity
+//     fields, and hasAnyIntegration() checks it - a telegram-only receiver
+//     validates clean, matching runtime support.
 //   - Inhibition matchers-list syntax: InhibitRule.SourceMatchers/
 //     TargetMatchers validate for syntax (and get a W155 warning when
 //     present) but internal/infrastructure/inhibition.InhibitionRule has
@@ -43,7 +43,13 @@
 //     reminder that any other constant borrowed from a runtime package
 //     should be referenced, not copied, for exactly this reason.
 //
-// Task 5.4 (wiring this package into the server's /-/reload path) is a
-// separate, later task and has not been done yet; none of the above
-// divergences are exercised through the running server today.
+// Task 5.4 wires this package into internal/config.LoadConfig (and,
+// transitively, the server's /-/reload path, which calls LoadConfig on
+// every reload) - see internal/config/alertmanager_validation.go. The
+// check only runs when the config file has a top-level `route:` section
+// (the same gate internal/config.loadRouteConfig already uses for
+// infrastructure/routing.Parse()), so it does not fire for legacy
+// single-receiver configs that never adopted the route tree. Errors
+// (E-codes) reject the load/reload with details; warnings (W-codes) are
+// logged, not blocking.
 package configvalidator
