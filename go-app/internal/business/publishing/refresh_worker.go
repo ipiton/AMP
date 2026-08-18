@@ -87,12 +87,19 @@ func (m *DefaultRefreshManager) executeRefresh(isManual bool) {
 		return
 	}
 
+	// Called synchronously (runBackgroundWorker calls executeRefresh directly,
+	// not via a spawned goroutine), so this is the same "mark started before
+	// any waiter could poll GetStatus" guarantee RefreshNow relies on.
+	m.markRefreshStarted()
+
 	m.doRefresh(isManual)
 }
 
 // doRefresh performs the actual refresh work with retry logic. The caller
 // MUST have already acquired the single-flight slot via tryAcquireRefreshSlot
-// — doRefresh only releases it (via defer), it never acquires it.
+// and flipped state via markRefreshStarted() — doRefresh only releases the
+// slot (via defer) and transitions state to a terminal outcome, it never
+// acquires the slot or marks state as started.
 //
 // This method:
 //  1. Updates metrics (in_progress=1)
