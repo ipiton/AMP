@@ -70,6 +70,21 @@ type RoutingDecision struct {
 	// Inherited from matched route (or root if no match).
 	RepeatInterval time.Duration
 
+	// MuteTimeIntervals are named time_intervals during which the matched
+	// route must NOT send notifications (task 3.2, PARITY-B1). NOT
+	// inherited from the matched route's ancestors — this is exactly the
+	// matched node's own field (see RouteNode.MuteTimeIntervals). Names
+	// only; resolving them to their timeinterval.TimeInterval definition
+	// happens at notify-chain TimeMute time via RouteTree.GetTimeInterval,
+	// not here.
+	MuteTimeIntervals []string
+
+	// ActiveTimeIntervals are named time_intervals during which the
+	// matched route IS allowed to send; outside all of them, it is muted
+	// (task 3.2). Same non-inherited, names-only semantics as
+	// MuteTimeIntervals above.
+	ActiveTimeIntervals []string
+
 	// MatchedRoute is the path of matched route (for debugging).
 	//
 	// Example: "/routes[0]" or "/routes[0]/routes[1]"

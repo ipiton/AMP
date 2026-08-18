@@ -23,7 +23,7 @@
 
 ## WIP (Max 2)
 
-_пусто — есть слот для старта следующей задачи_
+- [ ] **AMP-PARITY** — drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). План: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Поглощает PARITY-B1/B3/B6 из Queue.
 
 ## Notes
 - Очередь обновлена 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.

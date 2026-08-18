@@ -162,6 +162,49 @@ func TestDistributedLock_Extend(t *testing.T) {
 	})
 }
 
+// TestDistributedLock_Extend_SubSecondTTL is a regression test for a bug
+// fixed alongside task 6.4 (leader election): Extend built its Redis expire
+// argument via int(newTTL.Seconds()), which truncates any newTTL below one
+// second to 0 — and `EXPIRE key 0` deletes the key immediately instead of
+// extending it, so extending a sub-second-TTL lock destroyed it. Fixed by
+// switching to PEXPIRE with newTTL.Milliseconds(). This pins that fix on
+// DistributedLock directly, independent of LeaderElector (the caller whose
+// short-TTL tests originally surfaced it — production TTLs in this package
+// are otherwise always well above 1s, so the bug was latent until then).
+func TestDistributedLock_Extend_SubSecondTTL(t *testing.T) {
+	client, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer func() { _ = client.Close() }()
+
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"200ms", 200 * time.Millisecond},
+		{"500ms", 500 * time.Millisecond},
+		{"900ms", 900 * time.Millisecond},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "subsecond_ttl_" + tc.name
+			lock := NewDistributedLock(client, key, &LockConfig{TTL: 5 * time.Second}, nil)
+
+			acquired, err := lock.Acquire(ctx)
+			require.NoError(t, err)
+			require.True(t, acquired)
+
+			err = lock.Extend(ctx, tc.ttl)
+			require.NoError(t, err, "Extend with a sub-second TTL must succeed, not delete the key")
+
+			require.True(t, mr.Exists(key), "key must still exist after Extend with a sub-second TTL")
+			assert.Equal(t, tc.ttl, mr.TTL(key), "TTL after Extend should be exactly what was requested (PEXPIRE), not truncated to 0 (EXPIRE)")
+		})
+	}
+}
+
 func TestDistributedLock_Concurrency(t *testing.T) {
 	client, mr := setupTestRedis(t)
 	defer mr.Close()

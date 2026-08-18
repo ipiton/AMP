@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 )
 
 // RouteTreeManager manages hot reload of routing trees with zero downtime.
@@ -130,7 +132,7 @@ func (m *RouteTreeManager) GetTree() *RouteTree {
 // Returns:
 // - nil on success
 // - error if build or validation fails
-func (m *RouteTreeManager) Reload(config *RouteConfig) error {
+func (m *RouteTreeManager) Reload(config *infraroute.RouteConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

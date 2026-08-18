@@ -216,6 +216,13 @@ func (m *RouteMatcher) MatchesNode(node *RouteNode, alert *Alert) bool {
 //   - Cache miss: ~500µs (first time only)
 //
 // Note: Invalid regex should be caught at config parse time (TN-137).
+//
+// Anchoring: patterns are compiled as `^(?:<pattern>)$`, matching upstream
+// Alertmanager semantics. Without anchoring, a matcher like `=~ "prod"`
+// would match "production" or "not-prod-either" as a substring, which is
+// not how Alertmanager (or this matcher's own documentation) defines it.
+// The cache key remains the raw (unanchored) pattern string so callers
+// pass the same value they configured.
 func (m *RouteMatcher) regexMatch(pattern string, value string) bool {
 	// Try cache first (fast path)
 	if regex, ok := m.regexCache.Get(pattern); ok {
@@ -230,7 +237,7 @@ func (m *RouteMatcher) regexMatch(pattern string, value string) bool {
 		m.metrics.RegexCacheMisses.Inc()
 	}
 
-	regex, err := regexp.Compile(pattern)
+	regex, err := regexp.Compile(anchorRegex(pattern))
 	if err != nil {
 		// Invalid regex (should be caught at config parse)
 		slog.Error("invalid regex pattern",
@@ -243,17 +250,36 @@ func (m *RouteMatcher) regexMatch(pattern string, value string) bool {
 	return regex.MatchString(value)
 }
 
+// anchorRegex wraps a regex pattern so it must match the entire input,
+// mirroring upstream Alertmanager's `^(?:<re>)$` anchoring. Without this,
+// `=~`/`!~` would match on any substring instead of the full label value.
+func anchorRegex(pattern string) string {
+	return "^(?:" + pattern + ")$"
+}
+
 // FindMatchingRoutes finds all routes matching the alert.
 //
-// Algorithm (DFS with early exit):
-//  1. Start at tree root
-//  2. Walk tree depth-first:
-//     a. If node matches alert:
-//     - Add to results
-//     - If continue=false: stop traversal (early exit)
-//     - If continue=true: continue to siblings
-//     b. Recursively check children
-//  3. Return list of matched nodes with statistics
+// Algorithm (recursive descent, upstream Alertmanager semantics):
+//  1. Start at tree root.
+//  2. For the current node:
+//     a. If the node's own matchers don't match the alert: this subtree
+//     contributes no matches (return immediately).
+//     b. Otherwise, try each child in order:
+//     - Recurse into the child.
+//     - If the child produced matches, keep them; if child.Continue is
+//     false, stop trying further siblings; otherwise keep evaluating
+//     the remaining siblings (multi-match collection).
+//     c. If no child produced any match, the current node itself
+//     (already confirmed matching) is the result — its receiver is
+//     used. If any child matched, the current node's own receiver is
+//     NOT returned (children take precedence over the parent).
+//  3. Return the list of matched nodes with statistics.
+//
+// This differs from a flat tree Walk with a single global stop: a route's
+// own match is only a *prerequisite* for descending into its children, not
+// itself an automatic result — matching upstream Alertmanager, where the
+// root always "matches" (no matchers) but its receiver is only used when
+// nothing further down the tree matched.
 //
 // Complexity:
 //   - Best case: O(1) (first node matches, continue=false)
@@ -284,46 +310,13 @@ func (m *RouteMatcher) FindMatchingRoutes(
 	}
 
 	start := time.Now()
-	stopped := false
 
 	// Get initial cache stats
 	initialStats := m.regexCache.Stats()
 
-	// DFS traversal with early exit
-	_ = tree.Walk(func(node *RouteNode) bool {
-		if stopped {
-			return false
-		}
-
-		result.MatchersEvaluated += len(node.Matchers)
-
-		if m.MatchesNode(node, alert) {
-			result.Matches = append(result.Matches, node)
-
-			// Record match in metrics
-			if m.metrics != nil {
-				m.metrics.RecordMatch(node.Path, time.Since(start))
-			}
-
-			// Debug logging
-			if m.opts.EnableLogging {
-				slog.Debug("alert matched route",
-					"alert", alert.Labels["alertname"],
-					"route", node.Path,
-					"receiver", node.Receiver,
-					"matchers", len(node.Matchers),
-					"continue", node.Continue)
-			}
-
-			// Early exit if continue=false
-			if !node.Continue {
-				stopped = true
-				return false
-			}
-		}
-
-		return true // Continue to children
-	})
+	if tree != nil && tree.Root != nil {
+		result.Matches = m.matchRoute(tree.Root, alert, result, start)
+	}
 
 	result.Duration = time.Since(start)
 
@@ -349,6 +342,69 @@ func (m *RouteMatcher) FindMatchingRoutes(
 	}
 
 	return result
+}
+
+// matchRoute recursively evaluates node (and its subtree) against alert,
+// implementing upstream Alertmanager routing-tree semantics.
+//
+// Contract:
+//   - node's own matchers must match for its subtree to be considered at
+//     all (a non-matching node contributes nothing, even if a descendant
+//     would otherwise match — descent requires the parent to match first).
+//   - If one or more children match, those results are returned and
+//     node's own receiver is NOT included (children take precedence).
+//   - A child with Continue=false stops evaluation of subsequent siblings
+//     once it produces a match; Continue=true keeps evaluating siblings,
+//     allowing multiple routes to match ("continue" fan-out).
+//   - If node matches but no child does, node itself is the result.
+//
+// start is the overall FindMatchingRoutes start time, used for per-match
+// duration metrics.
+func (m *RouteMatcher) matchRoute(
+	node *RouteNode,
+	alert *Alert,
+	result *MatchResult,
+	start time.Time,
+) []*RouteNode {
+	result.MatchersEvaluated += len(node.Matchers)
+
+	if !m.MatchesNode(node, alert) {
+		return nil
+	}
+
+	var matches []*RouteNode
+	for _, child := range node.Children {
+		childMatches := m.matchRoute(child, alert, result, start)
+		if len(childMatches) == 0 {
+			continue
+		}
+
+		matches = append(matches, childMatches...)
+
+		if !child.Continue {
+			break
+		}
+	}
+
+	// No child matched: this (already matched) node is the result.
+	if len(matches) == 0 {
+		matches = []*RouteNode{node}
+
+		if m.metrics != nil {
+			m.metrics.RecordMatch(node.Path, time.Since(start))
+		}
+
+		if m.opts.EnableLogging {
+			slog.Debug("alert matched route",
+				"alert", alert.Labels["alertname"],
+				"route", node.Path,
+				"receiver", node.Receiver,
+				"matchers", len(node.Matchers),
+				"continue", node.Continue)
+		}
+	}
+
+	return matches
 }
 
 // FindMatchingRoutesWithContext finds routes with context cancellation support.

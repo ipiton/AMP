@@ -110,6 +110,7 @@ COMMENT ON COLUMN template_versions.change_summary IS 'Optional description of w
 -- ============================================================================
 
 -- Function to update updated_at column
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_templates_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -117,6 +118,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 -- Trigger on UPDATE
 CREATE TRIGGER trigger_update_templates_updated_at

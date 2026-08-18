@@ -1,0 +1,78 @@
+# Task 6.5 (alertmanager-parity, Phase 6): 2-replica HA e2e stack.
+#
+# NOT part of the default `go test ./...` gate. Run via run.sh (see that
+# script's header comment for usage) or manually:
+#
+#   docker compose -f deploy/e2e-ha/docker-compose.yml up --build
+#
+# Build context is the repo root (".." from here is deploy/, ".."  again is
+# the repo root) because the Dockerfile's COPY paths are rooted at
+# go-app/ one level below the repo root.
+name: amp-e2e-ha
+
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: amp_e2e
+      POSTGRES_USER: amp
+      POSTGRES_PASSWORD: amp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amp -d amp_e2e"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  amp-a:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    hostname: amp-a
+    environment:
+      AMP_CONFIG_FILE: /app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "18081:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  amp-b:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    hostname: amp-b
+    environment:
+      AMP_CONFIG_FILE: /app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "18082:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # amp-a first, not just redis/postgres: internal/database.RunMigrations
+      # (goose.Up) takes no Postgres advisory lock, so two replicas racing
+      # to migrate a brand-new database both try to create goose's own
+      # goose_db_version tracking table and collide (23505 duplicate key on
+      # pg_type) -- a genuine pre-existing gap, surfaced by this e2e test,
+      # in migration startup safety under >1 replica. Out of scope for task
+      # 6.5 to fix in application code (unrelated to the heartbeat/status
+      # feature); sequencing amp-b after amp-a's first successful boot
+      # sidesteps the race for this test the same way a one-shot migration
+      # Job ahead of a Deployment would in a real multi-replica rollout.
+      amp-a:
+        condition: service_healthy

@@ -206,6 +206,27 @@ func (m *MemoryGroupStorage) copyMetadata(meta *GroupMetadata) *GroupMetadata {
 	copy.GroupIntervalTimer = meta.GroupIntervalTimer
 	copy.RepeatIntervalTimer = meta.RepeatIntervalTimer
 
+	// Copy per-group timing overrides (task 2.4 fix round 1: this field was
+	// added to GroupMetadata after copyMetadata was last touched, and was
+	// silently dropped on every Store/Load round-trip through in-memory
+	// storage — group_interval/repeat_interval timers scheduled from a
+	// freshly-loaded group (see onGroupWaitExpired etc. in manager_impl.go)
+	// always fell back to the grouping config's root Route.* defaults
+	// instead of honoring the matched route's own timings, even though
+	// AddAlertToGroup captured them correctly on the group at creation
+	// time). RedisGroupStorage is unaffected — it round-trips the whole
+	// AlertGroup via json.Marshal/Unmarshal, which already includes this
+	// tagged field.
+	copy.Timings = meta.Timings.Clone()
+
+	// Copy per-group time-interval name references (task 3.2) — same
+	// round-trip gap as Timings above would otherwise reopen: without this,
+	// a freshly-loaded group would lose its matched route's
+	// mute_time_intervals/active_time_intervals names on every Store/Load
+	// through in-memory storage, silently disabling the TimeMute step for
+	// every group after its very first in-process publish.
+	copy.TimeIntervalNames = meta.TimeIntervalNames.Clone()
+
 	return copy
 }
 

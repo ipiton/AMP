@@ -85,15 +85,81 @@ func TestNewDefaultTimerManager_MissingStorage(t *testing.T) {
 	assert.Contains(t, err.Error(), "storage is required")
 }
 
-// TestNewDefaultTimerManager_MissingGroupManager tests validation
-func TestNewDefaultTimerManager_MissingGroupManager(t *testing.T) {
+// TestNewDefaultTimerManager_NilGroupManagerAllowed verifies construction
+// succeeds without a GroupManager (Task 2.2, alertmanager-parity): breaking
+// the GroupManager<->TimerManager construction cycle requires the TimerManager
+// to be buildable before the GroupManager exists, with SetGroupManager
+// injecting it afterwards.
+func TestNewDefaultTimerManager_NilGroupManagerAllowed(t *testing.T) {
 	config := TimerManagerConfig{
 		Storage: NewInMemoryTimerStorage(nil),
 	}
 
-	_, err := NewDefaultTimerManager(config)
+	manager, err := NewDefaultTimerManager(config)
+	require.NoError(t, err)
+	require.NotNil(t, manager)
+
+	manager.groupManagerMu.RLock()
+	gm := manager.groupManager
+	manager.groupManagerMu.RUnlock()
+	assert.Nil(t, gm)
+}
+
+// TestDefaultTimerManager_SetGroupManager verifies the setter injects the
+// group manager and rejects nil.
+func TestDefaultTimerManager_SetGroupManager(t *testing.T) {
+	manager, err := NewDefaultTimerManager(TimerManagerConfig{
+		Storage: NewInMemoryTimerStorage(nil),
+		Logger:  slog.Default(),
+	})
+	require.NoError(t, err)
+	defer func() { _ = manager.Shutdown(context.Background()) }()
+
+	// Rejects nil.
+	err = manager.SetGroupManager(nil)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "group manager is required")
+
+	groupManager := &DefaultGroupManager{
+		storage:          NewMemoryGroupStorage(&MemoryGroupStorageConfig{}),
+		fingerprintIndex: make(map[string]GroupKey),
+		logger:           slog.Default(),
+	}
+	require.NoError(t, manager.SetGroupManager(groupManager))
+
+	manager.groupManagerMu.RLock()
+	gm := manager.groupManager
+	manager.groupManagerMu.RUnlock()
+	assert.Same(t, groupManager, gm)
+}
+
+// TestDefaultTimerManager_OnTimerExpired_NilGroupManager verifies that a
+// timer firing before SetGroupManager is called logs and skips callback
+// dispatch instead of panicking (Task 2.2).
+func TestDefaultTimerManager_OnTimerExpired_NilGroupManager(t *testing.T) {
+	storage := NewInMemoryTimerStorage(nil)
+	manager, err := NewDefaultTimerManager(TimerManagerConfig{
+		Storage: storage,
+		Logger:  slog.Default(),
+	})
+	require.NoError(t, err)
+	defer func() { _ = manager.Shutdown(context.Background()) }()
+
+	var callbackInvoked atomic.Bool
+	manager.OnTimerExpired(func(_ context.Context, _ GroupKey, _ TimerType, _ *AlertGroup) error {
+		callbackInvoked.Store(true)
+		return nil
+	})
+
+	ctx := context.Background()
+	_, err = manager.StartTimer(ctx, "test-group", GroupWaitTimer, 20*time.Millisecond)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		_, getErr := manager.GetTimer(ctx, "test-group")
+		return getErr != nil
+	}, time.Second, 10*time.Millisecond, "timer should be removed from active state after expiring")
+
+	assert.False(t, callbackInvoked.Load(), "callback must not run without a group manager")
 }
 
 // TestDefaultTimerManager_StartTimer tests starting timers
@@ -399,6 +465,53 @@ func TestDefaultTimerManager_OnTimerExpired_MultipleCallbacks(t *testing.T) {
 	// Verify both callbacks called
 	assert.True(t, called1.Load())
 	assert.True(t, called2.Load())
+}
+
+// TestDefaultTimerManager_OnTimerExpired_CallbackPanicIsRecovered covers
+// task 2.4 fix round 1, Finding 3: a panicking callback (e.g. a bug in the
+// notify-stage chain, or in a caller-supplied InhibitionChecker/
+// SilenceChecker) must not crash the process. If invokeCallbackSafely's
+// recover() were missing, this whole test binary would crash instead of
+// reporting a test failure — reaching the assertions below at all is part
+// of the proof. A second, non-panicking callback registered after the
+// panicking one must still run (panic isolation is per-callback, not
+// per-timer-expiration).
+func TestDefaultTimerManager_OnTimerExpired_CallbackPanicIsRecovered(t *testing.T) {
+	manager, _, groupManager := setupTestTimerManager(t)
+	defer func() { _ = manager.Shutdown(context.Background()) }()
+
+	ctx := context.Background()
+
+	testGroup := &AlertGroup{
+		Key:    "test-group",
+		Alerts: make(map[string]*core.Alert),
+		Metadata: &GroupMetadata{
+			State:     GroupStateFiring,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+	_ = groupManager.storage.Store(ctx, testGroup)
+
+	panicked := atomic.Bool{}
+	afterPanicCalled := atomic.Bool{}
+
+	manager.OnTimerExpired(func(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
+		panicked.Store(true)
+		panic("simulated callback panic (task 2.4 fix round 1, Finding 3)")
+	})
+	manager.OnTimerExpired(func(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
+		afterPanicCalled.Store(true)
+		return nil
+	})
+
+	_, err := manager.StartTimer(ctx, "test-group", GroupWaitTimer, 50*time.Millisecond)
+	require.NoError(t, err)
+
+	time.Sleep(300 * time.Millisecond)
+
+	assert.True(t, panicked.Load(), "the panicking callback must have run")
+	assert.True(t, afterPanicCalled.Load(), "a later callback must still run after an earlier one panics")
 }
 
 // TestDefaultTimerManager_RestoreTimers tests timer restoration

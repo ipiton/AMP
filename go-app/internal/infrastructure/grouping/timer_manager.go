@@ -327,6 +327,23 @@ type TimerStorage interface {
 	//   - error: TimerStorageError
 	ListTimers(ctx context.Context) ([]*GroupTimer, error)
 
+	// ListOverdueTimers returns only timers whose ExpiresAt is at or before
+	// cutoff — the targeted counterpart to ListTimers used by the
+	// reconciliation loop (task 6.2, fix round 1, Finding 1). Implementations
+	// backed by an index scored by ExpiresAt (RedisTimerStorage's sorted set)
+	// must use a range query against that index instead of listing every
+	// timer and filtering in the caller, so a periodic reconciliation tick
+	// scales with the number of OVERDUE timers, not the total timer count.
+	//
+	// Parameters:
+	//   - ctx: Context for timeout
+	//   - cutoff: Only timers with ExpiresAt <= cutoff are returned
+	//
+	// Returns:
+	//   - []*GroupTimer: Overdue timers only (possibly empty)
+	//   - error: TimerStorageError
+	ListOverdueTimers(ctx context.Context, cutoff time.Time) ([]*GroupTimer, error)
+
 	// AcquireLock attempts to acquire a distributed lock for a group.
 	//
 	// Used for exactly-once delivery in multi-instance deployments.

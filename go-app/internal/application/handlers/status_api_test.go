@@ -9,6 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ipiton/AMP/internal/buildinfo"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core/services"
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
@@ -17,12 +21,13 @@ import (
 )
 
 type extendedFakeRegistry struct {
-	alertStore   *memory.AlertStore
-	silenceStore *memory.SilenceStore
-	processor    *services.AlertProcessor
-	config       *appconfig.Config
-	startTime    time.Time
-	reloadErr    error
+	alertStore    *memory.AlertStore
+	silenceStore  *memory.SilenceStore
+	processor     *services.AlertProcessor
+	config        *appconfig.Config
+	startTime     time.Time
+	reloadErr     error
+	clusterStatus ClusterStatus
 }
 
 func (r *extendedFakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
@@ -30,11 +35,20 @@ func (r *extendedFakeRegistry) SilenceStore() *memory.SilenceStore { return r.si
 func (r *extendedFakeRegistry) SilenceRepository() infrasilencing.SilenceRepository {
 	return nil
 }
+func (r *extendedFakeRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublisher {
+	return nil
+}
 func (r *extendedFakeRegistry) AlertProcessor() *services.AlertProcessor           { return r.processor }
 func (r *extendedFakeRegistry) Config() *appconfig.Config                          { return r.config }
 func (r *extendedFakeRegistry) StartTime() time.Time                               { return r.startTime }
 func (r *extendedFakeRegistry) ReloadConfig(_ context.Context) error               { return r.reloadErr }
 func (r *extendedFakeRegistry) InhibitionState() inhibition.InhibitionStateManager { return nil }
+func (r *extendedFakeRegistry) ClusterStatus(_ context.Context) ClusterStatus {
+	if r.clusterStatus.Status == "" {
+		return ClusterStatus{Status: "disabled"}
+	}
+	return r.clusterStatus
+}
 
 func TestStatusAPIHandler(t *testing.T) {
 	// Create a temporary config file
@@ -74,17 +88,94 @@ func TestStatusAPIHandler(t *testing.T) {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	if resp.ConfigOriginal != configContent {
-		t.Errorf("got config content %q, want %q", resp.ConfigOriginal, configContent)
+	if resp.Config.Original != configContent {
+		t.Errorf("got config content %q, want %q", resp.Config.Original, configContent)
 	}
 
 	if resp.Uptime.Unix() != startTime.Unix() {
 		t.Errorf("got uptime %v, want %v", resp.Uptime, startTime)
 	}
 
-	if resp.VersionInfo.Version != "0.0.1" {
-		t.Errorf("got version %q, want 0.0.1", resp.VersionInfo.Version)
+	if resp.VersionInfo.Version != buildinfo.Version {
+		t.Errorf("got version %q, want %q (buildinfo default)", resp.VersionInfo.Version, buildinfo.Version)
 	}
+	if resp.VersionInfo.GoVersion == "" {
+		t.Error("got empty goVersion")
+	}
+
+	if resp.Cluster.Status != "disabled" {
+		t.Errorf("got cluster.status %q, want %q (no clustering yet)", resp.Cluster.Status, "disabled")
+	}
+
+	// Verify the wire shape is actually nested (config: {original: ...}),
+	// not the old flat "config.original" key.
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("failed to unmarshal raw response: %v", err)
+	}
+	configObj, ok := raw["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level \"config\" to be a nested object, got %T", raw["config"])
+	}
+	if configObj["original"] != configContent {
+		t.Errorf("got config.original %v, want %q", configObj["original"], configContent)
+	}
+	if _, hasFlatKey := raw["config.original"]; hasFlatKey {
+		t.Error("response still has the old flat \"config.original\" key")
+	}
+	clusterObj, ok := raw["cluster"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected top-level \"cluster\" to be a nested object, got %T", raw["cluster"])
+	}
+	if clusterObj["status"] != "disabled" {
+		t.Errorf("got cluster.status %v, want disabled", clusterObj["status"])
+	}
+}
+
+// TestStatusAPIHandler_ClusterReadyWithPeers proves the standard-profile
+// "ready" shape (task 6.5): status/name/peers all surface on the wire
+// exactly as registry.ClusterStatus returns them, distinct from the
+// lite-profile "disabled" shape covered by TestStatusAPIHandler above.
+func TestStatusAPIHandler_ClusterReadyWithPeers(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "config*.yaml")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	_, err = tmpFile.WriteString("profile: standard\n")
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
+
+	_ = os.Setenv("AMP_CONFIG_FILE", tmpFile.Name())
+	defer func() { _ = os.Unsetenv("AMP_CONFIG_FILE") }()
+
+	registry := &extendedFakeRegistry{
+		config: &appconfig.Config{},
+		clusterStatus: ClusterStatus{
+			Status: "ready",
+			Name:   "amp-a",
+			Peers: []ClusterPeer{
+				{Name: "amp-a", Address: "10.0.0.1:8080"},
+				{Name: "amp-b", Address: "10.0.0.2:8080"},
+			},
+		},
+	}
+
+	handler := StatusAPIHandler(registry)
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/status", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp StatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+
+	assert.Equal(t, "ready", resp.Cluster.Status)
+	assert.Equal(t, "amp-a", resp.Cluster.Name)
+	require.Len(t, resp.Cluster.Peers, 2)
+	assert.Equal(t, "amp-a", resp.Cluster.Peers[0].Name)
+	assert.Equal(t, "10.0.0.1:8080", resp.Cluster.Peers[0].Address)
+	assert.Equal(t, "amp-b", resp.Cluster.Peers[1].Name)
+	assert.Equal(t, "10.0.0.2:8080", resp.Cluster.Peers[1].Address)
 }
 
 func TestReloadHandler(t *testing.T) {

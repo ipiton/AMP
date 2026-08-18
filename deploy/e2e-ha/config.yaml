@@ -1,0 +1,103 @@
+# Task 6.5 (alertmanager-parity, Phase 6) 2-replica HA e2e config.
+#
+# Shared by both `amp-a` and `amp-b` in docker-compose.yml — nothing here
+# needs to differ per replica: self-identity for the cluster heartbeat
+# (internal/infrastructure/cluster) comes from os.Hostname(), which Docker
+# Compose already makes distinct per container (the service name).
+#
+# publishing.enabled is deliberately false: real webhook delivery in this
+# codebase goes through businesspublishing.DefaultTargetDiscoveryManager,
+# which discovers targets exclusively from live Kubernetes Secrets
+# (k8s.NewK8sClient uses rest.InClusterConfig() — no file/env-based target
+# source exists). There is no way to exercise real HTTP webhook delivery
+# outside a real cluster, so this e2e test proves "exactly one replica
+# published" via the nflog Redis claim key + the grouping manager's
+# metrics-only publish log line instead of a live webhook hit — see
+# run.sh's comment block for the full substitution rationale.
+profile: standard
+
+storage:
+  backend: postgres
+
+server:
+  port: 8080
+  host: 0.0.0.0
+
+database:
+  driver: postgres
+  host: postgres
+  port: 5432
+  database: amp_e2e
+  username: amp
+  password: amp
+  ssl_mode: disable
+  max_connections: 10
+  min_connections: 2
+  connect_timeout: 5s
+
+redis:
+  addr: redis:6379
+  password: ""
+  db: 0
+  pool_size: 10
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+
+cache:
+  enabled: true
+  backend: redis
+  ttl: 1h
+
+lock:
+  enabled: true
+  backend: redis
+  ttl: 30s
+
+log:
+  level: info
+  format: json
+  output: stdout
+
+metrics:
+  enabled: true
+  path: /metrics
+  namespace: alert_history
+
+# Publishing target discovery requires a real Kubernetes API (see the
+# top-of-file comment) — disabled here, not "degraded": AlertProcessor
+# still runs the full inhibit -> silence -> group -> dedup/claim chain and
+# ends at a MetricsOnlyPublisher whose PublishGroup logs
+# "Group publishing skipped (metrics-only publisher)" exactly once for the
+# replica that won the nflog claim. That log line + the nflog:entry Redis
+# key are what run.sh asserts on.
+publishing:
+  enabled: false
+
+# Short group_wait/group_interval so the e2e test doesn't need to wait
+# upstream's production defaults (30s/5m) — this is a timing test, not a
+# config-defaults test.
+# grouping.enabled must be explicit true (defaults to false) — without it
+# the alert ingest pipeline never consults the group manager/timers at all,
+# regardless of the route: tree below.
+grouping:
+  enabled: true
+
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 1h
+
+receivers:
+  # webhook_configs is required by the route/receiver validator (every
+  # receiver needs >=1 integration configured) even though this URL is
+  # never actually dialed: real delivery only happens through
+  # businesspublishing.DefaultTargetDiscoveryManager's K8s-Secret-sourced
+  # targets (see top-of-file comment) — this config's route tree only
+  # decides routing/grouping, not delivery.
+  - name: default
+    webhook_configs:
+      - url: https://unused.invalid/e2e-placeholder
+        send_resolved: true

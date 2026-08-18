@@ -2,7 +2,12 @@ package routing
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
+
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 )
 
 // TreeBuilder constructs a RouteTree from RouteConfig.
@@ -28,8 +33,10 @@ import (
 // - TreeBuilder is not thread-safe (build one tree per instance)
 // - The resulting RouteTree is immutable and thread-safe
 type TreeBuilder struct {
-	// config is the input routing configuration
-	config *RouteConfig
+	// config is the input routing configuration.
+	// Canonical type from infrastructure/routing (TN-137 dedup, task 1.2):
+	// its route tree is grouping.Route, its receivers infraroute.Receiver.
+	config *infraroute.RouteConfig
 
 	// tree is the work-in-progress tree being built
 	tree *RouteTree
@@ -78,7 +85,7 @@ func DefaultBuildOptions() BuildOptions {
 //
 //	builder := routing.NewTreeBuilder(config, routing.DefaultBuildOptions())
 //	tree, err := builder.Build()
-func NewTreeBuilder(config *RouteConfig, opts BuildOptions) *TreeBuilder {
+func NewTreeBuilder(config *infraroute.RouteConfig, opts BuildOptions) *TreeBuilder {
 	return &TreeBuilder{
 		config: config,
 		tree:   nil, // Will be initialized in Build()
@@ -114,7 +121,7 @@ func (b *TreeBuilder) Build() (*RouteTree, error) {
 	// 2. Initialize tree
 	b.tree = &RouteTree{
 		Root:      nil, // Will be built below
-		receivers: make(map[string]*Receiver),
+		receivers: make(map[string]*infraroute.Receiver),
 		built:     time.Now(),
 	}
 
@@ -125,6 +132,12 @@ func (b *TreeBuilder) Build() (*RouteTree, error) {
 		}
 		b.tree.receivers[receiver.Name] = receiver
 	}
+
+	// 3b. Snapshot the config's named time_intervals for this tree (task
+	// 3.2). config.TimeIntervalIndex may be nil (no time_intervals: section)
+	// — a nil map still reads safely (zero value, ok=false) via
+	// RouteTree.GetTimeInterval, so no special-casing is needed here.
+	b.tree.timeIntervals = b.config.TimeIntervalIndex
 
 	// 4. Build root node (recursively builds entire tree)
 	b.tree.Root = b.buildNode(nil, b.config.Route, "route", 0)
@@ -163,7 +176,7 @@ func (b *TreeBuilder) Build() (*RouteTree, error) {
 // Complexity: O(1) per node, O(N) total
 func (b *TreeBuilder) buildNode(
 	parent *RouteNode,
-	route *Route,
+	route *grouping.Route,
 	path string,
 	level int,
 ) *RouteNode {
@@ -173,8 +186,8 @@ func (b *TreeBuilder) buildNode(
 		Level:  level,
 	}
 
-	// 1. Parse matchers (match + match_re)
-	node.Matchers = b.parseMatchers(route.Match, route.MatchRE)
+	// 1. Parse matchers (match + match_re + matchers list syntax)
+	node.Matchers = b.parseMatchers(route.Match, route.MatchRE, route.Matchers)
 
 	// 2. Set receiver name
 	node.Receiver = route.Receiver
@@ -191,10 +204,19 @@ func (b *TreeBuilder) buildNode(
 	node.Continue = route.Continue
 
 	// 5. Apply parameter inheritance
+	// grouping.Route stores durations as *grouping.Duration (nil = unset);
+	// durationOrZero unwraps to time.Duration so inheritDuration's existing
+	// "> 0 means explicitly set" check keeps working unchanged.
 	node.GroupBy = b.inheritGroupBy(parent, route)
-	node.GroupWait = b.inheritDuration(parent, route.GroupWait, "group_wait")
-	node.GroupInterval = b.inheritDuration(parent, route.GroupInterval, "group_interval")
-	node.RepeatInterval = b.inheritDuration(parent, route.RepeatInterval, "repeat_interval")
+	node.GroupWait = b.inheritDuration(parent, durationOrZero(route.GroupWait), "group_wait")
+	node.GroupInterval = b.inheritDuration(parent, durationOrZero(route.GroupInterval), "group_interval")
+	node.RepeatInterval = b.inheritDuration(parent, durationOrZero(route.RepeatInterval), "repeat_interval")
+
+	// 5b. mute_time_intervals/active_time_intervals (task 3.2) are
+	// deliberately NOT inherited from parent — set verbatim from this
+	// node's own route config, unlike every field above.
+	node.MuteTimeIntervals = route.MuteTimeIntervals
+	node.ActiveTimeIntervals = route.ActiveTimeIntervals
 
 	// 6. Build children recursively
 	for i, childRoute := range route.Routes {
@@ -206,38 +228,126 @@ func (b *TreeBuilder) buildNode(
 	return node
 }
 
-// parseMatchers converts match and match_re maps to Matcher list.
-func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]string) []Matcher {
-	matchers := make([]Matcher, 0, len(match)+len(matchRE))
+// matcherExprPattern parses a single entry of the `matchers:` list syntax,
+// e.g. `severity="critical"`, `severity != critical`, `sev =~ "a|b"`.
+//
+// Group 1: label name
+// Group 2: operator (=, !=, =~, !~)
+// Group 3: value (quotes, if any, stripped separately)
+var matcherExprPattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(!=|=~|!~|=)\s*(.*)$`)
 
-	// Equality matchers
+// parseMatchers converts match, match_re, and the `matchers:` list syntax
+// into a unified Matcher list.
+//
+//   - match: equality matchers (=), never negative.
+//   - match_re: regex matchers (=~), never negative.
+//   - matchers: free-form expressions supporting all 4 operators
+//     (=, !=, =~, !~), the only syntax that can express negative matchers
+//     (IsNegative=true), since match/match_re have no way to encode negation.
+//
+// Malformed entries in matchers are skipped (best-effort parsing; full
+// validation is out of scope here).
+func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]string, matcherExprs []string) []Matcher {
+	matchers := make([]Matcher, 0, len(match)+len(matchRE)+len(matcherExprs))
+
+	// Equality matchers (match: label -> value)
 	for name, value := range match {
 		matchers = append(matchers, Matcher{
-			Name:    name,
-			Value:   value,
-			IsRegex: false,
+			Name:       name,
+			Value:      value,
+			IsRegex:    false,
+			IsNegative: false,
 		})
 	}
 
-	// Regex matchers
+	// Regex matchers (match_re: label -> pattern)
 	for name, pattern := range matchRE {
 		matchers = append(matchers, Matcher{
-			Name:    name,
-			Value:   pattern,
-			IsRegex: true,
+			Name:       name,
+			Value:      pattern,
+			IsRegex:    true,
+			IsNegative: false,
 		})
+	}
+
+	// matchers: list syntax (free-form expressions, all 4 operators)
+	for _, expr := range matcherExprs {
+		if m, ok := parseMatcherExpr(expr); ok {
+			matchers = append(matchers, m)
+		}
 	}
 
 	return matchers
 }
 
+// parseMatcherExpr parses one `matchers:` list entry into a Matcher.
+//
+// Supported forms (whitespace around the operator is optional):
+//
+//	label=value
+//	label="value"
+//	label!=value
+//	label=~"regex"
+//	label!~"regex"
+//
+// Returns ok=false if expr doesn't match the expected grammar.
+func parseMatcherExpr(expr string) (Matcher, bool) {
+	groups := matcherExprPattern.FindStringSubmatch(expr)
+	if groups == nil {
+		return Matcher{}, false
+	}
+
+	name := groups[1]
+	op := groups[2]
+	value := strings.TrimSpace(groups[3])
+	// Strip a matched pair of surrounding quotes only. strings.Trim would
+	// also strip an unmatched quote (e.g. `foo"` -> `foo`), silently
+	// mangling malformed input instead of leaving it visibly wrong.
+	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+		value = value[1 : len(value)-1]
+	}
+
+	m := Matcher{Name: name, Value: value}
+	switch op {
+	case "=":
+		// IsRegex=false, IsNegative=false (zero values)
+	case "!=":
+		m.IsNegative = true
+	case "=~":
+		m.IsRegex = true
+	case "!~":
+		m.IsRegex = true
+		m.IsNegative = true
+	default:
+		return Matcher{}, false
+	}
+
+	return m, true
+}
+
+// durationOrZero unwraps a *grouping.Duration into a time.Duration,
+// treating nil (field absent from config) as the zero value. This keeps
+// inheritDuration's "> 0 means explicitly set" check meaningful for the
+// canonical grouping.Route, which represents unset durations as nil
+// pointers rather than zero time.Duration.
+func durationOrZero(d *grouping.Duration) time.Duration {
+	if d == nil {
+		return 0
+	}
+	return d.Duration
+}
+
 // inheritGroupBy applies inheritance logic for group_by parameter.
-func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *Route) []string {
+func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) []string {
 	// Priority:
 	// 1. Route's own group_by (if set)
 	// 2. Parent's group_by (if exists)
-	// 3. Global config group_by (if set)
-	// 4. Default: ["alertname"]
+	// 3. Default: ["alertname"]
+	//
+	// Note: there is no global-config fallback layer here. infrastructure/
+	// routing.GlobalConfig (TN-137 canonical type) only carries
+	// resolve_timeout/SMTP/HTTP settings, not grouping defaults, so unlike
+	// this package's pre-dedup local GlobalConfig there is nothing to read.
 
 	if len(route.GroupBy) > 0 {
 		return route.GroupBy
@@ -245,10 +355,6 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *Route) []string {
 
 	if parent != nil && len(parent.GroupBy) > 0 {
 		return parent.GroupBy
-	}
-
-	if b.config.Global != nil && len(b.config.Global.GroupBy) > 0 {
-		return b.config.Global.GroupBy
 	}
 
 	return []string{"alertname"}
@@ -263,8 +369,11 @@ func (b *TreeBuilder) inheritDuration(
 	// Priority:
 	// 1. Route's own value (if > 0)
 	// 2. Parent's value (if exists and > 0)
-	// 3. Global config value (if set and > 0)
-	// 4. Default value (based on field name)
+	// 3. Default value (based on field name)
+	//
+	// Note: no global-config fallback layer, for the same reason as
+	// inheritGroupBy above — infrastructure/routing.GlobalConfig has no
+	// grouping-duration fields to read.
 
 	if routeValue > 0 {
 		return routeValue
@@ -284,24 +393,6 @@ func (b *TreeBuilder) inheritDuration(
 		case "repeat_interval":
 			if parent.RepeatInterval > 0 {
 				return parent.RepeatInterval
-			}
-		}
-	}
-
-	// Get global config value
-	if b.config.Global != nil {
-		switch fieldName {
-		case "group_wait":
-			if b.config.Global.GroupWait > 0 {
-				return b.config.Global.GroupWait
-			}
-		case "group_interval":
-			if b.config.Global.GroupInterval > 0 {
-				return b.config.Global.GroupInterval
-			}
-		case "repeat_interval":
-			if b.config.Global.RepeatInterval > 0 {
-				return b.config.Global.RepeatInterval
 			}
 		}
 	}
@@ -369,73 +460,8 @@ func (b *TreeBuilder) calculateStats(root *RouteNode) TreeStats {
 	return stats
 }
 
-// RouteConfig represents the top-level routing configuration.
-//
-// Equivalent to Alertmanager's routing config.
-//
-// Example YAML:
-//
-//	route:
-//	  receiver: default
-//	  routes:
-//	    - match:
-//	        severity: critical
-//	      receiver: pagerduty
-//	receivers:
-//	  - name: default
-//	    webhook_configs:
-//	      - url: https://example.com
-type RouteConfig struct {
-	// Route is the root route definition
-	Route *Route
-
-	// Receivers is the list of notification receivers
-	Receivers []*Receiver
-
-	// Global contains global defaults
-	// (Not implemented yet - will be added in Phase 4)
-	Global *GlobalConfig
-}
-
-// Route represents a single route in the routing tree.
-//
-// This is a simplified version - full implementation in TN-137.
-type Route struct {
-	// Receiver name for this route
-	Receiver string
-
-	// Continue to next route after match
-	Continue bool
-
-	// Match conditions (label name → value)
-	Match map[string]string
-
-	// MatchRE regex conditions (label name → regex pattern)
-	MatchRE map[string]string
-
-	// Grouping parameters
-	GroupBy        []string
-	GroupWait      time.Duration
-	GroupInterval  time.Duration
-	RepeatInterval time.Duration
-
-	// Child routes
-	Routes []*Route
-}
-
-// GlobalConfig contains global routing defaults.
-//
-// These values are used when not specified in route.
-type GlobalConfig struct {
-	// GroupBy default labels for grouping
-	GroupBy []string
-
-	// GroupWait default initial wait time
-	GroupWait time.Duration
-
-	// GroupInterval default interval between notifications
-	GroupInterval time.Duration
-
-	// RepeatInterval default repeat interval
-	RepeatInterval time.Duration
-}
+// Note: this package used to define its own RouteConfig/Route/GlobalConfig
+// family here, duplicating infrastructure/routing's canonical types (and
+// grouping.Route for the route tree itself). TN-137 dedup (task 1.2)
+// removed it: TreeBuilder now takes infrastructure/routing.RouteConfig
+// directly, whose Route field is *grouping.Route.

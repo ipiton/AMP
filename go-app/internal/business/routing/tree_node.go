@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 )
 
 // RouteNode represents a single route in the routing tree hierarchy.
@@ -60,6 +62,20 @@ type RouteNode struct {
 	// Override: specify in route config
 	RepeatInterval time.Duration
 
+	// MuteTimeIntervals references named time_intervals (by name, resolved
+	// later via RouteTree.GetTimeInterval) during which this route must NOT
+	// send notifications (task 3.2). Deliberately NOT inherited from Parent
+	// — upstream Alertmanager applies mute_time_intervals/active_time_intervals
+	// only to the route node that declares them, unlike GroupBy/timings which
+	// do inherit. Set verbatim from this node's own grouping.Route field by
+	// TreeBuilder.buildNode; nil/empty means this route has none of its own.
+	MuteTimeIntervals []string
+
+	// ActiveTimeIntervals references named time_intervals during which this
+	// route IS allowed to send; outside all of them, the route is muted
+	// (task 3.2). Same non-inherited semantics as MuteTimeIntervals above.
+	ActiveTimeIntervals []string
+
 	// Receiver Configuration
 
 	// Receiver is the name of the receiver to send notifications to.
@@ -70,7 +86,9 @@ type RouteNode struct {
 	// ReceiverConfig is the resolved receiver configuration.
 	// Pre-resolved at tree build time for O(1) lookup.
 	// May be nil if receiver not found (validation error).
-	ReceiverConfig *Receiver
+	// Type is the canonical infrastructure/routing.Receiver (TN-137 dedup);
+	// this package no longer keeps its own parallel Receiver/*Config family.
+	ReceiverConfig *infraroute.Receiver
 
 	// Control Flow
 
@@ -210,6 +228,11 @@ func (n *RouteNode) Clone() *RouteNode {
 		// Copy pointer (shared, but ReceiverConfig is immutable)
 		ReceiverConfig: n.ReceiverConfig,
 
+		// Copy slices (task 3.2, not inherited so each node's own value
+		// must survive Clone independently)
+		MuteTimeIntervals:   append([]string(nil), n.MuteTimeIntervals...),
+		ActiveTimeIntervals: append([]string(nil), n.ActiveTimeIntervals...),
+
 		// Parent will be set by caller
 		Parent: nil,
 
@@ -269,149 +292,9 @@ func (n *RouteNode) MatchesAll() bool {
 	return len(n.Matchers) == 0
 }
 
-// Receiver represents a notification receiver configuration.
-//
-// A receiver can have multiple receiver types configured (webhook, PagerDuty, Slack, etc.)
-// but at least one must be present.
-//
-// Receivers are referenced by name in route definitions.
-//
-// Example:
-//
-//	&Receiver{
-//	    Name: "critical-alerts",
-//	    WebhookConfigs: []*WebhookConfig{{URL: "https://hooks.example.com"}},
-//	    PagerDutyConfigs: []*PagerDutyConfig{{ServiceKey: "secret"}},
-//	}
-type Receiver struct {
-	// Name is the unique identifier for this receiver.
-	// Referenced in route.receiver field.
-	// Required.
-	Name string
-
-	// WebhookConfigs are generic webhook configurations.
-	// Optional (at least one config type must be present).
-	WebhookConfigs []*WebhookConfig
-
-	// PagerDutyConfigs are PagerDuty Events API v2 configurations.
-	// Optional (at least one config type must be present).
-	PagerDutyConfigs []*PagerDutyConfig
-
-	// SlackConfigs are Slack webhook configurations.
-	// Optional (at least one config type must be present).
-	SlackConfigs []*SlackConfig
-}
-
-// WebhookConfig represents a generic webhook receiver configuration.
-//
-// Compatible with Alertmanager webhook format and custom webhooks.
-//
-// Example:
-//
-//	&WebhookConfig{
-//	    URL: "https://hooks.example.com/alerts",
-//	    HTTPConfig: &HTTPConfig{BearerToken: "secret"},
-//	}
-type WebhookConfig struct {
-	// URL is the webhook endpoint (required, HTTPS only in production).
-	URL string
-
-	// HTTPConfig contains authentication and TLS configuration.
-	// Optional.
-	HTTPConfig *HTTPConfig
-}
-
-// PagerDutyConfig represents a PagerDuty Events API v2 receiver configuration.
-//
-// Uses PagerDuty Events API v2 for incident creation/resolution.
-//
-// Example:
-//
-//	&PagerDutyConfig{
-//	    RoutingKey: "abc123...",
-//	    URL: "https://events.pagerduty.com/v2/enqueue",
-//	}
-type PagerDutyConfig struct {
-	// RoutingKey is the PagerDuty integration key (required).
-	// Also called "Integration Key" in PagerDuty UI.
-	RoutingKey string
-
-	// ServiceKey is deprecated (v1 API), use RoutingKey instead.
-	// Kept for backward compatibility.
-	ServiceKey string
-
-	// URL is the PagerDuty Events API endpoint.
-	// Default: https://events.pagerduty.com/v2/enqueue
-	URL string
-
-	// HTTPConfig contains authentication and TLS configuration.
-	// Optional (RoutingKey is the primary auth mechanism).
-	HTTPConfig *HTTPConfig
-}
-
-// SlackConfig represents a Slack webhook receiver configuration.
-//
-// Uses either Incoming Webhooks or Slack API for message posting.
-//
-// Example:
-//
-//	&SlackConfig{
-//	    APIURL: "https://hooks.slack.com/services/T00/B00/xxx",
-//	    Channel: "#alerts",
-//	}
-type SlackConfig struct {
-	// APIURL is the Slack webhook or API URL (required).
-	// Incoming Webhook: https://hooks.slack.com/services/...
-	// Slack API: https://slack.com/api/chat.postMessage
-	APIURL string
-
-	// Channel is the Slack channel or user to send to.
-	// Format: "#channel" or "@user"
-	// Optional (uses default channel from webhook if not set).
-	Channel string
-
-	// HTTPConfig contains authentication and TLS configuration.
-	// Optional (APIURL typically contains auth token).
-	HTTPConfig *HTTPConfig
-}
-
-// HTTPConfig represents HTTP client configuration for receivers.
-//
-// Used for authentication and TLS settings.
-//
-// Example:
-//
-//	&HTTPConfig{
-//	    BearerToken: "secret",
-//	    TLSConfig: &TLSConfig{InsecureSkipVerify: false},
-//	}
-type HTTPConfig struct {
-	// BearerToken for Authorization: Bearer header.
-	// Optional.
-	BearerToken string
-
-	// BasicAuth contains username/password for HTTP Basic Auth.
-	// Optional.
-	BasicAuth *BasicAuth
-
-	// TLSConfig contains TLS settings.
-	// Optional (uses system defaults if not set).
-	TLSConfig *TLSConfig
-}
-
-// BasicAuth represents HTTP Basic Authentication configuration.
-type BasicAuth struct {
-	// Username for HTTP Basic Auth.
-	Username string
-
-	// Password for HTTP Basic Auth.
-	Password string
-}
-
-// TLSConfig represents TLS client configuration.
-type TLSConfig struct {
-	// InsecureSkipVerify disables TLS certificate validation.
-	// Default: false (always validate certificates)
-	// WARNING: Only use in development/testing!
-	InsecureSkipVerify bool
-}
+// Note: this package used to define its own Receiver/WebhookConfig/
+// PagerDutyConfig/SlackConfig/HTTPConfig/BasicAuth/TLSConfig family here,
+// duplicating infrastructure/routing's canonical types. TN-137 dedup
+// (task 1.2) removed it: RouteNode.ReceiverConfig, RouteTree's receiver
+// index, and RouteTreeManager.Reload now all use
+// infrastructure/routing.Receiver / .RouteConfig directly.
