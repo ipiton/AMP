@@ -1258,34 +1258,47 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		}()
 	}
 
-	// Step 4b: Dedup (notification-log semantics, task 2.4 Step 4 — see
-	// dedup.go for the in-memory implementation and redis_notify_log.go for
-	// the cross-replica one).
+	// Step 4b: per-target Dedup (task fwb, alertmanager-parity wave 2 —
+	// replaces the old whole-group Dedup check with upstream nflog's
+	// group:receiver:integration granularity). skipTarget is handed to the
+	// publisher below; the publisher's own receiver-scoped target
+	// resolution (deep inside ApplicationPublishingAdapter/
+	// PublishingCoordinator) calls it once per candidate target BEFORE
+	// attempting delivery, so a target that already received this EXACT
+	// alert set within repeat_interval is skipped — not resent — while any
+	// target that failed last cycle is not, and gets retried here.
 	signature := alertSetSignature(alerts)
 	repeatInterval := m.effectiveRepeatInterval(group)
 	ttl := time.Now().Add(-repeatInterval)
-	dup, err := m.notifyLog.IsDuplicate(ctx, group.Key, signature, ttl)
-	if err != nil {
-		// Fail-open (Redis down): proceed as not-a-duplicate — same
-		// documented trade-off as the claim check above.
-		m.logger.Error("nflog duplicate check failed, proceeding fail-open (duplicate-across-replicas risk accepted)",
-			"group_key", group.Key,
-			"receiver", receiver,
-			"error", err)
-		dup = false
-	}
-	if dup {
-		m.logger.Debug("group notification suppressed by dedup (already sent within repeat_interval)",
-			"group_key", group.Key,
-			"receiver", receiver,
-			"repeat_interval", repeatInterval)
-		return // claim (if any) is released by the deferred call above
+	skipTarget := func(target string) bool {
+		dup, dupErr := m.notifyLog.IsDuplicate(ctx, group.Key, target, signature, ttl)
+		if dupErr != nil {
+			// Fail-open (Redis down): proceed as not-a-duplicate — same
+			// documented trade-off as the claim check above.
+			m.logger.Error("nflog duplicate check failed for target, proceeding fail-open (duplicate-across-replicas risk accepted)",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"target", target,
+				"error", dupErr)
+			return false
+		}
+		if dup {
+			m.logger.Debug("target notification suppressed by dedup (already sent within repeat_interval)",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"target", target,
+				"repeat_interval", repeatInterval)
+		}
+		return dup
 	}
 
 	// Step 5: publish ONE grouped notification (task 2.4's core change: a
 	// single PublishGroup call carrying all of alerts, not one PublishToAll
-	// call per alert).
-	if err := publisher.PublishGroup(ctx, alerts, receiver); err != nil {
+	// call per alert). outcomes reports per-target results (task fwb) so
+	// RecordSent below can be scoped to exactly the targets that confirmed
+	// delivery this cycle.
+	outcomes, err := publisher.PublishGroup(ctx, string(group.Key), alerts, receiver, skipTarget)
+	if err != nil {
 		// ErrDeliveryNotConfirmed (final review finding 4): the publisher
 		// deliberately delivered nothing — degraded/metrics-only mode. NOT a
 		// failure, but crucially NOT a send either, so the RecordSent below
@@ -1322,23 +1335,78 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	if err := m.notifyLog.RecordSent(ctx, group.Key, signature, time.Now(), repeatInterval); err != nil {
-		// Confirmed delivery already happened — a failure here only means
-		// the NEXT fire (this or another replica) might not see this send
-		// recorded and could re-publish. Logged, not fatal: matches the
-		// chain's overall fail-open posture.
-		m.logger.Error("failed to record nflog sent entry (duplicate-across-replicas risk on next fire)",
+	if len(outcomes) == 0 {
+		// Nothing NEW happened this fire: either every candidate target for
+		// this receiver was already covered by an earlier send this cycle
+		// (skipTarget returned true for all of them — the common steady-
+		// state case once every target has succeeded) or the publisher had
+		// no targets to report on. Neither is an error worth logging loudly.
+		m.logger.Debug("group notification produced no new target outcomes (fully deduped this cycle, or no targets)",
 			"group_key", group.Key,
-			"receiver", receiver,
-			"error", err)
+			"receiver", receiver)
+		return
+	}
+
+	now := time.Now()
+	allSucceeded := true
+	anySucceeded := false
+	for _, outcome := range outcomes {
+		if !outcome.Success {
+			allSucceeded = false
+			continue
+		}
+		anySucceeded = true
+		if recErr := m.notifyLog.RecordSent(ctx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
+			// Confirmed delivery already happened — a failure here only
+			// means the NEXT fire (this or another replica) might not see
+			// this target's send recorded and could re-publish to it.
+			// Logged, not fatal: matches the chain's overall fail-open
+			// posture.
+			m.logger.Error("failed to record nflog sent entry for target (duplicate risk for this target on next fire)",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"target", outcome.Target,
+				"error", recErr)
+		}
 	}
 
 	if m.metrics != nil {
-		m.metrics.RecordGroupOperation("publish", "success")
+		switch {
+		case allSucceeded:
+			m.metrics.RecordGroupOperation("publish", "success")
+		case anySucceeded:
+			m.metrics.RecordGroupOperation("publish", "partial")
+		default:
+			m.metrics.RecordGroupOperation("publish", "error")
+		}
 	}
 
-	// Step 6: drop the alerts that were resolved in the notification we just
-	// delivered (final review finding 8) — see pruneResolvedAlerts.
+	if !anySucceeded {
+		m.logger.Error("failed to publish group notification to any target",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"alert_count", len(alerts),
+			"target_count", len(outcomes))
+		return
+	}
+
+	if !allSucceeded {
+		// Partial failure (task fwb): the targets that succeeded were
+		// already recorded above, so the NEXT fire's skipTarget will skip
+		// them and retry only the ones still missing an entry. Deliberately
+		// do NOT prune resolved alerts yet — a target that hasn't confirmed
+		// delivery still needs to see them in the next attempt.
+		m.logger.Warn("group notification partially delivered; targets that failed will be retried on the next scheduled fire",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"alert_count", len(alerts),
+			"target_count", len(outcomes))
+		return
+	}
+
+	// Step 6: every target confirmed delivery — safe to drop the alerts
+	// that were resolved in the notification we just delivered (final
+	// review finding 8) — see pruneResolvedAlerts.
 	m.pruneResolvedAlerts(ctx, group.Key, alerts)
 }
 
