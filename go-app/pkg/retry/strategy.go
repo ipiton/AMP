@@ -1,12 +1,11 @@
 // Package retry provides unified retry strategy with exponential backoff and jitter.
 //
-// This package consolidates 6 different retry implementations across the codebase:
+// This package consolidates 5 different retry implementations across the codebase:
 //   - pkg/httperror/retry.go (was unused)
 //   - internal/core/resilience/resilience.go (LLM)
 //   - internal/infrastructure/k8s/client.go (K8s discovery)
 //   - internal/infrastructure/publishing/queue.go (critical path!)
 //   - internal/business/publishing/refresh_retry.go (refresh manager)
-//   - internal/infrastructure/migrations/errors.go (DB migrations)
 //
 // Usage:
 //
