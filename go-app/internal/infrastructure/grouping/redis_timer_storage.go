@@ -76,6 +76,54 @@ const (
 // finding 2.
 const _ = uint64(timerTTLGracePeriod - defaultReconciliationGracePeriod - 4*defaultReconciliationInterval)
 
+// ErrReconciliationGraceReopensZeroWindow is returned by
+// ValidateReconciliationGrace when an operator-supplied
+// (reconciliation_interval, reconciliation_grace) pair would collapse the
+// adoption window back to ~0 — the same bug the compile-time check just
+// above prevents for the hardcoded defaults (final review finding 2), but
+// for values that only exist at config-load time and therefore can't be
+// caught by a Go constant expression.
+var ErrReconciliationGraceReopensZeroWindow = fmt.Errorf(
+	"reconciliation_grace leaves no adoption window before the timer TTL grace period elapses (reopens finding 2)")
+
+// ValidateReconciliationGrace checks an operator-supplied
+// (reconciliation_interval, reconciliation_grace) pair against the same
+// invariant enforced at compile time (just above) for the hardcoded
+// defaults: effectiveGrace + a few reconciliation ticks must stay
+// comfortably under timerTTLGracePeriod, the hard upper bound on how long a
+// timer's Redis record survives past its own ExpiresAt. Otherwise a timer
+// becomes eligible for orphan-adoption at (or after) the exact moment its
+// Redis key is gone, so ListOverdueTimers can never find it and a dead
+// replica's groups stop notifying forever.
+//
+// interval <= 0 means the reconciliation loop is disabled entirely
+// (grouping.enabled config, task 6.2) — grace is not consulted and this
+// always returns nil. grace <= 0 means "use defaultReconciliationGracePeriod",
+// mirroring NewDefaultTimerManager's own defaulting, so the check validates
+// what will actually run rather than the raw zero value.
+//
+// Callers: internal/config.Config.Validate (config-load time), mirroring
+// the compile-time guard as a runtime check for values a Go const
+// expression can't see.
+func ValidateReconciliationGrace(interval, grace time.Duration) error {
+	if interval <= 0 {
+		return nil
+	}
+
+	effectiveGrace := grace
+	if effectiveGrace <= 0 {
+		effectiveGrace = defaultReconciliationGracePeriod
+	}
+
+	ticksHeadroom := 4 * interval
+	if effectiveGrace+ticksHeadroom >= timerTTLGracePeriod {
+		return fmt.Errorf("%w: grace=%s + 4*interval=%s (%s) >= timer TTL grace period %s",
+			ErrReconciliationGraceReopensZeroWindow, effectiveGrace, interval, ticksHeadroom, timerTTLGracePeriod)
+	}
+
+	return nil
+}
+
 // RedisTimerStorage implements TimerStorage using Redis.
 //
 // Features:

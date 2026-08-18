@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/spf13/viper"
 )
@@ -890,6 +891,31 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("publishing validation failed: %w", err)
 	}
 
+	if err := c.validateGrouping(); err != nil {
+		return fmt.Errorf("grouping validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateGrouping checks grouping.reconciliation_interval/reconciliation_grace
+// against the adoption-window invariant (task fu2-d item 9): an operator
+// value pair that leaves no room for the reconciliation loop to actually
+// discover an orphaned timer before its Redis record's TTL grace period
+// expires reopens the zero-adoption-window bug (final review finding 2),
+// which grouping.timerTTLGracePeriod's compile-time guard only prevents for
+// the hardcoded defaults, not for values that only exist at config-load
+// time.
+func (c *Config) validateGrouping() error {
+	if err := grouping.ValidateReconciliationGrace(
+		c.Grouping.ReconciliationInterval,
+		c.Grouping.ReconciliationGrace,
+	); err != nil {
+		return fmt.Errorf(
+			"grouping.reconciliation_grace=%s with grouping.reconciliation_interval=%s: %w",
+			c.Grouping.ReconciliationGrace, c.Grouping.ReconciliationInterval, err,
+		)
+	}
 	return nil
 }
 
