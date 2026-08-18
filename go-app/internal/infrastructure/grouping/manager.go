@@ -748,10 +748,17 @@ type GroupNotifyLog interface {
 	// freshness against a caller-supplied cutoff on every call instead).
 	RecordSent(ctx context.Context, groupKey GroupKey, signature string, now time.Time, repeatInterval time.Duration) error
 
-	// Forget removes any dedup entry (and any lingering claim, for
-	// Redis-backed implementations) for groupKey. Called when a group is
+	// Forget removes the dedup entry for groupKey. Called when a group is
 	// deleted so the log doesn't grow unbounded independent of active
-	// groups.
+	// groups. Must NOT clear any in-flight TryClaim claim for groupKey
+	// (fix round 1, Finding 2): Forget's callers (RemoveAlertFromGroup/
+	// CleanupExpiredGroups) run under a different lock than the claim ->
+	// check -> publish -> record sequence in publishGroupAlerts, so a group
+	// can be deleted while another replica still holds a live claim for it
+	// — deleting that claim early would let a third replica race in and
+	// publish concurrently, reopening the double-publish window TryClaim
+	// exists to close. Implementations must let any claim self-expire via
+	// its own claimTTL instead.
 	Forget(ctx context.Context, groupKey GroupKey) error
 
 	// TryClaim attempts to acquire a short-lived cross-replica publish

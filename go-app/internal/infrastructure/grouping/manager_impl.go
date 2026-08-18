@@ -22,6 +22,22 @@ import (
 // distributed-lock duration RedisTimerStorage.AcquireLock already uses, per
 // storage.go's note that lockTTL is meant to be shared across timer/group/
 // notify-log storage for consistency.
+//
+// Sizing assumption (fix round 1, Finding 1) — this is NOT renewed/extended
+// while a claim is held, unlike RedisTimerStorage's lock (no Extend call
+// anywhere in publishGroupAlerts). It is safe at 30s ONLY because
+// publisher.PublishGroup (see the call below) returns as soon as
+// ApplicationPublishingAdapter.PublishGroup's coordinator call enqueues
+// each target job onto the publishing queue (PublishingCoordinator.
+// PublishGroupToTargets -> c.queue.Submit) — actual delivery (HTTP POST to
+// the target, retries, etc.) happens out-of-band on the queue's own
+// workers, not inside this call. If PublishGroup or whatever it delegates
+// to is ever changed to block until delivery is confirmed (a synchronous
+// webhook call with no queue, say), a slow/hanging target could keep the
+// claim held past claimTTL, letting it expire mid-publish and reopening the
+// double-publish window this claim exists to close. Re-derive
+// notifyLogClaimTTL from the publishing stack's own max per-attempt
+// timeout (not repeat_interval) if that assumption ever stops holding.
 const notifyLogClaimTTL = lockTTL
 
 // DefaultGroupManager is an in-memory implementation of AlertGroupManager.
@@ -1174,6 +1190,15 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// notifyLog. claimTTL is deliberately short (notifyLogClaimTTL, seconds)
 	// so a replica that crashes before releasing self-heals quickly instead
 	// of blocking every replica's retries for this group.
+	//
+	// This claim is held across the publisher.PublishGroup call below with
+	// NO renewal/extension — see notifyLogClaimTTL's doc comment (fix round
+	// 1, Finding 1) for the sizing assumption that makes a fixed 30s safe
+	// today: PublishGroup returns once delivery is enqueued, not once it is
+	// confirmed delivered. If that ever changes (a blocking/synchronous
+	// publisher), this claim can expire mid-publish and the double-publish
+	// window reopens silently — re-check that assumption before touching
+	// the publisher call below.
 	claimed, releaseClaim, claimErr := m.notifyLog.TryClaim(ctx, group.Key, notifyLogClaimTTL)
 	switch {
 	case claimErr != nil:

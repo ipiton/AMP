@@ -158,7 +158,14 @@ func TestRedisNotifyLog_EntryExpiresFromRedisAfterRepeatIntervalTTL(t *testing.T
 	assert.False(t, dup, "the Redis key must have expired, so no entry is found at all")
 }
 
-func TestRedisNotifyLog_Forget_RemovesEntryAndClaim(t *testing.T) {
+// TestRedisNotifyLog_Forget_RemovesEntryOnly proves fix round 1, Finding 2:
+// Forget must clear the entry but must NOT touch a live claim. Forget's
+// callers (RemoveAlertFromGroup/CleanupExpiredGroups) run under a
+// different lock than the claim->check->publish->record sequence in
+// publishGroupAlerts, so a group can be deleted while another replica
+// still holds a live claim for it — clearing that claim early would let a
+// third replica race in and publish concurrently.
+func TestRedisNotifyLog_Forget_RemovesEntryOnly(t *testing.T) {
 	notifyLog, _, cleanup := setupTestRedisNotifyLog(t)
 	defer cleanup()
 
@@ -166,10 +173,9 @@ func TestRedisNotifyLog_Forget_RemovesEntryAndClaim(t *testing.T) {
 	groupKey := GroupKey("receiver=default/alertname=HighCPU")
 	require.NoError(t, notifyLog.RecordSent(ctx, groupKey, "fp1:firing", time.Now(), time.Hour))
 
-	acquired, release, err := notifyLog.TryClaim(ctx, groupKey, 30*time.Second)
+	acquired, _, err := notifyLog.TryClaim(ctx, groupKey, 30*time.Second)
 	require.NoError(t, err)
-	require.True(t, acquired)
-	_ = release // leave the claim in place to prove Forget also clears it
+	require.True(t, acquired) // leave the claim in place: Forget must not clear it
 
 	require.NoError(t, notifyLog.Forget(ctx, groupKey))
 
@@ -177,10 +183,10 @@ func TestRedisNotifyLog_Forget_RemovesEntryAndClaim(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, dup, "Forget must remove the entry")
 
-	// The claim must also be gone, so a fresh TryClaim succeeds immediately.
+	// The claim must still be held: a concurrent TryClaim must fail.
 	acquired2, _, err := notifyLog.TryClaim(ctx, groupKey, 30*time.Second)
 	require.NoError(t, err)
-	assert.True(t, acquired2, "Forget must also clear any lingering claim")
+	assert.False(t, acquired2, "Forget must NOT clear a live claim (fix round 1, Finding 2)")
 }
 
 // TestRedisNotifyLog_TryClaim_ConcurrentAcrossTwoReplicas_ExactlyOneWins is
