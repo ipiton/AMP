@@ -2,10 +2,13 @@ package publishing
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -68,4 +71,38 @@ func TestSlackClient_RetryLogMasksWebhookURL(t *testing.T) {
 
 	assert.NotContains(t, logBuf.String(), "sup3rSecretSlackToken",
 		"no log line may carry the webhook credential:\n%s", logBuf.String())
+}
+
+// TestSlackClient_MaskedErrorPreservesChain is wave re-review Minor 3: masking
+// via `fmt.Errorf("...: %s", masked)` stripped the secret but also broke the
+// error chain, so callers lost errors.Is/errors.As against the underlying
+// *url.Error. The masked message and the intact chain must coexist.
+func TestSlackClient_MaskedErrorPreservesChain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := srv.URL + "/services/T00000000/B00000000/sup3rSecretSlackToken"
+	srv.Close()
+
+	client := NewHTTPSlackWebhookClient(deadURL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	_, err := client.PostMessage(context.Background(), &SlackMessage{Text: "hello"})
+	require.Error(t, err)
+
+	assert.NotContains(t, err.Error(), "sup3rSecretSlackToken", "the message must stay masked")
+
+	var urlErr *url.Error
+	assert.True(t, errors.As(err, &urlErr),
+		"the underlying *url.Error must remain reachable via errors.As, or callers lose all network-error classification")
+}
+
+func TestMaskedError_ErrorAndUnwrap(t *testing.T) {
+	cause := errors.New("Post \"https://hooks.slack.example/services/AAA/BBB/tok\": dial tcp: refused")
+	masked := newMaskedError("Post \"***\": dial tcp: refused", cause)
+
+	assert.Equal(t, "Post \"***\": dial tcp: refused", masked.Error())
+	assert.NotContains(t, masked.Error(), "tok\"")
+	assert.ErrorIs(t, masked, cause, "Unwrap must expose the cause for errors.Is/As")
+
+	// And through one more fmt.Errorf %w hop, as the client does.
+	wrapped := fmt.Errorf("HTTP request failed: %w", masked)
+	assert.NotContains(t, wrapped.Error(), "/services/AAA/BBB/tok")
+	assert.ErrorIs(t, wrapped, cause)
 }

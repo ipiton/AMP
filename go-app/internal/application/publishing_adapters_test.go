@@ -198,6 +198,58 @@ func TestApplicationPublishingAdapter_NoTargetsIsNotAnError(t *testing.T) {
 	}
 }
 
+// TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure is
+// wave re-review Minor 4: the partial-failure comparison ran against
+// len(results), which counts nil entries. A run where every REAL target
+// succeeded but the coordinator returned a padded slice therefore reported a
+// partial failure — a spurious 5xx and a Prometheus retry for a delivery that
+// fully succeeded.
+func TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			nil,
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			nil,
+		},
+		groupResults: []*infrapublishing.PublishingResult{
+			nil,
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			nil,
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err != nil {
+		t.Fatalf("single-alert path: nil padding must not read as a partial failure, got %v", err)
+	}
+
+	if err := adapter.PublishGroup(context.Background(), []*core.Alert{{Fingerprint: "abc"}}, "default"); err != nil {
+		t.Fatalf("group path: nil padding must not read as a partial failure, got %v", err)
+	}
+}
+
+// TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed
+// keeps the group path's "nil must never mean sent" contract intact for the
+// degenerate all-nil case, which counts as zero confirmations.
+func TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{nil, nil},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishGroup(context.Background(), []*core.Alert{{Fingerprint: "abc"}}, "default"); err == nil {
+		t.Fatal("a result set with no usable entries must not be reported as delivered")
+	}
+}
+
 func TestMetricsOnlyPublisher_Noops(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("test_reason", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err := publisher.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}); err != nil {

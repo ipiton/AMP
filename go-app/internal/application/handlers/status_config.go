@@ -15,7 +15,8 @@ import (
 const RedactedSecretPlaceholder = "<secret>"
 
 // secretKeySubstrings drives redaction: any mapping key whose lowercase name
-// CONTAINS one of these is replaced with RedactedSecretPlaceholder.
+// CONTAINS one of these is replaced with RedactedSecretPlaceholder, wherever it
+// appears.
 //
 // Substring matching, not an exact allow-list, on purpose — this guards a
 // public unauthenticated endpoint, so a new integration field
@@ -33,12 +34,40 @@ var secretKeySubstrings = []string{
 	"routing_key",
 	"service_key",
 	"integration_key",
-	"api_url", // Slack/PagerDuty webhook URLs embed the credential itself
 	"webhook_url",
 	"auth",
 	"bearer",
 	"cert",
 	"private",
+}
+
+// sectionSecretKeys lists keys that are secret ONLY inside a specific parent
+// section, because the same key name is a credential in one integration and a
+// public endpoint in another. Keys are matched exactly (lowercased), unlike
+// secretKeySubstrings.
+//
+// This mirrors upstream Alertmanager's own typing, which is the authority on
+// which URLs are secrets: upstream types a field `SecretURL` (marshals as
+// `<secret>`) exactly where the URL itself is the credential.
+//
+//   - `webhook_configs[].url` — upstream `SecretURL`. Anyone holding it can
+//     post to the endpoint. Wave re-review, Important 2: this was NOT redacted,
+//     because the always-secret substrings above cannot contain a bare "url"
+//     without also blanking every harmless endpoint in the document.
+//   - `slack_configs[].api_url` — upstream `SecretURL`; a Slack incoming-webhook
+//     URL embeds the token.
+//   - `global.slack_api_url` — same, at global scope.
+//
+// Deliberately NOT here, because upstream types them as plain `URL` and they
+// carry no credential: `pagerduty_configs[].url` (the public Events API
+// endpoint) and `telegram_configs[].api_url` (the public Bot API base — the
+// credential is `bot_token`, which the substring list already covers). An
+// earlier revision blanket-redacted every `api_url`, which hid those two for no
+// security gain and reduced the fidelity of what amtool re-parses.
+var sectionSecretKeys = map[string][]string{
+	"webhook_configs": {"url"},
+	"slack_configs":   {"api_url"},
+	"global":          {"slack_api_url", "api_url"},
 }
 
 // AlertmanagerConfigYAML renders the Alertmanager-shaped, secret-redacted view
@@ -83,7 +112,7 @@ func AlertmanagerConfigYAML(cfg *appconfig.Config) string {
 		return "# configuration could not be rendered\n"
 	}
 
-	redactSecrets(doc)
+	redactSecrets(doc, "")
 
 	redacted, err := yaml.Marshal(doc)
 	if err != nil {
@@ -127,38 +156,53 @@ func legacyReceiverConfigYAML(cfg *appconfig.Config) string {
 // (e.g. `http_config.authorization:`) is descended into instead, so its own
 // secret-named leaves get redacted individually and its harmless structure
 // stays visible.
-func redactSecrets(node any) {
+//
+// section is the name of the nearest enclosing mapping key — "webhook_configs"
+// for every entry of a `webhook_configs:` list, and so on. It exists so keys
+// whose secrecy depends on where they appear can be handled correctly; see
+// sectionSecretKeys. List entries inherit their list's section, which is what
+// makes `receivers[].webhook_configs[].url` resolve with section
+// "webhook_configs" rather than "receivers".
+func redactSecrets(node any, section string) {
 	switch typed := node.(type) {
 	case map[string]any:
 		for key, value := range typed {
-			if isSecretKey(key) && isScalar(value) {
+			if isSecretKey(key, section) && isScalar(value) {
 				typed[key] = RedactedSecretPlaceholder
 				continue
 			}
-			redactSecrets(value)
+			redactSecrets(value, key)
 		}
 	case map[any]any:
 		// yaml.v3 produces map[string]any for string keys, but a non-string
 		// key (e.g. a numeric label) yields this shape — handle it so nothing
 		// escapes redaction through an unusual key type.
 		for key, value := range typed {
-			if keyStr, ok := key.(string); ok && isSecretKey(keyStr) && isScalar(value) {
+			keyStr, ok := key.(string)
+			if ok && isSecretKey(keyStr, section) && isScalar(value) {
 				typed[key] = RedactedSecretPlaceholder
 				continue
 			}
-			redactSecrets(value)
+			redactSecrets(value, keyStr)
 		}
 	case []any:
 		for _, item := range typed {
-			redactSecrets(item)
+			redactSecrets(item, section)
 		}
 	}
 }
 
-func isSecretKey(key string) bool {
+// isSecretKey reports whether key names a secret, either unconditionally
+// (secretKeySubstrings) or within this particular section (sectionSecretKeys).
+func isSecretKey(key, section string) bool {
 	lower := strings.ToLower(key)
 	for _, needle := range secretKeySubstrings {
 		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	for _, contextual := range sectionSecretKeys[strings.ToLower(section)] {
+		if lower == contextual {
 			return true
 		}
 	}

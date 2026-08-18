@@ -1395,18 +1395,55 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 	}
 }
 
-// groupStillExists reports whether groupKey is still present in storage.
+// groupStillExists reports whether groupKey is still present in storage, and
+// therefore whether the caller should schedule the group's next timer.
 //
 // Used by the three timer callbacks after publishGroupAlerts: that call may
 // have deleted the group (all its alerts resolved — see pruneResolvedAlerts),
 // and scheduling the next group_interval/repeat_interval timer for a deleted
 // group would resurrect the very notification loop finding 8 is about.
+//
+// FAIL-OPEN on transient errors (wave re-review, Important 1). Only a
+// CONFIRMED absence (GroupNotFoundError) may return false. The first version
+// treated every Load error as "gone", which recreated finding 3's wedge from
+// the other end: on a Redis blip the callback returned early, so
+// onTimerExpired's tail then ran its normal cleanup and deleted the SHARED
+// storage entry as well as the local handle — leaving nothing for
+// reconcileOrphanedTimers to adopt, and the group permanently silent. A
+// transient error must instead behave exactly as it did before pruning
+// existed: assume the group is alive and let the next timer be armed. Arming
+// a timer for a group that turns out to be gone is self-correcting (the very
+// next fire hits onTimerExpired's confirmed-GroupNotFound branch, which
+// cleans up once, at Warn); losing the group is not.
 func (m *DefaultGroupManager) groupStillExists(ctx context.Context, groupKey GroupKey) bool {
 	group, err := m.storage.Load(ctx, groupKey)
 	if err != nil {
-		return false
+		var notFound *GroupNotFoundError
+		if errors.As(err, &notFound) {
+			return false
+		}
+		m.logger.Warn("could not confirm group still exists after publishing; assuming it does and continuing the timer chain",
+			"group_key", groupKey,
+			"error", err)
+		return true
 	}
-	return group != nil && len(group.Alerts) > 0
+	return alertCount(group) > 0
+}
+
+// alertCount returns len(group.Alerts) under the group's own RWMutex.
+//
+// AlertGroup.mu exists precisely because Alerts is mutated concurrently
+// (AddAlertToGroup writes it while a timer callback reads it), and
+// MemoryGroupStorage.Load can hand back a group sharing that map with the live
+// object — so an unlocked `len(group.Alerts)` is a genuine data race, caught by
+// `go test -race` on TestTimerChain_GroupWaitToRepeatInterval.
+func alertCount(group *AlertGroup) int {
+	if group == nil {
+		return 0
+	}
+	group.mu.RLock()
+	defer group.mu.RUnlock()
+	return len(group.Alerts)
 }
 
 // startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
