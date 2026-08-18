@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,6 +123,102 @@ func TestInitializeGrouping_LiteUsesMemoryStorageAndIsFunctional(t *testing.T) {
 	}
 
 	// Shutdown must be clean (no error, no leaked goroutines beyond timeout).
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := r.groupTimerManager.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("groupTimerManager.Shutdown() error = %v", err)
+	}
+}
+
+// recordingGroupPublisher implements grouping.GroupNotificationPublisher
+// (task 2.4) for the end-to-end test below.
+type recordingGroupPublisher struct {
+	mu    sync.Mutex
+	calls [][]*core.Alert
+}
+
+func (p *recordingGroupPublisher) PublishGroup(_ context.Context, alerts []*core.Alert, _ string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, alerts)
+	return nil
+}
+
+func (p *recordingGroupPublisher) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.calls)
+}
+
+// TestGroupingEndToEnd_IngestToGroupWaitFiresOneNotification is the task
+// 2.4 integration test requested by the plan: ingest (AddAlertToGroup) all
+// the way through a real group_wait timer firing produces exactly ONE
+// PublishGroup call — not one per alert — even though two alerts were
+// added to the same group. Uses short timings (10ms) so the test doesn't
+// need to sleep for production-realistic durations.
+func TestGroupingEndToEnd_IngestToGroupWaitFiresOneNotification(t *testing.T) {
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileLite,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing: &infraroute.RouteConfig{
+			Route: &grouping.Route{
+				Receiver:      "default",
+				GroupBy:       []string{"alertname"},
+				GroupWait:     &grouping.Duration{Duration: 10 * time.Millisecond},
+				GroupInterval: &grouping.Duration{Duration: time.Hour}, // long enough to not fire during this test
+			},
+		},
+	}
+	r := newTestRegistryForGrouping(cfg)
+
+	ctx := context.Background()
+	if err := r.initializeGrouping(ctx); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if r.groupManager == nil {
+		t.Fatalf("groupManager must be initialized")
+	}
+
+	// Task 2.4's registry-ordering workaround: SetPublisher after the fact,
+	// mirroring what initializeAlertProcessor does once r.publisher exists.
+	pub := &recordingGroupPublisher{}
+	r.groupManager.SetPublisher(pub)
+
+	groupKey := grouping.GroupKey("receiver=default/alertname=HighCPU")
+	alert1 := &core.Alert{
+		Fingerprint: "fp-1",
+		AlertName:   "HighCPU",
+		Status:      core.StatusFiring,
+		Labels:      map[string]string{"alertname": "HighCPU"},
+		StartsAt:    time.Now(),
+	}
+	alert2 := &core.Alert{
+		Fingerprint: "fp-2",
+		AlertName:   "HighCPU",
+		Status:      core.StatusFiring,
+		Labels:      map[string]string{"alertname": "HighCPU"},
+		StartsAt:    time.Now(),
+	}
+
+	if _, err := r.groupManager.AddAlertToGroup(ctx, alert1, groupKey); err != nil {
+		t.Fatalf("AddAlertToGroup(alert1) error = %v", err)
+	}
+	if _, err := r.groupManager.AddAlertToGroup(ctx, alert2, groupKey); err != nil {
+		t.Fatalf("AddAlertToGroup(alert2) error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && pub.callCount() < 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if pub.callCount() != 1 {
+		t.Fatalf("PublishGroup call count = %d, want exactly 1 (one grouped notification, not one per alert)", pub.callCount())
+	}
+	if len(pub.calls[0]) != 2 {
+		t.Fatalf("the one PublishGroup call carried %d alerts, want 2", len(pub.calls[0]))
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := r.groupTimerManager.Shutdown(shutdownCtx); err != nil {

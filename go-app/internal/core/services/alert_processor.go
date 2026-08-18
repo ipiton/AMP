@@ -45,7 +45,7 @@ type InvestigationSubmitter interface {
 // grouping.DefaultGroupManager (and anything else implementing
 // grouping.AlertGroupManager) satisfies this interface automatically.
 type GroupManager interface {
-	AddAlertToGroup(ctx context.Context, alert *core.Alert, groupKey grouping.GroupKey) (*grouping.AlertGroup, error)
+	AddAlertToGroup(ctx context.Context, alert *core.Alert, groupKey grouping.GroupKey, opts ...grouping.AddAlertOption) (*grouping.AlertGroup, error)
 }
 
 // AlertProcessor handles alert processing with enrichment mode support
@@ -305,7 +305,14 @@ func (p *AlertProcessor) groupKeyFor(alert *core.Alert, decision *RoutingDecisio
 func (p *AlertProcessor) routeAlertToGroup(ctx context.Context, alert *core.Alert, decision *RoutingDecision) bool {
 	key := p.groupKeyFor(alert, decision)
 
-	if _, err := p.groupManager.AddAlertToGroup(ctx, alert, key); err != nil {
+	// task 2.4: thread the matched route's own timings onto a group this
+	// call creates (see WithGroupTimings) — closes the task 2.3 carry-over
+	// gap where every group used the root route's group_wait/group_interval/
+	// repeat_interval regardless of which route actually matched. No-op
+	// when the alert lands in an already-existing group.
+	timings := grouping.WithGroupTimings(decision.GroupWait, decision.GroupInterval, decision.RepeatInterval)
+
+	if _, err := p.groupManager.AddAlertToGroup(ctx, alert, key, timings); err != nil {
 		p.logger.Error("Failed to add alert to group, falling back to direct publish (fail-open)",
 			"error", err,
 			"alert", alert.AlertName,

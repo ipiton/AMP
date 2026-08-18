@@ -6,6 +6,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/services"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 )
 
 // MetricsOnlyPublisher is an explicit no-op publisher used for degraded runtime modes.
@@ -26,10 +27,29 @@ func NewMetricsOnlyPublisher(reason string, logger *slog.Logger) *MetricsOnlyPub
 	}
 }
 
-var _ services.Publisher = (*MetricsOnlyPublisher)(nil)
+var (
+	_ services.Publisher                  = (*MetricsOnlyPublisher)(nil)
+	_ grouping.GroupNotificationPublisher = (*MetricsOnlyPublisher)(nil)
+)
 
 func (p *MetricsOnlyPublisher) PublishToAll(ctx context.Context, alert *core.Alert) error {
 	p.logSkip(ctx, alert, nil)
+	return nil
+}
+
+// PublishGroup implements grouping.GroupNotificationPublisher (task 2.4):
+// no-op, same posture as PublishToAll in degraded/metrics-only runtime modes.
+func (p *MetricsOnlyPublisher) PublishGroup(ctx context.Context, alerts []*core.Alert, receiver string) error {
+	if len(alerts) == 0 {
+		return nil
+	}
+	if p.logger != nil {
+		p.logger.InfoContext(ctx, "Group publishing skipped (metrics-only publisher)",
+			"reason", p.reason,
+			"receiver", receiver,
+			"alert_count", len(alerts),
+		)
+	}
 	return nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/ipiton/AMP/internal/core"
 )
@@ -307,6 +308,121 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 			}
 			mu.Unlock()
 		}(i, target)
+	}
+
+	wg.Wait()
+
+	return results, nil
+}
+
+// PublishGroupToTargets publishes a resolved batch of alerts belonging to
+// ONE alert group as a single logical group notification (task 2.4,
+// alertmanager-parity notify-stage chain): target discovery/receiver
+// filtering happens exactly ONCE for the whole group, not once per alert as
+// a naive loop of PublishToAll/PublishToTargets calls would do.
+//
+// Wire-level scope (documented, not hidden): the publishing stack below
+// this call — PublishingJob, the queue workers, AlertFormatter, and every
+// publisher client (webhook/slack/telegram/pagerduty/email) — is built
+// around exactly one alert per job/payload (see formatWebhook/
+// formatAlertmanager: each always wraps exactly one alert in its "alerts"
+// array). Turning that into a true single multi-alert wire payload
+// (upstream Alertmanager's webhook body: one POST with "alerts": [N]) needs
+// changes across every formatter and client and is out of scope for this
+// task (tracked as a follow-up — see task 2.4 report). This method still
+// submits one queue job per (alert, target) pair internally. What task 2.4
+// actually changes is the CONTRACT above this call:
+// grouping.DefaultGroupManager.publishGroupAlerts now makes exactly ONE
+// call here per group-timer firing (after running Inhibit/Silence/Dedup
+// once for the whole group), instead of looping N publisher calls — one
+// per alert — as it did before this task.
+//
+// Receiver-matching semantics mirror PublishToTargets: empty receiverName,
+// or a target with no Receivers list, matches everything. Zero alerts is a
+// no-op (nil, nil — the caller, publishGroupAlerts, never calls this with
+// an empty slice, but this stays defensive). Zero matching targets returns
+// the same "no targets found for receiver" error as PublishToTargets —
+// logged by the caller, NOT retried in a loop here (the caller's next
+// scheduled group timer will naturally retry with the group's then-current
+// state).
+func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string) ([]*PublishingResult, error) {
+	if len(alerts) == 0 {
+		return nil, nil
+	}
+
+	// TN-060: Check mode before publishing (metrics-only mode fallback)
+	if c.modeManager != nil && c.modeManager.IsMetricsOnly() {
+		c.logger.Info("Group publishing skipped (metrics-only mode)",
+			"receiver", receiverName,
+			"alert_count", len(alerts),
+		)
+		return []*PublishingResult{}, nil
+	}
+
+	// Resolve targets ONCE for the whole group (not once per alert).
+	all := c.discoveryManager.ListTargets()
+	targets := make([]*core.PublishingTarget, 0, len(all))
+	for _, t := range all {
+		if !t.Enabled {
+			continue
+		}
+		if targetMatchesReceiver(t, receiverName) {
+			targets = append(targets, t)
+		}
+	}
+
+	if len(targets) == 0 {
+		c.logger.Warn("No publishing targets matched receiver for group notification; publishing none",
+			"receiver", receiverName,
+			"alert_count", len(alerts),
+		)
+		return []*PublishingResult{}, fmt.Errorf("no targets found for receiver %q", receiverName)
+	}
+
+	c.logger.Info("Publishing group notification to receiver-scoped targets",
+		"receiver", receiverName,
+		"alert_count", len(alerts),
+		"target_count", len(targets),
+	)
+
+	now := time.Now().UTC()
+	results := make([]*PublishingResult, 0, len(targets)*len(alerts))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, target := range targets {
+		for _, alert := range alerts {
+			wg.Add(1)
+
+			go func(t *core.PublishingTarget, a *core.Alert) {
+				defer wg.Done()
+
+				select {
+				case c.semaphore <- struct{}{}:
+					defer func() { <-c.semaphore }()
+				case <-ctx.Done():
+					mu.Lock()
+					results = append(results, &PublishingResult{
+						Target:  t,
+						Success: false,
+						Error:   ctx.Err(),
+					})
+					mu.Unlock()
+					return
+				}
+
+				enrichedAlert := &core.EnrichedAlert{Alert: a, ProcessingTimestamp: &now}
+				err := c.queue.Submit(enrichedAlert, t)
+
+				mu.Lock()
+				results = append(results, &PublishingResult{
+					Target:  t,
+					Success: err == nil,
+					Error:   err,
+				})
+				mu.Unlock()
+			}(target, alert)
+		}
 	}
 
 	wg.Wait()

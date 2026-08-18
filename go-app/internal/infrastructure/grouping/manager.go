@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
@@ -132,8 +133,39 @@ type GroupMetadata struct {
 	// RepeatIntervalTimer contains state for repeat_interval timer (TN-124, TN-125)
 	RepeatIntervalTimer *TimerMetadata `json:"repeat_interval_timer,omitempty"`
 
+	// Timings holds optional per-group route timing overrides (task 2.4,
+	// alertmanager-parity), captured from the matched route's
+	// RoutingDecision at group-CREATION time (AddAlertToGroup, via
+	// WithGroupTimings). nil means "use the grouping config's root
+	// Route.group_wait/group_interval/repeat_interval for every duration"
+	// — the pre-2.4 behavior, and still what non-route-aware callers (e.g.
+	// direct grouping-package tests) get by default.
+	//
+	// This closes a task 2.3 carry-over gap: AddAlertToGroup previously had
+	// no way to honor a non-root route's own timings, so every group used
+	// the root route's group_wait regardless of which route actually
+	// matched the alert.
+	Timings *GroupTimings `json:"timings,omitempty"`
+
 	// Version is used for optimistic locking (future: Redis storage in TN-125)
 	Version int64 `json:"version"`
+}
+
+// GroupTimings holds per-group group_wait/group_interval/repeat_interval
+// overrides (task 2.4). See GroupMetadata.Timings for when it's set and why.
+type GroupTimings struct {
+	GroupWait      time.Duration `json:"group_wait,omitempty"`
+	GroupInterval  time.Duration `json:"group_interval,omitempty"`
+	RepeatInterval time.Duration `json:"repeat_interval,omitempty"`
+}
+
+// Clone returns a shallow copy of t, or nil if t is nil.
+func (t *GroupTimings) Clone() *GroupTimings {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	return &c
 }
 
 // Size returns the total number of alerts in the group (firing + resolved).
@@ -213,6 +245,9 @@ func (g *AlertGroup) Clone() *AlertGroup {
 		metadataCopy.GroupBy = make([]string, len(g.Metadata.GroupBy))
 		copy(metadataCopy.GroupBy, g.Metadata.GroupBy)
 	}
+
+	// Copy per-group timing overrides (task 2.4)
+	metadataCopy.Timings = g.Metadata.Timings.Clone()
 
 	return &AlertGroup{
 		Key:      g.Key,
@@ -399,13 +434,18 @@ type AlertGroupManager interface {
 	//   - ctx: context for cancellation and timeouts
 	//   - alert: the alert to add (must have fingerprint)
 	//   - groupKey: the group key (from GroupKeyGenerator)
+	//   - opts: optional per-call overrides (task 2.4) — currently only
+	//     WithGroupTimings, applied ONLY when this call creates a brand-new
+	//     group; ignored when adding to an existing group (that group's
+	//     timers already run with whatever timings applied at its own
+	//     creation).
 	//
 	// Returns:
 	//   - *AlertGroup: the updated group
 	//   - error: InvalidAlertError, StorageError
 	//
 	// Thread-safe: Yes
-	AddAlertToGroup(ctx context.Context, alert *core.Alert, groupKey GroupKey) (*AlertGroup, error)
+	AddAlertToGroup(ctx context.Context, alert *core.Alert, groupKey GroupKey, opts ...AddAlertOption) (*AlertGroup, error)
 
 	// RemoveAlertFromGroup removes an alert from a group.
 	// If the group becomes empty, it automatically deletes the group.
@@ -513,13 +553,71 @@ type AlertGroupManager interface {
 	GetStats(ctx context.Context) (*GroupStats, error)
 }
 
-// GroupNotificationPublisher sends individual alert notifications when group timers expire.
+// GroupNotificationPublisher publishes a resolved batch of alerts belonging
+// to ONE alert group as a single logical group notification (task 2.4,
+// alertmanager-parity), when a group timer fires — one call per group
+// notification, not one call per alert as the pre-2.4 PublishToAll loop did.
 //
-// This interface is a subset of services.Publisher to avoid import cycles between
-// the infrastructure/grouping and core/services packages. Any implementation of
-// services.Publisher automatically satisfies this interface.
+// alerts have already been through the notify-stage chain
+// (Inhibit -> Silence -> Dedup, see publishGroupAlerts) by the time this is
+// called; PublishGroup only needs to deliver them. receiver is the matched
+// route's receiver name (parsed from the group key — see
+// receiverFromGroupKey), passed through so the implementation can do
+// receiver-scoped target selection (task 1.5's PublishToTargets).
+//
+// This interface is intentionally NOT a subset of services.Publisher (which
+// is strictly per-alert) to avoid import cycles between infrastructure/
+// grouping and core/services, and because the batch signature is the point.
+// application.ApplicationPublishingAdapter and application.MetricsOnlyPublisher
+// both implement it.
 type GroupNotificationPublisher interface {
-	PublishToAll(ctx context.Context, alert *core.Alert) error
+	PublishGroup(ctx context.Context, alerts []*core.Alert, receiver string) error
+}
+
+// AddAlertOption customizes a single AddAlertToGroup call (task 2.4).
+// Currently only used to carry a matched route's per-route timings
+// (RoutingDecision) onto a group created by that call — see
+// WithGroupTimings.
+type AddAlertOption func(*addAlertOptions)
+
+type addAlertOptions struct {
+	timings *GroupTimings
+}
+
+// WithGroupTimings overrides group_wait/group_interval/repeat_interval for
+// a group CREATED by this AddAlertToGroup call, sourced from the matched
+// route's RoutingDecision (task 2.4). Has no effect when the alert lands in
+// an already-existing group (see AddAlertToGroup's doc comment on why).
+func WithGroupTimings(groupWait, groupInterval, repeatInterval time.Duration) AddAlertOption {
+	return func(o *addAlertOptions) {
+		o.timings = &GroupTimings{
+			GroupWait:      groupWait,
+			GroupInterval:  groupInterval,
+			RepeatInterval: repeatInterval,
+		}
+	}
+}
+
+// GroupInhibitionChecker is the send-time inhibition read path used by the
+// notify-stage chain (task 2.4, Step 1: Inhibit). Re-checked when a group
+// timer fires (current state), not just at alert ingest — an alert can
+// become inhibited by a newer alert while it sits inside an already-open
+// group, and must be dropped from the notification even though it was
+// already grouped. inhibition.InhibitionMatcher satisfies this
+// automatically (subset interface, same pattern as GroupNotificationPublisher).
+type GroupInhibitionChecker interface {
+	ShouldInhibit(ctx context.Context, targetAlert *core.Alert) (*inhibition.MatchResult, error)
+}
+
+// GroupSilenceChecker is the send-time silence read path used by the
+// notify-stage chain (task 2.4, Step 2: Silence). memory.SilenceStore
+// satisfies this automatically. Checked at group-timer-fire time so a
+// silence created AFTER an alert entered its group still suppresses the
+// notification (upstream Alertmanager silences are inherently a
+// notify-time-only concept — there is no ingest-time silence check to
+// diverge from).
+type GroupSilenceChecker interface {
+	HasActiveMatch(labels map[string]string, now time.Time) bool
 }
 
 // DefaultGroupManagerConfig holds configuration for DefaultGroupManager.
@@ -539,8 +637,20 @@ type DefaultGroupManagerConfig struct {
 	TimerManager GroupTimerManager
 
 	// Publisher sends notifications when group timers fire (optional).
-	// If nil, timer callbacks only log — no alerts are sent (backwards compatible).
+	// If nil, timer callbacks only log — no alerts are sent (backwards
+	// compatible). Can also be wired later via SetPublisher (task 2.4) —
+	// see its doc comment for why (registry construction-order gap).
 	Publisher GroupNotificationPublisher
+
+	// InhibitionChecker is the notify-chain's Inhibit step (task 2.4,
+	// optional). If nil, the chain skips inhibition filtering entirely
+	// (backwards compatible — same posture as Publisher/TimerManager being
+	// optional).
+	InhibitionChecker GroupInhibitionChecker
+
+	// SilenceChecker is the notify-chain's Silence step (task 2.4,
+	// optional). If nil, the chain skips silence filtering entirely.
+	SilenceChecker GroupSilenceChecker
 
 	// Logger for structured logging (optional, defaults to slog.Default())
 	Logger *slog.Logger

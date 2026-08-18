@@ -170,3 +170,71 @@ func TestPublishToTargets_ExplicitTargetNames_UnaffectedByReceiverName(t *testin
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"a"}, resultNames(results))
 }
+
+// Test Suite: PublishingCoordinator.PublishGroupToTargets (task 2.4,
+// notify-stage chain batch publish)
+
+func testGroupAlerts(n int) []*core.Alert {
+	alerts := make([]*core.Alert, 0, n)
+	for i := 0; i < n; i++ {
+		alerts = append(alerts, &core.Alert{
+			Fingerprint: "fp-" + string(rune('1'+i)),
+			AlertName:   "TestAlert",
+			Status:      core.StatusFiring,
+			StartsAt:    time.Now().UTC(),
+		})
+	}
+	return alerts
+}
+
+func TestPublishGroupToTargets_EmptyAlertsIsNoop(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	coordinator := newTestCoordinator(t, discovery)
+
+	results, err := coordinator.PublishGroupToTargets(context.Background(), nil, "critical")
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}
+
+func TestPublishGroupToTargets_ReceiverFiltering_ResolvesTargetsOnce(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	discovery.AddTarget(&core.PublishingTarget{Name: "slack-critical", Type: "webhook", URL: "http://example.com", Enabled: true, Receivers: []string{"critical"}})
+	discovery.AddTarget(&core.PublishingTarget{Name: "pagerduty-oncall", Type: "webhook", URL: "http://example.com", Enabled: true, Receivers: []string{"oncall"}})
+
+	coordinator := newTestCoordinator(t, discovery)
+
+	// One group notification of 3 alerts, one matching target: expect one
+	// PublishingResult PER (target, alert) pair — 3 results, all against
+	// "slack-critical" — not against "pagerduty-oncall".
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(3), "critical")
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+	for _, r := range results {
+		assert.Equal(t, "slack-critical", r.Target.Name)
+		assert.True(t, r.Success)
+	}
+}
+
+func TestPublishGroupToTargets_NoMatchingTargetsReturnsError(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	discovery.AddTarget(&core.PublishingTarget{Name: "a", Type: "webhook", URL: "http://example.com", Enabled: true, Receivers: []string{"critical"}})
+
+	coordinator := newTestCoordinator(t, discovery)
+
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(2), "no-such-receiver")
+	require.Error(t, err)
+	assert.Empty(t, results)
+}
+
+func TestPublishGroupToTargets_EmptyReceiverMeansAllEnabled(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	discovery.AddTarget(&core.PublishingTarget{Name: "a", Type: "webhook", URL: "http://example.com", Enabled: true})
+	discovery.AddTarget(&core.PublishingTarget{Name: "b", Type: "webhook", URL: "http://example.com", Enabled: true})
+	discovery.AddTarget(&core.PublishingTarget{Name: "disabled", Type: "webhook", URL: "http://example.com", Enabled: false})
+
+	coordinator := newTestCoordinator(t, discovery)
+
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"a", "b"}, resultNames(results))
+}
