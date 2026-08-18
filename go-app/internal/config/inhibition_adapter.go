@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"strings"
 
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 )
@@ -20,7 +22,25 @@ import (
 func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, error) {
 	rules := make([]inhibition.InhibitionRule, 0, len(c.Rules))
 
-	for _, r := range c.Rules {
+	for i, r := range c.Rules {
+		// Final review finding 10: source_matchers/target_matchers (upstream's
+		// `matchers:` list syntax) are accepted by the config loader and by the
+		// validator (W155) but are NOT implemented by the inhibition engine —
+		// only the source_match/source_match_re map form is. A rule that uses
+		// ONLY them inhibits nothing, silently. Refusing to start would break
+		// deployments whose rules already (ineffectively) carry them, so this
+		// logs at Error, names the rule, and says what to do.
+		if unwired := r.UnwiredMatcherFields(); len(unwired) > 0 {
+			name := r.Name
+			if name == "" {
+				name = fmt.Sprintf("inhibit_rules[%d]", i)
+			}
+			slog.Error("inhibition rule uses matcher fields the runtime does not implement; this rule will NOT inhibit anything through them",
+				"rule", name,
+				"unwired_fields", strings.Join(unwired, ","),
+				"action", "rewrite as source_match/source_match_re/target_match/target_match_re")
+		}
+
 		rules = append(rules, inhibition.InhibitionRule{
 			SourceMatch:   r.SourceMatch,
 			SourceMatchRE: r.SourceMatchRE,

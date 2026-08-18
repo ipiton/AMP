@@ -1980,6 +1980,20 @@ func (r *ServiceRegistry) ReloadCoordinator() *appconfig.ReloadCoordinator {
 	return r.reloadCoordinator
 }
 
+// RouteEvaluator returns the live route-tree evaluator, or nil when running
+// without a `route:` section (lite/legacy single-receiver mode). It follows
+// config reloads, because initializeRouting wires a hot-reload-capable
+// evaluator over routeTreeManager.
+//
+// Exposed for /api/v2/alerts/groups (final review finding 17), which needs the
+// per-alert receiver and group_by that only the route tree can answer.
+func (r *ServiceRegistry) RouteEvaluator() services.RouteEvaluator {
+	if r.routeEvaluator == nil {
+		return nil
+	}
+	return r.routeEvaluator
+}
+
 // InhibitionState returns the inhibition state manager (may be nil if not configured).
 func (r *ServiceRegistry) InhibitionState() inhibitionpkg.InhibitionStateManager {
 	return r.inhibitionState

@@ -45,6 +45,12 @@ type RegistryProvider interface {
 	// 6.5). See ClusterStatus's own doc comment (status_api.go) for the
 	// disabled/ready contract.
 	ClusterStatus(ctx context.Context) ClusterStatus
+	// RouteEvaluator returns the live route-tree evaluator, or nil when
+	// running without a `route:` section (lite/legacy single-receiver mode).
+	// /api/v2/alerts/groups uses it for the per-alert receiver and group_by
+	// (final review finding 17); a nil evaluator falls back to the configured
+	// root route, then to the first legacy receiver.
+	RouteEvaluator() services.RouteEvaluator
 }
 
 func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
@@ -253,16 +259,64 @@ func AlertGroupsHandler(registry RegistryProvider) http.HandlerFunc {
 			return
 		}
 
-		// Active runtime has no routing tree yet: groups carry the first
-		// configured receiver (or "default") instead of a hardcoded value.
-		receiver := "default"
-		if receivers := registry.Config().Receivers; len(receivers) > 0 {
-			receiver = receivers[0].Name
-		}
-		groups := registry.AlertStore().GroupAlerts(groupBy, receiver, silenceMatcher(registry.SilenceStore()))
+		resolver := alertGroupingResolver(registry, groupBy)
+		groups := registry.AlertStore().GroupAlerts(resolver, silenceMatcher(registry.SilenceStore()))
 		groups = filterAlertGroups(groups, stateFilter, receiverRe)
 		writeJSON(w, http.StatusOK, groups)
 	})
+}
+
+// alertGroupingResolver builds the per-alert grouping identity (receiver +
+// group_by) that /api/v2/alerts/groups reports.
+//
+// Final review finding 17: every group used to report `labels: {}` unless the
+// caller passed `?group_by=` (upstream has no such parameter — group labels come
+// from the matched ROUTE's group_by), and every group reported the FIRST
+// configured receiver regardless of where its alerts actually route.
+//
+// Resolution order, per alert:
+//  1. The live route tree (registry.RouteEvaluator) — the authoritative answer,
+//     and the only one that can differ per alert.
+//  2. The root route's own receiver/group_by, when a `route:` tree exists but
+//     evaluation fails (fail-open, matching AlertProcessor.evaluateRoute).
+//  3. The first configured legacy receiver, then "default" — lite/legacy mode
+//     with no route tree at all.
+//
+// queryGroupBy (the `?group_by=` parameter, an AMP extension kept for backwards
+// compatibility) overrides the group_by from every source when present, so a
+// caller can still ask "how would these alerts group by X".
+func alertGroupingResolver(registry RegistryProvider, queryGroupBy []string) memory.AlertGroupingResolver {
+	cfg := registry.Config()
+
+	fallback := memory.AlertGrouping{Receiver: "default"}
+	if cfg != nil {
+		if cfg.Routing != nil && cfg.Routing.Route != nil {
+			fallback.Receiver = cfg.Routing.Route.Receiver
+			fallback.GroupBy = cfg.Routing.Route.GroupBy
+		} else if len(cfg.Receivers) > 0 {
+			fallback.Receiver = cfg.Receivers[0].Name
+		}
+	}
+	if fallback.Receiver == "" {
+		fallback.Receiver = "default"
+	}
+
+	evaluator := registry.RouteEvaluator()
+
+	return func(labels map[string]string) memory.AlertGrouping {
+		grouping := fallback
+
+		if evaluator != nil {
+			if decision, err := evaluator.Evaluate(labels); err == nil && decision != nil && decision.Receiver != "" {
+				grouping = memory.AlertGrouping{Receiver: decision.Receiver, GroupBy: decision.GroupBy}
+			}
+		}
+
+		if len(queryGroupBy) > 0 {
+			grouping.GroupBy = queryGroupBy
+		}
+		return grouping
+	}
 }
 
 // filterAlertGroups applies the active/silenced/inhibited/unprocessed state

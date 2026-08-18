@@ -44,6 +44,8 @@ type fakeRegistry struct {
 	silenceRepo     infrasilencing.SilenceRepository
 	silenceEventPub infrasilencing.SilenceEventPublisher
 	processor       *services.AlertProcessor
+	config          *appconfig.Config
+	routeEvaluator  services.RouteEvaluator
 }
 
 func (r *fakeRegistry) AlertStore() *memory.AlertStore     { return r.alertStore }
@@ -55,12 +57,21 @@ func (r *fakeRegistry) SilenceEventPublisher() infrasilencing.SilenceEventPublis
 	return r.silenceEventPub
 }
 func (r *fakeRegistry) AlertProcessor() *services.AlertProcessor { return r.processor }
-func (r *fakeRegistry) Config() *appconfig.Config                { return &appconfig.Config{} }
+func (r *fakeRegistry) Config() *appconfig.Config {
+	if r.config != nil {
+		return r.config
+	}
+	return &appconfig.Config{}
+}
 func (r *fakeRegistry) StartTime() time.Time                     { return time.Now() }
 func (r *fakeRegistry) ReloadConfig(_ context.Context) error     { return nil }
 func (r *fakeRegistry) ClusterStatus(_ context.Context) ClusterStatus {
 	return ClusterStatus{Status: "disabled"}
 }
+
+// RouteEvaluator returns nil unless a test injects one — nil is the
+// lite/legacy posture (no `route:` section).
+func (r *fakeRegistry) RouteEvaluator() services.RouteEvaluator { return r.routeEvaluator }
 
 func newTestProcessor(t *testing.T, publisher *fakePublisher) *services.AlertProcessor {
 	t.Helper()

@@ -134,6 +134,70 @@ func TestApplicationPublishingAdapter_ReturnsErrorWhenAllTargetsFail(t *testing.
 	}
 }
 
+// TestApplicationPublishingAdapter_PartialFailureReturnsError is final review
+// finding 11: the single-alert path returned nil as soon as ONE target
+// succeeded, while PublishGroup treats any unconfirmed target as a failure.
+// The failed target's notification was simply dropped. Now aligned, so the
+// webhook handler answers 5xx and Prometheus retries.
+func TestApplicationPublishingAdapter_PartialFailureReturnsError(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			{Target: &core.PublishingTarget{Name: "paging"}, Success: false, Error: errors.New("queue full")},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	err = adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"})
+	if err == nil {
+		t.Fatal("expected an error when only some targets confirmed the enqueue")
+	}
+	if !strings.Contains(err.Error(), "queue full") {
+		t.Fatalf("error should carry the failing target's cause, got %v", err)
+	}
+}
+
+// TestApplicationPublishingAdapter_PartialFailureWithoutCauseStillErrors covers
+// a result marked unsuccessful but carrying no Error — the adapter must still
+// refuse to report success.
+func TestApplicationPublishingAdapter_PartialFailureWithoutCauseStillErrors(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+			{Target: &core.PublishingTarget{Name: "paging"}, Success: false},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err == nil {
+		t.Fatal("expected an error when a target is unsuccessful without an explicit cause")
+	}
+}
+
+// TestApplicationPublishingAdapter_NoTargetsIsNotAnError pins the DELIBERATE
+// divergence from PublishGroup documented in publish(): an empty result set is a
+// legitimate steady state on this path (no amp.receiver Secrets provisioned yet,
+// or metrics-only mode) and there is no shared notification log to poison.
+// Erroring would 5xx every ingested alert on a working deployment.
+func TestApplicationPublishingAdapter_NoTargetsIsNotAnError(t *testing.T) {
+	adapter, err := NewApplicationPublishingAdapter(&fakePublishingCoordinator{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err != nil {
+		t.Fatalf("empty results must stay non-error on the single-alert path, got %v", err)
+	}
+}
+
 func TestMetricsOnlyPublisher_Noops(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("test_reason", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err := publisher.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}); err != nil {

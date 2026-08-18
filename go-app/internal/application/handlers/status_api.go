@@ -1,8 +1,8 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
-	"os"
 	"runtime"
 	"time"
 
@@ -21,6 +21,11 @@ type StatusResponse struct {
 }
 
 // StatusConfig is the nested `config` object in /api/v2/status: `{"original": "..."}`.
+//
+// Original carries the Alertmanager-shaped, SECRET-REDACTED configuration
+// (route/receivers/inhibit_rules/time_intervals/global) — not the raw config
+// file. See AlertmanagerConfigYAML for why both halves of that matter
+// (final review finding 15).
 type StatusConfig struct {
 	Original string `json:"original"`
 }
@@ -65,20 +70,16 @@ type VersionInfo struct {
 
 func StatusAPIHandler(registry RegistryProvider) http.HandlerFunc {
 	return getOnly(func(w http.ResponseWriter, r *http.Request) {
-		configPath := os.Getenv("AMP_CONFIG_FILE")
-		if configPath == "" {
-			configPath = "config.yaml"
-		}
-
-		configContent, err := os.ReadFile(configPath)
-		if err != nil {
-			// Fallback if file not found
-			configContent = []byte("# config file not found")
-		}
-
+		// Final review finding 15: this used to os.ReadFile the raw config
+		// path and return it verbatim. On an unauthenticated endpoint that
+		// leaked database.password, redis.password, LLM API keys and every
+		// webhook secret in the file — and it was the wrong shape for
+		// `amtool config routes show`, which expects an Alertmanager config.
+		// Rendering the Alertmanager section only, with secrets redacted,
+		// fixes both at once.
 		resp := StatusResponse{
 			Cluster: registry.ClusterStatus(r.Context()),
-			Config:  StatusConfig{Original: string(configContent)},
+			Config:  StatusConfig{Original: AlertmanagerConfigYAML(registry.Config())},
 			VersionInfo: VersionInfo{
 				Version:   buildinfo.Version,
 				Revision:  buildinfo.Revision,
@@ -102,7 +103,14 @@ func ReloadHandler(registry RegistryProvider) http.HandlerFunc {
 		}
 
 		if err := registry.ReloadConfig(r.Context()); err != nil {
-			InternalErrorHandler(w, "failed to reload configuration: "+err.Error())
+			// Final review finding 16: err.Error() embeds the config file path
+			// ("failed to read config file /etc/amp/secrets/config.yaml: ...")
+			// and, on a validation failure, field values from that file. This
+			// endpoint is unauthenticated, so the response must stay generic;
+			// the operator-facing detail goes to the log instead, where the
+			// reload pipeline has already recorded it per phase.
+			slog.Error("config reload via /-/reload failed", "error", err)
+			InternalErrorHandler(w, "failed to reload configuration; see server logs for details")
 			return
 		}
 
