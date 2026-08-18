@@ -451,6 +451,121 @@ func TestInitializeGrouping_StandardUsesRedisAndRestoresTimers(t *testing.T) {
 	}
 }
 
+// TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica
+// is task 6.2's end-to-end wiring test: with the standard profile and a
+// live Redis cache, ServiceRegistry.initializeGrouping must forward
+// cfg.Grouping.ReconciliationInterval/Grace into the TimerManager it
+// builds, and that TimerManager's reconciliation loop must actually adopt
+// a timer left overdue in shared Redis storage by a replica that is no
+// longer running — simulated here by seeding the overdue entry directly
+// via a second RedisTimerStorage connection, standing in for a DIFFERENT,
+// now-crashed replica (this registry's own timer for the group is
+// cancelled first, so nothing on THIS side would fire it otherwise).
+func TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run() error = %v", err)
+	}
+	defer mr.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	redisCache, err := infracache.NewRedisCache(&infracache.CacheConfig{
+		Addr:        mr.Addr(),
+		PoolSize:    5,
+		DialTimeout: time.Second,
+		ReadTimeout: time.Second,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewRedisCache() error = %v", err)
+	}
+	defer func() { _ = redisCache.Close() }()
+
+	cfg := &appconfig.Config{
+		Profile: appconfig.ProfileStandard,
+		Grouping: appconfig.GroupingConfig{
+			Enabled:                true,
+			ReconciliationInterval: 50 * time.Millisecond,
+			ReconciliationGrace:    10 * time.Millisecond,
+		},
+		Routing: &infraroute.RouteConfig{
+			Route: &grouping.Route{
+				Receiver:      "default",
+				GroupBy:       []string{"alertname"},
+				GroupWait:     &grouping.Duration{Duration: time.Hour}, // long enough this replica's own timer never fires during the test
+				GroupInterval: &grouping.Duration{Duration: time.Hour},
+			},
+		},
+	}
+	r := newTestRegistryForGrouping(cfg)
+	r.cache = redisCache
+
+	ctx := context.Background()
+	if err := r.initializeGrouping(ctx); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if r.groupManager == nil || r.groupTimerManager == nil {
+		t.Fatalf("groupManager/groupTimerManager must be initialized with a live Redis cache")
+	}
+	defer func() { _ = r.groupTimerManager.Shutdown(context.Background()) }()
+
+	groupKey := grouping.GroupKey("receiver=default/alertname=OrphanE2E")
+	alert := &core.Alert{
+		Fingerprint: "fp-orphan",
+		AlertName:   "OrphanE2E",
+		Status:      core.StatusFiring,
+		Labels:      map[string]string{"alertname": "OrphanE2E"},
+		StartsAt:    time.Now(),
+	}
+	if _, err := r.groupManager.AddAlertToGroup(ctx, alert, groupKey); err != nil {
+		t.Fatalf("AddAlertToGroup() error = %v", err)
+	}
+
+	// AddAlertToGroup just started a real (1h, won't fire here) group_wait
+	// timer for this group on THIS replica. Cancel it so nothing on this
+	// side would otherwise fire the group, then seed an overdue timer entry
+	// directly — this is what shared Redis storage looks like right after
+	// some OTHER replica started this group's timer and crashed before it
+	// fired.
+	if _, err := r.groupTimerManager.CancelTimer(ctx, groupKey); err != nil {
+		t.Fatalf("CancelTimer() error = %v", err)
+	}
+
+	seedStorage, err := grouping.NewRedisTimerStorage(redisCache, logger)
+	if err != nil {
+		t.Fatalf("NewRedisTimerStorage() error = %v", err)
+	}
+	startedAt := time.Now().Add(-5 * time.Minute)
+	duration := 3 * time.Minute
+	orphan := &grouping.GroupTimer{
+		GroupKey:  groupKey,
+		TimerType: grouping.GroupWaitTimer,
+		Duration:  duration,
+		StartedAt: startedAt,
+		ExpiresAt: startedAt.Add(duration), // 2 minutes overdue
+		State:     grouping.TimerStateActive,
+		Metadata:  &grouping.TimerMetadata{Version: 1, CreatedBy: "crashed-replica"},
+	}
+	if err := seedStorage.SaveTimer(ctx, orphan); err != nil {
+		t.Fatalf("SaveTimer() error = %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		stats, statsErr := r.groupTimerManager.GetStats(ctx)
+		if statsErr == nil && stats.ReconciledTimers >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ServiceRegistry-wired reconciliation loop never adopted the orphaned timer (stats=%+v, err=%v)", stats, statsErr)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, err := seedStorage.LoadTimer(ctx, groupKey); err == nil {
+		t.Fatalf("adopted orphan timer should have been deleted from storage after firing")
+	}
+}
+
 // TestServiceRegistryShutdown_GroupingTimerManagerStopsCleanly verifies
 // ServiceRegistry.Shutdown tears down the grouping timer manager (task 2.2)
 // without error and clears both fields, alongside the silence manager.
