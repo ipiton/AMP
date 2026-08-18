@@ -195,16 +195,38 @@ func (s *AlertStore) Stats() (total, firing, resolved int) {
 	return total, firing, resolved
 }
 
-// GroupAlerts groups the stored alerts by the given label names. The silences
-// matcher (nil-tolerant) is used so groups report the same state/silencedBy
-// as GET /api/v2/alerts.
-func (s *AlertStore) GroupAlerts(groupBy []string, receiver string, silences alertconv.SilenceMatcher) []core.APIGettableAlertGroup {
+// AlertGrouping is how ONE alert aggregates: the receiver its route sends it
+// to, and the label names that form its group.
+type AlertGrouping struct {
+	Receiver string
+	GroupBy  []string
+}
+
+// AlertGroupingResolver answers AlertGrouping for an alert's label set.
+//
+// It exists so GroupAlerts can reflect the ROUTE TREE (final review finding
+// 17): the receiver and group_by both depend on which route an alert matched,
+// so they cannot be single values passed in once for the whole store. A nil
+// resolver, or one returning an empty Receiver, falls back to "default".
+type AlertGroupingResolver func(labels map[string]string) AlertGrouping
+
+// GroupAlerts groups the stored alerts the way the route tree says they should
+// be grouped, via resolve. The silences matcher (nil-tolerant) is used so
+// groups report the same state/silencedBy as GET /api/v2/alerts.
+//
+// Final review finding 17: this used to take a single groupBy slice (sourced
+// only from the `?group_by=` query parameter, so `labels` came back as `{}` for
+// every group on a plain request) and a single receiver name (the FIRST
+// configured receiver, hardcoded for every group regardless of routing). Both
+// are per-route properties upstream: two groups routed to different receivers
+// must report different receivers, and a group's labels come from its route's
+// own group_by.
+//
+// The receiver is part of the aggregation key, matching upstream's per-route
+// aggrGroups: the same label set routed to two receivers is two groups.
+func (s *AlertStore) GroupAlerts(resolve AlertGroupingResolver, silences alertconv.SilenceMatcher) []core.APIGettableAlertGroup {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	if receiver == "" {
-		receiver = "default"
-	}
 
 	groups := make(map[string]*core.APIGettableAlertGroup)
 	now := time.Now().UTC()
@@ -215,12 +237,25 @@ func (s *AlertStore) GroupAlerts(groupBy []string, receiver string, silences ale
 		if a.Status == "resolved" {
 			continue
 		}
+
+		grouping := AlertGrouping{}
+		if resolve != nil {
+			grouping = resolve(a.Labels)
+		}
+		receiver := grouping.Receiver
+		if receiver == "" {
+			receiver = "default"
+		}
+
 		// Calculate grouping labels and key
 		groupLabels := make(map[string]string)
 		var keyBuilder strings.Builder
+		keyBuilder.WriteString("receiver=")
+		keyBuilder.WriteString(receiver)
+		keyBuilder.WriteByte('/')
 
-		sortedGroupBy := make([]string, len(groupBy))
-		copy(sortedGroupBy, groupBy)
+		sortedGroupBy := make([]string, len(grouping.GroupBy))
+		copy(sortedGroupBy, grouping.GroupBy)
 		sort.Strings(sortedGroupBy)
 
 		for _, l := range sortedGroupBy {
@@ -252,8 +287,16 @@ func (s *AlertStore) GroupAlerts(groupBy []string, receiver string, silences ale
 		out = append(out, *g)
 	}
 
+	// Receiver breaks the tie: now that it is part of the aggregation key, two
+	// groups can share an identical label set (and therefore fingerprint) while
+	// routing to different receivers — without this the response order for
+	// those two would be nondeterministic.
 	sort.Slice(out, func(i, j int) bool {
-		return alertconv.Fingerprint(out[i].Labels) < alertconv.Fingerprint(out[j].Labels)
+		fi, fj := alertconv.Fingerprint(out[i].Labels), alertconv.Fingerprint(out[j].Labels)
+		if fi != fj {
+			return fi < fj
+		}
+		return out[i].Receiver.Name < out[j].Receiver.Name
 	})
 
 	return out

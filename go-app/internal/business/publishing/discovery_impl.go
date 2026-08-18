@@ -289,10 +289,16 @@ func (m *DefaultTargetDiscoveryManager) parseAndValidateSecrets(secrets []corev1
 				"validation_errors", len(validationErrs),
 			)
 			for _, valErr := range validationErrs {
+				// Field + message only. valErr.Value used to be logged too
+				// (final review finding 18), but these targets come from
+				// Kubernetes Secrets, so the offending value is routinely a
+				// credential — a malformed webhook URL, an API key of the wrong
+				// length. Debug level is not a safety boundary: it is enabled in
+				// staging by default and the line lands in whatever log sink the
+				// cluster ships to.
 				m.logger.Debug("Validation error detail",
 					"field", valErr.Field,
 					"message", valErr.Message,
-					"value", valErr.Value,
 				)
 			}
 			invalidCount++

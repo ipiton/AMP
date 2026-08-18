@@ -166,9 +166,27 @@ func (p *ApplicationPublishingAdapter) publish(ctx context.Context, alert *core.
 		}
 	}
 
-	if len(results) > 0 && successful == 0 && lastErr != nil {
+	// Final review finding 11: this used to return nil whenever at least ONE
+	// target succeeded, diverging from PublishGroup, which treats any
+	// unconfirmed target as a failure. Aligned: a partial failure is a failure
+	// here too, so the caller (AlertProcessor -> the webhook handler) answers
+	// 5xx and Prometheus/Alertmanager retries the alert, rather than the failed
+	// targets being silently dropped.
+	if successful < len(results) {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("publish for alert %q confirmed only %d/%d targets", alert.Fingerprint, successful, len(results))
+		}
 		return lastErr
 	}
 
+	// DELIBERATE DIVERGENCE from PublishGroup: an EMPTY result set stays nil
+	// here. PublishGroup must error on it because its caller records the group
+	// in the shared, cross-replica notification log on nil and would then
+	// suppress the group for a whole repeat_interval (see that method's doc
+	// comment). This single-alert path has no such log to poison, while "no
+	// targets resolved" is a legitimate steady state — an operator who has not
+	// yet created any amp.receiver-scoped Secret, or metrics-only mode. Erroring
+	// would make every ingested alert answer 5xx and put Prometheus into a
+	// permanent retry loop over a working, deliberately-configured deployment.
 	return nil
 }
