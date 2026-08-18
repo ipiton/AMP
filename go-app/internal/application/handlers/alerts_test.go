@@ -656,8 +656,10 @@ func TestV1AlertsHandler_Get_RespectsFilters(t *testing.T) {
 	}
 }
 
-// TestV1AlertsHandler_Get_BadFilter_Returns400 mirrors v2's 400 contract for
-// a malformed filter= param.
+// TestV1AlertsHandler_Get_BadFilter_Returns400 mirrors v2's 400 status
+// contract for a malformed filter= param, but the BODY must use the v1
+// error envelope ({"status":"error","errorType":"bad_data","error":"..."}),
+// not v2's bare {"error":"..."} shape — every v1 response carries "status".
 func TestV1AlertsHandler_Get_BadFilter_Returns400(t *testing.T) {
 	registry := &fakeRegistry{
 		alertStore:   memory.NewAlertStore(),
@@ -671,6 +673,33 @@ func TestV1AlertsHandler_Get_BadFilter_Returns400(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("GET /api/v1/alerts?filter=bad status = %d, want 400", rec.Code)
+	}
+
+	var envelope core.APIV1ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode v1 error envelope: %v; body: %s", err, rec.Body.String())
+	}
+	if envelope.Status != "error" {
+		t.Fatalf("envelope.Status = %q, want %q", envelope.Status, "error")
+	}
+	if envelope.ErrorType != "bad_data" {
+		t.Fatalf("envelope.ErrorType = %q, want %q", envelope.ErrorType, "bad_data")
+	}
+	if envelope.Error == "" {
+		t.Fatal("envelope.Error is empty, want a description of the bad filter")
+	}
+
+	// Bare v2-shape leakage guard: the body must not be a plain
+	// {"error":"..."} object without "status"/"errorType".
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw json: %v", err)
+	}
+	if _, hasStatus := raw["status"]; !hasStatus {
+		t.Fatal("v1 error body missing \"status\" field")
+	}
+	if _, hasErrorType := raw["errorType"]; !hasErrorType {
+		t.Fatal("v1 error body missing \"errorType\" field")
 	}
 }
 
