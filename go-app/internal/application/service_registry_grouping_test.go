@@ -316,6 +316,63 @@ func TestInitializeGrouping_StandardRedisStorageFailureAddsDegradedReason(t *tes
 	}
 }
 
+// TestInitializeGrouping_StandardRedisNflogFailureAddsDegradedReason
+// verifies task 6.1's wiring: when the cache backend IS a live
+// *cache.RedisCache but the underlying Redis is unreachable, both
+// newGroupingStorage's and newNotifyLog's own Redis checks fail
+// independently, and initializeGrouping must add a degraded reason
+// specifically calling out the nflog (not just grouping storage) so a
+// "no cross-replica notification dedup" state is visible via
+// /health//readiness rather than only a Warn log.
+func TestInitializeGrouping_StandardRedisNflogFailureAddsDegradedReason(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run() error = %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	redisCache, err := infracache.NewRedisCache(&infracache.CacheConfig{
+		Addr:        mr.Addr(),
+		PoolSize:    5,
+		DialTimeout: time.Second,
+		ReadTimeout: time.Second,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewRedisCache() error = %v", err)
+	}
+	defer func() { _ = redisCache.Close() }()
+
+	// Kill the backing Redis server AFTER the cache was constructed
+	// successfully, same as TestInitializeGrouping_StandardRedisStorageFailureAddsDegradedReason.
+	mr.Close()
+
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileStandard,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing:  minimalRouteTree(),
+	}
+	r := newTestRegistryForGrouping(cfg)
+	r.cache = redisCache
+
+	if err := r.initializeGrouping(context.Background()); err != nil {
+		t.Fatalf("initializeGrouping() error = %v, want graceful fallback to memory nflog", err)
+	}
+	if r.groupManager == nil {
+		t.Fatalf("groupManager must still be initialized via memory-nflog fallback")
+	}
+
+	found := false
+	for _, reason := range r.degradedReasons {
+		if strings.Contains(reason, "nflog degraded") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("degradedReasons = %v, want an entry containing %q", r.degradedReasons, "nflog degraded")
+	}
+}
+
 // TestInitializeGrouping_StandardUsesRedisAndRestoresTimers verifies the
 // standard-profile Redis storage path end to end: a timer persisted before
 // startup (simulating a prior instance) is picked up by RestoreTimers

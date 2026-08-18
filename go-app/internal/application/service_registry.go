@@ -909,6 +909,16 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		r.addDegradedReason("grouping storage degraded: Redis init failed, using in-memory (no timer persistence across restart): %v", storageErr)
 	}
 
+	notifyLog, notifyLogErr := r.newNotifyLog(ctx)
+	if notifyLogErr != nil {
+		// Same posture as newGroupingStorage's storageErr above: the cache
+		// backend is healthy (otherwise this would duplicate Step 1's own
+		// degraded reason — see newNotifyLog), but the nflog-specific Redis
+		// client failed anyway. Falling back to in-memory means notification
+		// dedup no longer works across replicas until Redis recovers.
+		r.addDegradedReason("nflog degraded: Redis init failed, using in-memory (no cross-replica notification dedup): %v", notifyLogErr)
+	}
+
 	// Build the TimerManager first, without a GroupManager reference — see
 	// SetGroupManager below for why.
 	timerManager, err := grouping.NewDefaultTimerManager(grouping.TimerManagerConfig{
@@ -965,6 +975,7 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		InhibitionChecker:  r.inhibitionMatcher,
 		SilenceChecker:     silenceChecker,
 		TimeIntervalLookup: timeIntervalLookup,
+		NotifyLog:          notifyLog,
 		Logger:             r.logger,
 		Metrics:            r.metrics,
 	})
@@ -1045,6 +1056,46 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 
 	groupStorage, timerStorage := r.memoryGroupingStorage()
 	return groupStorage, timerStorage, nil
+}
+
+// newNotifyLog selects the notify-chain's Dedup + cross-replica publish
+// claim backend (task 6.1) by deployment profile: Redis (reusing the
+// already-initialized cache client, same pattern as newGroupingStorage
+// above) for standard, in-memory for lite.
+//
+// Return contract mirrors newGroupingStorage exactly, for the same reasons:
+//
+//   - (nil, nil): use the in-memory default (DefaultGroupManagerConfig.
+//     NotifyLog left nil — NewDefaultGroupManager fills in notifyDedupLog).
+//     Either lite profile, or standard profile without a live
+//     *cache.RedisCache — the latter is NOT a new degraded reason, since
+//     Step 1's initializeCache already recorded one for the same underlying
+//     "no Redis cache at all" situation.
+//   - (nil, err): standard profile, cache backend IS a live *cache.RedisCache
+//     (so Step 1 saw no failure), but RedisNotifyLog's own Redis check
+//     failed anyway. This is nflog-specific and would otherwise be
+//     invisible in /health//readiness, so initializeGrouping adds its own
+//     degraded reason for it.
+func (r *ServiceRegistry) newNotifyLog(ctx context.Context) (grouping.GroupNotifyLog, error) {
+	if r.config.Profile == appconfig.ProfileStandard {
+		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
+			notifyLog, err := grouping.NewRedisNotifyLog(ctx, &grouping.RedisNotifyLogConfig{
+				Client: redisCache.GetClient(),
+				Logger: r.logger,
+			})
+			if err != nil {
+				r.logger.Warn("Redis nflog init failed, notification dedup falls back to in-memory (no cross-replica dedup)", "error", err)
+				return nil, fmt.Errorf("redis nflog init failed: %w", err)
+			}
+
+			r.logger.Info("Notification log (nflog) using Redis storage (cross-replica dedup)")
+			return notifyLog, nil
+		}
+
+		r.logger.Warn("Standard profile without a Redis cache backend, nflog falls back to in-memory (no cross-replica dedup)")
+	}
+
+	return nil, nil
 }
 
 // memoryGroupingStorage builds the in-memory group + timer storage pair used
