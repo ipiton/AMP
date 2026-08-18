@@ -13,12 +13,24 @@
 #   1. Waits for both replicas' /healthz.
 #   2. Checks /api/v2/status on both: cluster.status == "ready" and
 #      exactly 2 peers (task 6.5's heartbeat/status wiring).
-#   3. POSTs one alert to replica A, waits group_wait (config.yaml: 5s)
+#   3. POSTs one alert to replica A, waits group_wait (config.yaml: 8s)
 #      plus a margin, then asserts EXACTLY ONE notification happened.
-#   4. Kills replica A, POSTs a second (distinctly-named) alert to
-#      replica B, and asserts B alone still delivers exactly once -- i.e.
-#      the cluster survives losing a replica.
-#   5. Tears the stack down (unless KEEP_UP=1).
+#   4. CROSS-REPLICA CONCURRENT FIRE: restarts replica B after ingest so its
+#      RestoreTimers arms a LOCAL timer for a group replica A also holds a
+#      timer for -- both then fire at the same group_interval instant, and
+#      exactly one publish must get through.
+#   5. ORPHAN ADOPTION: POSTs an alert to A and kills A BEFORE group_wait
+#      expires, so the timer is left in shared Redis with no owner. Replica
+#      B's reconciliation loop must adopt it and publish.
+#   6. POSTs a further alert to replica B (A still dead) and asserts B alone
+#      still delivers exactly once -- the cluster survives losing a replica.
+#   7. Tears the stack down (unless KEEP_UP=1).
+#
+# Steps 4 and 5 were added by final review finding 9. Before them, step 3's
+# "exactly once" was trivially true (only ONE replica ever held a timer for
+# the group, so there was nothing to arbitrate) and the "failover" step only
+# proved that a surviving replica can serve a BRAND NEW alert -- never that
+# work already in flight on the dead replica gets picked up.
 #
 # --- Why not a real webhook hit (substitution, investigated up front) ---
 # Actual HTTP delivery in this codebase (internal/infrastructure/publishing)
@@ -65,7 +77,9 @@ COMPOSE=(docker compose -f docker-compose.yml)
 PORT_A=18081
 PORT_B=18082
 KEEP_UP="${KEEP_UP:-0}"
-GROUP_WAIT_MARGIN=10 # config.yaml route.group_wait is 5s
+GROUP_WAIT_MARGIN=14     # config.yaml route.group_wait is 8s
+GROUP_INTERVAL=30        # config.yaml route.group_interval
+RECONCILE_MARGIN=20      # reconciliation_interval 5s + grace 3s, plus slack
 
 log() { printf '[e2e-ha] %s\n' "$1"; }
 fail() { printf '[e2e-ha] FAIL: %s\n' "$1" >&2; exit 1; }
@@ -158,6 +172,19 @@ nflog_entry_exists() {
   [[ "$hits" == "1" ]]
 }
 
+log_count() {
+  # log_count <service> <pattern>: occurrences of a fixed pattern in that
+  # service's cumulative logs.
+  #
+  # Always `grep -c`, never `grep -q`: under `set -o pipefail`, grep -q exits
+  # on the first match and closes the pipe, so `docker compose logs` dies of
+  # SIGPIPE (141) and the whole pipeline reports failure even though the
+  # pattern WAS found. That bit this script's first version of the step-4
+  # assertion. grep -c drains the input, and `|| true` absorbs the no-match
+  # exit status.
+  "${COMPOSE[@]}" logs "$1" 2>/dev/null | grep -c "$2" || true
+}
+
 undelivered_count() {
   # undelivered_count <service> <alertname>: how many times <service> reached
   # the publish step for this specific group and reported "delivered nothing"
@@ -240,12 +267,72 @@ if nflog_entry_exists "default" "$ALERT_1"; then
 fi
 log "PASS: no nflog:entry recorded for '$ALERT_1' -- metrics-only publish did not poison the shared dedup log"
 
-# --- Step 4: kill replica A; replica B alone still delivers exactly once -
-log "killing replica A"
+# --- Step 4: CROSS-REPLICA CONCURRENT FIRE (finding 9a) -----------------
+# Step 3 proved "exactly one publish" while only ONE replica held a timer for
+# the group -- trivially true, nothing to arbitrate. Force the real race:
+# replica A published '$ALERT_1' at group_wait and armed a group_interval
+# continuation in SHARED Redis. Restarting replica B makes its RestoreTimers
+# load that same entry and arm its OWN local Go timer for it, so both replicas
+# fire the same group at the same instant. Exactly one publish must get
+# through (RedisTimerStorage.AcquireLock + the nflog TryClaim).
+restores_before=$(log_count amp-b "Timer restoration completed")
+log "restarting replica B so RestoreTimers arms a local timer for '$ALERT_1' on BOTH replicas"
+"${COMPOSE[@]}" restart amp-b >/dev/null
+wait_for_http "http://localhost:${PORT_B}/healthz" 60 || fail "replica B never became healthy after restart"
+
+restores_after=$(log_count amp-b "Timer restoration completed")
+[[ "$restores_after" -gt "$restores_before" ]] ||
+  fail "replica B did not re-run RestoreTimers after restart (before=$restores_before after=$restores_after) -- the concurrent-fire scenario would be vacuous"
+
+restored_one=$("${COMPOSE[@]}" logs amp-b 2>/dev/null | grep "Timer restoration completed" | tail -1)
+printf '%s' "$restored_one" | grep -q '"restored":0' &&
+  fail "replica B restored 0 timers ($restored_one) -- it does not hold a local timer for '$ALERT_1', so the concurrent-fire scenario is vacuous"
+log "replica B restored timers from shared Redis: $restored_one"
+
+log "waiting for group_interval (${GROUP_INTERVAL}s) so both replicas' timers for '$ALERT_1' fire together"
+sleep "$GROUP_INTERVAL"
+
+concurrent_a=$(undelivered_count amp-a "$ALERT_1")
+concurrent_b=$(undelivered_count amp-b "$ALERT_1")
+concurrent_total=$((concurrent_a + concurrent_b))
+# 1 from step 3's group_wait fire + exactly 1 from the group_interval fire that
+# BOTH replicas raced. A double publish shows up as 3.
+[[ "$concurrent_total" -eq 2 ]] || fail "expected exactly 2 cumulative publishes for $ALERT_1 (group_wait + one arbitrated group_interval), got $concurrent_total (a=$concurrent_a b=$concurrent_b)"
+log "PASS: both replicas held a timer for '$ALERT_1' and exactly one publish got through (a=$concurrent_a b=$concurrent_b)"
+
+# --- Step 5: ORPHAN ADOPTION after the owner dies (finding 9b) ----------
+# POST to replica A and kill A BEFORE group_wait expires, so the group_wait
+# timer is left in shared Redis with no live owner and no local handle
+# anywhere. Nothing re-arms it: AddAlertToGroup only arms group_wait for BRAND
+# NEW groups, and RestoreTimers is startup-only. Replica B's reconciliation
+# loop is the only thing that can save this group -- and it could not before
+# finding 2's fix, because the adoption grace equalled the storage TTL grace.
+ALERT_3="E2EHaTestAlertAdopted"
+log "posting alert '$ALERT_3' to replica A, then killing A before group_wait expires"
+post_alert "$PORT_A" "$ALERT_3" >/dev/null
 "${COMPOSE[@]}" kill amp-a >/dev/null
+log "replica A killed"
 
 wait_for_http "http://localhost:${PORT_B}/healthz" 30 || fail "replica B unhealthy after replica A was killed"
 
+# A must NOT have published: it died inside group_wait.
+adopted_a=$(undelivered_count amp-a "$ALERT_3")
+[[ "$adopted_a" -eq 0 ]] || fail "replica A published $ALERT_3 before dying ($adopted_a) -- the kill was too slow, the adoption scenario is vacuous (raise route.group_wait)"
+
+log "waiting for replica B's reconciliation loop to adopt the orphaned timer (${RECONCILE_MARGIN}s)"
+sleep "$RECONCILE_MARGIN"
+
+adopted_b=$(undelivered_count amp-b "$ALERT_3")
+[[ "$adopted_b" -eq 1 ]] || fail "expected replica B to adopt the orphaned timer for $ALERT_3 and publish exactly once, got $adopted_b (finding 2: the reconciliation adoption window was ~0s)"
+adoptions=$(log_count amp-b "reconciliation: adopting orphaned group timer")
+[[ "$adoptions" -ge 1 ]] ||
+  fail "replica B published $ALERT_3 but never logged an adoption -- the assertion is not proving adoption"
+log "PASS: replica B adopted the dead replica's in-flight timer and published '$ALERT_3'"
+
+# --- Step 6: replica B alone still delivers exactly once ----------------
+# Replica A is already dead (killed in step 5); this step is about a BRAND NEW
+# alert ingested by the survivor, which is a different property from step 5's
+# adoption of work already in flight.
 ALERT_2="E2EHaTestAlertTwo"
 log "posting alert '$ALERT_2' to replica B (replica A is dead)"
 post_alert "$PORT_B" "$ALERT_2" >/dev/null
