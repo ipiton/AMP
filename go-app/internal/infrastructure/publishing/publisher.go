@@ -40,11 +40,12 @@ type AlertPublisher interface {
 // instead of submitting one job per alert (see that method's doc comment).
 type BatchAlertPublisher interface {
 	// PublishBatch delivers every alert in alerts to target as one request.
-	// groupKey/receiver populate the wire payload's corresponding fields
-	// (see GroupAlertFormatter.FormatGroup). Returns a single error for the
-	// whole batch — there is no partial-success concept at the wire level
-	// for a single HTTP request, unlike the per-message iteration path.
-	PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, target *core.PublishingTarget) error
+	// groupKey/receiver/groupLabels populate the wire payload's
+	// corresponding fields (see GroupAlertFormatter.FormatGroup). Returns a
+	// single error for the whole batch — there is no partial-success
+	// concept at the wire level for a single HTTP request, unlike the
+	// per-message iteration path.
+	PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error
 }
 
 // HTTPPublisher is a base HTTP client for all publishers
@@ -128,13 +129,13 @@ func (p *HTTPPublisher) publish(ctx context.Context, enrichedAlert *core.Enriche
 // targets, where DefaultAlertFormatter always supports it, but this stays
 // defensive for any other AlertFormatter implementation (tests, future
 // middleware) that might not.
-func (p *HTTPPublisher) publishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, target *core.PublishingTarget) error {
+func (p *HTTPPublisher) publishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error {
 	groupFormatter, ok := p.formatter.(GroupAlertFormatter)
 	if !ok {
 		return fmt.Errorf("formatter %T does not support wire-level group batching (GroupAlertFormatter)", p.formatter)
 	}
 
-	payload, err := groupFormatter.FormatGroup(ctx, alerts, groupKey, receiver, target.Format)
+	payload, err := groupFormatter.FormatGroup(ctx, alerts, groupKey, receiver, groupLabels, target.Format)
 	if err != nil {
 		return fmt.Errorf("failed to format alert group: %w", err)
 	}
@@ -283,8 +284,8 @@ func (p *WebhookPublisher) Publish(ctx context.Context, enrichedAlert *core.Enri
 
 // PublishBatch implements BatchAlertPublisher (task fwb): one POST carrying
 // every alert in the group, matching upstream Alertmanager's webhook shape.
-func (p *WebhookPublisher) PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, target *core.PublishingTarget) error {
-	return p.publishBatch(ctx, alerts, groupKey, receiver, target)
+func (p *WebhookPublisher) PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error {
+	return p.publishBatch(ctx, alerts, groupKey, receiver, groupLabels, target)
 }
 
 // Name returns publisher name

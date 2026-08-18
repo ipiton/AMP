@@ -33,7 +33,7 @@ type nonDeliveringPublisher struct {
 	calls int
 }
 
-func (p *nonDeliveringPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ func(string) bool) ([]TargetPublishOutcome, error) {
+func (p *nonDeliveringPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, _ func(string) bool) ([]TargetPublishOutcome, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}

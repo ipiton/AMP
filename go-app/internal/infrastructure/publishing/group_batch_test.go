@@ -93,7 +93,8 @@ func TestWebhookPublisher_PublishBatch_SendsOnePOSTWithAlertsArray(t *testing.T)
 	batchPublisher, ok := publisher.(BatchAlertPublisher)
 	require.True(t, ok, "WebhookPublisher must implement BatchAlertPublisher")
 
-	err := batchPublisher.PublishBatch(context.Background(), alerts, "receiver=ops/alertname=HighCPU", "ops", target)
+	groupLabels := map[string]string{"alertname": "HighCPU", "cluster": "prod"}
+	err := batchPublisher.PublishBatch(context.Background(), alerts, "receiver=ops/alertname=HighCPU", "ops", groupLabels, target)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(1), requestCount.Load(), "exactly ONE POST must be sent for the whole group, not one per alert")
@@ -107,6 +108,8 @@ func TestWebhookPublisher_PublishBatch_SendsOnePOSTWithAlertsArray(t *testing.T)
 	assert.Equal(t, "firing", payload["status"])
 	assert.Equal(t, "ops", payload["receiver"])
 	assert.Equal(t, "https://amp.example.com", payload["externalURL"])
+	assert.Equal(t, map[string]any{"alertname": "HighCPU", "cluster": "prod"}, payload["groupLabels"],
+		"groupLabels must carry the group_by=[alertname,cluster] values the caller resolved (review finding 1)")
 
 	rawAlerts, ok := payload["alerts"].([]any)
 	require.True(t, ok, "payload must carry an \"alerts\" array")
@@ -121,6 +124,31 @@ func TestWebhookPublisher_PublishBatch_SendsOnePOSTWithAlertsArray(t *testing.T)
 	commonAnnotations, ok := payload["commonAnnotations"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "shared summary", commonAnnotations["summary"])
+}
+
+// TestWebhookPublisher_PublishBatch_NilGroupLabelsBecomesEmptyMap covers the
+// other half of review finding 1's requested coverage: a group whose route
+// has no group_by (or the caller passes nil) must still emit
+// "groupLabels": {} — never a JSON null — so downstream webhook receivers
+// don't have to special-case a missing field.
+func TestWebhookPublisher_PublishBatch_NilGroupLabelsBecomesEmptyMap(t *testing.T) {
+	var capturedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	publisher := NewWebhookPublisher(NewAlertFormatter(""), slog.Default())
+	target := &core.PublishingTarget{Name: "ops-webhook", Type: string(TargetTypeWebhook), URL: server.URL, Enabled: true, Format: core.FormatWebhook}
+
+	batchPublisher := publisher.(BatchAlertPublisher)
+	require.NoError(t, batchPublisher.PublishBatch(context.Background(), testGroupBatchAlerts(1), "gk", "ops", nil, target))
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &payload))
+	assert.Equal(t, map[string]any{}, payload["groupLabels"], "nil groupLabels must serialize as an empty object, not null")
 }
 
 // TestWebhookPublisher_PublishBatch_ResolvedGroupReportsResolvedStatus
@@ -144,7 +172,7 @@ func TestWebhookPublisher_PublishBatch_ResolvedGroupReportsResolvedStatus(t *tes
 	}
 
 	batchPublisher := publisher.(BatchAlertPublisher)
-	require.NoError(t, batchPublisher.PublishBatch(context.Background(), alerts, "gk", "ops", target))
+	require.NoError(t, batchPublisher.PublishBatch(context.Background(), alerts, "gk", "ops", nil, target))
 
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(capturedBody, &payload))
@@ -164,7 +192,7 @@ func TestWebhookPublisher_PublishBatch_HTTPErrorPropagates(t *testing.T) {
 	target := &core.PublishingTarget{Name: "ops-webhook", Type: string(TargetTypeWebhook), URL: server.URL, Enabled: true, Format: core.FormatWebhook}
 
 	batchPublisher := publisher.(BatchAlertPublisher)
-	err := batchPublisher.PublishBatch(context.Background(), testGroupBatchAlerts(2), "gk", "ops", target)
+	err := batchPublisher.PublishBatch(context.Background(), testGroupBatchAlerts(2), "gk", "ops", nil, target)
 	assert.Error(t, err)
 }
 
@@ -252,26 +280,30 @@ func TestPublishingQueue_PublishJob_BatchPublisherCalledOnceNotIterated(t *testi
 
 	publisher := &countingBatchPublisher{}
 	alerts := testGroupBatchAlerts(3)
+	groupLabels := map[string]string{"alertname": "HighCPU"}
 	job := &PublishingJob{
 		EnrichedAlert: &core.EnrichedAlert{Alert: alerts[0]},
 		Target:        &core.PublishingTarget{Name: "ops-webhook", Type: string(TargetTypeWebhook)},
 		Alerts:        alerts,
 		GroupKey:      "gk",
 		Receiver:      "ops",
+		GroupLabels:   groupLabels,
 	}
 
 	require.NoError(t, queue.publishJob(publisher, job))
 	assert.Equal(t, 1, publisher.batchCalls, "PublishBatch must be called exactly once for a batch-capable publisher")
 	assert.Equal(t, 0, publisher.publishCalls, "Publish must never be called when PublishBatch is available")
 	assert.Len(t, publisher.lastAlerts, 3)
+	assert.Equal(t, groupLabels, publisher.lastGroupLabels, "job.GroupLabels must be forwarded to PublishBatch")
 }
 
 // countingBatchPublisher implements both AlertPublisher and
 // BatchAlertPublisher to prove publishJob prefers the batch path.
 type countingBatchPublisher struct {
-	publishCalls int
-	batchCalls   int
-	lastAlerts   []*core.Alert
+	publishCalls    int
+	batchCalls      int
+	lastAlerts      []*core.Alert
+	lastGroupLabels map[string]string
 }
 
 func (p *countingBatchPublisher) Publish(_ context.Context, _ *core.EnrichedAlert, _ *core.PublishingTarget) error {
@@ -281,9 +313,10 @@ func (p *countingBatchPublisher) Publish(_ context.Context, _ *core.EnrichedAler
 
 func (p *countingBatchPublisher) Name() string { return "counting-batch" }
 
-func (p *countingBatchPublisher) PublishBatch(_ context.Context, alerts []*core.Alert, _ string, _ string, _ *core.PublishingTarget) error {
+func (p *countingBatchPublisher) PublishBatch(_ context.Context, alerts []*core.Alert, _ string, _ string, groupLabels map[string]string, _ *core.PublishingTarget) error {
 	p.batchCalls++
 	p.lastAlerts = alerts
+	p.lastGroupLabels = groupLabels
 	return nil
 }
 

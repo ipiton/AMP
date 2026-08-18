@@ -53,13 +53,14 @@ func (p *MetricsOnlyPublisher) PublishToAll(ctx context.Context, alert *core.Ale
 // a full repeat_interval. The sentinel keeps this a non-error, non-delivery
 // outcome: no dedup entry is recorded (the caller never reaches its
 // RecordSent loop when err != nil), and the next replica to fire the
-// group's timer publishes for real. skipTarget is unused: a publisher that
-// delivers nothing has no targets to check dedup state for.
+// group's timer publishes for real. skipTarget and groupLabels are unused:
+// a publisher that delivers nothing has no targets to check dedup state
+// for and nothing to format a wire payload with.
 //
 // The empty-alerts early return stays nil (no outcomes, no error): there is
 // genuinely nothing to deliver, and publishGroupAlerts never reaches the
 // publisher with an empty slice anyway.
-func (p *MetricsOnlyPublisher) PublishGroup(ctx context.Context, _ string, alerts []*core.Alert, receiver string, _ func(string) bool) ([]grouping.TargetPublishOutcome, error) {
+func (p *MetricsOnlyPublisher) PublishGroup(ctx context.Context, _ string, alerts []*core.Alert, receiver string, _ map[string]string, _ func(string) bool) ([]grouping.TargetPublishOutcome, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}

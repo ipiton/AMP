@@ -17,8 +17,10 @@ type publishingCoordinator interface {
 	// PublishGroupToTargets is the notify-stage chain's batch publish call
 	// (task 2.4) — see grouping.GroupNotificationPublisher.PublishGroup.
 	// skipTarget implements task fwb's per-target nflog dedup (called once
-	// per candidate target before a job is submitted for it).
-	PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, skipTarget func(target string) bool) ([]*infrapublishing.PublishingResult, error)
+	// per candidate target before a job is submitted for it). groupLabels
+	// (review finding 1, fwb fix round 1) is forwarded into the wire
+	// payload's "groupLabels" field for batched targets.
+	PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, skipTarget func(target string) bool) ([]*infrapublishing.PublishingResult, error)
 }
 
 // ApplicationPublishingAdapter bridges AlertProcessor and the queue-based publishing stack.
@@ -69,15 +71,16 @@ func (p *ApplicationPublishingAdapter) PublishToAll(ctx context.Context, alert *
 // error because the dedup log had no per-target granularity to record a
 // partial success into.
 //
-// skipTarget is forwarded to PublishingCoordinator.PublishGroupToTargets
-// unchanged — see grouping.GroupNotificationPublisher's doc comment for the
-// per-target dedup protocol it implements.
-func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, skipTarget func(target string) bool) ([]grouping.TargetPublishOutcome, error) {
+// skipTarget and groupLabels are forwarded to
+// PublishingCoordinator.PublishGroupToTargets unchanged — see
+// grouping.GroupNotificationPublisher's doc comment for the per-target
+// dedup protocol and the groupLabels contract it implements.
+func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, groupLabels map[string]string, skipTarget func(target string) bool) ([]grouping.TargetPublishOutcome, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}
 
-	results, err := p.coordinator.PublishGroupToTargets(ctx, alerts, receiver, groupKey, skipTarget)
+	results, err := p.coordinator.PublishGroupToTargets(ctx, alerts, receiver, groupKey, groupLabels, skipTarget)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +95,11 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKe
 			continue
 		}
 
+		// result.Success reflects PublishingQueue.SubmitGroup's return
+		// (job enqueued), NOT an HTTP delivery confirmation from the
+		// target — see TargetPublishOutcome.Success's doc comment
+		// (grouping/manager.go) for the accepted "enqueue, not delivery"
+		// gap this carries forward unchanged from task 2.4.
 		outcomes = append(outcomes, grouping.TargetPublishOutcome{
 			Target:  result.Target.Name,
 			Success: result.Success,

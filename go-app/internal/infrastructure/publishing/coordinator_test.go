@@ -191,7 +191,7 @@ func TestPublishGroupToTargets_EmptyAlertsIsNoop(t *testing.T) {
 	discovery := NewStubTargetDiscoveryManager(slog.Default())
 	coordinator := newTestCoordinator(t, discovery)
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), nil, "critical", "gk", nil)
+	results, err := coordinator.PublishGroupToTargets(context.Background(), nil, "critical", "gk", nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, results)
 }
@@ -210,7 +210,7 @@ func TestPublishGroupToTargets_ReceiverFiltering_ResolvesTargetsOnce(t *testing.
 	// One group notification of 3 alerts, one matching target: expect
 	// exactly ONE PublishingResult, for "slack-critical" — not one per
 	// alert, and nothing for "pagerduty-oncall".
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(3), "critical", "gk", nil)
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(3), "critical", "gk", nil, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "slack-critical", results[0].Target.Name)
@@ -223,7 +223,7 @@ func TestPublishGroupToTargets_NoMatchingTargetsReturnsError(t *testing.T) {
 
 	coordinator := newTestCoordinator(t, discovery)
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(2), "no-such-receiver", "gk", nil)
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(2), "no-such-receiver", "gk", nil, nil)
 	require.Error(t, err)
 	assert.Empty(t, results)
 }
@@ -236,7 +236,7 @@ func TestPublishGroupToTargets_EmptyReceiverMeansAllEnabled(t *testing.T) {
 
 	coordinator := newTestCoordinator(t, discovery)
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", nil)
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", nil, nil)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"a", "b"}, resultNames(results))
 }
@@ -258,7 +258,7 @@ func TestPublishGroupToTargets_SkipTarget_ExcludesAlreadyDeliveredTargets(t *tes
 		return target == "a"
 	}
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", skipTarget)
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", nil, skipTarget)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "b", results[0].Target.Name)

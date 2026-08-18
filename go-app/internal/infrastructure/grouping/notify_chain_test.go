@@ -299,7 +299,7 @@ type twoTargetPublisher struct {
 	calls      []map[string]bool // one entry per PublishGroup call: target -> attempted (not skipped)
 }
 
-func (p *twoTargetPublisher) PublishGroup(_ context.Context, _ string, _ []*core.Alert, _ string, skipTarget func(string) bool) ([]TargetPublishOutcome, error) {
+func (p *twoTargetPublisher) PublishGroup(_ context.Context, _ string, _ []*core.Alert, _ string, _ map[string]string, skipTarget func(string) bool) ([]TargetPublishOutcome, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -389,6 +389,85 @@ func TestPublishGroupAlerts_PartialTargetFailure_ResolvedAlertsNotPrunedUntilAll
 
 	_, err = manager.GetGroup(ctx, groupKey)
 	assert.Error(t, err, "once t2 also confirms, the fully-delivered resolved alert must be pruned and the group removed")
+}
+
+// === Review finding 1 (fwb fix round 1): groupLabels resolved from
+// GroupMetadata.GroupBy, not hardcoded empty ===
+
+// createTestManagerWithChainAndGroupBy is createTestManagerWithChain with a
+// caller-supplied root Route.GroupBy, so tests can exercise
+// groupLabelsFor's resolution against something other than the fixed
+// ["alertname"] every other chain test uses.
+func createTestManagerWithChainAndGroupBy(t *testing.T, pub GroupNotificationPublisher, groupBy []string) *DefaultGroupManager {
+	t.Helper()
+	keyGen := NewGroupKeyGenerator()
+	config := &GroupingConfig{
+		Route: &Route{
+			Receiver:       "default",
+			GroupBy:        groupBy,
+			GroupWait:      &Duration{time.Hour},
+			GroupInterval:  &Duration{time.Hour},
+			RepeatInterval: &Duration{time.Hour},
+		},
+	}
+
+	storage := NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()})
+
+	manager, err := NewDefaultGroupManager(context.Background(), DefaultGroupManagerConfig{
+		KeyGenerator: keyGen,
+		Config:       config,
+		Logger:       slog.Default(),
+		Storage:      storage,
+		Publisher:    pub,
+	})
+	require.NoError(t, err)
+	return manager
+}
+
+// TestPublishGroupAlerts_GroupLabels_ResolvedFromGroupBy is review finding
+// 1's headline test: for group_by: [alertname, cluster], the batched
+// notification must carry groupLabels resolved to this group's actual
+// values for exactly those two names — not the hardcoded empty map the
+// pre-fix code passed down.
+func TestPublishGroupAlerts_GroupLabels_ResolvedFromGroupBy(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithChainAndGroupBy(t, pub, []string{"alertname", "cluster"})
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=HighCPU/cluster=prod")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU", "cluster": "prod", "instance": "host-1"})
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+	manager.publishGroupAlerts(ctx, group)
+
+	require.Len(t, pub.calls(), 1)
+	assert.Equal(t, map[string]string{"alertname": "HighCPU", "cluster": "prod"}, pub.lastGroupLabels(),
+		"groupLabels must resolve exactly the group_by names to this group's values, excluding non-group_by labels like instance")
+}
+
+// TestPublishGroupAlerts_GroupLabels_EmptyGroupByYieldsEmptyMap covers the
+// other half: a route with no group_by at all must resolve to an empty,
+// non-nil groupLabels map, matching the wire formatter's "never emit null"
+// contract.
+func TestPublishGroupAlerts_GroupLabels_EmptyGroupByYieldsEmptyMap(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithChainAndGroupBy(t, pub, nil)
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/no-group-by")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU"})
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+	manager.publishGroupAlerts(ctx, group)
+
+	require.Len(t, pub.calls(), 1)
+	assert.Equal(t, map[string]string{}, pub.lastGroupLabels(), "empty group_by must resolve to an empty, non-nil map")
 }
 
 // === Fix round 1, Finding 4: check-then-publish-then-record must be
