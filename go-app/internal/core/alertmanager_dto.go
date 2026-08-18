@@ -104,6 +104,22 @@ type APIV1AlertsResponse struct {
 	Data   []APIV1Alert `json:"data"`
 }
 
+// APIV1ErrorResponse is the legacy v1 error envelope, matching upstream's
+// retired v1 API response shape for a failed request:
+// {"status":"error","errorType":"bad_data","error":"..."}. Unlike v2 (which
+// this codebase serializes as a bare {"error":"..."} object), every v1
+// response — success or failure — carries the "status" field.
+type APIV1ErrorResponse struct {
+	Status    string `json:"status"`
+	ErrorType string `json:"errorType"`
+	Error     string `json:"error"`
+}
+
+// APIV1ErrorTypeBadData is the errorType value for a malformed request
+// (invalid query parameter, bad filter syntax, ...) — upstream's v1 API used
+// this for exactly this class of client error.
+const APIV1ErrorTypeBadData = "bad_data"
+
 // Silence DTOs
 
 // SilenceMatcherInput represents a label matcher in silence creation/update

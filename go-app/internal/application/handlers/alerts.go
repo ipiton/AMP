@@ -133,10 +133,18 @@ func collectGettableAlerts(store *memory.AlertStore, silences *memory.SilenceSto
 // into the v1 envelope ({"status":"success","data":[...]}) via
 // alertconv.ToV1Alert. It accepts the same query params as v2 — see
 // V1AlertsHandler's doc comment.
+//
+// Errors use the v1 envelope too ({"status":"error","errorType":"bad_data",
+// "error":"..."}), NOT the bare {"error":"..."} shape v2 uses — every v1
+// response, success or failure, carries "status".
 func handleV1AlertsGet(store *memory.AlertStore, silences *memory.SilenceStore, w http.ResponseWriter, r *http.Request) {
 	gettableAlerts, errMsg := collectGettableAlerts(store, silences, r.URL.Query())
 	if errMsg != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errMsg})
+		writeJSON(w, http.StatusBadRequest, core.APIV1ErrorResponse{
+			Status:    "error",
+			ErrorType: core.APIV1ErrorTypeBadData,
+			Error:     errMsg,
+		})
 		return
 	}
 

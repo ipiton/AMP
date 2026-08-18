@@ -37,6 +37,31 @@ func TestUpstreamFingerprint_MatchesModelLabelSet(t *testing.T) {
 	}
 }
 
+// TestUpstreamFingerprint_GoldenHexLiteral pins UpstreamFingerprint to a
+// hardcoded expected hex literal (not derived from model.LabelSet at test
+// time, unlike TestUpstreamFingerprint_MatchesModelLabelSet above) — this
+// catches a regression that TestUpstreamFingerprint_MatchesModelLabelSet
+// could theoretically miss if a change to prometheus/common itself (a
+// version bump, say) shifted the algorithm's output for both the
+// implementation and the test's "independently computed" expectation at
+// once. The literal was captured once via
+// model.LabelSet{"alertname":"HighCPU","severity":"critical",
+// "instance":"server-1"}.Fingerprint().String() against
+// prometheus/common v0.66.1.
+func TestUpstreamFingerprint_GoldenHexLiteral(t *testing.T) {
+	const wantHex = "fa2e382f9ca07c38"
+
+	got := UpstreamFingerprint(map[string]string{
+		"alertname": "HighCPU",
+		"severity":  "critical",
+		"instance":  "server-1",
+	})
+
+	if got != wantHex {
+		t.Fatalf("UpstreamFingerprint() = %q, want golden literal %q", got, wantHex)
+	}
+}
+
 func TestUpstreamFingerprint_EmptyLabels_ReturnsEmpty(t *testing.T) {
 	if got := UpstreamFingerprint(nil); got != "" {
 		t.Fatalf("UpstreamFingerprint(nil) = %q, want empty", got)

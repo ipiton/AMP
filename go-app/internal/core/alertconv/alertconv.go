@@ -115,6 +115,11 @@ func Fingerprint(labels map[string]string) string {
 // shape they expect, without touching internal storage identity.
 func UpstreamFingerprint(labels map[string]string) string {
 	if len(labels) == 0 {
+		// Deviation from upstream: real model.LabelSet{}.Fingerprint() returns
+		// a well-defined non-empty hash for the empty set, not "". Empty-string
+		// here mirrors Fingerprint()'s own empty-labels short-circuit above —
+		// this path is unreachable in practice (alertname is a required label
+		// on every ingested alert), so it exists only for defensive symmetry.
 		return ""
 	}
 
