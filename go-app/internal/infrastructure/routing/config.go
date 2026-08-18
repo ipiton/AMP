@@ -267,7 +267,7 @@ func (c *RouteConfig) Clone() *RouteConfig {
 		clone.ReceiverIndex[receiver.Name] = clone.Receivers[i]
 	}
 
-	// Deep copy time interval groups (both sections) and rebuild index
+	// Deep copy time interval groups (both sections)
 	if c.TimeIntervals != nil {
 		clone.TimeIntervals = make([]timeinterval.TimeInterval, len(c.TimeIntervals))
 		for i, group := range c.TimeIntervals {
@@ -280,11 +280,23 @@ func (c *RouteConfig) Clone() *RouteConfig {
 			clone.MuteTimeIntervalsSection[i] = group.Clone()
 		}
 	}
-	if c.TimeIntervalIndex != nil {
-		clone.TimeIntervalIndex = make(map[string]timeinterval.TimeInterval, len(c.TimeIntervalIndex))
-		for name, group := range c.TimeIntervalIndex {
-			clone.TimeIntervalIndex[name] = group.Clone()
-		}
+
+	// Always rebuild the time interval index from the cloned sections
+	// (same pattern as ReceiverIndex above), rather than copying
+	// c.TimeIntervalIndex verbatim: a RouteConfig built by hand (e.g. the
+	// ValidateConfig/hot-reload path, which never calls
+	// buildTimeIntervalIndex) may have TimeIntervals populated but
+	// TimeIntervalIndex still nil, in which case a conditional copy would
+	// silently drop lookups on the clone.
+	clone.TimeIntervalIndex = make(
+		map[string]timeinterval.TimeInterval,
+		len(clone.TimeIntervals)+len(clone.MuteTimeIntervalsSection),
+	)
+	for _, group := range clone.TimeIntervals {
+		clone.TimeIntervalIndex[group.Name] = group
+	}
+	for _, group := range clone.MuteTimeIntervalsSection {
+		clone.TimeIntervalIndex[group.Name] = group
 	}
 
 	// Note: CompiledRegex not copied (rebuilt during parse)
