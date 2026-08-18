@@ -198,12 +198,36 @@ func persistSilenceDBFirst(ctx context.Context, repo infrasilencing.SilenceRepos
 	return domain.ID, http.StatusOK, nil
 }
 
+// handleSilenceDelete implements DELETE /api/v2/silence/{id}.
+//
+// KNOWN SCOPE GAP: only the memory-only (repo == nil, lite profile) path
+// below was changed to expire-in-place (task: alertmanager-parity amtool
+// audit F3). The DB-first path (repo != nil) still performs a hard
+// DeleteSilence — it does not force early expiry the way upstream does, so
+// on a standard/Postgres profile a silence deleted before its natural
+// EndsAt disappears immediately rather than surfacing as
+// status.state == "expired" until the GC worker's retention window. The
+// audit that drove this fix reproduced the gap only against the lite
+// profile; widening the DB-first path to the same expire-then-GC semantics
+// (fetch existing row, set EndsAt/Status, UpdateSilence instead of
+// DeleteSilence) is a larger change — it touches the DB-first write-path
+// contract exercised by silences_dbfirst_test.go — and is left as a
+// follow-up rather than bundled in here.
 func handleSilenceDelete(ctx context.Context, store *memory.SilenceStore, repo infrasilencing.SilenceRepository, publisher infrasilencing.SilenceEventPublisher, id string, w http.ResponseWriter) {
 	if repo == nil {
 		// Memory-only fallback (lite profile / repository unavailable). No
 		// persistent source of truth exists for other replicas, so no event
 		// is published (same reasoning as handleSilencePost's repo==nil path).
-		if !store.Delete(id) {
+		//
+		// F3 fix: upstream Alertmanager's DELETE forces the silence into the
+		// "expired" state rather than removing it — amtool's `silence expire`
+		// relies on the expired silence staying queryable via GET
+		// /api/v2/silences (with status.state == "expired") afterwards. A
+		// literal store.Delete here made it vanish immediately, so
+		// `amtool silence query --expired` always returned empty. Expire
+		// keeps the entry (see memory.SilenceStore.Expire's doc comment for
+		// its GC/retention posture in this profile).
+		if !store.Expire(id, time.Now().UTC()) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

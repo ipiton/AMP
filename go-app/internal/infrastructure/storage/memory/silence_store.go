@@ -90,6 +90,36 @@ func (s *SilenceStore) Get(id string, now time.Time) (core.APISilence, bool) {
 	return toAPISilence(silence, now), true
 }
 
+// Expire transitions a silence to the "expired" state in place, instead of
+// removing it, matching upstream Alertmanager's DELETE /api/v2/silence/{id}
+// semantics: it forces early expiry (EndsAt moves to now if it hasn't
+// already passed) but the silence stays in the store, so it remains
+// queryable via GET /api/v2/silences with status.state == "expired" until
+// the store's retention/GC policy removes it (there is none for the
+// memory-only/lite profile: an already-expired-by-time silence was never
+// evicted here either — only an explicit Delete call removed entries, so
+// this keeps that same lifetime characteristic). Returns false if the ID
+// does not exist. Idempotent: calling it again on an already-expired
+// silence is a no-op beyond bumping UpdatedAt.
+func (s *SilenceStore) Expire(id string, now time.Time) bool {
+	s.mu.Lock()
+	silence, ok := s.silences[id]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+
+	now = now.UTC()
+	if now.Before(silence.EndsAt) {
+		silence.EndsAt = now
+	}
+	silence.UpdatedAt = now
+	s.mu.Unlock()
+
+	s.notifyChange()
+	return true
+}
+
 func (s *SilenceStore) Delete(id string) bool {
 	s.mu.Lock()
 	if _, ok := s.silences[id]; !ok {
