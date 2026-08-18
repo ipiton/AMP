@@ -265,6 +265,16 @@ func TestRefreshNow_RateLimit(t *testing.T) {
 	err = manager.RefreshNow()
 	assert.ErrorIs(t, err, ErrRateLimitExceeded)
 
+	// Regression guard: a rate-limited RefreshNow must not leave the manager
+	// stuck reporting state=in_progress. tryAcquireRefreshSlot() reserves the
+	// slot before the rate-limit check runs; if rejection only rolled back
+	// inProgress and left m.state at RefreshStateInProgress, GetStatus()
+	// would wrongly report a refresh running until the next real refresh
+	// fires (up to a full Interval later).
+	status := manager.GetStatus()
+	assert.NotEqual(t, RefreshStateInProgress, status.State,
+		"rate-limited RefreshNow must not leave state stuck at in_progress")
+
 	// Wait for rate limit window to pass
 	time.Sleep(60 * time.Millisecond) // RateLimitPer = 50ms in test config
 
