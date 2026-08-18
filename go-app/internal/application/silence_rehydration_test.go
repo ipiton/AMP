@@ -37,7 +37,7 @@ func (f *fakeSilenceRepository) ListSilences(_ context.Context, filter infrasile
 	return f.silences[filter.Offset:end], nil
 }
 
-func TestRehydrateSilenceStore_RestoresActiveAndPending(t *testing.T) {
+func TestRehydrateSilenceStore_RestoresActivePendingAndExpired(t *testing.T) {
 	now := time.Now().UTC()
 
 	active := &coresilencing.Silence{
@@ -60,8 +60,22 @@ func TestRehydrateSilenceStore_RestoresActiveAndPending(t *testing.T) {
 		CreatedAt: now.Add(-time.Minute),
 		Matchers:  []coresilencing.Matcher{{Name: "env", Value: "prod", Type: coresilencing.MatcherTypeNotEqual}},
 	}
+	// F3 (alertmanager-parity amtool audit): expired silences must also
+	// survive a restart now, not just active/pending, so GET
+	// /api/v2/silences keeps showing status.state == "expired" for an
+	// already-expired-in-place silence across a restart.
+	expired := &coresilencing.Silence{
+		ID:        "770e8400-e29b-41d4-a716-446655440002",
+		CreatedBy: "ops@example.com",
+		Comment:   "expired silence",
+		StartsAt:  now.Add(-2 * time.Hour),
+		EndsAt:    now.Add(-time.Hour),
+		Status:    coresilencing.SilenceStatusExpired,
+		CreatedAt: now.Add(-2 * time.Hour),
+		Matchers:  []coresilencing.Matcher{{Name: "alertname", Value: "OldIncident", Type: coresilencing.MatcherTypeEqual}},
+	}
 
-	repo := &fakeSilenceRepository{silences: []*coresilencing.Silence{active, pending}}
+	repo := &fakeSilenceRepository{silences: []*coresilencing.Silence{active, pending, expired}}
 	r := &ServiceRegistry{
 		logger:       slog.Default(),
 		silenceStore: memory.NewSilenceStore(),
@@ -95,13 +109,33 @@ func TestRehydrateSilenceStore_RestoresActiveAndPending(t *testing.T) {
 		t.Errorf("negative matcher lost on rehydration: %+v", got.Matchers)
 	}
 
-	// The rehydration filter must only ask for active+pending silences.
+	got, ok = r.silenceStore.Get(expired.ID, now)
+	if !ok {
+		t.Fatalf("expired silence %s not restored (F3 regression)", expired.ID)
+	}
+	if got.Status.State != "expired" {
+		t.Errorf("restored expired silence state = %q, want expired", got.Status.State)
+	}
+
+	// The rehydration filter must ask for active+pending+expired (F3) —
+	// row removal stays exclusively the GC retention worker's job, so
+	// rehydration itself must not re-exclude expired rows.
 	if len(repo.filters) == 0 {
 		t.Fatal("ListSilences never called")
 	}
 	statuses := repo.filters[0].Statuses
-	if len(statuses) != 2 {
-		t.Fatalf("filter statuses = %v, want [active pending]", statuses)
+	if len(statuses) != 3 {
+		t.Fatalf("filter statuses = %v, want [active pending expired]", statuses)
+	}
+	wantStatuses := map[coresilencing.SilenceStatus]bool{
+		coresilencing.SilenceStatusActive:  true,
+		coresilencing.SilenceStatusPending: true,
+		coresilencing.SilenceStatusExpired: true,
+	}
+	for _, s := range statuses {
+		if !wantStatuses[s] {
+			t.Errorf("unexpected status %q in rehydration filter", s)
+		}
 	}
 }
 

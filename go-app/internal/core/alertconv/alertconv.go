@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/prometheus/common/model"
 )
 
 // ParseAlertTime parses an alert timestamp leniently, matching Alertmanager
@@ -97,6 +98,39 @@ func Fingerprint(labels map[string]string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// UpstreamFingerprint computes the Alertmanager/Prometheus-compatible alert
+// fingerprint: FNV-1a 64-bit over the label set, via prometheus/common's
+// model.LabelSet.Fingerprint() (the exact algorithm/library upstream
+// Alertmanager uses), formatted as 16 lowercase hex characters
+// (model.Fingerprint.String()'s "%016x").
+//
+// This is intentionally a DIFFERENT value from Fingerprint() above (SHA-256,
+// 64 hex chars): that one remains the internal identity/dedup key used
+// everywhere a fingerprint is stored or looked up (AlertStore dedup keys,
+// GetAlertByFingerprint, classification/publishing cache keys, ...) — changing
+// it would require a migration of every persisted key. UpstreamFingerprint is
+// used ONLY for the value serialized in API responses (see
+// ToGettableAlert), so external consumers that validate/compare against
+// upstream's 16-hex format (dashboards, amtool, correlation logic) see the
+// shape they expect, without touching internal storage identity.
+func UpstreamFingerprint(labels map[string]string) string {
+	if len(labels) == 0 {
+		// Deviation from upstream: real model.LabelSet{}.Fingerprint() returns
+		// a well-defined non-empty hash for the empty set, not "". Empty-string
+		// here mirrors Fingerprint()'s own empty-labels short-circuit above —
+		// this path is unreachable in practice (alertname is a required label
+		// on every ingested alert), so it exists only for defensive symmetry.
+		return ""
+	}
+
+	ls := make(model.LabelSet, len(labels))
+	for name, value := range labels {
+		ls[model.LabelName(name)] = model.LabelValue(value)
+	}
+
+	return ls.Fingerprint().String()
+}
+
 // CloneStringMap returns a defensive copy of src. The result is always a
 // non-nil map so DTOs never marshal labels/annotations as JSON null.
 func CloneStringMap(src map[string]string) map[string]string {
@@ -118,6 +152,12 @@ type SilenceMatcher interface {
 // nil-tolerant to silences (nil ⇒ state derived from status only).
 // SilencedBy/InhibitedBy/MutedBy are always empty slices, never nil, per the
 // Alertmanager API v2 schema.
+//
+// Fingerprint is recomputed from alert.Labels via UpstreamFingerprint (16 hex
+// chars), NOT passed through from alert.Fingerprint (the internal SHA-256
+// dedup key, 64 hex chars) — see UpstreamFingerprint's doc comment. This is
+// the only place that substitution happens: every other consumer of
+// alert.Fingerprint keeps using the internal key untouched.
 func ToGettableAlert(alert core.APIAlert, silences SilenceMatcher, now time.Time) core.APIGettableAlert {
 	silencedBy := make([]string, 0)
 	if alert.Status == "firing" && silences != nil {
@@ -146,12 +186,38 @@ func ToGettableAlert(alert core.APIAlert, silences SilenceMatcher, now time.Time
 		UpdatedAt:    alert.UpdatedAt,
 		EndsAt:       endsAt,
 		GeneratorURL: alert.GeneratorURL,
-		Fingerprint:  alert.Fingerprint,
+		Fingerprint:  UpstreamFingerprint(alert.Labels),
 		Status: core.APIAlertStatus{
 			State:       state,
 			SilencedBy:  silencedBy,
 			InhibitedBy: []string{},
 			MutedBy:     []string{},
+		},
+	}
+}
+
+// ToV1Alert converts a v2 gettable alert into the legacy v1 API shape used by
+// GET /api/v1/alerts (thin wrapper: {"status":"success","data":[...]})  —
+// v1 predates mutedBy (a v2-only addition) and encodes receivers as bare
+// names rather than {"name": ...} objects.
+func ToV1Alert(g core.APIGettableAlert) core.APIV1Alert {
+	receivers := make([]string, 0, len(g.Receivers))
+	for _, r := range g.Receivers {
+		receivers = append(receivers, r.Name)
+	}
+
+	return core.APIV1Alert{
+		Labels:       g.Labels,
+		Annotations:  g.Annotations,
+		StartsAt:     g.StartsAt,
+		EndsAt:       g.EndsAt,
+		GeneratorURL: g.GeneratorURL,
+		Fingerprint:  g.Fingerprint,
+		Receivers:    receivers,
+		Status: core.APIV1AlertStatus{
+			State:       g.Status.State,
+			SilencedBy:  g.Status.SilencedBy,
+			InhibitedBy: g.Status.InhibitedBy,
 		},
 	}
 }
