@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 )
 
 // RouteConfig represents the complete Alertmanager-compatible configuration.
@@ -84,10 +85,28 @@ type RouteConfig struct {
 	// Moved here for full Alertmanager compatibility
 	InhibitRules []InhibitRule `yaml:"inhibit_rules,omitempty"`
 
+	// TimeIntervals is the primary (Alertmanager >=0.24) section name for
+	// named time interval groups, referenced by route.mute_time_intervals
+	// and route.active_time_intervals (PARITY-B1, Task 3.1).
+	TimeIntervals []timeinterval.TimeInterval `yaml:"time_intervals,omitempty"`
+
+	// MuteTimeIntervalsSection is the deprecated top-level alias for
+	// TimeIntervals (upstream's original section name before it was
+	// renamed to `time_intervals:`). Entries from both sections are merged
+	// into TimeIntervalIndex at parse time; using this alias logs a
+	// deprecation warning.
+	MuteTimeIntervalsSection []timeinterval.TimeInterval `yaml:"mute_time_intervals,omitempty"`
+
 	// Internal: Receiver index for O(1) lookup (built at parse time)
 	// Key: receiver.Name, Value: *Receiver
 	// Not serialized to YAML
 	ReceiverIndex map[string]*Receiver `yaml:"-"`
+
+	// Internal: Time interval index for O(1) lookup by name (built at
+	// parse time from TimeIntervals + MuteTimeIntervalsSection). Used by
+	// the TimeMute pipeline step (Task 3.2) and by route reference
+	// validation. Not serialized to YAML.
+	TimeIntervalIndex map[string]timeinterval.TimeInterval `yaml:"-"`
 
 	// Internal: Compiled regex patterns (built at parse time)
 	// Key1: Route pointer, Key2: MatchRE label key, Value: Compiled regex
@@ -121,6 +140,27 @@ func (c *RouteConfig) GetReceiver(name string) (*Receiver, bool) {
 	}
 	receiver, ok := c.ReceiverIndex[name]
 	return receiver, ok
+}
+
+// GetTimeInterval returns a named time interval group by name.
+// Uses TimeIntervalIndex for O(1) lookup performance.
+//
+// Returns (zero value, false) if no group with that name was defined.
+//
+// Complexity: O(1)
+//
+// Example:
+//
+//	group, ok := config.GetTimeInterval("business-hours")
+//	if ok && group.Matches(time.Now()) {
+//	    // suppress/allow notification depending on route field
+//	}
+func (c *RouteConfig) GetTimeInterval(name string) (timeinterval.TimeInterval, bool) {
+	if c.TimeIntervalIndex == nil {
+		return timeinterval.TimeInterval{}, false
+	}
+	group, ok := c.TimeIntervalIndex[name]
+	return group, ok
 }
 
 // ListReceivers returns all receivers in configuration order.
@@ -225,6 +265,26 @@ func (c *RouteConfig) Clone() *RouteConfig {
 	for i, receiver := range c.Receivers {
 		clone.Receivers[i] = receiver.Clone()
 		clone.ReceiverIndex[receiver.Name] = clone.Receivers[i]
+	}
+
+	// Deep copy time interval groups (both sections) and rebuild index
+	if c.TimeIntervals != nil {
+		clone.TimeIntervals = make([]timeinterval.TimeInterval, len(c.TimeIntervals))
+		for i, group := range c.TimeIntervals {
+			clone.TimeIntervals[i] = group.Clone()
+		}
+	}
+	if c.MuteTimeIntervalsSection != nil {
+		clone.MuteTimeIntervalsSection = make([]timeinterval.TimeInterval, len(c.MuteTimeIntervalsSection))
+		for i, group := range c.MuteTimeIntervalsSection {
+			clone.MuteTimeIntervalsSection[i] = group.Clone()
+		}
+	}
+	if c.TimeIntervalIndex != nil {
+		clone.TimeIntervalIndex = make(map[string]timeinterval.TimeInterval, len(c.TimeIntervalIndex))
+		for name, group := range c.TimeIntervalIndex {
+			clone.TimeIntervalIndex[name] = group.Clone()
+		}
 	}
 
 	// Note: CompiledRegex not copied (rebuilt during parse)

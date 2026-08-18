@@ -75,6 +75,20 @@ type Route struct {
 	// Example: matchers: ['severity != critical', 'namespace =~ "prod.*"']
 	Matchers []string `yaml:"matchers,omitempty"`
 
+	// MuteTimeIntervals references named time_intervals (by name) during
+	// which this route must NOT send notifications, even if it otherwise
+	// matches. Names are resolved against the top-level `time_intervals:`
+	// (or deprecated `mute_time_intervals:`) config section.
+	// Example: mute_time_intervals: ['weekends', 'nightly-maintenance']
+	MuteTimeIntervals []string `yaml:"mute_time_intervals,omitempty"`
+
+	// ActiveTimeIntervals references named time_intervals (by name) during
+	// which this route is allowed to send notifications; outside of them,
+	// the route is muted. Names are resolved the same way as
+	// MuteTimeIntervals.
+	// Example: active_time_intervals: ['business-hours']
+	ActiveTimeIntervals []string `yaml:"active_time_intervals,omitempty"`
+
 	// Continue indicates whether to continue matching after this route matches.
 	// If true, the alert will be sent to multiple receivers.
 	// Default: false
@@ -263,6 +277,16 @@ func (r *Route) Clone() *Route {
 	if r.Matchers != nil {
 		clone.Matchers = make([]string, len(r.Matchers))
 		copy(clone.Matchers, r.Matchers)
+	}
+
+	if r.MuteTimeIntervals != nil {
+		clone.MuteTimeIntervals = make([]string, len(r.MuteTimeIntervals))
+		copy(clone.MuteTimeIntervals, r.MuteTimeIntervals)
+	}
+
+	if r.ActiveTimeIntervals != nil {
+		clone.ActiveTimeIntervals = make([]string, len(r.ActiveTimeIntervals))
+		copy(clone.ActiveTimeIntervals, r.ActiveTimeIntervals)
 	}
 
 	if r.Routes != nil {
