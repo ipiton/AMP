@@ -1336,6 +1336,77 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	if m.metrics != nil {
 		m.metrics.RecordGroupOperation("publish", "success")
 	}
+
+	// Step 6: drop the alerts that were resolved in the notification we just
+	// delivered (final review finding 8) — see pruneResolvedAlerts.
+	m.pruneResolvedAlerts(ctx, group.Key, alerts)
+}
+
+// pruneResolvedAlerts removes from the group every alert that was RESOLVED in
+// the notification just confirmed delivered, deleting the group entirely once
+// that empties it.
+//
+// Upstream parity: this is exactly what Alertmanager's aggrGroup.flush does
+// after a successful notify — resolved alerts are deleted from the aggregation
+// group, so the resolved notification goes out ONCE.
+//
+// WHY IT WAS MISSING (final review finding 8): RemoveAlertFromGroup has no
+// non-test caller, and nothing else pruned resolved alerts. A group whose
+// alerts had all resolved therefore kept re-publishing the same resolved
+// notification on every repeat_interval — forever, until CleanupExpiredGroups
+// eventually reaped it. Operators saw a resolved alert paging them every
+// repeat_interval.
+//
+// Only called after a CONFIRMED delivery (publisher returned nil and RecordSent
+// was reached): pruning before that would drop the resolved state before anyone
+// was told about it.
+//
+// alerts is the post-filter set actually sent, so alerts suppressed by
+// inhibition/silence are deliberately left in place — they were not announced
+// as resolved, so they must not be forgotten. Errors are logged, never fatal:
+// the worst case is the pre-fix behaviour for one more interval.
+func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey GroupKey, alerts []*core.Alert) {
+	pruned := 0
+	for _, alert := range alerts {
+		if alert == nil || alert.Status != core.StatusResolved {
+			continue
+		}
+
+		// RemoveAlertFromGroup handles the whole teardown when this empties
+		// the group: storage delete, DecActiveGroups, cancelGroupTimers and
+		// notifyLog.Forget.
+		removed, err := m.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
+		if err != nil {
+			m.logger.Warn("failed to prune resolved alert after successful group notification",
+				"group_key", groupKey,
+				"fingerprint", alert.Fingerprint,
+				"error", err)
+			continue
+		}
+		if removed {
+			pruned++
+		}
+	}
+
+	if pruned > 0 {
+		m.logger.Info("pruned resolved alerts after group notification (upstream aggrGroup.flush semantics)",
+			"group_key", groupKey,
+			"pruned", pruned)
+	}
+}
+
+// groupStillExists reports whether groupKey is still present in storage.
+//
+// Used by the three timer callbacks after publishGroupAlerts: that call may
+// have deleted the group (all its alerts resolved — see pruneResolvedAlerts),
+// and scheduling the next group_interval/repeat_interval timer for a deleted
+// group would resurrect the very notification loop finding 8 is about.
+func (m *DefaultGroupManager) groupStillExists(ctx context.Context, groupKey GroupKey) bool {
+	group, err := m.storage.Load(ctx, groupKey)
+	if err != nil {
+		return false
+	}
+	return group != nil && len(group.Alerts) > 0
 }
 
 // startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
@@ -1421,6 +1492,17 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 	// Publish all alerts in the current group snapshot as the first notification
 	m.publishGroupAlerts(ctx, currentGroup)
 
+	// The publish above may have deleted the group entirely: all its alerts
+	// were resolved and got pruned (finding 8). Scheduling the next timer for
+	// a deleted group would resurrect the endless resolved-notification loop
+	// that pruning exists to stop.
+	if !m.groupStillExists(ctx, groupKey) {
+		m.logger.Debug("group fully resolved and removed after notification, not scheduling the next timer",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		return nil
+	}
+
 	// Start group_interval timer for subsequent notifications, honoring this
 	// group's own timing override if one was supplied (task 2.4).
 	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
@@ -1458,6 +1540,17 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 
 	// Publish update notification for all alerts in the current group snapshot
 	m.publishGroupAlerts(ctx, currentGroup)
+
+	// The publish above may have deleted the group entirely: all its alerts
+	// were resolved and got pruned (finding 8). Scheduling the next timer for
+	// a deleted group would resurrect the endless resolved-notification loop
+	// that pruning exists to stop.
+	if !m.groupStillExists(ctx, groupKey) {
+		m.logger.Debug("group fully resolved and removed after notification, not scheduling the next timer",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		return nil
+	}
 
 	// Switch to repeat_interval for periodic reminders.
 	// group_interval fires once after a notification is sent; subsequent reminders
@@ -1497,6 +1590,17 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 
 	// Publish reminder notification for all alerts
 	m.publishGroupAlerts(ctx, currentGroup)
+
+	// The publish above may have deleted the group entirely: all its alerts
+	// were resolved and got pruned (finding 8). Scheduling the next timer for
+	// a deleted group would resurrect the endless resolved-notification loop
+	// that pruning exists to stop.
+	if !m.groupStillExists(ctx, groupKey) {
+		m.logger.Debug("group fully resolved and removed after notification, not scheduling the next timer",
+			"group_key", groupKey,
+			"timer_type", timerType)
+		return nil
+	}
 
 	// Restart repeat_interval for the next reminder
 	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
