@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -50,6 +51,7 @@ func NewRouteConfigParser() *RouteConfigParser {
 
 	// Register custom validators
 	_ = v.RegisterValidation("alphanum_hyphen", validateAlphanumHyphen)
+	_ = v.RegisterValidation("receiver_name", validateReceiverName)
 	_ = v.RegisterValidation("https_production", validateHTTPSProduction)
 	_ = v.RegisterValidation("slack_channel", validateSlackChannel)
 	_ = v.RegisterValidation("emoji", validateEmoji)
@@ -429,14 +431,61 @@ func (p *RouteConfigParser) formatValidationErrors(err error) error {
 		errors.Add(
 			fieldErr.Namespace(),
 			fieldErr.Error(),
-			"", // No suggestion for struct tag errors
+			suggestionForTag(fieldErr.Tag()),
 		)
 	}
 
 	return errors.ErrType()
 }
 
+// suggestionForTag returns an actionable hint for a struct-tag validation
+// failure, or "" when the tag's own message is already self-explanatory.
+//
+// receiver_name is the case that needs one (final review finding 7): the raw
+// validator message is "Key: 'RouteConfig.Receivers[0].Name' Error:Field
+// validation for 'Name' failed on the 'receiver_name' tag", which tells the
+// operator nothing about WHICH character is the problem — and '/' is the only
+// one.
+func suggestionForTag(tag string) string {
+	switch tag {
+	case "receiver_name":
+		return fmt.Sprintf("receiver names may contain any character except %q, which is reserved as the group-key separator (\"receiver=<name>/<group-key>\"); rename the receiver", string(ReceiverNameReservedChar))
+	default:
+		return ""
+	}
+}
+
 // Custom validators
+
+// ReceiverNameReservedChar is the single character a receiver name may not
+// contain. Upstream Alertmanager places no restriction at all on receiver
+// names, so this is AMP's only divergence — and it is a hard implementation
+// constraint, not style: group keys are formatted as
+// "receiver=<name>/<generated-key>" (see AlertProcessor.groupKeyFor) and the
+// receiver is recovered by splitting on the FIRST '/' (see
+// grouping.receiverFromGroupKey). A '/' inside the name would truncate it and
+// route the group to the wrong receiver — or to none.
+const ReceiverNameReservedChar = '/'
+
+// validateReceiverName accepts any non-empty receiver name that does not
+// contain ReceiverNameReservedChar.
+//
+// Final review finding 7: receiver names were validated with
+// validateAlphanumHyphen, which rejects names upstream Alertmanager accepts
+// and that real configs use — "team.dba", "email:sre", "ops team",
+// "équipe-réseau". A config migrated from upstream failed to load with a
+// validation error, which reads as "AMP doesn't support my config" rather
+// than the cosmetic restriction it was.
+//
+// Emptiness is enforced separately by the `required` tag on the same field;
+// returning true for "" here keeps the two error messages from duplicating.
+func validateReceiverName(fl validator.FieldLevel) bool {
+	value := fl.Field().String()
+	if value == "" {
+		return true
+	}
+	return !strings.ContainsRune(value, ReceiverNameReservedChar)
+}
 
 func validateAlphanumHyphen(fl validator.FieldLevel) bool {
 	value := fl.Field().String()

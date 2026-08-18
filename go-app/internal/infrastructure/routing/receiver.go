@@ -27,10 +27,19 @@ import (
 //	        channel: "#oncall"
 //	        title: "Alert: {{ .GroupLabels.alertname }}"
 type Receiver struct {
-	// Name is the unique identifier for this receiver (required)
-	// Must match the receiver field in routes
-	// Length: 1-255 characters, alphanum + hyphens
-	Name string `yaml:"name" validate:"required,alphanum_hyphen,min=1,max=255"`
+	// Name is the unique identifier for this receiver (required).
+	// Must match the receiver field in routes.
+	//
+	// Length: 1-255 characters. Any character is allowed EXCEPT '/', which is
+	// reserved because group keys are formatted "receiver=<name>/<key>" and
+	// the receiver is recovered by splitting on the first '/' — see
+	// ReceiverNameReservedChar / validateReceiverName in parser.go.
+	//
+	// Final review finding 7: this used to be `alphanum_hyphen`, which
+	// rejected upstream-legal names such as "team.dba", "email:sre" and
+	// "ops team", so configs migrated from upstream Alertmanager failed to
+	// load.
+	Name string `yaml:"name" validate:"required,receiver_name,min=1,max=255"`
 
 	// WebhookConfigs defines generic HTTP webhook receivers
 	// Used for custom integrations or unsupported platforms
