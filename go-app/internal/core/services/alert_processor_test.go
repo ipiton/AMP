@@ -215,8 +215,11 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_RoutesToGroup_NotPublishedD
 	require.Len(t, groupMgr.calls, 1)
 	assert.Equal(t, alert.Fingerprint, groupMgr.calls[0].fingerprint)
 
-	wantKey, err := grouping.NewGroupKeyGenerator().GenerateKey(alert.Labels, decision.GroupBy)
+	// Finding 2 (review round 1): the storage key is prefixed with the
+	// matched route's receiver identity, not just the raw labels+groupBy key.
+	baseKey, err := grouping.NewGroupKeyGenerator().GenerateKey(alert.Labels, decision.GroupBy)
 	require.NoError(t, err)
+	wantKey := grouping.GroupKey("receiver=" + decision.Receiver + "/" + string(baseKey))
 	assert.Equal(t, wantKey, groupMgr.calls[0].key)
 }
 
@@ -271,6 +274,7 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabledNoRouteTree_FallsBackToDirec
 }
 
 func TestAlertProcessor_ProcessAlert_GroupingEnabled_GroupKeyGeneration(t *testing.T) {
+	const receiver = "team-x"
 	cases := []struct {
 		name    string
 		groupBy []string
@@ -279,17 +283,17 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_GroupKeyGeneration(t *testi
 		{
 			name:    "groups by present labels",
 			groupBy: []string{"alertname", "severity"},
-			wantKey: grouping.GroupKey("alertname=HighCPU,severity=critical"),
+			wantKey: grouping.GroupKey("receiver=" + receiver + "/alertname=HighCPU,severity=critical"),
 		},
 		{
 			name:    "missing label uses the <missing> marker",
 			groupBy: []string{"alertname", "namespace"},
-			wantKey: grouping.GroupKey("alertname=HighCPU,namespace=<missing>"),
+			wantKey: grouping.GroupKey("receiver=" + receiver + "/alertname=HighCPU,namespace=<missing>"),
 		},
 		{
 			name:    "empty GroupBy falls back to the global group key",
 			groupBy: []string{},
-			wantKey: grouping.GlobalGroupKey,
+			wantKey: grouping.GroupKey("receiver=" + receiver + "/" + string(grouping.GlobalGroupKey)),
 		},
 	}
 
@@ -297,7 +301,7 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_GroupKeyGeneration(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			publisher := &fakePublisher{}
 			groupMgr := &fakeGroupManager{}
-			decision := &RoutingDecision{GroupBy: tc.groupBy}
+			decision := &RoutingDecision{Receiver: receiver, GroupBy: tc.groupBy}
 			evaluator := &fakeRouteEvaluator{decision: decision}
 
 			cfg := newTestProcessorConfig(t, evaluator, publisher)
@@ -364,7 +368,7 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_NewGroupStartsTimer_Existin
 	require.NoError(t, timerMgr.SetGroupManager(groupMgr))
 
 	publisher := &fakePublisher{}
-	decision := &RoutingDecision{GroupBy: []string{"alertname"}, GroupWait: groupWait}
+	decision := &RoutingDecision{Receiver: "default", GroupBy: []string{"alertname"}, GroupWait: groupWait}
 	evaluator := &fakeRouteEvaluator{decision: decision}
 
 	cfg := newTestProcessorConfig(t, evaluator, publisher)
@@ -375,8 +379,9 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_NewGroupStartsTimer_Existin
 	processor, err := NewAlertProcessor(cfg)
 	require.NoError(t, err)
 
-	key, err := keyGen.GenerateKey(map[string]string{"alertname": "HighCPU"}, decision.GroupBy)
+	baseKey, err := keyGen.GenerateKey(map[string]string{"alertname": "HighCPU"}, decision.GroupBy)
 	require.NoError(t, err)
+	key := grouping.GroupKey("receiver=" + decision.Receiver + "/" + string(baseKey))
 
 	// First alert creates the group and starts its group_wait timer.
 	alert1 := testAlert()
@@ -407,4 +412,75 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_NewGroupStartsTimer_Existin
 
 	assert.Zero(t, publisher.publishToAllCalls+publisher.publishWithClassificationCalls,
 		"grouped alerts must never be published directly")
+}
+
+// --- task 2.3 review round 1 fixes ---------------------------------------
+
+// TestAlertProcessor_ProcessAlert_GroupingEnabled_AddAlertToGroupError_FailsOpenToDirectPublish
+// covers Finding 1: AddAlertToGroup failing must not drop the alert. It must
+// fall back to direct publish exactly once — never zero (dropped) and never
+// twice (double notification).
+func TestAlertProcessor_ProcessAlert_GroupingEnabled_AddAlertToGroupError_FailsOpenToDirectPublish(t *testing.T) {
+	publisher := &fakePublisher{}
+	groupMgr := &fakeGroupManager{err: errors.New("boom: group storage unavailable")}
+	decision := &RoutingDecision{Receiver: "team-x", GroupBy: []string{"alertname"}}
+	evaluator := &fakeRouteEvaluator{decision: decision}
+
+	cfg := newTestProcessorConfig(t, evaluator, publisher)
+	cfg.GroupingEnabled = true
+	cfg.GroupManager = groupMgr
+	cfg.GroupKeyGenerator = grouping.NewGroupKeyGenerator()
+
+	processor, err := NewAlertProcessor(cfg)
+	require.NoError(t, err)
+
+	err = processor.ProcessAlert(context.Background(), testAlert())
+	require.NoError(t, err)
+
+	// The grouping attempt happened (and failed) ...
+	require.Len(t, groupMgr.calls, 1)
+	// ... but the alert is still published, exactly once (fail-open, no drop,
+	// no double-publish).
+	assert.Equal(t, 1, publisher.publishToAllCalls+publisher.publishWithClassificationCalls,
+		"AddAlertToGroup failure must fall back to direct publish exactly once, never drop the alert")
+}
+
+// TestAlertProcessor_ProcessAlert_GroupingEnabled_SameLabelsDifferentReceivers_DistinctGroups
+// covers Finding 2: two alerts with identical labels/groupBy but different
+// matched receivers must land in two distinct groups, not collide into one
+// (which would risk misdelivery once task 2.4 delivers per-receiver).
+func TestAlertProcessor_ProcessAlert_GroupingEnabled_SameLabelsDifferentReceivers_DistinctGroups(t *testing.T) {
+	publisher := &fakePublisher{}
+	groupMgr := &fakeGroupManager{}
+	groupBy := []string{"alertname", "severity"}
+
+	decisionA := &RoutingDecision{Receiver: "team-a-pagerduty", GroupBy: groupBy}
+	evaluatorA := &fakeRouteEvaluator{decision: decisionA}
+	cfgA := newTestProcessorConfig(t, evaluatorA, publisher)
+	cfgA.GroupingEnabled = true
+	cfgA.GroupManager = groupMgr
+	cfgA.GroupKeyGenerator = grouping.NewGroupKeyGenerator()
+	processorA, err := NewAlertProcessor(cfgA)
+	require.NoError(t, err)
+
+	decisionB := &RoutingDecision{Receiver: "team-b-slack", GroupBy: groupBy}
+	evaluatorB := &fakeRouteEvaluator{decision: decisionB}
+	cfgB := newTestProcessorConfig(t, evaluatorB, publisher)
+	cfgB.GroupingEnabled = true
+	cfgB.GroupManager = groupMgr
+	cfgB.GroupKeyGenerator = grouping.NewGroupKeyGenerator()
+	processorB, err := NewAlertProcessor(cfgB)
+	require.NoError(t, err)
+
+	// Same labels for both alerts — only the matched route/receiver differs.
+	require.NoError(t, processorA.ProcessAlert(context.Background(), testAlert()))
+	require.NoError(t, processorB.ProcessAlert(context.Background(), testAlert()))
+
+	require.Len(t, groupMgr.calls, 2)
+	assert.NotEqual(t, groupMgr.calls[0].key, groupMgr.calls[1].key,
+		"identical labels/groupBy under different receivers must produce distinct group keys")
+	assert.Contains(t, string(groupMgr.calls[0].key), "receiver=team-a-pagerduty/")
+	assert.Contains(t, string(groupMgr.calls[1].key), "receiver=team-b-slack/")
+
+	assert.Zero(t, publisher.publishToAllCalls+publisher.publishWithClassificationCalls)
 }
