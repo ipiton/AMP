@@ -29,6 +29,7 @@ import (
 	invtools "github.com/ipiton/AMP/internal/infrastructure/investigation/tools"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
+	"github.com/ipiton/AMP/internal/infrastructure/lock"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	investigationrepo "github.com/ipiton/AMP/internal/infrastructure/repository"
 	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
@@ -105,6 +106,18 @@ type ServiceRegistry struct {
 	// started them (lite profile, no Redis, or init failure).
 	silenceSyncCancel context.CancelFunc
 	silenceSyncDone   chan struct{}
+
+	// Silence GC leader election (task 6.4, alertmanager-parity): gates
+	// silenceManager's GC worker (expires/deletes silence rows in shared
+	// PostgreSQL) to a single replica at a time instead of running it
+	// redundantly on every replica. Nil when: lite profile (initializeSilenceManager
+	// returns before this is ever wired — coordination is meaningless with
+	// one replica), or standard profile without a live Redis cache backend
+	// (falls back to the pre-6.4 posture: GC just runs on every replica,
+	// same as before this task — see initializeSilenceGCElection's doc
+	// comment). LeaderElector() below is the read-only hook task 6.5's
+	// status endpoint uses; it treats nil the same as "always leader."
+	leaderElector lock.Elector
 
 	// Core Services
 	alertProcessor    *services.AlertProcessor
@@ -514,13 +527,86 @@ func (r *ServiceRegistry) initializeSilenceManager(ctx context.Context) error {
 	matcher := coresilencing.NewSilenceMatcher()
 	manager := businesssilencing.NewDefaultSilenceManager(r.silenceRepo, matcher, r.logger, nil)
 
+	// Task 6.4: must run before manager.Start() below — EnableLeaderGatedGC
+	// (called inside here, only when a real elector can be wired) has to
+	// take effect before Start() decides whether to auto-start GC.
+	r.initializeSilenceGCElection(manager)
+
 	if err := manager.Start(ctx); err != nil {
 		return fmt.Errorf("silence manager start failed: %w", err)
+	}
+
+	if r.leaderElector != nil {
+		if err := r.leaderElector.Start(ctx); err != nil {
+			r.logger.Warn("Silence GC leader election failed to start, GC worker will not run on this replica until the next restart",
+				"error", err)
+			r.addDegradedReason("silence GC leader election unavailable: %v", err)
+		}
 	}
 
 	r.silenceManager = manager
 	r.logger.Info("Silence manager started (GC/stats worker running)")
 	return nil
+}
+
+// initializeSilenceGCElection wires leader election (task 6.4,
+// alertmanager-parity) so the silence manager's GC worker — which mutates
+// shared PostgreSQL rows (expires active->expired silences past EndsAt,
+// then deletes expired rows past the retention window) — runs on exactly
+// one replica at a time instead of redundantly on all of them. This is a
+// throughput/DB-load optimization, not a correctness fix: ExpireSilences is
+// idempotent (a WHERE ... LIMIT N update/delete that N replicas racing on
+// would just repeat with shrinking effect, same as today pre-6.4), so
+// skipping election entirely is always a safe fallback, never a
+// correctness risk — only a wasted-work one.
+//
+// Sets manager.EnableLeaderGatedGC() + r.leaderElector only when a real
+// Redis backend is available; otherwise leaves both untouched, which means
+// manager.Start() (called by the caller right after this) auto-starts GC
+// unconditionally — i.e. exactly the pre-6.4 behavior on every replica.
+// Mirrors newSilenceEventBus's own posture: no live *cache.RedisCache is
+// not a NEW degraded reason (Step 1's initializeCache already recorded one
+// for the same underlying issue if that's why there's no Redis backend at
+// all).
+func (r *ServiceRegistry) initializeSilenceGCElection(manager *businesssilencing.DefaultSilenceManager) {
+	redisCache, ok := r.cache.(*infrastructurecache.RedisCache)
+	if !ok {
+		r.logger.Warn("No Redis cache backend, silence GC leader election disabled (GC worker runs on every replica, as before task 6.4)")
+		return
+	}
+
+	manager.EnableLeaderGatedGC()
+	r.leaderElector = lock.NewLeaderElector(
+		redisCache.GetClient(),
+		"amp:leader:silence-gc",
+		nil, // defaults: 20s TTL / ~7s renew / 2s retry — see lock.Default* constants
+		r.logger,
+		manager.StartGC,
+		manager.StopGC,
+	)
+}
+
+// LeaderElector returns the leader-election hook wired for the silence GC
+// worker (task 6.4, alertmanager-parity), or nil when it was never wired
+// (lite profile, or standard profile without a live Redis backend — both
+// leave GC running unconditionally on every replica, so there is no
+// leadership concept to report). Exposed for task 6.5's status endpoint
+// (peers/leader info). Use IsLeader() below for the common "am I the
+// leader, treating unwired as trivially yes" case.
+func (r *ServiceRegistry) LeaderElector() lock.Elector {
+	return r.leaderElector
+}
+
+// IsLeader reports whether this replica currently owns the silence GC
+// worker's leadership slot. Nil leaderElector (GC unconditionally runs on
+// every replica — see initializeSilenceGCElection) reports true: there is
+// no coordination, so every replica is trivially "the leader" for this
+// worker's purposes.
+func (r *ServiceRegistry) IsLeader() bool {
+	if r.leaderElector == nil {
+		return true
+	}
+	return r.leaderElector.IsLeader()
 }
 
 // newSilenceEventBus selects the cross-replica silence cache invalidation
@@ -1598,6 +1684,22 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 			r.logger.Warn("Investigation tools DB close warning", "error", err)
 		}
 		r.investigationToolsDB = nil
+	}
+
+	// Shutdown silence GC leader election (task 6.4) before the silence
+	// manager itself: Stop cancels the election loop and, if this replica
+	// currently holds leadership, runs its OnLost callback (manager.StopGC)
+	// synchronously — that must happen while the manager is still alive,
+	// and releases the Redis lock so another replica can take over
+	// immediately instead of waiting out the full TTL.
+	if r.leaderElector != nil {
+		r.logger.Info("Shutting down silence GC leader election...")
+		stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := r.leaderElector.Stop(stopCtx); err != nil {
+			r.logger.Warn("Silence GC leader election stop warning", "error", err)
+		}
+		cancel()
+		r.leaderElector = nil
 	}
 
 	// Shutdown Silence manager background workers (task 2.1). Stop before

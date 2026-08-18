@@ -171,10 +171,14 @@ func (l *DistributedLock) Extend(ctx context.Context, newTTL time.Duration) erro
 
 	l.logger.Debug("Extending lock", "key", l.key, "newTTL", newTTL)
 
-	// Lua скрипт для атомарного продления блокировки
+	// Lua скрипт для атомарного продления блокировки.
+	// PEXPIRE (миллисекунды), а не EXPIRE (целые секунды): int(newTTL.Seconds())
+	// обрезал бы любой newTTL < 1s в 0, а EXPIRE key 0 удаляет ключ немедленно —
+	// продление лока с sub-second TTL (task 6.4: LeaderElector в тестах) тогда
+	// удаляло бы его вместо продления.
 	script := `
 		if redis.call("get", KEYS[1]) == ARGV[1] then
-			return redis.call("expire", KEYS[1], ARGV[2])
+			return redis.call("pexpire", KEYS[1], ARGV[2])
 		else
 			return 0
 		end
@@ -183,7 +187,7 @@ func (l *DistributedLock) Extend(ctx context.Context, newTTL time.Duration) erro
 	extendCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	result, err := l.redis.Eval(extendCtx, script, []string{l.key}, l.value, int(newTTL.Seconds())).Result()
+	result, err := l.redis.Eval(extendCtx, script, []string{l.key}, l.value, newTTL.Milliseconds()).Result()
 	if err != nil {
 		l.logger.Error("Failed to extend lock", "key", l.key, "error", err)
 		return fmt.Errorf("failed to extend lock: %w", err)
