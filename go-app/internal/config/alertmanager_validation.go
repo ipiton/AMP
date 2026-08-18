@@ -99,6 +99,13 @@ func validateAlertmanagerSubset(data []byte, cfg *Config) error {
 		amConfig.InhibitRules = toAlertmanagerInhibitRules(cfg.Inhibition.Rules)
 	}
 
+	// result.Valid is deliberately not consulted below - we branch on
+	// len(result.Errors) directly instead. Today the two are equivalent
+	// (result.Valid is only ever flipped false by AddError, never by a
+	// warning), but that's an implementation detail of types.Result, not
+	// a documented contract; task 5.4's own contract is explicit and
+	// narrower - "E-codes block, W-codes only log" - so we check the
+	// thing that contract is actually about.
 	validator := configvalidator.New(types.Options{
 		Mode:           types.StrictMode,
 		EnableSecurity: true,
