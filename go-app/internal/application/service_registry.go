@@ -918,18 +918,35 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 	// one.
 	keyGenerator := grouping.NewGroupKeyGenerator()
 
-	// Publisher is left nil: timer callbacks only log until task 2.4 wires
-	// the notify chain through this subsystem (see GroupNotificationPublisher's
-	// doc comment in manager.go — nil is explicitly backwards-compatible: "no
-	// alerts are sent"). Task 2.3 wires the INGEST side (AddAlertToGroup);
-	// nil Publisher here means group timer expiry still no-ops as before.
+	// Publisher is left nil here: initializeGrouping runs BEFORE
+	// initializePublishing (step 2.7 vs step 3 in Initialize — the publishing
+	// stack, and therefore anything implementing GroupNotificationPublisher,
+	// doesn't exist yet at this point), so it cannot be supplied at
+	// construction time. initializeAlertProcessor (step 4, after
+	// initializePublishing) wires it in afterward via SetPublisher once
+	// r.publisher exists — see that method's doc comment (task 2.4). Until
+	// then, nil is explicitly backwards-compatible: timer callbacks only log,
+	// no alerts are sent.
+	//
+	// InhibitionChecker/SilenceChecker (task 2.4, notify-chain Inhibit/
+	// Silence steps) ARE available here: r.inhibitionMatcher (step 2.5) and
+	// r.silenceStore (step 1, initializeInfrastructure) both run before
+	// grouping init (step 2.7), so — unlike Publisher — no SetX workaround
+	// is needed for either.
+	var silenceChecker grouping.GroupSilenceChecker
+	if r.silenceStore != nil {
+		silenceChecker = r.silenceStore
+	}
+
 	groupManager, err := grouping.NewDefaultGroupManager(ctx, grouping.DefaultGroupManagerConfig{
-		KeyGenerator: keyGenerator,
-		Config:       groupingCfg,
-		Storage:      groupStorage,
-		TimerManager: timerManager,
-		Logger:       r.logger,
-		Metrics:      r.metrics,
+		KeyGenerator:      keyGenerator,
+		Config:            groupingCfg,
+		Storage:           groupStorage,
+		TimerManager:      timerManager,
+		InhibitionChecker: r.inhibitionMatcher,
+		SilenceChecker:    silenceChecker,
+		Logger:            r.logger,
+		Metrics:           r.metrics,
 	})
 	if err != nil {
 		return fmt.Errorf("group manager init failed: %w", err)
@@ -1133,6 +1150,25 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 // initializeAlertProcessor initializes the alert processor.
 func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 	r.logger.Info("Initializing Alert Processor...")
+
+	// Task 2.4: wire the notify-stage publisher into GroupManager now that
+	// r.publisher exists (initializePublishing, step 3, runs AFTER
+	// initializeGrouping, step 2.7 — see initializeGrouping's Publisher
+	// comment for why it couldn't be supplied at GroupManager construction
+	// time). r.publisher is always non-nil by this point (initializePublishing
+	// falls back to MetricsOnlyPublisher rather than leaving it nil), and
+	// both concrete publisher types implement GroupNotificationPublisher —
+	// but this is checked via type assertion, not assumed, so a future
+	// publisher type that DOESN'T implement it degrades to "group
+	// notifications no-op" (logged) instead of a panic or compile break.
+	if r.groupManager != nil {
+		if groupPublisher, ok := r.publisher.(grouping.GroupNotificationPublisher); ok {
+			r.groupManager.SetPublisher(groupPublisher)
+		} else {
+			r.logger.Warn("Publisher does not implement GroupNotificationPublisher; grouped notifications will no-op",
+				"publisher_type", fmt.Sprintf("%T", r.publisher))
+		}
+	}
 
 	// Task 2.3: only wire a non-nil GroupManager when r.groupManager is
 	// actually set. Assigning a nil *grouping.DefaultGroupManager straight

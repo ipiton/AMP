@@ -18,11 +18,23 @@ type fakePublishingCoordinator struct {
 	results []*infrapublishing.PublishingResult
 	err     error
 	alert   *core.EnrichedAlert
+
+	// task 2.4: PublishGroupToTargets call recording
+	groupResults  []*infrapublishing.PublishingResult
+	groupErr      error
+	groupAlerts   []*core.Alert
+	groupReceiver string
 }
 
 func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error) {
 	f.alert = alert
 	return f.results, f.err
+}
+
+func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string) ([]*infrapublishing.PublishingResult, error) {
+	f.groupAlerts = alerts
+	f.groupReceiver = receiver
+	return f.groupResults, f.groupErr
 }
 
 type fakeBusinessDiscoveryManager struct {
@@ -170,5 +182,70 @@ func TestInitializeBusinessServices_LiteProfileUsesMetricsOnlyPublisher(t *testi
 
 	if _, ok := registry.publisher.(*MetricsOnlyPublisher); !ok {
 		t.Fatalf("expected MetricsOnlyPublisher, got %T", registry.publisher)
+	}
+}
+
+// --- task 2.4: PublishGroup (notify-stage chain, batch publish) ----------
+
+func TestApplicationPublishingAdapter_PublishGroup_PropagatesAlertsAndReceiver(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops"}, Success: true},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	alerts := []*core.Alert{
+		{Fingerprint: "a1", AlertName: "HighCPU"},
+		{Fingerprint: "a2", AlertName: "HighCPU"},
+	}
+
+	if err := adapter.PublishGroup(context.Background(), alerts, "critical-pagerduty"); err != nil {
+		t.Fatalf("PublishGroup() error = %v", err)
+	}
+
+	if len(coordinator.groupAlerts) != 2 {
+		t.Fatalf("expected coordinator to receive 2 alerts, got %d", len(coordinator.groupAlerts))
+	}
+	if coordinator.groupReceiver != "critical-pagerduty" {
+		t.Fatalf("expected receiver %q, got %q", "critical-pagerduty", coordinator.groupReceiver)
+	}
+}
+
+func TestApplicationPublishingAdapter_PublishGroup_EmptyAlertsIsNoop(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishGroup(context.Background(), nil, "any"); err != nil {
+		t.Fatalf("PublishGroup() with no alerts should be a no-op, got error = %v", err)
+	}
+	if coordinator.groupAlerts != nil {
+		t.Fatalf("coordinator should not have been called for an empty alert set")
+	}
+}
+
+func TestApplicationPublishingAdapter_PublishGroup_NoTargetsForReceiverReturnsError(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{},
+		groupErr:     errors.New(`no targets found for receiver "unknown-receiver"`),
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
+	err = adapter.PublishGroup(context.Background(), alerts, "unknown-receiver")
+	if err == nil {
+		t.Fatal("expected an error when no targets match the receiver")
 	}
 }

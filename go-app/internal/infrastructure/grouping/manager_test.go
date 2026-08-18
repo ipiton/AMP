@@ -3,6 +3,7 @@ package grouping
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -652,15 +653,33 @@ func TestGetStats_WithOperations(t *testing.T) {
 
 // === Notification Triggering Tests (parity-a1-notification-triggering) ===
 
-// mockPublisher records PublishToAll calls for assertion in tests.
+// mockPublisher records PublishGroup calls for assertion in tests (task
+// 2.4: GroupNotificationPublisher is a batch interface — one call per group
+// notification, carrying every alert in that notification, not one call per
+// alert). published has one entry per PublishGroup call; receivers has the
+// matching receiver argument for each call. Thread-safe: timer callbacks run
+// on their own goroutine.
 type mockPublisher struct {
-	published []*core.Alert
+	mu        sync.Mutex
+	published [][]*core.Alert
+	receivers []string
 	err       error
 }
 
-func (p *mockPublisher) PublishToAll(_ context.Context, alert *core.Alert) error {
-	p.published = append(p.published, alert)
+func (p *mockPublisher) PublishGroup(_ context.Context, alerts []*core.Alert, receiver string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.published = append(p.published, alerts)
+	p.receivers = append(p.receivers, receiver)
 	return p.err
+}
+
+func (p *mockPublisher) calls() [][]*core.Alert {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([][]*core.Alert, len(p.published))
+	copy(out, p.published)
+	return out
 }
 
 // createTestManagerWithPublisher creates a manager with a publisher and timer manager wired up.
@@ -714,14 +733,17 @@ func createTestManagerWithPublisher(t *testing.T, pub GroupNotificationPublisher
 	return manager, timerStorage
 }
 
-// TestPublishGroupAlerts_CallsPublisherForEachAlert verifies that publishGroupAlerts
-// invokes the publisher once per alert in the group.
-func TestPublishGroupAlerts_CallsPublisherForEachAlert(t *testing.T) {
+// TestPublishGroupAlerts_OneCallCarriesAllAlerts verifies that
+// publishGroupAlerts makes exactly ONE PublishGroup call for the whole
+// group, carrying every alert in it (task 2.4: one grouped notification
+// instead of N single ones — this replaces the pre-2.4 "once per alert"
+// PublishToAll loop).
+func TestPublishGroupAlerts_OneCallCarriesAllAlerts(t *testing.T) {
 	pub := &mockPublisher{}
 	manager, _ := createTestManagerWithPublisher(t, pub)
 	ctx := context.Background()
 
-	groupKey := GroupKey("alertname=TestAlert")
+	groupKey := GroupKey("receiver=default/alertname=TestAlert")
 	alert1 := createTestAlert("A1", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
 	alert2 := createTestAlert("A2", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
 
@@ -733,7 +755,10 @@ func TestPublishGroupAlerts_CallsPublisherForEachAlert(t *testing.T) {
 
 	manager.publishGroupAlerts(ctx, group)
 
-	assert.Len(t, pub.published, 2)
+	calls := pub.calls()
+	require.Len(t, calls, 1, "expected exactly one PublishGroup call for the group")
+	assert.Len(t, calls[0], 2, "expected both alerts carried in that one call")
+	assert.Equal(t, "default", pub.receivers[0], "receiver should be parsed from the group key prefix")
 }
 
 // TestPublishGroupAlerts_NilPublisher verifies that publishGroupAlerts is a no-op
@@ -772,7 +797,7 @@ func TestOnGroupWaitExpired_TriggersNotification(t *testing.T) {
 	err = manager.onGroupWaitExpired(ctx, groupKey, GroupWaitTimer, group)
 	require.NoError(t, err)
 
-	assert.Len(t, pub.published, 1, "expected one alert published on group_wait expiry")
+	assert.Len(t, pub.calls(), 1, "expected one PublishGroup call on group_wait expiry")
 }
 
 // TestOnGroupIntervalExpired_TriggersNotification verifies that when the group_interval
@@ -792,7 +817,7 @@ func TestOnGroupIntervalExpired_TriggersNotification(t *testing.T) {
 	err = manager.onGroupIntervalExpired(ctx, groupKey, GroupIntervalTimer, group)
 	require.NoError(t, err)
 
-	assert.Len(t, pub.published, 1, "expected one alert published on group_interval expiry")
+	assert.Len(t, pub.calls(), 1, "expected one PublishGroup call on group_interval expiry")
 }
 
 // TestOnRepeatIntervalExpired_TriggersNotification verifies that when the repeat_interval
@@ -812,7 +837,7 @@ func TestOnRepeatIntervalExpired_TriggersNotification(t *testing.T) {
 	err = manager.onRepeatIntervalExpired(ctx, groupKey, RepeatIntervalTimer, group)
 	require.NoError(t, err)
 
-	assert.Len(t, pub.published, 1, "expected one alert published on repeat_interval expiry")
+	assert.Len(t, pub.calls(), 1, "expected one PublishGroup call on repeat_interval expiry")
 }
 
 // TestOnRepeatIntervalExpired_EmptyGroup verifies that when a group is empty the
@@ -837,36 +862,51 @@ func TestOnRepeatIntervalExpired_EmptyGroup(t *testing.T) {
 	err := manager.onRepeatIntervalExpired(ctx, groupKey, RepeatIntervalTimer, group)
 	require.NoError(t, err)
 
-	assert.Empty(t, pub.published, "no alerts should be published for non-existent group")
+	assert.Empty(t, pub.calls(), "no notification should be published for non-existent group")
 }
 
-// TestTimerChain_GroupWaitToRepeatInterval is an integration test that starts a group,
-// waits for the group_wait timer to fire and verifies the full notification chain
-// (group_wait → publish → group_interval → publish → repeat_interval → publish).
+// TestTimerChain_GroupWaitToRepeatInterval is an integration test that starts
+// a group, waits for the group_wait timer to fire, and verifies the chain
+// continues into group_interval.
+//
+// Task 2.4 note: with the notify-chain's Dedup step now active (TTL =
+// repeat_interval, same 10ms as group_interval in this config), a SECOND
+// firing carrying the EXACT SAME unchanged alert set is correctly
+// suppressed — that is the point of Dedup, and matches upstream
+// Alertmanager's own DedupStage (a flush with an unchanged alert set within
+// repeat_interval does not re-send either). So this test adds a second
+// alert before the group_interval timer is expected to fire, changing the
+// alert set's signature, to verify the chain still delivers a fresh
+// notification when there IS something new — not merely that timers fire.
 func TestTimerChain_GroupWaitToRepeatInterval(t *testing.T) {
 	pub := &mockPublisher{}
 	manager, _ := createTestManagerWithPublisher(t, pub)
 	ctx := context.Background()
 
-	groupKey := GroupKey("alertname=Chain")
+	groupKey := GroupKey("receiver=default/alertname=Chain")
 	alert := createTestAlert("Chain", core.StatusFiring, map[string]string{"alertname": "Chain"})
 
 	// AddAlertToGroup triggers group_wait timer (configured to 10ms)
 	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
 	require.NoError(t, err)
 
-	// Wait for group_wait → group_interval → repeat_interval chain.
-	// Each timer is 10ms; 2s deadline to remain stable under heavy CI load
-	// (real-time based — may still be flaky on severely resource-starved runners).
+	// Wait for the group_wait notification.
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(pub.published) >= 2 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	for time.Now().Before(deadline) && len(pub.calls()) < 1 {
+		time.Sleep(5 * time.Millisecond)
 	}
+	require.Len(t, pub.calls(), 1, "expected exactly one notification from group_wait (dedup: unchanged alert set)")
 
-	// At minimum, group_wait and group_interval should have fired.
-	assert.GreaterOrEqual(t, len(pub.published), 2,
-		"expected at least 2 notifications from group_wait+group_interval timers")
+	// Add a second alert — changes the alert set's dedup signature, so the
+	// next firing (group_interval) must NOT be suppressed by Dedup.
+	alert2 := createTestAlert("Chain2", core.StatusFiring, map[string]string{"alertname": "Chain"})
+	_, err = manager.AddAlertToGroup(ctx, alert2, groupKey)
+	require.NoError(t, err)
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(pub.calls()) < 2 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	assert.GreaterOrEqual(t, len(pub.calls()), 2,
+		"expected a second notification once the alert set changed")
 }

@@ -75,7 +75,7 @@ type fakeGroupManagerCall struct {
 	key         grouping.GroupKey
 }
 
-func (f *fakeGroupManager) AddAlertToGroup(ctx context.Context, alert *core.Alert, groupKey grouping.GroupKey) (*grouping.AlertGroup, error) {
+func (f *fakeGroupManager) AddAlertToGroup(ctx context.Context, alert *core.Alert, groupKey grouping.GroupKey, _ ...grouping.AddAlertOption) (*grouping.AlertGroup, error) {
 	f.calls = append(f.calls, fakeGroupManagerCall{fingerprint: alert.Fingerprint, key: groupKey})
 	if f.err != nil {
 		return nil, f.err
