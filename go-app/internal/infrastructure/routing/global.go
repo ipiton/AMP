@@ -34,6 +34,17 @@ type GlobalConfig struct {
 	// API redacts it — see handlers.sectionSecretKeys).
 	SlackAPIURL string `yaml:"slack_api_url,omitempty" validate:"omitempty,url,https_production"`
 
+	// SlackAPIURLFile is upstream's `global.slack_api_url_file` (FU7-B: *_file
+	// secret variants): a path to a file containing the global Slack webhook
+	// URL, re-read on every config load/reload. Mutually exclusive with
+	// SlackAPIURL — the parser (resolveFileSecrets) rejects a config setting
+	// both, and resolves this into SlackAPIURL before resolveGlobalFallbacks
+	// ever runs, so the per-integration fallback chain (slack_configs[].api_url
+	// / .api_url_file wins over global) sees one already-resolved value
+	// exactly like today. The path itself is not secret, so the status API
+	// leaves it visible even though SlackAPIURL is redacted.
+	SlackAPIURLFile string `yaml:"slack_api_url_file,omitempty"`
+
 	// PagerDutyURL is upstream's `global.pagerduty_url`: the Events API
 	// endpoint, public and credential-free (the routing_key is the secret).
 	PagerDutyURL string `yaml:"pagerduty_url,omitempty" validate:"omitempty,url,https_production"`
@@ -51,7 +62,26 @@ type GlobalConfig struct {
 	SMTPSmartHost    string `yaml:"smtp_smarthost,omitempty"`
 	SMTPAuthUsername string `yaml:"smtp_auth_username,omitempty"`
 	SMTPAuthPassword string `yaml:"smtp_auth_password,omitempty"`
-	SMTPRequireTLS   bool   `yaml:"smtp_require_tls,omitempty"`
+
+	// SMTPAuthPasswordFile is upstream's `global.smtp_auth_password_file`
+	// (FU7-B: *_file secret variants): a path to a file containing the SMTP
+	// auth password, re-read on every config load/reload. Mutually exclusive
+	// with SMTPAuthPassword; resolved into it the same way as every other
+	// *_file field in this package (see SlackAPIURLFile above). The path
+	// itself is not secret.
+	//
+	// Honest scope note: upstream also has `global.smtp_auth_secret_file`
+	// (a CRAM-MD5 secret) — deliberately NOT added here, because AMP has no
+	// `smtp_auth_secret` field at all (the SMTP publisher only ever does
+	// plain auth with username/password, see extractSMTPConfig), so there is
+	// no inline field for a *_file twin to pair with. Adding a file-only
+	// field with no inline counterpart would not fit this package's mutual-
+	// exclusion pattern and nothing downstream would consume it. Tracked as
+	// a Known Gap in docs/ALERTMANAGER_COMPATIBILITY.md rather than silently
+	// dropped.
+	SMTPAuthPasswordFile string `yaml:"smtp_auth_password_file,omitempty"`
+
+	SMTPRequireTLS bool `yaml:"smtp_require_tls,omitempty"`
 
 	// HTTPConfig specifies default HTTP client settings
 	// Used by all receivers unless overridden
@@ -97,14 +127,16 @@ func (g *GlobalConfig) Defaults() {
 // Clone creates a deep copy.
 func (g *GlobalConfig) Clone() *GlobalConfig {
 	clone := &GlobalConfig{
-		SlackAPIURL:      g.SlackAPIURL,
-		PagerDutyURL:     g.PagerDutyURL,
-		TelegramAPIURL:   g.TelegramAPIURL,
-		SMTPFrom:         g.SMTPFrom,
-		SMTPSmartHost:    g.SMTPSmartHost,
-		SMTPAuthUsername: g.SMTPAuthUsername,
-		SMTPAuthPassword: g.SMTPAuthPassword,
-		SMTPRequireTLS:   g.SMTPRequireTLS,
+		SlackAPIURL:          g.SlackAPIURL,
+		SlackAPIURLFile:      g.SlackAPIURLFile,
+		PagerDutyURL:         g.PagerDutyURL,
+		TelegramAPIURL:       g.TelegramAPIURL,
+		SMTPFrom:             g.SMTPFrom,
+		SMTPSmartHost:        g.SMTPSmartHost,
+		SMTPAuthUsername:     g.SMTPAuthUsername,
+		SMTPAuthPassword:     g.SMTPAuthPassword,
+		SMTPAuthPasswordFile: g.SMTPAuthPasswordFile,
+		SMTPRequireTLS:       g.SMTPRequireTLS,
 	}
 
 	if g.ResolveTimeout != nil {

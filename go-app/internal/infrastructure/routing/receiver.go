@@ -189,10 +189,28 @@ func (r *Receiver) Sanitize() *Receiver {
 //	    send_resolved: true
 //	    max_alerts: 10
 type WebhookConfig struct {
-	// URL is the webhook endpoint (required)
+	// URL is the webhook endpoint (required — either set directly or via
+	// URLFile below; the parser resolves URLFile into this field before
+	// structural validation runs, so this tag alone still catches "neither
+	// set").
 	// Must be HTTPS in production mode
 	// SSRF protection: no private IPs allowed
-	URL string `yaml:"url" validate:"required,url,https_production"`
+	//
+	// Mutually exclusive with URLFile (FU7-B: *_file secret variants) — the
+	// parser (resolveFileSecrets) rejects a config setting both, and resolves
+	// URLFile into this field before anything else (validation, `global:`
+	// fallbacks, the publishing-target builder) ever reads it, so URL is
+	// always the value to use downstream regardless of which one the
+	// operator set.
+	URL string `yaml:"url,omitempty" validate:"required,url,https_production"`
+
+	// URLFile is upstream's `url_file`: a path to a file containing the
+	// webhook URL, re-read on every config load/reload (see
+	// docs/ALERTMANAGER_COMPATIBILITY.md's rotation-caveat note). Content is
+	// trimmed of trailing newline/whitespace. Not itself secret — a
+	// filesystem path leaks nothing an attacker can use — so the status API
+	// leaves it visible even though URL (the resolved value) is redacted.
+	URLFile string `yaml:"url_file,omitempty"`
 
 	// HTTPMethod specifies the HTTP method (default: POST)
 	// Allowed: POST, PUT, PATCH
@@ -234,6 +252,7 @@ func (w *WebhookConfig) Defaults() {
 func (w *WebhookConfig) Clone() *WebhookConfig {
 	clone := &WebhookConfig{
 		URL:        w.URL,
+		URLFile:    w.URLFile,
 		HTTPMethod: w.HTTPMethod,
 		MaxAlerts:  w.MaxAlerts,
 	}
@@ -294,7 +313,17 @@ type PagerDutyConfig struct {
 	// fixed length) — PagerDuty's own integration keys are not guaranteed
 	// to stay exactly 32 characters, so a key of any other length was
 	// silently rejected by config validation.
-	RoutingKey string `yaml:"routing_key" validate:"required"`
+	//
+	// Mutually exclusive with RoutingKeyFile (FU7-B: *_file secret variants);
+	// see WebhookConfig.URLFile's doc comment for the resolution mechanics
+	// shared by every *_file field in this package.
+	RoutingKey string `yaml:"routing_key,omitempty" validate:"required"`
+
+	// RoutingKeyFile is upstream's `routing_key_file`: a path to a file
+	// containing the integration key, re-read on every config load/reload.
+	// Content is trimmed of trailing newline/whitespace. The path itself is
+	// not secret, so the status API leaves it visible.
+	RoutingKeyFile string `yaml:"routing_key_file,omitempty"`
 
 	// ServiceKey is the legacy service key (deprecated)
 	// Use RoutingKey instead
@@ -347,14 +376,15 @@ func (p *PagerDutyConfig) Defaults() {
 // Clone creates deep copy.
 func (p *PagerDutyConfig) Clone() *PagerDutyConfig {
 	clone := &PagerDutyConfig{
-		RoutingKey:  p.RoutingKey,
-		ServiceKey:  p.ServiceKey,
-		URL:         p.URL,
-		Severity:    p.Severity,
-		Class:       p.Class,
-		Component:   p.Component,
-		Group:       p.Group,
-		Description: p.Description,
+		RoutingKey:     p.RoutingKey,
+		RoutingKeyFile: p.RoutingKeyFile,
+		ServiceKey:     p.ServiceKey,
+		URL:            p.URL,
+		Severity:       p.Severity,
+		Class:          p.Class,
+		Component:      p.Component,
+		Group:          p.Group,
+		Description:    p.Description,
 	}
 
 	if p.Details != nil {
@@ -408,6 +438,13 @@ type SlackConfig struct {
 	// requires the result to be non-empty (validateSemantics), so a config with
 	// neither still fails to load — with a message naming both places.
 	APIURL string `yaml:"api_url,omitempty" validate:"omitempty,url,https_production"`
+
+	// APIURLFile is upstream's `api_url_file`: a path to a file containing
+	// the Slack webhook/API URL, re-read on every config load/reload.
+	// Mutually exclusive with APIURL (FU7-B: *_file secret variants); see
+	// WebhookConfig.URLFile's doc comment for the resolution mechanics. Not
+	// itself secret, so the status API leaves it visible.
+	APIURLFile string `yaml:"api_url_file,omitempty"`
 
 	// Channel specifies the target channel or user
 	// Format: #channel or @username
@@ -471,6 +508,7 @@ func (s *SlackConfig) Defaults() {
 func (s *SlackConfig) Clone() *SlackConfig {
 	clone := &SlackConfig{
 		APIURL:      s.APIURL,
+		APIURLFile:  s.APIURLFile,
 		Channel:     s.Channel,
 		Username:    s.Username,
 		IconEmoji:   s.IconEmoji,
@@ -630,7 +668,14 @@ type TelegramConfig struct {
 	// BotToken is the Telegram bot API token (required)
 	// Obtained from @BotFather. Should use a secret reference: ${TELEGRAM_BOT_TOKEN}
 	// NEVER logged in plaintext - see Sanitize().
-	BotToken string `yaml:"bot_token" validate:"required"`
+	BotToken string `yaml:"bot_token,omitempty" validate:"required"`
+
+	// BotTokenFile is upstream's `bot_token_file`: a path to a file
+	// containing the bot API token, re-read on every config load/reload.
+	// Mutually exclusive with BotToken (FU7-B: *_file secret variants); see
+	// WebhookConfig.URLFile's doc comment for the resolution mechanics. Not
+	// itself secret, so the status API leaves it visible.
+	BotTokenFile string `yaml:"bot_token_file,omitempty"`
 
 	// ChatID is the target chat/channel/group identifier (required)
 	// Format: numeric chat id (may be negative for groups/channels) or "@channelusername"
@@ -687,6 +732,7 @@ func (t *TelegramConfig) Defaults() {
 func (t *TelegramConfig) Clone() *TelegramConfig {
 	clone := &TelegramConfig{
 		BotToken:             t.BotToken,
+		BotTokenFile:         t.BotTokenFile,
 		ChatID:               t.ChatID,
 		MessageThreadID:      t.MessageThreadID,
 		ParseMode:            t.ParseMode,

@@ -41,6 +41,29 @@ var secretKeySubstrings = []string{
 	"private",
 }
 
+// fileSecretRefKeys are the `*_file` secret-reference keys FU7-B added to
+// `internal/infrastructure/routing` (api_url_file, routing_key_file,
+// bot_token_file, url_file, slack_api_url_file, smtp_auth_password_file).
+// Their VALUE is a filesystem path, never the secret itself — the routing
+// parser resolves the file's content into the plain field (api_url,
+// routing_key, ...) at load time, and that field is already redacted by the
+// rules below regardless of which one supplied it. Revealing the path leaks
+// nothing an attacker can use, unlike the token/password it names, so these
+// keys are excluded from the substring/section matching before it runs:
+// several of them would otherwise trip an unrelated substring by
+// coincidence (e.g. "routing_key_file" contains "routing_key", and
+// "bot_token_file" contains "token") and get redacted right along with the
+// content, hiding the one piece of information — which file is in use —
+// that helps an operator debug a missing credential.
+var fileSecretRefKeys = map[string]bool{
+	"api_url_file":            true,
+	"routing_key_file":        true,
+	"bot_token_file":          true,
+	"url_file":                true,
+	"slack_api_url_file":      true,
+	"smtp_auth_password_file": true,
+}
+
 // sectionSecretKeys lists keys that are secret ONLY inside a specific parent
 // section, because the same key name is a credential in one integration and a
 // public endpoint in another. Keys are matched exactly (lowercased), unlike
@@ -196,6 +219,9 @@ func redactSecrets(node any, section string) {
 // (secretKeySubstrings) or within this particular section (sectionSecretKeys).
 func isSecretKey(key, section string) bool {
 	lower := strings.ToLower(key)
+	if fileSecretRefKeys[lower] {
+		return false
+	}
 	for _, needle := range secretKeySubstrings {
 		if strings.Contains(lower, needle) {
 			return true
