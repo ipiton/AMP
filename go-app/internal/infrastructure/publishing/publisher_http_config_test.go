@@ -300,3 +300,120 @@ func TestPublisherFactory_HTTPClientCacheIsRaceFree(t *testing.T) {
 	assert.LessOrEqual(t, len(factory.httpClientMap), 3*(len(targetTypes)+1))
 	assert.NotEmpty(t, factory.httpClientMap)
 }
+
+// ============================================================================
+// Review C1: credential-missing FALLBACK branches must honour http_config
+// ============================================================================
+//
+// Each createEnhanced*Publisher degrades to the basic publisher when the target
+// lacks the credential it reads out of target.Headers. Those branches used to
+// return NewXPublisher(f.formatter, f.logger), which takes no client — so
+// perTargetHTTPClient was never reached and the whole http_config was dropped:
+// the payload went out with NO credential, and a pinned ca_file was silently
+// replaced by the system trust store with err == nil.
+//
+// This is the natural migration shape, not an edge case: an operator moving auth
+// out of headers.Authorization and into http_config.authorization.credentials
+// lands on exactly this branch. Both halves of the reviewer's probe are pinned
+// per type below.
+
+// fallbackTargetShapes are the four (type, credential-missing) shapes that reach
+// a createEnhanced*Publisher fallback branch. Headers deliberately OMIT the
+// credential each path looks for.
+func fallbackTargetShapes(targetURL string) map[string]*core.PublishingTarget {
+	return map[string]*core.PublishingTarget{
+		// No Authorization header -> apiKey == "".
+		"rootly": {Name: "fb-rootly", Type: string(TargetTypeRootly), URL: targetURL, Enabled: true, Format: core.FormatRootly},
+		// No routing_key and no Authorization -> routingKey == "".
+		"pagerduty": {Name: "fb-pagerduty", Type: string(TargetTypePagerDuty), URL: targetURL, Enabled: true, Format: core.FormatPagerDuty},
+		// Empty URL -> webhookURL == "". Slack's fallback keys off the URL, so it
+		// cannot also carry the httptest URL; it is covered for the fail-closed
+		// half only (see below), where no request is made anyway.
+		"slack": {Name: "fb-slack", Type: string(TargetTypeSlack), URL: "", Enabled: true, Format: core.FormatSlack},
+		// bot_token present but chat_id missing -> falls back.
+		"telegram": {
+			Name: "fb-telegram", Type: string(TargetTypeTelegram), URL: targetURL, Enabled: true,
+			Format: core.FormatTelegram, Headers: map[string]string{"bot_token": "bt"},
+		},
+	}
+}
+
+// Half 1 of the probe: the credential from http_config must reach the wire on
+// the fallback branch.
+func TestCreatePublisherForTarget_FallbackBranchSendsHTTPConfigCredential(t *testing.T) {
+	var gotAuth atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	for name, target := range fallbackTargetShapes(server.URL) {
+		if name == "slack" {
+			continue // its fallback trigger is an EMPTY URL; nothing to publish to.
+		}
+		t.Run(name, func(t *testing.T) {
+			gotAuth.Store("")
+			factory := newTestPublisherFactory(t)
+
+			target.HTTPConfig = &core.HTTPClientConfig{
+				Authorization: &core.AuthorizationConfig{Credentials: "should-be-sent"},
+			}
+
+			publisher, err := factory.CreatePublisherForTarget(target)
+			require.NoError(t, err)
+			require.NotNil(t, publisher)
+
+			require.NoError(t, publisher.Publish(t.Context(), newHTTPConfigTestAlert(), target))
+			assert.Equal(t, "Bearer should-be-sent", gotAuth.Load(),
+				"the fallback branch must not drop http_config credentials")
+		})
+	}
+}
+
+// Half 2 of the probe: an unreadable ca_file must fail CLOSED on the fallback
+// branch too, instead of silently swapping the pinned CA for the system trust
+// store with a nil error.
+func TestCreatePublisherForTarget_FallbackBranchFailsClosedOnBadCAFile(t *testing.T) {
+	missingCA := filepath.Join(t.TempDir(), "definitely-missing-ca.pem")
+
+	for name, target := range fallbackTargetShapes("https://endpoint.example.com/hook") {
+		t.Run(name, func(t *testing.T) {
+			factory := newTestPublisherFactory(t)
+
+			target.HTTPConfig = &core.HTTPClientConfig{
+				TLSConfig: &core.TLSClientConfig{CAFile: missingCA},
+			}
+
+			publisher, err := factory.CreatePublisherForTarget(target)
+			require.Error(t, err, "an unreadable ca_file must fail the target build on the fallback branch")
+			assert.Nil(t, publisher, "a target that cannot honour its pinned CA must not publish at all")
+			assert.Contains(t, err.Error(), "ca_file")
+			assert.Contains(t, err.Error(), missingCA, "the error must name the path so it is debuggable")
+		})
+	}
+}
+
+// Without http_config, the fallback branches must behave exactly as before:
+// same publisher type, no per-target client allocated.
+func TestCreatePublisherForTarget_FallbackBranchUnchangedWithoutHTTPConfig(t *testing.T) {
+	expectedTypes := map[string]AlertPublisher{
+		"rootly":    (*RootlyPublisher)(nil),
+		"pagerduty": (*PagerDutyPublisher)(nil),
+		"slack":     (*SlackPublisher)(nil),
+		"telegram":  (*TelegramPublisher)(nil),
+	}
+
+	for name, target := range fallbackTargetShapes("https://endpoint.example.com/hook") {
+		t.Run(name, func(t *testing.T) {
+			factory := newTestPublisherFactory(t)
+
+			publisher, err := factory.CreatePublisherForTarget(target)
+			require.NoError(t, err)
+			assert.IsType(t, expectedTypes[name], publisher,
+				"the degraded publisher TYPE must not change")
+			assert.Empty(t, factory.httpClientMap,
+				"no per-target client may be allocated for a target without http_config")
+		})
+	}
+}

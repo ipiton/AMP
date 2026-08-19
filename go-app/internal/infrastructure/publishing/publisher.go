@@ -488,6 +488,24 @@ func (f *PublisherFactory) CreatePublisherForTarget(target *core.PublishingTarge
 	}
 }
 
+// FALLBACK BRANCHES AND http_config (review C1): each createEnhanced*Publisher
+// below degrades to the BASIC publisher when the target lacks the credential it
+// reads out of target.Headers. Those branches MUST go through
+// CreateBasicPublisherForTarget, never NewXPublisher(f.formatter, f.logger):
+// the bare constructors take no client, so perTargetHTTPClient is never
+// reached and the target's http_config is dropped WHOLESALE — basic_auth /
+// authorization silently omitted (the payload goes out with no credential at
+// all) and tls_config.ca_file silently replaced by the system trust store,
+// which also bypasses the fail-closed contract (an unreadable ca_file returned
+// a nil error here). This is the natural migration shape, not an edge case: an
+// operator moving auth from headers.Authorization into
+// http_config.authorization.credentials lands on exactly this branch.
+//
+// CreateBasicPublisherForTarget returns the identical basic publisher per type
+// (&RootlyPublisher{HTTPPublisher: base} etc.), so the degradation semantics
+// are unchanged — it just carries the per-target client and propagates the
+// build error.
+
 // createEnhancedRootlyPublisher creates an EnhancedRootlyPublisher with full Rootly API integration
 func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.PublishingTarget) (AlertPublisher, error) {
 	// Extract API key from target headers
@@ -499,7 +517,9 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 
 	if apiKey == "" {
 		f.logger.Warn("Rootly target missing API key, falling back to HTTP publisher", "target", target.Name)
-		return NewRootlyPublisher(f.formatter, f.logger), nil
+		// Basic publisher, but still honouring http_config — see the note above
+		// createEnhancedRootlyPublisher (review C1).
+		return f.CreateBasicPublisherForTarget(target)
 	}
 
 	// Get or create Rootly client for this (base_url, api_key) pair (clientMu
@@ -577,7 +597,7 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 
 	if routingKey == "" {
 		f.logger.Warn("PagerDuty target missing routing_key, falling back to HTTP publisher", "target", target.Name)
-		return NewPagerDutyPublisher(f.formatter, f.logger), nil
+		return f.CreateBasicPublisherForTarget(target)
 	}
 
 	// Normalise BEFORE keying (re-review finding R5, the wave-5 I3 lesson
@@ -651,7 +671,7 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 	webhookURL := target.URL
 	if webhookURL == "" {
 		f.logger.Warn("Slack target missing webhook URL, falling back to HTTP publisher", "target", target.Name)
-		return NewSlackPublisher(f.formatter, f.logger), nil
+		return f.CreateBasicPublisherForTarget(target)
 	}
 
 	// Get or create Slack client for this (webhook URL, http_config) pair
@@ -704,7 +724,7 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 
 	if botToken == "" || chatID == "" {
 		f.logger.Warn("Telegram target missing bot_token or chat_id, falling back to HTTP publisher", "target", target.Name)
-		return NewTelegramPublisher(f.formatter, f.logger), nil
+		return f.CreateBasicPublisherForTarget(target)
 	}
 
 	apiURL := target.URL
