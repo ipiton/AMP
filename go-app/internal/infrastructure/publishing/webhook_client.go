@@ -24,14 +24,42 @@ type WebhookHTTPClient struct {
 	logger      *slog.Logger
 }
 
-// NewWebhookHTTPClient creates a new webhook HTTP client
+// NewWebhookHTTPClient creates a new webhook HTTP client with the built-in
+// client shape (newWebhookBaseHTTPClient).
 func NewWebhookHTTPClient(retryConfig WebhookRetryConfig, logger *slog.Logger) *WebhookHTTPClient {
+	return NewWebhookHTTPClientWithHTTPClient(retryConfig, logger, nil)
+}
+
+// NewWebhookHTTPClientWithHTTPClient is NewWebhookHTTPClient with an explicit
+// *http.Client, used by PublisherFactory to hand in a client built from the
+// target's `http_config` (FU-HTTP-CONFIG). A nil httpClient falls back to the
+// built-in shape, so the two constructors are identical for every target
+// without http_config.
+func NewWebhookHTTPClientWithHTTPClient(retryConfig WebhookRetryConfig, logger *slog.Logger, httpClient *http.Client) *WebhookHTTPClient {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if httpClient == nil {
+		httpClient = newWebhookBaseHTTPClient()
+	}
 
+	return &WebhookHTTPClient{
+		httpClient:  httpClient,
+		retryConfig: retryConfig,
+		authManager: NewAuthManager(logger),
+		logger:      logger,
+	}
+}
+
+// newWebhookBaseHTTPClient builds the webhook publisher's built-in client.
+//
+// Extracted so a per-target `http_config` can be layered ON TOP of it
+// (applyHTTPClientConfig) instead of replacing it: every tuning below —
+// connection pooling, dial/handshake timeouts, the TLS 1.2 floor, HTTP/2 —
+// must survive a target that only sets, say, a proxy_url.
+func newWebhookBaseHTTPClient() *http.Client {
 	// Create HTTP client with optimized settings
-	httpClient := &http.Client{
+	return &http.Client{
 		Timeout: 10 * time.Second, // Default timeout
 		Transport: &http.Transport{
 			// TLS configuration
@@ -53,13 +81,6 @@ func NewWebhookHTTPClient(retryConfig WebhookRetryConfig, logger *slog.Logger) *
 			ResponseHeaderTimeout: 10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 		},
-	}
-
-	return &WebhookHTTPClient{
-		httpClient:  httpClient,
-		retryConfig: retryConfig,
-		authManager: NewAuthManager(logger),
-		logger:      logger,
 	}
 }
 

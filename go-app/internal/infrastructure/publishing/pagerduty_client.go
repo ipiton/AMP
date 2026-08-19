@@ -56,6 +56,12 @@ type PagerDutyClientConfig struct {
 	// PagerDuty limit: 120 req/min per integration
 	// Default: 120.0
 	RateLimit float64
+
+	// HTTPClient overrides the built-in HTTP client, used by PublisherFactory to
+	// hand in a client built from the target's `http_config` (FU-HTTP-CONFIG).
+	// nil keeps the built-in shape (newPagerDutyBaseHTTPClient), so every target
+	// without http_config is on exactly its previous code path.
+	HTTPClient *http.Client
 }
 
 // PagerDutyRetryConfig holds retry configuration
@@ -134,13 +140,9 @@ func NewPagerDutyEventsClient(config PagerDutyClientConfig, logger *slog.Logger)
 	}
 
 	// Create HTTP client with TLS 1.2+
-	httpClient := &http.Client{
-		Timeout: config.Timeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
-			},
-		},
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = newPagerDutyBaseHTTPClient(config.Timeout)
 	}
 
 	// Create rate limiter (requests per second)
@@ -157,6 +159,20 @@ func NewPagerDutyEventsClient(config PagerDutyClientConfig, logger *slog.Logger)
 			MaxRetries:  config.MaxRetries,
 			BaseBackoff: 100 * time.Millisecond,
 			MaxBackoff:  5 * time.Second,
+		},
+	}
+}
+
+// newPagerDutyBaseHTTPClient builds the PagerDuty client's built-in HTTP client.
+// Extracted so a per-target http_config can be layered on top of it rather than
+// replacing it — see newWebhookBaseHTTPClient.
+func newPagerDutyBaseHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
 		},
 	}
 }
