@@ -33,17 +33,12 @@ const DefaultDeliveryConfirmationTimeout = 45 * time.Second
 
 // MaxDeliveryConfirmationTimeout is the largest value
 // publishing.queue.delivery_confirmation_timeout may be set to (task rec fix
-// round 2, review finding R9).
-//
-// The knob is not merely a timeout: the notify chain holds the group's publish
-// lock and its cross-replica claim for the whole wait, and grouping derives the
-// timer-callback deadline and the orphan-adoption grace period from it (see
-// grouping/notify_budget.go). Two minutes already implies a ~2m45s adoption
-// grace, which is the point where those derived values start crowding a typical
-// group_interval and the timer record's own TTL grace. Enforced in
-// config.validatePublishing so a too-large value fails at load time with an
-// explanation instead of quietly degrading dispatch.
-const MaxDeliveryConfirmationTimeout = 2 * time.Minute
+// round 2, review finding R9). Re-exported from core.MaxDeliveryConfirmationTimeout
+// — see that constant's doc comment for the sizing rationale and for why the
+// real definition lives there instead of here (wave-3 review finding M-f:
+// internal/config must not import infrastructure/publishing for one
+// constant).
+const MaxDeliveryConfirmationTimeout = core.MaxDeliveryConfirmationTimeout
 
 // PublishingResult represents the result of publishing to a single target
 type PublishingResult struct {
@@ -513,7 +508,7 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 				// outcome, so Success below means "the target accepted the
 				// notification", not "a job was enqueued".
 				var settled bool
-				err, settled = c.awaitDelivery(ctx, handle, t)
+				settled, err = c.awaitDelivery(ctx, handle, t)
 				if settled {
 					reason = AbandonReasonSettled
 				}
@@ -568,13 +563,17 @@ func (c *PublishingCoordinator) submitGroupJob(ctx context.Context, alerts []*co
 // wait was given up on (false) — the caller turns that into the
 // AbandonReason, which decides whether the target's circuit breaker hears
 // about it (fix round 2, review finding R3).
-func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *GroupPublishHandle, target *core.PublishingTarget) (err error, settled bool) {
+//
+// Returns (settled, err) rather than (err, settled) — error-last per Go
+// convention (ST1008); the original (err, settled) order was a style nit
+// flagged in review finding M-f.
+func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *GroupPublishHandle, target *core.PublishingTarget) (settled bool, err error) {
 	confirm := handle.Done()
 	if confirm == nil {
 		// Defensive: SubmitGroupWithConfirmation only returns a nil handle
 		// together with a non-nil error, which the caller already handled.
 		// "settled": there is no job in flight to judge a target by.
-		return fmt.Errorf("%w: no confirmation channel for target %q", ErrDeliveryNotAttempted, target.Name), true
+		return true, fmt.Errorf("%w: no confirmation channel for target %q", ErrDeliveryNotAttempted, target.Name)
 	}
 
 	timer := time.NewTimer(c.deliveryTimeout)
@@ -588,10 +587,10 @@ func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *Group
 				"error", err,
 			)
 		}
-		return err, true
+		return true, err
 	case <-timer.C:
-		return fmt.Errorf("%w after %s (target %q)", ErrDeliveryWaitTimeout, c.deliveryTimeout, target.Name), false
+		return false, fmt.Errorf("%w after %s (target %q)", ErrDeliveryWaitTimeout, c.deliveryTimeout, target.Name)
 	case <-ctx.Done():
-		return fmt.Errorf("%w: delivery confirmation aborted for target %q: %w", ErrDeliveryWaitTimeout, target.Name, ctx.Err()), false
+		return false, fmt.Errorf("%w: delivery confirmation aborted for target %q: %w", ErrDeliveryWaitTimeout, target.Name, ctx.Err())
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
-	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/spf13/viper"
 )
@@ -988,11 +988,11 @@ func (c *Config) validatePublishing() error {
 	// and orphan-adoption grace are derived from it. A multi-minute value would
 	// hold those for minutes and collide with group_interval/reconciliation
 	// assumptions, so refuse it here rather than degrade quietly.
-	if c.Publishing.Queue.DeliveryConfirmationTimeout > infrapublishing.MaxDeliveryConfirmationTimeout {
+	if c.Publishing.Queue.DeliveryConfirmationTimeout > core.MaxDeliveryConfirmationTimeout {
 		return fmt.Errorf(
 			"publishing.queue.delivery_confirmation_timeout=%s exceeds the supported maximum %s "+
 				"(the notify chain holds each group's publish lock and cross-replica claim for this long, and both the timer-callback deadline and the orphan-adoption grace are derived from it)",
-			c.Publishing.Queue.DeliveryConfirmationTimeout, infrapublishing.MaxDeliveryConfirmationTimeout)
+			c.Publishing.Queue.DeliveryConfirmationTimeout, core.MaxDeliveryConfirmationTimeout)
 	}
 
 	if c.Publishing.Refresh.Enabled {
