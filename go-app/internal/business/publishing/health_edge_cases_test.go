@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -459,6 +460,92 @@ func TestHealthMonitor_StopDuringCheck(t *testing.T) {
 	}
 	if stopDuration > 3*time.Second {
 		t.Errorf("Stop took too long: %v", stopDuration)
+	}
+}
+
+// TestHealthMonitor_RestartAfterStopTimeoutWaitsForDrain is the regression
+// test for the fu3-rel review's disclosed (Minor #1) Stop()-timeout-path
+// reentrancy gap: if Stop(timeout) times out while the worker goroutine is
+// still draining, `running` is already false (flipped by Stop()'s
+// CompareAndSwap before its wait completed), so a subsequent Start() used to
+// be free to spawn a second worker while the first was still winding down —
+// sharing state such as m.cancel.
+//
+// testAfterCancelObserved (test-only hook, nil in production) makes the
+// "still draining" window fully deterministic instead of racing real HTTP
+// timing: the worker observes ctx.Done() (Stop() cancelling it) and then
+// blocks in the hook until this test releases it, which is exactly the
+// precondition Stop()'s timeout path needs to exhibit the bug.
+func TestHealthMonitor_RestartAfterStopTimeoutWaitsForDrain(t *testing.T) {
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
+	discovery := NewTestHealthDiscoveryManager()
+	config := DefaultHealthConfig()
+	config.WarmupDelay = time.Hour // never fires; worker parks on ctx.Done() instead
+
+	monitor, err := NewHealthMonitor(discovery, config, nil, metrics)
+	if err != nil {
+		t.Fatalf("Failed to create monitor: %v", err)
+	}
+
+	var liveWorkers int32
+	var maxLiveWorkers int32
+	release := make(chan struct{})
+
+	monitor.testAfterCancelObserved = func() {
+		cur := atomic.AddInt32(&liveWorkers, 1)
+		for {
+			old := atomic.LoadInt32(&maxLiveWorkers)
+			if cur <= old {
+				break
+			}
+			if atomic.CompareAndSwapInt32(&maxLiveWorkers, old, cur) {
+				break
+			}
+		}
+		<-release
+		atomic.AddInt32(&liveWorkers, -1)
+	}
+
+	if err := monitor.Start(); err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+
+	// Stop with a timeout far shorter than the (deliberately blocked) drain:
+	// this MUST time out while the worker is parked in the hook above.
+	if err := monitor.Stop(20 * time.Millisecond); !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("Stop() error = %v, want ErrShutdownTimeout (worker must still be draining)", err)
+	}
+
+	// Immediately try to restart. Before the fix, this would spawn a second
+	// worker right away, concurrently with the first still draining.
+	startDone := make(chan error, 1)
+	go func() { startDone <- monitor.Start() }()
+
+	select {
+	case err := <-startDone:
+		t.Fatalf("Start() returned (err=%v) before the draining worker exited — reentrancy gap is back", err)
+	case <-time.After(200 * time.Millisecond):
+		// Still blocked, as expected: Start() must wait for the drain.
+	}
+
+	// Let the first worker finish draining.
+	close(release)
+
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatalf("Start() after drain completed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start() never returned after the draining worker exited")
+	}
+
+	if err := monitor.Stop(2 * time.Second); err != nil {
+		t.Fatalf("final Stop() error = %v", err)
+	}
+
+	if got := atomic.LoadInt32(&maxLiveWorkers); got > 1 {
+		t.Errorf("max concurrently-live workers = %d, want at most 1", got)
 	}
 }
 
