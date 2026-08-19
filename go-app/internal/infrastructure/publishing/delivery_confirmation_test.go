@@ -246,6 +246,65 @@ func TestPublishGroupToTargets_ContextCancellationIsNotSuccess(t *testing.T) {
 	assert.ErrorIs(t, results[0].Error, context.DeadlineExceeded)
 }
 
+// TestPublishGroupToTargets_ShutdownContextDoesNotCountAgainstBreaker is the
+// regression test for review finding M-b: on a real SIGTERM the grouping
+// context is explicitly cancelled (context.Canceled), not merely allowed to
+// time out (context.DeadlineExceeded) — awaitDelivery's ctx.Done() branch
+// must tell the two apart and abandon with AbandonReasonShutdown for the
+// former, so an in-flight target's breaker sees nothing from a shutdown it
+// had no part in.
+func TestPublishGroupToTargets_ShutdownContextDoesNotCountAgainstBreaker(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		server.Close()
+	})
+
+	target := &core.PublishingTarget{
+		Name:    "webhook-shutdown",
+		Type:    "webhook",
+		URL:     server.URL,
+		Enabled: true,
+		Format:  core.FormatWebhook,
+	}
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	discovery.AddTarget(target)
+
+	coordinator := newConfirmingCoordinator(t, discovery, 10*time.Second, 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Simulate SIGTERM: cancel the grouping context explicitly, mid-delivery,
+	// rather than letting a deadline expire.
+	go func() {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			return
+		}
+		cancel()
+	}()
+
+	results, err := coordinator.PublishGroupToTargets(ctx, testGroupAlerts(1), "", "gk-shutdown", nil, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Success)
+	require.Error(t, results[0].Error)
+	assert.ErrorIs(t, results[0].Error, ErrDeliveryWaitTimeout)
+	assert.ErrorIs(t, results[0].Error, context.Canceled)
+
+	assert.Zero(t, coordinator.queue.getCircuitBreaker(target.Name).GetFailureCount(),
+		"a shutdown-driven cancellation must not count against the target's circuit breaker")
+}
+
 // === Queue-level: outcomes for jobs that never reach an HTTP attempt ===
 
 // metricsOnlyModeManager is a ModeManager stuck in metrics-only mode.
