@@ -55,7 +55,7 @@ Source of truth:
 | Config validation (E-codes/W-warnings) wired into startup + `/-/reload` | 🟢 Supported | `pkg/configvalidator` wired into `internal/config.LoadConfig`, used by both process start and `/-/reload` (same function). Only fires for configs with a top-level `route:` section. |
 | Hot reload triggers: `SIGHUP` **and** `POST /-/reload` | 🟢 Supported | Both, as upstream. `SIGHUP` is handled by `watchReloadSignal` in `cmd/server/main.go`; it is repeatable and survives a failed reload (the previous config stays active). Routing-only edits (`route:`/`receivers:`/`time_intervals:` and nothing else) are applied — they were silently discarded before the final fix wave, with `/-/reload` still answering 200 OK. |
 | Resolved notification sent once, then the group is dropped | 🟢 Supported | `pruneResolvedAlerts` in `internal/infrastructure/grouping/manager_impl.go` removes resolved alerts after a *confirmed* delivery, matching upstream `aggrGroup.flush`; the group is deleted (and its timers cancelled) once that empties it. Alerts suppressed by inhibition/silence are kept, since they were never announced. |
-| `inhibit_rules[].source_matchers` / `target_matchers` (`matchers:` list syntax) | 🟢 Supported | Wave 7 (`FU-INHIBIT-MATCHERS`): the inhibition engine (`internal/infrastructure/inhibition`) now parses and evaluates the matchers-form list, reusing the wave-5 upstream-verbatim grammar port (`pkg/configvalidator/matcher.Parse`) and anchoring `=~`/`!~` the same way `internal/business/routing` does (`^(?:pattern)$`). Coexists with the legacy `source_match`/`source_match_re`/`target_match`/`target_match_re` maps on the same rule — upstream ANDs both forms together, and so does AMP. `equal:` semantics are unchanged for either form, and matchers-form rules apply on hot-reload exactly like legacy ones. Replaces the previous stopgap (loud `ERROR` log + a runtime no-op). |
+| `inhibit_rules[].source_matchers` / `target_matchers` (`matchers:` list syntax) | 🟢 Supported | Wave 7 (`FU-INHIBIT-MATCHERS`): the inhibition engine (`internal/infrastructure/inhibition`) parses and evaluates the matchers-form list, reusing the wave-5 upstream-verbatim grammar port (`pkg/configvalidator/matcher.Parse`) and anchoring `=~`/`!~` the same way `internal/business/routing` does (`^(?:pattern)$`). Coexists with the legacy `source_match`/`source_match_re`/`target_match`/`target_match_re` maps on the same rule (both forms AND together, matching upstream), and applies on hot-reload like legacy rules. **Fix round 1** (first review round found the initial cut REJECT-worthy) closed: the config-loader bridge that dropped these fields before `pkg/configvalidator` ever saw them (`route:`-gated configs refused to load at all); upstream's `excludeTwoSidedMatch` mutual-inhibition guard (two alerts each matching both sides no longer silently mute each other); absent-label evaluation now matches upstream's no-presence-check semantics exactly for every operator (`=`/`!=`/`=~`/`!~`); `equal:` treats a label absent on both alerts as equal; and legacy `*_match_re` is now anchored the same as the matchers-form `=~`/`!~` (also fixed: an inline `source_match_re`/`target_match_re` rule, with no matchers-form fields at all, used to never get its regex compiled at all - a pre-existing, silent no-op bug the fix round closed in the same pass). See Known Gap #9 for one narrower divergence left open (label-name charset). |
 | HA: Redis nflog + send-claim for cross-replica dedup | 🟢 Supported | `internal/infrastructure/grouping/redis_notify_log.go` (task 6.1). |
 | HA: distributed timer liveness / reconciliation | 🟢 Supported | `internal/infrastructure/grouping/timer_manager_impl.go` + `manager_impl.go` reconciliation loop (task 6.2, hardened in fix round 1: targeted overdue-timer scan, no leftover-timer error-log spam). Final fix wave: the adoption window was effectively 0s (`reconciliation_grace` equalled the timer record's Redis TTL grace, so a timer became adoptable exactly as its key expired), and three early returns in `onTimerExpired` left a dead local handle that made reconciliation skip the group forever. Both fixed and covered by regression tests plus a live e2e scenario. |
 | HA: silence cross-replica cache sync | 🟢 Supported | Redis pub/sub invalidation (task 6.3), `internal/infrastructure/silencing`. |
@@ -424,6 +424,30 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    string"). The round-1 guard in `Parse` contradicted both parsers' "verbatim upstream grammar" claim; dropped so
    `label=` now parses the same way in both, matching upstream. Both `unquoteMatcherValue` ports also gained an
    explicit copyright/license attribution comment for the upstream file they port from (Apache-2.0 §4).
+9. **A top-level `inhibit_rules:` key (upstream's own placement) is parsed and then silently ignored.**
+   `internal/infrastructure/routing.RouteConfig.InhibitRules` accepts it, but no code path ever reads that field -
+   the only inhibition rules that reach `internal/infrastructure/inhibition` are AMP's own
+   `inhibition.inhibit_rules` wrapper (`internal/config.InhibitionConfig`, wired through `ToInhibitionRules`). A
+   verbatim-upstream config that puts `inhibit_rules:` at the top level (not nested under `inhibition:`) loads
+   cleanly and inhibits nothing, with no error and no warning; that `InhibitRule` type also lacks
+   `source_matchers`/`target_matchers`, so those keys are dropped silently too. Found by review during the wave-7
+   fix round (S2); deliberately **not** wired in that round - see `BACKLOG.md`'s `FU-TOPLEVEL-INHIBIT-RULES` line.
+
+Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
+mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`
+guard); `matchesAll`'s absent-label handling now matches upstream's no-presence-check semantics exactly (an absent
+label reads as `""`, not as an automatic pass for `!=`/`!~` or an automatic fail for `=`/`=~`) - the same fix was
+also required, and applied, to `internal/business/routing.MatchesNode`, which had copied the same divergence since
+wave 5; `equal:` now treats a label absent on BOTH alerts as equal, matching upstream's fingerprint hashing; and
+legacy `source_match_re`/`target_match_re` are now anchored `^(?:pattern)$` like the matchers-form `=~`/`!~`, not
+left as an unanchored substring search. One narrower gap from that same review round is deliberately left open:
+`pkg/configvalidator/matcher.Parse`'s label-name charset (`[a-zA-Z_][a-zA-Z0-9_]*`) is narrower than upstream's
+classic-matcher grammar (which also allows `:`), so a `matchers:` entry using a colon in the label name now fails
+config loading outright instead of the pre-fix-round behavior of logging an ineffective-rule warning. Left
+unfixed this round because the charset is a two-parser-wide, multiply-tested grammar constant (shared with
+`internal/business/routing.parseMatcherExpr` and pinned by wave-5's `FU-PARSEARGUMENT-QUOTE-HANDLING` test suite),
+not something specific to inhibit rules - widening it belongs to its own reviewed change, not a drive-by inside
+this fix round.
 
 ---
 
