@@ -91,6 +91,55 @@ func (e *ParseError) Error() string {
 	return fmt.Sprintf("invalid matcher '%s': %s", e.Matcher, e.Message)
 }
 
+// unquoteMatcherValue strips a matched pair of surrounding double quotes
+// from a matcher value and unescapes `\"`/`\\` within it, per
+// prometheus/alertmanager's pkg/labels matcher grammar (alertmanager-parity
+// wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
+//
+// Before this task, Parse never stripped quotes at all: Parse(`severity="critical"`)
+// returned Value == `"critical"` (quotes included literally) instead of
+// `critical` — a real bug, not just a cosmetic difference from
+// business/routing.parseMatcherExpr (which already stripped quotes, just
+// without unescaping): for a regex matcher, that raw quoted value was fed
+// straight into regexp.Compile below, so `severity=~"crit.*"` compiled a
+// pattern that required the label value to literally contain quote
+// characters — never the intent, and silently different from what the
+// route tree actually matches against for the exact same YAML.
+//
+// An unquoted value, or one without a real matched closing quote, is
+// returned unchanged — malformed input stays visibly wrong rather than
+// being silently mangled. Only `\"` and `\\` are recognized escapes,
+// matching upstream's matcher grammar; any other backslash sequence (e.g.
+// `\n`) is left as a literal two-character pair. This is intentionally the
+// same logic as business/routing.unquoteMatcherValue — kept as a separate,
+// duplicated implementation rather than a shared import because pkg/ is
+// meant to stay leaf-level (no internal/ dependency), and see that
+// function's own doc comment for the shared known limitation (a value like
+// `"foo\"` with no real closing quote still misreads as terminated — needs
+// a real tokenizer to fix properly, out of scope here).
+func unquoteMatcherValue(value string) string {
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return value
+	}
+
+	inner := value[1 : len(value)-1]
+	var sb strings.Builder
+	sb.Grow(len(inner))
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if c == '\\' && i+1 < len(inner) {
+			next := inner[i+1]
+			if next == '"' || next == '\\' {
+				sb.WriteByte(next)
+				i++
+				continue
+			}
+		}
+		sb.WriteByte(c)
+	}
+	return sb.String()
+}
+
 // Parse parses a label matcher string.
 //
 // Supported formats:
@@ -98,6 +147,10 @@ func (e *ParseError) Error() string {
 //   - label!=value         (not equal)
 //   - label=~regex         (regex match)
 //   - label!~regex         (negative regex match)
+//
+// A value may optionally be wrapped in double quotes, with `\"`/`\\`
+// escapes recognized inside them (task fu5-cfg item 5,
+// FU-PARSEARGUMENT-QUOTE-HANDLING) — see unquoteMatcherValue.
 //
 // Parameters:
 //   - matcher: Matcher string
@@ -111,6 +164,7 @@ func (e *ParseError) Error() string {
 // Examples:
 //
 //	Parse("severity=critical")      → {Label: "severity", Type: "=", Value: "critical"}
+//	Parse(`severity="critical"`)    → {Label: "severity", Type: "=", Value: "critical"}
 //	Parse("alertname!=test")        → {Label: "alertname", Type: "!=", Value: "test"}
 //	Parse("instance=~.*prod.*")     → {Label: "instance", Type: "=~", Value: ".*prod.*"}
 func Parse(matcher string) (*Matcher, error) {
@@ -154,7 +208,7 @@ func Parse(matcher string) (*Matcher, error) {
 
 	// Trim whitespace
 	label = strings.TrimSpace(label)
-	value = strings.TrimSpace(value)
+	rawValue := strings.TrimSpace(value)
 
 	// Validate label name
 	if label == "" {
@@ -173,14 +227,19 @@ func Parse(matcher string) (*Matcher, error) {
 		}
 	}
 
-	// Validate value
-	if value == "" {
+	// Validate value. Checked on rawValue (before quote-stripping) so an
+	// explicit empty quoted value (label="") — legitimate upstream syntax
+	// for "label absent or empty" — is not rejected just because it
+	// unquotes to "": only truly nothing-after-the-operator (label=) is a
+	// syntax error (task fu5-cfg item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
+	if rawValue == "" {
 		return nil, &ParseError{
 			Matcher:    matcher,
 			Message:    "value is empty",
 			Suggestion: "Provide a value after operator",
 		}
 	}
+	value = unquoteMatcherValue(rawValue)
 
 	// Create matcher
 	m := &Matcher{
