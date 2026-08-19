@@ -39,6 +39,7 @@ type Config struct {
 	Inhibition    InhibitionConfig    `mapstructure:"inhibition" yaml:"inhibition,omitempty"`
 	Investigation InvestigationConfig `mapstructure:"investigation" yaml:"investigation,omitempty"`
 	Grouping      GroupingConfig      `mapstructure:"grouping" yaml:"grouping,omitempty"`
+	Silencing     SilencingConfig     `mapstructure:"silencing" yaml:"silencing,omitempty"`
 	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
 
 	// Routing holds the full Alertmanager-compatible route tree and receiver
@@ -129,6 +130,35 @@ type GroupingConfig struct {
 	// when ReconciliationInterval is positive; left at 0 here means "use
 	// grouping.TimerManagerConfig's own default" (60s).
 	ReconciliationGrace time.Duration `mapstructure:"reconciliation_grace" yaml:"reconciliation_grace,omitempty"`
+}
+
+// SilencingConfig holds the cross-replica silence cache sync knobs (task
+// 6.3's RedisSilenceEventBus subscribe loop + periodic fallback resync in
+// ServiceRegistry, alertmanager-parity wave-5 item FU-SILENCE-SYNC-INTERVALS).
+// Both fields were hardcoded literals (runSilenceSubscribeLoop's retryDelay,
+// runSilencePeriodicResync's fallbackInterval) before this task; the
+// defaults below are unchanged from those literals.
+type SilencingConfig struct {
+	// SubscribeRetryBackoff is the fixed delay between resubscribe attempts
+	// after RedisSilenceEventBus.Subscribe returns a non-nil error (a
+	// dropped/failed Redis connection). Each successful (re)subscribe
+	// triggers a full resync via onResync, so a shorter backoff only trades
+	// faster reconnect attempts for more Redis connection churn while the
+	// outage lasts — it does not affect steady-state load.
+	//
+	// Defaults to 2s (see setDefaults).
+	SubscribeRetryBackoff time.Duration `mapstructure:"subscribe_retry_backoff" yaml:"subscribe_retry_backoff,omitempty"`
+
+	// PeriodicResyncInterval is how often runSilencePeriodicResync forces a
+	// full resync of memory.SilenceStore regardless of pub/sub health — the
+	// backstop for a Publish call that fails on the writing replica without
+	// surfacing as an HTTP error (publishSilenceEvent is deliberately
+	// best-effort). A shorter interval bounds the staleness window tighter
+	// at the cost of more frequent full-table resync reads.
+	//
+	// Defaults to 5m (see setDefaults) — the same order of magnitude as the
+	// silence GC worker's default (DefaultSilenceManagerConfig.GCInterval).
+	PeriodicResyncInterval time.Duration `mapstructure:"periodic_resync_interval" yaml:"periodic_resync_interval,omitempty"`
 }
 
 // InhibitionConfig holds inhibition rules configuration (Alertmanager parity, PARITY-A2)
@@ -701,6 +731,13 @@ func setDefaults() {
 	viper.SetDefault("llm.timeout", "30s")
 	viper.SetDefault("llm.max_retries", 3)
 
+	// Silence cross-replica sync defaults (task fu5-cfg item 1,
+	// alertmanager-parity wave-5): unchanged from the pre-config-knob
+	// hardcoded literals in ServiceRegistry's runSilenceSubscribeLoop /
+	// runSilencePeriodicResync.
+	viper.SetDefault("silencing.subscribe_retry_backoff", "2s")
+	viper.SetDefault("silencing.periodic_resync_interval", "5m")
+
 	// Grouping subsystem defaults (task 2.2, alertmanager-parity)
 	viper.SetDefault("grouping.enabled", false)
 	// Distributed timer reconciliation defaults (task 6.2). Only takes
@@ -937,6 +974,32 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("grouping validation failed: %w", err)
 	}
 
+	if err := c.validateSilencing(); err != nil {
+		return fmt.Errorf("silencing validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateSilencing checks silencing.subscribe_retry_backoff/
+// periodic_resync_interval (task fu5-cfg item 1): both must be positive, and
+// the backoff must stay below the resync interval — a backoff at or past
+// the resync period would make the periodic resync fire no more often (or
+// less often) than a single resubscribe retry cycle, defeating its purpose
+// as an independent-of-pub/sub backstop.
+func (c *Config) validateSilencing() error {
+	if c.Silencing.SubscribeRetryBackoff <= 0 {
+		return fmt.Errorf("silencing.subscribe_retry_backoff must be positive")
+	}
+	if c.Silencing.PeriodicResyncInterval <= 0 {
+		return fmt.Errorf("silencing.periodic_resync_interval must be positive")
+	}
+	if c.Silencing.SubscribeRetryBackoff >= c.Silencing.PeriodicResyncInterval {
+		return fmt.Errorf(
+			"silencing.subscribe_retry_backoff=%s must be less than silencing.periodic_resync_interval=%s",
+			c.Silencing.SubscribeRetryBackoff, c.Silencing.PeriodicResyncInterval,
+		)
+	}
 	return nil
 }
 

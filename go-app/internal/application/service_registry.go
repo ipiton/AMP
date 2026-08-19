@@ -831,7 +831,7 @@ func (r *ServiceRegistry) runSilenceEventSync(ctx context.Context) {
 // see RedisSilenceEventBus.Subscribe's doc comment for why a full resync,
 // not just catching up on the missed messages, is the correct recovery.
 func (r *ServiceRegistry) runSilenceSubscribeLoop(ctx context.Context) {
-	const retryDelay = 2 * time.Second
+	retryDelay := r.silenceSubscribeRetryBackoff()
 
 	for {
 		err := r.silenceEventBus.Subscribe(ctx, r.resyncSilenceStore, r.applySilenceEvent)
@@ -863,7 +863,7 @@ func (r *ServiceRegistry) runSilenceSubscribeLoop(ctx context.Context) {
 // a permanent one, without adding a steady background load comparable to
 // the pub/sub path itself.
 func (r *ServiceRegistry) runSilencePeriodicResync(ctx context.Context) {
-	const fallbackInterval = 5 * time.Minute
+	fallbackInterval := r.silencePeriodicResyncInterval()
 
 	ticker := time.NewTicker(fallbackInterval)
 	defer ticker.Stop()
@@ -1529,6 +1529,36 @@ func reconciliationGraceFor(configured, deliveryConfirmationTimeout time.Duratio
 		return configured
 	}
 	return grouping.ReconciliationGraceFor(deliveryConfirmationTimeout)
+}
+
+// Pre-config-knob defaults (task fu5-cfg item 1) for the silence sync
+// intervals below — unchanged from the literals runSilenceSubscribeLoop and
+// runSilencePeriodicResync hardcoded before this task.
+const (
+	defaultSilenceSubscribeRetryBackoff  = 2 * time.Second
+	defaultSilencePeriodicResyncInterval = 5 * time.Minute
+)
+
+// silenceSubscribeRetryBackoff returns the configured resubscribe backoff,
+// falling back to the pre-config-knob default when r.config is nil (unit
+// tests that construct *ServiceRegistry directly without going through
+// LoadConfig — same posture as reconciliationGraceFor above) or the value is
+// left at its zero default.
+func (r *ServiceRegistry) silenceSubscribeRetryBackoff() time.Duration {
+	if r.config != nil && r.config.Silencing.SubscribeRetryBackoff > 0 {
+		return r.config.Silencing.SubscribeRetryBackoff
+	}
+	return defaultSilenceSubscribeRetryBackoff
+}
+
+// silencePeriodicResyncInterval returns the configured periodic fallback
+// resync interval, with the same nil/zero fallback posture as
+// silenceSubscribeRetryBackoff above.
+func (r *ServiceRegistry) silencePeriodicResyncInterval() time.Duration {
+	if r.config != nil && r.config.Silencing.PeriodicResyncInterval > 0 {
+		return r.config.Silencing.PeriodicResyncInterval
+	}
+	return defaultSilencePeriodicResyncInterval
 }
 
 // newGroupingStorage selects group + timer storage backends for the grouping
