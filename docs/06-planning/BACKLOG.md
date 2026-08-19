@@ -113,7 +113,7 @@
 - [ ] **FU-FINGERPRINT-HEX-FORMAT** — fingerprint 16-hex upstream format (F2 compatibility). ~0.5d
 - [ ] **FU-SILENCES-EXPIRED-QUERY** — silences --expired query support. ~0.5d
 - [ ] **FU-GET-ALERTS-V1** — GET /api/v1/alerts endpoint (parity gap, brief asked POST alias only). ~0.5d
-- [ ] **FU-SILENCE-SYNC-INTERVALS** — configurable silence-sync intervals (currently: 2s backoff / 5min resync constants hardcoded). ~0.5d
+- [x] **FU-SILENCE-SYNC-INTERVALS** _(closed by wave 5, 2026-08-19)_ — configurable silence-sync intervals: `silencing.subscribe_retry_backoff` / `silencing.periodic_resync_interval` replace the hardcoded 2s backoff / 5min resync constants, defaults unchanged, validated (positive, backoff < resync). ~0.5d
 - [ ] **FU-STORAGEMANAGER-FAILBACK** — StorageManager runtime Redis failback (startup-only decision currently; potential graceful degradation). ~1-2d
 - [ ] **FU-SLACK-PAGERDUTY-QUEUE-PATH** — enhanced slack/pagerduty publishers unreachable via queue path (same class as telegram fix in Phase 7.2). Mutex guards for client maps. ~1d
 - [ ] **FU-PARSEARGUMENT-QUOTE-HANDLING** — parseMatcherExpr quote handling edge cases (third matcher grammar divergence vs configvalidator). ~0.5d
