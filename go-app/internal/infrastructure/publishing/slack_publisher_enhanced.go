@@ -204,7 +204,18 @@ func (p *EnhancedSlackPublisher) buildMessage(payload map[string]any) *SlackMess
 
 	// Extract blocks (Block Kit)
 	for _, blockMap := range toMapSlice(payload["blocks"]) {
-		message.Blocks = append(message.Blocks, p.buildBlock(blockMap))
+		block := p.buildBlock(blockMap)
+		// Block Kit REQUIRES 1-10 elements on a context block (review wave 5,
+		// finding R1) — Slack validates the whole "blocks" array and answers
+		// invalid_blocks/400 for a bare {"type":"context"}, it does not fall
+		// back to Text. buildBlock now populates Elements from the formatter's
+		// own output, so this only guards a formatter bug or a future context
+		// block that genuinely has nothing to show, dropping it rather than
+		// shipping something the API rejects.
+		if block.Type == "context" && len(block.Elements) == 0 {
+			continue
+		}
+		message.Blocks = append(message.Blocks, block)
 	}
 
 	// Extract attachments (color coding)
@@ -281,6 +292,24 @@ func (p *EnhancedSlackPublisher) buildBlock(blockMap map[string]interface{}) Blo
 		block.Fields = append(block.Fields, field)
 	}
 
+	// Extract elements (for context blocks — review wave 5, finding R1). Same
+	// toMapSlice normalizer as fields; each element is shaped like Text
+	// ({"type":..., "text":...}), which is all formatSlack's context block
+	// ever emits. Block Kit REQUIRES 1-10 elements on a context block, so a
+	// context block with none dropped here would still be invalid — see
+	// buildMessage, which drops empty context blocks entirely rather than
+	// shipping one.
+	for _, elementMap := range toMapSlice(blockMap["elements"]) {
+		element := Text{}
+		if elementType, ok := elementMap["type"].(string); ok {
+			element.Type = elementType
+		}
+		if elementText, ok := elementMap["text"].(string); ok {
+			element.Text = elementText
+		}
+		block.Elements = append(block.Elements, element)
+	}
+
 	return block
 }
 
@@ -296,6 +325,21 @@ func (p *EnhancedSlackPublisher) buildAttachment(attachMap map[string]interface{
 	// Extract text
 	if text, ok := attachMap["text"].(string); ok {
 		attachment.Text = text
+	}
+
+	// Extract fields (review wave 5, finding R2 — same defect family as R1,
+	// buildAttachment was the one caller of the trio never routed through
+	// toMapSlice, so formatSlack's attachment fields — Status/Started/
+	// Namespace/AI-severity — silently vanished, shipping a color-only bar).
+	for _, fieldMap := range toMapSlice(attachMap["fields"]) {
+		field := Field{}
+		if fieldType, ok := fieldMap["type"].(string); ok {
+			field.Type = fieldType
+		}
+		if fieldText, ok := fieldMap["text"].(string); ok {
+			field.Text = fieldText
+		}
+		attachment.Fields = append(attachment.Fields, field)
 	}
 
 	return attachment
