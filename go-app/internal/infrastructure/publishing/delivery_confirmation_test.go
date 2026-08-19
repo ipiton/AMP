@@ -62,6 +62,7 @@ func newConfirmingCoordinator(t *testing.T, discovery TargetDiscoveryManager, co
 	)
 	queue.Start()
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+	t.Cleanup(queue.factory.Shutdown)
 
 	config := DefaultCoordinatorConfig()
 	config.DeliveryConfirmationTimeout = confirmTimeout
@@ -341,6 +342,7 @@ func TestSubmitGroupWithConfirmation_MetricsOnlyModeReportsNotAttempted(t *testi
 	)
 	queue.Start()
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+	t.Cleanup(queue.factory.Shutdown)
 
 	target := &core.PublishingTarget{Name: "webhook-1", Type: "webhook", URL: "http://127.0.0.1:1", Enabled: true, Format: core.FormatWebhook}
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
@@ -360,7 +362,7 @@ func TestSubmitGroupWithConfirmation_MetricsOnlyModeReportsNotAttempted(t *testi
 // TestProcessJob_OpenCircuitBreakerReportsNotAttempted: the breaker short-
 // circuits before any HTTP call, which is a non-delivery like any other.
 func TestProcessJob_OpenCircuitBreakerReportsNotAttempted(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	target := &core.PublishingTarget{Name: "tripped", Type: "webhook", URL: "http://127.0.0.1:1", Enabled: true, Format: core.FormatWebhook}
 	cb := queue.getCircuitBreaker(target.Name)
@@ -400,6 +402,7 @@ func TestSubmitGroupWithConfirmation_EnqueueFailureReturnsNoChannel(t *testing.T
 		nil,
 		slog.Default(),
 	)
+	t.Cleanup(queue.factory.Shutdown)
 
 	target := &core.PublishingTarget{Name: "webhook-1", Type: "webhook", URL: "http://127.0.0.1:1", Enabled: true, Format: core.FormatWebhook}
 
@@ -417,7 +420,7 @@ func TestSubmitGroupWithConfirmation_EnqueueFailureReturnsNoChannel(t *testing.T
 // the worker block or panic.
 func TestSubmitGroup_StaysFireAndForget(t *testing.T) {
 	stub := newWebhookStub(t, http.StatusOK)
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	require.NoError(t, queue.SubmitGroup(testGroupAlerts(1), stub.target("webhook-ok"), "gk", "recv", nil))
 
@@ -483,6 +486,7 @@ func TestGroupPublishHandle_AbandonCancelsInFlightPublish(t *testing.T) {
 	)
 	queue.Start()
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+	t.Cleanup(queue.factory.Shutdown)
 
 	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
@@ -534,6 +538,7 @@ func TestGroupPublishHandle_RepeatedUnconfirmedAbandonmentsOpenTheBreaker(t *tes
 	)
 	queue.Start()
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+	t.Cleanup(queue.factory.Shutdown)
 
 	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
 
@@ -579,6 +584,7 @@ func TestGroupPublishHandle_ShutdownAbandonmentDoesNotBlameTheTarget(t *testing.
 	)
 	queue.Start()
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+	t.Cleanup(queue.factory.Shutdown)
 
 	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
@@ -622,6 +628,7 @@ func TestAbandonedJob_IsNotWrittenToDLQ(t *testing.T) {
 	)
 	queue.Start()
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+	t.Cleanup(queue.factory.Shutdown)
 
 	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
