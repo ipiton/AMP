@@ -257,7 +257,13 @@ func (m *DefaultTargetDiscoveryManager) IsConfigOnly() bool {
 // the config).
 func (m *DefaultTargetDiscoveryManager) SetConfigTargets(targets []*core.PublishingTarget) {
 	if m.configCache == nil {
-		m.configCache = newTargetCache()
+		// Review finding M2: this used to lazily assign m.configCache here,
+		// which is an unsynchronised write to a field the union read paths read
+		// from other goroutines. Both constructors initialise it, so the only
+		// way to get here is a hand-built struct literal (some tests) — report
+		// that instead of racing.
+		m.logger.Error("SetConfigTargets called on a discovery manager built without a config cache; config-provisioned targets ignored (use NewTargetDiscoveryManager or NewConfigOnlyTargetDiscoveryManager)")
+		return
 	}
 	m.configCache.Set(targets)
 
@@ -288,7 +294,9 @@ func (m *DefaultTargetDiscoveryManager) SetConfigTargets(targets []*core.Publish
 // configTargets / configTargetsByType / configTarget are the read accessors for
 // the config-provisioned set. They tolerate a nil configCache so a manager
 // built by struct literal (as some tests do) keeps working with no config
-// targets rather than panicking on the union read paths.
+// targets rather than panicking on the union read paths. The field is only ever
+// assigned by the constructors, never lazily — see SetConfigTargets (review
+// finding M2).
 func (m *DefaultTargetDiscoveryManager) configTargets() []*core.PublishingTarget {
 	if m.configCache == nil {
 		return nil
