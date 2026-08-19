@@ -73,7 +73,24 @@ func TestEdgeCase_UnavailableCollectors(t *testing.T) {
 	}
 }
 
-// TestEdgeCase_DuplicateMetricKeys tests handling of duplicate metric keys
+// TestEdgeCase_DuplicateMetricKeys tests handling of duplicate metric keys.
+//
+// fu6-mic item 2 (FU-FLAKE-DUPLICATE-METRIC-KEYS): CollectAll (stats_collector.go)
+// runs every registered collector's Collect() concurrently in its own
+// goroutine and merges each result into the shared snapshot map under a
+// mutex — by design (see CollectAll's own "Thread-Safe: Yes" doc comment),
+// there is no ordering guarantee between which goroutine's Collect() call
+// finishes and takes the merge lock first. The original version of this
+// test asserted a specific winner ("last writer wins (collector2)"), which
+// is only true on whichever runs of the goroutine scheduler happen to let
+// collector2's goroutine acquire the merge lock after collector1's — not
+// guaranteed, hence the observed flake. Fixed by asserting only the
+// order-independent property that actually holds unconditionally: exactly
+// one of the two values won (the map has one entry for the shared key, not
+// two, and it is not some third, corrupted value), while the two conflict-
+// free keys are exactly as their own collector set them. Production
+// behavior (CollectAll's concurrency, the merge-under-lock semantics) is
+// unchanged — only this test's assertion.
 func TestEdgeCase_DuplicateMetricKeys(t *testing.T) {
 	collector1 := &NamedCollector{
 		name: "Collector1",
@@ -98,14 +115,24 @@ func TestEdgeCase_DuplicateMetricKeys(t *testing.T) {
 	ctx := context.Background()
 	snapshot := aggregator.CollectAll(ctx)
 
-	// Should have 3 metrics (duplicate key overwrites)
+	// Should have 3 metrics (duplicate key overwrites, not accumulates)
 	if len(snapshot.Metrics) != 3 {
 		t.Errorf("Expected 3 metrics, got %d", len(snapshot.Metrics))
 	}
 
-	// Last writer wins (collector2)
-	if snapshot.Metrics["duplicate_metric"] != 200.0 {
-		t.Errorf("Expected duplicate_metric=200.0, got %v", snapshot.Metrics["duplicate_metric"])
+	// Order-independent: whichever collector's goroutine merges last wins,
+	// but it must be one of the two registered values — never anything else.
+	if got := snapshot.Metrics["duplicate_metric"]; got != 100.0 && got != 200.0 {
+		t.Errorf("Expected duplicate_metric to be 100.0 (Collector1) or 200.0 (Collector2), got %v", got)
+	}
+
+	// The non-conflicting keys must be exactly what their own collector set,
+	// regardless of merge order.
+	if snapshot.Metrics["unique1"] != 1.0 {
+		t.Errorf("Expected unique1=1.0, got %v", snapshot.Metrics["unique1"])
+	}
+	if snapshot.Metrics["unique2"] != 2.0 {
+		t.Errorf("Expected unique2=2.0, got %v", snapshot.Metrics["unique2"])
 	}
 }
 
