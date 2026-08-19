@@ -525,8 +525,16 @@ func (f *DefaultAlertFormatter) formatSlack(enrichedAlert *core.EnrichedAlert) (
 		}
 	}
 
-	// Build header
-	header := fmt.Sprintf("%s *%s* - %s", emoji, alert.AlertName, alert.Status)
+	// Build header. Two variants (fu6-mic item 4, wave-5 parked finding m5):
+	// a Slack "header" block's text object is ALWAYS "plain_text" — Block
+	// Kit does not render markdown there, so the mrkdwn-styled
+	// "⚠️ *HighCPUUsage* - firing" used to ship literal asterisks to the
+	// user. headerMrkdwn keeps the asterisks and is reused below for the
+	// top-level "text" fallback field, where mrkdwn DOES apply (notification
+	// previews/screen readers render it); headerPlain drops them for the
+	// header block itself.
+	headerMrkdwn := fmt.Sprintf("%s *%s* - %s", emoji, alert.AlertName, alert.Status)
+	headerPlain := fmt.Sprintf("%s %s - %s", emoji, alert.AlertName, alert.Status)
 
 	// Build text sections
 	var blocks []map[string]any
@@ -536,7 +544,7 @@ func (f *DefaultAlertFormatter) formatSlack(enrichedAlert *core.EnrichedAlert) (
 		"type": "header",
 		"text": map[string]any{
 			"type": "plain_text",
-			"text": header,
+			"text": headerPlain,
 		},
 	})
 
@@ -625,10 +633,11 @@ func (f *DefaultAlertFormatter) formatSlack(enrichedAlert *core.EnrichedAlert) (
 	// readers, clients that don't render Block Kit) — this formatter emitted
 	// only "blocks"/"attachments" and no "text" at all, so a client reading
 	// just the fallback (or a strict webhook that rejects a body with neither)
-	// saw nothing (review wave 5, finding C1). header is already the plain-text
-	// summary computed above ("<emoji> *name* - status"), so it doubles as the
-	// fallback text.
-	result["text"] = header
+	// saw nothing (review wave 5, finding C1). headerMrkdwn is the
+	// mrkdwn-styled summary computed above ("<emoji> *name* - status"), which
+	// is correct here since mrkdwn applies to the top-level fallback text
+	// (unlike the header block above, fixed to headerPlain by fu6-mic item 4).
+	result["text"] = headerMrkdwn
 	result["blocks"] = blocks
 	result["attachments"] = []map[string]any{
 		{

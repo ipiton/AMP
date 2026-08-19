@@ -178,6 +178,39 @@ func TestFormatAlert_Slack(t *testing.T) {
 	assert.Equal(t, "#FFA500", attachments[0]["color"])
 }
 
+// TestFormatAlert_Slack_HeaderIsPlainTextWithoutMarkdown is fu6-mic item 4
+// (wave-5 parked finding m5): a Slack "header" block's text object is
+// ALWAYS type "plain_text" — Block Kit does not render markdown there — but
+// formatSlack built that text with mrkdwn syntax
+// ("⚠️ *TestAlert* - firing"), so Slack rendered the literal asterisks
+// instead of bold. The header block's text must now be markdown-free, while
+// the top-level "text" fallback field (where mrkdwn DOES apply) keeps the
+// asterisks.
+func TestFormatAlert_Slack_HeaderIsPlainTextWithoutMarkdown(t *testing.T) {
+	formatter := NewAlertFormatter("")
+	enrichedAlert := createTestEnrichedAlert()
+
+	result, err := formatter.FormatAlert(context.Background(), enrichedAlert, core.FormatSlack)
+	require.NoError(t, err)
+
+	blocks, ok := result["blocks"].([]map[string]any)
+	require.True(t, ok)
+	require.NotEmpty(t, blocks)
+
+	headerBlock := blocks[0]
+	require.Equal(t, "header", headerBlock["type"])
+
+	headerText, ok := headerBlock["text"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "plain_text", headerText["type"])
+	assert.Equal(t, "⚠️ TestAlert - firing", headerText["text"],
+		"the header block's plain_text must not carry markdown asterisks")
+	assert.NotContains(t, headerText["text"], "*", "Block Kit renders header text literally — no markdown asterisks may reach it")
+
+	// The top-level fallback keeps the mrkdwn styling — mrkdwn applies there.
+	assert.Equal(t, "⚠️ *TestAlert* - firing", result["text"])
+}
+
 func TestFormatAlert_Slack_Critical(t *testing.T) {
 	formatter := NewAlertFormatter("")
 	enrichedAlert := createTestEnrichedAlert()
