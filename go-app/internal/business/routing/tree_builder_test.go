@@ -85,8 +85,11 @@ func TestTreeBuilder_BuildsFromCanonicalRouteConfig(t *testing.T) {
 		t.Fatalf("root.GroupWait = %v, want 10s", root.GroupWait)
 	}
 	// GroupInterval/RepeatInterval were left unset on the fixture root and
-	// have no parent to inherit from, so they must fall back to the
-	// hardcoded defaults (no global-config layer exists for these anymore).
+	// have no parent to inherit from; this fixture's RouteConfig.Global is
+	// also nil, so both must fall back to the hardcoded defaults. See
+	// global_inheritance_test.go for the global.group_interval/
+	// repeat_interval fallback layer restored by task fu5-cfg item 3
+	// (FU-GLOB-DEFAULT-VALUES).
 	if root.GroupInterval != 5*time.Minute {
 		t.Fatalf("root.GroupInterval = %v, want 5m default", root.GroupInterval)
 	}
