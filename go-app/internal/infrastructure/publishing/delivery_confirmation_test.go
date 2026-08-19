@@ -5,9 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -236,6 +239,11 @@ func TestPublishGroupToTargets_ContextCancellationIsNotSuccess(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Success)
 	require.Error(t, results[0].Error)
+	// Pin awaitDelivery's ctx-branch wrapping contract (fix round 1, review
+	// finding M5): the ctx path must be recognizable BOTH as an unconfirmed
+	// delivery and as the underlying context failure.
+	assert.ErrorIs(t, results[0].Error, ErrDeliveryWaitTimeout)
+	assert.ErrorIs(t, results[0].Error, context.DeadlineExceeded)
 }
 
 // === Queue-level: outcomes for jobs that never reach an HTTP attempt ===
@@ -356,4 +364,157 @@ func TestSubmitGroup_StaysFireAndForget(t *testing.T) {
 	require.Nil(t, job.completion)
 	queue.processJob(job) // must not panic on the nil completion
 	assert.Equal(t, int64(1), stub.hits.Load())
+}
+
+// === Fix round 1 (review finding I2): abandoning an unawaited job ===
+
+// newHangingWebhook serves requests that never answer until the test tears
+// down, and signals on the returned channel when a request arrives.
+//
+// The handler parks on an explicit release channel rather than on
+// r.Context(): net/http only cancels a server-side request context once it
+// notices the peer closed the connection, which is not prompt for a handler
+// that has not written anything yet — so client-side cancellation (what this
+// suite actually asserts, via the job's own outcome) is invisible here. The
+// release channel is closed BEFORE Server.Close so teardown does not block on
+// a parked handler.
+func newHangingWebhook(t *testing.T) (*httptest.Server, <-chan struct{}) {
+	t.Helper()
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		rw.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		server.Close()
+	})
+	return server, started
+}
+
+// TestGroupPublishHandle_AbandonCancelsInFlightPublish pins review finding
+// I2's fix: when the waiter gives up, the job's context is cancelled, so the
+// in-flight HTTP request unwinds at once instead of holding a worker for the
+// queue's whole retry budget (~2min with production defaults) while later
+// ticks submit fresh jobs for the same (group, target).
+func TestGroupPublishHandle_AbandonCancelsInFlightPublish(t *testing.T) {
+	server, started := newHangingWebhook(t)
+
+	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
+	queue := NewPublishingQueue(
+		NewPublisherFactory(NewAlertFormatter(""), slog.Default(), metrics, ""),
+		nil,
+		NewLRUJobTrackingStore(8),
+		// MaxRetries 3: without cancellation this job would keep a worker for
+		// four attempts plus back-off, which is exactly the starvation the
+		// finding describes.
+		PublishingQueueConfig{WorkerCount: 2, HighPriorityQueueSize: 8, MediumPriorityQueueSize: 8, LowPriorityQueueSize: 8, MaxRetries: 3, RetryInterval: time.Second, Metrics: metrics},
+		nil,
+		slog.Default(),
+	)
+	queue.Start()
+	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+
+	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
+	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
+	require.NoError(t, err)
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publish never reached the target")
+	}
+
+	// The waiter gives up (what awaitDelivery does on ErrDeliveryWaitTimeout).
+	handle.Abandon()
+
+	select {
+	case outcome := <-handle.Done():
+		require.Error(t, outcome, "an abandoned publish must never report confirmed delivery")
+		assert.ErrorIs(t, outcome, context.Canceled,
+			"the job's context must be what ended the attempt")
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoning a job must unwind its in-flight publish, not wait out the retry budget")
+	}
+
+	// Worker freed, breaker untouched: an abandoned job is not evidence that
+	// the endpoint is unhealthy.
+	assert.True(t, queue.getCircuitBreaker(target.Name).CanAttempt(),
+		"abandoning a delivery must not trip the target's circuit breaker")
+}
+
+// TestAbandonedJob_IsNotWrittenToDLQ: the notify chain re-publishes an
+// unconfirmed target on the group's next fire, so a DLQ entry for the
+// abandoned attempt would be a duplicate waiting to be replayed.
+func TestAbandonedJob_IsNotWrittenToDLQ(t *testing.T) {
+	server, started := newHangingWebhook(t)
+
+	dlq := &recordingDLQ{}
+	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
+	queue := NewPublishingQueue(
+		NewPublisherFactory(NewAlertFormatter(""), slog.Default(), metrics, ""),
+		dlq,
+		NewLRUJobTrackingStore(8),
+		PublishingQueueConfig{WorkerCount: 1, HighPriorityQueueSize: 8, MediumPriorityQueueSize: 8, LowPriorityQueueSize: 8, MaxRetries: 0, RetryInterval: time.Millisecond, Metrics: metrics},
+		nil,
+		slog.Default(),
+	)
+	queue.Start()
+	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+
+	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
+	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
+	require.NoError(t, err)
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publish never reached the target")
+	}
+	handle.Abandon()
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned job never reported an outcome")
+	}
+
+	assert.Zero(t, dlq.count(), "an abandoned job must not be written to the DLQ")
+}
+
+// recordingDLQ counts DLQ writes.
+type recordingDLQ struct {
+	mu     sync.Mutex
+	writes int
+}
+
+func (d *recordingDLQ) Write(_ context.Context, _ *PublishingJob) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.writes++
+	return nil
+}
+
+func (d *recordingDLQ) Read(_ context.Context, _ DLQFilters) ([]*DLQEntry, error) { return nil, nil }
+
+func (d *recordingDLQ) Replay(_ context.Context, _ uuid.UUID) error { return nil }
+
+func (d *recordingDLQ) Purge(_ context.Context, _ time.Duration) (int64, error) { return 0, nil }
+
+func (d *recordingDLQ) GetStats(_ context.Context) (*DLQStats, error) { return &DLQStats{}, nil }
+
+var _ DLQRepository = (*recordingDLQ)(nil)
+
+func (d *recordingDLQ) count() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.writes
 }
