@@ -2,6 +2,7 @@ package publishing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -509,8 +510,23 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 				// notification", not "a job was enqueued".
 				var settled bool
 				settled, err = c.awaitDelivery(ctx, handle, t)
-				if settled {
+				switch {
+				case settled:
 					reason = AbandonReasonSettled
+				case errors.Is(err, context.Canceled):
+					// ctx was explicitly cancelled — shutdown, or a caller
+					// giving up for a reason that says nothing about this
+					// target's health — as opposed to ctx.Done() firing
+					// because the CALLER's own bounded deadline ran out
+					// (context.DeadlineExceeded), which is still evidence the
+					// target didn't answer in time and stays Unconfirmed.
+					//
+					// Review finding M-b: on a real SIGTERM the grouping
+					// context dies too, so without this every in-flight
+					// target's abandonment defaulted to Unconfirmed and
+					// tripped one spurious circuit-breaker failure per target
+					// on every shutdown.
+					reason = AbandonReasonShutdown
 				}
 			}
 
