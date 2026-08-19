@@ -37,6 +37,7 @@ Source of truth:
 | Regex matcher anchoring (`^(?:re)$`) | 🟢 Supported | Anchored consistently across all four paths that evaluate a user-supplied regex matcher against a live alert: `internal/business/routing/matcher.go`'s `anchorRegex` (route `matchers:`/`match_re`); `internal/infrastructure/inhibition/matchers_list.go`'s `anchorMatcherRegex` (inhibit rule `matchers:`/`match_re`, wave-7 fix rounds 1-2); `internal/core/silencing/matcher_cache.go`'s `anchorSilenceRegex` (silence `=~`/`!~` evaluation itself, wave-7 fix round 2); and `internal/infrastructure/storage/memory/silence_store.go`'s `silenceMatchesLabels` — the live suppression path (notify-chain Step 2 `filterSilenced`, `status.silencedBy`, `?silenced=`) — which delegates to that SAME `core/silencing` evaluator rather than duplicating it a fourth time (wave-7 fix round 3, R6). Before round 3, silencing's own evaluator (backing `POST /api/v2/silences/check`) was fixed but this fourth path was not, so a silence on `job=~"prod"` still suppressed `job="preprod-2"` in production while the preview endpoint had already stopped agreeing — the two disagreed for exactly the shapes that matter. Unanchored substring matching would be a parity bug at any of the four; the three independent anchoring helpers (routing/inhibition/silencing) are each a duplicated copy of the same one-line helper, by design (see each site's own doc comment for why it isn't a shared import) — storage/memory intentionally has no fourth copy, by construction. `internal/infrastructure/routing`'s own `RouteConfigParser.compileRegexPatterns` (`config.CompiledRegex`) also anchors as of the same fix round, though nothing consumes that path in production today (see Known Gap #11 on the dead `RegexCache.Preload` wiring). |
 | `route:`/`receivers:` config parsing | 🟢 Supported | `internal/infrastructure/routing.Parse()`, gated on a top-level `route:` section existing (`internal/config.loadRouteConfig`); legacy single-receiver configs skip this path entirely. |
 | `receivers[].*_configs` **auto-provisioning delivery** | 🟢 Supported (AMP-PARITY-WAVE6-EPIC) | An untouched upstream config delivers with **zero Kubernetes Secrets**: every `webhook_configs`/`slack_configs`/`pagerduty_configs`/`telegram_configs`/`email_configs` block becomes an in-memory publishing target named `cfg:<receiver>/<type><idx>`, scoped to its receiver, rebuilt on every config load/reload (`internal/business/publishing/config_targets.go`). Secrets still work and are unchanged — the two sources merge into one view. See [Receiver Integration Compatibility Matrix](#receiver-integration-compatibility-matrix) for the per-field fidelity table. |
+| `templates:` + per-integration template fields | 🟢 Supported (TEMPLATES-EPIC) | Notifications render through upstream's own template engine: the ported data model (`Data`/`Alerts`/`KV`, `internal/business/templating/data.go`), all 25 `DefaultFuncs`, and **verbatim** copies of upstream v0.34.0's `default.tmpl` + `email.tmpl` (checksums in `templates/NOTICE`). `templates:` globs are loaded at config load and on `/-/reload`, resolved relative to the CONFIG FILE's directory as upstream's `resolveFilepaths` does, with later definitions winning. Per-integration presentation fields (`slack_configs[].title`/`text`/`color`/`channel`/…, `pagerduty_configs[].description`/`severity`/`client`/`client_url`/`details`, `telegram_configs[].message`, `email_configs[].subject`/`html`/`text`/`headers`) render onto the wire, with upstream's own defaults filled in when unset — so an untouched upstream config produces upstream's output. `webhook_configs` is NOT templated, matching upstream (its v4 JSON body is struct-marshaled). See [Notification templates](#notification-templates) for divergences. |
 | Receiver-name charset | 🟢 Supported (one reserved character) | Any non-empty name except `/`, which is reserved as the group-key separator (`receiver=<name>/<group-key>`). Upstream has no restriction at all; dotted/colon/spaced/non-ASCII names (`team.dba`, `email:sre`, `ops team`) all work — they were rejected before the final fix wave. |
 | Route evaluation wired into ingest | 🟢 Supported | `internal/core/services/alert_processor.go` `evaluateRoute` calls `RouteEvaluator.Evaluate` per alert when configured; nil (no-op) in lite/legacy mode. |
 | Receiver-scoped delivery targets (`amp.receiver` annotation/label) | 🟢 Supported (AMP-native mechanism) | `internal/business/publishing/discovery_parse.go`: annotation = comma-separated list, label = single name fallback. Not an upstream concept — AMP's own target-discovery scoping, functionally equivalent. |
@@ -256,20 +257,41 @@ this validation.
 
 ### Per-integration field fidelity
 
-Auto-provisioning maps every field the publisher layer actually consumes. The
-fields below are parsed and validated but **not** delivered — tracked as
-`FU-INTEGRATION-FIELD-FIDELITY` in `docs/06-planning/BACKLOG.md`, and the
-reason is the same for all of them: the enhanced publishers render their
-message entirely through the shared `AlertFormatter` and read nothing else off
-the target.
+The PRESENTATION fields are delivered as of TEMPLATES-EPIC slice 2, which closed
+`FU-INTEGRATION-FIELD-FIDELITY`: they are rendered through the template engine
+and overlaid onto the wire payload
+(`internal/infrastructure/publishing/template_formatter.go`), with upstream's own
+default (`{{ template "slack.default.title" . }}` and friends) filled in for any
+field the operator leaves unset. What remains undelivered is transport and
+structural, not presentational.
 
-| Integration | Mapped (delivered) | Parsed but NOT delivered |
-|---|---|---|
-| `webhook_configs` | `url`, `http_headers`, `send_resolved` | `http_method` (always POST), `max_alerts`, `http_config` |
-| `slack_configs` | `api_url`, `send_resolved` | `channel`, `username`, `icon_emoji`/`icon_url`, `title`, `title_link`, `pretext`, `text`, `fields`, `actions`, `color`, `short_fields`, `http_config` |
-| `pagerduty_configs` | `routing_key` (or legacy `service_key`), `url`, `send_resolved` | `severity`, `class`, `component`, `group`, `description`, `details`, `http_config` — severity/summary are derived from the alert itself |
-| `telegram_configs` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `send_resolved` | `parse_mode` (always the formatter's own), `message`, `http_config` |
-| `email_configs` | `to`, `from`, `subject`, `html`, `text`, `send_resolved` + the global SMTP settings | `headers`; upstream's per-`email_config` `smarthost`/`auth_*`/`require_tls` are not modelled at all |
+| Integration | Templated (delivered) | Other mapped fields | Parsed but NOT delivered |
+|---|---|---|---|
+| `webhook_configs` | *(none — upstream does not template webhook payloads)* | `url`, `http_headers`, `send_resolved` | `http_method` (always POST), `max_alerts`, `http_config` |
+| `slack_configs` | `title`, `title_link`, `pretext`, `text`, `color`, `username`, `icon_emoji`, `icon_url`, `channel` | `api_url`, `send_resolved` | `fields`, `actions`, `short_fields` (Block Kit structures the wire model does not carry), `http_config` |
+| `pagerduty_configs` | `description` (→ Events API `summary`), `severity`, `client`, `client_url`, `details.*` | `routing_key` (or legacy `service_key`), `url`, `send_resolved` | `class`, `component`, `group`, `images`, `http_config` |
+| `telegram_configs` | `message` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `parse_mode`, `send_resolved` | `http_config` |
+| `email_configs` | `subject`, `html`, `text`, `headers.*` | `to`, `from`, `send_resolved` + the global SMTP settings | upstream's per-`email_config` `smarthost`/`auth_*`/`require_tls` are not modelled at all |
+
+`parse_mode` is delivered but NOT templated — upstream treats it as a plain enum
+too, and templating it would let a typo produce an invalid Bot API request.
+
+### Notification templates
+
+What works, and where AMP still differs from upstream:
+
+| Aspect | Behaviour |
+|---|---|
+| Data model | Upstream's `Data` verbatim: `Receiver` (including upstream's own `regexp.QuoteMeta` quirk), `Status`, `Alerts` (with `.Firing`/`.Resolved`), `GroupLabels`, `CommonLabels`, `CommonAnnotations`, `ExternalURL`, plus `NotificationReason` and `RouteLabels` which are **always empty** (present so a migrated template referencing them renders blank instead of failing). Golden tests pin the rendered output against upstream's own template package. |
+| Functions | All 25 of upstream's `DefaultFuncs`, none skipped. `title` and `humanizeDuration` reuse `x/text` and `prometheus/common`, so their output is byte-identical. |
+| Default library | `default.tmpl` and `email.tmpl` copied byte-for-byte from upstream v0.34.0 (Apache-2.0; see `internal/business/templating/templates/NOTICE`). |
+| `templates:` loading | Globs resolved against the config file's directory (upstream's `resolveFilepaths`), parsed at load and on reload, later definitions winning. A malformed file is a **load error naming file and line**; a glob matching nothing is legal (a ConfigMap may mount later) but logs a WARNING naming the resolved glob. |
+| Reload | Atomic swap: a render in flight always sees one complete generation of the library, and a broken reload keeps the last-known-good one. |
+| Failure posture (AMP divergence, in AMP's favour) | Upstream has no execution guards. AMP bounds every render by a timeout and an output cap (`publishing.templates.render_timeout`, `publishing.templates.max_output_bytes`; defaults 5s / 4 MiB) and recovers panics. A render that fails **never drops the notification** — AMP's fixed formatter output is delivered instead and `alert_history_publishing_template_fallbacks_total{integration,reason}` increments. |
+| Route labels | Upstream's route-label templating feature is not ported (AMP's route config has no route labels). `{{ routeLabels "x" }}` and `.RouteLabels` render empty rather than erroring. |
+| `safeHtml` / `safeUrl` | Present and functional. The email HTML body renders through `html/template` (so label values are escaped); every other field renders as text, where these degrade to rendering the value — exactly upstream's behaviour. |
+| Group data on per-alert integrations | Slack/PagerDuty/Telegram/Email send one message per alert, so `.Alerts` holds that single alert while `.GroupLabels`/`.Receiver` come from the group it belongs to. `__subject` therefore renders the same text upstream would for a one-alert notification. |
+| Not templated | `webhook_configs` (as upstream), `parse_mode`, and per-integration `http_config`. Upstream's `resolveFilepaths` also rebases per-receiver `http_config` FILE paths (`ca_file`, `bearer_token_file`, …) against the config directory; AMP does not, because it does not apply `http_config` at all yet. |
 
 ### Still NOT supported for receivers
 
