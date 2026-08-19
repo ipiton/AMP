@@ -88,6 +88,16 @@ type dedupKey struct {
 type dedupEntry struct {
 	signature string
 	sentAt    time.Time
+
+	// ttl is the entry's freshness window (wave 6, FU-LITE-FILE-SNAPSHOT):
+	// deliveredStateTTL(repeatInterval) computed at RecordSent time, mirroring
+	// the TTL RedisNotifyLog attaches to the same key. It plays NO role in
+	// live duplicate detection — IsDuplicate still recomputes freshness
+	// against a caller-supplied cutoff on every call, unchanged — this field
+	// exists solely so a file snapshot can drop stale entries at load time
+	// (LoadNflogSnapshot, nflog_snapshot.go) the same way Redis would have
+	// let the key expire while the process was down.
+	ttl time.Duration
 }
 
 func newNotifyDedupLog() *notifyDedupLog {
@@ -120,16 +130,20 @@ func (l *notifyDedupLog) IsDuplicate(_ context.Context, groupKey GroupKey, targe
 
 // RecordSent records that a notification carrying signature for
 // (groupKey, target) was just sent successfully, at now. Implements
-// GroupNotifyLog; repeatInterval is ignored (see GroupNotifyLog's doc
-// comment for why).
+// GroupNotifyLog; repeatInterval plays no role in LIVE duplicate detection
+// (IsDuplicate recomputes freshness against a caller-supplied cutoff on
+// every call instead — see GroupNotifyLog's doc comment), but is captured
+// into the entry's ttl field (wave 6, FU-LITE-FILE-SNAPSHOT) via the same
+// deliveredStateTTL formula RedisNotifyLog uses for its key TTL, so a file
+// snapshot can apply the same freshness window at load time.
 //
 // Also drops this target's partial delivered set (task fu4): a full entry
 // covering the whole alert set supersedes any per-alert progress toward it.
-func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target string, signature string, now time.Time, _ time.Duration) error {
+func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target string, signature string, now time.Time, repeatInterval time.Duration) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	key := dedupKey{groupKey: groupKey, target: target}
-	l.entries[key] = dedupEntry{signature: signature, sentAt: now}
+	l.entries[key] = dedupEntry{signature: signature, sentAt: now, ttl: deliveredStateTTL(repeatInterval)}
 	delete(l.delivered, key)
 	return nil
 }
