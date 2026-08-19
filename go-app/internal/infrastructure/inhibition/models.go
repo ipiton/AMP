@@ -91,6 +91,27 @@ type InhibitionRule struct {
 	// Optional: at least one of (TargetMatch, TargetMatchRE) must be present
 	TargetMatchRE map[string]string `yaml:"target_match_re,omitempty" json:"target_match_re,omitempty"`
 
+	// SourceMatchers/TargetMatchers carry upstream Alertmanager's modern
+	// `matchers:` list syntax for inhibit rules (recommended since v0.22),
+	// e.g. `source_matchers: [severity="critical"]`. Each entry supports
+	// all four operators (=, !=, =~, !~) via the shared upstream-verbatim
+	// grammar port in pkg/configvalidator/matcher.Parse (alertmanager-parity
+	// wave 5) — see CompileMatchers/compileMatcherList in matchers_list.go.
+	//
+	// A rule may combine a matchers list with the legacy map form on the
+	// same side (SourceMatchers alongside SourceMatch/SourceMatchRE):
+	// upstream ANDs both forms together, and matchRuleFast preserves that.
+	//
+	// wave 7 (FU-INHIBIT-MATCHERS): this replaces a stopgap that logged an
+	// Error and silently inhibited nothing for a rule using only these
+	// fields — see git history on this file for that version.
+	//
+	// Optional: at least one of (SourceMatch, SourceMatchRE, SourceMatchers)
+	// — respectively (TargetMatch, TargetMatchRE, TargetMatchers) — must be
+	// present.
+	SourceMatchers []string `yaml:"source_matchers,omitempty" json:"source_matchers,omitempty"`
+	TargetMatchers []string `yaml:"target_matchers,omitempty" json:"target_matchers,omitempty"`
+
 	// Equal defines labels that must have the same value in both source and target alerts.
 	// If any of these labels is missing in either alert, the rule does not match.
 	//
@@ -131,6 +152,16 @@ type InhibitionRule struct {
 	// Value: compiled regexp.Regexp
 	compiledTargetRE map[string]*regexp.Regexp `yaml:"-" json:"-"`
 
+	// compiledSourceMatchers/compiledTargetMatchers hold SourceMatchers/
+	// TargetMatchers parsed and regex-compiled into evaluable form — see
+	// CompileMatchers. nil until CompileMatchers is called (by
+	// DefaultInhibitionParser for config_file-sourced rules, or by
+	// internal/config.ToInhibitionRules for inline rules); matchesAll
+	// treats a nil/empty list as vacuously true, so an uncompiled rule with
+	// no matchers list behaves exactly as before this field existed.
+	compiledSourceMatchers []compiledMatcher `yaml:"-" json:"-"`
+	compiledTargetMatchers []compiledMatcher `yaml:"-" json:"-"`
+
 	// CreatedAt is the timestamp when the rule was created/loaded.
 	// Set automatically during parsing.
 	CreatedAt time.Time `yaml:"-" json:"-"`
@@ -154,21 +185,24 @@ type InhibitionRule struct {
 //
 // Note: Regex compilation is handled by the parser, not by this method.
 func (r *InhibitionRule) Validate() error {
-	// Check source conditions
-	if len(r.SourceMatch) == 0 && len(r.SourceMatchRE) == 0 {
+	// Check source conditions. SourceMatchers (upstream's modern
+	// `matchers:` list syntax) satisfies this exactly like the legacy
+	// maps since wave 7 — it is no longer a syntax-only, runtime-inert
+	// field (see CompileMatchers/matchRuleFast).
+	if len(r.SourceMatch) == 0 && len(r.SourceMatchRE) == 0 && len(r.SourceMatchers) == 0 {
 		return &ValidationError{
-			Field:   "source_match/source_match_re",
+			Field:   "source_match/source_match_re/source_matchers",
 			Rule:    "required_one_of",
-			Message: "at least one of source_match or source_match_re must be present",
+			Message: "at least one of source_match, source_match_re, or source_matchers must be present",
 		}
 	}
 
-	// Check target conditions
-	if len(r.TargetMatch) == 0 && len(r.TargetMatchRE) == 0 {
+	// Check target conditions (same wave-7 note as source, above).
+	if len(r.TargetMatch) == 0 && len(r.TargetMatchRE) == 0 && len(r.TargetMatchers) == 0 {
 		return &ValidationError{
-			Field:   "target_match/target_match_re",
+			Field:   "target_match/target_match_re/target_matchers",
 			Rule:    "required_one_of",
-			Message: "at least one of target_match or target_match_re must be present",
+			Message: "at least one of target_match, target_match_re, or target_matchers must be present",
 		}
 	}
 
@@ -286,8 +320,8 @@ func (r *InhibitionRule) String() string {
 		fmt.Fprintf(&sb, "name=%q, ", r.Name)
 	}
 
-	fmt.Fprintf(&sb, "source=%d matchers, ", len(r.SourceMatch)+len(r.SourceMatchRE))
-	fmt.Fprintf(&sb, "target=%d matchers, ", len(r.TargetMatch)+len(r.TargetMatchRE))
+	fmt.Fprintf(&sb, "source=%d matchers, ", len(r.SourceMatch)+len(r.SourceMatchRE)+len(r.SourceMatchers))
+	fmt.Fprintf(&sb, "target=%d matchers, ", len(r.TargetMatch)+len(r.TargetMatchRE)+len(r.TargetMatchers))
 	fmt.Fprintf(&sb, "equal=%v", r.Equal)
 	sb.WriteString("}")
 

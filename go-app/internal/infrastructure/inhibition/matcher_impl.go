@@ -322,6 +322,15 @@ func (m *DefaultInhibitionMatcher) matchRuleFast(
 		}
 	}
 
+	// 2b. Check source_matchers (upstream's modern `source_matchers:` list
+	// syntax, wave 7 FU-INHIBIT-MATCHERS) - combines with source_match/
+	// source_match_re as AND, same as upstream allows both forms on one
+	// rule. A nil/empty list (no matchers-form on this side) is vacuously
+	// true, so a legacy-only rule is unaffected.
+	if !matchesAll(rule.compiledSourceMatchers, sourceAlert.Labels) {
+		return false // Early exit
+	}
+
 	// 3. Check target_match conditions (exact matching) - INLINED
 	for key, requiredValue := range rule.TargetMatch {
 		actualValue, exists := targetAlert.Labels[key]
@@ -341,6 +350,13 @@ func (m *DefaultInhibitionMatcher) matchRuleFast(
 		if !hasRE || !re.MatchString(actualValue) {
 			return false // Early exit
 		}
+	}
+
+	// 4b. Check target_matchers (upstream's modern `target_matchers:` list
+	// syntax, wave 7 FU-INHIBIT-MATCHERS) - same AND-combination and
+	// vacuous-true-when-empty rule as source_matchers above.
+	if !matchesAll(rule.compiledTargetMatchers, targetAlert.Labels) {
+		return false // Early exit
 	}
 
 	// 5. Check equal labels (must match between source and target) - INLINED

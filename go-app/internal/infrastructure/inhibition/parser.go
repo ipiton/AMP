@@ -327,6 +327,17 @@ func (p *DefaultInhibitionParser) compileRegexPatterns(config *InhibitionConfig)
 			}
 			rule.compiledTargetRE[key] = re
 		}
+
+		// Compile source_matchers/target_matchers (upstream's modern
+		// `matchers:` list syntax, wave 7 FU-INHIBIT-MATCHERS) into the
+		// anchored-regex evaluable form matchRuleFast reads.
+		if err := rule.CompileMatchers(); err != nil {
+			return NewParseError(
+				fmt.Sprintf("rules[%d]", i),
+				rule.Name,
+				err,
+			)
+		}
 	}
 
 	return nil
@@ -349,14 +360,17 @@ func (p *DefaultInhibitionParser) validateSemantics(config *InhibitionConfig) er
 
 	// Validate each rule
 	for i, rule := range config.Rules {
-		// At least one source condition
-		if len(rule.SourceMatch) == 0 && len(rule.SourceMatchRE) == 0 {
-			errors = append(errors, fmt.Errorf("rule %d: at least one of source_match or source_match_re required", i))
+		// At least one source condition. SourceMatchers (upstream's modern
+		// `matchers:` list syntax) satisfies this like the legacy maps
+		// since wave 7 (FU-INHIBIT-MATCHERS) — it is fully wired into
+		// matchRuleFast, not a syntax-only field.
+		if len(rule.SourceMatch) == 0 && len(rule.SourceMatchRE) == 0 && len(rule.SourceMatchers) == 0 {
+			errors = append(errors, fmt.Errorf("rule %d: at least one of source_match, source_match_re, or source_matchers required", i))
 		}
 
-		// At least one target condition
-		if len(rule.TargetMatch) == 0 && len(rule.TargetMatchRE) == 0 {
-			errors = append(errors, fmt.Errorf("rule %d: at least one of target_match or target_match_re required", i))
+		// At least one target condition (same wave-7 note as source, above).
+		if len(rule.TargetMatch) == 0 && len(rule.TargetMatchRE) == 0 && len(rule.TargetMatchers) == 0 {
+			errors = append(errors, fmt.Errorf("rule %d: at least one of target_match, target_match_re, or target_matchers required", i))
 		}
 
 		// Validate label names in equal
