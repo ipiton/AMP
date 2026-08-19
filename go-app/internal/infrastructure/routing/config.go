@@ -83,6 +83,19 @@ type RouteConfig struct {
 
 	// Inhibit rules (EXISTING - from TN-126)
 	// Moved here for full Alertmanager compatibility
+	//
+	// Review side finding S2 (wave 7 / FU-INHIBIT-MATCHERS fix round 1):
+	// this is upstream's own top-level `inhibit_rules:` placement, but
+	// grep confirms there is no consumer of this field anywhere - the
+	// only inhibition rules that actually reach
+	// internal/infrastructure/inhibition are AMP's own
+	// `inhibition.inhibit_rules` (internal/config.InhibitionConfig,
+	// wired through ToInhibitionRules). A verbatim upstream config using
+	// this top-level key parses cleanly and silently inhibits nothing.
+	// The InhibitRule type below also lacks SourceMatchers/TargetMatchers,
+	// so those keys are dropped by yaml.Unmarshal without complaint. Not
+	// wired by this fix round - see docs/ALERTMANAGER_COMPATIBILITY.md and
+	// BACKLOG.md for the ledgered follow-up.
 	InhibitRules []InhibitRule `yaml:"inhibit_rules,omitempty"`
 
 	// TimeIntervals is the primary (Alertmanager >=0.24) section name for

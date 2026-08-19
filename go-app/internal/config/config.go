@@ -180,36 +180,20 @@ type InhibitionRuleConfig struct {
 	Equal         []string          `mapstructure:"equal"           yaml:"equal,omitempty"`
 	Name          string            `mapstructure:"name"            yaml:"name,omitempty"`
 
-	// SourceMatchers/TargetMatchers are upstream Alertmanager's `matchers:`
-	// list syntax for inhibit rules (e.g. ['severity="critical"']). They are
-	// captured here but NOT converted into runtime rules by
-	// ToInhibitionRules — the inhibition engine only understands the
-	// source_match/source_match_re map form.
+	// SourceMatchers/TargetMatchers are upstream Alertmanager's modern
+	// `matchers:` list syntax for inhibit rules (e.g. ['severity="critical"'],
+	// recommended since v0.22), converted into runtime rules by
+	// ToInhibitionRules alongside the legacy map form — both may be present
+	// on the same rule (upstream ANDs them together).
 	//
-	// Final review finding 10: these fields did not exist on this struct at
-	// all, so a config using them loaded cleanly and inhibited NOTHING. The
-	// configvalidator's W155 warning covers `amp check-config`, but the
-	// running server was silent. Capturing them lets ToInhibitionRules log an
-	// Error naming the affected rule — see UnwiredMatcherFields.
+	// Wave 7 (FU-INHIBIT-MATCHERS): previously captured here only so
+	// ToInhibitionRules could log a loud per-rule Error naming them as
+	// unimplemented (final review finding 10) — the inhibition engine had
+	// no such fields and a rule using only this syntax inhibited nothing.
+	// internal/infrastructure/inhibition.InhibitionRule now implements
+	// them for real (CompileMatchers + matchRuleFast).
 	SourceMatchers []string `mapstructure:"source_matchers" yaml:"source_matchers,omitempty"`
 	TargetMatchers []string `mapstructure:"target_matchers" yaml:"target_matchers,omitempty"`
-}
-
-// UnwiredMatcherFields returns the names of the `matchers:`-syntax fields this
-// rule sets that the runtime inhibition engine does not implement, or nil when
-// there are none.
-//
-// A non-empty result means the rule will not inhibit what the operator wrote
-// (final review finding 10).
-func (r InhibitionRuleConfig) UnwiredMatcherFields() []string {
-	var fields []string
-	if len(r.SourceMatchers) > 0 {
-		fields = append(fields, "source_matchers")
-	}
-	if len(r.TargetMatchers) > 0 {
-		fields = append(fields, "target_matchers")
-	}
-	return fields
 }
 
 // ReceiverConfig holds configuration for a notification receiver.

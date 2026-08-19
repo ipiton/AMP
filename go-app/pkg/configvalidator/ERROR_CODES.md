@@ -124,10 +124,11 @@ route:
 
 ### E027/E028: superseded by E150/E151
 See "Inhibition Errors" below - implemented under E150 (source) and E151
-(target), not E027/E028. `source_matchers`/`target_matchers` alone do
-NOT satisfy either: only `source_match`/`source_match_re` (`target_match`/
-`target_match_re`) do, since that's what the runtime loader reads (see
-W155).
+(target), not E027/E028. As of wave 7 (`FU-INHIBIT-MATCHERS`),
+`source_matchers`/`target_matchers` alone DO satisfy either — the runtime
+loader now implements the matchers-form list syntax the same as the
+legacy `source_match`/`source_match_re` (`target_match`/`target_match_re`)
+maps.
 
 ---
 
@@ -317,15 +318,13 @@ W155).
 
 ### E150: Source Match Required
 **Severity**: Error
-**Solution**: Define `source_match` or `source_match_re`. `source_matchers`
-(list syntax) is syntax-checked but does NOT satisfy this on its own -
-see W155.
+**Solution**: Define `source_match`, `source_match_re`, or `source_matchers`
+(upstream's modern list syntax — any of the three satisfies this, wave 7).
 
 ### E151: Target Match Required
 **Severity**: Error
-**Solution**: Define `target_match` or `target_match_re`. `target_matchers`
-(list syntax) is syntax-checked but does NOT satisfy this on its own -
-see W155.
+**Solution**: Define `target_match`, `target_match_re`, or `target_matchers`
+(upstream's modern list syntax — any of the three satisfies this, wave 7).
 
 ### E152: Invalid Label in 'Equal'
 **Severity**: Error
@@ -401,18 +400,12 @@ see W155.
 **Severity**: Warning
 **Solution**: Use `routing_key` for Events API v2.
 
-#### W155: Inhibition matchers list not wired at runtime
-**Severity**: Warning
-**Description**: `source_matchers`/`target_matchers` (the AMP list-syntax
-successor to `source_match`/`source_match_re` and `target_match`/
-`target_match_re`) is accepted and syntax-checked here, but the runtime
-inhibition loader (`internal/infrastructure/inhibition.InhibitionRule`)
-has no such fields yet and silently drops it. **Do not rely on this
-field alone** - `source_match`/`source_match_re` (or `target_match`/
-`target_match_re`) is still required for E150/E151 and is what actually
-takes effect at runtime, as of Phase 5.
-**Solution**: Also define the equivalent `source_match`/`source_match_re`
-(or `target_match`/`target_match_re`) alongside the list-syntax field.
+#### W155: retired (wave 7, `FU-INHIBIT-MATCHERS`)
+Previously warned that `source_matchers`/`target_matchers` were
+syntax-checked but not wired into the runtime inhibition loader. The
+loader now implements them (`internal/infrastructure/inhibition.
+InhibitionRule.CompileMatchers`), so there is nothing left to warn about;
+this code is retired rather than reused.
 
 ### Security Warnings (W300-W311)
 

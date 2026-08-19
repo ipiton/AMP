@@ -155,16 +155,33 @@ func NewRouteMatcher(
 // Algorithm:
 //  1. If node has no matchers: return true (always match, e.g. root node)
 //  2. For each matcher in node:
-//     a. Get label value from alert
+//     a. Get label value from alert (upstream semantics: absent == "")
 //     b. Evaluate matcher based on operator
 //     c. If any matcher fails: return false (early exit)
 //  3. All matchers passed: return true
 //
-// Operators:
-//   - = (equality): label value must exactly equal matcher value
-//   - != (inequality): label value must not equal matcher value OR label missing
-//   - =~ (regex): label value must match regex pattern
-//   - !~ (negative regex): label value must NOT match regex OR label missing
+// Operators — upstream Alertmanager semantics (`pkg/labels/matcher.go`'s
+// `Matcher.Matches(s)`, called with `s = string(lset[name])`; a Go map
+// read of a missing key already returns the zero value "", so upstream
+// has NO presence check anywhere — an absent label is simply evaluated
+// as the empty string against every operator, below):
+//   - = (equality): (possibly absent-as-"") value must equal matcher value
+//   - != (inequality): (possibly absent-as-"") value must differ from matcher value
+//   - =~ (regex): (possibly absent-as-"") value must match the anchored regex
+//   - !~ (negative regex): (possibly absent-as-"") value must NOT match the anchored regex
+//
+// Review fix round 1 (I1 side task, FU7-A / alertmanager-parity): this
+// function used to gate `=`/`=~` on the label being present and
+// short-circuit `!=`/`!~` to true on absence, unconditionally — the same
+// divergence the inhibition engine's matchers-form evaluation was found
+// to have copied from here (internal/infrastructure/inhibition.matchesAll,
+// wave 7). Consequences that fix corrects: `env!=""` used to always match
+// an alert missing `env` (upstream: `"" != ""` is false, so it must NOT);
+// `service=~".*"` used to always FAIL to match an alert missing `service`
+// (upstream: the anchored regex matches the empty string, so it SHOULD).
+// Since Go's `alert.Labels[name]` already yields "" for a missing key,
+// this needs no presence check at all — dropping the `exists`
+// bookkeeping entirely is both the fix and the simplification.
 //
 // Complexity: O(M) where M = number of matchers
 //
@@ -186,23 +203,23 @@ func (m *RouteMatcher) MatchesNode(node *RouteNode, alert *Alert) bool {
 
 	// Check each matcher (early exit on first failure)
 	for _, matcher := range node.Matchers {
-		labelValue, exists := alert.Labels[matcher.Name]
+		labelValue := alert.Labels[matcher.Name] // upstream semantics: absent == ""
 
 		// Evaluate based on operator type
 		var matched bool
 		switch {
 		case matcher.IsRegex && !matcher.IsNegative:
 			// =~ operator: regex match
-			matched = exists && m.regexMatch(matcher.Value, labelValue)
+			matched = m.regexMatch(matcher.Value, labelValue)
 		case matcher.IsRegex && matcher.IsNegative:
-			// !~ operator: negative regex (match if label missing OR doesn't match)
-			matched = !exists || !m.regexMatch(matcher.Value, labelValue)
+			// !~ operator: negative regex match
+			matched = !m.regexMatch(matcher.Value, labelValue)
 		case !matcher.IsRegex && !matcher.IsNegative:
 			// = operator: equality
-			matched = exists && labelValue == matcher.Value
+			matched = labelValue == matcher.Value
 		case !matcher.IsRegex && matcher.IsNegative:
-			// != operator: inequality (match if label missing OR different value)
-			matched = !exists || labelValue != matcher.Value
+			// != operator: inequality
+			matched = labelValue != matcher.Value
 		}
 
 		// Early exit if matcher failed
