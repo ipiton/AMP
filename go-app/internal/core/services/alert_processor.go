@@ -350,6 +350,15 @@ func (p *AlertProcessor) resolveReceiver(alert *core.Alert, decision *RoutingDec
 // produce a receiver for an alert and no root receiver is known (re-review
 // finding R1). The alert is NOT published: an unscoped fan-out would deliver it
 // to every receiver's integrations.
+//
+// DEFENSIVE / UNREACHABLE through internal/config.LoadConfig: loadRouteConfig
+// runs pkg/configvalidator before the routing parser, and both E100 ("root
+// route is required") and E103 ("root route must have a receiver") are blocking
+// errors — so a Config with Routing != nil always carries a non-empty root
+// receiver, i.e. resolveReceiver's DefaultReceiver is never "". This branch
+// exists for programmatically-built configs (tests, embedding AMP as a library)
+// and as the fail-closed side of the R1 fix; do not read it as a live
+// production path.
 var ErrRoutingUnavailable = errors.New("routing unavailable")
 
 // shouldGroup reports whether alert should be routed into a group instead of
@@ -361,7 +370,6 @@ var ErrRoutingUnavailable = errors.New("routing unavailable")
 // initializeGrouping), and a RoutingDecision was computed for THIS alert
 // (route evaluation succeeded). Any gap falls back to direct publish — see
 // warnGroupingFallback — never both paths for the same alert.
-
 func (p *AlertProcessor) shouldGroup(decision *RoutingDecision) bool {
 	return p.groupingEnabled && p.groupManager != nil && p.groupKeyGenerator != nil && decision != nil
 }

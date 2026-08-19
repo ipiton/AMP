@@ -1902,10 +1902,10 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		RouteTreeConfigured:    r.config.HasRouteTree(),
 		DefaultReceiver:        rootRouteReceiver(r.config),
 		RoutingFallbackMetrics: routingFallbackMetricsOnce(),
-		GroupManager:       groupManager,              // task 2.3: nil unless grouping subsystem initialized (route tree required)
-		GroupKeyGenerator:  r.groupKeyGenerator,       // task 2.3: nil unless grouping subsystem initialized
-		Logger:             r.logger,
-		Metrics:            nil, // TODO: MetricsManager
+		GroupManager:           groupManager,        // task 2.3: nil unless grouping subsystem initialized (route tree required)
+		GroupKeyGenerator:      r.groupKeyGenerator, // task 2.3: nil unless grouping subsystem initialized
+		Logger:                 r.logger,
+		Metrics:                nil, // TODO: MetricsManager
 	}
 
 	processor, err := services.NewAlertProcessor(config)
@@ -2205,8 +2205,18 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 		return fmt.Errorf("reload failed: %v", result.Error)
 	}
 
+	newConfig := r.reloadCoordinator.GetCurrentConfig()
+
+	// Blackhole receiver set FIRST, before the config pointer swap below
+	// (fix-round-2 re-review minor 1): a receiver newly declared without
+	// integrations must be recognised as a blackhole by the time the new routing
+	// can route to it, otherwise alerts landing in that sub-millisecond window
+	// take the loud "no targets found" path. Safe in both directions — a
+	// receiver with targets never consults this set.
+	r.applyKnownReceivers(newConfig)
+
 	// Update local config pointer
-	r.config = r.reloadCoordinator.GetCurrentConfig()
+	r.config = newConfig
 
 	// PARITY-A2: hot-reload inhibition rules into the live matcher. The alert
 	// processor holds the same matcher instance, so an in-place update is the
@@ -2251,7 +2261,6 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	// rebuild is pure and the swap is atomic — cheaper than tracking which
 	// integration fields moved.
 	r.applyConfigTargets()
-	r.applyKnownReceivers()
 
 	return nil
 }

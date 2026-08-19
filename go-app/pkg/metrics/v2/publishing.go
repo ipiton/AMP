@@ -576,6 +576,17 @@ func (m *PublishingMetrics) RecordRetryAttempt(target, errorType string) {
 // ever enqueued, and a blackhole must not look like a delivery failure on a
 // dashboard. A rising rate here for a receiver the operator did NOT intend as a
 // blackhole is the signal that its integration went missing.
+//
+// NOT a delivery-volume series — it mixes two denominators by design:
+//
+//   - non-grouped path (grouping.enabled: false): once per ALERT;
+//   - grouped path: once per group FIRE that had something owed, i.e. at most
+//     once per repeat_interval per group (the blackhole's nflog entry dedupes
+//     the fires in between), and the alert count it drops is len(alerts) as the
+//     group saw it, which may be wider than what per-target dedup still owed.
+//
+// Read it as "is this receiver dropping, and roughly how often", never as "how
+// many notifications were suppressed".
 func (m *PublishingMetrics) RecordBlackholeDrop(receiver string) {
 	m.blackholeDropsTotal.WithLabelValues(receiver).Inc()
 }
