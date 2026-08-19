@@ -8,6 +8,7 @@ import (
 	"time"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
+	"github.com/ipiton/AMP/internal/business/templating"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
@@ -112,6 +113,37 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, confi
 		publishingMetrics,
 		externalURL,
 	)
+
+	// TEMPLATES-EPIC slice 2: hand the notification template library to the
+	// publisher factory, which wraps each target's formatter so the receiver's
+	// own `title`/`text`/`description`/`message`/`subject` templates render onto
+	// the wire. Without this call the factory keeps the fixed formatters, i.e.
+	// exactly the pre-epic behaviour — so a failed template load (registry nil,
+	// see initializeTemplating) degrades to "no templating", never to "no
+	// notifications".
+	//
+	// The registry is a stable pointer that swaps its own contents on reload, so
+	// this is a one-time wiring: reloadTemplates does not need to re-enter here.
+	//
+	// externalURL is the SAME value the fixed formatters use
+	// (server.external_url) — it is what `{{ .ExternalURL }}` and every default
+	// template's alertmanager link render.
+	if registry := r.TemplateRegistry(); registry != nil {
+		r.publisherFactory.SetTemplateRegistry(registry)
+
+		// Give the abandoned-execution counters a metric consumer (slice-1
+		// review I2 left them observable only from a debugger). Pull-based: the
+		// funcs are read at scrape time, so no ticker and no staleness.
+		if publishingMetrics != nil {
+			publishingMetrics.SetTemplateExecutionSource(&v2.TemplateExecutionSource{
+				Abandoned: func() float64 { return float64(templating.AbandonedExecutions()) },
+				InFlight:  func() float64 { return float64(templating.InFlightAbandonedExecutions()) },
+			})
+		}
+
+		r.logger.Info("Notification templates wired into publishing",
+			"external_url_configured", externalURL != "")
+	}
 
 	queueConfig := infrapublishing.DefaultPublishingQueueConfig()
 	queueConfig.WorkerCount = r.config.Publishing.Queue.WorkerCount

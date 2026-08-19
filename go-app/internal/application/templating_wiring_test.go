@@ -1,11 +1,8 @@
 package application
 
 import (
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -228,37 +225,16 @@ func TestTemplateRegistry_IsReachableForSliceTwo(t *testing.T) {
 	assert.Equal(t, "CUSTOM", renderTitle(t, r))
 }
 
-// TestPublishingDoesNotImportTemplatingYet is the real, STRUCTURAL slice-1 scope
-// guard (review Minor 3): it parses the publishing packages' import lists and
-// asserts none of them imports the templating package, which is what makes
-// "delivered output is unchanged by this slice" a checkable claim rather than an
-// assertion in a report.
+// The slice-1 structural scope guard TestPublishingDoesNotImportTemplatingYet
+// lived here and was DELETED DELIBERATELY by slice 2, exactly as its own doc
+// comment instructed: it asserted that no publishing package imports
+// internal/business/templating, which was the checkable form of "slice 1 cannot
+// have changed delivered output".
 //
-// Slice 2 DELETES this test — that is the point at which template output starts
-// reaching the wire, and the deletion is the visible marker of it.
-func TestPublishingDoesNotImportTemplatingYet(t *testing.T) {
-	const templatingPkg = `"github.com/ipiton/AMP/internal/business/templating"`
-
-	for _, dir := range []string{
-		filepath.Join("..", "infrastructure", "publishing"),
-		filepath.Join("..", "business", "publishing"),
-	} {
-		entries, err := os.ReadDir(dir)
-		require.NoError(t, err, "scope guard cannot run: %s unreadable", dir)
-
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-				continue
-			}
-			path := filepath.Join(dir, entry.Name())
-
-			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
-			require.NoError(t, err)
-
-			for _, imported := range file.Imports {
-				assert.NotEqual(t, templatingPkg, imported.Path.Value,
-					"%s imports templating: slice 2 has begun — delete this scope guard deliberately", path)
-			}
-		}
-	}
-}
+// That is no longer true, and must not be: infrastructure/publishing now imports
+// templating (template_formatter.go) so a receiver's own title/text/description/
+// message/subject templates render onto the wire. The replacement guarantee is
+// behavioural rather than structural, and lives in
+// infrastructure/publishing/template_formatter_test.go: a target with NO
+// template fields gets the fixed formatter's payload byte-for-byte, and a
+// template that fails to render falls back to it.

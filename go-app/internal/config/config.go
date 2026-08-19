@@ -475,6 +475,29 @@ type PublishingConfig struct {
 	Queue     PublishingQueueConfig     `mapstructure:"queue"`
 	Refresh   PublishingRefreshConfig   `mapstructure:"refresh"`
 	Health    PublishingHealthConfig    `mapstructure:"health"`
+	Templates PublishingTemplateConfig  `mapstructure:"templates"`
+}
+
+// PublishingTemplateConfig holds the notification-template execution guards
+// (TEMPLATES-EPIC slice 2; slice-1 review Minor 5 asked for these to be
+// operator-tunable instead of compile-time constants).
+//
+// Both default to templating's own defaults when zero/absent, so an existing
+// config behaves identically. They exist because the right values depend on the
+// deployment: a site that groups thousands of alerts into one email may
+// legitimately need a bigger cap than the 4 MiB default, and a site that would
+// rather drop formatting than delay a page may want a tighter timeout.
+//
+// A render that exceeds either guard does NOT drop the notification — it falls
+// back to AMP's fixed formatter and increments
+// publishing_template_fallbacks_total with reason "timeout"/"output_cap", which
+// is the signal to retune.
+type PublishingTemplateConfig struct {
+	// RenderTimeout bounds ONE template field render (default: 5s).
+	RenderTimeout time.Duration `mapstructure:"render_timeout"`
+
+	// MaxOutputBytes bounds the rendered size of ONE field (default: 4 MiB).
+	MaxOutputBytes int `mapstructure:"max_output_bytes"`
 }
 
 // PublishingDiscoveryConfig holds target discovery settings.

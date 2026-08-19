@@ -332,6 +332,12 @@ type PublisherFactory struct {
 	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
 	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by "api_url|bot_token" (clientMu)
 	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
+
+	// templates carries the optional notification-template wiring
+	// (TEMPLATES-EPIC slice 2). Zero value = templating disabled, which is the
+	// pre-epic behaviour; enabled via SetTemplateRegistry. All of its logic
+	// lives in factory_templating.go.
+	templates templateWiringStore
 }
 
 // NewPublisherFactory creates a new publisher factory with unified v2 metrics.
@@ -415,7 +421,7 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 
 	if apiKey == "" {
 		f.logger.Warn("Rootly target missing API key, falling back to HTTP publisher", "target", target.Name)
-		return NewRootlyPublisher(f.formatter, f.logger), nil
+		return NewRootlyPublisher(f.formatterFor(target), f.logger), nil
 	}
 
 	// Get or create Rootly client for this (base_url, api_key) pair (clientMu
@@ -453,7 +459,7 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		client,
 		f.rootlyCache,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -479,7 +485,7 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 
 	if routingKey == "" {
 		f.logger.Warn("PagerDuty target missing routing_key, falling back to HTTP publisher", "target", target.Name)
-		return NewPagerDutyPublisher(f.formatter, f.logger), nil
+		return NewPagerDutyPublisher(f.formatterFor(target), f.logger), nil
 	}
 
 	// Normalise BEFORE keying (re-review finding R5, the wave-5 I3 lesson
@@ -529,7 +535,7 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		client,
 		f.pagerDutyCache,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -540,7 +546,7 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 	webhookURL := target.URL
 	if webhookURL == "" {
 		f.logger.Warn("Slack target missing webhook URL, falling back to HTTP publisher", "target", target.Name)
-		return NewSlackPublisher(f.formatter, f.logger), nil
+		return NewSlackPublisher(f.formatterFor(target), f.logger), nil
 	}
 
 	// Get or create Slack client for this webhook URL (clientMu — see
@@ -562,7 +568,7 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 		client,
 		f.slackCache,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -581,7 +587,7 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 
 	if botToken == "" || chatID == "" {
 		f.logger.Warn("Telegram target missing bot_token or chat_id, falling back to HTTP publisher", "target", target.Name)
-		return NewTelegramPublisher(f.formatter, f.logger), nil
+		return NewTelegramPublisher(f.formatterFor(target), f.logger), nil
 	}
 
 	apiURL := target.URL
@@ -629,7 +635,7 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 		messageThreadID,
 		disableNotifications,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -650,7 +656,7 @@ func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.Publishin
 	publisher := NewEnhancedWebhookPublisher(
 		client,
 		validator,
-		f.formatter,
+		f.formatterFor(target),
 		f.metrics, // Unified v2 metrics instance
 		f.logger,
 	)
@@ -692,7 +698,7 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 	return NewEnhancedEmailPublisher(
 		client,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 		f.externalURL,
 	), nil
