@@ -138,11 +138,14 @@ type recordingGroupPublisher struct {
 	calls [][]*core.Alert
 }
 
-func (p *recordingGroupPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, skipTarget func(string) bool) ([]grouping.TargetPublishOutcome, error) {
+func (p *recordingGroupPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, targetAlerts func(string, []*core.Alert) []*core.Alert) ([]grouping.TargetPublishOutcome, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if skipTarget != nil && skipTarget("test") {
-		return nil, nil
+	if targetAlerts != nil {
+		alerts = targetAlerts("test", alerts)
+		if len(alerts) == 0 {
+			return nil, nil
+		}
 	}
 	p.calls = append(p.calls, alerts)
 	return []grouping.TargetPublishOutcome{{Target: "test", Success: true}}, nil

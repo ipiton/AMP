@@ -679,12 +679,14 @@ type mockPublisher struct {
 // PublishGroup implements grouping.GroupNotificationPublisher. When err is
 // set it always fails the whole call (mirrors a total/degraded-mode
 // failure, e.g. metrics-only mode or every target down). Otherwise it
-// consults skipTarget for its one synthetic target (task fwb's per-target
-// nflog dedup, exercised the same way a real multi-target publisher would
-// be) — a skip means this fire is fully deduped and nothing is appended or
-// reported. groupLabels (review finding 1) is recorded per call so tests
-// can assert the manager resolved it correctly from GroupMetadata.GroupBy.
-func (p *mockPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, receiver string, groupLabels map[string]string, skipTarget func(string) bool) ([]TargetPublishOutcome, error) {
+// consults targetAlerts for its one synthetic target (task fwb's per-target
+// nflog dedup plus task fu4's per-alert narrowing, exercised the same way a
+// real multi-target publisher would be) — an empty result means this fire is
+// fully deduped and nothing is appended or reported, and a narrowed result is
+// what gets recorded as published. groupLabels (review finding 1) is recorded
+// per call so tests can assert the manager resolved it correctly from
+// GroupMetadata.GroupBy.
+func (p *mockPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, receiver string, groupLabels map[string]string, targetAlerts func(string, []*core.Alert) []*core.Alert) ([]TargetPublishOutcome, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
@@ -697,12 +699,15 @@ func (p *mockPublisher) PublishGroup(_ context.Context, _ string, alerts []*core
 		p.groupLabels = append(p.groupLabels, groupLabels)
 		return nil, p.err
 	}
-	if skipTarget != nil && skipTarget(mockPublisherTarget) {
-		// Fully deduped: no real attempt was made against the (one synthetic)
-		// target, so nothing is recorded — mirrors a real publisher that
-		// skips a target's HTTP call entirely because it already delivered
-		// this cycle.
-		return nil, nil
+	if targetAlerts != nil {
+		// Fully deduped (empty result): no real attempt was made against the
+		// (one synthetic) target, so nothing is recorded — mirrors a real
+		// publisher that skips a target's HTTP call entirely because it already
+		// delivered this cycle. A narrowed result is delivered as-is.
+		alerts = targetAlerts(mockPublisherTarget, alerts)
+		if len(alerts) == 0 {
+			return nil, nil
+		}
 	}
 	p.published = append(p.published, alerts)
 	p.receivers = append(p.receivers, receiver)
