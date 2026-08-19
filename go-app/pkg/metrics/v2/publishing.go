@@ -110,6 +110,20 @@ type PublishingMetrics struct {
 	// Labels: target, error_type
 	retryAttemptsTotal *prometheus.CounterVec
 
+	// resolvedSuppressedTotal counts RESOLVED notifications suppressed by an
+	// integration's `send_resolved: false` (FU-RECEIVERS-INTEGRATION slice 2).
+	// Labels: receiver
+	resolvedSuppressedTotal *prometheus.CounterVec
+
+	// blackholeDropsTotal counts notifications intentionally dropped because
+	// the routed receiver is declared in the config but provisions no
+	// publishing targets — upstream Alertmanager's blackhole receiver
+	// (FU-RECEIVERS-INTEGRATION). NOT an error: distinguishing "deliberately
+	// dropped" from "misconfigured, nothing delivered" is exactly why this is
+	// its own series.
+	// Labels: receiver
+	blackholeDropsTotal *prometheus.CounterVec
+
 	// workersActive tracks active workers.
 	workersActive prometheus.Gauge
 
@@ -310,6 +324,16 @@ func NewPublishingMetrics(registerer prometheus.Registerer) *PublishingMetrics {
 		"retry_attempts_total",
 		"Retry attempts by target and error type",
 		[]string{"target", "error_type"})
+
+	m.resolvedSuppressedTotal = newCounterVec(registerer, publishingSubsystem,
+		"resolved_suppressed_total",
+		"Resolved notifications suppressed by send_resolved: false, by receiver",
+		[]string{"receiver"})
+
+	m.blackholeDropsTotal = newCounterVec(registerer, publishingSubsystem,
+		"blackhole_drops_total",
+		"Notifications intentionally dropped for a receiver with no publishing targets (blackhole receiver)",
+		[]string{"receiver"})
 
 	m.workersActive = newGauge(registerer, publishingSubsystem,
 		"workers_active",
@@ -551,6 +575,43 @@ func (m *PublishingMetrics) RecordJobDLQ(target string) {
 // RecordRetryAttempt records a retry attempt.
 func (m *PublishingMetrics) RecordRetryAttempt(target, errorType string) {
 	m.retryAttemptsTotal.WithLabelValues(target, errorType).Inc()
+}
+
+// RecordResolvedSuppressed records a resolved notification suppressed because
+// every candidate target set `send_resolved: false` (FU-RECEIVERS-INTEGRATION
+// slice 2, review finding S2-M3).
+//
+// This is the ONLY operator signal for that state: suppression is deliberate, so
+// it is not a delivery failure and produces no job, no result and no
+// notification-log entry for a real target. Same denominator caveat as
+// RecordBlackholeDrop — once per alert on the non-grouped path, once per group
+// fire that had something suppressed on the grouped one.
+func (m *PublishingMetrics) RecordResolvedSuppressed(receiver string) {
+	m.resolvedSuppressedTotal.WithLabelValues(receiver).Inc()
+}
+
+// RecordBlackholeDrop records a notification dropped on purpose because the
+// routed receiver is declared in the config but has no publishing targets —
+// upstream Alertmanager's blackhole receiver (FU-RECEIVERS-INTEGRATION slice-1
+// re-review finding R2).
+//
+// Deliberately separate from RecordJobFailure/jobsProcessedTotal: nothing was
+// ever enqueued, and a blackhole must not look like a delivery failure on a
+// dashboard. A rising rate here for a receiver the operator did NOT intend as a
+// blackhole is the signal that its integration went missing.
+//
+// NOT a delivery-volume series — it mixes two denominators by design:
+//
+//   - non-grouped path (grouping.enabled: false): once per ALERT;
+//   - grouped path: once per group FIRE that had something owed, i.e. at most
+//     once per repeat_interval per group (the blackhole's nflog entry dedupes
+//     the fires in between), and the alert count it drops is len(alerts) as the
+//     group saw it, which may be wider than what per-target dedup still owed.
+//
+// Read it as "is this receiver dropping, and roughly how often", never as "how
+// many notifications were suppressed".
+func (m *PublishingMetrics) RecordBlackholeDrop(receiver string) {
+	m.blackholeDropsTotal.WithLabelValues(receiver).Inc()
 }
 
 // SetWorkerCounts sets worker counts.

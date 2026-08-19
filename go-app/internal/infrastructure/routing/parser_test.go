@@ -115,7 +115,10 @@ receivers:
 	assert.Contains(t, err.Error(), "receiver 'nonexistent' not found")
 }
 
-func TestRouteConfigParser_Parse_InvalidReceiverNoConfigs(t *testing.T) {
+// Slice-1 review finding I1: an integration-less receiver is upstream's
+// blackhole receiver — it must LOAD, and route into a receiver that delivers
+// nothing.
+func TestRouteConfigParser_Parse_BlackholeReceiverLoads(t *testing.T) {
 	yamlConfig := `
 route:
   receiver: empty
@@ -123,15 +126,42 @@ route:
 
 receivers:
   - name: empty
-    # No configs defined
+    # No configs defined: upstream's blackhole receiver
 `
 
 	parser := NewRouteConfigParser()
 	config, err := parser.Parse([]byte(yamlConfig))
 
-	assert.Error(t, err)
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	require.Len(t, config.Receivers, 1)
+	assert.Equal(t, 0, config.Receivers[0].GetConfigCount())
+}
+
+// Slice-1 review finding I3: duplicate receiver names must be rejected as
+// upstream does — the receiver index (and config-provisioned target names) are
+// keyed by name, so a duplicate silently shadows the earlier receiver.
+func TestRouteConfigParser_Parse_DuplicateReceiverNames(t *testing.T) {
+	yamlConfig := `
+route:
+  receiver: dup
+  group_by: [alertname]
+
+receivers:
+  - name: dup
+    webhook_configs:
+      - url: https://a.example.com/hook
+  - name: dup
+    webhook_configs:
+      - url: https://b.example.com/hook
+`
+
+	parser := NewRouteConfigParser()
+	config, err := parser.Parse([]byte(yamlConfig))
+
+	require.Error(t, err)
 	assert.Nil(t, config)
-	assert.Contains(t, err.Error(), "at least one config")
+	assert.Contains(t, err.Error(), `duplicate receiver name "dup"`)
 }
 
 func TestRouteConfigParser_Parse_WithGlobal(t *testing.T) {

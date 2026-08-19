@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -24,10 +25,30 @@ type FilterEngine interface {
 	ShouldBlock(alert *core.Alert, classification *core.ClassificationResult) (bool, string)
 }
 
-// Publisher defines the interface for alert publishing
+// Publisher defines the interface for alert publishing on the NON-GROUPED
+// path: `grouping.enabled: false` (the default), or a grouping failure that
+// falls open to a direct publish.
+//
+// Both methods take the RECEIVER the alert was routed to (slice-1 review
+// finding C1). They used to be PublishToAll/PublishWithClassification with no
+// receiver, and the implementation published to EVERY enabled target. That was
+// tolerable while targets could only come from hand-created, hand-labelled K8s
+// Secrets; once the config's `receivers:` integrations auto-provision targets
+// (FU-RECEIVERS-INTEGRATION), it means an untouched upstream config delivers
+// every alert to every receiver's integrations — team-b's PagerDuty paging on
+// team-a's alerts. The names were renamed along with the signature on purpose:
+// a method called "PublishToAll" that must filter is exactly the trap that
+// produced the bug.
+//
+// receiver == "" keeps the pre-route-tree behaviour (every enabled target),
+// which is what a deployment without a `route:` section still needs.
 type Publisher interface {
-	PublishToAll(ctx context.Context, alert *core.Alert) error
-	PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error
+	// PublishToReceiver publishes alert to the targets belonging to receiver.
+	PublishToReceiver(ctx context.Context, alert *core.Alert, receiver string) error
+
+	// PublishToReceiverWithClassification is PublishToReceiver plus the LLM
+	// classification (enriched mode).
+	PublishToReceiverWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) error
 }
 
 // InvestigationSubmitter is the minimal interface AlertProcessor needs to fire-and-forget investigations.
@@ -63,6 +84,23 @@ type AlertProcessor struct {
 	routeEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
 	logger             *slog.Logger
 	metrics            *metrics.MetricsManager
+
+	// Routing-availability wiring (re-review finding R1). routeTreeConfigured
+	// says a `route:` section EXISTS in the config, which is not the same as
+	// routeEvaluator != nil: a tree that failed to build leaves the evaluator
+	// nil while the config still declares receivers whose targets are live.
+	// defaultReceiver is the root route's receiver — upstream's catch-all — used
+	// when the tree is configured but produced no decision for an alert.
+	// Snapshot taken at startup: changing the ROOT receiver needs a restart,
+	// same as enabling routing itself (see ServiceRegistry.reloadRoutingTree).
+	routeTreeConfigured bool
+	defaultReceiver     string
+	routingMetrics      *RoutingFallbackMetrics
+
+	// routingUnavailableWarner rate-limits the R1 fallback warning: with a
+	// broken route tree EVERY alert hits it, and one Warn per alert would drown
+	// the log that explains why.
+	routingUnavailableWarner *rateLimitedWarner
 
 	// Grouping subsystem wiring (task 2.3, alertmanager-parity). groupingEnabled
 	// mirrors config.Grouping.Enabled and is tracked separately from
@@ -134,6 +172,23 @@ type AlertProcessorConfig struct {
 	// set together, or both left nil.
 	GroupKeyGenerator *grouping.GroupKeyGenerator
 
+	// RouteTreeConfigured mirrors config.HasRouteTree() (re-review finding R1):
+	// true whenever the config carries a `route:` section, INDEPENDENTLY of
+	// whether the tree built successfully. When true, an alert with no routing
+	// decision must never publish unscoped — see resolveReceiver.
+	RouteTreeConfigured bool
+
+	// DefaultReceiver is the root route's receiver (upstream's catch-all), used
+	// as the fallback when RouteTreeConfigured is true but no decision was
+	// produced. Empty means "unknown", which turns that case into a hard error
+	// for the alert instead of a fan-out.
+	DefaultReceiver string
+
+	// RoutingFallbackMetrics counts the R1 situations. Optional (nil = no
+	// metrics); must be built at most once per process — see
+	// NewRoutingFallbackMetrics.
+	RoutingFallbackMetrics *RoutingFallbackMetrics
+
 	Logger  *slog.Logger
 	Metrics *metrics.MetricsManager
 }
@@ -176,6 +231,11 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 		groupKeyGenerator:  config.GroupKeyGenerator,  // task 2.3
 		logger:             config.Logger,
 		metrics:            config.Metrics,
+
+		routeTreeConfigured:      config.RouteTreeConfigured, // re-review finding R1
+		defaultReceiver:          config.DefaultReceiver,
+		routingMetrics:           config.RoutingFallbackMetrics,
+		routingUnavailableWarner: &rateLimitedWarner{},
 	}, nil
 }
 
@@ -232,6 +292,74 @@ func (p *AlertProcessor) evaluateRoute(alert *core.Alert) *RoutingDecision {
 		"repeat_interval", decision.RepeatInterval)
 	return decision
 }
+
+// resolveReceiver decides which receiver the non-grouped publish path must
+// target for this alert.
+//
+// Three cases, and the middle one is re-review finding R1 (the reason this is a
+// method and not the old one-line `receiverOf` helper):
+//
+//  1. A routing decision exists → its receiver. The evaluator never returns an
+//     empty receiver on success (it errors with ErrNoReceiver, and a root route
+//     without a receiver is rejected at config load), so this is the normal path.
+//
+//  2. NO decision, but a route tree IS configured → the tree is unavailable for
+//     this alert: either it never built (initializeRouting's failure is
+//     non-fatal, so the process runs degraded while config-provisioned targets
+//     are still live) or Evaluate failed for these labels. Returning "" here —
+//     which is what the code did before — makes
+//     PublishingCoordinator.targetMatchesReceiver match EVERY target, i.e. a
+//     silent cross-receiver fan-out to every receiver's integrations: exactly
+//     the leak finding C1 fixed, through a different door. Upstream Alertmanager
+//     has no such state (a config that cannot build a route tree does not run),
+//     so the closest honest behaviour is to fall back to the tree's ROOT
+//     receiver (upstream's catch-all default, which every alert would match if
+//     no child route did) and, if even that is unknown, to FAIL the alert loudly
+//     rather than fan it out.
+//
+//  3. No decision and no route tree configured at all → "", the genuine legacy
+//     single-receiver mode where "all enabled targets" is the intended and
+//     documented behaviour.
+func (p *AlertProcessor) resolveReceiver(alert *core.Alert, decision *RoutingDecision) (string, error) {
+	if decision != nil && decision.Receiver != "" {
+		return decision.Receiver, nil
+	}
+
+	if !p.routeTreeConfigured {
+		return "", nil
+	}
+
+	if p.defaultReceiver != "" {
+		p.routingUnavailableWarner.warn(p.logger,
+			"Route tree is configured but produced no routing decision for this alert; falling back to the root route's receiver instead of publishing to every target",
+			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint,
+			"root_receiver", p.defaultReceiver,
+			"route_evaluator_wired", p.routeEvaluator != nil,
+		)
+		p.routingMetrics.RecordUnavailable(RoutingFallbackDefaultReceiver)
+		return p.defaultReceiver, nil
+	}
+
+	p.routingMetrics.RecordUnavailable(RoutingFallbackFailed)
+	return "", fmt.Errorf("%w (alert %q, fingerprint %s): route tree is configured but no routing decision could be made and the root route has no known receiver; refusing to publish to every receiver's targets",
+		ErrRoutingUnavailable, alert.AlertName, alert.Fingerprint)
+}
+
+// ErrRoutingUnavailable is returned when a configured route tree could not
+// produce a receiver for an alert and no root receiver is known (re-review
+// finding R1). The alert is NOT published: an unscoped fan-out would deliver it
+// to every receiver's integrations.
+//
+// DEFENSIVE / UNREACHABLE through internal/config.LoadConfig: loadRouteConfig
+// runs pkg/configvalidator before the routing parser, and both E100 ("root
+// route is required") and E103 ("root route must have a receiver") are blocking
+// errors — so a Config with Routing != nil always carries a non-empty root
+// receiver, i.e. resolveReceiver's DefaultReceiver is never "". This branch
+// exists for programmatically-built configs (tests, embedding AMP as a library)
+// and as the fail-closed side of the R1 fix; do not read it as a live
+// production path.
+var ErrRoutingUnavailable = errors.New("routing unavailable")
 
 // shouldGroup reports whether alert should be routed into a group instead of
 // published directly (task 2.3).
@@ -575,8 +703,14 @@ func (p *AlertProcessor) processTransparentWithRecommendations(ctx context.Conte
 		p.warnGroupingFallback(decision)
 	}
 
-	// Publish to ALL targets immediately
-	return p.publisher.PublishToAll(ctx, alert)
+	// Publish to the routed receiver's targets (review finding C1: this used
+	// to fan out to every target regardless of receiver; R1: an unavailable
+	// route tree must not reopen that door).
+	receiver, err := p.resolveReceiver(alert, decision)
+	if err != nil {
+		return err
+	}
+	return p.publisher.PublishToReceiver(ctx, alert, receiver)
 }
 
 // processTransparent processes without LLM but with filtering
@@ -609,8 +743,12 @@ func (p *AlertProcessor) processTransparent(ctx context.Context, alert *core.Ale
 		p.warnGroupingFallback(decision)
 	}
 
-	// Publish to ALL configured targets
-	return p.publisher.PublishToAll(ctx, alert)
+	// Publish to the routed receiver's targets (review findings C1 and R1).
+	receiver, err := p.resolveReceiver(alert, decision)
+	if err != nil {
+		return err
+	}
+	return p.publisher.PublishToReceiver(ctx, alert, receiver)
 }
 
 // processEnriched processes with full LLM classification and filtering (production mode)
@@ -676,8 +814,13 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert,
 		p.warnGroupingFallback(decision)
 	}
 
-	// Step 3: Publish with classification (smart routing)
-	return p.publisher.PublishWithClassification(ctx, alert, classification)
+	// Step 3: Publish with classification (smart routing), scoped to the
+	// routed receiver (review findings C1 and R1).
+	receiver, resolveErr := p.resolveReceiver(alert, decision)
+	if resolveErr != nil {
+		return resolveErr
+	}
+	return p.publisher.PublishToReceiverWithClassification(ctx, alert, classification, receiver)
 }
 
 // cleanupInhibitionsForSource removes all active inhibitions caused by the given source alert.

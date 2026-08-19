@@ -1,18 +1,22 @@
 # Alertmanager vs Alertmanager++ - Migration Comparison
 
-**Last Updated**: 2026-08-18
+**Last Updated**: 2026-08-19
 **Alertmanager Version**: v0.27+
 **Alertmanager++ Version**: v0.0.1
 **Status**: AMP now implements upstream's core notification *mechanics* (routing tree, grouping/dispatch, notify chain, HA clustering) via branch `feat/alertmanager-parity` — not just a compatible API surface. This is a **mid-to-late-stage parity candidate**, not the earlier "controlled replacement slice" baseline.
 
-**AMP is NOT a config-level drop-in.** Its control plane (routing/grouping/timing/inhibition semantics) is
-parity-level, but its data plane is different by design: delivery endpoints come from `amp.receiver`-scoped
-Kubernetes Secrets, **not** from `receivers[].*_configs`, which AMP parses and validates but never
-auto-provisions. Dropping in an upstream `alertmanager.yml` yields correct routing and **zero deliveries** until
-those Secrets exist — with no error, no warning, and a clean startup. Plan that step explicitly; see
-[Config Migration](#config-migration) below and `docs/ALERTMANAGER_COMPATIBILITY.md`'s "control plane vs data plane"
-section. A short list of other gaps remains open; see below and that document's Known Gaps section. The
-`amtool`/Grafana live-audit half of task 7.4 (running separately) is the final acceptance check.
+**AMP is a config-level drop-in for the supported integrations, with field-level caveats.** Since
+AMP-PARITY-WAVE6-EPIC (`FU-RECEIVERS-INTEGRATION`) an upstream `alertmanager.yml` copied verbatim both ROUTES and
+DELIVERS: every `webhook_configs`/`slack_configs`/`pagerduty_configs`/`telegram_configs`/`email_configs` block is
+auto-provisioned into a delivery target, with `global:` endpoint fallbacks and per-integration `send_resolved`
+honoured. Kubernetes Secrets are no longer required (still supported, still `amp.receiver`-scoped).
+
+What to check before calling it a drop-in for YOUR config: per-integration FIELD fidelity. Slack
+channel/title/color, PagerDuty severity/class/details, Telegram `parse_mode`, per-integration `http_config` and all
+`*_file` secret variants are parsed and validated but not delivered — the full table is in
+`docs/ALERTMANAGER_COMPATIBILITY.md` ("Per-integration field fidelity" and "Still NOT supported for receivers").
+A short list of other gaps remains open; see below and that document's Known Gaps section. The `amtool`/Grafana
+live-audit half of task 7.4 (running separately) is the final acceptance check.
 
 ---
 
@@ -34,8 +38,16 @@ Treat AMP as a strong parity candidate for the great majority of standard Alertm
 - `--web.route-prefix` for reverse-proxy deployments
 
 What is **different**, not just narrower:
-- **Delivery targets are not built from `receivers[].*_configs`.** They come from Kubernetes Secrets annotated
-  `amp.receiver: <receiver-name>`. This is the one migration step that fails silently if skipped.
+- **Receiver integrations deliver, but not every field of them does.** Endpoints and credentials are mapped;
+  presentation/categorisation fields (Slack `channel`/`title`/`color`, PagerDuty `severity`/`details`, Telegram
+  `parse_mode`) are not, because every publisher renders through AMP's own formatter. Per-integration `http_config`
+  and `*_file` credential variants are likewise parsed-not-applied (tracked as
+  `FU-INTEGRATION-FIELD-FIDELITY`, not started).
+- **Two target sources can double-deliver.** If you keep a legacy UNSCOPED `amp.receiver`-less Secret target and
+  also declare the same endpoint under `receivers:`, both fire. Delete or scope the Secret when you migrate.
+- **A receiver with no deliverable integration is a blackhole**, upstream-style: alerts routed to it are dropped
+  silently (counted as `alert_history_publishing_blackhole_drops_total`), which also covers a receiver whose only
+  block is `opsgenie_configs`/`victorops_configs`/`wechat_configs`.
 - Receiver names may contain anything except `/` (AMP reserves it as the group-key separator). Upstream has no
   restriction; rename any receiver containing a slash.
 - `inhibit_rules[].source_matchers`/`target_matchers` (the `matchers:` list syntax) are **not evaluated** — only the
@@ -60,7 +72,9 @@ and the config-write/`/history` APIs (explicitly out of scope for this task). Se
 | Config validation | Mature | Wired into startup + `/-/reload` when a `route:` section is present | Legacy single-receiver configs still skip this validation path |
 | HA / clustering | Gossip-based | Redis-based (nflog, timer liveness, leader election, heartbeat); 2-replica e2e demonstrated via standalone script | Functionally equivalent goal, different mechanism; e2e script not CI-gated |
 | Operational API (`status`/`receivers`/`groups`/`reload`) | Available | Available, with upstream query params | Parity-level |
-| **Receiver → delivery endpoint provisioning** | Built directly from `receivers[].*_configs` | **Not built from config.** Targets discovered from `amp.receiver`-scoped Kubernetes Secrets; `*_configs` parsed/validated only | **Highest-impact difference.** Create one Secret per endpoint before cutting over, or you route correctly and deliver nothing |
+| **Receiver → delivery endpoint provisioning** | Built directly from `receivers[].*_configs` | Built from `receivers[].*_configs` (targets named `cfg:<receiver>/<type><idx>`, receiver-scoped, rebuilt on reload) **and** from `amp.receiver`-scoped Kubernetes Secrets; both merge into one view | Parity as of AMP-PARITY-WAVE6-EPIC. Remaining difference is per-field fidelity, not provisioning — see the field table in `ALERTMANAGER_COMPATIBILITY.md` |
+| `global:` endpoint fallbacks (`slack_api_url`, `pagerduty_url`, `telegram_api_url`, `smtp_*`) | Supported | Supported, resolved at load; per-integration value wins; a Slack integration with neither is a load error | Email is stricter than upstream: AMP has no per-`email_config` SMTP fields, so `global.smtp_smarthost`/`smtp_from` are mandatory when any `email_configs` exist |
+| `send_resolved` per integration | Supported (default true) | Supported (default true); suppression happens at target resolution, so nothing is queued, and is counted as `alert_history_publishing_resolved_suppressed_total` | A resolved-only group for a `send_resolved: false` target delivers nothing but still settles (resolved alerts pruned, group torn down), matching upstream's retry-stage + flush behaviour |
 | Receiver integrations (publisher availability) | Full set incl. OpsGenie/VictorOps/WeChat/Pushover/SNS/Webex | webhook/email/PagerDuty/Slack/Telegram/Rootly publishers wired (Telegram's enhanced publisher became runtime-reachable in the final fix wave); Discord/Teams via webhook templates; OpsGenie/VictorOps/WeChat validate-but-not-wired; Pushover/SNS/Webex absent | Check the receiver matrix in `ALERTMANAGER_COMPATIBILITY.md` against your actual receiver list |
 | Hot reload trigger | `SIGHUP` + `POST /-/reload` | Both. Routing-only edits are applied (they were silently discarded before the final fix wave) | Parity-level |
 | Wire-level webhook payload | One POST per target with a full `alerts` JSON array per group | One POST per `(target × alert)` pair | Different request shape/count; functionally delivers all alerts, but a downstream integration parsing the exact payload shape needs to be checked |
@@ -94,7 +108,12 @@ Honest, code-traceable gaps as of this branch:
 2. **Webhook delivery is one HTTP request per `(target × alert)` pair**, not upstream's single POST with an
    `alerts` array per target per group. (`internal/infrastructure/publishing/coordinator.go`)
 3. **Niche receivers**: OpsGenie/VictorOps/WeChat validate configuration but send zero notifications (no runtime
-   publisher); Pushover/AWS SNS/Webex have no support at any layer.
+   publisher — a receiver carrying only these is treated as a blackhole, with a load-time WARNING naming it);
+   Pushover/AWS SNS/Webex have no support at any layer.
+3a. **Per-integration field fidelity**: endpoints and credentials from `*_configs` are delivered, presentation and
+   categorisation fields are not (Slack `channel`/`title`/`color`, PagerDuty `severity`/`class`/`details`, Telegram
+   `parse_mode`), and per-integration `http_config` plus every `*_file` credential variant is parsed-not-applied.
+   Tracked as `FU-INTEGRATION-FIELD-FIDELITY`; full table in `ALERTMANAGER_COMPATIBILITY.md`.
 4. **Config write API (`/api/v2/config*`) and `/history*`** are not implemented — explicitly out of scope for this
    task.
 5. **Telegram rate limiting is global (30 msg/s), not per-chat.** Deferred; see backlog.
@@ -124,7 +143,8 @@ Use AMP if:
 - you need HA delivery guarantees across multiple replicas
 - your receiver set matches the 🟢 rows in the compatibility matrix (webhook, email, PagerDuty, Slack, Telegram,
   Discord/Teams-via-webhook)
-- you can create the `amp.receiver`-scoped Secrets that actually carry delivery (see step 3 of the rollout below)
+- the `*_configs` fields you rely on are in the "Mapped (delivered)" column of the field-fidelity table (Secrets are
+  no longer needed for delivery, but an existing unscoped one will double-deliver alongside a `cfg:` target)
 - you can validate the specific gaps above (webhook wire shape, unwired receiver types) against your own
   integrations before cutover
 
@@ -152,12 +172,13 @@ Suggested rollout shape:
 1. deploy AMP with the repo-local chart `./helm/amp`
 2. bring your real `route:`/`receivers:` config (or a representative subset) — this is now meaningfully exercised,
    unlike the earlier flat-receiver baseline
-3. <a id="config-migration"></a>**provision delivery targets — the step that has no config equivalent.** For every
-   receiver name your routes reference, create a Kubernetes Secret annotated
-   `amp.receiver: <receiver-name>` (comma-separated list for multiple receivers, or the `amp.receiver` *label* for a
-   single name) carrying that endpoint's `type`, `url` and credentials. AMP will not derive these from your
-   `receivers[].*_configs`; without them the pipeline runs green and delivers nothing. Confirm with
-   `GET /api/v2/alerts/groups` that groups report the receivers you expect, then confirm an actual delivery.
+3. <a id="config-migration"></a>**verify the auto-provisioned targets, then confirm a real delivery.** Your
+   `receivers[].*_configs` become delivery targets on load (`cfg:<receiver>/<type><idx>`) — no Kubernetes Secret
+   step. Confirm the count in the startup log line (`Publishing runtime initialized`, fields `config_targets` /
+   `k8s_targets`) and the `alert_history_publishing_discovery_targets_total{source="config"}` series, check
+   `GET /api/v2/alerts/groups` reports the receivers you expect, then confirm an actual notification arrives.
+   If you are migrating from an earlier AMP: delete (or receiver-scope) any legacy unscoped Secret target whose
+   endpoint you have now declared in `receivers:`, or that endpoint will receive every notification twice.
 4. validate ingest → grouping → notify-chain behavior end to end: group_wait, a repeat past group_interval, a
    silence suppressing an in-flight group, an inhibition rule, a mute_time_interval window, and a resolve (the
    resolved notification must arrive exactly once and then stop)

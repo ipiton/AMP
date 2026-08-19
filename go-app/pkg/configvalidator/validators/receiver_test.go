@@ -55,11 +55,15 @@ func TestReceiverValidator(t *testing.T) {
 			wantErrCode: "E022",
 		},
 		{
-			name: "zero integrations",
+			// FU-RECEIVERS-INTEGRATION slice-1 review finding I1: a receiver
+			// with no integrations is upstream's blackhole receiver, so this is
+			// W024 (warning) and no longer a blocking E024.
+			name: "zero integrations is a blackhole receiver, warning only",
 			cfg: &config.AlertmanagerConfig{
-				Receivers: []*config.Receiver{{Name: "default"}},
+				Receivers: []*config.Receiver{{Name: "null"}},
 			},
-			wantErrCode: "E024",
+			wantNoIssues: true,
+			wantWarnCode: "W024",
 		},
 		{
 			// Task 5.4 regression: a telegram-only receiver used to fail

@@ -23,12 +23,12 @@ type fakePublisher struct {
 	published []*core.Alert
 }
 
-func (p *fakePublisher) PublishToAll(_ context.Context, alert *core.Alert) error {
+func (p *fakePublisher) PublishToReceiver(_ context.Context, alert *core.Alert, _ string) error {
 	p.published = append(p.published, alert)
 	return nil
 }
 
-func (p *fakePublisher) PublishWithClassification(_ context.Context, alert *core.Alert, _ *core.ClassificationResult) error {
+func (p *fakePublisher) PublishToReceiverWithClassification(_ context.Context, alert *core.Alert, _ *core.ClassificationResult, _ string) error {
 	p.published = append(p.published, alert)
 	return nil
 }

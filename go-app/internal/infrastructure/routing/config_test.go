@@ -193,11 +193,14 @@ func TestReceiver_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "invalid receiver with no configs",
+			// Slice-1 review finding I1: a receiver with zero integrations is
+			// upstream Alertmanager's BLACKHOLE receiver (`- name: 'null'`),
+			// which is legal there and must therefore load here.
+			name: "receiver with no configs is a valid blackhole receiver",
 			receiver: &Receiver{
-				Name: "empty",
+				Name: "null",
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
@@ -207,7 +210,6 @@ func TestReceiver_Validate(t *testing.T) {
 
 			if tt.wantErr {
 				assert.Error(t, err)
-				assert.Contains(t, err.Error(), "at least one config")
 			} else {
 				assert.NoError(t, err)
 			}

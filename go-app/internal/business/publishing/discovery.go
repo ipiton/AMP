@@ -325,4 +325,31 @@ type DiscoveryStats struct {
 	// DiscoveryErrors is cumulative count of discovery errors.
 	// Incremented on K8s API failures (network, auth, timeout).
 	DiscoveryErrors int
+
+	// ConfigTargets is the number of config-provisioned targets currently in
+	// the view — those built from the config's `receivers:` integrations
+	// rather than from K8s Secrets (FU-RECEIVERS-INTEGRATION).
+	//
+	// Deliberately NOT folded into TotalTargets/ValidTargets: those keep
+	// meaning "secrets seen" and "secrets that parsed + validated", so a
+	// dashboard tracking Secret-discovery health is unaffected by config
+	// provisioning. ListTargets() returns the union of both, i.e.
+	// ValidTargets + ConfigTargets entries.
+	ConfigTargets int
+}
+
+// ConfigTargetSink is implemented by discovery managers that accept
+// config-provisioned publishing targets (FU-RECEIVERS-INTEGRATION, R3).
+//
+// Kept OUT of TargetDiscoveryManager on purpose: every existing consumer of
+// that interface (health monitor, refresh manager, stats collectors, the
+// infrastructure-side adapter) is a READER, and none of them should be able to
+// replace the target set. The wiring layer type-asserts to this instead — the
+// same pattern ServiceRegistry.ReloadConfig already uses for the inhibition
+// matcher's UpdateRules.
+type ConfigTargetSink interface {
+	// SetConfigTargets atomically replaces the config-provisioned target set.
+	// Implementations must swap the whole set at once: a reload must never
+	// expose a window in which the set is empty.
+	SetConfigTargets(targets []*core.PublishingTarget)
 }

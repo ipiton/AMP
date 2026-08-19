@@ -2090,10 +2090,19 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		BusinessMetrics:    r.metrics,
 		RouteEvaluator:     r.routeEvaluator,          // task 1.4: may be nil (lite/legacy mode, no route: section)
 		GroupingEnabled:    r.config.Grouping.Enabled, // task 2.3
-		GroupManager:       groupManager,              // task 2.3: nil unless grouping subsystem initialized (route tree required)
-		GroupKeyGenerator:  r.groupKeyGenerator,       // task 2.3: nil unless grouping subsystem initialized
-		Logger:             r.logger,
-		Metrics:            nil, // TODO: MetricsManager
+		// Re-review finding R1: a CONFIGURED route tree must never degrade into
+		// an unscoped publish, even when the tree failed to build
+		// (initializeRouting is non-fatal) or Evaluate fails for an alert.
+		// RouteTreeConfigured therefore comes from the config, NOT from
+		// r.routeEvaluator != nil, and DefaultReceiver carries the root route's
+		// catch-all receiver as the fallback.
+		RouteTreeConfigured:    r.config.HasRouteTree(),
+		DefaultReceiver:        rootRouteReceiver(r.config),
+		RoutingFallbackMetrics: routingFallbackMetricsOnce(),
+		GroupManager:           groupManager,        // task 2.3: nil unless grouping subsystem initialized (route tree required)
+		GroupKeyGenerator:      r.groupKeyGenerator, // task 2.3: nil unless grouping subsystem initialized
+		Logger:                 r.logger,
+		Metrics:                nil, // TODO: MetricsManager
 	}
 
 	processor, err := services.NewAlertProcessor(config)
@@ -2416,8 +2425,18 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 		return fmt.Errorf("reload failed: %v", result.Error)
 	}
 
+	newConfig := r.reloadCoordinator.GetCurrentConfig()
+
+	// Blackhole receiver set FIRST, before the config pointer swap below
+	// (fix-round-2 re-review minor 1): a receiver newly declared without
+	// integrations must be recognised as a blackhole by the time the new routing
+	// can route to it, otherwise alerts landing in that sub-millisecond window
+	// take the loud "no targets found" path. Safe in both directions — a
+	// receiver with targets never consults this set.
+	r.applyKnownReceivers(newConfig)
+
 	// Update local config pointer
-	r.config = r.reloadCoordinator.GetCurrentConfig()
+	r.config = newConfig
 
 	// PARITY-A2: hot-reload inhibition rules into the live matcher. The alert
 	// processor holds the same matcher instance, so an in-place update is the
@@ -2453,6 +2472,15 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	if err := r.reloadRoutingTree(); err != nil {
 		return err
 	}
+
+	// FU-RECEIVERS-INTEGRATION: rebuild the config-provisioned publishing
+	// targets from the new config and swap them into the discovery view. The
+	// routing fingerprint already makes a receivers-only edit reach this
+	// point; without this call such an edit would change routing and change
+	// nothing about delivery. Unconditional (not gated on a diff) because the
+	// rebuild is pure and the swap is atomic — cheaper than tracking which
+	// integration fields moved.
+	r.applyConfigTargets()
 
 	return nil
 }

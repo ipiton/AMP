@@ -30,6 +30,11 @@ import (
 var (
 	routingMatcherMetricsOnce   = sync.OnceValue(businessrouting.NewMatcherMetrics)
 	routingEvaluatorMetricsOnce = sync.OnceValue(businessrouting.NewEvaluatorMetrics)
+
+	// routingFallbackMetricsOnce guards the re-review finding R1 counter the
+	// same way: tests build several ServiceRegistry values per process, and
+	// promauto panics on a second registration against the default registry.
+	routingFallbackMetricsOnce = sync.OnceValue(services.NewRoutingFallbackMetrics)
 )
 
 // routeTreeEvaluator adapts a hot-reloadable business/routing route tree
