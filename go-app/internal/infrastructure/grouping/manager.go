@@ -909,9 +909,11 @@ type GroupNotifyLog interface {
 	// groupKey was just sent successfully to target, at now. repeatInterval
 	// is used by Redis-backed implementations as the entry's TTL (plus a
 	// grace period) so an abandoned group's entry doesn't outlive it
-	// indefinitely; the in-memory implementation ignores it (IsDuplicate
-	// recomputes freshness against a caller-supplied cutoff on every call
-	// instead).
+	// indefinitely; the in-memory implementation plays it no role in LIVE
+	// duplicate detection either (IsDuplicate recomputes freshness against a
+	// caller-supplied cutoff on every call instead), but does capture the
+	// same TTL as entry metadata purely for file-snapshot persistence (wave
+	// 6, FU-LITE-FILE-SNAPSHOT — see notifyDedupLog.LoadNflogSnapshot).
 	//
 	// Implementations MUST also drop any per-alert delivered set for
 	// (groupKey, target) (task fu4): a full entry states that the whole alert

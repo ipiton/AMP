@@ -34,6 +34,7 @@ import (
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	investigationrepo "github.com/ipiton/AMP/internal/infrastructure/repository"
 	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
+	"github.com/ipiton/AMP/internal/infrastructure/snapshot"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 	"github.com/jackc/pgx/v5/stdlib"
@@ -186,6 +187,28 @@ type ServiceRegistry struct {
 	// Shutdown before groupTimerManager is torn down below.
 	groupStorageManager *grouping.StorageManager
 
+	// memoryNotifyLog holds the in-memory GroupNotifyLog instance selected by
+	// newNotifyLog (lite profile, or the standard-profile fallback when
+	// Redis is unavailable), type-asserted against grouping.NflogSnapshotter
+	// so file-snapshot persistence (wave 6, FU-LITE-FILE-SNAPSHOT) can
+	// save/restore its state without reaching into groupManager's private
+	// notifyLog field. nil when grouping is disabled (cfg.Grouping.Enabled=
+	// false, the default) or the standard profile selected the Redis-backed
+	// RedisNotifyLog, which owns its own durability and does not implement
+	// NflogSnapshotter.
+	memoryNotifyLog grouping.NflogSnapshotter
+
+	// File-snapshot persistence (wave 6, FU-LITE-FILE-SNAPSHOT):
+	// snapshotPath is r.config.Storage.SnapshotPath, cached here so Shutdown
+	// can do the final write without re-reading config; both nil/empty
+	// unless initializeSnapshotting actually engaged (lite profile AND
+	// storage.path set). snapshotCancel/snapshotDone are the periodic
+	// writer's stop signal, same cancel+wait pattern as
+	// silenceSyncCancel/silenceSyncDone above.
+	snapshotPath   string
+	snapshotCancel context.CancelFunc
+	snapshotDone   chan struct{}
+
 	// Business Services
 	k8sClient                  k8s.K8sClient
 	publishingDiscovery        businesspublishing.TargetDiscoveryManager
@@ -324,6 +347,17 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 		r.addDegradedReason("grouping subsystem unavailable: %v", err)
 	}
 
+	// Step 2.8: Initialize lite-profile file-snapshot persistence (non-fatal
+	// — mirrors Step 2.7 above). Task FU-LITE-FILE-SNAPSHOT, alertmanager-
+	// parity wave 6. Runs after Step 2.7 so r.memoryNotifyLog (set inside
+	// initializeGrouping, when grouping is enabled) is already available to
+	// restore into; r.silenceStore has existed since Step 1 regardless.
+	if err := r.initializeSnapshotting(ctx); err != nil {
+		r.logger.Warn("File-snapshot persistence initialization failed, continuing without restart durability",
+			"error", err)
+		r.addDegradedReason("file-snapshot persistence unavailable: %v", err)
+	}
+
 	// Step 3: Initialize Business Services
 	if err := r.initializeBusinessServices(ctx); err != nil {
 		return fmt.Errorf("business services initialization failed: %w", err)
@@ -456,7 +490,19 @@ func (r *ServiceRegistry) rehydrateAlertStore(ctx context.Context) error {
 // explicitly so operators know restarts drop all silences.
 func (r *ServiceRegistry) initializeSilencePersistence(ctx context.Context) error {
 	if r.config.Profile == appconfig.ProfileLite {
-		r.logger.Warn("silences are memory-only in lite profile and will be lost on restart")
+		// Softened (wave 6, FU-LITE-FILE-SNAPSHOT): silences are still
+		// memory-only in the sense that there is no SQLite/Postgres silence
+		// repository in the lite profile, but they no longer have to be LOST
+		// on restart once storage.path is set — initializeSnapshotting
+		// (Step 2.8, runs later in Initialize) reloads them from the file
+		// snapshot before the HTTP server starts serving. Only warn when
+		// snapshotting is actually off.
+		if r.config.Storage.SnapshotPath != "" {
+			r.logger.Info("silences are memory-only in lite profile; persisted via file snapshot",
+				"storage.path", r.config.Storage.SnapshotPath)
+		} else {
+			r.logger.Warn("silences are memory-only in lite profile and will be lost on restart (set storage.path to enable file-snapshot persistence)")
+		}
 		return nil
 	}
 
@@ -1396,6 +1442,15 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		// dedup no longer works across replicas until Redis recovers.
 		r.addDegradedReason("nflog degraded: Redis init failed, using in-memory (no cross-replica notification dedup): %v", notifyLogErr)
 	}
+	// Wave 6 (FU-LITE-FILE-SNAPSHOT): keep a typed handle on the in-memory
+	// nflog instance (when that's what newNotifyLog returned) so
+	// initializeSnapshotting/writeSnapshot below can save/restore its state.
+	// Deliberately a type assertion, not a profile check: RedisNotifyLog
+	// never implements NflogSnapshotter, so this is naturally nil whenever
+	// the standard profile picked the Redis-backed implementation.
+	if snapshotter, ok := notifyLog.(grouping.NflogSnapshotter); ok {
+		r.memoryNotifyLog = snapshotter
+	}
 
 	// Notify-fire time budget (task rec fix round 1, review finding C1): the
 	// timer-callback deadline and the cross-replica publish-claim TTL are
@@ -1681,19 +1736,28 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 // already-initialized cache client, same pattern as newGroupingStorage
 // above) for standard, in-memory for lite.
 //
-// Return contract mirrors newGroupingStorage exactly, for the same reasons:
+// Return contract mirrors newGroupingStorage, with one change from wave 6
+// (FU-LITE-FILE-SNAPSHOT): the "use the in-memory default" case now
+// constructs grouping.NewMemoryNotifyLog() explicitly instead of returning
+// (nil, nil) and letting NewDefaultGroupManager default it internally —
+// functionally identical (NewDefaultGroupManager's own nil-check would have
+// built the exact same underlying type), but this way initializeGrouping's
+// caller gets a handle it can type-assert against grouping.NflogSnapshotter
+// and hold onto for file-snapshot persistence. Cases:
 //
-//   - (nil, nil): use the in-memory default (DefaultGroupManagerConfig.
-//     NotifyLog left nil — NewDefaultGroupManager fills in notifyDedupLog).
-//     Either lite profile, or standard profile without a live
-//     *cache.RedisCache — the latter is NOT a new degraded reason, since
-//     Step 1's initializeCache already recorded one for the same underlying
-//     "no Redis cache at all" situation.
+//   - (memory instance, nil): lite profile, or standard profile without a
+//     live *cache.RedisCache — the latter is NOT a new degraded reason,
+//     since Step 1's initializeCache already recorded one for the same
+//     underlying "no Redis cache at all" situation.
 //   - (nil, err): standard profile, cache backend IS a live *cache.RedisCache
 //     (so Step 1 saw no failure), but RedisNotifyLog's own Redis check
 //     failed anyway. This is nflog-specific and would otherwise be
 //     invisible in /health//readiness, so initializeGrouping adds its own
-//     degraded reason for it.
+//     degraded reason for it. Deliberately still nil (not the memory
+//     fallback instance) here: this path is standard-profile-only, which
+//     file snapshotting never engages (gated on profile==lite), so there is
+//     no snapshot benefit to constructing one, and NewDefaultGroupManager's
+//     own nil-check already provides the working fallback.
 func (r *ServiceRegistry) newNotifyLog(ctx context.Context) (grouping.GroupNotifyLog, error) {
 	if r.config.Profile == appconfig.ProfileStandard {
 		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
@@ -1713,7 +1777,7 @@ func (r *ServiceRegistry) newNotifyLog(ctx context.Context) (grouping.GroupNotif
 		r.logger.Warn("Standard profile without a Redis cache backend, nflog falls back to in-memory (no cross-replica dedup)")
 	}
 
-	return nil, nil
+	return grouping.NewMemoryNotifyLog(), nil
 }
 
 // memoryGroupingStorage builds the in-memory group + timer storage pair used
@@ -1724,6 +1788,139 @@ func (r *ServiceRegistry) memoryGroupingStorage() (grouping.GroupStorage, groupi
 		Logger:  r.logger,
 		Metrics: r.metrics,
 	}), grouping.NewInMemoryTimerStorage(r.logger)
+}
+
+// defaultSnapshotInterval is the pre-config-knob fallback used when
+// r.config.Storage.SnapshotInterval is left at zero — same posture as
+// defaultSilencePeriodicResyncInterval above (a hand-built *ServiceRegistry
+// in unit tests that skips LoadConfig). Matches the viper default in
+// internal/config/config.go's setDefaults.
+const defaultSnapshotInterval = 5 * time.Minute
+
+// initializeSnapshotting wires the lite profile's file-snapshot persistence
+// for silences + the notification log (wave 6, FU-LITE-FILE-SNAPSHOT),
+// giving a single-binary AMP the restart durability upstream Alertmanager's
+// --storage.path already provides. Disabled by default
+// (cfg.Storage.SnapshotPath == "") — see that field's doc comment
+// (internal/config/config.go) for why upstream's own non-empty default is
+// deliberately NOT copied here.
+//
+// Standard profile: Postgres/Redis already own durability (silences via
+// PostgresSilenceRepository, nflog via RedisNotifyLog when Redis is live),
+// so file snapshotting must never engage there even if an operator sets
+// storage.path anyway — logged and skipped, not an error, the same
+// non-fatal posture as every other Step 1.x/2.x initializer.
+//
+// Runs after initializeGrouping (Step 2.7) so r.memoryNotifyLog — set there,
+// only when grouping is enabled — is already populated; r.silenceStore has
+// existed since Step 1 (initializeInfrastructure) regardless of grouping.
+// Both loading and starting the periodic writer happen here, well before
+// cmd/server/main.go calls server.ListenAndServe — the brief's "load at
+// startup BEFORE the API starts serving" requirement.
+func (r *ServiceRegistry) initializeSnapshotting(ctx context.Context) error {
+	path := r.config.Storage.SnapshotPath
+	if path == "" {
+		return nil
+	}
+	if r.config.Profile != appconfig.ProfileLite {
+		r.logger.Info("storage.path is set but profile is not lite; file snapshotting is not engaged (Postgres/Redis already own durability)",
+			"profile", r.config.Profile, "storage.path", path)
+		return nil
+	}
+
+	r.logger.Info("Initializing lite-profile file-snapshot persistence...", "storage.path", path)
+	r.loadSnapshot(path)
+
+	interval := r.config.Storage.SnapshotInterval
+	if interval <= 0 {
+		interval = defaultSnapshotInterval
+	}
+
+	writerCtx, cancel := context.WithCancel(context.Background())
+	r.snapshotPath = path
+	r.snapshotCancel = cancel
+	r.snapshotDone = make(chan struct{})
+	go r.runSnapshotWriter(writerCtx, path, interval)
+
+	return nil
+}
+
+// loadSnapshot loads path and restores silences/nflog state from it.
+// Tolerates a missing file (routine — first boot with snapshotting freshly
+// enabled, logged at Info) and a corrupt/unreadable/version-mismatched file
+// (logged at Warn) identically: start empty. NEVER crashes on a bad
+// snapshot — the brief's explicit requirement, since a botched upgrade or a
+// hand-edited file must not turn into a boot failure for what is, at worst,
+// a restart-durability regression back to pre-wave-6 behavior.
+func (r *ServiceRegistry) loadSnapshot(path string) {
+	now := time.Now().UTC()
+
+	data, err := snapshot.Load(path)
+	switch {
+	case err == nil:
+		if r.silenceStore != nil {
+			if restoreErr := r.silenceStore.RestoreFromPersistence(data.Silences, now); restoreErr != nil {
+				r.logger.Error("File snapshot silences restore failed; silences API starts empty", "error", restoreErr)
+			} else if len(data.Silences) > 0 {
+				r.logger.Info("Silences restored from file snapshot", "silences", len(data.Silences))
+			}
+		}
+		if r.memoryNotifyLog != nil {
+			if loadErr := r.memoryNotifyLog.LoadNflogSnapshot(data.Nflog, now); loadErr != nil {
+				r.logger.Warn("File snapshot nflog restore failed; notification dedup starts empty", "error", loadErr)
+			} else {
+				r.logger.Info("Notification log restored from file snapshot",
+					"entries", len(data.Nflog.Entries), "delivered", len(data.Nflog.Delivered))
+			}
+		}
+		r.logger.Info("File snapshot loaded", "storage.path", path, "written_at", data.WrittenAt)
+	case errors.Is(err, snapshot.ErrNotExist):
+		r.logger.Info("No file snapshot found, starting with empty silences/nflog", "storage.path", path)
+	default:
+		r.logger.Warn("File snapshot unreadable, starting with empty silences/nflog", "storage.path", path, "error", err)
+	}
+}
+
+// runSnapshotWriter periodically flushes silences + nflog state to path
+// every interval until ctx is cancelled, then signals r.snapshotDone. The
+// FINAL write on graceful shutdown is a separate, synchronous call from
+// Shutdown (writeSnapshot below) made after this goroutine has already
+// stopped — see Shutdown's ordering comment — so there is never a
+// concurrent writer racing the shutdown write for the same path.
+func (r *ServiceRegistry) runSnapshotWriter(ctx context.Context, path string, interval time.Duration) {
+	defer close(r.snapshotDone)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := r.writeSnapshot(path); err != nil {
+				r.logger.Warn("Periodic file snapshot write failed", "storage.path", path, "error", err)
+			}
+		}
+	}
+}
+
+// writeSnapshot captures the current silences + nflog state and persists it
+// atomically to path (snapshot.Write). Called by both the periodic writer
+// and Shutdown's final write.
+func (r *ServiceRegistry) writeSnapshot(path string) error {
+	now := time.Now().UTC()
+	data := snapshot.Data{
+		Version:   snapshot.CurrentVersion,
+		WrittenAt: now,
+	}
+	if r.silenceStore != nil {
+		data.Silences = r.silenceStore.ExportForPersistence(now)
+	}
+	if r.memoryNotifyLog != nil {
+		data.Nflog = r.memoryNotifyLog.SnapshotNflog()
+	}
+	return snapshot.Write(path, data)
 }
 
 // initializeInvestigation sets up the async investigation pipeline (PHASE-5B).
@@ -1922,6 +2119,29 @@ func (r *ServiceRegistry) initializeBusinessServices(ctx context.Context) error 
 // Shutdown shuts down all services gracefully.
 func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 	r.logger.Info("Shutting down services...")
+
+	// Step 0: file-snapshot final write (wave 6, FU-LITE-FILE-SNAPSHOT) —
+	// deliberately FIRST, before any other teardown below touches
+	// silenceStore/memoryNotifyLog, so this write captures the freshest
+	// possible state. Stop the periodic writer and wait for it to actually
+	// exit BEFORE doing the final write, so the two never race for the same
+	// path (Write's atomic tmp+rename is safe under concurrent writers
+	// regardless — see snapshot_test.go's TestWrite_ConcurrentWritesToSamePath
+	// — but serializing them means the LAST write is unambiguously this
+	// one).
+	if r.snapshotCancel != nil {
+		r.snapshotCancel()
+		<-r.snapshotDone
+		r.snapshotCancel = nil
+		r.snapshotDone = nil
+	}
+	if r.snapshotPath != "" {
+		r.logger.Info("Writing final file snapshot before shutdown...", "storage.path", r.snapshotPath)
+		if err := r.writeSnapshot(r.snapshotPath); err != nil {
+			r.logger.Warn("Final file snapshot write failed", "storage.path", r.snapshotPath, "error", err)
+		}
+		r.snapshotPath = ""
+	}
 
 	// Shutdown in reverse order of initialization
 

@@ -245,6 +245,24 @@ type StorageConfig struct {
 	// FilesystemPath is the path for embedded storage (Lite profile)
 	// Default: /data/alerthistory.db (SQLite)
 	FilesystemPath string `mapstructure:"filesystem_path"`
+
+	// SnapshotPath is the directory where the lite profile persists file
+	// snapshots of the in-memory silence store and notification log (wave 6,
+	// FU-LITE-FILE-SNAPSHOT), mirroring upstream Alertmanager's
+	// --storage.path. Empty (the default) disables snapshotting entirely —
+	// this must be an explicit operator opt-in, not a default-on side effect
+	// of upgrading, so upstream's own non-empty default ("data/") is
+	// deliberately NOT copied here. Only consulted for the lite profile;
+	// ServiceRegistry.initializeSnapshotting logs Info and skips wiring when
+	// this is set under the standard profile, where Postgres/Redis already
+	// own durability.
+	SnapshotPath string `mapstructure:"path"`
+
+	// SnapshotInterval is how often the lite profile's periodic snapshot
+	// writer flushes silences + nflog state to SnapshotPath, on top of the
+	// always-on final write on graceful shutdown. Only consulted when
+	// SnapshotPath is non-empty.
+	SnapshotInterval time.Duration `mapstructure:"snapshot_interval"`
 }
 
 // ServerConfig holds server-related configuration
@@ -676,6 +694,8 @@ func setDefaults() {
 	viper.SetDefault("profile", "standard")                              // Default to standard profile
 	viper.SetDefault("storage.backend", "postgres")                      // Default to Postgres
 	viper.SetDefault("storage.filesystem_path", "/data/alerthistory.db") // SQLite path for Lite
+	viper.SetDefault("storage.path", "")                                 // Empty = file snapshots DISABLED (wave 6)
+	viper.SetDefault("storage.snapshot_interval", "5m")
 
 	// Server defaults
 	viper.SetDefault("server.port", 8080)
@@ -978,6 +998,28 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("silencing validation failed: %w", err)
 	}
 
+	if err := c.validateStorageSnapshot(); err != nil {
+		return fmt.Errorf("storage snapshot validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateStorageSnapshot checks storage.snapshot_interval (wave 6,
+// FU-LITE-FILE-SNAPSHOT) only when storage.path is set — an empty path
+// disables snapshotting entirely, so the interval is moot and left
+// unvalidated (its default is still positive; this just avoids rejecting a
+// config that never engages the feature). No profile check here: a
+// standard-profile operator setting storage.path anyway is logged and
+// ignored by ServiceRegistry.initializeSnapshotting, not a config error —
+// see that method's doc comment.
+func (c *Config) validateStorageSnapshot() error {
+	if c.Storage.SnapshotPath == "" {
+		return nil
+	}
+	if c.Storage.SnapshotInterval <= 0 {
+		return fmt.Errorf("storage.snapshot_interval must be positive when storage.path is set")
+	}
 	return nil
 }
 
