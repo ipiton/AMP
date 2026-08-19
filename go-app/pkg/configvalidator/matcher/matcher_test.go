@@ -60,9 +60,16 @@ func TestParse_QuoteHandling(t *testing.T) {
 			wantValue: "",
 		},
 		{
-			name:    "truly empty value (nothing after operator) is still rejected",
-			matcher: "label=",
-			wantErr: true,
+			// fix-round 2, Minor #5: upstream accepts an empty value
+			// outright ("The 3rd token may be the empty string" —
+			// ParseMatcher's own doc comment), and
+			// business/routing.parseMatcherExpr always did too; a round-1
+			// guard here rejected this specific case, contradicting the
+			// "verbatim upstream grammar" claim. Aligned instead of kept
+			// as a silent deviation.
+			name:      "empty value (nothing after operator) is accepted, matching upstream and parseMatcherExpr",
+			matcher:   "label=",
+			wantValue: "",
 		},
 		{
 			// fix-round finding I-3: upstream errors on a trailing quote

@@ -281,6 +281,19 @@ func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]
 	return matchers
 }
 
+// The unescaping loop in unquoteMatcherValue below is a verbatim port of
+// ParseMatcher's value-unescaping logic from
+// github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go:
+//
+//	Copyright 2018 Prometheus Team
+//	Licensed under the Apache License, Version 2 point 0 (see the upstream
+//	file's header for the full notice and the license URL); provided
+//	"AS IS", without warranties or conditions of any kind.
+//
+// (fix-round 2, Minor #6: the port named the upstream file but originally
+// carried no attribution — Apache-2.0 section 4 asks for the notice to be
+// retained in derivative works.)
+
 // unquoteMatcherValue applies prometheus/alertmanager's pkg/labels matcher
 // value grammar verbatim — ported from ParseMatcher in
 // github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go, the
