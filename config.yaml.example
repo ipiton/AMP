@@ -307,6 +307,48 @@ route:
 # into the same namespace, but logs a deprecation warning — prefer
 # `time_intervals:`.
 
+# ============================================================================
+# Receivers (Alertmanager parity, AMP-PARITY-WAVE6-EPIC)
+#
+# Every integration block below becomes a live delivery target on load —
+# named `cfg:<receiver>/<type><idx>` and scoped to its own receiver. NO
+# Kubernetes Secret is required. Secret-provisioned targets
+# (`amp.receiver`-scoped) still work and merge into the same view; if the same
+# endpoint is declared in BOTH places it receives every notification twice.
+#
+# Endpoints can be inherited from the optional `global:` section instead of
+# being repeated per integration (per-integration value always wins):
+#
+#   global:
+#     slack_api_url: https://hooks.slack.example.com/services/PLACEHOLDER
+#     pagerduty_url: https://events.pagerduty.com    # regional/proxy endpoint
+#     telegram_api_url: https://api.telegram.org
+#     smtp_smarthost: smtp.example.com:587           # REQUIRED for email_configs
+#     smtp_from: alerts@example.com                  # REQUIRED unless every
+#                                                    # email_config sets `from`
+#     smtp_auth_username: amp
+#     smtp_auth_password: "***"                      # inject via Vault/ESO
+#     smtp_require_tls: true
+#
+# A slack_config with neither its own `api_url` nor `global.slack_api_url`
+# fails to load, as does an email_config without global SMTP settings (AMP
+# has no per-email_config smarthost/auth fields).
+#
+# `send_resolved` (default true) is honoured per integration: false suppresses
+# resolved notifications for that target only.
+#
+# A receiver with NO integrations is upstream's blackhole receiver — valid,
+# and everything routed to it is dropped (counted as
+# alert_history_publishing_blackhole_drops_total). The same applies to a
+# receiver whose only block is one AMP cannot deliver (opsgenie_configs,
+# victorops_configs, wechat_configs), which also logs a WARNING at load.
+#
+# Field-level caveat: endpoints and credentials are delivered, but
+# presentation/categorisation fields (Slack channel/title/color, PagerDuty
+# severity/details, Telegram parse_mode) and per-integration http_config are
+# parsed and NOT delivered — see docs/ALERTMANAGER_COMPATIBILITY.md
+# "Per-integration field fidelity".
+# ============================================================================
 receivers:
   - name: default
     webhook_configs:
@@ -314,6 +356,9 @@ receivers:
         http_method: POST
         send_resolved: true
         max_alerts: 10
+
+  # Upstream's blackhole receiver: route noise here to drop it.
+  - name: "null"
 
   - name: pagerduty-critical
     pagerduty_configs:

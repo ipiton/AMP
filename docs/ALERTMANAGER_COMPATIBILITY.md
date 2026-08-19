@@ -36,7 +36,7 @@ Source of truth:
 | Matcher operators `=`, `!=`, `=~`, `!~` incl. `matchers:` list syntax | 🟢 Supported | `internal/business/routing/tree_builder.go` `parseMatchers`/`parseMatcherExpr` parse `match`, `match_re`, and the newer `matchers:` free-form syntax into all 4 operators. |
 | Regex matcher anchoring (`^(?:re)$`) | 🟢 Supported | `internal/business/routing/matcher.go` `anchorRegex` — matches upstream; unanchored substring matching would be a parity bug (fixed here). |
 | `route:`/`receivers:` config parsing | 🟢 Supported | `internal/infrastructure/routing.Parse()`, gated on a top-level `route:` section existing (`internal/config.loadRouteConfig`); legacy single-receiver configs skip this path entirely. |
-| `receivers[].*_configs` **auto-provisioning delivery** | 🔴 Not implemented — control-plane only | **Read this before migrating.** AMP parses and validates every receiver's integration blocks, and routes alerts to a receiver *by name*, but it does NOT build delivery endpoints from them. Delivery targets come exclusively from Kubernetes Secrets scoped with the `amp.receiver` annotation/label (`internal/business/publishing/discovery_parse.go`). See [Receiver Integration Compatibility Matrix](#receiver-integration-compatibility-matrix) and the migration note there. |
+| `receivers[].*_configs` **auto-provisioning delivery** | 🟢 Supported (AMP-PARITY-WAVE6-EPIC) | An untouched upstream config delivers with **zero Kubernetes Secrets**: every `webhook_configs`/`slack_configs`/`pagerduty_configs`/`telegram_configs`/`email_configs` block becomes an in-memory publishing target named `cfg:<receiver>/<type><idx>`, scoped to its receiver, rebuilt on every config load/reload (`internal/business/publishing/config_targets.go`). Secrets still work and are unchanged — the two sources merge into one view. See [Receiver Integration Compatibility Matrix](#receiver-integration-compatibility-matrix) for the per-field fidelity table. |
 | Receiver-name charset | 🟢 Supported (one reserved character) | Any non-empty name except `/`, which is reserved as the group-key separator (`receiver=<name>/<group-key>`). Upstream has no restriction at all; dotted/colon/spaced/non-ASCII names (`team.dba`, `email:sre`, `ops team`) all work — they were rejected before the final fix wave. |
 | Route evaluation wired into ingest | 🟢 Supported | `internal/core/services/alert_processor.go` `evaluateRoute` calls `RouteEvaluator.Evaluate` per alert when configured; nil (no-op) in lite/legacy mode. |
 | Receiver-scoped delivery targets (`amp.receiver` annotation/label) | 🟢 Supported (AMP-native mechanism) | `internal/business/publishing/discovery_parse.go`: annotation = comma-separated list, label = single name fallback. Not an upstream concept — AMP's own target-discovery scoping, functionally equivalent. |
@@ -126,35 +126,81 @@ The endpoints below are still **not** implemented (explicitly out of scope for t
 
 ## Receiver Integration Compatibility Matrix
 
-### Read this first: control plane vs data plane
+### Read this first: two target sources, one view
 
-AMP's receiver parity splits in two, and conflating them is the single
-easiest way to mis-plan a migration:
+Since **AMP-PARITY-WAVE6-EPIC** (`FU-RECEIVERS-INTEGRATION`) receivers are a
+data plane, not only a control plane:
 
 - **Control plane — full parity.** `route:`, nested routes, matchers,
   `group_by`, `group_wait`/`group_interval`/`repeat_interval`,
   `mute_time_intervals`/`active_time_intervals`, `inhibit_rules:` and
-  receiver *names* behave as upstream does. Your routing tree decides which
-  **receiver name** an alert belongs to, exactly as upstream.
-- **Data plane — different mechanism.** Upstream builds a delivery endpoint
-  from each `receivers[].*_configs` block. **AMP does not.** No code path
-  constructs a `PublishingTarget` from `routing.Receiver`; targets are
-  discovered exclusively from Kubernetes Secrets, scoped to a receiver name
-  by the `amp.receiver` annotation (comma-separated list) or label (single
-  name) — `internal/business/publishing/discovery_parse.go`. The
-  `*_configs` blocks are **parsed and validated, but never
-  auto-provisioned**.
+  receiver *names* behave as upstream does.
+- **Data plane — two sources, merged.** Every integration block of every
+  receiver is auto-provisioned into a `core.PublishingTarget`
+  (`internal/business/publishing/config_targets.go`), and Kubernetes-Secret
+  targets keep working exactly as before
+  (`internal/business/publishing/discovery_parse.go`). Both land in the SAME
+  discovery view — `ListTargets`/`GetTarget`/`GetTargetsByType` return the
+  union — and the publishing layer is untouched by the change.
 
-> **Migration requirement.** Copying an upstream `alertmanager.yml` into AMP
-> gives you correct routing and **zero deliveries** until you create a
-> Kubernetes Secret per delivery endpoint, each carrying
-> `amp.receiver: <receiver-name>` matching the receiver names in your
-> `receivers:` list. Budget for this step explicitly — the config will
-> validate clean, start clean, and route clean without it.
+Config-provisioned targets:
 
-The "Runtime wired" column below therefore means: *when a Secret-sourced
-target of this type exists, the publishing factory has a working publisher
-for it* — **not** that the `*_configs` block provisions anything.
+| Property | Behaviour |
+|---|---|
+| Name | `cfg:<receiver>/<type><idx>` (e.g. `cfg:team-x/slack0`). The `cfg:` prefix cannot collide with a Secret-sourced target — those are DNS-1123 validated, so `:` and `/` are illegal there. No precedence rules exist because no collision can. |
+| Receiver scoping | Always exactly `[<receiver name>]`, by construction. An empty `Receivers` list still means "all receivers" and remains reserved for legacy unscoped Secrets. |
+| Lifecycle | In memory only, never written to Kubernetes. Rebuilt from scratch on every config load and on every reload whose routing fingerprint changed (a receivers-only edit counts) — the swap is atomic, so a reload never exposes a window with zero targets. |
+| Ordering | Deterministic: receivers in config order, and inside a receiver the types in the order webhook → slack → pagerduty → telegram → email, each in its own declared order. |
+| Observability | `alert_history_publishing_discovery_targets_total{type,enabled,source}` (`source="config"` vs `"k8s"`) plus `targets_by_source{...}`/`targets_config` on the publishing metrics collector. |
+| Profiles | Works in the **lite** profile too: with receiver integrations present, a lite deployment runs the real publishing stack in config-only mode (no K8s client, no Secret discovery, no periodic refresh). |
+
+> **Migration note.** Copying an upstream `alertmanager.yml` into AMP now
+> routes AND delivers. Kubernetes Secrets are no longer required; they are
+> still supported, still receiver-scoped via `amp.receiver`, and a Secret
+> without that annotation/label still receives everything (backward
+> compatibility). If you previously hand-created a Secret per integration,
+> you can delete it once the same endpoint is declared in `receivers:` — but
+> check for double delivery first: a `cfg:` target and an unscoped Secret
+> target both match the same receiver, so both will fire.
+
+### `global:` endpoint fallbacks
+
+Upstream lets an integration omit its endpoint and inherit it from `global:`;
+AMP resolves this at parse time, per-integration value always winning:
+
+| Global key | Fills in | Behaviour when neither is set |
+|---|---|---|
+| `global.slack_api_url` | `slack_configs[].api_url` | **Load error** naming both places |
+| `global.pagerduty_url` | `pagerduty_configs[].url` | Public Events API endpoint (`https://events.pagerduty.com`) |
+| `global.telegram_api_url` | `telegram_configs[].api_url` | Public Bot API base (`https://api.telegram.org`) |
+| `global.smtp_smarthost`, `global.smtp_from`, `global.smtp_auth_username`, `global.smtp_auth_password`, `global.smtp_require_tls` | the whole SMTP endpoint for `email_configs` | **Load error** — AMP models no per-`email_config` SMTP fields at all (see Known Gaps) |
+
+### `send_resolved`
+
+Supported per integration, upstream default `true`. `send_resolved: false`
+suppresses RESOLVED notifications for that target only: it is recorded as
+`filter_config.send_resolved` on the target and applied during target
+resolution in `PublishingCoordinator`, so a suppressed notification never
+enters the publishing queue at all (no job, no retry, no circuit-breaker
+effect). A group whose remaining alerts are all resolved reaches such a
+target as "nothing to send" — no error, and no notification-log entry, which
+is upstream's own `DedupStage` outcome. Kubernetes-Secret targets can use the
+same `filter_config` key.
+
+### Blackhole receivers
+
+A receiver with **no** integrations (upstream's classic `- name: 'null'`) is
+valid and drops everything routed to it: the notification is treated as sent
+(the group settles, no re-fire loop), counted as
+`alert_history_publishing_blackhole_drops_total{receiver}` and logged at
+Debug. A receiver whose ONLY integration is one AMP cannot deliver
+(`opsgenie_configs`, `victorops_configs`, `wechat_configs`) behaves the same
+way, and its unsupported blocks are named in a load-time WARNING. A route
+pointing at a receiver the config does not declare remains a loud error.
+
+`blackhole_drops_total` is a "is this receiver dropping" signal, not delivery
+volume: it counts once per alert on the non-grouped path and once per group
+fire (at most once per `repeat_interval` per group) on the grouped one.
 
 ### Matrix
 
@@ -193,6 +239,41 @@ this validation.
 | AWS SNS | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
 | Webex | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
 
+### Per-integration field fidelity
+
+Auto-provisioning maps every field the publisher layer actually consumes. The
+fields below are parsed and validated but **not** delivered — tracked as
+`FU-INTEGRATION-FIELD-FIDELITY` in `docs/06-planning/BACKLOG.md`, and the
+reason is the same for all of them: the enhanced publishers render their
+message entirely through the shared `AlertFormatter` and read nothing else off
+the target.
+
+| Integration | Mapped (delivered) | Parsed but NOT delivered |
+|---|---|---|
+| `webhook_configs` | `url`, `http_headers`, `send_resolved` | `http_method` (always POST), `max_alerts`, `http_config` |
+| `slack_configs` | `api_url`, `send_resolved` | `channel`, `username`, `icon_emoji`/`icon_url`, `title`, `title_link`, `pretext`, `text`, `fields`, `actions`, `color`, `short_fields`, `http_config` |
+| `pagerduty_configs` | `routing_key` (or legacy `service_key`), `url`, `send_resolved` | `severity`, `class`, `component`, `group`, `description`, `details`, `http_config` — severity/summary are derived from the alert itself |
+| `telegram_configs` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `send_resolved` | `parse_mode` (always the formatter's own), `message`, `http_config` |
+| `email_configs` | `to`, `from`, `subject`, `html`, `text`, `send_resolved` + the global SMTP settings | `headers`; upstream's per-`email_config` `smarthost`/`auth_*`/`require_tls` are not modelled at all |
+
+### Still NOT supported for receivers
+
+- **`*_file` secret variants** (`api_key_file`, `bot_token_file`,
+  `routing_key_file`, `auth_password_file`, …): not modelled by
+  `internal/infrastructure/routing`, so an upstream config using them loads
+  (the keys are dropped) and that integration provisions no credential. Use
+  the inline value or an env-substituted value for now.
+- **Per-integration `http_config`** (proxy, TLS, custom bearer/basic auth,
+  `follow_redirects`): parsed and validated, never applied — every publisher
+  uses its own HTTP client. In progress on the wave-7 tracks.
+- **Per-`email_config` SMTP settings**: see the fidelity table; only the
+  `global.smtp_*` block reaches the SMTP dialer, so two receivers cannot use
+  different SMTP servers. A config that sets SMTP per `email_config` and
+  nothing globally fails to load rather than silently sending nothing.
+- **`opsgenie_configs` / `victorops_configs` / `wechat_configs`**: config
+  accepted, no publisher — a receiver carrying only these behaves as a
+  blackhole and says so in a load-time WARNING.
+
 **Decision (Task 7.2)**: VictorOps and WeChat publishers are not built in
 this task. Their config types and validators (Phase 5) already exist and
 are kept as-is; wiring a runtime publisher is deferred until a concrete
@@ -207,12 +288,16 @@ tools (including Discord and Teams) integrate through the generic
 
 These are the sharp edges behind the 🟡/🔴 markers above — stated plainly rather than buried in a footnote:
 
-1. **`receivers[].*_configs` are not delivery endpoints.** This is the biggest single divergence from upstream and
-   it is a *design* difference, not a bug: AMP's data plane is Kubernetes-Secret-driven target discovery scoped by
-   the `amp.receiver` annotation/label, while the `*_configs` blocks are parsed and validated only. A migrated
-   `alertmanager.yml` routes correctly and delivers nothing until the matching Secrets exist. See
-   [Read this first: control plane vs data plane](#read-this-first-control-plane-vs-data-plane). Building
-   `PublishingTarget`s directly from `routing.Receiver` is a future epic, not a shipped feature.
+1. **`receivers[].*_configs` ARE delivery endpoints now — with field-level gaps.** Closed in
+   AMP-PARITY-WAVE6-EPIC (`FU-RECEIVERS-INTEGRATION`): every integration block auto-provisions a publishing
+   target, so a migrated `alertmanager.yml` delivers with zero Kubernetes Secrets, and Secret-sourced targets are
+   unchanged and merge into the same view. What is still NOT upstream-equal is *field* fidelity, not existence —
+   see [Per-integration field fidelity](#per-integration-field-fidelity) and
+   [Still NOT supported for receivers](#still-not-supported-for-receivers): Slack channel/title/color, PagerDuty
+   severity/class/details, Telegram `parse_mode`, per-integration `http_config` and all `*_file` secret variants
+   are parsed and validated but not delivered. Two other honest edges: a receiver declared in the config with no
+   deliverable integration silently drops (by design, counted), and if you keep an UNSCOPED legacy Secret target
+   while also declaring the same endpoint in `receivers:`, both fire — one notification each.
    *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
    group labels come from the matched route's `group_by` and the receiver is resolved per group from the live route
    tree. The remaining AMP-only behaviour there is the extra `?group_by=` query override.)*
@@ -430,17 +515,20 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
 ## Replacement Guidance
 
 AMP's **control plane** (routing, grouping, dispatch, silences, inhibition, time-based muting, config validation, HA
-clustering) mirrors upstream Alertmanager's mechanics, not just its API shape. Its **data plane** does not: delivery
-endpoints come from `amp.receiver`-scoped Kubernetes Secrets, never from `receivers[].*_configs`. AMP is therefore
-**not a config-level drop-in replacement** — it is a behaviour-level replacement that needs its delivery targets
-provisioned separately.
+clustering) mirrors upstream Alertmanager's mechanics, not just its API shape. Since AMP-PARITY-WAVE6-EPIC its
+**data plane** follows the config too: `receivers[].*_configs` auto-provision delivery endpoints, so a copied
+`alertmanager.yml` both routes and delivers. What is still not upstream-equal is per-integration FIELD fidelity
+(Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`, per-integration `http_config`,
+`*_file` secret variants) — see [Per-integration field fidelity](#per-integration-field-fidelity).
 
 Concretely, a migration is:
-1. Copy your `route:` / `receivers:` / `inhibit_rules:` / `time_intervals:` across — semantics carry over.
-2. Create one Kubernetes Secret per delivery endpoint, annotated
-   `amp.receiver: <receiver-name>` to match the receiver names you just copied. **Without step 2 nothing is
-   delivered**, and nothing in the config, the logs at startup, or the validator will tell you so.
-3. Re-verify the items in "Still validate" below.
+1. Copy your `route:` / `receivers:` / `inhibit_rules:` / `time_intervals:` / `global:` across — semantics carry
+   over, and the receivers' integrations become live delivery targets on load. No Kubernetes Secrets required.
+2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
+   formatting, PagerDuty categorisation, per-integration HTTP settings, `*_file` credentials).
+3. If you are migrating FROM an earlier AMP that used `amp.receiver`-scoped Secrets: those keep working, but an
+   endpoint declared in BOTH a Secret and `receivers:` now delivers twice. Delete the Secret, or scope it away.
+4. Re-verify the items in "Still validate" below.
 
 Treat AMP as a strong replacement candidate if you rely on:
 - Prometheus-style alert ingestion with a real `route:`/`receivers:` routing tree (grouping, timing, matchers, time
@@ -452,7 +540,8 @@ Treat AMP as a strong replacement candidate if you rely on:
 - standard health/readiness monitoring and hot configuration reload (`POST /-/reload` **and** `SIGHUP`)
 
 Still validate before a blanket swap:
-- that you have provisioned an `amp.receiver`-scoped Secret for every receiver you route to (step 2 above)
+- that every field you depend on inside a `*_configs` block is in the "Mapped (delivered)" column of the
+  field-fidelity table, not the "Parsed but NOT delivered" one
 - exact wire-level webhook payload shape if a downstream integration depends on upstream's single alerts-array POST
 - any receiver type not in the 🟢 rows of the receiver matrix above
 - receiver names containing `/` — the one character AMP reserves (group-key separator); rename them
