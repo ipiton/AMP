@@ -140,10 +140,39 @@ func BuildConfigTargets(rc *infraroute.RouteConfig, logger *slog.Logger) []*core
 		targets = append(targets, buildReceiverTargets(receiver, rc.Global, logger)...)
 	}
 
+	targets = dedupeTargetNames(targets, logger)
 	if len(targets) == 0 {
 		return nil
 	}
 	return targets
+}
+
+// dedupeTargetNames drops targets whose name was already produced and WARNs
+// about each one (slice-1 review finding I3).
+//
+// Names are derived from receiver name + integration kind + index, so the only
+// way to get a collision is two receivers sharing a NAME. The routing parser
+// now rejects that outright (upstream semantics), which makes this a
+// defence-in-depth layer rather than the primary fix: the target cache is keyed
+// by name, so without it a duplicate silently overwrites the earlier target and
+// one receiver's integrations never deliver — invisible in logs AND in the
+// target count. Any other entry point that builds a RouteConfig without going
+// through the parser gets the same protection, loudly.
+func dedupeTargetNames(targets []*core.PublishingTarget, logger *slog.Logger) []*core.PublishingTarget {
+	seen := make(map[string]struct{}, len(targets))
+	out := targets[:0]
+	for _, target := range targets {
+		if _, dup := seen[target.Name]; dup {
+			logger.Warn("Dropping config-provisioned publishing target with a duplicate name; check for duplicate receiver names",
+				"target", target.Name,
+				"receivers", target.Receivers,
+			)
+			continue
+		}
+		seen[target.Name] = struct{}{}
+		out = append(out, target)
+	}
+	return out
 }
 
 // buildReceiverTargets builds the targets for a single receiver.

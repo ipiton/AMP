@@ -220,9 +220,30 @@ func (p *RouteConfigParser) applyDefaults(config *RouteConfig) {
 func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 	var errors ValidationErrors
 
-	// Build receiver index (for reference checking)
+	// Build receiver index (for reference checking) and enforce name
+	// UNIQUENESS the way upstream Alertmanager does (slice-1 review finding I3
+	// of FU-RECEIVERS-INTEGRATION).
+	//
+	// Why it matters beyond upstream parity: this index is keyed by name, so a
+	// duplicate silently shadowed the earlier receiver's integrations, and
+	// config-provisioned publishing target names are derived from
+	// receiver name + integration kind + index — two receivers sharing a name
+	// therefore produce IDENTICAL target names, and the target cache (keyed by
+	// name) keeps only the last one. One receiver's integrations would never
+	// deliver, with nothing in the logs to say so.
 	receiverIndex := make(map[string]bool)
-	for _, receiver := range config.Receivers {
+	for i, receiver := range config.Receivers {
+		if receiver == nil {
+			continue
+		}
+		if receiverIndex[receiver.Name] {
+			errors.Add(
+				fmt.Sprintf("receivers[%d].name", i),
+				fmt.Sprintf("duplicate receiver name %q", receiver.Name),
+				"Receiver names must be unique - rename the duplicate (upstream Alertmanager rejects duplicates too)",
+			)
+			continue
+		}
 		receiverIndex[receiver.Name] = true
 	}
 

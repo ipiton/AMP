@@ -67,10 +67,18 @@ func (v *ReceiverValidator) Validate(_ context.Context, cfg *config.Alertmanager
 		}
 
 		if !v.hasAnyIntegration(r) {
-			result.AddError(newError(
-				"E024", "receivers", path,
-				fmt.Sprintf("receiver '%s' has no integrations configured", receiverLabel(r)),
-				"Add at least one of: webhook_configs, email_configs, slack_configs, pagerduty_configs, opsgenie_configs, wechat_configs, victorops_configs, telegram_configs",
+			// W024, not an error (FU-RECEIVERS-INTEGRATION slice-1 review
+			// finding I1): a receiver with no integrations is upstream
+			// Alertmanager's BLACKHOLE receiver — the classic
+			// `- name: 'null'` paired with a route that drops unwanted alerts
+			// there. Upstream accepts it, and internal/config blocks the load
+			// on E-codes only, so this used to fail an untouched upstream
+			// config outright. It stays a warning because it is also what an
+			// accidentally-empty receiver looks like.
+			result.AddWarning(newWarning(
+				"W024", "receivers", path,
+				fmt.Sprintf("receiver '%s' has no integrations configured; alerts routed here are dropped (blackhole receiver)", receiverLabel(r)),
+				"Intentional for a blackhole receiver; otherwise add one of: webhook_configs, email_configs, slack_configs, pagerduty_configs, telegram_configs",
 			))
 		}
 
