@@ -184,6 +184,25 @@ type HTTPConfig struct {
 	// Default: true
 	FollowRedirects *bool `yaml:"follow_redirects,omitempty"`
 
+	// inheritedFromGlobal records that this block is a CLONE of
+	// `global.http_config` rather than the integration's own declaration
+	// (set by ResolveHTTPConfigFallback).
+	//
+	// It exists for one decision only: the oauth2 provenance split (review I1).
+	// An `oauth2:` block the integration declared ITSELF is an explicit
+	// per-endpoint auth requirement, so that target fails closed. The same block
+	// INHERITED from `global:` must not blackhole integrations that never asked
+	// for OAuth2 — one global block would otherwise take down every webhook,
+	// Slack, Telegram and PagerDuty target in the process, most of which
+	// authenticate through their own URL/header credential and never needed
+	// OAuth2 at all.
+	//
+	// Deliberately UNEXPORTED: `gopkg.in/yaml.v3` and the struct validator both
+	// ignore unexported fields, so this cannot leak into /api/v2/status's
+	// rendered config or affect validation. Read it through
+	// InheritedFromGlobal().
+	inheritedFromGlobal bool
+
 	// ConnectTimeout specifies the maximum time to establish a connection
 	// Default: 10s
 	ConnectTimeout time.Duration `yaml:"connect_timeout,omitempty"`
@@ -211,9 +230,10 @@ func (h *HTTPConfig) Defaults() {
 // Clone creates a deep copy.
 func (h *HTTPConfig) Clone() *HTTPConfig {
 	clone := &HTTPConfig{
-		ProxyURL:       h.ProxyURL,
-		ConnectTimeout: h.ConnectTimeout,
-		RequestTimeout: h.RequestTimeout,
+		ProxyURL:            h.ProxyURL,
+		ConnectTimeout:      h.ConnectTimeout,
+		RequestTimeout:      h.RequestTimeout,
+		inheritedFromGlobal: h.inheritedFromGlobal,
 	}
 
 	if h.FollowRedirects != nil {
@@ -263,6 +283,23 @@ func (h *HTTPConfig) Sanitize() *HTTPConfig {
 		clone.OAuth2.ClientSecret = RedactedValue
 	}
 	return clone
+}
+
+// InheritedFromGlobal reports whether this block was inherited wholesale from
+// `global.http_config` rather than declared by the integration itself. See the
+// inheritedFromGlobal field for the one decision that depends on it.
+//
+// A nil receiver reports false: there is no block, so nothing was inherited.
+func (h *HTTPConfig) InheritedFromGlobal() bool {
+	return h != nil && h.inheritedFromGlobal
+}
+
+// markInheritedFromGlobal is the only way the flag is ever set — see
+// ResolveHTTPConfigFallback.
+func (h *HTTPConfig) markInheritedFromGlobal() {
+	if h != nil {
+		h.inheritedFromGlobal = true
+	}
 }
 
 // BasicAuth specifies HTTP Basic authentication credentials, mirroring

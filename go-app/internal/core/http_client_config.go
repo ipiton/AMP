@@ -3,7 +3,10 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 )
 
@@ -45,9 +48,18 @@ import (
 // config block present in YAML/JSON but carrying nothing).
 type HTTPClientConfig struct {
 	// ProxyURL is upstream's `http_config.proxy_url`: the proxy every request
-	// from this target goes through. Empty means the standard library's own
-	// environment-based proxy resolution (HTTP_PROXY/HTTPS_PROXY/NO_PROXY)
-	// applies, which is what upstream falls back to as well.
+	// from this target goes through. Setting it BYPASSES NO_PROXY — an explicit
+	// proxy is explicit, same as upstream.
+	//
+	// Empty means "do not change the publisher's own proxy behaviour", which is
+	// NOT the same as environment-based resolution (review M5, an earlier
+	// revision of this comment claimed it was): the webhook/Slack/Telegram/
+	// PagerDuty/Rootly base clients each build their own &http.Transport{} with
+	// Proxy left nil, i.e. NO proxy at all, because ProxyFromEnvironment is only
+	// the default of http.DefaultTransport. HTTP_PROXY/HTTPS_PROXY are therefore
+	// honoured only on the basic-publisher shape (nil transport ->
+	// DefaultTransport.Clone()). That inconsistency predates this type; set
+	// proxy_url explicitly rather than relying on the environment.
 	ProxyURL string `json:"proxy_url,omitempty"`
 
 	// TLSConfig is upstream's `http_config.tls_config`.
@@ -139,9 +151,13 @@ func (c *HTTPClientConfig) IsZero() bool {
 		c.FollowRedirects == nil
 }
 
-// Clone returns a deep copy. Used wherever a target is handed across a
-// boundary that may mutate it (config reload rebuilds, test fixtures), so two
-// targets can never share mutable HTTP config state.
+// Clone returns a deep copy, so two targets can never share mutable HTTP config
+// state across a boundary that may mutate one of them.
+//
+// Honesty note (review M4): the routing-layer clone
+// (routing.HTTPConfig.Clone, called by ResolveHTTPConfigFallback) is what
+// actually protects the config-reload path today. This one is provided for
+// consumers of the core type and is currently exercised only by tests.
 func (c *HTTPClientConfig) Clone() *HTTPClientConfig {
 	if c == nil {
 		return nil
@@ -183,9 +199,17 @@ func (c *HTTPClientConfig) Clone() *HTTPClientConfig {
 //
 // The digest covers the credential VALUES (two targets differing only by
 // password must not share a client) but is a SHA-256 hash, so the result is
-// safe to embed in a key that ends up in a log line or a metric label. Fields
-// are written with an explicit separator that cannot occur in any of them
-// (0x00) so no two distinct configs can serialise to the same byte stream.
+// safe to embed in a key that ends up in a log line or a metric label.
+//
+// Fields are LENGTH-PREFIXED, not delimited (review M1). A delimiter-based
+// encoding was not injective: a separator "that cannot occur in any of them"
+// does not exist, because NUL is expressible in both YAML ("\0") and JSON
+// ("\u0000"), and the K8s Secret path json.Unmarshals straight into this
+// struct. An operator could therefore author a proxy_url whose bytes replayed a
+// basic_auth block, making a proxy-only target and a proxy+basic-auth target
+// hash identically and share one client — credential bleed, exactly the failure
+// class this function exists to prevent. Length-prefixing makes the encoding
+// injective for every possible byte string, so no such collision exists.
 func (c *HTTPClientConfig) Fingerprint() string {
 	if c.IsZero() {
 		return ""
@@ -194,8 +218,10 @@ func (c *HTTPClientConfig) Fingerprint() string {
 	h := sha256.New()
 	writeField := func(values ...string) {
 		for _, v := range values {
+			// "<len>:<value>" — self-delimiting regardless of v's contents.
+			_, _ = io.WriteString(h, strconv.Itoa(len(v)))
+			_, _ = io.WriteString(h, ":")
 			_, _ = io.WriteString(h, v)
-			_, _ = h.Write([]byte{0})
 		}
 	}
 
@@ -229,6 +255,111 @@ func (c *HTTPClientConfig) Fingerprint() string {
 	}
 
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ErrHTTPConfigBothAuth mirrors upstream Alertmanager's own validation ("at
+// most one of basic_auth, oauth2 & authorization must be configured"). Applying
+// both would make the Authorization header depend on the order the client
+// builder happens to set it in, which is not a behaviour to guess at.
+var ErrHTTPConfigBothAuth = errors.New("http_config: at most one of basic_auth and authorization may be set")
+
+// Validate reports structural problems that can be detected WITHOUT touching
+// the filesystem, so both target sources can reject a bad `http_config` at
+// load/discovery time rather than on every publish job.
+//
+// WHY IT IS SEPARATE from the client builder's own checks (review M7 + M8): the
+// builder (infrastructure/publishing.applyHTTPClientConfig) runs per publisher
+// construction, i.e. per job. A config-file target with `basic_auth` AND
+// `authorization` therefore used to reload SUCCESSFULLY, look healthy, and then
+// fail every single alert — breaker open, DLQ filling — while upstream rejects
+// that combination at config load. A K8s Secret target had the same shape: its
+// `http_config` was json.Unmarshal'd in for free but validated nowhere, so an
+// invalid one passed discovery and failed forever after, instead of being
+// skipped once with a WARN like every other invalid Secret.
+//
+// File READABILITY is deliberately NOT checked here: the paths are usually
+// projected volumes that may legitimately not exist yet when a config is first
+// parsed, and re-reading them per job is the client builder's job anyway. The
+// builder still enforces everything below, so this is a fail-early layer, not a
+// replacement.
+//
+// A nil/zero receiver is valid.
+func (c *HTTPClientConfig) Validate() error {
+	if c.IsZero() {
+		return nil
+	}
+
+	if c.BasicAuth != nil && c.Authorization != nil {
+		return ErrHTTPConfigBothAuth
+	}
+
+	if c.ProxyURL != "" {
+		proxyURL, err := url.Parse(c.ProxyURL)
+		if err != nil {
+			return fmt.Errorf("http_config: invalid proxy_url: %w", err)
+		}
+		if proxyURL.Scheme == "" || proxyURL.Host == "" {
+			return fmt.Errorf("http_config: proxy_url %q must be an absolute URL with a scheme and host", c.ProxyURL)
+		}
+	}
+
+	if tlsCfg := c.TLSConfig; tlsCfg != nil {
+		// Both halves of a client certificate are required together; one alone
+		// silently produces a connection with no client certificate at all.
+		switch {
+		case tlsCfg.CertFile != "" && tlsCfg.KeyFile == "":
+			return errors.New("http_config: tls_config.cert_file is set without key_file")
+		case tlsCfg.KeyFile != "" && tlsCfg.CertFile == "":
+			return errors.New("http_config: tls_config.key_file is set without cert_file")
+		}
+	}
+
+	if authz := c.Authorization; authz != nil {
+		if authz.Credentials == "" && authz.CredentialsFile == "" {
+			// A scheme with no credential renders as a bare "Bearer", which no
+			// endpoint accepts.
+			return errors.New("http_config: authorization has neither credentials nor credentials_file")
+		}
+	}
+
+	return nil
+}
+
+// Normalize drops sub-blocks and defaulted values that carry no behaviour, in
+// place.
+//
+// WHY IT MATTERS (review M10): a non-nil sub-block makes IsZero() false, which
+// gives the target a non-empty Fingerprint(), which buys it a dedicated
+// *http.Client that behaves identically to the publisher's built-in one. So
+// `{"tls_config":{"insecure_skip_verify":false}}` in a K8s Secret — a perfectly
+// natural way to write "no, don't skip verification" — used to cost a whole
+// client and a cache entry for nothing. Same for an explicit
+// `follow_redirects: true`, which is already the default.
+//
+// Shared by both target sources so they normalise identically: the config
+// builder calls it via httpClientConfigFor, and the Secret path calls it from
+// applyDefaults.
+//
+// A nil receiver is a no-op.
+func (c *HTTPClientConfig) Normalize() {
+	if c == nil {
+		return
+	}
+
+	if c.TLSConfig != nil && *c.TLSConfig == (TLSClientConfig{}) {
+		c.TLSConfig = nil
+	}
+	if c.BasicAuth != nil && *c.BasicAuth == (BasicAuthConfig{}) {
+		c.BasicAuth = nil
+	}
+	if c.Authorization != nil && *c.Authorization == (AuthorizationConfig{}) {
+		c.Authorization = nil
+	}
+	// follow_redirects: true is the upstream default, so recording it explicitly
+	// only costs a dedicated client. false is meaningful and kept.
+	if c.FollowRedirects != nil && *c.FollowRedirects {
+		c.FollowRedirects = nil
+	}
 }
 
 // Redacted returns a deep copy with every credential replaced by

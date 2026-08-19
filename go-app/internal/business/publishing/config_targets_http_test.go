@@ -1,12 +1,18 @@
 package publishing
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // ============================================================================
@@ -34,7 +40,6 @@ func TestBuildConfigTargets_MapsPerIntegrationHTTPConfig(t *testing.T) {
 								ServerName: "hooks.internal",
 							},
 							BasicAuth:       &infraroute.BasicAuth{Username: "amp", Password: "pw"},
-							Authorization:   &infraroute.Authorization{Type: "Token", Credentials: "tok"},
 							FollowRedirects: followRedirects(false),
 						},
 					},
@@ -60,12 +65,93 @@ func TestBuildConfigTargets_MapsPerIntegrationHTTPConfig(t *testing.T) {
 	assert.Equal(t, "amp", hc.BasicAuth.Username)
 	assert.Equal(t, "pw", hc.BasicAuth.Password)
 
+	require.NotNil(t, hc.FollowRedirects)
+	assert.False(t, *hc.FollowRedirects)
+
+	// authorization is mutually exclusive with basic_auth (review M7), so it gets
+	// its own target rather than being stacked onto the one above.
+	assert.Nil(t, hc.Authorization)
+}
+
+// authorization maps the same way basic_auth does, on its own target.
+func TestBuildConfigTargets_MapsAuthorization(t *testing.T) {
+	rc := &infraroute.RouteConfig{
+		Receivers: []*infraroute.Receiver{
+			{
+				Name: "bearer",
+				WebhookConfigs: []*infraroute.WebhookConfig{
+					{
+						URL: "https://hooks.internal/alerts",
+						HTTPConfig: &infraroute.HTTPConfig{
+							Authorization: &infraroute.Authorization{Type: "Token", Credentials: "tok"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	targets := BuildConfigTargets(rc, quietLogger())
+	require.Len(t, targets, 1)
+
+	hc := targets[0].HTTPConfig
+	require.NotNil(t, hc)
 	require.NotNil(t, hc.Authorization)
 	assert.Equal(t, "Token", hc.Authorization.Type)
 	assert.Equal(t, "tok", hc.Authorization.Credentials)
+	assert.Nil(t, hc.BasicAuth)
+}
 
-	require.NotNil(t, hc.FollowRedirects)
-	assert.False(t, *hc.FollowRedirects)
+// Review M7: basic_auth AND authorization together used to reload fine and then
+// fail every publish job into the DLQ. Rejected at build time now, like upstream.
+func TestBuildConfigTargets_BothAuthMethodsSkipsTarget(t *testing.T) {
+	rc := &infraroute.RouteConfig{
+		Receivers: []*infraroute.Receiver{
+			{
+				Name: "ambiguous",
+				WebhookConfigs: []*infraroute.WebhookConfig{
+					{
+						URL: "https://hooks.internal/alerts",
+						HTTPConfig: &infraroute.HTTPConfig{
+							BasicAuth:     &infraroute.BasicAuth{Username: "amp", Password: "pw"},
+							Authorization: &infraroute.Authorization{Credentials: "tok"},
+						},
+					},
+				},
+				// A sibling integration with a clean config must still deliver:
+				// the skip is per integration, never per receiver.
+				SlackConfigs: []*infraroute.SlackConfig{{APIURL: "https://hooks.slack.com/services/a"}},
+			},
+		},
+	}
+
+	targets := BuildConfigTargets(rc, quietLogger())
+	require.Len(t, targets, 1, "the ambiguous-auth webhook must be skipped, its sibling must survive")
+	assert.Equal(t, ConfigTargetName("ambiguous", configKindSlack, 0), targets[0].Name)
+}
+
+// Review M7: half a client certificate pair and an unroutable proxy_url are
+// structural errors decidable without touching the filesystem, so they fail at
+// build time rather than on every job.
+func TestBuildConfigTargets_StructurallyInvalidHTTPConfigSkipsTarget(t *testing.T) {
+	for name, hc := range map[string]*infraroute.HTTPConfig{
+		"cert without key": {TLSConfig: &infraroute.TLSConfig{CertFile: "/c.pem"}},
+		"key without cert": {TLSConfig: &infraroute.TLSConfig{KeyFile: "/k.pem"}},
+		"proxy not a url":  {ProxyURL: "proxy.example:8080"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rc := &infraroute.RouteConfig{
+				Receivers: []*infraroute.Receiver{
+					{
+						Name:           "bad",
+						WebhookConfigs: []*infraroute.WebhookConfig{{URL: "https://hooks.internal/a", HTTPConfig: hc}},
+					},
+				},
+			}
+			assert.Empty(t, BuildConfigTargets(rc, quietLogger()),
+				"a structurally invalid http_config must skip the target at build time")
+		})
+	}
 }
 
 // Every HTTP-carrying integration kind must be wired, not just webhook.
@@ -251,22 +337,98 @@ func TestBuildConfigTargets_AuthorizationWithoutCredentialsIsDropped(t *testing.
 	assert.Nil(t, targets[0].HTTPConfig)
 }
 
-// oauth2 is unsupported. The target must still be built and deliver (without
-// OAuth2 credentials) rather than being dropped, and the rest of its
-// http_config must survive.
-func TestBuildConfigTargets_OAuth2IsIgnoredButTargetSurvives(t *testing.T) {
+// ============================================================================
+// Review I1: oauth2 provenance split
+// ============================================================================
+//
+// oauth2 is unsupported either way; what differs is the blast radius of
+// refusing. An OWN-block oauth2 is an explicit per-endpoint auth requirement, so
+// that target fails closed. A GLOBAL-inherited one must not blackhole
+// integrations that never asked for OAuth2 — global propagates wholesale, so one
+// block would otherwise take down every webhook/Slack/PagerDuty/Telegram target
+// in the process, most of which authenticate through their own credential.
+
+// Own-block oauth2 -> that target is skipped, loudly. Its siblings survive.
+func TestBuildConfigTargets_OwnBlockOAuth2SkipsTargetOnly(t *testing.T) {
 	rc := &infraroute.RouteConfig{
 		Receivers: []*infraroute.Receiver{
 			{
 				Name: "r",
 				WebhookConfigs: []*infraroute.WebhookConfig{
 					{
-						URL: "https://hooks.example.com/a",
+						URL: "https://hooks.example.com/oauth",
 						HTTPConfig: &infraroute.HTTPConfig{
 							ProxyURL: "http://proxy.corp:8080",
 							OAuth2:   &infraroute.OAuth2Config{ClientID: "id", TokenURL: "https://idp.example.com/token"},
 						},
 					},
+					// Clean sibling: the skip must be per integration.
+					{URL: "https://hooks.example.com/plain"},
+				},
+			},
+		},
+	}
+
+	targets := BuildConfigTargets(rc, quietLogger())
+	require.Len(t, targets, 1, "only the oauth2 integration may be skipped")
+	assert.Equal(t, ConfigTargetName("r", configKindWebhook, 1), targets[0].Name)
+	assert.Nil(t, targets[0].HTTPConfig)
+}
+
+// Global-inherited oauth2 -> every integration still DELIVERS (WARN + metric),
+// because refusing would be a process-wide notification outage.
+func TestBuildConfigTargets_GlobalOAuth2DeliversWithWarning(t *testing.T) {
+	rc := &infraroute.RouteConfig{
+		Global: &infraroute.GlobalConfig{
+			HTTPConfig: &infraroute.HTTPConfig{
+				ProxyURL: "http://proxy.corp:8080",
+				OAuth2:   &infraroute.OAuth2Config{ClientID: "id", TokenURL: "https://idp.example.com/token"},
+			},
+		},
+		Receivers: []*infraroute.Receiver{
+			{
+				Name:             "all",
+				WebhookConfigs:   []*infraroute.WebhookConfig{{URL: "https://hooks.example.com/a"}},
+				SlackConfigs:     []*infraroute.SlackConfig{{APIURL: "https://hooks.slack.com/services/a"}},
+				PagerDutyConfigs: []*infraroute.PagerDutyConfig{{RoutingKey: "rk"}},
+				TelegramConfigs:  []*infraroute.TelegramConfig{{BotToken: "bt", ChatID: "1"}},
+			},
+		},
+	}
+
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	targets := BuildConfigTargets(rc, logger)
+	require.Len(t, targets, 4,
+		"one global oauth2 block must NOT blackhole every integration in the process")
+
+	for _, target := range targets {
+		require.NotNil(t, target.HTTPConfig, "target %s", target.Name)
+		assert.Equal(t, "http://proxy.corp:8080", target.HTTPConfig.ProxyURL,
+			"the supported half of the inherited block must still apply")
+	}
+
+	out := logged.String()
+	assert.Contains(t, out, "oauth2", "the ignored block must be named in a WARN")
+	assert.Contains(t, out, "WITHOUT OAuth2 credentials",
+		"the WARN must state the consequence, not just the field name")
+	assert.Equal(t, 4, strings.Count(out, "level=WARN"),
+		"one WARN per affected integration, at config load only — not per alert")
+}
+
+// An integration that sets its OWN http_config overrides global wholesale, so it
+// does not inherit global's oauth2 and must not be skipped for it.
+func TestBuildConfigTargets_OwnBlockEscapesGlobalOAuth2(t *testing.T) {
+	rc := &infraroute.RouteConfig{
+		Global: &infraroute.GlobalConfig{
+			HTTPConfig: &infraroute.HTTPConfig{OAuth2: &infraroute.OAuth2Config{ClientID: "id"}},
+		},
+		Receivers: []*infraroute.Receiver{
+			{
+				Name: "r",
+				WebhookConfigs: []*infraroute.WebhookConfig{
+					{URL: "https://hooks.example.com/a", HTTPConfig: &infraroute.HTTPConfig{ProxyURL: "http://own:3128"}},
 				},
 			},
 		},
@@ -275,7 +437,62 @@ func TestBuildConfigTargets_OAuth2IsIgnoredButTargetSurvives(t *testing.T) {
 	targets := BuildConfigTargets(rc, quietLogger())
 	require.Len(t, targets, 1)
 	require.NotNil(t, targets[0].HTTPConfig)
+	assert.Equal(t, "http://own:3128", targets[0].HTTPConfig.ProxyURL)
+}
+
+// Provenance must survive the PARSED path too, where resolution has already
+// erased the structural difference between own and inherited.
+func TestBuildConfigTargets_GlobalOAuth2ThroughParserStillDelivers(t *testing.T) {
+	yamlDoc := `
+global:
+  http_config:
+    proxy_url: http://proxy.corp:8080
+    oauth2:
+      client_id: amp
+      token_url: https://idp.example.com/token
+route:
+  receiver: team
+receivers:
+  - name: team
+    webhook_configs:
+      - url: https://hooks.example.com/alerts
+`
+	cfg, err := infraroute.NewRouteConfigParser().Parse([]byte(yamlDoc))
+	require.NoError(t, err)
+
+	parsed := cfg.Receivers[0].WebhookConfigs[0].HTTPConfig
+	require.NotNil(t, parsed, "the parser resolves global.http_config into the integration")
+	require.NotNil(t, parsed.OAuth2)
+	require.True(t, parsed.InheritedFromGlobal(),
+		"the resolved clone must remember it came from global, or the split collapses")
+
+	targets := BuildConfigTargets(cfg, quietLogger())
+	require.Len(t, targets, 1, "a parsed global oauth2 must not blackhole the integration")
+	require.NotNil(t, targets[0].HTTPConfig)
 	assert.Equal(t, "http://proxy.corp:8080", targets[0].HTTPConfig.ProxyURL)
+}
+
+// Own-block oauth2 through the parser must still be skipped: the parser leaves
+// an integration's own block untagged.
+func TestBuildConfigTargets_OwnOAuth2ThroughParserSkipsTarget(t *testing.T) {
+	yamlDoc := `
+route:
+  receiver: team
+receivers:
+  - name: team
+    webhook_configs:
+      - url: https://hooks.example.com/alerts
+        http_config:
+          oauth2:
+            client_id: amp
+            token_url: https://idp.example.com/token
+`
+	cfg, err := infraroute.NewRouteConfigParser().Parse([]byte(yamlDoc))
+	require.NoError(t, err)
+	require.False(t, cfg.Receivers[0].WebhookConfigs[0].HTTPConfig.InheritedFromGlobal())
+
+	assert.Empty(t, BuildConfigTargets(cfg, quietLogger()),
+		"an integration that declares oauth2 itself must fail closed")
 }
 
 // email_configs have no HTTP transport at all (SMTP), so they must never
@@ -326,4 +543,34 @@ func TestBuildConfigTargets_FingerprintGroupsAndSeparates(t *testing.T) {
 		"two integrations inheriting the same global http_config must share one cached client")
 	assert.NotEqual(t, targets[0].HTTPConfig.Fingerprint(), targets[2].HTTPConfig.Fingerprint(),
 		"a different proxy must produce a different client")
+}
+
+// The WARN fires once per config load and is then invisible for the life of the
+// process, so the durable signal is the counter (review I1).
+func TestBuildConfigTargets_GlobalOAuth2IncrementsMetric(t *testing.T) {
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
+	targetName := ConfigTargetName("all", configKindWebhook, 0)
+
+	before := testutil.ToFloat64(metrics.UnsupportedHTTPConfigCounter("oauth2", targetName))
+	metrics.RecordUnsupportedHTTPConfig("oauth2", targetName)
+	after := testutil.ToFloat64(metrics.UnsupportedHTTPConfigCounter("oauth2", targetName))
+
+	assert.Equal(t, before+1, after,
+		"an ignored oauth2 block must be observable after the load-time WARN has scrolled away")
+}
+
+// The metric must be labelled with the config TARGET name, so an operator can
+// tell WHICH integration is sending unauthenticated requests.
+func TestBuildConfigTargets_OAuth2MetricIsPerTarget(t *testing.T) {
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
+
+	first := ConfigTargetName("all", configKindWebhook, 0)
+	second := ConfigTargetName("all", configKindSlack, 0)
+
+	metrics.RecordUnsupportedHTTPConfig("oauth2", first)
+	metrics.RecordUnsupportedHTTPConfig("oauth2", first)
+	metrics.RecordUnsupportedHTTPConfig("oauth2", second)
+
+	assert.InDelta(t, 2.0, testutil.ToFloat64(metrics.UnsupportedHTTPConfigCounter("oauth2", first)), 0.001)
+	assert.InDelta(t, 1.0, testutil.ToFloat64(metrics.UnsupportedHTTPConfigCounter("oauth2", second)), 0.001)
 }

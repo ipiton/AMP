@@ -242,3 +242,166 @@ func TestPublishingTarget_HTTPConfigAbsentStaysNil(t *testing.T) {
 	assert.Nil(t, target.HTTPConfig)
 	assert.True(t, target.HTTPConfig.IsZero())
 }
+
+// ============================================================================
+// Review M1: the fingerprint encoding must be injective for ALL byte strings
+// ============================================================================
+//
+// The previous encoding delimited fields with NUL and claimed that byte "cannot
+// occur in any of them". It can: YAML and JSON can both express a NUL escape,
+// and the K8s Secret path json.Unmarshals straight into this struct. An operator
+// could therefore author a proxy_url whose bytes replayed a basic_auth block,
+// collapsing two distinct configs onto one cached client - credential bleed.
+func TestHTTPClientConfig_Fingerprint_NULInjectionDoesNotCollide(t *testing.T) {
+	const nul = "\x00"
+
+	// The reviewer's constructed collision: a proxy-only config whose proxy_url
+	// replays a basic_auth block, versus a genuine proxy+basic_auth config.
+	replayed := &HTTPClientConfig{ProxyURL: "x" + nul + "basic" + nul + "user" + nul + "pass" + nul}
+	genuine := &HTTPClientConfig{
+		ProxyURL:  "x",
+		BasicAuth: &BasicAuthConfig{Username: "user", Password: "pass"},
+	}
+
+	assert.NotEqual(t, replayed.Fingerprint(), genuine.Fingerprint(),
+		"a NUL-bearing proxy_url must not be able to impersonate a basic_auth block")
+}
+
+// Length-prefixing must survive NUL anywhere in any field, not just the one
+// constructed case above.
+func TestHTTPClientConfig_Fingerprint_NULAnywhereStaysDistinct(t *testing.T) {
+	const nul = "\x00"
+
+	seen := map[string]string{}
+	for name, cfg := range map[string]*HTTPClientConfig{
+		"nul in username":    {BasicAuth: &BasicAuthConfig{Username: "a" + nul + "b", Password: "c"}},
+		"nul shifted":        {BasicAuth: &BasicAuthConfig{Username: "a", Password: nul + "bc"}},
+		"nul in proxy":       {ProxyURL: "http://p" + nul + "q"},
+		"nul in credentials": {Authorization: &AuthorizationConfig{Credentials: "t" + nul + "u"}},
+		"trailing nul":       {Authorization: &AuthorizationConfig{Credentials: "tu" + nul}},
+	} {
+		fp := cfg.Fingerprint()
+		if owner, dup := seen[fp]; dup {
+			t.Errorf("fingerprint collision between %q and %q", name, owner)
+		}
+		seen[fp] = name
+	}
+}
+
+// ============================================================================
+// Review M7 + M8: Validate() - structural checks decidable without the filesystem
+// ============================================================================
+
+func TestHTTPClientConfig_Validate_AcceptsValidAndZero(t *testing.T) {
+	var nilCfg *HTTPClientConfig
+	require.NoError(t, nilCfg.Validate())
+	require.NoError(t, (&HTTPClientConfig{}).Validate())
+
+	require.NoError(t, (&HTTPClientConfig{
+		ProxyURL:      "http://proxy.corp:8080",
+		TLSConfig:     &TLSClientConfig{CAFile: "/ca.pem", CertFile: "/c.pem", KeyFile: "/k.pem", ServerName: "x"},
+		Authorization: &AuthorizationConfig{Credentials: "tok"},
+	}).Validate())
+
+	// ca_file alone, with no client-certificate pair, is valid.
+	require.NoError(t, (&HTTPClientConfig{TLSConfig: &TLSClientConfig{CAFile: "/ca.pem"}}).Validate())
+
+	// A credential from a FILE is a credential.
+	require.NoError(t, (&HTTPClientConfig{
+		Authorization: &AuthorizationConfig{CredentialsFile: "/cred"},
+	}).Validate())
+}
+
+func TestHTTPClientConfig_Validate_RejectsBothAuthMethods(t *testing.T) {
+	err := (&HTTPClientConfig{
+		BasicAuth:     &BasicAuthConfig{Username: "u", Password: "p"},
+		Authorization: &AuthorizationConfig{Credentials: "t"},
+	}).Validate()
+	require.ErrorIs(t, err, ErrHTTPConfigBothAuth)
+}
+
+func TestHTTPClientConfig_Validate_RejectsStructuralErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg  *HTTPClientConfig
+		want string
+	}{
+		"cert without key": {
+			cfg:  &HTTPClientConfig{TLSConfig: &TLSClientConfig{CertFile: "/c.pem"}},
+			want: "key_file",
+		},
+		"key without cert": {
+			cfg:  &HTTPClientConfig{TLSConfig: &TLSClientConfig{KeyFile: "/k.pem"}},
+			want: "cert_file",
+		},
+		"proxy not absolute": {
+			cfg:  &HTTPClientConfig{ProxyURL: "proxy.example:8080"},
+			want: "proxy_url",
+		},
+		"proxy unparseable": {
+			cfg:  &HTTPClientConfig{ProxyURL: "http://[::1"},
+			want: "proxy_url",
+		},
+		"authorization without credential": {
+			cfg:  &HTTPClientConfig{Authorization: &AuthorizationConfig{Type: "Bearer"}},
+			want: "authorization",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tc.cfg.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// File readability is deliberately NOT checked: a projected volume may not exist
+// yet when a config is first parsed, and the client builder enforces it anyway.
+func TestHTTPClientConfig_Validate_IgnoresFileExistence(t *testing.T) {
+	require.NoError(t, (&HTTPClientConfig{
+		TLSConfig: &TLSClientConfig{CAFile: "/definitely/not/here.pem"},
+		BasicAuth: &BasicAuthConfig{Username: "u", PasswordFile: "/definitely/not/here"},
+	}).Validate())
+}
+
+// ============================================================================
+// Review M10: Normalize() - no behaviour-free config may buy a dedicated client
+// ============================================================================
+
+func TestHTTPClientConfig_Normalize_DropsBehaviourFreeBlocks(t *testing.T) {
+	cfg := &HTTPClientConfig{
+		TLSConfig:       &TLSClientConfig{},     // e.g. {"insecure_skip_verify": false}
+		BasicAuth:       &BasicAuthConfig{},     // e.g. {}
+		Authorization:   &AuthorizationConfig{}, // e.g. {}
+		FollowRedirects: boolPtr(true),          // already the default
+	}
+
+	cfg.Normalize()
+
+	assert.Nil(t, cfg.TLSConfig)
+	assert.Nil(t, cfg.BasicAuth)
+	assert.Nil(t, cfg.Authorization)
+	assert.Nil(t, cfg.FollowRedirects)
+	assert.True(t, cfg.IsZero(), "a behaviour-free http_config must not buy a dedicated *http.Client")
+	assert.Empty(t, cfg.Fingerprint(), "and must not change any cache key")
+}
+
+func TestHTTPClientConfig_Normalize_KeepsMeaningfulValues(t *testing.T) {
+	cfg := &HTTPClientConfig{
+		ProxyURL:        "http://proxy:8080",
+		TLSConfig:       &TLSClientConfig{InsecureSkipVerify: true},
+		BasicAuth:       &BasicAuthConfig{Username: "u"},
+		FollowRedirects: boolPtr(false),
+	}
+
+	cfg.Normalize()
+
+	assert.Equal(t, "http://proxy:8080", cfg.ProxyURL)
+	require.NotNil(t, cfg.TLSConfig)
+	assert.True(t, cfg.TLSConfig.InsecureSkipVerify)
+	require.NotNil(t, cfg.BasicAuth)
+	require.NotNil(t, cfg.FollowRedirects)
+	assert.False(t, *cfg.FollowRedirects, "follow_redirects: false is meaningful and must survive")
+
+	var nilCfg *HTTPClientConfig
+	nilCfg.Normalize() // must not panic
+}
