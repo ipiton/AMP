@@ -512,7 +512,10 @@ func (l *RedisNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey Gro
 	l.logger.Debug("Recorded per-alert delivered state",
 		"group_key", groupKey,
 		"target", target,
-		"alerts_recorded", result,
+		// re-review, finding r6: this is the script's HLEN return, i.e. the
+		// resulting size of the whole hash after this write, not a count of
+		// what THIS call recorded — "alerts_recorded" mislabeled it.
+		"resulting_alert_count", result,
 		"ttl", ttl)
 	return nil
 }
