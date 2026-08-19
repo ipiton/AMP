@@ -1457,7 +1457,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	if len(outcomes) == 0 {
 		// Nothing NEW happened this fire: either every candidate target for
 		// this receiver was already covered by an earlier send this cycle
-		// (skipTarget returned true for all of them — the common steady-
+		// (targetAlerts returned no alerts for all of them — the common steady-
 		// state case once every target has succeeded) or the publisher had
 		// no targets to report on. Neither is an error worth logging loudly.
 		m.logger.Debug("group notification produced no new target outcomes (fully deduped this cycle, or no targets)",
@@ -1524,7 +1524,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		// happened. A webhook 500, an exhausted retry budget, an open
 		// circuit breaker, metrics-only mode, or a confirmation wait that
 		// expired all arrive as Success == false, get NO entry, and are
-		// therefore retried by skipTarget on this group's next scheduled
+		// therefore retried by targetAlerts on this group's next scheduled
 		// fire (group_interval) instead of being suppressed for a whole
 		// repeat_interval. That closes the "RecordSent == enqueue
 		// confirmation" gap task fwb narrowed but could not fix.
@@ -1572,7 +1572,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 
 	if !allSucceeded {
 		// Partial failure (task fwb): the targets that succeeded were
-		// already recorded above, so the NEXT fire's skipTarget will skip
+		// already recorded above, so the NEXT fire's targetAlerts will skip
 		// them and retry only the ones still missing an entry. Deliberately
 		// do NOT prune resolved alerts yet — a target that hasn't confirmed
 		// delivery still needs to see them in the next attempt.
