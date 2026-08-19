@@ -641,6 +641,15 @@ func loadRouteConfig(configPath string, cfg *Config) error {
 		return fmt.Errorf("invalid route/receivers configuration: %w", err)
 	}
 
+	// Notification templates (`templates:`) are loaded through the real engine
+	// here so a malformed template file fails the config load with a message
+	// naming file and line, instead of degrading a 03:00 notification to the
+	// fixed formatter with only a log line to explain it. See
+	// templating_validation.go.
+	if err := validateTemplateGlobs(parsed); err != nil {
+		return err
+	}
+
 	cfg.Routing = parsed
 	return nil
 }
