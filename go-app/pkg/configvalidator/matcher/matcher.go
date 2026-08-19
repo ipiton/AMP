@@ -122,6 +122,19 @@ var matcherOperatorTypes = map[string]MatcherType{
 	"!~": MatchNotRegexp,
 }
 
+// The unescaping loop in unquoteMatcherValue below is a verbatim port of
+// ParseMatcher's value-unescaping logic from
+// github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go:
+//
+//	Copyright 2018 Prometheus Team
+//	Licensed under the Apache License, Version 2 point 0 (see the upstream
+//	file's header for the full notice and the license URL); provided
+//	"AS IS", without warranties or conditions of any kind.
+//
+// (fix-round 2, Minor #6: the port named the upstream file but originally
+// carried no attribution — Apache-2.0 section 4 asks for the notice to be
+// retained in derivative works.)
+
 // unquoteMatcherValue applies prometheus/alertmanager's pkg/labels matcher
 // value grammar verbatim — ported from ParseMatcher in
 // github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go, the
@@ -277,18 +290,14 @@ func Parse(matcher string) (*Matcher, error) {
 		}
 	}
 
-	// Validate value. Checked on rawValue (before quote-stripping) so an
-	// explicit empty quoted value (label="") — legitimate upstream syntax
-	// for "label absent or empty" — is not rejected just because it
-	// unquotes to "": only truly nothing-after-the-operator (label=) is a
-	// syntax error (task fu5-cfg item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
-	if rawValue == "" {
-		return nil, &ParseError{
-			Matcher:    matcher,
-			Message:    "value is empty",
-			Suggestion: "Provide a value after operator",
-		}
-	}
+	// Value may be empty — both an explicit empty quoted value (label="")
+	// and truly nothing after the operator (label=) are legitimate
+	// upstream syntax ("The 3rd token may be the empty string" — ParseMatcher's
+	// own doc comment) and business/routing.parseMatcherExpr already
+	// accepted both. A round-1 guard rejected label= here specifically,
+	// contradicting both parsers' "verbatim upstream grammar" claim;
+	// dropped in the fix-round-2 pass (Minor #5) rather than kept as a
+	// silent, undocumented deviation.
 	value, err := unquoteMatcherValue(rawValue)
 	if err != nil {
 		return nil, &ParseError{

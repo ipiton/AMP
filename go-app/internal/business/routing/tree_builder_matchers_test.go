@@ -113,6 +113,17 @@ func TestParseMatcherExpr(t *testing.T) {
 			want:   Matcher{Name: "label", Value: ""},
 			wantOK: true,
 		},
+		{
+			// fix-round 2, Minor #5: upstream accepts an empty value
+			// outright ("The 3rd token may be the empty string"), and this
+			// parser always did too — mirrored in
+			// pkg/configvalidator/matcher's table after that parser's own
+			// round-1 guard against this exact case was found to diverge.
+			name:   "empty value (nothing after operator) is accepted, matching upstream",
+			expr:   "label=",
+			want:   Matcher{Name: "label", Value: ""},
+			wantOK: true,
+		},
 		// fix-round finding I-3: the four verified divergences vs upstream
 		// pkg/labels, now aligned. See matcher_test.go's mirrored table.
 		{

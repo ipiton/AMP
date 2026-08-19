@@ -483,23 +483,191 @@ func TestStorageManager_Store_ConnectivityErrorDegradesImmediately(t *testing.T)
 	require.Equal(t, "fallback", sm.GetCurrentStorage())
 }
 
+// TestIsConnectivityError covers fix-round 2 finding I-6: a
+// context.Canceled/DeadlineExceeded error only counts as connectivity when
+// the CALLER's own ctx is still live — i.e. some other, Redis-call-scoped
+// deadline fired. A caller whose own context is already done (a
+// disconnected client, a client-side timeout) must not look like a Redis
+// outage.
 func TestIsConnectivityError(t *testing.T) {
+	liveCtx := context.Background()
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	expiredCtx, expiredCancel := context.WithTimeout(context.Background(), -time.Second)
+	defer expiredCancel()
+
 	cases := []struct {
 		name string
+		ctx  context.Context
 		err  error
 		want bool
 	}{
-		{"nil", nil, false},
-		{"version mismatch", NewVersionMismatchError("g", 1, 2), false},
-		{"context deadline exceeded", context.DeadlineExceeded, true},
-		{"context canceled", context.Canceled, true},
-		{"wrapped connection refused text", fmt.Errorf("redis transaction: %w", errors.New("dial tcp 127.0.0.1:6379: connect: connection refused")), true},
-		{"EOF text", errors.New("EOF"), true},
-		{"unrecognized storage error", NewStorageError("store", errors.New("weird encoding issue")), false},
+		{"nil error", liveCtx, nil, false},
+		{"version mismatch", liveCtx, NewVersionMismatchError("g", 1, 2), false},
+		{
+			name: "context deadline exceeded, caller ctx still live -> a Redis-scoped deadline fired (I-6)",
+			ctx:  liveCtx, err: context.DeadlineExceeded, want: true,
+		},
+		{
+			name: "context canceled, caller ctx still live -> some OTHER context died (I-6)",
+			ctx:  liveCtx, err: context.Canceled, want: true,
+		},
+		{
+			name: "context canceled, but it's the CALLER's own ctx that's canceled -> not a Redis problem (I-6)",
+			ctx:  cancelledCtx, err: context.Canceled, want: false,
+		},
+		{
+			name: "context deadline exceeded, but it's the CALLER's own ctx that expired -> not a Redis problem (I-6)",
+			ctx:  expiredCtx, err: context.DeadlineExceeded, want: false,
+		},
+		{"wrapped connection refused text", liveCtx, fmt.Errorf("redis transaction: %w", errors.New("dial tcp 127.0.0.1:6379: connect: connection refused")), true},
+		{"EOF text", liveCtx, errors.New("EOF"), true},
+		{"unrecognized storage error", liveCtx, NewStorageError("store", errors.New("weird encoding issue")), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, isConnectivityError(tc.err))
+			require.Equal(t, tc.want, isConnectivityError(tc.ctx, tc.err))
 		})
 	}
+}
+
+// TestStorageManager_Store_CancelledCallerContextDoesNotDegrade is the
+// end-to-end (real Store call, not just isConnectivityError in isolation)
+// regression test for fix-round 2 finding I-6.
+func TestStorageManager_Store_CancelledCallerContextDoesNotDegrade(t *testing.T) {
+	fakePrimary := &fakeStoreErrStorage{
+		GroupStorage: NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		storeErr:     context.Canceled,
+	}
+	sm := NewStorageManager(StorageManagerConfig{
+		Primary:             fakePrimary,
+		Fallback:            NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		Logger:              slog.Default(),
+		HealthCheckInterval: time.Hour,
+	})
+	t.Cleanup(sm.Stop)
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := sm.Store(cancelledCtx, &AlertGroup{Key: "g1", Metadata: &GroupMetadata{}})
+	require.Error(t, err, "a cancelled caller context must surface as an error, not be silently absorbed by a fallback retry")
+	require.Equal(t, "primary", sm.GetCurrentStorage(), "a cancelled CALLER context must not degrade the storage layer")
+}
+
+// TestStorageManager_Store_RedisScopedDeadlineWithLiveCallerContextDegrades
+// is the companion case: a live caller context but a DeadlineExceeded from
+// some OTHER (Redis-call-scoped) context is a genuine connectivity signal
+// and must still degrade.
+func TestStorageManager_Store_RedisScopedDeadlineWithLiveCallerContextDegrades(t *testing.T) {
+	fakePrimary := &fakeStoreErrStorage{
+		GroupStorage: NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		storeErr:     fmt.Errorf("redis call: %w", context.DeadlineExceeded),
+	}
+	sm := NewStorageManager(StorageManagerConfig{
+		Primary:             fakePrimary,
+		Fallback:            NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		Logger:              slog.Default(),
+		HealthCheckInterval: time.Hour,
+	})
+	t.Cleanup(sm.Stop)
+
+	err := sm.Store(context.Background(), &AlertGroup{Key: "g1", Metadata: &GroupMetadata{}})
+	require.NoError(t, err, "must succeed via the fallback: a Redis-scoped deadline with a still-live caller ctx is a genuine connectivity signal")
+	require.Equal(t, "fallback", sm.GetCurrentStorage())
+}
+
+// groupWithAlertCount builds a minimal *AlertGroup with n distinguishable
+// alerts, for tests that need to tell "which generation of this GroupKey
+// is this" apart by a simple count rather than deep-inspecting content.
+func groupWithAlertCount(key GroupKey, n int) *AlertGroup {
+	alerts := make(map[string]*core.Alert, n)
+	for i := 0; i < n; i++ {
+		fp := fmt.Sprintf("fp%d", i)
+		alerts[fp] = createTestAlert(fp, core.StatusFiring, map[string]string{"alertname": fp})
+	}
+	return &AlertGroup{Key: key, Alerts: alerts, Metadata: &GroupMetadata{}}
+}
+
+// TestStorageManager_TwoOutages_SecondOutageDoesNotSeeOrOverwriteFirstOutageData
+// is the fix-round 2 finding C-1 regression test: the fallback used to
+// never be pruned after a successful reconcile, so a SECOND outage could
+// (1) serve a degraded Load from the FIRST outage's leftover, and (2)
+// write that leftover back over fresh Redis state on its own recovery.
+func TestStorageManager_TwoOutages_SecondOutageDoesNotSeeOrOverwriteFirstOutageData(t *testing.T) {
+	h := newTestStorageManagerHarness(t)
+	ctx := context.Background()
+
+	// Outage 1: g1 is written with 1 alert while degraded.
+	h.mr.Close()
+	waitForCondition(t, 2*time.Second, func() bool { return h.sm.GetCurrentStorage() == "fallback" })
+	require.NoError(t, h.sm.Store(ctx, groupWithAlertCount("g1", 1)))
+
+	// Recover from outage 1: write-through carries g1 (1 alert) into
+	// primary and — the fix under test — prunes it from the fallback.
+	require.NoError(t, h.mr.Restart())
+	waitForCondition(t, 2*time.Second, func() bool { return h.sm.GetCurrentStorage() == "primary" })
+
+	// While healthy: g1 legitimately moves on to a fresh generation with
+	// 42 alerts. Version is aligned to primary's current value first,
+	// exactly like the real DefaultGroupManager's Load-then-mutate-then-
+	// Store, so the optimistic-lock check lines up.
+	fresh := groupWithAlertCount("g1", 42)
+	fresh.Version = mustLoadVersion(t, h.sm, ctx, "g1")
+	require.NoError(t, h.sm.Store(ctx, fresh))
+
+	// Outage 2: unrelated to g1 this time — nothing touches it.
+	h.mr.Close()
+	waitForCondition(t, 2*time.Second, func() bool { return h.sm.GetCurrentStorage() == "fallback" })
+
+	// DEFECT (C-1): a degraded Load must not resurrect outage-1's leftover.
+	_, err := h.sm.Load(ctx, "g1")
+	require.Error(t, err, "the fallback must be empty for g1 entering outage 2 — a degraded Load must not return outage-1's pruned leftover")
+
+	// Recover from outage 2.
+	require.NoError(t, h.mr.Restart())
+	waitForCondition(t, 2*time.Second, func() bool { return h.sm.GetCurrentStorage() == "primary" })
+
+	// DEFECT (C-1): outage 2's write-through must not have had outage-1's
+	// leftover to write, so the fresh 42-alert generation must survive.
+	got, err := h.sm.Load(ctx, "g1")
+	require.NoError(t, err)
+	require.Len(t, got.Alerts, 42, "outage 2's reconcile must not overwrite the fresh Redis state with outage-1's stale leftover")
+}
+
+// mustLoadVersion is a small test helper: Load g1 and return its current
+// Version, so a test can build a "next generation" object that keeps
+// RedisGroupStorage's optimistic-lock check happy.
+func mustLoadVersion(t *testing.T, sm *StorageManager, ctx context.Context, key GroupKey) int64 {
+	t.Helper()
+	g, err := sm.Load(ctx, key)
+	require.NoError(t, err)
+	return g.Version
+}
+
+// TestStorageManager_RecoveryDeleteThenRecreateDuringSameOutage_GroupSurvives
+// is the fix-round 2 finding I-5 regression test: a group deleted and then
+// re-created under the SAME key during one outage used to be deleted from
+// primary on recovery, because the deletion replay ran AFTER the
+// write-through and nothing removed the stale "still deleted" entry.
+func TestStorageManager_RecoveryDeleteThenRecreateDuringSameOutage_GroupSurvives(t *testing.T) {
+	h := newTestStorageManagerHarness(t)
+	ctx := context.Background()
+
+	require.NoError(t, h.sm.Store(ctx, groupWithAlertCount("g1", 1)), "seed a pre-outage copy in primary")
+
+	h.mr.Close()
+	waitForCondition(t, 2*time.Second, func() bool { return h.sm.GetCurrentStorage() == "fallback" })
+
+	require.NoError(t, h.sm.Delete(ctx, "g1"), "delete while degraded")
+	require.NoError(t, h.sm.Store(ctx, groupWithAlertCount("g1", 2)), "re-create the SAME key later in the same outage")
+
+	require.NoError(t, h.mr.Restart())
+	waitForCondition(t, 2*time.Second, func() bool { return h.sm.GetCurrentStorage() == "primary" })
+
+	got, err := h.sm.Load(ctx, "g1")
+	require.NoError(t, err, "the re-created group must survive recovery, not be deleted by a stale replay entry from the earlier delete")
+	require.Len(t, got.Alerts, 2)
 }

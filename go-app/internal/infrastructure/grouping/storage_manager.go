@@ -102,8 +102,8 @@
 //     data-loss case.
 //
 // This is still NOT full state-merge machinery — the brief excludes that —
-// and three real limitations remain, stated plainly rather than folded into
-// the same paragraph as a footnote:
+// and real limitations remain, stated plainly rather than folded into the
+// same paragraph as a footnote:
 //
 //   - Loss direction 1 above (a group created fresh in the fallback, with no
 //     pre-outage Redis counterpart) is unchanged: the write-through DOES
@@ -139,6 +139,70 @@
 //     pins by GroupKey/alert), which is the common case, but does not (and
 //     per the brief's scope, cannot) extend it to genuinely concurrent
 //     cross-replica writes during a shared outage.
+//
+// # Fix-round 2 (finding C-1): the fallback is pruned after every successful
+// reconcile, so a SECOND outage starts from empty
+//
+// The first fix-round's reconcileFallbackIntoPrimary wrote every group
+// fallback.LoadAll() returned into primary, but never removed anything from
+// the fallback afterward. MemoryGroupStorage has no TTL/eviction of its own
+// (see its own package doc), so every outage's groups accumulated in the
+// fallback for the lifetime of the process. A SECOND, later outage then hit
+// three compounding problems: (1) a degraded Load during outage 2 could
+// return an outage-1 leftover instead of GroupNotFoundError, resuming a
+// group whose data was hours or days stale; (2) outage 2's reconcile would
+// write-through THAT leftover too, aligning its Version to primary's
+// current value and silently overwriting fresh Redis state with stale
+// outage-1 data — reproduced directly: a fresh count of 42 replaced by a
+// stale 1, with no error and no log beyond the ordinary recovery Info line;
+// (3) reconciliation cost grew monotonically with every outage, so a large
+// enough accumulated fallback could blow the reconcileTimeout and get stuck
+// re-failing the flip indefinitely while Redis was actually healthy.
+//
+// The fix: reconcileFallbackIntoPrimary now deletes every key it just wrote
+// through from the fallback once the write-through succeeds, so the next
+// degraded window starts from an empty fallback — exactly like the very
+// first outage does. Deletion-replay's degradedDeletions list was already
+// cleared unconditionally on every reconcile attempt (see
+// replayDegradedDeletions); this closes the other half by pruning the
+// write-through side too.
+//
+// # Fix-round 2 (finding I-5): deletion replay now runs BEFORE the
+// write-through
+//
+// The first fix-round replayed degradedDeletions AFTER writing through
+// every fallback group. For the ordinary sequence "a group resolves and is
+// deleted, then a new alert re-creates the SAME GroupKey, all during one
+// outage", degradedDeletions still held that key (nothing removed it when
+// the later Store re-created the group), so replaying it after the
+// write-through deleted the just-written-through, freshly re-created group
+// right back out of primary — reproduced directly: the re-created group
+// came back as "group not found" after recovery. Replay now runs first, so
+// a stale deletion entry for a key that was later re-created only ever
+// deletes what write-through is about to correctly re-add — never the
+// other way around. Store/StoreAll additionally remove a key from
+// degradedDeletions the moment they successfully write it back to the
+// fallback (see unrecordDegradedDeletion), so the list stays an accurate
+// "still absent as of the last fallback write" set instead of accumulating
+// stale entries across a long outage.
+//
+// # Fix-round 2 (finding I-6): a canceled/timed-out CALLER context no longer
+// looks like a Redis outage
+//
+// isConnectivityError originally treated context.Canceled/DeadlineExceeded
+// as connectivity failures unconditionally. The alert-ingest path passes a
+// request-scoped context all the way down to Store, so one client
+// disconnect or one client-side timeout produced a context.Canceled from
+// the Redis call and degraded the WHOLE process to memory — for up to
+// minHoldDuration + recoverThreshold probes (~2 minutes at the defaults),
+// followed by a full write-through reconcile — over an event that said
+// nothing about Redis's health. isConnectivityError now takes the same ctx
+// the caller passed to Store/Delete/StoreAll and checks ctx.Err() first: if
+// the caller's own context is already done, the cancellation/deadline is
+// the caller's, not Redis's, and does not count. Only a
+// context.DeadlineExceeded surfacing while the caller's context is still
+// live — meaning some OTHER, Redis-call-scoped deadline fired — counts as
+// connectivity.
 package grouping
 
 import (
@@ -238,10 +302,18 @@ type StorageManager struct {
 	// against primary on recovery — otherwise a group deleted while
 	// degraded reappears with its pre-outage alert set as soon as primary
 	// recovers, because primary's own copy was never touched (fix-round
-	// finding I-1's "zombie group" case). Bounded: maxDegradedDeletions
-	// caps it FIFO, so an unusually long outage with more deletions than
-	// the cap drops the oldest entries — documented in the package doc, not
-	// silent.
+	// finding I-1's "zombie group" case). A later successful Store/StoreAll
+	// of the same key removes it again (fix-round 2 finding I-5's
+	// unrecordDegradedDeletion), so this only ever holds keys genuinely
+	// still absent as of the most recent fallback write.
+	//
+	// Bounded: maxDegradedDeletions caps it FIFO — recordDegradedDeletion
+	// drops the OLDEST entry (logged at Warn, not silent) once an
+	// unusually long outage with more deletions than the cap would
+	// otherwise grow it further. A dropped entry means that one specific
+	// deletion will not be replayed on recovery — the same zombie-group
+	// risk this list exists to close, reopened only for whichever key gets
+	// evicted.
 	degradedDeletions []GroupKey
 
 	// healthTicker for periodic health checks
@@ -512,15 +584,26 @@ func (sm *StorageManager) checkHealthAndSwitch() {
 
 // reconcileFallbackIntoPrimary runs once, immediately before
 // checkHealthAndSwitch flips sm.current back to primary. See the package
-// doc's "What recovery does (and does not) do" for the full rationale;
-// summary:
+// doc's "What recovery does (and does not) do" and its two fix-round-2
+// addenda (findings C-1 and I-5) for the full rationale; summary:
 //
-//  1. Write-through: every group present in the fallback store is Stored
+//  1. Deletion replay (best-effort, via replayDegradedDeletions) runs
+//     FIRST (fix-round 2, finding I-5): every key recorded in
+//     degradedDeletions is Deleted from primary, so a group removed during
+//     the outage cannot reappear as a zombie. Running this before the
+//     write-through means a key that was deleted and then re-created
+//     during the SAME outage — degradedDeletions still names it, since
+//     nothing removes an entry except a LATER Store of the same key (see
+//     unrecordDegradedDeletion) — only ever gets a stale primary copy
+//     deleted, never the fresh one write-through is about to add.
+//  2. Write-through: every group present in the fallback store is Stored
 //     into primary, so the fallback's (fresher, during the outage) copy —
 //     not a stale pre-outage Redis copy — is what the next Load/Store sees.
-//  2. Deletion replay (best-effort, via replayDegradedDeletions): every key
-//     recorded in degradedDeletions is also Deleted from primary, so a
-//     group removed during the outage cannot reappear as a zombie.
+//  3. Pruning (fix-round 2, finding C-1): every key just written through is
+//     Deleted from the fallback, so the NEXT degraded window starts empty
+//     instead of accumulating this outage's groups for the life of the
+//     process — see the package doc for the two-outage data-loss sequence
+//     this closes.
 //
 // Deliberately runs WITHOUT sm.mu held: holding it for the whole pass would
 // block every Store/Load/Delete call for as long as reconciliation takes
@@ -533,19 +616,36 @@ func (sm *StorageManager) checkHealthAndSwitch() {
 //
 // Returns an error if the write-through phase itself fails (a Redis read/
 // write failing here means Redis is not actually healthy enough to trust
-// yet); the caller must NOT flip sm.current on error.
+// yet); the caller must NOT flip sm.current on error. A failure to prune
+// the fallback after a successful write-through is logged, not returned:
+// the data is already safely in primary at that point, so a stray leftover
+// in the fallback is a smaller residual than aborting an otherwise-successful
+// recovery over cleanup.
 func (sm *StorageManager) reconcileFallbackIntoPrimary(ctx context.Context) error {
+	sm.replayDegradedDeletions(ctx)
+
 	groups, err := sm.fallback.LoadAll(ctx)
 	if err != nil {
 		return fmt.Errorf("load fallback groups for write-through: %w", err)
 	}
 
+	written := make([]GroupKey, 0, len(groups))
 	for _, group := range groups {
 		if group == nil {
 			continue
 		}
 
-		existing, loadErr := sm.primary.Load(ctx, group.Key)
+		// fix-round 2, Minor #1: LoadAll returns the fallback's own live
+		// pointers (MemoryGroupStorage.LoadAll's "Returns copies" doc
+		// comment is wrong, pre-existing) — Clone() before mutating
+		// Version so this never writes into an object the fallback store
+		// itself might still be concurrently reading/writing; no lock is
+		// held here. Clone() does not carry Version, so it is restored
+		// explicitly before the alignment switch below.
+		g := group.Clone()
+		g.Version = group.Version
+
+		existing, loadErr := sm.primary.Load(ctx, g.Key)
 		var notFound *GroupNotFoundError
 		switch {
 		case loadErr == nil && existing != nil:
@@ -555,20 +655,29 @@ func (sm *StorageManager) reconcileFallbackIntoPrimary(ctx context.Context) erro
 			// fallback's copy was recreated from scratch in memory when
 			// the outage started, so it legitimately has a different
 			// (almost always lower) version than a pre-outage primary copy.
-			group.Version = existing.Version
+			g.Version = existing.Version
 		case errors.As(loadErr, &notFound):
 			// No pre-outage copy to align to — this group is brand new to
-			// primary; group.Version stays whatever the fallback gave it.
+			// primary; g.Version stays whatever the fallback gave it.
 		default:
-			return fmt.Errorf("load existing primary group %s before write-through: %w", group.Key, loadErr)
+			return fmt.Errorf("load existing primary group %s before write-through: %w", g.Key, loadErr)
 		}
 
-		if err := sm.primary.Store(ctx, group); err != nil {
-			return fmt.Errorf("write-through store for %s: %w", group.Key, err)
+		if err := sm.primary.Store(ctx, g); err != nil {
+			return fmt.Errorf("write-through store for %s: %w", g.Key, err)
+		}
+		written = append(written, g.Key)
+	}
+
+	// fix-round 2, finding C-1: prune everything just reconciled from the
+	// fallback so it does not keep accumulating across outages.
+	for _, key := range written {
+		if err := sm.fallback.Delete(ctx, key); err != nil {
+			sm.logger.Warn("Failed to prune reconciled group from fallback after write-through; it may resurface on a future outage",
+				"group_key", key, "error", err)
 		}
 	}
 
-	sm.replayDegradedDeletions(ctx)
 	return nil
 }
 
@@ -598,15 +707,79 @@ func (sm *StorageManager) replayDegradedDeletions(ctx context.Context) {
 }
 
 // recordDegradedDeletion appends groupKey to degradedDeletions (bounded,
-// FIFO — see that field's doc comment).
+// FIFO — see that field's doc comment). Logs at Warn when the cap forces
+// the oldest entry out, since a dropped entry is a deletion that will not
+// be replayed on recovery — the exact zombie-group risk this list exists
+// to close, reopened for whichever key gets evicted.
 func (sm *StorageManager) recordDegradedDeletion(groupKey GroupKey) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if len(sm.degradedDeletions) >= maxDegradedDeletions {
+		dropped := sm.degradedDeletions[0]
 		sm.degradedDeletions = sm.degradedDeletions[1:]
+		sm.logger.Warn("degradedDeletions cap reached; dropping the oldest pending deletion replay — it will NOT be replayed on recovery",
+			"dropped_group_key", dropped, "cap", maxDegradedDeletions)
 	}
 	sm.degradedDeletions = append(sm.degradedDeletions, groupKey)
+}
+
+// unrecordDegradedDeletion removes every occurrence of groupKey from
+// degradedDeletions (fix-round 2, finding I-5): called on a later
+// successful Store/StoreAll of the same key while degraded, so a group
+// that was deleted and then re-created during the SAME outage does not
+// leave a stale "still deleted" entry behind — reconcileFallbackIntoPrimary
+// would otherwise have nothing wrong to replay for that key by the time it
+// runs (since replay now runs before the write-through, the ordering fix
+// alone already prevents the concrete data-loss case), but this keeps the
+// list an accurate reflection of "genuinely absent as of the last write"
+// rather than carrying dead entries for the rest of the outage.
+func (sm *StorageManager) unrecordDegradedDeletion(groupKey GroupKey) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if len(sm.degradedDeletions) == 0 {
+		return
+	}
+	filtered := sm.degradedDeletions[:0]
+	for _, k := range sm.degradedDeletions {
+		if k != groupKey {
+			filtered = append(filtered, k)
+		}
+	}
+	sm.degradedDeletions = filtered
+}
+
+// unrecordDegradedDeletions is unrecordDegradedDeletion for StoreAll's
+// batch of groups.
+func (sm *StorageManager) unrecordDegradedDeletions(groups []*AlertGroup) {
+	if len(groups) == 0 {
+		return
+	}
+
+	keys := make(map[GroupKey]struct{}, len(groups))
+	for _, g := range groups {
+		if g != nil {
+			keys[g.Key] = struct{}{}
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if len(sm.degradedDeletions) == 0 {
+		return
+	}
+	filtered := sm.degradedDeletions[:0]
+	for _, k := range sm.degradedDeletions {
+		if _, deleted := keys[k]; !deleted {
+			filtered = append(filtered, k)
+		}
+	}
+	sm.degradedDeletions = filtered
 }
 
 // isConnectivityError classifies whether err indicates the primary storage
@@ -617,14 +790,24 @@ func (sm *StorageManager) recordDegradedDeletion(groupKey GroupKey) {
 // storage layer over, say, one ErrVersionMismatch (an expected outcome of
 // two concurrent updates) would be a serious overreaction.
 //
-// Deliberately conservative: anything not positively recognized as
-// connectivity-related returns false (do not degrade on this call alone).
-// That is safe because the periodic probe (checkHealthAndSwitch) is the
-// primary detection path and does not depend on this classification at all
-// — a genuinely down Redis is still caught within one health-check
+// ctx must be the SAME context the caller passed to Store/Delete/StoreAll
+// (fix-round 2, finding I-6): a context.Canceled/DeadlineExceeded error
+// only counts as a connectivity failure when ctx itself is still live at
+// the time of the check. If ctx.Err() is already non-nil, the
+// cancellation/deadline is the CALLER's — a request-scoped context from
+// the alert-ingest path, for instance — not Redis's, and must not degrade
+// the storage layer. Only a context.DeadlineExceeded surfacing while the
+// caller's own context is still fine indicates some OTHER, Redis-call-
+// scoped deadline fired, which is a genuine connectivity signal.
+//
+// Otherwise deliberately conservative: anything not positively recognized
+// as connectivity-related returns false (do not degrade on this call
+// alone). That is safe because the periodic probe (checkHealthAndSwitch)
+// is the primary detection path and does not depend on this classification
+// at all — a genuinely down Redis is still caught within one health-check
 // interval even if a specific per-call error's wording is not recognized
 // here.
-func isConnectivityError(err error) bool {
+func isConnectivityError(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
@@ -635,6 +818,11 @@ func isConnectivityError(err error) bool {
 	}
 
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if ctx.Err() != nil {
+			// The caller's own context is done; this is the caller giving
+			// up (or its deadline), not a Redis-side problem.
+			return false
+		}
 		return true
 	}
 
@@ -703,10 +891,13 @@ func (sm *StorageManager) Stop() {
 //
 // Behavior:
 //   - Try current storage (primary or fallback)
-//   - On a connectivity-class error (fix-round finding I-2) AND using
-//     primary: switch to fallback, retry
+//   - On a connectivity-class error (fix-round finding I-2, ctx-aware per
+//     fix-round 2 finding I-6) AND using primary: switch to fallback, retry
 //   - Any other error against primary (e.g. ErrVersionMismatch), or any
 //     error against fallback, is returned to the caller unchanged
+//   - A successful write to the fallback un-registers groupKey from
+//     degradedDeletions (fix-round 2, finding I-5): this key is no longer
+//     "still deleted" once it has been re-written.
 func (sm *StorageManager) Store(ctx context.Context, group *AlertGroup) error {
 	sm.mu.RLock()
 	storage := sm.current
@@ -714,9 +905,12 @@ func (sm *StorageManager) Store(ctx context.Context, group *AlertGroup) error {
 
 	err := storage.Store(ctx, group)
 	if err == nil {
+		if storage == sm.fallback {
+			sm.unrecordDegradedDeletion(group.Key)
+		}
 		return nil
 	}
-	if storage != sm.primary || !isConnectivityError(err) {
+	if storage != sm.primary || !isConnectivityError(ctx, err) {
 		return err
 	}
 
@@ -737,7 +931,11 @@ func (sm *StorageManager) Store(ctx context.Context, group *AlertGroup) error {
 	sm.mu.Unlock()
 
 	// Retry with fallback
-	return sm.fallback.Store(ctx, group)
+	if err := sm.fallback.Store(ctx, group); err != nil {
+		return err
+	}
+	sm.unrecordDegradedDeletion(group.Key)
+	return nil
 }
 
 // Load delegates to current storage (no automatic fallback for reads).
@@ -770,7 +968,7 @@ func (sm *StorageManager) Delete(ctx context.Context, groupKey GroupKey) error {
 		}
 		return nil
 	}
-	if storage != sm.primary || !isConnectivityError(err) {
+	if storage != sm.primary || !isConnectivityError(ctx, err) {
 		return err
 	}
 
@@ -827,7 +1025,10 @@ func (sm *StorageManager) LoadAll(ctx context.Context) ([]*AlertGroup, error) {
 }
 
 // StoreAll delegates to current storage with automatic fallback on a
-// connectivity-class error (fix-round finding I-2).
+// connectivity-class error (fix-round finding I-2, ctx-aware per fix-round
+// 2 finding I-6). A successful write to the fallback un-registers every
+// group's key from degradedDeletions (fix-round 2, finding I-5) — see
+// Store's doc comment.
 func (sm *StorageManager) StoreAll(ctx context.Context, groups []*AlertGroup) error {
 	sm.mu.RLock()
 	storage := sm.current
@@ -835,9 +1036,12 @@ func (sm *StorageManager) StoreAll(ctx context.Context, groups []*AlertGroup) er
 
 	err := storage.StoreAll(ctx, groups)
 	if err == nil {
+		if storage == sm.fallback {
+			sm.unrecordDegradedDeletions(groups)
+		}
 		return nil
 	}
-	if storage != sm.primary || !isConnectivityError(err) {
+	if storage != sm.primary || !isConnectivityError(ctx, err) {
 		return err
 	}
 
@@ -858,7 +1062,11 @@ func (sm *StorageManager) StoreAll(ctx context.Context, groups []*AlertGroup) er
 	sm.mu.Unlock()
 
 	// Retry with fallback
-	return sm.fallback.StoreAll(ctx, groups)
+	if err := sm.fallback.StoreAll(ctx, groups); err != nil {
+		return err
+	}
+	sm.unrecordDegradedDeletions(groups)
+	return nil
 }
 
 // Ping checks current storage health.

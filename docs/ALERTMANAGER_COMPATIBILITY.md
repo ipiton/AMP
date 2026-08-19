@@ -351,6 +351,38 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    - This is NOT the same convergence story as wave 4's per-alert delivered state: that data is a TTL'd dedup marker
      where the worst case of "never made it to Redis" is a harmless resend, while a `GroupStorage` entry *is* the
      alert membership, so a residual gap here has real consequences, not just a delayed resend.
+   - **Degrade detection latency roughly tripled for read-only workloads.** With `degradeThreshold`'s default of 3,
+     the periodic probe now needs 3 consecutive failed `Ping`s (up to `3 × healthCheckInterval`, ~90s at the 30s
+     default) before degrading, versus a single failed `Ping` before the hysteresis fix. `Load` has no per-call
+     fallback (by design — see its own doc comment), so a read-heavy replica can surface raw Redis errors for up
+     to that whole window instead of the previous ~30s. The trade-off (flap suppression vs. detection latency) is
+     deliberate, not an oversight.
+
+   **Fix round 2: the fallback is pruned after every successful reconcile, and deletion replay runs first.**
+   The reconciliation pass above initially had two further defects, both reproduced and closed:
+   - **A second outage could serve, and then overwrite, the first outage's stale data (finding C-1, Critical).**
+     `reconcileFallbackIntoPrimary` wrote through everything `fallback.LoadAll()` returned but never removed
+     anything from the fallback afterward — `MemoryGroupStorage` has no TTL/eviction of its own, so every outage's
+     groups accumulated for the life of the process. A SECOND, later outage then (1) could serve a degraded `Load`
+     from the FIRST outage's leftover instead of `ErrNotFound`, and (2) its own recovery would write-through that
+     leftover too — its `Version` aligned to primary's current value on purpose, so the fresh Redis copy was
+     silently replaced by stale data with no error, only the ordinary recovery log line. Reconciliation cost also
+     grew with every outage, risking a permanently-blocked failforward if it ever exceeded `reconcileTimeout`.
+     Fixed: every key written through is now `Delete`d from the fallback immediately after a successful
+     write-through, so the next degraded window starts empty — exactly like the very first outage does.
+   - **A group deleted and re-created under the same `GroupKey` during ONE outage could be deleted again on
+     recovery (finding I-5, Important).** Deletion replay ran *after* the write-through, so a stale "still
+     deleted" entry for a key that a later `Store` had already re-created deleted the just-written-through, fresh
+     group right back out of primary. Fixed: replay now runs *before* the write-through, and a successful
+     `Store`/`StoreAll` of a key removes it from the pending-deletion list immediately, so the list only ever
+     reflects what is genuinely still absent as of the most recent fallback write.
+   - **A caller-cancelled or caller-timed-out context no longer looks like a Redis outage (finding I-6,
+     Important).** `isConnectivityError` treated `context.Canceled`/`DeadlineExceeded` as connectivity failures
+     unconditionally — but the alert-ingest path passes a request-scoped context all the way down to `Store`, so
+     one client disconnect or client-side timeout degraded the WHOLE process to memory for roughly
+     `minHoldDuration + recoverThreshold` probes (~2 minutes at the defaults), followed by a full reconcile, over
+     an event that said nothing about Redis. Fixed: a cancellation/deadline only counts when the CALLER's own
+     context is still live at the time of the check — meaning some OTHER, Redis-call-scoped deadline fired.
 
    `TimerStorage` is not wrapped by the same mechanism — it has its own, separate reconciliation loop (task 6.2,
    `grouping.TimerManagerConfig.ReconciliationInterval`) for distributed timer liveness, which this task did not
@@ -384,6 +416,12 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    anchored `^label(op)value$` regex parsed the identical YAML entry fine — the same divergence class the item was
    opened for, just not covered by the first pass's table. `Parse` now locates the operator with the same anchored
    shape, verified through a real `LoadConfig` regression test, not just a unit test of the parser in isolation.
+   **Fix round 2: one more residual divergence closed, and license attribution added.** `label=` (nothing after
+   the operator) still diverged — `parseMatcherExpr` accepted it (`Value: ""`), `Parse` rejected it with "value is
+   empty", and upstream accepts it outright (`ParseMatcher`'s own doc comment: "The 3rd token may be the empty
+   string"). The round-1 guard in `Parse` contradicted both parsers' "verbatim upstream grammar" claim; dropped so
+   `label=` now parses the same way in both, matching upstream. Both `unquoteMatcherValue` ports also gained an
+   explicit copyright/license attribution comment for the upstream file they port from (Apache-2.0 §4).
 
 ---
 

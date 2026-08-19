@@ -19,6 +19,8 @@
 package metrics
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -1070,6 +1072,16 @@ type BusinessMetrics struct {
 	storage        *StorageMetrics
 	classification *ClassificationMetrics
 	deduplication  *DeduplicationMetrics
+
+	// groupStorageBackendMu protects lastCustomGroupStorageBackendLabel,
+	// used by SetActiveGroupStorageBackend (fix-round 2, Minor #7) to zero
+	// out a previously-used CUSTOM backend label when a caller switches to
+	// a different custom pairing — without this, a stale "1" would linger
+	// under the old label forever (unreachable for this package's only
+	// real caller, which always passes the same "redis"/"memory" pair for
+	// the lifetime of one StorageManager; kept for correctness regardless).
+	groupStorageBackendMu              sync.Mutex
+	lastCustomGroupStorageBackendLabel string
 }
 
 // NewBusinessMetrics creates a new BusinessMetrics instance
@@ -1377,13 +1389,26 @@ func (m *BusinessMetrics) SetActiveGroupStorageBackend(backend string) {
 	// {"redis","memory"} set — without this, a caller using a different
 	// label pair would silently produce an all-zero gauge (every label it
 	// actually uses reads 0, since none of them is "redis" or "memory").
-	// Explicitly set the real label so it always reflects the truth, at
-	// the cost of a stale entry under a PREVIOUSLY used custom label if
-	// the label set changes between calls — not a concern for this
-	// package's only real caller, which always passes the same two labels
-	// for the lifetime of one StorageManager.
+	// Explicitly set the real label so it always reflects the truth.
 	if !isKnown && backend != "" {
 		m.storage.BackendActive.WithLabelValues(backend).Set(1)
+	}
+
+	// fix-round 2, Minor #7: if the PREVIOUS call used a different custom
+	// (non-redis/memory) label, remove that series entirely instead of
+	// leaving it at a stale 1 forever — a caller switching custom label
+	// pairs (e.g. "postgres"/"disk") would otherwise read 1 for both the
+	// old and the new label after one flip.
+	m.groupStorageBackendMu.Lock()
+	previous := m.lastCustomGroupStorageBackendLabel
+	m.lastCustomGroupStorageBackendLabel = ""
+	if !isKnown {
+		m.lastCustomGroupStorageBackendLabel = backend
+	}
+	m.groupStorageBackendMu.Unlock()
+
+	if previous != "" && previous != backend {
+		m.storage.BackendActive.DeleteLabelValues(previous)
 	}
 }
 
