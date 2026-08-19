@@ -24,10 +24,30 @@ type FilterEngine interface {
 	ShouldBlock(alert *core.Alert, classification *core.ClassificationResult) (bool, string)
 }
 
-// Publisher defines the interface for alert publishing
+// Publisher defines the interface for alert publishing on the NON-GROUPED
+// path: `grouping.enabled: false` (the default), or a grouping failure that
+// falls open to a direct publish.
+//
+// Both methods take the RECEIVER the alert was routed to (slice-1 review
+// finding C1). They used to be PublishToAll/PublishWithClassification with no
+// receiver, and the implementation published to EVERY enabled target. That was
+// tolerable while targets could only come from hand-created, hand-labelled K8s
+// Secrets; once the config's `receivers:` integrations auto-provision targets
+// (FU-RECEIVERS-INTEGRATION), it means an untouched upstream config delivers
+// every alert to every receiver's integrations — team-b's PagerDuty paging on
+// team-a's alerts. The names were renamed along with the signature on purpose:
+// a method called "PublishToAll" that must filter is exactly the trap that
+// produced the bug.
+//
+// receiver == "" keeps the pre-route-tree behaviour (every enabled target),
+// which is what a deployment without a `route:` section still needs.
 type Publisher interface {
-	PublishToAll(ctx context.Context, alert *core.Alert) error
-	PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error
+	// PublishToReceiver publishes alert to the targets belonging to receiver.
+	PublishToReceiver(ctx context.Context, alert *core.Alert, receiver string) error
+
+	// PublishToReceiverWithClassification is PublishToReceiver plus the LLM
+	// classification (enriched mode).
+	PublishToReceiverWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) error
 }
 
 // InvestigationSubmitter is the minimal interface AlertProcessor needs to fire-and-forget investigations.
@@ -242,6 +262,16 @@ func (p *AlertProcessor) evaluateRoute(alert *core.Alert) *RoutingDecision {
 // initializeGrouping), and a RoutingDecision was computed for THIS alert
 // (route evaluation succeeded). Any gap falls back to direct publish — see
 // warnGroupingFallback — never both paths for the same alert.
+// receiverOf returns the receiver the route tree picked for this alert, or ""
+// when there is no route tree at all (legacy single-receiver mode) — which the
+// publisher reads as "every enabled target", i.e. the pre-routing behaviour.
+func receiverOf(decision *RoutingDecision) string {
+	if decision == nil {
+		return ""
+	}
+	return decision.Receiver
+}
+
 func (p *AlertProcessor) shouldGroup(decision *RoutingDecision) bool {
 	return p.groupingEnabled && p.groupManager != nil && p.groupKeyGenerator != nil && decision != nil
 }
@@ -575,8 +605,9 @@ func (p *AlertProcessor) processTransparentWithRecommendations(ctx context.Conte
 		p.warnGroupingFallback(decision)
 	}
 
-	// Publish to ALL targets immediately
-	return p.publisher.PublishToAll(ctx, alert)
+	// Publish to the routed receiver's targets (review finding C1: this used
+	// to fan out to every target regardless of receiver).
+	return p.publisher.PublishToReceiver(ctx, alert, receiverOf(decision))
 }
 
 // processTransparent processes without LLM but with filtering
@@ -609,8 +640,8 @@ func (p *AlertProcessor) processTransparent(ctx context.Context, alert *core.Ale
 		p.warnGroupingFallback(decision)
 	}
 
-	// Publish to ALL configured targets
-	return p.publisher.PublishToAll(ctx, alert)
+	// Publish to the routed receiver's targets (review finding C1).
+	return p.publisher.PublishToReceiver(ctx, alert, receiverOf(decision))
 }
 
 // processEnriched processes with full LLM classification and filtering (production mode)
@@ -676,8 +707,9 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert,
 		p.warnGroupingFallback(decision)
 	}
 
-	// Step 3: Publish with classification (smart routing)
-	return p.publisher.PublishWithClassification(ctx, alert, classification)
+	// Step 3: Publish with classification (smart routing), scoped to the
+	// routed receiver (review finding C1).
+	return p.publisher.PublishToReceiverWithClassification(ctx, alert, classification, receiverOf(decision))
 }
 
 // cleanupInhibitionsForSource removes all active inhibitions caused by the given source alert.

@@ -13,7 +13,13 @@ import (
 )
 
 type publishingCoordinator interface {
-	PublishToAll(ctx context.Context, enrichedAlert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error)
+	// PublishToTargets resolves targets by RECEIVER (empty receiver = every
+	// enabled target). Slice-1 review finding C1: this interface used to
+	// declare PublishToAll, which applies no receiver filtering at all, so the
+	// non-grouped publish path fanned every alert out to every receiver's
+	// targets — harmless-ish while targets were hand-made Secrets, a
+	// cross-receiver leak once `receivers:` auto-provisions them.
+	PublishToTargets(ctx context.Context, enrichedAlert *core.EnrichedAlert, targetNames []string, receiverName string) ([]*infrapublishing.PublishingResult, error)
 	// PublishGroupToTargets is the notify-stage chain's batch publish call
 	// (task 2.4) — see grouping.GroupNotificationPublisher.PublishGroup.
 	// targetAlerts implements task fwb's per-target nflog dedup AND task fu4's
@@ -51,8 +57,10 @@ var (
 	_ grouping.GroupNotificationPublisher = (*ApplicationPublishingAdapter)(nil)
 )
 
-func (p *ApplicationPublishingAdapter) PublishToAll(ctx context.Context, alert *core.Alert) error {
-	return p.publish(ctx, alert, nil)
+// PublishToReceiver implements services.Publisher: the non-grouped publish
+// path, scoped to the receiver the route tree picked (review finding C1).
+func (p *ApplicationPublishingAdapter) PublishToReceiver(ctx context.Context, alert *core.Alert, receiver string) error {
+	return p.publish(ctx, alert, nil, receiver)
 }
 
 // PublishGroup implements grouping.GroupNotificationPublisher (task 2.4,
@@ -137,21 +145,27 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKe
 	return outcomes, nil
 }
 
-func (p *ApplicationPublishingAdapter) PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error {
-	return p.publish(ctx, alert, classification)
+// PublishToReceiverWithClassification implements services.Publisher (enriched
+// mode), likewise receiver-scoped.
+func (p *ApplicationPublishingAdapter) PublishToReceiverWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) error {
+	return p.publish(ctx, alert, classification, receiver)
 }
 
-func (p *ApplicationPublishingAdapter) publish(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error {
+func (p *ApplicationPublishingAdapter) publish(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) error {
 	if alert == nil {
 		return fmt.Errorf("alert is required")
 	}
 
 	now := time.Now().UTC()
-	results, err := p.coordinator.PublishToAll(ctx, &core.EnrichedAlert{
+	// targetNames nil + receiver => receiver-scoped resolution
+	// (PublishingCoordinator.targetMatchesReceiver). receiver "" keeps the
+	// legacy "all enabled targets" behaviour for deployments with no route
+	// tree.
+	results, err := p.coordinator.PublishToTargets(ctx, &core.EnrichedAlert{
 		Alert:               alert,
 		Classification:      classification,
 		ProcessingTimestamp: &now,
-	})
+	}, nil, receiver)
 	if err != nil {
 		return err
 	}

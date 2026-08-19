@@ -142,7 +142,19 @@ func (c *PublishingCoordinator) DeliveryConfirmationTimeout() time.Duration {
 	return c.deliveryTimeout
 }
 
-// PublishToAll publishes alert to all enabled targets concurrently
+// PublishToAll publishes alert to all enabled targets concurrently.
+//
+// NO RECEIVER FILTERING — deliberately, and that is why it must NOT be used on
+// the alert-processing path (slice-1 review finding C1, FU-RECEIVERS-
+// INTEGRATION). It used to be the non-grouped publish path, which made every
+// alert reach every receiver's targets; since config-provisioned targets exist
+// (one per `receivers:` integration), that is a cross-receiver leak rather than
+// a wide fan-out. ApplicationPublishingAdapter now calls PublishToTargets with
+// the routed receiver instead.
+//
+// Kept for operator-driven "publish to everything" use (and its existing
+// tests): callers that genuinely mean ALL targets, not "the targets of this
+// alert's receiver".
 func (c *PublishingCoordinator) PublishToAll(ctx context.Context, enrichedAlert *core.EnrichedAlert) ([]*PublishingResult, error) {
 	// TN-060: Check mode before publishing (metrics-only mode fallback)
 	if c.modeManager != nil && c.modeManager.IsMetricsOnly() {

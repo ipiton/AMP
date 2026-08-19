@@ -35,11 +35,11 @@ var activeContractStartTime = time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 
 type contractPublisher struct{}
 
-func (p *contractPublisher) PublishToAll(_ context.Context, _ *core.Alert) error {
+func (p *contractPublisher) PublishToReceiver(_ context.Context, _ *core.Alert, _ string) error {
 	return nil
 }
 
-func (p *contractPublisher) PublishWithClassification(_ context.Context, _ *core.Alert, _ *core.ClassificationResult) error {
+func (p *contractPublisher) PublishToReceiverWithClassification(_ context.Context, _ *core.Alert, _ *core.ClassificationResult, _ string) error {
 	return nil
 }
 
