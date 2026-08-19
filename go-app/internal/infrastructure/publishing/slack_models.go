@@ -36,6 +36,16 @@ type Block struct {
 	// Fields are multi-column fields for section blocks only
 	// Displays 2-column layout (left field, right field)
 	Fields []Field `json:"fields,omitempty"`
+
+	// Elements are the small text/image items a "context" block displays
+	// (review wave 5, finding R1). Block Kit REQUIRES 1-10 elements on a
+	// context block — formatSlack builds one carrying the alert's fingerprint,
+	// but this field did not exist, so buildBlock had nothing to populate it
+	// from and every context block serialized as bare {"type":"context"}.
+	// Slack's webhook validates the whole "blocks" array and answers
+	// invalid_blocks / HTTP 400 for that, not a silent fallback to Text — the
+	// same live-breakage class C1 was fixed to remove.
+	Elements []Text `json:"elements,omitempty"`
 }
 
 // Text represents plain_text or mrkdwn text element
@@ -67,6 +77,14 @@ type Attachment struct {
 
 	// Text is attachment text content
 	Text string `json:"text,omitempty"`
+
+	// Fields are the legacy attachment's own 2-column fields (review wave 5,
+	// finding R2 — same shape as Block.Fields). formatSlack's attachment
+	// carries Status/Started/Namespace/AI-severity here, but this field did
+	// not exist, so buildAttachment had nothing to populate it from and every
+	// attachment shipped color-only. Cosmetic, not a rejection risk (legacy
+	// attachments don't require fields), unlike R1's context block.
+	Fields []Field `json:"fields,omitempty"`
 }
 
 // SlackResponse represents Slack webhook API response

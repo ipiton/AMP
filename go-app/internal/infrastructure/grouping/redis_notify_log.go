@@ -363,19 +363,38 @@ func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey,
 }
 
 // recordPartialDeliveryScript writes one target's per-alert delivery progress
-// ATOMICALLY: cap check, the writes themselves, and the TTL refresh in a single
-// Redis round-trip that no other client can interleave with (review round 1,
-// finding I2 — the previous SCARD → SADD → EXPIRE sequence could leave a
-// TTL-LESS key behind if the EXPIRE failed, which suppressed those alerts
-// forever, and its cap check raced across replicas).
+// ATOMICALLY: cap check, the writes themselves, and the TTL in a single Redis
+// round-trip that no other client can interleave with (review round 1, finding
+// I2 — the previous SCARD → SADD → EXPIRE sequence could leave a TTL-LESS key
+// behind if the EXPIRE failed, which suppressed those alerts forever, and its
+// cap check raced across replicas).
 //
 // KEYS[1] is the delivered hash. ARGV[1] is the cap, ARGV[2] the TTL in
 // milliseconds, and ARGV[3..] alternating fingerprint/status pairs. Returns the
 // resulting alert count, or -1 when the cap refused the whole batch (the
 // all-or-nothing shape maxDeliveredAlertsPerTarget documents).
 //
-// The cap counts only fields that are actually NEW, so re-recording an alert
-// already present — or overwriting its status — never consumes capacity.
+// The cap counts DISTINCT NEW fingerprints in this call, not new fields (re-
+// review, finding r2): the naive per-field HEXISTS-miss count double-charged a
+// batch that named the same new fingerprint twice (e.g.
+// ["new:firing","new:resolved"], both misses before either HSET lands), which
+// diverged from the in-memory implementation's distinct-fingerprint count —
+// probeable at cap−1 with exactly that batch (redis used to refuse where memory
+// accepted). Re-recording an alert already present — or overwriting its status
+// — still never consumes capacity either way.
+//
+// PEXPIRE only runs when this call CREATES the key, or repairs one that has
+// somehow lost its TTL (re-review, finding r5, hardened by finding m1): a key
+// that already exists WITH a live TTL keeps whatever expiry its first write
+// gave it, instead of sliding forward on every partial write. The previous
+// unconditional PEXPIRE let a group with one persistently-failing alert and
+// other alerts trickling in keep already-delivered alerts suppressed well
+// past one repeat_interval. Not refreshing (when a TTL is already live) can
+// only make the key expire EARLIER than a fresh window would (never later),
+// which resends sooner rather than suppressing longer — the at-least-once
+// floor stays intact. Re-arming a TTL-less key preserves the self-healing
+// property review round 1 (finding I2) required, which a naive "only on
+// EXISTS==0" gate would otherwise have dropped.
 //
 // Wrapped in redis.NewScript (re-review, finding r4) so calls go out as EVALSHA
 // and the script body travels only when the server has not cached it yet — the
@@ -397,10 +416,26 @@ var recordPartialDeliveryScript = redis.NewScript(`
 		return redis.error_reply("recordPartialDelivery: cap and ttl must be positive numbers")
 	end
 
+	-- r5: PEXPIRE must only run for a key this call creates — capture that
+	-- BEFORE any HSET, since HSET itself would make EXISTS true. Also re-arm
+	-- for a key that exists but has somehow lost its TTL (PTTL < 0: -1 no
+	-- expiry, -2 no key) — review wave 5, finding m1: gating PEXPIRE on EXISTS
+	-- alone would otherwise permanently drop the self-healing property round 1
+	-- (finding I2) required, where any later write repaired a TTL-less key.
+	local needsTTL = redis.call("EXISTS", KEYS[1]) == 0 or redis.call("PTTL", KEYS[1]) < 0
+
+	-- r2: count distinct NEW fingerprints, not new fields — a fingerprint
+	-- named twice in this call (two different statuses) must consume at most
+	-- one slot, matching the in-memory implementation exactly.
+	local seen = {}
 	local incoming = 0
 	for i = 3, #ARGV, 2 do
-		if redis.call("HEXISTS", KEYS[1], ARGV[i]) == 0 then
-			incoming = incoming + 1
+		local fingerprint = ARGV[i]
+		if not seen[fingerprint] then
+			seen[fingerprint] = true
+			if redis.call("HEXISTS", KEYS[1], fingerprint) == 0 then
+				incoming = incoming + 1
+			end
 		end
 	end
 
@@ -411,15 +446,18 @@ var recordPartialDeliveryScript = redis.NewScript(`
 	for i = 3, #ARGV, 2 do
 		redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1])
 	end
-	redis.call("PEXPIRE", KEYS[1], ttl)
+	if needsTTL then
+		redis.call("PEXPIRE", KEYS[1], ttl)
+	end
 
 	return redis.call("HLEN", KEYS[1])
 `)
 
 // RecordPartialDelivery implements GroupNotifyLog (task fu4): records the alerts
-// target accepted during an unconfirmed fire and refreshes the TTL to match what
-// an entry would get (repeat_interval + grace), so partial progress ages out
-// exactly when a full send would have stopped deduping.
+// target accepted during an unconfirmed fire, giving the state a TTL matching
+// what an entry would get (repeat_interval + grace) the first time it is
+// written, so partial progress ages out exactly when a full send would have
+// stopped deduping.
 //
 // Additive on purpose: each fire only reports the alerts it actually attempted,
 // so a second partial failure must EXTEND the recorded state rather than replace
@@ -482,7 +520,10 @@ func (l *RedisNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey Gro
 	l.logger.Debug("Recorded per-alert delivered state",
 		"group_key", groupKey,
 		"target", target,
-		"alerts_recorded", result,
+		// re-review, finding r6: this is the script's HLEN return, i.e. the
+		// resulting size of the whole hash after this write, not a count of
+		// what THIS call recorded — "alerts_recorded" mislabeled it.
+		"resulting_alert_count", result,
 		"ttl", ttl)
 	return nil
 }
