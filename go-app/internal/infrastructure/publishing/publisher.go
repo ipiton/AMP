@@ -57,16 +57,34 @@ type HTTPPublisher struct {
 
 // NewHTTPPublisher creates a new HTTP publisher with default settings
 func NewHTTPPublisher(formatter AlertFormatter, logger *slog.Logger) *HTTPPublisher {
+	return NewHTTPPublisherWithHTTPClient(formatter, logger, nil)
+}
+
+// NewHTTPPublisherWithHTTPClient is NewHTTPPublisher with an explicit
+// *http.Client, used by PublisherFactory.CreateBasicPublisherForTarget to hand
+// in a client built from the target's `http_config` (FU-HTTP-CONFIG). A nil
+// httpClient falls back to the built-in shape.
+func NewHTTPPublisherWithHTTPClient(formatter AlertFormatter, logger *slog.Logger, httpClient *http.Client) *HTTPPublisher {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if httpClient == nil {
+		httpClient = newBasicPublisherBaseHTTPClient()
+	}
 
 	return &HTTPPublisher{
-		formatter: formatter,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		logger: logger,
+		formatter:  formatter,
+		httpClient: httpClient,
+		logger:     logger,
+	}
+}
+
+// newBasicPublisherBaseHTTPClient builds the base HTTPPublisher's built-in
+// client. Extracted so a per-target http_config can be layered on top of it —
+// see newWebhookBaseHTTPClient.
+func newBasicPublisherBaseHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
 	}
 }
 
@@ -331,7 +349,18 @@ type PublisherFactory struct {
 	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
 	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
 	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by "api_url|bot_token" (clientMu)
-	metrics            *v2.PublishingMetrics            // Unified publishing metrics (v2)
+
+	// httpClientMap caches the per-target *http.Client built from a target's
+	// `http_config` (FU-HTTP-CONFIG), keyed by "<shape>|<fingerprint>" — see
+	// perTargetHTTPClient. Guarded by clientMu.
+	//
+	// It exists so the TLS/credential FILES behind an http_config are read once
+	// per distinct configuration instead of on every publish job, and so two
+	// targets with identical http_config against the same publisher shape share
+	// one connection pool.
+	httpClientMap map[string]*http.Client
+
+	metrics *v2.PublishingMetrics // Unified publishing metrics (v2)
 }
 
 // NewPublisherFactory creates a new publisher factory with unified v2 metrics.
@@ -354,6 +383,7 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics 
 		slackCleanupWorker: slackCleanupWorker,
 		emailClientMap:     make(map[string]SMTPClient),
 		telegramClientMap:  make(map[string]TelegramClient),
+		httpClientMap:      make(map[string]*http.Client),
 		metrics:            metrics, // Unified v2 metrics
 	}
 }
@@ -381,6 +411,60 @@ func (f *PublisherFactory) CreatePublisher(targetType string) (AlertPublisher, e
 		return NewTelegramPublisher(f.formatter, f.logger), nil
 	default:
 		return NewWebhookPublisher(f.formatter, f.logger), nil // Default to webhook
+	}
+}
+
+// CreateBasicPublisherForTarget returns the same BASIC publisher
+// CreatePublisher returns for target.Type, but with an *http.Client built from
+// the target's `http_config` (FU-HTTP-CONFIG).
+//
+// WHY IT EXISTS: the publishing queue deliberately routes webhook/alertmanager
+// targets through CreatePublisher rather than CreatePublisherForTarget, because
+// the enhanced webhook publisher additionally runs WebhookValidator.ValidateTarget
+// and turning that on is its own behaviour change (see
+// PublishingQueue.createPublisherForJob). Webhook targets are also the single
+// most likely users of http_config — a corp-proxied or mTLS-protected internal
+// endpoint. Without this method they would silently ignore it on the queue path.
+//
+// This changes NOTHING else about the basic publishers: same types, same
+// formatter, same 30s timeout. A target without http_config gets a client
+// indistinguishable from CreatePublisher's.
+//
+// Email is delegated to CreatePublisher: EnhancedEmailPublisher speaks SMTP and
+// has no HTTP client to configure.
+func (f *PublisherFactory) CreateBasicPublisherForTarget(target *core.PublishingTarget) (AlertPublisher, error) {
+	if target == nil {
+		return nil, fmt.Errorf("cannot create publisher for a nil target")
+	}
+	if TargetType(target.Type) == TargetTypeEmail {
+		return f.CreatePublisher(target.Type)
+	}
+
+	httpClient, err := f.perTargetHTTPClient(shapeBasic, target.HTTPConfig, newBasicPublisherBaseHTTPClient)
+	if err != nil {
+		f.logger.Error("Skipping target with an unusable http_config",
+			"target", target.Name,
+			"type", target.Type,
+			"error", err,
+		)
+		return nil, fmt.Errorf("target %q: %w", target.Name, err)
+	}
+
+	base := NewHTTPPublisherWithHTTPClient(f.formatter, f.logger, httpClient)
+
+	switch TargetType(target.Type) {
+	case TargetTypeRootly:
+		return &RootlyPublisher{HTTPPublisher: base}, nil
+	case TargetTypePagerDuty:
+		return &PagerDutyPublisher{HTTPPublisher: base}, nil
+	case TargetTypeSlack:
+		return &SlackPublisher{HTTPPublisher: base}, nil
+	case TargetTypeTelegram:
+		return &TelegramPublisher{HTTPPublisher: base}, nil
+	case TargetTypeWebhook, TargetTypeAlertmanager:
+		return &WebhookPublisher{HTTPPublisher: base}, nil
+	default:
+		return &WebhookPublisher{HTTPPublisher: base}, nil // Default to webhook
 	}
 }
 
@@ -430,7 +514,20 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 	// key against a different URL (direct vs. a proxy/regional endpoint)
 	// silently reused the first one's client. Same shape as
 	// createEnhancedTelegramPublisher's clientKey.
-	clientKey := target.URL + "|" + apiKey
+	//
+	// The http_config FINGERPRINT is part of the key too (FU-HTTP-CONFIG): two
+	// targets sharing a URL and an API key but reaching it through different
+	// proxies, or with different client certificates, are different clients. It
+	// is empty for every target without http_config, so those keys are unchanged.
+	const rootlyTimeout = 10 * time.Second
+	httpClient, err := f.perTargetHTTPClient(shapeRootly, target.HTTPConfig, func() *http.Client {
+		return newRootlyBaseHTTPClient(rootlyTimeout)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("target %q: %w", target.Name, err)
+	}
+
+	clientKey := target.URL + "|" + apiKey + "|" + target.HTTPConfig.Fingerprint()
 
 	f.clientMu.RLock()
 	client, ok := f.rootlyClientMap[clientKey]
@@ -439,9 +536,10 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		f.clientMu.Lock()
 		if client, ok = f.rootlyClientMap[clientKey]; !ok {
 			client = NewRootlyIncidentsClient(ClientConfig{
-				BaseURL: target.URL,
-				APIKey:  apiKey,
-				Timeout: 10 * time.Second,
+				BaseURL:    target.URL,
+				APIKey:     apiKey,
+				Timeout:    rootlyTimeout,
+				HTTPClient: httpClient,
 			}, f.logger)
 			f.rootlyClientMap[clientKey] = client
 		}
@@ -505,7 +603,19 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 	// createEnhancedTelegramPublisher's clientKey; baseURL is resolved (empty
 	// -> the public default) BEFORE building the key so two targets that both
 	// leave URL empty still correctly share one client.
-	clientKey := baseURL + "|" + routingKey
+	//
+	// The http_config FINGERPRINT is part of the key too (FU-HTTP-CONFIG) — same
+	// reasoning, third occurrence of the same defect class. Empty for every
+	// target without http_config, so those keys are unchanged.
+	const pagerDutyTimeout = 10 * time.Second
+	httpClient, err := f.perTargetHTTPClient(shapePagerDuty, target.HTTPConfig, func() *http.Client {
+		return newPagerDutyBaseHTTPClient(pagerDutyTimeout)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("target %q: %w", target.Name, err)
+	}
+
+	clientKey := baseURL + "|" + routingKey + "|" + target.HTTPConfig.Fingerprint()
 
 	f.clientMu.RLock()
 	client, ok := f.pagerDutyClientMap[clientKey]
@@ -515,9 +625,10 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		if client, ok = f.pagerDutyClientMap[clientKey]; !ok {
 			client = NewPagerDutyEventsClient(PagerDutyClientConfig{
 				BaseURL:    baseURL,
-				Timeout:    10 * time.Second,
+				Timeout:    pagerDutyTimeout,
 				MaxRetries: 3,
 				RateLimit:  120.0, // 120 req/min
+				HTTPClient: httpClient,
 			}, f.logger)
 			f.pagerDutyClientMap[clientKey] = client
 		}
@@ -543,16 +654,28 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 		return NewSlackPublisher(f.formatter, f.logger), nil
 	}
 
-	// Get or create Slack client for this webhook URL (clientMu — see
-	// PublisherFactory's doc comment).
+	// Get or create Slack client for this (webhook URL, http_config) pair
+	// (clientMu — see PublisherFactory's doc comment).
+	//
+	// The http_config FINGERPRINT is part of the key (FU-HTTP-CONFIG): two Slack
+	// targets on the same webhook URL reached through different proxies are
+	// different clients. Empty for every target without http_config, so those
+	// keys are byte-identical to the plain URL they used before.
+	httpClient, err := f.perTargetHTTPClient(shapeSlack, target.HTTPConfig, newSlackBaseHTTPClient)
+	if err != nil {
+		return nil, fmt.Errorf("target %q: %w", target.Name, err)
+	}
+
+	clientKey := webhookURL + "|" + target.HTTPConfig.Fingerprint()
+
 	f.clientMu.RLock()
-	client, ok := f.slackClientMap[webhookURL]
+	client, ok := f.slackClientMap[clientKey]
 	f.clientMu.RUnlock()
 	if !ok {
 		f.clientMu.Lock()
-		if client, ok = f.slackClientMap[webhookURL]; !ok {
-			client = NewHTTPSlackWebhookClient(webhookURL, f.logger)
-			f.slackClientMap[webhookURL] = client
+		if client, ok = f.slackClientMap[clientKey]; !ok {
+			client = NewHTTPSlackWebhookClientWithHTTPClient(webhookURL, f.logger, httpClient)
+			f.slackClientMap[clientKey] = client
 		}
 		f.clientMu.Unlock()
 	}
@@ -600,7 +723,16 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 	// sharing that token — so a second target pointing the same bot at a
 	// different API base (a proxy, or a test server) silently reused the first
 	// one's endpoint. Same shape as the SMTP cache's "host:port" key.
-	clientKey := apiURL + "|" + botToken
+	//
+	// The http_config FINGERPRINT joins it (FU-HTTP-CONFIG): same bot, same API
+	// base, different proxy or client certificate = different client. Empty for
+	// every target without http_config.
+	httpClient, err := f.perTargetHTTPClient(shapeTelegram, target.HTTPConfig, newTelegramBaseHTTPClient)
+	if err != nil {
+		return nil, fmt.Errorf("target %q: %w", target.Name, err)
+	}
+
+	clientKey := apiURL + "|" + botToken + "|" + target.HTTPConfig.Fingerprint()
 
 	f.clientMu.RLock()
 	client, ok := f.telegramClientMap[clientKey]
@@ -608,7 +740,7 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 	if !ok {
 		f.clientMu.Lock()
 		if client, ok = f.telegramClientMap[clientKey]; !ok {
-			client = NewHTTPTelegramClient(apiURL, botToken, f.logger)
+			client = NewHTTPTelegramClientWithHTTPClient(apiURL, botToken, f.logger, httpClient)
 			f.telegramClientMap[clientKey] = client
 		}
 		f.clientMu.Unlock()
@@ -640,8 +772,25 @@ func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.Publishin
 		"target", target.Name,
 		"url", target.URL)
 
+	// Per-target http_config (FU-HTTP-CONFIG): proxy / TLS / basic-auth / bearer
+	// layered on top of the webhook client's own tuning. nil for every target
+	// without http_config, which keeps the built-in client.
+	//
+	// An unreadable ca_file / cert_file / password_file fails HERE, and the
+	// error propagates out of CreatePublisherForTarget so the caller logs it and
+	// skips this target — every other target keeps delivering. Falling back to a
+	// plain client instead would deliver alerts unverified or unauthenticated.
+	httpClient, err := f.perTargetHTTPClient(shapeWebhook, target.HTTPConfig, newWebhookBaseHTTPClient)
+	if err != nil {
+		f.logger.Error("Skipping webhook target with an unusable http_config",
+			"target", target.Name,
+			"error", err,
+		)
+		return nil, fmt.Errorf("target %q: %w", target.Name, err)
+	}
+
 	// Create HTTP client with default retry config
-	client := NewWebhookHTTPClient(DefaultWebhookRetryConfig, f.logger)
+	client := NewWebhookHTTPClientWithHTTPClient(DefaultWebhookRetryConfig, f.logger, httpClient)
 
 	// Create validator with default config
 	validator := NewWebhookValidator(f.logger)
