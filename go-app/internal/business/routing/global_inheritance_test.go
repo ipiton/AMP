@@ -63,13 +63,20 @@ func TestInheritGroupBy_FallsBackToGlobalWhenRouteAndParentUnset(t *testing.T) {
 	}
 }
 
-func TestInheritGroupBy_FallsBackToHardcodedDefaultWhenGlobalAlsoUnset(t *testing.T) {
+// Upstream's DefaultRouteOpts leaves GroupBy EMPTY: a route without group_by
+// aggregates everything it matches into ONE group with an empty label set. AMP
+// used to substitute ["alertname"] here, which produced one group per alertname
+// and broke `TestUpstreamParity_AlertGroupsWithoutGroupByHaveEmptyLabels` the
+// moment a config without group_by became loadable (the blackhole-receiver
+// change in FU-RECEIVERS-INTEGRATION). This assertion is inverted deliberately:
+// the old expectation encoded AMP-only behaviour, not upstream's.
+func TestInheritGroupBy_NoDefaultWhenRouteParentAndGlobalUnset(t *testing.T) {
 	b := &TreeBuilder{config: &infraroute.RouteConfig{}} // no Global at all
 
 	got := b.inheritGroupBy(nil, &grouping.Route{})
 
-	if len(got) != 1 || got[0] != "alertname" {
-		t.Fatalf("inheritGroupBy() = %v, want [\"alertname\"] (hardcoded default)", got)
+	if len(got) != 0 {
+		t.Fatalf("inheritGroupBy() = %v, want empty (upstream: no group_by = one group per receiver with empty labels)", got)
 	}
 }
 
@@ -234,5 +241,43 @@ func TestGlobalConfig_Clone_CopiesGroupingFallbackFields(t *testing.T) {
 	clone.GroupWait = routingDuration(999 * time.Second)
 	if *original.GroupWait == *clone.GroupWait {
 		t.Fatal("Clone() must not alias the original's GroupWait pointer")
+	}
+}
+
+// TestTreeBuilder_RootWithoutGroupBy_BuildsEmptyGroupBy is the regression guard
+// at the surface that actually broke: a config shaped exactly like upstream's
+// minimal `route: {receiver: default}` must produce a root node with NO grouping
+// labels, and every child that does not set its own must inherit that.
+//
+// The post-merge failure (futureparity
+// TestUpstreamParity_AlertGroupsWithoutGroupByHaveEmptyLabels, "expected 1 group,
+// got 2") came from this path returning ["alertname"] instead.
+func TestTreeBuilder_RootWithoutGroupBy_BuildsEmptyGroupBy(t *testing.T) {
+	child := &grouping.Route{Match: map[string]string{"severity": "critical"}}
+	config := &infraroute.RouteConfig{
+		Route: &grouping.Route{
+			Receiver: "default",
+			Routes:   []*grouping.Route{child},
+		},
+		Receivers: []*infraroute.Receiver{{
+			Name:           "default",
+			WebhookConfigs: []*infraroute.WebhookConfig{{URL: "https://example.com/default"}},
+		}},
+	}
+
+	tree, err := NewTreeBuilder(config, BuildOptions{ValidateOnBuild: false}).Build()
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	root := tree.Root
+	if len(root.GroupBy) != 0 {
+		t.Fatalf("root.GroupBy = %v, want empty (upstream: no group_by = one group per receiver, labels {})", root.GroupBy)
+	}
+	if len(root.Children) != 1 {
+		t.Fatalf("expected 1 child, got %d", len(root.Children))
+	}
+	if len(root.Children[0].GroupBy) != 0 {
+		t.Fatalf("child.GroupBy = %v, want empty (inherited)", root.Children[0].GroupBy)
 	}
 }

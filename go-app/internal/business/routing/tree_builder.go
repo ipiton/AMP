@@ -453,15 +453,35 @@ func durationOrZero(d *grouping.Duration) time.Duration {
 }
 
 // inheritGroupBy applies inheritance logic for group_by parameter.
+//
+// Priority:
+//  1. Route's own group_by (if set)
+//  2. Parent's group_by (if exists)
+//  3. global.group_by (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
+//     — restored on infraroute.GlobalConfig; see that type's doc comment
+//     for why this is an AMP-only convenience, not an upstream field)
+//  4. EMPTY — upstream Alertmanager's actual default.
+//
+// Step 4 used to return ["alertname"], which is NOT upstream's default and is
+// the post-merge regression this fix closes (FU-RECEIVERS-INTEGRATION's
+// blackhole-receiver change made a config with no group_by loadable, which
+// unmasked it). Upstream's DefaultRouteOpts leaves GroupBy empty: a route
+// without group_by aggregates every alert it matches into ONE group with an
+// EMPTY label set — `amtool`/`GET /api/v2/alerts/groups` show `labels: {}` and
+// one notification per receiver, not one per alertname.
+//
+// An empty result is already the well-defined "global group" everywhere it is
+// consumed, so nothing downstream needs a special case:
+//   - grouping.GroupKeyGenerator.GenerateKey returns GlobalGroupKey ("{global}")
+//     for an empty groupBy, so AlertProcessor.groupKeyFor produces exactly one
+//     key per receiver;
+//   - grouping.Route.IsGlobalGroup() already documents len(GroupBy) == 0 as
+//     "all alerts go into one group";
+//   - the alert-store group assembler builds one group with empty labels.
+//
+// Operators who WANT per-alertname grouping must say so — `group_by:
+// [alertname]` — exactly as upstream requires.
 func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) []string {
-	// Priority:
-	// 1. Route's own group_by (if set)
-	// 2. Parent's group_by (if exists)
-	// 3. global.group_by (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
-	//    — restored on infraroute.GlobalConfig; see that type's doc comment
-	//    for why this is an AMP-only convenience, not an upstream field)
-	// 4. Default: ["alertname"]
-
 	if len(route.GroupBy) > 0 {
 		return route.GroupBy
 	}
@@ -474,7 +494,7 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) [
 		return b.config.Global.GroupBy
 	}
 
-	return []string{"alertname"}
+	return nil
 }
 
 // inheritDuration applies inheritance logic for duration parameters.

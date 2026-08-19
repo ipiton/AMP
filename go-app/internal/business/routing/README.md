@@ -165,7 +165,9 @@ route:
 ```
 
 **Defaults**:
-- `group_by`: `["alertname"]`
+- `group_by`: none (empty) — upstream semantics: every alert the route matches
+  lands in ONE group whose labels are `{}`. Set `group_by: [alertname]`
+  explicitly for per-alertname grouping.
 - `group_wait`: `30s`
 - `group_interval`: `5m`
 - `repeat_interval`: `4h`

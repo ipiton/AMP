@@ -39,7 +39,10 @@ type RouteNode struct {
 	// Routing Parameters (inherited from parent if not set)
 
 	// GroupBy specifies label names for grouping alerts.
-	// Default (root): ["alertname"]
+	// Default (root): EMPTY — upstream Alertmanager's own default, meaning one
+	// group per receiver with an empty label set (see
+	// TreeBuilder.inheritGroupBy). NOT ["alertname"]: that was an AMP-only
+	// substitution, removed as a post-merge regression fix.
 	// Inherited: from parent node
 	// Override: specify in route config
 	GroupBy []string
