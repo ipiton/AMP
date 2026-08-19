@@ -214,6 +214,61 @@ func TestMatchesAll_AbsentLabelUpstreamSemantics(t *testing.T) {
 	}
 }
 
+// TestRuleMatchesSide_LegacyMapForm_AbsentLabelUpstreamSemantics is the
+// review fix-round-2 (R2) regression test: I1's absent-label fix (fix
+// round 1) only reached the matchers-form (matchesAll); the legacy
+// source_match/source_match_re (and target_match/target_match_re) maps,
+// evaluated inline in ruleMatchesSourceSide/ruleMatchesTargetSide, kept
+// the old presence gate. Upstream turns BOTH legacy maps into
+// labels.Matcher{MatchEqual}/{MatchRegexp} the exact same way it turns
+// the matchers-form list (inhibit.go's NewInhibitRule), so they get the
+// exact same absent-as-"" semantics — no special case for the
+// deprecated map syntax. This is the reviewer's own repro:
+// `target_match_re: {foo: ".*"}` must match an alert lacking `foo`
+// upstream (anchored ".*" matches ""), which the pre-fix presence gate
+// refused (fail-open direction: missed inhibition, not over-inhibition).
+func TestRuleMatchesSide_LegacyMapForm_AbsentLabelUpstreamSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		rule    InhibitionRule
+		want    bool
+		explain string
+	}{
+		{
+			name:    `target_match_re: {foo: ".*"} on absent "foo" (reviewer's own repro)`,
+			rule:    InhibitionRule{TargetMatchRE: map[string]string{"foo": ".*"}},
+			want:    true,
+			explain: `upstream: anchored ".*" matches "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `source_match_re: {foo: ".*"} on absent "foo"`,
+			rule:    InhibitionRule{SourceMatchRE: map[string]string{"foo": ".*"}},
+			want:    true,
+			explain: `upstream: anchored ".*" matches "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `target_match: {foo: ""} on absent "foo" (legacy exact-match form, empty value)`,
+			rule:    InhibitionRule{TargetMatch: map[string]string{"foo": ""}},
+			want:    true,
+			explain: `upstream: "" == "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `source_match: {foo: "bar"} on absent "foo" (non-empty operand, tables agree)`,
+			rule:    InhibitionRule{SourceMatch: map[string]string{"foo": "bar"}},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, tt.rule.CompileLegacyRegex())
+			labels := map[string]string{"unrelated": "value"} // "foo" absent
+			got := ruleMatchesSourceSide(&tt.rule, labels) && ruleMatchesTargetSide(&tt.rule, labels)
+			assert.Equal(t, tt.want, got, tt.explain)
+		})
+	}
+}
+
 func TestMatchesAll_RegexAnchoring(t *testing.T) {
 	// "warning" must not also match "warning2" or "not-warning" — anchored
 	// full-string match, same as internal/business/routing.anchorRegex.
