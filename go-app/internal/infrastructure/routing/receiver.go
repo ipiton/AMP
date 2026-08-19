@@ -399,9 +399,15 @@ func (p *PagerDutyConfig) Sanitize() *PagerDutyConfig {
 //	    text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
 //	    color: danger
 type SlackConfig struct {
-	// APIURL is the Slack webhook or API URL (required)
-	// Must be HTTPS
-	APIURL string `yaml:"api_url" validate:"required,url,https_production"`
+	// APIURL is the Slack webhook or API URL.
+	// Must be HTTPS.
+	//
+	// Optional at the FIELD level since FU-RECEIVERS-INTEGRATION slice 2:
+	// upstream lets a slack_config omit it and inherit `global.slack_api_url`.
+	// The parser resolves that fallback (resolveGlobalFallbacks) and then
+	// requires the result to be non-empty (validateSemantics), so a config with
+	// neither still fails to load — with a message naming both places.
+	APIURL string `yaml:"api_url,omitempty" validate:"omitempty,url,https_production"`
 
 	// Channel specifies the target channel or user
 	// Format: #channel or @username

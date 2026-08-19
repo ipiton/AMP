@@ -399,3 +399,49 @@ func webhookReceiverFixture(name, url string) *infraroute.Receiver {
 		WebhookConfigs: []*infraroute.WebhookConfig{{URL: url}},
 	}
 }
+
+// TestBuildConfigTargets_SendResolved is FU-RECEIVERS-INTEGRATION slice 2:
+// upstream's per-integration `send_resolved` (default true) is carried on the
+// target's FilterConfig, and ONLY when explicitly false — so a default config
+// produces exactly the slice-1 encoding.
+func TestBuildConfigTargets_SendResolved(t *testing.T) {
+	no, yes := false, true
+
+	rc := &infraroute.RouteConfig{
+		Global: &infraroute.GlobalConfig{SMTPSmartHost: "smtp.example.com:25"},
+		Receivers: []*infraroute.Receiver{{
+			Name: "team-x",
+			WebhookConfigs: []*infraroute.WebhookConfig{
+				{URL: "https://a.example.com/hook", SendResolved: &no},
+				{URL: "https://b.example.com/hook", SendResolved: &yes},
+				{URL: "https://c.example.com/hook"}, // unset == upstream default true
+			},
+			SlackConfigs:     []*infraroute.SlackConfig{{APIURL: "https://hooks.slack.com/x", SendResolved: &no}},
+			PagerDutyConfigs: []*infraroute.PagerDutyConfig{{RoutingKey: "rk", SendResolved: &no}},
+			TelegramConfigs:  []*infraroute.TelegramConfig{{BotToken: "t", ChatID: "1", SendResolved: &no}},
+			EmailConfigs:     []*infraroute.EmailConfig{{To: mail("ops", "example.com"), SendResolved: &no}},
+		}},
+	}
+
+	byName := map[string]*core.PublishingTarget{}
+	for _, target := range BuildConfigTargets(rc, quietLogger()) {
+		byName[target.Name] = target
+	}
+
+	for _, name := range []string{
+		"cfg:team-x/webhook0", "cfg:team-x/slack0", "cfg:team-x/pagerduty0",
+		"cfg:team-x/telegram0", "cfg:team-x/email0",
+	} {
+		target := byName[name]
+		require.NotNil(t, target, name)
+		assert.Equal(t, false, target.FilterConfig[FilterConfigSendResolved],
+			"%s: send_resolved: false must be recorded", name)
+	}
+
+	for _, name := range []string{"cfg:team-x/webhook1", "cfg:team-x/webhook2"} {
+		target := byName[name]
+		require.NotNil(t, target, name)
+		assert.NotContains(t, target.FilterConfig, FilterConfigSendResolved,
+			"%s: upstream's default (true) must leave no key behind", name)
+	}
+}

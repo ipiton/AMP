@@ -225,6 +225,25 @@ func buildReceiverTargets(receiver *infraroute.Receiver, global *infraroute.Glob
 	return out
 }
 
+// FilterConfigSendResolved is the target FilterConfig key carrying upstream's
+// per-integration `send_resolved` (FU-RECEIVERS-INTEGRATION slice 2).
+//
+// Only written when the integration explicitly sets `send_resolved: false` —
+// upstream's default is true, and an absent key means exactly that, so a target
+// built from a default config is byte-identical to a slice-1 one. Consumed by
+// PublishingCoordinator (targetAcceptsAlertStatus): the publisher layer stays
+// untouched, and K8s-sourced targets can use the same key in their JSON.
+const FilterConfigSendResolved = "send_resolved"
+
+// applySendResolved records `send_resolved: false` on the target. A nil or true
+// value writes nothing (see FilterConfigSendResolved).
+func applySendResolved(target *core.PublishingTarget, sendResolved *bool) {
+	if sendResolved == nil || *sendResolved {
+		return
+	}
+	target.FilterConfig[FilterConfigSendResolved] = false
+}
+
 // newConfigTarget builds the common skeleton every config-provisioned target
 // shares: cfg: name (R1), receiver scoping (R2), enabled, non-nil maps (the
 // same post-conditions applyDefaults gives K8s-sourced targets).
@@ -250,7 +269,7 @@ func newConfigTarget(receiver, kind string, index int, targetType string, format
 //
 // NOT expressible on the publisher contract (documented, not silently
 // dropped): http_method (WebhookPublisher always POSTs), max_alerts,
-// http_config, send_resolved (slice 2).
+// http_config. send_resolved IS expressible — see sendResolvedFilter below.
 func webhookTarget(receiver string, index int, cfg *infraroute.WebhookConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
@@ -260,6 +279,7 @@ func webhookTarget(receiver string, index int, cfg *infraroute.WebhookConfig) (*
 	}
 
 	target := newConfigTarget(receiver, configKindWebhook, index, "webhook", core.FormatAlertmanager, cfg.URL)
+	applySendResolved(target, cfg.SendResolved)
 	// http_headers -> target.Headers, the same channel the K8s path uses for
 	// per-target auth (webhook_publisher_enhanced reads Authorization /
 	// X-API-Key out of it, HTTPPublisher.publish sets all of them verbatim).
@@ -291,11 +311,16 @@ func slackTarget(receiver string, index int, cfg *infraroute.SlackConfig) (*core
 		return nil, fmt.Errorf("nil config entry")
 	}
 	if strings.TrimSpace(cfg.APIURL) == "" {
-		// Slice 2 wires global.slack_api_url as the fallback for this.
-		return nil, fmt.Errorf("api_url is empty (global slack_api_url fallback not wired yet)")
+		// Unreachable through a parsed config since slice 2: the parser resolves
+		// global.slack_api_url into this field and then refuses to load a config
+		// where BOTH are empty (validateReceiverEndpoints). Kept for
+		// programmatically-built configs.
+		return nil, fmt.Errorf("api_url is empty and no global slack_api_url fallback applied")
 	}
 
-	return newConfigTarget(receiver, configKindSlack, index, "slack", core.FormatSlack, cfg.APIURL), nil
+	target := newConfigTarget(receiver, configKindSlack, index, "slack", core.FormatSlack, cfg.APIURL)
+	applySendResolved(target, cfg.SendResolved)
+	return target, nil
 }
 
 // pagerDutyTarget maps one pagerduty_configs entry.
@@ -311,7 +336,7 @@ func slackTarget(receiver string, index int, cfg *infraroute.SlackConfig) (*core
 //
 // NOT expressible: severity/class/component/group/description/details
 // (formatPagerDuty derives severity/summary from the alert itself),
-// http_config, send_resolved (slice 2).
+// http_config.
 func pagerDutyTarget(receiver string, index int, cfg *infraroute.PagerDutyConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
@@ -326,6 +351,7 @@ func pagerDutyTarget(receiver string, index int, cfg *infraroute.PagerDutyConfig
 	}
 
 	target := newConfigTarget(receiver, configKindPagerDuty, index, "pagerduty", core.FormatPagerDuty, pagerDutyBaseURL(cfg.URL))
+	applySendResolved(target, cfg.SendResolved)
 	target.Headers["routing_key"] = routingKey
 	return target, nil
 }
@@ -356,7 +382,7 @@ func pagerDutyBaseURL(raw string) string {
 // and the publisher's own zero values already mean the same thing.
 //
 // NOT expressible: parse_mode (EnhancedTelegramPublisher always renders via
-// core.FormatTelegram), message, http_config, send_resolved (slice 2).
+// core.FormatTelegram), message, http_config.
 func telegramTarget(receiver string, index int, cfg *infraroute.TelegramConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
@@ -371,6 +397,7 @@ func telegramTarget(receiver string, index int, cfg *infraroute.TelegramConfig) 
 	}
 
 	target := newConfigTarget(receiver, configKindTelegram, index, "telegram", core.FormatTelegram, strings.TrimSpace(cfg.APIURL))
+	applySendResolved(target, cfg.SendResolved)
 	target.Headers["bot_token"] = botToken
 	target.Headers["chat_id"] = chatID
 	if cfg.MessageThreadID > 0 {
@@ -433,6 +460,8 @@ func emailTarget(receiver string, index int, cfg *infraroute.EmailConfig, global
 		requireTLS = global.SMTPRequireTLS
 	}
 	if host == "" {
+		// Also unreachable through a parsed config since slice 2: email_configs
+		// without global.smtp_smarthost is now a load error.
 		return nil, fmt.Errorf("no SMTP smarthost configured (global.smtp_smarthost is empty)")
 	}
 	if strings.TrimSpace(cfg.From) != "" {
@@ -441,6 +470,7 @@ func emailTarget(receiver string, index int, cfg *infraroute.EmailConfig, global
 
 	url := "smtp://" + net.JoinHostPort(host, strconv.Itoa(port))
 	target := newConfigTarget(receiver, configKindEmail, index, "email", core.FormatWebhook, url)
+	applySendResolved(target, cfg.SendResolved)
 
 	// Header keys are exactly the ones extractSMTPConfig / buildEmailMessage
 	// read on the publisher side.
