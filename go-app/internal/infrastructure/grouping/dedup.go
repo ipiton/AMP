@@ -117,15 +117,21 @@ func (l *notifyDedupLog) TryClaim(_ context.Context, _ GroupKey, _ time.Duration
 func noopRelease() error { return nil }
 
 // alertSetSignature computes a deterministic signature for alerts: sorted
-// "fingerprint:status" pairs joined by "|". Order-independent (a group's
-// alerts map iteration order is not stable) and status-sensitive (an alert
-// flipping firing<->resolved changes the signature, so it is never treated
-// as a duplicate of the prior send — matching upstream nflog, where a
-// changed alert set always triggers a fresh notification).
+// core.Alert.DeliveryKey values ("fingerprint:status") joined by "|".
+// Order-independent (a group's alerts map iteration order is not stable) and
+// status-sensitive (an alert flipping firing<->resolved changes the signature,
+// so it is never treated as a duplicate of the prior send — matching upstream
+// nflog, where a changed alert set always triggers a fresh notification).
+//
+// The per-element format is core.Alert.DeliveryKey and NOT an inline
+// concatenation (task fu4): the per-(group, target) delivered set that
+// tracks which individual alerts a non-batch target accepted is keyed by
+// exactly the same atoms, so the two must never drift apart. See
+// DeliveryKey's doc comment.
 func alertSetSignature(alerts []*core.Alert) string {
 	parts := make([]string, 0, len(alerts))
 	for _, a := range alerts {
-		parts = append(parts, a.Fingerprint+":"+string(a.Status))
+		parts = append(parts, a.DeliveryKey())
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "|")
