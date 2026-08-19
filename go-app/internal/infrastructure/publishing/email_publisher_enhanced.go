@@ -80,16 +80,48 @@ func (p *EnhancedEmailPublisher) Publish(ctx context.Context, enrichedAlert *cor
 		return fmt.Errorf("email: render templates: %w", err)
 	}
 
+	// TEMPLATES-EPIC slice 2: upstream `email_configs[].subject`/`.html`/`.text`
+	// and `headers:`, rendered against the upstream notification data model.
+	//
+	// Applied AFTER the block above, never instead of it: the fixed rendering
+	// always runs first, so its output is the fallback if a configured template
+	// fails, and this overlay only ever replaces fields that rendered
+	// successfully into non-empty content (see RenderEmailContent). Email is the
+	// only integration needing this shape — it renders its own body instead of
+	// going through AlertFormatter, so the formatter decorator cannot reach it.
+	extraHeaders := map[string]string{}
+	if renderer, ok := p.GetFormatter().(emailContentRenderer); ok {
+		if content, rendered := renderer.RenderEmailContent(enrichedAlert); rendered {
+			if content.Subject != "" {
+				subject = content.Subject
+			}
+			if content.HTML != "" {
+				html = content.HTML
+			}
+			if content.Text != "" {
+				text = content.Text
+			}
+			for key, value := range content.Headers {
+				extraHeaders[key] = value
+			}
+		}
+	}
+
 	// Собрать EmailMessage
+	headers := map[string]string{
+		"X-Mailer": "Alertmanager++ OSS",
+	}
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
+
 	msg := &EmailMessage{
 		To:      to,
 		From:    from,
 		Subject: subject,
 		HTML:    html,
 		Text:    text,
-		Headers: map[string]string{
-			"X-Mailer": "Alertmanager++ OSS",
-		},
+		Headers: headers,
 	}
 
 	// Отправить

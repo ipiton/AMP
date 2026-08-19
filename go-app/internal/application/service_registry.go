@@ -1431,7 +1431,7 @@ func (r *ServiceRegistry) initializeTemplating() {
 		globs = r.config.Routing.Templates
 	}
 
-	registry, err := templating.NewRegistry(globs, templating.Options{})
+	registry, err := templating.NewRegistry(globs, r.templateOptions())
 	if err != nil {
 		r.logger.Error("Notification template files failed to load; falling back to the built-in defaults",
 			"templates", globs, "error", err)
@@ -1439,7 +1439,7 @@ func (r *ServiceRegistry) initializeTemplating() {
 
 		// Defaults-only registry. This cannot fail: the templates are embedded
 		// in the binary and parsed by a unit test on every build.
-		registry, err = templating.NewRegistry(nil, templating.Options{})
+		registry, err = templating.NewRegistry(nil, r.templateOptions())
 		if err != nil {
 			r.logger.Error("Built-in notification templates failed to load", "error", err)
 			return
@@ -1474,6 +1474,17 @@ func (r *ServiceRegistry) warnUnmatchedTemplateGlobs(registry *templating.Regist
 		r.logger.Warn("Notification template glob matched no files; the built-in defaults will be used for anything it was meant to override",
 			"globs", unmatched,
 			"hint", "paths are resolved relative to the config file's directory; a ConfigMap mounted after startup is the benign case")
+	}
+}
+
+// templateOptions builds the template execution guards from config
+// (publishing.templates.*), falling back to templating's own defaults for any
+// value the operator did not set (TEMPLATES-EPIC slice 2 / slice-1 review
+// Minor 5: the guards used to be compile-time constants).
+func (r *ServiceRegistry) templateOptions() templating.Options {
+	return templating.Options{
+		Timeout:        r.config.Publishing.Templates.RenderTimeout,
+		MaxOutputBytes: r.config.Publishing.Templates.MaxOutputBytes,
 	}
 }
 
