@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ipiton/AMP/pkg/httperror"
@@ -79,9 +80,46 @@ type pagerDutyEventsClientImpl struct {
 	retryConfig PagerDutyRetryConfig
 }
 
+// PagerDuty Events API v2 paths.
+//
+// pagerDutyEnqueuePath was "/v2/events" until FU-RECEIVERS-INTEGRATION's
+// slice-1 review (finding I2). That path does not exist: PagerDuty's Events API
+// v2 accepts trigger/acknowledge/resolve events at POST /v2/enqueue (change
+// events at /v2/change/enqueue, which this file already had right). Every
+// PagerDuty notification therefore 404'd — a pre-existing publisher bug that
+// only became load-bearing when config-provisioned targets started advertising
+// PagerDuty delivery straight from an untouched upstream config.
+const (
+	pagerDutyEnqueuePath       = "/v2/enqueue"
+	pagerDutyChangeEnqueuePath = "/v2/change/enqueue"
+)
+
+// normalizePagerDutyBaseURL turns whatever an operator put in a target's URL
+// into the BASE this client appends its own paths to.
+//
+// Both target sources can legitimately carry the FULL endpoint rather than a
+// base: upstream Alertmanager's `pagerduty_configs[].url` is documented as the
+// events endpoint (and routing.PagerDutyConfig.Defaults() fills in
+// https://events.pagerduty.com/v2/enqueue), and a hand-written K8s Secret may
+// well copy that. Stripping a trailing endpoint path here keeps both shapes
+// working instead of POSTing to /v2/enqueue/v2/enqueue.
+//
+// "/v2/events" is stripped too: it is the path this client used to (wrongly)
+// append, so a Secret written to compensate for that bug keeps working.
+func normalizePagerDutyBaseURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	for _, suffix := range []string{pagerDutyChangeEnqueuePath, pagerDutyEnqueuePath, "/v2/events"} {
+		if trimmed, ok := strings.CutSuffix(base, suffix); ok {
+			return strings.TrimRight(trimmed, "/")
+		}
+	}
+	return base
+}
+
 // NewPagerDutyEventsClient creates a new PagerDuty Events API v2 client
 func NewPagerDutyEventsClient(config PagerDutyClientConfig, logger *slog.Logger) PagerDutyEventsClient {
 	// Set defaults
+	config.BaseURL = normalizePagerDutyBaseURL(config.BaseURL)
 	if config.BaseURL == "" {
 		config.BaseURL = "https://events.pagerduty.com"
 	}
@@ -134,7 +172,7 @@ func (c *pagerDutyEventsClientImpl) TriggerEvent(ctx context.Context, req *Trigg
 	req.EventAction = EventActionTrigger
 
 	// Send request
-	resp, err := c.doRequest(ctx, "POST", "/v2/events", req)
+	resp, err := c.doRequest(ctx, "POST", pagerDutyEnqueuePath, req)
 	if err != nil {
 		c.logger.Error("Failed to trigger PagerDuty event",
 			"error", err,
@@ -174,7 +212,7 @@ func (c *pagerDutyEventsClientImpl) AcknowledgeEvent(ctx context.Context, req *A
 	req.EventAction = EventActionAcknowledge
 
 	// Send request
-	resp, err := c.doRequest(ctx, "POST", "/v2/events", req)
+	resp, err := c.doRequest(ctx, "POST", pagerDutyEnqueuePath, req)
 	if err != nil {
 		c.logger.Error("Failed to acknowledge PagerDuty event",
 			"error", err,
@@ -214,7 +252,7 @@ func (c *pagerDutyEventsClientImpl) ResolveEvent(ctx context.Context, req *Resol
 	req.EventAction = EventActionResolve
 
 	// Send request
-	resp, err := c.doRequest(ctx, "POST", "/v2/events", req)
+	resp, err := c.doRequest(ctx, "POST", pagerDutyEnqueuePath, req)
 	if err != nil {
 		c.logger.Error("Failed to resolve PagerDuty event",
 			"error", err,
@@ -248,7 +286,7 @@ func (c *pagerDutyEventsClientImpl) SendChangeEvent(ctx context.Context, req *Ch
 	}
 
 	// Send request
-	resp, err := c.doRequest(ctx, "POST", "/v2/change/enqueue", req)
+	resp, err := c.doRequest(ctx, "POST", pagerDutyChangeEnqueuePath, req)
 	if err != nil {
 		c.logger.Error("Failed to send PagerDuty change event",
 			"error", err,
@@ -286,7 +324,7 @@ func (c *pagerDutyEventsClientImpl) Health(ctx context.Context) error {
 		},
 	}
 
-	resp, err := c.doRequestWithoutRetry(ctx, "POST", "/v2/events", req)
+	resp, err := c.doRequestWithoutRetry(ctx, "POST", pagerDutyEnqueuePath, req)
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}

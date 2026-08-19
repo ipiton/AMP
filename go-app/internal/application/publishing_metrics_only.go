@@ -33,8 +33,8 @@ var (
 	_ grouping.GroupNotificationPublisher = (*MetricsOnlyPublisher)(nil)
 )
 
-func (p *MetricsOnlyPublisher) PublishToAll(ctx context.Context, alert *core.Alert) error {
-	p.logSkip(ctx, alert, nil)
+func (p *MetricsOnlyPublisher) PublishToReceiver(ctx context.Context, alert *core.Alert, receiver string) error {
+	p.logSkip(ctx, alert, nil, receiver)
 	return nil
 }
 
@@ -75,17 +75,20 @@ func (p *MetricsOnlyPublisher) PublishGroup(ctx context.Context, _ string, alert
 	return nil, fmt.Errorf("%w: %s", grouping.ErrDeliveryNotConfirmed, p.reason)
 }
 
-func (p *MetricsOnlyPublisher) PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error {
-	p.logSkip(ctx, alert, classification)
+func (p *MetricsOnlyPublisher) PublishToReceiverWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) error {
+	p.logSkip(ctx, alert, classification, receiver)
 	return nil
 }
 
-func (p *MetricsOnlyPublisher) logSkip(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) {
+func (p *MetricsOnlyPublisher) logSkip(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) {
 	if p.logger == nil {
 		return
 	}
 
 	fields := []any{"reason", p.reason}
+	if receiver != "" {
+		fields = append(fields, "receiver", receiver)
+	}
 	if alert != nil {
 		fields = append(fields,
 			"alert", alert.AlertName,

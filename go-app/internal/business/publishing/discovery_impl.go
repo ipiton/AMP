@@ -64,15 +64,35 @@ import (
 //	target, _ := manager.GetTarget("rootly-prod")
 //	publish(alert, target)
 type DefaultTargetDiscoveryManager struct {
-	// K8s client for secret discovery (from TN-046)
+	// K8s client for secret discovery (from TN-046).
+	//
+	// NIL in config-only mode (NewConfigOnlyTargetDiscoveryManager): a
+	// deployment whose targets come exclusively from the config's
+	// `receivers:` section needs no cluster access at all, which is what
+	// makes the lite profile able to deliver notifications.
 	k8sClient k8s.K8sClient
 
 	// Configuration
 	namespace     string // K8s namespace to search
 	labelSelector string // Label selector (e.g., "publishing-target=true")
 
-	// In-memory cache (thread-safe, O(1) Get)
+	// In-memory cache of K8s-Secret-sourced targets (thread-safe, O(1) Get)
 	cache *targetCache
+
+	// configCache holds the config-provisioned targets (FU-RECEIVERS-
+	// INTEGRATION, R3): built by BuildConfigTargets from the loaded
+	// `receivers:` section and injected via SetConfigTargets. Deliberately a
+	// SECOND cache rather than entries in `cache`:
+	//
+	//   - DiscoverTargets replaces `cache` wholesale on every K8s poll, so
+	//     config targets living there would be wiped by the next refresh;
+	//   - the two sources have to be told apart for source-labelled stats and
+	//     metrics, and for keeping the K8s path's behaviour bit-for-bit
+	//     unchanged (R1: "K8s targets keep today's behavior untouched").
+	//
+	// targetCache.Set builds a fresh map and swaps it under one lock, so a
+	// reload never exposes a window with zero config targets.
+	configCache *targetCache
 
 	// Statistics (protected by mu)
 	stats DiscoveryStats
@@ -85,8 +105,9 @@ type DefaultTargetDiscoveryManager struct {
 
 // DiscoveryMetrics holds Prometheus metrics for target discovery.
 type DiscoveryMetrics struct {
-	// TargetsTotal tracks active targets by type and enabled status.
-	// Labels: type (rootly/pagerduty/slack/webhook), enabled (true/false)
+	// TargetsTotal tracks active targets by type, enabled status and source.
+	// Labels: type (rootly/pagerduty/slack/webhook/telegram/email),
+	// enabled (true/false), source (k8s/config)
 	TargetsTotal *prometheus.GaugeVec
 
 	// DurationSeconds tracks operation duration (discover/parse/validate).
@@ -171,6 +192,7 @@ func NewTargetDiscoveryManager(
 		namespace:     namespace,
 		labelSelector: labelSelector,
 		cache:         newTargetCache(),
+		configCache:   newTargetCache(),
 		logger:        logger,
 		metrics:       discoveryMetrics,
 	}
@@ -184,9 +206,150 @@ func NewTargetDiscoveryManager(
 	return manager, nil
 }
 
+// NewConfigOnlyTargetDiscoveryManager creates a discovery manager with NO
+// Kubernetes access (FU-RECEIVERS-INTEGRATION slice 1, item 3).
+//
+// Targets come exclusively from SetConfigTargets, i.e. from the config's
+// `receivers:` section. DiscoverTargets becomes a no-op success and Health
+// always reports healthy, because there is no cluster to talk to and nothing
+// to poll — the config targets are rebuilt by the caller on config reload
+// instead.
+//
+// This is what lets a lite-profile deployment (no K8s client, no Secrets)
+// deliver notifications from an untouched upstream Alertmanager config.
+func NewConfigOnlyTargetDiscoveryManager(
+	logger *slog.Logger,
+	metricsRegistry *v2.Registry,
+) *DefaultTargetDiscoveryManager {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	var discoveryMetrics *DiscoveryMetrics
+	if metricsRegistry != nil {
+		discoveryMetrics = registerDiscoveryMetrics(metricsRegistry)
+	}
+
+	logger.Info("Target discovery manager initialized in config-only mode (no Kubernetes access)")
+
+	return &DefaultTargetDiscoveryManager{
+		cache:       newTargetCache(),
+		configCache: newTargetCache(),
+		logger:      logger,
+		metrics:     discoveryMetrics,
+	}
+}
+
+// IsConfigOnly reports whether this manager runs without Kubernetes access.
+func (m *DefaultTargetDiscoveryManager) IsConfigOnly() bool {
+	return m.k8sClient == nil
+}
+
+// SetConfigTargets atomically replaces the config-provisioned target set
+// (implements ConfigTargetSink; FU-RECEIVERS-INTEGRATION R3).
+//
+// Called once at startup and again on every config reload that changed the
+// routing fingerprint. The swap is a single targetCache.Set, so readers see
+// either the whole old set or the whole new one — never an empty intermediate
+// state, which would silently drop notifications for the duration of a reload.
+//
+// Passing nil/empty clears the set (all receivers' integrations removed from
+// the config).
+func (m *DefaultTargetDiscoveryManager) SetConfigTargets(targets []*core.PublishingTarget) {
+	if m.configCache == nil {
+		if m.logger == nil {
+			// Re-review finding R4: the guard below dereferences the logger, and
+			// a struct-literal manager — the very case this branch exists for —
+			// may have none. Nothing to report to, but never panic.
+			return
+		}
+		// Review finding M2: this used to lazily assign m.configCache here,
+		// which is an unsynchronised write to a field the union read paths read
+		// from other goroutines. Both constructors initialise it, so the only
+		// way to get here is a hand-built struct literal (some tests) — report
+		// that instead of racing.
+		m.logger.Error("SetConfigTargets called on a discovery manager built without a config cache; config-provisioned targets ignored (use NewTargetDiscoveryManager or NewConfigOnlyTargetDiscoveryManager)")
+		return
+	}
+	m.configCache.Set(targets)
+
+	// Count comes from the CACHE, not from len(targets) (slice-1 review finding
+	// I3): the cache is keyed by name, so if two targets ever shared a name the
+	// stat would over-report what is actually reachable. BuildConfigTargets
+	// drops duplicates itself, and the parser rejects the duplicate receiver
+	// names that could cause them — reading the cache keeps the number honest
+	// regardless of who calls this.
+	stored := m.configCache.Len()
+
+	m.mu.Lock()
+	m.stats.ConfigTargets = stored
+	m.mu.Unlock()
+
+	if m.metrics != nil {
+		m.updateTargetsGauge(m.ListTargets())
+	}
+
+	// Names only — they are built from receiver names and integration kinds,
+	// so unlike the targets' URLs/headers they carry no credentials.
+	m.logger.Info("Config-provisioned publishing targets updated",
+		"count", len(targets),
+		"names", configTargetNames(targets),
+	)
+}
+
+// configTargets / configTargetsByType / configTarget are the read accessors for
+// the config-provisioned set. They tolerate a nil configCache so a manager
+// built by struct literal (as some tests do) keeps working with no config
+// targets rather than panicking on the union read paths. The field is only ever
+// assigned by the constructors, never lazily — see SetConfigTargets (review
+// finding M2).
+func (m *DefaultTargetDiscoveryManager) configTargets() []*core.PublishingTarget {
+	if m.configCache == nil {
+		return nil
+	}
+	return m.configCache.List()
+}
+
+func (m *DefaultTargetDiscoveryManager) configTargetsByType(targetType string) []*core.PublishingTarget {
+	if m.configCache == nil {
+		return nil
+	}
+	return m.configCache.GetByType(targetType)
+}
+
+func (m *DefaultTargetDiscoveryManager) configTarget(name string) *core.PublishingTarget {
+	if m.configCache == nil {
+		return nil
+	}
+	return m.configCache.Get(name)
+}
+
+// configTargetNames renders the target names for the log line above.
+func configTargetNames(targets []*core.PublishingTarget) []string {
+	names := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if target != nil {
+			names = append(names, target.Name)
+		}
+	}
+	return names
+}
+
 // DiscoverTargets lists K8s secrets and refreshes in-memory cache.
 func (m *DefaultTargetDiscoveryManager) DiscoverTargets(ctx context.Context) error {
 	startTime := time.Now()
+
+	// Config-only mode: no cluster to list, and NOTHING to clear — the
+	// config-provisioned set is owned by SetConfigTargets. Returning early
+	// (rather than falling through to a nil-client call) also keeps the
+	// periodic RefreshManager and the manual refresh endpoint harmless.
+	if m.k8sClient == nil {
+		m.mu.Lock()
+		m.stats.LastDiscovery = time.Now()
+		m.mu.Unlock()
+		m.logger.Debug("Target discovery skipped (config-only mode, no Kubernetes client)")
+		return nil
+	}
 
 	m.logger.Info("Starting target discovery",
 		"namespace", m.namespace,
@@ -236,8 +399,10 @@ func (m *DefaultTargetDiscoveryManager) DiscoverTargets(ctx context.Context) err
 
 	// Record metrics
 	if m.metrics != nil {
-		// Update targets gauge (by type and enabled)
-		m.updateTargetsGauge(validTargets)
+		// Update targets gauge (by type, enabled and source). The gauge covers
+		// the WHOLE view, so the config-provisioned targets must be included
+		// here too — otherwise every K8s poll would zero their series.
+		m.updateTargetsGauge(m.ListTargets())
 
 		// Record duration
 		m.metrics.DurationSeconds.WithLabelValues("discover").Observe(time.Since(startTime).Seconds())
@@ -322,39 +487,57 @@ func (m *DefaultTargetDiscoveryManager) parseAndValidateSecrets(secrets []corev1
 	return validTargets, invalidCount
 }
 
-// updateTargetsGauge updates Prometheus gauge with target counts by type and enabled.
+// gaugeTargetTypes is the label-value space reset before each gauge update.
+// telegram/email joined the list with FU-RECEIVERS-INTEGRATION: config
+// provisioning is the first code path that can actually produce targets of
+// those two types (discovery_validate.isValidTargetType still rejects them for
+// K8s Secrets), so without them here a removed telegram receiver would leave a
+// stale non-zero series behind.
+var gaugeTargetTypes = []string{"rootly", "pagerduty", "slack", "webhook", "telegram", "email", "alertmanager"}
+
+// updateTargetsGauge updates the Prometheus gauge with target counts by type,
+// enabled status and SOURCE ("config" vs "k8s" — FU-RECEIVERS-INTEGRATION
+// slice 1, item 2), for the union of both sources.
 func (m *DefaultTargetDiscoveryManager) updateTargetsGauge(targets []*core.PublishingTarget) {
 	// Reset all gauges (to handle deleted targets)
-	for _, targetType := range []string{"rootly", "pagerduty", "slack", "webhook"} {
+	for _, targetType := range gaugeTargetTypes {
 		for _, enabled := range []string{"true", "false"} {
-			m.metrics.TargetsTotal.WithLabelValues(targetType, enabled).Set(0)
+			for _, source := range []string{TargetSourceK8s, TargetSourceConfig} {
+				m.metrics.TargetsTotal.WithLabelValues(targetType, enabled, source).Set(0)
+			}
 		}
 	}
 
-	// Count targets by type and enabled
-	counts := make(map[string]map[string]int)
+	// Count targets by (type, enabled, source)
+	type gaugeKey struct {
+		targetType string
+		enabled    string
+		source     string
+	}
+	counts := make(map[gaugeKey]int, len(targets))
 	for _, target := range targets {
-		if _, ok := counts[target.Type]; !ok {
-			counts[target.Type] = make(map[string]int)
-		}
 		enabledStr := "false"
 		if target.Enabled {
 			enabledStr = "true"
 		}
-		counts[target.Type][enabledStr]++
+		counts[gaugeKey{target.Type, enabledStr, TargetSource(target)}]++
 	}
 
 	// Update gauges
-	for targetType, enabledCounts := range counts {
-		for enabled, count := range enabledCounts {
-			m.metrics.TargetsTotal.WithLabelValues(targetType, enabled).Set(float64(count))
-		}
+	for key, count := range counts {
+		m.metrics.TargetsTotal.WithLabelValues(key.targetType, key.enabled, key.source).Set(float64(count))
 	}
 }
 
-// GetTarget returns target by name (O(1) lookup).
+// GetTarget returns target by name (O(1) lookup) from the UNION of both
+// sources (R3). The two name spaces are disjoint by construction — config
+// targets are prefixed "cfg:", which validateTarget rejects for K8s Secrets —
+// so the lookup order carries no precedence semantics.
 func (m *DefaultTargetDiscoveryManager) GetTarget(name string) (*core.PublishingTarget, error) {
 	target := m.cache.Get(name)
+	if target == nil {
+		target = m.configTarget(name)
+	}
 
 	// Record lookup metric
 	if m.metrics != nil {
@@ -374,9 +557,11 @@ func (m *DefaultTargetDiscoveryManager) GetTarget(name string) (*core.Publishing
 	return target, nil
 }
 
-// ListTargets returns all active targets.
+// ListTargets returns all active targets from BOTH sources (R3): the K8s
+// Secret-sourced ones first (unchanged order semantics for existing callers),
+// then the config-provisioned ones.
 func (m *DefaultTargetDiscoveryManager) ListTargets() []*core.PublishingTarget {
-	targets := m.cache.List()
+	targets := append(m.cache.List(), m.configTargets()...)
 
 	// Record lookup metric
 	if m.metrics != nil {
@@ -387,9 +572,9 @@ func (m *DefaultTargetDiscoveryManager) ListTargets() []*core.PublishingTarget {
 	return targets
 }
 
-// GetTargetsByType filters targets by type.
+// GetTargetsByType filters the union of both sources by type (R3).
 func (m *DefaultTargetDiscoveryManager) GetTargetsByType(targetType string) []*core.PublishingTarget {
-	targets := m.cache.GetByType(targetType)
+	targets := append(m.cache.GetByType(targetType), m.configTargetsByType(targetType)...)
 
 	// Record lookup metric
 	if m.metrics != nil {
@@ -414,6 +599,12 @@ func (m *DefaultTargetDiscoveryManager) GetStats() DiscoveryStats {
 
 // Health checks target discovery manager + K8s client health.
 func (m *DefaultTargetDiscoveryManager) Health(ctx context.Context) error {
+	// Config-only mode: nothing external to be unhealthy about. The targets
+	// are in memory and their own reachability is the health monitor's job.
+	if m.k8sClient == nil {
+		return nil
+	}
+
 	// Check K8s client health
 	if err := m.k8sClient.Health(ctx); err != nil {
 		m.logger.Warn("K8s client unhealthy", "error", err)
@@ -432,9 +623,9 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 				Namespace: "alert_history",
 				Subsystem: "publishing_discovery",
 				Name:      "targets_total",
-				Help:      "Total discovered targets by type and enabled status",
+				Help:      "Total discovered targets by type, enabled status and source (k8s/config)",
 			},
-			[]string{"type", "enabled"},
+			[]string{"type", "enabled", "source"},
 		),
 		DurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{

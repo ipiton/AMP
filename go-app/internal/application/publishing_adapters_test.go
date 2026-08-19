@@ -34,10 +34,20 @@ type fakePublishingCoordinator struct {
 	// callback was asked about, and the alert subset it returned for each.
 	skipTargetAsked  []string
 	targetAlertsSeen map[string][]*core.Alert
+
+	// review finding C1: non-grouped publish call recording.
+	directReceiver    string
+	directTargetNames []string
+	directCalls       int
 }
 
-func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error) {
+// PublishToTargets records the receiver the adapter passed (review finding C1:
+// the non-grouped path must resolve targets by receiver, not fan out).
+func (f *fakePublishingCoordinator) PublishToTargets(_ context.Context, alert *core.EnrichedAlert, targetNames []string, receiverName string) ([]*infrapublishing.PublishingResult, error) {
 	f.alert = alert
+	f.directTargetNames = targetNames
+	f.directReceiver = receiverName
+	f.directCalls++
 	return f.results, f.err
 }
 
@@ -127,8 +137,8 @@ func TestApplicationPublishingAdapter_BuildsEnrichedAlert(t *testing.T) {
 	alert := &core.Alert{Fingerprint: "abc123", AlertName: "HighCPU"}
 	classification := &core.ClassificationResult{Severity: core.SeverityWarning}
 
-	if err := adapter.PublishWithClassification(context.Background(), alert, classification); err != nil {
-		t.Fatalf("PublishWithClassification() error = %v", err)
+	if err := adapter.PublishToReceiverWithClassification(context.Background(), alert, classification, ""); err != nil {
+		t.Fatalf("PublishToReceiverWithClassification() error = %v", err)
 	}
 
 	if coordinator.alert == nil {
@@ -164,7 +174,7 @@ func TestApplicationPublishingAdapter_ReturnsErrorWhenAllTargetsFail(t *testing.
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}); err == nil {
+	if err := adapter.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}, ""); err == nil {
 		t.Fatalf("expected publish error when all targets fail")
 	}
 }
@@ -187,7 +197,7 @@ func TestApplicationPublishingAdapter_PartialFailureReturnsError(t *testing.T) {
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	err = adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"})
+	err = adapter.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}, "")
 	if err == nil {
 		t.Fatal("expected an error when only some targets confirmed the enqueue")
 	}
@@ -212,7 +222,7 @@ func TestApplicationPublishingAdapter_PartialFailureWithoutCauseStillErrors(t *t
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err == nil {
+	if err := adapter.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc"}, ""); err == nil {
 		t.Fatal("expected an error when a target is unsuccessful without an explicit cause")
 	}
 }
@@ -228,7 +238,7 @@ func TestApplicationPublishingAdapter_NoTargetsIsNotAnError(t *testing.T) {
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err != nil {
+	if err := adapter.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc"}, ""); err != nil {
 		t.Fatalf("empty results must stay non-error on the single-alert path, got %v", err)
 	}
 }
@@ -258,7 +268,7 @@ func TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure(t 
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	if err := adapter.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc"}); err != nil {
+	if err := adapter.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc"}, ""); err != nil {
 		t.Fatalf("single-alert path: nil padding must not read as a partial failure, got %v", err)
 	}
 
@@ -298,7 +308,7 @@ func TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed(t
 
 func TestMetricsOnlyPublisher_Noops(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("test_reason", slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err := publisher.PublishToAll(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}); err != nil {
+	if err := publisher.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}, ""); err != nil {
 		t.Fatalf("PublishToAll() error = %v", err)
 	}
 }
@@ -568,5 +578,45 @@ func TestApplicationPublishingAdapter_PublishGroup_ForwardsTargetAlerts(t *testi
 	}
 	if len(outcomes) != 1 || outcomes[0].Target != "ops-a" {
 		t.Fatalf("expected only ops-a to be reported (ops-b skipped), got %+v", outcomes)
+	}
+}
+
+// TestApplicationPublishingAdapter_ForwardsReceiver is the adapter half of
+// slice-1 review finding C1: the non-grouped publish path must resolve targets
+// BY RECEIVER (coordinator.PublishToTargets with nil target names), not through
+// the unfiltered PublishToAll it used to call.
+func TestApplicationPublishingAdapter_ForwardsReceiver(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		results: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "cfg:team-x/webhook0"}, Success: true},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	if err := adapter.PublishToReceiver(context.Background(), &core.Alert{Fingerprint: "abc", AlertName: "Test"}, "team-x"); err != nil {
+		t.Fatalf("PublishToReceiver() error = %v", err)
+	}
+	if coordinator.directReceiver != "team-x" {
+		t.Errorf("coordinator receiver = %q, want %q", coordinator.directReceiver, "team-x")
+	}
+	if coordinator.directTargetNames != nil {
+		t.Errorf("target names = %v, want nil (receiver-scoped resolution)", coordinator.directTargetNames)
+	}
+
+	if err := adapter.PublishToReceiverWithClassification(context.Background(),
+		&core.Alert{Fingerprint: "abc", AlertName: "Test"},
+		&core.ClassificationResult{Severity: "critical", Confidence: 1, Reasoning: "t"},
+		"team-y"); err != nil {
+		t.Fatalf("PublishToReceiverWithClassification() error = %v", err)
+	}
+	if coordinator.directReceiver != "team-y" {
+		t.Errorf("coordinator receiver = %q, want %q", coordinator.directReceiver, "team-y")
+	}
+	if coordinator.directCalls != 2 {
+		t.Errorf("coordinator calls = %d, want 2", coordinator.directCalls)
 	}
 }

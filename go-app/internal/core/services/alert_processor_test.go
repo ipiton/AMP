@@ -31,15 +31,22 @@ func (fakeFilterEngine) ShouldBlock(alert *core.Alert, classification *core.Clas
 type fakePublisher struct {
 	publishToAllCalls              int
 	publishWithClassificationCalls int
+
+	// gotReceivers records the receiver argument of every publish call
+	// (review finding C1): the non-grouped path must carry the routed
+	// receiver, not publish to everything.
+	gotReceivers []string
 }
 
-func (f *fakePublisher) PublishToAll(ctx context.Context, alert *core.Alert) error {
+func (f *fakePublisher) PublishToReceiver(ctx context.Context, alert *core.Alert, receiver string) error {
 	f.publishToAllCalls++
+	f.gotReceivers = append(f.gotReceivers, receiver)
 	return nil
 }
 
-func (f *fakePublisher) PublishWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) error {
+func (f *fakePublisher) PublishToReceiverWithClassification(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult, receiver string) error {
 	f.publishWithClassificationCalls++
+	f.gotReceivers = append(f.gotReceivers, receiver)
 	return nil
 }
 

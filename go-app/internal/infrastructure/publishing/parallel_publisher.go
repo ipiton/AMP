@@ -393,6 +393,21 @@ collect:
 }
 
 // PublishToAll implements ParallelPublisher.PublishToAll.
+//
+// UNWIRED, and NOT SAFE TO WIRE AS-IS (FU-RECEIVERS-INTEGRATION slice-1
+// re-review finding R7): it enumerates every enabled target itself and applies
+// NO receiver filtering, exactly like PublishingCoordinator.PublishToAll — which
+// was the C1 cross-receiver leak on the alert path. That was tolerable while
+// targets could only come from hand-created K8s Secrets; now every `receivers:`
+// integration provisions one, so an alert published through here would reach
+// every receiver's integrations.
+//
+// Kept rather than deleted because it is part of the exported ParallelPublisher
+// interface alongside its options/results/errors subsystem (which has its own
+// tests); DefaultParallelPublisher itself has no constructor call anywhere in
+// the tree, test or otherwise. Tracked as FU-UNWIRED-PUBLISH-SURFACES in
+// BACKLOG.md: whoever wires it must add receiver scoping first (see
+// PublishingCoordinator.PublishToTargets), or delete the subsystem.
 func (p *DefaultParallelPublisher) PublishToAll(
 	ctx context.Context,
 	alert *core.EnrichedAlert,

@@ -16,10 +16,13 @@
 //     (internal/infrastructure/routing.Receiver) only supports Webhook,
 //     PagerDuty, Slack, Email, and Telegram configs. A config using only
 //     an OpsGenie/VictorOps/WeChat receiver will validate clean here and
-//     then send zero notifications at runtime.
+//     then send zero notifications at runtime. Since
+//     FU-RECEIVERS-INTEGRATION, internal/config logs a load-time WARNING
+//     naming the receiver and the unsupported integration, so this
+//     divergence is at least visible to the operator.
 //   - (Fixed, task 5.4): TelegramConfigs used to have no matching field on
 //     internal/alertmanager/config.Receiver, so hasAnyIntegration() (the
-//     E024 "no integrations configured" check) rejected a telegram-only
+//     E024 - now W024 - "no integrations configured" check) rejected a telegram-only
 //     receiver the runtime would happily serve. Receiver now carries a
 //     minimal TelegramConfig (see config.go) mirroring the runtime-parity
 //     fields, and hasAnyIntegration() checks it - a telegram-only receiver
