@@ -119,7 +119,7 @@
 - [ ] **FU-PARSEARGUMENT-QUOTE-HANDLING** — parseMatcherExpr quote handling edge cases (third matcher grammar divergence vs configvalidator). ~0.5d
 - [ ] **FU-GLOB-DEFAULT-VALUES** — GlobalConfig fallback fields for group_by/duration. ~0.5d
 - [ ] **FU-DOUBLE-NORMALIZE-ROUTES** — double NormalizeRoutePrefix call cleanup. ~0.25d
-- [ ] **FU-PARSEBOOL-EMPTY-DEFAULT** — parseBoolQueryStrict silently defaults on empty param value. ~0.25d
+- [x] **FU-PARSEBOOL-EMPTY-DEFAULT** _(closed by wave 5, 2026-08-19)_ — parseBoolQueryStrict silently defaults on empty param value. Fixed: `query.Has(key)` distinguishes absent (keeps default) from present-but-empty (`?active=`, now 400, matching upstream). ~0.25d
 - [x] **FU-MICRO-CLEANUPS** _(closed by wave 2, 2026-08-18)_ — — minor code/test hygiene from final-review backlog:
   - matcherErrorCode classification via error-string substring (fragile); clarify or fix
   - GetStats TODOs (GCLastRun, etc., pre-existing)
