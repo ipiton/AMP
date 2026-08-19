@@ -153,6 +153,22 @@ func (c *DiscoveryMetricsCollector) Collect(ctx context.Context) (map[string]flo
 	metrics["targets_enabled"] = float64(enabledCount)
 	metrics["targets_disabled"] = float64(disabledCount)
 
+	// Source breakdown (FU-RECEIVERS-INTEGRATION slice 1, item 2): where each
+	// target in the view came from — a K8s Secret or the config's
+	// `receivers:` section. This collector is the wired observability path for
+	// discovery (ServiceRegistry registers it on the publishing metrics
+	// collector), so the source split has to be visible here and not only on
+	// DiscoveryMetrics.TargetsTotal.
+	configCount := 0
+	for _, target := range targets {
+		if IsConfigTarget(target) {
+			configCount++
+		}
+	}
+	metrics[fmt.Sprintf("targets_by_source{source=%q}", TargetSourceConfig)] = float64(configCount)
+	metrics[fmt.Sprintf("targets_by_source{source=%q}", TargetSourceK8s)] = float64(len(targets) - configCount)
+	metrics["targets_config"] = float64(stats.ConfigTargets)
+
 	return metrics, nil
 }
 
