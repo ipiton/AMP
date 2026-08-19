@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -362,6 +363,68 @@ func targetMatchesReceiver(target *core.PublishingTarget, receiverName string) b
 	return target.Name == receiverName
 }
 
+// FilterConfigSendResolved is the target FilterConfig key carrying upstream's
+// per-integration `send_resolved` (FU-RECEIVERS-INTEGRATION slice 2). Absent (or
+// any non-false value) means true, upstream's default.
+//
+// Written by businesspublishing.BuildConfigTargets for config-provisioned
+// targets; a K8s Secret can carry the same key in its `filter_config` JSON. This
+// is the ONLY consumer, and it deliberately sits in target RESOLUTION rather
+// than inside a publisher: the publisher layer is the epic's fixed boundary, and
+// filtering here also keeps a suppressed notification out of the queue entirely
+// (no job, no retry, no circuit-breaker effect).
+const FilterConfigSendResolved = "send_resolved"
+
+// targetAcceptsAlertStatus reports whether target wants a notification about an
+// alert in this state.
+//
+// Only one rule today: `send_resolved: false` drops RESOLVED alerts. Firing
+// alerts are always accepted, and a target with no filter_config accepts
+// everything — so this is a no-op for every pre-slice-2 target.
+func targetAcceptsAlertStatus(target *core.PublishingTarget, status core.AlertStatus) bool {
+	if status != core.StatusResolved {
+		return true
+	}
+	if target == nil || target.FilterConfig == nil {
+		return true
+	}
+	sendResolved, ok := target.FilterConfig[FilterConfigSendResolved]
+	if !ok {
+		return true
+	}
+	// Tolerant of the shapes JSON round-trips produce for a K8s target's
+	// filter_config: bool, "false", 0.
+	switch v := sendResolved.(type) {
+	case bool:
+		return v
+	case string:
+		return !strings.EqualFold(strings.TrimSpace(v), "false")
+	case float64:
+		return v != 0
+	default:
+		return true
+	}
+}
+
+// filterAlertsForTarget returns the alerts target actually wants out of alerts
+// (send_resolved filtering, FU-RECEIVERS-INTEGRATION slice 2). Returns the input
+// slice unchanged when nothing is filtered, so the common path allocates
+// nothing.
+func filterAlertsForTarget(target *core.PublishingTarget, alerts []*core.Alert) []*core.Alert {
+	if targetAcceptsAlertStatus(target, core.StatusResolved) {
+		return alerts
+	}
+
+	kept := make([]*core.Alert, 0, len(alerts))
+	for _, alert := range alerts {
+		if alert != nil && alert.Status == core.StatusResolved {
+			continue
+		}
+		kept = append(kept, alert)
+	}
+	return kept
+}
+
 // PublishToTargets publishes alert either to explicitly named targets, or —
 // when targetNames is empty — to all targets belonging to receiverName per
 // targetMatchesReceiver. An empty receiverName in that second mode means
@@ -417,13 +480,35 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 		// Receiver-based selection over all discovered targets.
 		all := c.discoveryManager.ListTargets()
 		targets = make([]*core.PublishingTarget, 0, len(all))
+		// matchedReceiver counts targets that belong to this receiver BEFORE
+		// send_resolved filtering, so "this receiver has no targets at all"
+		// (blackhole / config gap) stays distinguishable from "its targets do
+		// not want resolved notifications" (slice 2).
+		matchedReceiver := 0
 		for _, t := range all {
 			if !t.Enabled {
 				continue
 			}
-			if targetMatchesReceiver(t, receiverName) {
-				targets = append(targets, t)
+			if !targetMatchesReceiver(t, receiverName) {
+				continue
 			}
+			matchedReceiver++
+			if !targetAcceptsAlertStatus(t, enrichedAlert.Alert.Status) {
+				continue
+			}
+			targets = append(targets, t)
+		}
+
+		if len(targets) == 0 && matchedReceiver > 0 {
+			// Every target for this receiver declined this alert's state —
+			// upstream's own outcome for send_resolved: false is "send nothing,
+			// record nothing, not an error".
+			c.logger.Debug("All targets for receiver declined this alert state (send_resolved: false); publishing nothing",
+				"receiver", receiverName,
+				"status", enrichedAlert.Alert.Status,
+				"fingerprint", enrichedAlert.Alert.Fingerprint,
+			)
+			return []*PublishingResult{}, nil
 		}
 
 		if len(targets) == 0 {
@@ -577,6 +662,9 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 	all := c.discoveryManager.ListTargets()
 	targets := make([]*core.PublishingTarget, 0, len(all))
 	perTargetAlerts := make([][]*core.Alert, 0, len(all))
+	// See the single-alert path: counts receiver-matched targets before
+	// send_resolved filtering.
+	matchedReceiver := 0
 	for _, t := range all {
 		if !t.Enabled {
 			continue
@@ -585,12 +673,23 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 			continue
 		}
 
+		matchedReceiver++
+
+		// send_resolved filtering (slice 2) runs BEFORE the dedup callback: a
+		// target that does not want resolved alerts must not have them counted
+		// as owed, and a group that is entirely resolved must not reach it at
+		// all.
+		wanted := filterAlertsForTarget(t, alerts)
+		if len(wanted) == 0 {
+			continue
+		}
+
 		// Task fwb per-target nflog dedup + task fu4 per-alert dedup: a target
 		// already fully covered this cycle is skipped entirely — no job
 		// submitted, no result reported.
-		owed := alerts
+		owed := wanted
 		if targetAlerts != nil {
-			owed = targetAlerts(t.Name, alerts)
+			owed = targetAlerts(t.Name, wanted)
 			if len(owed) == 0 {
 				continue
 			}
@@ -598,6 +697,16 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 
 		targets = append(targets, t)
 		perTargetAlerts = append(perTargetAlerts, owed)
+	}
+
+	if len(targets) == 0 && matchedReceiver > 0 {
+		// Either every target was already covered this cycle (the steady state
+		// the manager logs at Debug) or they all declined a resolved-only group
+		// (send_resolved: false, slice 2). Both are "nothing new to send" —
+		// upstream's DedupStage stops the pipeline the same way, recording
+		// nothing. NOT counted as a blackhole drop: the receiver does have
+		// targets.
+		return []*PublishingResult{}, nil
 	}
 
 	if len(targets) == 0 {

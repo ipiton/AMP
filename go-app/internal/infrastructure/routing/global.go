@@ -21,7 +21,32 @@ type GlobalConfig struct {
 	// Used when route doesn't specify repeat_interval
 	ResolveTimeout *Duration `yaml:"resolve_timeout,omitempty"`
 
-	// SMTP configuration (FUTURE - TN-154)
+	// Per-integration ENDPOINT fallbacks (FU-RECEIVERS-INTEGRATION slice 2,
+	// upstream fidelity). Upstream Alertmanager lets an integration omit its
+	// endpoint and inherit it from `global:`; the per-integration value always
+	// wins. Resolved at PARSE time (RouteConfigParser.resolveGlobalFallbacks),
+	// so everything downstream — the route tree, the publishing-target builder,
+	// the status API — sees one already-resolved endpoint rather than having to
+	// re-implement the fallback.
+	//
+	// SlackAPIURL is upstream's `global.slack_api_url`: a Slack incoming-webhook
+	// URL, i.e. itself a CREDENTIAL (upstream types it SecretURL, and the status
+	// API redacts it — see handlers.sectionSecretKeys).
+	SlackAPIURL string `yaml:"slack_api_url,omitempty" validate:"omitempty,url,https_production"`
+
+	// PagerDutyURL is upstream's `global.pagerduty_url`: the Events API
+	// endpoint, public and credential-free (the routing_key is the secret).
+	PagerDutyURL string `yaml:"pagerduty_url,omitempty" validate:"omitempty,url,https_production"`
+
+	// TelegramAPIURL is upstream's `global.telegram_api_url`: the Bot API base,
+	// public (the bot_token is the secret).
+	TelegramAPIURL string `yaml:"telegram_api_url,omitempty" validate:"omitempty,url,https_production"`
+
+	// SMTP configuration. smtp_smarthost/smtp_from are REQUIRED (by
+	// validateSemantics) as soon as any receiver declares email_configs, because
+	// routing.EmailConfig models no per-integration SMTP fields at all — same
+	// posture as upstream, which requires a global smarthost/from whenever an
+	// email_config omits its own.
 	SMTPFrom         string `yaml:"smtp_from,omitempty" validate:"omitempty,email"`
 	SMTPSmartHost    string `yaml:"smtp_smarthost,omitempty"`
 	SMTPAuthUsername string `yaml:"smtp_auth_username,omitempty"`
@@ -72,6 +97,9 @@ func (g *GlobalConfig) Defaults() {
 // Clone creates a deep copy.
 func (g *GlobalConfig) Clone() *GlobalConfig {
 	clone := &GlobalConfig{
+		SlackAPIURL:      g.SlackAPIURL,
+		PagerDutyURL:     g.PagerDutyURL,
+		TelegramAPIURL:   g.TelegramAPIURL,
 		SMTPFrom:         g.SMTPFrom,
 		SMTPSmartHost:    g.SMTPSmartHost,
 		SMTPAuthUsername: g.SMTPAuthUsername,

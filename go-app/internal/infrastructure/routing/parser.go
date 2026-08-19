@@ -94,7 +94,11 @@ func (p *RouteConfigParser) Parse(data []byte) (*RouteConfig, error) {
 		return nil, fmt.Errorf("at least one receiver is required")
 	}
 
-	// Step 3: Apply defaults
+	// Step 3: Resolve `global:` endpoint fallbacks, THEN apply defaults.
+	// Order matters: PagerDutyConfig/TelegramConfig.Defaults() fill in the
+	// public endpoint for an empty URL, which would mask global.pagerduty_url /
+	// global.telegram_api_url if it ran first.
+	resolveGlobalFallbacks(&config)
 	p.applyDefaults(&config)
 
 	// Step 4: Structural validation (validator tags)
@@ -182,6 +186,46 @@ func (p *RouteConfigParser) ValidateConfig(config *RouteConfig) error {
 
 	// Semantic validation
 	return p.validateSemantics(config)
+}
+
+// resolveGlobalFallbacks copies `global:` endpoint defaults into every
+// integration that omitted its own (FU-RECEIVERS-INTEGRATION slice 2).
+//
+// Upstream Alertmanager semantics: the per-integration value always wins, and
+// `global:` only fills a gap. Resolved once, here, so no downstream consumer
+// (route tree, publishing-target builder, status API) has to know about the
+// fallback — they all see a single resolved endpoint.
+//
+// SMTP is deliberately NOT resolved into the email configs: routing.EmailConfig
+// has no smarthost/auth fields to copy into, so the publishing-target builder
+// reads global directly (and validateSemantics requires it whenever any
+// email_configs exist).
+func resolveGlobalFallbacks(config *RouteConfig) {
+	if config == nil || config.Global == nil {
+		return
+	}
+	global := config.Global
+
+	for _, receiver := range config.Receivers {
+		if receiver == nil {
+			continue
+		}
+		for _, cfg := range receiver.SlackConfigs {
+			if cfg != nil && cfg.APIURL == "" {
+				cfg.APIURL = global.SlackAPIURL
+			}
+		}
+		for _, cfg := range receiver.PagerDutyConfigs {
+			if cfg != nil && cfg.URL == "" {
+				cfg.URL = global.PagerDutyURL
+			}
+		}
+		for _, cfg := range receiver.TelegramConfigs {
+			if cfg != nil && cfg.APIURL == "" {
+				cfg.APIURL = global.TelegramAPIURL
+			}
+		}
+	}
 }
 
 // applyDefaults applies default values recursively.
@@ -283,6 +327,12 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 
 	// Validate receivers
 	for i, receiver := range config.Receivers {
+		// Endpoint completeness after the `global:` fallback pass
+		// (FU-RECEIVERS-INTEGRATION slice 2): an integration with no endpoint
+		// anywhere can never deliver, and upstream refuses such a config at
+		// load rather than discovering it at notify time.
+		validateReceiverEndpoints(receiver, i, config.Global, &errors)
+
 		// Check at least one config type
 		if err := receiver.Validate(); err != nil {
 			errors.Add(
@@ -294,6 +344,65 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 	}
 
 	return errors.ErrType()
+}
+
+// validateReceiverEndpoints reports integrations left without a usable endpoint
+// once `global:` fallbacks have been applied (FU-RECEIVERS-INTEGRATION slice 2).
+//
+// Messages name BOTH places the endpoint could have come from, because "api_url
+// is required" on a config that deliberately relies on `global.slack_api_url` is
+// exactly the kind of error that sends an operator looking in the wrong file.
+//
+// Email is the odd one out: routing.EmailConfig carries no SMTP fields at all,
+// so `global.smtp_smarthost`/`global.smtp_from` are the ONLY possible sources
+// and both are required as soon as any email_configs exist — mirroring
+// upstream's "no global SMTP smarthost set" / "no global SMTP from set".
+func validateReceiverEndpoints(receiver *Receiver, index int, global *GlobalConfig, errors *ValidationErrors) {
+	if receiver == nil {
+		return
+	}
+
+	for i, cfg := range receiver.SlackConfigs {
+		if cfg != nil && strings.TrimSpace(cfg.APIURL) == "" {
+			errors.Add(
+				fmt.Sprintf("receivers[%d].slack_configs[%d].api_url", index, i),
+				fmt.Sprintf("receiver %q has a slack_config with no api_url and no global slack_api_url fallback", receiver.Name),
+				"Set api_url on this slack_config, or set global.slack_api_url for all of them",
+			)
+		}
+	}
+
+	if len(receiver.EmailConfigs) == 0 {
+		return
+	}
+	smarthost, from := "", ""
+	if global != nil {
+		smarthost = strings.TrimSpace(global.SMTPSmartHost)
+		from = strings.TrimSpace(global.SMTPFrom)
+	}
+	if smarthost == "" {
+		errors.Add(
+			fmt.Sprintf("receivers[%d].email_configs", index),
+			fmt.Sprintf("receiver %q declares email_configs but no SMTP smarthost is configured", receiver.Name),
+			"Set global.smtp_smarthost (AMP has no per-email_config smarthost field — see docs/ALERTMANAGER_COMPATIBILITY.md)",
+		)
+	}
+	if from == "" {
+		allHaveFrom := true
+		for _, cfg := range receiver.EmailConfigs {
+			if cfg == nil || strings.TrimSpace(cfg.From) == "" {
+				allHaveFrom = false
+				break
+			}
+		}
+		if !allHaveFrom {
+			errors.Add(
+				fmt.Sprintf("receivers[%d].email_configs", index),
+				fmt.Sprintf("receiver %q has an email_config with no from address and no global smtp_from fallback", receiver.Name),
+				"Set from on every email_config, or set global.smtp_from",
+			)
+		}
+	}
 }
 
 // validateRouteTree recursively validates the route tree.
