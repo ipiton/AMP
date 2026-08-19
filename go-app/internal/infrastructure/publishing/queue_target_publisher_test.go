@@ -418,14 +418,17 @@ func TestCreatePublisherForJob_SlackActuallyPostsToWebhook(t *testing.T) {
 	assert.Equal(t, 1, gotCalls)
 	assert.Equal(t, "/services/T000/B000/XXXX", gotPath,
 		"must POST straight at the target's webhook path, not some derived endpoint")
-	// NOTE (found while writing this test, out of FU-SLACK-PAGERDUTY-QUEUE-PATH's
-	// scope — that item is routing/credentials, not payload shape): gotMsg ends
-	// up with an empty Text/Blocks/Attachments here. formatSlack (formatter.go)
-	// returns "blocks"/"attachments" as []map[string]any, but buildMessage's
-	// type assertions expect []interface{} — a different slice type in Go, so
-	// they never match and every enhanced Slack payload is silently empty. Not
-	// fixed here; tracked as FU-SLACK-BUILDMESSAGE-TYPE-MISMATCH in BACKLOG.md.
-	_ = gotMsg
+
+	// CONTENT, not just transport (review wave 5, finding C1/I1): before the
+	// fix this was {"text":""} with no blocks/attachments — Slack's real API
+	// answers a body like that with 400 invalid_payload. formatSlack never set
+	// "text" at all, and buildMessage's []interface{} assertions never matched
+	// formatSlack's []map[string]any blocks/attachments, so every field here
+	// came back empty/nil regardless of what the alert said.
+	require.NotEmpty(t, gotMsg.Text, "the wire body must carry Slack's required fallback text, not an empty string Slack would reject")
+	assert.Contains(t, gotMsg.Text, "HighCPUUsage", "the fallback text must actually describe THIS alert")
+	require.NotEmpty(t, gotMsg.Blocks, "the Block Kit body must not be empty — formatSlack's blocks must survive buildMessage intact")
+	assert.NotEmpty(t, gotMsg.Attachments, "the color-coded attachment must survive buildMessage intact")
 }
 
 // TestCreatePublisherForJob_MissingSlackURLDegradesGracefully mirrors the
