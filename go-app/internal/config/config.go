@@ -641,11 +641,24 @@ func loadRouteConfig(configPath string, cfg *Config) error {
 		return fmt.Errorf("invalid route/receivers configuration: %w", err)
 	}
 
-	// Notification templates (`templates:`) are loaded through the real engine
-	// here so a malformed template file fails the config load with a message
-	// naming file and line, instead of degrading a 03:00 notification to the
-	// fixed formatter with only a log line to explain it. See
-	// templating_validation.go.
+	// Notification templates (`templates:`).
+	//
+	// Resolve FIRST, validate second, and in that order: a relative glob such as
+	// upstream's canonical `templates: ['templates/*.tmpl']` must be interpreted
+	// relative to THIS config file's directory (upstream's resolveFilepaths),
+	// not to whatever CWD the process has. Skipping that step made such a config
+	// load clean while silently matching nothing — the "custom templates lose
+	// their formatting silently" failure this epic exists to remove.
+	//
+	// Resolving into `parsed` (rather than at each consumer) fixes the load path,
+	// ServiceRegistry.initializeTemplating and reloadTemplates in one place,
+	// because all three read cfg.Routing.Templates.
+	//
+	// Validation then loads the globs through the real engine, so a malformed
+	// template file fails the config load with a message naming file and line
+	// instead of degrading a 03:00 notification to the fixed formatter with only
+	// a log line to explain it. See templating_validation.go.
+	resolveTemplateGlobs(parsed, configPath)
 	if err := validateTemplateGlobs(parsed); err != nil {
 		return err
 	}

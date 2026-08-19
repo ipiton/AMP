@@ -57,13 +57,22 @@
 // # Divergences from upstream (all deliberate, all in AMP's favour)
 //
 //   - Execution is bounded: Options.Timeout and Options.MaxOutputBytes abort a
-//     runaway template. Upstream has neither. See Template.ExecuteTextString.
+//     runaway template. Upstream has neither. The timeout is enforced both by
+//     the guard writer (which stops an output-producing runaway) and by running
+//     the execution on its own goroutine (which bounds what the CALLER waits
+//     for, the only thing that works against a loop producing no output). See
+//     (*Template).guarded for the trade-off and its cost, stated plainly.
 //   - Execution never panics: a panic from a template function or a data
 //     method is recovered and returned as an error, so the notify chain can
 //     fall back to AMP's fixed formatter instead of taking the process down.
-//   - Data.RouteLabels and the `routeLabels` data plumbing are NOT ported
-//     (AMP has no route-label config); the `routeLabels` FUNCTION is present as
-//     upstream's no-op placeholder so a config referencing it still parses.
-//     Data.NotificationReason is not ported either — AMP has no source for it.
-//     See data.go for the full ported-vs-skipped ledger.
+//   - `templates:` globs are resolved relative to the CONFIG FILE's directory
+//     (upstream's resolveFilepaths) — see internal/config.resolveTemplateGlobs.
+//     Not a divergence but a parity requirement that is easy to miss: without
+//     it the canonical relative glob silently matches nothing.
+//   - The route-label FEATURE is not ported (AMP has no route-label config), but
+//     nothing about it errors: Data.RouteLabels exists and stays empty, and the
+//     `routeLabels` function is upstream's no-op placeholder. Same for
+//     Data.NotificationReason, which AMP has no source for. Both fields are
+//     PRESENT precisely because a missing struct field is an execution error
+//     that load-time validation cannot catch. See data.go's ledger.
 package templating

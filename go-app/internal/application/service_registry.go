@@ -1449,7 +1449,31 @@ func (r *ServiceRegistry) initializeTemplating() {
 	r.templateRegistry = registry
 	if len(globs) > 0 {
 		r.logger.Info("Notification templates loaded", "globs", globs,
+			"files", loadedTemplateFiles(registry),
 			"definitions", len(registry.Current().DefinitionNames()))
+		r.warnUnmatchedTemplateGlobs(registry)
+	}
+}
+
+// loadedTemplateFiles lists the template files actually parsed, so the
+// "templates loaded" log line differs between "your files loaded" and "your glob
+// matched nothing" — before this it was identical either way (review I3).
+func loadedTemplateFiles(registry *templating.Registry) []string {
+	var files []string
+	for _, match := range registry.Current().GlobMatches() {
+		files = append(files, match.Files...)
+	}
+	return files
+}
+
+// warnUnmatchedTemplateGlobs WARNs for every configured glob that matched no
+// files. An empty match stays legal (a ConfigMap may mount seconds later), but
+// it is also the ONLY symptom of a wrong path, so it must be visible.
+func (r *ServiceRegistry) warnUnmatchedTemplateGlobs(registry *templating.Registry) {
+	if unmatched := registry.Current().UnmatchedGlobs(); len(unmatched) > 0 {
+		r.logger.Warn("Notification template glob matched no files; the built-in defaults will be used for anything it was meant to override",
+			"globs", unmatched,
+			"hint", "paths are resolved relative to the config file's directory; a ConfigMap mounted after startup is the benign case")
 	}
 }
 
@@ -1486,7 +1510,12 @@ func (r *ServiceRegistry) reloadTemplates() {
 			"templates", globs, "error", err)
 		return
 	}
-	r.logger.Info("Notification templates reloaded", "globs", globs)
+	r.logger.Info("Notification templates reloaded", "globs", globs,
+		"files", loadedTemplateFiles(r.templateRegistry),
+		"definitions", len(r.templateRegistry.Current().DefinitionNames()))
+	if len(globs) > 0 {
+		r.warnUnmatchedTemplateGlobs(r.templateRegistry)
+	}
 }
 
 // initializeGrouping wires the alert grouping subsystem (task 2.2,

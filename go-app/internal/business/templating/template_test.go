@@ -214,6 +214,77 @@ func TestFromGlobs_TemplateUsingRouteLabelsStillLoads(t *testing.T) {
 	assert.Equal(t, "[] ok", got, "unported feature renders empty rather than failing the load")
 }
 
+// === glob match reporting (review I3) ===
+
+// TestGlobMatches_RecordsFilesPerGlob: the loader must be able to tell its caller
+// what each configured glob actually matched — before this, the "templates
+// loaded" log line was identical whether the operator's files loaded or not.
+func TestGlobMatches_RecordsFilesPerGlob(t *testing.T) {
+	withFiles := t.TempDir()
+	empty := t.TempDir()
+	a := writeTemplateFile(t, withFiles, "a.tmpl", `{{ define "a" }}a{{ end }}`)
+	b := writeTemplateFile(t, withFiles, "b.tmpl", `{{ define "b" }}b{{ end }}`)
+
+	globWith := filepath.Join(withFiles, "*.tmpl")
+	globEmpty := filepath.Join(empty, "*.tmpl")
+
+	tmpl, err := FromGlobs([]string{globWith, globEmpty}, Options{})
+	require.NoError(t, err)
+
+	assert.Equal(t, []GlobMatch{
+		{Glob: globWith, Files: []string{a, b}},
+		{Glob: globEmpty},
+	}, tmpl.GlobMatches(), "config order preserved, files in parse order")
+}
+
+func TestUnmatchedGlobs_ReportsOnlyTheEmptyOnes(t *testing.T) {
+	withFiles := t.TempDir()
+	writeTemplateFile(t, withFiles, "a.tmpl", `{{ define "a" }}a{{ end }}`)
+	emptyOne := filepath.Join(t.TempDir(), "*.tmpl")
+	emptyTwo := filepath.Join(t.TempDir(), "nothing-here-*.tmpl")
+
+	tmpl, err := FromGlobs([]string{filepath.Join(withFiles, "*.tmpl"), emptyOne, emptyTwo}, Options{})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{emptyOne, emptyTwo}, tmpl.UnmatchedGlobs())
+}
+
+func TestUnmatchedGlobs_EmptyWhenNoGlobsConfigured(t *testing.T) {
+	tmpl, err := FromGlobs(nil, Options{})
+	require.NoError(t, err)
+	assert.Empty(t, tmpl.UnmatchedGlobs())
+	assert.Empty(t, tmpl.GlobMatches(), "the embedded defaults are not a configured glob")
+}
+
+// TestGlobMatches_DirectoryMatchIsNotCountedAsAFile keeps the report honest: a
+// glob that matched only a directory loaded nothing and must warn.
+func TestGlobMatches_DirectoryMatchIsNotCountedAsAFile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "subdir"), 0o750))
+
+	glob := filepath.Join(dir, "*")
+	tmpl, err := FromGlobs([]string{glob}, Options{})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{glob}, tmpl.UnmatchedGlobs())
+}
+
+// TestGlobMatches_IsACopy: callers log these; handing out the internal slice
+// would let a caller mutate load state.
+func TestGlobMatches_IsACopy(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplateFile(t, dir, "a.tmpl", `{{ define "a" }}a{{ end }}`)
+
+	tmpl, err := FromGlobs([]string{filepath.Join(dir, "*.tmpl")}, Options{})
+	require.NoError(t, err)
+
+	got := tmpl.GlobMatches()
+	require.Len(t, got, 1)
+	got[0].Glob = "mutated"
+
+	assert.NotEqual(t, "mutated", tmpl.GlobMatches()[0].Glob)
+}
+
 // === execution: inline expressions, definitions, errors ===
 
 func TestExecuteTextString_EmptyExpressionIsEmpty(t *testing.T) {
@@ -257,12 +328,21 @@ func TestExecuteTextString_MissingKeyRendersEmpty(t *testing.T) {
 	assert.Equal(t, "[]", got)
 }
 
+// TestExecuteTextString_MalformedExpressionIsAnError also pins upstream's
+// "failed to parse template" wrapper (review Minor 4): text/template's bare
+// message ("template: :1:3: ...") never says a TEMPLATE was at fault, which
+// matters where slice 2 logs this next to a fallback decision.
 func TestExecuteTextString_MalformedExpressionIsAnError(t *testing.T) {
 	tmpl, err := FromGlobs(nil, Options{})
 	require.NoError(t, err)
 
 	_, err = tmpl.ExecuteTextString(`{{ if }}`, simpleData(t))
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse template")
+
+	_, err = tmpl.ExecuteHTMLString(`{{ if }}`, simpleData(t))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse template")
 }
 
 // TestExecuteTextString_ParsingDoesNotMutateTheTemplate: execution clones, so
@@ -360,9 +440,9 @@ func TestExecute_HTMLOutputCapAborts(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrOutputTooLarge), "got %v", err)
 }
 
-// TestExecute_TimeoutAborts pins the time guard. An already-expired deadline is
-// used rather than a slow template so the test is deterministic and instant.
-func TestExecute_TimeoutAborts(t *testing.T) {
+// TestExecute_TimeoutAborts_OnFirstWrite pins the cheapest case: a deadline that
+// has already passed fails the very first write.
+func TestExecute_TimeoutAborts_OnFirstWrite(t *testing.T) {
 	tmpl, err := FromGlobs(nil, Options{Timeout: -1})
 	require.NoError(t, err)
 	// Timeout <= 0 means "use the default", so build the expired case directly.
@@ -372,6 +452,110 @@ func TestExecute_TimeoutAborts(t *testing.T) {
 	_, err = tmpl.ExecuteTextString(`{{ .Status }}`, simpleData(t))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTimeout), "got %v", err)
+}
+
+// rangeData returns data with a slice of n elements under .S, for the two
+// runaway-loop tests below.
+func rangeData(n int) map[string]any {
+	return map[string]any{"S": make([]int, n)}
+}
+
+// TestExecute_TimeoutAborts_RunningLoopWithOutput is the first half of review
+// I2's missing coverage: a loop that is ALREADY RUNNING and producing output is
+// interrupted mid-execution by the guard writer's deadline check — not merely
+// checked once before the first write.
+//
+// 200^3 = 8M iterations each writing a byte takes far longer than 200 ms
+// unguarded (the output cap alone would also stop it, so the cap is set high
+// enough that the TIMEOUT is what fires).
+func TestExecute_TimeoutAborts_RunningLoopWithOutput(t *testing.T) {
+	tmpl, err := FromGlobs(nil, Options{Timeout: 200 * time.Millisecond, MaxOutputBytes: 1 << 30})
+	require.NoError(t, err)
+
+	expr := `{{ range .S }}{{ range $.S }}{{ range $.S }}x{{ end }}{{ end }}{{ end }}`
+
+	start := time.Now()
+	out, err := tmpl.ExecuteTextString(expr, rangeData(200))
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTimeout), "got %v", err)
+	assert.Empty(t, out)
+	assert.Less(t, elapsed, 5*time.Second, "the running loop must be aborted, not merely reported on")
+}
+
+// TestExecute_TimeoutAborts_RunningLoopWithoutOutput is the second half, and it
+// documents a REAL limitation honestly rather than asserting a comfortable
+// fiction (review I2: the original comment claimed such a construct did not
+// exist; it does — an empty loop body performs zero writes, so the guard
+// writer's deadline check is never reached).
+//
+// The behaviour that IS guaranteed, and is what this asserts:
+//
+//   - the CALLER is released at the deadline with ErrTimeout, because execution
+//     runs on its own goroutine (this is what the fix added);
+//   - the abandoned execution is counted, so a deployment can alarm on it;
+//   - it terminates on its own — asserted here by waiting for the in-flight
+//     gauge to fall back to zero.
+//
+// N is deliberately small (100^3 ≈ 23 ms of work) so the abandoned goroutine
+// finishes quickly and the test does not leave CPU burning behind it.
+func TestExecute_TimeoutAborts_RunningLoopWithoutOutput(t *testing.T) {
+	tmpl, err := FromGlobs(nil, Options{Timeout: 5 * time.Millisecond})
+	require.NoError(t, err)
+
+	before := AbandonedExecutions()
+	expr := `{{ range .S }}{{ range $.S }}{{ range $.S }}{{ end }}{{ end }}{{ end }}`
+
+	start := time.Now()
+	out, err := tmpl.ExecuteTextString(expr, rangeData(100))
+	elapsed := time.Since(start)
+
+	require.Error(t, err, "a no-output runaway must still release the caller")
+	assert.True(t, errors.Is(err, ErrTimeout), "got %v", err)
+	assert.Empty(t, out)
+	assert.Less(t, elapsed, time.Second, "the caller waits for the timeout, not for the template")
+
+	assert.Greater(t, AbandonedExecutions(), before,
+		"the abandoned execution must be counted, not silently dropped")
+
+	// It terminates on its own: `range` iterates a finite value, so the gauge
+	// returns to zero without anyone cancelling anything.
+	require.Eventually(t, func() bool {
+		return InFlightAbandonedExecutions() == 0
+	}, 10*time.Second, 5*time.Millisecond,
+		"an abandoned execution must finish by itself — that is the bound the design relies on")
+}
+
+// TestExecute_CompletesNormallyWhenFast is the control for the two tests above:
+// the goroutine hand-off must not break the ordinary path, nor count a normal
+// render as abandoned.
+func TestExecute_CompletesNormallyWhenFast(t *testing.T) {
+	tmpl, err := FromGlobs(nil, Options{Timeout: 5 * time.Second})
+	require.NoError(t, err)
+
+	before := AbandonedExecutions()
+
+	got, err := tmpl.ExecuteTextString(`{{ .Status }}`, simpleData(t))
+	require.NoError(t, err)
+	assert.Equal(t, "firing", got)
+	assert.Equal(t, before, AbandonedExecutions())
+}
+
+// TestExecute_RecursiveDefinitionIsAnError guards the other half of the
+// "abandoned executions always terminate" claim: unbounded RECURSION is stopped
+// by text/template's own depth cap and comes back as an error, so it cannot
+// produce an immortal goroutine either.
+func TestExecute_RecursiveDefinitionIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplateFile(t, dir, "loop.tmpl", `{{ define "loop" }}{{ template "loop" . }}{{ end }}`)
+
+	tmpl, err := FromGlobs([]string{filepath.Join(dir, "*.tmpl")}, Options{Timeout: 30 * time.Second})
+	require.NoError(t, err)
+
+	_, err = tmpl.ExecuteTextDefinition("loop", simpleData(t))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeded maximum template depth")
 }
 
 // TestExecute_PanickingFuncNeverPanicsTheCaller is the "never panics the notify

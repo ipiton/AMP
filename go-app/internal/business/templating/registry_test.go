@@ -114,16 +114,26 @@ func TestRegistry_ReloadPreservesOptions(t *testing.T) {
 // TestRegistry_ConcurrentRenderDuringReload is the reason Registry exists at
 // all: renders run from the notify chain while an operator reloads. Under -race
 // this fails if reload mutated a template instead of swapping a new one in.
+//
+// Both alternative outputs are genuinely REACHABLE (review Minor 2: the first
+// version accepted {"V", "V2"} while only ever writing "V", so the looser
+// assertion could not have caught a stale-swap bug). The reloader alternates
+// between two directories holding DIFFERENT definitions — swapping the glob list
+// rather than rewriting a file, so no reader can observe a half-written file.
 func TestRegistry_ConcurrentRenderDuringReload(t *testing.T) {
-	dir := t.TempDir()
-	glob := filepath.Join(dir, "*.tmpl")
-	writeTemplateFile(t, dir, "custom.tmpl", `{{ define "custom.title" }}V{{ end }}`)
+	dirV1 := t.TempDir()
+	dirV2 := t.TempDir()
+	writeTemplateFile(t, dirV1, "custom.tmpl", `{{ define "custom.title" }}V1{{ end }}`)
+	writeTemplateFile(t, dirV2, "custom.tmpl", `{{ define "custom.title" }}V2{{ end }}`)
+	globV1 := filepath.Join(dirV1, "*.tmpl")
+	globV2 := filepath.Join(dirV2, "*.tmpl")
 
-	registry, err := NewRegistry([]string{glob}, Options{})
+	registry, err := NewRegistry([]string{globV1}, Options{})
 	require.NoError(t, err)
 
 	data := simpleData(t)
 	var wg sync.WaitGroup
+	seen := make(chan string, 8*50)
 
 	for range 8 {
 		wg.Add(1)
@@ -132,7 +142,10 @@ func TestRegistry_ConcurrentRenderDuringReload(t *testing.T) {
 			for range 50 {
 				out, execErr := registry.Current().ExecuteTextDefinition("custom.title", data)
 				assert.NoError(t, execErr)
-				assert.Contains(t, []string{"V", "V2"}, out)
+				// Never a partial or empty render: a reader always sees ONE
+				// complete generation of the library, never a half-swapped one.
+				assert.Contains(t, []string{"V1", "V2"}, out)
+				seen <- out
 			}
 		}()
 	}
@@ -140,10 +153,69 @@ func TestRegistry_ConcurrentRenderDuringReload(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for range 20 {
+		for i := range 20 {
+			glob := globV1
+			if i%2 == 1 {
+				glob = globV2
+			}
 			assert.NoError(t, registry.Reload([]string{glob}))
 		}
 	}()
 
 	wg.Wait()
+	close(seen)
+
+	counts := map[string]int{}
+	for out := range seen {
+		counts[out]++
+	}
+	assert.NotEmpty(t, counts, "renders happened")
+	// Not asserting that BOTH values appear — that would be a scheduling race.
+	// What is asserted above and here is that every observed value is a whole,
+	// valid generation.
+	for value := range counts {
+		assert.Contains(t, []string{"V1", "V2"}, value)
+	}
+}
+
+// TestRegistry_ReloadIsVisibleToTheNextRender is the deterministic half of the
+// concurrency test above: after Reload returns, the NEXT render sees the new
+// generation — no staleness window.
+func TestRegistry_ReloadIsVisibleToTheNextRender(t *testing.T) {
+	dirV1 := t.TempDir()
+	dirV2 := t.TempDir()
+	writeTemplateFile(t, dirV1, "custom.tmpl", `{{ define "custom.title" }}V1{{ end }}`)
+	writeTemplateFile(t, dirV2, "custom.tmpl", `{{ define "custom.title" }}V2{{ end }}`)
+
+	registry, err := NewRegistry([]string{filepath.Join(dirV1, "*.tmpl")}, Options{})
+	require.NoError(t, err)
+
+	for i := range 6 {
+		want := "V1"
+		glob := filepath.Join(dirV1, "*.tmpl")
+		if i%2 == 1 {
+			want, glob = "V2", filepath.Join(dirV2, "*.tmpl")
+		}
+		require.NoError(t, registry.Reload([]string{glob}))
+
+		got, execErr := registry.Current().ExecuteTextDefinition("custom.title", simpleData(t))
+		require.NoError(t, execErr)
+		assert.Equal(t, want, got)
+	}
+}
+
+// TestRegistry_ExposesGlobMatches: the reload path needs the same zero-match
+// diagnostics as the load path (review I3), so they must survive the swap.
+func TestRegistry_ExposesGlobMatches(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "*.tmpl")
+
+	registry, err := NewRegistry([]string{empty}, Options{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{empty}, registry.Current().UnmatchedGlobs())
+
+	populated := t.TempDir()
+	writeTemplateFile(t, populated, "a.tmpl", `{{ define "a" }}a{{ end }}`)
+	require.NoError(t, registry.Reload([]string{filepath.Join(populated, "*.tmpl")}))
+
+	assert.Empty(t, registry.Current().UnmatchedGlobs())
 }

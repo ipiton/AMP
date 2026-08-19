@@ -1,8 +1,11 @@
 package application
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -150,6 +153,49 @@ func TestReloadTemplates_BrokenEditKeepsLastKnownGood(t *testing.T) {
 	assert.Equal(t, "GOOD", renderTitle(t, r), "the previous library stays live")
 }
 
+// TestInitializeTemplating_ReportsUnmatchedGlobs is the diagnostic half of
+// review I3/C1: a configured glob that matched nothing is legal, but it must be
+// visible — before this, "Notification templates loaded" logged an identical
+// definition count whether the operator's files loaded or not.
+//
+// The assertion is on the DATA the warning is built from (UnmatchedGlobs and the
+// parsed file list), which is the part that can regress silently; the log call
+// itself is a one-liner over that data.
+func TestInitializeTemplating_ReportsUnmatchedGlobs(t *testing.T) {
+	populated := t.TempDir()
+	writeTemplate(t, populated, "custom.tmpl", `{{ define "custom.title" }}X{{ end }}`)
+	emptyGlob := filepath.Join(t.TempDir(), "*.tmpl")
+
+	r := templatingTestRegistry([]string{filepath.Join(populated, "*.tmpl"), emptyGlob})
+	r.initializeTemplating()
+
+	require.NotNil(t, r.TemplateRegistry())
+	assert.Equal(t, []string{emptyGlob}, r.TemplateRegistry().Current().UnmatchedGlobs())
+	assert.Len(t, loadedTemplateFiles(r.TemplateRegistry()), 1,
+		"the log line must be able to say WHICH files loaded, not just a count")
+	assert.Empty(t, r.degradedReasons, "an empty match is legal, not degradation")
+}
+
+// TestReloadTemplates_ReportsUnmatchedGlobsAfterSwap: the same diagnostic must
+// survive a reload, since a reload is where a glob typically starts matching (or
+// stops).
+func TestReloadTemplates_ReportsUnmatchedGlobsAfterSwap(t *testing.T) {
+	dir := t.TempDir()
+	glob := filepath.Join(dir, "*.tmpl")
+
+	r := templatingTestRegistry([]string{glob})
+	r.initializeTemplating()
+	require.Equal(t, []string{glob}, r.TemplateRegistry().Current().UnmatchedGlobs(),
+		"nothing has been mounted yet")
+
+	// The ConfigMap mounts.
+	writeTemplate(t, dir, "custom.tmpl", `{{ define "custom.title" }}X{{ end }}`)
+	r.reloadTemplates()
+
+	assert.Empty(t, r.TemplateRegistry().Current().UnmatchedGlobs())
+	assert.Len(t, loadedTemplateFiles(r.TemplateRegistry()), 1)
+}
+
 // TestReloadTemplates_BeforeInitializeIsANoOp: reload must not construct the
 // registry behind initializeTemplating's back (that would skip the
 // degraded-reason bookkeeping).
@@ -167,17 +213,52 @@ func TestTemplateRegistry_NilBeforeInitialize(t *testing.T) {
 	assert.Nil(t, templatingTestRegistry(nil).TemplateRegistry())
 }
 
-// TestTemplating_NotWiredIntoFormattersYet is a scope guard for slice 1: the
-// engine's lifecycle is wired, but no notification formatting reads it yet, so
-// this slice cannot have changed any delivered output. Slice 2 deletes this
-// test when it wires the formatters.
-func TestTemplating_NotWiredIntoFormattersYet(t *testing.T) {
+// TestTemplateRegistry_IsReachableForSliceTwo asserts what slice 1 actually
+// delivers: the library is loaded, live, and reachable through the accessor
+// slice 2 will call. (Renamed from a previous name that promised a structural
+// "nothing reads it yet" guarantee it did not check — review Minor 3. That
+// guarantee is now asserted for real, by the test below.)
+func TestTemplateRegistry_IsReachableForSliceTwo(t *testing.T) {
 	dir := t.TempDir()
 	writeTemplate(t, dir, "custom.tmpl", `{{ define "slack.default.title" }}CUSTOM{{ end }}`)
 
 	r := templatingTestRegistry([]string{filepath.Join(dir, "*.tmpl")})
 	r.initializeTemplating()
 
-	// The registry is populated and reachable, and that is the whole of slice 1.
 	assert.Equal(t, "CUSTOM", renderTitle(t, r))
+}
+
+// TestPublishingDoesNotImportTemplatingYet is the real, STRUCTURAL slice-1 scope
+// guard (review Minor 3): it parses the publishing packages' import lists and
+// asserts none of them imports the templating package, which is what makes
+// "delivered output is unchanged by this slice" a checkable claim rather than an
+// assertion in a report.
+//
+// Slice 2 DELETES this test — that is the point at which template output starts
+// reaching the wire, and the deletion is the visible marker of it.
+func TestPublishingDoesNotImportTemplatingYet(t *testing.T) {
+	const templatingPkg = `"github.com/ipiton/AMP/internal/business/templating"`
+
+	for _, dir := range []string{
+		filepath.Join("..", "infrastructure", "publishing"),
+		filepath.Join("..", "business", "publishing"),
+	} {
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err, "scope guard cannot run: %s unreadable", dir)
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+			require.NoError(t, err)
+
+			for _, imported := range file.Imports {
+				assert.NotEqual(t, templatingPkg, imported.Path.Value,
+					"%s imports templating: slice 2 has begun — delete this scope guard deliberately", path)
+			}
+		}
+	}
 }
