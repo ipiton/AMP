@@ -1,6 +1,7 @@
 package inhibition
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -292,7 +293,11 @@ func (p *DefaultInhibitionParser) applyDefaults(config *InhibitionConfig) {
 	}
 }
 
-// compileRegexPatterns compiles all regex patterns in the configuration.
+// compileRegexPatterns compiles all regex patterns in the configuration —
+// both the legacy `*_match_re` maps and the matchers-form list syntax —
+// via InhibitionRule.Compile, the single compile path both this parser
+// (config_file-sourced rules) and internal/config.ToInhibitionRules
+// (inline rules) now share (review fix round 1, S1).
 //
 // Pre-compilation improves performance during matching.
 // Invalid patterns return ParseError with detailed information.
@@ -300,38 +305,15 @@ func (p *DefaultInhibitionParser) compileRegexPatterns(config *InhibitionConfig)
 	for i := range config.Rules {
 		rule := &config.Rules[i]
 
-		// Compile source_match_re patterns
-		rule.compiledSourceRE = make(map[string]*regexp.Regexp)
-		for key, pattern := range rule.SourceMatchRE {
-			re, err := regexp.Compile(pattern)
-			if err != nil {
+		if err := rule.Compile(); err != nil {
+			var rce *regexCompileError
+			if errors.As(err, &rce) {
 				return NewParseError(
-					fmt.Sprintf("rules[%d].source_match_re.%s", i, key),
-					pattern,
-					fmt.Errorf("invalid regex: %w", err),
+					fmt.Sprintf("rules[%d].%s", i, rce.Field),
+					rce.Pattern,
+					rce.Err,
 				)
 			}
-			rule.compiledSourceRE[key] = re
-		}
-
-		// Compile target_match_re patterns
-		rule.compiledTargetRE = make(map[string]*regexp.Regexp)
-		for key, pattern := range rule.TargetMatchRE {
-			re, err := regexp.Compile(pattern)
-			if err != nil {
-				return NewParseError(
-					fmt.Sprintf("rules[%d].target_match_re.%s", i, key),
-					pattern,
-					fmt.Errorf("invalid regex: %w", err),
-				)
-			}
-			rule.compiledTargetRE[key] = re
-		}
-
-		// Compile source_matchers/target_matchers (upstream's modern
-		// `matchers:` list syntax, wave 7 FU-INHIBIT-MATCHERS) into the
-		// anchored-regex evaluable form matchRuleFast reads.
-		if err := rule.CompileMatchers(); err != nil {
 			return NewParseError(
 				fmt.Sprintf("rules[%d]", i),
 				rule.Name,

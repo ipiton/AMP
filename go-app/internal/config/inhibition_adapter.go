@@ -27,6 +27,15 @@ import (
 // like a real condition — a config using only the matchers-form on a rule
 // now inhibits exactly as written, instead of silently (or loudly)
 // nothing.
+//
+// Review fix round 1 (S1): calls rule.Compile(), not rule.CompileMatchers()
+// alone — Compile also runs CompileLegacyRegex, so an inline
+// source_match_re/target_match_re rule gets its regexes compiled here too.
+// Before this fix, this was the ONLY InhibitionRule construction path that
+// never compiled legacy regexes at all (DefaultInhibitionParser, used for
+// ConfigFile-sourced rules, always did), so matchRuleFast's
+// `hasRE := rule.compiledSourceRE[key]; if !hasRE { return false }` made
+// every inline legacy regex rule a permanent, silent no-op.
 func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, error) {
 	rules := make([]inhibition.InhibitionRule, 0, len(c.Rules))
 
@@ -42,7 +51,7 @@ func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, err
 			Name:           r.Name,
 		}
 
-		if err := rule.CompileMatchers(); err != nil {
+		if err := rule.Compile(); err != nil {
 			name := r.Name
 			if name == "" {
 				name = fmt.Sprintf("inhibit_rules[%d]", i)

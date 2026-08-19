@@ -79,7 +79,7 @@ func TestMatchesAll_AllFourOperators(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "!= passes when label missing (treated as not-equal)",
+			name: "!= passes when label missing and Value is non-empty (upstream: \"\" != \"eu\")",
 			labels: map[string]string{
 				"severity": "critical",
 				"service":  "api-gateway",
@@ -107,7 +107,7 @@ func TestMatchesAll_AllFourOperators(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "!~ passes when label missing",
+			name: "!~ passes when label missing and pattern doesn't match \"\" (upstream: !re.MatchString(\"\"))",
 			labels: map[string]string{
 				"severity": "critical",
 				"region":   "us",
@@ -139,6 +139,81 @@ func TestMatchesAll_EmptyListIsVacuouslyTrue(t *testing.T) {
 	assert.True(t, matchesAll([]compiledMatcher{}, nil))
 }
 
+// TestMatchesAll_AbsentLabelUpstreamSemantics is the review fix-round-1
+// (I1) table test: upstream Alertmanager's Matchers.Matches has NO
+// presence check at all (pkg/labels/matcher.go:184-191 reads
+// `lset[name]`, which is "" for an absent Go map key), so an absent label
+// is evaluated as the empty string against every operator — never
+// short-circuited by existence the way the pre-fix-round matchesAll did.
+// Each row pins one operator against a label that is entirely absent
+// from the input map, both for an operand that is itself empty (the
+// sharpest edge, where the pre-fix table diverged) and a typical
+// non-empty operand (where both tables happen to agree, so a regression
+// back to the exists-gated version would only be caught by the
+// empty-operand rows).
+func TestMatchesAll_AbsentLabelUpstreamSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		exprs   []string
+		want    bool
+		explain string
+	}{
+		{
+			name:    `job!="" on absent label`,
+			exprs:   []string{`job!=""`},
+			want:    false,
+			explain: `upstream: "" != "" is false -> NOT matched (the pre-fix version returned true)`,
+		},
+		{
+			name:    `foo=~".*" on absent label`,
+			exprs:   []string{`foo=~".*"`},
+			want:    true,
+			explain: `upstream: anchored ".*" matches "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `foo="" on absent label`,
+			exprs:   []string{`foo=""`},
+			want:    true,
+			explain: `upstream: "" == "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `foo!~".*" on absent label`,
+			exprs:   []string{`foo!~".*"`},
+			want:    false,
+			explain: `upstream: anchored ".*" matches "" so negated is false -> NOT matched (the pre-fix version returned true)`,
+		},
+		{
+			name:    `foo="bar" on absent label (non-empty operand, tables agree)`,
+			exprs:   []string{`foo="bar"`},
+			want:    false,
+		},
+		{
+			name:    `foo!="bar" on absent label (non-empty operand, tables agree)`,
+			exprs:   []string{`foo!="bar"`},
+			want:    true,
+		},
+		{
+			name:    `foo=~"bar" on absent label (non-empty operand, tables agree)`,
+			exprs:   []string{`foo=~"bar"`},
+			want:    false,
+		},
+		{
+			name:    `foo!~"bar" on absent label (non-empty operand, tables agree)`,
+			exprs:   []string{`foo!~"bar"`},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compiled, err := compileMatcherList(tt.exprs)
+			require.NoError(t, err)
+			got := matchesAll(compiled, map[string]string{"unrelated": "value"}) // "foo"/"job" absent
+			assert.Equal(t, tt.want, got, tt.explain)
+		})
+	}
+}
+
 func TestMatchesAll_RegexAnchoring(t *testing.T) {
 	// "warning" must not also match "warning2" or "not-warning" — anchored
 	// full-string match, same as internal/business/routing.anchorRegex.
@@ -148,6 +223,91 @@ func TestMatchesAll_RegexAnchoring(t *testing.T) {
 	assert.True(t, matchesAll(compiled, map[string]string{"severity": "warning"}))
 	assert.False(t, matchesAll(compiled, map[string]string{"severity": "warning2"}))
 	assert.False(t, matchesAll(compiled, map[string]string{"severity": "not-warning"}))
+}
+
+// --- Review fix round 1: CompileLegacyRegex / Compile (I3 + S1) -----------
+
+// TestCompileLegacyRegex_Anchored is the I3 regression test: legacy
+// *_match_re patterns must be anchored ^(?:pattern)$ the same as the
+// matchers-form =~/!~ and upstream's own labels.NewMatcher, not evaluated
+// as a raw substring search.
+func TestCompileLegacyRegex_Anchored(t *testing.T) {
+	rule := InhibitionRule{
+		SourceMatch:   map[string]string{"alertname": "NodeDown"},
+		TargetMatchRE: map[string]string{"severity": "warning"},
+	}
+	require.NoError(t, rule.CompileLegacyRegex())
+
+	cache := &mockCache{firingAlerts: []*core.Alert{
+		{Fingerprint: "src", Labels: map[string]string{"alertname": "NodeDown"}},
+	}}
+	m := NewMatcher(cache, []InhibitionRule{rule}, nil)
+
+	// Exact "warning": matched.
+	res, err := m.ShouldInhibit(context.Background(), &core.Alert{
+		Fingerprint: "tgt-exact", Labels: map[string]string{"severity": "warning"},
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Matched, "anchored target_match_re must match the exact value")
+
+	// "warning2": anchoring must reject the substring match a raw
+	// regexp.Compile("warning") would have allowed before this fix.
+	res, err = m.ShouldInhibit(context.Background(), &core.Alert{
+		Fingerprint: "tgt-substring", Labels: map[string]string{"severity": "warning2"},
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Matched, "anchored target_match_re must NOT match \"warning2\"")
+}
+
+// TestCompileLegacyRegex_NoOpWhenUnset mirrors
+// TestInhibitionRule_CompileMatchers_NoOpWhenUnset for the legacy side.
+func TestCompileLegacyRegex_NoOpWhenUnset(t *testing.T) {
+	rule := InhibitionRule{}
+	require.NoError(t, rule.CompileLegacyRegex())
+	assert.Nil(t, rule.compiledSourceRE)
+	assert.Nil(t, rule.compiledTargetRE)
+}
+
+func TestCompileLegacyRegex_InvalidPatternNamesSideAndKey(t *testing.T) {
+	rule := InhibitionRule{SourceMatchRE: map[string]string{"service": "("}}
+	err := rule.CompileLegacyRegex()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source_match_re.service")
+
+	rule = InhibitionRule{TargetMatchRE: map[string]string{"service": "("}}
+	err = rule.CompileLegacyRegex()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "target_match_re.service")
+}
+
+// TestInhibitionRule_Compile_InlineLegacyRegexRuleActuallyInhibits is the
+// S1 regression test: before the fix round, InhibitionRule.CompileMatchers
+// (called by internal/config.ToInhibitionRules for inline rules) compiled
+// ONLY the matchers-form list — compiledSourceRE/compiledTargetRE stayed
+// nil for an inline rule, and matchRuleFast treats a missing compiled
+// regex as a hard non-match, so an inline source_match_re/target_match_re
+// rule was a permanent, silent no-op. Compile() (which ToInhibitionRules
+// now calls) must actually wire it up.
+func TestInhibitionRule_Compile_InlineLegacyRegexRuleActuallyInhibits(t *testing.T) {
+	rule := InhibitionRule{
+		Name:          "inline-legacy-regex",
+		SourceMatchRE: map[string]string{"alertname": "Node.*"},
+		TargetMatch:   map[string]string{"alertname": "InstanceDown"},
+		Equal:         []string{"cluster"},
+	}
+	require.NoError(t, rule.Compile())
+	require.NotNil(t, rule.compiledSourceRE, "Compile must populate compiledSourceRE for an inline rule")
+
+	cache := &mockCache{firingAlerts: []*core.Alert{
+		{Fingerprint: "src", Labels: map[string]string{"alertname": "NodeDown", "cluster": "a"}},
+	}}
+	m := NewMatcher(cache, []InhibitionRule{rule}, nil)
+
+	res, err := m.ShouldInhibit(context.Background(), &core.Alert{
+		Fingerprint: "tgt", Labels: map[string]string{"alertname": "InstanceDown", "cluster": "a"},
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Matched, "an inline source_match_re rule must actually inhibit once compiled via Compile()")
 }
 
 // --- InhibitionRule.CompileMatchers ----------------------------------------
