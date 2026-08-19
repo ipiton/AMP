@@ -233,7 +233,7 @@ func resolveGlobalFallbacks(config *RouteConfig) {
 			if cfg.APIURL == "" {
 				cfg.APIURL = global.SlackAPIURL
 			}
-			cfg.HTTPConfig = resolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 		for _, cfg := range receiver.PagerDutyConfigs {
 			if cfg == nil {
@@ -242,7 +242,7 @@ func resolveGlobalFallbacks(config *RouteConfig) {
 			if cfg.URL == "" {
 				cfg.URL = global.PagerDutyURL
 			}
-			cfg.HTTPConfig = resolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 		for _, cfg := range receiver.TelegramConfigs {
 			if cfg == nil {
@@ -251,21 +251,27 @@ func resolveGlobalFallbacks(config *RouteConfig) {
 			if cfg.APIURL == "" {
 				cfg.APIURL = global.TelegramAPIURL
 			}
-			cfg.HTTPConfig = resolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 		for _, cfg := range receiver.WebhookConfigs {
 			if cfg == nil {
 				continue
 			}
-			cfg.HTTPConfig = resolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 	}
 }
 
-// resolveHTTPConfigFallback returns the integration's own http_config when it
+// ResolveHTTPConfigFallback returns the integration's own http_config when it
 // has one, and otherwise a CLONE of the global block. Wholesale, never merged —
 // see resolveGlobalFallbacks' doc comment for why that matches upstream.
-func resolveHTTPConfigFallback(own, global *HTTPConfig) *HTTPConfig {
+//
+// Exported because the publishing-target builder applies it a second time: a
+// RouteConfig built PROGRAMMATICALLY (tests, any future entry point) never
+// passes through Parse and therefore never had its fallbacks resolved. The
+// operation is idempotent — the integration's own value always wins — so
+// applying it twice on a parsed config is a no-op.
+func ResolveHTTPConfigFallback(own, global *HTTPConfig) *HTTPConfig {
 	if own != nil {
 		return own
 	}
