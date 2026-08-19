@@ -301,6 +301,26 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
 5. **2-replica HA e2e (`deploy/e2e-ha/`) is a standalone script, not a CI gate.** It demonstrates exactly-once
    delivery and failover when run manually (`./deploy/e2e-ha/run.sh`); it does not run in `go test ./...` and so
    provides no regression protection against a future change silently breaking HA behavior.
+6. **Group storage now survives a runtime Redis outage — but recovery is a clean cutover, not a state merge.**
+   Closed in wave 5 (`FU-STORAGEMANAGER-FAILBACK`): the standard profile's `GroupStorage` used to be chosen once at
+   startup (`ServiceRegistry.newGroupingStorage`) with no runtime revisit — a Redis outage after boot surfaced raw
+   Redis errors on every group read/write until the process restarted. `grouping.StorageManager` (built in
+   2025-11-04, never actually wired in until this task) now wraps it: a 30s health probe on `Ping` switches to an
+   in-memory fallback on loss and back on recovery, with a `backend_active` gauge (labeled `redis`/`memory`) and a
+   loud log line on every switch, on top of the pre-existing per-call fallback (a failing `Store`/`Delete`/`StoreAll`
+   switches immediately, without waiting for the next probe tick).
+   **What this deliberately does NOT do**: on recovery, any `AlertGroup` created or updated in the fallback store
+   during the outage is *not* copied back into Redis. The next `Load` for that key goes to Redis and returns
+   `ErrNotFound` even though the fallback store still has it — `DefaultGroupManager.AddAlertToGroup` treats that as
+   "no group yet" and starts a fresh one, so an alert still firing reappears as a *new* group rather than vanishing
+   (duplicate notifications for the outage window are possible; silent data loss is not). This is NOT the same
+   convergence story as wave 4's per-alert delivered state: that data is a TTL'd dedup marker where the worst case
+   of "never made it to Redis" is a harmless resend, while a `GroupStorage` entry *is* the alert membership, so
+   there is no equivalently safe automatic merge to perform. Full state-merge machinery (reconciling two stores that
+   may both have live writes for overlapping keys) is out of scope for this task; detection, visibility, and a safe
+   (if not fully lossless) resume are the shipped deliverable. `TimerStorage` is not wrapped by the same mechanism —
+   it has its own, separate reconciliation loop (task 6.2, `grouping.TimerManagerConfig.ReconciliationInterval`) for
+   distributed timer liveness, which this task did not extend.
 
 ---
 

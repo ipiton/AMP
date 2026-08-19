@@ -6,13 +6,68 @@
 // Features:
 //   - Automatic fallback to MemoryGroupStorage on Redis failure
 //   - Automatic recovery to RedisGroupStorage when Redis restored
-//   - Health check polling every 30s
-//   - Metrics for fallback/recovery events
+//   - Health check polling every 30s (configurable, see StorageManagerConfig)
+//   - Metrics for fallback/recovery events, plus a backend-active gauge
+//     (BusinessMetrics.SetActiveGroupStorageBackend)
 //   - Graceful shutdown
 //
 // TN-125: Group Storage (Redis Backend)
 // Target Quality: 150%
 // Date: 2025-11-04
+//
+// # Runtime failback/failforward (alertmanager-parity wave-5,
+// FU-STORAGEMANAGER-FAILBACK)
+//
+// This type existed fully built — health probe, per-call fallback, recovery
+// switch, fallback/recovery counters — since 2025-11-04, but
+// ServiceRegistry.newGroupingStorage (added by the alertmanager-parity epic,
+// 2026-08-18) never actually constructed one: it picked RedisGroupStorage or
+// MemoryGroupStorage ONCE at startup and returned that value directly. A
+// Redis outage after startup therefore had no runtime detection at all — the
+// per-call fallback in GroupManager's callers (none; GroupManager itself
+// holds no fallback logic) never engaged, and requests just got the
+// underlying Redis error. wave-5 wires this type into newGroupingStorage's
+// standard-profile Redis path (service_registry.go) to close that gap.
+//
+// # What recovery does NOT do, and why
+//
+// On primary recovery, checkHealthAndSwitch flips sm.current back to primary
+// immediately — it does NOT read back and re-write whatever accumulated in
+// the fallback store while primary was down. This is a deliberate MINIMUM
+// VIABLE scope boundary (full state-merge machinery — reconciling two stores
+// that may both have live writes for overlapping keys, with no vector clock
+// or last-writer-wins policy defined anywhere in this codebase — is a
+// separate, much larger piece of work than "detect + make visible + resume
+// safely"):
+//
+//   - Any AlertGroup created or updated in the fallback store during the
+//     outage is NOT copied into the primary on recovery. The next Load for
+//     that GroupKey goes to the (now current again) primary and gets a
+//     GroupNotFoundError, even though the group is sitting right there in
+//     the fallback store — DefaultGroupManager.AddAlertToGroup treats that
+//     as "no group yet" and starts a fresh one (see manager_impl.go), so
+//     this fails safe rather than fails silent, but the fallback group's
+//     accumulated alerts are not merged into the new one automatically.
+//   - This is NOT the same convergence story as wave-4's nflog/delivered-state
+//     (see manager_impl.go's RecordPartialDelivery / redis_notify_log.go):
+//     that data converges FOR FREE because it is keyed by
+//     (group, target, alert fingerprint) with a bounded TTL — an entry that
+//     never made it to Redis simply expires and the next fire re-sends,
+//     which is safe because notify-log entries are idempotent dedup markers,
+//     not the group's actual alert membership. A GroupStorage entry has no
+//     such TTL-based "worst case is a harmless resend" property: it IS the
+//     alert membership, so losing track of it (rather than re-deriving it)
+//     is the actual risk this boundary accepts.
+//   - Mitigations already in place, not new to this task: (1) the fallback
+//     store is exactly as durable as the process — a crash during the outage
+//     loses it either way, same as before this task; (2) the alert ingest
+//     pipeline re-adds any alert still firing on its next classification
+//     pass, so an orphaned fallback-store group's alerts reappear as a NEW
+//     group on the primary rather than vanishing — duplicate notifications
+//     for the outage window are possible, silent data loss is not; (3) the
+//     backend-active gauge and the loud Warn/Info log lines on every switch
+//     (see checkHealthAndSwitch) make the window operationally visible
+//     instead of a silent gap, which is this task's actual deliverable.
 package grouping
 
 import (
@@ -40,7 +95,12 @@ import (
 //	primary, _ := grouping.NewRedisGroupStorage(redisConfig)
 //	fallback := grouping.NewMemoryGroupStorage(logger)
 //
-//	manager := grouping.NewStorageManager(primary, fallback, logger, metrics)
+//	manager := grouping.NewStorageManager(grouping.StorageManagerConfig{
+//		Primary:  primary,
+//		Fallback: fallback,
+//		Logger:   logger,
+//		Metrics:  metrics,
+//	})
 //	defer manager.Stop()
 //
 //	// Automatically uses Redis (or Memory if Redis fails)
@@ -55,6 +115,12 @@ type StorageManager struct {
 	// current active storage (primary or fallback)
 	current GroupStorage
 
+	// primaryLabel/fallbackLabel name the two backends for the
+	// backend-active gauge (task fu5-cfg item 2) and log lines — e.g.
+	// "redis"/"memory". Defaulted by NewStorageManager when left empty.
+	primaryLabel  string
+	fallbackLabel string
+
 	// mu protects current field
 	mu sync.RWMutex
 
@@ -63,6 +129,12 @@ type StorageManager struct {
 
 	// metrics for observability
 	metrics *metrics.BusinessMetrics
+
+	// healthCheckInterval controls how often checkHealthAndSwitch polls
+	// primary.Ping (task fu5-cfg item 2: made configurable, default
+	// unchanged at 30s, so tests can inject a short interval instead of
+	// sleeping through a real 30s tick).
+	healthCheckInterval time.Duration
 
 	// healthTicker for periodic health checks
 	healthTicker *time.Ticker
@@ -74,60 +146,104 @@ type StorageManager struct {
 	stopped bool
 }
 
+// StorageManagerConfig configures NewStorageManager.
+type StorageManagerConfig struct {
+	// Primary is the primary storage (typically RedisGroupStorage). Required.
+	Primary GroupStorage
+
+	// Fallback is the fallback storage (typically MemoryGroupStorage). Required.
+	Fallback GroupStorage
+
+	// Logger for structured logging. Optional, defaults to slog.Default().
+	Logger *slog.Logger
+
+	// Metrics for fallback/recovery/backend-active tracking. Optional (nil
+	// disables metrics, same posture as the rest of this package).
+	Metrics *metrics.BusinessMetrics
+
+	// HealthCheckInterval overrides the default 30s primary.Ping poll
+	// interval (task fu5-cfg item 2). Optional; <= 0 uses the default.
+	HealthCheckInterval time.Duration
+
+	// PrimaryLabel/FallbackLabel name the two backends for the
+	// backend-active gauge and log lines (task fu5-cfg item 2). Optional;
+	// empty defaults to "redis"/"memory" — this type's only real-world
+	// pairing (newGroupingStorage in service_registry.go).
+	PrimaryLabel  string
+	FallbackLabel string
+}
+
+// defaultStorageManagerHealthCheckInterval is the pre-task-fu5-cfg-item-2
+// hardcoded literal, kept as the default when StorageManagerConfig leaves
+// HealthCheckInterval unset.
+const defaultStorageManagerHealthCheckInterval = 30 * time.Second
+
 // NewStorageManager creates a new StorageManager with automatic fallback/recovery.
 //
-// Parameters:
-//   - primary: Primary storage (typically RedisGroupStorage)
-//   - fallback: Fallback storage (typically MemoryGroupStorage)
-//   - logger: Structured logger (optional, defaults to slog.Default)
-//   - metrics: Business metrics for fallback/recovery tracking (optional)
-//
-// Returns:
-//   - *StorageManager: Initialized manager with health check running
-//
-// The health check goroutine starts immediately and polls every 30s.
-// Call Stop() to gracefully shutdown when done.
+// The health check goroutine starts immediately and polls every
+// cfg.HealthCheckInterval (default 30s). Call Stop() to gracefully shutdown
+// when done.
 //
 // Example:
 //
-//	manager := grouping.NewStorageManager(redisStorage, memoryStorage, logger, metrics)
+//	manager := grouping.NewStorageManager(grouping.StorageManagerConfig{
+//		Primary: redisStorage, Fallback: memoryStorage, Logger: logger, Metrics: metrics,
+//	})
 //	defer manager.Stop()
 //
 // TN-125: Group Storage (Redis Backend)
 // Date: 2025-11-04
-func NewStorageManager(
-	primary GroupStorage,
-	fallback GroupStorage,
-	logger *slog.Logger,
-	metrics *metrics.BusinessMetrics,
-) *StorageManager {
+func NewStorageManager(cfg StorageManagerConfig) *StorageManager {
+	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	interval := cfg.HealthCheckInterval
+	if interval <= 0 {
+		interval = defaultStorageManagerHealthCheckInterval
+	}
+
+	primaryLabel := cfg.PrimaryLabel
+	if primaryLabel == "" {
+		primaryLabel = "redis"
+	}
+	fallbackLabel := cfg.FallbackLabel
+	if fallbackLabel == "" {
+		fallbackLabel = "memory"
+	}
+
 	sm := &StorageManager{
-		primary:  primary,
-		fallback: fallback,
-		current:  primary, // Start with primary (Redis)
-		logger:   logger,
-		metrics:  metrics,
-		stopChan: make(chan struct{}),
+		primary:             cfg.Primary,
+		fallback:            cfg.Fallback,
+		current:             cfg.Primary, // Start with primary (Redis)
+		primaryLabel:        primaryLabel,
+		fallbackLabel:       fallbackLabel,
+		logger:              logger,
+		metrics:             cfg.Metrics,
+		healthCheckInterval: interval,
+		stopChan:            make(chan struct{}),
+	}
+
+	if sm.metrics != nil {
+		sm.metrics.SetActiveGroupStorageBackend(primaryLabel)
 	}
 
 	// Start health check poller
 	sm.startHealthCheck()
 
 	logger.Info("Initialized storage manager with automatic fallback/recovery",
-		"initial_storage", "primary")
+		"initial_storage", primaryLabel, "health_check_interval", interval)
 
 	return sm
 }
 
-// startHealthCheck polls primary storage health every 30s and switches storage accordingly.
+// startHealthCheck polls primary storage health every healthCheckInterval
+// and switches storage accordingly.
 //
 // Goroutine lifecycle:
 //   - Starts immediately in NewStorageManager
-//   - Polls every 30s
+//   - Polls every healthCheckInterval
 //   - Stops when Stop() is called
 //
 // Behavior:
@@ -135,7 +251,7 @@ func NewStorageManager(
 //   - On primary.Ping() success: switch back to primary (if was fallback)
 //   - Records metrics for fallback/recovery events
 func (sm *StorageManager) startHealthCheck() {
-	sm.healthTicker = time.NewTicker(30 * time.Second)
+	sm.healthTicker = time.NewTicker(sm.healthCheckInterval)
 
 	go func() {
 		for {
@@ -149,10 +265,14 @@ func (sm *StorageManager) startHealthCheck() {
 		}
 	}()
 
-	sm.logger.Debug("Started health check poller", "interval", "30s")
+	sm.logger.Debug("Started health check poller", "interval", sm.healthCheckInterval)
 }
 
 // checkHealthAndSwitch checks primary storage health and switches if needed.
+//
+// See this file's package doc ("What recovery does NOT do, and why") for why
+// the primary-recovered branch is a clean cutover, not a merge of whatever
+// accumulated in the fallback store while primary was down.
 func (sm *StorageManager) checkHealthAndSwitch() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -166,23 +286,26 @@ func (sm *StorageManager) checkHealthAndSwitch() {
 		// Primary unhealthy → switch to fallback
 		if sm.current == sm.primary {
 			sm.logger.Warn("Primary storage unhealthy, switching to fallback",
-				"error", err)
+				"error", err, "backend", sm.fallbackLabel)
 			sm.current = sm.fallback
 
 			// Record fallback metric
 			if sm.metrics != nil {
 				sm.metrics.IncStorageFallback("health_check_failed")
+				sm.metrics.SetActiveGroupStorageBackend(sm.fallbackLabel)
 			}
 		}
 	} else {
 		// Primary healthy → switch back to primary
 		if sm.current == sm.fallback {
-			sm.logger.Info("Primary storage recovered, switching back from fallback")
+			sm.logger.Info("Primary storage recovered, switching back from fallback",
+				"backend", sm.primaryLabel)
 			sm.current = sm.primary
 
 			// Record recovery metric
 			if sm.metrics != nil {
 				sm.metrics.IncStorageRecovery()
+				sm.metrics.SetActiveGroupStorageBackend(sm.primaryLabel)
 			}
 		}
 	}
@@ -242,6 +365,7 @@ func (sm *StorageManager) Store(ctx context.Context, group *AlertGroup) error {
 			// Record fallback metric
 			if sm.metrics != nil {
 				sm.metrics.IncStorageFallback("store_error")
+				sm.metrics.SetActiveGroupStorageBackend(sm.fallbackLabel)
 			}
 		}
 		sm.mu.Unlock()
@@ -284,6 +408,7 @@ func (sm *StorageManager) Delete(ctx context.Context, groupKey GroupKey) error {
 			// Record fallback metric
 			if sm.metrics != nil {
 				sm.metrics.IncStorageFallback("delete_error")
+				sm.metrics.SetActiveGroupStorageBackend(sm.fallbackLabel)
 			}
 		}
 		sm.mu.Unlock()
@@ -344,6 +469,7 @@ func (sm *StorageManager) StoreAll(ctx context.Context, groups []*AlertGroup) er
 			// Record fallback metric
 			if sm.metrics != nil {
 				sm.metrics.IncStorageFallback("store_all_error")
+				sm.metrics.SetActiveGroupStorageBackend(sm.fallbackLabel)
 			}
 		}
 		sm.mu.Unlock()

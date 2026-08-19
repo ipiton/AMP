@@ -114,7 +114,7 @@
 - [ ] **FU-SILENCES-EXPIRED-QUERY** — silences --expired query support. ~0.5d
 - [ ] **FU-GET-ALERTS-V1** — GET /api/v1/alerts endpoint (parity gap, brief asked POST alias only). ~0.5d
 - [x] **FU-SILENCE-SYNC-INTERVALS** _(closed by wave 5, 2026-08-19)_ — configurable silence-sync intervals: `silencing.subscribe_retry_backoff` / `silencing.periodic_resync_interval` replace the hardcoded 2s backoff / 5min resync constants, defaults unchanged, validated (positive, backoff < resync). ~0.5d
-- [ ] **FU-STORAGEMANAGER-FAILBACK** — StorageManager runtime Redis failback (startup-only decision currently; potential graceful degradation). ~1-2d
+- [x] **FU-STORAGEMANAGER-FAILBACK** _(closed by wave 5, 2026-08-19)_ — StorageManager runtime Redis failback/failforward: the existing (built 2025-11-04, never wired in) `grouping.StorageManager` now wraps the standard profile's Redis `GroupStorage`, with a health probe, backend-active gauge, and loud logging on switch. Recovery is a clean cutover, not a state merge — documented in `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #6. ~1-2d
 - [ ] **FU-SLACK-PAGERDUTY-QUEUE-PATH** — enhanced slack/pagerduty publishers unreachable via queue path (same class as telegram fix in Phase 7.2). Mutex guards for client maps. ~1d
 - [ ] **FU-PARSEARGUMENT-QUOTE-HANDLING** — parseMatcherExpr quote handling edge cases (third matcher grammar divergence vs configvalidator). ~0.5d
 - [ ] **FU-GLOB-DEFAULT-VALUES** — GlobalConfig fallback fields for group_by/duration. ~0.5d
