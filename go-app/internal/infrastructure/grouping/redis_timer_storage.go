@@ -51,14 +51,17 @@ const (
 	// ADOPTION WINDOW: once the key is gone, no replica can ever discover
 	// that the group still needs a notification.
 	//
-	// INVARIANT (final review finding 2): this MUST stay comfortably larger
-	// than defaultReconciliationGracePeriod, which is how long the
-	// reconciliation loop waits past ExpiresAt before treating a timer as
-	// orphaned. Both were 60s, which collapsed the adoption window to ~0s:
-	// a timer became eligible for adoption at the exact moment its Redis key
-	// expired, so ListOverdueTimers always came back empty and a dead
-	// replica's groups were never adopted — the group simply never notified
-	// again. Enforced at compile time just below.
+	// INVARIANT (final review finding 2): this MUST stay STRICTLY greater
+	// than defaultReconciliationGracePeriod (plus reconciliation-tick
+	// headroom) — equality is not enough. defaultReconciliationGracePeriod
+	// is how long the reconciliation loop waits past ExpiresAt before
+	// treating a timer as orphaned. Both were 60s, which collapsed the
+	// adoption window to exactly 0s: a timer became eligible for adoption
+	// at the exact moment its Redis key expired, so ListOverdueTimers
+	// always came back empty and a dead replica's groups were never
+	// adopted — the group simply never notified again. Enforced at compile
+	// time just below, with the same strict (not `<=`) semantics as
+	// ValidateReconciliationGrace's runtime check further down.
 	//
 	// 10m also has to leave room for reconciliationInterval (45s default) to
 	// tick at least a few times inside the window, so a single missed tick
@@ -72,9 +75,20 @@ const (
 // timerTTLGracePeriod: converting a negative untyped constant to uint64 is a
 // compile error ("constant … overflows uint64"), so shrinking
 // timerTTLGracePeriod below the reconciliation grace period (plus room for a
-// few reconciliation ticks) breaks the build instead of silently reintroducing
-// finding 2.
-const _ = uint64(timerTTLGracePeriod - defaultReconciliationGracePeriod - 4*defaultReconciliationInterval)
+// few reconciliation ticks) breaks the build instead of silently
+// reintroducing finding 2.
+//
+// The trailing "- 1" makes this STRICT (timerTTLGracePeriod must be greater
+// than, not just greater-than-or-equal-to, the reconciliation headroom): it
+// forces the expression negative — and therefore the build to fail — at the
+// exact equality boundary, not only once it goes negative. Without the "- 1"
+// this compiled fine at equality (result 0, a valid uint64), silently
+// allowing a zero-width adoption window — the original finding 2 bug — to
+// pass the compile-time guard while ValidateReconciliationGrace below
+// correctly rejects the equivalent runtime case (its `>=` check). Both must
+// use the same strict semantics: equality means zero adoption window, which
+// is exactly as broken as a negative window.
+const _ = uint64(timerTTLGracePeriod - defaultReconciliationGracePeriod - 4*defaultReconciliationInterval - 1)
 
 // ErrReconciliationGraceReopensZeroWindow is returned by
 // ValidateReconciliationGrace when an operator-supplied
@@ -84,17 +98,21 @@ const _ = uint64(timerTTLGracePeriod - defaultReconciliationGracePeriod - 4*defa
 // for values that only exist at config-load time and therefore can't be
 // caught by a Go constant expression.
 var ErrReconciliationGraceReopensZeroWindow = fmt.Errorf(
-	"reconciliation_grace leaves no adoption window before the timer TTL grace period elapses (reopens finding 2)")
+	"reconciliation_grace leaves no adoption window (or a negative one) before the timer TTL grace period elapses (reopens finding 2)")
 
 // ValidateReconciliationGrace checks an operator-supplied
 // (reconciliation_interval, reconciliation_grace) pair against the same
 // invariant enforced at compile time (just above) for the hardcoded
-// defaults: effectiveGrace + a few reconciliation ticks must stay
-// comfortably under timerTTLGracePeriod, the hard upper bound on how long a
-// timer's Redis record survives past its own ExpiresAt. Otherwise a timer
-// becomes eligible for orphan-adoption at (or after) the exact moment its
-// Redis key is gone, so ListOverdueTimers can never find it and a dead
-// replica's groups stop notifying forever.
+// defaults: effectiveGrace + a few reconciliation ticks must stay STRICTLY
+// less than timerTTLGracePeriod, the hard upper bound on how long a timer's
+// Redis record survives past its own ExpiresAt — equality is rejected, not
+// just values that exceed it, because equality means a zero-width adoption
+// window (the original finding 2 bug: a timer becomes eligible for
+// orphan-adoption at the exact moment its Redis key is gone, so
+// ListOverdueTimers can never find it and a dead replica's groups stop
+// notifying forever). This mirrors the compile-time guard above, which
+// enforces the same strict `<` (not `<=`) boundary for the hardcoded
+// defaults via its trailing "- 1".
 //
 // interval <= 0 means the reconciliation loop is disabled entirely
 // (grouping.enabled config, task 6.2) — grace is not consulted and this
@@ -116,8 +134,11 @@ func ValidateReconciliationGrace(interval, grace time.Duration) error {
 	}
 
 	ticksHeadroom := 4 * interval
+	// Strict: equality (== timerTTLGracePeriod) is rejected too, not just
+	// values that exceed it — equality is a zero-width adoption window,
+	// which is the finding-2 bug just as much as a negative one.
 	if effectiveGrace+ticksHeadroom >= timerTTLGracePeriod {
-		return fmt.Errorf("%w: grace=%s + 4*interval=%s (%s) >= timer TTL grace period %s",
+		return fmt.Errorf("%w: grace=%s + 4*interval=%s (%s) >= timer TTL grace period %s (must be strictly less than, not equal to)",
 			ErrReconciliationGraceReopensZeroWindow, effectiveGrace, interval, ticksHeadroom, timerTTLGracePeriod)
 	}
 
