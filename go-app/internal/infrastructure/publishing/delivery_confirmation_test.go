@@ -2,6 +2,8 @@ package publishing
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -639,6 +641,41 @@ func TestAbandonedJob_IsNotWrittenToDLQ(t *testing.T) {
 	}
 
 	assert.Zero(t, dlq.count(), "an abandoned job must not be written to the DLQ")
+}
+
+// === Wave-4 hygiene item 2 (review finding M-c): a genuine failure racing
+// the waiter's timeout must not lose its DLQ entry ===
+//
+// The real race is a single scheduling instant inside processJob (between
+// retryPublish returning a REAL, already-decided outcome and the abandon-
+// branch check reading job.ctx.Err()) that a concurrent handle.Abandon call
+// can, in principle, land inside of. That window has no synchronization
+// point to hook a test onto, so this pins the decision function processJob
+// actually calls instead of trying to win a race that is inherently
+// unrepeatable — see jobWasAbandoned's doc comment for why job.ctx.Err() !=
+// nil alone is not enough.
+func TestJobWasAbandoned_SettledFailureRacingTimeoutKeepsNormalPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate: the waiter gave up and Abandon()'d the job AFTER its attempt had already settled
+	job := &PublishingJob{ctx: ctx}
+
+	genuineFailure := errors.New("500 Internal Server Error")
+	assert.False(t, jobWasAbandoned(job, genuineFailure),
+		"a real, completed failure must not be reclassified as abandonment just because ctx is now cancelled — it must keep its DLQ entry")
+
+	trueAbandonment := fmt.Errorf("request aborted: %w", context.Canceled)
+	assert.True(t, jobWasAbandoned(job, trueAbandonment),
+		"a job whose OWN attempt was actually aborted by cancellation must still take the abandon branch")
+
+	assert.False(t, jobWasAbandoned(job, nil), "a nil error (success) is never abandonment")
+
+	unstartedJob := &PublishingJob{}
+	assert.False(t, jobWasAbandoned(unstartedJob, genuineFailure), "a job with no ctx (Submit/SubmitGroup) can never be abandoned")
+
+	liveCtx, liveCancel := context.WithCancel(context.Background())
+	defer liveCancel()
+	liveJob := &PublishingJob{ctx: liveCtx}
+	assert.False(t, jobWasAbandoned(liveJob, genuineFailure), "ctx still live: a failure here is just a normal failure")
 }
 
 // recordingDLQ counts DLQ writes.
