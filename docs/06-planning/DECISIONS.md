@@ -76,3 +76,21 @@
 - **Следствие**:
   - `GRAFANA-DASHBOARD-IDENTITY-DRIFT` закрывается как «working as intended, документировано»;
   - historical naming в uid/filename не считается drift и не должен попадать в новые BUGS-записи.
+
+## ADR-008: `http_config.oauth2` — Skip The Target Only When The Integration Asked For It
+- **Дата**: 2026-08-19
+- **Контекст**: `FU-HTTP-CONFIG` (AMP-PARITY-WAVE7 track C) доставляет per-integration `http_config`, но `oauth2` не поддержан (нужен token endpoint + refresh loop, это отдельная единица работы — `FU-HTTP-OAUTH2`). Первая реализация всегда логировала `WARN` и отправляла запрос БЕЗ OAuth2-креденшелов. Security-review предложил обратное: skip target (fail closed), по аналогии с нечитаемым `password_file`. Controller ruling: ни один из двух вариантов целиком не верен — решает ПРОВЕНАНС блока.
+- **Решение**:
+  - `oauth2` в СОБСТВЕННОМ `http_config` интеграции → **target пропускается** (`fail closed`) с громким `WARN`, содержащим receiver/kind/index. Endpoint явно объявил требование auth, поэтому доставка без него — осознанная неаутентифицированная отправка. Радиус — ровно одна интеграция, которая об этом попросила.
+  - `oauth2`, унаследованный из `global.http_config` → интеграция **продолжает доставлять** (без OAuth2), с `WARN` **и** счётчиком `amp_publishing_unsupported_http_config_total{field="oauth2",target=...}`.
+  - Провенанс сохраняется через неэкспортированное поле `routing.HTTPConfig.inheritedFromGlobal` (устанавливается только в `ResolveHTTPConfigFallback`), потому что parse-time resolution стирает структурную разницу между own и inherited. Поле неэкспортированное намеренно: `yaml.v3` и struct-validator игнорируют такие поля, поэтому оно не может протечь в `/api/v2/status`.
+- **Обоснование асимметрии**:
+  - `global.http_config` распространяется WHOLESALE на каждую `webhook`/`slack`/`pagerduty`/`telegram` интеграцию, которая не задала свой блок. При политике «всегда skip» ОДИН глобальный `oauth2` блок = **полный notification outage по всему процессу**, включая Slack/Telegram/PagerDuty, которые аутентифицируются своим URL/header-креденшелом и OAuth2 никогда не требовали.
+  - Неаутентифицированный запрос уходит на **собственный настроенный host оператора**, который его auth-gate-ит и вернёт 401. Это отвергнутый запрос к предполагаемому получателю, а не раскрытие данных третьей стороне — материально слабее, чем C1 (где выбрасывались креденшелы, которые оператор ДАЛ).
+- **Accepted risk**:
+  - Интеграция, унаследовавшая `global.http_config.oauth2`, отправляет запросы без OAuth2-креденшелов до тех пор, пока `FU-HTTP-OAUTH2` не закрыт. Сигнал: `WARN` на каждый config load/reload + монотонный счётчик + 401 от самого endpoint.
+  - Осознанно принято, потому что альтернатива (skip) превращает одну неподдерживаемую опцию в отказ всей доставки.
+- **Следствие**:
+  - `WARN` один раз на config load — не per-alert; поэтому счётчик обязателен, а не «nice to have» (review I1).
+  - `docs/ALERTMANAGER_COMPATIBILITY.md` описывает оба варианта поведения в секции `Per-integration http_config`.
+  - При закрытии `FU-HTTP-OAUTH2` этот ADR отменяется целиком: оба пути станут «поддержано».
