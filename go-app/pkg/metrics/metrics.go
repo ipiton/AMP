@@ -1362,12 +1362,28 @@ var groupStorageBackendLabels = []string{"redis", "memory"}
 // Exactly one of groupStorageBackendLabels reads 1 at any time; the others
 // read 0.
 func (m *BusinessMetrics) SetActiveGroupStorageBackend(backend string) {
+	isKnown := false
 	for _, b := range groupStorageBackendLabels {
 		v := 0.0
 		if b == backend {
 			v = 1.0
+			isKnown = true
 		}
 		m.storage.BackendActive.WithLabelValues(b).Set(v)
+	}
+
+	// fix-round Minor #2: StorageManagerConfig.PrimaryLabel/FallbackLabel
+	// accept any string, but the loop above only ever zeroes the fixed
+	// {"redis","memory"} set — without this, a caller using a different
+	// label pair would silently produce an all-zero gauge (every label it
+	// actually uses reads 0, since none of them is "redis" or "memory").
+	// Explicitly set the real label so it always reflects the truth, at
+	// the cost of a stale entry under a PREVIOUSLY used custom label if
+	// the label set changes between calls — not a concern for this
+	// package's only real caller, which always passes the same two labels
+	// for the lifetime of one StorageManager.
+	if !isKnown && backend != "" {
+		m.storage.BackendActive.WithLabelValues(backend).Set(1)
 	}
 }
 

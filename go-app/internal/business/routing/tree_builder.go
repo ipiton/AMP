@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
@@ -280,53 +281,94 @@ func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]
 	return matchers
 }
 
-// unquoteMatcherValue strips a matched pair of surrounding double quotes
-// from a `matchers:` list value and unescapes `\"`/`\\` within it, per
-// prometheus/alertmanager's pkg/labels matcher grammar — the authority for
-// this parser and pkg/configvalidator/matcher.Parse alike (alertmanager-
-// parity wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING: quote handling was
-// the third matcher-grammar divergence found between the two, after
-// pkg/configvalidator/matcher.Parse turned out not to strip quotes at ALL —
-// see that function's own doc comment).
+// unquoteMatcherValue applies prometheus/alertmanager's pkg/labels matcher
+// value grammar verbatim — ported from ParseMatcher in
+// github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go, the
+// authority for this parser and pkg/configvalidator/matcher.Parse alike
+// (alertmanager-parity wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
 //
-// An unquoted value, or one without a real matched closing quote, is
-// returned unchanged: strings.Trim would also strip an unmatched quote
-// (e.g. `foo"` -> `foo`), silently mangling malformed input instead of
-// leaving it visibly wrong — the same posture this function's predecessor
-// (a bare quote-strip with no unescaping) already had.
+// fix-round finding I-3: the first pass here was a simplified "strip a
+// matched outer quote pair, unescape only \" and \\", which diverged from
+// upstream on four verified points: `\n` was never unescaped to a line
+// feed; escaping was skipped entirely for an unquoted value (upstream
+// applies it either way); an unescaped inner `"` was silently accepted
+// instead of rejected; and an unterminated/unmatched quote failed open
+// (kept the literal, mangled value) instead of erroring. This port fixes
+// all four by matching upstream's algorithm exactly rather than
+// approximating it.
 //
-// Only `\"` and `\\` are recognized escapes, matching upstream's matcher
-// grammar; any other backslash sequence (e.g. `\n`) is left as a literal
-// two-character pair rather than interpreted as a Go string escape.
+// Rules (see upstream's ParseMatcher doc comment for the canonical
+// wording):
+//   - A single leading '"' switches on "expect a trailing quote" and is
+//     stripped; a value need not be quoted at all.
+//   - Escaping applies regardless of quoting: '\n' -> LF, '\"' -> '"',
+//     '\\' -> '\\'. Any other '\x' is a "spurious escape" and is kept
+//     literally as the two characters '\' and 'x' — not an error, and not
+//     just the backslash dropped.
+//   - A lone trailing '\' with nothing after it is a literal backslash.
+//   - An unescaped '"' is only valid as the very last character, and only
+//     when a leading '"' was present; anywhere else (mid-value, or in a
+//     value that never had a leading quote) it is an error. A leading '"'
+//     with no matching trailing '"' at the end is also an error.
+//   - The input must be valid UTF-8.
 //
-// Known limitation shared with the pre-existing bare quote-strip this
-// replaces: detecting the "real" closing quote is a simple last-byte check,
-// not an escape-aware scan from the start — a value like `"foo\"` (an
-// escaped quote with no actual closing quote after it) still misreads as
-// quoted-and-terminated. A correct fix needs a real tokenizer, not a regex
-// capture group; out of scope for this task (see FU-PARSEARGUMENT-QUOTE-
-// HANDLING's brief: quote handling, not a lexer rewrite).
-func unquoteMatcherValue(value string) string {
-	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
-		return value
+// Returns ok=false (not an error type) to match this file's existing
+// "malformed matchers: entries are skipped" posture (parseMatchers' doc
+// comment) — parseMatcherExpr folds this into its own ok=false return.
+func unquoteMatcherValue(rawValue string) (string, bool) {
+	var expectTrailingQuote bool
+	if after, hasQuote := strings.CutPrefix(rawValue, `"`); hasQuote {
+		rawValue = after
+		expectTrailingQuote = true
 	}
 
-	inner := value[1 : len(value)-1]
-	var sb strings.Builder
-	sb.Grow(len(inner))
-	for i := 0; i < len(inner); i++ {
-		c := inner[i]
-		if c == '\\' && i+1 < len(inner) {
-			next := inner[i+1]
-			if next == '"' || next == '\\' {
-				sb.WriteByte(next)
-				i++
+	if !utf8.ValidString(rawValue) {
+		return "", false
+	}
+
+	var value strings.Builder
+	var escaped bool
+	for i := 0; i < len(rawValue); i++ {
+		c := rawValue[i]
+
+		if escaped {
+			escaped = false
+			switch c {
+			case 'n':
+				value.WriteByte('\n')
+			case '"', '\\':
+				value.WriteByte(c)
+			default:
+				// Spurious escape: keep the backslash literal.
+				value.WriteByte('\\')
+				value.WriteByte(c)
+			}
+			continue
+		}
+
+		switch c {
+		case '\\':
+			if i < len(rawValue)-1 {
+				escaped = true
 				continue
 			}
+			// Trailing lone backslash: literal.
+			value.WriteByte('\\')
+		case '"':
+			if !expectTrailingQuote || i < len(rawValue)-1 {
+				return "", false
+			}
+			expectTrailingQuote = false
+		default:
+			value.WriteByte(c)
 		}
-		sb.WriteByte(c)
 	}
-	return sb.String()
+
+	if expectTrailingQuote {
+		return "", false
+	}
+
+	return value.String(), true
 }
 
 // parseMatcherExpr parses one `matchers:` list entry into a Matcher.
@@ -336,11 +378,18 @@ func unquoteMatcherValue(value string) string {
 //	label=value
 //	label="value"
 //	label="va\"lue"   (escaped quote, unescaped to `va"lue`)
+//	label="line\nbreak" (escaped LF, unescaped to a real line feed)
 //	label!=value
 //	label=~"regex"
 //	label!~"regex"
 //
-// Returns ok=false if expr doesn't match the expected grammar.
+// Value quoting/escaping follows unquoteMatcherValue's ported upstream
+// grammar — see that function's doc comment. Returns ok=false if expr
+// doesn't match the expected grammar, INCLUDING a value that violates the
+// quote grammar (unescaped inner quote, unterminated quote, invalid
+// UTF-8): this is one more thing that can make a `matchers:` entry
+// malformed, on top of "no operator found" — both fold into the same
+// ok=false, matching parseMatchers' "malformed entries are skipped" posture.
 func parseMatcherExpr(expr string) (Matcher, bool) {
 	groups := matcherExprPattern.FindStringSubmatch(expr)
 	if groups == nil {
@@ -349,7 +398,10 @@ func parseMatcherExpr(expr string) (Matcher, bool) {
 
 	name := groups[1]
 	op := groups[2]
-	value := unquoteMatcherValue(strings.TrimSpace(groups[3]))
+	value, ok := unquoteMatcherValue(strings.TrimSpace(groups[3]))
+	if !ok {
+		return Matcher{}, false
+	}
 
 	m := Matcher{Name: name, Value: value}
 	switch op {
