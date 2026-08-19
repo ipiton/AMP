@@ -330,6 +330,16 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    parent-chain inheritance this layer sits below. AMP had this fallback layer once (a pre-dedup, package-local
    `GlobalConfig`), lost it when that type was deleted in favor of the canonical `infrastructure/routing` one
    (`3f8d69d`, TN-137), and this task put it back on the canonical type rather than reintroducing the duplicate.
+8. **`matchers:` list quote handling: closed the gap where the config validator disagreed with the route tree.**
+   Closed in wave 5 (`FU-PARSEARGUMENT-QUOTE-HANDLING`): `pkg/configvalidator/matcher.Parse` never stripped quotes
+   at all — for a regex matcher the quote-included literal was fed straight into `regexp.Compile`, so a config
+   could pass/fail E-code validation based on a DIFFERENT compiled pattern than the one `business/routing.
+   parseMatcherExpr` actually builds the runtime tree with, for the identical YAML `matchers:` entry. Both parsers
+   now strip a matched outer quote pair and unescape `\"`/`\\` inside it (an independently-duplicated
+   `unquoteMatcherValue`, not a shared import — `pkg/` stays leaf-level). Residual, deliberately out of scope:
+   both parsers still detect the closing quote with a simple last-byte check rather than an escape-aware scan from
+   the start, so a value like `"foo\"` (an escaped quote with no real closing quote after it) still misreads as
+   quoted-and-terminated — fixing that needs a real tokenizer, not a regex/index-based capture.
 
 ---
 

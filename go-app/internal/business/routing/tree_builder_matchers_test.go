@@ -73,6 +73,41 @@ func TestParseMatcherExpr(t *testing.T) {
 			expr:   "",
 			wantOK: false,
 		},
+		// alertmanager-parity wave-5 item 5 (FU-PARSEARGUMENT-QUOTE-HANDLING):
+		// escaped quotes, embedded spaces, and unicode inside a quoted value
+		// — the previously-divergent cases vs pkg/configvalidator/matcher.Parse
+		// (which didn't strip quotes at all before this task). See
+		// pkg/configvalidator/matcher/matcher_test.go for the mirrored table.
+		{
+			name:   "escaped quote inside quoted value is unescaped",
+			expr:   `team="front\"end"`,
+			want:   Matcher{Name: "team", Value: `front"end`},
+			wantOK: true,
+		},
+		{
+			name:   "escaped backslash inside quoted value is unescaped",
+			expr:   `path="C:\\temp"`,
+			want:   Matcher{Name: "path", Value: `C:\temp`},
+			wantOK: true,
+		},
+		{
+			name:   "embedded space inside quoted value survives",
+			expr:   `message="hello world"`,
+			want:   Matcher{Name: "message", Value: "hello world"},
+			wantOK: true,
+		},
+		{
+			name:   "unicode inside quoted value survives",
+			expr:   `city="Zürich 東京"`,
+			want:   Matcher{Name: "city", Value: "Zürich 東京"},
+			wantOK: true,
+		},
+		{
+			name:   "explicit empty quoted value is preserved as empty string",
+			expr:   `label=""`,
+			want:   Matcher{Name: "label", Value: ""},
+			wantOK: true,
+		},
 	}
 
 	for _, tc := range tests {

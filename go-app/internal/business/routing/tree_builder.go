@@ -280,12 +280,62 @@ func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]
 	return matchers
 }
 
+// unquoteMatcherValue strips a matched pair of surrounding double quotes
+// from a `matchers:` list value and unescapes `\"`/`\\` within it, per
+// prometheus/alertmanager's pkg/labels matcher grammar — the authority for
+// this parser and pkg/configvalidator/matcher.Parse alike (alertmanager-
+// parity wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING: quote handling was
+// the third matcher-grammar divergence found between the two, after
+// pkg/configvalidator/matcher.Parse turned out not to strip quotes at ALL —
+// see that function's own doc comment).
+//
+// An unquoted value, or one without a real matched closing quote, is
+// returned unchanged: strings.Trim would also strip an unmatched quote
+// (e.g. `foo"` -> `foo`), silently mangling malformed input instead of
+// leaving it visibly wrong — the same posture this function's predecessor
+// (a bare quote-strip with no unescaping) already had.
+//
+// Only `\"` and `\\` are recognized escapes, matching upstream's matcher
+// grammar; any other backslash sequence (e.g. `\n`) is left as a literal
+// two-character pair rather than interpreted as a Go string escape.
+//
+// Known limitation shared with the pre-existing bare quote-strip this
+// replaces: detecting the "real" closing quote is a simple last-byte check,
+// not an escape-aware scan from the start — a value like `"foo\"` (an
+// escaped quote with no actual closing quote after it) still misreads as
+// quoted-and-terminated. A correct fix needs a real tokenizer, not a regex
+// capture group; out of scope for this task (see FU-PARSEARGUMENT-QUOTE-
+// HANDLING's brief: quote handling, not a lexer rewrite).
+func unquoteMatcherValue(value string) string {
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return value
+	}
+
+	inner := value[1 : len(value)-1]
+	var sb strings.Builder
+	sb.Grow(len(inner))
+	for i := 0; i < len(inner); i++ {
+		c := inner[i]
+		if c == '\\' && i+1 < len(inner) {
+			next := inner[i+1]
+			if next == '"' || next == '\\' {
+				sb.WriteByte(next)
+				i++
+				continue
+			}
+		}
+		sb.WriteByte(c)
+	}
+	return sb.String()
+}
+
 // parseMatcherExpr parses one `matchers:` list entry into a Matcher.
 //
 // Supported forms (whitespace around the operator is optional):
 //
 //	label=value
 //	label="value"
+//	label="va\"lue"   (escaped quote, unescaped to `va"lue`)
 //	label!=value
 //	label=~"regex"
 //	label!~"regex"
@@ -299,13 +349,7 @@ func parseMatcherExpr(expr string) (Matcher, bool) {
 
 	name := groups[1]
 	op := groups[2]
-	value := strings.TrimSpace(groups[3])
-	// Strip a matched pair of surrounding quotes only. strings.Trim would
-	// also strip an unmatched quote (e.g. `foo"` -> `foo`), silently
-	// mangling malformed input instead of leaving it visibly wrong.
-	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
-		value = value[1 : len(value)-1]
-	}
+	value := unquoteMatcherValue(strings.TrimSpace(groups[3]))
 
 	m := Matcher{Name: name, Value: value}
 	switch op {
