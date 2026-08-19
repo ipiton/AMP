@@ -120,6 +120,12 @@ const (
 	// extra time beyond repeat_interval before the entry expires, so a
 	// slightly-late retry (e.g. a stalled replica) still sees it.
 	notifyLogEntryTTLGracePeriod = 60 * time.Second
+
+	// claimReleaseTimeout bounds the claim-release Lua CAS on its own
+	// detached context — see the release closure in TryClaim. One Redis
+	// round-trip; if it cannot complete in this window Redis is unhealthy
+	// and the claim's own TTL is the fallback.
+	claimReleaseTimeout = 5 * time.Second
 )
 
 // notifyLogEntry is the JSON payload stored at "nflog:entry:{groupKey}".
@@ -329,7 +335,20 @@ func (l *RedisNotifyLog) TryClaim(ctx context.Context, groupKey GroupKey, claimT
 				return 0
 			end
 		`
-		if _, err := l.client.Eval(ctx, script, []string{claimKey}, claimID).Result(); err != nil {
+		// Release runs on its OWN short-lived context, not the ctx that
+		// acquired the claim (task rec fix round 1, review finding C1.3).
+		// The caller holds this claim across the notify chain's publish,
+		// which since task rec blocks until delivery is confirmed and can
+		// therefore outlive its own (timer-callback-bounded) context — with
+		// the acquiring ctx captured here, the CAS-delete would silently
+		// no-op on exactly the fires that ran long, leaving the claim to
+		// expire on its TTL and making the group's next fire skip itself
+		// ("claim held by another replica"). Release must be
+		// caller-context-independent: it is cleanup, not cancellable work.
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), claimReleaseTimeout)
+		defer cancel()
+
+		if _, err := l.client.Eval(releaseCtx, script, []string{claimKey}, claimID).Result(); err != nil {
 			return fmt.Errorf("nflog claim release %s: %w", groupKey, err)
 		}
 		return nil

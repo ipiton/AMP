@@ -956,6 +956,17 @@ type DefaultGroupManagerConfig struct {
 	// pass a *notifyDedupLog) for a single-process/lite deployment.
 	NotifyLog GroupNotifyLog
 
+	// NotifyLogClaimTTL is the TTL for the cross-replica publish claim
+	// (NotifyLog.TryClaim). Optional: 0 uses defaultNotifyLogClaimTTL.
+	//
+	// Task rec fix round 1 (review finding C1): this MUST cover a whole
+	// notify fire, which since task rec includes waiting for confirmed
+	// delivery. Wiring code derives it from the publishing stack's
+	// delivery-confirmation wait via NotifyLogClaimTTLFor and
+	// ServiceRegistry.validateNotifyTimingBudget rechecks the relationship at
+	// startup — see notify_budget.go for the full chain.
+	NotifyLogClaimTTL time.Duration
+
 	// Logger for structured logging (optional, defaults to slog.Default())
 	Logger *slog.Logger
 
