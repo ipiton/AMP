@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
@@ -280,17 +281,134 @@ func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]
 	return matchers
 }
 
+// The unescaping loop in unquoteMatcherValue below is a verbatim port of
+// ParseMatcher's value-unescaping logic from
+// github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go:
+//
+//	Copyright 2018 Prometheus Team
+//	Licensed under the Apache License, Version 2.0 (the "License");
+//	you may not use this file except in compliance with the License.
+//	You may obtain a copy of the License at
+//
+//	    http://www.apache.org/licenses/LICENSE-2.0
+//
+//	Unless required by applicable law or agreed to in writing, software
+//	distributed under the License is distributed on an "AS IS" BASIS,
+//	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//
+// (fix-round 2, Minor #6: the port named the upstream file but originally
+// carried no attribution — Apache-2.0 section 4 asks for the notice to be
+// retained in derivative works.)
+
+// unquoteMatcherValue applies prometheus/alertmanager's pkg/labels matcher
+// value grammar verbatim — ported from ParseMatcher in
+// github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go, the
+// authority for this parser and pkg/configvalidator/matcher.Parse alike
+// (alertmanager-parity wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
+//
+// fix-round finding I-3: the first pass here was a simplified "strip a
+// matched outer quote pair, unescape only \" and \\", which diverged from
+// upstream on four verified points: `\n` was never unescaped to a line
+// feed; escaping was skipped entirely for an unquoted value (upstream
+// applies it either way); an unescaped inner `"` was silently accepted
+// instead of rejected; and an unterminated/unmatched quote failed open
+// (kept the literal, mangled value) instead of erroring. This port fixes
+// all four by matching upstream's algorithm exactly rather than
+// approximating it.
+//
+// Rules (see upstream's ParseMatcher doc comment for the canonical
+// wording):
+//   - A single leading '"' switches on "expect a trailing quote" and is
+//     stripped; a value need not be quoted at all.
+//   - Escaping applies regardless of quoting: '\n' -> LF, '\"' -> '"',
+//     '\\' -> '\\'. Any other '\x' is a "spurious escape" and is kept
+//     literally as the two characters '\' and 'x' — not an error, and not
+//     just the backslash dropped.
+//   - A lone trailing '\' with nothing after it is a literal backslash.
+//   - An unescaped '"' is only valid as the very last character, and only
+//     when a leading '"' was present; anywhere else (mid-value, or in a
+//     value that never had a leading quote) it is an error. A leading '"'
+//     with no matching trailing '"' at the end is also an error.
+//   - The input must be valid UTF-8.
+//
+// Returns ok=false (not an error type) to match this file's existing
+// "malformed matchers: entries are skipped" posture (parseMatchers' doc
+// comment) — parseMatcherExpr folds this into its own ok=false return.
+func unquoteMatcherValue(rawValue string) (string, bool) {
+	var expectTrailingQuote bool
+	if after, hasQuote := strings.CutPrefix(rawValue, `"`); hasQuote {
+		rawValue = after
+		expectTrailingQuote = true
+	}
+
+	if !utf8.ValidString(rawValue) {
+		return "", false
+	}
+
+	var value strings.Builder
+	var escaped bool
+	for i := 0; i < len(rawValue); i++ {
+		c := rawValue[i]
+
+		if escaped {
+			escaped = false
+			switch c {
+			case 'n':
+				value.WriteByte('\n')
+			case '"', '\\':
+				value.WriteByte(c)
+			default:
+				// Spurious escape: keep the backslash literal.
+				value.WriteByte('\\')
+				value.WriteByte(c)
+			}
+			continue
+		}
+
+		switch c {
+		case '\\':
+			if i < len(rawValue)-1 {
+				escaped = true
+				continue
+			}
+			// Trailing lone backslash: literal.
+			value.WriteByte('\\')
+		case '"':
+			if !expectTrailingQuote || i < len(rawValue)-1 {
+				return "", false
+			}
+			expectTrailingQuote = false
+		default:
+			value.WriteByte(c)
+		}
+	}
+
+	if expectTrailingQuote {
+		return "", false
+	}
+
+	return value.String(), true
+}
+
 // parseMatcherExpr parses one `matchers:` list entry into a Matcher.
 //
 // Supported forms (whitespace around the operator is optional):
 //
 //	label=value
 //	label="value"
+//	label="va\"lue"   (escaped quote, unescaped to `va"lue`)
+//	label="line\nbreak" (escaped LF, unescaped to a real line feed)
 //	label!=value
 //	label=~"regex"
 //	label!~"regex"
 //
-// Returns ok=false if expr doesn't match the expected grammar.
+// Value quoting/escaping follows unquoteMatcherValue's ported upstream
+// grammar — see that function's doc comment. Returns ok=false if expr
+// doesn't match the expected grammar, INCLUDING a value that violates the
+// quote grammar (unescaped inner quote, unterminated quote, invalid
+// UTF-8): this is one more thing that can make a `matchers:` entry
+// malformed, on top of "no operator found" — both fold into the same
+// ok=false, matching parseMatchers' "malformed entries are skipped" posture.
 func parseMatcherExpr(expr string) (Matcher, bool) {
 	groups := matcherExprPattern.FindStringSubmatch(expr)
 	if groups == nil {
@@ -299,12 +417,9 @@ func parseMatcherExpr(expr string) (Matcher, bool) {
 
 	name := groups[1]
 	op := groups[2]
-	value := strings.TrimSpace(groups[3])
-	// Strip a matched pair of surrounding quotes only. strings.Trim would
-	// also strip an unmatched quote (e.g. `foo"` -> `foo`), silently
-	// mangling malformed input instead of leaving it visibly wrong.
-	if len(value) >= 2 && strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
-		value = value[1 : len(value)-1]
+	value, ok := unquoteMatcherValue(strings.TrimSpace(groups[3]))
+	if !ok {
+		return Matcher{}, false
 	}
 
 	m := Matcher{Name: name, Value: value}
@@ -342,12 +457,10 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) [
 	// Priority:
 	// 1. Route's own group_by (if set)
 	// 2. Parent's group_by (if exists)
-	// 3. Default: ["alertname"]
-	//
-	// Note: there is no global-config fallback layer here. infrastructure/
-	// routing.GlobalConfig (TN-137 canonical type) only carries
-	// resolve_timeout/SMTP/HTTP settings, not grouping defaults, so unlike
-	// this package's pre-dedup local GlobalConfig there is nothing to read.
+	// 3. global.group_by (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
+	//    — restored on infraroute.GlobalConfig; see that type's doc comment
+	//    for why this is an AMP-only convenience, not an upstream field)
+	// 4. Default: ["alertname"]
 
 	if len(route.GroupBy) > 0 {
 		return route.GroupBy
@@ -355,6 +468,10 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) [
 
 	if parent != nil && len(parent.GroupBy) > 0 {
 		return parent.GroupBy
+	}
+
+	if b.config != nil && b.config.Global != nil && len(b.config.Global.GroupBy) > 0 {
+		return b.config.Global.GroupBy
 	}
 
 	return []string{"alertname"}
@@ -369,11 +486,10 @@ func (b *TreeBuilder) inheritDuration(
 	// Priority:
 	// 1. Route's own value (if > 0)
 	// 2. Parent's value (if exists and > 0)
-	// 3. Default value (based on field name)
-	//
-	// Note: no global-config fallback layer, for the same reason as
-	// inheritGroupBy above — infrastructure/routing.GlobalConfig has no
-	// grouping-duration fields to read.
+	// 3. global.<field> (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
+	//    — restored on infraroute.GlobalConfig; see that type's doc comment
+	//    for why this is an AMP-only convenience, not an upstream field)
+	// 4. Default value (based on field name)
 
 	if routeValue > 0 {
 		return routeValue
@@ -397,8 +513,41 @@ func (b *TreeBuilder) inheritDuration(
 		}
 	}
 
+	if global := b.globalDuration(fieldName); global > 0 {
+		return global
+	}
+
 	// Return default value
 	return b.getDefaultDuration(fieldName)
+}
+
+// globalDuration reads the global.<fieldName> fallback (see inheritDuration's
+// priority list above), returning 0 when config/Global is nil or the field
+// itself is unset — both mean "nothing to fall back to here", identical to
+// how routeValue/parent's 0 is treated by the caller.
+//
+// b.config.Global's duration fields are *infraroute.Duration (a defined
+// time.Duration type, not the grouping.Duration struct durationOrZero
+// unwraps above) — hence the explicit conversion instead of reusing that
+// helper.
+func (b *TreeBuilder) globalDuration(fieldName string) time.Duration {
+	if b.config == nil || b.config.Global == nil {
+		return 0
+	}
+
+	var d *infraroute.Duration
+	switch fieldName {
+	case "group_wait":
+		d = b.config.Global.GroupWait
+	case "group_interval":
+		d = b.config.Global.GroupInterval
+	case "repeat_interval":
+		d = b.config.Global.RepeatInterval
+	}
+	if d == nil {
+		return 0
+	}
+	return time.Duration(*d)
 }
 
 // getDefaultDuration returns the default duration for a field.

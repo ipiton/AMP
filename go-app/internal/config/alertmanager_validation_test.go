@@ -67,6 +67,44 @@ func TestLoadConfig_AlertmanagerSubset_ValidConfig(t *testing.T) {
 	assert.True(t, cfg.HasRouteTree())
 }
 
+// TestLoadConfig_AlertmanagerSubset_QuotedOperatorInMatcherValue is the
+// fix-round finding I-4 regression test, through the REAL LoadConfig path
+// the reviewer reproduced it against: before the fix,
+// pkg/configvalidator/matcher.Parse located the operator via
+// strings.Index over the WHOLE matcher string, so a quoted value
+// containing an operator-looking substring (here: `summary="a!=b"`) split
+// INSIDE the quotes and hard-failed startup with a nonsensical E104
+// ("invalid label name 'summary=\"a'"), while
+// business/routing.parseMatcherExpr's anchored regex parsed the identical
+// YAML `matchers:` entry fine when building the actual route tree. A
+// config that the runtime route tree accepts must not fail
+// configvalidator's startup gate for the same entry.
+func TestLoadConfig_AlertmanagerSubset_QuotedOperatorInMatcherValue(t *testing.T) {
+	resetViper()
+	unsetEnvKeys("SERVER_PORT")
+
+	yaml := `
+route:
+  receiver: default
+  routes:
+    - receiver: default
+      matchers:
+        - 'summary="a!=b"'
+        - 'note="a=~b"'
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+`
+	path := writeTempYAML(t, yaml)
+
+	cfg, err := LoadConfig(path)
+	require.NoError(t, err, "a quoted value containing an operator token must not fail startup validation")
+	require.NotNil(t, cfg)
+	assert.True(t, cfg.HasRouteTree())
+}
+
 // TestLoadConfig_AlertmanagerSubset_WarningsOnlyStillLoads proves a config
 // that only trips a W-code (here: W300, a secret set directly in
 // global.smtp_auth_password instead of via env/secret-manager) still
