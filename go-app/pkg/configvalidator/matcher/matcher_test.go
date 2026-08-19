@@ -65,14 +65,63 @@ func TestParse_QuoteHandling(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:      "unmatched trailing quote is preserved, not stripped",
-			matcher:   `service=files"`,
-			wantValue: `files"`,
+			// fix-round finding I-3: upstream errors on a trailing quote
+			// with no leading quote — the first pass here silently kept
+			// it as a literal trailing quote instead.
+			name:    "unmatched trailing quote now errors (upstream: unescaped double quote)",
+			matcher: `service=files"`,
+			wantErr: true,
 		},
 		{
-			name:      "unmatched leading quote is preserved, not stripped",
-			matcher:   `service="files`,
-			wantValue: `"files`,
+			// fix-round finding I-3: upstream errors on a leading quote
+			// with no matching trailing quote.
+			name:    "unmatched leading quote now errors (upstream: unescaped double quote)",
+			matcher: `service="files`,
+			wantErr: true,
+		},
+		// fix-round finding I-3: the four verified divergences vs upstream
+		// pkg/labels, now aligned. Mirrors
+		// tree_builder_matchers_test.go's TestParseMatcherExpr table.
+		{
+			name:      "escaped LF inside a quoted value becomes a real line feed",
+			matcher:   "v=\"line\\nbreak\"",
+			wantValue: "line\nbreak",
+		},
+		{
+			name:      "escaping also applies to an UNQUOTED value (upstream applies it either way)",
+			matcher:   `v=C:\\temp`,
+			wantValue: `C:\temp`,
+		},
+		{
+			name:    "unescaped inner quote inside a quoted value now errors",
+			matcher: `v="a"b"`,
+			wantErr: true,
+		},
+		{
+			name:      "spurious escape (unrecognized \\x) keeps the backslash literal, not just the char",
+			matcher:   `v="a\tb"`,
+			wantValue: `a\tb`,
+		},
+		{
+			name:      "a lone trailing backslash with nothing after it is a literal backslash",
+			matcher:   `v=foo\`,
+			wantValue: `foo\`,
+		},
+		// fix-round finding I-4: a quoted value containing an operator
+		// token used to hard-error here (E104's "invalid label name") while
+		// business/routing.parseMatcherExpr parsed the identical YAML
+		// entry fine, because the old operator search was a plain
+		// strings.Index over the whole string and matched INSIDE the
+		// quotes.
+		{
+			name:      "operator token inside a quoted value no longer splits the matcher (I-4)",
+			matcher:   `summary="a!=b"`,
+			wantValue: "a!=b",
+		},
+		{
+			name:      "regex operator token inside a quoted value no longer splits the matcher (I-4)",
+			matcher:   `summary="a=~b"`,
+			wantValue: "a=~b",
 		},
 	}
 

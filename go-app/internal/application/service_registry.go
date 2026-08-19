@@ -1556,6 +1556,12 @@ const (
 // tests that construct *ServiceRegistry directly without going through
 // LoadConfig — same posture as reconciliationGraceFor above) or the value is
 // left at its zero default.
+//
+// Restart-only (fix-round Minor #3): this is read once by
+// runSilenceSubscribeLoop before its loop starts, so a POST /-/reload that
+// changes silencing.subscribe_retry_backoff has no effect until the process
+// restarts — validateSilencing does still re-run on reload, so the value is
+// re-validated, just not re-applied live.
 func (r *ServiceRegistry) silenceSubscribeRetryBackoff() time.Duration {
 	if r.config != nil && r.config.Silencing.SubscribeRetryBackoff > 0 {
 		return r.config.Silencing.SubscribeRetryBackoff
@@ -1566,6 +1572,11 @@ func (r *ServiceRegistry) silenceSubscribeRetryBackoff() time.Duration {
 // silencePeriodicResyncInterval returns the configured periodic fallback
 // resync interval, with the same nil/zero fallback posture as
 // silenceSubscribeRetryBackoff above.
+//
+// Restart-only (fix-round Minor #3): read once to build the
+// runSilencePeriodicResync ticker, same posture as
+// silenceSubscribeRetryBackoff above — a reload changes the validated value
+// but not the running ticker's interval until restart.
 func (r *ServiceRegistry) silencePeriodicResyncInterval() time.Duration {
 	if r.config != nil && r.config.Silencing.PeriodicResyncInterval > 0 {
 		return r.config.Silencing.PeriodicResyncInterval
@@ -1601,6 +1612,13 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 			if err != nil {
 				r.logger.Warn("Redis group storage init failed, grouping falls back to in-memory storage", "error", err)
 				groupStorage, timerStorage := r.memoryGroupingStorage()
+				// fix-round Minor #1: this return handed back memory storage
+				// without ever setting the backend-active gauge, so it read
+				// 0 for BOTH labels in exactly the case an operator would
+				// dashboard on.
+				if r.metrics != nil {
+					r.metrics.SetActiveGroupStorageBackend("memory")
+				}
 				return groupStorage, timerStorage, fmt.Errorf("redis group storage init failed: %w", err)
 			}
 
@@ -1608,6 +1626,11 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 			if err != nil {
 				r.logger.Warn("Redis timer storage init failed, grouping falls back to in-memory storage", "error", err)
 				memGroupStorage, memTimerStorage := r.memoryGroupingStorage()
+				// fix-round Minor #1: same gauge gap as the Redis
+				// group-storage-init-failure branch above.
+				if r.metrics != nil {
+					r.metrics.SetActiveGroupStorageBackend("memory")
+				}
 				return memGroupStorage, memTimerStorage, fmt.Errorf("redis timer storage init failed: %w", err)
 			}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // ================================================================================
@@ -91,53 +92,114 @@ func (e *ParseError) Error() string {
 	return fmt.Sprintf("invalid matcher '%s': %s", e.Matcher, e.Message)
 }
 
-// unquoteMatcherValue strips a matched pair of surrounding double quotes
-// from a matcher value and unescapes `\"`/`\\` within it, per
-// prometheus/alertmanager's pkg/labels matcher grammar (alertmanager-parity
-// wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
+// matcherPattern anchors label+operator+value the same way
+// business/routing.matcherExprPattern does (fix-round finding I-4): the
+// label only matches identifier characters immediately after the string
+// start, so an operator-looking substring embedded inside a quoted value
+// (e.g. `label="a!=b"`) can never be mistaken for the real operator.
+//
+// This REPLACES the old strings.Index-based operator search below, which
+// scanned the WHOLE matcher string and found the FIRST occurrence of !~/
+// !=/=~/= anywhere in it — including inside a quoted value. A real config
+// with `summary="a!=b"` used to hard-fail startup validation with a
+// nonsensical "invalid label name 'summary=\"a'" (E104), while the actual
+// route tree (built via business/routing.parseMatcherExpr's anchored
+// regex) parsed the exact same YAML entry fine.
+//
+// Alternation order matters: != and =~ must be tried before the bare =,
+// otherwise the single-character = alternative would win before the engine
+// ever considers the longer alternative — Go's regexp/RE2 tries
+// alternatives in declared order and takes the first one that leads to an
+// overall match, and the trailing (.*)$ trivially matches any remainder,
+// so ordering (not length) decides here. Kept in sync with
+// business/routing.matcherExprPattern's ordering deliberately.
+var matcherPattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(!=|=~|!~|=)\s*(.*)$`)
+
+var matcherOperatorTypes = map[string]MatcherType{
+	"=":  MatchEqual,
+	"!=": MatchNotEqual,
+	"=~": MatchRegexp,
+	"!~": MatchNotRegexp,
+}
+
+// unquoteMatcherValue applies prometheus/alertmanager's pkg/labels matcher
+// value grammar verbatim — ported from ParseMatcher in
+// github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go, the
+// authority for this parser and business/routing.parseMatcherExpr alike
+// (alertmanager-parity wave-5 item 5, FU-PARSEARGUMENT-QUOTE-HANDLING).
 //
 // Before this task, Parse never stripped quotes at all: Parse(`severity="critical"`)
 // returned Value == `"critical"` (quotes included literally) instead of
-// `critical` — a real bug, not just a cosmetic difference from
-// business/routing.parseMatcherExpr (which already stripped quotes, just
-// without unescaping): for a regex matcher, that raw quoted value was fed
-// straight into regexp.Compile below, so `severity=~"crit.*"` compiled a
-// pattern that required the label value to literally contain quote
+// `critical` — a real bug: for a regex matcher, that raw quoted value was
+// fed straight into regexp.Compile below, so `severity=~"crit.*"` compiled
+// a pattern that required the label value to literally contain quote
 // characters — never the intent, and silently different from what the
 // route tree actually matches against for the exact same YAML.
 //
-// An unquoted value, or one without a real matched closing quote, is
-// returned unchanged — malformed input stays visibly wrong rather than
-// being silently mangled. Only `\"` and `\\` are recognized escapes,
-// matching upstream's matcher grammar; any other backslash sequence (e.g.
-// `\n`) is left as a literal two-character pair. This is intentionally the
-// same logic as business/routing.unquoteMatcherValue — kept as a separate,
-// duplicated implementation rather than a shared import because pkg/ is
-// meant to stay leaf-level (no internal/ dependency), and see that
-// function's own doc comment for the shared known limitation (a value like
-// `"foo\"` with no real closing quote still misreads as terminated — needs
-// a real tokenizer to fix properly, out of scope here).
-func unquoteMatcherValue(value string) string {
-	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
-		return value
+// fix-round finding I-3: the FIRST fix (a simplified "strip a matched
+// outer quote pair, unescape only \" and \\") diverged from upstream on
+// four verified points — `\n` was never unescaped; escaping was skipped
+// for an unquoted value; an unescaped inner `"` was silently accepted; an
+// unterminated/unmatched quote failed open. This ports upstream's actual
+// ~25-line loop instead of approximating it — see
+// business/routing.unquoteMatcherValue's doc comment for the full rule
+// list; this is intentionally the same algorithm, kept as a separate,
+// duplicated implementation (not a shared import) because pkg/ is meant to
+// stay leaf-level with no internal/ dependency.
+func unquoteMatcherValue(rawValue string) (string, error) {
+	var expectTrailingQuote bool
+	if after, hasQuote := strings.CutPrefix(rawValue, `"`); hasQuote {
+		rawValue = after
+		expectTrailingQuote = true
 	}
 
-	inner := value[1 : len(value)-1]
-	var sb strings.Builder
-	sb.Grow(len(inner))
-	for i := 0; i < len(inner); i++ {
-		c := inner[i]
-		if c == '\\' && i+1 < len(inner) {
-			next := inner[i+1]
-			if next == '"' || next == '\\' {
-				sb.WriteByte(next)
-				i++
+	if !utf8.ValidString(rawValue) {
+		return "", fmt.Errorf("value is not valid UTF-8")
+	}
+
+	var value strings.Builder
+	var escaped bool
+	for i := 0; i < len(rawValue); i++ {
+		c := rawValue[i]
+
+		if escaped {
+			escaped = false
+			switch c {
+			case 'n':
+				value.WriteByte('\n')
+			case '"', '\\':
+				value.WriteByte(c)
+			default:
+				// Spurious escape: keep the backslash literal.
+				value.WriteByte('\\')
+				value.WriteByte(c)
+			}
+			continue
+		}
+
+		switch c {
+		case '\\':
+			if i < len(rawValue)-1 {
+				escaped = true
 				continue
 			}
+			// Trailing lone backslash: literal.
+			value.WriteByte('\\')
+		case '"':
+			if !expectTrailingQuote || i < len(rawValue)-1 {
+				return "", fmt.Errorf("value contains an unescaped double quote")
+			}
+			expectTrailingQuote = false
+		default:
+			value.WriteByte(c)
 		}
-		sb.WriteByte(c)
 	}
-	return sb.String()
+
+	if expectTrailingQuote {
+		return "", fmt.Errorf("value contains an unescaped double quote (unterminated quoted value)")
+	}
+
+	return value.String(), nil
 }
 
 // Parse parses a label matcher string.
@@ -148,9 +210,13 @@ func unquoteMatcherValue(value string) string {
 //   - label=~regex         (regex match)
 //   - label!~regex         (negative regex match)
 //
-// A value may optionally be wrapped in double quotes, with `\"`/`\\`
-// escapes recognized inside them (task fu5-cfg item 5,
-// FU-PARSEARGUMENT-QUOTE-HANDLING) — see unquoteMatcherValue.
+// A value may optionally be wrapped in double quotes, with escapes
+// recognized inside AND outside them per upstream's grammar (task fu5-cfg
+// item 5, FU-PARSEARGUMENT-QUOTE-HANDLING; fix-round finding I-3) — see
+// unquoteMatcherValue. The operator is located via the same anchored
+// `^label(op)value$` shape business/routing.parseMatcherExpr uses (fix-round
+// finding I-4), so an operator-looking substring inside a quoted value
+// (`label="a!=b"`) is never mistaken for the real operator.
 //
 // Parameters:
 //   - matcher: Matcher string
@@ -167,6 +233,7 @@ func unquoteMatcherValue(value string) string {
 //	Parse(`severity="critical"`)    → {Label: "severity", Type: "=", Value: "critical"}
 //	Parse("alertname!=test")        → {Label: "alertname", Type: "!=", Value: "test"}
 //	Parse("instance=~.*prod.*")     → {Label: "instance", Type: "=~", Value: ".*prod.*"}
+//	Parse(`summary="a!=b"`)         → {Label: "summary", Type: "=", Value: "a!=b"}
 func Parse(matcher string) (*Matcher, error) {
 	if matcher == "" {
 		return nil, &ParseError{
@@ -176,29 +243,8 @@ func Parse(matcher string) (*Matcher, error) {
 		}
 	}
 
-	// Try to find operator
-	var label, value string
-	var matchType MatcherType
-
-	// Try operators in order of length (longest first to avoid mismatches)
-	// !~, !=, =~, =
-	if idx := strings.Index(matcher, "!~"); idx > 0 {
-		label = matcher[:idx]
-		value = matcher[idx+2:]
-		matchType = MatchNotRegexp
-	} else if idx := strings.Index(matcher, "!="); idx > 0 {
-		label = matcher[:idx]
-		value = matcher[idx+2:]
-		matchType = MatchNotEqual
-	} else if idx := strings.Index(matcher, "=~"); idx > 0 {
-		label = matcher[:idx]
-		value = matcher[idx+2:]
-		matchType = MatchRegexp
-	} else if idx := strings.Index(matcher, "="); idx > 0 {
-		label = matcher[:idx]
-		value = matcher[idx+1:]
-		matchType = MatchEqual
-	} else {
+	groups := matcherPattern.FindStringSubmatch(matcher)
+	if groups == nil {
 		return nil, &ParseError{
 			Matcher:    matcher,
 			Message:    "no operator found (expected =, !=, =~, or !~)",
@@ -206,11 +252,15 @@ func Parse(matcher string) (*Matcher, error) {
 		}
 	}
 
-	// Trim whitespace
-	label = strings.TrimSpace(label)
-	rawValue := strings.TrimSpace(value)
+	label := strings.TrimSpace(groups[1])
+	matchType := matcherOperatorTypes[groups[2]]
+	rawValue := strings.TrimSpace(groups[3])
 
-	// Validate label name
+	// Validate label name. matcherPattern's [a-zA-Z_][a-zA-Z0-9_]* charset
+	// already guarantees a non-empty, valid label whenever the regex
+	// matches at all, so these two checks are now defense-in-depth rather
+	// than reachable in practice — kept for a stable public error
+	// contract if that charset ever changes.
 	if label == "" {
 		return nil, &ParseError{
 			Matcher:    matcher,
@@ -239,7 +289,14 @@ func Parse(matcher string) (*Matcher, error) {
 			Suggestion: "Provide a value after operator",
 		}
 	}
-	value = unquoteMatcherValue(rawValue)
+	value, err := unquoteMatcherValue(rawValue)
+	if err != nil {
+		return nil, &ParseError{
+			Matcher:    matcher,
+			Message:    err.Error(),
+			Suggestion: `Check quoting: a value may be unquoted or wrapped in "double quotes"; an inner quote must be escaped as \"`,
+		}
+	}
 
 	// Create matcher
 	m := &Matcher{
