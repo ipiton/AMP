@@ -181,8 +181,11 @@ AMP resolves this at parse time, per-integration value always winning:
 Every secret field AMP's five supported integrations (+ `global:`) carry has
 a `*_file` twin — upstream's shape for a Kubernetes Secret mounted as a
 volume: `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file`,
-`slack_configs[].api_url_file`, `telegram_configs[].bot_token_file`,
-`global.slack_api_url_file`, `global.smtp_auth_password_file`. Resolved at
+`pagerduty_configs[].service_key_file` (the legacy `service_key`'s twin —
+`service_key` is still a live routing-key fallback, see the field-fidelity
+table above), `slack_configs[].api_url_file`,
+`telegram_configs[].bot_token_file`, `global.slack_api_url_file`,
+`global.smtp_auth_password_file`. Resolved at
 parse time (`resolveFileSecrets`, `internal/infrastructure/routing/file_secrets.go`)
 into the SAME inline field the rest of the pipeline already reads — the
 `global:` fallback chain above, defaults, structural/semantic validation, and

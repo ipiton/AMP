@@ -43,7 +43,8 @@ var secretKeySubstrings = []string{
 
 // fileSecretRefKeys are the `*_file` secret-reference keys FU7-B added to
 // `internal/infrastructure/routing` (api_url_file, routing_key_file,
-// bot_token_file, url_file, slack_api_url_file, smtp_auth_password_file).
+// service_key_file, bot_token_file, url_file, slack_api_url_file,
+// smtp_auth_password_file).
 // Their VALUE is a filesystem path, never the secret itself — the routing
 // parser resolves the file's content into the plain field (api_url,
 // routing_key, ...) at load time, and that field is already redacted by the
@@ -58,6 +59,7 @@ var secretKeySubstrings = []string{
 var fileSecretRefKeys = map[string]bool{
 	"api_url_file":            true,
 	"routing_key_file":        true,
+	"service_key_file":        true,
 	"bot_token_file":          true,
 	"url_file":                true,
 	"slack_api_url_file":      true,

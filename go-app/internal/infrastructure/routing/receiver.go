@@ -327,7 +327,20 @@ type PagerDutyConfig struct {
 
 	// ServiceKey is the legacy service key (deprecated)
 	// Use RoutingKey instead
+	//
+	// Mutually exclusive with ServiceKeyFile (FU7-B: *_file secret variants) —
+	// upstream's `pagerduty_config` carries both `service_key`/
+	// `service_key_file` alongside `routing_key`/`routing_key_file`
+	// (notify/pagerduty/config.go), and AMP's ServiceKey is a live fallback
+	// (config_targets.go's pagerDutyTarget reads it when RoutingKey is
+	// empty), so it gets the same *_file twin.
 	ServiceKey string `yaml:"service_key,omitempty"`
+
+	// ServiceKeyFile is upstream's `service_key_file`: a path to a file
+	// containing the legacy service key, re-read on every config
+	// load/reload. Content is trimmed of trailing newline/whitespace. The
+	// path itself is not secret, so the status API leaves it visible.
+	ServiceKeyFile string `yaml:"service_key_file,omitempty"`
 
 	// URL is the PagerDuty Events API endpoint
 	// Default: https://events.pagerduty.com/v2/enqueue
@@ -379,6 +392,7 @@ func (p *PagerDutyConfig) Clone() *PagerDutyConfig {
 		RoutingKey:     p.RoutingKey,
 		RoutingKeyFile: p.RoutingKeyFile,
 		ServiceKey:     p.ServiceKey,
+		ServiceKeyFile: p.ServiceKeyFile,
 		URL:            p.URL,
 		Severity:       p.Severity,
 		Class:          p.Class,
