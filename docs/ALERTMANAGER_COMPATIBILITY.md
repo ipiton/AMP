@@ -216,14 +216,24 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
    group labels come from the matched route's `group_by` and the receiver is resolved per group from the live route
    tree. The remaining AMP-only behaviour there is the extra `?group_by=` query override.)*
-2. **Per-target dedup records on *enqueue*, not on confirmed HTTP delivery.** Wire-level batching itself shipped
-   in wave 2: webhook/alertmanager targets get one HTTP POST per `(group, target)` with an upstream-v4 `alerts`
-   array, and the nflog is keyed per `(group, receiver, target)` so a failed target retries alone. The remaining
-   gap: `TargetPublishOutcome.Success` (and therefore `RecordSent`) is set when the job is successfully *enqueued*
-   onto the publishing queue — the actual HTTP call happens later, asynchronously. A webhook returning 500 after a
-   successful enqueue is NOT retried by the dedup machinery until `repeat_interval` elapses; only local
-   queue-congestion failures are isolated per target today. Tracked as `FU-RECORDSENT-DELIVERY-CONFIRMATION`
-   in the backlog (move `RecordSent` to a job-completion callback).
+2. **Per-target dedup now records on *confirmed delivery* — with a bounded confirmation wait.** Closed in wave 3
+   (`FU-RECORDSENT-DELIVERY-CONFIRMATION`): `TargetPublishOutcome.Success`, and therefore `RecordSent`, is set only
+   after the publisher's HTTP call for that `(group, target)` pair actually succeeded. `PublishGroupToTargets`
+   submits each target's job with a completion channel and blocks on it, so a webhook returning 500 gets **no**
+   nflog entry and is re-published on the group's next scheduled fire instead of going quiet until
+   `repeat_interval`. Wire-level batching (one POST per `(group, target)` with an upstream-v4 `alerts` array) and
+   per-`(group, receiver, target)` nflog keys are unchanged from wave 2.
+   Residual sharp edges, both deliberate:
+   - The wait is bounded by `CoordinatorConfig.DeliveryConfirmationTimeout` (45s default) and is *shorter* than the
+     queue's worst-case retry budget. A target still retrying past the deadline is reported as unconfirmed, so a
+     delivery that succeeds afterwards is re-sent on the next fire — a duplicate notification, never a dropped one.
+     The pipeline is at-least-once, same as upstream.
+   - The cross-replica publish claim (`GroupNotifyLog.TryClaim`) is now held across a real HTTP publish, so its TTL
+     (`notifyLogClaimTTL`, 60s) must stay larger than that timeout. The two constants live in different packages and
+     are kept in step by comments, not by the compiler — change one, re-check the other.
+   - After the `group_interval` fire, AMP's timer chain moves to `repeat_interval`, so an endpoint that is down for
+     a long time gets one fast retry and then retries at `repeat_interval` cadence (upstream keeps flushing at
+     `group_interval`). Independent of this fix; not tracked as a parity blocker.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
    The original timer-continuation code cancelled its own context when arming the next interval timer
    (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `c6cfadc` (contexts
