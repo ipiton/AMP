@@ -80,32 +80,48 @@ func compileMatcherList(exprs []string) ([]compiledMatcher, error) {
 }
 
 // matchesAll evaluates a compiled matcher list against a label set,
-// combining all entries with AND — the same decision table
-// internal/business/routing.RouteMatcher.MatchesNode uses for route
-// matchers (upstream Alertmanager semantics):
+// combining all entries with AND, using upstream Alertmanager's exact
+// absent-label semantics.
 //
-//	=   matched only if the label exists and equals Value
-//	!=  matched if the label is missing OR differs from Value
-//	=~  matched only if the label exists and matches the anchored regex
-//	!~  matched if the label is missing OR does not match the anchored regex
+// Review fix round 1 (I1): the first version of this function gated `=`/
+// `=~` on the label being present and short-circuited `!=`/`!~` to true
+// on absence — a table copied from internal/business/routing's wave-5
+// MatchesNode (see the fix to that function alongside this one; both
+// diverged the same way). Upstream has NO presence check at all:
+// `labels.Matchers.Matches` (pkg/labels/matcher.go:184-191) does
+// `m.Matches(string(lset[name]))`, and a Go map read of a missing key
+// already returns the zero value "" — so an absent label is simply
+// treated as the empty string, for every operator:
+//
+//	=   matched if the (possibly absent-as-"") value equals Value
+//	!=  matched if the (possibly absent-as-"") value differs from Value
+//	=~  matched if the (possibly absent-as-"") value matches the anchored regex
+//	!~  matched if the (possibly absent-as-"") value does not match the anchored regex
+//
+// Consequences this fixes: `job!=""` no longer matches an alert missing
+// `job` (upstream: `"" != ""` is false); `foo=~".*"` now DOES match an
+// alert missing `foo` (upstream: the anchored regex matches the empty
+// string). Since Go's `labels[key]` already yields "" for a missing key,
+// this needs no presence check at all — dropping it is both the fix and
+// the simplification.
 //
 // An empty/nil matcher list matches vacuously (true): a rule relying only
 // on the legacy match/match_re maps for a side has no matchers list to
 // evaluate, and must not be rejected here.
 func matchesAll(matchers []compiledMatcher, labels map[string]string) bool {
 	for _, m := range matchers {
-		value, exists := labels[m.Label]
+		value := labels[m.Label] // upstream semantics: absent == ""
 
 		var matched bool
 		switch m.Type {
 		case matcher.MatchEqual:
-			matched = exists && value == m.Value
+			matched = value == m.Value
 		case matcher.MatchNotEqual:
-			matched = !exists || value != m.Value
+			matched = value != m.Value
 		case matcher.MatchRegexp:
-			matched = exists && m.Regex.MatchString(value)
+			matched = m.Regex.MatchString(value)
 		case matcher.MatchNotRegexp:
-			matched = !exists || !m.Regex.MatchString(value)
+			matched = !m.Regex.MatchString(value)
 		}
 
 		if !matched {
@@ -145,4 +161,95 @@ func (r *InhibitionRule) CompileMatchers() error {
 	r.compiledSourceMatchers = sourceCompiled
 	r.compiledTargetMatchers = targetCompiled
 	return nil
+}
+
+// regexCompileError names which legacy `*_match_re` map and label key
+// failed to compile, so callers (parser.go) can build the same
+// `rules[N].source_match_re.key`-shaped ParseError.Field they built before
+// this compilation moved into a shared method.
+type regexCompileError struct {
+	Field   string // e.g. "source_match_re.service" or "target_match_re.severity"
+	Pattern string
+	Err     error
+}
+
+func (e *regexCompileError) Error() string {
+	return fmt.Sprintf("%s: invalid regex %q: %v", e.Field, e.Pattern, e.Err)
+}
+
+func (e *regexCompileError) Unwrap() error { return e.Err }
+
+// CompileLegacyRegex compiles SourceMatchRE/TargetMatchRE into anchored,
+// evaluable regexes (compiledSourceRE/compiledTargetRE) — the same
+// `^(?:pattern)$` anchoring upstream's `labels.NewMatcher` applies
+// (matcher.go:69) and compileMatcherList already applies to the
+// matchers-form list.
+//
+// Review fix round 1 (I3 + S1): two related bugs, fixed together because
+// both live in "how are legacy *_match_re maps turned into
+// compiledSourceRE/compiledTargetRE":
+//
+//   - I3: the pre-fix-round compilation (parser.go's compileRegexPatterns)
+//     compiled the pattern UNANCHORED (`regexp.Compile(pattern)`), so
+//     `target_match_re: {severity: "warning"}` also inhibited an alert
+//     whose severity was "warning2" — upstream anchors this the same as
+//     `=~`, and since wave 7 lets a matchers-form `=~` (anchored) and a
+//     legacy `*_match_re` (previously unanchored) coexist on one rule,
+//     the inconsistency was no longer just an old bug, it was two
+//     different regex semantics side by side in the same rule.
+//   - S1 (the implementer's own finding, confirmed by review):
+//     `internal/config.ToInhibitionRules` builds InhibitionRule literals
+//     for inline `inhibition.inhibit_rules` entries and used to call only
+//     CompileMatchers() — compiledSourceRE/compiledTargetRE stayed nil,
+//     and matchRuleFast treats a missing compiled regex as a hard
+//     non-match, so every inline source_match_re/target_match_re rule was
+//     a permanent, silent no-op (only ConfigFile-sourced rules, via
+//     DefaultInhibitionParser, ever got compiled at all).
+//
+// Both are fixed by making this the ONE place *_match_re is compiled, and
+// having both InhibitionRule construction paths call it (via Compile,
+// below) instead of duplicating (and, in the inline path's case, omitting)
+// the loop.
+func (r *InhibitionRule) CompileLegacyRegex() error {
+	if len(r.SourceMatchRE) > 0 {
+		compiled := make(map[string]*regexp.Regexp, len(r.SourceMatchRE))
+		for key, pattern := range r.SourceMatchRE {
+			re, err := regexp.Compile(anchorMatcherRegex(pattern))
+			if err != nil {
+				return &regexCompileError{Field: "source_match_re." + key, Pattern: pattern, Err: err}
+			}
+			compiled[key] = re
+		}
+		r.compiledSourceRE = compiled
+	}
+
+	if len(r.TargetMatchRE) > 0 {
+		compiled := make(map[string]*regexp.Regexp, len(r.TargetMatchRE))
+		for key, pattern := range r.TargetMatchRE {
+			re, err := regexp.Compile(anchorMatcherRegex(pattern))
+			if err != nil {
+				return &regexCompileError{Field: "target_match_re." + key, Pattern: pattern, Err: err}
+			}
+			compiled[key] = re
+		}
+		r.compiledTargetRE = compiled
+	}
+
+	return nil
+}
+
+// Compile is the single entry point that fully prepares a rule for
+// matchRuleFast: legacy `*_match_re` regex compilation (anchored, via
+// CompileLegacyRegex) plus the matchers-form list compilation (via
+// CompileMatchers). Review fix round 1 (S1): both InhibitionRule
+// construction paths — DefaultInhibitionParser (config_file-sourced
+// rules) and internal/config.ToInhibitionRules (inline rules) — now call
+// this ONE method instead of each doing (or, for the inline path, failing
+// to do) their own regex compilation, closing the gap where inline legacy
+// regex rules silently never matched.
+func (r *InhibitionRule) Compile() error {
+	if err := r.CompileLegacyRegex(); err != nil {
+		return err
+	}
+	return r.CompileMatchers()
 }

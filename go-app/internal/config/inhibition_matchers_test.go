@@ -140,6 +140,38 @@ inhibition:
 	require.Len(t, rules, 1)
 }
 
+// TestToInhibitionRules_InlineLegacyRegexRuleActuallyInhibits is the S1
+// regression test (implementer's own finding, confirmed by review) at the
+// actual bug site: before the fix round, ToInhibitionRules built
+// InhibitionRule literals and called only CompileMatchers(), so an inline
+// source_match_re/target_match_re rule (no matchers-form fields at all)
+// never got its regexes compiled and was a permanent, silent no-op — only
+// ConfigFile-sourced rules (via DefaultInhibitionParser) worked. Now
+// ToInhibitionRules calls rule.Compile(), which also runs
+// CompileLegacyRegex.
+func TestToInhibitionRules_InlineLegacyRegexRuleActuallyInhibits(t *testing.T) {
+	cfg := &InhibitionConfig{
+		Rules: []InhibitionRuleConfig{
+			{
+				Name:          "inline-legacy-regex",
+				SourceMatchRE: map[string]string{"alertname": "Node.*"},
+				TargetMatch:   map[string]string{"alertname": "InstanceDown"},
+				Equal:         []string{"cluster"},
+			},
+		},
+	}
+	rules, err := cfg.ToInhibitionRules()
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+
+	source := &core.Alert{Fingerprint: "src", Labels: map[string]string{"alertname": "NodeDown", "cluster": "a"}}
+	target := &core.Alert{Fingerprint: "tgt", Labels: map[string]string{"alertname": "InstanceDown", "cluster": "a"}}
+	matcher := inhibition.NewMatcher(&staticAlertCache{alerts: []*core.Alert{source}}, rules, nil)
+	result, err := matcher.ShouldInhibit(context.Background(), target)
+	require.NoError(t, err)
+	assert.True(t, result.Matched, "an inline source_match_re-only rule must actually inhibit, not silently no-op")
+}
+
 // TestLoadConfig_MatchersFormOnly_WithRouteSection_LoadsAndInhibits is the
 // fix-round-1 regression test for review Critical C1: `toAlertmanagerInhibitRules`
 // (internal/config/alertmanager_validation.go) never copied
