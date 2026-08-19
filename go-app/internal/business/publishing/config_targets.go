@@ -396,6 +396,18 @@ func telegramTarget(receiver string, index int, cfg *infraroute.TelegramConfig) 
 // about per-integration endpoints like slack_api_url inheriting from global
 // and erroring when neither is set).
 //
+// NOT expressible (review finding M4, previously undocumented):
+//
+//   - `email_configs[].headers` — parsed by routing.EmailConfig, read by
+//     nothing on the publisher side (extractEmailConfig ignores it), so custom
+//     mail headers are dropped.
+//   - upstream's PER-RECEIVER `smarthost`/`auth_username`/`auth_password`/
+//     `require_tls` — routing.EmailConfig models none of them, so an upstream
+//     config that sets SMTP per email_config is silently reduced to the GLOBAL
+//     SMTP settings (or skipped entirely, with the warning below, when
+//     `global:` has none). Two receivers needing different SMTP servers cannot
+//     be expressed at all today.
+//
 // URL is informational only: the email publisher never dials it. It is set to
 // smtp://<smarthost> so the target is self-describing in logs and stats
 // rather than carrying a fake http:// placeholder. Health probes cannot check
