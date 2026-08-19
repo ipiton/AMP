@@ -70,9 +70,16 @@ const (
 )
 
 // pagerDutyEventsPath is the Events API v2 path that PagerDutyConfig.Defaults
-// bakes into its URL and that pagerDutyEventsClientImpl appends itself.
-// Passing the full endpoint through as target.URL would produce
-// ".../v2/enqueue/v2/enqueue", so the builder strips it back to the base.
+// bakes into its URL (upstream types `pagerduty_configs[].url` as the full
+// endpoint) and that the publisher's own client appends to target.URL.
+//
+// The builder strips it so a config-provisioned target is encoded exactly like
+// a K8s-sourced one — a base URL. Corrected in the slice-1 fix round (review
+// finding I2): the original comment claimed the client appended "/v2/enqueue",
+// but it actually appended "/v2/events", which is not a PagerDuty endpoint at
+// all. That bug is fixed in pagerduty_client.go (see pagerDutyEnqueuePath),
+// which now also normalises a full endpoint away itself — so this strip is
+// belt-and-braces rather than the only line of defence.
 const pagerDutyEventsPath = "/v2/enqueue"
 
 // defaultSMTPPort mirrors extractSMTPConfig's own default (publisher side),
@@ -299,9 +306,8 @@ func slackTarget(receiver string, index int, cfg *infraroute.SlackConfig) (*core
 //
 // URL needs a conversion, not a copy: PagerDutyConfig.Defaults() stores the
 // FULL Events API endpoint (https://events.pagerduty.com/v2/enqueue, matching
-// upstream's `url:` semantics), while the publisher's client treats
-// target.URL as a BASE and appends /v2/enqueue itself. Passing it through
-// verbatim would POST to /v2/enqueue/v2/enqueue.
+// upstream's `url:` semantics), while the publisher's client treats target.URL
+// as a BASE and appends the enqueue path itself.
 //
 // NOT expressible: severity/class/component/group/description/details
 // (formatPagerDuty derives severity/summary from the alert itself),
@@ -332,11 +338,11 @@ func pagerDutyBaseURL(raw string) string {
 	if url == "" {
 		return ""
 	}
-	trimmed := strings.TrimSuffix(url, "/")
-	if strings.HasSuffix(trimmed, pagerDutyEventsPath) {
-		return strings.TrimSuffix(trimmed, pagerDutyEventsPath)
-	}
-	return url
+	trimmed := strings.TrimRight(url, "/")
+	// Review finding M1: the fallback used to return the UN-trimmed input, so
+	// "https://events.pagerduty.com/" produced a base with a trailing slash and
+	// a doubled separator in the final request path.
+	return strings.TrimSuffix(trimmed, pagerDutyEventsPath)
 }
 
 // telegramTarget maps one telegram_configs entry.

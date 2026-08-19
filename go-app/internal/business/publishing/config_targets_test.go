@@ -348,6 +348,10 @@ func TestPagerDutyBaseURL(t *testing.T) {
 		"https://events.pagerduty.com/v2/enqueue/":   "https://events.pagerduty.com",
 		"https://events.eu.pagerduty.com":            "https://events.eu.pagerduty.com",
 		"https://pd-proxy.internal/relay/v2/enqueue": "https://pd-proxy.internal/relay",
+		// Review finding M1: the non-matching branch used to return the
+		// un-trimmed input, leaving a trailing slash in the base.
+		"https://events.pagerduty.com/":  "https://events.pagerduty.com",
+		"https://events.pagerduty.com//": "https://events.pagerduty.com",
 	}
 
 	for in, want := range cases {

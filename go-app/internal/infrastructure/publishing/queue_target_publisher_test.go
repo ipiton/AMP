@@ -492,7 +492,7 @@ func TestCreatePublisherForJob_PagerDutyReachesEnhancedPublisher(t *testing.T) {
 
 // TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI closes the loop
 // over HTTP: a firing alert must reach PagerDuty's Events API v2 trigger
-// endpoint (POST /v2/events) carrying the target's routing_key.
+// endpoint (POST /v2/enqueue) carrying the target's routing_key.
 func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
 	const routingKey = "rk-oncall-1"
 
@@ -553,7 +553,7 @@ func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, 1, gotCalls)
-	assert.Equal(t, "/v2/events", gotPath, "must hit the PagerDuty Events API v2 endpoint, not some other path")
+	assert.Equal(t, "/v2/enqueue", gotPath, "must hit the real PagerDuty Events API v2 endpoint (review finding I2: this used to be /v2/events, which does not exist)")
 	assert.Equal(t, routingKey, gotRoutingKey, "the target's routing_key must be honored")
 
 	// CONTENT, not just transport (review wave 5, finding C2/I1): buildPayload

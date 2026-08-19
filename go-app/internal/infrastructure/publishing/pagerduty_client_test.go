@@ -46,7 +46,7 @@ func TestTriggerEvent(t *testing.T) {
 		// Mock server
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "POST", r.Method)
-			assert.Equal(t, "/v2/events", r.URL.Path)
+			assert.Equal(t, "/v2/enqueue", r.URL.Path)
 			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 			// Parse request
