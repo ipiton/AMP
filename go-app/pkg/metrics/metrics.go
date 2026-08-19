@@ -849,6 +849,7 @@ type StorageMetrics struct {
 	OperationDuration *prometheus.HistogramVec
 	FallbackTotal     *prometheus.CounterVec
 	RecoveryTotal     prometheus.Counter
+	BackendActive     *prometheus.GaugeVec
 }
 
 // NewStorageMetrics creates new storage metrics
@@ -897,6 +898,22 @@ func NewStorageMetrics() *StorageMetrics {
 				Name:      "recovery_total",
 				Help:      "Total number of storage recoveries.",
 			},
+		),
+		// BackendActive (task fu5-cfg item 2, FU-STORAGEMANAGER-FAILBACK):
+		// which grouping storage backend StorageManager is currently routing
+		// reads/writes through. Exactly one label value reads 1 at a time;
+		// the rest read 0 — the "amp_storage_backend{backend=...}" gauge
+		// called for in the wave-5 brief (namespaced under this package's
+		// existing alert_history_storage_* family instead of a new "amp_"
+		// prefix).
+		BackendActive: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Subsystem: "storage",
+				Name:      "backend_active",
+				Help:      "Which group storage backend is currently active (1=active, 0=inactive), labeled by backend.",
+			},
+			[]string{"backend"},
 		),
 	}
 }
@@ -1331,6 +1348,36 @@ func (m *BusinessMetrics) IncStorageFallback(reason string) {
 // IncStorageRecovery increments storage recovery counter
 func (m *BusinessMetrics) IncStorageRecovery() {
 	m.storage.RecoveryTotal.Inc()
+}
+
+// groupStorageBackendLabels enumerates the label values
+// SetActiveGroupStorageBackend zeroes out before setting the active one, so
+// stale "1"s never linger under a label that stopped being active (task
+// fu5-cfg item 2). grouping.StorageManager only ever uses "redis"/"memory".
+var groupStorageBackendLabels = []string{"redis", "memory"}
+
+// SetActiveGroupStorageBackend records which grouping storage backend
+// (grouping.StorageManager's primary or fallback) is currently serving
+// group-storage reads/writes (task fu5-cfg item 2, FU-STORAGEMANAGER-FAILBACK).
+// Exactly one of groupStorageBackendLabels reads 1 at any time; the others
+// read 0.
+func (m *BusinessMetrics) SetActiveGroupStorageBackend(backend string) {
+	for _, b := range groupStorageBackendLabels {
+		v := 0.0
+		if b == backend {
+			v = 1.0
+		}
+		m.storage.BackendActive.WithLabelValues(b).Set(v)
+	}
+}
+
+// GroupStorageBackendGauge exposes the backend-active GaugeVec set by
+// SetActiveGroupStorageBackend, for tests that need to assert on its value
+// (e.g. via prometheus/client_golang/testutil.ToFloat64) without a scrape
+// round-trip. Production code should call SetActiveGroupStorageBackend
+// instead of reading this directly.
+func (m *BusinessMetrics) GroupStorageBackendGauge() *prometheus.GaugeVec {
+	return m.storage.BackendActive
 }
 
 // RecordTimerStarted records a timer start
