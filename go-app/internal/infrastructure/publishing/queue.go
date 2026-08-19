@@ -1292,7 +1292,17 @@ func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJo
 	now := time.Now().UTC()
 	var firstErr error
 	for _, alert := range job.Alerts {
-		key := alert.DeliveryKey()
+		// An alert with no fingerprint cannot be tracked: every such alert would
+		// share the key ":<status>" and the second one would be skipped as
+		// "already delivered" (review round 1, finding m5). Unreachable through
+		// the grouping path — groups index their alerts BY fingerprint — so this
+		// is a guard, not a fix: an untrackable alert is always sent and never
+		// recorded, i.e. it falls back to at-least-once.
+		key := ""
+		if alert != nil && alert.Fingerprint != "" {
+			key = alert.DeliveryKey()
+		}
+
 		if job.progress.has(key) {
 			// Already accepted on an earlier attempt of THIS job — re-sending
 			// it would be a duplicate wire message, not a retry.

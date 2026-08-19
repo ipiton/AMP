@@ -1494,7 +1494,20 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 					// Advisory only: the consequence is the pre-fu4 behaviour
 					// for this target — the alerts that landed are re-sent on
 					// the next fire (duplicates), never dropped.
-					m.logger.Warn("failed to record per-alert delivered set for an unconfirmed target (already-delivered alerts may be re-sent next fire)",
+					//
+					// Counted, and the cap is counted separately from a backend
+					// failure (review round 1, finding m3): hitting the cap
+					// silently reverts a group to at-least-once, which is
+					// exactly the kind of degradation that must be visible on a
+					// dashboard rather than only in a log line.
+					if m.metrics != nil {
+						status := "error"
+						if errors.Is(partErr, ErrDeliveredStateCapped) {
+							status = "capped"
+						}
+						m.metrics.RecordGroupOperation("delivered_state", status)
+					}
+					m.logger.Warn("failed to record per-alert delivered state for an unconfirmed target (already-delivered alerts may be re-sent next fire)",
 						"group_key", group.Key,
 						"receiver", receiver,
 						"target", outcome.Target,
