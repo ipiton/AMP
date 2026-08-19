@@ -315,6 +315,19 @@ func ruleMatchesSourceSide(rule *InhibitionRule, labels map[string]string) bool 
 
 	for key := range rule.SourceMatchRE {
 		actualValue := labels[key] // upstream semantics: absent == ""
+		// hasRE is false only for a rule that was never run through
+		// InhibitionRule.Compile()/CompileLegacyRegex() — the sole legal
+		// construction path for a matching-ready rule (review fix round 3,
+		// R8). Both real construction sites (DefaultInhibitionParser and
+		// internal/config.ToInhibitionRules) always call Compile(); this
+		// silently fails closed (no match) rather than panicking on a nil
+		// map read, which matters for hand-built InhibitionRule literals in
+		// tests that skip Compile() on purpose (e.g. to exercise a
+		// not-yet-compiled rule) - a hard error here would turn "forgot to
+		// compile" into a crash instead of a loud "why doesn't this match"
+		// during development. A future third construction path that also
+		// skips Compile() would reproduce S1 (fix round 1) silently; there
+		// is deliberately no defensive panic/error for that today.
 		re, hasRE := rule.compiledSourceRE[key]
 		if !hasRE || !re.MatchString(actualValue) {
 			return false
@@ -336,7 +349,7 @@ func ruleMatchesTargetSide(rule *InhibitionRule, labels map[string]string) bool 
 
 	for key := range rule.TargetMatchRE {
 		actualValue := labels[key] // upstream semantics: absent == ""
-		re, hasRE := rule.compiledTargetRE[key]
+		re, hasRE := rule.compiledTargetRE[key] // hasRE convention: see ruleMatchesSourceSide's twin guard above (R8)
 		if !hasRE || !re.MatchString(actualValue) {
 			return false
 		}
