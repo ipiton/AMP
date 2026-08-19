@@ -105,10 +105,12 @@ test-coverage-all:
 	$(GOTEST) -race -coverprofile=coverage.out -covermode=atomic $(TEST_TARGETS_ALL)
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
-# Run linter (requires golangci-lint to be installed)
+# Run linter (requires golangci-lint to be installed).
+# PATH-resolved on purpose: a stale copy in GOPATH/bin shadowed the real one
+# and made `make lint` report false typecheck errors on clean trees.
 lint:
 	@echo "Running linter..."
-	$(shell go env GOPATH)/bin/golangci-lint run
+	golangci-lint run
 
 # Format code
 fmt:
