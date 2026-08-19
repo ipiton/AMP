@@ -324,3 +324,399 @@ func TestCreatePublisherForJob_TelegramHonoursTargetAPIURL(t *testing.T) {
 	assert.Equal(t, 1, hits["a"], "the first target's own API base must be used")
 	assert.Equal(t, 1, hits["b"], "the second target must NOT be silently redirected to the first target's API base")
 }
+
+// === FU-SLACK-PAGERDUTY-QUEUE-PATH (wave 5) ===
+//
+// The wiring itself (createPublisherForJob routing Slack/PagerDuty through
+// CreatePublisherForTarget, and the clientMu guard covering
+// slackClientMap/pagerDutyClientMap) landed already in the same commit as the
+// telegram fix above — both were part of "route live queue to target-aware
+// publishers" (see queue.go's createPublisherForJob switch: TargetTypeSlack
+// and TargetTypePagerDuty are already in the CreatePublisherForTarget case,
+// and TestCreatePublisherForTarget_ConcurrentIsRaceFree above already drives
+// slack/pagerduty client-map creation under -race). What was missing was the
+// end-to-end proof mirroring the telegram tests: a queue-path job for these
+// two target types must reach the ENHANCED publisher and actually hit the
+// provider's real API shape, not just resolve to the right Go type.
+
+// TestCreatePublisherForJob_SlackReachesEnhancedPublisher mirrors
+// TestCreatePublisherForJob_TelegramReachesEnhancedPublisher: the live queue
+// path must build EnhancedSlackPublisher for a Slack target, not the bare
+// SlackPublisher webhook-only shim.
+func TestCreatePublisherForJob_SlackReachesEnhancedPublisher(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	job := &PublishingJob{
+		Target: &core.PublishingTarget{
+			Name: "oncall-slack",
+			Type: string(TargetTypeSlack),
+			URL:  "https://hooks.slack.example/services/T000/B000/XXXX",
+		},
+	}
+
+	publisher, err := q.createPublisherForJob(job)
+	require.NoError(t, err)
+	require.IsType(t, &EnhancedSlackPublisher{}, publisher,
+		"the live queue path must build the ENHANCED slack publisher, not the basic webhook-only one")
+}
+
+// TestCreatePublisherForJob_SlackActuallyPostsToWebhook closes the loop over
+// HTTP, mirroring TestCreatePublisherForJob_TelegramActuallyCallsBotAPI: the
+// enhanced publisher must POST a Slack message payload straight at the
+// target's webhook URL.
+func TestCreatePublisherForJob_SlackActuallyPostsToWebhook(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		gotCalls int
+		gotMsg   SlackMessage
+		gotPath  string
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var msg SlackMessage
+		_ = json.Unmarshal(body, &msg)
+
+		mu.Lock()
+		gotCalls++
+		gotMsg = msg
+		gotPath = r.URL.Path
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1234567890.000001"}`))
+	}))
+	defer srv.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	target := &core.PublishingTarget{
+		Name: "oncall-slack",
+		Type: string(TargetTypeSlack),
+		URL:  srv.URL + "/services/T000/B000/XXXX",
+	}
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+	require.NoError(t, err)
+
+	err = publisher.Publish(context.Background(), &core.EnrichedAlert{
+		Alert: &core.Alert{
+			Fingerprint: "fp-slack-1",
+			AlertName:   "HighCPUUsage",
+			Status:      core.StatusFiring,
+			StartsAt:    time.Now(),
+			Labels:      map[string]string{"severity": "critical"},
+			Annotations: map[string]string{"summary": "queue path reaches the Slack webhook"},
+		},
+	}, target)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, gotCalls)
+	assert.Equal(t, "/services/T000/B000/XXXX", gotPath,
+		"must POST straight at the target's webhook path, not some derived endpoint")
+
+	// CONTENT, not just transport (review wave 5, finding C1/I1): before the
+	// fix this was {"text":""} with no blocks/attachments — Slack's real API
+	// answers a body like that with 400 invalid_payload. formatSlack never set
+	// "text" at all, and buildMessage's []interface{} assertions never matched
+	// formatSlack's []map[string]any blocks/attachments, so every field here
+	// came back empty/nil regardless of what the alert said.
+	require.NotEmpty(t, gotMsg.Text, "the wire body must carry Slack's required fallback text, not an empty string Slack would reject")
+	assert.Contains(t, gotMsg.Text, "HighCPUUsage", "the fallback text must actually describe THIS alert")
+	require.NotEmpty(t, gotMsg.Blocks, "the Block Kit body must not be empty — formatSlack's blocks must survive buildMessage intact")
+	assert.NotEmpty(t, gotMsg.Attachments, "the color-coded attachment must survive buildMessage intact")
+
+	// R1 (re-review, wave 5): Block Kit REQUIRES 1-10 "elements" on a context
+	// block. Block had no Elements field and buildBlock had no elements
+	// branch, so this block shipped as bare {"type":"context"} — Slack
+	// validates the whole "blocks" array and answers invalid_blocks/400 for
+	// that, the exact failure class C1 was fixed to remove. Find the context
+	// block among the fixed set of blocks formatSlack emits and assert it
+	// actually carries content.
+	var contextBlock *Block
+	for i := range gotMsg.Blocks {
+		if gotMsg.Blocks[i].Type == "context" {
+			contextBlock = &gotMsg.Blocks[i]
+			break
+		}
+	}
+	require.NotNil(t, contextBlock, "formatSlack always emits a context block (the fingerprint footer) — it must survive buildMessage, not be silently dropped")
+	require.NotEmpty(t, contextBlock.Elements, "a context block with zero elements is REJECTED by Block Kit (invalid_blocks) — it must carry the fingerprint text, not ship empty")
+	assert.Contains(t, contextBlock.Elements[0].Text, "fp-slack-1", "the context block's element must actually carry this alert's fingerprint")
+
+	// R2 (re-review, wave 5): the same []map[string]any vs []interface{}
+	// mismatch, third instance — buildAttachment was never routed through
+	// toMapSlice, so formatSlack's attachment fields (Status/Started/...)
+	// silently vanished, shipping a color-only bar.
+	require.NotEmpty(t, gotMsg.Attachments[0].Fields, "the legacy attachment's fields (Status/Started/...) must survive buildAttachment intact")
+}
+
+// TestCreatePublisherForJob_MissingSlackURLDegradesGracefully mirrors the
+// telegram credential-fallback test: a Slack target with no webhook URL must
+// still yield a working (basic) publisher rather than failing the job.
+func TestCreatePublisherForJob_MissingSlackURLDegradesGracefully(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{
+		Target: &core.PublishingTarget{Name: "broken-slack", Type: string(TargetTypeSlack)},
+	})
+	require.NoError(t, err)
+	require.IsType(t, &SlackPublisher{}, publisher)
+}
+
+// TestCreatePublisherForJob_PagerDutyReachesEnhancedPublisher mirrors the
+// telegram type-check test for PagerDuty.
+func TestCreatePublisherForJob_PagerDutyReachesEnhancedPublisher(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	job := &PublishingJob{
+		Target: &core.PublishingTarget{
+			Name:    "oncall-pagerduty",
+			Type:    string(TargetTypePagerDuty),
+			URL:     "https://events.pagerduty.example",
+			Headers: map[string]string{"routing_key": "rk-oncall-1"},
+		},
+	}
+
+	publisher, err := q.createPublisherForJob(job)
+	require.NoError(t, err)
+	require.IsType(t, &EnhancedPagerDutyPublisher{}, publisher,
+		"the live queue path must build the ENHANCED pagerduty publisher, not the basic HTTP one")
+}
+
+// TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI closes the loop
+// over HTTP: a firing alert must reach PagerDuty's Events API v2 trigger
+// endpoint (POST /v2/events) carrying the target's routing_key.
+func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
+	const routingKey = "rk-oncall-1"
+
+	var (
+		mu            sync.Mutex
+		gotPath       string
+		gotRoutingKey string
+		gotSummary    string
+		gotSeverity   string
+		gotSource     string
+		gotCalls      int
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req TriggerEventRequest
+		_ = json.Unmarshal(body, &req)
+
+		mu.Lock()
+		gotPath = r.URL.Path
+		gotRoutingKey = req.RoutingKey
+		gotSummary = req.Payload.Summary
+		gotSeverity = req.Payload.Severity
+		gotSource = req.Payload.Source
+		gotCalls++
+		mu.Unlock()
+
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"success","message":"Event processed","dedup_key":"fp-pagerduty-1"}`))
+	}))
+	defer srv.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	target := &core.PublishingTarget{
+		Name:    "oncall-pagerduty",
+		Type:    string(TargetTypePagerDuty),
+		URL:     srv.URL,
+		Headers: map[string]string{"routing_key": routingKey},
+	}
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+	require.NoError(t, err)
+
+	err = publisher.Publish(context.Background(), &core.EnrichedAlert{
+		Alert: &core.Alert{
+			Fingerprint: "fp-pagerduty-1",
+			AlertName:   "HighCPUUsage",
+			Status:      core.StatusFiring,
+			StartsAt:    time.Now(),
+			Labels:      map[string]string{"severity": "critical"},
+			Annotations: map[string]string{"summary": "queue path reaches the PagerDuty Events API"},
+		},
+	}, target)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, gotCalls)
+	assert.Equal(t, "/v2/events", gotPath, "must hit the PagerDuty Events API v2 endpoint, not some other path")
+	assert.Equal(t, routingKey, gotRoutingKey, "the target's routing_key must be honored")
+
+	// CONTENT, not just transport (review wave 5, finding C2/I1): buildPayload
+	// read summary/severity/timestamp/source at the TOP level of the formatted
+	// map, but formatPagerDuty nests all four under a "payload" key — so every
+	// trigger event shipped payload.summary/payload.severity empty, and the
+	// real Events API v2 requires both non-blank (400 otherwise). Only
+	// custom_details was ever read correctly, since that access already went
+	// through the nested map.
+	require.NotEmpty(t, gotSummary, "payload.summary is REQUIRED by the real Events API v2 — an empty one is a guaranteed 400")
+	assert.Contains(t, gotSummary, "HighCPUUsage", "the summary must actually describe THIS alert")
+	require.NotEmpty(t, gotSeverity, "payload.severity is REQUIRED by the real Events API v2")
+	assert.Equal(t, "alert-history-service", gotSource, "payload.source must be honored, not silently dropped")
+}
+
+// TestCreatePublisherForJob_MissingPagerDutyRoutingKeyDegradesGracefully
+// mirrors the telegram credential-fallback test: a PagerDuty target with no
+// routing_key must still yield a working (basic) publisher rather than
+// failing the job.
+func TestCreatePublisherForJob_MissingPagerDutyRoutingKeyDegradesGracefully(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{
+		Target: &core.PublishingTarget{Name: "broken-pagerduty", Type: string(TargetTypePagerDuty)},
+	})
+	require.NoError(t, err)
+	require.IsType(t, &PagerDutyPublisher{}, publisher)
+}
+
+// === I3 (review wave 5): pagerDutyClientMap/rootlyClientMap cache keys must
+// include the base URL, mirroring TestCreatePublisherForTarget_
+// TelegramCacheKeyIncludesAPIURL/TestCreatePublisherForJob_
+// TelegramHonoursTargetAPIURL. Both were keyed on the credential alone
+// (routing_key / api key) while the cached client bakes in target.URL too, so
+// the FIRST target built for a given credential silently pinned its base URL
+// for every later target sharing that credential — exactly the telegram
+// defect this item was supposed to carry the fix for, and it wasn't. Critically,
+// this only shows up with a SHARED factory across targets — a fresh factory
+// per target (as in TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI)
+// cannot reproduce it, which is why it slipped through.
+
+// TestCreatePublisherForTarget_PagerDutyCacheKeyIncludesBaseURL mirrors the
+// telegram cache-key test.
+func TestCreatePublisherForTarget_PagerDutyCacheKeyIncludesBaseURL(t *testing.T) {
+	const routingKey = "rk-shared"
+
+	newTarget := func(name, url string) *core.PublishingTarget {
+		return &core.PublishingTarget{
+			Name:    name,
+			Type:    string(TargetTypePagerDuty),
+			URL:     url,
+			Headers: map[string]string{"routing_key": routingKey},
+		}
+	}
+
+	f := newTestPublisherFactory(t)
+
+	_, err := f.CreatePublisherForTarget(newTarget("pd-primary", "https://events.pagerduty.example"))
+	require.NoError(t, err)
+	_, err = f.CreatePublisherForTarget(newTarget("pd-proxy", "https://pagerduty-proxy.internal"))
+	require.NoError(t, err)
+
+	pagerDutyClients := func() int {
+		f.clientMu.RLock()
+		defer f.clientMu.RUnlock()
+		return len(f.pagerDutyClientMap)
+	}
+
+	assert.Equal(t, 2, pagerDutyClients(),
+		"the same routing_key behind two different base URLs must yield two clients, not one pinned to the first URL")
+
+	_, err = f.CreatePublisherForTarget(newTarget("pd-primary-again", "https://events.pagerduty.example"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, pagerDutyClients(), "an identical (base_url, routing_key) pair must reuse its cached client")
+}
+
+// TestCreatePublisherForJob_PagerDutyHonoursTargetURL is the behavioural half,
+// using ONE SHARED factory across two targets — the exact case the review
+// found untested: each of the two existing PagerDuty httptest tests builds
+// its own fresh factory via newTestPublisherFactory, so neither could
+// reproduce the cache collision a shared factory (the real one, built once at
+// startup) hits immediately.
+func TestCreatePublisherForJob_PagerDutyHonoursTargetURL(t *testing.T) {
+	const routingKey = "rk-shared"
+
+	var mu sync.Mutex
+	hits := map[string]int{}
+	handler := func(label string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			hits[label]++
+			mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"success","message":"ok","dedup_key":"fp-shared"}`))
+		}
+	}
+	srvA := httptest.NewServer(handler("a"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(handler("b"))
+	defer srvB.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	alert := &core.EnrichedAlert{Alert: &core.Alert{
+		Fingerprint: "fp-shared-routing-key",
+		AlertName:   "SharedRoutingKey",
+		Status:      core.StatusFiring,
+		StartsAt:    time.Now(),
+		Labels:      map[string]string{"severity": "warning"},
+	}}
+
+	for _, srv := range []*httptest.Server{srvA, srvB} {
+		target := &core.PublishingTarget{
+			Name:    "pd-" + srv.URL,
+			Type:    string(TargetTypePagerDuty),
+			URL:     srv.URL,
+			Headers: map[string]string{"routing_key": routingKey},
+		}
+		publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+		require.NoError(t, err)
+		require.NoError(t, publisher.Publish(context.Background(), alert, target))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, hits["a"], "the first target's own base URL must be used")
+	assert.Equal(t, 1, hits["b"], "the second target sharing the routing_key must NOT be silently redirected to the first target's base URL")
+}
+
+// TestCreatePublisherForTarget_RootlyCacheKeyIncludesBaseURL mirrors the
+// telegram/pagerduty cache-key test for Rootly: NewRootlyIncidentsClient bakes
+// in both target.URL and the API key, so the cache key must too.
+func TestCreatePublisherForTarget_RootlyCacheKeyIncludesBaseURL(t *testing.T) {
+	const apiKey = "rootly-shared-key"
+
+	newTarget := func(name, url string) *core.PublishingTarget {
+		return &core.PublishingTarget{
+			Name:    name,
+			Type:    string(TargetTypeRootly),
+			URL:     url,
+			Headers: map[string]string{"Authorization": "Bearer " + apiKey},
+		}
+	}
+
+	f := newTestPublisherFactory(t)
+
+	_, err := f.CreatePublisherForTarget(newTarget("rootly-primary", "https://api.rootly.example"))
+	require.NoError(t, err)
+	_, err = f.CreatePublisherForTarget(newTarget("rootly-proxy", "https://rootly-proxy.internal"))
+	require.NoError(t, err)
+
+	rootlyClients := func() int {
+		f.clientMu.RLock()
+		defer f.clientMu.RUnlock()
+		return len(f.rootlyClientMap)
+	}
+
+	assert.Equal(t, 2, rootlyClients(),
+		"the same API key behind two different base URLs must yield two clients, not one pinned to the first URL")
+
+	_, err = f.CreatePublisherForTarget(newTarget("rootly-primary-again", "https://api.rootly.example"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, rootlyClients(), "an identical (base_url, api_key) pair must reuse its cached client")
+}

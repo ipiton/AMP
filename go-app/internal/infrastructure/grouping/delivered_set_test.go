@@ -196,6 +196,44 @@ func TestDeliveredSet_CapStopsRecording(t *testing.T) {
 	}
 }
 
+// TestDeliveredSet_CapCountsDistinctFingerprintsNotOccurrences is the r2
+// regression (re-review, wave 5): the Redis Lua script used to count an
+// HEXISTS-miss per OCCURRENCE in the incoming batch, while the in-memory
+// implementation counted distinct NEW fingerprints. A batch naming the same
+// new fingerprint twice (two different statuses for the same alert, which is
+// a legitimate single-fire shape — nothing requires a fingerprint to appear
+// once) diverged: probed at cap−1, redis refused (2 occurrences > 1 slot
+// left) while memory accepted (1 distinct fingerprint, exactly the slot
+// available). Both implementations must now agree: exactly one slot per
+// distinct fingerprint, regardless of how many statuses it carries in one
+// call.
+func TestDeliveredSet_CapCountsDistinctFingerprintsNotOccurrences(t *testing.T) {
+	for name, log := range deliveredSetLogs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+
+			// Fill to exactly one slot short of the cap.
+			keys := make([]string, 0, maxDeliveredAlertsPerTarget-1)
+			for i := 0; i < maxDeliveredAlertsPerTarget-1; i++ {
+				keys = append(keys, fmt.Sprintf("fp-%d:firing", i))
+			}
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", keys, time.Hour))
+
+			// One call, one NEW fingerprint, two statuses for it. Must consume
+			// exactly the one remaining slot, not two.
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a",
+				[]string{"new:firing", "new:resolved"}, time.Hour),
+				"a duplicate-fingerprint batch must consume exactly one slot per distinct fingerprint, matching the other implementation")
+
+			delivered, dErr := log.DeliveredAlerts(ctx, "gk", "target-a")
+			require.NoError(t, dErr)
+			assert.Len(t, delivered, maxDeliveredAlertsPerTarget, "must have landed at exactly the cap")
+			assert.Contains(t, delivered, "new:resolved", "the later status in the same call must be the one that lands")
+			assert.NotContains(t, delivered, "new:firing", "one status per fingerprint even within a single call")
+		})
+	}
+}
+
 // TestDeliveredSet_TTLIsBoundedByRepeatInterval proves the Redis state cannot
 // outlive the dedup window it belongs to: a stale partial state must age out
 // into a full resend rather than suppress alerts indefinitely.
@@ -219,6 +257,102 @@ func TestDeliveredSet_TTLIsBoundedByRepeatInterval(t *testing.T) {
 	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
 	require.NoError(t, err)
 	assert.Empty(t, delivered, "past its TTL the state must read as absent, so the whole set is re-sent")
+}
+
+// TestDeliveredSet_TTLDoesNotSlideOnSubsequentWrites is the r5 regression
+// (re-review, wave 5): a SECOND partial write used to PEXPIRE the whole hash
+// again, sliding its expiry forward from "now" instead of leaving the window
+// anchored to the FIRST write. A group with one persistently-failing alert and
+// other alerts trickling in through separate fires could therefore keep
+// already-delivered alerts suppressed well past one repeat_interval — every
+// fire that recorded even one new fingerprint reset the clock. The state must
+// now expire on the schedule its first write set, however many partial writes
+// follow.
+func TestDeliveredSet_TTLDoesNotSlideOnSubsequentWrites(t *testing.T) {
+	log, mr, cleanup := setupTestRedisNotifyLog(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	initialTTL := mr.TTL(notifyLogDeliveredKey("gk", "target-a"))
+	require.Equal(t, 10*time.Minute+notifyLogEntryTTLGracePeriod, initialTTL)
+
+	// Let time pass (well inside the window), then a second alert lands while
+	// the target is still only partially delivered.
+	mr.FastForward(5 * time.Minute)
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-2:firing"}, 10*time.Minute))
+
+	ttlAfterSecondWrite := mr.TTL(notifyLogDeliveredKey("gk", "target-a"))
+	assert.Less(t, ttlAfterSecondWrite, initialTTL,
+		"a later partial write must not reset the TTL back to a full window")
+
+	// Forward past the FIRST write's original window. If the second write had
+	// slid the expiry, the key would still be alive here.
+	mr.FastForward(initialTTL - 5*time.Minute + time.Second)
+
+	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	assert.Empty(t, delivered, "the state must expire on the FIRST write's schedule, not be extended by later partial writes")
+}
+
+// TestDeliveredSet_TTLSelfHealsWhenLost is the m1 regression (re-review, wave
+// 5, finding R3): gating recordPartialDeliveryScript's PEXPIRE on EXISTS==0
+// alone would drop the self-healing property review round 1 (finding I2)
+// required — that ANY later write repairs a key that has somehow lost its
+// TTL, rather than leaving it to suppress alerts forever. The fix widened the
+// gate to "EXISTS==0 OR PTTL<0", but that second disjunct had no regression
+// test of its own.
+//
+// Uses the underlying client's PERSIST, not miniredis's mr.SetTTL(key, 0):
+// SetTTL(key, 0) leaves the key readable as PTTL == 0 (a TTL that is about to
+// expire), not PTTL < 0 (no TTL at all) — those are different states, and
+// asserting against the wrong one would pass or fail for the wrong reason.
+// PERSIST is the actual operation that produces "no TTL", matching how a real
+// TTL-less key could arise (a bug, an operator's redis-cli PERSIST, a botched
+// migration).
+func TestDeliveredSet_TTLSelfHealsWhenLost(t *testing.T) {
+	log, mr, cleanup := setupTestRedisNotifyLog(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	key := notifyLogDeliveredKey("gk", "target-a")
+	require.NoError(t, log.client.Persist(ctx, key).Err())
+	require.Equal(t, time.Duration(0), mr.TTL(key), "PERSIST must actually strip the TTL before this test means anything")
+
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-2:firing"}, 10*time.Minute))
+
+	ttl := mr.TTL(key)
+	assert.Equal(t, 10*time.Minute+notifyLogEntryTTLGracePeriod, ttl,
+		"a write to a key that has lost its TTL must re-arm it — the self-healing property review round 1 (finding I2) required, which gating PEXPIRE on EXISTS alone would silently drop")
+}
+
+// TestDeliveredSet_MemoryTTLDoesNotSlideOnSubsequentWrites is the in-memory
+// half of the r5 regression: recordedAt/ttl must be stamped once, on the write
+// that creates the state, and left untouched by every later partial write for
+// the same (group, target).
+func TestDeliveredSet_MemoryTTLDoesNotSlideOnSubsequentWrites(t *testing.T) {
+	log := newNotifyDedupLog()
+	ctx := context.Background()
+
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	// Age the state most of the way to its window, but not past it, then
+	// record a second alert while the target is still only partially
+	// delivered.
+	backdateDeliveredState(t, log, "gk", "target-a", 9*time.Minute)
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-2:firing"}, 10*time.Minute))
+
+	// Age it the rest of the way past the FIRST write's window. If the second
+	// write had reset recordedAt, this would not be enough to expire it.
+	remaining := deliveredStateTTL(10*time.Minute) - 9*time.Minute + time.Second
+	backdateDeliveredState(t, log, "gk", "target-a", remaining)
+
+	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	assert.Empty(t, delivered, "a later partial write must not push recordedAt forward, or the state would outlive its first-write window")
 }
 
 // TestDeliveredSet_MemoryStateExpires is the I1 regression (review round 1,
