@@ -268,15 +268,16 @@ func (m *DefaultInhibitionMatcher) UpdateRules(rules []InhibitionRule) {
 // MatchRule implements InhibitionMatcher.MatchRule.
 //
 // Core matching logic (pure function, no I/O):
-//  1. Check source_match (exact label matching)
-//  2. Check source_match_re (regex label matching)
-//  3. Check target_match (exact label matching)
-//  4. Check target_match_re (regex label matching)
-//  5. Check equal labels (must have same value in both alerts)
+//  1. Source side: source_match AND source_match_re AND source_matchers (ruleMatchesSourceSide)
+//  2. Target side: target_match AND target_match_re AND target_matchers (ruleMatchesTargetSide)
+//  3. excludeTwoSidedMatch: reject a candidate that would let two alerts
+//     each matching both sides mutually inhibit each other (upstream
+//     inhibit.go's hasEqual guard — review fix round 1, C2)
+//  4. equal labels (must have the same value — including "both absent" — in both alerts)
 //
 // All conditions must match (AND logic).
 //
-// Performance: <5µs per call (zero allocations, inlined checks).
+// Performance: <5µs per call, no allocations.
 //
 // Note: This is a public API method. Internal hot path uses matchRuleFast() for better performance.
 func (m *DefaultInhibitionMatcher) MatchRule(
@@ -286,94 +287,122 @@ func (m *DefaultInhibitionMatcher) MatchRule(
 	return m.matchRuleFast(rule, sourceAlert, targetAlert)
 }
 
+// ruleMatchesSourceSide reports whether the given label set satisfies a
+// rule's SOURCE-side conditions: source_match (exact) AND source_match_re
+// (regex) AND source_matchers (upstream's matchers-form list) - the three
+// blocks matchRuleFast ANDs when checking the actual source alert.
+// Factored out (review fix round 1, C2) so the SAME predicate can also be
+// evaluated against the TARGET alert's own labels for
+// excludeTwoSidedMatch below - upstream's guard needs to ask "does this
+// label set ALSO qualify as a source under this rule?" regardless of
+// which alert it came from.
+func ruleMatchesSourceSide(rule *InhibitionRule, labels map[string]string) bool {
+	for key, requiredValue := range rule.SourceMatch {
+		actualValue, exists := labels[key]
+		if !exists || actualValue != requiredValue {
+			return false
+		}
+	}
+
+	for key := range rule.SourceMatchRE {
+		actualValue, exists := labels[key]
+		if !exists {
+			return false
+		}
+		re, hasRE := rule.compiledSourceRE[key]
+		if !hasRE || !re.MatchString(actualValue) {
+			return false
+		}
+	}
+
+	return matchesAll(rule.compiledSourceMatchers, labels)
+}
+
+// ruleMatchesTargetSide is ruleMatchesSourceSide's target-side twin:
+// target_match AND target_match_re AND target_matchers.
+func ruleMatchesTargetSide(rule *InhibitionRule, labels map[string]string) bool {
+	for key, requiredValue := range rule.TargetMatch {
+		actualValue, exists := labels[key]
+		if !exists || actualValue != requiredValue {
+			return false
+		}
+	}
+
+	for key := range rule.TargetMatchRE {
+		actualValue, exists := labels[key]
+		if !exists {
+			return false
+		}
+		re, hasRE := rule.compiledTargetRE[key]
+		if !hasRE || !re.MatchString(actualValue) {
+			return false
+		}
+	}
+
+	return matchesAll(rule.compiledTargetMatchers, labels)
+}
+
 // matchRuleFast is an optimized version of MatchRule for internal hot path usage.
 //
-// Optimizations:
-//   - Inlined label checks (no function calls)
-//   - Early exit on first mismatch
-//   - Minimized map lookups
-//   - Zero allocations
-//
-// Performance: <2µs per call (hot path optimized).
+// Performance: <2µs per call (hot path optimized) — a handful of small
+// map lookups per side, no allocations.
 //
 //go:inline
 func (m *DefaultInhibitionMatcher) matchRuleFast(
 	rule *InhibitionRule,
 	sourceAlert, targetAlert *core.Alert,
 ) bool {
-	// 1. Check source_match conditions (exact matching) - INLINED
-	for key, requiredValue := range rule.SourceMatch {
-		actualValue, exists := sourceAlert.Labels[key]
-		if !exists || actualValue != requiredValue {
-			return false // Early exit
-		}
+	// 1-2b. source_match / source_match_re / source_matchers (all AND'd) —
+	// candidate source alert must satisfy the rule's source side.
+	if !ruleMatchesSourceSide(rule, sourceAlert.Labels) {
+		return false
 	}
 
-	// 2. Check source_match_re conditions (regex matching) - INLINED
-	for key := range rule.SourceMatchRE {
-		actualValue, exists := sourceAlert.Labels[key]
-		if !exists {
-			return false // Early exit
-		}
-
-		re, hasRE := rule.compiledSourceRE[key]
-		if !hasRE || !re.MatchString(actualValue) {
-			return false // Early exit
-		}
+	// 3-4b. target_match / target_match_re / target_matchers (all AND'd) —
+	// the alert under evaluation must satisfy the rule's target side.
+	if !ruleMatchesTargetSide(rule, targetAlert.Labels) {
+		return false
 	}
 
-	// 2b. Check source_matchers (upstream's modern `source_matchers:` list
-	// syntax, wave 7 FU-INHIBIT-MATCHERS) - combines with source_match/
-	// source_match_re as AND, same as upstream allows both forms on one
-	// rule. A nil/empty list (no matchers-form on this side) is vacuously
-	// true, so a legacy-only rule is unaffected.
-	if !matchesAll(rule.compiledSourceMatchers, sourceAlert.Labels) {
-		return false // Early exit
+	// 5. excludeTwoSidedMatch (review fix round 1, C2) — ports upstream
+	// inhibit.go's Mutes/hasEqual guard (inhibit.go:206-218, 411-418):
+	//
+	//	if inhibitedByFP, eq := r.hasEqual(lset, r.SourceMatchers.Matches(lset), now); eq {
+	//	...
+	//	if excludeTwoSidedMatch && r.TargetMatchers.Matches(equal.Labels) {
+	//		return model.Fingerprint(0), false
+	//	}
+	//
+	// Without it, two distinct alerts that each satisfy BOTH sides of a
+	// rule (e.g. source_matchers `severity="critical"` + target_matchers
+	// `severity=~"critical|warning"`, two alerts both severity=critical
+	// sharing the equal label) mutually inhibit each other — every such
+	// alert vanishes with only an INFO log line as a trace, which is
+	// exactly the "suppression rule silently kills alerting" class the
+	// parity epic's final review flagged. Upstream instead: if the TARGET
+	// alert would also qualify as a SOURCE under this rule, any candidate
+	// source that would also qualify as a TARGET is disregarded — so
+	// neither A nor B inhibits the other, matching upstream exactly.
+	if ruleMatchesSourceSide(rule, targetAlert.Labels) && ruleMatchesTargetSide(rule, sourceAlert.Labels) {
+		return false
 	}
 
-	// 3. Check target_match conditions (exact matching) - INLINED
-	for key, requiredValue := range rule.TargetMatch {
-		actualValue, exists := targetAlert.Labels[key]
-		if !exists || actualValue != requiredValue {
-			return false // Early exit
-		}
-	}
-
-	// 4. Check target_match_re conditions (regex matching) - INLINED
-	for key := range rule.TargetMatchRE {
-		actualValue, exists := targetAlert.Labels[key]
-		if !exists {
-			return false // Early exit
-		}
-
-		re, hasRE := rule.compiledTargetRE[key]
-		if !hasRE || !re.MatchString(actualValue) {
-			return false // Early exit
-		}
-	}
-
-	// 4b. Check target_matchers (upstream's modern `target_matchers:` list
-	// syntax, wave 7 FU-INHIBIT-MATCHERS) - same AND-combination and
-	// vacuous-true-when-empty rule as source_matchers above.
-	if !matchesAll(rule.compiledTargetMatchers, targetAlert.Labels) {
-		return false // Early exit
-	}
-
-	// 5. Check equal labels (must match between source and target) - INLINED
+	// 6. Check equal labels (must match between source and target).
+	//
+	// Review fix round 1 (I2): a label absent on BOTH alerts now counts
+	// as equal, matching upstream's fingerprintEquals (inhibit.go:338-344,
+	// `equalSet[n] = lset[n]` — a Go map read of a missing key is "",
+	// hashed identically for both sides). The pre-fix version required
+	// `sourceOk && targetOk`, so "neither alert carries this label" was
+	// treated as UNEQUAL and blocked the rule — upstream treats it as a
+	// match. Reading with the map's own zero-value default (dropping the
+	// ", ok" form entirely) is both the fix and the simplification.
 	for _, labelName := range rule.Equal {
-		sourceVal, sourceOk := sourceAlert.Labels[labelName]
-		targetVal, targetOk := targetAlert.Labels[labelName]
-
-		// If label missing in either alert OR values differ → no match
-		if !sourceOk || !targetOk || sourceVal != targetVal {
-			return false // Early exit
+		if sourceAlert.Labels[labelName] != targetAlert.Labels[labelName] {
+			return false
 		}
 	}
 
 	// All conditions matched
 	return true
 }
-
-// Note: Helper functions matchLabels() and matchLabelsRE() were removed in favor of
-// inlined matching logic in matchRuleFast() for better performance (zero allocations,
-// early exit optimizations, and reduced function call overhead).

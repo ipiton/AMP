@@ -225,6 +225,116 @@ func TestMatchesAll_RegexAnchoring(t *testing.T) {
 	assert.False(t, matchesAll(compiled, map[string]string{"severity": "not-warning"}))
 }
 
+// --- Review fix round 1: excludeTwoSidedMatch (C2) + equal absent-on-both (I2) ---
+
+// TestShouldInhibit_TwoSidedMutualInhibitionExcluded is the C2 fixture:
+// upstream's exact reproduction from the review (rule: source_matchers
+// ['severity="critical"'], target_matchers ['severity=~"critical|warning"'],
+// equal [alertname]; two alerts A and B both alertname=Boom,
+// severity=critical). Before this fix, AMP mutually inhibited both (A
+// inhibited by B, B inhibited by A) — every instance of the overlapping
+// severity silently vanished. Upstream inhibits NEITHER, because each
+// alert also qualifies as a source under the rule it would be inhibited
+// by (excludeTwoSidedMatch).
+func TestShouldInhibit_TwoSidedMutualInhibitionExcluded(t *testing.T) {
+	rule := InhibitionRule{
+		Name:           "two-sided",
+		SourceMatchers: []string{`severity="critical"`},
+		TargetMatchers: []string{`severity=~"critical|warning"`},
+		Equal:          []string{"alertname"},
+	}
+	require.NoError(t, rule.CompileMatchers())
+
+	a := &core.Alert{Fingerprint: "A", Labels: map[string]string{"alertname": "Boom", "severity": "critical", "instance": "i1"}}
+	b := &core.Alert{Fingerprint: "B", Labels: map[string]string{"alertname": "Boom", "severity": "critical", "instance": "i2"}}
+
+	cache := &mockCache{firingAlerts: []*core.Alert{a, b}}
+	m := NewMatcher(cache, []InhibitionRule{rule}, nil)
+
+	resA, err := m.ShouldInhibit(context.Background(), a)
+	require.NoError(t, err)
+	assert.False(t, resA.Matched, "A must NOT be inhibited by B (upstream excludeTwoSidedMatch)")
+
+	resB, err := m.ShouldInhibit(context.Background(), b)
+	require.NoError(t, err)
+	assert.False(t, resB.Matched, "B must NOT be inhibited by A (upstream excludeTwoSidedMatch)")
+}
+
+// TestShouldInhibit_TwoSidedGuard_DoesNotBlockGenuineOneSidedInhibition
+// proves the C2 guard is scoped correctly: it must not suppress a
+// legitimate rule where the source and target populations genuinely don't
+// overlap (the ordinary, non-degenerate case every other fixture in this
+// package already covers) or where only ONE of the two alerts qualifies
+// as both source and target.
+func TestShouldInhibit_TwoSidedGuard_DoesNotBlockGenuineOneSidedInhibition(t *testing.T) {
+	rule := InhibitionRule{
+		Name:           "one-sided",
+		SourceMatchers: []string{`severity="critical"`},
+		TargetMatchers: []string{`severity=~"warning|info"`}, // does NOT overlap "critical"
+		Equal:          []string{"cluster"},
+	}
+	require.NoError(t, rule.CompileMatchers())
+
+	source := &core.Alert{Fingerprint: "src", Labels: map[string]string{"severity": "critical", "cluster": "a"}}
+	target := &core.Alert{Fingerprint: "tgt", Labels: map[string]string{"severity": "warning", "cluster": "a"}}
+
+	cache := &mockCache{firingAlerts: []*core.Alert{source}}
+	m := NewMatcher(cache, []InhibitionRule{rule}, nil)
+
+	res, err := m.ShouldInhibit(context.Background(), target)
+	require.NoError(t, err)
+	assert.True(t, res.Matched, "non-overlapping source/target populations must inhibit normally; the C2 guard must not over-fire")
+}
+
+// TestMatchRuleFast_EqualAbsentOnBothAlertsCountsAsEqual is the I2
+// regression test: upstream's fingerprintEquals hashes a missing label as
+// "" (inhibit.go:338-344, `equalSet[n] = lset[n]`), so "absent on both
+// alerts" hashes identically and the rule still matches. The pre-fix
+// version required both alerts to explicitly carry the label
+// (`sourceOk && targetOk`), treating "neither has it" as UNEQUAL.
+func TestMatchRuleFast_EqualAbsentOnBothAlertsCountsAsEqual(t *testing.T) {
+	rule := InhibitionRule{
+		Name:        "equal-absent-both",
+		SourceMatch: map[string]string{"alertname": "NodeDown"},
+		TargetMatch: map[string]string{"alertname": "InstanceDown"},
+		Equal:       []string{"cluster"}, // neither alert below carries "cluster"
+	}
+	require.NoError(t, rule.CompileMatchers())
+
+	source := &core.Alert{Fingerprint: "src", Labels: map[string]string{"alertname": "NodeDown"}}
+	target := &core.Alert{Fingerprint: "tgt", Labels: map[string]string{"alertname": "InstanceDown"}}
+
+	cache := &mockCache{firingAlerts: []*core.Alert{source}}
+	m := NewMatcher(cache, []InhibitionRule{rule}, nil)
+
+	res, err := m.ShouldInhibit(context.Background(), target)
+	require.NoError(t, err)
+	assert.True(t, res.Matched, "equal label absent on BOTH alerts must count as equal (upstream fingerprintEquals semantics)")
+}
+
+// TestMatchRuleFast_EqualAbsentOnOneAlertOnlyStillBlocks pins the
+// complementary case: absent on only ONE side must still block (both
+// upstream and AMP agree here — "" != "some-value").
+func TestMatchRuleFast_EqualAbsentOnOneAlertOnlyStillBlocks(t *testing.T) {
+	rule := InhibitionRule{
+		Name:        "equal-absent-one-side",
+		SourceMatch: map[string]string{"alertname": "NodeDown"},
+		TargetMatch: map[string]string{"alertname": "InstanceDown"},
+		Equal:       []string{"cluster"},
+	}
+	require.NoError(t, rule.CompileMatchers())
+
+	source := &core.Alert{Fingerprint: "src", Labels: map[string]string{"alertname": "NodeDown", "cluster": "prod"}}
+	target := &core.Alert{Fingerprint: "tgt", Labels: map[string]string{"alertname": "InstanceDown"}} // no cluster
+
+	cache := &mockCache{firingAlerts: []*core.Alert{source}}
+	m := NewMatcher(cache, []InhibitionRule{rule}, nil)
+
+	res, err := m.ShouldInhibit(context.Background(), target)
+	require.NoError(t, err)
+	assert.False(t, res.Matched, `equal label present on one alert ("prod") and absent (i.e. "") on the other must still block`)
+}
+
 // --- Review fix round 1: CompileLegacyRegex / Compile (I3 + S1) -----------
 
 // TestCompileLegacyRegex_Anchored is the I3 regression test: legacy
