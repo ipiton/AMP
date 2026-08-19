@@ -208,6 +208,22 @@ func (p *RouteConfigParser) ValidateConfig(config *RouteConfig) error {
 // has no smarthost/auth fields to copy into, so the publishing-target builder
 // reads global directly (and validateSemantics requires it whenever any
 // email_configs exist).
+//
+// `global.http_config` is resolved here too (FU-HTTP-CONFIG, wave 7 track C).
+// It follows the same rule and, importantly, is NOT deep-merged: upstream
+// Alertmanager assigns the global block only when the integration's own is
+// nil (Config.UnmarshalYAML: `if wh.HTTPConfig == nil { wh.HTTPConfig =
+// c.Global.HTTPConfig }`), so an integration that sets http_config at all
+// replaces the global one WHOLESALE — setting only `proxy_url` per integration
+// discards global's tls_config rather than inheriting it. AMP mirrors that
+// exactly, including the surprising part, because silently deep-merging would
+// mean an AMP deployment authenticates or verifies certificates differently
+// from the Alertmanager the same file was written for.
+//
+// Unlike upstream, each integration gets its own CLONE rather than a shared
+// pointer: the config is reloadable and downstream consumers (the target
+// builder, the status API) must not be able to mutate one integration's HTTP
+// config through another's.
 func resolveGlobalFallbacks(config *RouteConfig) {
 	if config == nil || config.Global == nil {
 		return
@@ -219,21 +235,64 @@ func resolveGlobalFallbacks(config *RouteConfig) {
 			continue
 		}
 		for _, cfg := range receiver.SlackConfigs {
-			if cfg != nil && cfg.APIURL == "" {
+			if cfg == nil {
+				continue
+			}
+			if cfg.APIURL == "" {
 				cfg.APIURL = global.SlackAPIURL
 			}
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 		for _, cfg := range receiver.PagerDutyConfigs {
-			if cfg != nil && cfg.URL == "" {
+			if cfg == nil {
+				continue
+			}
+			if cfg.URL == "" {
 				cfg.URL = global.PagerDutyURL
 			}
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 		for _, cfg := range receiver.TelegramConfigs {
-			if cfg != nil && cfg.APIURL == "" {
+			if cfg == nil {
+				continue
+			}
+			if cfg.APIURL == "" {
 				cfg.APIURL = global.TelegramAPIURL
 			}
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
+		}
+		for _, cfg := range receiver.WebhookConfigs {
+			if cfg == nil {
+				continue
+			}
+			cfg.HTTPConfig = ResolveHTTPConfigFallback(cfg.HTTPConfig, global.HTTPConfig)
 		}
 	}
+}
+
+// ResolveHTTPConfigFallback returns the integration's own http_config when it
+// has one, and otherwise a CLONE of the global block. Wholesale, never merged —
+// see resolveGlobalFallbacks' doc comment for why that matches upstream.
+//
+// Exported because the publishing-target builder applies it a second time: a
+// RouteConfig built PROGRAMMATICALLY (tests, any future entry point) never
+// passes through Parse and therefore never had its fallbacks resolved. The
+// operation is idempotent — the integration's own value always wins — so
+// applying it twice on a parsed config is a no-op.
+func ResolveHTTPConfigFallback(own, global *HTTPConfig) *HTTPConfig {
+	if own != nil {
+		return own
+	}
+	if global == nil {
+		return nil
+	}
+	// The clone is TAGGED as inherited so downstream can tell a global-propagated
+	// block from the integration's own declaration even after resolution has
+	// erased the structural difference (review I1). Idempotent: the second,
+	// builder-side call sees own != nil and returns it with the tag intact.
+	clone := global.Clone()
+	clone.markInheritedFromGlobal()
+	return clone
 }
 
 // applyDefaults applies default values recursively.

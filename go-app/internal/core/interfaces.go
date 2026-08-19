@@ -126,6 +126,24 @@ type PublishingTarget struct {
 	// ALL receivers (backward compatibility with targets predating
 	// receiver-based routing). See PublishingCoordinator.PublishToTargets.
 	Receivers []string `json:"receivers,omitempty"`
+
+	// HTTPConfig is upstream Alertmanager's per-integration `http_config`
+	// (FU-HTTP-CONFIG, wave 7 track C): proxy, TLS, basic auth, bearer
+	// authorization and redirect policy for THIS target's HTTP client.
+	//
+	// nil (the overwhelmingly common case) means the publisher keeps its own
+	// built-in client and nothing about delivery changes. When set, the
+	// publisher factory builds a dedicated *http.Client from it and includes
+	// HTTPClientConfig.Fingerprint() in every client cache key, so two targets
+	// sharing a URL and a credential but differing in http_config can never
+	// share a client.
+	//
+	// BOTH target sources populate it: BuildConfigTargets maps
+	// `receivers[].<kind>_configs[].http_config` (with the `global.http_config`
+	// fallback already resolved at parse time), and a K8s Secret target can
+	// carry an `http_config` object in its JSON blob — same field name, same
+	// shape, no extra parsing code.
+	HTTPConfig *HTTPClientConfig `json:"http_config,omitempty"`
 }
 
 // EnrichedAlert represents alert enriched with classification data

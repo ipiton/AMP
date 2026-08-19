@@ -32,7 +32,7 @@ func (c *staticAlertCache) GetFiringAlerts(_ context.Context) ([]*core.Alert, er
 	return c.alerts, nil
 }
 func (c *staticAlertCache) AddFiringAlert(_ context.Context, _ *core.Alert) error { return nil }
-func (c *staticAlertCache) RemoveAlert(_ context.Context, _ string) error        { return nil }
+func (c *staticAlertCache) RemoveAlert(_ context.Context, _ string) error         { return nil }
 
 func TestToInhibitionRules_MatchersFormWiredAtRuntime(t *testing.T) {
 	cfg := &InhibitionConfig{

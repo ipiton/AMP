@@ -238,4 +238,19 @@ func applyDefaults(target *core.PublishingTarget) {
 	if target.FilterConfig == nil {
 		target.FilterConfig = make(map[string]any)
 	}
+
+	// Normalise http_config the same way the config-target builder does
+	// (FU-HTTP-CONFIG, review M10). Without this, a Secret writing the perfectly
+	// natural `"tls_config": {"insecure_skip_verify": false}` produced a non-nil
+	// TLSConfig, a non-empty fingerprint and a dedicated *http.Client
+	// behaviourally identical to the publisher's built-in one — a wasted client
+	// and cache entry per such target. Same for an explicit
+	// `"follow_redirects": true`, which is already the default.
+	target.HTTPConfig.Normalize()
+	if target.HTTPConfig.IsZero() {
+		// An `"http_config": {}` block (or one that normalised down to nothing)
+		// must leave the field nil, so the publisher keeps its built-in client and
+		// the cache key keeps its pre-existing shape.
+		target.HTTPConfig = nil
+	}
 }

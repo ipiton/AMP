@@ -944,7 +944,13 @@ func (q *PublishingQueue) createPublisherForJob(job *PublishingJob) (AlertPublis
 	case TargetTypeRootly, TargetTypePagerDuty, TargetTypeSlack, TargetTypeTelegram, TargetTypeEmail:
 		return q.factory.CreatePublisherForTarget(job.Target)
 	default:
-		return q.factory.CreatePublisher(job.Target.Type)
+		// CreateBasicPublisherForTarget, not CreatePublisher: same basic
+		// publisher, but honouring the target's `http_config`
+		// (FU-HTTP-CONFIG). Webhook targets stay on the BASIC publisher for the
+		// validation reason above, and they are the most likely users of
+		// http_config — a corp-proxied or mTLS internal endpoint — so ignoring
+		// it here would make the feature dead on the queue path.
+		return q.factory.CreateBasicPublisherForTarget(job.Target)
 	}
 }
 
