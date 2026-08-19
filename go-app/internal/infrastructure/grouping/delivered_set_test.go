@@ -221,6 +221,69 @@ func TestDeliveredSet_TTLIsBoundedByRepeatInterval(t *testing.T) {
 	assert.Empty(t, delivered, "past its TTL the state must read as absent, so the whole set is re-sent")
 }
 
+// TestDeliveredSet_TTLDoesNotSlideOnSubsequentWrites is the r5 regression
+// (re-review, wave 5): a SECOND partial write used to PEXPIRE the whole hash
+// again, sliding its expiry forward from "now" instead of leaving the window
+// anchored to the FIRST write. A group with one persistently-failing alert and
+// other alerts trickling in through separate fires could therefore keep
+// already-delivered alerts suppressed well past one repeat_interval — every
+// fire that recorded even one new fingerprint reset the clock. The state must
+// now expire on the schedule its first write set, however many partial writes
+// follow.
+func TestDeliveredSet_TTLDoesNotSlideOnSubsequentWrites(t *testing.T) {
+	log, mr, cleanup := setupTestRedisNotifyLog(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	initialTTL := mr.TTL(notifyLogDeliveredKey("gk", "target-a"))
+	require.Equal(t, 10*time.Minute+notifyLogEntryTTLGracePeriod, initialTTL)
+
+	// Let time pass (well inside the window), then a second alert lands while
+	// the target is still only partially delivered.
+	mr.FastForward(5 * time.Minute)
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-2:firing"}, 10*time.Minute))
+
+	ttlAfterSecondWrite := mr.TTL(notifyLogDeliveredKey("gk", "target-a"))
+	assert.Less(t, ttlAfterSecondWrite, initialTTL,
+		"a later partial write must not reset the TTL back to a full window")
+
+	// Forward past the FIRST write's original window. If the second write had
+	// slid the expiry, the key would still be alive here.
+	mr.FastForward(initialTTL - 5*time.Minute + time.Second)
+
+	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	assert.Empty(t, delivered, "the state must expire on the FIRST write's schedule, not be extended by later partial writes")
+}
+
+// TestDeliveredSet_MemoryTTLDoesNotSlideOnSubsequentWrites is the in-memory
+// half of the r5 regression: recordedAt/ttl must be stamped once, on the write
+// that creates the state, and left untouched by every later partial write for
+// the same (group, target).
+func TestDeliveredSet_MemoryTTLDoesNotSlideOnSubsequentWrites(t *testing.T) {
+	log := newNotifyDedupLog()
+	ctx := context.Background()
+
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	// Age the state most of the way to its window, but not past it, then
+	// record a second alert while the target is still only partially
+	// delivered.
+	backdateDeliveredState(t, log, "gk", "target-a", 9*time.Minute)
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-2:firing"}, 10*time.Minute))
+
+	// Age it the rest of the way past the FIRST write's window. If the second
+	// write had reset recordedAt, this would not be enough to expire it.
+	remaining := deliveredStateTTL(10*time.Minute) - 9*time.Minute + time.Second
+	backdateDeliveredState(t, log, "gk", "target-a", remaining)
+
+	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	assert.Empty(t, delivered, "a later partial write must not push recordedAt forward, or the state would outlive its first-write window")
+}
+
 // TestDeliveredSet_MemoryStateExpires is the I1 regression (review round 1,
 // Important): the IN-MEMORY delivered state had no expiry at all, so in the lite
 // profile — or in the standard profile whenever Redis was unavailable at
