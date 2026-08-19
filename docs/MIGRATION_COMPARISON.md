@@ -77,7 +77,7 @@ and the config-write/`/history` APIs (explicitly out of scope for this task). Se
 | `send_resolved` per integration | Supported (default true) | Supported (default true); suppression happens at target resolution, so nothing is queued, and is counted as `alert_history_publishing_resolved_suppressed_total` | A resolved-only group for a `send_resolved: false` target delivers nothing but still settles (resolved alerts pruned, group torn down), matching upstream's retry-stage + flush behaviour |
 | Receiver integrations (publisher availability) | Full set incl. OpsGenie/VictorOps/WeChat/Pushover/SNS/Webex | webhook/email/PagerDuty/Slack/Telegram/Rootly publishers wired (Telegram's enhanced publisher became runtime-reachable in the final fix wave); Discord/Teams via webhook templates; OpsGenie/VictorOps/WeChat validate-but-not-wired; Pushover/SNS/Webex absent | Check the receiver matrix in `ALERTMANAGER_COMPATIBILITY.md` against your actual receiver list |
 | Hot reload trigger | `SIGHUP` + `POST /-/reload` | Both. Routing-only edits are applied (they were silently discarded before the final fix wave) | Parity-level |
-| Wire-level webhook payload | One POST per target with a full `alerts` JSON array per group | One POST per `(target × alert)` pair | Different request shape/count; functionally delivers all alerts, but a downstream integration parsing the exact payload shape needs to be checked |
+| Wire-level webhook payload | One POST per target with a full `alerts` JSON array per group | Same since wave 2: one POST per `(group, target)` with an upstream-v4-shaped `alerts` array (`BatchAlertPublisher.PublishBatch`); non-batch integrations (Slack/Telegram/PagerDuty/Email) send one wire message per alert within one job, with per-alert delivered-state so partial failures retry only what is owed | Parity-level for webhook/alertmanager targets |
 | Config write API / `/history*` | Available | Not implemented | Explicitly out of scope for this task; stays backlog |
 | Benchmarks / resource claims | Well-known operational profile | Intentionally withheld pending reproducible current benchmarks | Do not make sizing assumptions from old marketing numbers |
 
@@ -102,23 +102,18 @@ AMP is now a realistic candidate for most standard Alertmanager deployments wher
 
 Honest, code-traceable gaps as of this branch:
 
-1. **`GET /api/v2/alerts/groups` receiver field is hardcoded** to the first configured receiver (or `"default"`),
-   not the routing-tree-evaluated receiver for each alert. The real notify pipeline is correct; this read-only
-   query endpoint is not. (`internal/application/handlers/alerts.go`)
-2. **Webhook delivery is one HTTP request per `(target × alert)` pair**, not upstream's single POST with an
-   `alerts` array per target per group. (`internal/infrastructure/publishing/coordinator.go`)
-3. **Niche receivers**: OpsGenie/VictorOps/WeChat validate configuration but send zero notifications (no runtime
+1. **Niche receivers**: OpsGenie/VictorOps/WeChat validate configuration but send zero notifications (no runtime
    publisher — a receiver carrying only these is treated as a blackhole, with a load-time WARNING naming it);
    Pushover/AWS SNS/Webex have no support at any layer.
-3a. **Per-integration field fidelity**: endpoints and credentials from `*_configs` are delivered, presentation and
+2. **Per-integration field fidelity**: endpoints and credentials from `*_configs` are delivered, presentation and
    categorisation fields are not (Slack `channel`/`title`/`color`, PagerDuty `severity`/`class`/`details`, Telegram
    `parse_mode`), and per-integration `http_config` plus every `*_file` credential variant is parsed-not-applied.
    Tracked as `FU-INTEGRATION-FIELD-FIDELITY`; full table in `ALERTMANAGER_COMPATIBILITY.md`.
-4. **Config write API (`/api/v2/config*`) and `/history*`** are not implemented — explicitly out of scope for this
+3. **Config write API (`/api/v2/config*`) and `/history*`** are not implemented — explicitly out of scope for this
    task.
-5. **Telegram rate limiting is global (30 msg/s), not per-chat.** Deferred; see backlog.
-6. **A cross-replica DB migration advisory lock** for concurrent startup isn't implemented — deferred.
-7. **Repeat-notification continuation under replica restart** is implemented and hardened (task 6.2's timer
+4. **Custom notification templates (`templates:`)** are not implemented — fixed formatters render every
+   integration's payload; upstream `{{ template ... }}` references are ignored. Epic in progress.
+5. **Repeat-notification continuation under replica restart** is implemented and hardened (task 6.2's timer
    reconciliation loop) but not proven by a long-duration regression test — worth an explicit check during the
    live `amtool`/Grafana audit.
 
