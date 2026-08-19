@@ -201,20 +201,39 @@ func buildReceiverTargets(receiver *infraroute.Receiver, global *infraroute.Glob
 		out = append(out, target)
 	}
 
+	// httpConfig resolves + converts an integration's http_config once per
+	// integration, logging any unsupported sub-block against the receiver/kind/
+	// index it came from (never a value — see this file's SECRETS note).
+	httpConfig := func(own *infraroute.HTTPConfig, kind string, idx int) *core.HTTPClientConfig {
+		return httpClientConfigFor(own, global, receiver.Name, kind, idx, logger)
+	}
+
 	for i, cfg := range receiver.WebhookConfigs {
 		target, err := webhookTarget(receiver.Name, i, cfg)
+		if err == nil && cfg != nil {
+			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindWebhook, i)
+		}
 		add(target, err, configKindWebhook, i)
 	}
 	for i, cfg := range receiver.SlackConfigs {
 		target, err := slackTarget(receiver.Name, i, cfg)
+		if err == nil && cfg != nil {
+			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindSlack, i)
+		}
 		add(target, err, configKindSlack, i)
 	}
 	for i, cfg := range receiver.PagerDutyConfigs {
 		target, err := pagerDutyTarget(receiver.Name, i, cfg)
+		if err == nil && cfg != nil {
+			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindPagerDuty, i)
+		}
 		add(target, err, configKindPagerDuty, i)
 	}
 	for i, cfg := range receiver.TelegramConfigs {
 		target, err := telegramTarget(receiver.Name, i, cfg)
+		if err == nil && cfg != nil {
+			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindTelegram, i)
+		}
 		add(target, err, configKindTelegram, i)
 	}
 	for i, cfg := range receiver.EmailConfigs {
@@ -223,6 +242,118 @@ func buildReceiverTargets(receiver *infraroute.Receiver, global *infraroute.Glob
 	}
 
 	return out
+}
+
+// ============================================================================
+// http_config mapping (FU-HTTP-CONFIG, wave 7 track C)
+// ============================================================================
+
+// httpClientConfigFor resolves an integration's `http_config` (falling back to
+// `global.http_config`) and converts it to the transport-neutral
+// core.HTTPClientConfig the publisher factory consumes.
+//
+// The fallback is applied HERE as well as at parse time
+// (routing.resolveGlobalFallbacks): a RouteConfig built programmatically never
+// passes through Parse, and routing.ResolveHTTPConfigFallback is idempotent, so
+// applying it twice on a parsed config is a no-op. Wholesale, never a deep merge
+// — see that function's doc comment for the upstream ruling.
+//
+// Returns nil for an absent or empty block, which is what makes this change
+// invisible to every existing config: the publisher keeps its built-in client
+// and its cache keys keep their existing shape.
+//
+// Unsupported sub-blocks are reported, not silently dropped. Only `oauth2`
+// qualifies today (see routing.HTTPConfig.OAuth2): an OAuth2-protected endpoint
+// would otherwise receive unauthenticated requests with no clue why. The WARN
+// names the receiver, integration kind and index — never a credential.
+func httpClientConfigFor(
+	own *infraroute.HTTPConfig,
+	global *infraroute.GlobalConfig,
+	receiver, kind string,
+	index int,
+	logger *slog.Logger,
+) *core.HTTPClientConfig {
+	var globalHTTP *infraroute.HTTPConfig
+	if global != nil {
+		globalHTTP = global.HTTPConfig
+	}
+
+	resolved := infraroute.ResolveHTTPConfigFallback(own, globalHTTP)
+	if resolved == nil {
+		return nil
+	}
+
+	if resolved.OAuth2 != nil {
+		logger.Warn("Ignoring unsupported http_config.oauth2; requests from this integration will be sent WITHOUT OAuth2 credentials (see FU-HTTP-OAUTH2)",
+			"receiver", receiver,
+			"integration", kind+"_configs",
+			"index", index,
+		)
+	}
+
+	converted := &core.HTTPClientConfig{ProxyURL: strings.TrimSpace(resolved.ProxyURL)}
+
+	// An empty sub-block (`tls_config: {}`, `basic_auth: {}`) is normalised back
+	// to nil rather than carried through: keeping it would make IsZero() false
+	// and buy the target a dedicated *http.Client that behaves identically to
+	// the built-in one.
+	if tlsCfg := resolved.TLSConfig; tlsCfg != nil {
+		candidate := &core.TLSClientConfig{
+			CAFile:             strings.TrimSpace(tlsCfg.CAFile),
+			CertFile:           strings.TrimSpace(tlsCfg.CertFile),
+			KeyFile:            strings.TrimSpace(tlsCfg.KeyFile),
+			ServerName:         strings.TrimSpace(tlsCfg.ServerName),
+			InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
+		}
+		if *candidate != (core.TLSClientConfig{}) {
+			converted.TLSConfig = candidate
+		}
+	}
+	if basic := resolved.BasicAuth; basic != nil {
+		candidate := &core.BasicAuthConfig{
+			Username:     basic.Username,
+			Password:     basic.Password,
+			PasswordFile: strings.TrimSpace(basic.PasswordFile),
+		}
+		if *candidate != (core.BasicAuthConfig{}) {
+			converted.BasicAuth = candidate
+		}
+	}
+	if authz := resolved.Authorization; authz != nil {
+		candidate := &core.AuthorizationConfig{
+			Type:            strings.TrimSpace(authz.Type),
+			Credentials:     authz.Credentials,
+			CredentialsFile: strings.TrimSpace(authz.CredentialsFile),
+		}
+		// `authorization: {type: Bearer}` with no credential at all is also
+		// nothing: the header would render as a bare scheme.
+		if candidate.Credentials == "" && candidate.CredentialsFile == "" {
+			logger.Warn("Ignoring http_config.authorization with no credentials or credentials_file",
+				"receiver", receiver,
+				"integration", kind+"_configs",
+				"index", index,
+			)
+		} else {
+			converted.Authorization = candidate
+		}
+	}
+
+	// follow_redirects is only carried when it DIFFERS from the upstream default
+	// (true). routing.HTTPConfig.Defaults() materialises the default as an
+	// explicit `true` for every parsed config, so copying it verbatim would give
+	// every single target a non-empty http_config — and therefore a
+	// non-empty cache-key fingerprint and a dedicated *http.Client — purely
+	// because the parser filled in a default. Dropping the redundant `true`
+	// keeps IsZero() honest.
+	if resolved.FollowRedirects != nil && !*resolved.FollowRedirects {
+		follow := false
+		converted.FollowRedirects = &follow
+	}
+
+	if converted.IsZero() {
+		return nil
+	}
+	return converted
 }
 
 // FilterConfigSendResolved is the target FilterConfig key carrying upstream's
@@ -268,8 +399,12 @@ func newConfigTarget(receiver, kind string, index int, targetType string, format
 // also the pair discovery_validate.isCompatibleTypeFormat accepts.
 //
 // NOT expressible on the publisher contract (documented, not silently
-// dropped): http_method (WebhookPublisher always POSTs), max_alerts,
-// http_config. send_resolved IS expressible — see sendResolvedFilter below.
+// dropped): http_method (WebhookPublisher always POSTs), max_alerts.
+// send_resolved IS expressible — see sendResolvedFilter below. http_config is
+// expressible since FU-HTTP-CONFIG — mapped by the caller
+// (buildReceiverTargets) via httpClientConfigFor, not here, because the
+// `global.http_config` fallback needs the global block this function does not
+// receive.
 func webhookTarget(receiver string, index int, cfg *infraroute.WebhookConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
@@ -335,8 +470,9 @@ func slackTarget(receiver string, index int, cfg *infraroute.SlackConfig) (*core
 // as a BASE and appends the enqueue path itself.
 //
 // NOT expressible: severity/class/component/group/description/details
-// (formatPagerDuty derives severity/summary from the alert itself),
-// http_config.
+// (formatPagerDuty derives severity/summary from the alert itself).
+// http_config IS expressible since FU-HTTP-CONFIG — mapped by
+// buildReceiverTargets, see webhookTarget's note.
 func pagerDutyTarget(receiver string, index int, cfg *infraroute.PagerDutyConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
@@ -382,7 +518,8 @@ func pagerDutyBaseURL(raw string) string {
 // and the publisher's own zero values already mean the same thing.
 //
 // NOT expressible: parse_mode (EnhancedTelegramPublisher always renders via
-// core.FormatTelegram), message, http_config.
+// core.FormatTelegram), message. http_config IS expressible since
+// FU-HTTP-CONFIG — mapped by buildReceiverTargets, see webhookTarget's note.
 func telegramTarget(receiver string, index int, cfg *infraroute.TelegramConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
