@@ -42,19 +42,28 @@ import (
 //   Alerts.Firing/Resolved, and the CommonLabels/CommonAnnotations
 //   intersection performed by (*Template).Data — here BuildData.
 //
+// PORTED AS PRESENT-BUT-NEVER-POPULATED (fix round, review I1):
+//   Data.RouteLabels, Data.NotificationReason — both ARE upstream v0.34.0
+//     fields, and both were originally omitted on the reasoning that "a
+//     permanently-empty field would be a parity lie". That optimised the wrong
+//     axis. A missing STRUCT FIELD is an execution error
+//     (`can't evaluate field NotificationReason in type *templating.Data`),
+//     not a parse error — `missingkey=zero` only rescues missing MAP keys — so
+//     a migrated template referencing either one sails through
+//     validateTemplateGlobs at config load and then fails at 03:00, degrading
+//     to the fixed formatter. That is exactly the failure the load-time gate
+//     exists to prevent, and it also contradicted the treatment of the
+//     `routeLabels` FUNCTION, which was deliberately kept as a no-op so such a
+//     config would still load. Graceful-empty is the correct posture for an
+//     unported field; missing is not.
+//
 // SKIPPED, with reasons:
-//   Data.RouteLabels + routeLabelResolver + Template.RouteLabelRenderer +
-//     MarkRouteLabelsRendered — upstream's route-label templating feature.
-//     AMP's route config (internal/infrastructure/routing) has no route
-//     labels at all, so there is nothing to populate the field from and a
-//     resolver would only ever resolve the empty set. The `routeLabels`
-//     template FUNCTION is kept (see funcs.go) as upstream's own no-op
-//     placeholder so that a user template referencing it still parses instead
-//     of failing the whole file load.
-//   Data.NotificationReason — set by upstream's dispatcher from its notify
-//     pipeline; AMP's notify chain has no equivalent value to supply, and
-//     emitting a permanently-empty field would be a parity lie rather than
-//     parity.
+//   routeLabelResolver + Template.RouteLabelRenderer + MarkRouteLabelsRendered
+//     — the machinery BEHIND upstream's route-label templating feature. AMP's
+//     route config (internal/infrastructure/routing) has no route labels at
+//     all, so a resolver would only ever resolve the empty set. The field and
+//     the function both exist (above), so a config using the feature loads and
+//     renders empty rather than erroring.
 //   DeepCopyWithTemplate + normalizeYAMLValue — used by upstream only to
 //     template arbitrary webhook/JSON payload trees. AMP's webhook v4 payload
 //     is struct-marshaled and explicitly NOT templated (wave-2 batch
@@ -185,9 +194,26 @@ type Data struct {
 	Status   string `json:"status"`
 	Alerts   Alerts `json:"alerts"`
 
+	// NotificationReason is upstream's dispatcher-supplied reason string. AMP
+	// has no equivalent value in its notify chain, so it is ALWAYS "".
+	//
+	// Present so that `{{ .NotificationReason }}` in a config migrated from
+	// upstream renders empty instead of failing execution with "can't evaluate
+	// field" — a struct-field miss is an execution error that the load-time
+	// template validation cannot catch, so omitting the field turned a
+	// harmless unused reference into a silent 03:00 fallback (review I1).
+	NotificationReason string `json:"notification_reason"`
+
 	GroupLabels       KV `json:"groupLabels"`
 	CommonLabels      KV `json:"commonLabels"`
 	CommonAnnotations KV `json:"commonAnnotations"`
+
+	// RouteLabels is upstream's route-label map. AMP's route config has no
+	// route labels, so it is ALWAYS an empty (never nil) KV — nil would make
+	// `{{ .RouteLabels.team }}` behave differently from an empty map for some
+	// helpers. Same rationale as NotificationReason above, and consistent with
+	// the `routeLabels` function being kept as a no-op in funcs.go.
+	RouteLabels KV `json:"routeLabels"`
 
 	ExternalURL string `json:"externalURL"`
 }
@@ -290,12 +316,16 @@ type DataInput struct {
 //     (upstream compares against the zero value of a missing label).
 func BuildData(in DataInput) *Data {
 	data := &Data{
-		Receiver:          regexp.QuoteMeta(in.Receiver),
-		Status:            string(model.AlertResolved),
-		Alerts:            make(Alerts, 0, len(in.Alerts)),
+		Receiver: regexp.QuoteMeta(in.Receiver),
+		Status:   string(model.AlertResolved),
+		Alerts:   make(Alerts, 0, len(in.Alerts)),
+		// NotificationReason stays "" and RouteLabels stays empty by design —
+		// see their field comments. Both are initialized rather than left nil so
+		// a template can walk them without a special case.
 		GroupLabels:       KV{},
 		CommonLabels:      KV{},
 		CommonAnnotations: KV{},
+		RouteLabels:       KV{},
 		ExternalURL:       in.ExternalURL,
 	}
 

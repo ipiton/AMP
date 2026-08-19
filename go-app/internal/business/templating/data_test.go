@@ -278,7 +278,10 @@ func TestData_JSONTagsMatchUpstream(t *testing.T) {
 	var decoded map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 
-	for _, key := range []string{"receiver", "status", "alerts", "groupLabels", "commonLabels", "commonAnnotations", "externalURL"} {
+	for _, key := range []string{
+		"receiver", "status", "alerts", "notification_reason",
+		"groupLabels", "commonLabels", "commonAnnotations", "routeLabels", "externalURL",
+	} {
 		assert.Contains(t, decoded, key)
 	}
 
@@ -305,6 +308,60 @@ func TestBuildData_NoSecretsReachData(t *testing.T) {
 
 	var decoded map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(raw, &decoded))
-	assert.Len(t, decoded, 7,
+	assert.Len(t, decoded, 9,
 		"Data gained a field: verify it cannot carry receiver credentials before updating this count")
+}
+
+// === Upstream fields AMP never populates (review I1) ===
+
+// TestBuildData_UnpopulatedUpstreamFieldsExist is the fix for review I1. A
+// migrated template referencing either field must render EMPTY, not fail: a
+// struct-field miss is an execution error, and `missingkey=zero` rescues only
+// missing MAP keys — so an absent field slips past the load-time template
+// validation and only surfaces when an alert fires.
+func TestBuildData_UnpopulatedUpstreamFieldsExist(t *testing.T) {
+	tmpl, err := FromGlobs(nil, Options{})
+	require.NoError(t, err)
+
+	data := BuildData(DataInput{
+		Receiver: "r",
+		Alerts:   []*core.Alert{alertWith(map[string]string{"alertname": "A"}, nil, core.StatusFiring)},
+	})
+
+	assert.Equal(t, "", data.NotificationReason)
+	assert.NotNil(t, data.RouteLabels, "empty, never nil")
+	assert.Empty(t, data.RouteLabels)
+
+	// Every shape a migrated template plausibly uses, including the ones that
+	// would have hard-errored before the fix.
+	for expr, want := range map[string]string{
+		`[{{ .NotificationReason }}]`:                             "[]",
+		`[{{ .RouteLabels.team }}]`:                               "[]",
+		`[{{ index .RouteLabels "team" }}]`:                       "[]",
+		`[{{ len .RouteLabels }}]`:                                "[0]",
+		`[{{ .RouteLabels.SortedPairs.Values | join "," }}]`:      "[]",
+		`[{{ routeLabels "team" }}]`:                              "[]",
+		`{{ if .NotificationReason }}set{{ else }}unset{{ end }}`: "unset",
+	} {
+		got, execErr := tmpl.ExecuteTextString(expr, data)
+		require.NoError(t, execErr, expr)
+		assert.Equal(t, want, got, expr)
+	}
+}
+
+// TestBuildData_MissingFieldWouldBeAnExecutionError pins the REASON the two
+// fields above must exist: an unknown struct field is an execution error that no
+// amount of load-time validation can catch, unlike an unknown map key.
+func TestBuildData_MissingFieldWouldBeAnExecutionError(t *testing.T) {
+	tmpl, err := FromGlobs(nil, Options{})
+	require.NoError(t, err)
+	data := BuildData(DataInput{Receiver: "r"})
+
+	_, err = tmpl.ExecuteTextString(`{{ .NoSuchFieldAtAll }}`, data)
+	require.Error(t, err, "an unknown struct field is an execution error")
+	assert.Contains(t, err.Error(), "can't evaluate field")
+
+	got, err := tmpl.ExecuteTextString(`[{{ .CommonLabels.nope }}]`, data)
+	require.NoError(t, err, "an unknown MAP key is not — missingkey=zero handles it")
+	assert.Equal(t, "[]", got)
 }

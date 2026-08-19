@@ -19,9 +19,16 @@ import (
 //
 //	github.com/prometheus/alertmanager@v0.34.0/template
 //
-// rendering the same two fixtures through its own Data() + ExecuteTextString().
+// rendering the same fixtures through its own Data() + ExecuteTextString().
 // A mismatch here therefore means AMP diverged from upstream, which is the only
 // question this file exists to answer.
+//
+// Five fixtures, each chosen for a branch the others do not reach: `mixed`
+// (2 firing + 1 resolved), `single` (one alert, dotted receiver → QuoteMeta),
+// `resolved-only` ([RESOLVED], no `:count`, empty Firing partition), `unicode`
+// (cyrillic/CJK/emoji labels and annotations) and `disjoint` (alerts sharing
+// nothing → both Common* maps empty). The last two were added in the fix round
+// per review Minor 1.
 //
 // How they were generated (reproduce it the same way after an upstream bump):
 //
@@ -363,6 +370,126 @@ func TestGolden_EmailHTMLRenders(t *testing.T) {
 	assert.NotContains(t, body, `<script>alert("xss")</script>`,
 		"html/template must escape a label value carrying markup")
 	assert.Contains(t, body, "&lt;script&gt;")
+}
+
+// TestGolden_UnicodeLabelsAndAnnotations closes a golden coverage gap flagged in
+// review (Minor 1): every earlier fixture is ASCII, yet real deployments label
+// alerts in cyrillic/CJK and put emoji in annotations. Upstream's output for this
+// fixture was captured by the same generator; note that `__subject` sorts
+// `сервер-1` before `东京` (byte order over UTF-8, not locale collation) and that
+// the receiver is percent-encoded in the URL.
+func TestGolden_UnicodeLabelsAndAnnotations(t *testing.T) {
+	tmpl := goldenTemplate(t)
+
+	generatorURL := goldenGeneratorURL
+	data := BuildData(DataInput{
+		Receiver:    "команда-х",
+		GroupLabels: map[string]string{"alertname": "ДискЗаполнен", "severity": "критично"},
+		Alerts: []*core.Alert{{
+			AlertName: "ДискЗаполнен",
+			Status:    core.StatusFiring,
+			Labels: map[string]string{
+				"alertname": "ДискЗаполнен",
+				"severity":  "критично",
+				"instance":  "сервер-1",
+				"区域":        "东京",
+			},
+			Annotations: map[string]string{
+				"summary":  "Диск заполнен на 95% 🔥",
+				"описание": "требуется вмешательство",
+			},
+			StartsAt:     goldenStartsAt,
+			GeneratorURL: &generatorURL,
+		}},
+		ExternalURL: goldenExternalURL,
+	})
+
+	assert.Equal(t, "6d1b9e68b3ab396f", data.Alerts[0].Fingerprint,
+		"upstream fingerprints UTF-8 label values byte-wise")
+
+	const wantSubject = "[FIRING:1] ДискЗаполнен критично (сервер-1 东京)"
+	const wantURL = "http://amp.example.com/#/alerts?receiver=%D0%BA%D0%BE%D0%BC%D0%B0%D0%BD%D0%B4%D0%B0-%D1%85"
+
+	cases := map[string]string{
+		`{{ template "__subject" . }}`:              wantSubject,
+		`{{ template "slack.default.title" . }}`:    wantSubject,
+		`{{ template "email.default.subject" . }}`:  wantSubject,
+		`{{ template "__alertmanagerURL" . }}`:      wantURL,
+		`{{ template "slack.default.fallback" . }}`: wantSubject + " | " + wantURL,
+		`{{ template "telegram.default.message" . }}`: "\n\nAlerts Firing:\n" +
+			"Labels:\n - alertname = ДискЗаполнен\n - instance = сервер-1\n - severity = критично\n - 区域 = 东京\n" +
+			"Annotations:\n - summary = Диск заполнен на 95% 🔥\n - описание = требуется вмешательство\n" +
+			"Source: http://prometheus.example/graph?g0.expr=up\n\n\n\n",
+	}
+
+	for expr, want := range cases {
+		got, err := tmpl.ExecuteTextString(expr, data)
+		require.NoError(t, err, expr)
+		assert.Equal(t, want, got, expr)
+	}
+}
+
+// TestGolden_DisjointGroupHasEmptyCommonMaps closes the second coverage gap
+// (review Minor 1): a group whose alerts share nothing. Both Common* maps are
+// empty, and `__subject` renders its no-remainder branch — which upstream emits
+// with TWO trailing spaces ("[FIRING:2]  "), one from the empty GroupLabels join
+// and one from the omitted parenthesis group. Pinning that exact whitespace is
+// the point.
+func TestGolden_DisjointGroupHasEmptyCommonMaps(t *testing.T) {
+	tmpl := goldenTemplate(t)
+
+	data := BuildData(DataInput{
+		Receiver:    "team-x",
+		GroupLabels: map[string]string{},
+		Alerts: []*core.Alert{
+			{
+				AlertName: "A", Status: core.StatusFiring,
+				Labels: map[string]string{"alertname": "A", "x": "1"}, Annotations: map[string]string{"a": "1"},
+				StartsAt: goldenStartsAt,
+			},
+			{
+				AlertName: "B", Status: core.StatusFiring,
+				Labels: map[string]string{"alertname": "B", "y": "2"}, Annotations: map[string]string{"b": "2"},
+				StartsAt: goldenStartsAt,
+			},
+		},
+		ExternalURL: goldenExternalURL,
+	})
+
+	assert.Empty(t, data.CommonLabels)
+	assert.Empty(t, data.CommonAnnotations)
+	assert.NotNil(t, data.CommonLabels, "empty, never nil")
+
+	got, err := tmpl.ExecuteTextString(`{{ template "__subject" . }}`, data)
+	require.NoError(t, err)
+	assert.Equal(t, "[FIRING:2]  ", got)
+
+	// GeneratorURL is unset on both alerts, so upstream renders a bare "Source: ".
+	got, err = tmpl.ExecuteTextString(`{{ template "__text_alert_list" .Alerts }}`, data)
+	require.NoError(t, err)
+	assert.Equal(t, "Labels:\n - alertname = A\n - x = 1\nAnnotations:\n - a = 1\nSource: \n"+
+		"Labels:\n - alertname = B\n - y = 2\nAnnotations:\n - b = 2\nSource: \n", got)
+}
+
+// TestGolden_FiringListOnAllResolvedGroup pins the empty-partition case (review
+// Minor 1): `.Alerts.Firing` on an all-resolved group renders "" for the plain
+// list and a single newline for the markdown one.
+func TestGolden_FiringListOnAllResolvedGroup(t *testing.T) {
+	tmpl := goldenTemplate(t)
+	data := BuildData(DataInput{
+		Receiver:    "team-x",
+		GroupLabels: map[string]string{"alertname": "HighCPU", "severity": "critical"},
+		Alerts:      fixtureAlerts()[2:],
+		ExternalURL: goldenExternalURL,
+	})
+
+	got, err := tmpl.ExecuteTextString(`{{ template "__text_alert_list" .Alerts.Firing }}`, data)
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
+
+	got, err = tmpl.ExecuteTextString(`{{ template "__text_alert_list_markdown" .Alerts.Firing }}`, data)
+	require.NoError(t, err)
+	assert.Equal(t, "\n", got)
 }
 
 // TestGolden_DefaultLibraryDefinitionsPresent guards against a truncated or
