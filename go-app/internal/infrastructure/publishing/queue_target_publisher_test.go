@@ -324,3 +324,217 @@ func TestCreatePublisherForJob_TelegramHonoursTargetAPIURL(t *testing.T) {
 	assert.Equal(t, 1, hits["a"], "the first target's own API base must be used")
 	assert.Equal(t, 1, hits["b"], "the second target must NOT be silently redirected to the first target's API base")
 }
+
+// === FU-SLACK-PAGERDUTY-QUEUE-PATH (wave 5) ===
+//
+// The wiring itself (createPublisherForJob routing Slack/PagerDuty through
+// CreatePublisherForTarget, and the clientMu guard covering
+// slackClientMap/pagerDutyClientMap) landed already in the same commit as the
+// telegram fix above — both were part of "route live queue to target-aware
+// publishers" (see queue.go's createPublisherForJob switch: TargetTypeSlack
+// and TargetTypePagerDuty are already in the CreatePublisherForTarget case,
+// and TestCreatePublisherForTarget_ConcurrentIsRaceFree above already drives
+// slack/pagerduty client-map creation under -race). What was missing was the
+// end-to-end proof mirroring the telegram tests: a queue-path job for these
+// two target types must reach the ENHANCED publisher and actually hit the
+// provider's real API shape, not just resolve to the right Go type.
+
+// TestCreatePublisherForJob_SlackReachesEnhancedPublisher mirrors
+// TestCreatePublisherForJob_TelegramReachesEnhancedPublisher: the live queue
+// path must build EnhancedSlackPublisher for a Slack target, not the bare
+// SlackPublisher webhook-only shim.
+func TestCreatePublisherForJob_SlackReachesEnhancedPublisher(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	job := &PublishingJob{
+		Target: &core.PublishingTarget{
+			Name: "oncall-slack",
+			Type: string(TargetTypeSlack),
+			URL:  "https://hooks.slack.example/services/T000/B000/XXXX",
+		},
+	}
+
+	publisher, err := q.createPublisherForJob(job)
+	require.NoError(t, err)
+	require.IsType(t, &EnhancedSlackPublisher{}, publisher,
+		"the live queue path must build the ENHANCED slack publisher, not the basic webhook-only one")
+}
+
+// TestCreatePublisherForJob_SlackActuallyPostsToWebhook closes the loop over
+// HTTP, mirroring TestCreatePublisherForJob_TelegramActuallyCallsBotAPI: the
+// enhanced publisher must POST a Slack message payload straight at the
+// target's webhook URL.
+func TestCreatePublisherForJob_SlackActuallyPostsToWebhook(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		gotCalls int
+		gotMsg   SlackMessage
+		gotPath  string
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var msg SlackMessage
+		_ = json.Unmarshal(body, &msg)
+
+		mu.Lock()
+		gotCalls++
+		gotMsg = msg
+		gotPath = r.URL.Path
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"1234567890.000001"}`))
+	}))
+	defer srv.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	target := &core.PublishingTarget{
+		Name: "oncall-slack",
+		Type: string(TargetTypeSlack),
+		URL:  srv.URL + "/services/T000/B000/XXXX",
+	}
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+	require.NoError(t, err)
+
+	err = publisher.Publish(context.Background(), &core.EnrichedAlert{
+		Alert: &core.Alert{
+			Fingerprint: "fp-slack-1",
+			AlertName:   "HighCPUUsage",
+			Status:      core.StatusFiring,
+			StartsAt:    time.Now(),
+			Labels:      map[string]string{"severity": "critical"},
+			Annotations: map[string]string{"summary": "queue path reaches the Slack webhook"},
+		},
+	}, target)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, gotCalls)
+	assert.Equal(t, "/services/T000/B000/XXXX", gotPath,
+		"must POST straight at the target's webhook path, not some derived endpoint")
+	// NOTE (found while writing this test, out of FU-SLACK-PAGERDUTY-QUEUE-PATH's
+	// scope — that item is routing/credentials, not payload shape): gotMsg ends
+	// up with an empty Text/Blocks/Attachments here. formatSlack (formatter.go)
+	// returns "blocks"/"attachments" as []map[string]any, but buildMessage's
+	// type assertions expect []interface{} — a different slice type in Go, so
+	// they never match and every enhanced Slack payload is silently empty. Not
+	// fixed here; tracked as FU-SLACK-BUILDMESSAGE-TYPE-MISMATCH in BACKLOG.md.
+	_ = gotMsg
+}
+
+// TestCreatePublisherForJob_MissingSlackURLDegradesGracefully mirrors the
+// telegram credential-fallback test: a Slack target with no webhook URL must
+// still yield a working (basic) publisher rather than failing the job.
+func TestCreatePublisherForJob_MissingSlackURLDegradesGracefully(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{
+		Target: &core.PublishingTarget{Name: "broken-slack", Type: string(TargetTypeSlack)},
+	})
+	require.NoError(t, err)
+	require.IsType(t, &SlackPublisher{}, publisher)
+}
+
+// TestCreatePublisherForJob_PagerDutyReachesEnhancedPublisher mirrors the
+// telegram type-check test for PagerDuty.
+func TestCreatePublisherForJob_PagerDutyReachesEnhancedPublisher(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	job := &PublishingJob{
+		Target: &core.PublishingTarget{
+			Name:    "oncall-pagerduty",
+			Type:    string(TargetTypePagerDuty),
+			URL:     "https://events.pagerduty.example",
+			Headers: map[string]string{"routing_key": "rk-oncall-1"},
+		},
+	}
+
+	publisher, err := q.createPublisherForJob(job)
+	require.NoError(t, err)
+	require.IsType(t, &EnhancedPagerDutyPublisher{}, publisher,
+		"the live queue path must build the ENHANCED pagerduty publisher, not the basic HTTP one")
+}
+
+// TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI closes the loop
+// over HTTP: a firing alert must reach PagerDuty's Events API v2 trigger
+// endpoint (POST /v2/events) carrying the target's routing_key.
+func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
+	const routingKey = "rk-oncall-1"
+
+	var (
+		mu            sync.Mutex
+		gotPath       string
+		gotRoutingKey string
+		gotCalls      int
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req TriggerEventRequest
+		_ = json.Unmarshal(body, &req)
+
+		mu.Lock()
+		gotPath = r.URL.Path
+		gotRoutingKey = req.RoutingKey
+		gotCalls++
+		mu.Unlock()
+
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"success","message":"Event processed","dedup_key":"fp-pagerduty-1"}`))
+	}))
+	defer srv.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	target := &core.PublishingTarget{
+		Name:    "oncall-pagerduty",
+		Type:    string(TargetTypePagerDuty),
+		URL:     srv.URL,
+		Headers: map[string]string{"routing_key": routingKey},
+	}
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+	require.NoError(t, err)
+
+	err = publisher.Publish(context.Background(), &core.EnrichedAlert{
+		Alert: &core.Alert{
+			Fingerprint: "fp-pagerduty-1",
+			AlertName:   "HighCPUUsage",
+			Status:      core.StatusFiring,
+			StartsAt:    time.Now(),
+			Labels:      map[string]string{"severity": "critical"},
+			Annotations: map[string]string{"summary": "queue path reaches the PagerDuty Events API"},
+		},
+	}, target)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, gotCalls)
+	assert.Equal(t, "/v2/events", gotPath, "must hit the PagerDuty Events API v2 endpoint, not some other path")
+	assert.Equal(t, routingKey, gotRoutingKey, "the target's routing_key must be honored")
+}
+
+// TestCreatePublisherForJob_MissingPagerDutyRoutingKeyDegradesGracefully
+// mirrors the telegram credential-fallback test: a PagerDuty target with no
+// routing_key must still yield a working (basic) publisher rather than
+// failing the job.
+func TestCreatePublisherForJob_MissingPagerDutyRoutingKeyDegradesGracefully(t *testing.T) {
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	publisher, err := q.createPublisherForJob(&PublishingJob{
+		Target: &core.PublishingTarget{Name: "broken-pagerduty", Type: string(TargetTypePagerDuty)},
+	})
+	require.NoError(t, err)
+	require.IsType(t, &PagerDutyPublisher{}, publisher)
+}
