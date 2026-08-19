@@ -71,20 +71,21 @@ func Write(path string, data Data) error {
 	}
 	tmpPath := tmp.Name()
 	// Best-effort cleanup: harmless no-op once the rename below has already
-	// moved tmpPath to path (Remove then just fails ErrNotExist, ignored).
-	defer os.Remove(tmpPath)
+	// moved tmpPath to path (Remove then just fails ErrNotExist, ignored) —
+	// error deliberately discarded for that reason.
+	defer func() { _ = os.Remove(tmpPath) }()
 
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("chmod temp snapshot file: %w", err)
 	}
 
 	if err := json.NewEncoder(tmp).Encode(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("encode snapshot: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("fsync temp snapshot file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -139,6 +140,6 @@ func fsyncDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return f.Sync()
 }
