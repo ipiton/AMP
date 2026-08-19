@@ -52,10 +52,19 @@ type recordingNotifyLog struct {
 	sends     []string             // target names, in RecordSent order
 	releases  int                  // successful claim releases
 	ctxErrors int                  // calls rejected because their ctx was already done
+
+	// delivered is task fu4's per-alert delivered set: "groupKey|target" ->
+	// set of core.Alert.DeliveryKey values accepted while the target as a
+	// whole stayed unconfirmed. partials counts RecordPartialDelivery calls.
+	delivered map[string]map[string]struct{}
+	partials  int
 }
 
 func newRecordingNotifyLog() *recordingNotifyLog {
-	return &recordingNotifyLog{entries: map[string]time.Time{}}
+	return &recordingNotifyLog{
+		entries:   map[string]time.Time{},
+		delivered: map[string]map[string]struct{}{},
+	}
 }
 
 func (l *recordingNotifyLog) key(groupKey grouping.GroupKey, target string) string {
@@ -92,7 +101,68 @@ func (l *recordingNotifyLog) RecordSent(ctx context.Context, groupKey grouping.G
 	defer l.mu.Unlock()
 	l.entries[l.key(groupKey, target)] = now
 	l.sends = append(l.sends, target)
+	// A full entry supersedes any per-alert progress toward it (task fu4) —
+	// the production implementations drop it, so the double must too, or the
+	// "delivered-set cleaned on success" invariant is untested.
+	delete(l.delivered, l.key(groupKey, target))
 	return nil
+}
+
+// DeliveredAlerts implements task fu4's per-alert delivered-set read.
+func (l *recordingNotifyLog) DeliveredAlerts(ctx context.Context, groupKey grouping.GroupKey, target string) ([]string, error) {
+	if err := l.checkCtx(ctx); err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	set := l.delivered[l.key(groupKey, target)]
+	if len(set) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	return out, nil
+}
+
+// RecordPartialDelivery implements task fu4's additive per-alert record.
+func (l *recordingNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey grouping.GroupKey, target string, deliveryKeys []string, _ time.Duration) error {
+	if err := l.checkCtx(ctx); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.partials++
+	key := l.key(groupKey, target)
+	set := l.delivered[key]
+	if set == nil {
+		set = map[string]struct{}{}
+		l.delivered[key] = set
+	}
+	for _, deliveryKey := range deliveryKeys {
+		set[deliveryKey] = struct{}{}
+	}
+	return nil
+}
+
+// deliveredAlerts returns the recorded per-alert delivered set for one
+// (group, target) pair.
+func (l *recordingNotifyLog) deliveredAlerts(groupKey grouping.GroupKey, target string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]string, 0, len(l.delivered[l.key(groupKey, target)]))
+	for key := range l.delivered[l.key(groupKey, target)] {
+		out = append(out, key)
+	}
+	return out
+}
+
+// partialRecords returns how many times RecordPartialDelivery was called.
+func (l *recordingNotifyLog) partialRecords() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.partials
 }
 
 func (l *recordingNotifyLog) Forget(ctx context.Context, groupKey grouping.GroupKey) error {
@@ -104,6 +174,11 @@ func (l *recordingNotifyLog) Forget(ctx context.Context, groupKey grouping.Group
 	for k := range l.entries {
 		if len(k) > len(groupKey) && k[:len(groupKey)] == string(groupKey) {
 			delete(l.entries, k)
+		}
+	}
+	for k := range l.delivered {
+		if len(k) > len(groupKey) && k[:len(groupKey)] == string(groupKey) {
+			delete(l.delivered, k)
 		}
 	}
 	return nil

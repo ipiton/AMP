@@ -1357,17 +1357,24 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 
 	// Step 4b: per-target Dedup (task fwb, alertmanager-parity wave 2 —
 	// replaces the old whole-group Dedup check with upstream nflog's
-	// group:receiver:integration granularity). skipTarget is handed to the
-	// publisher below; the publisher's own receiver-scoped target
-	// resolution (deep inside ApplicationPublishingAdapter/
-	// PublishingCoordinator) calls it once per candidate target BEFORE
-	// attempting delivery, so a target that already received this EXACT
-	// alert set within repeat_interval is skipped — not resent — while any
-	// target that failed last cycle is not, and gets retried here.
+	// group:receiver:integration granularity), refined to per-ALERT dedup for
+	// non-batch targets (task fu4, wave 4). targetAlerts is handed to the
+	// publisher below; the publisher's own receiver-scoped target resolution
+	// (deep inside ApplicationPublishingAdapter/PublishingCoordinator) calls
+	// it once per candidate target BEFORE attempting delivery and sends
+	// exactly what it returns:
+	//
+	//   - nil       → this target already received this EXACT alert set within
+	//                 repeat_interval: skipped, not resent, no outcome.
+	//   - a subset  → this target is a non-batch integration (one wire message
+	//                 per alert) that already accepted SOME of these alerts on
+	//                 an earlier fire; only the remainder is sent, so the ones
+	//                 that landed are not duplicated.
+	//   - the input → nothing is known to have been delivered: send everything.
 	signature := alertSetSignature(alerts)
 	repeatInterval := m.effectiveRepeatInterval(group)
 	ttl := time.Now().Add(-repeatInterval)
-	skipTarget := func(target string) bool {
+	targetAlerts := func(target string, candidates []*core.Alert) []*core.Alert {
 		dup, dupErr := m.notifyLog.IsDuplicate(ctx, group.Key, target, signature, ttl)
 		if dupErr != nil {
 			// Fail-open (Redis down): proceed as not-a-duplicate — same
@@ -1377,7 +1384,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 				"receiver", receiver,
 				"target", target,
 				"error", dupErr)
-			return false
+			return candidates
 		}
 		if dup {
 			m.logger.Debug("target notification suppressed by dedup (already sent within repeat_interval)",
@@ -1385,8 +1392,9 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 				"receiver", receiver,
 				"target", target,
 				"repeat_interval", repeatInterval)
+			return nil
 		}
-		return dup
+		return m.alertsStillOwed(ctx, group.Key, receiver, target, candidates)
 	}
 
 	// groupLabels (review finding 1, fwb fix round 1): the resolved
@@ -1408,7 +1416,7 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// call per alert). outcomes reports per-target results (task fwb) so
 	// RecordSent below can be scoped to exactly the targets that confirmed
 	// delivery this cycle.
-	outcomes, err := publisher.PublishGroup(ctx, string(group.Key), alerts, receiver, groupLabels, skipTarget)
+	outcomes, err := publisher.PublishGroup(ctx, string(group.Key), alerts, receiver, groupLabels, targetAlerts)
 	if err != nil {
 		// ErrDeliveryNotConfirmed (final review finding 4): the publisher
 		// deliberately delivered nothing — degraded/metrics-only mode. NOT a
@@ -1470,6 +1478,37 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	for _, outcome := range outcomes {
 		if !outcome.Success {
 			allSucceeded = false
+
+			// Task fu4 (alertmanager-parity wave 4): the target did not confirm
+			// the notification as a whole, but a NON-BATCH target sends one
+			// wire message per alert and may well have accepted some of them.
+			// Recording those keys is what makes the retry fire send only the
+			// alerts still owed instead of re-sending the whole set and
+			// duplicating everything that already landed.
+			//
+			// Empty for every batch target (one atomic POST per group ⇒ no
+			// partial state exists) and for a non-batch target that got
+			// nowhere, so this is a no-op on both of those paths.
+			if len(outcome.DeliveredAlerts) > 0 {
+				if partErr := m.notifyLog.RecordPartialDelivery(recordCtx, group.Key, outcome.Target, outcome.DeliveredAlerts, repeatInterval); partErr != nil {
+					// Advisory only: the consequence is the pre-fu4 behaviour
+					// for this target — the alerts that landed are re-sent on
+					// the next fire (duplicates), never dropped.
+					m.logger.Warn("failed to record per-alert delivered set for an unconfirmed target (already-delivered alerts may be re-sent next fire)",
+						"group_key", group.Key,
+						"receiver", receiver,
+						"target", outcome.Target,
+						"delivered_alerts", len(outcome.DeliveredAlerts),
+						"error", partErr)
+				} else {
+					m.logger.Info("target notification partially delivered; only the remaining alerts will be re-sent next fire",
+						"group_key", group.Key,
+						"receiver", receiver,
+						"target", outcome.Target,
+						"delivered_alerts", len(outcome.DeliveredAlerts),
+						"alert_count", len(alerts))
+				}
+			}
 			continue
 		}
 		anySucceeded = true
@@ -1554,6 +1593,92 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	pruneCtx, cancelPrune := m.bookkeepingContext(ctx)
 	defer cancelPrune()
 	m.pruneResolvedAlerts(pruneCtx, group.Key, alerts)
+}
+
+// alertsStillOwed narrows candidates to the alerts target has NOT already
+// accepted (task fu4, alertmanager-parity wave 4 — per-alert outcome tracking
+// for non-batch publishers).
+//
+// The delivered set it consults exists only after a PARTIAL failure: a
+// non-batch target (Slack/Telegram/PagerDuty/Email) sends one wire message per
+// alert, so alert 3 of 5 failing used to leave the whole (group, target) pair
+// unrecorded and make the next fire re-send all five — duplicating the four
+// that had landed. See GroupNotifyLog.DeliveredAlerts.
+//
+// Three results, matching the targetAlerts contract:
+//
+//   - candidates unchanged — no partial state (the common case, including
+//     every batch target and every first fire), or the lookup failed. A lookup
+//     failure is deliberately fail-open in the resend direction: at-least-once
+//     is the floor, so a duplicate notification beats suppressing an alert
+//     because Redis was unreachable.
+//   - a shorter slice — send only these.
+//   - nil — every candidate is already in the delivered set, so this target
+//     has provably seen the whole current alert set and there is nothing to
+//     send. Reported as "skip" rather than as a delivery, because no wire
+//     message would be sent this fire; the delivered set's own TTL
+//     (repeat_interval + grace) is what eventually re-opens the group for a
+//     full resend, exactly as a full nflog entry's TTL would.
+//
+// Matching is by core.Alert.DeliveryKey, never by position: the group's alert
+// set legitimately changes between fires (new alerts arrive, resolved ones are
+// pruned) and an index-based comparison would silently pair up unrelated
+// alerts. Because the key includes status, an alert that flipped
+// firing<->resolved does not match its own earlier delivery and is correctly
+// re-sent.
+func (m *DefaultGroupManager) alertsStillOwed(ctx context.Context, groupKey GroupKey, receiver string, target string, candidates []*core.Alert) []*core.Alert {
+	delivered, err := m.notifyLog.DeliveredAlerts(ctx, groupKey, target)
+	if err != nil {
+		m.logger.Error("nflog per-alert delivered-set lookup failed for target, proceeding fail-open (already-delivered alerts may be re-sent)",
+			"group_key", groupKey,
+			"receiver", receiver,
+			"target", target,
+			"error", err)
+		return candidates
+	}
+	if len(delivered) == 0 {
+		return candidates
+	}
+
+	deliveredSet := make(map[string]struct{}, len(delivered))
+	for _, key := range delivered {
+		deliveredSet[key] = struct{}{}
+	}
+
+	remaining := make([]*core.Alert, 0, len(candidates))
+	for _, alert := range candidates {
+		if alert == nil {
+			continue
+		}
+		if _, ok := deliveredSet[alert.DeliveryKey()]; ok {
+			continue
+		}
+		remaining = append(remaining, alert)
+	}
+
+	if len(remaining) == len(candidates) {
+		// Stale set: every key in it belongs to alerts no longer in the group
+		// (all pruned/changed). Nothing to filter — hand back the original
+		// slice so the publisher sees the identical, unallocated input.
+		return candidates
+	}
+
+	if len(remaining) == 0 {
+		m.logger.Debug("target notification fully covered by the per-alert delivered set; nothing left to send",
+			"group_key", groupKey,
+			"receiver", receiver,
+			"target", target,
+			"alert_count", len(candidates))
+		return nil
+	}
+
+	m.logger.Info("target notification narrowed to the alerts it has not yet accepted (per-alert retry)",
+		"group_key", groupKey,
+		"receiver", receiver,
+		"target", target,
+		"remaining", len(remaining),
+		"alert_count", len(candidates))
+	return remaining
 }
 
 // pruneResolvedAlerts removes from the group every alert that was RESOLVED in

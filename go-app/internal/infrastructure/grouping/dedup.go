@@ -2,6 +2,7 @@ package grouping
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -38,6 +39,19 @@ import (
 type notifyDedupLog struct {
 	mu      sync.Mutex
 	entries map[dedupKey]dedupEntry
+
+	// delivered holds the per-(group, target) PARTIAL delivery state (task
+	// fu4): which individual alerts a non-batch target accepted while the
+	// group as a whole stayed unconfirmed. Guarded by mu, same as entries.
+	//
+	// No TTL, unlike the Redis implementation's set: this log is already
+	// process-lifetime state (a restart loses everything, see the type's doc
+	// comment), and the freshness question is answered by the entries map's
+	// caller-supplied cutoff. Bounded by deletion — RecordSent drops a
+	// target's set, Forget drops the whole group's — plus the same
+	// maxDeliveredAlertsPerTarget cap the Redis side applies, so a
+	// pathological group cannot grow it without bound either.
+	delivered map[dedupKey]map[string]struct{}
 }
 
 // dedupKey scopes a dedup entry to one (group, target) pair (task fwb).
@@ -52,7 +66,10 @@ type dedupEntry struct {
 }
 
 func newNotifyDedupLog() *notifyDedupLog {
-	return &notifyDedupLog{entries: make(map[dedupKey]dedupEntry)}
+	return &notifyDedupLog{
+		entries:   make(map[dedupKey]dedupEntry),
+		delivered: make(map[dedupKey]map[string]struct{}),
+	}
 }
 
 // IsDuplicate reports whether a notification for (groupKey, target) carrying
@@ -80,23 +97,81 @@ func (l *notifyDedupLog) IsDuplicate(_ context.Context, groupKey GroupKey, targe
 // (groupKey, target) was just sent successfully, at now. Implements
 // GroupNotifyLog; repeatInterval is ignored (see GroupNotifyLog's doc
 // comment for why).
+//
+// Also drops this target's partial delivered set (task fu4): a full entry
+// covering the whole alert set supersedes any per-alert progress toward it.
 func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target string, signature string, now time.Time, _ time.Duration) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.entries[dedupKey{groupKey: groupKey, target: target}] = dedupEntry{signature: signature, sentAt: now}
+	key := dedupKey{groupKey: groupKey, target: target}
+	l.entries[key] = dedupEntry{signature: signature, sentAt: now}
+	delete(l.delivered, key)
 	return nil
 }
 
-// Forget removes every dedup entry (for every target) belonging to
-// groupKey. Called when a group is deleted (emptied) so the dedup log
-// doesn't grow unbounded independent of active groups. Implements
-// GroupNotifyLog.
+// DeliveredAlerts implements GroupNotifyLog (task fu4): the delivery keys of
+// the alerts target accepted while the group stayed unconfirmed. ctx is unused
+// (in-memory) and the error is always nil.
+func (l *notifyDedupLog) DeliveredAlerts(_ context.Context, groupKey GroupKey, target string) ([]string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	set := l.delivered[dedupKey{groupKey: groupKey, target: target}]
+	if len(set) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	return out, nil
+}
+
+// RecordPartialDelivery implements GroupNotifyLog (task fu4): additively
+// records the alerts target accepted during an otherwise unconfirmed fire.
+// Capped at maxDeliveredAlertsPerTarget for the same reason the Redis
+// implementation caps it — see that constant.
+func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey GroupKey, target string, deliveryKeys []string, _ time.Duration) error {
+	if len(deliveryKeys) == 0 {
+		return nil
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	key := dedupKey{groupKey: groupKey, target: target}
+	set := l.delivered[key]
+	if set == nil {
+		set = make(map[string]struct{}, len(deliveryKeys))
+		l.delivered[key] = set
+	}
+	for _, deliveryKey := range deliveryKeys {
+		if deliveryKey == "" {
+			continue
+		}
+		if len(set) >= maxDeliveredAlertsPerTarget {
+			return fmt.Errorf("delivered set for %s/%s is at its %d-entry cap; further per-alert progress is not recorded", groupKey, target, maxDeliveredAlertsPerTarget)
+		}
+		set[deliveryKey] = struct{}{}
+	}
+	return nil
+}
+
+// Forget removes every dedup entry AND every partial delivered set (for every
+// target) belonging to groupKey. Called when a group is deleted (emptied) so
+// the dedup log doesn't grow unbounded independent of active groups.
+// Implements GroupNotifyLog.
 func (l *notifyDedupLog) Forget(_ context.Context, groupKey GroupKey) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for k := range l.entries {
 		if k.groupKey == groupKey {
 			delete(l.entries, k)
+		}
+	}
+	for k := range l.delivered {
+		if k.groupKey == groupKey {
+			delete(l.delivered, k)
 		}
 	}
 	return nil

@@ -21,6 +21,10 @@
 //   - "nflog:claim:{groupKey}" — a short-lived (claimTTL, seconds — see
 //     TryClaim) SET-NX marker that arbitrates which replica is currently
 //     allowed to run the check-publish-record sequence for this group.
+//   - "nflog:delivered:{groupKey}:{target}" — the per-ALERT delivered set for
+//     a non-batch target whose delivery was only partial (task fu4, wave 4).
+//     Written by RecordPartialDelivery, read by DeliveredAlerts, dropped by
+//     RecordSent/Forget; absent on the happy path.
 //
 // Cross-replica publish protocol (see DefaultGroupManager.publishGroupAlerts
 // for the call site):
@@ -101,6 +105,35 @@ const (
 	// them with SMEMBERS instead of scanning the whole keyspace.
 	// Format: "nflog:targets:{groupKey}" → Redis SET of target names.
 	notifyLogTargetsKeyPrefix = "nflog:targets:"
+
+	// notifyLogDeliveredKeyPrefix stores, per (groupKey, target), the SET of
+	// core.Alert.DeliveryKey values that target has ALREADY accepted while the
+	// group as a whole stayed unconfirmed (task fu4, alertmanager-parity wave
+	// 4 — per-alert outcome tracking for non-batch publishers).
+	// Format: "nflog:delivered:{groupKey}:{target}" → Redis SET of delivery
+	// keys, TTL = repeat_interval + grace (the same bound as an entry, see
+	// RecordPartialDelivery).
+	//
+	// Written ONLY on a partial failure, so the happy path costs no extra
+	// Redis key or round-trip; deleted by RecordSent (a full entry supersedes
+	// it) and by Forget (the group is gone). Cross-replica by construction,
+	// like every other key here: a replica that adopts the group mid-recovery
+	// sees the same delivered set and re-sends the same remainder.
+	notifyLogDeliveredKeyPrefix = "nflog:delivered:"
+
+	// maxDeliveredAlertsPerTarget caps one delivered set (task fu4). The set
+	// grows only while a non-batch target keeps failing PART of a group, which
+	// is remote-endpoint-driven, so it needs a bound that does not depend on
+	// the endpoint behaving. A group large enough to exceed this is already far
+	// outside anything a human reads as one notification.
+	//
+	// Hitting the cap stops recording rather than trimming or resetting:
+	// stopping degrades exactly to the pre-fu4 behaviour for the alerts beyond
+	// the cap (they are re-sent, i.e. duplicated), whereas trimming would
+	// evict keys that ARE delivered and make the same duplicates happen
+	// anyway, with a silent, order-dependent choice of which. At-least-once is
+	// the floor either way; the cap only forfeits the exactly-once refinement.
+	maxDeliveredAlertsPerTarget = 500
 
 	// notifyLogClaimKeyPrefix stores the short-lived cross-replica publish
 	// claim. Format: "nflog:claim:{groupKey}" → random claim ID string.
@@ -201,6 +234,12 @@ func notifyLogEntryKey(groupKey GroupKey, target string) string {
 	return notifyLogEntryKeyPrefix + string(groupKey) + ":" + target
 }
 
+// notifyLogDeliveredKey builds the per-(groupKey, target) delivered-set key
+// (task fu4). See notifyLogDeliveredKeyPrefix's doc comment.
+func notifyLogDeliveredKey(groupKey GroupKey, target string) string {
+	return notifyLogDeliveredKeyPrefix + string(groupKey) + ":" + target
+}
+
 // IsDuplicate implements GroupNotifyLog. See its doc comment for semantics.
 func (l *RedisNotifyLog) IsDuplicate(ctx context.Context, groupKey GroupKey, target string, signature string, ttl time.Time) (bool, error) {
 	data, err := l.client.Get(ctx, notifyLogEntryKey(groupKey, target)).Bytes()
@@ -261,11 +300,116 @@ func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, targ
 			"error", err)
 	}
 
+	// A full entry states that the WHOLE alert set reached this target, which
+	// strictly supersedes the per-alert delivered set that tracked progress
+	// toward it (task fu4) — drop it so the state does not linger on its own
+	// TTL and so a later signature change re-sends the full set rather than
+	// consulting stale per-alert progress. Best-effort for the same reason the
+	// target-set bookkeeping above is: the key has its own TTL, and the worst
+	// case is one fire that filters against an already-superseded set, which
+	// can only ever SKIP alerts this very call just confirmed as delivered.
+	if err := l.client.Del(ctx, notifyLogDeliveredKey(groupKey, target)).Err(); err != nil {
+		l.logger.Warn("failed to drop per-alert delivered set after a confirmed full delivery (it will self-expire)",
+			"group_key", groupKey,
+			"target", target,
+			"error", err)
+	}
+
 	l.logger.Debug("Recorded nflog entry",
 		"group_key", groupKey,
 		"target", target,
 		"receiver", receiver,
 		"ttl", entryTTL)
+	return nil
+}
+
+// DeliveredAlerts implements GroupNotifyLog (task fu4): reads the per-alert
+// delivered set for (groupKey, target). A missing key is not an error — it is
+// the normal state — and yields a nil slice.
+func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey, target string) ([]string, error) {
+	keys, err := l.client.SMembers(ctx, notifyLogDeliveredKey(groupKey, target)).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("nflog delivered smembers %s/%s: %w", groupKey, target, err)
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	return keys, nil
+}
+
+// RecordPartialDelivery implements GroupNotifyLog (task fu4): SADDs the alerts
+// target accepted during an unconfirmed fire and refreshes the set's TTL to
+// match what an entry would get (repeat_interval + grace), so partial progress
+// ages out exactly when a full send would have stopped deduping.
+//
+// SADD is additive on purpose: each fire only reports the alerts it actually
+// attempted, so a second partial failure must extend the set rather than
+// replace it. The cap is checked BEFORE adding (SCARD), because Redis has no
+// bounded-set type — see maxDeliveredAlertsPerTarget for why hitting it stops
+// recording instead of trimming.
+func (l *RedisNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey GroupKey, target string, deliveryKeys []string, repeatInterval time.Duration) error {
+	if len(deliveryKeys) == 0 {
+		return nil
+	}
+
+	key := notifyLogDeliveredKey(groupKey, target)
+
+	size, err := l.client.SCard(ctx, key).Result()
+	if err != nil && err != redis.Nil {
+		return fmt.Errorf("nflog delivered scard %s/%s: %w", groupKey, target, err)
+	}
+	if size+int64(len(deliveryKeys)) > maxDeliveredAlertsPerTarget {
+		return fmt.Errorf("delivered set for %s/%s would exceed its %d-entry cap (%d + %d); per-alert progress is not recorded for this fire",
+			groupKey, target, maxDeliveredAlertsPerTarget, size, len(deliveryKeys))
+	}
+
+	members := make([]any, 0, len(deliveryKeys))
+	for _, deliveryKey := range deliveryKeys {
+		if deliveryKey == "" {
+			continue
+		}
+		members = append(members, deliveryKey)
+	}
+	if len(members) == 0 {
+		return nil
+	}
+
+	if err := l.client.SAdd(ctx, key, members...).Err(); err != nil {
+		return fmt.Errorf("nflog delivered sadd %s/%s: %w", groupKey, target, err)
+	}
+
+	ttl := repeatInterval
+	if ttl <= 0 {
+		ttl = notifyLogEntryTTLFallback
+	}
+	ttl += notifyLogEntryTTLGracePeriod
+	if err := l.client.Expire(ctx, key, ttl).Err(); err != nil {
+		return fmt.Errorf("nflog delivered expire %s/%s: %w", groupKey, target, err)
+	}
+
+	// Tracked in the group's target-set so Forget reaches this key too, even
+	// for a target that has never had a full entry written (the whole point of
+	// a partial delivery). Same best-effort posture as in the entry path.
+	targetsKey := notifyLogTargetsKeyPrefix + string(groupKey)
+	if err := l.client.SAdd(ctx, targetsKey, target).Err(); err != nil {
+		l.logger.Warn("failed to track target in nflog target-set for a partial delivery (Forget may miss the delivered set; it will still self-expire)",
+			"group_key", groupKey,
+			"target", target,
+			"error", err)
+	} else if err := l.client.Expire(ctx, targetsKey, ttl).Err(); err != nil {
+		l.logger.Warn("failed to refresh nflog target-set TTL",
+			"group_key", groupKey,
+			"error", err)
+	}
+
+	l.logger.Debug("Recorded per-alert delivered set",
+		"group_key", groupKey,
+		"target", target,
+		"added", len(members),
+		"ttl", ttl)
 	return nil
 }
 
@@ -294,9 +438,13 @@ func (l *RedisNotifyLog) Forget(ctx context.Context, groupKey GroupKey) error {
 		return fmt.Errorf("nflog targets smembers %s: %w", groupKey, err)
 	}
 
-	keys := make([]string, 0, len(targets)+1)
+	keys := make([]string, 0, 2*len(targets)+1)
 	for _, target := range targets {
-		keys = append(keys, notifyLogEntryKey(groupKey, target))
+		// Both key families are group-scoped state that must not outlive the
+		// group: the confirmed entry and the per-alert delivered set (task
+		// fu4). Deleting a non-existent key is a no-op, so listing both
+		// unconditionally is cheaper than checking.
+		keys = append(keys, notifyLogEntryKey(groupKey, target), notifyLogDeliveredKey(groupKey, target))
 	}
 	keys = append(keys, targetsKey)
 
