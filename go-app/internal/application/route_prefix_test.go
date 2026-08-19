@@ -23,6 +23,33 @@ func TestNormalizeRoutePrefix(t *testing.T) {
 	}
 }
 
+// TestNormalizeRoutePrefix_Idempotent is the alertmanager-parity wave-5 item
+// 4 (FU-DOUBLE-NORMALIZE-ROUTES) regression guard: NormalizeRoutePrefix was
+// being called twice on the exact same cfg.Server.RoutePrefix value in
+// cmd/server/main.go's startup log line (once for the "routePrefix" field,
+// once inline building the dashboard URL) — never a correctness bug, since
+// the function is a pure, idempotent string transform, but redundant work
+// on every process start. main.go now computes it once and reuses the
+// result; this test is the property that made collapsing the two calls
+// into one safe, and would fail first if a future change made
+// NormalizeRoutePrefix NOT idempotent (e.g. by giving it any state,
+// randomness, or path-dependent behavior) — the exact class of change that
+// would make "call it twice vs. once" an actual bug instead of a style nit.
+func TestNormalizeRoutePrefix_Idempotent(t *testing.T) {
+	inputs := []string{
+		"", "/", "amp", "/amp", "/amp/", "  /amp  ", "/amp/mon/",
+		"AMP", "//amp//", "amp/mon", "/", "   ", "/a/b/c/",
+	}
+	for _, in := range inputs {
+		once := NormalizeRoutePrefix(in)
+		twice := NormalizeRoutePrefix(once)
+		if once != twice {
+			t.Errorf("NormalizeRoutePrefix(%q) = %q, but NormalizeRoutePrefix applied again = %q — not idempotent",
+				in, once, twice)
+		}
+	}
+}
+
 func TestResolveRoutePrefix(t *testing.T) {
 	cases := []struct {
 		name        string
