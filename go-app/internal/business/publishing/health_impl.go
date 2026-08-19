@@ -189,8 +189,26 @@ func (m *DefaultHealthMonitor) Start() error {
 
 // Stop gracefully stops background health check worker.
 func (m *DefaultHealthMonitor) Stop(timeout time.Duration) error {
-	// Check if not started
-	if !m.running.Load() {
+	// Atomically check-and-clear the single-flight running gate — the same
+	// CompareAndSwap pattern used in Start(), replacing the previous
+	// Load()-then-eventual-Store(false) pair. Without this, concurrent
+	// Stop() calls could all observe running==true (the Load) and all
+	// proceed to call m.cancel(), each spawn their own wg.Wait() goroutine,
+	// and race the final Store(false) — the same TOCTOU class fixed in
+	// Start(). CompareAndSwap makes "was it true, and is it now false" one
+	// atomic operation, so exactly one caller among any number of
+	// concurrent Stop()s runs the stop sequence below; the rest get
+	// ErrNotStarted immediately, mirroring Start()'s ErrAlreadyStarted.
+	//
+	// This does NOT close the narrow timeout-path reentrancy gap disclosed
+	// separately (out of scope here, same as for item 3's Start() fix): if
+	// this call's stop sequence times out while the old worker is still
+	// draining, running is already false (flipped by the CompareAndSwap
+	// below, before the wait completes), so a subsequent Start() can still
+	// win and spawn a second worker while the first winds down. That needs
+	// state distinct from "is a Stop() currently in flight" and is not
+	// addressed by this gate.
+	if !m.running.CompareAndSwap(true, false) {
 		return ErrNotStarted
 	}
 
@@ -208,11 +226,9 @@ func (m *DefaultHealthMonitor) Stop(timeout time.Duration) error {
 
 	select {
 	case <-done:
-		m.running.Store(false)
 		m.logger.Info("Health check worker stopped gracefully")
 		return nil
 	case <-time.After(timeout):
-		m.running.Store(false)
 		m.logger.Error("Health check worker stop timeout exceeded")
 		return ErrShutdownTimeout
 	}

@@ -363,6 +363,55 @@ func TestHealthMonitor_ConcurrentStarts(t *testing.T) {
 	_ = monitor.Stop(time.Second)
 }
 
+// TestHealthMonitor_ConcurrentStops is the mirror of
+// TestHealthMonitor_ConcurrentStarts for fix-round-1 finding (Minor #1):
+// Stop() had the same Load()-then-eventual-Store(false) TOCTOU shape fixed
+// in Start() via CompareAndSwap. Start the monitor once, then race N
+// concurrent Stop() calls against it — exactly one must actually run the
+// stop sequence (and succeed), the rest must get ErrNotStarted immediately,
+// mirroring ConcurrentStarts' "exactly 1 success" assertion.
+func TestHealthMonitor_ConcurrentStops(t *testing.T) {
+	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
+	discovery := NewTestHealthDiscoveryManager()
+	monitor, err := NewHealthMonitor(discovery, DefaultHealthConfig(), nil, metrics)
+	if err != nil {
+		t.Fatalf("Failed to create monitor: %v", err)
+	}
+
+	if err := monitor.Start(); err != nil {
+		t.Fatalf("Failed to start monitor: %v", err)
+	}
+
+	// Try to stop multiple times concurrently
+	stopErrors := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			stopErrors <- monitor.Stop(time.Second)
+		}()
+	}
+
+	successCount := 0
+	notStartedCount := 0
+	for i := 0; i < 10; i++ {
+		err := <-stopErrors
+		if err == nil {
+			successCount++
+		} else if errors.Is(err, ErrNotStarted) {
+			notStartedCount++
+		} else {
+			t.Errorf("Unexpected error from concurrent Stop(): %v", err)
+		}
+	}
+
+	// Should have exactly 1 success, rest should be ErrNotStarted
+	if successCount != 1 {
+		t.Errorf("Expected 1 successful stop, got %d", successCount)
+	}
+	if notStartedCount != 9 {
+		t.Errorf("Expected 9 ErrNotStarted, got %d", notStartedCount)
+	}
+}
+
 // TestHealthMonitor_StopDuringCheck tests Stop() during active checks
 func TestHealthMonitor_StopDuringCheck(t *testing.T) {
 	metrics := v2.NewPublishingMetrics(prometheus.NewRegistry())
