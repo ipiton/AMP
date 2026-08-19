@@ -138,6 +138,7 @@
   - configurable silence-sync intervals (2s backoff / 5min resync hardcoded constants)
   - ~0.25d each
 
+- [x] **FU-LITE-FILE-SNAPSHOT** _(closed by wave 6, 2026-08-19)_ — lite-profile restart durability: silences + notification log (dedup entries + per-target delivered-state) file-snapshotted to `storage.path` (new knob, default empty = disabled), mirroring upstream `--storage.path`. Atomic tmp-file+rename+fsync, versioned JSON (stdlib only), mode 0600, tolerates missing/corrupt file (never crashes), TTL-respected at load. Loaded before the HTTP server serves; periodic writer + final write on graceful shutdown. Standard profile logs and skips (Postgres/Redis already own durability). Groups/alerts not snapshotted, matching upstream. ~1.5d
 - [ ] **FU-STORAGE-RECONCILE-SIGNAL** — metric distinguishing "Redis down" from "reconciliation keeps failing" when failforward stays blocked (wave-5 review residual; today both look identical on the backend gauge). ~0.5d
 - [ ] **FU-FLAKE-DUPLICATE-METRIC-KEYS** — `internal/business/publishing.TestEdgeCase_DuplicateMetricKeys` is an order-dependent flake (concurrent CollectAll vs "last writer wins" assertion), pre-existing, documented across waves 2-5 gates. Fix the test's determinism. ~0.25d
 - [ ] **PARITY-C2-REMAINING-RECEIVERS** — нишевые:
