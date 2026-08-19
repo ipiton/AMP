@@ -945,6 +945,32 @@ func (m *DefaultGroupManager) startGroupIntervalTimer(ctx context.Context, group
 // reads in publishGroupAlerts take the same lock.
 //
 // Thread-safe.
+// bookkeepingContext returns a context for work that must still complete
+// AFTER a notify fire's delivery wait: RecordSent per confirmed target and
+// pruneResolvedAlerts (the claim release builds its own equivalent inside
+// RedisNotifyLog.TryClaim, since it takes no context argument).
+//
+// WHY DETACHED: parent is the timer manager's per-callback context (bounded by
+// TimerManagerConfig.CallbackTimeout) and the publish blocks for as long as
+// delivery confirmation takes. If a slow target burns the whole callback
+// budget, parent is already dead by the time we learn that a DIFFERENT target
+// delivered — and then RecordSent fails for a target that really was notified
+// (⇒ duplicate page next fire) and resolved-alert pruning silently no-ops (⇒
+// the resolved re-notification loop it exists to stop comes back).
+//
+// WHY IT MUST BE CALLED AT THE POINT OF USE, NOT EARLIER (fix round 2, review
+// finding R1): context.WithTimeout stamps an ABSOLUTE deadline when it is
+// created. Fix round 1 built this once near the top of publishGroupAlerts, so
+// the delivery wait (up to 45s) ran down the 5s bookkeeping budget and every
+// fire longer than notifyBookkeepingTimeout still did its bookkeeping on an
+// expired context — the exact bug the detaching was supposed to fix, just
+// harder to see. Detaching from cancellation is only half of it; the deadline
+// has to start when the work does. Every call site therefore calls this
+// immediately before the work it covers, and each phase gets its own budget.
+func (m *DefaultGroupManager) bookkeepingContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), notifyBookkeepingTimeout)
+}
+
 // NotifyLogClaimTTL reports the cross-replica publish-claim TTL this manager
 // passes to GroupNotifyLog.TryClaim (task rec fix round 1). Exported so
 // wiring code can assert it covers the publishing stack's
@@ -1291,28 +1317,6 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	// bookkeepingCtx (task rec fix round 1, review finding C1) roots
-	// everything that must still happen AFTER delivery — RecordSent per
-	// confirmed target, the claim release below, pruneResolvedAlerts — in a
-	// context DETACHED from this fire's own ctx.
-	//
-	// WHY: ctx here is the timer manager's per-callback context (bounded by
-	// TimerManagerConfig.CallbackTimeout) and the publish below blocks for as
-	// long as delivery confirmation takes. If a slow target burns the whole
-	// callback budget, ctx is already dead by the time we know that a DIFFERENT
-	// target delivered successfully — and then RecordSent fails for a target
-	// that really was notified (⇒ duplicate page next fire), the claim's Lua
-	// CAS release never runs (⇒ the group is skipped until the claim TTL
-	// expires) and resolved-alert pruning silently no-ops (⇒ the resolved
-	// re-notification loop it exists to stop comes back). Detaching costs a
-	// bounded few seconds of work on a dying fire; not detaching corrupts the
-	// dedup state the whole task is about.
-	//
-	// Deliberately NOT used for the publish itself: a caller that cancels
-	// (shutdown) must still be able to abandon an in-flight delivery.
-	bookkeepingCtx, cancelBookkeeping := context.WithTimeout(context.WithoutCancel(ctx), notifyBookkeepingTimeout)
-	defer cancelBookkeeping()
-
 	// Step 4a: cross-replica publish claim (task 6.1 — see this function's
 	// doc comment above). A no-op ("always wins") for the in-memory
 	// notifyLog. claimTTL is deliberately short (m.notifyLogClaimTTL,
@@ -1454,6 +1458,12 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
+	// The delivery wait is over: everything below is bookkeeping, and its
+	// context budget starts HERE, not before the publish (fix round 2, review
+	// finding R1 — see bookkeepingContext).
+	recordCtx, cancelRecord := m.bookkeepingContext(ctx)
+	defer cancelRecord()
+
 	now := time.Now()
 	allSucceeded := true
 	anySucceeded := false
@@ -1480,12 +1490,14 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		// repeat_interval. That closes the "RecordSent == enqueue
 		// confirmation" gap task fwb narrowed but could not fix.
 		//
-		// bookkeepingCtx, NOT ctx (fix round 1, finding C1.2): a mixed batch
-		// whose slowest target burned the whole callback budget arrives here
-		// with ctx already expired, and recording nothing for the target that
-		// DID deliver would re-page it on the next fire — the very failure
-		// this task removes, in the opposite direction.
-		if recErr := m.notifyLog.RecordSent(bookkeepingCtx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
+		// recordCtx, NOT ctx (fix round 1 finding C1.2, corrected in round 2
+		// by finding R1): a mixed batch whose slowest target burned the whole
+		// callback budget arrives here with ctx already expired, and recording
+		// nothing for the target that DID deliver would re-page it on the next
+		// fire — the very failure this task removes, in the opposite
+		// direction. recordCtx is created just above, AFTER the wait, so its
+		// own deadline is not spent by the wait either.
+		if recErr := m.notifyLog.RecordSent(recordCtx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see
 			// this target's send recorded and could re-publish to it.
@@ -1535,11 +1547,13 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 
 	// Step 6: every target confirmed delivery — safe to drop the alerts
 	// that were resolved in the notification we just delivered (final
-	// review finding 8) — see pruneResolvedAlerts. On bookkeepingCtx for the
-	// same reason RecordSent is (fix round 1, finding C1.4): a fire that spent
-	// its whole budget on delivery must still be able to prune, or the
-	// resolved-notification loop pruning exists to stop comes back.
-	m.pruneResolvedAlerts(bookkeepingCtx, group.Key, alerts)
+	// review finding 8) — see pruneResolvedAlerts. On its own bookkeeping
+	// context for the same reason RecordSent is (fix round 1 finding C1.4,
+	// corrected in round 2 by finding R1) — and a SEPARATE one from
+	// recordCtx, so a slow RecordSent loop cannot eat the pruning budget.
+	pruneCtx, cancelPrune := m.bookkeepingContext(ctx)
+	defer cancelPrune()
+	m.pruneResolvedAlerts(pruneCtx, group.Key, alerts)
 }
 
 // pruneResolvedAlerts removes from the group every alert that was RESOLVED in

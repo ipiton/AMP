@@ -503,3 +503,52 @@ func TestNotifyChain_CallerContextShorterThanConfirmationWaitStillReleasesClaim(
 	assert.Zero(t, stack.notifyLog.contextErrors(),
 		"no notify-log operation may run on an already-expired context")
 }
+
+// TestNotifyChain_ConfirmedTargetIsRecordedWhenTheFireOutlastsTheBookkeepingWindow
+// is the fix-round-2 regression net (review findings R1/R2), and the one that
+// runs at PRODUCTION proportions: the fire's delivery wait (6s) is longer than
+// grouping's bookkeeping window (notifyBookkeepingTimeout, 5s), which is the
+// relationship production has at the defaults (45s wait vs. 5s window).
+//
+// Fix round 1 detached the bookkeeping context but built it BEFORE the blocking
+// publish, so context.WithTimeout's absolute deadline was already spent by the
+// time RecordSent ran — the "detached" context was expired and a target that
+// really delivered still got no nflog entry. The earlier
+// callback-deadline-shorter-than-the-wait test cannot see this, because its
+// whole fire ends well inside the 5s window.
+//
+// Deliberately slow (~6s): the timing relationship IS the assertion, and
+// notifyBookkeepingTimeout is an internal constant rather than an injectable
+// knob. Kept to one test.
+func TestNotifyChain_ConfirmedTargetIsRecordedWhenTheFireOutlastsTheBookkeepingWindow(t *testing.T) {
+	fast := newCountingWebhook(t, http.StatusOK)
+	hanging := newHangingWebhook(t)
+
+	stack := newNotifyChainStackWithOptions(t, notifyChainOptions{
+		repeatInterval: time.Hour,
+		// 6s > notifyBookkeepingTimeout (5s): the wait alone would exhaust a
+		// bookkeeping deadline stamped before the publish.
+		confirmationTimeout: 6 * time.Second,
+		// Comfortably longer than the wait, so the fire's own context is NOT
+		// what expires — isolating the bookkeeping-deadline bug from the
+		// callback-deadline bug the sibling test covers.
+		callbackTimeout: 30 * time.Second,
+	}, fast.target("target-fast"), hanging.target("target-hanging"))
+
+	stack.addFiringAlert(t, "fp-1")
+
+	require.Eventually(t, func() bool {
+		for _, target := range stack.notifyLog.recordedSends() {
+			if target == "target-fast" {
+				return true
+			}
+		}
+		return false
+	}, 20*time.Second, 50*time.Millisecond,
+		"a target that confirmed delivery must be recorded even when the fire spent longer than the bookkeeping window waiting on a slower target")
+
+	assert.NotContains(t, stack.notifyLog.recordedSends(), "target-hanging")
+	assert.Zero(t, stack.notifyLog.contextErrors(),
+		"bookkeeping must never run on an expired context, however long the delivery wait took")
+	assert.Positive(t, stack.notifyLog.claimReleases())
+}
