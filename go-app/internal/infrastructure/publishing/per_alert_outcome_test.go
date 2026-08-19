@@ -44,7 +44,7 @@ func groupJobWithConfirmation(alerts []*core.Alert, targetType string) *Publishi
 // headline queue-level assertion: the four alerts that were accepted are
 // reported even though the job as a whole failed.
 func TestPublishJob_NonBatch_PartialFailureRecordsTheAlertsThatLanded(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	alerts := testGroupBatchAlerts(5)
 	publisher := &countingAlertPublisher{failOn: "fp-3"}
@@ -63,7 +63,7 @@ func TestPublishJob_NonBatch_PartialFailureRecordsTheAlertsThatLanded(t *testing
 // half: retryPublish calls publishJob again for the same job, and that attempt
 // must not repeat the wire messages that already landed.
 func TestPublishJob_NonBatch_RetryResendsOnlyTheFailedAlert(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	alerts := testGroupBatchAlerts(5)
 	publisher := &countingAlertPublisher{failOn: "fp-3"}
@@ -85,7 +85,7 @@ func TestPublishJob_NonBatch_RetryResendsOnlyTheFailedAlert(t *testing.T) {
 // TestPublishJob_NonBatch_ProgressIsCumulativeAcrossAttempts pins that a
 // second partial failure adds to the delivered set instead of replacing it.
 func TestPublishJob_NonBatch_ProgressIsCumulativeAcrossAttempts(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	alerts := testGroupBatchAlerts(4)
 	publisher := &countingAlertPublisher{failOn: "fp-2"}
@@ -104,7 +104,7 @@ func TestPublishJob_NonBatch_ProgressIsCumulativeAcrossAttempts(t *testing.T) {
 // guard: a batch-capable target delivers one POST for the whole group, so
 // there is no partial state to report and none must be invented.
 func TestPublishJob_Batch_RecordsNoPerAlertProgress(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	alerts := testGroupBatchAlerts(3)
 	publisher := &countingBatchPublisher{}
@@ -118,7 +118,7 @@ func TestPublishJob_Batch_RecordsNoPerAlertProgress(t *testing.T) {
 // TestPublishJob_SingleAlertJob_RecordsNoPerAlertProgress covers the
 // fire-and-forget Submit path (no group set at all).
 func TestPublishJob_SingleAlertJob_RecordsNoPerAlertProgress(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	alerts := testGroupBatchAlerts(1)
 	publisher := &countingAlertPublisher{}
@@ -136,7 +136,7 @@ func TestPublishJob_SingleAlertJob_RecordsNoPerAlertProgress(t *testing.T) {
 // job still skips already-delivered alerts on retry (progress is tracked) but
 // pays no allocation for a snapshot nobody will load.
 func TestPublishJob_NoWaiter_KeepsProgressUnpublished(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	alerts := testGroupBatchAlerts(3)
 	publisher := &countingAlertPublisher{failOn: "fp-2"}
