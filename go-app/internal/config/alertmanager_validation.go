@@ -116,6 +116,7 @@ func validateAlertmanagerSubset(data []byte, cfg *Config) error {
 	}
 
 	logConfigValidatorWarnings(result)
+	logUnsupportedReceiverIntegrations(&amConfig)
 
 	if len(result.Errors) > 0 {
 		return fmt.Errorf("alertmanager config validation failed (%d error(s)):\n%s",
@@ -123,6 +124,54 @@ func validateAlertmanagerSubset(data []byte, cfg *Config) error {
 	}
 
 	return nil
+}
+
+// logUnsupportedReceiverIntegrations warns, at load/reload time, about
+// receiver integrations that this config is allowed to contain but AMP cannot
+// deliver through (FU-RECEIVERS-INTEGRATION constraint).
+//
+// WHY A WARNING AND NOT AN ERROR: the whole point of the epic is that an
+// UNTOUCHED upstream Alertmanager config keeps loading. A config with an
+// opsgenie receiver alongside three supported ones must still start and still
+// deliver the three. But it must not be silent either: since config
+// provisioning now builds real publishing targets for the five supported
+// integration types, an unsupported block is the one case where a receiver
+// looks configured and delivers nothing.
+//
+// WHY HERE: internal/infrastructure/routing.Receiver has no field for these
+// types at all, so gopkg.in/yaml.v3's non-strict unmarshal drops them before
+// the routing parser (or the target builder) can see them. This function runs
+// against internal/alertmanager/config.Receiver, which DOES model them — the
+// same struct pkg/configvalidator checks — so the information is available
+// exactly here and nowhere downstream.
+func logUnsupportedReceiverIntegrations(cfg *amcfg.AlertmanagerConfig) {
+	if cfg == nil {
+		return
+	}
+
+	for _, receiver := range cfg.Receivers {
+		if receiver == nil {
+			continue
+		}
+		unsupported := make([]string, 0, 3)
+		if len(receiver.OpsGenieConfigs) > 0 {
+			unsupported = append(unsupported, "opsgenie_configs")
+		}
+		if len(receiver.VictorOpsConfigs) > 0 {
+			unsupported = append(unsupported, "victorops_configs")
+		}
+		if len(receiver.WeChatConfigs) > 0 {
+			unsupported = append(unsupported, "wechat_configs")
+		}
+
+		for _, integration := range unsupported {
+			slog.Warn("receiver integration is accepted by config validation but AMP cannot deliver through it; no notifications will be sent via this integration",
+				"receiver", receiver.Name,
+				"integration", integration,
+				"supported", "webhook_configs, slack_configs, pagerduty_configs, telegram_configs, email_configs",
+			)
+		}
+	}
 }
 
 // toAlertmanagerInhibitRules bridges AMP's inline inhibition rules

@@ -25,15 +25,23 @@ func (r *ServiceRegistry) initializePublishing(ctx context.Context) {
 		return
 	}
 
-	if r.config.Profile != appconfig.ProfileStandard {
+	// Non-standard (lite) profile has no Kubernetes access, so it used to be
+	// metrics-only unconditionally. Since FU-RECEIVERS-INTEGRATION the
+	// config's own `receivers:` integrations provision publishing targets
+	// without any Secrets, so a lite deployment with receiver integrations CAN
+	// deliver — it just runs the publishing stack in config-only mode (no K8s
+	// client, no Secret discovery, no periodic refresh).
+	configOnly := r.config.Profile != appconfig.ProfileStandard
+	if configOnly && !hasConfigProvisionedTargets(r.config) {
 		r.publisher = NewMetricsOnlyPublisher("lite_profile", r.logger)
 		r.logger.Info("Publishing running in metrics-only mode for non-standard profile",
 			"profile", r.config.Profile,
+			"reason", "no receivers: integrations configured",
 		)
 		return
 	}
 
-	if err := r.initializePublishingRuntime(ctx); err != nil {
+	if err := r.initializePublishingRuntime(ctx, configOnly); err != nil {
 		r.logger.Warn("Publishing runtime unavailable, falling back to metrics-only mode", "error", err)
 		r.shutdownPublishing()
 		r.publisher = NewMetricsOnlyPublisher("publishing_stack_unavailable", r.logger)
@@ -41,31 +49,46 @@ func (r *ServiceRegistry) initializePublishing(ctx context.Context) {
 	}
 }
 
-func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context) error {
-	k8sConfig := k8s.DefaultK8sClientConfig()
-	k8sConfig.Logger = r.logger
+func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, configOnly bool) error {
+	var discovery businesspublishing.TargetDiscoveryManager
 
-	k8sClient, err := k8s.NewK8sClient(k8sConfig)
-	if err != nil {
-		return err
-	}
-	r.k8sClient = k8sClient
+	if configOnly {
+		// No cluster access at all: every target comes from `receivers:`.
+		discovery = businesspublishing.NewConfigOnlyTargetDiscoveryManager(r.logger, nil)
+	} else {
+		k8sConfig := k8s.DefaultK8sClientConfig()
+		k8sConfig.Logger = r.logger
 
-	discovery, err := businesspublishing.NewTargetDiscoveryManager(
-		k8sClient,
-		resolvePublishingNamespace(r.config),
-		r.config.Publishing.Discovery.LabelSelector,
-		r.logger,
-		nil,
-	)
-	if err != nil {
-		return err
+		k8sClient, err := k8s.NewK8sClient(k8sConfig)
+		if err != nil {
+			return err
+		}
+		r.k8sClient = k8sClient
+
+		discovery, err = businesspublishing.NewTargetDiscoveryManager(
+			k8sClient,
+			resolvePublishingNamespace(r.config),
+			r.config.Publishing.Discovery.LabelSelector,
+			r.logger,
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+
+		if err := discovery.DiscoverTargets(ctx); err != nil {
+			r.logger.Warn("Initial publishing target discovery failed, starting with empty cache", "error", err)
+		}
 	}
+
 	r.publishingDiscovery = discovery
 
-	if err := discovery.DiscoverTargets(ctx); err != nil {
-		r.logger.Warn("Initial publishing target discovery failed, starting with empty cache", "error", err)
-	}
+	// FU-RECEIVERS-INTEGRATION: provision targets from the config's
+	// `receivers:` integrations and merge them into the same discovery view
+	// (R3). MUST happen before the mode manager's first transition check
+	// below — otherwise a config-only deployment looks target-less and starts
+	// in metrics-only mode.
+	r.applyConfigTargets()
 
 	discoveryAdapter, err := NewDiscoveryAdapter(discovery)
 	if err != nil {
@@ -123,7 +146,10 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context) error
 		r.logger,
 	)
 
-	if r.config.Publishing.Refresh.Enabled {
+	// Refresh polls the K8s API for Secret changes; in config-only mode there
+	// is nothing to poll (config targets are rebuilt on config reload, not on
+	// a timer), so the worker would just burn a goroutine.
+	if r.config.Publishing.Refresh.Enabled && !configOnly {
 		refreshConfig := businesspublishing.DefaultRefreshConfig()
 		refreshConfig.Interval = r.config.Publishing.Refresh.Interval
 		refreshConfig.MaxRetries = r.config.Publishing.Refresh.MaxRetries
@@ -193,13 +219,63 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context) error
 	}
 	r.publisher = publisher
 
+	stats := discovery.GetStats()
 	r.logger.Info("Publishing runtime initialized",
 		"namespace", resolvePublishingNamespace(r.config),
 		"targets", len(discovery.ListTargets()),
+		"k8s_targets", stats.ValidTargets,
+		"config_targets", stats.ConfigTargets,
+		"config_only", configOnly,
 		"mode", r.publishingMode.GetCurrentMode().String(),
 	)
 
 	return nil
+}
+
+// applyConfigTargets rebuilds the config-provisioned publishing targets from
+// the LIVE config and swaps them into the discovery view
+// (FU-RECEIVERS-INTEGRATION slice 1, item 3).
+//
+// Called at startup and again from ReloadConfig — the reload pipeline already
+// fires on receivers-only edits (the routing fingerprint covers
+// route:/receivers:/global:), so this is the hook that makes such an edit
+// actually change delivery.
+//
+// The swap inside SetConfigTargets is atomic, so a reload never leaves the
+// receiver with zero targets; a rebuild that produces nothing (all
+// integrations removed) correctly clears the set.
+func (r *ServiceRegistry) applyConfigTargets() {
+	if r.publishingDiscovery == nil {
+		return
+	}
+
+	sink, ok := r.publishingDiscovery.(businesspublishing.ConfigTargetSink)
+	if !ok {
+		// Only reachable if the discovery manager is swapped for an
+		// implementation that cannot accept config targets; say so rather than
+		// silently delivering nothing.
+		r.logger.Warn("Discovery manager does not accept config-provisioned targets; receivers: integrations will not deliver",
+			"manager", fmt.Sprintf("%T", r.publishingDiscovery))
+		return
+	}
+
+	sink.SetConfigTargets(businesspublishing.BuildConfigTargets(r.config.Routing, r.logger))
+}
+
+// hasConfigProvisionedTargets reports whether the config carries at least one
+// receiver integration block, i.e. whether config provisioning can produce any
+// publishing target at all. Used to decide whether a lite-profile deployment
+// gets a real publishing stack instead of the metrics-only publisher.
+func hasConfigProvisionedTargets(cfg *appconfig.Config) bool {
+	if cfg == nil || cfg.Routing == nil {
+		return false
+	}
+	for _, receiver := range cfg.Routing.Receivers {
+		if receiver != nil && receiver.GetConfigCount() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *ServiceRegistry) shutdownPublishing() {

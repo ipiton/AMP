@@ -2234,6 +2234,15 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 		return err
 	}
 
+	// FU-RECEIVERS-INTEGRATION: rebuild the config-provisioned publishing
+	// targets from the new config and swap them into the discovery view. The
+	// routing fingerprint already makes a receivers-only edit reach this
+	// point; without this call such an edit would change routing and change
+	// nothing about delivery. Unconditional (not gated on a diff) because the
+	// rebuild is pure and the swap is atomic — cheaper than tracking which
+	// integration fields moved.
+	r.applyConfigTargets()
+
 	return nil
 }
 
