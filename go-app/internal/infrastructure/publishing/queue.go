@@ -33,13 +33,18 @@ var (
 
 	// ErrDeliveryWaitTimeout means the caller stopped waiting for this
 	// job's final outcome before a worker reported one (see
-	// CoordinatorConfig.DeliveryConfirmationTimeout). The job itself is NOT
-	// cancelled — it keeps running on the queue's worker pool and may still
-	// succeed. Treating the timeout as "unconfirmed" is deliberate and
-	// keeps the at-least-once posture: a late success that already left no
-	// nflog entry behind is re-sent on the next fire (duplicate
-	// notification), whereas assuming success would silently drop a genuine
-	// delivery failure for a whole repeat_interval.
+	// CoordinatorConfig.DeliveryConfirmationTimeout). Treating the timeout as
+	// "unconfirmed" is deliberate and keeps the at-least-once posture: a
+	// success that lands after the waiter gave up left no nflog entry behind
+	// and is re-sent on the next fire (duplicate notification), whereas
+	// assuming success would silently drop a genuine delivery failure for a
+	// whole repeat_interval.
+	//
+	// Since fix round 1 (review finding I2) giving up also ABANDONS the job:
+	// GroupPublishHandle.Abandon cancels the job's own context, so an
+	// in-flight HTTP request and any pending retry back-off unwind instead of
+	// pinning a worker for the queue's full ~2min retry budget while later
+	// ticks submit fresh jobs for the same (group, target).
 	ErrDeliveryWaitTimeout = errors.New("publishing: timed out waiting for delivery confirmation")
 )
 
@@ -48,10 +53,11 @@ var (
 // PublishingJob so PublishingJob itself stays copyable (go vet copylocks:
 // the sync.Once lives here, never in the job struct).
 //
-// ch is buffered (capacity 1) and closed right after the single send, so
-// signal never blocks even when nobody is waiting any more (the submitter
-// already gave up on ErrDeliveryWaitTimeout) and a waiter that arrives late
-// still observes the outcome.
+// ch is buffered (capacity 1) and never closed (fix round 1, review finding
+// M1): the buffer already makes the single send non-blocking for an
+// abandoned channel, while closing would make every receive AFTER the value
+// is drained yield a nil error — i.e. "confirmed delivery", the one direction
+// this design must never fail in.
 type jobCompletion struct {
 	once sync.Once
 	ch   chan error
@@ -72,8 +78,44 @@ func (c *jobCompletion) signal(err error) {
 	}
 	c.once.Do(func() {
 		c.ch <- err
-		close(c.ch)
 	})
+}
+
+// GroupPublishHandle is what SubmitGroupWithConfirmation hands back: the
+// single-outcome channel for one (group, target) job plus the ability to
+// abandon that job (task rec fix round 1, review finding I2).
+type GroupPublishHandle struct {
+	done    <-chan error
+	abandon context.CancelFunc
+}
+
+// Done yields exactly one value: the job's final delivery outcome (nil ==
+// confirmed delivery). Never closed — see jobCompletion.
+func (h *GroupPublishHandle) Done() <-chan error {
+	if h == nil {
+		return nil
+	}
+	return h.done
+}
+
+// Abandon cancels the job's context: an in-flight HTTP request is aborted and
+// any pending retry back-off unwinds immediately, freeing the worker.
+//
+// Idempotent and safe to call after the job already finished (then it is just
+// the context cleanup `go vet -lostcancel` wants), so callers should
+// `defer handle.Abandon()` unconditionally rather than only on timeout.
+//
+// WHY ABANDONING IS THE RIGHT DEFAULT: nobody is left who could act on this
+// job's outcome — its waiter already reported the target as unconfirmed, and
+// the notify chain will re-publish to it on the group's next fire. Letting it
+// run would burn a worker for up to the queue's full retry budget and push
+// healthy targets' jobs behind it, turning one hanging endpoint into
+// unconfirmed (⇒ duplicated) notifications for endpoints that are fine.
+func (h *GroupPublishHandle) Abandon() {
+	if h == nil || h.abandon == nil {
+		return
+	}
+	h.abandon()
 }
 
 // Priority levels for job processing order
@@ -185,6 +227,14 @@ type PublishingJob struct {
 	// serialized into the DLQ, and callers interact with it only through
 	// the receive-only channel SubmitGroupWithConfirmation hands back.
 	completion *jobCompletion
+
+	// ctx, when non-nil, scopes THIS job's publish attempts and retry
+	// back-off (task rec fix round 1, review finding I2). It is derived from
+	// the queue's own context, so a queue shutdown still cancels it, and it
+	// is cancelled early by GroupPublishHandle.Abandon when the submitter
+	// stops waiting for the outcome. Nil (Submit/SubmitGroup) means "use the
+	// queue context", i.e. the pre-fix-round behaviour.
+	ctx context.Context
 
 	// Extended fields for 150% quality
 	ID          string         // UUID v4
@@ -384,18 +434,30 @@ func (q *PublishingQueue) SubmitGroup(alerts []*core.Alert, target *core.Publish
 // full repeat_interval (hours), with no retry. Waiting for this channel is
 // what makes RecordSent mean "delivered".
 //
-// The channel is buffered and closed after its single send, so a caller
-// that gives up waiting (CoordinatorConfig.DeliveryConfirmationTimeout)
-// leaks nothing and the worker never blocks. A non-nil error return means
-// the job was never enqueued at all (queue full / shutting down) and the
-// channel is nil — there is nothing to wait for.
-func (q *PublishingQueue) SubmitGroupWithConfirmation(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string, groupLabels map[string]string) (<-chan error, error) {
+// IN-FLIGHT DEDUP — why there is none (fix round 1, review finding I2): a
+// second job for the same (groupKey, target) cannot be submitted while the
+// first is still being awaited, because the notify chain serializes fires per
+// group key (grouping.groupPublishLocks, held across the whole publish) and
+// across replicas (GroupNotifyLog.TryClaim). The only overlap window is the
+// tail of an ABANDONED job — cancelled, unwinding — which is bounded by how
+// fast the HTTP client honours cancellation, not by the retry budget. A
+// (group, target) in-flight registry would therefore add shared mutable state
+// to guard a window the locking already bounds.
+//
+// The handle's channel is buffered, so a caller that gives up waiting
+// (CoordinatorConfig.DeliveryConfirmationTimeout) leaks nothing and the
+// worker never blocks. Such a caller MUST call GroupPublishHandle.Abandon to
+// release the job's context; `defer handle.Abandon()` right after a
+// successful submit is the intended shape. A non-nil error return means the
+// job was never enqueued at all (queue full / shutting down) and the handle
+// is nil — there is nothing to wait for and nothing to abandon.
+func (q *PublishingQueue) SubmitGroupWithConfirmation(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string, groupLabels map[string]string) (*GroupPublishHandle, error) {
 	return q.submitGroupJob(alerts, target, groupKey, receiver, groupLabels, true)
 }
 
 // submitGroupJob is the shared body of SubmitGroup (withConfirmation ==
-// false, fire-and-forget) and SubmitGroupWithConfirmation (true).
-func (q *PublishingQueue) submitGroupJob(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string, groupLabels map[string]string, withConfirmation bool) (<-chan error, error) {
+// false, fire-and-forget, nil handle) and SubmitGroupWithConfirmation (true).
+func (q *PublishingQueue) submitGroupJob(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string, groupLabels map[string]string, withConfirmation bool) (*GroupPublishHandle, error) {
 	if len(alerts) == 0 {
 		return nil, fmt.Errorf("cannot submit a group job with no alerts")
 	}
@@ -424,21 +486,30 @@ func (q *PublishingQueue) submitGroupJob(alerts []*core.Alert, target *core.Publ
 		GroupLabels:   groupLabels,
 	}
 
-	if withConfirmation {
-		job.completion = newJobCompletion()
+	if !withConfirmation {
+		if err := q.submitJob(job, priority, fmt.Sprintf("group:%s alerts=%d", groupKey, len(alerts))); err != nil {
+			return nil, err
+		}
+		return nil, nil
 	}
 
+	// Confirmed-delivery submission: the job gets its own cancellable context
+	// (rooted in the queue's, so shutdown still reaches it) plus a completion
+	// channel. Cancelling that context is how a caller that stops waiting
+	// frees the worker — see GroupPublishHandle.Abandon.
+	jobCtx, abandon := context.WithCancel(q.ctx)
+	job.ctx = jobCtx
+	job.completion = newJobCompletion()
+
 	if err := q.submitJob(job, priority, fmt.Sprintf("group:%s alerts=%d", groupKey, len(alerts))); err != nil {
-		// Never enqueued ⇒ no worker will ever signal this job's
-		// completion, so hand back a nil channel rather than one that would
-		// block until the caller's timeout.
+		// Never enqueued ⇒ no worker will ever signal this job's completion,
+		// so hand back a nil handle rather than one that would block until
+		// the caller's timeout, and release the context here.
+		abandon()
 		return nil, err
 	}
 
-	if job.completion == nil {
-		return nil, nil
-	}
-	return job.completion.ch, nil
+	return &GroupPublishHandle{done: job.completion.ch, abandon: abandon}, nil
 }
 
 // submitJob is the shared enqueue path for Submit and SubmitGroup: picks the
@@ -582,6 +653,18 @@ func (q *PublishingQueue) worker(id int) {
 				// nothing, so no nflog entry may be written for it (same
 				// reasoning as grouping.ErrDeliveryNotConfirmed).
 				job.completion.signal(fmt.Errorf("%w: metrics-only mode (target %q)", ErrDeliveryNotAttempted, job.Target.Name))
+
+				// Close the job out properly (fix round 1, review finding M3):
+				// before this, a skipped job kept its "queued" tracking
+				// snapshot forever, so JobTrackingStore/GetStats reported jobs
+				// that no worker would ever touch again as still pending.
+				job.State = JobStateFailed
+				skippedAt := time.Now()
+				job.CompletedAt = &skippedAt
+				if q.jobTrackingStore != nil {
+					q.jobTrackingStore.Add(job)
+				}
+
 				// Skip processing, continue to next job
 				continue
 			}
@@ -719,6 +802,29 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	// in-queue retry of this job counts as ONE delivery attempt cycle, so a
 	// final failure here reports "not delivered" exactly once.
 	deliveryOutcome = err
+
+	// Abandoned job (task rec fix round 1, review finding I2): its waiter gave
+	// up and already reported the target as unconfirmed, then cancelled this
+	// job's context. That is not a target failure — do NOT trip the circuit
+	// breaker for a healthy endpoint and do NOT write a DLQ entry the notify
+	// chain is going to supersede on the group's next fire. Just report the
+	// outcome (already non-nil) and let the job go.
+	if err != nil && job.ctx != nil && job.ctx.Err() != nil {
+		q.totalFailed.Add(1)
+		job.State = JobStateFailed
+		completedAt := time.Now()
+		job.CompletedAt = &completedAt
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Add(job)
+		}
+		q.logger.Warn("Publish abandoned (delivery confirmation no longer awaited)",
+			"job_id", job.ID,
+			"target", job.Target.Name,
+			"fingerprint", job.EnrichedAlert.Alert.Fingerprint,
+			"error", err,
+		)
+		return
+	}
 
 	if err != nil {
 		q.totalFailed.Add(1)
@@ -915,23 +1021,37 @@ func (q *PublishingQueue) GetStats() QueueStats {
 //     spec: there is no wire-level partial-success concept for a per-
 //     message loop the way there is for a single batched HTTP request).
 func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJob) error {
+	ctx := q.jobContext(job)
+
 	if len(job.Alerts) == 0 {
-		return publisher.Publish(q.ctx, job.EnrichedAlert, job.Target)
+		return publisher.Publish(ctx, job.EnrichedAlert, job.Target)
 	}
 
 	if batchPublisher, ok := publisher.(BatchAlertPublisher); ok {
-		return batchPublisher.PublishBatch(q.ctx, job.Alerts, job.GroupKey, job.Receiver, job.GroupLabels, job.Target)
+		return batchPublisher.PublishBatch(ctx, job.Alerts, job.GroupKey, job.Receiver, job.GroupLabels, job.Target)
 	}
 
 	now := time.Now().UTC()
 	var firstErr error
 	for _, alert := range job.Alerts {
 		enrichedAlert := &core.EnrichedAlert{Alert: alert, ProcessingTimestamp: &now}
-		if err := publisher.Publish(q.ctx, enrichedAlert, job.Target); err != nil && firstErr == nil {
+		if err := publisher.Publish(ctx, enrichedAlert, job.Target); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+// jobContext is the context a job's publish attempts run under: the job's own
+// cancellable context when it has one (task rec fix round 1, review finding
+// I2 — cancelled by GroupPublishHandle.Abandon so an abandoned delivery stops
+// occupying a worker), otherwise the queue-wide context, which is the
+// pre-fix-round behaviour for Submit/SubmitGroup jobs.
+func (q *PublishingQueue) jobContext(job *PublishingJob) context.Context {
+	if job.ctx != nil {
+		return job.ctx
+	}
+	return q.ctx
 }
 
 func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *PublishingJob) error {
@@ -952,8 +1072,10 @@ func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *Publishing
 	// Track attempt count for job state updates
 	attemptCount := 0
 
-	// Execute publish with retry
-	err := retry.DoSimple(q.ctx, strategy, func() error {
+	// Execute publish with retry, on the JOB's context (fix round 1, finding
+	// I2): abandoning a job must also unwind its pending retry back-off, not
+	// just cancel the HTTP request in flight.
+	err := retry.DoSimple(q.jobContext(job), strategy, func() error {
 		attemptCount++
 
 		// Try publish

@@ -113,6 +113,10 @@ type DefaultTimerManager struct {
 	// means the loop is disabled — see TimerManagerConfig.ReconciliationInterval.
 	reconciliationInterval time.Duration
 	reconciliationGrace    time.Duration
+
+	// callbackTimeout bounds ONE registered callback's execution (task rec
+	// fix round 1) — always positive, see TimerManagerConfig.CallbackTimeout.
+	callbackTimeout time.Duration
 }
 
 // timerHandle represents an active timer's runtime state.
@@ -187,13 +191,31 @@ type TimerManagerConfig struct {
 	// the reconciliation loop treats it as orphaned rather than "still being
 	// processed by its owning replica right now." Fire processing (lock
 	// acquire, group load, notify-chain, storage delete) normally completes
-	// in well under a second — see onTimerExpired — so this only needs to
-	// absorb scheduling jitter and Redis latency, not notification delivery
-	// time (PublishGroup only enqueues, per notifyLogClaimTTL's doc
-	// comment in manager_impl.go). Defaults to 60s (timerTTLGracePeriod)
+	// in well under a second — see onTimerExpired — EXCEPT for the notify
+	// chain itself, which since task rec blocks until delivery is confirmed
+	// (up to CallbackTimeout). A fire that is still waiting on a slow target
+	// therefore looks "overdue" to this loop; adoption is nonetheless safe
+	// because the adopting replica must win Storage.AcquireLock and then the
+	// nflog publish claim, which the publishing replica still holds — see
+	// notify_budget.go. Defaults to 60s (timerTTLGracePeriod)
 	// when ReconciliationInterval is positive and this is left at its
 	// zero-value default.
 	ReconciliationGrace time.Duration
+
+	// CallbackTimeout bounds how long ONE registered TimerCallback may run
+	// for a single expiration (task rec fix round 1, review finding C1).
+	// Optional: 0 uses TimerCallbackTimeoutFor's default.
+	//
+	// This used to be a 30s literal inside onTimerExpired, which was fine
+	// while the notify-chain callback only enqueued deliveries. Since task
+	// rec, publishGroupAlerts BLOCKS until the publishing stack confirms
+	// delivery, so a deadline shorter than that wait silently truncates
+	// every fire — the callback context is what
+	// PublishingCoordinator.awaitDelivery ultimately selects on. Wiring code
+	// therefore derives this from the configured delivery-confirmation wait
+	// via TimerCallbackTimeoutFor; see notify_budget.go for the whole
+	// wait → callback → claim-TTL chain.
+	CallbackTimeout time.Duration
 
 	// Observability
 	Logger  *slog.Logger
@@ -253,6 +275,14 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 	// Generate instance ID
 	instanceID := fmt.Sprintf("%s:%d", getHostname(), os.Getpid())
 
+	// Task rec fix round 1: 0 means "derive from the default
+	// delivery-confirmation wait" rather than the old 30s literal, which is
+	// shorter than that wait and would silently cap every notify fire.
+	callbackTimeout := config.CallbackTimeout
+	if callbackTimeout <= 0 {
+		callbackTimeout = TimerCallbackTimeoutFor(0)
+	}
+
 	manager := &DefaultTimerManager{
 		storage:      config.Storage,
 		timers:       make(map[GroupKey]*timerHandle),
@@ -271,13 +301,15 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 
 		reconciliationInterval: config.ReconciliationInterval,
 		reconciliationGrace:    config.ReconciliationGrace,
+		callbackTimeout:        callbackTimeout,
 	}
 
 	manager.logger.Info("Timer manager initialized",
 		"instance_id", instanceID,
 		"max_concurrent_timers", config.MaxConcurrentTimers,
 		"reconciliation_interval", config.ReconciliationInterval,
-		"reconciliation_grace", config.ReconciliationGrace)
+		"reconciliation_grace", config.ReconciliationGrace,
+		"callback_timeout", callbackTimeout)
 
 	// Start the orphan-adoption loop (task 6.2) if enabled. Safe to start
 	// before SetGroupManager/RestoreTimers run: onTimerExpired already
@@ -308,6 +340,14 @@ func NewDefaultTimerManager(config TimerManagerConfig) (*DefaultTimerManager, er
 // fires while groupManager is still nil.
 //
 // Thread-safe: safe to call concurrently with StartTimer/onTimerExpired.
+// CallbackTimeout reports the per-callback deadline this manager applies to
+// every timer expiration (task rec fix round 1). Exported so wiring code can
+// assert the wait → callback → claim-TTL relationship at startup — see
+// notify_budget.go and ServiceRegistry.validateNotifyTimingBudget.
+func (tm *DefaultTimerManager) CallbackTimeout() time.Duration {
+	return tm.callbackTimeout
+}
+
 func (tm *DefaultTimerManager) SetGroupManager(gm *DefaultGroupManager) error {
 	if gm == nil {
 		return fmt.Errorf("group manager cannot be nil")
@@ -901,7 +941,12 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 	tm.callbacksMu.RUnlock()
 
 	for i, callback := range callbacks {
-		callbackCtx, callbackCancel := context.WithTimeout(tm.ctx, 30*time.Second)
+		// tm.callbackTimeout, not a 30s literal (task rec fix round 1,
+		// review finding C1): the notify-chain callback now blocks until
+		// delivery is confirmed, so this deadline must cover that wait plus
+		// the chain's own overhead — see TimerManagerConfig.CallbackTimeout
+		// and notify_budget.go.
+		callbackCtx, callbackCancel := context.WithTimeout(tm.ctx, tm.callbackTimeout)
 		tm.invokeCallbackSafely(callbackCtx, callback, i, groupKey, timerType, group)
 		callbackCancel()
 	}

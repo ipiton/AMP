@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -109,6 +110,10 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context) error
 
 	coordinatorConfig := infrapublishing.DefaultCoordinatorConfig()
 	coordinatorConfig.MaxConcurrent = r.config.Publishing.Queue.MaxConcurrent
+	// Task rec fix round 1 (review finding I3): operator-tunable, and the
+	// single source for the derived grouping-side budgets — see
+	// initializeGrouping and grouping/notify_budget.go.
+	coordinatorConfig.DeliveryConfirmationTimeout = r.config.Publishing.Queue.DeliveryConfirmationTimeout
 	r.publishingCoordinator = infrapublishing.NewPublishingCoordinator(
 		r.publishingQueue,
 		discoveryAdapter,
@@ -275,4 +280,64 @@ func resolvePublishingNamespace(cfg *appconfig.Config) string {
 	}
 
 	return "default"
+}
+
+// validateNotifyTimingBudget asserts, at startup, that the notify-fire time
+// budget is internally consistent (task rec fix round 1, review findings C1
+// and I3).
+//
+// Since task rec, DefaultGroupManager.publishGroupAlerts waits for CONFIRMED
+// delivery inside a timer callback while holding the cross-replica publish
+// claim, which makes three durations from two packages mutually dependent:
+//
+//	delivery-confirmation wait  <  timer-callback deadline  <=  publish-claim TTL
+//
+// Violating the first inequality silently truncates every delivery to the
+// callback deadline (the wait's own timeout becomes unreachable); violating
+// the second lets the claim expire mid-publish and reopens the double-publish
+// window HA correctness depends on. Neither failure is visible in logs, so
+// this refuses to start instead.
+//
+// ServiceRegistry derives all three from publishing.queue.
+// delivery_confirmation_timeout, so a violation means either a code change to
+// notify_budget.go's helpers or hand-wiring that bypassed them — a bug, not a
+// misconfiguration an operator can fix, hence the explicit "internal
+// inconsistency" wording. Returns nil when either side is absent (publishing
+// disabled, grouping disabled): there is no blocking publish to budget for.
+func (r *ServiceRegistry) validateNotifyTimingBudget() error {
+	if r.publishingCoordinator == nil || r.groupManager == nil {
+		return nil
+	}
+
+	wait := r.publishingCoordinator.DeliveryConfirmationTimeout()
+	claimTTL := r.groupManager.NotifyLogClaimTTL()
+
+	if claimTTL <= wait {
+		return fmt.Errorf(
+			"notify timing budget internal inconsistency: nflog publish-claim TTL (%s) must exceed publishing delivery-confirmation timeout (%s), "+
+				"otherwise the claim can expire mid-publish and two replicas can notify the same group (see grouping/notify_budget.go)",
+			claimTTL, wait)
+	}
+
+	if r.groupTimerManager != nil {
+		callbackTimeout := r.groupTimerManager.CallbackTimeout()
+		if callbackTimeout <= wait {
+			return fmt.Errorf(
+				"notify timing budget internal inconsistency: timer callback timeout (%s) must exceed publishing delivery-confirmation timeout (%s), "+
+					"otherwise every group notification is truncated at the callback deadline and confirmed deliveries go unrecorded (see grouping/notify_budget.go)",
+				callbackTimeout, wait)
+		}
+		if claimTTL < callbackTimeout {
+			return fmt.Errorf(
+				"notify timing budget internal inconsistency: nflog publish-claim TTL (%s) must be at least the timer callback timeout (%s), "+
+					"otherwise a long fire outlives its own claim (see grouping/notify_budget.go)",
+				claimTTL, callbackTimeout)
+		}
+	}
+
+	r.logger.Debug("Notify timing budget validated",
+		"delivery_confirmation_timeout", wait,
+		"nflog_claim_ttl", claimTTL)
+
+	return nil
 }

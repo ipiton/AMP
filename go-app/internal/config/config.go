@@ -461,6 +461,20 @@ type PublishingQueueConfig struct {
 	RetryInterval           time.Duration `mapstructure:"retry_interval"`
 	StopTimeout             time.Duration `mapstructure:"stop_timeout"`
 	JobTrackingCapacity     int           `mapstructure:"job_tracking_capacity"`
+
+	// DeliveryConfirmationTimeout bounds how long a group notification waits
+	// for ONE target to confirm delivery before that target is reported
+	// unconfirmed (task rec, alertmanager-parity wave 3; exposed as a knob in
+	// fix round 1, review finding I3).
+	//
+	// An unconfirmed target gets no notification-log entry and is retried on
+	// the group's next scheduled fire, so raising this trades a longer-held
+	// per-group publish lock for fewer duplicate notifications from slow
+	// endpoints. Two grouping-side durations are DERIVED from it at startup —
+	// the timer-callback deadline and the cross-replica publish-claim TTL (see
+	// grouping/notify_budget.go) — so it is the single knob for the whole
+	// notify-fire time budget.
+	DeliveryConfirmationTimeout time.Duration `mapstructure:"delivery_confirmation_timeout"`
 }
 
 // PublishingRefreshConfig holds dynamic target refresh settings.
@@ -805,6 +819,7 @@ func setDefaults() {
 	viper.SetDefault("publishing.queue.retry_interval", "2s")
 	viper.SetDefault("publishing.queue.stop_timeout", "10s")
 	viper.SetDefault("publishing.queue.job_tracking_capacity", 10000)
+	viper.SetDefault("publishing.queue.delivery_confirmation_timeout", "45s")
 
 	viper.SetDefault("publishing.refresh.enabled", true)
 	viper.SetDefault("publishing.refresh.interval", "5m")
@@ -950,6 +965,9 @@ func (c *Config) validatePublishing() error {
 	}
 	if c.Publishing.Queue.JobTrackingCapacity <= 0 {
 		return fmt.Errorf("publishing.queue.job_tracking_capacity must be positive")
+	}
+	if c.Publishing.Queue.DeliveryConfirmationTimeout <= 0 {
+		return fmt.Errorf("publishing.queue.delivery_confirmation_timeout must be positive")
 	}
 
 	if c.Publishing.Refresh.Enabled {

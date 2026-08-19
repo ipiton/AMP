@@ -274,12 +274,13 @@ func TestSubmitGroupWithConfirmation_MetricsOnlyModeReportsNotAttempted(t *testi
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
 
 	target := &core.PublishingTarget{Name: "webhook-1", Type: "webhook", URL: "http://127.0.0.1:1", Enabled: true, Format: core.FormatWebhook}
-	confirm, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
+	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
 	require.NoError(t, err)
-	require.NotNil(t, confirm)
+	require.NotNil(t, handle)
+	defer handle.Abandon()
 
 	select {
-	case outcome := <-confirm:
+	case outcome := <-handle.Done():
 		require.Error(t, outcome, "metrics-only mode delivers nothing, so it must not confirm delivery")
 		assert.ErrorIs(t, outcome, ErrDeliveryNotAttempted)
 	case <-time.After(3 * time.Second):
@@ -299,14 +300,15 @@ func TestProcessJob_OpenCircuitBreakerReportsNotAttempted(t *testing.T) {
 	}
 	require.False(t, cb.CanAttempt(), "breaker must be open for this test to mean anything")
 
-	confirm, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
+	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
 	require.NoError(t, err)
+	defer handle.Abandon()
 
 	// No workers in newTestPublishingQueue: drive the job by hand.
 	queue.processJob(<-queue.mediumPriorityJobs)
 
 	select {
-	case outcome := <-confirm:
+	case outcome := <-handle.Done():
 		require.Error(t, outcome)
 		assert.ErrorIs(t, outcome, ErrDeliveryNotAttempted)
 	case <-time.After(time.Second):
@@ -332,12 +334,13 @@ func TestSubmitGroupWithConfirmation_EnqueueFailureReturnsNoChannel(t *testing.T
 
 	target := &core.PublishingTarget{Name: "webhook-1", Type: "webhook", URL: "http://127.0.0.1:1", Enabled: true, Format: core.FormatWebhook}
 
-	_, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk-1", "recv", nil)
+	first, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk-1", "recv", nil)
 	require.NoError(t, err)
+	defer first.Abandon()
 
-	confirm, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk-2", "recv", nil)
+	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk-2", "recv", nil)
 	require.Error(t, err, "queue is full")
-	assert.Nil(t, confirm)
+	assert.Nil(t, handle, "a job that was never enqueued has no outcome to wait for")
 }
 
 // TestSubmitGroup_StaysFireAndForget: the pre-rec entry point must keep

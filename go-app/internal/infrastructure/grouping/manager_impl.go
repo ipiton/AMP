@@ -13,38 +13,33 @@ import (
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // SA1019: deprecated pkg/metrics kept until v2 migration (v2 lacks BusinessMetrics)
 )
 
-// notifyLogClaimTTL bounds how long a cross-replica publish claim
-// (GroupNotifyLog.TryClaim, task 6.1) is held before it expires
-// automatically. Deliberately short — seconds, NOT repeat_interval — so a
-// replica that crashes mid-publish (before its deferred release runs)
-// self-heals quickly instead of blocking every replica's retries for that
-// group.
+// defaultNotifyLogClaimTTL is the fallback cross-replica publish-claim TTL
+// (GroupNotifyLog.TryClaim, task 6.1) for a manager built without an
+// explicit DefaultGroupManagerConfig.NotifyLogClaimTTL.
 //
-// SIZING (task rec, alertmanager-parity wave 3) — the claim is held across
-// the whole publisher.PublishGroup call and is NOT renewed/extended while
-// held (unlike RedisTimerStorage's lock, which has Extend; there is no
-// Extend call anywhere in publishGroupAlerts). Until wave 3, PublishGroup
-// returned as soon as each target's job was ENQUEUED, so 30s (a borrowed
-// lockTTL) covered it with room to spare. Task rec made PublishGroup block
-// until delivery is CONFIRMED, so the claim must now outlive a real HTTP
-// publish: this value MUST stay strictly larger than the publishing
-// coordinator's per-target confirmation wait
-// (publishing.DefaultDeliveryConfirmationTimeout, 45s) — otherwise the
-// claim expires mid-publish and a second replica can publish the same
-// group, exactly the double-publish window this claim exists to close.
+// Deliberately short — seconds, NOT repeat_interval — so a replica that
+// crashes mid-publish (before its deferred release runs) self-heals quickly
+// instead of blocking every replica's retries for that group.
 //
-// 60s = 45s wait + ~15s margin for the chain's own Redis round-trips
-// (IsDuplicate per target, RecordSent per target) and for scheduling. The
-// coupling is one-way and cross-package by necessity: grouping must not
-// import infrastructure/publishing (see GroupNotificationPublisher's doc
-// comment on that boundary), so the two constants are kept in step by these
-// comments — change one, re-check the other.
+// SIZING (task rec, wave 3; reworked in fix round 1 after review finding C1)
+// — the claim is held across the whole publisher.PublishGroup call and is NOT
+// renewed while held (unlike RedisTimerStorage's lock, which has Extend;
+// there is no Extend call anywhere in publishGroupAlerts). Since task rec
+// that call blocks until delivery is CONFIRMED, so the claim must outlive a
+// real HTTP publish AND the timer-callback deadline that bounds the fire.
+// All three durations are now derived from one knob — see notify_budget.go
+// (NotifyLogClaimTTLFor / TimerCallbackTimeoutFor) — and
+// ServiceRegistry.validateNotifyTimingBudget re-checks the relationship at
+// startup. This constant is just NotifyLogClaimTTLFor's value for the
+// default 45s wait.
 //
-// Cost of the increase: a replica that crashes mid-publish blocks this
-// group's retries for up to 60s instead of 30s. That is still well inside a
-// typical group_interval/repeat_interval, and it is the price of never
-// double-paging.
-const notifyLogClaimTTL = 60 * time.Second
+// Related (review finding M6): RedisTimerStorage's own distributed timer
+// lock (lockTTL, 30s, no Extend) now routinely expires mid-fire, so a second
+// replica's timer for the same group CAN fire while the first is still
+// publishing. This claim is what prevents the double publish in that window
+// — it went from a backstop to load-bearing, which is another reason it must
+// cover the whole fire.
+const defaultNotifyLogClaimTTL = defaultDeliveryConfirmationBudget + notifyChainOverheadBudget
 
 // DefaultGroupManager is an in-memory implementation of AlertGroupManager.
 //
@@ -109,6 +104,12 @@ type DefaultGroupManager struct {
 	// protocol.
 	notifyLog GroupNotifyLog
 
+	// notifyLogClaimTTL is the TTL passed to notifyLog.TryClaim (task rec fix
+	// round 1: was a package constant). Always positive — see
+	// defaultNotifyLogClaimTTL and notify_budget.go for the sizing chain it
+	// belongs to.
+	notifyLogClaimTTL time.Duration
+
 	// publishLocks serializes the whole notify-stage chain per GroupKey
 	// (task 2.4 fix round 1, Finding 4 — see publish_lock.go). Always
 	// non-nil.
@@ -171,6 +172,14 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		notifyLog = newNotifyDedupLog()
 	}
 
+	// Claim TTL (task rec fix round 1, review finding C1): derived from the
+	// publishing stack's delivery-confirmation wait by wiring code
+	// (NotifyLogClaimTTLFor), with a default for hand-built managers.
+	claimTTL := cfg.NotifyLogClaimTTL
+	if claimTTL <= 0 {
+		claimTTL = defaultNotifyLogClaimTTL
+	}
+
 	mgr := &DefaultGroupManager{
 		storage:            cfg.Storage,
 		fingerprintIndex:   make(map[string]GroupKey),
@@ -182,7 +191,8 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		silenceChecker:     cfg.SilenceChecker,     // Optional (task 2.4)
 		timeIntervalLookup: cfg.TimeIntervalLookup, // Optional (task 3.2)
 		notifyLog:          notifyLog,              // task 2.4/6.1: always-on dedup + cross-replica claim
-		publishLocks:       &groupPublishLocks{},   // task 2.4 fix round 1: serialize per group key
+		notifyLogClaimTTL:  claimTTL,               // task rec fix round 1: derived from the delivery-confirmation wait
+		publishLocks:       newGroupPublishLocks(), // task 2.4 fix round 1: serialize per group key
 		logger:             cfg.Logger,
 		metrics:            cfg.Metrics,
 		stats:              &groupStats{},
@@ -935,6 +945,15 @@ func (m *DefaultGroupManager) startGroupIntervalTimer(ctx context.Context, group
 // reads in publishGroupAlerts take the same lock.
 //
 // Thread-safe.
+// NotifyLogClaimTTL reports the cross-replica publish-claim TTL this manager
+// passes to GroupNotifyLog.TryClaim (task rec fix round 1). Exported so
+// wiring code can assert it covers the publishing stack's
+// delivery-confirmation wait at startup — see
+// ServiceRegistry.validateNotifyTimingBudget and notify_budget.go.
+func (m *DefaultGroupManager) NotifyLogClaimTTL() time.Duration {
+	return m.notifyLogClaimTTL
+}
+
 func (m *DefaultGroupManager) SetPublisher(pub GroupNotificationPublisher) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1223,9 +1242,13 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
-	lock := m.publishLocks.lockFor(group.Key)
-	lock.Lock()
-	defer lock.Unlock()
+	// Per-GroupKey lock, held across the whole chain including the blocking
+	// delivery wait. Genuinely per-key since task rec fix round 1 (review
+	// finding I1): the old striped implementation would have made two
+	// unrelated groups that hash-collide serialize for a full delivery
+	// timeout. See publish_lock.go.
+	releaseLock := m.publishLocks.acquire(group.Key)
+	defer releaseLock()
 
 	group.mu.RLock()
 	alerts := make([]*core.Alert, 0, len(group.Alerts))
@@ -1268,19 +1291,40 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		return
 	}
 
+	// bookkeepingCtx (task rec fix round 1, review finding C1) roots
+	// everything that must still happen AFTER delivery — RecordSent per
+	// confirmed target, the claim release below, pruneResolvedAlerts — in a
+	// context DETACHED from this fire's own ctx.
+	//
+	// WHY: ctx here is the timer manager's per-callback context (bounded by
+	// TimerManagerConfig.CallbackTimeout) and the publish below blocks for as
+	// long as delivery confirmation takes. If a slow target burns the whole
+	// callback budget, ctx is already dead by the time we know that a DIFFERENT
+	// target delivered successfully — and then RecordSent fails for a target
+	// that really was notified (⇒ duplicate page next fire), the claim's Lua
+	// CAS release never runs (⇒ the group is skipped until the claim TTL
+	// expires) and resolved-alert pruning silently no-ops (⇒ the resolved
+	// re-notification loop it exists to stop comes back). Detaching costs a
+	// bounded few seconds of work on a dying fire; not detaching corrupts the
+	// dedup state the whole task is about.
+	//
+	// Deliberately NOT used for the publish itself: a caller that cancels
+	// (shutdown) must still be able to abandon an in-flight delivery.
+	bookkeepingCtx, cancelBookkeeping := context.WithTimeout(context.WithoutCancel(ctx), notifyBookkeepingTimeout)
+	defer cancelBookkeeping()
+
 	// Step 4a: cross-replica publish claim (task 6.1 — see this function's
 	// doc comment above). A no-op ("always wins") for the in-memory
-	// notifyLog. claimTTL is deliberately short (notifyLogClaimTTL, seconds)
-	// so a replica that crashes before releasing self-heals quickly instead
-	// of blocking every replica's retries for this group.
+	// notifyLog. claimTTL is deliberately short (m.notifyLogClaimTTL,
+	// seconds) so a replica that crashes before releasing self-heals quickly
+	// instead of blocking every replica's retries for this group.
 	//
 	// This claim is held across the publisher.PublishGroup call below with
 	// NO renewal/extension. Since task rec that call blocks until delivery
 	// is CONFIRMED, so the claim has to cover a real HTTP publish — see
-	// notifyLogClaimTTL's doc comment for why it is 60s and why it must stay
-	// larger than publishing.DefaultDeliveryConfirmationTimeout. Re-check
-	// that relationship before changing either side.
-	claimed, releaseClaim, claimErr := m.notifyLog.TryClaim(ctx, group.Key, notifyLogClaimTTL)
+	// notify_budget.go for the derived wait/callback/claim chain. Re-check
+	// that relationship before changing any side of it.
+	claimed, releaseClaim, claimErr := m.notifyLog.TryClaim(ctx, group.Key, m.notifyLogClaimTTL)
 	switch {
 	case claimErr != nil:
 		// Fail-open (Redis down): proceed without a claim, matching the
@@ -1435,7 +1479,13 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		// fire (group_interval) instead of being suppressed for a whole
 		// repeat_interval. That closes the "RecordSent == enqueue
 		// confirmation" gap task fwb narrowed but could not fix.
-		if recErr := m.notifyLog.RecordSent(ctx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
+		//
+		// bookkeepingCtx, NOT ctx (fix round 1, finding C1.2): a mixed batch
+		// whose slowest target burned the whole callback budget arrives here
+		// with ctx already expired, and recording nothing for the target that
+		// DID deliver would re-page it on the next fire — the very failure
+		// this task removes, in the opposite direction.
+		if recErr := m.notifyLog.RecordSent(bookkeepingCtx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see
 			// this target's send recorded and could re-publish to it.
@@ -1485,8 +1535,11 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 
 	// Step 6: every target confirmed delivery — safe to drop the alerts
 	// that were resolved in the notification we just delivered (final
-	// review finding 8) — see pruneResolvedAlerts.
-	m.pruneResolvedAlerts(ctx, group.Key, alerts)
+	// review finding 8) — see pruneResolvedAlerts. On bookkeepingCtx for the
+	// same reason RecordSent is (fix round 1, finding C1.4): a fire that spent
+	// its whole budget on delivery must still be able to prune, or the
+	// resolved-notification loop pruning exists to stop comes back.
+	m.pruneResolvedAlerts(bookkeepingCtx, group.Key, alerts)
 }
 
 // pruneResolvedAlerts removes from the group every alert that was RESOLVED in
