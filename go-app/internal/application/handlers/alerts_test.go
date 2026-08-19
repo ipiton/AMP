@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -762,5 +763,106 @@ func TestAlertsHandler_OldStatusResolvedAliasCombinedWithNewParams(t *testing.T)
 	excluded := getAlerts(t, handler, "status=resolved&unprocessed=false")
 	if len(excluded) != 0 {
 		t.Fatalf("expected status=resolved&unprocessed=false to exclude it, got %d", len(excluded))
+	}
+}
+
+// TestParseBoolQueryStrict_AbsentParam_ReturnsDefault covers the case the
+// param is never in the query string at all: def wins.
+func TestParseBoolQueryStrict_AbsentParam_ReturnsDefault(t *testing.T) {
+	query, err := url.ParseQuery("")
+	if err != nil {
+		t.Fatalf("ParseQuery: %v", err)
+	}
+
+	got, err := parseBoolQueryStrict(query, "active", true)
+	if err != nil {
+		t.Fatalf("parseBoolQueryStrict() error = %v, want nil", err)
+	}
+	if got != true {
+		t.Fatalf("parseBoolQueryStrict() = %v, want default true", got)
+	}
+}
+
+// TestParseBoolQueryStrict_ValidValues covers ?x=true and ?x=false parsing
+// to their literal values, independent of def.
+func TestParseBoolQueryStrict_ValidValues(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{"true", true},
+		{"false", false},
+		{"1", true},
+		{"0", false},
+	}
+
+	for _, tc := range cases {
+		query, err := url.ParseQuery("active=" + tc.raw)
+		if err != nil {
+			t.Fatalf("ParseQuery(%q): %v", tc.raw, err)
+		}
+
+		got, err := parseBoolQueryStrict(query, "active", false)
+		if err != nil {
+			t.Fatalf("parseBoolQueryStrict(%q) error = %v, want nil", tc.raw, err)
+		}
+		if got != tc.want {
+			t.Fatalf("parseBoolQueryStrict(%q) = %v, want %v", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestParseBoolQueryStrict_PresentButEmpty_Returns400Error is the F4 fix
+// itself: upstream Alertmanager treats a present-but-empty bool query param
+// (?active=) as a malformed value, not as "unset" — it must error, not
+// silently fall back to def. query.Get alone can't distinguish "absent" from
+// "present but empty" (both are ""), which is exactly the bug: the old
+// implementation only ever called query.Get and treated both the same way.
+func TestParseBoolQueryStrict_PresentButEmpty_Returns400Error(t *testing.T) {
+	query, err := url.ParseQuery("active=")
+	if err != nil {
+		t.Fatalf("ParseQuery: %v", err)
+	}
+
+	got, err := parseBoolQueryStrict(query, "active", true)
+	if err == nil {
+		t.Fatal("parseBoolQueryStrict(?active=) error = nil, want an error (upstream 400s on empty bool params)")
+	}
+	if got != true {
+		t.Fatalf("parseBoolQueryStrict(?active=) value = %v, want def (true) returned alongside the error", got)
+	}
+}
+
+// TestParseBoolQueryStrict_Garbage_ReturnsError covers a present value that
+// isn't a valid boolean at all (distinct from the present-but-empty case
+// above, but the same "present and invalid" family).
+func TestParseBoolQueryStrict_Garbage_ReturnsError(t *testing.T) {
+	query, err := url.ParseQuery("active=notabool")
+	if err != nil {
+		t.Fatalf("ParseQuery: %v", err)
+	}
+
+	if _, err := parseBoolQueryStrict(query, "active", true); err == nil {
+		t.Fatal("parseBoolQueryStrict(?active=notabool) error = nil, want an error")
+	}
+}
+
+// TestAlertStateFilter_PresentButEmptyBoolParam_Returns400 is the
+// handler-level counterpart: GET /api/v2/alerts?active= must 400 through the
+// full filter-parsing path (parseAlertStateFilters -> parseBoolQueryStrict),
+// not just at the unit level.
+func TestAlertStateFilter_PresentButEmptyBoolParam_Returns400(t *testing.T) {
+	registry := &fakeRegistry{
+		alertStore:   memory.NewAlertStore(),
+		silenceStore: memory.NewSilenceStore(),
+	}
+	handler := AlertsHandler(registry)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?active=", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("GET /api/v2/alerts?active= status = %d, want 400; body: %s", rec.Code, rec.Body.String())
 	}
 }

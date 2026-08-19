@@ -216,12 +216,18 @@ func parseAlertStateFilters(query url.Values) (alertStateFilter, error) {
 }
 
 // parseBoolQueryStrict parses a boolean query param, returning def when the
-// param is absent/empty and an error when it is present but not a valid
-// boolean (upstream returns 400 for malformed query params).
+// param is entirely ABSENT, and an error when it is present but not a valid
+// boolean — including present-but-empty (?key=), which upstream Alertmanager
+// treats as a malformed value (400), not as "unset". query.Get alone can't
+// tell those two cases apart (both yield ""), so presence is checked via
+// query.Has first.
 func parseBoolQueryStrict(query url.Values, key string, def bool) (bool, error) {
+	if !query.Has(key) {
+		return def, nil
+	}
 	raw := strings.TrimSpace(query.Get(key))
 	if raw == "" {
-		return def, nil
+		return def, fmt.Errorf("invalid %s query parameter: %q (empty value)", key, raw)
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
