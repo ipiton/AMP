@@ -132,10 +132,17 @@ func main() {
 		}
 	}()
 
+	// alertmanager-parity wave-5 item 4 (FU-DOUBLE-NORMALIZE-ROUTES): computed
+	// once and reused below — this used to call NormalizeRoutePrefix twice on
+	// the exact same cfg.Server.RoutePrefix value (once for the log field,
+	// once inline in the dashboard URL). NormalizeRoutePrefix is pure/
+	// idempotent (see TestNormalizeRoutePrefix_Idempotent), so the duplicate
+	// call was never a correctness bug, just redundant work on every startup.
+	effectiveRoutePrefix := application.NormalizeRoutePrefix(cfg.Server.RoutePrefix)
 	slog.Info("🎯 Server listening",
 		"port", port,
-		"routePrefix", application.NormalizeRoutePrefix(cfg.Server.RoutePrefix),
-		"dashboard", fmt.Sprintf("http://localhost:%d%s/dashboard", port, application.NormalizeRoutePrefix(cfg.Server.RoutePrefix)),
+		"routePrefix", effectiveRoutePrefix,
+		"dashboard", fmt.Sprintf("http://localhost:%d%s/dashboard", port, effectiveRoutePrefix),
 	)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {

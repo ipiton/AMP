@@ -118,7 +118,7 @@
 - [ ] **FU-SLACK-PAGERDUTY-QUEUE-PATH** — enhanced slack/pagerduty publishers unreachable via queue path (same class as telegram fix in Phase 7.2). Mutex guards for client maps. ~1d
 - [ ] **FU-PARSEARGUMENT-QUOTE-HANDLING** — parseMatcherExpr quote handling edge cases (third matcher grammar divergence vs configvalidator). ~0.5d
 - [x] **FU-GLOB-DEFAULT-VALUES** _(closed by wave 5, 2026-08-19)_ — GlobalConfig fallback fields for group_by/duration: `infraroute.GlobalConfig.GroupBy/GroupWait/GroupInterval/RepeatInterval` restored (dropped by the TN-137 dedup, 3f8d69d) as a fallback layer `TreeBuilder.inheritGroupBy`/`inheritDuration` consult below parent-route inheritance and above the hardcoded upstream defaults. AMP-only convenience, not upstream's actual `global:` schema — see `docs/ALERTMANAGER_COMPATIBILITY.md`. ~0.5d
-- [ ] **FU-DOUBLE-NORMALIZE-ROUTES** — double NormalizeRoutePrefix call cleanup. ~0.25d
+- [x] **FU-DOUBLE-NORMALIZE-ROUTES** _(closed by wave 5, 2026-08-19)_ — double NormalizeRoutePrefix call cleanup: `cmd/server/main.go`'s startup log line called it twice on the identical `cfg.Server.RoutePrefix` value (log field + inline dashboard URL); computed once and reused. `NormalizeRoutePrefix` is pure/idempotent — added `TestNormalizeRoutePrefix_Idempotent` as the regression guard. ~0.25d
 - [ ] **FU-PARSEBOOL-EMPTY-DEFAULT** — parseBoolQueryStrict silently defaults on empty param value. ~0.25d
 - [x] **FU-MICRO-CLEANUPS** _(closed by wave 2, 2026-08-18)_ — — minor code/test hygiene from final-review backlog:
   - matcherErrorCode classification via error-string substring (fragile); clarify or fix
