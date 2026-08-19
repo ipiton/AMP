@@ -223,17 +223,35 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    nflog entry and is re-published on the group's next scheduled fire instead of going quiet until
    `repeat_interval`. Wire-level batching (one POST per `(group, target)` with an upstream-v4 `alerts` array) and
    per-`(group, receiver, target)` nflog keys are unchanged from wave 2.
-   Residual sharp edges, both deliberate:
-   - The wait is bounded by `CoordinatorConfig.DeliveryConfirmationTimeout` (45s default) and is *shorter* than the
-     queue's worst-case retry budget. A target still retrying past the deadline is reported as unconfirmed, so a
-     delivery that succeeds afterwards is re-sent on the next fire — a duplicate notification, never a dropped one.
-     The pipeline is at-least-once, same as upstream.
-   - The cross-replica publish claim (`GroupNotifyLog.TryClaim`) is now held across a real HTTP publish, so its TTL
-     (`notifyLogClaimTTL`, 60s) must stay larger than that timeout. The two constants live in different packages and
-     are kept in step by comments, not by the compiler — change one, re-check the other.
+   **The notify-fire time budget** is one derived chain, driven by a single knob,
+   `publishing.queue.delivery_confirmation_timeout` (45s default):
+
+   | Duration | Value at the default | Role |
+   |---|---|---|
+   | delivery-confirmation wait | 45s | per-target wait in `PublishGroupToTargets` |
+   | timer-callback deadline | 60s (= wait + 15s) | bounds one whole notify fire (`TimerManagerConfig.CallbackTimeout`) |
+   | cross-replica publish-claim TTL | 60s | must cover the whole fire (`GroupNotifyLog.TryClaim`) |
+
+   The two grouping-side values are derived from the wait at wiring time
+   (`grouping.TimerCallbackTimeoutFor` / `NotifyLogClaimTTLFor`) and re-checked at startup
+   (`ServiceRegistry.validateNotifyTimingBudget`) — AMP refuses to start on an inconsistent triple, because both
+   failure modes are invisible at runtime: a callback deadline below the wait silently truncates every delivery, and
+   a claim TTL below it lets the claim expire mid-publish and reopens the double-publish window.
+   Post-delivery bookkeeping (`RecordSent`, claim release, resolved-alert pruning) deliberately runs on a **detached**
+   5s context, so a fire that spent its whole budget on a slow target still records the targets that *did* deliver.
+
+   Residual sharp edges, all deliberate:
+   - The wait is *shorter* than the queue's worst-case retry budget (~2min). A target still retrying past the
+     deadline is reported as unconfirmed, so a delivery that succeeds afterwards is re-sent on the next fire — a
+     duplicate notification, never a dropped one. The pipeline is at-least-once, same as upstream. Giving up also
+     **abandons** the job (its context is cancelled), so one hanging endpoint cannot pin workers and starve healthy
+     targets into false "unconfirmed" results.
    - After the `group_interval` fire, AMP's timer chain moves to `repeat_interval`, so an endpoint that is down for
      a long time gets one fast retry and then retries at `repeat_interval` cadence (upstream keeps flushing at
      `group_interval`). Independent of this fix; not tracked as a parity blocker.
+   - The timer manager's own distributed lock (`lockTTL`, 30s, no renewal) can now expire mid-fire, so a second
+     replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
+     that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
    The original timer-continuation code cancelled its own context when arming the next interval timer
    (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `c6cfadc` (contexts
