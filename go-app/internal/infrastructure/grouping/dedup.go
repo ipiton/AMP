@@ -141,6 +141,15 @@ func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey Group
 
 	key := dedupKey{groupKey: groupKey, target: target}
 	set := l.delivered[key]
+
+	// Checked up front, so the whole batch is either recorded or refused —
+	// same all-or-nothing shape as RedisNotifyLog's SCARD pre-check, so the two
+	// implementations cannot disagree about what happens at the boundary.
+	if len(set)+len(deliveryKeys) > maxDeliveredAlertsPerTarget {
+		return fmt.Errorf("delivered set for %s/%s would exceed its %d-entry cap (%d + %d); per-alert progress is not recorded for this fire",
+			groupKey, target, maxDeliveredAlertsPerTarget, len(set), len(deliveryKeys))
+	}
+
 	if set == nil {
 		set = make(map[string]struct{}, len(deliveryKeys))
 		l.delivered[key] = set
@@ -148,9 +157,6 @@ func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey Group
 	for _, deliveryKey := range deliveryKeys {
 		if deliveryKey == "" {
 			continue
-		}
-		if len(set) >= maxDeliveredAlertsPerTarget {
-			return fmt.Errorf("delivered set for %s/%s is at its %d-entry cap; further per-alert progress is not recorded", groupKey, target, maxDeliveredAlertsPerTarget)
 		}
 		set[deliveryKey] = struct{}{}
 	}
