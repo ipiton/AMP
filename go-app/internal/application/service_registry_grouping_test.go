@@ -14,6 +14,7 @@ import (
 	"github.com/ipiton/AMP/internal/core"
 	infracache "github.com/ipiton/AMP/internal/infrastructure/cache"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 )
@@ -692,5 +693,57 @@ func TestGroupingEndToEnd_TimeIntervalLookupWiredFromRouteTreeManager_MutesNotif
 	defer cancel()
 	if err := r.groupTimerManager.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("groupTimerManager.Shutdown() error = %v", err)
+	}
+}
+
+// === Wave-4 hygiene item 3 (review finding M-a) ===
+//
+// service_registry.go used to wire grouping.reconciliation_grace straight
+// from a static "90s" viper literal, completely independent of the actual
+// publishing.queue.delivery_confirmation_timeout — drift caught only by
+// validateNotifyTimingBudget at startup, and only after the operator had
+// already raised the delivery timeout and hit a confusing failure. These pin
+// reconciliationGraceFor, the helper initializeGrouping now calls instead.
+
+// TestReconciliationGraceFor_UnsetConfigDerivesFromActualDeliveryTimeout is
+// the heart of the fix: raising delivery_confirmation_timeout alone (leaving
+// reconciliation_grace unset) must scale the derived grace with it, instead
+// of silently keeping the old default.
+func TestReconciliationGraceFor_UnsetConfigDerivesFromActualDeliveryTimeout(t *testing.T) {
+	for _, wait := range []time.Duration{
+		infrapublishing.DefaultDeliveryConfirmationTimeout, // 45s
+		90 * time.Second,
+		infrapublishing.MaxDeliveryConfirmationTimeout, // 2m
+	} {
+		got := reconciliationGraceFor(0, wait)
+		want := grouping.ReconciliationGraceFor(wait)
+		if got != want {
+			t.Errorf("reconciliationGraceFor(0, %s) = %s, want %s (grouping.ReconciliationGraceFor)", wait, got, want)
+		}
+	}
+}
+
+// TestReconciliationGraceFor_ExplicitConfigWins: an operator-supplied value
+// must never be overridden by the derivation, however it compares to what the
+// formula would have produced.
+func TestReconciliationGraceFor_ExplicitConfigWins(t *testing.T) {
+	const explicit = 10 * time.Minute
+	got := reconciliationGraceFor(explicit, infrapublishing.DefaultDeliveryConfirmationTimeout)
+	if got != explicit {
+		t.Errorf("reconciliationGraceFor(%s, ...) = %s, want the explicit value unchanged", explicit, got)
+	}
+}
+
+// TestReconciliationGraceFor_DefaultMatchesHistoricalLiteral kills the exact
+// silent drift review finding M-a described: the "90s" that used to be
+// hand-typed into config.go's viper default must still equal what the
+// formula produces at the shipped delivery-confirmation-timeout default, so
+// a change to notify_budget.go's constants that moves this value is caught
+// here instead of only at startup validation.
+func TestReconciliationGraceFor_DefaultMatchesHistoricalLiteral(t *testing.T) {
+	const historicalLiteral = 90 * time.Second
+	got := reconciliationGraceFor(0, infrapublishing.DefaultDeliveryConfirmationTimeout)
+	if got != historicalLiteral {
+		t.Errorf("reconciliationGraceFor(0, DefaultDeliveryConfirmationTimeout) = %s, want %s (config.go's former hardcoded default)", got, historicalLiteral)
 	}
 }

@@ -1418,7 +1418,7 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 	// cfg.Grouping.ReconciliationInterval.
 	if _, redisBacked := timerStorage.(*grouping.RedisTimerStorage); redisBacked {
 		timerManagerCfg.ReconciliationInterval = r.config.Grouping.ReconciliationInterval
-		timerManagerCfg.ReconciliationGrace = r.config.Grouping.ReconciliationGrace
+		timerManagerCfg.ReconciliationGrace = reconciliationGraceFor(r.config.Grouping.ReconciliationGrace, deliveryConfirmationTimeout)
 	}
 
 	timerManager, err := grouping.NewDefaultTimerManager(timerManagerCfg)
@@ -1504,6 +1504,31 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 
 	r.logger.Info("Grouping subsystem initialized")
 	return nil
+}
+
+// reconciliationGraceFor returns the effective grouping.reconciliation_grace
+// to wire into the timer manager (wave-4 hygiene item 3, review finding M-a).
+//
+// configured is whatever config.go decoded grouping.reconciliation_grace to
+// — zero when the operator left the key unset (config.go's setDefaults
+// deliberately registers no viper default for it, see that call site).
+// deliveryConfirmationTimeout is the ACTUAL configured
+// publishing.queue.delivery_confirmation_timeout, not a hardcoded default —
+// using the real value is what makes this a fix rather than a relocation of
+// the same drift: service_registry.go used to read a static "90s" literal
+// completely independent of this timeout, so raising the timeout alone (all
+// PublishGroupToTargets and the timer callback keep tracking it correctly)
+// left reconciliation_grace pointing at a now-too-small default and failed
+// startup with a message that named a knob the operator never touched.
+//
+// An explicit operator value always wins over the derivation —
+// validateNotifyTimingBudget still rejects the end result if the combination
+// violates the budget invariant, exactly as before.
+func reconciliationGraceFor(configured, deliveryConfirmationTimeout time.Duration) time.Duration {
+	if configured > 0 {
+		return configured
+	}
+	return grouping.ReconciliationGraceFor(deliveryConfirmationTimeout)
 }
 
 // newGroupingStorage selects group + timer storage backends for the grouping

@@ -708,9 +708,24 @@ func setDefaults() {
 	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc
 	// comment (config.go) for why the lite profile ignores this.
 	viper.SetDefault("grouping.reconciliation_interval", "45s")
-	// Two invariants meet here — keep in sync with
-	// grouping.defaultReconciliationGracePeriod, which derives the same value
-	// and is checked against the first one at compile time:
+	// grouping.reconciliation_grace deliberately has NO viper default (wave-4
+	// hygiene item 3, review finding M-a): a hardcoded literal here duplicated
+	// grouping.ReconciliationGraceFor(deliveryConfirmationTimeout) with
+	// nothing tying the two together, so raising
+	// publishing.queue.delivery_confirmation_timeout alone (without also
+	// raising this knob) failed startup validation for no reason a config
+	// diff would explain. When this key is left unset, the field decodes to
+	// zero and ServiceRegistry.initializeGrouping derives the effective grace
+	// from the ACTUAL configured delivery-confirmation timeout via
+	// ReconciliationGraceFor — see reconciliationGraceFor in
+	// service_registry.go. An operator-supplied value (any positive
+	// duration here) always wins over that derivation, and
+	// validateNotifyTimingBudget still rejects the end result if it violates
+	// the budget invariant.
+	//
+	// Two invariants meet at the DERIVED value — kept in sync with
+	// grouping.defaultReconciliationGracePeriod, which computes the same
+	// formula and is checked against reconciliation_interval at compile time:
 	//
 	//  1. Well BELOW the shared timer record's own Redis TTL grace
 	//     (grouping.timerTTLGracePeriod, 10m): the difference between the two
@@ -727,7 +742,6 @@ func setDefaults() {
 	//
 	// ServiceRegistry.validateNotifyTimingBudget rechecks (2) at startup
 	// against the actual publishing.queue.delivery_confirmation_timeout.
-	viper.SetDefault("grouping.reconciliation_grace", "90s")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)
