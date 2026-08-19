@@ -85,7 +85,19 @@ func newTestCoordinator(t *testing.T, discovery TargetDiscoveryManager) *Publish
 		logger,
 	)
 
-	return NewPublishingCoordinator(queue, discovery, nil, DefaultCoordinatorConfig(), logger)
+	// DeliveryConfirmationTimeout (task rec): this coordinator's queue runs
+	// with NO workers, so a submitted job can never report a delivery
+	// outcome and PublishGroupToTargets waits out the full timeout for each
+	// target. These tests only assert target RESOLUTION (which targets got a
+	// job, which were filtered/skipped), so a millisecond-scale timeout
+	// keeps them fast; every group result they produce is deliberately
+	// Success == false / ErrDeliveryWaitTimeout. Delivery outcomes
+	// themselves are covered in delivery_confirmation_test.go against real
+	// workers and httptest servers.
+	config := DefaultCoordinatorConfig()
+	config.DeliveryConfirmationTimeout = 20 * time.Millisecond
+
+	return NewPublishingCoordinator(queue, discovery, nil, config, logger)
 }
 
 func testAlert() *core.EnrichedAlert {
@@ -214,7 +226,12 @@ func TestPublishGroupToTargets_ReceiverFiltering_ResolvesTargetsOnce(t *testing.
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "slack-critical", results[0].Target.Name)
-	assert.True(t, results[0].Success)
+	// Success is NOT asserted here: newTestCoordinator's queue has no
+	// workers, so no delivery outcome can arrive (task rec — see the helper's
+	// comment). Confirmed-delivery assertions live in
+	// delivery_confirmation_test.go.
+	assert.False(t, results[0].Success)
+	assert.ErrorIs(t, results[0].Error, ErrDeliveryWaitTimeout)
 }
 
 func TestPublishGroupToTargets_NoMatchingTargetsReturnsError(t *testing.T) {
