@@ -290,9 +290,16 @@ SMTP, so there is no HTTP client to configure.
 | `basic_auth.password_file` | ✅ | Wins over the inline `password` when both are set (upstream's precedence). Contents are whitespace-trimmed, so a mounted Secret's trailing newline does not corrupt the header. |
 | `authorization.type` / `credentials` | ✅ | `type` defaults to `Bearer`. |
 | `authorization.credentials_file` | ✅ | Same precedence and trimming as `password_file`. |
-| `follow_redirects` | ✅ | `false` returns the redirect response as-is. Default (`true`) is the standard library's follow behaviour. |
+| `follow_redirects` | ✅ | `false` returns the redirect response as-is. Default (`true`) is the standard library's follow behaviour. **Credentials survive a cross-host redirect**: because `http_config` auth is applied inside the transport, `net/http`'s own stripping of `Authorization` on a cross-host redirect does not apply, so an endpoint that 302s elsewhere hands that host the basic password or bearer token. `prometheus/common/config` behaves identically, so this is upstream parity, not an AMP quirk — set `follow_redirects: false` on an endpoint you do not want to trust that far. |
 | `oauth2` | ❌ | Parsed and reported, never applied — see [Still NOT supported for receivers](#still-not-supported-for-receivers). |
 | `enable_http2` | ➖ | Not modelled as a field. HTTP/2 is already attempted by the publishers whose clients set `ForceAttemptHTTP2`, and layering `http_config` preserves that. |
+
+Precedence over target-level auth: `http_config.basic_auth` / `authorization`
+are applied inside the HTTP transport, so they **override** an `Authorization`
+header carried in the target's own `http_headers` (config) or `headers` (K8s
+Secret), and anything the webhook client's auth manager applied. `http_config`
+wins because it is the more specific declaration — but a Secret target carrying
+both will not behave the way its author expects, and nothing logs the override.
 
 Semantics worth knowing before you migrate:
 
@@ -306,6 +313,12 @@ Semantics worth knowing before you migrate:
   certificates differently — a silent security difference.
 - **`basic_auth` and `authorization` are mutually exclusive.** Setting both is a
   target build error, matching upstream's own validation.
+- **Structural mistakes are caught at LOAD, not per alert.** `basic_auth`
+  together with `authorization` (upstream rejects the combination too), half a
+  client-certificate pair, an unroutable `proxy_url` and an `authorization` with
+  no credential are all decided when the config is built or the Secret is
+  discovered — so a bad target is skipped once and loudly, instead of reloading
+  cleanly, looking healthy, and then failing every alert into the DLQ.
 - **Bad TLS or credential files skip the TARGET, not the process.** An
   unreadable `ca_file`, a `ca_file` containing no PEM certificate, half a client
   certificate pair, an unreadable `password_file`/`credentials_file`, or an
@@ -313,6 +326,15 @@ Semantics worth knowing before you migrate:
   `ERROR` naming the target and the path; every other target keeps delivering.
   AMP deliberately fails **closed** here — downgrading to a plain client would
   deliver alerts unverified or unauthenticated.
+- **Relative `*_file` paths resolve against the CONFIG FILE's directory**, not
+  the process working directory — `ca_file: certs/internal-ca.pem` next to your
+  `alertmanager.yml` works, exactly as upstream's `resolveFilepaths` intends.
+  Applies to `tls_config.ca_file`/`cert_file`/`key_file`,
+  `basic_auth.password_file`, `authorization.credentials_file` and (for the day
+  it is supported) `oauth2.client_secret_file`, at both `global:` and
+  per-integration scope. **Kubernetes Secret targets are the exception**: their
+  `http_config` has no config file to be relative to, so a relative path there
+  resolves against the process working directory — use absolute paths in Secrets.
 - **File contents are captured at first use.** Clients are cached per distinct
   `http_config`, so rotating a certificate or password file on disk does not
   affect an already-built client until a restart or a config reload that changes
@@ -321,6 +343,18 @@ Semantics worth knowing before you migrate:
 - **Kubernetes Secret targets support it too**, with no extra syntax: add an
   `http_config` object to the target's JSON blob using exactly the field names
   above. The Secret path `json.Unmarshal`s straight into the same target struct.
+- **Health probes do NOT honour `http_config`.** The health monitor uses one
+  process-wide HTTP client with no proxy and no per-target TLS or auth, so a
+  proxied, mTLS-protected or auth-gated target can report `degraded`/`unhealthy`
+  while delivering perfectly. Delivery is not gated on it today (nothing live
+  consults the monitor), so this is an observability false negative — but it
+  feeds the health metrics and therefore alerting. Tracked as
+  `FU-HEALTH-HTTP-CONFIG`.
+- **HTTPS-over-proxy (CONNECT) is not covered by AMP's own tests.** AMP's proxy
+  test asserts the plain-HTTP proxy path (absolute-URI request line). Since
+  nearly every real webhook is `https://`, the tunnelled path is the common one
+  in practice, and it relies entirely on `net/http`'s own CONNECT handling —
+  which AMP configures via `Transport.Proxy` and does not reimplement.
 - **Status API**: `basic_auth.password`, `authorization.credentials` and
   `oauth2.client_secret` are redacted to `<secret>` in `/api/v2/status`'s
   `config.original`. `cert_file`, `key_file` and `token_url` are also redacted
@@ -335,13 +369,24 @@ Semantics worth knowing before you migrate:
   `internal/infrastructure/routing`, so an upstream config using them loads
   (the keys are dropped) and that integration provisions no credential. Use
   the inline value or an env-substituted value for now.
-- **`http_config.oauth2`**: parsed but never applied — supporting it means a
-  token endpoint client plus a refresh loop with its own failure semantics, not
-  a field mapping. An `oauth2:` block is reported with a loud `WARN` naming the
-  receiver, integration kind and index, because the alternative is
-  unauthenticated requests to an OAuth2-protected endpoint with no signal at
-  all. The rest of that integration's `http_config` still applies. Tracked as
-  `FU-HTTP-OAUTH2` in `docs/06-planning/BACKLOG.md`.
+- **`http_config.oauth2`**: never applied — supporting it means a token endpoint
+  client plus a refresh loop with its own failure semantics, not a field
+  mapping. What happens next depends on WHERE the block came from, because the
+  blast radius of refusing differs enormously:
+  - **on the integration's own `http_config`** → that integration is **skipped**
+    with a loud `WARN` naming the receiver, kind and index. The endpoint told us
+    it needs OAuth2, so delivering without it would be a knowing unauthenticated
+    send. Only that one integration is affected.
+  - **inherited from `global.http_config`** → the integration still **delivers**
+    (without OAuth2 credentials), with a `WARN` plus the
+    `amp_publishing_unsupported_http_config_total{field="oauth2",target=...}`
+    counter. Refusing here would be disproportionate: `global:` propagates
+    wholesale, so one `oauth2:` block would black-hole every webhook, Slack,
+    PagerDuty and Telegram target in the process — including the ones that
+    authenticate through their own URL or header credential and never wanted
+    OAuth2. See `docs/06-planning/DECISIONS.md` for the accepted risk.
+
+  Tracked as `FU-HTTP-OAUTH2` in `docs/06-planning/BACKLOG.md`.
 - **Per-`email_config` SMTP settings**: see the fidelity table; only the
   `global.smtp_*` block reaches the SMTP dialer, so two receivers cannot use
   different SMTP servers. A config that sets SMTP per `email_config` and
