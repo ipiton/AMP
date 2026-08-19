@@ -671,3 +671,112 @@ func TestStorageManager_RecoveryDeleteThenRecreateDuringSameOutage_GroupSurvives
 	require.NoError(t, err, "the re-created group must survive recovery, not be deleted by a stale replay entry from the earlier delete")
 	require.Len(t, got.Alerts, 2)
 }
+
+// === fu6-mic item 1: FU-STORAGE-RECONCILE-SIGNAL ===
+//
+// Before this item, "stuck on fallback" looked identical on the
+// backend-active gauge whether the periodic probe itself kept failing
+// (Redis genuinely down, reconciliation never even attempted) or the probe
+// reported primary healthy while reconcileFallbackIntoPrimary itself kept
+// failing. These two tests are the brief's "reconcile error path increments;
+// probe-fail path doesn't" pair.
+
+// fakeLoadAllErrStorage wraps a GroupStorage delegate and forces LoadAll to
+// always fail, independent of the delegate's real behavior — used to
+// simulate "reconciliation itself is broken" deterministically, without
+// depending on any real Redis/miniredis error path.
+type fakeLoadAllErrStorage struct {
+	GroupStorage
+}
+
+func (f *fakeLoadAllErrStorage) LoadAll(_ context.Context) ([]*AlertGroup, error) {
+	return nil, errors.New("simulated fallback LoadAll failure")
+}
+
+// TestStorageManager_ReconcileFailure_IncrementsReconcileFailuresCounter is
+// the positive case: the probe reports primary healthy again, but
+// reconcileFallbackIntoPrimary itself fails (fallback.LoadAll erroring) —
+// this must increment IncStorageReconcileFailure and must NOT flip current
+// back to primary despite the probe being healthy.
+func TestStorageManager_ReconcileFailure_IncrementsReconcileFailuresCounter(t *testing.T) {
+	bm := sharedTestBusinessMetrics()
+	before := testutil.ToFloat64(bm.StorageReconcileFailuresCounter())
+
+	var primaryDown atomic.Bool
+	primaryDown.Store(true)
+
+	fakePrimary := &fakePingStorage{
+		GroupStorage: NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		pingErr: func(_ int) error {
+			if primaryDown.Load() {
+				return errors.New("down")
+			}
+			return nil
+		},
+	}
+	fallback := &fakeLoadAllErrStorage{
+		GroupStorage: NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+	}
+
+	sm := NewStorageManager(StorageManagerConfig{
+		Primary:             fakePrimary,
+		Fallback:            fallback,
+		Logger:              slog.Default(),
+		Metrics:             bm,
+		HealthCheckInterval: 10 * time.Millisecond,
+		DegradeThreshold:    1,
+		RecoverThreshold:    1,
+		MinHoldDuration:     time.Millisecond,
+		ReconcileTimeout:    time.Second,
+	})
+	t.Cleanup(sm.Stop)
+
+	waitForCondition(t, 2*time.Second, func() bool { return sm.GetCurrentStorage() == "fallback" })
+
+	primaryDown.Store(false) // probe now reports healthy; fallback.LoadAll still always fails
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		return testutil.ToFloat64(bm.StorageReconcileFailuresCounter()) > before
+	})
+
+	require.Equal(t, "fallback", sm.GetCurrentStorage(),
+		"a failed reconciliation must not flip current back to primary even though the probe is healthy")
+}
+
+// TestStorageManager_ProbeFailure_DoesNotIncrementReconcileFailuresCounter is
+// the negative case: while the probe itself keeps failing (primary
+// genuinely down), reconciliation is never even attempted, so the
+// reconcile-failures counter must stay untouched — this is exactly the
+// distinction the counter exists to draw.
+func TestStorageManager_ProbeFailure_DoesNotIncrementReconcileFailuresCounter(t *testing.T) {
+	bm := sharedTestBusinessMetrics()
+	before := testutil.ToFloat64(bm.StorageReconcileFailuresCounter())
+
+	fakePrimary := &fakePingStorage{
+		GroupStorage: NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		pingErr: func(_ int) error {
+			return errors.New("down")
+		},
+	}
+	fallback := NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()})
+
+	sm := NewStorageManager(StorageManagerConfig{
+		Primary:             fakePrimary,
+		Fallback:            fallback,
+		Logger:              slog.Default(),
+		Metrics:             bm,
+		HealthCheckInterval: 10 * time.Millisecond,
+		DegradeThreshold:    1,
+		RecoverThreshold:    1,
+		MinHoldDuration:     time.Millisecond,
+		ReconcileTimeout:    time.Second,
+	})
+	t.Cleanup(sm.Stop)
+
+	waitForCondition(t, 2*time.Second, func() bool { return sm.GetCurrentStorage() == "fallback" })
+
+	time.Sleep(200 * time.Millisecond) // ~20 more failed probes; reconcile must never be attempted
+
+	require.Equal(t, before, testutil.ToFloat64(bm.StorageReconcileFailuresCounter()),
+		"the probe-failing path must never attempt reconciliation, so the counter must not move")
+}

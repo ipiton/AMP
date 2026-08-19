@@ -203,6 +203,22 @@
 // context.DeadlineExceeded surfacing while the caller's context is still
 // live — meaning some OTHER, Redis-call-scoped deadline fired — counts as
 // connectivity.
+//
+// # Reconcile-failure signal (alertmanager-parity wave-6, FU-STORAGE-RECONCILE-SIGNAL)
+//
+// fu5-cfg's review noted that "stuck on fallback" looked identical on the
+// backend-active gauge whether the cause was Redis genuinely still down (the
+// periodic probe keeps failing, reconciliation is never even attempted) or
+// Redis being reachable again but reconcileFallbackIntoPrimary itself
+// repeatedly failing (e.g. its write-through Store call erroring). Only a
+// Warn log line distinguished the two. checkHealthAndSwitch now increments
+// BusinessMetrics.IncStorageReconcileFailure (amp_storage_reconcile_failures_total)
+// whenever reconciliation fails AFTER a successful Ping — i.e. never on the
+// probe-failing path, since that branch returns before reconciliation is
+// attempted at all. An operator can now tell "reconcile_failures_total is
+// climbing while backend_active{redis}=0 persists" (reconciliation is the
+// problem) apart from "reconcile_failures_total stays at 0 while
+// backend_active{redis}=0 persists" (the probe itself is still failing).
 package grouping
 
 import (
@@ -560,6 +576,14 @@ func (sm *StorageManager) checkHealthAndSwitch() {
 	if reconcileErr := sm.reconcileFallbackIntoPrimary(reconcileCtx); reconcileErr != nil {
 		sm.logger.Warn("Primary storage recovered but write-through reconciliation failed, staying on fallback",
 			"error", reconcileErr)
+		if sm.metrics != nil {
+			// fu6-mic item 1 (FU-STORAGE-RECONCILE-SIGNAL): the probe just
+			// reported primary as UP (we only get here when pingErr == nil),
+			// so this failure is reconciliation's own — not a Redis-down
+			// signal. Without this counter, "stuck on fallback" looks
+			// identical to "probe still failing" on the backend-active gauge.
+			sm.metrics.IncStorageReconcileFailure()
+		}
 		sm.mu.Lock()
 		sm.consecutiveSuccesses = 0 // require the streak to rebuild before retrying
 		sm.mu.Unlock()

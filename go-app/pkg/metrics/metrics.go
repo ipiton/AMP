@@ -846,12 +846,13 @@ func NewTimerMetrics() *TimerMetrics {
 
 // StorageMetrics holds metrics for storage operations
 type StorageMetrics struct {
-	Health            prometheus.Gauge
-	OperationsTotal   *prometheus.CounterVec
-	OperationDuration *prometheus.HistogramVec
-	FallbackTotal     *prometheus.CounterVec
-	RecoveryTotal     prometheus.Counter
-	BackendActive     *prometheus.GaugeVec
+	Health                 prometheus.Gauge
+	OperationsTotal        *prometheus.CounterVec
+	OperationDuration      *prometheus.HistogramVec
+	FallbackTotal          *prometheus.CounterVec
+	RecoveryTotal          prometheus.Counter
+	BackendActive          *prometheus.GaugeVec
+	ReconcileFailuresTotal prometheus.Counter
 }
 
 // NewStorageMetrics creates new storage metrics
@@ -916,6 +917,24 @@ func NewStorageMetrics() *StorageMetrics {
 				Help:      "Which group storage backend is currently active (1=active, 0=inactive), labeled by backend.",
 			},
 			[]string{"backend"},
+		),
+		// ReconcileFailuresTotal (task fu6-mic item 1, FU-STORAGE-RECONCILE-SIGNAL):
+		// increments only when grouping.StorageManager's write-through
+		// reconciliation itself fails (reconcileFallbackIntoPrimary returning
+		// an error), while the health probe reports primary as UP. Before
+		// this metric, "backend_active{memory}=1 and staying there" looked
+		// identical whether the cause was Redis genuinely still down (the
+		// probe keeps failing, no reconcile is even attempted) or Redis being
+		// reachable but reconciliation itself repeatedly failing (e.g. a
+		// write-through Store error) — this counter only increments in the
+		// second case, so an operator can tell them apart without reading logs.
+		ReconcileFailuresTotal: promauto.NewCounter(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Subsystem: "storage",
+				Name:      "reconcile_failures_total",
+				Help:      "Total number of failed group-storage fallback-to-primary reconciliation attempts (primary reachable, reconcile itself failed).",
+			},
 		),
 	}
 }
@@ -1362,6 +1381,17 @@ func (m *BusinessMetrics) IncStorageRecovery() {
 	m.storage.RecoveryTotal.Inc()
 }
 
+// IncStorageReconcileFailure increments the reconcile-failures counter (task
+// fu6-mic item 1, FU-STORAGE-RECONCILE-SIGNAL). Call only when the primary
+// health probe is UP but grouping.StorageManager's write-through
+// reconciliation itself failed — this is what distinguishes "Redis is still
+// down" (probe failing, reconcile never attempted) from "Redis is up but
+// reconciliation keeps failing" on the backend-active gauge, which looks
+// identical between the two without this signal.
+func (m *BusinessMetrics) IncStorageReconcileFailure() {
+	m.storage.ReconcileFailuresTotal.Inc()
+}
+
 // groupStorageBackendLabels enumerates the label values
 // SetActiveGroupStorageBackend zeroes out before setting the active one, so
 // stale "1"s never linger under a label that stopped being active (task
@@ -1419,6 +1449,15 @@ func (m *BusinessMetrics) SetActiveGroupStorageBackend(backend string) {
 // instead of reading this directly.
 func (m *BusinessMetrics) GroupStorageBackendGauge() *prometheus.GaugeVec {
 	return m.storage.BackendActive
+}
+
+// StorageReconcileFailuresCounter exposes the counter IncStorageReconcileFailure
+// increments (task fu6-mic item 1, FU-STORAGE-RECONCILE-SIGNAL), for tests
+// that need to assert on its value (e.g. via testutil.ToFloat64) without a
+// scrape round-trip. Production code should call IncStorageReconcileFailure
+// instead of writing to this directly.
+func (m *BusinessMetrics) StorageReconcileFailuresCounter() prometheus.Counter {
+	return m.storage.ReconcileFailuresTotal
 }
 
 // RecordTimerStarted records a timer start
