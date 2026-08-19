@@ -39,7 +39,7 @@ import (
 // publishing. This claim is what prevents the double publish in that window
 // — it went from a backstop to load-bearing, which is another reason it must
 // cover the whole fire.
-const defaultNotifyLogClaimTTL = defaultDeliveryConfirmationBudget + notifyChainOverheadBudget
+const defaultNotifyLogClaimTTL = defaultDeliveryConfirmationBudget + notifyChainOverheadBudget + notifyBookkeepingTimeout
 
 // DefaultGroupManager is an in-memory implementation of AlertGroupManager.
 //

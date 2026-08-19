@@ -31,6 +31,20 @@ import (
 // is the safe direction (see that sentinel's doc comment).
 const DefaultDeliveryConfirmationTimeout = 45 * time.Second
 
+// MaxDeliveryConfirmationTimeout is the largest value
+// publishing.queue.delivery_confirmation_timeout may be set to (task rec fix
+// round 2, review finding R9).
+//
+// The knob is not merely a timeout: the notify chain holds the group's publish
+// lock and its cross-replica claim for the whole wait, and grouping derives the
+// timer-callback deadline and the orphan-adoption grace period from it (see
+// grouping/notify_budget.go). Two minutes already implies a ~2m45s adoption
+// grace, which is the point where those derived values start crowding a typical
+// group_interval and the timer record's own TTL grace. Enforced in
+// config.validatePublishing so a too-large value fails at load time with an
+// explanation instead of quietly degrading dispatch.
+const MaxDeliveryConfirmationTimeout = 2 * time.Minute
+
 // PublishingResult represents the result of publishing to a single target
 type PublishingResult struct {
 	Target  *core.PublishingTarget
