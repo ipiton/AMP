@@ -265,11 +265,68 @@ the target.
 
 | Integration | Mapped (delivered) | Parsed but NOT delivered |
 |---|---|---|
-| `webhook_configs` | `url`, `http_headers`, `send_resolved` | `http_method` (always POST), `max_alerts`, `http_config` |
-| `slack_configs` | `api_url`, `send_resolved` | `channel`, `username`, `icon_emoji`/`icon_url`, `title`, `title_link`, `pretext`, `text`, `fields`, `actions`, `color`, `short_fields`, `http_config` |
-| `pagerduty_configs` | `routing_key` (or legacy `service_key`), `url`, `send_resolved` | `severity`, `class`, `component`, `group`, `description`, `details`, `http_config` — severity/summary are derived from the alert itself |
-| `telegram_configs` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `send_resolved` | `parse_mode` (always the formatter's own), `message`, `http_config` |
+| `webhook_configs` | `url`, `http_headers`, `send_resolved`, `http_config` (supported subset — see below) | `http_method` (always POST), `max_alerts` |
+| `slack_configs` | `api_url`, `send_resolved`, `http_config` | `channel`, `username`, `icon_emoji`/`icon_url`, `title`, `title_link`, `pretext`, `text`, `fields`, `actions`, `color`, `short_fields` |
+| `pagerduty_configs` | `routing_key` (or legacy `service_key`), `url`, `send_resolved`, `http_config` | `severity`, `class`, `component`, `group`, `description`, `details` — severity/summary are derived from the alert itself |
+| `telegram_configs` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `send_resolved`, `http_config` | `parse_mode` (always the formatter's own), `message` |
 | `email_configs` | `to`, `from`, `subject`, `html`, `text`, `send_resolved` + the global SMTP settings | `headers`; upstream's per-`email_config` `smarthost`/`auth_*`/`require_tls` are not modelled at all |
+
+### Per-integration `http_config`
+
+Supported since `AMP-PARITY-WAVE7` track C (`FU-HTTP-CONFIG`). Every
+HTTP-carrying integration — `webhook_configs`, `slack_configs`,
+`pagerduty_configs`, `telegram_configs` — may set `http_config`, and
+`global.http_config` acts as the fallback. `email_configs` cannot: it speaks
+SMTP, so there is no HTTP client to configure.
+
+| Field | Status | Notes |
+|---|---|---|
+| `proxy_url` | ✅ | Absolute URL with scheme + host. An explicit `proxy_url` bypasses `NO_PROXY`, same as upstream. |
+| `tls_config.ca_file` | ✅ | PEM bundle used to verify the server. Read at client construction. |
+| `tls_config.cert_file` / `key_file` | ✅ | Client certificate pair for mutual TLS. **Both required together** — one alone is a target build error, not a silent connection without a client cert. |
+| `tls_config.server_name` | ✅ | SNI / verified hostname override. |
+| `tls_config.insecure_skip_verify` | ✅ | Testing only. |
+| `basic_auth.username` / `password` | ✅ | |
+| `basic_auth.password_file` | ✅ | Wins over the inline `password` when both are set (upstream's precedence). Contents are whitespace-trimmed, so a mounted Secret's trailing newline does not corrupt the header. |
+| `authorization.type` / `credentials` | ✅ | `type` defaults to `Bearer`. |
+| `authorization.credentials_file` | ✅ | Same precedence and trimming as `password_file`. |
+| `follow_redirects` | ✅ | `false` returns the redirect response as-is. Default (`true`) is the standard library's follow behaviour. |
+| `oauth2` | ❌ | Parsed and reported, never applied — see [Still NOT supported for receivers](#still-not-supported-for-receivers). |
+| `enable_http2` | ➖ | Not modelled as a field. HTTP/2 is already attempted by the publishers whose clients set `ForceAttemptHTTP2`, and layering `http_config` preserves that. |
+
+Semantics worth knowing before you migrate:
+
+- **Per-integration `http_config` replaces `global.http_config` WHOLESALE — it
+  is not deep-merged.** This mirrors upstream exactly (`Config.UnmarshalYAML`
+  assigns the global block only when the integration's own is `nil`), including
+  the surprising part: an integration that sets only `proxy_url` **discards**
+  global's `tls_config` and `basic_auth` rather than inheriting them. AMP does
+  not "improve" on this, because a deployment that merged differently from the
+  Alertmanager the same file was written for would authenticate or verify
+  certificates differently — a silent security difference.
+- **`basic_auth` and `authorization` are mutually exclusive.** Setting both is a
+  target build error, matching upstream's own validation.
+- **Bad TLS or credential files skip the TARGET, not the process.** An
+  unreadable `ca_file`, a `ca_file` containing no PEM certificate, half a client
+  certificate pair, an unreadable `password_file`/`credentials_file`, or an
+  unroutable `proxy_url` all fail that target's construction with a logged
+  `ERROR` naming the target and the path; every other target keeps delivering.
+  AMP deliberately fails **closed** here — downgrading to a plain client would
+  deliver alerts unverified or unauthenticated.
+- **File contents are captured at first use.** Clients are cached per distinct
+  `http_config`, so rotating a certificate or password file on disk does not
+  affect an already-built client until a restart or a config reload that changes
+  the config. Upstream re-reads per handshake; tracked as
+  `FU-HTTP-FILE-ROTATION`.
+- **Kubernetes Secret targets support it too**, with no extra syntax: add an
+  `http_config` object to the target's JSON blob using exactly the field names
+  above. The Secret path `json.Unmarshal`s straight into the same target struct.
+- **Status API**: `basic_auth.password`, `authorization.credentials` and
+  `oauth2.client_secret` are redacted to `<secret>` in `/api/v2/status`'s
+  `config.original`. `cert_file`, `key_file` and `token_url` are also redacted
+  there despite being paths/public endpoints — the redaction list is
+  deliberately conservative for an unauthenticated endpoint. Redaction affects
+  only that rendering, never delivery.
 
 ### Still NOT supported for receivers
 
@@ -278,10 +335,13 @@ the target.
   `internal/infrastructure/routing`, so an upstream config using them loads
   (the keys are dropped) and that integration provisions no credential. Use
   the inline value or an env-substituted value for now.
-- **Per-integration `http_config`** (proxy, TLS, custom bearer/basic auth,
-  `follow_redirects`): parsed and validated, never applied — every publisher
-  uses its own HTTP client. Tracked (not started) as
-  `FU-INTEGRATION-FIELD-FIDELITY` in `docs/06-planning/BACKLOG.md`.
+- **`http_config.oauth2`**: parsed but never applied — supporting it means a
+  token endpoint client plus a refresh loop with its own failure semantics, not
+  a field mapping. An `oauth2:` block is reported with a loud `WARN` naming the
+  receiver, integration kind and index, because the alternative is
+  unauthenticated requests to an OAuth2-protected endpoint with no signal at
+  all. The rest of that integration's `http_config` still applies. Tracked as
+  `FU-HTTP-OAUTH2` in `docs/06-planning/BACKLOG.md`.
 - **Per-`email_config` SMTP settings**: see the fidelity table; only the
   `global.smtp_*` block reaches the SMTP dialer, so two receivers cannot use
   different SMTP servers. A config that sets SMTP per `email_config` and
@@ -310,8 +370,9 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    unchanged and merge into the same view. What is still NOT upstream-equal is *field* fidelity, not existence —
    see [Per-integration field fidelity](#per-integration-field-fidelity) and
    [Still NOT supported for receivers](#still-not-supported-for-receivers): Slack channel/title/color, PagerDuty
-   severity/class/details, Telegram `parse_mode`, per-integration `http_config` and all `*_file` secret variants
-   are parsed and validated but not delivered. Two other honest edges: a receiver declared in the config with no
+   severity/class/details, Telegram `parse_mode` and all `*_file` secret variants
+   are parsed and validated but not delivered. (Per-integration `http_config` no longer belongs on that list —
+   wave 7 track C delivers it; see [Per-integration `http_config`](#per-integration-http_config).) Two other honest edges: a receiver declared in the config with no
    deliverable integration silently drops (by design, counted), and if you keep an UNSCOPED legacy Secret target
    while also declaring the same endpoint in `receivers:`, both fire — one notification each.
    *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
@@ -643,7 +704,7 @@ AMP's **control plane** (routing, grouping, dispatch, silences, inhibition, time
 clustering) mirrors upstream Alertmanager's mechanics, not just its API shape. Since AMP-PARITY-WAVE6-EPIC its
 **data plane** follows the config too: `receivers[].*_configs` auto-provision delivery endpoints, so a copied
 `alertmanager.yml` both routes and delivers. What is still not upstream-equal is per-integration FIELD fidelity
-(Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`, per-integration `http_config`,
+(Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`,
 `*_file` secret variants) — see [Per-integration field fidelity](#per-integration-field-fidelity).
 
 Concretely, a migration is:
