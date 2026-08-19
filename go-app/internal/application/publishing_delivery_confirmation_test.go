@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -37,10 +38,20 @@ import (
 // counts as a duplicate while its sentAt is at/after the caller's ttl
 // cutoff. TryClaim always succeeds (single process — DefaultGroupManager's
 // own publishLocks serialize same-process fires).
+//
+// CONTEXT-AWARE ON PURPOSE (fix round 1, review finding I4): every method
+// honours its context the way RedisNotifyLog does, and every ctx failure is
+// counted in ctxErrors. That is what makes finding C1 testable — before the
+// fix, a fire whose callback deadline expired during a slow delivery called
+// RecordSent / the claim release / pruning with a dead context, so a target
+// that HAD received the notification was never recorded and got re-paged.
+// A test-double that ignored ctx could never see it.
 type recordingNotifyLog struct {
-	mu      sync.Mutex
-	entries map[string]time.Time // "groupKey|target" -> sentAt
-	sends   []string             // target names, in RecordSent order
+	mu        sync.Mutex
+	entries   map[string]time.Time // "groupKey|target" -> sentAt
+	sends     []string             // target names, in RecordSent order
+	releases  int                  // successful claim releases
+	ctxErrors int                  // calls rejected because their ctx was already done
 }
 
 func newRecordingNotifyLog() *recordingNotifyLog {
@@ -51,14 +62,32 @@ func (l *recordingNotifyLog) key(groupKey grouping.GroupKey, target string) stri
 	return string(groupKey) + "|" + target
 }
 
-func (l *recordingNotifyLog) IsDuplicate(_ context.Context, groupKey grouping.GroupKey, target string, _ string, ttl time.Time) (bool, error) {
+// checkCtx mimics a Redis client's behaviour on an expired context: fail the
+// operation and remember that it happened.
+func (l *recordingNotifyLog) checkCtx(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		l.mu.Lock()
+		l.ctxErrors++
+		l.mu.Unlock()
+		return fmt.Errorf("recordingNotifyLog: context already done: %w", err)
+	}
+	return nil
+}
+
+func (l *recordingNotifyLog) IsDuplicate(ctx context.Context, groupKey grouping.GroupKey, target string, _ string, ttl time.Time) (bool, error) {
+	if err := l.checkCtx(ctx); err != nil {
+		return false, err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	sentAt, ok := l.entries[l.key(groupKey, target)]
 	return ok && !sentAt.Before(ttl), nil
 }
 
-func (l *recordingNotifyLog) RecordSent(_ context.Context, groupKey grouping.GroupKey, target string, _ string, now time.Time, _ time.Duration) error {
+func (l *recordingNotifyLog) RecordSent(ctx context.Context, groupKey grouping.GroupKey, target string, _ string, now time.Time, _ time.Duration) error {
+	if err := l.checkCtx(ctx); err != nil {
+		return err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.entries[l.key(groupKey, target)] = now
@@ -66,7 +95,10 @@ func (l *recordingNotifyLog) RecordSent(_ context.Context, groupKey grouping.Gro
 	return nil
 }
 
-func (l *recordingNotifyLog) Forget(_ context.Context, groupKey grouping.GroupKey) error {
+func (l *recordingNotifyLog) Forget(ctx context.Context, groupKey grouping.GroupKey) error {
+	if err := l.checkCtx(ctx); err != nil {
+		return err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for k := range l.entries {
@@ -77,8 +109,30 @@ func (l *recordingNotifyLog) Forget(_ context.Context, groupKey grouping.GroupKe
 	return nil
 }
 
-func (l *recordingNotifyLog) TryClaim(_ context.Context, _ grouping.GroupKey, _ time.Duration) (bool, func() error, error) {
-	return true, func() error { return nil }, nil
+// TryClaim always wins the claim (single process).
+//
+// The release closure detaches from the acquiring context, mirroring the
+// production RedisNotifyLog (fix round 1, finding C1.3): release takes no
+// context of its own, so the only place that decision can live is the
+// implementation, and a release bound to the fire's context would silently
+// skip its CAS-delete on exactly the long fires that need it — leaving the
+// claim to linger to its TTL and making the group's NEXT fire skip itself.
+// Counting releases here is what proves the chain releases the claim even
+// when the fire's own context is already dead.
+func (l *recordingNotifyLog) TryClaim(ctx context.Context, _ grouping.GroupKey, _ time.Duration) (bool, func() error, error) {
+	if err := l.checkCtx(ctx); err != nil {
+		return false, func() error { return nil }, err
+	}
+	releaseCtx := context.WithoutCancel(ctx)
+	return true, func() error {
+		if err := l.checkCtx(releaseCtx); err != nil {
+			return err
+		}
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.releases++
+		return nil
+	}, nil
 }
 
 // recordedSends returns the target names RecordSent was called for.
@@ -86,6 +140,21 @@ func (l *recordingNotifyLog) recordedSends() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]string(nil), l.sends...)
+}
+
+// contextErrors returns how many notify-log operations were rejected because
+// their context was already done.
+func (l *recordingNotifyLog) contextErrors() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.ctxErrors
+}
+
+// claimReleases returns how many claim releases completed successfully.
+func (l *recordingNotifyLog) claimReleases() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.releases
 }
 
 // countingWebhook is an httptest webhook that counts requests and answers
@@ -123,6 +192,24 @@ type notifyChainStack struct {
 	groupKey  grouping.GroupKey
 }
 
+// notifyChainOptions tunes the harness where a test needs the time budget to
+// bite (fix round 1, review finding I4). Zero values mean "comfortable
+// defaults": a 3s confirmation wait and a callback deadline derived from it,
+// i.e. nothing expires during a healthy fire.
+type notifyChainOptions struct {
+	repeatInterval time.Duration
+
+	// confirmationTimeout is the coordinator's per-target delivery wait.
+	confirmationTimeout time.Duration
+
+	// callbackTimeout is the timer manager's per-callback deadline — the
+	// context publishGroupAlerts actually receives in production. Setting it
+	// SHORTER than confirmationTimeout reproduces the production shape review
+	// finding C1 describes: the fire's own context dies while a slow target is
+	// still being waited on.
+	callbackTimeout time.Duration
+}
+
 // newNotifyChainStack wires the real notify chain onto a real publishing
 // queue and coordinator over targets.
 //
@@ -131,6 +218,24 @@ type notifyChainStack struct {
 // the fix relies on), repeat_interval as given (the dedup window).
 func newNotifyChainStack(t *testing.T, repeatInterval time.Duration, targets ...*core.PublishingTarget) *notifyChainStack {
 	t.Helper()
+	return newNotifyChainStackWithOptions(t, notifyChainOptions{repeatInterval: repeatInterval}, targets...)
+}
+
+func newNotifyChainStackWithOptions(t *testing.T, opts notifyChainOptions, targets ...*core.PublishingTarget) *notifyChainStack {
+	t.Helper()
+
+	repeatInterval := opts.repeatInterval
+	if repeatInterval <= 0 {
+		repeatInterval = time.Hour
+	}
+	confirmationTimeout := opts.confirmationTimeout
+	if confirmationTimeout <= 0 {
+		confirmationTimeout = 3 * time.Second
+	}
+	callbackTimeout := opts.callbackTimeout
+	if callbackTimeout <= 0 {
+		callbackTimeout = grouping.TimerCallbackTimeoutFor(confirmationTimeout)
+	}
 
 	logger := slog.New(slog.NewTextHandler(&discardWriter{}, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
@@ -160,7 +265,7 @@ func newNotifyChainStack(t *testing.T, repeatInterval time.Duration, targets ...
 	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
 
 	coordinatorConfig := infrapublishing.DefaultCoordinatorConfig()
-	coordinatorConfig.DeliveryConfirmationTimeout = 3 * time.Second
+	coordinatorConfig.DeliveryConfirmationTimeout = confirmationTimeout
 	coordinator := infrapublishing.NewPublishingCoordinator(queue, discovery, nil, coordinatorConfig, logger)
 
 	adapter, err := NewApplicationPublishingAdapter(coordinator, logger)
@@ -168,8 +273,9 @@ func newNotifyChainStack(t *testing.T, repeatInterval time.Duration, targets ...
 
 	timerStorage := grouping.NewInMemoryTimerStorage(logger)
 	timerManager, err := grouping.NewDefaultTimerManager(grouping.TimerManagerConfig{
-		Storage: timerStorage,
-		Logger:  logger,
+		Storage:         timerStorage,
+		Logger:          logger,
+		CallbackTimeout: callbackTimeout,
 	})
 	require.NoError(t, err)
 
@@ -186,13 +292,14 @@ func newNotifyChainStack(t *testing.T, repeatInterval time.Duration, targets ...
 	notifyLog := newRecordingNotifyLog()
 
 	manager, err := grouping.NewDefaultGroupManager(context.Background(), grouping.DefaultGroupManagerConfig{
-		KeyGenerator: grouping.NewGroupKeyGenerator(),
-		Config:       groupingConfig,
-		Storage:      grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{Logger: logger}),
-		TimerManager: timerManager,
-		Publisher:    adapter,
-		NotifyLog:    notifyLog,
-		Logger:       logger,
+		KeyGenerator:      grouping.NewGroupKeyGenerator(),
+		Config:            groupingConfig,
+		Storage:           grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{Logger: logger}),
+		TimerManager:      timerManager,
+		Publisher:         adapter,
+		NotifyLog:         notifyLog,
+		NotifyLogClaimTTL: grouping.NotifyLogClaimTTLFor(confirmationTimeout),
+		Logger:            logger,
 	})
 	require.NoError(t, err)
 	require.NoError(t, timerManager.SetGroupManager(manager))
@@ -295,4 +402,104 @@ func TestNotifyChain_MixedBatchRecordsOnlyTheConfirmedTarget(t *testing.T) {
 		"only the target that confirmed delivery may be recorded")
 	assert.Equal(t, int64(1), ok.hits.Load(),
 		"the confirmed target must not be re-notified while its entry is fresh")
+}
+
+// === Fix round 1 (review findings C1 / I4): the fire's own context expires ===
+
+// newHangingWebhook serves requests that never answer until the test tears
+// down: it is how these tests burn a fire's callback budget on one target
+// without failing its delivery.
+//
+// Parks on an explicit release channel (closed before Server.Close, so
+// teardown never waits on a stuck handler) rather than on r.Context(), which
+// net/http does not cancel promptly for a handler that has not written yet.
+func newHangingWebhook(t *testing.T) *countingWebhook {
+	t.Helper()
+	w := &countingWebhook{}
+	release := make(chan struct{})
+	w.server = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		w.hits.Add(1)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		rw.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(func() {
+		close(release)
+		w.server.Close()
+	})
+	return w
+}
+
+// TestNotifyChain_ConfirmedTargetIsRecordedEvenWhenTheFireContextExpires is
+// the regression net for review finding C1, in the production shape: the
+// notify chain runs on the timer manager's per-callback context, and that
+// deadline is SHORTER here than one target's delivery takes.
+//
+// Round 1 shipped RecordSent / claim release / pruning on that same context,
+// so the fast target — which really did receive the notification — got no
+// nflog entry (and the claim was never released), meaning it would be re-paged
+// on the next fire. The fix runs post-delivery bookkeeping on a detached,
+// bounded context, so the confirmed target IS recorded even though the fire's
+// own context is already dead by then.
+func TestNotifyChain_ConfirmedTargetIsRecordedEvenWhenTheFireContextExpires(t *testing.T) {
+	fast := newCountingWebhook(t, http.StatusOK)
+	slow := newHangingWebhook(t)
+
+	stack := newNotifyChainStackWithOptions(t, notifyChainOptions{
+		repeatInterval: time.Hour,
+		// Confirmation wait far longer than the callback deadline: the fire's
+		// context is what gives up first, exactly as in production before this
+		// fix (30s callback ctx vs. 45s wait).
+		confirmationTimeout: 10 * time.Second,
+		callbackTimeout:     300 * time.Millisecond,
+	}, fast.target("target-fast"), slow.target("target-slow"))
+
+	stack.addFiringAlert(t, "fp-1")
+
+	// The fast target must end up recorded — bookkeeping survives the dead
+	// fire context.
+	require.Eventually(t, func() bool {
+		for _, target := range stack.notifyLog.recordedSends() {
+			if target == "target-fast" {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond,
+		"a target that confirmed delivery must be recorded even when the fire's context expired waiting on a slower target")
+
+	assert.NotContains(t, stack.notifyLog.recordedSends(), "target-slow",
+		"the target that never confirmed must NOT be recorded")
+	assert.Zero(t, stack.notifyLog.contextErrors(),
+		"no notify-log operation may run on an already-expired context")
+	assert.Positive(t, stack.notifyLog.claimReleases(),
+		"the cross-replica publish claim must be released even on a fire whose context expired")
+}
+
+// TestNotifyChain_CallerContextShorterThanConfirmationWaitStillReleasesClaim
+// is the single-target version of the same class: nothing confirms at all
+// (the only target is slower than the fire), so nothing may be recorded — but
+// the claim must still be released and no bookkeeping call may hit a dead
+// context, or the group's next fire would skip itself with "claim held by
+// another replica".
+func TestNotifyChain_CallerContextShorterThanConfirmationWaitStillReleasesClaim(t *testing.T) {
+	slow := newHangingWebhook(t)
+
+	stack := newNotifyChainStackWithOptions(t, notifyChainOptions{
+		repeatInterval:      time.Hour,
+		confirmationTimeout: 10 * time.Second,
+		callbackTimeout:     250 * time.Millisecond,
+	}, slow.target("target-slow"))
+
+	stack.addFiringAlert(t, "fp-1")
+
+	require.Eventually(t, func() bool { return stack.notifyLog.claimReleases() >= 1 }, 5*time.Second, 10*time.Millisecond,
+		"the publish claim must be released once the fire gives up on its unconfirmed target")
+
+	assert.Empty(t, stack.notifyLog.recordedSends(),
+		"an unconfirmed target must never be recorded")
+	assert.Zero(t, stack.notifyLog.contextErrors(),
+		"no notify-log operation may run on an already-expired context")
 }
