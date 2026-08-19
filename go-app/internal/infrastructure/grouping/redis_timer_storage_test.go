@@ -509,3 +509,71 @@ func BenchmarkRedisTimerStorage_LoadTimer(b *testing.B) {
 		_, _ = storage.LoadTimer(ctx, "bench-group")
 	}
 }
+
+// === ValidateReconciliationGrace (item 5, FU-WAVE3-RELIABILITY) ===
+//
+// Regression coverage for the compile-guard vs runtime-validator boundary
+// mismatch: the compile-time guard on timerTTLGracePeriod used to allow the
+// exact equality boundary (effectiveGrace + 4*interval == timerTTLGracePeriod)
+// to compile fine, while this runtime validator already correctly rejected
+// it. Both must reject equality — a zero-width adoption window is exactly
+// the finding-2 bug, not a safe edge case.
+
+// TestValidateReconciliationGrace_ExactEquality_Rejected pins down the
+// equality boundary explicitly: interval=100s, grace=200s gives
+// effectiveGrace(200s) + 4*interval(400s) == timerTTLGracePeriod(600s)
+// exactly. This MUST be rejected (strict <, not <=).
+func TestValidateReconciliationGrace_ExactEquality_Rejected(t *testing.T) {
+	err := ValidateReconciliationGrace(100*time.Second, 200*time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrReconciliationGraceReopensZeroWindow)
+}
+
+// TestValidateReconciliationGrace_OneUnitUnderEquality_Accepted is the same
+// scenario with grace reduced by 1s (199s), landing the sum 1s below
+// timerTTLGracePeriod — the smallest margin that must still pass.
+func TestValidateReconciliationGrace_OneUnitUnderEquality_Accepted(t *testing.T) {
+	err := ValidateReconciliationGrace(100*time.Second, 199*time.Second)
+	assert.NoError(t, err)
+}
+
+// TestValidateReconciliationGrace_OneUnitOverEquality_Rejected mirrors the
+// above one unit past equality (201s) to confirm the check also still
+// catches the case that was never in question.
+func TestValidateReconciliationGrace_OneUnitOverEquality_Rejected(t *testing.T) {
+	err := ValidateReconciliationGrace(100*time.Second, 201*time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrReconciliationGraceReopensZeroWindow)
+}
+
+// TestValidateReconciliationGrace_IntervalDisabled_AlwaysNil covers the
+// interval<=0 "reconciliation loop disabled" short-circuit, which must
+// return nil regardless of how extreme grace is (grace is not consulted
+// when the loop never runs).
+func TestValidateReconciliationGrace_IntervalDisabled_AlwaysNil(t *testing.T) {
+	assert.NoError(t, ValidateReconciliationGrace(0, 999*time.Hour))
+	assert.NoError(t, ValidateReconciliationGrace(-1*time.Second, 999*time.Hour))
+}
+
+// TestValidateReconciliationGrace_GraceDefaulting mirrors
+// NewDefaultTimerManager's own defaulting: grace<=0 means "use
+// defaultReconciliationGracePeriod" (20s), so the effective check for
+// interval=100s should behave exactly like passing grace=20s explicitly —
+// both accepted, since 20s+400s=420s is comfortably under 600s.
+func TestValidateReconciliationGrace_GraceDefaulting(t *testing.T) {
+	errZero := ValidateReconciliationGrace(100*time.Second, 0)
+	errNegative := ValidateReconciliationGrace(100*time.Second, -5*time.Second)
+	errExplicitDefault := ValidateReconciliationGrace(100*time.Second, defaultReconciliationGracePeriod)
+
+	assert.NoError(t, errZero)
+	assert.NoError(t, errNegative)
+	assert.NoError(t, errExplicitDefault)
+}
+
+// TestValidateReconciliationGrace_HardcodedDefaults_Accepted is the runtime
+// analogue of the compile-time guard just above timerTTLGracePeriod: the
+// actual shipped defaults (interval=45s, grace defaulted to 20s) must pass.
+func TestValidateReconciliationGrace_HardcodedDefaults_Accepted(t *testing.T) {
+	err := ValidateReconciliationGrace(defaultReconciliationInterval, defaultReconciliationGracePeriod)
+	assert.NoError(t, err)
+}
