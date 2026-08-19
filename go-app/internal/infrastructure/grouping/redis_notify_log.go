@@ -383,14 +383,18 @@ func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey,
 // accepted). Re-recording an alert already present — or overwriting its status
 // — still never consumes capacity either way.
 //
-// PEXPIRE only runs when this call CREATES the key (re-review, finding r5): a
-// key that already exists keeps whatever TTL its first write gave it, instead
-// of sliding forward on every partial write. The previous unconditional
-// PEXPIRE let a group with one persistently-failing alert and other alerts
-// trickling in keep already-delivered alerts suppressed well past one
-// repeat_interval. Not refreshing can only make the key expire EARLIER than a
-// fresh window would (never later), which resends sooner rather than
-// suppressing longer — the at-least-once floor stays intact.
+// PEXPIRE only runs when this call CREATES the key, or repairs one that has
+// somehow lost its TTL (re-review, finding r5, hardened by finding m1): a key
+// that already exists WITH a live TTL keeps whatever expiry its first write
+// gave it, instead of sliding forward on every partial write. The previous
+// unconditional PEXPIRE let a group with one persistently-failing alert and
+// other alerts trickling in keep already-delivered alerts suppressed well
+// past one repeat_interval. Not refreshing (when a TTL is already live) can
+// only make the key expire EARLIER than a fresh window would (never later),
+// which resends sooner rather than suppressing longer — the at-least-once
+// floor stays intact. Re-arming a TTL-less key preserves the self-healing
+// property review round 1 (finding I2) required, which a naive "only on
+// EXISTS==0" gate would otherwise have dropped.
 //
 // Wrapped in redis.NewScript (re-review, finding r4) so calls go out as EVALSHA
 // and the script body travels only when the server has not cached it yet — the
@@ -413,8 +417,12 @@ var recordPartialDeliveryScript = redis.NewScript(`
 	end
 
 	-- r5: PEXPIRE must only run for a key this call creates — capture that
-	-- BEFORE any HSET, since HSET itself would make EXISTS true.
-	local isNew = redis.call("EXISTS", KEYS[1]) == 0
+	-- BEFORE any HSET, since HSET itself would make EXISTS true. Also re-arm
+	-- for a key that exists but has somehow lost its TTL (PTTL < 0: -1 no
+	-- expiry, -2 no key) — review wave 5, finding m1: gating PEXPIRE on EXISTS
+	-- alone would otherwise permanently drop the self-healing property round 1
+	-- (finding I2) required, where any later write repaired a TTL-less key.
+	local needsTTL = redis.call("EXISTS", KEYS[1]) == 0 or redis.call("PTTL", KEYS[1]) < 0
 
 	-- r2: count distinct NEW fingerprints, not new fields — a fingerprint
 	-- named twice in this call (two different statuses) must consume at most
@@ -438,7 +446,7 @@ var recordPartialDeliveryScript = redis.NewScript(`
 	for i = 3, #ARGV, 2 do
 		redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1])
 	end
-	if isNew then
+	if needsTTL then
 		redis.call("PEXPIRE", KEYS[1], ttl)
 	end
 
