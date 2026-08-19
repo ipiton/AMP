@@ -216,14 +216,59 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
    group labels come from the matched route's `group_by` and the receiver is resolved per group from the live route
    tree. The remaining AMP-only behaviour there is the extra `?group_by=` query override.)*
-2. **Per-target dedup records on *enqueue*, not on confirmed HTTP delivery.** Wire-level batching itself shipped
-   in wave 2: webhook/alertmanager targets get one HTTP POST per `(group, target)` with an upstream-v4 `alerts`
-   array, and the nflog is keyed per `(group, receiver, target)` so a failed target retries alone. The remaining
-   gap: `TargetPublishOutcome.Success` (and therefore `RecordSent`) is set when the job is successfully *enqueued*
-   onto the publishing queue — the actual HTTP call happens later, asynchronously. A webhook returning 500 after a
-   successful enqueue is NOT retried by the dedup machinery until `repeat_interval` elapses; only local
-   queue-congestion failures are isolated per target today. Tracked as `FU-RECORDSENT-DELIVERY-CONFIRMATION`
-   in the backlog (move `RecordSent` to a job-completion callback).
+2. **Per-target dedup now records on *confirmed delivery* — with a bounded confirmation wait.** Closed in wave 3
+   (`FU-RECORDSENT-DELIVERY-CONFIRMATION`): `TargetPublishOutcome.Success`, and therefore `RecordSent`, is set only
+   after the publisher's HTTP call for that `(group, target)` pair actually succeeded. `PublishGroupToTargets`
+   submits each target's job with a completion channel and blocks on it, so a webhook returning 500 gets **no**
+   nflog entry and is re-published on the group's next scheduled fire instead of going quiet until
+   `repeat_interval`. Wire-level batching (one POST per `(group, target)` with an upstream-v4 `alerts` array) and
+   per-`(group, receiver, target)` nflog keys are unchanged from wave 2.
+   **The notify-fire time budget** is one derived chain, driven by a single knob,
+   `publishing.queue.delivery_confirmation_timeout` (45s default):
+
+   | Duration | Value at the default | Role |
+   |---|---|---|
+   | delivery-confirmation wait | 45s (max 2m) | per-target wait in `PublishGroupToTargets` |
+   | timer-callback deadline | 60s (= wait + 15s) | bounds one whole notify fire (`TimerManagerConfig.CallbackTimeout`) |
+   | cross-replica publish-claim TTL | 65s (= callback + 5s) | must cover the fire *and* its post-delivery bookkeeping (`GroupNotifyLog.TryClaim`) |
+   | orphan-adoption grace | 90s (= claim + 25s) | a fire still delivering must never look abandoned (`grouping.reconciliation_grace`) |
+
+   All three grouping-side values are derived from the wait at wiring time (`grouping.TimerCallbackTimeoutFor` /
+   `NotifyLogClaimTTLFor` / `ReconciliationGraceFor`) and re-checked at startup
+   (`ServiceRegistry.validateNotifyTimingBudget`) — AMP refuses to start on an inconsistent set, because every
+   failure mode is invisible at runtime: a callback deadline below the wait silently truncates every delivery; a
+   claim TTL below it lets the claim expire mid-publish and reopens the double-publish window; an adoption grace
+   below it makes a live fire adoptable, and the adopting replica deletes the group's shared timer record while the
+   publishing replica is still using it.
+
+   Post-delivery bookkeeping (`RecordSent`, claim release, resolved-alert pruning) runs on a **detached** 5s context
+   that is created *after* the delivery wait returns — a detached context built before the wait would have had its
+   deadline consumed by the wait itself, which is the same failure in disguise.
+
+   One relationship is deliberately *not* satisfied: the distributed per-group timer lock (`lockTTL`, 30s, never
+   renewed) is shorter than a fire, so a long fire runs on with that lock expired. The publish claim, not the lock,
+   is what stops a second replica notifying the same group in that window — it is load-bearing, not a backstop, and
+   the startup log line reports both values.
+
+   Residual sharp edges, all deliberate:
+   - The wait is *shorter* than the queue's worst-case retry budget (~2min). A target still retrying past the
+     deadline is reported as unconfirmed, so a delivery that succeeds afterwards is re-sent on the next fire — a
+     duplicate notification, never a dropped one. The pipeline is at-least-once, same as upstream. Giving up also
+     **abandons** the job (its context is cancelled), so one hanging endpoint cannot pin workers and starve healthy
+     targets into false "unconfirmed" results.
+   - After the `group_interval` fire, AMP's timer chain moves to `repeat_interval`, so an endpoint that is down for
+     a long time gets one fast retry and then retries at `repeat_interval` cadence (upstream keeps flushing at
+     `group_interval`). Independent of this fix; not tracked as a parity blocker.
+   - The timer manager's own distributed lock (`lockTTL`, 30s, no renewal) can now expire mid-fire, so a second
+     replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
+     that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
+   - For integrations with no batch wire shape (Slack, Telegram, PagerDuty, Email) one job covers the group by
+     looping `Publish` per alert, and a single failing alert makes the whole `(group, target)` unconfirmed — so the
+     next fire re-sends *every* alert to that target, including the ones that already landed. Pre-existing wire-shape
+     limitation; delivery confirmation makes the retry actually happen, so the duplicate is now reachable rather than
+     theoretical. Webhook/alertmanager targets are unaffected (one batched POST, one outcome).
+   - On queue shutdown, in-flight confirmed-delivery jobs are cancelled and deliberately **not** written to the DLQ:
+     the notify chain re-publishes to any unconfirmed target after restart, so a DLQ replay would double-deliver.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
    The original timer-continuation code cancelled its own context when arming the next interval timer
    (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `c6cfadc` (contexts

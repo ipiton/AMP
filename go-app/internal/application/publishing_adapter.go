@@ -71,6 +71,13 @@ func (p *ApplicationPublishingAdapter) PublishToAll(ctx context.Context, alert *
 // error because the dedup log had no per-target granularity to record a
 // partial success into.
 //
+// Delivery confirmation (task rec, wave 3): this call now blocks for as
+// long as the actual wire-level delivery takes (bounded per target by
+// CoordinatorConfig.DeliveryConfirmationTimeout), because an outcome may
+// only be reported as Success once the target has really accepted the
+// notification — the caller turns Success into a shared, cross-replica nflog
+// entry that suppresses the group for a whole repeat_interval.
+//
 // skipTarget and groupLabels are forwarded to
 // PublishingCoordinator.PublishGroupToTargets unchanged — see
 // grouping.GroupNotificationPublisher's doc comment for the per-target
@@ -95,18 +102,20 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKe
 			continue
 		}
 
-		// result.Success reflects PublishingQueue.SubmitGroup's return
-		// (job enqueued), NOT an HTTP delivery confirmation from the
-		// target — see TargetPublishOutcome.Success's doc comment
-		// (grouping/manager.go) for the accepted "enqueue, not delivery"
-		// gap this carries forward unchanged from task 2.4.
+		// result.Success is a CONFIRMED delivery for this target since task
+		// rec (alertmanager-parity wave 3): PublishGroupToTargets blocks
+		// until the target's queued job reports its final outcome, so this
+		// is the publisher's HTTP result (after in-queue retries), not the
+		// pre-rec "job enqueued" signal. That is exactly what
+		// TargetPublishOutcome.Success promises the notify chain, which
+		// writes an nflog entry per successful target.
 		outcomes = append(outcomes, grouping.TargetPublishOutcome{
 			Target:  result.Target.Name,
 			Success: result.Success,
 		})
 
 		if !result.Success && result.Error != nil {
-			p.logger.Warn("Group publishing enqueue failed",
+			p.logger.Warn("Group publishing delivery not confirmed for target; no dedup entry will be recorded, target retried on next fire",
 				"target", result.Target.Name,
 				"receiver", receiver,
 				"alert_count", len(alerts),
