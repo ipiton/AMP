@@ -345,6 +345,34 @@ func (p *RouteConfigParser) validateRouteTree(
 	return errors.ErrType()
 }
 
+// anchorMatchREPattern mirrors internal/business/routing.anchorRegex (and
+// its independently-duplicated twins in
+// internal/infrastructure/inhibition.anchorMatcherRegex and
+// internal/core/silencing.anchorSilenceRegex): a label value must match
+// the WHOLE pattern, not merely contain a substring matching it —
+// upstream Alertmanager semantics. Cannot import business/routing's copy
+// directly: business/routing already imports this package
+// (infrastructure/routing), so the reverse import would cycle.
+//
+// Review fix round 3 (R7, latent): config.CompiledRegex (built here) is
+// NOT on any live match path today — RouteMatcher.regexMatch (the actual
+// evaluator) has its own independently-anchored cache-miss compile, and
+// production wires `businessrouting.NewRouteMatcher(nil, matcherOpts)`
+// (service_registry.go), i.e. never calls RegexCache.Preload with this
+// map at all; the doc-comment's own `ExtractCompiledPatterns(config)`
+// bridging function referenced in matcher.go doesn't exist anywhere in
+// the codebase. But RegexCache.Preload/Put exist and are keyed by the
+// RAW pattern the same way regexMatch's Get is — if this map is ever
+// wired up in the future without this fix, an unanchored entry inserted
+// via Preload would silently win over regexMatch's own anchored
+// cache-miss compile for that pattern's every subsequent hit (a
+// unanchored entry, once cached, is never re-compiled). Anchoring here
+// now, while this path is unused, means whoever eventually builds that
+// bridge inherits a correct cache rather than a latent poisoning bug.
+func anchorMatchREPattern(pattern string) string {
+	return "^(?:" + pattern + ")$"
+}
+
 // compileRegexPatterns compiles all MatchRE patterns for performance.
 func (p *RouteConfigParser) compileRegexPatterns(config *RouteConfig) error {
 	config.CompiledRegex = make(map[*grouping.Route]map[string]*regexp.Regexp)
@@ -355,11 +383,13 @@ func (p *RouteConfigParser) compileRegexPatterns(config *RouteConfig) error {
 			return nil
 		}
 
-		// Compile MatchRE patterns
+		// Compile MatchRE patterns, anchored ^(?:pattern)$ — see
+		// anchorMatchREPattern's doc comment for why this matters even
+		// though nothing consumes config.CompiledRegex today.
 		if len(route.MatchRE) > 0 {
 			patterns := make(map[string]*regexp.Regexp)
 			for key, pattern := range route.MatchRE {
-				regex, err := regexp.Compile(pattern)
+				regex, err := regexp.Compile(anchorMatchREPattern(pattern))
 				if err != nil {
 					return fmt.Errorf(
 						"invalid regex for route.match_re[%s]: %w",
