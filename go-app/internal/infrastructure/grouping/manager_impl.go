@@ -18,27 +18,33 @@ import (
 // automatically. Deliberately short — seconds, NOT repeat_interval — so a
 // replica that crashes mid-publish (before its deferred release runs)
 // self-heals quickly instead of blocking every replica's retries for that
-// group. Reuses lockTTL (redis_timer_storage.go, 30s), the same
-// distributed-lock duration RedisTimerStorage.AcquireLock already uses, per
-// storage.go's note that lockTTL is meant to be shared across timer/group/
-// notify-log storage for consistency.
+// group.
 //
-// Sizing assumption (fix round 1, Finding 1) — this is NOT renewed/extended
-// while a claim is held, unlike RedisTimerStorage's lock (no Extend call
-// anywhere in publishGroupAlerts). It is safe at 30s ONLY because
-// publisher.PublishGroup (see the call below) returns as soon as
-// ApplicationPublishingAdapter.PublishGroup's coordinator call enqueues
-// each target job onto the publishing queue (PublishingCoordinator.
-// PublishGroupToTargets -> c.queue.Submit) — actual delivery (HTTP POST to
-// the target, retries, etc.) happens out-of-band on the queue's own
-// workers, not inside this call. If PublishGroup or whatever it delegates
-// to is ever changed to block until delivery is confirmed (a synchronous
-// webhook call with no queue, say), a slow/hanging target could keep the
-// claim held past claimTTL, letting it expire mid-publish and reopening the
-// double-publish window this claim exists to close. Re-derive
-// notifyLogClaimTTL from the publishing stack's own max per-attempt
-// timeout (not repeat_interval) if that assumption ever stops holding.
-const notifyLogClaimTTL = lockTTL
+// SIZING (task rec, alertmanager-parity wave 3) — the claim is held across
+// the whole publisher.PublishGroup call and is NOT renewed/extended while
+// held (unlike RedisTimerStorage's lock, which has Extend; there is no
+// Extend call anywhere in publishGroupAlerts). Until wave 3, PublishGroup
+// returned as soon as each target's job was ENQUEUED, so 30s (a borrowed
+// lockTTL) covered it with room to spare. Task rec made PublishGroup block
+// until delivery is CONFIRMED, so the claim must now outlive a real HTTP
+// publish: this value MUST stay strictly larger than the publishing
+// coordinator's per-target confirmation wait
+// (publishing.DefaultDeliveryConfirmationTimeout, 45s) — otherwise the
+// claim expires mid-publish and a second replica can publish the same
+// group, exactly the double-publish window this claim exists to close.
+//
+// 60s = 45s wait + ~15s margin for the chain's own Redis round-trips
+// (IsDuplicate per target, RecordSent per target) and for scheduling. The
+// coupling is one-way and cross-package by necessity: grouping must not
+// import infrastructure/publishing (see GroupNotificationPublisher's doc
+// comment on that boundary), so the two constants are kept in step by these
+// comments — change one, re-check the other.
+//
+// Cost of the increase: a replica that crashes mid-publish blocks this
+// group's retries for up to 60s instead of 30s. That is still well inside a
+// typical group_interval/repeat_interval, and it is the price of never
+// double-paging.
+const notifyLogClaimTTL = 60 * time.Second
 
 // DefaultGroupManager is an in-memory implementation of AlertGroupManager.
 //
@@ -1269,13 +1275,11 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// of blocking every replica's retries for this group.
 	//
 	// This claim is held across the publisher.PublishGroup call below with
-	// NO renewal/extension — see notifyLogClaimTTL's doc comment (fix round
-	// 1, Finding 1) for the sizing assumption that makes a fixed 30s safe
-	// today: PublishGroup returns once delivery is enqueued, not once it is
-	// confirmed delivered. If that ever changes (a blocking/synchronous
-	// publisher), this claim can expire mid-publish and the double-publish
-	// window reopens silently — re-check that assumption before touching
-	// the publisher call below.
+	// NO renewal/extension. Since task rec that call blocks until delivery
+	// is CONFIRMED, so the claim has to cover a real HTTP publish — see
+	// notifyLogClaimTTL's doc comment for why it is 60s and why it must stay
+	// larger than publishing.DefaultDeliveryConfirmationTimeout. Re-check
+	// that relationship before changing either side.
 	claimed, releaseClaim, claimErr := m.notifyLog.TryClaim(ctx, group.Key, notifyLogClaimTTL)
 	switch {
 	case claimErr != nil:
@@ -1415,22 +1419,22 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 			continue
 		}
 		anySucceeded = true
-		// NOTE (review finding 2, fwb fix round 1 — enqueue vs. delivery):
-		// outcome.Success == true means the target's job was successfully
-		// ENQUEUED onto the publishing queue, not that its HTTP endpoint
-		// confirmed receipt — see TargetPublishOutcome.Success's doc
-		// comment (manager.go) for the full picture. RecordSent therefore
-		// fires before any actual delivery attempt for that target; a
-		// webhook 500/timeout discovered later, by the queue's own async
-		// worker/retry/DLQ machinery, is invisible here and will NOT cause
-		// this target to be retried by skipTarget on the group's next
-		// scheduled fire. This is an accepted, pre-existing gap carried
-		// forward from task 2.4 (the same "enqueue, not delivery" contract
-		// PublishGroup has always had) — task fwb narrows its scope from
-		// "affects the whole group" to "affects one target", but does not
-		// close it. Backlog follow-up: record on the queue job's own
-		// completion callback (success/failure of the actual HTTP publish)
-		// instead of on enqueue.
+		// Task rec (alertmanager-parity wave 3 — CONFIRMED delivery):
+		// outcome.Success == true now means this target actually accepted
+		// the notification (the publisher's HTTP call succeeded, after any
+		// in-queue retries), not merely that a job was enqueued for it —
+		// PublishGroup blocks until each target's queued job reports its
+		// final outcome. See TargetPublishOutcome.Success's doc comment
+		// (manager.go) for the full contract.
+		//
+		// So the nflog entry written here records a delivery that provably
+		// happened. A webhook 500, an exhausted retry budget, an open
+		// circuit breaker, metrics-only mode, or a confirmation wait that
+		// expired all arrive as Success == false, get NO entry, and are
+		// therefore retried by skipTarget on this group's next scheduled
+		// fire (group_interval) instead of being suppressed for a whole
+		// repeat_interval. That closes the "RecordSent == enqueue
+		// confirmation" gap task fwb narrowed but could not fix.
 		if recErr := m.notifyLog.RecordSent(ctx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see
