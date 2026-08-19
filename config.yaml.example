@@ -347,6 +347,20 @@ route:
 # fails to load, as does an email_config without global SMTP settings (AMP
 # has no per-email_config smarthost/auth fields).
 #
+# Every secret field above also accepts a `_file` twin instead of the inline
+# value — the shape a Kubernetes Secret mounted as a volume takes:
+# `url_file` (webhook), `routing_key_file` (pagerduty), `api_url_file`
+# (slack), `bot_token_file` (telegram), `slack_api_url_file` /
+# `smtp_auth_password_file` (global). Re-read on every config load/reload;
+# setting BOTH the inline field and its `_file` twin is a load error. See
+# docs/ALERTMANAGER_COMPATIBILITY.md's "`*_file` secret variants" section for
+# the rotation caveat (reload/SIGHUP required, no lazy per-notification
+# re-read). Example:
+#
+#   slack_configs:
+#     - api_url_file: /etc/amp/secrets/slack-webhook-url   # mounted Secret
+#       channel: "#alerts"
+#
 # `send_resolved` (default true) is honoured per integration: false suppresses
 # resolved notifications for that target only.
 #

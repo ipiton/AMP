@@ -171,10 +171,48 @@ AMP resolves this at parse time, per-integration value always winning:
 
 | Global key | Fills in | Behaviour when neither is set |
 |---|---|---|
-| `global.slack_api_url` | `slack_configs[].api_url` | **Load error** naming both places |
+| `global.slack_api_url` (or `global.slack_api_url_file`) | `slack_configs[].api_url` (or `.api_url_file`) | **Load error** naming both places |
 | `global.pagerduty_url` | `pagerduty_configs[].url` | Public Events API endpoint (`https://events.pagerduty.com`) |
 | `global.telegram_api_url` | `telegram_configs[].api_url` | Public Bot API base (`https://api.telegram.org`) |
 | `global.smtp_smarthost`, `global.smtp_from`, `global.smtp_auth_username`, `global.smtp_auth_password`, `global.smtp_require_tls` | the whole SMTP endpoint for `email_configs` | **Load error** — AMP models no per-`email_config` SMTP fields at all (see Known Gaps) |
+
+### `*_file` secret variants (FU7-B)
+
+Every secret field AMP's five supported integrations (+ `global:`) carry has
+a `*_file` twin — upstream's shape for a Kubernetes Secret mounted as a
+volume: `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file`,
+`slack_configs[].api_url_file`, `telegram_configs[].bot_token_file`,
+`global.slack_api_url_file`, `global.smtp_auth_password_file`. Resolved at
+parse time (`resolveFileSecrets`, `internal/infrastructure/routing/file_secrets.go`)
+into the SAME inline field the rest of the pipeline already reads — the
+`global:` fallback chain above, defaults, structural/semantic validation, and
+`business/publishing.BuildConfigTargets` all consume e.g. `SlackConfig.APIURL`
+without knowing or caring whether it came from `api_url:` or `api_url_file:`.
+
+Upstream's mutual-exclusion rule is enforced: setting both the inline field
+and its `_file` twin is a **load error** naming the field; an unreadable file
+is a load error naming the PATH (never any content — the read failed, so
+there is none to leak). File content is trimmed of trailing newline/
+whitespace, matching upstream.
+
+**Rotation caveat (honesty note):** upstream re-reads some `*_file` secrets
+lazily, per notification, so rotating the file's content on disk updates
+live delivery without a reload. AMP reads at config load and on every
+`/-/reload`/SIGHUP (the whole config, including `route:`/`receivers:`, is
+re-parsed from the file on every reload), but **not** per-notification — a
+secret rotated between reloads keeps using the old value until the next
+`/-/reload` or SIGHUP. Lazy per-publish re-reading was evaluated and
+intentionally not implemented: it would mean the publisher layer reading a
+file on the request path, crossing the boundary this and the parent epic
+both promise to leave untouched (`CreatePublisherForTarget`'s contract).
+
+The `*_file` field's value (a filesystem path) is not itself secret and stays
+visible in `/api/v2/status`'s `config.original`, even for fields whose *name*
+would otherwise trip the redaction substring list by coincidence
+(`routing_key_file` contains `routing_key`, `bot_token_file` contains
+`token`) — see `internal/application/handlers/status_config.go`'s
+`fileSecretRefKeys`. The resolved inline field is redacted exactly as before,
+regardless of which form supplied it.
 
 ### `send_resolved`
 
@@ -273,11 +311,12 @@ the target.
 
 ### Still NOT supported for receivers
 
-- **`*_file` secret variants** (`api_key_file`, `bot_token_file`,
-  `routing_key_file`, `auth_password_file`, …): not modelled by
-  `internal/infrastructure/routing`, so an upstream config using them loads
-  (the keys are dropped) and that integration provisions no credential. Use
-  the inline value or an env-substituted value for now.
+- **`*_file` secret variants — closed by FU7-B**, see
+  [`*_file` secret variants](#_file-secret-variants-fu7-b) above. Narrower gap
+  left open: `global.smtp_auth_secret_file` (upstream's CRAM-MD5 secret) has
+  no inline `smtp_auth_secret` field to pair with — AMP's SMTP publisher only
+  ever does plain username/password auth — so there is nothing to add a
+  `*_file` twin to; tracked, not silently dropped.
 - **Per-integration `http_config`** (proxy, TLS, custom bearer/basic auth,
   `follow_redirects`): parsed and validated, never applied — every publisher
   uses its own HTTP client. Tracked (not started) as
@@ -310,8 +349,9 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    unchanged and merge into the same view. What is still NOT upstream-equal is *field* fidelity, not existence —
    see [Per-integration field fidelity](#per-integration-field-fidelity) and
    [Still NOT supported for receivers](#still-not-supported-for-receivers): Slack channel/title/color, PagerDuty
-   severity/class/details, Telegram `parse_mode`, per-integration `http_config` and all `*_file` secret variants
-   are parsed and validated but not delivered. Two other honest edges: a receiver declared in the config with no
+   severity/class/details, Telegram `parse_mode`, and per-integration `http_config`
+   are parsed and validated but not delivered. `*_file` secret variants (closed by FU7-B) are now delivered — see
+   [`*_file` secret variants](#_file-secret-variants-fu7-b). Two other honest edges: a receiver declared in the config with no
    deliverable integration silently drops (by design, counted), and if you keep an UNSCOPED legacy Secret target
    while also declaring the same endpoint in `receivers:`, both fire — one notification each.
    *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
@@ -642,15 +682,17 @@ correct" in the abstract - operators should know before deploying):
 AMP's **control plane** (routing, grouping, dispatch, silences, inhibition, time-based muting, config validation, HA
 clustering) mirrors upstream Alertmanager's mechanics, not just its API shape. Since AMP-PARITY-WAVE6-EPIC its
 **data plane** follows the config too: `receivers[].*_configs` auto-provision delivery endpoints, so a copied
-`alertmanager.yml` both routes and delivers. What is still not upstream-equal is per-integration FIELD fidelity
-(Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`, per-integration `http_config`,
-`*_file` secret variants) — see [Per-integration field fidelity](#per-integration-field-fidelity).
+`alertmanager.yml` both routes and delivers, including `*_file` secret variants (FU7-B — see
+[`*_file` secret variants](#_file-secret-variants-fu7-b)). What is still not upstream-equal is per-integration FIELD
+fidelity (Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`, per-integration
+`http_config`) — see [Per-integration field fidelity](#per-integration-field-fidelity).
 
 Concretely, a migration is:
 1. Copy your `route:` / `receivers:` / `inhibit_rules:` / `time_intervals:` / `global:` across — semantics carry
    over, and the receivers' integrations become live delivery targets on load. No Kubernetes Secrets required.
 2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
-   formatting, PagerDuty categorisation, per-integration HTTP settings, `*_file` credentials).
+   formatting, PagerDuty categorisation, per-integration HTTP settings). `*_file` credentials are delivered
+   (FU7-B) — no action needed for those.
 3. If you are migrating FROM an earlier AMP that used `amp.receiver`-scoped Secrets: those keep working, but an
    endpoint declared in BOTH a Secret and `receivers:` now delivers twice. Delete the Secret, or scope it away.
 4. Re-verify the items in "Still validate" below.
