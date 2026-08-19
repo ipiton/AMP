@@ -138,8 +138,8 @@
   - configurable silence-sync intervals (2s backoff / 5min resync hardcoded constants)
   - ~0.25d each
 
-- [ ] **FU-STORAGE-RECONCILE-SIGNAL** — metric distinguishing "Redis down" from "reconciliation keeps failing" when failforward stays blocked (wave-5 review residual; today both look identical on the backend gauge). ~0.5d
-- [ ] **FU-FLAKE-DUPLICATE-METRIC-KEYS** — `internal/business/publishing.TestEdgeCase_DuplicateMetricKeys` is an order-dependent flake (concurrent CollectAll vs "last writer wins" assertion), pre-existing, documented across waves 2-5 gates. Fix the test's determinism. ~0.25d
+- [x] **FU-STORAGE-RECONCILE-SIGNAL** _(closed by wave 6, 2026-08-19)_ — metric distinguishing "Redis down" from "reconciliation keeps failing" when failforward stays blocked (wave-5 review residual; today both look identical on the backend gauge). Added `amp_storage_reconcile_failures_total` (`BusinessMetrics.IncStorageReconcileFailure`), incremented in `checkHealthAndSwitch` only when `reconcileFallbackIntoPrimary` fails AFTER a successful `Ping` — never on the probe-still-failing path. Tests: reconcile-failure path increments and does not flip back to primary; probe-failure path leaves the counter untouched. ~0.5d
+- [x] **FU-FLAKE-DUPLICATE-METRIC-KEYS** _(closed by wave 6, 2026-08-19)_ — `internal/business/publishing.TestEdgeCase_DuplicateMetricKeys` is an order-dependent flake (concurrent CollectAll vs "last writer wins" assertion), pre-existing, documented across waves 2-5 gates. Fixed the test's assertion to the order-independent property that always holds (winner is one of the two registered values, never a third; conflict-free keys match their own collector) instead of a scheduling-dependent winner. No production code changed. `-count=20 -race`: stable. ~0.25d
 - [ ] **PARITY-C2-REMAINING-RECEIVERS** — нишевые:
   - VictorOps/Splunk On-Call — config определён (`VictorOpsConfig`)
   - WeChat — config определён (`WeChatConfig`)
