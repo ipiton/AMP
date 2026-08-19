@@ -418,21 +418,32 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		return NewRootlyPublisher(f.formatter, f.logger), nil
 	}
 
-	// Get or create Rootly client for this API key (clientMu — see
-	// PublisherFactory's doc comment; read-lock fast path, double-check after
-	// upgrading, same pattern as createEnhancedEmailPublisher).
+	// Get or create Rootly client for this (base_url, api_key) pair (clientMu
+	// — see PublisherFactory's doc comment; read-lock fast path, double-check
+	// after upgrading, same pattern as createEnhancedEmailPublisher).
+	//
+	// The cache key is COMPOUND (review wave 5, finding I3 — the telegram
+	// lesson this item was supposed to carry over but didn't): the cached
+	// client bakes in BOTH target.URL and apiKey. Keying on apiKey alone meant
+	// the first target built for a key pinned its base URL for every later
+	// target sharing that key, so a second Rootly target using the same API
+	// key against a different URL (direct vs. a proxy/regional endpoint)
+	// silently reused the first one's client. Same shape as
+	// createEnhancedTelegramPublisher's clientKey.
+	clientKey := target.URL + "|" + apiKey
+
 	f.clientMu.RLock()
-	client, ok := f.rootlyClientMap[apiKey]
+	client, ok := f.rootlyClientMap[clientKey]
 	f.clientMu.RUnlock()
 	if !ok {
 		f.clientMu.Lock()
-		if client, ok = f.rootlyClientMap[apiKey]; !ok {
+		if client, ok = f.rootlyClientMap[clientKey]; !ok {
 			client = NewRootlyIncidentsClient(ClientConfig{
 				BaseURL: target.URL,
 				APIKey:  apiKey,
 				Timeout: 10 * time.Second,
 			}, f.logger)
-			f.rootlyClientMap[apiKey] = client
+			f.rootlyClientMap[clientKey] = client
 		}
 		f.clientMu.Unlock()
 	}
@@ -471,25 +482,39 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		return NewPagerDutyPublisher(f.formatter, f.logger), nil
 	}
 
-	// Get or create PagerDuty client for this routing key (clientMu — see
-	// PublisherFactory's doc comment).
+	baseURL := target.URL
+	if baseURL == "" {
+		baseURL = "https://events.pagerduty.com"
+	}
+
+	// Get or create PagerDuty client for this (base_url, routing_key) pair
+	// (clientMu — see PublisherFactory's doc comment).
+	//
+	// The cache key is COMPOUND (review wave 5, finding I3 — the telegram
+	// lesson this item was supposed to carry over but didn't): the cached
+	// client bakes in BOTH baseURL and routingKey. Keying on routingKey alone
+	// meant the first target built for a routing key pinned its base URL for
+	// every later target sharing that key, so two PagerDuty targets sharing a
+	// routing key (one direct, one via a proxy/regional endpoint) silently
+	// both went to whichever was constructed first. Same shape as
+	// createEnhancedTelegramPublisher's clientKey; baseURL is resolved (empty
+	// -> the public default) BEFORE building the key so two targets that both
+	// leave URL empty still correctly share one client.
+	clientKey := baseURL + "|" + routingKey
+
 	f.clientMu.RLock()
-	client, ok := f.pagerDutyClientMap[routingKey]
+	client, ok := f.pagerDutyClientMap[clientKey]
 	f.clientMu.RUnlock()
 	if !ok {
 		f.clientMu.Lock()
-		if client, ok = f.pagerDutyClientMap[routingKey]; !ok {
-			config := PagerDutyClientConfig{
-				BaseURL:    target.URL,
+		if client, ok = f.pagerDutyClientMap[clientKey]; !ok {
+			client = NewPagerDutyEventsClient(PagerDutyClientConfig{
+				BaseURL:    baseURL,
 				Timeout:    10 * time.Second,
 				MaxRetries: 3,
 				RateLimit:  120.0, // 120 req/min
-			}
-			if config.BaseURL == "" {
-				config.BaseURL = "https://events.pagerduty.com"
-			}
-			client = NewPagerDutyEventsClient(config, f.logger)
-			f.pagerDutyClientMap[routingKey] = client
+			}, f.logger)
+			f.pagerDutyClientMap[clientKey] = client
 		}
 		f.clientMu.Unlock()
 	}
