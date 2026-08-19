@@ -157,34 +157,58 @@ func NewHTTPTelegramClient(
 	botToken string,
 	logger *slog.Logger,
 ) TelegramClient {
+	return NewHTTPTelegramClientWithHTTPClient(apiURL, botToken, logger, nil)
+}
+
+// NewHTTPTelegramClientWithHTTPClient is NewHTTPTelegramClient with an explicit
+// *http.Client, used by PublisherFactory to hand in a client built from the
+// target's `http_config` (FU-HTTP-CONFIG). A nil httpClient falls back to the
+// built-in shape, so the two constructors are identical for every target
+// without http_config.
+func NewHTTPTelegramClientWithHTTPClient(
+	apiURL string,
+	botToken string,
+	logger *slog.Logger,
+	httpClient *http.Client,
+) TelegramClient {
 	if apiURL == "" {
 		apiURL = DefaultTelegramAPIURL
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if httpClient == nil {
+		httpClient = newTelegramBaseHTTPClient()
+	}
 
 	return &HTTPTelegramClient{
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					MinVersion: tls.VersionTLS12, // TLS 1.2+ required
-				},
-				MaxIdleConns:        10,
-				MaxIdleConnsPerHost: 2,
-				IdleConnTimeout:     30 * time.Second,
-				DialContext: (&net.Dialer{
-					Timeout:   5 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-			},
-		},
+		httpClient:   httpClient,
 		apiURL:       strings.TrimRight(apiURL, "/"),
 		botToken:     botToken,
 		rateLimiter:  rate.NewLimiter(rate.Limit(30), 5), // Telegram global limit: ~30 msg/sec, burst 5
 		chatLimiters: newChatRateLimiterStore(maxTrackedChatLimiters, defaultChatRateLimit, defaultChatBurst),
 		logger:       logger.With("component", "telegram_client"),
+	}
+}
+
+// newTelegramBaseHTTPClient builds the Telegram client's built-in HTTP client.
+// Extracted so a per-target http_config can be layered on top of it rather than
+// replacing it — see newWebhookBaseHTTPClient.
+func newTelegramBaseHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12, // TLS 1.2+ required
+			},
+			MaxIdleConns:        10,
+			MaxIdleConnsPerHost: 2,
+			IdleConnTimeout:     30 * time.Second,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+		},
 	}
 }
 

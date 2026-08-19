@@ -427,3 +427,133 @@ func TestApplyDefaults(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// FU-HTTP-CONFIG, review M8 + M10: Secret-sourced http_config
+// ============================================================================
+//
+// The Secret path json.Unmarshals `http_config` in for free, which is the whole
+// reason K8s targets support it with no extra syntax. But "for free" also meant
+// "unvalidated and un-normalised": an invalid block passed discovery, appeared
+// in the target list, and then failed on EVERY publish job instead of being
+// skipped once with a WARN like every other invalid Secret (M8); and a
+// behaviour-free block bought a dedicated *http.Client for nothing (M10).
+
+func secretFromTargetJSON(t *testing.T, name, raw string) corev1.Secret {
+	t.Helper()
+	return corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Data:       map[string][]byte{"config": []byte(raw)},
+	}
+}
+
+func TestParseSecret_HTTPConfigIsParsedAndNormalized(t *testing.T) {
+	// insecure_skip_verify:false and follow_redirects:true are both the DEFAULT.
+	// Writing them explicitly is natural and must cost nothing.
+	target, err := parseSecret(secretFromTargetJSON(t, "s", `{
+	  "name": "webhook-1",
+	  "type": "webhook",
+	  "url": "https://hooks.internal/a",
+	  "format": "alertmanager",
+	  "http_config": {
+	    "tls_config": {"insecure_skip_verify": false},
+	    "basic_auth": {},
+	    "follow_redirects": true
+	  }
+	}`))
+	require.NoError(t, err)
+
+	assert.Nil(t, target.HTTPConfig,
+		"a behaviour-free http_config must normalise to nil, not buy a dedicated *http.Client")
+	assert.Empty(t, target.HTTPConfig.Fingerprint(), "and must leave the cache key unchanged")
+}
+
+func TestParseSecret_MeaningfulHTTPConfigSurvivesNormalization(t *testing.T) {
+	target, err := parseSecret(secretFromTargetJSON(t, "s", `{
+	  "name": "webhook-1",
+	  "type": "webhook",
+	  "url": "https://hooks.internal/a",
+	  "format": "alertmanager",
+	  "http_config": {
+	    "proxy_url": "http://proxy.corp:8080",
+	    "tls_config": {"ca_file": "/etc/ssl/ca.pem"},
+	    "follow_redirects": false
+	  }
+	}`))
+	require.NoError(t, err)
+
+	require.NotNil(t, target.HTTPConfig)
+	assert.Equal(t, "http://proxy.corp:8080", target.HTTPConfig.ProxyURL)
+	require.NotNil(t, target.HTTPConfig.TLSConfig)
+	assert.Equal(t, "/etc/ssl/ca.pem", target.HTTPConfig.TLSConfig.CAFile)
+	require.NotNil(t, target.HTTPConfig.FollowRedirects)
+	assert.False(t, *target.HTTPConfig.FollowRedirects)
+}
+
+// M8: an invalid http_config must be caught at DISCOVERY, so the target is
+// skipped once and loudly rather than failing every job forever.
+func TestValidateTarget_RejectsInvalidHTTPConfig(t *testing.T) {
+	cases := map[string]*core.HTTPClientConfig{
+		"both auth methods": {
+			BasicAuth:     &core.BasicAuthConfig{Username: "u", Password: "p"},
+			Authorization: &core.AuthorizationConfig{Credentials: "t"},
+		},
+		"cert without key":                 {TLSConfig: &core.TLSClientConfig{CertFile: "/c.pem"}},
+		"unroutable proxy":                 {ProxyURL: "proxy.corp:8080"},
+		"authorization without credential": {Authorization: &core.AuthorizationConfig{Type: "Bearer"}},
+	}
+
+	for name, httpConfig := range cases {
+		t.Run(name, func(t *testing.T) {
+			target := &core.PublishingTarget{
+				Name:       "webhook-1",
+				Type:       "webhook",
+				URL:        "https://hooks.internal/a",
+				Format:     core.FormatAlertmanager,
+				Enabled:    true,
+				HTTPConfig: httpConfig,
+			}
+
+			errs := validateTarget(target)
+			require.NotEmpty(t, errs, "an invalid http_config must fail validation at discovery")
+
+			var found bool
+			for _, e := range errs {
+				if e.Field == "http_config" {
+					found = true
+					assert.NotContains(t, e.Value, "password",
+						"the validation error must never echo the config's credentials")
+				}
+			}
+			assert.True(t, found, "the error must be attributed to the http_config field")
+		})
+	}
+}
+
+// A valid http_config (and no http_config at all) must pass validation
+// untouched — the new check must not reject working targets.
+func TestValidateTarget_AcceptsValidAndAbsentHTTPConfig(t *testing.T) {
+	for name, httpConfig := range map[string]*core.HTTPClientConfig{
+		"absent": nil,
+		"valid": {
+			ProxyURL:  "http://proxy.corp:8080",
+			TLSConfig: &core.TLSClientConfig{CAFile: "/ca.pem", CertFile: "/c.pem", KeyFile: "/k.pem"},
+			BasicAuth: &core.BasicAuthConfig{Username: "amp", PasswordFile: "/pw"},
+		},
+		// File readability is the client builder's job: a projected volume may
+		// legitimately not exist yet when the Secret is first observed.
+		"unreadable files": {TLSConfig: &core.TLSClientConfig{CAFile: "/definitely/not/here.pem"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := &core.PublishingTarget{
+				Name:       "webhook-1",
+				Type:       "webhook",
+				URL:        "https://hooks.internal/a",
+				Format:     core.FormatAlertmanager,
+				Enabled:    true,
+				HTTPConfig: httpConfig,
+			}
+			assert.Empty(t, validateTarget(target))
+		})
+	}
+}

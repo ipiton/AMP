@@ -641,6 +641,14 @@ func loadRouteConfig(configPath string, cfg *Config) error {
 		return fmt.Errorf("invalid route/receivers configuration: %w", err)
 	}
 
+	// Rebase relative `http_config` file paths onto the config file's directory,
+	// as upstream's resolveFilepaths does (FU-HTTP-CONFIG). Without it,
+	// `ca_file: certs/internal-ca.pem` resolves against the process CWD ("/" in
+	// most containers) and the target fails closed on a path the operator never
+	// wrote. Runs AFTER Parse() so the per-integration clones that inherited
+	// `global.http_config` get rebased too. See http_config_filepaths.go.
+	resolveHTTPConfigFilepaths(parsed, configPath)
+
 	cfg.Routing = parsed
 	return nil
 }

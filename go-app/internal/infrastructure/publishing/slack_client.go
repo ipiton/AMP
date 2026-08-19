@@ -56,25 +56,48 @@ func NewHTTPSlackWebhookClient(
 	webhookURL string,
 	logger *slog.Logger,
 ) SlackWebhookClient {
+	return NewHTTPSlackWebhookClientWithHTTPClient(webhookURL, logger, nil)
+}
+
+// NewHTTPSlackWebhookClientWithHTTPClient is NewHTTPSlackWebhookClient with an
+// explicit *http.Client, used by PublisherFactory to hand in a client built from
+// the target's `http_config` (FU-HTTP-CONFIG). A nil httpClient falls back to
+// the built-in shape, so the two constructors are identical for every target
+// without http_config.
+func NewHTTPSlackWebhookClientWithHTTPClient(
+	webhookURL string,
+	logger *slog.Logger,
+	httpClient *http.Client,
+) SlackWebhookClient {
+	if httpClient == nil {
+		httpClient = newSlackBaseHTTPClient()
+	}
 	return &HTTPSlackWebhookClient{
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					MinVersion: tls.VersionTLS12, // TLS 1.2+ required
-				},
-				MaxIdleConns:        10,
-				MaxIdleConnsPerHost: 2,
-				IdleConnTimeout:     30 * time.Second,
-				DialContext: (&net.Dialer{
-					Timeout:   5 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-			},
-		},
+		httpClient:  httpClient,
 		webhookURL:  webhookURL,
 		rateLimiter: rate.NewLimiter(rate.Every(1*time.Second), 1), // 1 msg/sec, burst 1
 		logger:      logger.With("component", "slack_client"),
+	}
+}
+
+// newSlackBaseHTTPClient builds the Slack client's built-in HTTP client.
+// Extracted so a per-target http_config can be layered on top of it rather than
+// replacing it — see newWebhookBaseHTTPClient.
+func newSlackBaseHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12, // TLS 1.2+ required
+			},
+			MaxIdleConns:        10,
+			MaxIdleConnsPerHost: 2,
+			IdleConnTimeout:     30 * time.Second,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+		},
 	}
 }
 

@@ -283,10 +283,14 @@ func (w *WebhookConfig) Sanitize() *WebhookConfig {
 	if clone.HTTPHeaders != nil {
 		for key := range clone.HTTPHeaders {
 			if isSensitiveHeader(key) {
-				clone.HTTPHeaders[key] = "[REDACTED]"
+				clone.HTTPHeaders[key] = RedactedValue
 			}
 		}
 	}
+
+	// http_config carries basic_auth.password / authorization.credentials
+	// (FU-HTTP-CONFIG) — Sanitize would be a lie without this.
+	clone.HTTPConfig = clone.HTTPConfig.Sanitize()
 
 	return clone
 }
@@ -425,8 +429,9 @@ func (p *PagerDutyConfig) Sanitize() *PagerDutyConfig {
 		clone.RoutingKey = clone.RoutingKey[:8] + "..." + "[REDACTED]"
 	}
 	if len(clone.ServiceKey) > 0 {
-		clone.ServiceKey = "[REDACTED]"
+		clone.ServiceKey = RedactedValue
 	}
+	clone.HTTPConfig = clone.HTTPConfig.Sanitize()
 	return clone
 }
 
@@ -559,6 +564,7 @@ func (s *SlackConfig) Clone() *SlackConfig {
 func (s *SlackConfig) Sanitize() *SlackConfig {
 	clone := s.Clone()
 	clone.APIURL = sanitizeURL(clone.APIURL)
+	clone.HTTPConfig = clone.HTTPConfig.Sanitize()
 	return clone
 }
 
@@ -770,7 +776,8 @@ func (t *TelegramConfig) Clone() *TelegramConfig {
 func (t *TelegramConfig) Sanitize() *TelegramConfig {
 	clone := t.Clone()
 	if clone.BotToken != "" {
-		clone.BotToken = "[REDACTED]"
+		clone.BotToken = RedactedValue
 	}
+	clone.HTTPConfig = clone.HTTPConfig.Sanitize()
 	return clone
 }

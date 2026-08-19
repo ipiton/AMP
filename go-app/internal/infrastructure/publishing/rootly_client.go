@@ -30,6 +30,11 @@ type ClientConfig struct {
 	RateLimit   int           // Rate limit (requests per minute, default: 60)
 	RateBurst   int           // Rate limit burst (default: 10)
 	RetryConfig RetryConfig   // Retry configuration
+
+	// HTTPClient overrides the built-in HTTP client, used by PublisherFactory to
+	// hand in a client built from the target's `http_config` (FU-HTTP-CONFIG).
+	// nil keeps the built-in shape (newRootlyBaseHTTPClient).
+	HTTPClient *http.Client
 }
 
 // RetryConfig holds retry logic configuration
@@ -75,20 +80,32 @@ func NewRootlyIncidentsClient(config ClientConfig, logger *slog.Logger) RootlyIn
 	ratePerSecond := float64(config.RateLimit) / 60.0
 	rateLimiter := rate.NewLimiter(rate.Limit(ratePerSecond), config.RateBurst)
 
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = newRootlyBaseHTTPClient(config.Timeout)
+	}
+
 	return &defaultRootlyIncidentsClient{
-		httpClient: &http.Client{
-			Timeout: config.Timeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					MinVersion: tls.VersionTLS12, // TLS 1.2+
-				},
-			},
-		},
+		httpClient:  httpClient,
 		baseURL:     config.BaseURL,
 		apiKey:      config.APIKey,
 		rateLimiter: rateLimiter,
 		retryConfig: config.RetryConfig,
 		logger:      logger,
+	}
+}
+
+// newRootlyBaseHTTPClient builds the Rootly client's built-in HTTP client.
+// Extracted so a per-target http_config can be layered on top of it rather than
+// replacing it — see newWebhookBaseHTTPClient.
+func newRootlyBaseHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12, // TLS 1.2+
+			},
+		},
 	}
 }
 
