@@ -178,8 +178,16 @@ func NewPublishingQueue(factory *PublisherFactory, dlqRepository DLQRepository, 
 	// Use v2.PublishingMetrics from config (no stub needed)
 	metrics := config.Metrics
 	if metrics == nil {
-		// Fallback: create default metrics if not provided
-		metrics = v2.NewRegistry().Publishing
+		// Fallback: reuse the process-wide singleton registry (sync.Once
+		// under the hood, see pkg/metrics/v2.Global) rather than calling
+		// v2.NewRegistry() here. NewRegistry() with no explicit registerer
+		// defaults to prometheus.DefaultRegisterer and re-registers every
+		// PublishingMetrics collector on every call — a second
+		// NewPublishingQueue in the same process (multiple instances, or
+		// repeated construction across tests in one binary) then panics
+		// with "duplicate metrics collector registration". v2.Global()
+		// registers exactly once no matter how many times it's called.
+		metrics = v2.Global().Publishing
 	}
 
 	if logger == nil {
