@@ -459,6 +459,22 @@ func (q *PublishingQueue) submitJob(job *PublishingJob, priority Priority, logFi
 		targetQueue = q.mediumPriorityJobs
 	}
 
+	// Track the job BEFORE handing it to the channel (data race fix): the
+	// instant the send below completes, a worker may already be inside
+	// processJob writing job.State/job.StartedAt, while JobTrackingStore.Add
+	// READS exactly those fields to build its snapshot. Doing it first puts
+	// the read strictly before the channel send, which happens-before the
+	// worker's receive. The race is pre-existing (any Submit with a live
+	// worker pool hits it) but was only surfaced by task rec's tests, which
+	// are the first to submit and process concurrently under -race.
+	//
+	// A job that then fails to enqueue is removed again below, so a
+	// queue-full/shutting-down submission leaves no phantom "queued" entry
+	// behind — same observable tracking state as before this reordering.
+	if q.jobTrackingStore != nil {
+		q.jobTrackingStore.Add(job)
+	}
+
 	select {
 	case targetQueue <- job:
 		q.totalSubmitted.Add(1)
@@ -466,10 +482,6 @@ func (q *PublishingQueue) submitJob(job *PublishingJob, priority Priority, logFi
 		if q.metrics != nil {
 			q.metrics.RecordQueueSubmission(priority.String(), true)
 			q.metrics.UpdateQueueSize(priority.String(), len(targetQueue), cap(targetQueue))
-		}
-
-		if q.jobTrackingStore != nil {
-			q.jobTrackingStore.Add(job)
 		}
 
 		if q.logger.Enabled(q.ctx, slog.LevelDebug) {
@@ -485,10 +497,16 @@ func (q *PublishingQueue) submitJob(job *PublishingJob, priority Priority, logFi
 		if q.metrics != nil {
 			q.metrics.RecordQueueSubmission(priority.String(), false)
 		}
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Remove(job.ID)
+		}
 		return fmt.Errorf("publishing queue is shutting down")
 	default:
 		if q.metrics != nil {
 			q.metrics.RecordQueueSubmission(priority.String(), false)
+		}
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Remove(job.ID)
 		}
 		return fmt.Errorf("queue full (priority=%s, capacity=%d)", priority, cap(targetQueue))
 	}
