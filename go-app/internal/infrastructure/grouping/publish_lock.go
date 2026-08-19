@@ -1,14 +1,6 @@
 package grouping
 
-import (
-	"hash/fnv"
-	"sync"
-)
-
-// groupPublishLockStripes is the fixed number of mutexes backing
-// groupPublishLocks. Bounded, never grows — see groupPublishLocks' doc
-// comment for why a striped lock was chosen over a per-GroupKey map.
-const groupPublishLockStripes = 256
+import "sync"
 
 // groupPublishLocks serializes the full notify-stage chain
 // (Inhibit -> Silence -> Dedup -> publish, see publishGroupAlerts) per
@@ -35,26 +27,77 @@ const groupPublishLockStripes = 256
 // driven by a single goroutine, so its notify calls are inherently
 // serialized — at the cost of one lock instead of a redesign.
 //
-// Why striped (fixed array) instead of a map keyed by GroupKey: a map
-// needs either unbounded growth (one mutex per distinct group ever seen,
-// never freed — the same class of "small leak, no cleanup" trade-off
-// notifyDedupLog explicitly avoids via Forget) or lifecycle-matched cleanup
-// coordinated with group deletion, which risks unlocking/deleting a mutex
-// another goroutine is still waiting on. A small fixed array of mutexes,
-// indexed by a hash of the key, has fixed memory (256 mutexes, ~1 cache
-// line group total) and needs no cleanup. Cost: two DIFFERENT group keys
-// that hash to the same stripe serialize against each other unnecessarily
-// — harmless correctness-wise, just occasional extra contention. At 256
-// stripes this is negligible for realistic group-count scale.
+// WHY NOT STRIPED ANY MORE (task rec fix round 1, review finding I1): this
+// was a fixed array of 256 mutexes indexed by fnv32a(GroupKey)%256, on the
+// argument that a hash collision only costs "occasional extra contention".
+// That argument died with task rec: the critical section used to be an
+// enqueue (microseconds) and is now a blocking wait for confirmed HTTP
+// delivery (up to the delivery-confirmation timeout). Two unrelated groups
+// sharing a stripe would serialize for that whole duration — and by the
+// birthday bound a collision among ~25 concurrently-firing groups is already
+// ~70% likely, certain above 256 groups. Worse, the group waiting on a
+// stripe burns its own timer-callback budget while parked, so it could reach
+// the publish with an already-expired context and lose the fire outright.
+//
+// So this is now a real per-GroupKey lock: a map of refcounted entries.
+// Memory is bounded by the number of groups CONCURRENTLY inside
+// publishGroupAlerts (not by the number of groups ever seen): the entry is
+// deleted as soon as its last holder/waiter releases it, so there is no
+// unbounded-growth leak — the concern that originally motivated striping —
+// and no risk of freeing a mutex someone still waits on, because a waiter
+// holds a reference before it blocks.
 type groupPublishLocks struct {
-	stripes [groupPublishLockStripes]sync.Mutex
+	mu      sync.Mutex
+	entries map[GroupKey]*groupPublishLockEntry
 }
 
-// lockFor returns the mutex for key's stripe. Callers must Lock/Unlock it
-// themselves (no helper method, so `defer` reads naturally at the call
-// site).
-func (l *groupPublishLocks) lockFor(key GroupKey) *sync.Mutex {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return &l.stripes[h.Sum32()%groupPublishLockStripes]
+// groupPublishLockEntry is one group's mutex plus the number of goroutines
+// currently holding OR waiting for it. refs is guarded by
+// groupPublishLocks.mu, never by mu itself.
+type groupPublishLockEntry struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func newGroupPublishLocks() *groupPublishLocks {
+	return &groupPublishLocks{entries: make(map[GroupKey]*groupPublishLockEntry)}
+}
+
+// acquire locks key's mutex and returns the release func. The returned func
+// must be called exactly once (callers use `defer`).
+//
+// Reference counting happens under l.mu BEFORE blocking on the entry's own
+// mutex, so an entry can never be evicted while another goroutine is queued
+// on it.
+func (l *groupPublishLocks) acquire(key GroupKey) func() {
+	l.mu.Lock()
+	entry, ok := l.entries[key]
+	if !ok {
+		entry = &groupPublishLockEntry{}
+		l.entries[key] = entry
+	}
+	entry.refs++
+	l.mu.Unlock()
+
+	entry.mu.Lock()
+
+	return func() {
+		entry.mu.Unlock()
+
+		l.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(l.entries, key)
+		}
+		l.mu.Unlock()
+	}
+}
+
+// tracked reports how many per-group lock entries exist right now. Test-only
+// helper: the count must return to 0 once every fire has released, which is
+// what proves the map does not leak.
+func (l *groupPublishLocks) tracked() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.entries)
 }

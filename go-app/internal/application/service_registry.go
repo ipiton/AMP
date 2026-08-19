@@ -1385,12 +1385,26 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		r.addDegradedReason("nflog degraded: Redis init failed, using in-memory (no cross-replica notification dedup): %v", notifyLogErr)
 	}
 
+	// Notify-fire time budget (task rec fix round 1, review finding C1): the
+	// timer-callback deadline and the cross-replica publish-claim TTL are
+	// DERIVED from the publishing stack's delivery-confirmation wait, because
+	// publishGroupAlerts now blocks on that wait inside a timer callback while
+	// holding the claim. Three independent literals silently truncated every
+	// fire to the shortest of them; see grouping/notify_budget.go.
+	//
+	// Read from config even though initializePublishing (which configures the
+	// coordinator with the same value) runs LATER — both sides read the same
+	// knob, and validateNotifyTimingBudget re-checks the built objects once
+	// both exist.
+	deliveryConfirmationTimeout := r.config.Publishing.Queue.DeliveryConfirmationTimeout
+
 	// Build the TimerManager first, without a GroupManager reference — see
 	// SetGroupManager below for why.
 	timerManagerCfg := grouping.TimerManagerConfig{
-		Storage: timerStorage,
-		Logger:  r.logger,
-		Metrics: r.metrics,
+		Storage:         timerStorage,
+		Logger:          r.logger,
+		Metrics:         r.metrics,
+		CallbackTimeout: grouping.TimerCallbackTimeoutFor(deliveryConfirmationTimeout),
 	}
 
 	// Distributed timer reconciliation (task 6.2) only makes sense when
@@ -1458,6 +1472,7 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 		SilenceChecker:     silenceChecker,
 		TimeIntervalLookup: timeIntervalLookup,
 		NotifyLog:          notifyLog,
+		NotifyLogClaimTTL:  grouping.NotifyLogClaimTTLFor(deliveryConfirmationTimeout),
 		Logger:             r.logger,
 		Metrics:            r.metrics,
 	})
@@ -1714,6 +1729,14 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 	// but this is checked via type assertion, not assumed, so a future
 	// publisher type that DOESN'T implement it degrades to "group
 	// notifications no-op" (logged) instead of a panic or compile break.
+	// Task rec fix round 1 (review findings C1/I3): the publisher wired in
+	// just below makes group notifications BLOCK on confirmed delivery, so the
+	// wait/callback/claim-TTL triple must be consistent before that goes live.
+	// Refuse to start rather than truncate deliveries invisibly.
+	if err := r.validateNotifyTimingBudget(); err != nil {
+		return err
+	}
+
 	if r.groupManager != nil {
 		if groupPublisher, ok := r.publisher.(grouping.GroupNotificationPublisher); ok {
 			r.groupManager.SetPublisher(groupPublisher)

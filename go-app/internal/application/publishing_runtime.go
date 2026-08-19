@@ -2,12 +2,14 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
+	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
@@ -109,6 +111,10 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context) error
 
 	coordinatorConfig := infrapublishing.DefaultCoordinatorConfig()
 	coordinatorConfig.MaxConcurrent = r.config.Publishing.Queue.MaxConcurrent
+	// Task rec fix round 1 (review finding I3): operator-tunable, and the
+	// single source for the derived grouping-side budgets — see
+	// initializeGrouping and grouping/notify_budget.go.
+	coordinatorConfig.DeliveryConfirmationTimeout = r.config.Publishing.Queue.DeliveryConfirmationTimeout
 	r.publishingCoordinator = infrapublishing.NewPublishingCoordinator(
 		r.publishingQueue,
 		discoveryAdapter,
@@ -275,4 +281,117 @@ func resolvePublishingNamespace(cfg *appconfig.Config) string {
 	}
 
 	return "default"
+}
+
+// validateNotifyTimingBudget asserts, at startup, that the notify-fire time
+// budget is internally consistent (task rec fix round 1, review findings C1
+// and I3).
+//
+// Since task rec, DefaultGroupManager.publishGroupAlerts waits for CONFIRMED
+// delivery inside a timer callback while holding the cross-replica publish
+// claim, which makes four durations from two packages mutually dependent:
+//
+//	delivery-confirmation wait  <  timer-callback deadline  <  publish-claim TTL
+//	                                                        <  reconciliation grace
+//
+// Each violation has its own silent failure mode:
+//
+//   - callback deadline <= wait: every delivery is truncated at the callback
+//     deadline and the wait's own timeout is unreachable (round-1 finding C1).
+//   - claim TTL <= callback deadline: the claim can expire while the fire is
+//     still publishing (or doing its post-delivery bookkeeping), reopening the
+//     double-publish window HA correctness depends on.
+//   - reconciliation grace <= claim TTL: a LIVE fire looks orphaned to
+//     reconcileOrphanedTimers, and the adopting replica — correctly blocked
+//     from notifying by the claim — still deletes the shared timer record,
+//     racing the publisher's continuation SaveTimer and potentially leaving the
+//     group with no persisted timer at all (round-2 finding R4).
+//
+// None of these show up in logs, so this refuses to start instead.
+//
+// NOT an error, but reported here because it is the same budget: the
+// distributed per-group timer lock (grouping.TimerLockTTL, 30s, never renewed)
+// is SHORTER than the callback deadline, so a long fire runs on with that lock
+// already expired. The publish claim is what prevents a second replica from
+// notifying the same group in that window — it went from backstop to
+// load-bearing when publishing became blocking.
+//
+// ServiceRegistry derives all three from publishing.queue.
+// delivery_confirmation_timeout, so a violation means either a code change to
+// notify_budget.go's helpers or hand-wiring that bypassed them — a bug, not a
+// misconfiguration an operator can fix, hence the explicit "internal
+// inconsistency" wording. Returns nil when either side is absent (publishing
+// disabled, grouping disabled): there is no blocking publish to budget for.
+func (r *ServiceRegistry) validateNotifyTimingBudget() error {
+	if r.publishingCoordinator == nil || r.groupManager == nil {
+		return nil
+	}
+
+	wait := r.publishingCoordinator.DeliveryConfirmationTimeout()
+	claimTTL := r.groupManager.NotifyLogClaimTTL()
+
+	if claimTTL <= wait {
+		return fmt.Errorf(
+			"notify timing budget internal inconsistency: nflog publish-claim TTL (%s) must exceed publishing delivery-confirmation timeout (%s), "+
+				"otherwise the claim can expire mid-publish and two replicas can notify the same group (see grouping/notify_budget.go)",
+			claimTTL, wait)
+	}
+
+	if r.groupTimerManager != nil {
+		callbackTimeout := r.groupTimerManager.CallbackTimeout()
+		if callbackTimeout <= wait {
+			return fmt.Errorf(
+				"notify timing budget internal inconsistency: timer callback timeout (%s) must exceed publishing delivery-confirmation timeout (%s), "+
+					"otherwise every group notification is truncated at the callback deadline and confirmed deliveries go unrecorded (see grouping/notify_budget.go)",
+				callbackTimeout, wait)
+		}
+		if claimTTL <= callbackTimeout {
+			// Strict since fix round 2 (review finding R8): the claim must
+			// still be held while the post-delivery bookkeeping runs, and that
+			// work happens at the very end of the callback budget.
+			return fmt.Errorf(
+				"notify timing budget internal inconsistency: nflog publish-claim TTL (%s) must exceed the timer callback timeout (%s), "+
+					"otherwise a long fire outlives its own claim before its bookkeeping completes (see grouping/notify_budget.go)",
+				claimTTL, callbackTimeout)
+		}
+
+		// Orphan-adoption grace (review finding R4). Zero means the
+		// reconciliation loop is disabled — nothing can be adopted, so there is
+		// no window to protect (lite profile, or a non-Redis timer storage).
+		if grace := r.groupTimerManager.ReconciliationGrace(); grace > 0 && grace <= claimTTL {
+			return fmt.Errorf(
+				"notify timing budget inconsistency: grouping.reconciliation_grace (%s) must exceed the nflog publish-claim TTL (%s, derived from "+
+					"publishing.queue.delivery_confirmation_timeout=%s), otherwise a notification still being delivered looks orphaned and the adopting "+
+					"replica deletes the group's shared timer record while the publisher is still using it — raise grouping.reconciliation_grace to at "+
+					"least %s or lower publishing.queue.delivery_confirmation_timeout (see grouping/notify_budget.go, ReconciliationGraceFor)",
+				grace, claimTTL, wait, grouping.ReconciliationGraceFor(wait))
+		}
+	}
+
+	r.logger.Info("Notify timing budget validated",
+		"delivery_confirmation_timeout", wait,
+		"timer_callback_timeout", callbackTimeoutOf(r.groupTimerManager),
+		"nflog_claim_ttl", claimTTL,
+		"reconciliation_grace", reconciliationGraceOf(r.groupTimerManager),
+		// Deliberately surfaced: shorter than the callback deadline by design,
+		// which is why the claim above is load-bearing rather than a backstop.
+		"timer_lock_ttl", grouping.TimerLockTTL())
+
+	return nil
+}
+
+// callbackTimeoutOf / reconciliationGraceOf keep the log line above readable
+// when grouping is wired without a timer manager (timers disabled).
+func callbackTimeoutOf(tm *grouping.DefaultTimerManager) time.Duration {
+	if tm == nil {
+		return 0
+	}
+	return tm.CallbackTimeout()
+}
+
+func reconciliationGraceOf(tm *grouping.DefaultTimerManager) time.Duration {
+	if tm == nil {
+		return 0
+	}
+	return tm.ReconciliationGrace()
 }

@@ -69,6 +69,12 @@ const (
 	timerTTLGracePeriod = 10 * time.Minute
 
 	lockTTL = 30 * time.Second // Distributed lock duration
+
+	// lockReleaseTimeout bounds the lock-release Lua CAS on its own detached
+	// context — see the release closure in AcquireLock. One Redis round-trip;
+	// if it cannot complete in this window Redis is unhealthy and the lock's
+	// own TTL is the fallback.
+	lockReleaseTimeout = 5 * time.Second
 )
 
 // Compile-time enforcement of the adoption-window invariant documented on
@@ -535,7 +541,23 @@ func (rs *RedisTimerStorage) AcquireLock(ctx context.Context, groupKey GroupKey,
 				return 0
 			end
 		`
-		result, err := rs.client.Eval(ctx, script, []string{lockKey}, lockID).Result()
+		// Own short-lived, detached context — NOT the ctx that acquired the
+		// lock (task rec fix round 2, review finding R1's audit; same shape as
+		// RedisNotifyLog.TryClaim's release).
+		//
+		// WHY: the only caller, DefaultTimerManager.onTimerExpired, acquires
+		// this lock under a 5s context and releases it in a defer that runs
+		// AFTER the timer callbacks. Since task rec the notify-chain callback
+		// blocks until delivery is confirmed (up to
+		// TimerManagerConfig.CallbackTimeout), so on any fire longer than that
+		// 5s the CAS-delete would silently no-op on an expired context and the
+		// lock would linger to its own TTL instead of being handed back. That
+		// costs one wasted lock TTL per long fire — nothing corrupt, but it
+		// blocks this group's next fire for no reason.
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
+		defer cancel()
+
+		result, err := rs.client.Eval(releaseCtx, script, []string{lockKey}, lockID).Result()
 		if err != nil {
 			rs.logger.Warn("Failed to release lock",
 				"group_key", groupKey,
