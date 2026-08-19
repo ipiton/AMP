@@ -111,7 +111,7 @@
 - [x] **FU-ROUTING-METRICS** _(shipped 2026-08-18, injected singleton metrics)_ — — routing metrics restoration (currently disabled due to promauto double-registration). Per-evaluator custom registry. In progress on sdd/fu-routing-metrics. ~2d
 - [ ] **FU-RECEIVERS-INTEGRATION** — receivers: integration auto-provisioning (data-plane follow-up; current state: control-plane parity only, delivery via K8s Secrets). See final-review #5. ~5-7d
 - [x] **FU-FINGERPRINT-HEX-FORMAT** _(verified already shipped, closed by wave 5, 2026-08-19)_ — fingerprint 16-hex upstream format (F2 compatibility). Boundary conversion: `alertconv.UpstreamFingerprint` (FNV-1a via `prometheus/common/model`) substituted into the API response only; internal SHA-256 dedup key untouched. ~0.5d
-- [ ] **FU-SILENCES-EXPIRED-QUERY** — silences --expired query support. ~0.5d
+- [x] **FU-SILENCES-EXPIRED-QUERY** _(verified already shipped, closed by wave 5, 2026-08-19)_ — silences --expired query support. `GET /api/v2/silences` returns all states incl. expired with correct `status.state`; DELETE expires in place. ~0.5d
 - [ ] **FU-GET-ALERTS-V1** — GET /api/v1/alerts endpoint (parity gap, brief asked POST alias only). ~0.5d
 - [ ] **FU-SILENCE-SYNC-INTERVALS** — configurable silence-sync intervals (currently: 2s backoff / 5min resync constants hardcoded). ~0.5d
 - [ ] **FU-STORAGEMANAGER-FAILBACK** — StorageManager runtime Redis failback (startup-only decision currently; potential graceful degradation). ~1-2d
