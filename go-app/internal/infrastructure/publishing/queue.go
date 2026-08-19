@@ -81,12 +81,62 @@ func (c *jobCompletion) signal(err error) {
 	})
 }
 
+// AbandonReason tells the queue WHY a caller stopped awaiting a job's delivery
+// outcome (task rec fix round 2, review finding R3). The distinction matters
+// because only one of these is evidence about the target's health.
+type AbandonReason int32
+
+const (
+	// AbandonReasonSettled means the outcome already arrived and the handle is
+	// just being released. Nothing to judge: whatever the job reported was
+	// already accounted for by processJob. Also what an implicit cancellation
+	// (queue shutdown, no Abandon call) reads as — see AbandonReasonShutdown.
+	AbandonReasonSettled AbandonReason = iota
+
+	// AbandonReasonUnconfirmed means the waiter gave up before the job
+	// reported anything: its delivery-confirmation timeout elapsed, or the
+	// caller's context died.
+	//
+	// THIS IS EVIDENCE THE TARGET IS UNHEALTHY — it was handed a notification
+	// and did not answer within the window, which is precisely what the
+	// circuit breaker exists to notice. Fix round 1 skipped RecordFailure for
+	// every abandoned job, so a target that HANGS (rather than failing fast)
+	// could never open its breaker: each fire abandoned its job at the
+	// timeout, the breaker saw nothing, and every subsequent fire paid the
+	// full wait again. Fix round 2 (review finding R3) counts this case.
+	AbandonReasonUnconfirmed
+
+	// AbandonReasonShutdown means the queue itself is going away, so nothing
+	// can be concluded about the target: never counted against the breaker,
+	// never written to the DLQ (the notify chain re-publishes after restart,
+	// and a DLQ replay would double-deliver). PublishingQueue.Stop's force
+	// cancel reaches jobs through q.ctx without any Abandon call, so it
+	// arrives as the AbandonReasonSettled zero value — which is treated the
+	// same way. This constant exists for callers that abandon explicitly
+	// during a shutdown sequence.
+	AbandonReasonShutdown
+)
+
+func (r AbandonReason) String() string {
+	switch r {
+	case AbandonReasonSettled:
+		return "settled"
+	case AbandonReasonUnconfirmed:
+		return "unconfirmed"
+	case AbandonReasonShutdown:
+		return "shutdown"
+	default:
+		return "unknown"
+	}
+}
+
 // GroupPublishHandle is what SubmitGroupWithConfirmation hands back: the
 // single-outcome channel for one (group, target) job plus the ability to
 // abandon that job (task rec fix round 1, review finding I2).
 type GroupPublishHandle struct {
 	done    <-chan error
 	abandon context.CancelFunc
+	job     *PublishingJob
 }
 
 // Done yields exactly one value: the job's final delivery outcome (nil ==
@@ -103,7 +153,11 @@ func (h *GroupPublishHandle) Done() <-chan error {
 //
 // Idempotent and safe to call after the job already finished (then it is just
 // the context cleanup `go vet -lostcancel` wants), so callers should
-// `defer handle.Abandon()` unconditionally rather than only on timeout.
+// `defer handle.Abandon(reason)` unconditionally rather than only on timeout —
+// AbandonReasonSettled once an outcome has been read, AbandonReasonUnconfirmed
+// when the wait was given up on. reason is stored on the job BEFORE the
+// cancellation, so the worker observing the cancelled context can classify it
+// (see processJob's abandon branch).
 //
 // WHY ABANDONING IS THE RIGHT DEFAULT: nobody is left who could act on this
 // job's outcome — its waiter already reported the target as unconfirmed, and
@@ -111,9 +165,12 @@ func (h *GroupPublishHandle) Done() <-chan error {
 // run would burn a worker for up to the queue's full retry budget and push
 // healthy targets' jobs behind it, turning one hanging endpoint into
 // unconfirmed (⇒ duplicated) notifications for endpoints that are fine.
-func (h *GroupPublishHandle) Abandon() {
+func (h *GroupPublishHandle) Abandon(reason AbandonReason) {
 	if h == nil || h.abandon == nil {
 		return
+	}
+	if h.job != nil {
+		h.job.abandonReason.Store(int32(reason))
 	}
 	h.abandon()
 }
@@ -235,6 +292,14 @@ type PublishingJob struct {
 	// stops waiting for the outcome. Nil (Submit/SubmitGroup) means "use the
 	// queue context", i.e. the pre-fix-round behaviour.
 	ctx context.Context
+
+	// abandonReason carries the AbandonReason the waiter set when it gave up,
+	// read by the worker once it sees ctx cancelled (task rec fix round 2,
+	// review finding R3). Zero value is AbandonReasonSettled, which is also
+	// the right reading for "cancelled without any Abandon call", i.e. a queue
+	// shutdown — see the abandon branch in processJob. Atomic because it is
+	// written by the submitting goroutine and read by the worker.
+	abandonReason atomic.Int32
 
 	// Extended fields for 150% quality
 	ID          string         // UUID v4
@@ -509,7 +574,7 @@ func (q *PublishingQueue) submitGroupJob(alerts []*core.Alert, target *core.Publ
 		return nil, err
 	}
 
-	return &GroupPublishHandle{done: job.completion.ch, abandon: abandon}, nil
+	return &GroupPublishHandle{done: job.completion.ch, abandon: abandon, job: job}, nil
 }
 
 // submitJob is the shared enqueue path for Submit and SubmitGroup: picks the
@@ -803,13 +868,26 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	// final failure here reports "not delivered" exactly once.
 	deliveryOutcome = err
 
-	// Abandoned job (task rec fix round 1, review finding I2): its waiter gave
-	// up and already reported the target as unconfirmed, then cancelled this
-	// job's context. That is not a target failure — do NOT trip the circuit
-	// breaker for a healthy endpoint and do NOT write a DLQ entry the notify
-	// chain is going to supersede on the group's next fire. Just report the
-	// outcome (already non-nil) and let the job go.
+	// Abandoned job (task rec fix round 1, review finding I2; classified in
+	// round 2 per finding R3): its context was cancelled before it finished.
+	// Never a DLQ entry — the notify chain re-publishes to any target it could
+	// not confirm on the group's next fire, so a DLQ record here is a
+	// duplicate waiting to be replayed.
+	//
+	// The circuit breaker, though, depends on WHY:
+	//
+	//   - AbandonReasonUnconfirmed (the waiter's delivery-confirmation timeout
+	//     elapsed): the target was given a notification and did not answer in
+	//     time. That IS a failure and must count, otherwise a HANGING target —
+	//     unlike one that 500s or refuses the connection, which fails fast and
+	//     completes normally — never opens its breaker and every fire keeps
+	//     paying the full wait.
+	//   - anything else (queue shutdown, or a handle released after its
+	//     outcome was already read): says nothing about the target, so the
+	//     breaker is left alone.
 	if err != nil && job.ctx != nil && job.ctx.Err() != nil {
+		reason := AbandonReason(job.abandonReason.Load())
+
 		q.totalFailed.Add(1)
 		job.State = JobStateFailed
 		completedAt := time.Now()
@@ -817,10 +895,22 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 		if q.jobTrackingStore != nil {
 			q.jobTrackingStore.Add(job)
 		}
+
+		if reason == AbandonReasonUnconfirmed {
+			cb.RecordFailure()
+		}
+		if q.metrics != nil {
+			// Observability for exactly the hanging-endpoint case above, which
+			// otherwise shows up on no dashboard at all (review finding R5).
+			q.metrics.RecordJobAbandoned(job.Target.Name, reason.String())
+		}
+
 		q.logger.Warn("Publish abandoned (delivery confirmation no longer awaited)",
 			"job_id", job.ID,
 			"target", job.Target.Name,
 			"fingerprint", job.EnrichedAlert.Alert.Fingerprint,
+			"reason", reason,
+			"counted_against_circuit_breaker", reason == AbandonReasonUnconfirmed,
 			"error", err,
 		)
 		return

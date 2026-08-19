@@ -285,7 +285,7 @@ func TestSubmitGroupWithConfirmation_MetricsOnlyModeReportsNotAttempted(t *testi
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
 	require.NoError(t, err)
 	require.NotNil(t, handle)
-	defer handle.Abandon()
+	defer handle.Abandon(AbandonReasonSettled)
 
 	select {
 	case outcome := <-handle.Done():
@@ -310,7 +310,7 @@ func TestProcessJob_OpenCircuitBreakerReportsNotAttempted(t *testing.T) {
 
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
 	require.NoError(t, err)
-	defer handle.Abandon()
+	defer handle.Abandon(AbandonReasonSettled)
 
 	// No workers in newTestPublishingQueue: drive the job by hand.
 	queue.processJob(<-queue.mediumPriorityJobs)
@@ -344,7 +344,7 @@ func TestSubmitGroupWithConfirmation_EnqueueFailureReturnsNoChannel(t *testing.T
 
 	first, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk-1", "recv", nil)
 	require.NoError(t, err)
-	defer first.Abandon()
+	defer first.Abandon(AbandonReasonSettled)
 
 	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk-2", "recv", nil)
 	require.Error(t, err, "queue is full")
@@ -433,8 +433,10 @@ func TestGroupPublishHandle_AbandonCancelsInFlightPublish(t *testing.T) {
 		t.Fatal("publish never reached the target")
 	}
 
-	// The waiter gives up (what awaitDelivery does on ErrDeliveryWaitTimeout).
-	handle.Abandon()
+	// The waiter gives up (what the coordinator does on
+	// ErrDeliveryWaitTimeout) — an unanswered target, so this must count
+	// against its circuit breaker (fix round 2, review finding R3).
+	handle.Abandon(AbandonReasonUnconfirmed)
 
 	select {
 	case outcome := <-handle.Done():
@@ -445,10 +447,100 @@ func TestGroupPublishHandle_AbandonCancelsInFlightPublish(t *testing.T) {
 		t.Fatal("abandoning a job must unwind its in-flight publish, not wait out the retry budget")
 	}
 
-	// Worker freed, breaker untouched: an abandoned job is not evidence that
-	// the endpoint is unhealthy.
-	assert.True(t, queue.getCircuitBreaker(target.Name).CanAttempt(),
-		"abandoning a delivery must not trip the target's circuit breaker")
+	// A target that was handed a notification and never answered IS unhealthy
+	// (fix round 2, review finding R3): the abandonment must count against its
+	// breaker. Round 1 skipped this, so a hanging target — which never produces
+	// a completed, failed job — could never open its breaker at all.
+	assert.Equal(t, 1, queue.getCircuitBreaker(target.Name).GetFailureCount(),
+		"a waiter-timeout abandonment must be recorded as a circuit-breaker failure")
+}
+
+// TestGroupPublishHandle_RepeatedUnconfirmedAbandonmentsOpenTheBreaker is the
+// consequence that matters operationally: a target that hangs on every fire
+// must eventually be short-circuited instead of costing a worker and a full
+// confirmation wait forever.
+func TestGroupPublishHandle_RepeatedUnconfirmedAbandonmentsOpenTheBreaker(t *testing.T) {
+	server, started := newHangingWebhook(t)
+
+	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
+	queue := NewPublishingQueue(
+		NewPublisherFactory(NewAlertFormatter(""), slog.Default(), metrics, ""),
+		nil,
+		NewLRUJobTrackingStore(16),
+		PublishingQueueConfig{WorkerCount: 4, HighPriorityQueueSize: 16, MediumPriorityQueueSize: 16, LowPriorityQueueSize: 16, MaxRetries: 0, RetryInterval: time.Millisecond, Metrics: metrics},
+		nil,
+		slog.Default(),
+	)
+	queue.Start()
+	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+
+	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
+
+	// FailureThreshold is 5 (getCircuitBreaker), i.e. five consecutive fires.
+	for i := 0; i < 5; i++ {
+		handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
+		require.NoError(t, err)
+
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("publish %d never reached the target", i)
+		}
+
+		handle.Abandon(AbandonReasonUnconfirmed)
+
+		select {
+		case <-handle.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("abandoned job %d never reported an outcome", i)
+		}
+	}
+
+	assert.False(t, queue.getCircuitBreaker(target.Name).CanAttempt(),
+		"a target that never answers must eventually have its circuit breaker opened")
+}
+
+// TestGroupPublishHandle_ShutdownAbandonmentDoesNotBlameTheTarget: the other
+// side of R3 — cancellation that says nothing about the endpoint must leave the
+// breaker alone (and, as before, write no DLQ entry).
+func TestGroupPublishHandle_ShutdownAbandonmentDoesNotBlameTheTarget(t *testing.T) {
+	server, started := newHangingWebhook(t)
+
+	dlq := &recordingDLQ{}
+	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
+	queue := NewPublishingQueue(
+		NewPublisherFactory(NewAlertFormatter(""), slog.Default(), metrics, ""),
+		dlq,
+		NewLRUJobTrackingStore(8),
+		PublishingQueueConfig{WorkerCount: 2, HighPriorityQueueSize: 8, MediumPriorityQueueSize: 8, LowPriorityQueueSize: 8, MaxRetries: 0, RetryInterval: time.Millisecond, Metrics: metrics},
+		nil,
+		slog.Default(),
+	)
+	queue.Start()
+	t.Cleanup(func() { _ = queue.Stop(5 * time.Second) })
+
+	target := &core.PublishingTarget{Name: "hanging", Type: "webhook", URL: server.URL, Enabled: true, Format: core.FormatWebhook}
+	handle, err := queue.SubmitGroupWithConfirmation(testGroupAlerts(1), target, "gk", "recv", nil)
+	require.NoError(t, err)
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("publish never reached the target")
+	}
+
+	handle.Abandon(AbandonReasonShutdown)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned job never reported an outcome")
+	}
+
+	assert.Zero(t, queue.getCircuitBreaker(target.Name).GetFailureCount(),
+		"shutdown-driven cancellation is not evidence about the target")
+	assert.Zero(t, dlq.count(),
+		"a shutdown-abandoned job must not be written to the DLQ (the notify chain retries after restart)")
 }
 
 // TestAbandonedJob_IsNotWrittenToDLQ: the notify chain re-publishes an
@@ -479,7 +571,7 @@ func TestAbandonedJob_IsNotWrittenToDLQ(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("publish never reached the target")
 	}
-	handle.Abandon()
+	handle.Abandon(AbandonReasonUnconfirmed)
 
 	select {
 	case <-handle.Done():

@@ -485,12 +485,24 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 				// Abandon on every exit (fix round 1, review finding I2): a
 				// no-op once the job finished, and the thing that frees the
 				// worker when we stop waiting for a job that has not.
-				defer handle.Abandon()
+				//
+				// The reason is what lets the queue tell "this target did not
+				// answer in time" (breaker failure) from "we already have its
+				// outcome" (nothing to judge) — fix round 2, finding R3. The
+				// default is the pessimistic one, so an unforeseen early exit
+				// still counts as an unanswered target rather than silently
+				// exonerating it.
+				reason := AbandonReasonUnconfirmed
+				defer func() { handle.Abandon(reason) }()
 
 				// Task rec: block until this target's job reports its real
 				// outcome, so Success below means "the target accepted the
 				// notification", not "a job was enqueued".
-				err = c.awaitDelivery(ctx, handle, t)
+				var settled bool
+				err, settled = c.awaitDelivery(ctx, handle, t)
+				if settled {
+					reason = AbandonReasonSettled
+				}
 			}
 
 			mu.Lock()
@@ -538,12 +550,17 @@ func (c *PublishingCoordinator) submitGroupJob(ctx context.Context, alerts []*co
 // retry a target it cannot prove was reached rather than record it as sent —
 // see ErrDeliveryWaitTimeout. The caller abandons the job on both paths, so
 // the queue stops working on an outcome nobody will read.
-func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *GroupPublishHandle, target *core.PublishingTarget) error {
+// settled reports whether the job actually reported an outcome (true) or the
+// wait was given up on (false) — the caller turns that into the
+// AbandonReason, which decides whether the target's circuit breaker hears
+// about it (fix round 2, review finding R3).
+func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *GroupPublishHandle, target *core.PublishingTarget) (err error, settled bool) {
 	confirm := handle.Done()
 	if confirm == nil {
 		// Defensive: SubmitGroupWithConfirmation only returns a nil handle
 		// together with a non-nil error, which the caller already handled.
-		return fmt.Errorf("%w: no confirmation channel for target %q", ErrDeliveryNotAttempted, target.Name)
+		// "settled": there is no job in flight to judge a target by.
+		return fmt.Errorf("%w: no confirmation channel for target %q", ErrDeliveryNotAttempted, target.Name), true
 	}
 
 	timer := time.NewTimer(c.deliveryTimeout)
@@ -557,10 +574,10 @@ func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *Group
 				"error", err,
 			)
 		}
-		return err
+		return err, true
 	case <-timer.C:
-		return fmt.Errorf("%w after %s (target %q)", ErrDeliveryWaitTimeout, c.deliveryTimeout, target.Name)
+		return fmt.Errorf("%w after %s (target %q)", ErrDeliveryWaitTimeout, c.deliveryTimeout, target.Name), false
 	case <-ctx.Done():
-		return fmt.Errorf("%w: delivery confirmation aborted for target %q: %w", ErrDeliveryWaitTimeout, target.Name, ctx.Err())
+		return fmt.Errorf("%w: delivery confirmation aborted for target %q: %w", ErrDeliveryWaitTimeout, target.Name, ctx.Err()), false
 	}
 }

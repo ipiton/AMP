@@ -529,6 +529,20 @@ func (m *PublishingMetrics) RecordJobFailure(target string) {
 	m.jobsProcessedTotal.WithLabelValues(target, "failed").Inc()
 }
 
+// RecordJobAbandoned records a job whose delivery confirmation was no longer
+// awaited when it finished (alertmanager-parity wave 3, task rec).
+//
+// reason is publishing.AbandonReason.String() — "unconfirmed" (the waiter's
+// delivery-confirmation timeout elapsed, which also counts against the
+// target's circuit breaker), "shutdown", or "settled". Reuses
+// jobsProcessedTotal's status label rather than adding a metric, so existing
+// job dashboards pick it up: an "abandoned_unconfirmed" rate above zero is the
+// signature of a target that accepts connections and never answers, which is
+// otherwise invisible (it never produces a failed job).
+func (m *PublishingMetrics) RecordJobAbandoned(target, reason string) {
+	m.jobsProcessedTotal.WithLabelValues(target, "abandoned_"+reason).Inc()
+}
+
 // RecordJobDLQ records a job sent to DLQ.
 func (m *PublishingMetrics) RecordJobDLQ(target string) {
 	m.jobsProcessedTotal.WithLabelValues(target, "dlq").Inc()
