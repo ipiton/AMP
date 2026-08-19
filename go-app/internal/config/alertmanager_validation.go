@@ -133,11 +133,13 @@ func toAlertmanagerInhibitRules(rules []InhibitionRuleConfig) []*amcfg.InhibitRu
 	out := make([]*amcfg.InhibitRule, 0, len(rules))
 	for _, r := range rules {
 		out = append(out, &amcfg.InhibitRule{
-			SourceMatch:   r.SourceMatch,
-			SourceMatchRE: r.SourceMatchRE,
-			TargetMatch:   r.TargetMatch,
-			TargetMatchRE: r.TargetMatchRE,
-			Equal:         r.Equal,
+			SourceMatch:    r.SourceMatch,
+			SourceMatchRE:  r.SourceMatchRE,
+			TargetMatch:    r.TargetMatch,
+			TargetMatchRE:  r.TargetMatchRE,
+			SourceMatchers: r.SourceMatchers,
+			TargetMatchers: r.TargetMatchers,
+			Equal:          r.Equal,
 		})
 	}
 	return out

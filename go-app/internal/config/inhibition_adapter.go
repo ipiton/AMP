@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
-	"strings"
 
 	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 )
@@ -19,36 +17,49 @@ import (
 // an operator fixing a typo in the file would see no error and no
 // indication the rules never took effect. The error is now propagated so
 // callers can fail startup / reject the reload instead.
+//
+// Wave 7 (FU-INHIBIT-MATCHERS): SourceMatchers/TargetMatchers (upstream's
+// modern `matchers:` list syntax) used to be captured here only to log a
+// loud per-rule Error ("this rule will NOT inhibit anything through
+// them") because the inhibition engine had no runtime support for them.
+// The engine now does (internal/infrastructure/inhibition.InhibitionRule.
+// CompileMatchers), so this carries the fields through and compiles them
+// like a real condition — a config using only the matchers-form on a rule
+// now inhibits exactly as written, instead of silently (or loudly)
+// nothing.
+//
+// Review fix round 1 (S1): calls rule.Compile(), not rule.CompileMatchers()
+// alone — Compile also runs CompileLegacyRegex, so an inline
+// source_match_re/target_match_re rule gets its regexes compiled here too.
+// Before this fix, this was the ONLY InhibitionRule construction path that
+// never compiled legacy regexes at all (DefaultInhibitionParser, used for
+// ConfigFile-sourced rules, always did), so matchRuleFast's
+// `hasRE := rule.compiledSourceRE[key]; if !hasRE { return false }` made
+// every inline legacy regex rule a permanent, silent no-op.
 func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, error) {
 	rules := make([]inhibition.InhibitionRule, 0, len(c.Rules))
 
 	for i, r := range c.Rules {
-		// Final review finding 10: source_matchers/target_matchers (upstream's
-		// `matchers:` list syntax) are accepted by the config loader and by the
-		// validator (W155) but are NOT implemented by the inhibition engine —
-		// only the source_match/source_match_re map form is. A rule that uses
-		// ONLY them inhibits nothing, silently. Refusing to start would break
-		// deployments whose rules already (ineffectively) carry them, so this
-		// logs at Error, names the rule, and says what to do.
-		if unwired := r.UnwiredMatcherFields(); len(unwired) > 0 {
+		rule := inhibition.InhibitionRule{
+			SourceMatch:    r.SourceMatch,
+			SourceMatchRE:  r.SourceMatchRE,
+			TargetMatch:    r.TargetMatch,
+			TargetMatchRE:  r.TargetMatchRE,
+			SourceMatchers: r.SourceMatchers,
+			TargetMatchers: r.TargetMatchers,
+			Equal:          r.Equal,
+			Name:           r.Name,
+		}
+
+		if err := rule.Compile(); err != nil {
 			name := r.Name
 			if name == "" {
 				name = fmt.Sprintf("inhibit_rules[%d]", i)
 			}
-			slog.Error("inhibition rule uses matcher fields the runtime does not implement; this rule will NOT inhibit anything through them",
-				"rule", name,
-				"unwired_fields", strings.Join(unwired, ","),
-				"action", "rewrite as source_match/source_match_re/target_match/target_match_re")
+			return nil, fmt.Errorf("inline inhibition rule %q: %w", name, err)
 		}
 
-		rules = append(rules, inhibition.InhibitionRule{
-			SourceMatch:   r.SourceMatch,
-			SourceMatchRE: r.SourceMatchRE,
-			TargetMatch:   r.TargetMatch,
-			TargetMatchRE: r.TargetMatchRE,
-			Equal:         r.Equal,
-			Name:          r.Name,
-		})
+		rules = append(rules, rule)
 	}
 
 	if c.ConfigFile != "" {

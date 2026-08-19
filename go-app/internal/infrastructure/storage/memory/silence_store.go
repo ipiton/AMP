@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/silencing"
 )
 
 type SilenceStore struct {
@@ -303,31 +305,87 @@ func (s *SilenceStore) HasActiveMatch(labels map[string]string, now time.Time) b
 
 // Internal helpers
 
+// silenceRegexMatcher is the SAME silence-matching implementation that
+// backs `POST /api/v2/silences/check` (cmd/server/handlers/
+// silence_advanced.go -> IsAlertSilenced ->
+// internal/core/silencing.DefaultSilenceMatcher). Sharing one instance
+// here, rather than re-implementing the four-operator match logic a
+// second time, is the review fix round 3 (R6) fix: this package used to
+// carry its OWN independent evaluator (silenceMatchesLabels, below) that
+// compiled `=~`/`!~` patterns UNANCHORED — the live suppression path
+// (notify-chain Step 2 `filterSilenced` -> `HasActiveMatch`, plus
+// `status.silencedBy` and `?silenced=` via `ActiveMatchingSilenceIDs`)
+// disagreed with the round-1/round-2-fixed `core/silencing` evaluator: a
+// silence on `job=~"prod"` still suppressed `job="preprod-2"` in
+// production while the preview endpoint had already stopped agreeing.
+// Routing both through this one shared *silencing.DefaultSilenceMatcher
+// makes a FIFTH copy of this divergence class structurally impossible —
+// there is now exactly one implementation of "does this alert match
+// these matchers" for silences, anchored regex and upstream absent-label
+// ("" default, no presence gate) semantics included, and it is
+// independently table-tested in internal/core/silencing.
+//
+// Safe for concurrent use (DefaultSilenceMatcher's own regexCache is
+// RWMutex-guarded) and does not interact with SilenceStore.mu — it is a
+// wholly separate object with its own locking, called while
+// SilenceStore.mu is held for reading, never for writing.
+var silenceRegexMatcher = silencing.NewSilenceMatcher()
+
+// toSilencingMatchers converts the store's (IsRegex, IsEqual) matcher
+// shape into internal/core/silencing.Matcher's operator enum. The two
+// booleans are upstream Alertmanager's own API v1 matcher encoding
+// (mirrored by pkg/labels/matcher.go's apiV1Matcher/UnmarshalJSON):
+// IsEqual&&!IsRegex=MatchEqual, !IsEqual&&!IsRegex=MatchNotEqual,
+// IsEqual&&IsRegex=MatchRegexp, !IsEqual&&IsRegex=MatchNotRegexp.
+func toSilencingMatchers(matchers []core.StoredSilenceMatcher) []silencing.Matcher {
+	out := make([]silencing.Matcher, 0, len(matchers))
+	for _, m := range matchers {
+		var t silencing.MatcherType
+		switch {
+		case m.IsEqual && !m.IsRegex:
+			t = silencing.MatcherTypeEqual
+		case !m.IsEqual && !m.IsRegex:
+			t = silencing.MatcherTypeNotEqual
+		case m.IsEqual && m.IsRegex:
+			t = silencing.MatcherTypeRegex
+		default: // !m.IsEqual && m.IsRegex
+			t = silencing.MatcherTypeNotRegex
+		}
+		out = append(out, silencing.Matcher{Name: m.Name, Value: m.Value, Type: t})
+	}
+	return out
+}
+
+// silenceMatchesLabels reports whether labels satisfy every matcher
+// (AND logic), delegating to the shared silenceRegexMatcher above.
+//
+// An empty matcher list vacuously matches (preserves the pre-fix-round-3
+// behavior for this shape rather than DefaultSilenceMatcher.Matches's
+// ErrInvalidSilence-on-empty-matchers contract) — unreachable via the
+// normal creation path today (normalizeSilenceInput below already
+// requires at least one matcher), kept explicit rather than relying on
+// that invariant holding forever.
 func silenceMatchesLabels(matchers []core.StoredSilenceMatcher, labels map[string]string) bool {
-	for _, matcher := range matchers {
-		labelValue := labels[matcher.Name]
-
-		match := false
-		if matcher.IsRegex {
-			re, err := regexp.Compile(matcher.Value)
-			if err != nil {
-				return false
-			}
-			match = re.MatchString(labelValue)
-		} else {
-			match = labelValue == matcher.Value
-		}
-
-		if matcher.IsEqual {
-			if !match {
-				return false
-			}
-		} else if match {
-			return false
-		}
+	if len(matchers) == 0 {
+		return true
 	}
 
-	return true
+	matched, err := silenceRegexMatcher.Matches(
+		context.Background(),
+		silencing.Alert{Labels: labels},
+		&silencing.Silence{Matchers: toSilencingMatchers(matchers)},
+	)
+	if err != nil {
+		// Regex patterns are validated at silence-creation time
+		// (validator.go / normalizeSilenceInput's own regexp.Compile
+		// check below), so a compile error here should not be
+		// reachable in practice; fail closed (not matched) rather than
+		// treat an unexpected error as a silence-wide match, matching
+		// this function's pre-fix-round-3 fail-closed posture for a bad
+		// pattern.
+		return false
+	}
+	return matched
 }
 
 func normalizeSilenceInput(in *core.SilenceInput, now time.Time, allowPastEndsAt bool) (*core.StoredSilenceState, error) {

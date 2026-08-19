@@ -280,6 +280,87 @@ func TestMatchesNode_NegativeMatchers(t *testing.T) {
 	})
 }
 
+// TestMatchesNode_AbsentLabelUpstreamSemantics is the review fix-round-1
+// (I1 side task) table test for internal/business/routing: upstream
+// Alertmanager's Matchers.Matches has NO presence check at all
+// (pkg/labels/matcher.go:184-191 reads `lset[name]`, "" for an absent Go
+// map key), so an absent label is evaluated as the empty string against
+// every operator. MatchesNode used to gate `=`/`=~` on presence and
+// short-circuit `!=`/`!~` to true on absence unconditionally — the exact
+// table internal/infrastructure/inhibition.matchesAll was found to have
+// copied from here (fixed alongside this one). Each row below pins one
+// operator against a label entirely absent from the alert, both for an
+// operand that is itself empty (the sharpest edge, where the two tables
+// diverged) and a typical non-empty operand (where the tables happened to
+// agree, so a regression back to the presence-gated version would only
+// be caught by the empty-operand rows).
+func TestMatchesNode_AbsentLabelUpstreamSemantics(t *testing.T) {
+	m := testMatcher()
+	alert := &Alert{Labels: map[string]string{"unrelated": "value"}} // "job"/"foo" absent
+
+	tests := []struct {
+		name    string
+		matcher Matcher
+		want    bool
+		explain string
+	}{
+		{
+			name:    `job!="" on absent label`,
+			matcher: Matcher{Name: "job", Value: "", IsNegative: true},
+			want:    false,
+			explain: `upstream: "" != "" is false -> NOT matched (the pre-fix version returned true)`,
+		},
+		{
+			name:    `foo=~".*" on absent label`,
+			matcher: Matcher{Name: "foo", Value: ".*", IsRegex: true},
+			want:    true,
+			explain: `upstream: anchored ".*" matches "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `foo="" on absent label`,
+			matcher: Matcher{Name: "foo", Value: ""},
+			want:    true,
+			explain: `upstream: "" == "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `foo!~".*" on absent label`,
+			matcher: Matcher{Name: "foo", Value: ".*", IsRegex: true, IsNegative: true},
+			want:    false,
+			explain: `upstream: anchored ".*" matches "" so negated is false -> NOT matched (the pre-fix version returned true)`,
+		},
+		{
+			name:    `foo="bar" on absent label (non-empty operand, tables agree)`,
+			matcher: Matcher{Name: "foo", Value: "bar"},
+			want:    false,
+		},
+		{
+			name:    `foo!="bar" on absent label (non-empty operand, tables agree)`,
+			matcher: Matcher{Name: "foo", Value: "bar", IsNegative: true},
+			want:    true,
+		},
+		{
+			name:    `foo=~"bar" on absent label (non-empty operand, tables agree)`,
+			matcher: Matcher{Name: "foo", Value: "bar", IsRegex: true},
+			want:    false,
+		},
+		{
+			name:    `foo!~"bar" on absent label (non-empty operand, tables agree)`,
+			matcher: Matcher{Name: "foo", Value: "bar", IsRegex: true, IsNegative: true},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := &RouteNode{Matchers: []Matcher{tt.matcher}}
+			got := m.MatchesNode(node, alert)
+			if got != tt.want {
+				t.Fatalf("MatchesNode() = %v, want %v (%s)", got, tt.want, tt.explain)
+			}
+		})
+	}
+}
+
 func TestFindMatchingRoutes_NilTree(t *testing.T) {
 	m := testMatcher()
 	alert := &Alert{Labels: map[string]string{"alertname": "X"}}

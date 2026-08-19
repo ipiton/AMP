@@ -242,6 +242,46 @@ receivers:
 	assert.False(t, regex.MatchString("database"))
 }
 
+// TestRouteConfigParser_Parse_RegexCompilation_Anchored is the review fix
+// round 3 (R7) regression test: config.CompiledRegex (built by
+// compileRegexPatterns) used to compile match_re patterns UNANCHORED,
+// diverging from internal/business/routing.RouteMatcher.regexMatch (the
+// actual live evaluator, which anchors on every cache-miss compile).
+// Nothing consumes config.CompiledRegex in production today (production
+// wires businessrouting.NewRouteMatcher(nil, ...), so RegexCache.Preload
+// is never called with it) — but RegexCache.Preload/Put key by the raw
+// pattern the same way regexMatch's own Get does, so an unanchored entry
+// injected via a future Preload call would silently poison the cache for
+// every subsequent anchored lookup of that pattern. This pins the fix:
+// GetCompiledRegex now returns an anchored regex that requires a FULL
+// value match, not a substring match.
+func TestRouteConfigParser_Parse_RegexCompilation_Anchored(t *testing.T) {
+	yamlConfig := `
+route:
+  receiver: default
+  group_by: [alertname]
+  match_re:
+    severity: "warning"
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+`
+
+	parser := NewRouteConfigParser()
+	config, err := parser.Parse([]byte(yamlConfig))
+	require.NoError(t, err)
+	require.NotNil(t, config)
+
+	regex, ok := config.GetCompiledRegex(config.Route, "severity")
+	require.True(t, ok)
+	require.NotNil(t, regex)
+
+	assert.True(t, regex.MatchString("warning"), "exact value must still match")
+	assert.False(t, regex.MatchString("warning2"), "anchored regex must NOT match on a mere substring")
+}
+
 func TestRouteConfigParser_Parse_InvalidRegex(t *testing.T) {
 	yamlConfig := `
 route:

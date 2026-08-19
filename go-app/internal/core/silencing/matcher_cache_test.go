@@ -114,11 +114,16 @@ func TestRegexCache_Get_CompileAndCache(t *testing.T) {
 				t.Fatalf("Get(%q) returned nil regexp", tt.pattern)
 			}
 
-			// Verify the pattern works
-			expected, _ := regexp.Compile(tt.pattern)
+			// Verify the pattern works — compared against the ANCHORED
+			// form (review fix round 2, R1: Get anchors ^(?:pattern)$ to
+			// match upstream Alertmanager semantics, so this must not
+			// compare against a raw, unanchored regexp.Compile(tt.pattern)
+			// anymore; a raw substring-matching comparison would silently
+			// re-introduce the over-silencing bug this fix closed).
+			expected, _ := regexp.Compile(anchorSilenceRegex(tt.pattern))
 			testString := "test string critical warning prod"
 			if re.MatchString(testString) != expected.MatchString(testString) {
-				t.Errorf("compiled regex behaves differently than expected")
+				t.Errorf("compiled regex behaves differently than expected (anchored)")
 			}
 		})
 	}

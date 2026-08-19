@@ -1,6 +1,7 @@
 package inhibition
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -292,7 +293,11 @@ func (p *DefaultInhibitionParser) applyDefaults(config *InhibitionConfig) {
 	}
 }
 
-// compileRegexPatterns compiles all regex patterns in the configuration.
+// compileRegexPatterns compiles all regex patterns in the configuration —
+// both the legacy `*_match_re` maps and the matchers-form list syntax —
+// via InhibitionRule.Compile, the single compile path both this parser
+// (config_file-sourced rules) and internal/config.ToInhibitionRules
+// (inline rules) now share (review fix round 1, S1).
 //
 // Pre-compilation improves performance during matching.
 // Invalid patterns return ParseError with detailed information.
@@ -300,32 +305,20 @@ func (p *DefaultInhibitionParser) compileRegexPatterns(config *InhibitionConfig)
 	for i := range config.Rules {
 		rule := &config.Rules[i]
 
-		// Compile source_match_re patterns
-		rule.compiledSourceRE = make(map[string]*regexp.Regexp)
-		for key, pattern := range rule.SourceMatchRE {
-			re, err := regexp.Compile(pattern)
-			if err != nil {
+		if err := rule.Compile(); err != nil {
+			var rce *regexCompileError
+			if errors.As(err, &rce) {
 				return NewParseError(
-					fmt.Sprintf("rules[%d].source_match_re.%s", i, key),
-					pattern,
-					fmt.Errorf("invalid regex: %w", err),
+					fmt.Sprintf("rules[%d].%s", i, rce.Field),
+					rce.Pattern,
+					rce.Err,
 				)
 			}
-			rule.compiledSourceRE[key] = re
-		}
-
-		// Compile target_match_re patterns
-		rule.compiledTargetRE = make(map[string]*regexp.Regexp)
-		for key, pattern := range rule.TargetMatchRE {
-			re, err := regexp.Compile(pattern)
-			if err != nil {
-				return NewParseError(
-					fmt.Sprintf("rules[%d].target_match_re.%s", i, key),
-					pattern,
-					fmt.Errorf("invalid regex: %w", err),
-				)
-			}
-			rule.compiledTargetRE[key] = re
+			return NewParseError(
+				fmt.Sprintf("rules[%d]", i),
+				rule.Name,
+				err,
+			)
 		}
 	}
 
@@ -349,14 +342,17 @@ func (p *DefaultInhibitionParser) validateSemantics(config *InhibitionConfig) er
 
 	// Validate each rule
 	for i, rule := range config.Rules {
-		// At least one source condition
-		if len(rule.SourceMatch) == 0 && len(rule.SourceMatchRE) == 0 {
-			errors = append(errors, fmt.Errorf("rule %d: at least one of source_match or source_match_re required", i))
+		// At least one source condition. SourceMatchers (upstream's modern
+		// `matchers:` list syntax) satisfies this like the legacy maps
+		// since wave 7 (FU-INHIBIT-MATCHERS) — it is fully wired into
+		// matchRuleFast, not a syntax-only field.
+		if len(rule.SourceMatch) == 0 && len(rule.SourceMatchRE) == 0 && len(rule.SourceMatchers) == 0 {
+			errors = append(errors, fmt.Errorf("rule %d: at least one of source_match, source_match_re, or source_matchers required", i))
 		}
 
-		// At least one target condition
-		if len(rule.TargetMatch) == 0 && len(rule.TargetMatchRE) == 0 {
-			errors = append(errors, fmt.Errorf("rule %d: at least one of target_match or target_match_re required", i))
+		// At least one target condition (same wave-7 note as source, above).
+		if len(rule.TargetMatch) == 0 && len(rule.TargetMatchRE) == 0 && len(rule.TargetMatchers) == 0 {
+			errors = append(errors, fmt.Errorf("rule %d: at least one of target_match, target_match_re, or target_matchers required", i))
 		}
 
 		// Validate label names in equal

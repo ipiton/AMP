@@ -24,13 +24,13 @@
 //     minimal TelegramConfig (see config.go) mirroring the runtime-parity
 //     fields, and hasAnyIntegration() checks it - a telegram-only receiver
 //     validates clean, matching runtime support.
-//   - Inhibition matchers-list syntax: InhibitRule.SourceMatchers/
-//     TargetMatchers validate for syntax (and get a W155 warning when
-//     present) but internal/infrastructure/inhibition.InhibitionRule has
-//     no such fields, so the runtime loader silently drops them. Only
-//     source_match/source_match_re (target_match/target_match_re) are
-//     required here for E150/E151, matching what the runtime actually
-//     loads.
+//   - (Fixed, wave 7 / FU-INHIBIT-MATCHERS): InhibitRule.SourceMatchers/
+//     TargetMatchers (upstream's modern `matchers:` list syntax for
+//     inhibit rules) used to validate for syntax only, with a W155
+//     warning that internal/infrastructure/inhibition.InhibitionRule had
+//     no matching fields and silently dropped them. The runtime now
+//     implements them (InhibitionRule.CompileMatchers), so they satisfy
+//     E150/E151 on their own here too, matching what actually loads.
 //   - time_intervals / mute_time_intervals (top-level) and route-level
 //     mute_time_intervals / active_time_intervals: accepted structurally
 //     (an Info note, code I001, is added when present) but not resolved

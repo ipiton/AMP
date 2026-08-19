@@ -5,6 +5,29 @@ import (
 	"sync"
 )
 
+// anchorSilenceRegex wraps a raw matcher pattern so it must match the
+// WHOLE label value, not merely contain a substring matching it —
+// upstream Alertmanager semantics (`pkg/labels/matcher.go`'s
+// `NewMatcher`: `regexp.Compile("^(?:" + v + ")$")`), and the same
+// anchoring `internal/business/routing.anchorRegex` and
+// `internal/infrastructure/inhibition.anchorMatcherRegex` already apply
+// for route matchers and inhibit rules respectively.
+//
+// Review fix round 2 (R1 / silencing's own copy of the anchoring
+// divergence): before this fix, RegexCache.Get compiled the raw pattern
+// unanchored, so a silence matcher `job=~"prod"` would ALSO silence an
+// alert with `job="preprod-2"` (substring match) — the over-silencing
+// direction, and the more dangerous one of the two directions this class
+// of bug can go in (a route/inhibition anchoring bug misses a match; a
+// silence anchoring bug SUPPRESSES real alerts nobody asked to suppress).
+// Kept as a literal, independently-duplicated helper (not a shared
+// import) for the same reason the other two sites are: each package's
+// copy is meant to stay easy to audit on its own, and pkg/ - style
+// leaf-level packages avoid depending on internal/ siblings.
+func anchorSilenceRegex(pattern string) string {
+	return "^(?:" + pattern + ")$"
+}
+
 // RegexCache caches compiled regex patterns for performance optimization.
 //
 // Regex compilation is expensive (~5µs per pattern). Without caching, matching
@@ -87,6 +110,14 @@ func NewRegexCache(maxSize int) *RegexCache {
 // Errors:
 //   - Returns error if pattern is invalid regex syntax
 //
+// Anchoring (review fix round 2, R1): the compiled regex is anchored
+// `^(?:pattern)$` (see anchorSilenceRegex), matching upstream
+// Alertmanager semantics — `re.MatchString("critical")` below requires
+// the WHOLE label value to equal "critical", not merely contain it. The
+// cache key remains the raw (unanchored) pattern string so callers pass
+// the same value they configured; only the compiled *regexp.Regexp is
+// anchored.
+//
 // Example:
 //
 //	cache := NewRegexCache(1000)
@@ -97,6 +128,7 @@ func NewRegexCache(maxSize int) *RegexCache {
 //	    return fmt.Errorf("invalid regex: %w", err)
 //	}
 //	matched := re.MatchString("critical")  // true
+//	matched = re.MatchString("critical-ish")  // false (anchored)
 //
 //	// Second call: cache hit (same pattern)
 //	re2, _ := cache.Get("(critical|warning)")
@@ -121,8 +153,9 @@ func (rc *RegexCache) Get(pattern string) (*regexp.Regexp, error) {
 		return re, nil
 	}
 
-	// Compile regex pattern
-	re, err := regexp.Compile(pattern)
+	// Compile regex pattern, anchored to the whole label value (upstream
+	// semantics — see anchorSilenceRegex's doc comment above).
+	re, err := regexp.Compile(anchorSilenceRegex(pattern))
 	if err != nil {
 		// Return compilation error without caching
 		return nil, err
