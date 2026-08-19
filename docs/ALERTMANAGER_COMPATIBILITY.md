@@ -265,18 +265,28 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    - For integrations with no batch wire shape (Slack, Telegram, PagerDuty, Email) one job covers the group by
      looping `Publish` per alert, so a single failing alert still makes the whole `(group, target)` unconfirmed.
      Since wave 4 (`FU-PER-ALERT-OUTCOMES`) that no longer re-sends the alerts that already landed: the job reports
-     which individual alerts the target accepted, and the chain stores them as a per-`(group, target)`
-     **delivered set** (`nflog:delivered:{groupKey}:{target}`, TTL = `repeat_interval` + 60s grace, capped at 500
-     keys) so the next fire carries only the alerts still owed. Keys are `fingerprint:status` — the same atoms the
-     nflog signature is built from — so an alert that flipped `firing`↔`resolved` counts as new and is re-sent, and a
-     group that gained or lost alerts between fires still filters correctly. Retries *inside* one job skip the
-     already-accepted alerts too. When the remainder lands, the target gets its normal full nflog entry and the
-     delivered set is deleted; the set exists only while a target is partially delivered, so the happy path costs no
-     extra key. Webhook/alertmanager targets are unaffected (one batched POST, one outcome, never a delivered set).
+     which individual alerts the target accepted, and the chain stores that as per-`(group, target)`
+     **delivered state** — `nflog:delivered:{groupKey}:{target}`, a Redis HASH `{alert fingerprint → delivered
+     status}`, TTL = `repeat_interval` + 60s grace, capped at 500 alerts — so the next fire carries only the alerts
+     still owed. Comparison is by `fingerprint:status`, the same atoms the nflog signature is built from, so an alert
+     that flipped `firing`↔`resolved` counts as new and is re-sent, and a group that gained or lost alerts between
+     fires still filters correctly. **One status per fingerprint**: recording an alert's new status *replaces* the
+     previous one, because an alert flapping `firing→resolved→firing` must be delivered again — accumulating both
+     statuses would suppress the re-fire, and suppression is the one outcome this design never accepts. Retries
+     *inside* one job skip the already-accepted alerts too. When the remainder lands, the target gets its normal full
+     nflog entry and the delivered state is deleted; it exists only while a target is partially delivered, so the
+     happy path costs no extra key. Webhook/alertmanager targets are unaffected (one batched POST, one outcome, never
+     any delivered state).
      Residual: this is an **AMP extension with no upstream counterpart** — upstream Alertmanager sends exactly one
-     wire message per `group × integration` and has no per-alert send to be partial about. And if the delivered set
-     cannot be read or written (Redis unreachable, cap reached), AMP falls back to re-sending the whole set: the
-     floor stays at-least-once, exactly-once per `(alert, target)` is the refinement that is forfeited.
+     wire message per `group × integration` and has no per-alert send to be partial about. If the delivered state
+     cannot be read or written (Redis unreachable, cap reached — the latter counted as
+     `amp_group_operations_total{operation="delivered_state",status="capped"}`), AMP falls back to re-sending the
+     whole set: the floor stays at-least-once, exactly-once per `(alert, target)` is the refinement that is
+     forfeited. One exotic edge is not handled: the notify chain cannot tell which targets are batch-capable, so if a
+     target's `type` is changed from a non-batch integration to `webhook`/`alertmanager` (same target name) *while*
+     it has delivered state, the first batched POST after the change carries only the remainder and the full-signature
+     nflog entry then suppresses the filtered alerts for one `repeat_interval`. Renaming the target, or letting the
+     state expire before the type change, avoids it.
    - On queue shutdown, in-flight confirmed-delivery jobs are cancelled and deliberately **not** written to the DLQ:
      the notify chain re-publishes to any unconfirmed target after restart, so a DLQ replay would double-deliver.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
