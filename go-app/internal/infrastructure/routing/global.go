@@ -31,6 +31,31 @@ type GlobalConfig struct {
 	// HTTPConfig specifies default HTTP client settings
 	// Used by all receivers unless overridden
 	HTTPConfig *HTTPConfig `yaml:"http_config,omitempty"`
+
+	// GroupBy/GroupWait/GroupInterval/RepeatInterval (alertmanager-parity
+	// wave-5, FU-GLOB-DEFAULT-VALUES) are grouping-default fallbacks
+	// consulted by business/routing.TreeBuilder's inheritGroupBy/
+	// inheritDuration when NEITHER a route NOR any of its ancestors set the
+	// corresponding field — i.e. below root-route inheritance, above the
+	// hardcoded upstream defaults (["alertname"] / 30s / 5m / 4h).
+	//
+	// Honesty note: this is an AMP-only convenience, not part of upstream
+	// Alertmanager's `global:` schema (upstream's global: has no grouping
+	// fields at all — its equivalent mechanism is simply setting these on
+	// the root `route:`, which cascades via the same parent-chain
+	// inheritance these fields sit below). It existed in this package's
+	// pre-dedup local GlobalConfig (deleted by 3f8d69d, TN-137) and is
+	// restored here on the canonical type; see tree_builder.go's
+	// inheritGroupBy/inheritDuration for the consulting side and
+	// docs/ALERTMANAGER_COMPATIBILITY.md for the parity note.
+	//
+	// nil/empty means "not set" — GroupBy/durations left unset here do NOT
+	// get defaulted by GlobalConfig.Defaults() below; an unset field simply
+	// falls through to the next priority (the hardcoded default).
+	GroupBy        []string  `yaml:"group_by,omitempty"`
+	GroupWait      *Duration `yaml:"group_wait,omitempty"`
+	GroupInterval  *Duration `yaml:"group_interval,omitempty"`
+	RepeatInterval *Duration `yaml:"repeat_interval,omitempty"`
 }
 
 // Defaults applies default values.
@@ -60,6 +85,22 @@ func (g *GlobalConfig) Clone() *GlobalConfig {
 	}
 	if g.HTTPConfig != nil {
 		clone.HTTPConfig = g.HTTPConfig.Clone()
+	}
+
+	if len(g.GroupBy) > 0 {
+		clone.GroupBy = append([]string(nil), g.GroupBy...)
+	}
+	if g.GroupWait != nil {
+		v := *g.GroupWait
+		clone.GroupWait = &v
+	}
+	if g.GroupInterval != nil {
+		v := *g.GroupInterval
+		clone.GroupInterval = &v
+	}
+	if g.RepeatInterval != nil {
+		v := *g.RepeatInterval
+		clone.RepeatInterval = &v
 	}
 
 	return clone

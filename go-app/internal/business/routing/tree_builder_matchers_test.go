@@ -52,16 +52,21 @@ func TestParseMatcherExpr(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "unmatched trailing quote is preserved, not stripped",
+			// fix-round finding I-3: upstream errors on a trailing quote
+			// with no leading quote (an unescaped '"' anywhere outside a
+			// properly-opened quoted value is invalid) — the first pass
+			// here silently kept it as a literal trailing quote instead.
+			name:   "unmatched trailing quote now errors (upstream: unescaped double quote)",
 			expr:   `service=files"`,
-			want:   Matcher{Name: "service", Value: `files"`},
-			wantOK: true,
+			wantOK: false,
 		},
 		{
-			name:   "unmatched leading quote is preserved, not stripped",
+			// fix-round finding I-3: upstream errors on a leading quote
+			// with no matching trailing quote — the first pass here
+			// silently kept the literal leading quote instead.
+			name:   "unmatched leading quote now errors (upstream: unescaped double quote)",
 			expr:   `service="files`,
-			want:   Matcher{Name: "service", Value: `"files`},
-			wantOK: true,
+			wantOK: false,
 		},
 		{
 			name:   "malformed: no operator",
@@ -72,6 +77,83 @@ func TestParseMatcherExpr(t *testing.T) {
 			name:   "malformed: empty",
 			expr:   "",
 			wantOK: false,
+		},
+		// alertmanager-parity wave-5 item 5 (FU-PARSEARGUMENT-QUOTE-HANDLING):
+		// escaped quotes, embedded spaces, and unicode inside a quoted value
+		// — the previously-divergent cases vs pkg/configvalidator/matcher.Parse
+		// (which didn't strip quotes at all before this task). See
+		// pkg/configvalidator/matcher/matcher_test.go for the mirrored table.
+		{
+			name:   "escaped quote inside quoted value is unescaped",
+			expr:   `team="front\"end"`,
+			want:   Matcher{Name: "team", Value: `front"end`},
+			wantOK: true,
+		},
+		{
+			name:   "escaped backslash inside quoted value is unescaped",
+			expr:   `path="C:\\temp"`,
+			want:   Matcher{Name: "path", Value: `C:\temp`},
+			wantOK: true,
+		},
+		{
+			name:   "embedded space inside quoted value survives",
+			expr:   `message="hello world"`,
+			want:   Matcher{Name: "message", Value: "hello world"},
+			wantOK: true,
+		},
+		{
+			name:   "unicode inside quoted value survives",
+			expr:   `city="Zürich 東京"`,
+			want:   Matcher{Name: "city", Value: "Zürich 東京"},
+			wantOK: true,
+		},
+		{
+			name:   "explicit empty quoted value is preserved as empty string",
+			expr:   `label=""`,
+			want:   Matcher{Name: "label", Value: ""},
+			wantOK: true,
+		},
+		{
+			// fix-round 2, Minor #5: upstream accepts an empty value
+			// outright ("The 3rd token may be the empty string"), and this
+			// parser always did too — mirrored in
+			// pkg/configvalidator/matcher's table after that parser's own
+			// round-1 guard against this exact case was found to diverge.
+			name:   "empty value (nothing after operator) is accepted, matching upstream",
+			expr:   "label=",
+			want:   Matcher{Name: "label", Value: ""},
+			wantOK: true,
+		},
+		// fix-round finding I-3: the four verified divergences vs upstream
+		// pkg/labels, now aligned. See matcher_test.go's mirrored table.
+		{
+			name:   "escaped LF inside a quoted value becomes a real line feed",
+			expr:   "v=\"line\\nbreak\"",
+			want:   Matcher{Name: "v", Value: "line\nbreak"},
+			wantOK: true,
+		},
+		{
+			name:   "escaping also applies to an UNQUOTED value (upstream applies it either way)",
+			expr:   `v=C:\\temp`,
+			want:   Matcher{Name: "v", Value: `C:\temp`},
+			wantOK: true,
+		},
+		{
+			name:   "unescaped inner quote inside a quoted value now errors",
+			expr:   `v="a"b"`,
+			wantOK: false,
+		},
+		{
+			name:   "spurious escape (unrecognized \\x) keeps the backslash literal, not just the char",
+			expr:   `v="a\tb"`,
+			want:   Matcher{Name: "v", Value: `a\tb`},
+			wantOK: true,
+		},
+		{
+			name:   "a lone trailing backslash with nothing after it is a literal backslash",
+			expr:   `v=foo\`,
+			want:   Matcher{Name: "v", Value: `foo\`},
+			wantOK: true,
 		},
 	}
 
@@ -85,6 +167,27 @@ func TestParseMatcherExpr(t *testing.T) {
 				t.Fatalf("parseMatcherExpr(%q) = %+v, want %+v", tc.expr, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestUnquoteMatcherValue_InvalidUTF8 exercises unquoteMatcherValue
+// directly (fix-round finding I-3's "non-UTF-8 input" rule) rather than
+// through parseMatcherExpr's regex: routing an invalid byte sequence
+// through matcherExprPattern's `(.*)$` capture group first would make this
+// a test of Go's regexp/UTF-8 handling as much as of unquoteMatcherValue
+// itself.
+func TestUnquoteMatcherValue_InvalidUTF8(t *testing.T) {
+	invalid := string([]byte{0xff, 0xfe})
+
+	if _, ok := unquoteMatcherValue(invalid); ok {
+		t.Fatalf("unquoteMatcherValue(%q) ok = true, want false (invalid UTF-8 must be rejected)", invalid)
+	}
+
+	// A leading-quote variant, since the UTF-8 check runs on rawValue
+	// AFTER stripping a leading quote (matching upstream's exact
+	// placement) — both paths must reject it.
+	if _, ok := unquoteMatcherValue(`"` + invalid + `"`); ok {
+		t.Fatalf("unquoteMatcherValue with a quoted invalid UTF-8 value: ok = true, want false")
 	}
 }
 

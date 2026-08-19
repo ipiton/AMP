@@ -174,6 +174,18 @@ type ServiceRegistry struct {
 	groupTimerManager *grouping.DefaultTimerManager
 	groupKeyGenerator *grouping.GroupKeyGenerator
 
+	// groupStorageManager is non-nil only when newGroupingStorage chose the
+	// standard profile's Redis-backed GroupStorage (task fu5-cfg item 2,
+	// FU-STORAGEMANAGER-FAILBACK): it wraps that RedisGroupStorage with a
+	// periodic health probe + automatic runtime failback to an in-memory
+	// GroupStorage on Redis loss, and failforward back on recovery — see
+	// grouping.StorageManager's package doc for what recovery deliberately
+	// does NOT do (no state merge). nil in the lite profile, when Redis
+	// init failed (already memory-only, nothing to probe), or when grouping
+	// itself is disabled/skipped. Owns a background goroutine; Stop() it in
+	// Shutdown before groupTimerManager is torn down below.
+	groupStorageManager *grouping.StorageManager
+
 	// Business Services
 	k8sClient                  k8s.K8sClient
 	publishingDiscovery        businesspublishing.TargetDiscoveryManager
@@ -831,7 +843,7 @@ func (r *ServiceRegistry) runSilenceEventSync(ctx context.Context) {
 // see RedisSilenceEventBus.Subscribe's doc comment for why a full resync,
 // not just catching up on the missed messages, is the correct recovery.
 func (r *ServiceRegistry) runSilenceSubscribeLoop(ctx context.Context) {
-	const retryDelay = 2 * time.Second
+	retryDelay := r.silenceSubscribeRetryBackoff()
 
 	for {
 		err := r.silenceEventBus.Subscribe(ctx, r.resyncSilenceStore, r.applySilenceEvent)
@@ -863,7 +875,7 @@ func (r *ServiceRegistry) runSilenceSubscribeLoop(ctx context.Context) {
 // a permanent one, without adding a steady background load comparable to
 // the pub/sub path itself.
 func (r *ServiceRegistry) runSilencePeriodicResync(ctx context.Context) {
-	const fallbackInterval = 5 * time.Minute
+	fallbackInterval := r.silencePeriodicResyncInterval()
 
 	ticker := time.NewTicker(fallbackInterval)
 	defer ticker.Stop()
@@ -1531,6 +1543,47 @@ func reconciliationGraceFor(configured, deliveryConfirmationTimeout time.Duratio
 	return grouping.ReconciliationGraceFor(deliveryConfirmationTimeout)
 }
 
+// Pre-config-knob defaults (task fu5-cfg item 1) for the silence sync
+// intervals below — unchanged from the literals runSilenceSubscribeLoop and
+// runSilencePeriodicResync hardcoded before this task.
+const (
+	defaultSilenceSubscribeRetryBackoff  = 2 * time.Second
+	defaultSilencePeriodicResyncInterval = 5 * time.Minute
+)
+
+// silenceSubscribeRetryBackoff returns the configured resubscribe backoff,
+// falling back to the pre-config-knob default when r.config is nil (unit
+// tests that construct *ServiceRegistry directly without going through
+// LoadConfig — same posture as reconciliationGraceFor above) or the value is
+// left at its zero default.
+//
+// Restart-only (fix-round Minor #3): this is read once by
+// runSilenceSubscribeLoop before its loop starts, so a POST /-/reload that
+// changes silencing.subscribe_retry_backoff has no effect until the process
+// restarts — validateSilencing does still re-run on reload, so the value is
+// re-validated, just not re-applied live.
+func (r *ServiceRegistry) silenceSubscribeRetryBackoff() time.Duration {
+	if r.config != nil && r.config.Silencing.SubscribeRetryBackoff > 0 {
+		return r.config.Silencing.SubscribeRetryBackoff
+	}
+	return defaultSilenceSubscribeRetryBackoff
+}
+
+// silencePeriodicResyncInterval returns the configured periodic fallback
+// resync interval, with the same nil/zero fallback posture as
+// silenceSubscribeRetryBackoff above.
+//
+// Restart-only (fix-round Minor #3): read once to build the
+// runSilencePeriodicResync ticker, same posture as
+// silenceSubscribeRetryBackoff above — a reload changes the validated value
+// but not the running ticker's interval until restart.
+func (r *ServiceRegistry) silencePeriodicResyncInterval() time.Duration {
+	if r.config != nil && r.config.Silencing.PeriodicResyncInterval > 0 {
+		return r.config.Silencing.PeriodicResyncInterval
+	}
+	return defaultSilencePeriodicResyncInterval
+}
+
 // newGroupingStorage selects group + timer storage backends for the grouping
 // subsystem by deployment profile (task 2.2): Redis (reusing the
 // already-initialized cache client) for standard, in-memory for lite.
@@ -1559,6 +1612,13 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 			if err != nil {
 				r.logger.Warn("Redis group storage init failed, grouping falls back to in-memory storage", "error", err)
 				groupStorage, timerStorage := r.memoryGroupingStorage()
+				// fix-round Minor #1: this return handed back memory storage
+				// without ever setting the backend-active gauge, so it read
+				// 0 for BOTH labels in exactly the case an operator would
+				// dashboard on.
+				if r.metrics != nil {
+					r.metrics.SetActiveGroupStorageBackend("memory")
+				}
 				return groupStorage, timerStorage, fmt.Errorf("redis group storage init failed: %w", err)
 			}
 
@@ -1566,17 +1626,53 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 			if err != nil {
 				r.logger.Warn("Redis timer storage init failed, grouping falls back to in-memory storage", "error", err)
 				memGroupStorage, memTimerStorage := r.memoryGroupingStorage()
+				// fix-round Minor #1: same gauge gap as the Redis
+				// group-storage-init-failure branch above.
+				if r.metrics != nil {
+					r.metrics.SetActiveGroupStorageBackend("memory")
+				}
 				return memGroupStorage, memTimerStorage, fmt.Errorf("redis timer storage init failed: %w", err)
 			}
 
-			r.logger.Info("Grouping subsystem using Redis storage")
-			return groupStorage, timerStorage, nil
+			// Wrap the Redis group storage with a runtime health probe +
+			// automatic failback/failforward (task fu5-cfg item 2,
+			// FU-STORAGEMANAGER-FAILBACK): before this, a Redis outage AFTER
+			// startup had no detection at all — groupStorage above would be
+			// returned as-is and every Store/Load call would just surface the
+			// raw Redis error until the process restarted. StorageManager
+			// polls groupStorage.Ping and switches to an in-memory fallback
+			// on loss, back to Redis on recovery (clean cutover, not a state
+			// merge — see grouping.StorageManager's package doc). TimerStorage
+			// is NOT wrapped: no equivalent exists yet, and timer liveness
+			// already has its own, separate reconciliation mechanism (task
+			// 6.2, grouping.TimerManagerConfig.ReconciliationInterval) — that
+			// gap is out of this task's minimum-viable scope.
+			// Built directly (not via memoryGroupingStorage(), whose "using
+			// in-memory storage" log line would be misleading here — Redis
+			// IS the primary; this is only the backstop StorageManager
+			// falls back to).
+			memGroupStorage := grouping.NewMemoryGroupStorage(&grouping.MemoryGroupStorageConfig{
+				Logger:  r.logger,
+				Metrics: r.metrics,
+			})
+			r.groupStorageManager = grouping.NewStorageManager(grouping.StorageManagerConfig{
+				Primary:  groupStorage,
+				Fallback: memGroupStorage,
+				Logger:   r.logger,
+				Metrics:  r.metrics,
+			})
+
+			r.logger.Info("Grouping subsystem using Redis storage with runtime health-probe failback")
+			return r.groupStorageManager, timerStorage, nil
 		}
 
 		r.logger.Warn("Standard profile without a Redis cache backend, grouping falls back to in-memory storage")
 	}
 
 	groupStorage, timerStorage := r.memoryGroupingStorage()
+	if r.metrics != nil {
+		r.metrics.SetActiveGroupStorageBackend("memory")
+	}
 	return groupStorage, timerStorage, nil
 }
 
@@ -1917,14 +2013,25 @@ func (r *ServiceRegistry) Shutdown(ctx context.Context) error {
 	// the silence manager above: both are background workers independent of
 	// the request path, safe to stop before Publishing/Storage/Database
 	// teardown below. GroupManager itself owns no goroutines/connections of
-	// its own to close — only the TimerManager's timer goroutines need
-	// Shutdown.
+	// its own to close — only the TimerManager's timer goroutines (and, since
+	// task fu5-cfg item 2, groupStorageManager's health-probe goroutine
+	// below) need Shutdown.
 	if r.groupTimerManager != nil {
 		r.logger.Info("Shutting down grouping timer manager...")
 		if err := r.groupTimerManager.Shutdown(ctx); err != nil {
 			r.logger.Warn("Grouping timer manager stop warning", "error", err)
 		}
 		r.groupTimerManager = nil
+	}
+	// Stop the group-storage health probe (task fu5-cfg item 2,
+	// FU-STORAGEMANAGER-FAILBACK) — non-nil only when newGroupingStorage
+	// wrapped a Redis-backed GroupStorage. Stop() is synchronous (closes
+	// stopChan, no wait needed) and safe to call even if the probe never
+	// switched away from primary.
+	if r.groupStorageManager != nil {
+		r.logger.Info("Shutting down grouping storage manager health probe...")
+		r.groupStorageManager.Stop()
+		r.groupStorageManager = nil
 	}
 	r.groupManager = nil
 	r.groupKeyGenerator = nil

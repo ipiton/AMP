@@ -19,6 +19,8 @@
 package metrics
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -849,6 +851,7 @@ type StorageMetrics struct {
 	OperationDuration *prometheus.HistogramVec
 	FallbackTotal     *prometheus.CounterVec
 	RecoveryTotal     prometheus.Counter
+	BackendActive     *prometheus.GaugeVec
 }
 
 // NewStorageMetrics creates new storage metrics
@@ -897,6 +900,22 @@ func NewStorageMetrics() *StorageMetrics {
 				Name:      "recovery_total",
 				Help:      "Total number of storage recoveries.",
 			},
+		),
+		// BackendActive (task fu5-cfg item 2, FU-STORAGEMANAGER-FAILBACK):
+		// which grouping storage backend StorageManager is currently routing
+		// reads/writes through. Exactly one label value reads 1 at a time;
+		// the rest read 0 — the "amp_storage_backend{backend=...}" gauge
+		// called for in the wave-5 brief (namespaced under this package's
+		// existing alert_history_storage_* family instead of a new "amp_"
+		// prefix).
+		BackendActive: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Subsystem: "storage",
+				Name:      "backend_active",
+				Help:      "Which group storage backend is currently active (1=active, 0=inactive), labeled by backend.",
+			},
+			[]string{"backend"},
 		),
 	}
 }
@@ -1053,6 +1072,16 @@ type BusinessMetrics struct {
 	storage        *StorageMetrics
 	classification *ClassificationMetrics
 	deduplication  *DeduplicationMetrics
+
+	// groupStorageBackendMu protects lastCustomGroupStorageBackendLabel,
+	// used by SetActiveGroupStorageBackend (fix-round 2, Minor #7) to zero
+	// out a previously-used CUSTOM backend label when a caller switches to
+	// a different custom pairing — without this, a stale "1" would linger
+	// under the old label forever (unreachable for this package's only
+	// real caller, which always passes the same "redis"/"memory" pair for
+	// the lifetime of one StorageManager; kept for correctness regardless).
+	groupStorageBackendMu              sync.Mutex
+	lastCustomGroupStorageBackendLabel string
 }
 
 // NewBusinessMetrics creates a new BusinessMetrics instance
@@ -1331,6 +1360,65 @@ func (m *BusinessMetrics) IncStorageFallback(reason string) {
 // IncStorageRecovery increments storage recovery counter
 func (m *BusinessMetrics) IncStorageRecovery() {
 	m.storage.RecoveryTotal.Inc()
+}
+
+// groupStorageBackendLabels enumerates the label values
+// SetActiveGroupStorageBackend zeroes out before setting the active one, so
+// stale "1"s never linger under a label that stopped being active (task
+// fu5-cfg item 2). grouping.StorageManager only ever uses "redis"/"memory".
+var groupStorageBackendLabels = []string{"redis", "memory"}
+
+// SetActiveGroupStorageBackend records which grouping storage backend
+// (grouping.StorageManager's primary or fallback) is currently serving
+// group-storage reads/writes (task fu5-cfg item 2, FU-STORAGEMANAGER-FAILBACK).
+// Exactly one of groupStorageBackendLabels reads 1 at any time; the others
+// read 0.
+func (m *BusinessMetrics) SetActiveGroupStorageBackend(backend string) {
+	isKnown := false
+	for _, b := range groupStorageBackendLabels {
+		v := 0.0
+		if b == backend {
+			v = 1.0
+			isKnown = true
+		}
+		m.storage.BackendActive.WithLabelValues(b).Set(v)
+	}
+
+	// fix-round Minor #2: StorageManagerConfig.PrimaryLabel/FallbackLabel
+	// accept any string, but the loop above only ever zeroes the fixed
+	// {"redis","memory"} set — without this, a caller using a different
+	// label pair would silently produce an all-zero gauge (every label it
+	// actually uses reads 0, since none of them is "redis" or "memory").
+	// Explicitly set the real label so it always reflects the truth.
+	if !isKnown && backend != "" {
+		m.storage.BackendActive.WithLabelValues(backend).Set(1)
+	}
+
+	// fix-round 2, Minor #7: if the PREVIOUS call used a different custom
+	// (non-redis/memory) label, remove that series entirely instead of
+	// leaving it at a stale 1 forever — a caller switching custom label
+	// pairs (e.g. "postgres"/"disk") would otherwise read 1 for both the
+	// old and the new label after one flip.
+	m.groupStorageBackendMu.Lock()
+	previous := m.lastCustomGroupStorageBackendLabel
+	m.lastCustomGroupStorageBackendLabel = ""
+	if !isKnown {
+		m.lastCustomGroupStorageBackendLabel = backend
+	}
+	m.groupStorageBackendMu.Unlock()
+
+	if previous != "" && previous != backend {
+		m.storage.BackendActive.DeleteLabelValues(previous)
+	}
+}
+
+// GroupStorageBackendGauge exposes the backend-active GaugeVec set by
+// SetActiveGroupStorageBackend, for tests that need to assert on its value
+// (e.g. via prometheus/client_golang/testutil.ToFloat64) without a scrape
+// round-trip. Production code should call SetActiveGroupStorageBackend
+// instead of reading this directly.
+func (m *BusinessMetrics) GroupStorageBackendGauge() *prometheus.GaugeVec {
+	return m.storage.BackendActive
 }
 
 // RecordTimerStarted records a timer start

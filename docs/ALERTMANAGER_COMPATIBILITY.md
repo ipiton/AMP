@@ -301,6 +301,129 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
 5. **2-replica HA e2e (`deploy/e2e-ha/`) is a standalone script, not a CI gate.** It demonstrates exactly-once
    delivery and failover when run manually (`./deploy/e2e-ha/run.sh`); it does not run in `go test ./...` and so
    provides no regression protection against a future change silently breaking HA behavior.
+6. **Group storage now survives a runtime Redis outage — but recovery is a clean cutover, not a state merge.**
+   Closed in wave 5 (`FU-STORAGEMANAGER-FAILBACK`): the standard profile's `GroupStorage` used to be chosen once at
+   startup (`ServiceRegistry.newGroupingStorage`) with no runtime revisit — a Redis outage after boot surfaced raw
+   Redis errors on every group read/write until the process restarted. `grouping.StorageManager` (built in
+   2025-11-04, never actually wired in until this task) now wraps it: a health probe on `Ping` switches to an
+   in-memory fallback on loss and back on recovery, with a `backend_active` gauge (labeled `redis`/`memory`) and a
+   loud log line on every switch, on top of the pre-existing per-call fallback (a failing `Store`/`Delete`/`StoreAll`
+   switches immediately, without waiting for the next probe tick).
+   **Fix round (same wave): hysteresis, error classification, and a write-through + deletion-replay reconciliation
+   pass.** The first cut flipped on a single failed/succeeded `Ping` and on ANY per-call error — so a flapping Redis
+   oscillated every probe tick, and one `ErrVersionMismatch` (an expected outcome of two concurrent updates) looked
+   identical to Redis being down. Now: the probe requires `degradeThreshold` (default 3) consecutive failures
+   before degrading, and BOTH `recoverThreshold` (default 3) consecutive successes AND `minHoldDuration` (default
+   30s) since the last transition before failing forward; per-call `Store`/`Delete`/`StoreAll` only degrade for
+   `isConnectivityError(err)` (a real transport/timeout failure) — any other error is returned to the caller
+   unchanged, exactly as it would be with no wrapper at all. Separately, recovery used to flip `sm.current` back to
+   primary with **no reconciliation whatsoever**, which had two silent-loss directions, only one of which the
+   original text here admitted:
+   - *(originally documented)* a group created fresh in the fallback during the outage was invisible to primary
+     after the flip (`ErrNotFound`, a new group started — "duplicate notification possible, not silent data loss").
+   - *(found in review, strictly worse)* for a group that already existed in Redis **before** the outage — the
+     common case — the stale pre-outage copy resurfaced after the flip and every alert added during the outage was
+     silently dropped on the next `Store`; and a `Delete` issued while degraded only ever reached the fallback, so
+     the pre-outage Redis copy came back as a **zombie** group capable of firing a notification for alerts that had
+     already resolved.
+
+   `reconcileFallbackIntoPrimary` now runs before every failforward: every group in the fallback store is written
+   through to primary (its `Version` aligned to primary's current value first, so `RedisGroupStorage.Store`'s
+   optimistic-lock check doesn't reject the write-through as a spurious "concurrent update" — this actually makes
+   the fallback's fresher copy win over the stale one), and every key deleted while degraded (tracked, bounded at
+   500) is replayed as a `Delete` against primary. If the write-through itself fails, the flip is skipped for
+   another probe cycle rather than failing forward onto a half-reconciled primary.
+
+   **This is still not full state-merge machinery — three real limits remain, stated plainly:**
+   - The write-through's read-then-write runs *without* the manager's lock held (holding it for the whole pass
+     would block every `Store`/`Load`/`Delete` call for as long as reconciliation takes — an availability
+     regression of its own). This leaves a narrow race: a write landing in the fallback *after* the write-through's
+     snapshot of it but *before* the flip is not part of the write-through and can be shadowed once primary is
+     current again — bounded by one reconciliation pass, not by the whole outage, but not zero.
+   - **Multi-replica HA is NOT covered.** `MemoryGroupStorage` is per-process. If two replicas both degraded and
+     both received writes for the SAME `GroupKey` during the outage (possible when a load balancer does not pin a
+     given alert's requests to one replica), each replica's fallback holds a different view of that group, and
+     whichever replica's reconciliation runs last simply overwrites the other's outage-window data — no merge
+     between the two replicas' views. This is the same last-writer-wins limitation the brief already excludes full
+     state-merge machinery for, now exercised concretely rather than left abstract; the fix above removes it for
+     the single-writer-per-key case (one replica, or a load balancer pinning by `GroupKey`/alert), which is the
+     common case, but does not extend to genuinely concurrent cross-replica writes during a shared outage.
+   - This is NOT the same convergence story as wave 4's per-alert delivered state: that data is a TTL'd dedup marker
+     where the worst case of "never made it to Redis" is a harmless resend, while a `GroupStorage` entry *is* the
+     alert membership, so a residual gap here has real consequences, not just a delayed resend.
+   - **Degrade detection latency roughly tripled for read-only workloads.** With `degradeThreshold`'s default of 3,
+     the periodic probe now needs 3 consecutive failed `Ping`s (up to `3 × healthCheckInterval`, ~90s at the 30s
+     default) before degrading, versus a single failed `Ping` before the hysteresis fix. `Load` has no per-call
+     fallback (by design — see its own doc comment), so a read-heavy replica can surface raw Redis errors for up
+     to that whole window instead of the previous ~30s. The trade-off (flap suppression vs. detection latency) is
+     deliberate, not an oversight.
+
+   **Fix round 2: the fallback is pruned after every successful reconcile, and deletion replay runs first.**
+   The reconciliation pass above initially had two further defects, both reproduced and closed:
+   - **A second outage could serve, and then overwrite, the first outage's stale data (finding C-1, Critical).**
+     `reconcileFallbackIntoPrimary` wrote through everything `fallback.LoadAll()` returned but never removed
+     anything from the fallback afterward — `MemoryGroupStorage` has no TTL/eviction of its own, so every outage's
+     groups accumulated for the life of the process. A SECOND, later outage then (1) could serve a degraded `Load`
+     from the FIRST outage's leftover instead of `ErrNotFound`, and (2) its own recovery would write-through that
+     leftover too — its `Version` aligned to primary's current value on purpose, so the fresh Redis copy was
+     silently replaced by stale data with no error, only the ordinary recovery log line. Reconciliation cost also
+     grew with every outage, risking a permanently-blocked failforward if it ever exceeded `reconcileTimeout`.
+     Fixed: every key written through is now `Delete`d from the fallback immediately after a successful
+     write-through, so the next degraded window starts (almost) empty. One narrow exception survives: a write
+     landing in the snapshot-to-flip window is not part of the reconciled snapshot, is therefore not pruned,
+     and can carry into a future outage as a fallback leftover.
+   - **A group deleted and re-created under the same `GroupKey` during ONE outage could be deleted again on
+     recovery (finding I-5, Important).** Deletion replay ran *after* the write-through, so a stale "still
+     deleted" entry for a key that a later `Store` had already re-created deleted the just-written-through, fresh
+     group right back out of primary. Fixed: replay now runs *before* the write-through, and a successful
+     `Store`/`StoreAll` of a key removes it from the pending-deletion list immediately, so the list only ever
+     reflects what is genuinely still absent as of the most recent fallback write.
+   - **A caller-cancelled or caller-timed-out context no longer looks like a Redis outage (finding I-6,
+     Important).** `isConnectivityError` treated `context.Canceled`/`DeadlineExceeded` as connectivity failures
+     unconditionally — but the alert-ingest path passes a request-scoped context all the way down to `Store`, so
+     one client disconnect or client-side timeout degraded the WHOLE process to memory for roughly
+     `minHoldDuration + recoverThreshold` probes (~2 minutes at the defaults), followed by a full reconcile, over
+     an event that said nothing about Redis. Fixed: a cancellation/deadline only counts when the CALLER's own
+     context is still live at the time of the check — meaning some OTHER, Redis-call-scoped deadline fired.
+
+   `TimerStorage` is not wrapped by the same mechanism — it has its own, separate reconciliation loop (task 6.2,
+   `grouping.TimerManagerConfig.ReconciliationInterval`) for distributed timer liveness, which this task did not
+   extend.
+7. **`global.group_by`/`group_wait`/`group_interval`/`repeat_interval` are an AMP-only convenience, not an
+   upstream `global:` field.** Closed in wave 5 (`FU-GLOB-DEFAULT-VALUES`): `TreeBuilder.inheritGroupBy`/
+   `inheritDuration` now consult `infraroute.GlobalConfig`'s matching field when neither the route itself nor any
+   ancestor route set one, before falling back to the hardcoded upstream default (`["alertname"]` / 30s / 5m / 4h).
+   Upstream Alertmanager's actual `global:` section carries no grouping fields at all — its equivalent mechanism is
+   simply setting these on the root `route:`, which already cascades to every descendant via the same
+   parent-chain inheritance this layer sits below. AMP had this fallback layer once (a pre-dedup, package-local
+   `GlobalConfig`), lost it when that type was deleted in favor of the canonical `infrastructure/routing` one
+   (`3f8d69d`, TN-137), and this task put it back on the canonical type rather than reintroducing the duplicate.
+8. **`matchers:` list quote handling and grammar: aligned to upstream `pkg/labels`, not just internally consistent.**
+   Closed in wave 5 (`FU-PARSEARGUMENT-QUOTE-HANDLING`): `pkg/configvalidator/matcher.Parse` never stripped quotes
+   at all — for a regex matcher the quote-included literal was fed straight into `regexp.Compile`, so a config
+   could pass/fail E-code validation based on a DIFFERENT compiled pattern than the one `business/routing.
+   parseMatcherExpr` actually builds the runtime tree with, for the identical YAML `matchers:` entry.
+   **Fix round (same wave): the first pass's quote handling was only internally consistent, not upstream-aligned —
+   review found four verified divergences from `github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go`**
+   (`ParseMatcher`): `\n` was never unescaped to a line feed; escaping was skipped entirely for an unquoted value
+   (upstream applies `\n`/`\"`/`\\` unescaping regardless of quoting); an unescaped inner `"` was silently accepted
+   instead of rejected; and an unterminated/mismatched quote failed OPEN — kept the literal, visibly-wrong value —
+   instead of erroring, which is the wrong direction for a config validator to be silent in. Both parsers'
+   `unquoteMatcherValue` are now a verbatim, independently-duplicated port of upstream's ~25-line loop (not a
+   shared import — `pkg/` stays leaf-level), table-tested against the same cases in both packages, including a
+   direct (non-regex-routed) invalid-UTF-8 check upstream's grammar also requires.
+   **Also found in the same review pass and fixed: a quoted value containing an operator token** (`summary="a!=b"`)
+   used to split *inside* the quotes in `pkg/configvalidator/matcher.Parse` (a plain `strings.Index` over the
+   whole string) and hard-fail startup with a nonsensical E104, while `business/routing.parseMatcherExpr`'s
+   anchored `^label(op)value$` regex parsed the identical YAML entry fine — the same divergence class the item was
+   opened for, just not covered by the first pass's table. `Parse` now locates the operator with the same anchored
+   shape, verified through a real `LoadConfig` regression test, not just a unit test of the parser in isolation.
+   **Fix round 2: one more residual divergence closed, and license attribution added.** `label=` (nothing after
+   the operator) still diverged — `parseMatcherExpr` accepted it (`Value: ""`), `Parse` rejected it with "value is
+   empty", and upstream accepts it outright (`ParseMatcher`'s own doc comment: "The 3rd token may be the empty
+   string"). The round-1 guard in `Parse` contradicted both parsers' "verbatim upstream grammar" claim; dropped so
+   `label=` now parses the same way in both, matching upstream. Both `unquoteMatcherValue` ports also gained an
+   explicit copyright/license attribution comment for the upstream file they port from (Apache-2.0 §4).
 
 ---
 
