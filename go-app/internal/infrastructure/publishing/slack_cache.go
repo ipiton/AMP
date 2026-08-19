@@ -111,10 +111,19 @@ func (c *DefaultMessageCache) Size() int {
 
 // StartCleanupWorker starts background cleanup worker
 // Runs every interval, removes entries older than TTL (24h)
-// Returns cancel function to stop worker
+// Returns cancel function to stop worker. The cancel function is safe to
+// call more than once (item 2 fix-round-1, FU-WAVE3-RELIABILITY): it used
+// to do a bare close(done), which panics ("close of closed channel") on a
+// second call — the same class of bug fixed for the PagerDuty/Rootly cache
+// Stop() methods via sync.Once, but missed here since Slack's stop
+// mechanism already existed and wasn't touched by the original item-2 fix.
+// PublisherFactory.Shutdown() calls this cancel func unconditionally with
+// no guard of its own, so a second Shutdown() call on the same factory must
+// not panic.
 func StartCleanupWorker(cache MessageIDCache, interval, ttl time.Duration) func() {
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
+	var stopOnce sync.Once
 
 	go func() {
 		for {
@@ -132,8 +141,11 @@ func StartCleanupWorker(cache MessageIDCache, interval, ttl time.Duration) func(
 		}
 	}()
 
-	// Return cancel function
+	// Return cancel function. Safe to call more than once (only the first
+	// call closes done).
 	return func() {
-		close(done)
+		stopOnce.Do(func() {
+			close(done)
+		})
 	}
 }

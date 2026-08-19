@@ -175,6 +175,25 @@ func TestPublish_WithCustomHeaders(t *testing.T) {
 	assert.Equal(t, "Bearer test-token", receivedHeaders.Get("Authorization"))
 }
 
+// TestPublisherFactory_ShutdownTwiceDoesNotPanic is the regression test for
+// fix-round-1 finding (Important #1): PagerDuty/Rootly cache Stop() got
+// sync.Once guards making them safe against a second call, but Slack's
+// cancel closure (StartCleanupWorker's returned func) still did a bare
+// close(done) with no guard, and Shutdown() itself has no once-guard either
+// — so a second Shutdown() on the same factory panicked ("close of closed
+// channel") via the Slack path even though the PagerDuty/Rootly paths would
+// have survived it. All three cache-stop paths must now tolerate Shutdown()
+// being called more than once on the same factory instance.
+func TestPublisherFactory_ShutdownTwiceDoesNotPanic(t *testing.T) {
+	factory := NewPublisherFactory(NewAlertFormatter(""), slog.Default(), nil, "")
+
+	assert.NotPanics(t, func() {
+		factory.Shutdown()
+		factory.Shutdown()
+		factory.Shutdown()
+	})
+}
+
 func TestPublisherFactory_CreatePublisher(t *testing.T) {
 	formatter := NewAlertFormatter("")
 	factory := NewPublisherFactory(formatter, slog.Default(), nil, "")
