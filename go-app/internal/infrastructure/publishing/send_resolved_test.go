@@ -131,9 +131,12 @@ func TestPublishGroupToTargets_SendResolvedNarrowsTheGroup(t *testing.T) {
 	assert.Equal(t, "fp-1", owedSeen[0].Fingerprint)
 }
 
-// A resolved-only group for a target that declines them: nothing to send, no
-// error, no outcomes — so the notify chain records nothing (upstream's
-// DedupStage stops the pipeline the same way).
+// A resolved-only group for a target that declines them: nothing is delivered,
+// but the fire must still SETTLE (review finding S2-I1). Returning zero outcomes
+// made publishGroupAlerts skip RecordSent and pruneResolvedAlerts — the only
+// caller of RemoveAlertFromGroup — so the group kept its resolved alerts and
+// re-armed its repeat_interval timer forever. One synthetic successful outcome
+// under a stable pseudo-target name is what upstream's RetryStage+flush achieve.
 func TestPublishGroupToTargets_ResolvedOnlyGroupWithSendResolvedFalse(t *testing.T) {
 	discovery := NewStubTargetDiscoveryManager(slog.Default())
 	discovery.AddTarget(noResolvedTarget("cfg:team-x/webhook0", "team-x"))
@@ -149,7 +152,68 @@ func TestPublishGroupToTargets_ResolvedOnlyGroupWithSendResolvedFalse(t *testing
 		`{}:{alertname="TestAlert"}`, nil, nil,
 	)
 	require.NoError(t, err, "must not be reported as a publish failure")
-	assert.Empty(t, results, "and must not fabricate a delivered outcome either")
+	require.Len(t, results, 1, "the fire must settle so the group can be pruned")
+	assert.Equal(t, "suppressed:team-x", results[0].Target.Name)
+	assert.True(t, results[0].Success)
+	assert.Nil(t, results[0].Target.FilterConfig, "the pseudo-target is not a real target")
+}
+
+// The synthetic outcome participates in the chain's per-target dedup, so a
+// group that already settled does not re-record on every later fire.
+func TestPublishGroupToTargets_SuppressionHonoursPerTargetDedup(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	discovery.AddTarget(noResolvedTarget("cfg:team-x/webhook0", "team-x"))
+
+	coordinator := newTestCoordinator(t, discovery)
+	coordinator.SetKnownReceivers([]string{"team-x"})
+
+	endsAt := time.Now().UTC()
+	resolved := &core.Alert{Fingerprint: "fp-2", AlertName: "TestAlert", Status: core.StatusResolved, StartsAt: time.Now().UTC(), EndsAt: &endsAt}
+
+	var asked []string
+	results, err := coordinator.PublishGroupToTargets(
+		context.Background(), []*core.Alert{resolved}, "team-x",
+		`{}:{alertname="TestAlert"}`, nil,
+		func(target string, alerts []*core.Alert) []*core.Alert {
+			asked = append(asked, target)
+			return nil // already recorded
+		},
+	)
+	require.NoError(t, err)
+	assert.Empty(t, results, "already settled this cycle: no new outcome")
+	assert.Equal(t, []string{"suppressed:team-x"}, asked)
+}
+
+// A resolved-only group whose targets were merely already covered this cycle
+// (dedup, not suppression) must stay outcome-free: the fire that delivered
+// already recorded and pruned.
+func TestPublishGroupToTargets_DedupedNotSuppressedStaysOutcomeFree(t *testing.T) {
+	discovery := NewStubTargetDiscoveryManager(slog.Default())
+	// Accepts resolved alerts, so nothing is suppressed — only deduped.
+	discovery.AddTarget(&core.PublishingTarget{
+		Name: "cfg:team-x/webhook0", Type: "webhook", URL: "http://example.com",
+		Enabled: true, Receivers: []string{"team-x"},
+	})
+
+	coordinator := newTestCoordinator(t, discovery)
+	coordinator.SetKnownReceivers([]string{"team-x"})
+
+	endsAt := time.Now().UTC()
+	resolved := &core.Alert{Fingerprint: "fp-2", AlertName: "TestAlert", Status: core.StatusResolved, StartsAt: time.Now().UTC(), EndsAt: &endsAt}
+
+	var asked []string
+	results, err := coordinator.PublishGroupToTargets(
+		context.Background(), []*core.Alert{resolved}, "team-x",
+		`{}:{alertname="TestAlert"}`, nil,
+		func(target string, alerts []*core.Alert) []*core.Alert {
+			asked = append(asked, target)
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	assert.Empty(t, results)
+	assert.Equal(t, []string{"cfg:team-x/webhook0"}, asked,
+		"the real target was asked; no suppression pseudo-target is involved")
 }
 
 // The fully-deduped steady state (every target already covered this cycle) is

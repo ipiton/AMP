@@ -182,10 +182,24 @@ suppresses RESOLVED notifications for that target only: it is recorded as
 `filter_config.send_resolved` on the target and applied during target
 resolution in `PublishingCoordinator`, so a suppressed notification never
 enters the publishing queue at all (no job, no retry, no circuit-breaker
-effect). A group whose remaining alerts are all resolved reaches such a
-target as "nothing to send" — no error, and no notification-log entry, which
-is upstream's own `DedupStage` outcome. Kubernetes-Secret targets can use the
-same `filter_config` key.
+effect). Suppressions are counted as
+`alert_history_publishing_resolved_suppressed_total{receiver}`.
+
+A Kubernetes-Secret target can set the same key in its `filter_config` JSON.
+Accepted false values: the boolean `false`, any string `strconv.ParseBool`
+reads as false (`"false"`, `"FALSE"`, `"0"`, `"f"`), and the number `0`.
+Anything else — including an unparseable string — means `true`, upstream's
+default: an unreadable value must never silently suppress notifications.
+
+A group whose remaining alerts are ALL resolved, for a receiver whose targets
+all decline them, delivers nothing but still **settles**: the fire records
+against a synthetic `suppressed:<receiver>` pseudo-target (never a real one, so
+no real notification is suppressed) and the group's resolved alerts are pruned,
+tearing the group down. Without that, the group would keep its resolved alerts
+and re-arm its `repeat_interval` timer forever — one silent no-op fire per
+interval, one undead group per key. Upstream reaches the same end state: its
+retry stage filters the resolved alerts out, succeeds, and `aggrGroup.flush`
+prunes.
 
 ### Blackhole receivers
 
@@ -228,7 +242,7 @@ this validation.
 | `email_configs` | ✅ | ✅ | 🟢 Supported | SMTP, enhanced publisher |
 | `pagerduty_configs` | ✅ | ✅ | 🟢 Supported | Events API v2 |
 | `slack_configs` | ✅ | ✅ | 🟢 Supported | Incoming Webhooks, message threading cache |
-| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Config side fixed in Task 5.4 (`internal/alertmanager/config.Receiver` carries a `TelegramConfig`, `hasAnyIntegration()`/E024 check it). Runtime side fixed in the final fix wave: the publishing queue built publishers with `CreatePublisher(type)`, which cannot pass per-target credentials, so `EnhancedTelegramPublisher` (bot token, `chat_id`, `message_thread_id`, Bot API `sendMessage`) was **unreachable at runtime** despite being implemented. Integration types now go through `CreatePublisherForTarget` — see `createPublisherForJob` in `internal/infrastructure/publishing/queue.go`. Wave 2: added a per-chat rate limiter (bounded LRU, cap 1000, 1 msg/s burst 3) waited on before the existing global 30/s limiter in `SendMessage`, so an alert storm to one chat no longer trips Telegram's per-chat 429s (`internal/infrastructure/publishing/telegram_client.go`). |
+| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Config side fixed in Task 5.4 (`internal/alertmanager/config.Receiver` carries a `TelegramConfig`, `hasAnyIntegration()` checks it — the "no integrations" finding it feeds became the non-blocking `W024` in AMP-PARITY-WAVE6-EPIC). Runtime side fixed in the final fix wave: the publishing queue built publishers with `CreatePublisher(type)`, which cannot pass per-target credentials, so `EnhancedTelegramPublisher` (bot token, `chat_id`, `message_thread_id`, Bot API `sendMessage`) was **unreachable at runtime** despite being implemented. Integration types now go through `CreatePublisherForTarget` — see `createPublisherForJob` in `internal/infrastructure/publishing/queue.go`. Wave 2: added a per-chat rate limiter (bounded LRU, cap 1000, 1 msg/s burst 3) waited on before the existing global 30/s limiter in `SendMessage`, so an alert storm to one chat no longer trips Telegram's per-chat 429s (`internal/infrastructure/publishing/telegram_client.go`). |
 | Rootly (`alertmanager`/`rootly` target type) | N/A (AMP-native target, not an upstream receiver type) | ✅ | 🟢 Supported | AMP-specific addition, not part of upstream Alertmanager |
 | `opsgenie_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E126-E129); no `OpsGenieConfigs` field on the runtime receiver and no publisher target type — zero notifications sent |
 | `victorops_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E130-E134); same gap as OpsGenie. Deferred "по потребности" (on demand) — build only if a concrete need arises |
@@ -265,7 +279,8 @@ the target.
   the inline value or an env-substituted value for now.
 - **Per-integration `http_config`** (proxy, TLS, custom bearer/basic auth,
   `follow_redirects`): parsed and validated, never applied — every publisher
-  uses its own HTTP client. In progress on the wave-7 tracks.
+  uses its own HTTP client. Tracked (not started) as
+  `FU-INTEGRATION-FIELD-FIDELITY` in `docs/06-planning/BACKLOG.md`.
 - **Per-`email_config` SMTP settings**: see the fidelity table; only the
   `global.smtp_*` block reaches the SMTP dialer, so two receivers cannot use
   different SMTP servers. A config that sets SMTP per `email_config` and

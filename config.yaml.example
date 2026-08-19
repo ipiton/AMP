@@ -362,9 +362,11 @@ receivers:
 
   - name: pagerduty-critical
     pagerduty_configs:
-      # routing_key must be exactly 32 chars (PagerDuty Events API v2
-      # integration key). Replace with the real key via secret injection
-      # (Vault/ESO) — never commit a real key here.
+      # routing_key is the PagerDuty Events API v2 integration key: any
+      # non-empty value is accepted (the old exactly-32-chars rule was relaxed
+      # to match upstream, whose routing_key is a plain secret). Replace with
+      # the real key via secret injection (Vault/ESO) — never commit a real
+      # key here.
       - routing_key: "00000000000000000000000000000000"
         severity: critical
         description: "Critical Alert: {{ .GroupLabels.alertname }}"

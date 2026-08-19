@@ -333,6 +333,24 @@ receivers:
 		assert.NotEqual(t, "resolved", request.body["status"],
 			"send_resolved: false must suppress the resolved notification: %v", request.body)
 	}
+
+	// …and the group must still SETTLE (review finding S2-I1). Suppression used
+	// to return zero outcomes, which made publishGroupAlerts skip both
+	// RecordSent and pruneResolvedAlerts — the only caller of
+	// RemoveAlertFromGroup — so the group kept its resolved alert and re-armed
+	// its repeat_interval timer forever, one silent no-op fire per interval.
+	// A pruned group whose last alert was resolved is deleted outright.
+	deadline := time.Now().Add(3 * time.Second)
+	settled := false
+	for time.Now().Before(deadline) {
+		if _, err := stack.groupManager.GetGroup(context.Background(), stack.groupKey); err != nil {
+			settled = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.True(t, settled,
+		"the fully-resolved group must be pruned and torn down, not left re-firing forever")
 }
 
 // mustBuildGroupingConfig derives the grouping config (group_wait/

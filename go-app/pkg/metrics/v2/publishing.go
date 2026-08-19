@@ -110,6 +110,11 @@ type PublishingMetrics struct {
 	// Labels: target, error_type
 	retryAttemptsTotal *prometheus.CounterVec
 
+	// resolvedSuppressedTotal counts RESOLVED notifications suppressed by an
+	// integration's `send_resolved: false` (FU-RECEIVERS-INTEGRATION slice 2).
+	// Labels: receiver
+	resolvedSuppressedTotal *prometheus.CounterVec
+
 	// blackholeDropsTotal counts notifications intentionally dropped because
 	// the routed receiver is declared in the config but provisions no
 	// publishing targets — upstream Alertmanager's blackhole receiver
@@ -319,6 +324,11 @@ func NewPublishingMetrics(registerer prometheus.Registerer) *PublishingMetrics {
 		"retry_attempts_total",
 		"Retry attempts by target and error type",
 		[]string{"target", "error_type"})
+
+	m.resolvedSuppressedTotal = newCounterVec(registerer, publishingSubsystem,
+		"resolved_suppressed_total",
+		"Resolved notifications suppressed by send_resolved: false, by receiver",
+		[]string{"receiver"})
 
 	m.blackholeDropsTotal = newCounterVec(registerer, publishingSubsystem,
 		"blackhole_drops_total",
@@ -565,6 +575,19 @@ func (m *PublishingMetrics) RecordJobDLQ(target string) {
 // RecordRetryAttempt records a retry attempt.
 func (m *PublishingMetrics) RecordRetryAttempt(target, errorType string) {
 	m.retryAttemptsTotal.WithLabelValues(target, errorType).Inc()
+}
+
+// RecordResolvedSuppressed records a resolved notification suppressed because
+// every candidate target set `send_resolved: false` (FU-RECEIVERS-INTEGRATION
+// slice 2, review finding S2-M3).
+//
+// This is the ONLY operator signal for that state: suppression is deliberate, so
+// it is not a delivery failure and produces no job, no result and no
+// notification-log entry for a real target. Same denominator caveat as
+// RecordBlackholeDrop — once per alert on the non-grouped path, once per group
+// fire that had something suppressed on the grouped one.
+func (m *PublishingMetrics) RecordResolvedSuppressed(receiver string) {
+	m.resolvedSuppressedTotal.WithLabelValues(receiver).Inc()
 }
 
 // RecordBlackholeDrop records a notification dropped on purpose because the

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -392,14 +393,24 @@ func targetAcceptsAlertStatus(target *core.PublishingTarget, status core.AlertSt
 	if !ok {
 		return true
 	}
-	// Tolerant of the shapes JSON round-trips produce for a K8s target's
-	// filter_config: bool, "false", 0.
+	// Tolerant of the shapes a K8s target's filter_config JSON round-trips
+	// into. Strings go through strconv.ParseBool, so "false"/"FALSE"/"0"/"f"
+	// all mean false — review finding S2-M5: an earlier version special-cased
+	// only the literal "false", which made the string "0" mean TRUE while the
+	// NUMBER 0 meant false. An unparseable value means true (upstream's
+	// default), never a silent suppression.
 	switch v := sendResolved.(type) {
 	case bool:
 		return v
 	case string:
-		return !strings.EqualFold(strings.TrimSpace(v), "false")
+		parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return true
+		}
+		return parsed
 	case float64:
+		return v != 0
+	case int:
 		return v != 0
 	default:
 		return true
@@ -502,12 +513,9 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 		if len(targets) == 0 && matchedReceiver > 0 {
 			// Every target for this receiver declined this alert's state —
 			// upstream's own outcome for send_resolved: false is "send nothing,
-			// record nothing, not an error".
-			c.logger.Debug("All targets for receiver declined this alert state (send_resolved: false); publishing nothing",
-				"receiver", receiverName,
-				"status", enrichedAlert.Alert.Status,
-				"fingerprint", enrichedAlert.Alert.Fingerprint,
-			)
+			// record nothing, not an error". No group lifecycle is involved on
+			// this path, so there is nothing to settle (cf. S2-I1 below).
+			c.recordResolvedSuppressed(receiverName, 1, enrichedAlert.Alert.Fingerprint)
 			return []*PublishingResult{}, nil
 		}
 
@@ -663,8 +671,11 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 	targets := make([]*core.PublishingTarget, 0, len(all))
 	perTargetAlerts := make([][]*core.Alert, 0, len(all))
 	// See the single-alert path: counts receiver-matched targets before
-	// send_resolved filtering.
+	// send_resolved filtering. suppressedByFilter counts the ones that dropped
+	// out BECAUSE of send_resolved, which review finding S2-I1 requires telling
+	// apart from targets that were merely already covered this cycle.
 	matchedReceiver := 0
+	suppressedByFilter := 0
 	for _, t := range all {
 		if !t.Enabled {
 			continue
@@ -681,6 +692,7 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		// all.
 		wanted := filterAlertsForTarget(t, alerts)
 		if len(wanted) == 0 {
+			suppressedByFilter++
 			continue
 		}
 
@@ -700,13 +712,42 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 	}
 
 	if len(targets) == 0 && matchedReceiver > 0 {
-		// Either every target was already covered this cycle (the steady state
-		// the manager logs at Debug) or they all declined a resolved-only group
-		// (send_resolved: false, slice 2). Both are "nothing new to send" —
-		// upstream's DedupStage stops the pipeline the same way, recording
-		// nothing. NOT counted as a blackhole drop: the receiver does have
-		// targets.
-		return []*PublishingResult{}, nil
+		// NOT a blackhole: the receiver demonstrably has enabled matching
+		// targets. Two very different reasons can land here, and conflating
+		// them leaks groups (review finding S2-I1):
+		//
+		//  1. suppressedByFilter == 0 — every target was already covered this
+		//     cycle (the fu4/fwb dedup steady state). Nothing new happened, and
+		//     the fire that DID deliver already wrote its nflog entry and pruned
+		//     the group. Report no outcomes; the manager logs Debug and stops.
+		//
+		//  2. suppressedByFilter > 0 — the alerts still owed are resolved ones
+		//     that every candidate target declines (send_resolved: false). This
+		//     MUST report a successful outcome, not "nothing new": returning
+		//     zero outcomes makes publishGroupAlerts skip RecordSent AND
+		//     pruneResolvedAlerts, which is the only caller of
+		//     RemoveAlertFromGroup — so the group keeps its resolved alerts and
+		//     re-arms its repeat_interval timer forever, one silent no-op fire
+		//     per interval, one undead group per key. Upstream settles here: its
+		//     RetryStage filters the resolved alerts out, SUCCEEDS, records, and
+		//     aggrGroup.flush prunes. The synthetic outcome below is the same
+		//     device the blackhole branch uses, under its own stable pseudo-
+		//     target name so it can never suppress a real target's notification.
+		if suppressedByFilter == 0 {
+			return []*PublishingResult{}, nil
+		}
+
+		suppressedTarget := suppressedTargetName(receiverName)
+		if targetAlerts != nil && len(targetAlerts(suppressedTarget, alerts)) == 0 {
+			// Already settled this cycle — nothing new to suppress.
+			return []*PublishingResult{}, nil
+		}
+
+		c.recordResolvedSuppressed(receiverName, len(alerts), "")
+		return []*PublishingResult{{
+			Target:  &core.PublishingTarget{Name: suppressedTarget, Receivers: []string{receiverName}},
+			Success: true,
+		}}, nil
 	}
 
 	if len(targets) == 0 {
@@ -904,4 +945,31 @@ const BlackholeTargetPrefix = "blackhole:"
 // a name that changed between fires would re-record on every fire.
 func blackholeTargetName(receiverName string) string {
 	return BlackholeTargetPrefix + receiverName
+}
+
+// SuppressedTargetPrefix namespaces the synthetic "target" a receiver reports a
+// send_resolved-suppressed notification under (review finding S2-I1).
+//
+// Like BlackholeTargetPrefix it cannot collide with a real target name (K8s
+// names are DNS-1123, config-provisioned ones are namespaced `cfg:`), and it is
+// STABLE across fires so the notify chain's per-target dedup recognises it.
+const SuppressedTargetPrefix = "suppressed:"
+
+func suppressedTargetName(receiverName string) string {
+	return SuppressedTargetPrefix + receiverName
+}
+
+// recordResolvedSuppressed logs and counts a suppressed resolved notification.
+// fingerprint is empty on the group path (the suppression covers a whole group).
+func (c *PublishingCoordinator) recordResolvedSuppressed(receiverName string, alertCount int, fingerprint string) {
+	// Debug, not Warn: the operator asked for this by setting
+	// send_resolved: false. resolved_suppressed_total is the dashboard signal.
+	c.logger.Debug("Resolved notification suppressed for every target of receiver (send_resolved: false)",
+		"receiver", receiverName,
+		"alert_count", alertCount,
+		"fingerprint", fingerprint,
+	)
+	if c.metrics != nil {
+		c.metrics.RecordResolvedSuppressed(receiverName)
+	}
 }

@@ -41,7 +41,8 @@ What is **different**, not just narrower:
 - **Receiver integrations deliver, but not every field of them does.** Endpoints and credentials are mapped;
   presentation/categorisation fields (Slack `channel`/`title`/`color`, PagerDuty `severity`/`details`, Telegram
   `parse_mode`) are not, because every publisher renders through AMP's own formatter. Per-integration `http_config`
-  and `*_file` credential variants are likewise parsed-not-applied (wave-7 tracks).
+  and `*_file` credential variants are likewise parsed-not-applied (tracked as
+  `FU-INTEGRATION-FIELD-FIDELITY`, not started).
 - **Two target sources can double-deliver.** If you keep a legacy UNSCOPED `amp.receiver`-less Secret target and
   also declare the same endpoint under `receivers:`, both fire. Delete or scope the Secret when you migrate.
 - **A receiver with no deliverable integration is a blackhole**, upstream-style: alerts routed to it are dropped
@@ -73,7 +74,7 @@ and the config-write/`/history` APIs (explicitly out of scope for this task). Se
 | Operational API (`status`/`receivers`/`groups`/`reload`) | Available | Available, with upstream query params | Parity-level |
 | **Receiver → delivery endpoint provisioning** | Built directly from `receivers[].*_configs` | Built from `receivers[].*_configs` (targets named `cfg:<receiver>/<type><idx>`, receiver-scoped, rebuilt on reload) **and** from `amp.receiver`-scoped Kubernetes Secrets; both merge into one view | Parity as of AMP-PARITY-WAVE6-EPIC. Remaining difference is per-field fidelity, not provisioning — see the field table in `ALERTMANAGER_COMPATIBILITY.md` |
 | `global:` endpoint fallbacks (`slack_api_url`, `pagerduty_url`, `telegram_api_url`, `smtp_*`) | Supported | Supported, resolved at load; per-integration value wins; a Slack integration with neither is a load error | Email is stricter than upstream: AMP has no per-`email_config` SMTP fields, so `global.smtp_smarthost`/`smtp_from` are mandatory when any `email_configs` exist |
-| `send_resolved` per integration | Supported (default true) | Supported (default true); suppression happens at target resolution, so nothing is queued | A resolved-only group for a `send_resolved: false` target records nothing, matching upstream's dedup-stage behaviour |
+| `send_resolved` per integration | Supported (default true) | Supported (default true); suppression happens at target resolution, so nothing is queued, and is counted as `alert_history_publishing_resolved_suppressed_total` | A resolved-only group for a `send_resolved: false` target delivers nothing but still settles (resolved alerts pruned, group torn down), matching upstream's retry-stage + flush behaviour |
 | Receiver integrations (publisher availability) | Full set incl. OpsGenie/VictorOps/WeChat/Pushover/SNS/Webex | webhook/email/PagerDuty/Slack/Telegram/Rootly publishers wired (Telegram's enhanced publisher became runtime-reachable in the final fix wave); Discord/Teams via webhook templates; OpsGenie/VictorOps/WeChat validate-but-not-wired; Pushover/SNS/Webex absent | Check the receiver matrix in `ALERTMANAGER_COMPATIBILITY.md` against your actual receiver list |
 | Hot reload trigger | `SIGHUP` + `POST /-/reload` | Both. Routing-only edits are applied (they were silently discarded before the final fix wave) | Parity-level |
 | Wire-level webhook payload | One POST per target with a full `alerts` JSON array per group | One POST per `(target × alert)` pair | Different request shape/count; functionally delivers all alerts, but a downstream integration parsing the exact payload shape needs to be checked |
