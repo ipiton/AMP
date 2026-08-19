@@ -68,7 +68,8 @@ func NewRouteConfigParser() *RouteConfigParser {
 // Steps:
 //  1. YAML unmarshaling
 //  2. Required fields validation
-//  3. Apply defaults recursively
+//  3. Resolve `*_file` secret references (FU7-B), `global:` endpoint
+//     fallbacks, then apply defaults recursively
 //  4. Structural validation
 //  5. Semantic validation (incl. time interval name/reference checks)
 //  6. Build time interval index (merges deprecated top-level alias)
@@ -94,10 +95,17 @@ func (p *RouteConfigParser) Parse(data []byte) (*RouteConfig, error) {
 		return nil, fmt.Errorf("at least one receiver is required")
 	}
 
-	// Step 3: Resolve `global:` endpoint fallbacks, THEN apply defaults.
-	// Order matters: PagerDutyConfig/TelegramConfig.Defaults() fill in the
-	// public endpoint for an empty URL, which would mask global.pagerduty_url /
-	// global.telegram_api_url if it ran first.
+	// Step 3: Resolve `*_file` secret references (FU7-B) FIRST, then `global:`
+	// endpoint fallbacks, THEN apply defaults. Order matters twice over:
+	// resolveFileSecrets must run before resolveGlobalFallbacks (a
+	// file-resolved per-integration value has to be in the inline field
+	// before the empty-string check that decides whether `global:` fills the
+	// gap runs), and PagerDutyConfig/TelegramConfig.Defaults() fill in the
+	// public endpoint for an empty URL, which would mask global.pagerduty_url
+	// / global.telegram_api_url if it ran first.
+	if err := resolveFileSecrets(&config); err != nil {
+		return nil, err
+	}
 	resolveGlobalFallbacks(&config)
 	p.applyDefaults(&config)
 
