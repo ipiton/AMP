@@ -44,6 +44,13 @@ func TestNewPublishingQueue_NilMetricsFallbackDoesNotPanicOnSecondCall(t *testin
 			}()
 			q = build()
 		}()
+		if q != nil {
+			// Each build() starts its own PublisherFactory cache-cleanup
+			// goroutines (Slack/PagerDuty/Rootly); leaving them running leaks
+			// across the test binary and slows -race runs (wave-4 hygiene
+			// item 6).
+			t.Cleanup(q.factory.Shutdown)
+		}
 		return q
 	}
 

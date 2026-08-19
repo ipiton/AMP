@@ -23,9 +23,10 @@ import (
 // (WorkerCount: 0) and its own isolated metrics registry, so tests can call
 // publishJob directly without racing the global Prometheus default registry
 // across parallel test binaries.
-func newTestPublishingQueue() *PublishingQueue {
+func newTestPublishingQueue(t *testing.T) *PublishingQueue {
+	t.Helper()
 	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
-	return NewPublishingQueue(
+	queue := NewPublishingQueue(
 		NewPublisherFactory(NewAlertFormatter(""), slog.Default(), metrics, ""),
 		nil,
 		NewLRUJobTrackingStore(16),
@@ -33,6 +34,12 @@ func newTestPublishingQueue() *PublishingQueue {
 		nil,
 		slog.Default(),
 	)
+	// FU-WAVE3-RELIABILITY item 2 / wave-4 hygiene item 6: every
+	// PublisherFactory starts cache-cleanup goroutines (Slack/PagerDuty/
+	// Rootly) that only stop on Shutdown() — leaving it uncalled leaks them
+	// across the whole test binary and slows -race runs down.
+	t.Cleanup(queue.factory.Shutdown)
+	return queue
 }
 
 // === Task fwb: wire-level group batching ===
@@ -230,7 +237,7 @@ var _ AlertPublisher = (*countingAlertPublisher)(nil)
 // per alert, rather than the coordinator fragmenting back into one job per
 // alert.
 func TestPublishingQueue_PublishJob_NonBatchPublisherIteratesAlertsWithinOneJob(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	publisher := &countingAlertPublisher{}
 	alerts := testGroupBatchAlerts(3)
@@ -254,7 +261,7 @@ func TestPublishingQueue_PublishJob_NonBatchPublisherIteratesAlertsWithinOneJob(
 // attempted (best-effort), while the job still reports failure overall so
 // the retry strategy above it treats the job as needing another attempt.
 func TestPublishingQueue_PublishJob_NonBatchPublisher_BestEffortAttemptsAll(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	publisher := &countingAlertPublisher{failOn: "fp-2"}
 	alerts := testGroupBatchAlerts(3)
@@ -276,7 +283,7 @@ func TestPublishingQueue_PublishJob_NonBatchPublisher_BestEffortAttemptsAll(t *t
 // publishJob must call PublishBatch exactly once and never fall back to
 // per-alert iteration.
 func TestPublishingQueue_PublishJob_BatchPublisherCalledOnceNotIterated(t *testing.T) {
-	queue := newTestPublishingQueue()
+	queue := newTestPublishingQueue(t)
 
 	publisher := &countingBatchPublisher{}
 	alerts := testGroupBatchAlerts(3)
