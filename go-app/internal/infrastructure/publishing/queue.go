@@ -1362,10 +1362,24 @@ func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJo
 // occupying a worker), otherwise the queue-wide context, which is the
 // pre-fix-round behaviour for Submit/SubmitGroup jobs.
 func (q *PublishingQueue) jobContext(job *PublishingJob) context.Context {
+	ctx := q.ctx
 	if job.ctx != nil {
-		return job.ctx
+		ctx = job.ctx
 	}
-	return q.ctx
+
+	// TEMPLATES-EPIC slice 2: carry the group's identity/labels/receiver so the
+	// template renderer can build upstream's Data with a populated
+	// `.GroupLabels` and `.Receiver`. Only attached when the job actually came
+	// from the group path; see notification_context.go for why it travels on the
+	// context instead of through AlertPublisher's signature.
+	if job.GroupKey != "" || job.Receiver != "" || len(job.GroupLabels) > 0 {
+		ctx = withGroupNotificationContext(ctx, GroupNotificationContext{
+			GroupKey:    job.GroupKey,
+			Receiver:    job.Receiver,
+			GroupLabels: job.GroupLabels,
+		})
+	}
+	return ctx
 }
 
 func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *PublishingJob) error {

@@ -86,13 +86,3 @@ func (f *PublisherFactory) formatterFor(target *core.PublishingTarget) AlertForm
 	}
 	return newTemplateFormatter(f.formatter, wiring.renderer, target)
 }
-
-// templateRendererFor returns the shared renderer, or nil when templating is not
-// wired. The email publisher uses it directly: it renders its own body instead
-// of going through AlertFormatter, so the decorator cannot reach it.
-func (f *PublisherFactory) templateRendererFor() *templateRenderer {
-	if wiring := f.templates.value.Load(); wiring != nil {
-		return wiring.renderer
-	}
-	return nil
-}

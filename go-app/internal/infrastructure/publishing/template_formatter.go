@@ -93,7 +93,10 @@ func integrationOf(target *core.PublishingTarget) string {
 // target NAME, stripping AMP's `cfg:<receiver>/<kind><idx>` encoding via
 // templating.ReceiverNameFromTarget — the slice-1 guarantee that `cfg:` never
 // leaks into a notification title.
-func receiverNameOf(target *core.PublishingTarget) string {
+func receiverNameOf(ctx context.Context, target *core.PublishingTarget) string {
+	if group := groupNotificationContextFrom(ctx); group.Receiver != "" {
+		return group.Receiver
+	}
 	if target == nil {
 		return ""
 	}
@@ -106,20 +109,27 @@ func receiverNameOf(target *core.PublishingTarget) string {
 // dataFor builds the upstream template data model for one alert delivered to
 // one target.
 //
-// Single-alert Data, not a group: slack/pagerduty/telegram/email are
-// one-message-per-alert integrations in AMP (see PublishingQueue.publishJob),
-// so the notification being rendered genuinely covers one alert. GroupLabels
-// is therefore empty and CommonLabels/CommonAnnotations equal that alert's own
-// labels/annotations — which is exactly what upstream's Data would contain for a
-// one-alert group, so `__subject` and friends render the same text.
-func (r *templateRenderer) dataFor(enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) *templating.Data {
+// One ALERT, but the real GROUP context: slack/pagerduty/telegram/email are
+// one-message-per-alert integrations in AMP (see PublishingQueue.publishJob), so
+// Alerts holds the single alert being delivered — while GroupLabels and Receiver
+// come from the group the alert belongs to, carried on the context by the queue
+// (notification_context.go).
+//
+// Both halves matter for output parity. Without the group labels, upstream's
+// `__subject` renders every label into its parenthesised remainder
+// (`[FIRING:1]  (HighCPU critical)`) instead of naming the group
+// (`[FIRING:1] HighCPU (critical)`). CommonLabels/CommonAnnotations equal the
+// alert's own, which is exactly what upstream computes for a one-alert
+// notification.
+func (r *templateRenderer) dataFor(ctx context.Context, enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) *templating.Data {
 	var alerts []*core.Alert
 	if enrichedAlert != nil && enrichedAlert.Alert != nil {
 		alerts = []*core.Alert{enrichedAlert.Alert}
 	}
 
 	return templating.BuildData(templating.DataInput{
-		Receiver:    receiverNameOf(target),
+		Receiver:    receiverNameOf(ctx, target),
+		GroupLabels: groupNotificationContextFrom(ctx).GroupLabels,
 		Alerts:      alerts,
 		ExternalURL: r.externalURL,
 	})
@@ -251,7 +261,7 @@ func (f *templateFormatter) FormatAlert(ctx context.Context, enrichedAlert *core
 		return nil, err
 	}
 
-	data := f.renderer.dataFor(enrichedAlert, f.target)
+	data := f.renderer.dataFor(ctx, enrichedAlert, f.target)
 
 	switch format {
 	case core.FormatSlack:
@@ -451,7 +461,10 @@ type emailContentRenderer interface {
 	// fields. ok is false when this target has no email template fields, or when
 	// the required ones failed to render — in which case the publisher keeps its
 	// existing behaviour untouched.
-	RenderEmailContent(enrichedAlert *core.EnrichedAlert) (content emailTemplateContent, ok bool)
+	//
+	// ctx carries the group context (see notification_context.go), so an email
+	// subject renders the same `__subject` text as every other integration.
+	RenderEmailContent(ctx context.Context, enrichedAlert *core.EnrichedAlert) (content emailTemplateContent, ok bool)
 }
 
 // emailTemplateContent is the rendered result. Empty fields mean "not
@@ -469,12 +482,12 @@ type emailTemplateContent struct {
 // `email.default.html` is HTML, and label values reaching it are
 // attacker-influenced), while subject, text body and headers render as plain
 // text — escaping a subject line would be a bug, not a defence.
-func (f *templateFormatter) RenderEmailContent(enrichedAlert *core.EnrichedAlert) (emailTemplateContent, bool) {
+func (f *templateFormatter) RenderEmailContent(ctx context.Context, enrichedAlert *core.EnrichedAlert) (emailTemplateContent, bool) {
 	if !f.hasAnyEmailField() {
 		return emailTemplateContent{}, false
 	}
 
-	data := f.renderer.dataFor(enrichedAlert, f.target)
+	data := f.renderer.dataFor(ctx, enrichedAlert, f.target)
 	htmlFields := map[string]bool{core.TemplateFieldHTML: true}
 	rendered := f.renderer.renderAll(f.target, data, htmlFields, func(field string) bool {
 		switch field {

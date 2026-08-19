@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
+	"github.com/ipiton/AMP/internal/business/templating"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
@@ -44,6 +45,10 @@ import (
 // receive upstream's v4 group shape, and the Slack target must receive a
 // Slack-shaped message. A green "a POST happened" test is exactly what let two
 // payload bugs through in wave 5.
+
+// externalURLForTests is the AMP base URL the stack renders into notification
+// links (`{{ .ExternalURL }}` and every default template's alertmanager URL).
+const externalURLForTests = "http://amp.example.com"
 
 type recordedRequest struct {
 	path string
@@ -102,6 +107,26 @@ type configOnlyStack struct {
 	groupManager *grouping.DefaultGroupManager
 	groupKey     grouping.GroupKey
 	discovery    businesspublishing.TargetDiscoveryManager
+
+	// promRegistry is this stack's isolated Prometheus registry, so a test can
+	// assert on the metrics the delivery path emitted (TEMPLATES-EPIC slice 2
+	// asserts the template-fallback counter this way).
+	promRegistry *prometheus.Registry
+}
+
+// stackOption tunes the assembled stack. Kept as options rather than extra
+// parameters so the existing call sites stay untouched.
+type stackOption func(*stackSettings)
+
+type stackSettings struct {
+	templates *templating.Registry
+}
+
+// withTemplateRegistry wires notification templates into the publisher factory,
+// exactly as application.initializePublishingRuntime does in production
+// (TEMPLATES-EPIC slice 2).
+func withTemplateRegistry(registry *templating.Registry) stackOption {
+	return func(s *stackSettings) { s.templates = registry }
 }
 
 // newConfigOnlyStack loads configYAML from disk exactly as production does and
@@ -133,11 +158,17 @@ func newConfigOnlyStack(t *testing.T, configYAML string, receiver string) *confi
 // newStackFromRouting is the same assembly starting from an already-built
 // RouteConfig, for the cases a config FILE cannot express in a test (see the
 // Slack note above).
-func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver string, groupingConfig *grouping.GroupingConfig) *configOnlyStack {
+func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver string, groupingConfig *grouping.GroupingConfig, opts ...stackOption) *configOnlyStack {
 	t.Helper()
 
+	settings := &stackSettings{}
+	for _, opt := range opts {
+		opt(settings)
+	}
+
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
+	promRegistry := prometheus.NewRegistry()
+	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(promRegistry)).Publishing
 
 	// Config-only discovery: targets come from `receivers:`, nothing else.
 	discovery := businesspublishing.NewConfigOnlyTargetDiscoveryManager(logger, nil)
@@ -147,8 +178,11 @@ func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver
 	adapterDiscovery, err := NewDiscoveryAdapter(discovery)
 	require.NoError(t, err)
 
-	factory := infrapublishing.NewPublisherFactory(infrapublishing.NewAlertFormatter(""), logger, metrics, "")
+	factory := infrapublishing.NewPublisherFactory(infrapublishing.NewAlertFormatter(externalURLForTests), logger, metrics, externalURLForTests)
 	t.Cleanup(factory.Shutdown)
+	if settings.templates != nil {
+		factory.SetTemplateRegistry(settings.templates)
+	}
 
 	queue := infrapublishing.NewPublishingQueue(
 		factory,
@@ -205,6 +239,7 @@ func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver
 		groupManager: groupManager,
 		groupKey:     grouping.GroupKey(fmt.Sprintf("receiver=%s/alertname=HighCPU", receiver)),
 		discovery:    discovery,
+		promRegistry: promRegistry,
 	}
 }
 

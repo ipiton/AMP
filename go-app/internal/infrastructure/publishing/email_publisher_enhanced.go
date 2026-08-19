@@ -91,7 +91,7 @@ func (p *EnhancedEmailPublisher) Publish(ctx context.Context, enrichedAlert *cor
 	// going through AlertFormatter, so the formatter decorator cannot reach it.
 	extraHeaders := map[string]string{}
 	if renderer, ok := p.GetFormatter().(emailContentRenderer); ok {
-		if content, rendered := renderer.RenderEmailContent(enrichedAlert); rendered {
+		if content, rendered := renderer.RenderEmailContent(ctx, enrichedAlert); rendered {
 			if content.Subject != "" {
 				subject = content.Subject
 			}
