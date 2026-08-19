@@ -91,6 +91,14 @@ func (e *perAlertEndpoint) heal() {
 	e.received = nil
 }
 
+// forget clears the request log while LEAVING the failure set in place, for
+// tests that need the target to keep failing one alert.
+func (e *perAlertEndpoint) forget() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.received = nil
+}
+
 func (e *perAlertEndpoint) delivered() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -211,4 +219,57 @@ func TestNotifyChain_BatchTargetIsUnaffectedByPerAlertTracking(t *testing.T) {
 	assert.Zero(t, stack.notifyLog.partialRecords(),
 		"a batch target has no per-alert outcome, so no delivered set may ever be written for it")
 	assert.Empty(t, stack.notifyLog.deliveredAlerts(stack.groupKey, "webhook-500"))
+}
+
+// TestNotifyChain_FlappingAlertReachesTheWireWhenItFiresAgain is the C1
+// regression (review round 1, Critical) end to end, on the wire: with one alert
+// of the group permanently failing — so no full nflog entry is ever written and
+// the delivered state is never cleared — an alert going firing → resolved →
+// firing MUST be delivered again.
+//
+// Before the fix the delivered state accumulated `fp-1:firing` AND
+// `fp-1:resolved`, so the re-fire was filtered out as already-delivered and the
+// notification was LOST for up to repeat_interval — the one place this design
+// degraded to a drop instead of a duplicate.
+func TestNotifyChain_FlappingAlertReachesTheWireWhenItFiresAgain(t *testing.T) {
+	endpoint := newPerAlertEndpoint(t, "fp-3") // fp-3 fails on every fire, forever
+	// Short repeat_interval so the timer chain keeps firing across all three
+	// phases of the flap: after the group_interval fire AMP moves to
+	// repeat_interval cadence (documented wave-3 behaviour), and an hour-long
+	// one would end the test's observable fires after phase 2. It stays far
+	// above the delivered state's own lifetime (repeat_interval + 60s grace),
+	// so nothing here expires mid-test.
+	stack := newNotifyChainStack(t, 300*time.Millisecond, endpoint.target("telegram-flap"))
+
+	stack.addFiringAlert(t, "fp-1")
+	stack.addFiringAlert(t, "fp-3")
+
+	// Fire 1: fp-1 lands as firing, fp-3 fails.
+	require.Eventually(t, func() bool {
+		return len(stack.notifyLog.deliveredAlerts(stack.groupKey, "telegram-flap")) == 1
+	}, 5*time.Second, 10*time.Millisecond, "fp-1 landed while fp-3 failed")
+
+	// fp-1 resolves; its resolved notification lands too. The delivered state
+	// must now describe fp-1 as resolved and NOT also as firing.
+	stack.addResolvedAlert(t, "fp-1")
+	require.Eventually(t, func() bool {
+		delivered := stack.notifyLog.deliveredAlerts(stack.groupKey, "telegram-flap")
+		return len(delivered) == 1 && delivered[0] == "fp-1:resolved"
+	}, 5*time.Second, 10*time.Millisecond,
+		"the resolved notification must land and REPLACE the recorded firing status, not accumulate alongside it")
+
+	// fp-1 fires again, and the wire log is cleared so what follows is
+	// attributable to the fires after this point.
+	endpoint.forget()
+	stack.addFiringAlert(t, "fp-1")
+
+	require.Eventually(t, func() bool {
+		for _, fp := range endpoint.delivered() {
+			if fp == "fp-1" {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond,
+		"fp-1 firing again is a NEW notification and must reach the target; a stale same-fingerprint key must never suppress it")
 }

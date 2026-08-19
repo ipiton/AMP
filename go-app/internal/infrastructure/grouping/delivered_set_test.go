@@ -59,6 +59,33 @@ func TestDeliveredSet_RecordIsAdditiveAndDeduplicated(t *testing.T) {
 	}
 }
 
+// TestDeliveredSet_OneStatusPerFingerprint is the C1 regression (review round
+// 1, Critical): the delivered set must hold AT MOST ONE status per fingerprint.
+//
+// Recording `fp-1:resolved` has to invalidate a previously recorded
+// `fp-1:firing`, because an alert has exactly one current status and the two
+// keys describe the same alert. Accumulating both meant that an alert flapping
+// firing→resolved→firing while the target stayed partially delivered had its
+// re-fire filtered out as "already delivered" — a LOST notification, and the
+// one place the design degraded to a drop instead of a duplicate.
+func TestDeliveredSet_OneStatusPerFingerprint(t *testing.T) {
+	for name, log := range deliveredSetLogs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing", "fp-2:firing"}, time.Hour))
+			// fp-1 resolved and that resolved notification landed too.
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:resolved"}, time.Hour))
+
+			delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+			require.NoError(t, err)
+			assert.ElementsMatch(t, []string{"fp-1:resolved", "fp-2:firing"}, delivered,
+				"the superseded status must be gone: an alert has one current status, and keeping the old key would suppress a re-fire")
+			assert.NotContains(t, delivered, "fp-1:firing",
+				"fp-1:firing must not survive, or fp-1 firing AGAIN would be filtered out as already delivered")
+		})
+	}
+}
+
 func TestDeliveredSet_IsPerTargetAndPerGroup(t *testing.T) {
 	for name, log := range deliveredSetLogs(t) {
 		t.Run(name, func(t *testing.T) {
@@ -152,6 +179,14 @@ func TestDeliveredSet_CapStopsRecording(t *testing.T) {
 
 			err := log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"one-too-many:firing"}, time.Hour)
 			require.Error(t, err, "exceeding the cap must be reported, not silently absorbed")
+			require.ErrorIs(t, err, ErrDeliveredStateCapped,
+				"the cap must be distinguishable from a backend failure — the caller counts the two separately")
+
+			// Re-recording an alert ALREADY present consumes no capacity, so a
+			// full state can still track status changes (exact accounting, both
+			// implementations).
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-0:resolved"}, time.Hour),
+				"overwriting an alert already in the state must not count against the cap")
 
 			delivered, dErr := log.DeliveredAlerts(ctx, "gk", "target-a")
 			require.NoError(t, dErr)
@@ -161,18 +196,106 @@ func TestDeliveredSet_CapStopsRecording(t *testing.T) {
 	}
 }
 
-// TestDeliveredSet_TTLIsBoundedByRepeatInterval proves the Redis set cannot
+// TestDeliveredSet_TTLIsBoundedByRepeatInterval proves the Redis state cannot
 // outlive the dedup window it belongs to: a stale partial state must age out
 // into a full resend rather than suppress alerts indefinitely.
+//
+// Asserts the TTL is set at all (review round 1, finding I2: it used to be a
+// separate EXPIRE round-trip that could fail and leave a TTL-LESS key behind,
+// i.e. permanent suppression) AND that expiry really empties the state.
 func TestDeliveredSet_TTLIsBoundedByRepeatInterval(t *testing.T) {
 	log, mr, cleanup := setupTestRedisNotifyLog(t)
 	defer cleanup()
 
-	require.NoError(t, log.RecordPartialDelivery(context.Background(), "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+	ctx := context.Background()
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
 
 	ttl := mr.TTL(notifyLogDeliveredKey("gk", "target-a"))
 	assert.Equal(t, 10*time.Minute+notifyLogEntryTTLGracePeriod, ttl,
-		"the delivered set must expire on the same schedule an nflog entry would")
+		"the delivered state must expire on the same schedule an nflog entry would")
+
+	mr.FastForward(ttl + time.Second)
+
+	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	assert.Empty(t, delivered, "past its TTL the state must read as absent, so the whole set is re-sent")
+}
+
+// TestDeliveredSet_MemoryStateExpires is the I1 regression (review round 1,
+// Important): the IN-MEMORY delivered state had no expiry at all, so in the lite
+// profile — or in the standard profile whenever Redis was unavailable at
+// grouping-init — the alerts that landed were filtered out of every subsequent
+// fire FOREVER while one alert of the group kept failing. Their repeat
+// notifications were lost indefinitely, with no path back (the Redis
+// implementation recovers via TTL; this one had none).
+//
+// recordedAt is back-dated rather than slept on: the real expiry bound is
+// repeat_interval + 60s grace, and this exercises the same expired() check and
+// the same read/write paths the production clock would.
+func TestDeliveredSet_MemoryStateExpires(t *testing.T) {
+	log := newNotifyDedupLog()
+	ctx := context.Background()
+
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	delivered, err := log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"fp-1:firing"}, delivered, "fresh state must be visible")
+
+	backdateDeliveredState(t, log, "gk", "target-a", deliveredStateTTL(10*time.Minute)+time.Second)
+
+	delivered, err = log.DeliveredAlerts(ctx, "gk", "target-a")
+	require.NoError(t, err)
+	assert.Empty(t, delivered,
+		"state older than repeat_interval + grace must read as absent, so the alerts are re-sent instead of suppressed forever")
+
+	log.mu.Lock()
+	_, stillThere := log.delivered[dedupKey{groupKey: "gk", target: "target-a"}]
+	log.mu.Unlock()
+	assert.False(t, stillThere, "expiring on read must also reclaim the memory")
+}
+
+// TestNotifyChain_ExpiredMemoryDeliveredStateResendsEverything is I1 at chain
+// level: once the in-memory state has aged past repeat_interval, the next fire
+// carries the WHOLE set again (one duplicate round — at-least-once — instead of
+// permanently suppressed alerts).
+func TestNotifyChain_ExpiredMemoryDeliveredStateResendsEverything(t *testing.T) {
+	notifyLog := newNotifyDedupLog()
+	pub := newPerAlertRecordingPublisher("target-a", "fp-3")
+	manager := createTestManagerWithRedisNotifyLog(t, pub, notifyLog)
+	group := addAlertsForDeliveredSetTest(t, manager, 3)
+	ctx := context.Background()
+
+	manager.publishGroupAlerts(ctx, group)
+
+	// Fire 2 while the state is fresh: only the alert still owed.
+	manager.publishGroupAlerts(ctx, group)
+	calls := pub.callsHanded()
+	require.Len(t, calls, 2)
+	require.Equal(t, []string{"fp-3"}, calls[1], "fresh state narrows the fire")
+
+	// Age the state past its window; the next fire must resend everything.
+	backdateDeliveredState(t, notifyLog, group.Key, "target-a", deliveredStateTTL(time.Hour)+time.Second)
+	manager.publishGroupAlerts(ctx, group)
+
+	calls = pub.callsHanded()
+	require.Len(t, calls, 3)
+	assert.ElementsMatch(t, []string{"fp-1", "fp-2", "fp-3"}, calls[2],
+		"an expired delivered state must age out into a full resend, never into indefinite suppression")
+}
+
+// backdateDeliveredState ages one (group, target) delivered state by age, which
+// is how the in-memory TTL is exercised without sleeping through a
+// repeat_interval.
+func backdateDeliveredState(t *testing.T, log *notifyDedupLog, groupKey GroupKey, target string, age time.Duration) {
+	t.Helper()
+
+	log.mu.Lock()
+	defer log.mu.Unlock()
+
+	state, ok := log.delivered[dedupKey{groupKey: groupKey, target: target}]
+	require.True(t, ok, "expected a delivered state for %s/%s", groupKey, target)
+	state.recordedAt = state.recordedAt.Add(-age)
 }
 
 // TestDeliveredSet_CrossReplicaVisibility is the HA assertion: a second replica
@@ -381,4 +504,71 @@ func groupAlertSlice(group *AlertGroup) []*core.Alert {
 		out = append(out, a)
 	}
 	return out
+}
+
+// TestNotifyChain_FlappingAlertIsResentWhenItFiresAgain is the C1 regression at
+// chain level (review round 1, Critical): with one alert of the group
+// persistently failing — so no full entry is ever written and the delivered set
+// is never cleared — an alert that goes firing → resolved → firing MUST reach
+// the target on that third fire.
+//
+// Before the fix the set accumulated both `fp-1:firing` and `fp-1:resolved`, so
+// alertsStillOwed filtered the re-fire out and the notification was lost until
+// the set's TTL (repeat_interval scale) or a full success.
+func TestNotifyChain_FlappingAlertIsResentWhenItFiresAgain(t *testing.T) {
+	notifyLog, _, cleanup := setupTestRedisNotifyLog(t)
+	defer cleanup()
+
+	// fp-3 fails on every fire: the target can never be fully confirmed, which
+	// is exactly the state the delivered set exists for.
+	pub := newPerAlertRecordingPublisher("target-a", "fp-3")
+	manager := createTestManagerWithRedisNotifyLog(t, pub, notifyLog)
+	group := addAlertsForDeliveredSetTest(t, manager, 3)
+	ctx := context.Background()
+
+	// Fire 1: fp-1, fp-2 land as firing; fp-3 fails.
+	manager.publishGroupAlerts(ctx, group)
+
+	// fp-1 resolves. Fire 2: its resolved notification lands.
+	group = flipAlertStatus(t, manager, group.Key, "fp-1", core.StatusResolved)
+	manager.publishGroupAlerts(ctx, group)
+
+	// fp-1 fires again. Fire 3: this is a NEW notification by every upstream
+	// rule and must go on the wire.
+	group = flipAlertStatus(t, manager, group.Key, "fp-1", core.StatusFiring)
+	manager.publishGroupAlerts(ctx, group)
+
+	calls := pub.callsHanded()
+	require.Len(t, calls, 3, "every fire must reach the publisher (fp-3 keeps failing, so nothing is ever fully deduped)")
+
+	assert.Contains(t, calls[1], "fp-1", "fire 2 must carry fp-1's resolved notification")
+	assert.Contains(t, calls[2], "fp-1",
+		"fire 3 must carry fp-1 firing AGAIN — a flap must never be suppressed by a stale same-fingerprint key")
+	assert.NotContains(t, calls[2], "fp-2", "fp-2 has not changed and already landed: still must not be re-sent")
+}
+
+// flipAlertStatus re-adds an alert under the same fingerprint with a new status,
+// which is how a real flap reaches a group (AddAlertToGroup replaces in place).
+//
+// Returns the group instance AddAlertToGroup resolved: the manager reloads the
+// group through its storage, so the caller must publish through that instance
+// rather than a pointer captured earlier.
+func flipAlertStatus(t *testing.T, manager *DefaultGroupManager, groupKey GroupKey, fingerprint string, status core.AlertStatus) *AlertGroup {
+	t.Helper()
+
+	alert := &core.Alert{
+		Fingerprint: fingerprint,
+		AlertName:   "HighCPU",
+		Status:      status,
+		Labels:      map[string]string{"alertname": "HighCPU"},
+		StartsAt:    time.Now().UTC(),
+	}
+	if status == core.StatusResolved {
+		endsAt := time.Now().UTC()
+		alert.EndsAt = &endsAt
+	}
+
+	group, err := manager.AddAlertToGroup(context.Background(), alert, groupKey)
+	require.NoError(t, err)
+	return group
 }

@@ -106,33 +106,46 @@ const (
 	// Format: "nflog:targets:{groupKey}" → Redis SET of target names.
 	notifyLogTargetsKeyPrefix = "nflog:targets:"
 
-	// notifyLogDeliveredKeyPrefix stores, per (groupKey, target), the SET of
-	// core.Alert.DeliveryKey values that target has ALREADY accepted while the
-	// group as a whole stayed unconfirmed (task fu4, alertmanager-parity wave
-	// 4 — per-alert outcome tracking for non-batch publishers).
-	// Format: "nflog:delivered:{groupKey}:{target}" → Redis SET of delivery
-	// keys, TTL = repeat_interval + grace (the same bound as an entry, see
-	// RecordPartialDelivery).
+	// notifyLogDeliveredKeyPrefix stores, per (groupKey, target), which
+	// individual alerts that target has ALREADY accepted while the group as a
+	// whole stayed unconfirmed (task fu4, alertmanager-parity wave 4 —
+	// per-alert outcome tracking for non-batch publishers).
+	// Format: "nflog:delivered:{groupKey}:{target}" → Redis HASH
+	// {alert fingerprint → the delivered status}, TTL = repeat_interval +
+	// grace (the same bound as an entry, see RecordPartialDelivery).
+	//
+	// WHY A HASH AND NOT A SET of core.Alert.DeliveryKey values (review round
+	// 1, finding C1): an alert has exactly ONE current status, so the store
+	// must hold at most one entry per fingerprint. A set of composite
+	// "fingerprint:status" members accumulated BOTH `fp:firing` and
+	// `fp:resolved` for a flapping alert, and the next `firing` was then
+	// filtered out as already-delivered — a lost notification, the only place
+	// this design degraded to a drop rather than a duplicate. Keying the hash
+	// by fingerprint makes recording a status invalidate the previous one by
+	// construction (HSET overwrites), and makes the cap check exact (HLEN
+	// counts alerts, not alert-status pairs).
 	//
 	// Written ONLY on a partial failure, so the happy path costs no extra
-	// Redis key or round-trip; deleted by RecordSent (a full entry supersedes
-	// it) and by Forget (the group is gone). Cross-replica by construction,
-	// like every other key here: a replica that adopts the group mid-recovery
-	// sees the same delivered set and re-sends the same remainder.
+	// Redis key; deleted by RecordSent (a full entry supersedes it) and by
+	// Forget (the group is gone). Cross-replica by construction, like every
+	// other key here: a replica that adopts the group mid-recovery sees the
+	// same delivered state and re-sends the same remainder.
 	notifyLogDeliveredKeyPrefix = "nflog:delivered:"
 
-	// maxDeliveredAlertsPerTarget caps one delivered set (task fu4). The set
-	// grows only while a non-batch target keeps failing PART of a group, which
-	// is remote-endpoint-driven, so it needs a bound that does not depend on
-	// the endpoint behaving. A group large enough to exceed this is already far
-	// outside anything a human reads as one notification.
+	// maxDeliveredAlertsPerTarget caps one delivered hash at this many ALERTS
+	// (task fu4). It grows only while a non-batch target keeps failing PART of
+	// a group, which is remote-endpoint-driven, so it needs a bound that does
+	// not depend on the endpoint behaving. A group large enough to exceed this
+	// is already far outside anything a human reads as one notification.
 	//
 	// Hitting the cap stops recording rather than trimming or resetting:
 	// stopping degrades exactly to the pre-fu4 behaviour for the alerts beyond
 	// the cap (they are re-sent, i.e. duplicated), whereas trimming would
-	// evict keys that ARE delivered and make the same duplicates happen
+	// evict alerts that WERE delivered and make the same duplicates happen
 	// anyway, with a silent, order-dependent choice of which. At-least-once is
 	// the floor either way; the cap only forfeits the exactly-once refinement.
+	// A refusal is counted (GroupingMetrics.RecordDeliveredSetRefused) so the
+	// reversion is visible on a dashboard instead of only in a log line.
 	maxDeliveredAlertsPerTarget = 500
 
 	// notifyLogClaimKeyPrefix stores the short-lived cross-replica publish
@@ -324,78 +337,120 @@ func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, targ
 }
 
 // DeliveredAlerts implements GroupNotifyLog (task fu4): reads the per-alert
-// delivered set for (groupKey, target). A missing key is not an error — it is
-// the normal state — and yields a nil slice.
+// delivered state for (groupKey, target) and returns it as
+// core.Alert.DeliveryKey values ("fingerprint:status"), which is what the
+// caller compares alerts against.
+//
+// A missing key is not an error — it is the normal state — and yields a nil
+// slice. HGETALL never reports redis.Nil for a missing hash (it answers with an
+// empty map), so there is no special case to write for it.
 func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey, target string) ([]string, error) {
-	keys, err := l.client.SMembers(ctx, notifyLogDeliveredKey(groupKey, target)).Result()
+	statuses, err := l.client.HGetAll(ctx, notifyLogDeliveredKey(groupKey, target)).Result()
 	if err != nil {
-		if err == redis.Nil {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("nflog delivered smembers %s/%s: %w", groupKey, target, err)
+		return nil, fmt.Errorf("nflog delivered hgetall %s/%s: %w", groupKey, target, err)
 	}
-	if len(keys) == 0 {
+	if len(statuses) == 0 {
 		return nil, nil
+	}
+
+	keys := make([]string, 0, len(statuses))
+	for fingerprint, status := range statuses {
+		keys = append(keys, deliveryKeyFor(fingerprint, status))
 	}
 	return keys, nil
 }
 
-// RecordPartialDelivery implements GroupNotifyLog (task fu4): SADDs the alerts
-// target accepted during an unconfirmed fire and refreshes the set's TTL to
-// match what an entry would get (repeat_interval + grace), so partial progress
-// ages out exactly when a full send would have stopped deduping.
+// recordPartialDeliveryScript writes one target's per-alert delivery progress
+// ATOMICALLY: cap check, the writes themselves, and the TTL refresh in a single
+// Redis round-trip that no other client can interleave with (review round 1,
+// finding I2 — the previous SCARD → SADD → EXPIRE sequence could leave a
+// TTL-LESS key behind if the EXPIRE failed, which suppressed those alerts
+// forever, and its cap check raced across replicas).
 //
-// SADD is additive on purpose: each fire only reports the alerts it actually
-// attempted, so a second partial failure must extend the set rather than
-// replace it. The cap is checked BEFORE adding (SCARD), because Redis has no
-// bounded-set type — see maxDeliveredAlertsPerTarget for why hitting it stops
-// recording instead of trimming.
+// KEYS[1] is the delivered hash. ARGV[1] is the cap, ARGV[2] the TTL in
+// milliseconds, and ARGV[3..] alternating fingerprint/status pairs. Returns the
+// resulting alert count, or -1 when the cap refused the whole batch (the
+// all-or-nothing shape maxDeliveredAlertsPerTarget documents).
+//
+// The cap counts only fields that are actually NEW, so re-recording an alert
+// already present — or overwriting its status — never consumes capacity.
+const recordPartialDeliveryScript = `
+	local cap = tonumber(ARGV[1])
+	local ttl = tonumber(ARGV[2])
+
+	local incoming = 0
+	for i = 3, #ARGV, 2 do
+		if redis.call("HEXISTS", KEYS[1], ARGV[i]) == 0 then
+			incoming = incoming + 1
+		end
+	end
+
+	if redis.call("HLEN", KEYS[1]) + incoming > cap then
+		return -1
+	end
+
+	for i = 3, #ARGV, 2 do
+		redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1])
+	end
+	redis.call("PEXPIRE", KEYS[1], ttl)
+
+	return redis.call("HLEN", KEYS[1])
+`
+
+// RecordPartialDelivery implements GroupNotifyLog (task fu4): records the alerts
+// target accepted during an unconfirmed fire and refreshes the TTL to match what
+// an entry would get (repeat_interval + grace), so partial progress ages out
+// exactly when a full send would have stopped deduping.
+//
+// Additive on purpose: each fire only reports the alerts it actually attempted,
+// so a second partial failure must EXTEND the recorded state rather than replace
+// it. Additive per FINGERPRINT, though, not per fingerprint-status pair (review
+// round 1, finding C1): writing `fp:resolved` replaces a previously recorded
+// `fp:firing`, because an alert has one current status and keeping the stale key
+// would filter a later re-fire out as already-delivered.
+//
+// Everything happens inside one Lua script — see recordPartialDeliveryScript for
+// why atomicity is load-bearing here rather than merely tidy. Consequently an
+// error from this method always means "nothing was recorded", which is what the
+// caller's log line claims.
 func (l *RedisNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey GroupKey, target string, deliveryKeys []string, repeatInterval time.Duration) error {
 	if len(deliveryKeys) == 0 {
 		return nil
 	}
 
-	key := notifyLogDeliveredKey(groupKey, target)
+	ttl := deliveredStateTTL(repeatInterval)
 
-	size, err := l.client.SCard(ctx, key).Result()
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("nflog delivered scard %s/%s: %w", groupKey, target, err)
-	}
-	if size+int64(len(deliveryKeys)) > maxDeliveredAlertsPerTarget {
-		return fmt.Errorf("delivered set for %s/%s would exceed its %d-entry cap (%d + %d); per-alert progress is not recorded for this fire",
-			groupKey, target, maxDeliveredAlertsPerTarget, size, len(deliveryKeys))
-	}
-
-	members := make([]any, 0, len(deliveryKeys))
+	argv := make([]any, 0, 2+2*len(deliveryKeys))
+	argv = append(argv, maxDeliveredAlertsPerTarget, ttl.Milliseconds())
 	for _, deliveryKey := range deliveryKeys {
-		if deliveryKey == "" {
+		fingerprint, status, ok := splitDeliveryKey(deliveryKey)
+		if !ok {
 			continue
 		}
-		members = append(members, deliveryKey)
+		argv = append(argv, fingerprint, status)
 	}
-	if len(members) == 0 {
+	if len(argv) == 2 {
 		return nil
 	}
 
-	if err := l.client.SAdd(ctx, key, members...).Err(); err != nil {
-		return fmt.Errorf("nflog delivered sadd %s/%s: %w", groupKey, target, err)
+	key := notifyLogDeliveredKey(groupKey, target)
+	result, err := l.client.Eval(ctx, recordPartialDeliveryScript, []string{key}, argv...).Int64()
+	if err != nil {
+		return fmt.Errorf("nflog delivered record %s/%s: %w", groupKey, target, err)
 	}
-
-	ttl := repeatInterval
-	if ttl <= 0 {
-		ttl = notifyLogEntryTTLFallback
-	}
-	ttl += notifyLogEntryTTLGracePeriod
-	if err := l.client.Expire(ctx, key, ttl).Err(); err != nil {
-		return fmt.Errorf("nflog delivered expire %s/%s: %w", groupKey, target, err)
+	if result < 0 {
+		return fmt.Errorf("%w: delivered state for %s/%s would exceed its %d-alert cap; per-alert progress is not recorded for this fire",
+			ErrDeliveredStateCapped, groupKey, target, maxDeliveredAlertsPerTarget)
 	}
 
 	// Tracked in the group's target-set so Forget reaches this key too, even
 	// for a target that has never had a full entry written (the whole point of
-	// a partial delivery). Same best-effort posture as in the entry path.
+	// a partial delivery). Deliberately OUTSIDE the script: it is a second key,
+	// and this bookkeeping is best-effort — losing it only means Forget misses
+	// a key that still self-expires on the TTL the script just set.
 	targetsKey := notifyLogTargetsKeyPrefix + string(groupKey)
 	if err := l.client.SAdd(ctx, targetsKey, target).Err(); err != nil {
-		l.logger.Warn("failed to track target in nflog target-set for a partial delivery (Forget may miss the delivered set; it will still self-expire)",
+		l.logger.Warn("failed to track target in nflog target-set for a partial delivery (Forget may miss the delivered state; it will still self-expire)",
 			"group_key", groupKey,
 			"target", target,
 			"error", err)
@@ -405,10 +460,10 @@ func (l *RedisNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey Gro
 			"error", err)
 	}
 
-	l.logger.Debug("Recorded per-alert delivered set",
+	l.logger.Debug("Recorded per-alert delivered state",
 		"group_key", groupKey,
 		"target", target,
-		"added", len(members),
+		"alerts_recorded", result,
 		"ttl", ttl)
 	return nil
 }

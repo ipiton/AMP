@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -53,17 +54,23 @@ type recordingNotifyLog struct {
 	releases  int                  // successful claim releases
 	ctxErrors int                  // calls rejected because their ctx was already done
 
-	// delivered is task fu4's per-alert delivered set: "groupKey|target" ->
-	// set of core.Alert.DeliveryKey values accepted while the target as a
-	// whole stayed unconfirmed. partials counts RecordPartialDelivery calls.
-	delivered map[string]map[string]struct{}
+	// delivered is task fu4's per-alert delivered state:
+	// "groupKey|target" -> {alert fingerprint -> delivered status}.
+	//
+	// Keyed by FINGERPRINT, exactly like both production implementations
+	// (review round 1, finding C1): a set of composite "fingerprint:status"
+	// members would accumulate both statuses of a flapping alert and suppress
+	// its re-fire. A double that kept the looser shape would let that bug back
+	// in through the end-to-end tests, which is how C1 survived round 1.
+	// partials counts RecordPartialDelivery calls.
+	delivered map[string]map[string]string
 	partials  int
 }
 
 func newRecordingNotifyLog() *recordingNotifyLog {
 	return &recordingNotifyLog{
 		entries:   map[string]time.Time{},
-		delivered: map[string]map[string]struct{}{},
+		delivered: map[string]map[string]string{},
 	}
 }
 
@@ -115,13 +122,13 @@ func (l *recordingNotifyLog) DeliveredAlerts(ctx context.Context, groupKey group
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	set := l.delivered[l.key(groupKey, target)]
-	if len(set) == 0 {
+	statuses := l.delivered[l.key(groupKey, target)]
+	if len(statuses) == 0 {
 		return nil, nil
 	}
-	out := make([]string, 0, len(set))
-	for key := range set {
-		out = append(out, key)
+	out := make([]string, 0, len(statuses))
+	for fingerprint, status := range statuses {
+		out = append(out, fingerprint+":"+status)
 	}
 	return out, nil
 }
@@ -135,13 +142,18 @@ func (l *recordingNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey
 	defer l.mu.Unlock()
 	l.partials++
 	key := l.key(groupKey, target)
-	set := l.delivered[key]
-	if set == nil {
-		set = map[string]struct{}{}
-		l.delivered[key] = set
+	statuses := l.delivered[key]
+	if statuses == nil {
+		statuses = map[string]string{}
+		l.delivered[key] = statuses
 	}
 	for _, deliveryKey := range deliveryKeys {
-		set[deliveryKey] = struct{}{}
+		idx := strings.LastIndex(deliveryKey, ":")
+		if idx <= 0 || idx == len(deliveryKey)-1 {
+			continue
+		}
+		// One status per fingerprint: the new status REPLACES the old one.
+		statuses[deliveryKey[:idx]] = deliveryKey[idx+1:]
 	}
 	return nil
 }
@@ -151,9 +163,10 @@ func (l *recordingNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey
 func (l *recordingNotifyLog) deliveredAlerts(groupKey grouping.GroupKey, target string) []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	out := make([]string, 0, len(l.delivered[l.key(groupKey, target)]))
-	for key := range l.delivered[l.key(groupKey, target)] {
-		out = append(out, key)
+	statuses := l.delivered[l.key(groupKey, target)]
+	out := make([]string, 0, len(statuses))
+	for fingerprint, status := range statuses {
+		out = append(out, fingerprint+":"+status)
 	}
 	return out
 }
@@ -398,6 +411,24 @@ func (s *notifyChainStack) addFiringAlert(t *testing.T, fingerprint string) {
 		Labels:      map[string]string{"alertname": "HighCPU", "severity": "warning"},
 		Annotations: map[string]string{"summary": "cpu is high"},
 		StartsAt:    time.Now().UTC(),
+	}, s.groupKey)
+	require.NoError(t, err)
+}
+
+// addResolvedAlert re-adds an alert under the same fingerprint as RESOLVED,
+// which is how a real flap reaches a group: AddAlertToGroup replaces the alert
+// in place, so the group's signature and the alert's DeliveryKey both change.
+func (s *notifyChainStack) addResolvedAlert(t *testing.T, fingerprint string) {
+	t.Helper()
+	endsAt := time.Now().UTC()
+	_, err := s.manager.AddAlertToGroup(context.Background(), &core.Alert{
+		Fingerprint: fingerprint,
+		AlertName:   "HighCPU",
+		Status:      core.StatusResolved,
+		Labels:      map[string]string{"alertname": "HighCPU", "severity": "warning"},
+		Annotations: map[string]string{"summary": "cpu is high"},
+		StartsAt:    time.Now().UTC().Add(-time.Minute),
+		EndsAt:      &endsAt,
 	}, s.groupKey)
 	require.NoError(t, err)
 }
