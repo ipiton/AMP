@@ -374,8 +374,14 @@ func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey,
 // resulting alert count, or -1 when the cap refused the whole batch (the
 // all-or-nothing shape maxDeliveredAlertsPerTarget documents).
 //
-// The cap counts only fields that are actually NEW, so re-recording an alert
-// already present — or overwriting its status — never consumes capacity.
+// The cap counts DISTINCT NEW fingerprints in this call, not new fields (re-
+// review, finding r2): the naive per-field HEXISTS-miss count double-charged a
+// batch that named the same new fingerprint twice (e.g.
+// ["new:firing","new:resolved"], both misses before either HSET lands), which
+// diverged from the in-memory implementation's distinct-fingerprint count —
+// probeable at cap−1 with exactly that batch (redis used to refuse where memory
+// accepted). Re-recording an alert already present — or overwriting its status
+// — still never consumes capacity either way.
 //
 // PEXPIRE only runs when this call CREATES the key (re-review, finding r5): a
 // key that already exists keeps whatever TTL its first write gave it, instead
@@ -410,10 +416,18 @@ var recordPartialDeliveryScript = redis.NewScript(`
 	-- BEFORE any HSET, since HSET itself would make EXISTS true.
 	local isNew = redis.call("EXISTS", KEYS[1]) == 0
 
+	-- r2: count distinct NEW fingerprints, not new fields — a fingerprint
+	-- named twice in this call (two different statuses) must consume at most
+	-- one slot, matching the in-memory implementation exactly.
+	local seen = {}
 	local incoming = 0
 	for i = 3, #ARGV, 2 do
-		if redis.call("HEXISTS", KEYS[1], ARGV[i]) == 0 then
-			incoming = incoming + 1
+		local fingerprint = ARGV[i]
+		if not seen[fingerprint] then
+			seen[fingerprint] = true
+			if redis.call("HEXISTS", KEYS[1], fingerprint) == 0 then
+				incoming = incoming + 1
+			end
 		end
 	end
 

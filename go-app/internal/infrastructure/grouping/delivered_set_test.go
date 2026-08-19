@@ -196,6 +196,44 @@ func TestDeliveredSet_CapStopsRecording(t *testing.T) {
 	}
 }
 
+// TestDeliveredSet_CapCountsDistinctFingerprintsNotOccurrences is the r2
+// regression (re-review, wave 5): the Redis Lua script used to count an
+// HEXISTS-miss per OCCURRENCE in the incoming batch, while the in-memory
+// implementation counted distinct NEW fingerprints. A batch naming the same
+// new fingerprint twice (two different statuses for the same alert, which is
+// a legitimate single-fire shape — nothing requires a fingerprint to appear
+// once) diverged: probed at cap−1, redis refused (2 occurrences > 1 slot
+// left) while memory accepted (1 distinct fingerprint, exactly the slot
+// available). Both implementations must now agree: exactly one slot per
+// distinct fingerprint, regardless of how many statuses it carries in one
+// call.
+func TestDeliveredSet_CapCountsDistinctFingerprintsNotOccurrences(t *testing.T) {
+	for name, log := range deliveredSetLogs(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+
+			// Fill to exactly one slot short of the cap.
+			keys := make([]string, 0, maxDeliveredAlertsPerTarget-1)
+			for i := 0; i < maxDeliveredAlertsPerTarget-1; i++ {
+				keys = append(keys, fmt.Sprintf("fp-%d:firing", i))
+			}
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", keys, time.Hour))
+
+			// One call, one NEW fingerprint, two statuses for it. Must consume
+			// exactly the one remaining slot, not two.
+			require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a",
+				[]string{"new:firing", "new:resolved"}, time.Hour),
+				"a duplicate-fingerprint batch must consume exactly one slot per distinct fingerprint, matching the other implementation")
+
+			delivered, dErr := log.DeliveredAlerts(ctx, "gk", "target-a")
+			require.NoError(t, dErr)
+			assert.Len(t, delivered, maxDeliveredAlertsPerTarget, "must have landed at exactly the cap")
+			assert.Contains(t, delivered, "new:resolved", "the later status in the same call must be the one that lands")
+			assert.NotContains(t, delivered, "new:firing", "one status per fingerprint even within a single call")
+		})
+	}
+}
+
 // TestDeliveredSet_TTLIsBoundedByRepeatInterval proves the Redis state cannot
 // outlive the dedup window it belongs to: a stale partial state must age out
 // into a full resend rather than suppress alerts indefinitely.
