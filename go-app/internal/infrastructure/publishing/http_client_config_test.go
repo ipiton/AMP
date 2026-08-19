@@ -590,19 +590,37 @@ func httpConfigGet(t *testing.T, client *http.Client, targetURL string) (string,
 // life outside this process.
 func writeSelfSignedPair(t *testing.T) (certPath, keyPath string) {
 	t.Helper()
+	return writeSelfSignedPairFor(t, []string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1")})
+}
+
+// writeSelfSignedPairForName generates a certificate valid ONLY for dnsName —
+// no IP SAN — so a connection to 127.0.0.1 verifies only when server_name
+// redirects verification to that name (review M2).
+func writeSelfSignedPairForName(t *testing.T, dnsName string) (certPath, keyPath string) {
+	t.Helper()
+	return writeSelfSignedPairFor(t, []string{dnsName}, nil)
+}
+
+func writeSelfSignedPairFor(t *testing.T, dnsNames []string, ips []net.IP) (certPath, keyPath string) {
+	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 
+	commonName := "amp-http-config-test"
+	if len(dnsNames) > 0 {
+		commonName = dnsNames[0]
+	}
+
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "amp-http-config-test"},
+		Subject:               pkix.Name{CommonName: commonName},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-		DNSNames:              []string{"localhost"},
+		IPAddresses:           ips,
+		DNSNames:              dnsNames,
 		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
@@ -619,4 +637,78 @@ func writeSelfSignedPair(t *testing.T) (certPath, keyPath string) {
 	require.NoError(t, os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
 	require.NoError(t, os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
 	return certPath, keyPath
+}
+
+// ============================================================================
+// Review M2: server_name must be proven to be what makes verification succeed
+// ============================================================================
+//
+// The pre-existing TLS tests did not isolate server_name: the negative case
+// would have failed on the unknown authority anyway, and the positive case set
+// server_name to the URL's own hostname, so it would have passed with the field
+// ignored. This pair pins the ACTUAL use case — connect to 127.0.0.1 while the
+// certificate is only valid for an internal DNS name — where the connection
+// succeeds ONLY because server_name selects the name to verify against.
+func TestApplyHTTPClientConfig_ServerNameSelectsVerifiedName(t *testing.T) {
+	const certName = "amp-webhook.internal"
+
+	certPath, keyPath := writeSelfSignedPairForName(t, certName)
+	certPEM, err := os.ReadFile(certPath)
+	require.NoError(t, err)
+
+	serverCert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	require.NoError(t, err)
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{serverCert},
+	}
+	server.StartTLS()
+	defer server.Close()
+
+	caPath := filepath.Join(t.TempDir(), "ca.pem")
+	require.NoError(t, os.WriteFile(caPath, certPEM, 0o600))
+
+	// The URL's host is 127.0.0.1, which the certificate does NOT cover.
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1", serverURL.Hostname(),
+		"the point of this test is that the dialled host is NOT on the certificate")
+
+	t.Run("fails without server_name", func(t *testing.T) {
+		client, cErr := applyHTTPClientConfig(plainBase(), &core.HTTPClientConfig{
+			TLSConfig: &core.TLSClientConfig{CAFile: caPath},
+		})
+		require.NoError(t, cErr)
+
+		req, rErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+		require.NoError(t, rErr)
+		resp, dErr := client.Do(req) //nolint:bodyclose // expected to fail before a body exists
+		if dErr == nil {
+			_ = resp.Body.Close()
+		}
+		require.Error(t, dErr, "the CA is trusted but the NAME does not match, so verification must fail")
+		// The failure must be about the NAME, not the authority: the CA IS
+		// trusted here (same ca_file as the passing case), so an
+		// unknown-authority error would mean this test proves nothing about
+		// server_name.
+		assert.NotContains(t, dErr.Error(), "unknown authority",
+			"the ca_file is trusted; the failure must be a name mismatch")
+		assert.Contains(t, dErr.Error(), "127.0.0.1",
+			"the failure must name the dialled host the certificate does not cover")
+	})
+
+	t.Run("succeeds because of server_name", func(t *testing.T) {
+		client, cErr := applyHTTPClientConfig(plainBase(), &core.HTTPClientConfig{
+			TLSConfig: &core.TLSClientConfig{CAFile: caPath, ServerName: certName},
+		})
+		require.NoError(t, cErr)
+
+		_, status := httpConfigGet(t, client, server.URL)
+		assert.Equal(t, http.StatusNoContent, status,
+			"server_name is the only difference from the failing case above")
+	})
 }
