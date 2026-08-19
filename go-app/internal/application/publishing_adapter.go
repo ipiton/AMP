@@ -16,11 +16,13 @@ type publishingCoordinator interface {
 	PublishToAll(ctx context.Context, enrichedAlert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error)
 	// PublishGroupToTargets is the notify-stage chain's batch publish call
 	// (task 2.4) — see grouping.GroupNotificationPublisher.PublishGroup.
-	// skipTarget implements task fwb's per-target nflog dedup (called once
-	// per candidate target before a job is submitted for it). groupLabels
-	// (review finding 1, fwb fix round 1) is forwarded into the wire
-	// payload's "groupLabels" field for batched targets.
-	PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, skipTarget func(target string) bool) ([]*infrapublishing.PublishingResult, error)
+	// targetAlerts implements task fwb's per-target nflog dedup AND task fu4's
+	// per-alert refinement of it: called once per candidate target before a job
+	// is submitted for it, it returns the alerts that target is still owed
+	// (empty ⇒ skip the target entirely). groupLabels (review finding 1, fwb
+	// fix round 1) is forwarded into the wire payload's "groupLabels" field for
+	// batched targets.
+	PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, targetAlerts func(target string, alerts []*core.Alert) []*core.Alert) ([]*infrapublishing.PublishingResult, error)
 }
 
 // ApplicationPublishingAdapter bridges AlertProcessor and the queue-based publishing stack.
@@ -78,16 +80,21 @@ func (p *ApplicationPublishingAdapter) PublishToAll(ctx context.Context, alert *
 // notification — the caller turns Success into a shared, cross-replica nflog
 // entry that suppresses the group for a whole repeat_interval.
 //
-// skipTarget and groupLabels are forwarded to
+// Per-alert outcomes (task fu4, wave 4): for a NON-BATCH target the outcome
+// additionally carries which individual alerts did land when the target as a
+// whole is unconfirmed, so the caller can retry only the rest. That travels
+// straight through from infrapublishing.PublishingResult.DeliveredAlerts.
+//
+// targetAlerts and groupLabels are forwarded to
 // PublishingCoordinator.PublishGroupToTargets unchanged — see
-// grouping.GroupNotificationPublisher's doc comment for the per-target
-// dedup protocol and the groupLabels contract it implements.
-func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, groupLabels map[string]string, skipTarget func(target string) bool) ([]grouping.TargetPublishOutcome, error) {
+// grouping.GroupNotificationPublisher's doc comment for the per-target/
+// per-alert dedup protocol and the groupLabels contract it implements.
+func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, groupLabels map[string]string, targetAlerts func(target string, alerts []*core.Alert) []*core.Alert) ([]grouping.TargetPublishOutcome, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}
 
-	results, err := p.coordinator.PublishGroupToTargets(ctx, alerts, receiver, groupKey, groupLabels, skipTarget)
+	results, err := p.coordinator.PublishGroupToTargets(ctx, alerts, receiver, groupKey, groupLabels, targetAlerts)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +119,9 @@ func (p *ApplicationPublishingAdapter) PublishGroup(ctx context.Context, groupKe
 		outcomes = append(outcomes, grouping.TargetPublishOutcome{
 			Target:  result.Target.Name,
 			Success: result.Success,
+			// Task fu4: non-empty only for an unconfirmed NON-BATCH target
+			// that still got some of its per-alert wire messages through.
+			DeliveredAlerts: result.DeliveredAlerts,
 		})
 
 		if !result.Success && result.Error != nil {

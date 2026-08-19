@@ -81,6 +81,73 @@ func (c *jobCompletion) signal(err error) {
 	})
 }
 
+// perAlertProgress records which alerts of ONE non-batch group job have been
+// confirmed accepted by the target (task fu4, alertmanager-parity wave 4).
+//
+// WHY: a Slack/Telegram/PagerDuty/Email job sends one wire message PER ALERT
+// inside a single job (see publishJob). Before this, the job's outcome was
+// all-or-nothing — alert 3 of 5 failing marked the whole (group, target) pair
+// unconfirmed, so no nflog entry was written and the group's next fire
+// re-sent ALL five alerts, duplicating the four that had already landed. The
+// keys collected here travel back to the notify chain through
+// GroupPublishHandle.DeliveredAlerts, which records them as the target's
+// per-alert delivered set so the retry carries only the alerts still owed.
+//
+// Two independent duplicate sources are closed by the same bookkeeping:
+//
+//   - WITHIN one job: retryPublish calls publishJob up to MaxAttempts times,
+//     and every attempt used to resend every alert. has() now skips the ones
+//     already accepted, so a retry re-sends only the failures.
+//   - ACROSS fires: snapshot() is published to the job's atomic pointer after
+//     every accepted alert, so even a job whose waiter timed out (or that is
+//     still retrying when abandoned) hands back the progress it made.
+//
+// OWNERSHIP: created and mutated ONLY by the worker goroutine running
+// processJob for this job — no locking. The single value shared with the
+// submitting goroutine is the immutable []string snapshot behind
+// PublishingJob.deliveredAlerts (an atomic.Pointer), which is why a waiter
+// may read progress from a job that is still running without racing it.
+type perAlertProgress struct {
+	delivered map[string]struct{}
+	order     []string
+}
+
+func newPerAlertProgress(capacity int) *perAlertProgress {
+	return &perAlertProgress{delivered: make(map[string]struct{}, capacity), order: make([]string, 0, capacity)}
+}
+
+func (p *perAlertProgress) has(key string) bool {
+	if p == nil || key == "" {
+		return false
+	}
+	_, ok := p.delivered[key]
+	return ok
+}
+
+// add records one accepted alert. Insertion-ordered and deduplicated: the
+// same alert can legitimately appear twice in a job's alert set only through
+// a caller bug, but the delivered set must stay a set either way.
+func (p *perAlertProgress) add(key string) {
+	if p == nil || key == "" {
+		return
+	}
+	if _, ok := p.delivered[key]; ok {
+		return
+	}
+	p.delivered[key] = struct{}{}
+	p.order = append(p.order, key)
+}
+
+// snapshot returns an immutable copy safe to publish to another goroutine.
+func (p *perAlertProgress) snapshot() []string {
+	if p == nil || len(p.order) == 0 {
+		return nil
+	}
+	out := make([]string, len(p.order))
+	copy(out, p.order)
+	return out
+}
+
 // AbandonReason tells the queue WHY a caller stopped awaiting a job's delivery
 // outcome (task rec fix round 2, review finding R3). The distinction matters
 // because only one of these is evidence about the target's health.
@@ -146,6 +213,33 @@ func (h *GroupPublishHandle) Done() <-chan error {
 		return nil
 	}
 	return h.done
+}
+
+// DeliveredAlerts reports the core.Alert.DeliveryKey of every alert this job
+// has confirmed accepted so far (task fu4, alertmanager-parity wave 4). Nil
+// for a batch-capable target — one POST covers the whole set, so there is no
+// per-alert notion to report — and nil for a non-batch job that got nowhere.
+//
+// Meaningful on BOTH outcomes:
+//
+//   - Done() reported failure: these alerts still landed, and the notify chain
+//     records them so the retry fire skips them (the whole point of the task).
+//   - Done() never fired (the waiter's confirmation timeout elapsed): the
+//     snapshot is whatever the still-running job had delivered when it was
+//     read, which is strictly better than assuming nothing arrived.
+//
+// Safe to call at any time from the submitting goroutine, including while the
+// worker is still publishing: the value read is an immutable slice published
+// through an atomic pointer, never the worker's own mutable tracker (see
+// perAlertProgress). A read that races an in-flight alert may therefore MISS
+// a delivery that just succeeded, which is the safe direction — an unrecorded
+// delivery costs one duplicate on the next fire, whereas a wrongly-recorded
+// one would silently drop the notification for a whole repeat_interval.
+func (h *GroupPublishHandle) DeliveredAlerts() []string {
+	if h == nil || h.job == nil {
+		return nil
+	}
+	return h.job.deliveredSnapshot()
 }
 
 // Abandon cancels the job's context: an in-flight HTTP request is aborted and
@@ -293,6 +387,20 @@ type PublishingJob struct {
 	// queue context", i.e. the pre-fix-round behaviour.
 	ctx context.Context
 
+	// progress tracks which alerts of a NON-BATCH group job have been accepted
+	// so far (task fu4). Worker-owned: created lazily by publishJob and
+	// mutated only by the single worker goroutine running this job, so it
+	// carries no lock — see perAlertProgress.
+	progress *perAlertProgress
+
+	// deliveredAlerts publishes progress's immutable snapshot to the
+	// submitting goroutine (task fu4). Atomic because the waiter may read it
+	// while the worker is still publishing — a job whose confirmation wait
+	// expired is abandoned, not joined, so there is no happens-before edge to
+	// lean on there. Read through deliveredSnapshot / exposed by
+	// GroupPublishHandle.DeliveredAlerts.
+	deliveredAlerts atomic.Pointer[[]string]
+
 	// abandonReason carries the AbandonReason the waiter set when it gave up,
 	// read by the worker once it sees ctx cancelled (task rec fix round 2,
 	// review finding R3). Zero value is AbandonReasonSettled, which is also
@@ -309,6 +417,40 @@ type PublishingJob struct {
 	CompletedAt *time.Time     // When processing completed
 	LastError   error          // Most recent error
 	ErrorType   QueueErrorType // transient/permanent/unknown
+}
+
+// deliveredSnapshot loads the last published per-alert delivery snapshot for
+// this job (task fu4), or nil when the job has confirmed nothing (or is a
+// batch/single-alert job, which never records per-alert progress).
+func (j *PublishingJob) deliveredSnapshot() []string {
+	if j == nil {
+		return nil
+	}
+	if snapshot := j.deliveredAlerts.Load(); snapshot != nil {
+		return *snapshot
+	}
+	return nil
+}
+
+// publishProgress records one accepted alert and republishes the snapshot the
+// waiter reads (task fu4). Called by the worker only.
+//
+// The store happens after every accepted alert rather than once at the end so
+// a job that is abandoned mid-flight — its waiter's confirmation timeout
+// elapsed while alert 4 of 5 was in flight — still hands back the alerts that
+// did land. Skipped entirely for jobs with no completion channel
+// (Submit/SubmitGroup, fire-and-forget): nobody can read the snapshot, so
+// maintaining it would be pure allocation.
+func (j *PublishingJob) publishProgress(key string) {
+	if j == nil || j.progress == nil {
+		return
+	}
+	j.progress.add(key)
+	if j.completion == nil {
+		return
+	}
+	snapshot := j.progress.snapshot()
+	j.deliveredAlerts.Store(&snapshot)
 }
 
 // PublishingQueue manages async publishing with worker pool and retry logic
@@ -1147,12 +1289,26 @@ func (q *PublishingQueue) GetStats() QueueStats {
 //     integrations): iterate Publish once per alert WITHIN this single
 //     call/attempt, so retries and rate-limiting stay scoped to one job per
 //     (group, target) rather than fragmenting back into one job per alert.
-//     Best-effort: every alert is attempted even if an earlier one fails,
-//     and the first error (if any) is what the retry strategy above sees —
-//     a retry of this job resends the whole alert set again, including any
-//     that already succeeded (accepted trade-off, documented in the task
-//     spec: there is no wire-level partial-success concept for a per-
-//     message loop the way there is for a single batched HTTP request).
+//     Best-effort: every alert still owed is attempted even if an earlier one
+//     fails, and the first error (if any) is what the retry strategy above
+//     sees.
+//
+// PER-ALERT OUTCOMES (task fu4, alertmanager-parity wave 4) apply to that
+// third case only. Each accepted alert is recorded in job.progress, and the
+// loop SKIPS alerts already recorded, which fixes two distinct duplicate
+// sources:
+//
+//   - a retry of this job (retryPublish calls this function again) no longer
+//     resends the alerts that already landed on the previous attempt — the
+//     trade-off the pre-fu4 comment documented as accepted;
+//   - the accumulated keys travel back to the notify chain (see
+//     GroupPublishHandle.DeliveredAlerts), which records them as the target's
+//     delivered set so the group's NEXT fire sends only the alerts still owed
+//     instead of the whole set.
+//
+// The batch branch deliberately records nothing: one POST either delivers the
+// whole set or none of it, so per-target confirmation is already exact and
+// wave-3 semantics stay untouched.
 func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJob) error {
 	ctx := q.jobContext(job)
 
@@ -1164,13 +1320,38 @@ func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJo
 		return batchPublisher.PublishBatch(ctx, job.Alerts, job.GroupKey, job.Receiver, job.GroupLabels, job.Target)
 	}
 
+	if job.progress == nil {
+		job.progress = newPerAlertProgress(len(job.Alerts))
+	}
+
 	now := time.Now().UTC()
 	var firstErr error
 	for _, alert := range job.Alerts {
-		enrichedAlert := &core.EnrichedAlert{Alert: alert, ProcessingTimestamp: &now}
-		if err := publisher.Publish(ctx, enrichedAlert, job.Target); err != nil && firstErr == nil {
-			firstErr = err
+		// An alert with no fingerprint cannot be tracked: every such alert would
+		// share the key ":<status>" and the second one would be skipped as
+		// "already delivered" (review round 1, finding m5). Unreachable through
+		// the grouping path — groups index their alerts BY fingerprint — so this
+		// is a guard, not a fix: an untrackable alert is always sent and never
+		// recorded, i.e. it falls back to at-least-once.
+		key := ""
+		if alert != nil && alert.Fingerprint != "" {
+			key = alert.DeliveryKey()
 		}
+
+		if job.progress.has(key) {
+			// Already accepted on an earlier attempt of THIS job — re-sending
+			// it would be a duplicate wire message, not a retry.
+			continue
+		}
+
+		enrichedAlert := &core.EnrichedAlert{Alert: alert, ProcessingTimestamp: &now}
+		if err := publisher.Publish(ctx, enrichedAlert, job.Target); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		job.publishProgress(key)
 	}
 	return firstErr
 }

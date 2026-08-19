@@ -30,9 +30,10 @@ type fakePublishingCoordinator struct {
 	groupKey      string
 	groupLabels   map[string]string
 
-	// task fwb: records which target names the caller's skipTarget callback
-	// was asked about.
-	skipTargetAsked []string
+	// task fwb/fu4: records which target names the caller's targetAlerts
+	// callback was asked about, and the alert subset it returned for each.
+	skipTargetAsked  []string
+	targetAlertsSeen map[string][]*core.Alert
 }
 
 func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error) {
@@ -40,18 +41,22 @@ func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.
 	return f.results, f.err
 }
 
-func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string, groupKey string, groupLabels map[string]string, skipTarget func(string) bool) ([]*infrapublishing.PublishingResult, error) {
+func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string, groupKey string, groupLabels map[string]string, targetAlerts func(string, []*core.Alert) []*core.Alert) ([]*infrapublishing.PublishingResult, error) {
 	f.groupAlerts = alerts
 	f.groupReceiver = receiver
 	f.groupKey = groupKey
 	f.groupLabels = groupLabels
 
-	if skipTarget == nil {
+	if targetAlerts == nil {
 		return f.groupResults, f.groupErr
 	}
 
-	// Mirror the real coordinator: ask skipTarget once per configured
-	// result's target name, and omit any it says to skip.
+	// Mirror the real coordinator: ask targetAlerts once per configured
+	// result's target name, omit any target it returns no alerts for, and
+	// record the per-target subset it asked us to deliver (task fu4).
+	if f.targetAlertsSeen == nil {
+		f.targetAlertsSeen = map[string][]*core.Alert{}
+	}
 	filtered := make([]*infrapublishing.PublishingResult, 0, len(f.groupResults))
 	for _, result := range f.groupResults {
 		name := ""
@@ -59,9 +64,11 @@ func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, ale
 			name = result.Target.Name
 		}
 		f.skipTargetAsked = append(f.skipTargetAsked, name)
-		if skipTarget(name) {
+		owed := targetAlerts(name, alerts)
+		if len(owed) == 0 {
 			continue
 		}
+		f.targetAlertsSeen[name] = owed
 		filtered = append(filtered, result)
 	}
 	return filtered, f.groupErr
@@ -525,10 +532,11 @@ func TestApplicationPublishingAdapter_PublishGroup_PartialFailureReportsPerTarge
 	}
 }
 
-// TestApplicationPublishingAdapter_PublishGroup_ForwardsSkipTarget proves
-// skipTarget (task fwb's per-target nflog dedup callback) reaches the
-// coordinator unchanged, and that a skipped target produces no outcome.
-func TestApplicationPublishingAdapter_PublishGroup_ForwardsSkipTarget(t *testing.T) {
+// TestApplicationPublishingAdapter_PublishGroup_ForwardsTargetAlerts proves
+// targetAlerts (task fwb's per-target nflog dedup callback, widened to the
+// per-alert filter by task fu4) reaches the coordinator unchanged, and that a
+// target it returns no alerts for produces no outcome.
+func TestApplicationPublishingAdapter_PublishGroup_ForwardsTargetAlerts(t *testing.T) {
 	coordinator := &fakePublishingCoordinator{
 		groupResults: []*infrapublishing.PublishingResult{
 			{Target: &core.PublishingTarget{Name: "ops-a"}, Success: true},
@@ -542,18 +550,21 @@ func TestApplicationPublishingAdapter_PublishGroup_ForwardsSkipTarget(t *testing
 	}
 
 	skipCalls := 0
-	skipTarget := func(target string) bool {
+	targetAlerts := func(target string, alerts []*core.Alert) []*core.Alert {
 		skipCalls++
-		return target == "ops-b"
+		if target == "ops-b" {
+			return nil
+		}
+		return alerts
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil, skipTarget)
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil, targetAlerts)
 	if err != nil {
 		t.Fatalf("PublishGroup() error = %v", err)
 	}
 	if skipCalls == 0 {
-		t.Fatal("expected skipTarget to be forwarded to the coordinator and invoked")
+		t.Fatal("expected targetAlerts to be forwarded to the coordinator and invoked")
 	}
 	if len(outcomes) != 1 || outcomes[0].Target != "ops-a" {
 		t.Fatalf("expected only ops-a to be reported (ops-b skipped), got %+v", outcomes)
