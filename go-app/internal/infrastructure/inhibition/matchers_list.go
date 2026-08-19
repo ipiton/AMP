@@ -210,6 +210,15 @@ func (e *regexCompileError) Unwrap() error { return e.Err }
 // having both InhibitionRule construction paths call it (via Compile,
 // below) instead of duplicating (and, in the inline path's case, omitting)
 // the loop.
+//
+// Review fix round 2 (R5): unlike the old parser.go loop (which always
+// allocated compiledSourceRE/compiledTargetRE, even to an empty map),
+// this leaves them nil when the corresponding *_match_re map is empty —
+// harmless today, since matchRuleFast's iteration is driven by
+// SourceMatchRE/TargetMatchRE's own length (ranging over a nil map is a
+// valid no-op), but worth flagging as a behavioral difference in this
+// exported-ish helper for anyone reaching for "is this rule's regex
+// compiled" via a nil check rather than the source map's length.
 func (r *InhibitionRule) CompileLegacyRegex() error {
 	if len(r.SourceMatchRE) > 0 {
 		compiled := make(map[string]*regexp.Regexp, len(r.SourceMatchRE))
