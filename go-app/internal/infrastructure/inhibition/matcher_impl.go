@@ -296,19 +296,25 @@ func (m *DefaultInhibitionMatcher) MatchRule(
 // excludeTwoSidedMatch below - upstream's guard needs to ask "does this
 // label set ALSO qualify as a source under this rule?" regardless of
 // which alert it came from.
+//
+// Review fix round 2 (R2): source_match/source_match_re no longer gate on
+// label presence - upstream converts both legacy maps into
+// labels.Matcher{Type: MatchEqual}/{Type: MatchRegexp} (inhibit.go's
+// NewInhibitRule) exactly like the matchers-form, and Matcher.Matches
+// reads an absent label as "" with no presence check at all, for EVERY
+// form. This was fix round 1's I1 fix applied to compiledSourceMatchers
+// only (matchesAll); the legacy maps here still had the old presence gate
+// until now - I1 is complete in 3 of 3 tables (matchers-form,
+// business/routing.MatchesNode, and this function) only as of this round.
 func ruleMatchesSourceSide(rule *InhibitionRule, labels map[string]string) bool {
 	for key, requiredValue := range rule.SourceMatch {
-		actualValue, exists := labels[key]
-		if !exists || actualValue != requiredValue {
+		if labels[key] != requiredValue { // upstream semantics: absent == ""
 			return false
 		}
 	}
 
 	for key := range rule.SourceMatchRE {
-		actualValue, exists := labels[key]
-		if !exists {
-			return false
-		}
+		actualValue := labels[key] // upstream semantics: absent == ""
 		re, hasRE := rule.compiledSourceRE[key]
 		if !hasRE || !re.MatchString(actualValue) {
 			return false
@@ -319,20 +325,17 @@ func ruleMatchesSourceSide(rule *InhibitionRule, labels map[string]string) bool 
 }
 
 // ruleMatchesTargetSide is ruleMatchesSourceSide's target-side twin:
-// target_match AND target_match_re AND target_matchers.
+// target_match AND target_match_re AND target_matchers. Same fix round 2
+// (R2) absent-label fix applies here.
 func ruleMatchesTargetSide(rule *InhibitionRule, labels map[string]string) bool {
 	for key, requiredValue := range rule.TargetMatch {
-		actualValue, exists := labels[key]
-		if !exists || actualValue != requiredValue {
+		if labels[key] != requiredValue { // upstream semantics: absent == ""
 			return false
 		}
 	}
 
 	for key := range rule.TargetMatchRE {
-		actualValue, exists := labels[key]
-		if !exists {
-			return false
-		}
+		actualValue := labels[key] // upstream semantics: absent == ""
 		re, hasRE := rule.compiledTargetRE[key]
 		if !hasRE || !re.MatchString(actualValue) {
 			return false
