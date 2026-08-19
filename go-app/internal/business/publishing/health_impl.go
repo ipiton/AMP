@@ -139,6 +139,30 @@ func NewHealthMonitor(
 		logger = slog.Default()
 	}
 
+	// LIMITATION — health probes do NOT honour per-target http_config
+	// (FU-HTTP-CONFIG, review I2; tracked as FU-HEALTH-HTTP-CONFIG in
+	// docs/06-planning/BACKLOG.md).
+	//
+	// This is ONE process-wide client: its own transport, its own
+	// config.TLSSkipVerify, Proxy unset. Every discovered target is probed with
+	// it, so a target that only reaches its endpoint through
+	// http_config.proxy_url, or that needs a client certificate, or whose
+	// endpoint 401s without basic_auth/authorization, fails its probe and reports
+	// degraded/unhealthy while DELIVERING correctly.
+	//
+	// Not a delivery bug today: filterHealthyTargets lives on
+	// DefaultParallelPublisher, which has no non-test constructor, and the live
+	// path (PublishingQueue.processJob) does not consult this monitor. So the
+	// blast radius is an observability false negative that also feeds
+	// NewHealthMetricsCollector and therefore alerting — but it BECOMES a
+	// delivery bug the moment anything wires filterHealthyTargets up.
+	//
+	// Deliberately not fixed in the http_config change: the per-target client
+	// cache is PublisherFactory.perTargetHTTPClient over in
+	// infrastructure/publishing, so reusing it means injecting the factory into
+	// NewHealthMonitor and every caller — a constructor change across a layer
+	// boundary, for a surface that has no live consumer. Ledgered instead.
+	//
 	// Create HTTP client with timeout & connection pooling
 	transport := &http.Transport{
 		MaxIdleConns:        config.MaxIdleConns,

@@ -120,6 +120,28 @@ func validateTarget(target *core.PublishingTarget) []ValidationError {
 		}
 	}
 
+	// Validate http_config structurally (FU-HTTP-CONFIG, review M8).
+	//
+	// The Secret path json.Unmarshals `http_config` straight into the target for
+	// free, but nothing used to check it here — so an invalid one passed
+	// discovery, appeared in the target list, and then failed on EVERY publish
+	// job, instead of being skipped once with a WARN like every other invalid
+	// Secret. core.HTTPClientConfig.Validate() covers only what can be decided
+	// without touching the filesystem (mutually exclusive auth, half a client
+	// certificate pair, an unroutable proxy_url, a credential-less
+	// authorization); file readability stays with the client builder, because a
+	// projected volume may legitimately not exist yet when a Secret is first
+	// observed.
+	if err := target.HTTPConfig.Validate(); err != nil {
+		errors = append(errors, NewValidationError(
+			"http_config",
+			err.Error(),
+			// Never the config itself: it carries basic_auth.password and
+			// authorization.credentials. The message names fields and paths only.
+			"<http_config>",
+		))
+	}
+
 	// Validate headers (no empty keys/values)
 	for key, value := range target.Headers {
 		if key == "" {

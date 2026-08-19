@@ -278,7 +278,13 @@ func ResolveHTTPConfigFallback(own, global *HTTPConfig) *HTTPConfig {
 	if global == nil {
 		return nil
 	}
-	return global.Clone()
+	// The clone is TAGGED as inherited so downstream can tell a global-propagated
+	// block from the integration's own declaration even after resolution has
+	// erased the structural difference (review I1). Idempotent: the second,
+	// builder-side call sees own != nil and returns it with the tag intact.
+	clone := global.Clone()
+	clone.markInheritedFromGlobal()
+	return clone
 }
 
 // applyDefaults applies default values recursively.

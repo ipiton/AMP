@@ -64,6 +64,22 @@ type PublishingMetrics struct {
 	// Labels: provider
 	rateLimitHitsTotal *prometheus.CounterVec
 
+	// unsupportedHTTPConfigTotal counts per-integration `http_config` sub-blocks
+	// that AMP parsed, reported and then IGNORED, per target (FU-HTTP-CONFIG,
+	// review I1).
+	//
+	// It exists because a WARN alone is not a durable signal: the config-target
+	// builder logs once per config load/reload and then never again, which in a
+	// busy startup log is invisible for the life of the process. Today the only
+	// value of `field` is "oauth2", and only when INHERITED from
+	// `global.http_config` — an oauth2 block on an integration's OWN http_config
+	// fails that target's build instead and never reaches this counter.
+	//
+	// Labels: field (the ignored http_config sub-block), target (the config
+	// target name, e.g. cfg:team/webhook0 — bounded by config size, never a
+	// per-alert value).
+	unsupportedHTTPConfigTotal *prometheus.CounterVec
+
 	// payloadSizeBytes measures payload size by provider.
 	// Labels: provider
 	payloadSizeBytes *prometheus.HistogramVec
@@ -252,6 +268,11 @@ func NewPublishingMetrics(registerer prometheus.Registerer) *PublishingMetrics {
 		"rate_limit_hits_total",
 		"Rate limit hits by provider",
 		[]string{"provider"})
+
+	m.unsupportedHTTPConfigTotal = newCounterVec(registerer, publishingSubsystem,
+		"unsupported_http_config_total",
+		"Per-integration http_config sub-blocks that were parsed, reported and ignored",
+		[]string{"field", "target"})
 
 	m.payloadSizeBytes = newHistogramVec(registerer, publishingSubsystem,
 		"payload_size_bytes",
@@ -450,6 +471,26 @@ func NewPublishingMetrics(registerer prometheus.Registerer) *PublishingMetrics {
 // RecordMessage records a message/event sent to a provider.
 func (m *PublishingMetrics) RecordMessage(provider, status string) {
 	m.messagesTotal.WithLabelValues(provider, status).Inc()
+}
+
+// RecordUnsupportedHTTPConfig records one ignored `http_config` sub-block for a
+// target. See unsupportedHTTPConfigTotal for why a WARN alone was insufficient.
+//
+// Nil-safe on both the receiver and the counter: the config-target builder runs
+// before/independently of the publishing stack's own wiring, so it must be able
+// to call this unconditionally.
+func (m *PublishingMetrics) RecordUnsupportedHTTPConfig(field, target string) {
+	if m == nil || m.unsupportedHTTPConfigTotal == nil {
+		return
+	}
+	m.unsupportedHTTPConfigTotal.WithLabelValues(field, target).Inc()
+}
+
+// UnsupportedHTTPConfigCounter exposes one labelled child of
+// unsupported_http_config_total so tests can assert on it without reaching into
+// the unexported field or scraping the whole registry.
+func (m *PublishingMetrics) UnsupportedHTTPConfigCounter(field, target string) prometheus.Counter {
+	return m.unsupportedHTTPConfigTotal.WithLabelValues(field, target)
 }
 
 // RecordAPIRequest records an API request with all details.

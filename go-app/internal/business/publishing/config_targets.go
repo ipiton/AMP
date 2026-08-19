@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // ============================================================================
@@ -201,38 +202,48 @@ func buildReceiverTargets(receiver *infraroute.Receiver, global *infraroute.Glob
 		out = append(out, target)
 	}
 
-	// httpConfig resolves + converts an integration's http_config once per
-	// integration, logging any unsupported sub-block against the receiver/kind/
-	// index it came from (never a value — see this file's SECRETS note).
-	httpConfig := func(own *infraroute.HTTPConfig, kind string, idx int) *core.HTTPClientConfig {
-		return httpClientConfigFor(own, global, receiver.Name, kind, idx, logger)
+	// applyHTTPConfig resolves + converts an integration's http_config once per
+	// integration. An error here SKIPS the target through the same `add` path as
+	// any other unprovisionable integration (loud WARN naming receiver/kind/
+	// index, never a value — see this file's SECRETS note), so a target that
+	// cannot honour its declared auth or TLS never delivers unprotected.
+	applyHTTPConfig := func(target *core.PublishingTarget, err error, own *infraroute.HTTPConfig, kind string, idx int) error {
+		if err != nil || target == nil {
+			return err
+		}
+		httpConfig, httpErr := httpClientConfigFor(own, global, receiver.Name, kind, idx, logger)
+		if httpErr != nil {
+			return httpErr
+		}
+		target.HTTPConfig = httpConfig
+		return nil
 	}
 
 	for i, cfg := range receiver.WebhookConfigs {
 		target, err := webhookTarget(receiver.Name, i, cfg)
-		if err == nil && cfg != nil {
-			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindWebhook, i)
+		if cfg != nil {
+			err = applyHTTPConfig(target, err, cfg.HTTPConfig, configKindWebhook, i)
 		}
 		add(target, err, configKindWebhook, i)
 	}
 	for i, cfg := range receiver.SlackConfigs {
 		target, err := slackTarget(receiver.Name, i, cfg)
-		if err == nil && cfg != nil {
-			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindSlack, i)
+		if cfg != nil {
+			err = applyHTTPConfig(target, err, cfg.HTTPConfig, configKindSlack, i)
 		}
 		add(target, err, configKindSlack, i)
 	}
 	for i, cfg := range receiver.PagerDutyConfigs {
 		target, err := pagerDutyTarget(receiver.Name, i, cfg)
-		if err == nil && cfg != nil {
-			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindPagerDuty, i)
+		if cfg != nil {
+			err = applyHTTPConfig(target, err, cfg.HTTPConfig, configKindPagerDuty, i)
 		}
 		add(target, err, configKindPagerDuty, i)
 	}
 	for i, cfg := range receiver.TelegramConfigs {
 		target, err := telegramTarget(receiver.Name, i, cfg)
-		if err == nil && cfg != nil {
-			target.HTTPConfig = httpConfig(cfg.HTTPConfig, configKindTelegram, i)
+		if cfg != nil {
+			err = applyHTTPConfig(target, err, cfg.HTTPConfig, configKindTelegram, i)
 		}
 		add(target, err, configKindTelegram, i)
 	}
@@ -272,7 +283,7 @@ func httpClientConfigFor(
 	receiver, kind string,
 	index int,
 	logger *slog.Logger,
-) *core.HTTPClientConfig {
+) (*core.HTTPClientConfig, error) {
 	var globalHTTP *infraroute.HTTPConfig
 	if global != nil {
 		globalHTTP = global.HTTPConfig
@@ -280,15 +291,42 @@ func httpClientConfigFor(
 
 	resolved := infraroute.ResolveHTTPConfigFallback(own, globalHTTP)
 	if resolved == nil {
-		return nil
+		return nil, nil
 	}
 
 	if resolved.OAuth2 != nil {
-		logger.Warn("Ignoring unsupported http_config.oauth2; requests from this integration will be sent WITHOUT OAuth2 credentials (see FU-HTTP-OAUTH2)",
+		// PROVENANCE SPLIT (review I1, controller ruling). oauth2 is unsupported
+		// either way; what differs is the blast radius of refusing.
+		//
+		// The integration declared it ITSELF -> that endpoint explicitly requires
+		// OAuth2, so delivering without it is a knowing unauthenticated send to a
+		// target the operator told us needs auth. Fail that target's build, same
+		// posture as an unreadable password_file. Scope is exactly the one
+		// integration that asked.
+		//
+		// INHERITED from global.http_config -> refusing would be catastrophically
+		// disproportionate: global propagates wholesale into every webhook, Slack,
+		// PagerDuty and Telegram integration that did not set its own block, so ONE
+		// global oauth2 block would blackhole every notification in the process,
+		// including integrations that authenticate through their own URL/header
+		// credential and never wanted OAuth2. Those keep delivering, with a WARN
+		// plus a durable counter (a WARN fires once per config load and is then
+		// invisible for the life of the process). Accepted risk recorded in
+		// docs/06-planning/DECISIONS.md.
+		if !resolved.InheritedFromGlobal() {
+			return nil, fmt.Errorf("http_config.oauth2 is not supported (see FU-HTTP-OAUTH2); "+
+				"remove it or move this endpoint behind a supported auth method (%s/%s)",
+				"basic_auth", "authorization")
+		}
+
+		targetName := ConfigTargetName(receiver, kind, index)
+		logger.Warn("Ignoring http_config.oauth2 inherited from global.http_config; requests from this integration are sent WITHOUT OAuth2 credentials (see FU-HTTP-OAUTH2). An oauth2 block on the integration's OWN http_config skips that target instead",
 			"receiver", receiver,
 			"integration", kind+"_configs",
 			"index", index,
+			"target", targetName,
 		)
+		v2.Global().Publishing.RecordUnsupportedHTTPConfig("oauth2", targetName)
 	}
 
 	converted := &core.HTTPClientConfig{ProxyURL: strings.TrimSpace(resolved.ProxyURL)}
@@ -325,8 +363,11 @@ func httpClientConfigFor(
 			Credentials:     authz.Credentials,
 			CredentialsFile: strings.TrimSpace(authz.CredentialsFile),
 		}
-		// `authorization: {type: Bearer}` with no credential at all is also
-		// nothing: the header would render as a bare scheme.
+		// `authorization: {type: Bearer}` with no credential at all renders as a
+		// bare scheme no endpoint accepts. Dropped here rather than failed,
+		// because an empty block is far more likely to be leftover YAML than an
+		// auth requirement — and core.HTTPClientConfig.Validate() rejects the
+		// shape for the K8s Secret path, where there is no builder to drop it.
 		if candidate.Credentials == "" && candidate.CredentialsFile == "" {
 			logger.Warn("Ignoring http_config.authorization with no credentials or credentials_file",
 				"receiver", receiver,
@@ -338,22 +379,30 @@ func httpClientConfigFor(
 		}
 	}
 
-	// follow_redirects is only carried when it DIFFERS from the upstream default
-	// (true). routing.HTTPConfig.Defaults() materialises the default as an
-	// explicit `true` for every parsed config, so copying it verbatim would give
-	// every single target a non-empty http_config — and therefore a
-	// non-empty cache-key fingerprint and a dedicated *http.Client — purely
-	// because the parser filled in a default. Dropping the redundant `true`
-	// keeps IsZero() honest.
-	if resolved.FollowRedirects != nil && !*resolved.FollowRedirects {
-		follow := false
-		converted.FollowRedirects = &follow
-	}
+	converted.FollowRedirects = resolved.FollowRedirects
+
+	// Normalize drops everything that carries no behaviour: empty sub-blocks and
+	// a redundant `follow_redirects: true`. The latter matters more than it looks
+	// — routing.HTTPConfig.Defaults() materialises that default for every parsed
+	// config, so carrying it verbatim would give EVERY target a non-empty
+	// fingerprint and therefore a dedicated *http.Client, purely because the
+	// parser filled in a default. Shared with the K8s Secret path (applyDefaults)
+	// so both sources normalise identically (review M10).
+	converted.Normalize()
 
 	if converted.IsZero() {
-		return nil
+		return nil, nil
 	}
-	return converted
+
+	// Validate at BUILD time, not per publish job (review M7). The client builder
+	// enforces the same rules, but it runs per publisher construction — so a
+	// target with both basic_auth and authorization used to reload successfully,
+	// look healthy, and then fail every single alert into the DLQ. Upstream
+	// rejects that combination at config load; so do we.
+	if err := converted.Validate(); err != nil {
+		return nil, err
+	}
+	return converted, nil
 }
 
 // FilterConfigSendResolved is the target FilterConfig key carrying upstream's
