@@ -257,6 +257,12 @@ func (m *DefaultTargetDiscoveryManager) IsConfigOnly() bool {
 // the config).
 func (m *DefaultTargetDiscoveryManager) SetConfigTargets(targets []*core.PublishingTarget) {
 	if m.configCache == nil {
+		if m.logger == nil {
+			// Re-review finding R4: the guard below dereferences the logger, and
+			// a struct-literal manager — the very case this branch exists for —
+			// may have none. Nothing to report to, but never panic.
+			return
+		}
 		// Review finding M2: this used to lazily assign m.configCache here,
 		// which is an unsynchronised write to a field the union read paths read
 		// from other goroutines. Both constructors initialise it, so the only

@@ -110,6 +110,15 @@ type PublishingMetrics struct {
 	// Labels: target, error_type
 	retryAttemptsTotal *prometheus.CounterVec
 
+	// blackholeDropsTotal counts notifications intentionally dropped because
+	// the routed receiver is declared in the config but provisions no
+	// publishing targets — upstream Alertmanager's blackhole receiver
+	// (FU-RECEIVERS-INTEGRATION). NOT an error: distinguishing "deliberately
+	// dropped" from "misconfigured, nothing delivered" is exactly why this is
+	// its own series.
+	// Labels: receiver
+	blackholeDropsTotal *prometheus.CounterVec
+
 	// workersActive tracks active workers.
 	workersActive prometheus.Gauge
 
@@ -310,6 +319,11 @@ func NewPublishingMetrics(registerer prometheus.Registerer) *PublishingMetrics {
 		"retry_attempts_total",
 		"Retry attempts by target and error type",
 		[]string{"target", "error_type"})
+
+	m.blackholeDropsTotal = newCounterVec(registerer, publishingSubsystem,
+		"blackhole_drops_total",
+		"Notifications intentionally dropped for a receiver with no publishing targets (blackhole receiver)",
+		[]string{"receiver"})
 
 	m.workersActive = newGauge(registerer, publishingSubsystem,
 		"workers_active",
@@ -551,6 +565,19 @@ func (m *PublishingMetrics) RecordJobDLQ(target string) {
 // RecordRetryAttempt records a retry attempt.
 func (m *PublishingMetrics) RecordRetryAttempt(target, errorType string) {
 	m.retryAttemptsTotal.WithLabelValues(target, errorType).Inc()
+}
+
+// RecordBlackholeDrop records a notification dropped on purpose because the
+// routed receiver is declared in the config but has no publishing targets —
+// upstream Alertmanager's blackhole receiver (FU-RECEIVERS-INTEGRATION slice-1
+// re-review finding R2).
+//
+// Deliberately separate from RecordJobFailure/jobsProcessedTotal: nothing was
+// ever enqueued, and a blackhole must not look like a delivery failure on a
+// dashboard. A rising rate here for a receiver the operator did NOT intend as a
+// blackhole is the signal that its integration went missing.
+func (m *PublishingMetrics) RecordBlackholeDrop(receiver string) {
+	m.blackholeDropsTotal.WithLabelValues(receiver).Inc()
 }
 
 // SetWorkerCounts sets worker counts.
