@@ -183,14 +183,12 @@ func FromGlobs(paths []string, opts Options, options ...Option) (*Template, erro
 	}
 
 	for _, name := range defaultAssetNames {
-		f, err := defaultAssets.Open(name)
+		content, err := defaultAssets.ReadFile(name)
 		if err != nil {
 			// Unreachable: the files are embedded at compile time.
 			return nil, fmt.Errorf("open embedded default template %s: %w", name, err)
 		}
-		err = t.Parse(f)
-		_ = f.Close()
-		if err != nil {
+		if err := t.parseNamed(filepath.Base(name), string(content)); err != nil {
 			return nil, fmt.Errorf("parse embedded default template %s: %w", name, err)
 		}
 	}
@@ -204,7 +202,8 @@ func FromGlobs(paths []string, opts Options, options ...Option) (*Template, erro
 }
 
 // Parse parses the given text into the template (both the text and the html
-// instance, as upstream does).
+// instance, as upstream does). Definitions land in the shared namespace, so a
+// later Parse of the same definition name replaces the earlier one.
 func (t *Template) Parse(r io.Reader) error {
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -214,6 +213,27 @@ func (t *Template) Parse(r io.Reader) error {
 		return err
 	}
 	if t.html, err = t.html.Parse(string(b)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// parseNamed parses content under a template NAME (the base file name), which
+// is what puts `<file>:<line>` into text/template's own parse errors — the
+// unnamed root would report a bare `:<line>`. It mirrors what
+// text/template.ParseFiles does internally, and is why every load path in this
+// package (embedded defaults included) goes through it rather than through
+// Parse.
+//
+// The returned named template is discarded on purpose: only its DEFINITIONS
+// matter, and they are registered in the shared namespace that t.text/t.html
+// own. Re-parsing the same name (two files with the same base name in different
+// directories) is allowed and simply re-registers.
+func (t *Template) parseNamed(name, content string) error {
+	if _, err := t.text.New(name).Parse(content); err != nil {
+		return err
+	}
+	if _, err := t.html.New(name).Parse(content); err != nil {
 		return err
 	}
 	return nil
@@ -262,13 +282,12 @@ func (t *Template) FromGlob(path string) error {
 //	template glob "/etc/amp/tmpl/*.tmpl": file "/etc/amp/tmpl/slack.tmpl":
 //	template: slack.tmpl:4: unexpected "}" in operand
 func (t *Template) parseFile(glob, file string) error {
-	f, err := os.Open(file) //nolint:gosec // path comes from the operator's own `templates:` glob, resolved by filepath.Glob.
+	content, err := os.ReadFile(file) //nolint:gosec // path comes from the operator's own `templates:` glob, resolved by filepath.Glob.
 	if err != nil {
 		return fmt.Errorf("template glob %q: file %q: %w", glob, file, err)
 	}
-	defer func() { _ = f.Close() }()
 
-	if err := t.Parse(f); err != nil {
+	if err := t.parseNamed(filepath.Base(file), string(content)); err != nil {
 		return fmt.Errorf("template glob %q: file %q: %w", glob, file, err)
 	}
 	return nil
