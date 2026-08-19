@@ -630,8 +630,8 @@ type AlertGroupManager interface {
 // group notification (task fwb: wire-level group batching + per-target
 // nflog). GroupNotificationPublisher.PublishGroup returns one of these per
 // target it actually attempted delivery to — a target skipped via the
-// skipTarget callback (already delivered this cycle) is omitted entirely,
-// not reported as an outcome.
+// targetAlerts callback (already delivered this cycle — it returned no
+// alerts for that target) is omitted entirely, not reported as an outcome.
 type TargetPublishOutcome struct {
 	// Target is the publishing target's name (core.PublishingTarget.Name),
 	// used as the nflog dedup key's target segment — see GroupNotifyLog.
@@ -654,7 +654,7 @@ type TargetPublishOutcome struct {
 	// metrics-only mode, or a delivery-confirmation wait that expired
 	// before the outcome arrived — must be reported as false, which leaves
 	// no nflog entry and makes the group's next scheduled fire retry
-	// exactly that target (skipTarget skips only the ones already
+	// exactly that target (targetAlerts excludes only the ones already
 	// recorded).
 	//
 	// Retries INSIDE the publishing stack count as one delivery attempt
@@ -664,6 +664,26 @@ type TargetPublishOutcome struct {
 	// re-sent on the next fire) — the notification pipeline is
 	// at-least-once, same as upstream Alertmanager.
 	Success bool
+
+	// DeliveredAlerts carries the core.Alert.DeliveryKey of the individual
+	// alerts this target DID accept while Success is false (task fu4,
+	// alertmanager-parity wave 4).
+	//
+	// Only a non-batch integration can produce it: Slack/Telegram/PagerDuty/
+	// Email send one wire message per alert inside the single job for this
+	// (group, target) pair, so "alert 3 of 5 failed" is a real state. The
+	// caller (publishGroupAlerts) writes these keys to the target's delivered
+	// set (GroupNotifyLog.RecordPartialDelivery) so the group's next fire
+	// sends only the alerts still owed instead of re-sending the whole set and
+	// duplicating the ones that landed.
+	//
+	// Always empty when Success is true (the full nflog entry supersedes it)
+	// and always empty for a batch target — one POST per (group, target) is
+	// atomic on the wire, so its confirmation is already exact. An
+	// implementation that cannot tell which alerts landed must leave this
+	// empty: the fallback is the pre-fu4 behaviour (resend everything),
+	// i.e. at-least-once, never a suppressed alert.
+	DeliveredAlerts []string
 }
 
 // GroupNotificationPublisher publishes a resolved batch of alerts belonging
@@ -697,16 +717,27 @@ type TargetPublishOutcome struct {
 // field (upstream Alertmanager webhook shape) without a dependency in
 // either direction between this package and infrastructure/publishing.
 //
-// skipTarget implements task fwb's per-target notification-log dedup:
-// PublishGroup's implementation resolves its own receiver-scoped target list
-// internally (as it always has) and MUST call skipTarget(target.Name) once
-// per candidate target BEFORE attempting delivery to it. A true result means
-// "this target already received this exact alert set within
-// repeat_interval — do not send, and do not include it in the returned
-// outcomes." This is what makes a retry after a partial failure resend ONLY
-// the targets that failed last time: the ones that already succeeded report
-// skipTarget == true on the next fire (their nflog entry was recorded) and
-// are silently excluded.
+// targetAlerts implements the notification log's per-target dedup (task fwb)
+// AND its per-alert refinement (task fu4). PublishGroup's implementation
+// resolves its own receiver-scoped target list internally (as it always has)
+// and MUST call targetAlerts(target.Name, alerts) once per candidate target
+// BEFORE attempting delivery, then deliver exactly the returned subset:
+//
+//   - an EMPTY/nil result means "this target already received this exact alert
+//     set within repeat_interval — do not send, and do not include it in the
+//     returned outcomes". This is what makes a retry after a partial failure
+//     resend ONLY the targets that failed last time: targets that already
+//     succeeded have an nflog entry, so they are excluded silently.
+//   - a SHORTER result (task fu4) means "this target is a non-batch
+//     integration that already accepted these particular alerts on an earlier
+//     fire — send only the rest". The implementation must forward the subset
+//     to the wire, not the full slice, or already-delivered alerts get
+//     duplicated.
+//   - the full slice (the common case, and what a nil callback implies) means
+//     "nothing is known to have been delivered — send everything".
+//
+// The callback must never be assumed to return the same subset for two
+// different targets: per-target divergence is the entire point.
 //
 // This interface is intentionally NOT a subset of services.Publisher (which
 // is strictly per-alert) to avoid import cycles between infrastructure/
@@ -714,7 +745,7 @@ type TargetPublishOutcome struct {
 // application.ApplicationPublishingAdapter and application.MetricsOnlyPublisher
 // both implement it.
 type GroupNotificationPublisher interface {
-	PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, groupLabels map[string]string, skipTarget func(target string) bool) ([]TargetPublishOutcome, error)
+	PublishGroup(ctx context.Context, groupKey string, alerts []*core.Alert, receiver string, groupLabels map[string]string, targetAlerts func(target string, alerts []*core.Alert) []*core.Alert) ([]TargetPublishOutcome, error)
 }
 
 // ErrDeliveryNotConfirmed is the sentinel a GroupNotificationPublisher must
@@ -869,7 +900,7 @@ type GroupNotifyLog interface {
 	// targets) had no way to record "N succeeded" without also recording
 	// the M that didn't — the next tick re-sent to every target,
 	// duplicating the N that already got it. Per-target keys let
-	// DefaultGroupManager.publishGroupAlerts (via the skipTarget callback
+	// DefaultGroupManager.publishGroupAlerts (via the targetAlerts callback
 	// passed to GroupNotificationPublisher.PublishGroup) retry ONLY the
 	// targets that failed.
 	IsDuplicate(ctx context.Context, groupKey GroupKey, target string, signature string, ttl time.Time) (bool, error)
@@ -881,11 +912,62 @@ type GroupNotifyLog interface {
 	// indefinitely; the in-memory implementation ignores it (IsDuplicate
 	// recomputes freshness against a caller-supplied cutoff on every call
 	// instead).
+	//
+	// Implementations MUST also drop any per-alert delivered set for
+	// (groupKey, target) (task fu4): a full entry states that the whole alert
+	// set reached this target, which strictly supersedes "these individual
+	// alerts reached it", and leaving the partial state behind would keep a
+	// second, redundant key alive on its own TTL. See DeliveredAlerts.
 	RecordSent(ctx context.Context, groupKey GroupKey, target string, signature string, now time.Time, repeatInterval time.Duration) error
 
-	// Forget removes every per-target dedup entry for groupKey (task fwb:
-	// there can be more than one now — one per target that ever received
-	// this group's notification within its current repeat_interval). Called
+	// DeliveredAlerts reports the core.Alert.DeliveryKey of the individual
+	// alerts target has already accepted for groupKey WITHOUT the group as a
+	// whole having been confirmed (task fu4, alertmanager-parity wave 4 —
+	// per-alert outcome tracking for non-batch publishers).
+	//
+	// WHY IT EXISTS: a non-batch target (Slack/Telegram/PagerDuty/Email)
+	// receives one wire message per alert, so its delivery can be genuinely
+	// partial. Before this, alert 3 of 5 failing left the whole (group,
+	// target) pair unrecorded and the next fire re-sent all five, duplicating
+	// the four that had landed. The delivered set carries the successful ones
+	// across fires so the retry sends only the alerts still owed.
+	//
+	// Empty/nil on the happy path — a fully delivered target has a normal
+	// nflog entry instead (RecordSent drops the set), and a batch target never
+	// produces one at all. Freshness is bounded the same way an entry is (TTL
+	// = repeat_interval + grace in the Redis implementation), so a stale
+	// partial state ages out into a full resend rather than suppressing
+	// notifications indefinitely.
+	//
+	// A non-nil error must be treated as "nothing is known to have been
+	// delivered" by the caller (fail-open: resend the whole set), matching the
+	// chain's Inhibit/Silence/IsDuplicate posture — at-least-once is the
+	// floor, and a duplicate beats a dropped notification.
+	DeliveredAlerts(ctx context.Context, groupKey GroupKey, target string) ([]string, error)
+
+	// RecordPartialDelivery adds deliveryKeys to target's delivered set for
+	// groupKey (task fu4) — called ONLY when the target's outcome was NOT
+	// confirmed but some of its individual alerts were accepted. Additive: a
+	// second partial fire must extend the set, not replace it, because each
+	// fire only reports on the alerts it actually attempted.
+	//
+	// repeatInterval bounds the set's lifetime exactly as it bounds an entry's
+	// (Redis-backed implementations; the in-memory one keeps it until Forget).
+	// Implementations must cap the set's size defensively — an unbounded set
+	// is a Redis memory leak driven by remote endpoint behaviour — and treat
+	// hitting the cap as "stop recording", which degrades to the pre-fu4
+	// resend-everything behaviour rather than to lost notifications.
+	//
+	// Errors are advisory: the caller logs them and continues, since the
+	// consequence is one duplicate notification per already-delivered alert on
+	// the next fire.
+	RecordPartialDelivery(ctx context.Context, groupKey GroupKey, target string, deliveryKeys []string, repeatInterval time.Duration) error
+
+	// Forget removes every per-target dedup entry for groupKey — and every
+	// per-target delivered set (task fu4), which is the same kind of
+	// group-scoped state and must not outlive the group either. (Task fwb:
+	// there can be more than one entry now — one per target that ever received
+	// this group's notification within its current repeat_interval.) Called
 	// when a group is deleted so the log doesn't grow unbounded independent
 	// of active groups. Must NOT clear any in-flight TryClaim claim for
 	// groupKey (fix round 1, Finding 2): Forget's callers

@@ -299,14 +299,14 @@ type twoTargetPublisher struct {
 	calls      []map[string]bool // one entry per PublishGroup call: target -> attempted (not skipped)
 }
 
-func (p *twoTargetPublisher) PublishGroup(_ context.Context, _ string, _ []*core.Alert, _ string, _ map[string]string, skipTarget func(string) bool) ([]TargetPublishOutcome, error) {
+func (p *twoTargetPublisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, targetAlerts func(string, []*core.Alert) []*core.Alert) ([]TargetPublishOutcome, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	attempted := map[string]bool{}
 	outcomes := make([]TargetPublishOutcome, 0, 2)
 	for _, target := range []string{"t1", "t2"} {
-		if skipTarget != nil && skipTarget(target) {
+		if targetAlerts != nil && len(targetAlerts(target, alerts)) == 0 {
 			continue
 		}
 		attempted[target] = true

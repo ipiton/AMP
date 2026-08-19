@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -52,10 +53,25 @@ type recordingNotifyLog struct {
 	sends     []string             // target names, in RecordSent order
 	releases  int                  // successful claim releases
 	ctxErrors int                  // calls rejected because their ctx was already done
+
+	// delivered is task fu4's per-alert delivered state:
+	// "groupKey|target" -> {alert fingerprint -> delivered status}.
+	//
+	// Keyed by FINGERPRINT, exactly like both production implementations
+	// (review round 1, finding C1): a set of composite "fingerprint:status"
+	// members would accumulate both statuses of a flapping alert and suppress
+	// its re-fire. A double that kept the looser shape would let that bug back
+	// in through the end-to-end tests, which is how C1 survived round 1.
+	// partials counts RecordPartialDelivery calls.
+	delivered map[string]map[string]string
+	partials  int
 }
 
 func newRecordingNotifyLog() *recordingNotifyLog {
-	return &recordingNotifyLog{entries: map[string]time.Time{}}
+	return &recordingNotifyLog{
+		entries:   map[string]time.Time{},
+		delivered: map[string]map[string]string{},
+	}
 }
 
 func (l *recordingNotifyLog) key(groupKey grouping.GroupKey, target string) string {
@@ -92,7 +108,74 @@ func (l *recordingNotifyLog) RecordSent(ctx context.Context, groupKey grouping.G
 	defer l.mu.Unlock()
 	l.entries[l.key(groupKey, target)] = now
 	l.sends = append(l.sends, target)
+	// A full entry supersedes any per-alert progress toward it (task fu4) —
+	// the production implementations drop it, so the double must too, or the
+	// "delivered-set cleaned on success" invariant is untested.
+	delete(l.delivered, l.key(groupKey, target))
 	return nil
+}
+
+// DeliveredAlerts implements task fu4's per-alert delivered-set read.
+func (l *recordingNotifyLog) DeliveredAlerts(ctx context.Context, groupKey grouping.GroupKey, target string) ([]string, error) {
+	if err := l.checkCtx(ctx); err != nil {
+		return nil, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	statuses := l.delivered[l.key(groupKey, target)]
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(statuses))
+	for fingerprint, status := range statuses {
+		out = append(out, fingerprint+":"+status)
+	}
+	return out, nil
+}
+
+// RecordPartialDelivery implements task fu4's additive per-alert record.
+func (l *recordingNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey grouping.GroupKey, target string, deliveryKeys []string, _ time.Duration) error {
+	if err := l.checkCtx(ctx); err != nil {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.partials++
+	key := l.key(groupKey, target)
+	statuses := l.delivered[key]
+	if statuses == nil {
+		statuses = map[string]string{}
+		l.delivered[key] = statuses
+	}
+	for _, deliveryKey := range deliveryKeys {
+		idx := strings.LastIndex(deliveryKey, ":")
+		if idx <= 0 || idx == len(deliveryKey)-1 {
+			continue
+		}
+		// One status per fingerprint: the new status REPLACES the old one.
+		statuses[deliveryKey[:idx]] = deliveryKey[idx+1:]
+	}
+	return nil
+}
+
+// deliveredAlerts returns the recorded per-alert delivered set for one
+// (group, target) pair.
+func (l *recordingNotifyLog) deliveredAlerts(groupKey grouping.GroupKey, target string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	statuses := l.delivered[l.key(groupKey, target)]
+	out := make([]string, 0, len(statuses))
+	for fingerprint, status := range statuses {
+		out = append(out, fingerprint+":"+status)
+	}
+	return out
+}
+
+// partialRecords returns how many times RecordPartialDelivery was called.
+func (l *recordingNotifyLog) partialRecords() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.partials
 }
 
 func (l *recordingNotifyLog) Forget(ctx context.Context, groupKey grouping.GroupKey) error {
@@ -104,6 +187,11 @@ func (l *recordingNotifyLog) Forget(ctx context.Context, groupKey grouping.Group
 	for k := range l.entries {
 		if len(k) > len(groupKey) && k[:len(groupKey)] == string(groupKey) {
 			delete(l.entries, k)
+		}
+	}
+	for k := range l.delivered {
+		if len(k) > len(groupKey) && k[:len(groupKey)] == string(groupKey) {
+			delete(l.delivered, k)
 		}
 	}
 	return nil
@@ -323,6 +411,24 @@ func (s *notifyChainStack) addFiringAlert(t *testing.T, fingerprint string) {
 		Labels:      map[string]string{"alertname": "HighCPU", "severity": "warning"},
 		Annotations: map[string]string{"summary": "cpu is high"},
 		StartsAt:    time.Now().UTC(),
+	}, s.groupKey)
+	require.NoError(t, err)
+}
+
+// addResolvedAlert re-adds an alert under the same fingerprint as RESOLVED,
+// which is how a real flap reaches a group: AddAlertToGroup replaces the alert
+// in place, so the group's signature and the alert's DeliveryKey both change.
+func (s *notifyChainStack) addResolvedAlert(t *testing.T, fingerprint string) {
+	t.Helper()
+	endsAt := time.Now().UTC()
+	_, err := s.manager.AddAlertToGroup(context.Background(), &core.Alert{
+		Fingerprint: fingerprint,
+		AlertName:   "HighCPU",
+		Status:      core.StatusResolved,
+		Labels:      map[string]string{"alertname": "HighCPU", "severity": "warning"},
+		Annotations: map[string]string{"summary": "cpu is high"},
+		StartsAt:    time.Now().UTC().Add(-time.Minute),
+		EndsAt:      &endsAt,
 	}, s.groupKey)
 	require.NoError(t, err)
 }

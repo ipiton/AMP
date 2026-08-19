@@ -261,11 +261,12 @@ func TestPublishGroupToTargets_EmptyReceiverMeansAllEnabled(t *testing.T) {
 	assert.ElementsMatch(t, []string{"a", "b"}, resultNames(results))
 }
 
-// TestPublishGroupToTargets_SkipTarget_ExcludesAlreadyDeliveredTargets
+// TestPublishGroupToTargets_TargetAlerts_ExcludesAlreadyDeliveredTargets
 // covers task fwb's per-target nflog dedup hook: a target for which
-// skipTarget returns true must be excluded entirely — no job submitted, no
-// result reported — while a target it doesn't skip still gets its result.
-func TestPublishGroupToTargets_SkipTarget_ExcludesAlreadyDeliveredTargets(t *testing.T) {
+// targetAlerts returns no alerts must be excluded entirely — no job submitted,
+// no result reported — while a target that is still owed alerts gets its
+// result.
+func TestPublishGroupToTargets_TargetAlerts_ExcludesAlreadyDeliveredTargets(t *testing.T) {
 	discovery := NewStubTargetDiscoveryManager(slog.Default())
 	discovery.AddTarget(&core.PublishingTarget{Name: "a", Type: "webhook", URL: "http://example.com", Enabled: true})
 	discovery.AddTarget(&core.PublishingTarget{Name: "b", Type: "webhook", URL: "http://example.com", Enabled: true})
@@ -273,15 +274,18 @@ func TestPublishGroupToTargets_SkipTarget_ExcludesAlreadyDeliveredTargets(t *tes
 	coordinator := newTestCoordinator(t, discovery)
 
 	asked := map[string]bool{}
-	skipTarget := func(target string) bool {
+	targetAlerts := func(target string, alerts []*core.Alert) []*core.Alert {
 		asked[target] = true
-		return target == "a"
+		if target == "a" {
+			return nil
+		}
+		return alerts
 	}
 
-	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", nil, skipTarget)
+	results, err := coordinator.PublishGroupToTargets(context.Background(), testGroupAlerts(1), "", "gk", nil, targetAlerts)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "b", results[0].Target.Name)
-	assert.True(t, asked["a"], "skipTarget must be consulted for target a")
-	assert.True(t, asked["b"], "skipTarget must be consulted for target b")
+	assert.True(t, asked["a"], "targetAlerts must be consulted for target a")
+	assert.True(t, asked["b"], "targetAlerts must be consulted for target b")
 }

@@ -46,6 +46,24 @@ type PublishingResult struct {
 	Target  *core.PublishingTarget
 	Success bool
 	Error   error
+
+	// DeliveredAlerts carries the core.Alert.DeliveryKey of the alerts this
+	// target DID accept when Success is false (task fu4, alertmanager-parity
+	// wave 4) — the per-alert partial progress of a non-batch group job whose
+	// outcome as a whole was not confirmed.
+	//
+	// Always nil when Success is true: a confirmed target gets a full nflog
+	// entry covering the whole alert set, which supersedes any per-alert
+	// bookkeeping, so repeating the keys there would be redundant state with
+	// its own TTL. Also always nil for a batch-capable target (one POST per
+	// group ⇒ nothing partial to report) and for the single-alert
+	// PublishToAll/PublishToTargets paths, which have no group set to be
+	// partial about.
+	//
+	// The notify chain turns a non-empty value into the target's delivered set
+	// so the group's next fire re-sends only the alerts still owed — see
+	// grouping.TargetPublishOutcome.DeliveredAlerts.
+	DeliveredAlerts []string
 }
 
 // PublishingCoordinator manages concurrent publishing to multiple targets
@@ -409,14 +427,22 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // hold their per-group locks/claims for the duration of an actual delivery;
 // see grouping.notifyLogClaimTTL for the TTL that has to cover it.
 //
-// skipTarget implements task fwb's per-target notification-log dedup (see
-// grouping.GroupNotificationPublisher.PublishGroup's doc comment): called
-// once per candidate target AFTER receiver-matching resolves it, BEFORE a
-// job is submitted for it. A target for which skipTarget returns true is
-// excluded entirely — no job, no result — because it already confirmed
-// delivery of this exact alert set within repeat_interval; this is what
-// makes a retry after a partial failure resend to ONLY the targets that
-// failed last cycle.
+// targetAlerts implements task fwb's per-target notification-log dedup and
+// task fu4's per-ALERT refinement of it (see
+// grouping.GroupNotificationPublisher.PublishGroup's doc comment): called once
+// per candidate target AFTER receiver-matching resolves it, BEFORE a job is
+// submitted for it, and the job carries exactly the alerts it returns.
+//
+//   - empty/nil → the target is excluded entirely (no job, no result), because
+//     it already confirmed delivery of this exact alert set within
+//     repeat_interval. This is what makes a retry after a partial failure
+//     resend to ONLY the targets that failed last cycle.
+//   - a subset → a non-batch target that already accepted some of these alerts
+//     individually (task fu4): its job carries only the remainder, so the
+//     alerts that already landed are not sent twice. The subset is what
+//     reaches the wire AND what the returned PublishingResult is about.
+//   - nil callback → every target gets the full alert set (what every caller
+//     outside the notify chain does).
 //
 // groupKey is forwarded into the wire payload's "groupKey" field for
 // batched targets (see GroupAlertFormatter.FormatGroup); it is passed
@@ -434,7 +460,7 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // logged by the caller, NOT retried in a loop here (the caller's next
 // scheduled group timer will naturally retry with the group's then-current
 // state).
-func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, skipTarget func(target string) bool) ([]*PublishingResult, error) {
+func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, targetAlerts func(target string, alerts []*core.Alert) []*core.Alert) ([]*PublishingResult, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}
@@ -448,9 +474,13 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		return []*PublishingResult{}, nil
 	}
 
-	// Resolve targets ONCE for the whole group (not once per alert).
+	// Resolve targets ONCE for the whole group (not once per alert). Each
+	// surviving target carries its OWN alert slice (task fu4): normally the
+	// whole group, but only the alerts still owed for a non-batch target that
+	// already accepted some of them — see targetAlerts.
 	all := c.discoveryManager.ListTargets()
 	targets := make([]*core.PublishingTarget, 0, len(all))
+	perTargetAlerts := make([][]*core.Alert, 0, len(all))
 	for _, t := range all {
 		if !t.Enabled {
 			continue
@@ -458,12 +488,20 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		if !targetMatchesReceiver(t, receiverName) {
 			continue
 		}
-		// Task fwb per-target nflog dedup: a target already covered this
-		// cycle is skipped entirely — no job submitted, no result reported.
-		if skipTarget != nil && skipTarget(t.Name) {
-			continue
+
+		// Task fwb per-target nflog dedup + task fu4 per-alert dedup: a target
+		// already fully covered this cycle is skipped entirely — no job
+		// submitted, no result reported.
+		owed := alerts
+		if targetAlerts != nil {
+			owed = targetAlerts(t.Name, alerts)
+			if len(owed) == 0 {
+				continue
+			}
 		}
+
 		targets = append(targets, t)
+		perTargetAlerts = append(perTargetAlerts, owed)
 	}
 
 	if len(targets) == 0 {
@@ -487,10 +525,12 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 	for i, target := range targets {
 		wg.Add(1)
 
-		go func(idx int, t *core.PublishingTarget) {
+		go func(idx int, t *core.PublishingTarget, owed []*core.Alert) {
 			defer wg.Done()
 
-			handle, err := c.submitGroupJob(ctx, alerts, t, groupKey, receiverName, groupLabels)
+			var delivered []string
+
+			handle, err := c.submitGroupJob(ctx, owed, t, groupKey, receiverName, groupLabels)
 			if err == nil {
 				// Abandon on every exit (fix round 1, review finding I2): a
 				// no-op once the job finished, and the thing that frees the
@@ -528,16 +568,27 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 					// on every shutdown.
 					reason = AbandonReasonShutdown
 				}
+
+				if err != nil {
+					// Task fu4: this target did not confirm the notification,
+					// but a non-batch job may still have got SOME of the
+					// alerts through. Harvest that progress so the notify
+					// chain's retry fire carries only the alerts still owed.
+					// Read before the deferred Abandon so a job that is about
+					// to be cancelled still reports what it managed to send.
+					delivered = handle.DeliveredAlerts()
+				}
 			}
 
 			mu.Lock()
 			results[idx] = &PublishingResult{
-				Target:  t,
-				Success: err == nil,
-				Error:   err,
+				Target:          t,
+				Success:         err == nil,
+				Error:           err,
+				DeliveredAlerts: delivered,
 			}
 			mu.Unlock()
-		}(i, target)
+		}(i, target, perTargetAlerts[i])
 	}
 
 	wg.Wait()

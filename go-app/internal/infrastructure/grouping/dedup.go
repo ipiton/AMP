@@ -2,6 +2,8 @@ package grouping
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -38,6 +40,43 @@ import (
 type notifyDedupLog struct {
 	mu      sync.Mutex
 	entries map[dedupKey]dedupEntry
+
+	// delivered holds the per-(group, target) PARTIAL delivery state (task
+	// fu4): which individual alerts a non-batch target accepted while the
+	// group as a whole stayed unconfirmed. Guarded by mu, same as entries.
+	//
+	// EXPIRES, on the same schedule as the Redis implementation's TTL (review
+	// round 1, finding I1). The first cut kept this state forever on the theory
+	// that "the entries map's caller-supplied cutoff answers freshness" — it
+	// does not: nothing consults a cutoff on this path, so while one alert of a
+	// group kept failing, the alerts that HAD landed were filtered out of every
+	// subsequent fire indefinitely and their repeat notifications were lost.
+	// This is production code (the lite profile, and the standard profile's
+	// fallback when Redis is unavailable at grouping-init), not a test double.
+	//
+	// Also bounded by deletion — RecordSent drops a target's state, Forget
+	// drops the whole group's — and by maxDeliveredAlertsPerTarget.
+	delivered map[dedupKey]*deliveredState
+}
+
+// deliveredState is one (group, target) pair's per-alert delivery progress in
+// the in-memory log (task fu4).
+//
+// statuses is keyed by FINGERPRINT, holding that alert's delivered status, so
+// there is at most one entry per alert (review round 1, finding C1): recording
+// `resolved` for an alert overwrites a previously recorded `firing` instead of
+// accumulating both, which is what a flapping alert needs in order not to be
+// suppressed when it fires again.
+type deliveredState struct {
+	statuses   map[string]string // fingerprint -> delivered status
+	recordedAt time.Time
+	ttl        time.Duration
+}
+
+// expired reports whether this state is past its TTL and must be treated as
+// absent — the in-memory equivalent of the Redis key expiring.
+func (s *deliveredState) expired(now time.Time) bool {
+	return s == nil || now.Sub(s.recordedAt) > s.ttl
 }
 
 // dedupKey scopes a dedup entry to one (group, target) pair (task fwb).
@@ -52,7 +91,10 @@ type dedupEntry struct {
 }
 
 func newNotifyDedupLog() *notifyDedupLog {
-	return &notifyDedupLog{entries: make(map[dedupKey]dedupEntry)}
+	return &notifyDedupLog{
+		entries:   make(map[dedupKey]dedupEntry),
+		delivered: make(map[dedupKey]*deliveredState),
+	}
 }
 
 // IsDuplicate reports whether a notification for (groupKey, target) carrying
@@ -80,23 +122,119 @@ func (l *notifyDedupLog) IsDuplicate(_ context.Context, groupKey GroupKey, targe
 // (groupKey, target) was just sent successfully, at now. Implements
 // GroupNotifyLog; repeatInterval is ignored (see GroupNotifyLog's doc
 // comment for why).
+//
+// Also drops this target's partial delivered set (task fu4): a full entry
+// covering the whole alert set supersedes any per-alert progress toward it.
 func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target string, signature string, now time.Time, _ time.Duration) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.entries[dedupKey{groupKey: groupKey, target: target}] = dedupEntry{signature: signature, sentAt: now}
+	key := dedupKey{groupKey: groupKey, target: target}
+	l.entries[key] = dedupEntry{signature: signature, sentAt: now}
+	delete(l.delivered, key)
 	return nil
 }
 
-// Forget removes every dedup entry (for every target) belonging to
-// groupKey. Called when a group is deleted (emptied) so the dedup log
-// doesn't grow unbounded independent of active groups. Implements
-// GroupNotifyLog.
+// DeliveredAlerts implements GroupNotifyLog (task fu4): the delivery keys of
+// the alerts target accepted while the group stayed unconfirmed. ctx is unused
+// (in-memory) and the error is always nil.
+//
+// Expired state is dropped here rather than by a background sweeper (review
+// round 1, finding I1): this is the only read path, so expiring on read gives
+// the same observable behaviour as the Redis TTL with no extra goroutine, and it
+// reclaims the memory at the same time.
+func (l *notifyDedupLog) DeliveredAlerts(_ context.Context, groupKey GroupKey, target string) ([]string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	key := dedupKey{groupKey: groupKey, target: target}
+	state := l.delivered[key]
+	if state.expired(time.Now()) {
+		delete(l.delivered, key)
+		return nil, nil
+	}
+
+	out := make([]string, 0, len(state.statuses))
+	for fingerprint, status := range state.statuses {
+		out = append(out, deliveryKeyFor(fingerprint, status))
+	}
+	return out, nil
+}
+
+// RecordPartialDelivery implements GroupNotifyLog (task fu4): additively
+// records the alerts target accepted during an otherwise unconfirmed fire, and
+// (re)sets the state's expiry to repeat_interval + grace — the same bound the
+// Redis implementation gives its key.
+//
+// Additive per FINGERPRINT: a newly recorded status replaces that alert's
+// previous one (review round 1, finding C1), so a flapping alert can never
+// accumulate two statuses and suppress its own re-fire.
+//
+// Capped at maxDeliveredAlertsPerTarget, checked up front against the count of
+// genuinely NEW alerts so the batch is either recorded whole or refused whole —
+// the same shape (and the same exact accounting) as the Redis Lua script.
+func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey GroupKey, target string, deliveryKeys []string, repeatInterval time.Duration) error {
+	if len(deliveryKeys) == 0 {
+		return nil
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	key := dedupKey{groupKey: groupKey, target: target}
+
+	state := l.delivered[key]
+	if state.expired(now) {
+		state = &deliveredState{statuses: make(map[string]string, len(deliveryKeys))}
+		l.delivered[key] = state
+	}
+
+	incoming := make(map[string]string, len(deliveryKeys))
+	newAlerts := 0
+	for _, deliveryKey := range deliveryKeys {
+		fingerprint, status, ok := splitDeliveryKey(deliveryKey)
+		if !ok {
+			continue
+		}
+		if _, exists := state.statuses[fingerprint]; !exists {
+			if _, counted := incoming[fingerprint]; !counted {
+				newAlerts++
+			}
+		}
+		incoming[fingerprint] = status
+	}
+	if len(incoming) == 0 {
+		return nil
+	}
+
+	if len(state.statuses)+newAlerts > maxDeliveredAlertsPerTarget {
+		return fmt.Errorf("%w: delivered state for %s/%s would exceed its %d-alert cap (%d + %d); per-alert progress is not recorded for this fire",
+			ErrDeliveredStateCapped, groupKey, target, maxDeliveredAlertsPerTarget, len(state.statuses), newAlerts)
+	}
+
+	for fingerprint, status := range incoming {
+		state.statuses[fingerprint] = status
+	}
+	state.recordedAt = now
+	state.ttl = deliveredStateTTL(repeatInterval)
+	return nil
+}
+
+// Forget removes every dedup entry AND every partial delivered set (for every
+// target) belonging to groupKey. Called when a group is deleted (emptied) so
+// the dedup log doesn't grow unbounded independent of active groups.
+// Implements GroupNotifyLog.
 func (l *notifyDedupLog) Forget(_ context.Context, groupKey GroupKey) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for k := range l.entries {
 		if k.groupKey == groupKey {
 			delete(l.entries, k)
+		}
+	}
+	for k := range l.delivered {
+		if k.groupKey == groupKey {
+			delete(l.delivered, k)
 		}
 	}
 	return nil
@@ -116,16 +254,67 @@ func (l *notifyDedupLog) TryClaim(_ context.Context, _ GroupKey, _ time.Duration
 // returned by RedisNotifyLog.TryClaim when acquired == false).
 func noopRelease() error { return nil }
 
+// ErrDeliveredStateCapped is returned by RecordPartialDelivery when recording
+// would push a target's delivered state past maxDeliveredAlertsPerTarget (task
+// fu4). Distinguished from a backend failure so the caller can count the
+// reversion to at-least-once separately from "Redis is broken" — see
+// DefaultGroupManager's RecordPartialDelivery call site.
+var ErrDeliveredStateCapped = errors.New("grouping: per-alert delivered state is at its cap")
+
+// splitDeliveryKey inverts core.Alert.DeliveryKey: "fingerprint:status" →
+// (fingerprint, status). ok is false for a key with no status segment or an
+// empty fingerprint, which the caller skips rather than storing.
+//
+// Split at the LAST colon: alert statuses ("firing"/"resolved") never contain
+// one, so this is exact even if a fingerprint did.
+//
+// This exists because the delivered state is stored per FINGERPRINT (one status
+// per alert — review round 1, finding C1) while the notify chain compares whole
+// DeliveryKeys, so the two representations have to convert cleanly in both
+// directions. Keeping both halves of that conversion next to alertSetSignature
+// keeps every user of the format in one file.
+func splitDeliveryKey(deliveryKey string) (fingerprint string, status string, ok bool) {
+	idx := strings.LastIndex(deliveryKey, ":")
+	if idx <= 0 || idx == len(deliveryKey)-1 {
+		return "", "", false
+	}
+	return deliveryKey[:idx], deliveryKey[idx+1:], true
+}
+
+// deliveryKeyFor rebuilds a core.Alert.DeliveryKey from its stored halves.
+func deliveryKeyFor(fingerprint string, status string) string {
+	return fingerprint + ":" + status
+}
+
+// deliveredStateTTL is how long a per-alert delivered state stays valid: the
+// group's repeat_interval plus the same grace an nflog entry gets (task fu4), so
+// stale partial progress ages out into a full resend rather than suppressing
+// notifications indefinitely. Shared by both GroupNotifyLog implementations so
+// the in-memory one cannot drift from the Redis TTL (review round 1, finding I1).
+func deliveredStateTTL(repeatInterval time.Duration) time.Duration {
+	ttl := repeatInterval
+	if ttl <= 0 {
+		ttl = notifyLogEntryTTLFallback
+	}
+	return ttl + notifyLogEntryTTLGracePeriod
+}
+
 // alertSetSignature computes a deterministic signature for alerts: sorted
-// "fingerprint:status" pairs joined by "|". Order-independent (a group's
-// alerts map iteration order is not stable) and status-sensitive (an alert
-// flipping firing<->resolved changes the signature, so it is never treated
-// as a duplicate of the prior send — matching upstream nflog, where a
-// changed alert set always triggers a fresh notification).
+// core.Alert.DeliveryKey values ("fingerprint:status") joined by "|".
+// Order-independent (a group's alerts map iteration order is not stable) and
+// status-sensitive (an alert flipping firing<->resolved changes the signature,
+// so it is never treated as a duplicate of the prior send — matching upstream
+// nflog, where a changed alert set always triggers a fresh notification).
+//
+// The per-element format is core.Alert.DeliveryKey and NOT an inline
+// concatenation (task fu4): the per-(group, target) delivered set that
+// tracks which individual alerts a non-batch target accepted is keyed by
+// exactly the same atoms, so the two must never drift apart. See
+// DeliveryKey's doc comment.
 func alertSetSignature(alerts []*core.Alert) string {
 	parts := make([]string, 0, len(alerts))
 	for _, a := range alerts {
-		parts = append(parts, a.Fingerprint+":"+string(a.Status))
+		parts = append(parts, a.DeliveryKey())
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "|")

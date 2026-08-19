@@ -48,6 +48,40 @@ type Alert struct {
 	Timestamp    *time.Time        `json:"timestamp,omitempty"`
 }
 
+// DeliveryKey identifies this alert for notification-delivery bookkeeping:
+// "<fingerprint>:<status>" (task fu4, alertmanager-parity wave 4 — per-alert
+// outcome tracking for non-batch publishers).
+//
+// It is the ATOM shared by two otherwise unrelated pieces of state, and they
+// MUST agree or the per-alert delivered-set stops matching the group's dedup
+// signature:
+//
+//   - grouping.alertSetSignature — the sorted, "|"-joined list of exactly
+//     these keys, stored in the notification log per (group, target) and
+//     compared to decide whether a group's alert set changed since the last
+//     send.
+//   - the per-(group, target) DELIVERED SET — which individual alerts a
+//     non-batch target (Slack/Telegram/PagerDuty/Email, one wire message per
+//     alert) already accepted, so a partial failure re-sends only the alerts
+//     that did not land instead of the whole set.
+//
+// Status is part of the key on purpose: an alert flipping firing<->resolved
+// is a NEW notification, never a delivered duplicate — same reasoning that
+// makes the group signature status-sensitive. Fingerprint alone would
+// suppress the resolved notification for an alert whose firing notification
+// already landed.
+//
+// Lives here, in core, rather than in either consumer, because
+// infrastructure/grouping and infrastructure/publishing deliberately do not
+// import each other (see grouping.GroupNotificationPublisher) and would
+// otherwise each carry their own copy of the format.
+func (a *Alert) DeliveryKey() string {
+	if a == nil {
+		return ""
+	}
+	return a.Fingerprint + ":" + string(a.Status)
+}
+
 // Namespace returns alert namespace from labels
 func (a *Alert) Namespace() *string {
 	if ns, ok := a.Labels["namespace"]; ok {
