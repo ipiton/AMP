@@ -34,7 +34,7 @@ Source of truth:
 |---|---|---|
 | **Routing tree** — recursive matcher, `continue`, nested routes | 🟢 Supported | `internal/business/routing/matcher.go` `RouteMatcher.FindMatchingRoutes`: recursive descent, children take precedence over parent, `continue: true` keeps evaluating siblings for multi-match. (Previously misattributed here to `evaluator.go`, which only wraps it.) |
 | Matcher operators `=`, `!=`, `=~`, `!~` incl. `matchers:` list syntax | 🟢 Supported | `internal/business/routing/tree_builder.go` `parseMatchers`/`parseMatcherExpr` parse `match`, `match_re`, and the newer `matchers:` free-form syntax into all 4 operators. |
-| Regex matcher anchoring (`^(?:re)$`) | 🟢 Supported | `internal/business/routing/matcher.go` `anchorRegex` — matches upstream; unanchored substring matching would be a parity bug (fixed here). |
+| Regex matcher anchoring (`^(?:re)$`) | 🟢 Supported | Anchored consistently across all three sites that compile a user-supplied regex matcher: `internal/business/routing/matcher.go`'s `anchorRegex` (route `matchers:`/`match_re`), `internal/infrastructure/inhibition/matchers_list.go`'s `anchorMatcherRegex` (inhibit rule `matchers:`/`match_re`, wave 7 fix rounds 1-2), and `internal/core/silencing/matcher_cache.go`'s `anchorSilenceRegex` (silence `=~`/`!~`, wave-7 fix round 2 — silences were the one site still unanchored, and for a silence that means over-silencing: `job=~"prod"` matched `job="preprod-2"` before this fix). Unanchored substring matching would be a parity bug at any of the three; each is an independently-duplicated copy of the same one-line helper, by design (see each site's own doc comment for why it isn't a shared import). |
 | `route:`/`receivers:` config parsing | 🟢 Supported | `internal/infrastructure/routing.Parse()`, gated on a top-level `route:` section existing (`internal/config.loadRouteConfig`); legacy single-receiver configs skip this path entirely. |
 | `receivers[].*_configs` **auto-provisioning delivery** | 🔴 Not implemented — control-plane only | **Read this before migrating.** AMP parses and validates every receiver's integration blocks, and routes alerts to a receiver *by name*, but it does NOT build delivery endpoints from them. Delivery targets come exclusively from Kubernetes Secrets scoped with the `amp.receiver` annotation/label (`internal/business/publishing/discovery_parse.go`). See [Receiver Integration Compatibility Matrix](#receiver-integration-compatibility-matrix) and the migration note there. |
 | Receiver-name charset | 🟢 Supported (one reserved character) | Any non-empty name except `/`, which is reserved as the group-key separator (`receiver=<name>/<group-key>`). Upstream has no restriction at all; dotted/colon/spaced/non-ASCII names (`team.dba`, `email:sre`, `ops team`) all work — they were rejected before the final fix wave. |
@@ -432,6 +432,18 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    cleanly and inhibits nothing, with no error and no warning; that `InhibitRule` type also lacks
    `source_matchers`/`target_matchers`, so those keys are dropped silently too. Found by review during the wave-7
    fix round (S2); deliberately **not** wired in that round - see `BACKLOG.md`'s `FU-TOPLEVEL-INHIBIT-RULES` line.
+10. **AMP scans every firing alert as a candidate inhibitor; upstream v0.34's `sindex` keeps one representative per
+    `equal:`-group.** `DefaultInhibitionMatcher.ShouldInhibit`/`FindInhibitors` iterate all firing alerts and test
+    each against a rule; upstream's `InhibitRule.sindex` (`inhibit.go`) instead indexes source alerts by their
+    `equal:`-label fingerprint and keeps only one (the one with the latest `EndsAt`) per fingerprint. Consequence
+    (found by review, wave-7 fix round 2, R4): where a two-sided candidate (matches both source and target sides of
+    a rule) and a separate pure-source candidate share the same `equal:`-group, AMP still inhibits via the
+    pure-source candidate (`excludeTwoSidedMatch` only excludes the two-sided one), while upstream v0.34's index may
+    have already been overwritten by whichever alert of the two arrived/re-fired last, so it does not always
+    inhibit in that scenario. This is arguably in AMP's favour (it inhibits in a case upstream sometimes misses,
+    never the reverse), and it matches how AMP already behaved for the legacy map form before wave 7 - not a new
+    divergence introduced by the matchers-form work, just newly visible once `excludeTwoSidedMatch` (C2) made the
+    two packages' inhibitor-selection strategies worth comparing directly. No code change; noted for honesty only.
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`
@@ -448,6 +460,44 @@ unfixed this round because the charset is a two-parser-wide, multiply-tested gra
 `internal/business/routing.parseMatcherExpr` and pinned by wave-5's `FU-PARSEARGUMENT-QUOTE-HANDLING` test suite),
 not something specific to inhibit rules - widening it belongs to its own reviewed change, not a drive-by inside
 this fix round.
+
+Fix round 2 (same wave, re-review "ACCEPT, residuals need one more round") found the absent-label fix (I1) had
+only reached 2 of 3 tables that carried the divergence, and one more site outside FU7-A's original scope entirely:
+
+- **`internal/core/silencing`'s own copy, R1 (fixed).** `DefaultSilenceMatcher.matchSingle` presence-gated the
+  same way, AND `RegexCache.Get` compiled silence regexes **unanchored** - for silences both point the same
+  direction, over-silencing (`job=~"prod"` silenced `job="preprod-2"` too). Both fixed the same way as the other
+  two sites; see the anchoring matrix row above and `docs/06-planning/BACKLOG.md` for the full writeup. Two
+  existing test assertions were upstream-incorrect as a direct result of the anchoring fix and are now inverted:
+  `TestMatcherRegex_Anchors`'s `{"^start", "start-middle-end"}` and `{"end$", "start-middle-end"}` cases, both in
+  `internal/core/silencing/matcher_test.go` - upstream's `labels.NewMatcher` unconditionally double-anchors even a
+  pattern that already carries its own `^`/`$`, so "starts with"/"ends with" over a longer value never matched
+  upstream in the first place; the test now documents that gotcha and adds the correct idiom (`^start.*`, `.*end$`)
+  as new coverage.
+- **Inhibition's own legacy map form, R2 (fixed).** I1's fix (fix round 1) reached `matchesAll` (the
+  matchers-form) but not `ruleMatchesSourceSide`/`ruleMatchesTargetSide`'s inline handling of
+  `source_match`/`source_match_re` (and the target twins) - upstream turns both legacy forms into
+  `labels.Matcher{MatchEqual}`/`{MatchRegexp}` exactly like the matchers-form, so they get the identical
+  absent-as-`""` treatment. I1 is complete in 3 of 3 tables only as of fix round 2.
+- **R4, sindex strategy difference** - see Known Gap #10 above; documented, no code change.
+
+**Upgrade impact** (fix rounds 1-2 together change firing/suppression behavior on upgrade, not just "more
+correct" in the abstract - operators should know before deploying):
+
+1. Route matchers `!=`/`!~` against a label an alert doesn't carry now evaluate against `""` instead of
+   auto-passing; a route relying on the old "missing label always satisfies `!=`/`!~`" behavior with an
+   empty-string comparison value (e.g. `env!=""`, previously a no-op that matched everything) can now send an
+   alert to a different receiver/branch than before.
+2. Inline (non-`config_file`) `source_match_re`/`target_match_re` inhibit rules, previously a **silent no-op**
+   (S1), now actually suppress notifications - an operator who added such a rule expecting it to work, gave up,
+   and left it in the config will see it start working (as intended) but this is new suppression appearing with
+   no config change on their end.
+3. Regex anchoring tightened at all three matcher sites (routing, inhibition, and - fix round 2 - silencing): a
+   `=~`/`!~` (or, for silences, any classic-form regex) pattern that relied on substring matching now requires a
+   full-value match. A route, inhibit rule, or **silence** whose regex was written assuming "contains" semantics
+   may stop matching (or, for silences specifically, stop suppressing) after upgrade; the fix direction is
+   correctness (upstream parity), but the practical effect for an existing deployment is "this used to
+   match/suppress and now doesn't" until the pattern is rewritten with explicit `.*` wildcards.
 
 ---
 
