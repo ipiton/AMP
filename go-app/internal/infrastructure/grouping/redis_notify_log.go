@@ -363,11 +363,11 @@ func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey,
 }
 
 // recordPartialDeliveryScript writes one target's per-alert delivery progress
-// ATOMICALLY: cap check, the writes themselves, and the TTL refresh in a single
-// Redis round-trip that no other client can interleave with (review round 1,
-// finding I2 — the previous SCARD → SADD → EXPIRE sequence could leave a
-// TTL-LESS key behind if the EXPIRE failed, which suppressed those alerts
-// forever, and its cap check raced across replicas).
+// ATOMICALLY: cap check, the writes themselves, and the TTL in a single Redis
+// round-trip that no other client can interleave with (review round 1, finding
+// I2 — the previous SCARD → SADD → EXPIRE sequence could leave a TTL-LESS key
+// behind if the EXPIRE failed, which suppressed those alerts forever, and its
+// cap check raced across replicas).
 //
 // KEYS[1] is the delivered hash. ARGV[1] is the cap, ARGV[2] the TTL in
 // milliseconds, and ARGV[3..] alternating fingerprint/status pairs. Returns the
@@ -376,6 +376,15 @@ func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey,
 //
 // The cap counts only fields that are actually NEW, so re-recording an alert
 // already present — or overwriting its status — never consumes capacity.
+//
+// PEXPIRE only runs when this call CREATES the key (re-review, finding r5): a
+// key that already exists keeps whatever TTL its first write gave it, instead
+// of sliding forward on every partial write. The previous unconditional
+// PEXPIRE let a group with one persistently-failing alert and other alerts
+// trickling in keep already-delivered alerts suppressed well past one
+// repeat_interval. Not refreshing can only make the key expire EARLIER than a
+// fresh window would (never later), which resends sooner rather than
+// suppressing longer — the at-least-once floor stays intact.
 //
 // Wrapped in redis.NewScript (re-review, finding r4) so calls go out as EVALSHA
 // and the script body travels only when the server has not cached it yet — the
@@ -397,6 +406,10 @@ var recordPartialDeliveryScript = redis.NewScript(`
 		return redis.error_reply("recordPartialDelivery: cap and ttl must be positive numbers")
 	end
 
+	-- r5: PEXPIRE must only run for a key this call creates — capture that
+	-- BEFORE any HSET, since HSET itself would make EXISTS true.
+	local isNew = redis.call("EXISTS", KEYS[1]) == 0
+
 	local incoming = 0
 	for i = 3, #ARGV, 2 do
 		if redis.call("HEXISTS", KEYS[1], ARGV[i]) == 0 then
@@ -411,15 +424,18 @@ var recordPartialDeliveryScript = redis.NewScript(`
 	for i = 3, #ARGV, 2 do
 		redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1])
 	end
-	redis.call("PEXPIRE", KEYS[1], ttl)
+	if isNew then
+		redis.call("PEXPIRE", KEYS[1], ttl)
+	end
 
 	return redis.call("HLEN", KEYS[1])
 `)
 
 // RecordPartialDelivery implements GroupNotifyLog (task fu4): records the alerts
-// target accepted during an unconfirmed fire and refreshes the TTL to match what
-// an entry would get (repeat_interval + grace), so partial progress ages out
-// exactly when a full send would have stopped deduping.
+// target accepted during an unconfirmed fire, giving the state a TTL matching
+// what an entry would get (repeat_interval + grace) the first time it is
+// written, so partial progress ages out exactly when a full send would have
+// stopped deduping.
 //
 // Additive on purpose: each fire only reports the alerts it actually attempted,
 // so a second partial failure must EXTEND the recorded state rather than replace

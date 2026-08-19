@@ -161,17 +161,33 @@ func (l *notifyDedupLog) DeliveredAlerts(_ context.Context, groupKey GroupKey, t
 }
 
 // RecordPartialDelivery implements GroupNotifyLog (task fu4): additively
-// records the alerts target accepted during an otherwise unconfirmed fire, and
-// (re)sets the state's expiry to repeat_interval + grace — the same bound the
-// Redis implementation gives its key.
+// records the alerts target accepted during an otherwise unconfirmed fire.
 //
 // Additive per FINGERPRINT: a newly recorded status replaces that alert's
 // previous one (review round 1, finding C1), so a flapping alert can never
 // accumulate two statuses and suppress its own re-fire.
 //
 // Capped at maxDeliveredAlertsPerTarget, checked up front against the count of
-// genuinely NEW alerts so the batch is either recorded whole or refused whole —
-// the same shape (and the same exact accounting) as the Redis Lua script.
+// genuinely NEW (distinct) fingerprints in this call so the batch is either
+// recorded whole or refused whole — the same rule the Redis Lua script uses
+// (re-review, finding r2: a batch that names the same new fingerprint twice,
+// e.g. ["new:firing","new:resolved"], must consume exactly one slot in both
+// implementations, not one per occurrence).
+//
+// The state's expiry is set ONLY when this call CREATES it (re-review, finding
+// r5): a state that already exists keeps the TTL its first write gave it.
+// Refreshing the TTL on every partial write let a group with one
+// persistently-failing alert and other alerts trickling in keep already-
+// delivered alerts suppressed well past one repeat_interval — this is the
+// in-memory half of that fix (see recordPartialDeliveryScript for the Redis
+// half). Not refreshing can only make the state expire EARLIER than a fresh
+// window would, which resends sooner — the at-least-once floor stays intact.
+//
+// Writes l.delivered[key] only after every check has passed (re-review,
+// finding r6): a refused (cap) or no-op (nothing genuinely new) call used to
+// still plant a fresh, empty *deliveredState in the map when the previous one
+// had expired — harmless (it reads back as expired and is reclaimed on the
+// next read) but pointless bookkeeping for a call that recorded nothing.
 func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey GroupKey, target string, deliveryKeys []string, repeatInterval time.Duration) error {
 	if len(deliveryKeys) == 0 {
 		return nil
@@ -183,10 +199,14 @@ func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey Group
 	now := time.Now()
 	key := dedupKey{groupKey: groupKey, target: target}
 
-	state := l.delivered[key]
-	if state.expired(now) {
-		state = &deliveredState{statuses: make(map[string]string, len(deliveryKeys))}
-		l.delivered[key] = state
+	existing, found := l.delivered[key]
+	isNewState := !found || existing.expired(now)
+
+	var statuses map[string]string
+	if isNewState {
+		statuses = make(map[string]string, len(deliveryKeys))
+	} else {
+		statuses = existing.statuses
 	}
 
 	incoming := make(map[string]string, len(deliveryKeys))
@@ -196,7 +216,7 @@ func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey Group
 		if !ok {
 			continue
 		}
-		if _, exists := state.statuses[fingerprint]; !exists {
+		if _, exists := statuses[fingerprint]; !exists {
 			if _, counted := incoming[fingerprint]; !counted {
 				newAlerts++
 			}
@@ -207,16 +227,26 @@ func (l *notifyDedupLog) RecordPartialDelivery(_ context.Context, groupKey Group
 		return nil
 	}
 
-	if len(state.statuses)+newAlerts > maxDeliveredAlertsPerTarget {
+	if len(statuses)+newAlerts > maxDeliveredAlertsPerTarget {
 		return fmt.Errorf("%w: delivered state for %s/%s would exceed its %d-alert cap (%d + %d); per-alert progress is not recorded for this fire",
-			ErrDeliveredStateCapped, groupKey, target, maxDeliveredAlertsPerTarget, len(state.statuses), newAlerts)
+			ErrDeliveredStateCapped, groupKey, target, maxDeliveredAlertsPerTarget, len(statuses), newAlerts)
 	}
 
 	for fingerprint, status := range incoming {
-		state.statuses[fingerprint] = status
+		statuses[fingerprint] = status
 	}
-	state.recordedAt = now
-	state.ttl = deliveredStateTTL(repeatInterval)
+
+	var state *deliveredState
+	if isNewState {
+		state = &deliveredState{
+			statuses:   statuses,
+			recordedAt: now,
+			ttl:        deliveredStateTTL(repeatInterval),
+		}
+	} else {
+		state = existing
+	}
+	l.delivered[key] = state
 	return nil
 }
 
