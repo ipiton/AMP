@@ -108,3 +108,56 @@ receivers:
 	require.Len(t, targets, 1)
 	assert.Equal(t, "https://hooks.slack.com/services/GLOBAL/FILE/HOOK", targets[0].URL)
 }
+
+// TestBuildConfigTargets_ReloadPicksUpRotatedSecretFile is the fix-round I2
+// pin for the brief-required "reload picks up changed file content" test,
+// verified at the level that actually matters: the DELIVERED target, not
+// just the parsed struct field.
+//
+// Sequence: write v1 -> load (Parse + BuildConfigTargets) -> assert target
+// carries v1 -> rewrite the SAME path to v2 -> reload (a second, independent
+// Parse + BuildConfigTargets call, standing in for /-/reload's
+// loadAndParse -> routing.Parse -> BuildConfigTargets chain) -> assert the
+// target now carries v2.
+//
+// This is the exact shape the wave-3 "config-diff short-circuit" lesson
+// exists to catch: ReloadCoordinator's "no changes, skip reload" fast path
+// (reload_coordinator.go) must never see an unchanged rotated-secret-file
+// scenario as "nothing changed" and skip re-provisioning targets. By
+// construction here the resolved value lands in RoutingConfig.Global /
+// .Receivers, which participates in RoutingFingerprint, so that short
+// circuit does not falsely trigger — this test pins the OUTCOME (the target
+// reflects the new file content after a fresh parse) rather than that
+// internal mechanism, so a future change to the fingerprint/short-circuit
+// logic that broke rotation would fail this test.
+func TestBuildConfigTargets_ReloadPicksUpRotatedSecretFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bot-token")
+	require.NoError(t, os.WriteFile(path, []byte("bot-token-v1\n"), 0o600))
+
+	yamlConfig := `
+route:
+  receiver: tg
+  group_by: [alertname]
+receivers:
+  - name: tg
+    telegram_configs:
+      - bot_token_file: ` + path + `
+        chat_id: "-100"
+`
+
+	config1, err := infraroute.NewRouteConfigParser().Parse([]byte(yamlConfig))
+	require.NoError(t, err)
+	targets1 := BuildConfigTargets(config1, quietLogger())
+	require.Len(t, targets1, 1)
+	assert.Equal(t, "bot-token-v1", targets1[0].Headers["bot_token"],
+		"first load must carry the file's v1 content")
+
+	require.NoError(t, os.WriteFile(path, []byte("bot-token-v2\n"), 0o600))
+
+	config2, err := infraroute.NewRouteConfigParser().Parse([]byte(yamlConfig))
+	require.NoError(t, err)
+	targets2 := BuildConfigTargets(config2, quietLogger())
+	require.Len(t, targets2, 1)
+	assert.Equal(t, "bot-token-v2", targets2[0].Headers["bot_token"],
+		"a reload (fresh Parse + BuildConfigTargets) must deliver the ROTATED content, not the first load's cached value")
+}

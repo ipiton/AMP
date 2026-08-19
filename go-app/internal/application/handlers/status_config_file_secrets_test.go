@@ -50,7 +50,7 @@ receivers:
 // and get redacted right along with the content they name.
 func TestIsSecretKey_FileSecretRefKeysStayVisible(t *testing.T) {
 	for _, key := range []string{
-		"api_url_file", "routing_key_file", "bot_token_file",
+		"api_url_file", "routing_key_file", "service_key_file", "bot_token_file",
 		"url_file", "slack_api_url_file", "smtp_auth_password_file",
 	} {
 		assert.False(t, isSecretKey(key, ""), "%q is a path, not a secret, and must stay visible", key)

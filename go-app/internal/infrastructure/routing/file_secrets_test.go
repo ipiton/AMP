@@ -189,6 +189,74 @@ receivers:
 	assert.Contains(t, err.Error(), missing)
 }
 
+// ServiceKey (legacy, still live as a routing-key fallback in
+// config_targets.go's pagerDutyTarget) gets the same *_file twin upstream
+// carries (fix round I1): service_key/service_key_file alongside
+// routing_key/routing_key_file.
+
+func TestParse_PagerDuty_ServiceKeyFile_MatchesInline(t *testing.T) {
+	path := writeSecretFile(t, "sk-from-file\n")
+	// RoutingKey carries validate:"required" unconditionally (a pre-existing
+	// quirk, not introduced here: even an INLINE service_key-only
+	// pagerduty_config already fails to load today, so a service_key-only
+	// config was never reachable before this fix round either) — routing_key
+	// is set here purely to get past that gate, isolating the assertion to
+	// ServiceKeyFile's own resolution.
+	yamlConfig := fmt.Sprintf(`
+route:
+  receiver: pd
+  group_by: [alertname]
+receivers:
+  - name: pd
+    pagerduty_configs:
+      - routing_key: rk-placeholder
+        service_key_file: %s
+`, path)
+
+	config, err := NewRouteConfigParser().Parse([]byte(yamlConfig))
+	require.NoError(t, err)
+	assert.Equal(t, "sk-from-file", config.Receivers[0].PagerDutyConfigs[0].ServiceKey)
+}
+
+func TestParse_PagerDuty_ServiceKeyAndFile_BothSet_Fails(t *testing.T) {
+	path := writeSecretFile(t, "sk-from-file")
+	yamlConfig := fmt.Sprintf(`
+route:
+  receiver: pd
+  group_by: [alertname]
+receivers:
+  - name: pd
+    pagerduty_configs:
+      - routing_key: rk-inline
+        service_key: sk-inline
+        service_key_file: %s
+`, path)
+
+	config, err := NewRouteConfigParser().Parse([]byte(yamlConfig))
+	require.Error(t, err)
+	assert.Nil(t, config)
+	assert.Contains(t, err.Error(), "pagerduty_configs[0].service_key")
+	assert.Contains(t, err.Error(), "exactly one")
+}
+
+func TestParse_PagerDuty_ServiceKeyFile_MissingFile_Fails(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "gone")
+	yamlConfig := fmt.Sprintf(`
+route:
+  receiver: pd
+  group_by: [alertname]
+receivers:
+  - name: pd
+    pagerduty_configs:
+      - service_key_file: %s
+`, missing)
+
+	config, err := NewRouteConfigParser().Parse([]byte(yamlConfig))
+	require.Error(t, err)
+	assert.Nil(t, config)
+	assert.Contains(t, err.Error(), missing)
+}
+
 func TestParse_Slack_APIURLFile_MatchesInline(t *testing.T) {
 	path := writeSecretFile(t, "https://hooks.slack.com/services/FILE/HOOK/URL\n")
 	yamlConfig := fmt.Sprintf(`
@@ -429,6 +497,100 @@ receivers:
 }
 
 // ============================================================================
+// Empty/whitespace-only *_file content against a `required` inline field
+// (fix round M1, brief scrutiny point 4). resolveFileSecret trims trailing
+// whitespace only, so a file holding nothing but blank lines/spaces resolves
+// to "" - the SAME as the field never having been set at all - and the
+// inline field's own `validate:"required"` tag must reject it with a clear
+// error naming the field, not a confusing pass or a silent empty credential.
+// ============================================================================
+
+func TestParse_FileSecret_WhitespaceOnlyFile_FailsRequiredValidation(t *testing.T) {
+	tests := []struct {
+		name          string
+		yamlTemplate  string
+		wantFieldPath string
+	}{
+		{
+			name: "webhook url_file",
+			yamlTemplate: `
+route:
+  receiver: hook
+  group_by: [alertname]
+receivers:
+  - name: hook
+    webhook_configs:
+      - url_file: %s
+`,
+			wantFieldPath: "WebhookConfigs[0].URL",
+		},
+		{
+			name: "pagerduty routing_key_file",
+			yamlTemplate: `
+route:
+  receiver: pd
+  group_by: [alertname]
+receivers:
+  - name: pd
+    pagerduty_configs:
+      - routing_key_file: %s
+`,
+			wantFieldPath: "PagerDutyConfigs[0].RoutingKey",
+		},
+		{
+			name: "telegram bot_token_file",
+			yamlTemplate: `
+route:
+  receiver: tg
+  group_by: [alertname]
+receivers:
+  - name: tg
+    telegram_configs:
+      - bot_token_file: %s
+        chat_id: "-100"
+`,
+			wantFieldPath: "TelegramConfigs[0].BotToken",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeSecretFile(t, "   \n\t\n   \n")
+			yamlConfig := fmt.Sprintf(tc.yamlTemplate, path)
+
+			config, err := NewRouteConfigParser().Parse([]byte(yamlConfig))
+			require.Error(t, err, "a whitespace-only secret file must resolve to empty and trip the required tag, not silently load")
+			assert.Nil(t, config)
+			assert.Contains(t, err.Error(), tc.wantFieldPath,
+				"the error must clearly name the field left empty by the whitespace-only file")
+			assert.Contains(t, err.Error(), "required")
+		})
+	}
+}
+
+// Slack's api_url is OPTIONAL at the field level (it can fall back to
+// global.slack_api_url), so a whitespace-only api_url_file takes the OTHER
+// documented path: validateReceiverEndpoints' "no api_url and no global
+// slack_api_url fallback" error, not a struct-tag `required` failure.
+func TestParse_FileSecret_WhitespaceOnlySlackAPIURLFile_FailsEndpointCheck(t *testing.T) {
+	path := writeSecretFile(t, "   \n")
+	yamlConfig := fmt.Sprintf(`
+route:
+  receiver: slack
+  group_by: [alertname]
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url_file: %s
+`, path)
+
+	config, err := NewRouteConfigParser().Parse([]byte(yamlConfig))
+	require.Error(t, err)
+	assert.Nil(t, config)
+	assert.Contains(t, err.Error(), "no api_url and no global slack_api_url")
+}
+
+// ============================================================================
 // Clone must carry every new *_file field - a missed field here would
 // silently drop it on any cloned/hot-reloaded config.
 // ============================================================================
@@ -442,8 +604,15 @@ func TestClone_CarriesFileSecretFields(t *testing.T) {
 	webhook := &WebhookConfig{URL: "https://example.com", URLFile: "/etc/amp/url"}
 	assert.Equal(t, webhook.URLFile, webhook.Clone().URLFile)
 
-	pagerduty := &PagerDutyConfig{RoutingKey: "rk", RoutingKeyFile: "/etc/amp/rk"}
-	assert.Equal(t, pagerduty.RoutingKeyFile, pagerduty.Clone().RoutingKeyFile)
+	pagerduty := &PagerDutyConfig{
+		RoutingKey:     "rk",
+		RoutingKeyFile: "/etc/amp/rk",
+		ServiceKey:     "sk",
+		ServiceKeyFile: "/etc/amp/sk",
+	}
+	pagerdutyClone := pagerduty.Clone()
+	assert.Equal(t, pagerduty.RoutingKeyFile, pagerdutyClone.RoutingKeyFile)
+	assert.Equal(t, pagerduty.ServiceKeyFile, pagerdutyClone.ServiceKeyFile)
 
 	slack := &SlackConfig{APIURL: "https://hooks.slack.com/x", APIURLFile: "/etc/amp/slack"}
 	assert.Equal(t, slack.APIURLFile, slack.Clone().APIURLFile)

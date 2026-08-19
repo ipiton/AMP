@@ -13,8 +13,9 @@ import (
 // PROBLEM: upstream Alertmanager lets every integration secret be supplied
 // either inline or via a `*_file` twin that names a file on disk — the
 // standard shape for a Kubernetes Secret mounted as a volume
-// (`api_url_file`, `routing_key_file`, `bot_token_file`, `url_file`,
-// `smtp_auth_password_file`, `slack_api_url_file`). Before this file, AMP
+// (`api_url_file`, `routing_key_file`, `service_key_file`, `bot_token_file`,
+// `url_file`, `smtp_auth_password_file`, `slack_api_url_file`). Before this
+// file, AMP
 // parsed none of them: `routing.Receiver`/`GlobalConfig` had no such fields,
 // so a config using them either failed structural validation (the inline
 // field's own `required` tag firing on an empty value) or silently lost the
@@ -126,9 +127,24 @@ func resolveFileSecrets(config *RouteConfig) error {
 					err.Error(),
 					"Set either routing_key or routing_key_file, not both",
 				)
+			} else {
+				cfg.RoutingKey = resolved
+			}
+
+			// ServiceKey is the legacy fallback (config_targets.go's
+			// pagerDutyTarget reads it when RoutingKey is empty) — upstream
+			// carries both routing_key/routing_key_file AND
+			// service_key/service_key_file, so it gets the same *_file twin.
+			resolvedService, err := resolveFileSecret(cfg.ServiceKey, cfg.ServiceKeyFile)
+			if err != nil {
+				errors.Add(
+					fmt.Sprintf("receivers[%d].pagerduty_configs[%d].service_key", ri, pi),
+					err.Error(),
+					"Set either service_key or service_key_file, not both",
+				)
 				continue
 			}
-			cfg.RoutingKey = resolved
+			cfg.ServiceKey = resolvedService
 		}
 
 		for si, cfg := range receiver.SlackConfigs {
