@@ -863,7 +863,26 @@ func TestMatchRuleFast_MissingRegexLabel(t *testing.T) {
 	}
 }
 
-// TestMatchRuleFast_EmptyConditions tests empty source/target conditions
+// TestMatchRuleFast_EmptyConditions tests a rule with empty source/target
+// conditions on BOTH sides.
+//
+// Review fix round 1 (C2): before excludeTwoSidedMatch existed, this test
+// asserted such a rule always matched when `equal` agreed, since empty
+// source/target maps were treated as vacuously true and nothing else
+// gated the result. That is no longer upstream-correct: with BOTH sides
+// empty, every alert satisfies both the source side and the target side
+// (vacuous AND over zero conditions) — so ruleMatchesSourceSide(target)
+// and ruleMatchesTargetSide(source) are always true too, and
+// excludeTwoSidedMatch discards every candidate, exactly as upstream's
+// own hasEqual guard does for this same degenerate shape (traced against
+// inhibit.go: an empty labels.Matchers.Matches is vacuously true, so
+// hasEqual's `excludeTwoSidedMatch && r.TargetMatchers.Matches(equal.Labels)`
+// fires for every candidate). A rule with no condition on either side
+// never inhibits anything upstream, full stop — which also matches
+// InhibitionRule.Validate() rejecting this exact shape (at least one
+// source AND one target condition required); this test bypasses Validate
+// by constructing the struct directly, which is why it can still observe
+// the degenerate case.
 func TestMatchRuleFast_EmptyConditions(t *testing.T) {
 	sourceAlert := createTestAlert("NodeDown", "critical", "node1", "prod")
 	targetAlert := createTestAlert("InstanceDown", "warning", "node1", "prod")
@@ -880,12 +899,15 @@ func TestMatchRuleFast_EmptyConditions(t *testing.T) {
 
 	matcher := NewMatcher(&mockCache{}, []InhibitionRule{rule}, nil)
 
-	// Should match (empty conditions = always true, only equal matters)
-	if !matcher.matchRuleFast(&rule, sourceAlert, targetAlert) {
-		t.Error("Expected match (empty source/target conditions with matching equal labels)")
+	// excludeTwoSidedMatch discards this candidate even though `equal`
+	// agrees — matching upstream's own behavior for a rule with no
+	// condition on either side.
+	if matcher.matchRuleFast(&rule, sourceAlert, targetAlert) {
+		t.Error("Expected no match: a rule with empty conditions on BOTH sides matches every alert as both source and target, so excludeTwoSidedMatch must discard every candidate (upstream behavior)")
 	}
 
-	// Test mismatch in equal labels
+	// Test mismatch in equal labels — still no match, now for two
+	// independently-sufficient reasons (exclusion AND the equal mismatch).
 	targetAlert.Labels["cluster"] = "staging" // Different cluster
 	if matcher.matchRuleFast(&rule, sourceAlert, targetAlert) {
 		t.Error("Expected no match (equal label mismatch)")
