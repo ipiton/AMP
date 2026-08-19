@@ -182,3 +182,37 @@ func TestInitializePublishing_BlackholeReceiverIngestSucceeds(t *testing.T) {
 	// A receiver the config never declared is still a loud configuration gap.
 	require.Error(t, publisher.PublishToReceiver(context.Background(), alert, "never-declared"))
 }
+
+// TestApplyKnownReceivers_UsesGivenConfig pins fix-round-2 re-review minor 1:
+// the receiver set is published from the config passed IN, so ReloadConfig can
+// push the new set before swapping r.config — closing the window where an alert
+// routed to a newly declared blackhole receiver still took the loud path.
+func TestApplyKnownReceivers_UsesGivenConfig(t *testing.T) {
+	cfg := liteConfigWithReceivers(true)
+	registry := &ServiceRegistry{logger: testRegistryLogger(), config: cfg}
+	t.Cleanup(registry.shutdownPublishing)
+	registry.initializePublishing(context.Background())
+
+	publisher, ok := registry.publisher.(*ApplicationPublishingAdapter)
+	require.True(t, ok)
+
+	alert := &core.Alert{
+		Fingerprint: "fp-new-blackhole",
+		AlertName:   "DroppedByDesign",
+		Status:      core.StatusFiring,
+		StartsAt:    time.Now(),
+	}
+
+	// Not declared yet -> loud error.
+	require.Error(t, publisher.PublishToReceiver(context.Background(), alert, "added-later"))
+
+	// A reload's NEW config declares it, pushed while r.config still points at
+	// the old one (exactly ReloadConfig's ordering).
+	newCfg := liteConfigWithReceivers(true)
+	newCfg.Routing.Receivers = append(newCfg.Routing.Receivers, &infraroute.Receiver{Name: "added-later"})
+	registry.applyKnownReceivers(newCfg)
+
+	require.NoError(t, publisher.PublishToReceiver(context.Background(), alert, "added-later"),
+		"the new blackhole receiver must be recognised before the config pointer swap")
+	assert.Same(t, cfg, registry.config, "sanity: r.config was not swapped by applyKnownReceivers")
+}

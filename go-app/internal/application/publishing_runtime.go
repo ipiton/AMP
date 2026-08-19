@@ -224,7 +224,7 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, confi
 	// receivers the config DECLARES, so a declared receiver with no targets is
 	// an intentional drop rather than a "no targets found" error. Must run after
 	// the coordinator exists, hence not folded into applyConfigTargets.
-	r.applyKnownReceivers()
+	r.applyKnownReceivers(r.config)
 
 	stats := discovery.GetStats()
 	r.logger.Info("Publishing runtime initialized",
@@ -272,18 +272,26 @@ func (r *ServiceRegistry) applyConfigTargets() {
 // applyKnownReceivers pushes the receiver names declared in the LIVE config into
 // the publishing coordinator (re-review finding R2).
 //
-// Called at startup and again from ReloadConfig, alongside applyConfigTargets:
-// a receivers-only edit can add or remove a blackhole receiver just as easily as
-// an integration.
-func (r *ServiceRegistry) applyKnownReceivers() {
+// Called at startup and again from ReloadConfig. On reload it runs FIRST — before
+// the config pointer swap, the route-tree reload and applyConfigTargets
+// (fix-round-2 re-review minor 1): otherwise an alert routed to a NEWLY declared
+// blackhole receiver in that sub-millisecond window still took the loud path
+// (207 on ingest, or an error log plus a retry on the next group fire). Pushing
+// the new set early is safe in both directions — a receiver that HAS targets
+// never reaches the blackhole branch, and a receiver dropped from the config
+// simply goes back to being a loud unknown receiver.
+//
+// Takes the config explicitly rather than reading r.config, so the reload can
+// publish the NEW receiver set before r.config itself is swapped.
+func (r *ServiceRegistry) applyKnownReceivers(cfg *appconfig.Config) {
 	if r.publishingCoordinator == nil {
 		return
 	}
 
 	var names []string
-	if r.config != nil && r.config.Routing != nil {
-		names = make([]string, 0, len(r.config.Routing.Receivers))
-		for _, receiver := range r.config.Routing.Receivers {
+	if cfg != nil && cfg.Routing != nil {
+		names = make([]string, 0, len(cfg.Routing.Receivers))
+		for _, receiver := range cfg.Routing.Receivers {
 			if receiver != nil && receiver.Name != "" {
 				names = append(names, receiver.Name)
 			}
