@@ -10,7 +10,8 @@ import "time"
 //
 //	delivery-confirmation wait  (publishing.CoordinatorConfig.DeliveryConfirmationTimeout)
 //	  <  timer-callback deadline (TimerManagerConfig.CallbackTimeout)
-//	  <= cross-replica claim TTL (DefaultGroupManagerConfig.NotifyLogClaimTTL)
+//	  <  cross-replica claim TTL (DefaultGroupManagerConfig.NotifyLogClaimTTL)
+//	  <  reconciliation grace    (TimerManagerConfig.ReconciliationGrace)
 //
 // Round 1 shipped them as three independent literals — a 30s callback
 // deadline (hardcoded in onTimerExpired), a 45s wait and a 60s claim TTL —
@@ -47,6 +48,23 @@ const (
 	// claim TTL expires.
 	notifyBookkeepingTimeout = 5 * time.Second
 
+	// adoptionSafetyMargin is how much longer than a fire's WORST CASE the
+	// orphan-adoption grace period must be (task rec fix round 2, review
+	// finding R4).
+	//
+	// WHY IT EXISTS: reconcileOrphanedTimers treats a timer overdue by more
+	// than the grace period as abandoned by a dead replica and adopts it. Since
+	// task rec a fire legitimately takes up to the callback deadline, so with
+	// the pre-round-2 20s grace a LIVE fire looked orphaned: the adopting
+	// replica correctly lost the publish claim (no double notification), but it
+	// continued into onTimerExpired's tail and called
+	// storage.DeleteTimer, racing the publishing replica's continuation
+	// SaveTimer. If the delete landed last, the shared timer record was gone
+	// and only the publisher's in-memory Go timer kept the group alive — losing
+	// that replica stopped the group notifying at all. Grace must therefore
+	// exceed the whole fire INCLUDING its claim, not just the delivery wait.
+	adoptionSafetyMargin = 25 * time.Second
+
 	// defaultDeliveryConfirmationBudget mirrors
 	// publishing.DefaultDeliveryConfirmationTimeout and exists only so the
 	// package-level defaults below (notifyLogClaimTTL,
@@ -78,10 +96,23 @@ func TimerCallbackTimeoutFor(deliveryTimeout time.Duration) time.Duration {
 // deliveryTimeout — i.e. it must outlive the callback deadline, since the
 // claim is taken early in the fire and released at the very end.
 //
-// Kept equal to TimerCallbackTimeoutFor rather than larger: the claim is
-// acquired a few milliseconds into the fire, so its expiry lands just after
-// the callback deadline, and every extra second here is a second longer that
-// a CRASHED replica blocks this group's retries on the surviving ones.
+// Strictly larger than TimerCallbackTimeoutFor by the bookkeeping window (fix
+// round 2, review finding R8): the claim must still be held while the
+// post-delivery bookkeeping runs, and that work happens at the very end of —
+// or just past — the callback deadline. Round 1 made the two equal, which left
+// zero margin for it. Every extra second here is a second longer that a
+// CRASHED replica blocks this group's retries on the surviving ones, so the
+// margin is exactly the bookkeeping budget and no more.
 func NotifyLogClaimTTLFor(deliveryTimeout time.Duration) time.Duration {
-	return TimerCallbackTimeoutFor(deliveryTimeout)
+	return TimerCallbackTimeoutFor(deliveryTimeout) + notifyBookkeepingTimeout
+}
+
+// ReconciliationGraceFor returns the orphan-adoption grace period that cannot
+// mistake a live notify fire for one abandoned by a dead replica — see
+// adoptionSafetyMargin for the liveness bug that causes.
+//
+// Used by wiring code the same way as the other two helpers, and by
+// defaultReconciliationGracePeriod for hand-built timer managers.
+func ReconciliationGraceFor(deliveryTimeout time.Duration) time.Duration {
+	return NotifyLogClaimTTLFor(deliveryTimeout) + adoptionSafetyMargin
 }

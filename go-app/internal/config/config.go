@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/spf13/viper"
 )
@@ -707,14 +708,26 @@ func setDefaults() {
 	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc
 	// comment (config.go) for why the lite profile ignores this.
 	viper.SetDefault("grouping.reconciliation_interval", "45s")
-	// 20s, NOT 60s (final review finding 2): the shared timer record's own
-	// Redis TTL is ExpiresAt + grouping's timerTTLGracePeriod. A 60s
-	// adoption grace equalled that TTL grace, so a timer became eligible for
-	// adoption at the exact moment its key expired — ListOverdueTimers
-	// always came back empty and a dead replica's groups never notified
-	// again. Keep in sync with grouping.defaultReconciliationGracePeriod,
-	// which enforces the same relationship at compile time.
-	viper.SetDefault("grouping.reconciliation_grace", "20s")
+	// Two invariants meet here — keep in sync with
+	// grouping.defaultReconciliationGracePeriod, which derives the same value
+	// and is checked against the first one at compile time:
+	//
+	//  1. Well BELOW the shared timer record's own Redis TTL grace
+	//     (grouping.timerTTLGracePeriod, 10m): the difference between the two
+	//     IS the adoption window. Equal values collapsed it to ~0s, so a timer
+	//     became adoptable exactly when its key expired and a dead replica's
+	//     groups never notified again (final review finding 2).
+	//  2. ABOVE a whole notify fire, publish claim included (90s at the default
+	//     delivery-confirmation timeout — task rec fix round 2, review finding
+	//     R4). Since task rec a fire blocks until delivery is confirmed; a
+	//     shorter grace makes a LIVE fire look orphaned, and the adopting
+	//     replica — correctly blocked from double-notifying by the publish
+	//     claim — still deletes the shared timer record, racing the
+	//     publisher's continuation. Was 20s, i.e. shorter than the fire.
+	//
+	// ServiceRegistry.validateNotifyTimingBudget rechecks (2) at startup
+	// against the actual publishing.queue.delivery_confirmation_timeout.
+	viper.SetDefault("grouping.reconciliation_grace", "90s")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)
@@ -968,6 +981,18 @@ func (c *Config) validatePublishing() error {
 	}
 	if c.Publishing.Queue.DeliveryConfirmationTimeout <= 0 {
 		return fmt.Errorf("publishing.queue.delivery_confirmation_timeout must be positive")
+	}
+	// Upper bound (task rec fix round 2, review finding R9): this knob is not
+	// just a timeout — the notify chain holds a group's publish lock and its
+	// cross-replica claim for the whole wait, and the timer-callback deadline
+	// and orphan-adoption grace are derived from it. A multi-minute value would
+	// hold those for minutes and collide with group_interval/reconciliation
+	// assumptions, so refuse it here rather than degrade quietly.
+	if c.Publishing.Queue.DeliveryConfirmationTimeout > infrapublishing.MaxDeliveryConfirmationTimeout {
+		return fmt.Errorf(
+			"publishing.queue.delivery_confirmation_timeout=%s exceeds the supported maximum %s "+
+				"(the notify chain holds each group's publish lock and cross-replica claim for this long, and both the timer-callback deadline and the orphan-adoption grace are derived from it)",
+			c.Publishing.Queue.DeliveryConfirmationTimeout, infrapublishing.MaxDeliveryConfirmationTimeout)
 	}
 
 	if c.Publishing.Refresh.Enabled {
