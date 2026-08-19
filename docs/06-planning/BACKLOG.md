@@ -117,7 +117,7 @@
 - [x] **FU-STORAGEMANAGER-FAILBACK** _(closed by wave 5, 2026-08-19)_ — StorageManager runtime Redis failback/failforward: the existing (built 2025-11-04, never wired in) `grouping.StorageManager` now wraps the standard profile's Redis `GroupStorage`, with a health probe, backend-active gauge, and loud logging on switch. Recovery is a clean cutover, not a state merge — documented in `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #6. ~1-2d
 - [ ] **FU-SLACK-PAGERDUTY-QUEUE-PATH** — enhanced slack/pagerduty publishers unreachable via queue path (same class as telegram fix in Phase 7.2). Mutex guards for client maps. ~1d
 - [ ] **FU-PARSEARGUMENT-QUOTE-HANDLING** — parseMatcherExpr quote handling edge cases (third matcher grammar divergence vs configvalidator). ~0.5d
-- [ ] **FU-GLOB-DEFAULT-VALUES** — GlobalConfig fallback fields for group_by/duration. ~0.5d
+- [x] **FU-GLOB-DEFAULT-VALUES** _(closed by wave 5, 2026-08-19)_ — GlobalConfig fallback fields for group_by/duration: `infraroute.GlobalConfig.GroupBy/GroupWait/GroupInterval/RepeatInterval` restored (dropped by the TN-137 dedup, 3f8d69d) as a fallback layer `TreeBuilder.inheritGroupBy`/`inheritDuration` consult below parent-route inheritance and above the hardcoded upstream defaults. AMP-only convenience, not upstream's actual `global:` schema — see `docs/ALERTMANAGER_COMPATIBILITY.md`. ~0.5d
 - [ ] **FU-DOUBLE-NORMALIZE-ROUTES** — double NormalizeRoutePrefix call cleanup. ~0.25d
 - [ ] **FU-PARSEBOOL-EMPTY-DEFAULT** — parseBoolQueryStrict silently defaults on empty param value. ~0.25d
 - [x] **FU-MICRO-CLEANUPS** _(closed by wave 2, 2026-08-18)_ — — minor code/test hygiene from final-review backlog:

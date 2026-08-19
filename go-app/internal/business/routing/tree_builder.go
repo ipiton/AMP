@@ -342,12 +342,10 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) [
 	// Priority:
 	// 1. Route's own group_by (if set)
 	// 2. Parent's group_by (if exists)
-	// 3. Default: ["alertname"]
-	//
-	// Note: there is no global-config fallback layer here. infrastructure/
-	// routing.GlobalConfig (TN-137 canonical type) only carries
-	// resolve_timeout/SMTP/HTTP settings, not grouping defaults, so unlike
-	// this package's pre-dedup local GlobalConfig there is nothing to read.
+	// 3. global.group_by (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
+	//    — restored on infraroute.GlobalConfig; see that type's doc comment
+	//    for why this is an AMP-only convenience, not an upstream field)
+	// 4. Default: ["alertname"]
 
 	if len(route.GroupBy) > 0 {
 		return route.GroupBy
@@ -355,6 +353,10 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) [
 
 	if parent != nil && len(parent.GroupBy) > 0 {
 		return parent.GroupBy
+	}
+
+	if b.config != nil && b.config.Global != nil && len(b.config.Global.GroupBy) > 0 {
+		return b.config.Global.GroupBy
 	}
 
 	return []string{"alertname"}
@@ -369,11 +371,10 @@ func (b *TreeBuilder) inheritDuration(
 	// Priority:
 	// 1. Route's own value (if > 0)
 	// 2. Parent's value (if exists and > 0)
-	// 3. Default value (based on field name)
-	//
-	// Note: no global-config fallback layer, for the same reason as
-	// inheritGroupBy above — infrastructure/routing.GlobalConfig has no
-	// grouping-duration fields to read.
+	// 3. global.<field> (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
+	//    — restored on infraroute.GlobalConfig; see that type's doc comment
+	//    for why this is an AMP-only convenience, not an upstream field)
+	// 4. Default value (based on field name)
 
 	if routeValue > 0 {
 		return routeValue
@@ -397,8 +398,41 @@ func (b *TreeBuilder) inheritDuration(
 		}
 	}
 
+	if global := b.globalDuration(fieldName); global > 0 {
+		return global
+	}
+
 	// Return default value
 	return b.getDefaultDuration(fieldName)
+}
+
+// globalDuration reads the global.<fieldName> fallback (see inheritDuration's
+// priority list above), returning 0 when config/Global is nil or the field
+// itself is unset — both mean "nothing to fall back to here", identical to
+// how routeValue/parent's 0 is treated by the caller.
+//
+// b.config.Global's duration fields are *infraroute.Duration (a defined
+// time.Duration type, not the grouping.Duration struct durationOrZero
+// unwraps above) — hence the explicit conversion instead of reusing that
+// helper.
+func (b *TreeBuilder) globalDuration(fieldName string) time.Duration {
+	if b.config == nil || b.config.Global == nil {
+		return 0
+	}
+
+	var d *infraroute.Duration
+	switch fieldName {
+	case "group_wait":
+		d = b.config.Global.GroupWait
+	case "group_interval":
+		d = b.config.Global.GroupInterval
+	case "repeat_interval":
+		d = b.config.Global.RepeatInterval
+	}
+	if d == nil {
+		return 0
+	}
+	return time.Duration(*d)
 }
 
 // getDefaultDuration returns the default duration for a field.

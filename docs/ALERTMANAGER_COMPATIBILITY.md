@@ -321,6 +321,15 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    (if not fully lossless) resume are the shipped deliverable. `TimerStorage` is not wrapped by the same mechanism —
    it has its own, separate reconciliation loop (task 6.2, `grouping.TimerManagerConfig.ReconciliationInterval`) for
    distributed timer liveness, which this task did not extend.
+7. **`global.group_by`/`group_wait`/`group_interval`/`repeat_interval` are an AMP-only convenience, not an
+   upstream `global:` field.** Closed in wave 5 (`FU-GLOB-DEFAULT-VALUES`): `TreeBuilder.inheritGroupBy`/
+   `inheritDuration` now consult `infraroute.GlobalConfig`'s matching field when neither the route itself nor any
+   ancestor route set one, before falling back to the hardcoded upstream default (`["alertname"]` / 30s / 5m / 4h).
+   Upstream Alertmanager's actual `global:` section carries no grouping fields at all — its equivalent mechanism is
+   simply setting these on the root `route:`, which already cascades to every descendant via the same
+   parent-chain inheritance this layer sits below. AMP had this fallback layer once (a pre-dedup, package-local
+   `GlobalConfig`), lost it when that type was deleted in favor of the canonical `infrastructure/routing` one
+   (`3f8d69d`, TN-137), and this task put it back on the canonical type rather than reintroducing the duplicate.
 
 ---
 
