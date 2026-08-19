@@ -806,6 +806,26 @@ func (q *PublishingQueue) createPublisherForJob(job *PublishingJob) (AlertPublis
 	}
 }
 
+// jobWasAbandoned reports whether job's delivery attempt was genuinely
+// abandoned — cancelled before it produced any real outcome — as opposed to
+// one that SETTLED (successfully, or with a real failure) even though
+// job.ctx happens to already be cancelled by the time this runs.
+//
+// Review finding M-c: a job whose final HTTP attempt fails (500, refused) at
+// essentially the same instant the waiter's confirmation-wait timeout fires
+// can have job.ctx already cancelled by handle.Abandon by the time processJob
+// checks it, even though that cancellation had nothing to do with the
+// attempt's own, already-decided outcome. job.ctx is a plain
+// context.WithCancel, so its Err() is always exactly context.Canceled once
+// set — checking that the RETURNED error itself wraps that cancellation (the
+// attempt was actually aborted mid-flight, not merely coincident with a
+// now-cancelled context) is what tells "never settled" apart from "settled,
+// but raced". A settled job must keep its normal failure path (breaker + DLQ
+// decision), never lose its DLQ entry to the abandon branch.
+func jobWasAbandoned(job *PublishingJob, err error) bool {
+	return err != nil && job.ctx != nil && job.ctx.Err() != nil && errors.Is(err, context.Canceled)
+}
+
 // processJob processes a single publishing job with retry logic.
 //
 // Delivery confirmation (task rec): every exit path reports an outcome
@@ -877,10 +897,25 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	deliveryOutcome = err
 
 	// Abandoned job (task rec fix round 1, review finding I2; classified in
-	// round 2 per finding R3): its context was cancelled before it finished.
-	// Never a DLQ entry — the notify chain re-publishes to any target it could
-	// not confirm on the group's next fire, so a DLQ record here is a
-	// duplicate waiting to be replayed.
+	// round 2 per finding R3): its context was cancelled BEFORE IT FINISHED —
+	// i.e. cancellation is what ended the attempt, not a coincidence. Never a
+	// DLQ entry — the notify chain re-publishes to any target it could not
+	// confirm on the group's next fire, so a DLQ record here is a duplicate
+	// waiting to be replayed.
+	//
+	// errors.Is(err, context.Canceled) (rather than just job.ctx.Err() != nil)
+	// is the fix for review finding M-c: a job whose final HTTP attempt
+	// genuinely SETTLES (success, or a real 500/refused failure) at
+	// essentially the same instant the waiter's confirmation-wait timeout
+	// fires can have job.ctx already cancelled by handle.Abandon by the time
+	// this runs, even though that cancellation had nothing to do with the
+	// attempt's own outcome. job.ctx is a plain context.WithCancel, so its
+	// Err() is always exactly context.Canceled once set — checking that the
+	// RETURNED error itself is a cancellation (the request was actually
+	// aborted mid-flight) distinguishes "never settled" from "settled with a
+	// real failure that happened to race the ctx cancellation", which must
+	// keep its normal failure path (breaker + DLQ decision) below instead of
+	// silently losing its DLQ entry.
 	//
 	// The circuit breaker, though, depends on WHY:
 	//
@@ -893,7 +928,7 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	//   - anything else (queue shutdown, or a handle released after its
 	//     outcome was already read): says nothing about the target, so the
 	//     breaker is left alone.
-	if err != nil && job.ctx != nil && job.ctx.Err() != nil {
+	if jobWasAbandoned(job, err) {
 		reason := AbandonReason(job.abandonReason.Load())
 
 		q.totalFailed.Add(1)
