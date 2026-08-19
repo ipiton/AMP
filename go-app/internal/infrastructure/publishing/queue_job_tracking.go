@@ -126,8 +126,11 @@ func (s *LRUJobTrackingStore) Add(job *PublishingJob) {
 
 // Get retrieves a job by ID (nil if not found)
 func (s *LRUJobTrackingStore) Get(id string) *JobSnapshot {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// Full lock (not RLock): MoveToFront mutates the shared lruList, so
+	// concurrent Get calls must not run this in parallel with each other
+	// or with any other reader/writer touching the list.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if elem, ok := s.store[id]; ok {
 		// Move to front (most recently used)

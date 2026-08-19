@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/ipiton/AMP/internal/core"
 )
@@ -321,21 +320,32 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // filtering happens exactly ONCE for the whole group, not once per alert as
 // a naive loop of PublishToAll/PublishToTargets calls would do.
 //
-// Wire-level scope (documented, not hidden): the publishing stack below
-// this call — PublishingJob, the queue workers, AlertFormatter, and every
-// publisher client (webhook/slack/telegram/pagerduty/email) — is built
-// around exactly one alert per job/payload (see formatWebhook/
-// formatAlertmanager: each always wraps exactly one alert in its "alerts"
-// array). Turning that into a true single multi-alert wire payload
-// (upstream Alertmanager's webhook body: one POST with "alerts": [N]) needs
-// changes across every formatter and client and is out of scope for this
-// task (tracked as a follow-up — see task 2.4 report). This method still
-// submits one queue job per (alert, target) pair internally. What task 2.4
-// actually changes is the CONTRACT above this call:
-// grouping.DefaultGroupManager.publishGroupAlerts now makes exactly ONE
-// call here per group-timer firing (after running Inhibit/Silence/Dedup
-// once for the whole group), instead of looping N publisher calls — one
-// per alert — as it did before this task.
+// Wire-level batching (task fwb, alertmanager-parity wave 2): this method
+// now submits exactly ONE queue job per matching target — via
+// PublishingQueue.SubmitGroup, carrying every alert — instead of the task
+// 2.4-era one-job-per-(alert, target) shape. A webhook/alertmanager-format
+// target's job is delivered as ONE wire-level POST with an "alerts" array
+// (upstream Alertmanager's shape — see GroupAlertFormatter.FormatGroup);
+// every other target type is still ONE job, but PublishingQueue.publishJob
+// iterates Publish once per alert inside that single job/retry unit (those
+// integrations have no array-payload wire shape to batch into).
+//
+// skipTarget implements task fwb's per-target notification-log dedup (see
+// grouping.GroupNotificationPublisher.PublishGroup's doc comment): called
+// once per candidate target AFTER receiver-matching resolves it, BEFORE a
+// job is submitted for it. A target for which skipTarget returns true is
+// excluded entirely — no job, no result — because it already confirmed
+// delivery of this exact alert set within repeat_interval; this is what
+// makes a retry after a partial failure resend to ONLY the targets that
+// failed last cycle.
+//
+// groupKey is forwarded into the wire payload's "groupKey" field for
+// batched targets (see GroupAlertFormatter.FormatGroup); it is passed
+// through as a plain string precisely so this package need not import
+// infrastructure/grouping (see GroupNotificationPublisher's doc comment on
+// that boundary). groupLabels (review finding 1, fwb fix round 1) is
+// forwarded the same way into the wire payload's "groupLabels" field — the
+// caller resolves it from grouping.GroupMetadata.GroupBy.
 //
 // Receiver-matching semantics mirror PublishToTargets: empty receiverName,
 // or a target with no Receivers list, matches everything. Zero alerts is a
@@ -345,7 +355,7 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // logged by the caller, NOT retried in a loop here (the caller's next
 // scheduled group timer will naturally retry with the group's then-current
 // state).
-func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string) ([]*PublishingResult, error) {
+func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alerts []*core.Alert, receiverName string, groupKey string, groupLabels map[string]string, skipTarget func(target string) bool) ([]*PublishingResult, error) {
 	if len(alerts) == 0 {
 		return nil, nil
 	}
@@ -366,9 +376,15 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		if !t.Enabled {
 			continue
 		}
-		if targetMatchesReceiver(t, receiverName) {
-			targets = append(targets, t)
+		if !targetMatchesReceiver(t, receiverName) {
+			continue
 		}
+		// Task fwb per-target nflog dedup: a target already covered this
+		// cycle is skipped entirely — no job submitted, no result reported.
+		if skipTarget != nil && skipTarget(t.Name) {
+			continue
+		}
+		targets = append(targets, t)
 	}
 
 	if len(targets) == 0 {
@@ -385,44 +401,40 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		"target_count", len(targets),
 	)
 
-	now := time.Now().UTC()
-	results := make([]*PublishingResult, 0, len(targets)*len(alerts))
+	results := make([]*PublishingResult, len(targets))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	for _, target := range targets {
-		for _, alert := range alerts {
-			wg.Add(1)
+	for i, target := range targets {
+		wg.Add(1)
 
-			go func(t *core.PublishingTarget, a *core.Alert) {
-				defer wg.Done()
+		go func(idx int, t *core.PublishingTarget) {
+			defer wg.Done()
 
-				select {
-				case c.semaphore <- struct{}{}:
-					defer func() { <-c.semaphore }()
-				case <-ctx.Done():
-					mu.Lock()
-					results = append(results, &PublishingResult{
-						Target:  t,
-						Success: false,
-						Error:   ctx.Err(),
-					})
-					mu.Unlock()
-					return
-				}
-
-				enrichedAlert := &core.EnrichedAlert{Alert: a, ProcessingTimestamp: &now}
-				err := c.queue.Submit(enrichedAlert, t)
-
+			select {
+			case c.semaphore <- struct{}{}:
+				defer func() { <-c.semaphore }()
+			case <-ctx.Done():
 				mu.Lock()
-				results = append(results, &PublishingResult{
+				results[idx] = &PublishingResult{
 					Target:  t,
-					Success: err == nil,
-					Error:   err,
-				})
+					Success: false,
+					Error:   ctx.Err(),
+				}
 				mu.Unlock()
-			}(target, alert)
-		}
+				return
+			}
+
+			err := c.queue.SubmitGroup(alerts, t, groupKey, receiverName, groupLabels)
+
+			mu.Lock()
+			results[idx] = &PublishingResult{
+				Target:  t,
+				Success: err == nil,
+				Error:   err,
+			}
+			mu.Unlock()
+		}(i, target)
 	}
 
 	wg.Wait()

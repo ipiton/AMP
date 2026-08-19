@@ -165,6 +165,30 @@ type TimerMetadata struct {
 	LockID string `json:"lock_id,omitempty"`
 }
 
+// Clone creates a deep copy of t, including the LastResetAt time pointer,
+// so a caller mutating the returned copy cannot corrupt the original shared
+// TimerMetadata. Returns nil for a nil receiver. Shared by GroupTimer.Clone
+// and MemoryGroupStorage.copyMetadata (task fu2-d item 5) so both timer-copy
+// paths use the same deep-copy logic instead of one of them shallow-copying
+// the pointer.
+func (t *TimerMetadata) Clone() *TimerMetadata {
+	if t == nil {
+		return nil
+	}
+
+	clone := &TimerMetadata{
+		Version:    t.Version,
+		CreatedBy:  t.CreatedBy,
+		ResetCount: t.ResetCount,
+		LockID:     t.LockID,
+	}
+	if t.LastResetAt != nil {
+		resetTime := *t.LastResetAt
+		clone.LastResetAt = &resetTime
+	}
+	return clone
+}
+
 // IsExpired returns true if the timer has passed its expiration time.
 //
 // This is a convenience method for checking if a timer should have fired.
@@ -205,18 +229,7 @@ func (t *GroupTimer) Clone() *GroupTimer {
 	}
 
 	// Deep copy metadata if present
-	if t.Metadata != nil {
-		clone.Metadata = &TimerMetadata{
-			Version:    t.Metadata.Version,
-			CreatedBy:  t.Metadata.CreatedBy,
-			ResetCount: t.Metadata.ResetCount,
-			LockID:     t.Metadata.LockID,
-		}
-		if t.Metadata.LastResetAt != nil {
-			resetTime := *t.Metadata.LastResetAt
-			clone.Metadata.LastResetAt = &resetTime
-		}
-	}
+	clone.Metadata = t.Metadata.Clone()
 
 	return clone
 }

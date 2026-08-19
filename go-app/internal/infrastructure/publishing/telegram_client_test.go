@@ -4,16 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ipiton/AMP/pkg/httperror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 // telegram_client_test.go - tests for HTTPTelegramClient against a fake
@@ -299,4 +302,159 @@ func TestHTTPTelegramClient_SendMessage_NetworkErrorDoesNotLeakToken(t *testing.
 	// test would pass vacuously because nothing was logged at all).
 	assert.True(t, strings.Contains(logOutput, "Retrying after network error"),
 		"expected at least one retry log line to assert masking against")
+}
+
+// telegram_client_test.go (per-chat rate limiting) - tests for
+// chatRateLimiterStore and its wiring into HTTPTelegramClient.SendMessage.
+// Timing assertions use rate/burst parameters chosen for the test (fast,
+// deterministic) rather than the client's real defaults (1 msg/sec per
+// chat), and use floor/ceiling ranges instead of exact durations to stay
+// stable under CI scheduling jitter.
+
+func TestNewHTTPTelegramClient_ChatRateLimiters(t *testing.T) {
+	client := NewHTTPTelegramClient("", "test-token", slog.Default())
+	impl, ok := client.(*HTTPTelegramClient)
+	require.True(t, ok)
+	require.NotNil(t, impl.chatLimiters)
+	assert.Equal(t, maxTrackedChatLimiters, impl.chatLimiters.capacity)
+	assert.Equal(t, defaultChatRateLimit, impl.chatLimiters.rate)
+	assert.Equal(t, defaultChatBurst, impl.chatLimiters.burst)
+}
+
+func TestChatRateLimiterStore_GetOrCreate(t *testing.T) {
+	store := newChatRateLimiterStore(10, rate.Limit(1), 3)
+
+	a1 := store.getOrCreate("chatA")
+	a2 := store.getOrCreate("chatA")
+	b1 := store.getOrCreate("chatB")
+
+	assert.Same(t, a1, a2, "repeated lookups of the same chat must return the same limiter")
+	assert.NotSame(t, a1, b1, "different chats must get independent limiters")
+	assert.Equal(t, 2, store.len())
+}
+
+func TestChatRateLimiterStore_BoundedCapacity(t *testing.T) {
+	const capacity = 5
+	store := newChatRateLimiterStore(capacity, rate.Limit(1), 1)
+
+	for i := 0; i < capacity*3; i++ {
+		store.getOrCreate(fmt.Sprintf("chat-%d", i))
+	}
+
+	assert.Equal(t, capacity, store.len(), "store must not grow past its configured capacity")
+}
+
+func TestChatRateLimiterStore_LRUEviction(t *testing.T) {
+	store := newChatRateLimiterStore(2, rate.Limit(1), 1)
+
+	a := store.getOrCreate("a")
+	store.getOrCreate("b")
+	// Touch "a" again so "b" becomes the least-recently-used entry.
+	store.getOrCreate("a")
+	store.getOrCreate("c") // should evict "b", not "a"
+
+	assert.Equal(t, 2, store.len())
+	assert.Same(t, a, store.getOrCreate("a"), "recently-touched chat must survive eviction")
+}
+
+func TestChatRateLimiterStore_ConcurrentAccess(t *testing.T) {
+	const capacity = 10
+	store := newChatRateLimiterStore(capacity, rate.Limit(50), 5)
+
+	// 30 distinct chat IDs against a 10-entry store: eviction must trigger
+	// repeatedly while goroutines race on it, not just capacity-check pass.
+	var wg sync.WaitGroup
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			chatID := fmt.Sprintf("chat-%d", i%30)
+			limiter := store.getOrCreate(chatID)
+			limiter.Allow()
+		}(i)
+	}
+	wg.Wait()
+
+	assert.LessOrEqual(t, store.len(), capacity, "concurrent access must not push the store past capacity")
+}
+
+func TestNewChatRateLimiterStore_NonPositiveCapacityClampedToDefault(t *testing.T) {
+	assert.Equal(t, maxTrackedChatLimiters, newChatRateLimiterStore(0, rate.Limit(1), 1).capacity)
+	assert.Equal(t, maxTrackedChatLimiters, newChatRateLimiterStore(-5, rate.Limit(1), 1).capacity)
+}
+
+func TestHTTPTelegramClient_PerChatRateLimit(t *testing.T) {
+	newOKServer := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(TelegramResponse{OK: true, Result: &TelegramResult{MessageID: 1}})
+		}))
+	}
+
+	t.Run("two chats interleave without blocking each other", func(t *testing.T) {
+		server := newOKServer()
+		defer server.Close()
+
+		client := NewHTTPTelegramClient(server.URL, "test-token", slog.Default()).(*HTTPTelegramClient)
+		// Fast, deterministic override: burst 1 so a second send to the same
+		// chat must wait, while an unrelated chat is unaffected.
+		client.chatLimiters = newChatRateLimiterStore(10, rate.Limit(20), 1)
+
+		ctx := context.Background()
+		_, err := client.SendMessage(ctx, &TelegramMessage{ChatID: "chatA", Text: "1"})
+		require.NoError(t, err) // consumes chatA's only burst token
+
+		start := time.Now()
+		_, err = client.SendMessage(ctx, &TelegramMessage{ChatID: "chatB", Text: "1"})
+		elapsed := time.Since(start)
+
+		require.NoError(t, err)
+		assert.Less(t, elapsed, 25*time.Millisecond,
+			"chat B send should not be delayed by chat A's exhausted limiter")
+	})
+
+	t.Run("single chat burst is smoothed", func(t *testing.T) {
+		server := newOKServer()
+		defer server.Close()
+
+		client := NewHTTPTelegramClient(server.URL, "test-token", slog.Default()).(*HTTPTelegramClient)
+		client.chatLimiters = newChatRateLimiterStore(10, rate.Limit(20), 2) // burst 2, refill every 50ms
+
+		ctx := context.Background()
+		start := time.Now()
+		for i := 0; i < 4; i++ {
+			_, err := client.SendMessage(ctx, &TelegramMessage{ChatID: "chatA", Text: "1"})
+			require.NoError(t, err)
+		}
+		elapsed := time.Since(start)
+
+		// 4 sends, burst 2 free, 2 remaining wait ~50ms each. Floor is lower
+		// than the theoretical ~100ms to tolerate CI jitter; ceiling only
+		// guards against an outright hang.
+		assert.GreaterOrEqual(t, elapsed, 60*time.Millisecond)
+		assert.Less(t, elapsed, 2*time.Second)
+	})
+
+	t.Run("context cancellation during per-chat wait returns promptly", func(t *testing.T) {
+		server := newOKServer()
+		defer server.Close()
+
+		client := NewHTTPTelegramClient(server.URL, "test-token", slog.Default()).(*HTTPTelegramClient)
+		client.chatLimiters = newChatRateLimiterStore(10, rate.Limit(1), 1) // burst 1, next token in ~1s
+
+		ctx := context.Background()
+		_, err := client.SendMessage(ctx, &TelegramMessage{ChatID: "chatA", Text: "1"})
+		require.NoError(t, err) // consumes the only token
+
+		cctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+
+		start := time.Now()
+		_, err = client.SendMessage(cctx, &TelegramMessage{ChatID: "chatA", Text: "2"})
+		elapsed := time.Since(start)
+
+		require.Error(t, err)
+		assert.Less(t, elapsed, 200*time.Millisecond,
+			"ctx cancellation must return promptly, not wait out the full rate-limit delay")
+	})
 }

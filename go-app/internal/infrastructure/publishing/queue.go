@@ -95,6 +95,23 @@ type PublishingJob struct {
 	RetryCount    int
 	SubmittedAt   time.Time
 
+	// Alerts, GroupKey and Receiver are set (Alerts non-empty) for a GROUP
+	// job (task fwb: wire-level group batching) — one job per (group,
+	// target), submitted by PublishingCoordinator.PublishGroupToTargets,
+	// carrying every alert of the group instead of the pre-fwb one-job-per-
+	// (alert, target) shape. EnrichedAlert above is still populated for a
+	// group job (wrapping Alerts[0]) purely so existing fingerprint-keyed
+	// logging/DLQ/job-tracking code paths that assume it's always non-nil
+	// keep working unchanged — Alerts is the authoritative payload for a
+	// group job; EnrichedAlert.Alert is representative only. See
+	// PublishingQueue.publishJob for how a group job is actually
+	// dispatched (one wire batch, or a per-alert iteration loop, depending
+	// on whether the target's publisher implements BatchAlertPublisher).
+	Alerts      []*core.Alert
+	GroupKey    string
+	Receiver    string
+	GroupLabels map[string]string
+
 	// Extended fields for 150% quality
 	ID          string         // UUID v4
 	Priority    Priority       // HIGH/MEDIUM/LOW
@@ -238,24 +255,71 @@ func (q *PublishingQueue) Stop(timeout time.Duration) error {
 
 // Submit submits a job to the publishing queue
 func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) error {
-	// Generate job ID
-	jobID := uuid.NewString()
-
-	// Determine priority
 	priority := determinePriority(enrichedAlert)
 
-	// Create job
 	job := &PublishingJob{
 		EnrichedAlert: enrichedAlert,
 		Target:        target,
 		RetryCount:    0,
 		SubmittedAt:   time.Now(),
-		ID:            jobID,
+		ID:            uuid.NewString(),
 		Priority:      priority,
 		State:         JobStateQueued,
 	}
 
-	// Select appropriate queue
+	return q.submitJob(job, priority, enrichedAlert.Alert.Fingerprint)
+}
+
+// SubmitGroup submits ONE job for a whole alert group destined to a single
+// target (task fwb: wire-level group batching) — the coordinator calls this
+// once per target instead of Submit once per (alert, target) pair. See
+// PublishingJob's doc comment on Alerts/GroupKey/Receiver and
+// PublishingQueue.publishJob for how the job is dispatched once a worker
+// picks it up.
+//
+// alerts must be non-empty (the caller — PublishingCoordinator.
+// PublishGroupToTargets — never calls this otherwise). priority is derived
+// from the HIGHEST-priority alert in the set (PriorityHigh has the lowest
+// numeric value): a group containing even one critical firing alert must
+// not be queued behind an unrelated low-priority job.
+func (q *PublishingQueue) SubmitGroup(alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiver string, groupLabels map[string]string) error {
+	if len(alerts) == 0 {
+		return fmt.Errorf("cannot submit a group job with no alerts")
+	}
+
+	now := time.Now().UTC()
+	priority := PriorityLow
+	for _, a := range alerts {
+		if p := determinePriority(&core.EnrichedAlert{Alert: a, ProcessingTimestamp: &now}); p < priority {
+			priority = p
+		}
+	}
+
+	job := &PublishingJob{
+		// Representative alert for logging/DLQ/tracking code that assumes
+		// EnrichedAlert is always non-nil — see PublishingJob's doc comment.
+		EnrichedAlert: &core.EnrichedAlert{Alert: alerts[0], ProcessingTimestamp: &now},
+		Target:        target,
+		RetryCount:    0,
+		SubmittedAt:   time.Now(),
+		ID:            uuid.NewString(),
+		Priority:      priority,
+		State:         JobStateQueued,
+		Alerts:        alerts,
+		GroupKey:      groupKey,
+		Receiver:      receiver,
+		GroupLabels:   groupLabels,
+	}
+
+	return q.submitJob(job, priority, fmt.Sprintf("group:%s alerts=%d", groupKey, len(alerts)))
+}
+
+// submitJob is the shared enqueue path for Submit and SubmitGroup: picks the
+// priority-tiered channel, updates metrics/tracking, and reports back
+// queue-full/shutting-down as errors exactly as the pre-fwb Submit did.
+// logField is whatever identifies the job in the debug log line (a single
+// alert's fingerprint for Submit, a group summary for SubmitGroup).
+func (q *PublishingQueue) submitJob(job *PublishingJob, priority Priority, logField string) error {
 	var targetQueue chan *PublishingJob
 	switch priority {
 	case PriorityHigh:
@@ -268,29 +332,25 @@ func (q *PublishingQueue) Submit(enrichedAlert *core.EnrichedAlert, target *core
 		targetQueue = q.mediumPriorityJobs
 	}
 
-	// Submit to queue
 	select {
 	case targetQueue <- job:
 		q.totalSubmitted.Add(1)
 
-		// Update metrics
 		if q.metrics != nil {
 			q.metrics.RecordQueueSubmission(priority.String(), true)
 			q.metrics.UpdateQueueSize(priority.String(), len(targetQueue), cap(targetQueue))
 		}
 
-		// Track job
 		if q.jobTrackingStore != nil {
 			q.jobTrackingStore.Add(job)
 		}
 
-		// Level guard: avoid expensive string formatting in production
 		if q.logger.Enabled(q.ctx, slog.LevelDebug) {
 			q.logger.Debug("Job submitted",
-				"job_id", jobID,
+				"job_id", job.ID,
 				"priority", priority,
-				"target", target.Name,
-				"fingerprint", enrichedAlert.Alert.Fingerprint,
+				"target", job.Target.Name,
+				"fingerprint", logField,
 			)
 		}
 		return nil
@@ -664,6 +724,45 @@ func (q *PublishingQueue) GetStats() QueueStats {
 //
 // Migration note: This is part of Sprint 5 (Retry Unification).
 // See: tasks/code-quality-refactoring/ACTION_ITEMS.md#1
+// publishJob dispatches one publish attempt for job (task fwb: wire-level
+// group batching). Three cases:
+//
+//   - Not a group job (len(job.Alerts) == 0): unchanged pre-fwb behavior —
+//     one Publish call for job.EnrichedAlert.
+//   - Group job, publisher implements BatchAlertPublisher (webhook/
+//     alertmanager formats): ONE PublishBatch call carrying every alert —
+//     the actual wire-level batching this task adds.
+//   - Group job, publisher does NOT implement BatchAlertPublisher (Slack,
+//     Telegram, PagerDuty, Email — inherently one-message-per-alert
+//     integrations): iterate Publish once per alert WITHIN this single
+//     call/attempt, so retries and rate-limiting stay scoped to one job per
+//     (group, target) rather than fragmenting back into one job per alert.
+//     Best-effort: every alert is attempted even if an earlier one fails,
+//     and the first error (if any) is what the retry strategy above sees —
+//     a retry of this job resends the whole alert set again, including any
+//     that already succeeded (accepted trade-off, documented in the task
+//     spec: there is no wire-level partial-success concept for a per-
+//     message loop the way there is for a single batched HTTP request).
+func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJob) error {
+	if len(job.Alerts) == 0 {
+		return publisher.Publish(q.ctx, job.EnrichedAlert, job.Target)
+	}
+
+	if batchPublisher, ok := publisher.(BatchAlertPublisher); ok {
+		return batchPublisher.PublishBatch(q.ctx, job.Alerts, job.GroupKey, job.Receiver, job.GroupLabels, job.Target)
+	}
+
+	now := time.Now().UTC()
+	var firstErr error
+	for _, alert := range job.Alerts {
+		enrichedAlert := &core.EnrichedAlert{Alert: alert, ProcessingTimestamp: &now}
+		if err := publisher.Publish(q.ctx, enrichedAlert, job.Target); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *PublishingJob) error {
 	// Create retry strategy with queue configuration
 	// Note: Uses queue-specific config (maxRetries, retryInterval) which can be
@@ -687,7 +786,7 @@ func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *Publishing
 		attemptCount++
 
 		// Try publish
-		publishErr := publisher.Publish(q.ctx, job.EnrichedAlert, job.Target)
+		publishErr := q.publishJob(publisher, job)
 
 		if publishErr != nil {
 			// Classify error for job tracking

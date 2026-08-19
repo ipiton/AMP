@@ -155,6 +155,118 @@ func (p *EnhancedWebhookPublisher) Name() string {
 	return "EnhancedWebhook"
 }
 
+// PublishBatch implements BatchAlertPublisher (task fwb: wire-level group
+// batching). One POST carrying every alert in the group as an "alerts"
+// array — the upstream Alertmanager webhook shape — instead of the one
+// job/one alert loop the pre-fwb PublishGroupToTargets used. Mirrors
+// Publish's validation/metrics/error-handling shape but calls
+// GroupAlertFormatter.FormatGroup instead of FormatAlert.
+func (p *EnhancedWebhookPublisher) PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error {
+	startTime := time.Now()
+
+	p.GetLogger().InfoContext(ctx, "Publishing alert group to webhook",
+		slog.String("target", target.Name),
+		slog.String("url", maskURL(target.URL)),
+		slog.String("group_key", groupKey),
+		slog.Int("alert_count", len(alerts)))
+
+	if err := p.validator.ValidateTarget(target); err != nil {
+		p.GetLogger().ErrorContext(ctx, "Target validation failed",
+			slog.String("target", target.Name),
+			slog.String("error", err.Error()))
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish_batch", "validation_error")
+		}
+		return fmt.Errorf("target validation failed: %w", err)
+	}
+
+	groupFormatter, ok := p.formatter.(GroupAlertFormatter)
+	if !ok {
+		return fmt.Errorf("formatter %T does not support wire-level group batching (GroupAlertFormatter)", p.formatter)
+	}
+
+	payload, err := groupFormatter.FormatGroup(ctx, alerts, groupKey, receiver, groupLabels, target.Format)
+	if err != nil {
+		p.GetLogger().ErrorContext(ctx, "Failed to format alert group",
+			slog.String("target", target.Name),
+			slog.String("error", err.Error()))
+		return fmt.Errorf("failed to format alert group: %w", err)
+	}
+
+	if err := p.validator.ValidateFormat(payload); err != nil {
+		p.GetLogger().ErrorContext(ctx, "Payload format validation failed",
+			slog.String("target", target.Name),
+			slog.String("error", err.Error()))
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish_batch", "format_validation_error")
+		}
+		return fmt.Errorf("payload format validation failed: %w", err)
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	if err := p.validator.ValidatePayloadSize(payloadBytes); err != nil {
+		p.GetLogger().ErrorContext(ctx, "Payload size validation failed",
+			slog.String("target", target.Name),
+			slog.Int("size", len(payloadBytes)),
+			slog.String("error", err.Error()))
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish_batch", "payload_size_error")
+		}
+		return fmt.Errorf("payload size validation failed: %w", err)
+	}
+
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordPayloadSize(v2.ProviderWebhook, len(payloadBytes))
+	}
+
+	authConfig := p.extractAuthConfig(target)
+
+	resp, err := p.client.Post(ctx, target.URL, payload, target.Headers, authConfig)
+	duration := time.Since(startTime)
+
+	if err != nil {
+		errorType := GetPublishingErrorType(err)
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderWebhook, "publish_batch", errorType)
+			p.metrics.RecordAPIDuration(v2.ProviderWebhook, "publish_batch", "POST", duration)
+
+			if IsPublishingAuthError(err) {
+				p.metrics.RecordAPIError(v2.ProviderWebhook, "publish_batch", "auth_error")
+			} else if IsPublishingTimeout(err) {
+				p.metrics.RecordAPIError(v2.ProviderWebhook, "publish_batch", "timeout")
+			}
+		}
+
+		p.GetLogger().ErrorContext(ctx, "Failed to publish alert group",
+			slog.String("target", target.Name),
+			slog.String("url", maskURL(target.URL)),
+			slog.Duration("duration", duration),
+			slog.String("error", err.Error()))
+		return fmt.Errorf("failed to publish alert group: %w", err)
+	}
+
+	if p.GetMetrics() != nil {
+		p.GetMetrics().RecordMessage(v2.ProviderWebhook, "success")
+		p.metrics.RecordAPIDuration(v2.ProviderWebhook, "publish_batch", "POST", duration)
+	}
+
+	p.GetLogger().InfoContext(ctx, "Alert group published successfully",
+		slog.String("target", target.Name),
+		slog.String("url", maskURL(target.URL)),
+		slog.Int("status_code", resp.StatusCode),
+		slog.Duration("duration", duration),
+		slog.Int("payload_size", len(payloadBytes)),
+		slog.Int("alert_count", len(alerts)))
+
+	return nil
+}
+
+var _ BatchAlertPublisher = (*EnhancedWebhookPublisher)(nil)
+
 // extractAuthConfig extracts authentication configuration from target headers
 func (p *EnhancedWebhookPublisher) extractAuthConfig(target *core.PublishingTarget) *AuthConfig {
 	// Check for Authorization header (Bearer or Basic)

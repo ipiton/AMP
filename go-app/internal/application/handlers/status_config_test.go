@@ -54,7 +54,7 @@ receivers:
       - url: https://hooks.example.com/ingest/sup3r-secret-webhook-path
   - name: pager
     pagerduty_configs:
-      # 32 chars: AMP's PagerDutyConfig.RoutingKey carries validate:"len=32".
+      # Any non-empty value: AMP's PagerDutyConfig.RoutingKey carries validate:"required" (wave 2: relaxed from len=32).
       # NOTE: the url below is the PUBLIC Events API endpoint (upstream: plain URL),
       # and must stay visible — see sectionSecretKeys.
       - routing_key: sup3rsecretpdkey0123456789abcdef
@@ -119,12 +119,13 @@ func TestAlertmanagerConfigYAML_RedactsEverySecret(t *testing.T) {
 //
 // Deliberately a plain yaml.Unmarshal into RouteConfig rather than
 // RouteConfigParser.Parse: Parse additionally runs AMP's own structural
-// validators, some of which are stricter than upstream's. PagerDutyConfig
-// .RoutingKey carries validate:"len=32" whereas upstream types it as a plain
-// `Secret` with no length rule — so ANY redaction placeholder necessarily fails
-// AMP's rule while remaining perfectly valid upstream. Asserting shape (which is
-// what parity means here) rather than AMP's stricter validation keeps this test
-// about finding 15 instead of about that unrelated validator.
+// validators, which can be stricter than upstream's — e.g. PagerDutyConfig
+// .RoutingKey used to carry validate:"len=32" (relaxed to validate:"required"
+// in wave 2, matching upstream's plain non-empty `Secret`), so a redaction
+// placeholder of a different length would have failed AMP's rule while
+// remaining perfectly valid upstream. Asserting shape (which is what parity
+// means here) rather than AMP's structural validation keeps this test
+// decoupled from validators unrelated to finding 15.
 func TestAlertmanagerConfigYAML_ParsesAsAlertmanagerConfig(t *testing.T) {
 	out := AlertmanagerConfigYAML(loadStatusTestConfig(t))
 

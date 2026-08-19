@@ -72,14 +72,41 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Redis key prefixes and TTL defaults for the notification log (task 6.1).
+// Redis key prefixes and TTL defaults for the notification log (task 6.1;
+// per-target keys added by task fwb).
 const (
-	// notifyLogEntryKeyPrefix stores the confirmed-sent record.
-	// Format: "nflog:entry:{groupKey}" → JSON-serialized notifyLogEntry.
+	// notifyLogEntryKeyPrefix stores the confirmed-sent record, one per
+	// (groupKey, target) pair (task fwb — mirrors upstream nflog's
+	// group:receiver:integration granularity; before this, one entry
+	// covered the whole group+receiver regardless of which of its targets
+	// actually confirmed delivery).
+	// Format: "nflog:entry:{groupKey}:{target}" → JSON-serialized
+	// notifyLogEntry. See notifyLogEntryKey.
+	//
+	// Migration note: pre-task-fwb entries were written at the bare
+	// "nflog:entry:{groupKey}" key (no ":{target}" suffix). Those old-format
+	// keys are simply never read by the new target-suffixed lookups in
+	// IsDuplicate/Forget below — they are not migrated or actively deleted,
+	// they just sit until their original TTL (repeat_interval + grace)
+	// expires them, same as any other abandoned entry. No collision is
+	// possible: a target name can never be empty (core.PublishingTarget.Name
+	// is required), so "{groupKey}:{target}" can never equal the bare
+	// pre-migration "{groupKey}" key.
 	notifyLogEntryKeyPrefix = "nflog:entry:"
+
+	// notifyLogTargetsKeyPrefix stores, per groupKey, the SET of target
+	// names that currently have a live entry (task fwb). Needed because
+	// Forget must remove every per-target entry for a group but Redis has
+	// no server-side "delete by prefix" — this set lets Forget enumerate
+	// them with SMEMBERS instead of scanning the whole keyspace.
+	// Format: "nflog:targets:{groupKey}" → Redis SET of target names.
+	notifyLogTargetsKeyPrefix = "nflog:targets:"
 
 	// notifyLogClaimKeyPrefix stores the short-lived cross-replica publish
 	// claim. Format: "nflog:claim:{groupKey}" → random claim ID string.
+	// Deliberately still group-scoped, not per-target (see TryClaim's doc
+	// comment): the claim protects the whole check-publish-record sequence
+	// for a group-timer fire, not any individual target's delivery.
 	notifyLogClaimKeyPrefix = "nflog:claim:"
 
 	// notifyLogEntryTTLFallback is used for the entry TTL only when
@@ -161,19 +188,26 @@ func NewRedisNotifyLog(ctx context.Context, cfg *RedisNotifyLogConfig) (*RedisNo
 	return l, nil
 }
 
+// notifyLogEntryKey builds the per-(groupKey, target) entry key (task fwb).
+// See notifyLogEntryKeyPrefix's doc comment for the format and migration
+// note.
+func notifyLogEntryKey(groupKey GroupKey, target string) string {
+	return notifyLogEntryKeyPrefix + string(groupKey) + ":" + target
+}
+
 // IsDuplicate implements GroupNotifyLog. See its doc comment for semantics.
-func (l *RedisNotifyLog) IsDuplicate(ctx context.Context, groupKey GroupKey, signature string, ttl time.Time) (bool, error) {
-	data, err := l.client.Get(ctx, notifyLogEntryKeyPrefix+string(groupKey)).Bytes()
+func (l *RedisNotifyLog) IsDuplicate(ctx context.Context, groupKey GroupKey, target string, signature string, ttl time.Time) (bool, error) {
+	data, err := l.client.Get(ctx, notifyLogEntryKey(groupKey, target)).Bytes()
 	if err != nil {
 		if err == redis.Nil {
 			return false, nil
 		}
-		return false, fmt.Errorf("nflog get %s: %w", groupKey, err)
+		return false, fmt.Errorf("nflog get %s/%s: %w", groupKey, target, err)
 	}
 
 	var entry notifyLogEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return false, fmt.Errorf("nflog unmarshal %s: %w", groupKey, err)
+		return false, fmt.Errorf("nflog unmarshal %s/%s: %w", groupKey, target, err)
 	}
 
 	if entry.Signature != signature {
@@ -185,13 +219,13 @@ func (l *RedisNotifyLog) IsDuplicate(ctx context.Context, groupKey GroupKey, sig
 }
 
 // RecordSent implements GroupNotifyLog. See its doc comment for semantics.
-func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, signature string, now time.Time, repeatInterval time.Duration) error {
+func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, target string, signature string, now time.Time, repeatInterval time.Duration) error {
 	receiver := receiverFromGroupKey(groupKey)
 	entry := notifyLogEntry{Signature: signature, SentAt: now, Receiver: receiver}
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("nflog marshal %s: %w", groupKey, err)
+		return fmt.Errorf("nflog marshal %s/%s: %w", groupKey, target, err)
 	}
 
 	entryTTL := repeatInterval
@@ -200,18 +234,39 @@ func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, sign
 	}
 	entryTTL += notifyLogEntryTTLGracePeriod
 
-	if err := l.client.Set(ctx, notifyLogEntryKeyPrefix+string(groupKey), data, entryTTL).Err(); err != nil {
-		return fmt.Errorf("nflog set %s: %w", groupKey, err)
+	if err := l.client.Set(ctx, notifyLogEntryKey(groupKey, target), data, entryTTL).Err(); err != nil {
+		return fmt.Errorf("nflog set %s/%s: %w", groupKey, target, err)
+	}
+
+	// Track target in the group's target-set so Forget can enumerate and
+	// delete every per-target entry without a keyspace scan (task fwb).
+	// Best-effort: a failure here only means Forget might miss this one
+	// target's entry, which then simply self-expires via its own TTL set
+	// above — not a correctness problem, just a slightly delayed cleanup.
+	targetsKey := notifyLogTargetsKeyPrefix + string(groupKey)
+	if err := l.client.SAdd(ctx, targetsKey, target).Err(); err != nil {
+		l.logger.Warn("failed to track target in nflog target-set (Forget may miss this entry; it will still self-expire)",
+			"group_key", groupKey,
+			"target", target,
+			"error", err)
+	} else if err := l.client.Expire(ctx, targetsKey, entryTTL).Err(); err != nil {
+		l.logger.Warn("failed to refresh nflog target-set TTL",
+			"group_key", groupKey,
+			"error", err)
 	}
 
 	l.logger.Debug("Recorded nflog entry",
 		"group_key", groupKey,
+		"target", target,
 		"receiver", receiver,
 		"ttl", entryTTL)
 	return nil
 }
 
-// Forget implements GroupNotifyLog: removes the entry for groupKey.
+// Forget implements GroupNotifyLog: removes every per-target entry for
+// groupKey (task fwb — there can be more than one now), found via the
+// group's target-set (notifyLogTargetsKeyPrefix), then removes the set
+// itself.
 //
 // Deliberately does NOT touch the claim key (fix round 1, Finding 2):
 // Forget is called from RemoveAlertFromGroup/CleanupExpiredGroups, which
@@ -227,7 +282,19 @@ func (l *RedisNotifyLog) RecordSent(ctx context.Context, groupKey GroupKey, sign
 // reason to force it out early, only a minor "unused key sits around for
 // up to claimTTL after Forget" cost.
 func (l *RedisNotifyLog) Forget(ctx context.Context, groupKey GroupKey) error {
-	if err := l.client.Del(ctx, notifyLogEntryKeyPrefix+string(groupKey)).Err(); err != nil {
+	targetsKey := notifyLogTargetsKeyPrefix + string(groupKey)
+	targets, err := l.client.SMembers(ctx, targetsKey).Result()
+	if err != nil && err != redis.Nil {
+		return fmt.Errorf("nflog targets smembers %s: %w", groupKey, err)
+	}
+
+	keys := make([]string, 0, len(targets)+1)
+	for _, target := range targets {
+		keys = append(keys, notifyLogEntryKey(groupKey, target))
+	}
+	keys = append(keys, targetsKey)
+
+	if err := l.client.Del(ctx, keys...).Err(); err != nil {
 		return fmt.Errorf("nflog del %s: %w", groupKey, err)
 	}
 	return nil
