@@ -750,3 +750,81 @@ func TestReconciliationGraceFor_DefaultMatchesHistoricalLiteral(t *testing.T) {
 		t.Errorf("reconciliationGraceFor(0, DefaultDeliveryConfirmationTimeout) = %s, want %s (config.go's former hardcoded default)", got, historicalLiteral)
 	}
 }
+
+// === Wave 6 (FU-LITE-FILE-SNAPSHOT): r.memoryNotifyLog wiring ===
+//
+// initializeGrouping must populate r.memoryNotifyLog with a handle on the
+// in-memory nflog instance whenever newNotifyLog picked it (lite profile,
+// or the standard-profile no-Redis-cache fallback) — so
+// initializeSnapshotting/writeSnapshot can save/restore its state — and
+// must leave it nil whenever the Redis-backed RedisNotifyLog was selected
+// instead (Redis owns its own durability; RedisNotifyLog does not
+// implement grouping.NflogSnapshotter).
+
+func TestInitializeGrouping_LiteProfile_PopulatesMemoryNotifyLog(t *testing.T) {
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileLite,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing:  minimalRouteTree(),
+	}
+	r := newTestRegistryForGrouping(cfg)
+
+	if err := r.initializeGrouping(context.Background()); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if r.memoryNotifyLog == nil {
+		t.Fatal("memoryNotifyLog must be populated for the lite profile so file snapshotting can persist it")
+	}
+}
+
+func TestInitializeGrouping_StandardWithoutRedisCache_PopulatesMemoryNotifyLog(t *testing.T) {
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileStandard,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing:  minimalRouteTree(),
+	}
+	r := newTestRegistryForGrouping(cfg)
+	r.cache = infracache.NewMemoryCache(r.logger) // not *cache.RedisCache
+
+	if err := r.initializeGrouping(context.Background()); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if r.memoryNotifyLog == nil {
+		t.Fatal("memoryNotifyLog must be populated for the standard-without-Redis fallback too")
+	}
+}
+
+func TestInitializeGrouping_StandardWithLiveRedis_LeavesMemoryNotifyLogNil(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run() error = %v", err)
+	}
+	defer mr.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	redisCache, err := infracache.NewRedisCache(&infracache.CacheConfig{
+		Addr:        mr.Addr(),
+		PoolSize:    5,
+		DialTimeout: time.Second,
+		ReadTimeout: time.Second,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewRedisCache() error = %v", err)
+	}
+	defer func() { _ = redisCache.Close() }()
+
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileStandard,
+		Grouping: appconfig.GroupingConfig{Enabled: true},
+		Routing:  minimalRouteTree(),
+	}
+	r := newTestRegistryForGrouping(cfg)
+	r.cache = redisCache
+
+	if err := r.initializeGrouping(context.Background()); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if r.memoryNotifyLog != nil {
+		t.Fatal("memoryNotifyLog must stay nil when the Redis-backed RedisNotifyLog was selected — Redis owns its own durability")
+	}
+}
