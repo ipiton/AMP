@@ -296,6 +296,39 @@ func TestDeliveredSet_TTLDoesNotSlideOnSubsequentWrites(t *testing.T) {
 	assert.Empty(t, delivered, "the state must expire on the FIRST write's schedule, not be extended by later partial writes")
 }
 
+// TestDeliveredSet_TTLSelfHealsWhenLost is the m1 regression (re-review, wave
+// 5, finding R3): gating recordPartialDeliveryScript's PEXPIRE on EXISTS==0
+// alone would drop the self-healing property review round 1 (finding I2)
+// required — that ANY later write repairs a key that has somehow lost its
+// TTL, rather than leaving it to suppress alerts forever. The fix widened the
+// gate to "EXISTS==0 OR PTTL<0", but that second disjunct had no regression
+// test of its own.
+//
+// Uses the underlying client's PERSIST, not miniredis's mr.SetTTL(key, 0):
+// SetTTL(key, 0) leaves the key readable as PTTL == 0 (a TTL that is about to
+// expire), not PTTL < 0 (no TTL at all) — those are different states, and
+// asserting against the wrong one would pass or fail for the wrong reason.
+// PERSIST is the actual operation that produces "no TTL", matching how a real
+// TTL-less key could arise (a bug, an operator's redis-cli PERSIST, a botched
+// migration).
+func TestDeliveredSet_TTLSelfHealsWhenLost(t *testing.T) {
+	log, mr, cleanup := setupTestRedisNotifyLog(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-1:firing"}, 10*time.Minute))
+
+	key := notifyLogDeliveredKey("gk", "target-a")
+	require.NoError(t, log.client.Persist(ctx, key).Err())
+	require.Equal(t, time.Duration(0), mr.TTL(key), "PERSIST must actually strip the TTL before this test means anything")
+
+	require.NoError(t, log.RecordPartialDelivery(ctx, "gk", "target-a", []string{"fp-2:firing"}, 10*time.Minute))
+
+	ttl := mr.TTL(key)
+	assert.Equal(t, 10*time.Minute+notifyLogEntryTTLGracePeriod, ttl,
+		"a write to a key that has lost its TTL must re-arm it — the self-healing property review round 1 (finding I2) required, which gating PEXPIRE on EXISTS alone would silently drop")
+}
+
 // TestDeliveredSet_MemoryTTLDoesNotSlideOnSubsequentWrites is the in-memory
 // half of the r5 regression: recordedAt/ttl must be stamped once, on the write
 // that creates the state, and left untouched by every later partial write for
