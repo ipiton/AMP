@@ -26,6 +26,28 @@ type AlertPublisher interface {
 	Name() string
 }
 
+// BatchAlertPublisher is implemented by publishers that can deliver an
+// entire alert group as ONE wire-level request carrying every alert (task
+// fwb: wire-level group batching — upstream Alertmanager's webhook shape:
+// one POST per group per target, "alerts" array, not one POST per alert).
+//
+// Only WebhookPublisher/EnhancedWebhookPublisher implement this today —
+// the only formats with a native array-of-alerts wire shape (see
+// GroupAlertFormatter.FormatGroup). Every other publisher (Rootly,
+// PagerDuty, Slack, Telegram, Email) is inherently one-message-per-alert;
+// PublishingQueue.publishJob detects the absence of this interface and
+// falls back to calling Publish once per alert within the SAME queued job
+// instead of submitting one job per alert (see that method's doc comment).
+type BatchAlertPublisher interface {
+	// PublishBatch delivers every alert in alerts to target as one request.
+	// groupKey/receiver/groupLabels populate the wire payload's
+	// corresponding fields (see GroupAlertFormatter.FormatGroup). Returns a
+	// single error for the whole batch — there is no partial-success
+	// concept at the wire level for a single HTTP request, unlike the
+	// per-message iteration path.
+	PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error
+}
+
 // HTTPPublisher is a base HTTP client for all publishers
 type HTTPPublisher struct {
 	formatter  AlertFormatter
@@ -91,6 +113,64 @@ func (p *HTTPPublisher) publish(ctx context.Context, enrichedAlert *core.Enriche
 
 	p.logger.Debug("Alert published successfully",
 		"target", target.Name,
+		"status_code", resp.StatusCode,
+	)
+
+	return nil
+}
+
+// publishBatch is publish's group counterpart (task fwb): formats the WHOLE
+// alert group as one wire payload via GroupAlertFormatter.FormatGroup and
+// POSTs it once, instead of once per alert. Returns a descriptive error if
+// the configured formatter doesn't implement GroupAlertFormatter at all, or
+// returns one for this target's format (e.g. a formatter wired for a
+// per-message-only format) — callers (WebhookPublisher/
+// EnhancedWebhookPublisher) only ever call this for webhook/alertmanager
+// targets, where DefaultAlertFormatter always supports it, but this stays
+// defensive for any other AlertFormatter implementation (tests, future
+// middleware) that might not.
+func (p *HTTPPublisher) publishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error {
+	groupFormatter, ok := p.formatter.(GroupAlertFormatter)
+	if !ok {
+		return fmt.Errorf("formatter %T does not support wire-level group batching (GroupAlertFormatter)", p.formatter)
+	}
+
+	payload, err := groupFormatter.FormatGroup(ctx, alerts, groupKey, receiver, groupLabels, target.Format)
+	if err != nil {
+		return fmt.Errorf("failed to format alert group: %w", err)
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal group payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", target.URL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range target.Headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	p.logger.Debug("Alert group published successfully",
+		"target", target.Name,
+		"group_key", groupKey,
+		"alert_count", len(alerts),
 		"status_code", resp.StatusCode,
 	)
 
@@ -202,10 +282,18 @@ func (p *WebhookPublisher) Publish(ctx context.Context, enrichedAlert *core.Enri
 	return p.publish(ctx, enrichedAlert, target)
 }
 
+// PublishBatch implements BatchAlertPublisher (task fwb): one POST carrying
+// every alert in the group, matching upstream Alertmanager's webhook shape.
+func (p *WebhookPublisher) PublishBatch(ctx context.Context, alerts []*core.Alert, groupKey string, receiver string, groupLabels map[string]string, target *core.PublishingTarget) error {
+	return p.publishBatch(ctx, alerts, groupKey, receiver, groupLabels, target)
+}
+
 // Name returns publisher name
 func (p *WebhookPublisher) Name() string {
 	return "Webhook"
 }
+
+var _ BatchAlertPublisher = (*WebhookPublisher)(nil)
 
 // PublisherFactory creates publishers based on target type.
 //

@@ -265,10 +265,16 @@ func (w *WebhookConfig) Sanitize() *WebhookConfig {
 //	    details:
 //	      environment: "{{ .CommonLabels.environment }}"
 type PagerDutyConfig struct {
-	// RoutingKey is the integration key (required, 32 chars)
+	// RoutingKey is the integration key (required, non-empty).
 	// Obtained from PagerDuty service integration
 	// Should use secret reference: ${PAGERDUTY_KEY}
-	RoutingKey string `yaml:"routing_key" validate:"required,len=32"`
+	//
+	// task fu2-d item 10: was validate:"required,len=32", stricter than
+	// upstream Alertmanager's PagerDuty routing_key (a plain Secret, no
+	// fixed length) — PagerDuty's own integration keys are not guaranteed
+	// to stay exactly 32 characters, so a key of any other length was
+	// silently rejected by config validation.
+	RoutingKey string `yaml:"routing_key" validate:"required"`
 
 	// ServiceKey is the legacy service key (deprecated)
 	// Use RoutingKey instead

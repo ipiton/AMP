@@ -285,6 +285,191 @@ func TestPublishGroupAlerts_FailedPublishDoesNotPoisonDedup(t *testing.T) {
 		"a failed/unconfirmed publish must not be recorded as sent — the next fire must still attempt delivery, not be deduped")
 }
 
+// === Task fwb: per-target nflog granularity — partial failure retries
+// only the failed target ===
+
+// twoTargetPublisher simulates a GroupNotificationPublisher fanning out to
+// TWO named targets (task fwb) — unlike mockPublisher's single synthetic
+// target, this lets tests exercise per-target dedup/retry semantics
+// end-to-end through DefaultGroupManager.publishGroupAlerts without pulling
+// in the full infrastructure/publishing stack.
+type twoTargetPublisher struct {
+	mu         sync.Mutex
+	failTarget string            // target name that fails this call; "" means none fail
+	calls      []map[string]bool // one entry per PublishGroup call: target -> attempted (not skipped)
+}
+
+func (p *twoTargetPublisher) PublishGroup(_ context.Context, _ string, _ []*core.Alert, _ string, _ map[string]string, skipTarget func(string) bool) ([]TargetPublishOutcome, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	attempted := map[string]bool{}
+	outcomes := make([]TargetPublishOutcome, 0, 2)
+	for _, target := range []string{"t1", "t2"} {
+		if skipTarget != nil && skipTarget(target) {
+			continue
+		}
+		attempted[target] = true
+		outcomes = append(outcomes, TargetPublishOutcome{Target: target, Success: target != p.failTarget})
+	}
+	p.calls = append(p.calls, attempted)
+	return outcomes, nil
+}
+
+func (p *twoTargetPublisher) setFailTarget(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failTarget = name
+}
+
+func (p *twoTargetPublisher) callAttempts() []map[string]bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]map[string]bool, len(p.calls))
+	copy(out, p.calls)
+	return out
+}
+
+// TestPublishGroupAlerts_PartialTargetFailure_RetryOnlyResendsFailedTarget
+// is the deliverable's central claim: t1 succeeds and t2 fails on the first
+// fire; the immediate re-fire (same unchanged alert set, well within
+// repeat_interval) must skip t1 (already recorded) and retry ONLY t2.
+func TestPublishGroupAlerts_PartialTargetFailure_RetryOnlyResendsFailedTarget(t *testing.T) {
+	pub := &twoTargetPublisher{failTarget: "t2"}
+	manager := createTestManagerWithChain(t, pub, nil, nil) // repeat_interval = 50ms
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=TestAlert")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "TestAlert"})
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	manager.publishGroupAlerts(ctx, group) // t1 succeeds, t2 fails
+	pub.setFailTarget("")                  // t2 recovers before the next fire
+	manager.publishGroupAlerts(ctx, group) // immediate re-fire, same unchanged alert set
+
+	calls := pub.callAttempts()
+	require.Len(t, calls, 2)
+	assert.True(t, calls[0]["t1"], "first fire: t1 must be attempted")
+	assert.True(t, calls[0]["t2"], "first fire: t2 must be attempted")
+	assert.False(t, calls[1]["t1"], "second fire: t1 already succeeded last cycle — must be skipped, not resent")
+	assert.True(t, calls[1]["t2"], "second fire: t2 failed last cycle — must be retried")
+}
+
+// TestPublishGroupAlerts_PartialTargetFailure_ResolvedAlertsNotPrunedUntilAllTargetsConfirm
+// guards a correctness property the redesign must preserve: pruning
+// resolved alerts (final review finding 8) must wait until EVERY target has
+// confirmed delivery, or a still-failing target would never get to see the
+// resolved alert on its retry.
+func TestPublishGroupAlerts_PartialTargetFailure_ResolvedAlertsNotPrunedUntilAllTargetsConfirm(t *testing.T) {
+	pub := &twoTargetPublisher{failTarget: "t2"}
+	manager := createTestManagerWithChain(t, pub, nil, nil)
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=ResolvingAlert")
+	resolved := createTestAlert("R1", core.StatusResolved, map[string]string{"alertname": "ResolvingAlert"})
+	_, err := manager.AddAlertToGroup(ctx, resolved, groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+
+	manager.publishGroupAlerts(ctx, group) // t1 confirms, t2 fails: must NOT prune yet
+
+	stillThere, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err, "the group must survive a partial failure so the retry can still deliver to t2")
+	_, found := stillThere.Alerts["fp_R1"]
+	assert.True(t, found, "the resolved alert must not be pruned until every target confirms delivery")
+
+	pub.setFailTarget("") // t2 recovers
+	manager.publishGroupAlerts(ctx, stillThere)
+
+	_, err = manager.GetGroup(ctx, groupKey)
+	assert.Error(t, err, "once t2 also confirms, the fully-delivered resolved alert must be pruned and the group removed")
+}
+
+// === Review finding 1 (fwb fix round 1): groupLabels resolved from
+// GroupMetadata.GroupBy, not hardcoded empty ===
+
+// createTestManagerWithChainAndGroupBy is createTestManagerWithChain with a
+// caller-supplied root Route.GroupBy, so tests can exercise
+// groupLabelsFor's resolution against something other than the fixed
+// ["alertname"] every other chain test uses.
+func createTestManagerWithChainAndGroupBy(t *testing.T, pub GroupNotificationPublisher, groupBy []string) *DefaultGroupManager {
+	t.Helper()
+	keyGen := NewGroupKeyGenerator()
+	config := &GroupingConfig{
+		Route: &Route{
+			Receiver:       "default",
+			GroupBy:        groupBy,
+			GroupWait:      &Duration{time.Hour},
+			GroupInterval:  &Duration{time.Hour},
+			RepeatInterval: &Duration{time.Hour},
+		},
+	}
+
+	storage := NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()})
+
+	manager, err := NewDefaultGroupManager(context.Background(), DefaultGroupManagerConfig{
+		KeyGenerator: keyGen,
+		Config:       config,
+		Logger:       slog.Default(),
+		Storage:      storage,
+		Publisher:    pub,
+	})
+	require.NoError(t, err)
+	return manager
+}
+
+// TestPublishGroupAlerts_GroupLabels_ResolvedFromGroupBy is review finding
+// 1's headline test: for group_by: [alertname, cluster], the batched
+// notification must carry groupLabels resolved to this group's actual
+// values for exactly those two names — not the hardcoded empty map the
+// pre-fix code passed down.
+func TestPublishGroupAlerts_GroupLabels_ResolvedFromGroupBy(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithChainAndGroupBy(t, pub, []string{"alertname", "cluster"})
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/alertname=HighCPU/cluster=prod")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU", "cluster": "prod", "instance": "host-1"})
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+	manager.publishGroupAlerts(ctx, group)
+
+	require.Len(t, pub.calls(), 1)
+	assert.Equal(t, map[string]string{"alertname": "HighCPU", "cluster": "prod"}, pub.lastGroupLabels(),
+		"groupLabels must resolve exactly the group_by names to this group's values, excluding non-group_by labels like instance")
+}
+
+// TestPublishGroupAlerts_GroupLabels_EmptyGroupByYieldsEmptyMap covers the
+// other half: a route with no group_by at all must resolve to an empty,
+// non-nil groupLabels map, matching the wire formatter's "never emit null"
+// contract.
+func TestPublishGroupAlerts_GroupLabels_EmptyGroupByYieldsEmptyMap(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithChainAndGroupBy(t, pub, nil)
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=default/no-group-by")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "HighCPU"})
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey)
+	require.NoError(t, err)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+	manager.publishGroupAlerts(ctx, group)
+
+	require.Len(t, pub.calls(), 1)
+	assert.Equal(t, map[string]string{}, pub.lastGroupLabels(), "empty group_by must resolve to an empty, non-nil map")
+}
+
 // === Fix round 1, Finding 4: check-then-publish-then-record must be
 // atomic per group, not just the dedup log's own internal locking ===
 

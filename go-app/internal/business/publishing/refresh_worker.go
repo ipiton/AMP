@@ -68,40 +68,53 @@ func (m *DefaultRefreshManager) runBackgroundWorker() {
 	}
 }
 
-// executeRefresh performs actual refresh with retry logic.
+// executeRefresh performs actual refresh with retry logic, acquiring the
+// single-flight slot itself first.
 //
-// This method:
-//  1. Checks if refresh already in progress (skip if yes)
-//  2. Sets state to in_progress
-//  3. Updates metrics (in_progress=1)
-//  4. Calls refreshWithRetry() (retry logic with exponential backoff)
-//  5. Updates state based on result (success/failed)
-//  6. Records metrics (duration, errors, last_success)
-//  7. Logs result (success/failure with details)
+// Used by the periodic (ticker-driven) refresh path in runBackgroundWorker,
+// which calls this synchronously and has not already acquired the slot.
+// The manual (RefreshNow) path acquires the slot itself before spawning a
+// goroutine and calls doRefresh directly — see RefreshNow for why.
 //
 // Parameters:
 //   - isManual: true if triggered via API, false if periodic
 //
 // Thread-Safe: Yes (single-flight pattern via mutex)
 func (m *DefaultRefreshManager) executeRefresh(isManual bool) {
-	// Single-flight pattern: skip if already in progress
-	m.mu.Lock()
-	if m.inProgress {
+	if !m.tryAcquireRefreshSlot() {
 		m.logger.Debug("Refresh already in progress, skipping",
 			"is_manual", isManual)
-		m.mu.Unlock()
 		return
 	}
-	m.inProgress = true
-	m.state = RefreshStateInProgress
-	m.mu.Unlock()
 
+	// Called synchronously (runBackgroundWorker calls executeRefresh directly,
+	// not via a spawned goroutine), so this is the same "mark started before
+	// any waiter could poll GetStatus" guarantee RefreshNow relies on.
+	m.markRefreshStarted()
+
+	m.doRefresh(isManual)
+}
+
+// doRefresh performs the actual refresh work with retry logic. The caller
+// MUST have already acquired the single-flight slot via tryAcquireRefreshSlot
+// and flipped state via markRefreshStarted() — doRefresh only releases the
+// slot (via defer) and transitions state to a terminal outcome, it never
+// acquires the slot or marks state as started.
+//
+// This method:
+//  1. Updates metrics (in_progress=1)
+//  2. Calls refreshWithRetry() (retry logic with exponential backoff)
+//  3. Updates state based on result (success/failed)
+//  4. Records metrics (duration, errors, last_success)
+//  5. Logs result (success/failure with details)
+//
+// Parameters:
+//   - isManual: true if triggered via API, false if periodic
+//
+// Thread-Safe: Yes (relies on caller-held single-flight slot; releases it on exit)
+func (m *DefaultRefreshManager) doRefresh(isManual bool) {
 	// Ensure inProgress is reset on exit
-	defer func() {
-		m.mu.Lock()
-		m.inProgress = false
-		m.mu.Unlock()
-	}()
+	defer m.releaseRefreshSlot()
 
 	// Record start time
 	startTime := time.Now()
@@ -135,11 +148,15 @@ func (m *DefaultRefreshManager) executeRefresh(isManual bool) {
 
 	if err != nil {
 		// Refresh failed
+		m.mu.RLock()
+		nextConsecutiveFailures := m.consecutiveFailures + 1
+		m.mu.RUnlock()
+
 		m.logger.Error("Refresh failed",
 			"type", refreshType,
 			"error", err,
 			"duration", duration,
-			"consecutive_failures", m.consecutiveFailures+1)
+			"consecutive_failures", nextConsecutiveFailures)
 
 		// Update state
 		m.updateState(

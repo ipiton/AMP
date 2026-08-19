@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,12 @@ type fakePublishingCoordinator struct {
 	groupErr      error
 	groupAlerts   []*core.Alert
 	groupReceiver string
+	groupKey      string
+	groupLabels   map[string]string
+
+	// task fwb: records which target names the caller's skipTarget callback
+	// was asked about.
+	skipTargetAsked []string
 }
 
 func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.EnrichedAlert) ([]*infrapublishing.PublishingResult, error) {
@@ -33,10 +40,31 @@ func (f *fakePublishingCoordinator) PublishToAll(_ context.Context, alert *core.
 	return f.results, f.err
 }
 
-func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string) ([]*infrapublishing.PublishingResult, error) {
+func (f *fakePublishingCoordinator) PublishGroupToTargets(_ context.Context, alerts []*core.Alert, receiver string, groupKey string, groupLabels map[string]string, skipTarget func(string) bool) ([]*infrapublishing.PublishingResult, error) {
 	f.groupAlerts = alerts
 	f.groupReceiver = receiver
-	return f.groupResults, f.groupErr
+	f.groupKey = groupKey
+	f.groupLabels = groupLabels
+
+	if skipTarget == nil {
+		return f.groupResults, f.groupErr
+	}
+
+	// Mirror the real coordinator: ask skipTarget once per configured
+	// result's target name, and omit any it says to skip.
+	filtered := make([]*infrapublishing.PublishingResult, 0, len(f.groupResults))
+	for _, result := range f.groupResults {
+		name := ""
+		if result != nil && result.Target != nil {
+			name = result.Target.Name
+		}
+		f.skipTargetAsked = append(f.skipTargetAsked, name)
+		if skipTarget(name) {
+			continue
+		}
+		filtered = append(filtered, result)
+	}
+	return filtered, f.groupErr
 }
 
 type fakeBusinessDiscoveryManager struct {
@@ -227,14 +255,21 @@ func TestApplicationPublishingAdapter_NilResultsDoNotSynthesizePartialFailure(t 
 		t.Fatalf("single-alert path: nil padding must not read as a partial failure, got %v", err)
 	}
 
-	if err := adapter.PublishGroup(context.Background(), []*core.Alert{{Fingerprint: "abc"}}, "default"); err != nil {
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", []*core.Alert{{Fingerprint: "abc"}}, "default", nil, nil)
+	if err != nil {
 		t.Fatalf("group path: nil padding must not read as a partial failure, got %v", err)
+	}
+	if len(outcomes) != 1 || !outcomes[0].Success {
+		t.Fatalf("group path: expected exactly one successful outcome (nil entries dropped), got %+v", outcomes)
 	}
 }
 
 // TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed
-// keeps the group path's "nil must never mean sent" contract intact for the
-// degenerate all-nil case, which counts as zero confirmations.
+// keeps the group path's "nil must never be reported as a delivery outcome"
+// contract intact for the degenerate all-nil case: no usable entries means
+// no outcomes at all, so the caller's RecordSent loop (task fwb) has
+// nothing to record — same "not confirmed" effect the old all-or-nothing
+// error used to convey, just via an empty outcome list instead of an error.
 func TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed(t *testing.T) {
 	coordinator := &fakePublishingCoordinator{
 		groupResults: []*infrapublishing.PublishingResult{nil, nil},
@@ -245,8 +280,12 @@ func TestApplicationPublishingAdapter_PublishGroup_AllNilResultsIsNotConfirmed(t
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	if err := adapter.PublishGroup(context.Background(), []*core.Alert{{Fingerprint: "abc"}}, "default"); err == nil {
-		t.Fatal("a result set with no usable entries must not be reported as delivered")
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", []*core.Alert{{Fingerprint: "abc"}}, "default", nil, nil)
+	if err != nil {
+		t.Fatalf("PublishGroup() error = %v, want nil (the coordinator itself did not error)", err)
+	}
+	if len(outcomes) != 0 {
+		t.Fatalf("a result set with no usable entries must produce zero outcomes, got %+v", outcomes)
 	}
 }
 
@@ -270,16 +309,19 @@ func TestMetricsOnlyPublisher_PublishGroupSignalsNoDelivery(t *testing.T) {
 	publisher := NewMetricsOnlyPublisher("publishing_disabled", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	alerts := []*core.Alert{{Fingerprint: "abc", AlertName: "Test"}}
 
-	err := publisher.PublishGroup(context.Background(), alerts, "default")
+	outcomes, err := publisher.PublishGroup(context.Background(), "gk", alerts, "default", nil, nil)
 	if !errors.Is(err, grouping.ErrDeliveryNotConfirmed) {
 		t.Fatalf("PublishGroup() error = %v, want it to wrap grouping.ErrDeliveryNotConfirmed", err)
 	}
 	if !strings.Contains(err.Error(), "publishing_disabled") {
 		t.Fatalf("PublishGroup() error = %q, want it to carry the degradation reason", err)
 	}
+	if outcomes != nil {
+		t.Fatalf("PublishGroup() outcomes = %+v, want nil (nothing was delivered)", outcomes)
+	}
 
 	// Empty alert set is genuinely nothing to deliver, not a suppressed send.
-	if err := publisher.PublishGroup(context.Background(), nil, "default"); err != nil {
+	if _, err := publisher.PublishGroup(context.Background(), "gk", nil, "default", nil, nil); err != nil {
 		t.Fatalf("PublishGroup(no alerts) error = %v, want nil", err)
 	}
 }
@@ -348,9 +390,14 @@ func TestApplicationPublishingAdapter_PublishGroup_PropagatesAlertsAndReceiver(t
 		{Fingerprint: "a1", AlertName: "HighCPU"},
 		{Fingerprint: "a2", AlertName: "HighCPU"},
 	}
+	groupLabels := map[string]string{"alertname": "HighCPU"}
 
-	if err := adapter.PublishGroup(context.Background(), alerts, "critical-pagerduty"); err != nil {
+	outcomes, err := adapter.PublishGroup(context.Background(), "receiver=critical-pagerduty/alertname=HighCPU", alerts, "critical-pagerduty", groupLabels, nil)
+	if err != nil {
 		t.Fatalf("PublishGroup() error = %v", err)
+	}
+	if len(outcomes) != 1 || !outcomes[0].Success || outcomes[0].Target != "ops" {
+		t.Fatalf("expected exactly one successful outcome for target %q, got %+v", "ops", outcomes)
 	}
 
 	if len(coordinator.groupAlerts) != 2 {
@@ -358,6 +405,12 @@ func TestApplicationPublishingAdapter_PublishGroup_PropagatesAlertsAndReceiver(t
 	}
 	if coordinator.groupReceiver != "critical-pagerduty" {
 		t.Fatalf("expected receiver %q, got %q", "critical-pagerduty", coordinator.groupReceiver)
+	}
+	if coordinator.groupKey != "receiver=critical-pagerduty/alertname=HighCPU" {
+		t.Fatalf("expected groupKey to be forwarded to the coordinator, got %q", coordinator.groupKey)
+	}
+	if !reflect.DeepEqual(coordinator.groupLabels, groupLabels) {
+		t.Fatalf("expected groupLabels to be forwarded to the coordinator, got %+v", coordinator.groupLabels)
 	}
 }
 
@@ -369,8 +422,12 @@ func TestApplicationPublishingAdapter_PublishGroup_EmptyAlertsIsNoop(t *testing.
 		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
 	}
 
-	if err := adapter.PublishGroup(context.Background(), nil, "any"); err != nil {
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", nil, "any", nil, nil)
+	if err != nil {
 		t.Fatalf("PublishGroup() with no alerts should be a no-op, got error = %v", err)
+	}
+	if outcomes != nil {
+		t.Fatalf("PublishGroup() with no alerts should report no outcomes, got %+v", outcomes)
 	}
 	if coordinator.groupAlerts != nil {
 		t.Fatalf("coordinator should not have been called for an empty alert set")
@@ -389,23 +446,25 @@ func TestApplicationPublishingAdapter_PublishGroup_NoTargetsForReceiverReturnsEr
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	err = adapter.PublishGroup(context.Background(), alerts, "unknown-receiver")
+	_, err = adapter.PublishGroup(context.Background(), "gk", alerts, "unknown-receiver", nil, nil)
 	if err == nil {
 		t.Fatal("expected an error when no targets match the receiver")
 	}
 }
 
-// --- task 2.4 fix round 1, Findings 1+2: PublishGroup must not report
-// success unless every resolved target confirmed the enqueue, or the
-// caller's Dedup step records a send that never happened. -------------
+// --- task fwb: PublishGroup reports per-target outcomes instead of an
+// all-or-nothing error, so the caller (DefaultGroupManager.
+// publishGroupAlerts) can record successes and retry only the failures. ---
 
-// TestApplicationPublishingAdapter_PublishGroup_EmptyResultsReturnsError
-// covers Finding 1: PublishingCoordinator.PublishGroupToTargets's
-// metrics-only-mode fallback returns (empty results, nil error) — this
-// must NOT read as success here, or the notify-chain's Dedup log records
-// "sent" for a notification that was actually skipped, and the group goes
-// silent for a full repeat_interval once metrics-only mode ends.
-func TestApplicationPublishingAdapter_PublishGroup_EmptyResultsReturnsError(t *testing.T) {
+// TestApplicationPublishingAdapter_PublishGroup_EmptyResultsIsNotAnError
+// covers the metrics-only-mode fallback: PublishingCoordinator.
+// PublishGroupToTargets returns (empty results, nil error). Under the task
+// fwb contract this must surface as ZERO outcomes with a nil error — not an
+// error — since the caller only records an nflog entry for outcomes it
+// actually receives; an empty outcome list already means "nothing to
+// record," which is exactly the "no confirmed delivery" effect the old
+// all-or-nothing contract needed an explicit error for.
+func TestApplicationPublishingAdapter_PublishGroup_EmptyResultsIsNotAnError(t *testing.T) {
 	coordinator := &fakePublishingCoordinator{
 		groupResults: []*infrapublishing.PublishingResult{}, // e.g. metrics-only mode
 		groupErr:     nil,
@@ -417,18 +476,22 @@ func TestApplicationPublishingAdapter_PublishGroup_EmptyResultsReturnsError(t *t
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	if err := adapter.PublishGroup(context.Background(), alerts, "any-receiver"); err == nil {
-		t.Fatal("expected an error for empty results with a nil coordinator error (no confirmed delivery)")
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "any-receiver", nil, nil)
+	if err != nil {
+		t.Fatalf("PublishGroup() error = %v, want nil (the coordinator itself did not error)", err)
+	}
+	if len(outcomes) != 0 {
+		t.Fatalf("expected zero outcomes for empty results, got %+v", outcomes)
 	}
 }
 
-// TestApplicationPublishingAdapter_PublishGroup_PartialFailureReturnsError
-// covers Finding 2: previously, as long as at least one of N targets
-// succeeded, PublishGroup returned nil — so Dedup recorded "sent" and the
-// failed target(s) would not be retried until repeat_interval elapsed
-// (every other publish path in this codebase retries on the very next
-// tick). Now a partial failure must return a non-nil error too.
-func TestApplicationPublishingAdapter_PublishGroup_PartialFailureReturnsError(t *testing.T) {
+// TestApplicationPublishingAdapter_PublishGroup_PartialFailureReportsPerTargetOutcomes
+// covers what task fwb replaces the old all-or-nothing error with: 1 of 2
+// targets fails, and PublishGroup must report BOTH outcomes (one success,
+// one failure) with a nil error, so the caller can record the success and
+// retry only the failure on the next scheduled fire — instead of treating
+// the whole call as failed and resending to both targets again.
+func TestApplicationPublishingAdapter_PublishGroup_PartialFailureReportsPerTargetOutcomes(t *testing.T) {
 	coordinator := &fakePublishingCoordinator{
 		groupResults: []*infrapublishing.PublishingResult{
 			{Target: &core.PublishingTarget{Name: "ops-a"}, Success: true},
@@ -442,7 +505,57 @@ func TestApplicationPublishingAdapter_PublishGroup_PartialFailureReturnsError(t 
 	}
 
 	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
-	if err := adapter.PublishGroup(context.Background(), alerts, "multi-target-receiver"); err == nil {
-		t.Fatal("expected an error when 1 of 2 targets fails, so the caller does not record this as fully delivered")
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil, nil)
+	if err != nil {
+		t.Fatalf("PublishGroup() error = %v, want nil (per-target outcomes carry the partial failure now)", err)
+	}
+	if len(outcomes) != 2 {
+		t.Fatalf("expected 2 outcomes, got %+v", outcomes)
+	}
+
+	byTarget := map[string]bool{}
+	for _, o := range outcomes {
+		byTarget[o.Target] = o.Success
+	}
+	if !byTarget["ops-a"] {
+		t.Fatalf("expected ops-a to be reported as a success, got %+v", outcomes)
+	}
+	if byTarget["ops-b"] {
+		t.Fatalf("expected ops-b to be reported as a failure, got %+v", outcomes)
+	}
+}
+
+// TestApplicationPublishingAdapter_PublishGroup_ForwardsSkipTarget proves
+// skipTarget (task fwb's per-target nflog dedup callback) reaches the
+// coordinator unchanged, and that a skipped target produces no outcome.
+func TestApplicationPublishingAdapter_PublishGroup_ForwardsSkipTarget(t *testing.T) {
+	coordinator := &fakePublishingCoordinator{
+		groupResults: []*infrapublishing.PublishingResult{
+			{Target: &core.PublishingTarget{Name: "ops-a"}, Success: true},
+			{Target: &core.PublishingTarget{Name: "ops-b"}, Success: true},
+		},
+	}
+
+	adapter, err := NewApplicationPublishingAdapter(coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewApplicationPublishingAdapter() error = %v", err)
+	}
+
+	skipCalls := 0
+	skipTarget := func(target string) bool {
+		skipCalls++
+		return target == "ops-b"
+	}
+
+	alerts := []*core.Alert{{Fingerprint: "a1", AlertName: "HighCPU"}}
+	outcomes, err := adapter.PublishGroup(context.Background(), "gk", alerts, "multi-target-receiver", nil, skipTarget)
+	if err != nil {
+		t.Fatalf("PublishGroup() error = %v", err)
+	}
+	if skipCalls == 0 {
+		t.Fatal("expected skipTarget to be forwarded to the coordinator and invoked")
+	}
+	if len(outcomes) != 1 || outcomes[0].Target != "ops-a" {
+		t.Fatalf("expected only ops-a to be reported (ops-b skipped), got %+v", outcomes)
 	}
 }
