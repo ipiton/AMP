@@ -364,6 +364,25 @@ func TestStartCleanupWorker_Stop(t *testing.T) {
 	assert.True(t, found, "Worker should have stopped, old entry should remain")
 }
 
+// TestStartCleanupWorker_CancelTwiceDoesNotPanic is the regression test for
+// fix-round-1 finding (Important #1): the cancel closure returned by
+// StartCleanupWorker used to do a bare close(done), which panics ("close of
+// closed channel") on a second call. PublisherFactory.Shutdown() calls this
+// cancel func unconditionally with no guard of its own, so a second
+// Shutdown() on the same factory must not panic via this path either — see
+// TestPublisherFactory_ShutdownTwiceDoesNotPanic in publisher_test.go for
+// the factory-level equivalent covering all three caches together.
+func TestStartCleanupWorker_CancelTwiceDoesNotPanic(t *testing.T) {
+	cache := NewMessageCache()
+	cancel := StartCleanupWorker(cache, 50*time.Millisecond, 24*time.Hour)
+
+	assert.NotPanics(t, func() {
+		cancel()
+		cancel()
+		cancel()
+	})
+}
+
 // TestCache_UpdateEntry tests updating an existing entry
 func TestCache_UpdateEntry(t *testing.T) {
 	cache := NewMessageCache()
