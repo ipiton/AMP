@@ -468,6 +468,22 @@ func TestMatcherRegex_Quantifiers(t *testing.T) {
 	}
 }
 
+// TestMatcherRegex_Anchors pins upstream Alertmanager's regex anchoring:
+// `labels.NewMatcher` (MatchRegexp) ALWAYS compiles `^(?:pattern)$`,
+// regardless of whether the pattern itself already carries its own `^`/
+// `$` — so a pattern like "^start" or "end$", used with the intent of
+// "starts with"/"ends with" over a longer value, does NOT do that
+// upstream: the outer anchors force the WHOLE label value to match, so
+// "^start" only ever matches a label whose entire value is "start", and
+// "end$" only ever matches a label whose entire value is "end".
+//
+// Review fix round 2 (R1): before RegexCache.Get anchored its compiled
+// pattern, this package evaluated `=~`/`!~` unanchored, so these two rows
+// asserted the (wrong) substring-matching answer — inverted here to the
+// upstream-correct one now that anchoring is fixed. Verified against
+// `github.com/prometheus/alertmanager@v0.34.0/pkg/labels/matcher.go:69`
+// (`regexp.Compile("^(?:" + v + ")$")`, unconditional — it does not
+// special-case an already-anchored input pattern).
 func TestMatcherRegex_Anchors(t *testing.T) {
 	matcher := NewSilenceMatcher()
 	ctx := context.Background()
@@ -477,12 +493,35 @@ func TestMatcherRegex_Anchors(t *testing.T) {
 		value     string
 		wantMatch bool
 	}{
-		{"^start", "start-middle-end", true},
+		// INVERTED (fix round 2, R1): pre-fix unanchored evaluation made
+		// "^start" behave like "starts with start" and matched the full
+		// "start-middle-end" value (want=true); upstream's own
+		// `^(?:^start)$` requires the ENTIRE value to be exactly "start",
+		// so a longer value never matches (want=false, flipped below).
+		{"^start", "start-middle-end", false},
+		// Unaffected by the fix: "middle-start-end" doesn't start with
+		// "start" either way (unanchored `^` already anchors to
+		// position 0, so this was false before and stays false).
 		{"^start", "middle-start-end", false},
-		{"end$", "start-middle-end", true},
+		// INVERTED (fix round 2, R1): same anchoring gotcha for a
+		// trailing `$` — "end$" only matches a label whose entire value
+		// is "end", not one that merely ends with "end" (want=true
+		// pre-fix, flipped to false below).
+		{"end$", "start-middle-end", false},
+		// Unaffected by the fix: "start-end-middle" doesn't END with
+		// "end" either way (it ends with "middle"), so this was false
+		// before and stays false.
 		{"end$", "start-end-middle", false},
+		// Already a full-value pattern (its own ^...$ already spans the
+		// whole thing), so double-anchoring changes nothing — these two
+		// rows are unaffected by the fix.
 		{"^exact$", "exact", true},
 		{"^exact$", "not-exact", false},
+		// New coverage: the actual "starts with"/"ends with" idiom
+		// upstream requires for these two patterns to mean what the
+		// removed rows above used to assume — wrap in `.*`.
+		{"^start.*", "start-middle-end", true},
+		{".*end$", "start-middle-end", true},
 	}
 
 	for _, tt := range tests {
@@ -501,6 +540,90 @@ func TestMatcherRegex_Anchors(t *testing.T) {
 			}
 			if matched != tt.wantMatch {
 				t.Errorf("pattern=%q value=%q: got %v, want %v", tt.pattern, tt.value, matched, tt.wantMatch)
+			}
+		})
+	}
+}
+
+// TestMatchSingle_AbsentLabelUpstreamSemantics is the review fix-round-2
+// (R1) table test for internal/core/silencing — the third site (after
+// internal/infrastructure/inhibition.matchesAll and
+// internal/business/routing.MatchesNode, both fixed in fix round 1) found
+// to carry the same absent-label divergence. Upstream Alertmanager's
+// Matchers.Matches has NO presence check at all (pkg/labels/matcher.go:
+// 184-191 reads `lset[name]`, "" for an absent Go map key), so an absent
+// label is evaluated as the empty string against every operator. Each row
+// pins one operator against a label entirely absent from the alert, both
+// for an operand that is itself empty/empty-matching (the sharpest edge,
+// where the pre-fix table diverged) and a typical non-empty operand
+// (where the tables happened to agree, so a regression back to the
+// presence-gated version would only be caught by the empty-operand rows).
+func TestMatchSingle_AbsentLabelUpstreamSemantics(t *testing.T) {
+	matcher := NewSilenceMatcher()
+	ctx := context.Background()
+	alert := newTestAlert(map[string]string{"unrelated": "value"}) // "job"/"foo" absent
+
+	tests := []struct {
+		name    string
+		m       Matcher
+		want    bool
+		explain string
+	}{
+		{
+			name:    `job!="" on absent label`,
+			m:       Matcher{Name: "job", Value: "", Type: MatcherTypeNotEqual},
+			want:    false,
+			explain: `upstream: "" != "" is false -> NOT matched (the pre-fix version returned true)`,
+		},
+		{
+			name:    `foo=~".*" on absent label`,
+			m:       Matcher{Name: "foo", Value: ".*", Type: MatcherTypeRegex},
+			want:    true,
+			explain: `upstream: anchored ".*" matches "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `foo="" on absent label`,
+			m:       Matcher{Name: "foo", Value: "", Type: MatcherTypeEqual},
+			want:    true,
+			explain: `upstream: "" == "" -> matched (the pre-fix version returned false)`,
+		},
+		{
+			name:    `foo!~".*" on absent label`,
+			m:       Matcher{Name: "foo", Value: ".*", Type: MatcherTypeNotRegex},
+			want:    false,
+			explain: `upstream: anchored ".*" matches "" so negated is false -> NOT matched (the pre-fix version returned true)`,
+		},
+		{
+			name: `foo="bar" on absent label (non-empty operand, tables agree)`,
+			m:    Matcher{Name: "foo", Value: "bar", Type: MatcherTypeEqual},
+			want: false,
+		},
+		{
+			name: `foo!="bar" on absent label (non-empty operand, tables agree)`,
+			m:    Matcher{Name: "foo", Value: "bar", Type: MatcherTypeNotEqual},
+			want: true,
+		},
+		{
+			name: `foo=~"bar" on absent label (non-empty operand, tables agree)`,
+			m:    Matcher{Name: "foo", Value: "bar", Type: MatcherTypeRegex},
+			want: false,
+		},
+		{
+			name: `foo!~"bar" on absent label (non-empty operand, tables agree)`,
+			m:    Matcher{Name: "foo", Value: "bar", Type: MatcherTypeNotRegex},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			silence := newTestSilence("s1", []Matcher{tt.m})
+			got, err := matcher.Matches(ctx, alert, silence)
+			if err != nil {
+				t.Fatalf("Matches() error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Matches() = %v, want %v (%s)", got, tt.want, tt.explain)
 			}
 		})
 	}

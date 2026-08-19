@@ -82,11 +82,13 @@ func NewSilenceMatcher() *DefaultSilenceMatcher {
 //     c. If matcher fails → return false (early exit)
 //  3. If all matchers pass → return true
 //
-// Operator Semantics:
-//   - = (Equal): Label exists AND value equals matcher value
-//   - != (NotEqual): Label missing OR value not equals matcher value
-//   - =~ (Regex): Label exists AND matches regex pattern
-//   - !~ (NotRegex): Label missing OR not matches regex pattern
+// Operator Semantics (upstream Alertmanager: absent label reads as ""
+// for every operator, see matchSingle's doc comment for the fix-round-2
+// detail):
+//   - = (Equal): (possibly absent-as-"") value equals matcher value
+//   - != (NotEqual): (possibly absent-as-"") value differs from matcher value
+//   - =~ (Regex): (possibly absent-as-"") value matches the anchored regex
+//   - !~ (NotRegex): (possibly absent-as-"") value does not match the anchored regex
 //
 // Performance:
 //   - Target: <500µs for silence with 10 matchers
@@ -214,11 +216,28 @@ func (m *DefaultSilenceMatcher) MatchesAny(ctx context.Context, alert Alert, sil
 //   - bool: true if matcher matches, false otherwise
 //   - error: regex compilation error or invalid operator error
 //
-// Operator Semantics:
-//   - = (Equal): Label must exist AND value must equal matcher value
-//   - != (NotEqual): Label missing OR value not equal to matcher value
-//   - =~ (Regex): Label must exist AND match regex pattern
-//   - !~ (NotRegex): Label missing OR not match regex pattern
+// Operator Semantics — upstream Alertmanager semantics
+// (`pkg/labels/matcher.go`'s `Matcher.Matches(s)`, called with
+// `s = string(lset[name])`; a Go map read of a missing key already
+// returns the zero value "", so upstream has NO presence check anywhere
+// — an absent label is simply evaluated as the empty string against
+// every operator, below):
+//   - = (Equal): (possibly absent-as-"") value must equal matcher value
+//   - != (NotEqual): (possibly absent-as-"") value must differ from matcher value
+//   - =~ (Regex): (possibly absent-as-"") value must match the anchored regex
+//   - !~ (NotRegex): (possibly absent-as-"") value must NOT match the anchored regex
+//
+// Review fix round 2 (R1): this method used to gate `=`/`=~` on the label
+// being present and short-circuit `!=`/`!~` to true on absence,
+// unconditionally — the third copy of the exact divergence already fixed
+// in `internal/infrastructure/inhibition.matchesAll` and
+// `internal/business/routing.MatchesNode` during fix round 1, for
+// silences specifically the over-silencing direction (see
+// RegexCache.Get's anchoring fix in the same commit: an unanchored `=~`
+// on top of the presence gate meant `job=~"prod"` silenced
+// `job="preprod-2"` too). Since Go's `labels[name]` already yields "" for
+// a missing key, this needs no presence check at all — dropping it is
+// both the fix and the simplification.
 //
 // Performance:
 //   - = and !=: <10µs (O(1) map lookup)
@@ -226,39 +245,39 @@ func (m *DefaultSilenceMatcher) MatchesAny(ctx context.Context, alert Alert, sil
 //   - =~ uncached: <100µs (compile + cache + match)
 //   - !~ same as =~ (same regex evaluation)
 func (m *DefaultSilenceMatcher) matchSingle(labels map[string]string, matcher *Matcher) (bool, error) {
-	// Get label value from alert
-	labelValue, labelExists := labels[matcher.Name]
+	// Get label value from alert (upstream semantics: absent == "")
+	labelValue := labels[matcher.Name]
 
 	// Match based on operator type
 	switch matcher.Type {
 	case MatcherTypeEqual:
-		// = operator: label must exist AND equal value
+		// = operator: value must equal matcher value
 		// Examples:
 		//   - Label "job=api", Matcher "job=api" → true
 		//   - Label "job=web", Matcher "job=api" → false
-		//   - Label missing, Matcher "job=api" → false
-		return labelExists && labelValue == matcher.Value, nil
+		//   - Label missing, Matcher "job=api" → false ("" != "api")
+		//   - Label missing, Matcher "job=" (empty value) → true ("" == "")
+		return labelValue == matcher.Value, nil
 
 	case MatcherTypeNotEqual:
-		// != operator: label missing OR not equal value
+		// != operator: value must differ from matcher value
 		// Examples:
 		//   - Label "job=api", Matcher "job!=web" → true
 		//   - Label "job=api", Matcher "job!=api" → false
-		//   - Label missing, Matcher "job!=api" → true (important!)
-		return !labelExists || labelValue != matcher.Value, nil
+		//   - Label missing, Matcher "job!=api" → true ("" != "api")
+		//   - Label missing, Matcher "job!=" (empty value) → false ("" == "", NOT a match for !=)
+		return labelValue != matcher.Value, nil
 
 	case MatcherTypeRegex:
-		// =~ operator: label must exist AND match regex
+		// =~ operator: value must match the anchored regex
 		// Examples:
 		//   - Label "severity=critical", Matcher "severity=~(critical|warning)" → true
 		//   - Label "severity=info", Matcher "severity=~(critical|warning)" → false
-		//   - Label missing, Matcher "severity=~(critical|warning)" → false
+		//   - Label missing, Matcher "severity=~(critical|warning)" → false (anchored pattern doesn't match "")
+		//   - Label missing, Matcher "severity=~.*" → true (anchored ".*" DOES match "")
 
-		if !labelExists {
-			return false, nil // Label missing = no match
-		}
-
-		// Get compiled regex from cache (or compile if not cached)
+		// Get compiled regex from cache (or compile if not cached); anchored
+		// ^(?:pattern)$ by RegexCache.Get, matching upstream.
 		re, err := m.regexCache.Get(matcher.Value)
 		if err != nil {
 			return false, fmt.Errorf("%w: pattern=%q: %v", ErrRegexCompilationFailed, matcher.Value, err)
@@ -267,17 +286,15 @@ func (m *DefaultSilenceMatcher) matchSingle(labels map[string]string, matcher *M
 		return re.MatchString(labelValue), nil
 
 	case MatcherTypeNotRegex:
-		// !~ operator: label missing OR not match regex
+		// !~ operator: value must NOT match the anchored regex
 		// Examples:
 		//   - Label "instance=server-prod-01", Matcher "instance!~.*-dev-.*" → true
 		//   - Label "instance=server-dev-01", Matcher "instance!~.*-dev-.*" → false
-		//   - Label missing, Matcher "instance!~.*-dev-.*" → true (important!)
+		//   - Label missing, Matcher "instance!~.*-dev-.*" → true (anchored pattern doesn't match "")
+		//   - Label missing, Matcher "instance!~.*" → false (anchored ".*" DOES match "", so negated is false)
 
-		if !labelExists {
-			return true, nil // Label missing = not matched = match for !~
-		}
-
-		// Get compiled regex from cache (or compile if not cached)
+		// Get compiled regex from cache (or compile if not cached); anchored
+		// ^(?:pattern)$ by RegexCache.Get, matching upstream.
 		re, err := m.regexCache.Get(matcher.Value)
 		if err != nil {
 			return false, fmt.Errorf("%w: pattern=%q: %v", ErrRegexCompilationFailed, matcher.Value, err)
