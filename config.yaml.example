@@ -14,6 +14,16 @@ storage:
   backend: postgres  # "filesystem" for Lite, "postgres" for Standard
   filesystem_path: /data/alerthistory.db  # Used in Lite mode
 
+  # File-snapshot persistence for the Lite profile's silences + notification
+  # log (wave 6, FU-LITE-FILE-SNAPSHOT) — mirrors upstream Alertmanager's
+  # --storage.path. Empty (the default) DISABLES snapshotting entirely: this
+  # must be an explicit opt-in, so leaving it unset never starts writing
+  # files as a side effect of upgrading. Only consulted for profile: lite —
+  # the Standard profile's Postgres/Redis already own durability, and
+  # setting this here has no effect for it beyond a startup log line.
+  path: ""  # e.g. /data/amp-snapshot.json to enable
+  snapshot_interval: 5m  # periodic flush interval; final write also happens on graceful shutdown
+
 # ============================================================================
 # Server Configuration
 # ============================================================================
