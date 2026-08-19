@@ -1893,6 +1893,15 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		BusinessMetrics:    r.metrics,
 		RouteEvaluator:     r.routeEvaluator,          // task 1.4: may be nil (lite/legacy mode, no route: section)
 		GroupingEnabled:    r.config.Grouping.Enabled, // task 2.3
+		// Re-review finding R1: a CONFIGURED route tree must never degrade into
+		// an unscoped publish, even when the tree failed to build
+		// (initializeRouting is non-fatal) or Evaluate fails for an alert.
+		// RouteTreeConfigured therefore comes from the config, NOT from
+		// r.routeEvaluator != nil, and DefaultReceiver carries the root route's
+		// catch-all receiver as the fallback.
+		RouteTreeConfigured:    r.config.HasRouteTree(),
+		DefaultReceiver:        rootRouteReceiver(r.config),
+		RoutingFallbackMetrics: routingFallbackMetricsOnce(),
 		GroupManager:       groupManager,              // task 2.3: nil unless grouping subsystem initialized (route tree required)
 		GroupKeyGenerator:  r.groupKeyGenerator,       // task 2.3: nil unless grouping subsystem initialized
 		Logger:             r.logger,
@@ -2242,6 +2251,7 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	// rebuild is pure and the swap is atomic — cheaper than tracking which
 	// integration fields moved.
 	r.applyConfigTargets()
+	r.applyKnownReceivers()
 
 	return nil
 }

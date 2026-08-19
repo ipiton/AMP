@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
 // DefaultDeliveryConfirmationTimeout bounds how long
@@ -73,7 +75,25 @@ type PublishingCoordinator struct {
 	modeManager      ModeManager // TN-060: Mode manager for metrics-only fallback
 	semaphore        chan struct{}
 	deliveryTimeout  time.Duration // task rec: per-target delivery-confirmation wait
+	metrics          *v2.PublishingMetrics
 	logger           *slog.Logger
+
+	// knownReceivers is the set of receiver names DECLARED in the loaded
+	// config, pushed in by the wiring layer (ServiceRegistry) at startup and on
+	// every reload. It exists to tell two zero-target situations apart
+	// (FU-RECEIVERS-INTEGRATION slice-1 re-review finding R2):
+	//
+	//   - the receiver is declared but provisions no targets → upstream
+	//     Alertmanager's BLACKHOLE receiver (`- name: 'null'`, or a receiver
+	//     whose only integration AMP cannot deliver). Upstream accepts the
+	//     notification and drops it, so this must be a SUCCESSFUL no-op.
+	//   - the receiver is not declared at all → a real configuration gap
+	//     (a route pointing at a receiver that does not exist, or a target set
+	//     that never loaded), which must stay a loud error.
+	//
+	// nil/empty means "the wiring never told us", in which case every
+	// zero-target resolution keeps the pre-R2 error behaviour.
+	knownReceivers atomic.Pointer[map[string]struct{}]
 }
 
 // CoordinatorConfig holds configuration for publishing coordinator
@@ -96,6 +116,11 @@ type CoordinatorConfig struct {
 	// DefaultDeliveryConfirmationTimeout — see that constant for the sizing
 	// constraint against grouping.notifyLogClaimTTL.
 	DeliveryConfirmationTimeout time.Duration
+
+	// Metrics is optional (nil = no metrics). Used for the blackhole-drop
+	// counter (re-review finding R2); delivery metrics themselves are recorded
+	// by the queue and the publishers.
+	Metrics *v2.PublishingMetrics
 }
 
 // DefaultCoordinatorConfig returns default configuration
@@ -129,7 +154,57 @@ func NewPublishingCoordinator(
 		modeManager:      modeManager,
 		semaphore:        make(chan struct{}, config.MaxConcurrent),
 		deliveryTimeout:  deliveryTimeout,
+		metrics:          config.Metrics,
 		logger:           logger,
+	}
+}
+
+// SetKnownReceivers publishes the set of receiver names declared in the loaded
+// config (re-review finding R2). Called by the wiring layer at startup and on
+// every config reload; the swap is atomic, so a reload never leaves the
+// coordinator with a half-updated set.
+//
+// Passing nil/empty restores the pre-R2 behaviour: every zero-target resolution
+// is an error, blackhole or not.
+func (c *PublishingCoordinator) SetKnownReceivers(names []string) {
+	set := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name != "" {
+			set[name] = struct{}{}
+		}
+	}
+	c.knownReceivers.Store(&set)
+}
+
+// isBlackholeReceiver reports whether receiverName is a receiver the config
+// DECLARES but that resolved to zero publishing targets — upstream
+// Alertmanager's blackhole receiver, which accepts a notification and drops it.
+//
+// An empty receiverName is never a blackhole: that is the legacy
+// "all enabled targets" mode, where zero targets means the deployment has no
+// targets at all.
+func (c *PublishingCoordinator) isBlackholeReceiver(receiverName string) bool {
+	if receiverName == "" {
+		return false
+	}
+	set := c.knownReceivers.Load()
+	if set == nil {
+		return false
+	}
+	_, ok := (*set)[receiverName]
+	return ok
+}
+
+// recordBlackholeDrop logs and counts an intentional drop.
+func (c *PublishingCoordinator) recordBlackholeDrop(receiverName string, alertCount int) {
+	// Debug, not Warn: this is the configured outcome, and a blackhole route
+	// can carry a large share of the alert volume by design.
+	c.logger.Debug("Receiver has no publishing targets; dropping notification as an intentional blackhole",
+		"receiver", receiverName,
+		"alert_count", alertCount,
+	)
+	if c.metrics != nil {
+		c.metrics.RecordBlackholeDrop(receiverName)
 	}
 }
 
@@ -352,6 +427,15 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 		}
 
 		if len(targets) == 0 {
+			// Blackhole (re-review finding R2): a DECLARED receiver with no
+			// targets is upstream's drop-on-purpose receiver, so this is a
+			// successful no-op — not an error that would make the ingest batch
+			// answer 207/500 for an alert the operator deliberately discards.
+			if c.isBlackholeReceiver(receiverName) {
+				c.recordBlackholeDrop(receiverName, 1)
+				return []*PublishingResult{}, nil
+			}
+
 			c.logger.Warn("No publishing targets matched receiver; publishing to none",
 				"receiver", receiverName,
 				"fingerprint", enrichedAlert.Alert.Fingerprint,
@@ -517,6 +601,30 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 	}
 
 	if len(targets) == 0 {
+		// Blackhole (re-review finding R2): upstream treats a notification to a
+		// blackhole receiver as SENT, so this reports one successful synthetic
+		// outcome. That makes the notify chain write its nflog entry and settle
+		// the group (prune resolved alerts, no re-fire every group_interval),
+		// instead of logging a publish error on every single fire for the life
+		// of the alerts.
+		//
+		// The synthetic target name is stable across fires, which is what lets
+		// the chain's own per-target dedup (targetAlerts, consulted just below)
+		// recognise it next time.
+		if c.isBlackholeReceiver(receiverName) {
+			blackholeTarget := blackholeTargetName(receiverName)
+			if targetAlerts != nil && len(targetAlerts(blackholeTarget, alerts)) == 0 {
+				// Already recorded as sent this cycle — nothing new to drop.
+				return []*PublishingResult{}, nil
+			}
+
+			c.recordBlackholeDrop(receiverName, len(alerts))
+			return []*PublishingResult{{
+				Target:  &core.PublishingTarget{Name: blackholeTarget, Receivers: []string{receiverName}},
+				Success: true,
+			}}, nil
+		}
+
 		c.logger.Warn("No publishing targets matched receiver for group notification; publishing none",
 			"receiver", receiverName,
 			"alert_count", len(alerts),
@@ -672,4 +780,19 @@ func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, handle *Group
 	case <-ctx.Done():
 		return false, fmt.Errorf("%w: delivery confirmation aborted for target %q: %w", ErrDeliveryWaitTimeout, target.Name, ctx.Err())
 	}
+}
+
+// BlackholeTargetPrefix namespaces the synthetic "target" a blackhole receiver
+// reports its (intentionally dropped) notification under — see
+// PublishGroupToTargets and re-review finding R2.
+//
+// It can never collide with a real target: K8s-sourced names are DNS-1123
+// (no ':'), and config-provisioned ones are namespaced `cfg:`.
+const BlackholeTargetPrefix = "blackhole:"
+
+// blackholeTargetName builds the stable synthetic target name for a receiver.
+// Stability matters: the notify chain's per-target dedup (nflog) keys on it, so
+// a name that changed between fires would re-record on every fire.
+func blackholeTargetName(receiverName string) string {
+	return BlackholeTargetPrefix + receiverName
 }

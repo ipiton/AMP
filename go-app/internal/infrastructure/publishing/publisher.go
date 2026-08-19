@@ -482,7 +482,12 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		return NewPagerDutyPublisher(f.formatter, f.logger), nil
 	}
 
-	baseURL := target.URL
+	// Normalise BEFORE keying (re-review finding R5, the wave-5 I3 lesson
+	// applied to normalisation): NewPagerDutyEventsClient strips a trailing
+	// endpoint path from the base itself, so keying on the raw target.URL gave
+	// ".../v2/enqueue" and its own base two cache entries for one effective
+	// endpoint — a wasted client per shape, though never a misdelivery.
+	baseURL := normalizePagerDutyBaseURL(target.URL)
 	if baseURL == "" {
 		baseURL = "https://events.pagerduty.com"
 	}

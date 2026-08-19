@@ -138,6 +138,7 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, confi
 	// single source for the derived grouping-side budgets — see
 	// initializeGrouping and grouping/notify_budget.go.
 	coordinatorConfig.DeliveryConfirmationTimeout = r.config.Publishing.Queue.DeliveryConfirmationTimeout
+	coordinatorConfig.Metrics = publishingMetrics
 	r.publishingCoordinator = infrapublishing.NewPublishingCoordinator(
 		r.publishingQueue,
 		discoveryAdapter,
@@ -219,6 +220,12 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, confi
 	}
 	r.publisher = publisher
 
+	// Blackhole support (re-review finding R2): the coordinator must know which
+	// receivers the config DECLARES, so a declared receiver with no targets is
+	// an intentional drop rather than a "no targets found" error. Must run after
+	// the coordinator exists, hence not folded into applyConfigTargets.
+	r.applyKnownReceivers()
+
 	stats := discovery.GetStats()
 	r.logger.Info("Publishing runtime initialized",
 		"namespace", resolvePublishingNamespace(r.config),
@@ -260,6 +267,30 @@ func (r *ServiceRegistry) applyConfigTargets() {
 	}
 
 	sink.SetConfigTargets(businesspublishing.BuildConfigTargets(r.config.Routing, r.logger))
+}
+
+// applyKnownReceivers pushes the receiver names declared in the LIVE config into
+// the publishing coordinator (re-review finding R2).
+//
+// Called at startup and again from ReloadConfig, alongside applyConfigTargets:
+// a receivers-only edit can add or remove a blackhole receiver just as easily as
+// an integration.
+func (r *ServiceRegistry) applyKnownReceivers() {
+	if r.publishingCoordinator == nil {
+		return
+	}
+
+	var names []string
+	if r.config != nil && r.config.Routing != nil {
+		names = make([]string, 0, len(r.config.Routing.Receivers))
+		for _, receiver := range r.config.Routing.Receivers {
+			if receiver != nil && receiver.Name != "" {
+				names = append(names, receiver.Name)
+			}
+		}
+	}
+
+	r.publishingCoordinator.SetKnownReceivers(names)
 }
 
 // hasConfigProvisionedTargets reports whether the config carries at least one
@@ -470,4 +501,19 @@ func reconciliationGraceOf(tm *grouping.DefaultTimerManager) time.Duration {
 		return 0
 	}
 	return tm.ReconciliationGrace()
+}
+
+// rootRouteReceiver returns the root route's receiver — upstream Alertmanager's
+// catch-all — or "" when there is no route tree (or the tree carries no root
+// receiver, which config validation rejects, so only a hand-built config can
+// reach that).
+//
+// Used as the fallback receiver when a configured route tree produces no
+// decision for an alert (re-review finding R1); "" makes that case a hard error
+// for the alert rather than an unscoped fan-out.
+func rootRouteReceiver(cfg *appconfig.Config) string {
+	if cfg == nil || cfg.Routing == nil || cfg.Routing.Route == nil {
+		return ""
+	}
+	return cfg.Routing.Route.Receiver
 }

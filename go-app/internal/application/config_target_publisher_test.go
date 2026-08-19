@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -11,6 +12,7 @@ import (
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	appconfig "github.com/ipiton/AMP/internal/config"
+	"github.com/ipiton/AMP/internal/core"
 	infrapublishing "github.com/ipiton/AMP/internal/infrastructure/publishing"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
@@ -147,4 +149,36 @@ func liteConfigWithReceivers(withIntegrations bool) *appconfig.Config {
 	}
 	cfg.Routing = &infraroute.RouteConfig{Receivers: []*infraroute.Receiver{receiver}}
 	return cfg
+}
+
+// TestInitializePublishing_BlackholeReceiverIngestSucceeds is the wiring half of
+// re-review finding R2: with the real publishing stack in place, publishing an
+// alert routed to a DECLARED receiver that has no integrations must succeed. It
+// is the error return here that used to make the ingest batch answer 207 (or 500
+// when every alert in the batch was blackholed).
+func TestInitializePublishing_BlackholeReceiverIngestSucceeds(t *testing.T) {
+	cfg := liteConfigWithReceivers(true)
+	// Upstream's blackhole receiver, declared but integration-less.
+	cfg.Routing.Receivers = append(cfg.Routing.Receivers, &infraroute.Receiver{Name: "null"})
+
+	registry := &ServiceRegistry{logger: testRegistryLogger(), config: cfg}
+	t.Cleanup(registry.shutdownPublishing)
+	registry.initializePublishing(context.Background())
+
+	publisher, ok := registry.publisher.(*ApplicationPublishingAdapter)
+	require.True(t, ok, "lite profile with integrations must wire the real publishing adapter")
+
+	alert := &core.Alert{
+		Fingerprint: "fp-blackhole",
+		AlertName:   "DroppedByDesign",
+		Status:      core.StatusFiring,
+		StartsAt:    time.Now(),
+		Labels:      map[string]string{"severity": "info"},
+	}
+
+	require.NoError(t, publisher.PublishToReceiver(context.Background(), alert, "null"),
+		"a declared receiver with zero targets is an intentional drop; ingest must stay 2xx")
+
+	// A receiver the config never declared is still a loud configuration gap.
+	require.Error(t, publisher.PublishToReceiver(context.Background(), alert, "never-declared"))
 }
