@@ -47,6 +47,56 @@ func TestNflogSnapshot_RoundTrip(t *testing.T) {
 	assertDeliveredSnapshotsMatch(t, snap.Delivered, roundTripped.Delivered)
 }
 
+// TestNflogSnapshot_RestoreDoesNotExtendSuppressionPastOriginalDeadline is
+// the missing "other direction" the review flagged (I1): every other
+// post-restore IsDuplicate assertion in this file uses a cutoff BEFORE
+// sentAt, which only proves an entry isn't dropped too early. This proves
+// the opposite failure mode — that LoadNflogSnapshot preserves the
+// ORIGINAL sentAt verbatim rather than resetting it to the restore/load
+// time, which would otherwise let a restart resurrect an entry's live
+// repeat_interval dedup window for a full fresh cycle measured from
+// restore time instead of from when it was actually sent.
+//
+// Setup: record at t0 with repeatInterval=1m (snapshot-load TTL becomes
+// 1m+60s grace = 2m, per deliveredStateTTL). Snapshot near the end of that
+// TTL window (t0+90s, well past the live 1m repeat_interval window but
+// still inside the 2m snapshot-retention TTL, so the entry survives the
+// load). Then advance the clock to t0+70s worth PAST the live window
+// (t0+130s) and check IsDuplicate with the cutoff a real caller would use
+// (now - repeatInterval). If sentAt had been bumped to the restore time,
+// this would incorrectly still read as a duplicate; since it wasn't, it
+// must not.
+func TestNflogSnapshot_RestoreDoesNotExtendSuppressionPastOriginalDeadline(t *testing.T) {
+	ctx := context.Background()
+	log := newNotifyDedupLog()
+
+	const repeatInterval = time.Minute
+	t0 := time.Now().UTC()
+	require.NoError(t, log.RecordSent(ctx, "gk-deadline", "target-a", "sig", t0, repeatInterval))
+
+	// Snapshot near the end of the snapshot-retention TTL (2m), well past
+	// the live repeat_interval window (1m) it will be judged against below.
+	snapshotTime := t0.Add(90 * time.Second)
+	snap := log.SnapshotNflog()
+
+	restored := newNotifyDedupLog()
+	require.NoError(t, restored.LoadNflogSnapshot(snap, snapshotTime))
+
+	// Sanity: the entry did survive the load (it's within the 2m TTL).
+	stillPresent, err := restored.IsDuplicate(ctx, "gk-deadline", "target-a", "sig", t0.Add(-time.Second))
+	require.NoError(t, err)
+	require.True(t, stillPresent, "entry must survive a load well inside its snapshot TTL")
+
+	// Now advance well past the ORIGINAL live dedup window (t0+repeatInterval
+	// = t0+1m), using the cutoff a real caller computes: now - repeatInterval.
+	afterOriginalWindow := t0.Add(130 * time.Second)
+	cutoff := afterOriginalWindow.Add(-repeatInterval)
+
+	dup, err := restored.IsDuplicate(ctx, "gk-deadline", "target-a", "sig", cutoff)
+	require.NoError(t, err)
+	assert.False(t, dup, "restore must not extend suppression past the entry's ORIGINAL sentAt+repeat_interval deadline")
+}
+
 func assertDeliveredSnapshotsMatch(t *testing.T, want, got []NflogDeliveredSnapshot) {
 	t.Helper()
 	require.Len(t, got, len(want))

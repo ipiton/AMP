@@ -147,18 +147,20 @@ func (l *notifyDedupLog) LoadNflogSnapshot(snap NflogSnapshot, now time.Time) er
 		if ttl <= 0 {
 			ttl = deliveredStateTTL(0)
 		}
-		if now.Sub(d.RecordedAt) > ttl {
-			continue
-		}
 		statuses := make(map[string]string, len(d.Statuses))
 		for fingerprint, status := range d.Statuses {
 			statuses[fingerprint] = status
 		}
-		delivered[dedupKey{groupKey: d.GroupKey, target: d.Target}] = &deliveredState{
-			statuses:   statuses,
-			recordedAt: d.RecordedAt,
-			ttl:        ttl,
+		state := &deliveredState{statuses: statuses, recordedAt: d.RecordedAt, ttl: ttl}
+		// Reuse deliveredState.expired (dedup.go) instead of re-deriving the
+		// same now.Sub(recordedAt) > ttl comparison inline (review M2) — one
+		// formula, so a future change to expired() (jitter, inclusive
+		// boundary, ...) can't silently diverge between live reads and
+		// snapshot-load pruning.
+		if state.expired(now) {
+			continue
 		}
+		delivered[dedupKey{groupKey: d.GroupKey, target: d.Target}] = state
 	}
 
 	l.mu.Lock()
