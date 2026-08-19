@@ -263,10 +263,20 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
      replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
      that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
    - For integrations with no batch wire shape (Slack, Telegram, PagerDuty, Email) one job covers the group by
-     looping `Publish` per alert, and a single failing alert makes the whole `(group, target)` unconfirmed — so the
-     next fire re-sends *every* alert to that target, including the ones that already landed. Pre-existing wire-shape
-     limitation; delivery confirmation makes the retry actually happen, so the duplicate is now reachable rather than
-     theoretical. Webhook/alertmanager targets are unaffected (one batched POST, one outcome).
+     looping `Publish` per alert, so a single failing alert still makes the whole `(group, target)` unconfirmed.
+     Since wave 4 (`FU-PER-ALERT-OUTCOMES`) that no longer re-sends the alerts that already landed: the job reports
+     which individual alerts the target accepted, and the chain stores them as a per-`(group, target)`
+     **delivered set** (`nflog:delivered:{groupKey}:{target}`, TTL = `repeat_interval` + 60s grace, capped at 500
+     keys) so the next fire carries only the alerts still owed. Keys are `fingerprint:status` — the same atoms the
+     nflog signature is built from — so an alert that flipped `firing`↔`resolved` counts as new and is re-sent, and a
+     group that gained or lost alerts between fires still filters correctly. Retries *inside* one job skip the
+     already-accepted alerts too. When the remainder lands, the target gets its normal full nflog entry and the
+     delivered set is deleted; the set exists only while a target is partially delivered, so the happy path costs no
+     extra key. Webhook/alertmanager targets are unaffected (one batched POST, one outcome, never a delivered set).
+     Residual: this is an **AMP extension with no upstream counterpart** — upstream Alertmanager sends exactly one
+     wire message per `group × integration` and has no per-alert send to be partial about. And if the delivered set
+     cannot be read or written (Redis unreachable, cap reached), AMP falls back to re-sending the whole set: the
+     floor stays at-least-once, exactly-once per `(alert, target)` is the refinement that is forfeited.
    - On queue shutdown, in-flight confirmed-delivery jobs are cancelled and deliberately **not** written to the DLQ:
      the notify chain re-publishes to any unconfirmed target after restart, so a DLQ replay would double-deliver.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
