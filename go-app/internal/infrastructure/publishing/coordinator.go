@@ -5,9 +5,31 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/ipiton/AMP/internal/core"
 )
+
+// DefaultDeliveryConfirmationTimeout bounds how long
+// PublishGroupToTargets waits for ONE target's queued job to report its
+// final delivery outcome (task rec, alertmanager-parity wave 3).
+//
+// SIZING — this value is coupled to grouping.notifyLogClaimTTL: the notify
+// chain holds a cross-replica publish claim (GroupNotifyLog.TryClaim) across
+// the whole PublishGroup call, without renewal, so the claim TTL MUST stay
+// comfortably larger than this timeout or the claim can expire mid-publish
+// and let a second replica publish the same group. Keep the two in step
+// (claim TTL 60s vs. 45s here leaves ~15s of margin for the chain's own
+// Redis round-trips); see grouping.notifyLogClaimTTL's doc comment.
+//
+// It is deliberately SMALLER than the queue's worst-case retry budget
+// (MaxRetries+1 attempts × the publisher's 30s HTTP timeout + exponential
+// backoff ≈ 2min): a target that is retrying that long has already missed
+// this group's next tick, and waiting the full budget would mean holding the
+// claim — and blocking this group's timer goroutine — for minutes. Exceeding
+// the timeout is reported as ErrDeliveryWaitTimeout, i.e. unconfirmed, which
+// is the safe direction (see that sentinel's doc comment).
+const DefaultDeliveryConfirmationTimeout = 45 * time.Second
 
 // PublishingResult represents the result of publishing to a single target
 type PublishingResult struct {
@@ -22,18 +44,26 @@ type PublishingCoordinator struct {
 	discoveryManager TargetDiscoveryManager
 	modeManager      ModeManager // TN-060: Mode manager for metrics-only fallback
 	semaphore        chan struct{}
+	deliveryTimeout  time.Duration // task rec: per-target delivery-confirmation wait
 	logger           *slog.Logger
 }
 
 // CoordinatorConfig holds configuration for publishing coordinator
 type CoordinatorConfig struct {
 	MaxConcurrent int // Maximum concurrent publishing operations
+
+	// DeliveryConfirmationTimeout bounds the per-target wait in
+	// PublishGroupToTargets (task rec). Zero/negative falls back to
+	// DefaultDeliveryConfirmationTimeout — see that constant for the sizing
+	// constraint against grouping.notifyLogClaimTTL.
+	DeliveryConfirmationTimeout time.Duration
 }
 
 // DefaultCoordinatorConfig returns default configuration
 func DefaultCoordinatorConfig() CoordinatorConfig {
 	return CoordinatorConfig{
-		MaxConcurrent: 5, // Publish to max 5 targets concurrently
+		MaxConcurrent:               5, // Publish to max 5 targets concurrently
+		DeliveryConfirmationTimeout: DefaultDeliveryConfirmationTimeout,
 	}
 }
 
@@ -49,11 +79,17 @@ func NewPublishingCoordinator(
 		logger = slog.Default()
 	}
 
+	deliveryTimeout := config.DeliveryConfirmationTimeout
+	if deliveryTimeout <= 0 {
+		deliveryTimeout = DefaultDeliveryConfirmationTimeout
+	}
+
 	return &PublishingCoordinator{
 		queue:            queue,
 		discoveryManager: discoveryManager,
 		modeManager:      modeManager,
 		semaphore:        make(chan struct{}, config.MaxConcurrent),
+		deliveryTimeout:  deliveryTimeout,
 		logger:           logger,
 	}
 }
@@ -330,6 +366,19 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // iterates Publish once per alert inside that single job/retry unit (those
 // integrations have no array-payload wire shape to batch into).
 //
+// Delivery confirmation (task rec, alertmanager-parity wave 3): this method
+// BLOCKS until every submitted job reports its final outcome, so
+// PublishingResult.Success means "this target accepted the notification"
+// (the publisher's HTTP call succeeded, after any in-queue retries) rather
+// than the pre-rec "a job was enqueued for this target". Each target is
+// waited on independently, bounded by
+// CoordinatorConfig.DeliveryConfirmationTimeout — a slow target cannot
+// prevent a fast sibling's success from being reported, and a target whose
+// wait expires is reported as unconfirmed (ErrDeliveryWaitTimeout) so the
+// notify chain retries it instead of recording it as sent. Callers therefore
+// hold their per-group locks/claims for the duration of an actual delivery;
+// see grouping.notifyLogClaimTTL for the TTL that has to cover it.
+//
 // skipTarget implements task fwb's per-target notification-log dedup (see
 // grouping.GroupNotificationPublisher.PublishGroup's doc comment): called
 // once per candidate target AFTER receiver-matching resolves it, BEFORE a
@@ -411,21 +460,13 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		go func(idx int, t *core.PublishingTarget) {
 			defer wg.Done()
 
-			select {
-			case c.semaphore <- struct{}{}:
-				defer func() { <-c.semaphore }()
-			case <-ctx.Done():
-				mu.Lock()
-				results[idx] = &PublishingResult{
-					Target:  t,
-					Success: false,
-					Error:   ctx.Err(),
-				}
-				mu.Unlock()
-				return
+			confirm, err := c.submitGroupJob(ctx, alerts, t, groupKey, receiverName, groupLabels)
+			if err == nil {
+				// Task rec: block until this target's job reports its real
+				// outcome, so Success below means "the target accepted the
+				// notification", not "a job was enqueued".
+				err = c.awaitDelivery(ctx, confirm, t)
 			}
-
-			err := c.queue.SubmitGroup(alerts, t, groupKey, receiverName, groupLabels)
 
 			mu.Lock()
 			results[idx] = &PublishingResult{
@@ -440,4 +481,60 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 	wg.Wait()
 
 	return results, nil
+}
+
+// submitGroupJob enqueues one (group, target) job under the coordinator's
+// MaxConcurrent semaphore and returns its delivery-confirmation channel.
+//
+// The semaphore is held for the ENQUEUE only, never across the confirmation
+// wait (task rec). Holding it through the wait would mean that with
+// MaxConcurrent=5 the 6th target of a fan-out is not even submitted until an
+// earlier target's HTTP delivery finishes — up to
+// DeliveryConfirmationTimeout later, by which point the notify chain's
+// cross-replica claim may have expired and that target would time out
+// without ever having been attempted. Concurrency of the actual delivery
+// work is bounded by the queue's own worker pool, not by this semaphore, and
+// a goroutine parked on a channel receive costs nothing.
+func (c *PublishingCoordinator) submitGroupJob(ctx context.Context, alerts []*core.Alert, target *core.PublishingTarget, groupKey string, receiverName string, groupLabels map[string]string) (<-chan error, error) {
+	select {
+	case c.semaphore <- struct{}{}:
+		defer func() { <-c.semaphore }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	return c.queue.SubmitGroupWithConfirmation(alerts, target, groupKey, receiverName, groupLabels)
+}
+
+// awaitDelivery waits for one target's final delivery outcome, bounded by
+// deliveryTimeout and by ctx (task rec).
+//
+// Both bounds report "unconfirmed", never "delivered": the queued job keeps
+// running either way, and the notify chain must retry a target it cannot
+// prove was reached rather than record it as sent — see
+// ErrDeliveryWaitTimeout.
+func (c *PublishingCoordinator) awaitDelivery(ctx context.Context, confirm <-chan error, target *core.PublishingTarget) error {
+	if confirm == nil {
+		// Defensive: SubmitGroupWithConfirmation only returns a nil channel
+		// together with a non-nil error, which the caller already handled.
+		return fmt.Errorf("%w: no confirmation channel for target %q", ErrDeliveryNotAttempted, target.Name)
+	}
+
+	timer := time.NewTimer(c.deliveryTimeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-confirm:
+		if err != nil {
+			c.logger.Warn("Group notification delivery not confirmed for target",
+				"target", target.Name,
+				"error", err,
+			)
+		}
+		return err
+	case <-timer.C:
+		return fmt.Errorf("%w after %s (target %q)", ErrDeliveryWaitTimeout, c.deliveryTimeout, target.Name)
+	case <-ctx.Done():
+		return fmt.Errorf("%w: delivery confirmation aborted for target %q: %w", ErrDeliveryWaitTimeout, target.Name, ctx.Err())
+	}
 }

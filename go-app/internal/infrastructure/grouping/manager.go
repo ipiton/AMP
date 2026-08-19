@@ -637,21 +637,32 @@ type TargetPublishOutcome struct {
 	// used as the nflog dedup key's target segment — see GroupNotifyLog.
 	Target string
 
-	// Success reports whether this target's job was successfully ENQUEUED
-	// onto the publishing queue (infrastructure/publishing.PublishingQueue.
-	// SubmitGroup returning nil) — NOT whether the target's HTTP endpoint
-	// confirmed receipt. Actual delivery (the HTTP POST, retries, DLQ) runs
-	// asynchronously on the queue's own worker pool after this call
-	// returns; a webhook 500/timeout at that later stage is invisible here
-	// and is NOT retried by publishGroupAlerts's skipTarget mechanism (see
-	// its call site in manager_impl.go for the accepted-gap note and the
-	// follow-up this should eventually close: recording on the queue job's
-	// own completion callback instead of on enqueue). DefaultGroupManager.
-	// publishGroupAlerts records an nflog entry only for Success == true
-	// outcomes, so a target whose ENQUEUE failed (queue full, shutting
-	// down) is retried on the group's next scheduled timer fire, while one
-	// that enqueued successfully is skipped (via skipTarget) on that retry
-	// even if the actual HTTP delivery later fails.
+	// Success reports whether this target CONFIRMED receipt of the
+	// notification — the publisher's HTTP call to the target succeeded,
+	// after any retries the publishing stack performed internally (task
+	// rec, alertmanager-parity wave 3). It is NOT "the job was enqueued":
+	// PublishGroup blocks until the queued job reports its final outcome,
+	// so an implementation must never report Success for work it has merely
+	// scheduled.
+	//
+	// This is what makes DefaultGroupManager.publishGroupAlerts's
+	// RecordSent correct: the nflog entry it writes per Success == true
+	// target is SHARED across replicas with TTL = repeat_interval, so a
+	// falsely-successful outcome suppresses the group everywhere for hours.
+	// Anything short of proven delivery — HTTP 5xx after the last retry, a
+	// publisher that could not be built, an open circuit breaker,
+	// metrics-only mode, or a delivery-confirmation wait that expired
+	// before the outcome arrived — must be reported as false, which leaves
+	// no nflog entry and makes the group's next scheduled fire retry
+	// exactly that target (skipTarget skips only the ones already
+	// recorded).
+	//
+	// Retries INSIDE the publishing stack count as one delivery attempt
+	// cycle, not as several outcomes: exactly one outcome per target per
+	// fire. False negatives are possible and deliberate (a target whose
+	// confirmation wait expired but whose delivery later succeeds is
+	// re-sent on the next fire) — the notification pipeline is
+	// at-least-once, same as upstream Alertmanager.
 	Success bool
 }
 
