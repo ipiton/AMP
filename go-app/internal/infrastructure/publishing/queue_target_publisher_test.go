@@ -429,6 +429,30 @@ func TestCreatePublisherForJob_SlackActuallyPostsToWebhook(t *testing.T) {
 	assert.Contains(t, gotMsg.Text, "HighCPUUsage", "the fallback text must actually describe THIS alert")
 	require.NotEmpty(t, gotMsg.Blocks, "the Block Kit body must not be empty — formatSlack's blocks must survive buildMessage intact")
 	assert.NotEmpty(t, gotMsg.Attachments, "the color-coded attachment must survive buildMessage intact")
+
+	// R1 (re-review, wave 5): Block Kit REQUIRES 1-10 "elements" on a context
+	// block. Block had no Elements field and buildBlock had no elements
+	// branch, so this block shipped as bare {"type":"context"} — Slack
+	// validates the whole "blocks" array and answers invalid_blocks/400 for
+	// that, the exact failure class C1 was fixed to remove. Find the context
+	// block among the fixed set of blocks formatSlack emits and assert it
+	// actually carries content.
+	var contextBlock *Block
+	for i := range gotMsg.Blocks {
+		if gotMsg.Blocks[i].Type == "context" {
+			contextBlock = &gotMsg.Blocks[i]
+			break
+		}
+	}
+	require.NotNil(t, contextBlock, "formatSlack always emits a context block (the fingerprint footer) — it must survive buildMessage, not be silently dropped")
+	require.NotEmpty(t, contextBlock.Elements, "a context block with zero elements is REJECTED by Block Kit (invalid_blocks) — it must carry the fingerprint text, not ship empty")
+	assert.Contains(t, contextBlock.Elements[0].Text, "fp-slack-1", "the context block's element must actually carry this alert's fingerprint")
+
+	// R2 (re-review, wave 5): the same []map[string]any vs []interface{}
+	// mismatch, third instance — buildAttachment was never routed through
+	// toMapSlice, so formatSlack's attachment fields (Status/Started/...)
+	// silently vanished, shipping a color-only bar.
+	require.NotEmpty(t, gotMsg.Attachments[0].Fields, "the legacy attachment's fields (Status/Started/...) must survive buildAttachment intact")
 }
 
 // TestCreatePublisherForJob_MissingSlackURLDegradesGracefully mirrors the
