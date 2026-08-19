@@ -1,18 +1,22 @@
 package routing
 
 import (
-	"fmt"
 	"strings"
 )
 
 // Receiver represents a notification receiver configuration.
-// Each receiver has a unique name and one or more notification configs.
+// Each receiver has a unique name (enforced by the parser) and zero or more
+// notification configs.
 //
-// At least one config type must be defined:
+// Supported config types:
 //   - WebhookConfigs (generic HTTP webhook)
 //   - PagerDutyConfigs (PagerDuty Events API v2)
 //   - SlackConfigs (Slack Incoming Webhooks or API)
-//   - EmailConfigs (SMTP email, FUTURE - TN-154)
+//   - EmailConfigs (SMTP email; SMTP endpoint from GlobalConfig)
+//   - TelegramConfigs (Telegram Bot API)
+//
+// ZERO config types is also valid: that is upstream Alertmanager's blackhole
+// receiver — see Validate().
 //
 // Example YAML:
 //
@@ -71,18 +75,34 @@ type Receiver struct {
 	Referenced bool `yaml:"-"`
 }
 
-// Validate checks that the receiver has at least one config defined.
-// This is a semantic validation (not enforced by struct tags).
+// Validate performs the receiver's semantic validation (the checks struct tags
+// cannot express).
 //
-// Returns error if no configs are defined.
+// A receiver with ZERO integration blocks is VALID — it is upstream
+// Alertmanager's blackhole receiver, the classic
+//
+//	receivers:
+//	  - name: 'null'
+//
+// paired with a route that sends unwanted alerts there to be dropped. Upstream
+// accepts it, so an untouched upstream config must load here too.
+//
+// This used to return "receiver 'x' must have at least one config type
+// defined", which broke two legal upstream configs (slice-1 review finding I1
+// of FU-RECEIVERS-INTEGRATION):
+//
+//   - the blackhole receiver above;
+//   - a receiver whose only block is an integration AMP cannot deliver
+//     (opsgenie_configs, victorops_configs, wechat_configs). This struct has no
+//     fields for those, so yaml.v3's non-strict unmarshal drops them and the
+//     receiver arrives here looking empty — turning what should be a "AMP
+//     cannot deliver through this integration" WARNING (see
+//     internal/config.logUnsupportedReceiverIntegrations) into a hard load
+//     failure.
+//
+// Kept as a method (rather than deleted) because it is the parser's hook for
+// per-receiver semantic checks; it currently has none that can fail.
 func (r *Receiver) Validate() error {
-	if len(r.WebhookConfigs) == 0 &&
-		len(r.PagerDutyConfigs) == 0 &&
-		len(r.SlackConfigs) == 0 &&
-		len(r.EmailConfigs) == 0 &&
-		len(r.TelegramConfigs) == 0 {
-		return fmt.Errorf("receiver '%s' must have at least one config type defined", r.Name)
-	}
 	return nil
 }
 

@@ -401,6 +401,17 @@ see W155.
 **Severity**: Warning
 **Solution**: Use `routing_key` for Events API v2.
 
+#### W024: Receiver With No Integrations (blackhole)
+**Severity**: Warning
+**Description**: The receiver defines no integration blocks. That is upstream
+Alertmanager's blackhole receiver (the classic `- name: 'null'` paired with a
+route that sends unwanted alerts there), so it is legal and does not block the
+load — but it is also what an accidentally-empty receiver looks like, hence the
+warning. Was a blocking `E024` before FU-RECEIVERS-INTEGRATION.
+**Solution**: Intentional for a blackhole receiver; otherwise add one of
+`webhook_configs`, `email_configs`, `slack_configs`, `pagerduty_configs`,
+`telegram_configs`.
+
 #### W155: Inhibition matchers list not wired at runtime
 **Severity**: Warning
 **Description**: `source_matchers`/`target_matchers` (the AMP list-syntax

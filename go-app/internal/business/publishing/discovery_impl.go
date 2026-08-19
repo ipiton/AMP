@@ -261,8 +261,16 @@ func (m *DefaultTargetDiscoveryManager) SetConfigTargets(targets []*core.Publish
 	}
 	m.configCache.Set(targets)
 
+	// Count comes from the CACHE, not from len(targets) (slice-1 review finding
+	// I3): the cache is keyed by name, so if two targets ever shared a name the
+	// stat would over-report what is actually reachable. BuildConfigTargets
+	// drops duplicates itself, and the parser rejects the duplicate receiver
+	// names that could cause them — reading the cache keeps the number honest
+	// regardless of who calls this.
+	stored := m.configCache.Len()
+
 	m.mu.Lock()
-	m.stats.ConfigTargets = len(targets)
+	m.stats.ConfigTargets = stored
 	m.mu.Unlock()
 
 	if m.metrics != nil {

@@ -354,3 +354,44 @@ func TestPagerDutyBaseURL(t *testing.T) {
 		assert.Equal(t, want, pagerDutyBaseURL(in), "input %q", in)
 	}
 }
+
+// TestBuildConfigTargets_BlackholeReceiverYieldsNoTargets: a receiver with no
+// (supported) integrations is upstream's blackhole receiver — review finding I1.
+// It must simply produce nothing, not an error and not a partial target.
+func TestBuildConfigTargets_BlackholeReceiverYieldsNoTargets(t *testing.T) {
+	rc := &infraroute.RouteConfig{
+		Receivers: []*infraroute.Receiver{
+			{Name: "null"},
+			webhookReceiverFixture("team-x", "https://x.example.com/hook"),
+		},
+	}
+
+	targets := BuildConfigTargets(rc, quietLogger())
+	require.Len(t, targets, 1)
+	assert.Equal(t, "cfg:team-x/webhook0", targets[0].Name)
+}
+
+// TestBuildConfigTargets_DuplicateNamesAreDropped is review finding I3's
+// defence-in-depth half: the parser rejects duplicate receiver names, but if a
+// RouteConfig is built some other way, identical target names must not silently
+// overwrite each other in the name-keyed cache.
+func TestBuildConfigTargets_DuplicateNamesAreDropped(t *testing.T) {
+	rc := &infraroute.RouteConfig{
+		Receivers: []*infraroute.Receiver{
+			webhookReceiverFixture("dup", "https://a.example.com/hook"),
+			webhookReceiverFixture("dup", "https://b.example.com/hook"),
+		},
+	}
+
+	targets := BuildConfigTargets(rc, quietLogger())
+	require.Len(t, targets, 1, "the duplicate must be dropped with a WARN, not silently shadowed later")
+	assert.Equal(t, "cfg:dup/webhook0", targets[0].Name)
+	assert.Equal(t, "https://a.example.com/hook", targets[0].URL, "first one wins")
+}
+
+func webhookReceiverFixture(name, url string) *infraroute.Receiver {
+	return &infraroute.Receiver{
+		Name:           name,
+		WebhookConfigs: []*infraroute.WebhookConfig{{URL: url}},
+	}
+}
