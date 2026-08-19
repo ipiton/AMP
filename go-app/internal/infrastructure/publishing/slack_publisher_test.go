@@ -466,6 +466,71 @@ func TestBuildMessage_EmptyPayload(t *testing.T) {
 	assert.Empty(t, message.Attachments)
 }
 
+// TestBuildMessage_ContextBlockElement_EmptyTextIsDropped is fu6-mic item 3
+// (wave-5 parked finding m4): an elements entry with neither "type" nor
+// "text" used to survive as a zero-value Text ({"type":"","text":""}),
+// which Block Kit rejects (a text object requires non-empty text) — even
+// though the context block AS A WHOLE was not empty, so the existing
+// empty-context guard in buildMessage did not catch it. Unreachable from
+// formatSlack (it always sets both fields on every element it emits); this
+// is the malformed/custom-formatter case the finding called for. buildBlock
+// now skips any element whose text is empty, so a block with one good and
+// one malformed element keeps only the good one.
+func TestBuildMessage_ContextBlockElement_EmptyTextIsDropped(t *testing.T) {
+	publisher, _, _, _ := setupSlackPublisher(t)
+
+	payload := map[string]any{
+		"blocks": []interface{}{
+			map[string]interface{}{
+				"type": "context",
+				"elements": []interface{}{
+					map[string]interface{}{
+						"type": "mrkdwn",
+						"text": "Fingerprint: `fp-1`",
+					},
+					map[string]interface{}{}, // malformed: neither type nor text
+				},
+			},
+		},
+	}
+
+	message := publisher.buildMessage(payload)
+
+	require.NotNil(t, message)
+	require.Len(t, message.Blocks, 1, "the context block must survive — it still has one valid element")
+	require.Len(t, message.Blocks[0].Elements, 1, "the malformed empty-text element must be dropped, not appended as a zero-value Text")
+	assert.Equal(t, "Fingerprint: `fp-1`", message.Blocks[0].Elements[0].Text)
+}
+
+// TestBuildMessage_ContextBlockAllElementsEmpty_BlockDropped is the other
+// half of fu6-mic item 3: if EVERY element in a context block is malformed
+// (empty text), the block ends up with zero elements after the new skip —
+// buildMessage's existing len(block.Elements)==0 guard then drops the whole
+// block for free, exactly as it does for a context block with no elements
+// key at all.
+func TestBuildMessage_ContextBlockAllElementsEmpty_BlockDropped(t *testing.T) {
+	publisher, _, _, _ := setupSlackPublisher(t)
+
+	payload := map[string]any{
+		"blocks": []interface{}{
+			map[string]interface{}{
+				"type": "context",
+				"elements": []interface{}{
+					map[string]interface{}{"type": "mrkdwn"}, // text missing entirely
+					map[string]interface{}{"text": ""},       // text explicitly empty
+				},
+			},
+			map[string]interface{}{"type": "divider"},
+		},
+	}
+
+	message := publisher.buildMessage(payload)
+
+	require.NotNil(t, message)
+	require.Len(t, message.Blocks, 1, "the all-empty context block must be dropped entirely; only the divider survives")
+	assert.Equal(t, "divider", message.Blocks[0].Type)
+}
+
 // TestClassifySlackError tests error classification for metrics
 func TestClassifySlackError(t *testing.T) {
 	tests := []struct {

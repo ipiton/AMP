@@ -299,6 +299,18 @@ func (p *EnhancedSlackPublisher) buildBlock(blockMap map[string]interface{}) Blo
 	// context block with none dropped here would still be invalid — see
 	// buildMessage, which drops empty context blocks entirely rather than
 	// shipping one.
+	//
+	// fu6-mic item 3 (wave-5 parked finding m4): an elements entry that
+	// carries neither "type" nor "text" used to still be appended as a
+	// zero-value Text, so a formatter bug could survive the empty-context
+	// guard above and ship {"type":"context","elements":[{"type":"","text":""}]},
+	// which Block Kit rejects just as it rejects an elements-less context
+	// block — a text object requires non-empty text. Unreachable from
+	// formatSlack itself (it always sets both fields), but reachable from a
+	// custom/erroneous AlertFormatter. Skipping an empty-text element here
+	// makes the guard airtight: if that empties out ALL of a context block's
+	// elements, buildMessage's existing len(block.Elements)==0 check drops
+	// the whole block for free.
 	for _, elementMap := range toMapSlice(blockMap["elements"]) {
 		element := Text{}
 		if elementType, ok := elementMap["type"].(string); ok {
@@ -306,6 +318,9 @@ func (p *EnhancedSlackPublisher) buildBlock(blockMap map[string]interface{}) Blo
 		}
 		if elementText, ok := elementMap["text"].(string); ok {
 			element.Text = elementText
+		}
+		if element.Text == "" {
+			continue
 		}
 		block.Elements = append(block.Elements, element)
 	}
