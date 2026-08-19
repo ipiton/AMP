@@ -620,6 +620,15 @@ func (f *DefaultAlertFormatter) formatSlack(enrichedAlert *core.EnrichedAlert) (
 	})
 
 	// Fill result map (already from pool)
+	//
+	// "text" is Slack's REQUIRED fallback field (notification previews, screen
+	// readers, clients that don't render Block Kit) — this formatter emitted
+	// only "blocks"/"attachments" and no "text" at all, so a client reading
+	// just the fallback (or a strict webhook that rejects a body with neither)
+	// saw nothing (review wave 5, finding C1). header is already the plain-text
+	// summary computed above ("<emoji> *name* - status"), so it doubles as the
+	// fallback text.
+	result["text"] = header
 	result["blocks"] = blocks
 	result["attachments"] = []map[string]any{
 		{

@@ -203,24 +203,48 @@ func (p *EnhancedSlackPublisher) buildMessage(payload map[string]any) *SlackMess
 	}
 
 	// Extract blocks (Block Kit)
-	if blocksRaw, ok := payload["blocks"].([]interface{}); ok {
-		for _, blockRaw := range blocksRaw {
-			if blockMap, ok := blockRaw.(map[string]interface{}); ok {
-				message.Blocks = append(message.Blocks, p.buildBlock(blockMap))
-			}
-		}
+	for _, blockMap := range toMapSlice(payload["blocks"]) {
+		message.Blocks = append(message.Blocks, p.buildBlock(blockMap))
 	}
 
 	// Extract attachments (color coding)
-	if attachmentsRaw, ok := payload["attachments"].([]interface{}); ok {
-		for _, attachRaw := range attachmentsRaw {
-			if attachMap, ok := attachRaw.(map[string]interface{}); ok {
-				message.Attachments = append(message.Attachments, p.buildAttachment(attachMap))
-			}
-		}
+	for _, attachMap := range toMapSlice(payload["attachments"]) {
+		message.Attachments = append(message.Attachments, p.buildAttachment(attachMap))
 	}
 
 	return message
+}
+
+// toMapSlice normalizes a formatter payload field that is logically a slice
+// of maps but may arrive as either concrete Go type (review wave 5, finding
+// C1): formatSlack builds its own "blocks"/"attachments"/"fields" values as
+// []map[string]any (Go-native construction), while a generic JSON decode (or
+// a hand-built test payload, see slack_publisher_test.go) produces
+// []interface{} with map[string]interface{} elements. []map[string]any and
+// []interface{} are DIFFERENT concrete slice types in Go — a type assertion
+// for one never matches a value of the other, even though the per-element map
+// type (map[string]any / map[string]interface{}) is the exact same type under
+// the "any" alias. That mismatch is why buildMessage/buildBlock silently
+// dropped every block/attachment/field from the real formatter's output: the
+// assertion always missed, so the loop body never ran, and nothing errored.
+func toMapSlice(v any) []map[string]any {
+	switch vv := v.(type) {
+	case []map[string]any:
+		return vv
+	case []interface{}:
+		if len(vv) == 0 {
+			return nil
+		}
+		out := make([]map[string]any, 0, len(vv))
+		for _, item := range vv {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // buildBlock builds Block from map (TN-051 formatter output)
@@ -243,20 +267,18 @@ func (p *EnhancedSlackPublisher) buildBlock(blockMap map[string]interface{}) Blo
 		}
 	}
 
-	// Extract fields (for section blocks)
-	if fieldsRaw, ok := blockMap["fields"].([]interface{}); ok {
-		for _, fieldRaw := range fieldsRaw {
-			if fieldMap, ok := fieldRaw.(map[string]interface{}); ok {
-				field := Field{}
-				if fieldType, ok := fieldMap["type"].(string); ok {
-					field.Type = fieldType
-				}
-				if fieldText, ok := fieldMap["text"].(string); ok {
-					field.Text = fieldText
-				}
-				block.Fields = append(block.Fields, field)
-			}
+	// Extract fields (for section blocks) — same []map[string]any vs
+	// []interface{} mismatch as buildMessage's blocks/attachments, so this
+	// goes through the same toMapSlice normalizer.
+	for _, fieldMap := range toMapSlice(blockMap["fields"]) {
+		field := Field{}
+		if fieldType, ok := fieldMap["type"].(string); ok {
+			field.Type = fieldType
 		}
+		if fieldText, ok := fieldMap["text"].(string); ok {
+			field.Text = fieldText
+		}
+		block.Fields = append(block.Fields, field)
 	}
 
 	return block
