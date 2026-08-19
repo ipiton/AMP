@@ -559,3 +559,140 @@ func TestCreatePublisherForJob_MissingPagerDutyRoutingKeyDegradesGracefully(t *t
 	require.NoError(t, err)
 	require.IsType(t, &PagerDutyPublisher{}, publisher)
 }
+
+// === I3 (review wave 5): pagerDutyClientMap/rootlyClientMap cache keys must
+// include the base URL, mirroring TestCreatePublisherForTarget_
+// TelegramCacheKeyIncludesAPIURL/TestCreatePublisherForJob_
+// TelegramHonoursTargetAPIURL. Both were keyed on the credential alone
+// (routing_key / api key) while the cached client bakes in target.URL too, so
+// the FIRST target built for a given credential silently pinned its base URL
+// for every later target sharing that credential — exactly the telegram
+// defect this item was supposed to carry the fix for, and it wasn't. Critically,
+// this only shows up with a SHARED factory across targets — a fresh factory
+// per target (as in TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI)
+// cannot reproduce it, which is why it slipped through.
+
+// TestCreatePublisherForTarget_PagerDutyCacheKeyIncludesBaseURL mirrors the
+// telegram cache-key test.
+func TestCreatePublisherForTarget_PagerDutyCacheKeyIncludesBaseURL(t *testing.T) {
+	const routingKey = "rk-shared"
+
+	newTarget := func(name, url string) *core.PublishingTarget {
+		return &core.PublishingTarget{
+			Name:    name,
+			Type:    string(TargetTypePagerDuty),
+			URL:     url,
+			Headers: map[string]string{"routing_key": routingKey},
+		}
+	}
+
+	f := newTestPublisherFactory(t)
+
+	_, err := f.CreatePublisherForTarget(newTarget("pd-primary", "https://events.pagerduty.example"))
+	require.NoError(t, err)
+	_, err = f.CreatePublisherForTarget(newTarget("pd-proxy", "https://pagerduty-proxy.internal"))
+	require.NoError(t, err)
+
+	pagerDutyClients := func() int {
+		f.clientMu.RLock()
+		defer f.clientMu.RUnlock()
+		return len(f.pagerDutyClientMap)
+	}
+
+	assert.Equal(t, 2, pagerDutyClients(),
+		"the same routing_key behind two different base URLs must yield two clients, not one pinned to the first URL")
+
+	_, err = f.CreatePublisherForTarget(newTarget("pd-primary-again", "https://events.pagerduty.example"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, pagerDutyClients(), "an identical (base_url, routing_key) pair must reuse its cached client")
+}
+
+// TestCreatePublisherForJob_PagerDutyHonoursTargetURL is the behavioural half,
+// using ONE SHARED factory across two targets — the exact case the review
+// found untested: each of the two existing PagerDuty httptest tests builds
+// its own fresh factory via newTestPublisherFactory, so neither could
+// reproduce the cache collision a shared factory (the real one, built once at
+// startup) hits immediately.
+func TestCreatePublisherForJob_PagerDutyHonoursTargetURL(t *testing.T) {
+	const routingKey = "rk-shared"
+
+	var mu sync.Mutex
+	hits := map[string]int{}
+	handler := func(label string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			hits[label]++
+			mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"success","message":"ok","dedup_key":"fp-shared"}`))
+		}
+	}
+	srvA := httptest.NewServer(handler("a"))
+	defer srvA.Close()
+	srvB := httptest.NewServer(handler("b"))
+	defer srvB.Close()
+
+	f := newTestPublisherFactory(t)
+	q := newQueueForFactory(t, f)
+
+	alert := &core.EnrichedAlert{Alert: &core.Alert{
+		Fingerprint: "fp-shared-routing-key",
+		AlertName:   "SharedRoutingKey",
+		Status:      core.StatusFiring,
+		StartsAt:    time.Now(),
+		Labels:      map[string]string{"severity": "warning"},
+	}}
+
+	for _, srv := range []*httptest.Server{srvA, srvB} {
+		target := &core.PublishingTarget{
+			Name:    "pd-" + srv.URL,
+			Type:    string(TargetTypePagerDuty),
+			URL:     srv.URL,
+			Headers: map[string]string{"routing_key": routingKey},
+		}
+		publisher, err := q.createPublisherForJob(&PublishingJob{Target: target})
+		require.NoError(t, err)
+		require.NoError(t, publisher.Publish(context.Background(), alert, target))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, hits["a"], "the first target's own base URL must be used")
+	assert.Equal(t, 1, hits["b"], "the second target sharing the routing_key must NOT be silently redirected to the first target's base URL")
+}
+
+// TestCreatePublisherForTarget_RootlyCacheKeyIncludesBaseURL mirrors the
+// telegram/pagerduty cache-key test for Rootly: NewRootlyIncidentsClient bakes
+// in both target.URL and the API key, so the cache key must too.
+func TestCreatePublisherForTarget_RootlyCacheKeyIncludesBaseURL(t *testing.T) {
+	const apiKey = "rootly-shared-key"
+
+	newTarget := func(name, url string) *core.PublishingTarget {
+		return &core.PublishingTarget{
+			Name:    name,
+			Type:    string(TargetTypeRootly),
+			URL:     url,
+			Headers: map[string]string{"Authorization": "Bearer " + apiKey},
+		}
+	}
+
+	f := newTestPublisherFactory(t)
+
+	_, err := f.CreatePublisherForTarget(newTarget("rootly-primary", "https://api.rootly.example"))
+	require.NoError(t, err)
+	_, err = f.CreatePublisherForTarget(newTarget("rootly-proxy", "https://rootly-proxy.internal"))
+	require.NoError(t, err)
+
+	rootlyClients := func() int {
+		f.clientMu.RLock()
+		defer f.clientMu.RUnlock()
+		return len(f.rootlyClientMap)
+	}
+
+	assert.Equal(t, 2, rootlyClients(),
+		"the same API key behind two different base URLs must yield two clients, not one pinned to the first URL")
+
+	_, err = f.CreatePublisherForTarget(newTarget("rootly-primary-again", "https://api.rootly.example"))
+	require.NoError(t, err)
+	assert.Equal(t, 2, rootlyClients(), "an identical (base_url, api_key) pair must reuse its cached client")
+}
