@@ -32,11 +32,9 @@ func newTestPublisherFactory(t *testing.T) *PublisherFactory {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	f := NewPublisherFactory(NewAlertFormatter(""), logger, nil, "https://amp.example.com")
-	t.Cleanup(func() {
-		if f.slackCleanupWorker != nil {
-			f.slackCleanupWorker()
-		}
-	})
+	// Shutdown stops all three cache cleanup workers (Slack, Rootly,
+	// PagerDuty) — see item 2, FU-WAVE3-RELIABILITY.
+	t.Cleanup(f.Shutdown)
 	return f
 }
 

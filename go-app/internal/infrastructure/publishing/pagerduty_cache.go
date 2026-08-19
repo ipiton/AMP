@@ -25,6 +25,14 @@ type EventKeyCache interface {
 
 	// Size returns the number of entries in cache
 	Size() int
+
+	// Stop stops the background cleanup worker goroutine started by
+	// NewEventKeyCache. Safe to call once; the cache remains usable for
+	// Set/Get/Delete/Size after Stop (only the background ticker is torn
+	// down). Callers that own an EventKeyCache for the lifetime of a
+	// component (see PublisherFactory.Shutdown) MUST call Stop on teardown,
+	// otherwise cleanupWorker's goroutine leaks for the life of the process.
+	Stop()
 }
 
 // pagerDutyCacheEntry represents a single cache entry
@@ -35,9 +43,11 @@ type pagerDutyCacheEntry struct {
 
 // eventKeyCacheImpl implements EventKeyCache using sync.Map
 type eventKeyCacheImpl struct {
-	data   sync.Map
-	ttl    time.Duration
-	logger *slog.Logger
+	data     sync.Map
+	ttl      time.Duration
+	logger   *slog.Logger
+	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
 // NewEventKeyCache creates a new event key cache with specified TTL
@@ -45,8 +55,9 @@ type eventKeyCacheImpl struct {
 // Full implementation will be done in Phase 7
 func NewEventKeyCache(ttl time.Duration) EventKeyCache {
 	cache := &eventKeyCacheImpl{
-		ttl:    ttl,
-		logger: slog.Default(),
+		ttl:      ttl,
+		logger:   slog.Default(),
+		stopChan: make(chan struct{}),
 	}
 
 	// Start background cleanup worker
@@ -126,12 +137,25 @@ func (c *eventKeyCacheImpl) Size() int {
 	return count
 }
 
-// cleanupWorker runs periodic cleanup
+// cleanupWorker runs periodic cleanup until Stop is called.
 func (c *eventKeyCacheImpl) cleanupWorker() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.Cleanup()
+	for {
+		select {
+		case <-ticker.C:
+			c.Cleanup()
+		case <-c.stopChan:
+			return
+		}
 	}
+}
+
+// Stop stops the background cleanup worker goroutine. Safe to call more
+// than once (only the first call closes stopChan).
+func (c *eventKeyCacheImpl) Stop() {
+	c.stopOnce.Do(func() {
+		close(c.stopChan)
+	})
 }

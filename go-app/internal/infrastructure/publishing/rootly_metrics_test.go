@@ -11,12 +11,14 @@ import (
 func TestNewIncidentIDCache(t *testing.T) {
 	ttl := 1 * time.Hour
 	cache := NewIncidentIDCache(ttl)
+	t.Cleanup(cache.Stop)
 
 	assert.NotNil(t, cache)
 }
 
 func TestIncidentIDCache_SetAndGet(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
+	t.Cleanup(cache.Stop)
 
 	fingerprint := "test-fingerprint"
 	incidentID := "incident-123"
@@ -32,6 +34,7 @@ func TestIncidentIDCache_SetAndGet(t *testing.T) {
 
 func TestIncidentIDCache_GetNonExistent(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
+	t.Cleanup(cache.Stop)
 
 	retrievedID, found := cache.Get("nonexistent-fingerprint")
 	assert.False(t, found)
@@ -40,6 +43,7 @@ func TestIncidentIDCache_GetNonExistent(t *testing.T) {
 
 func TestIncidentIDCache_Expiry(t *testing.T) {
 	cache := NewIncidentIDCache(50 * time.Millisecond) // Very short TTL
+	t.Cleanup(cache.Stop)
 
 	fingerprint := "test-fingerprint"
 	incidentID := "incident-123"
@@ -62,6 +66,7 @@ func TestIncidentIDCache_Expiry(t *testing.T) {
 
 func TestIncidentIDCache_Delete(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
+	t.Cleanup(cache.Stop)
 
 	fingerprint := "test-fingerprint"
 	incidentID := "incident-123"
@@ -82,6 +87,7 @@ func TestIncidentIDCache_Delete(t *testing.T) {
 
 func TestIncidentIDCache_Size(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
+	t.Cleanup(cache.Stop)
 
 	// Initially empty
 	assert.Equal(t, 0, cache.Size())
@@ -103,6 +109,7 @@ func TestIncidentIDCache_Size(t *testing.T) {
 
 func TestIncidentIDCache_ConcurrentAccess(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
+	t.Cleanup(cache.Stop)
 
 	numGoroutines := 100
 	var wg sync.WaitGroup
@@ -137,6 +144,7 @@ func TestIncidentIDCache_ConcurrentAccess(t *testing.T) {
 
 func TestIncidentIDCache_ConcurrentDeleteAndRead(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
+	t.Cleanup(cache.Stop)
 
 	fingerprint := "test-fp"
 	cache.Set(fingerprint, "test-id")

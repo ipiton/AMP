@@ -668,11 +668,29 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 	), nil
 }
 
-// Shutdown stops all background workers
+// Shutdown stops all background workers owned by this factory: the Slack
+// message cache cleanup worker plus the Rootly and PagerDuty cache cleanup
+// goroutines started in NewPublisherFactory. Without this, each of those
+// goroutines runs forever (see their respective cleanupWorker/cleanup loops),
+// which leaks one goroutine per factory instance for the life of the
+// process and drowns full-package -race runs in stacks from unrelated tests
+// that never tear down their own factory.
 func (f *PublisherFactory) Shutdown() {
 	// Stop Slack cache cleanup worker
 	if f.slackCleanupWorker != nil {
 		f.slackCleanupWorker()
 		f.logger.Info("Stopped Slack cache cleanup worker")
+	}
+
+	// Stop Rootly incident cache cleanup worker
+	if f.rootlyCache != nil {
+		f.rootlyCache.Stop()
+		f.logger.Info("Stopped Rootly cache cleanup worker")
+	}
+
+	// Stop PagerDuty event key cache cleanup worker
+	if f.pagerDutyCache != nil {
+		f.pagerDutyCache.Stop()
+		f.logger.Info("Stopped PagerDuty cache cleanup worker")
 	}
 }

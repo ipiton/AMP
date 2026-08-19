@@ -68,8 +68,11 @@ func newTestCoordinator(t *testing.T, discovery TargetDiscoveryManager) *Publish
 	logger := slog.Default()
 	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
 
+	factory := NewPublisherFactory(NewAlertFormatter(""), logger, nil, "")
+	t.Cleanup(factory.Shutdown)
+
 	queue := NewPublishingQueue(
-		NewPublisherFactory(NewAlertFormatter(""), logger, nil, ""),
+		factory,
 		nil,
 		NewLRUJobTrackingStore(16),
 		PublishingQueueConfig{

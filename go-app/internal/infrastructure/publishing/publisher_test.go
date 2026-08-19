@@ -178,6 +178,7 @@ func TestPublish_WithCustomHeaders(t *testing.T) {
 func TestPublisherFactory_CreatePublisher(t *testing.T) {
 	formatter := NewAlertFormatter("")
 	factory := NewPublisherFactory(formatter, slog.Default(), nil, "")
+	t.Cleanup(factory.Shutdown)
 
 	tests := []struct {
 		targetType   string
