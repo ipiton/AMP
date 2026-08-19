@@ -48,6 +48,11 @@ type eventKeyCacheImpl struct {
 	logger   *slog.Logger
 	stopChan chan struct{}
 	stopOnce sync.Once
+	// workerDone is closed by cleanupWorker on exit. It exists so tests can
+	// deterministically observe the goroutine terminating instead of
+	// sampling the process-wide runtime.NumGoroutine, which races with
+	// unrelated tests' goroutines starting and stopping.
+	workerDone chan struct{}
 }
 
 // NewEventKeyCache creates a new event key cache with specified TTL
@@ -55,9 +60,10 @@ type eventKeyCacheImpl struct {
 // Full implementation will be done in Phase 7
 func NewEventKeyCache(ttl time.Duration) EventKeyCache {
 	cache := &eventKeyCacheImpl{
-		ttl:      ttl,
-		logger:   slog.Default(),
-		stopChan: make(chan struct{}),
+		ttl:        ttl,
+		logger:     slog.Default(),
+		stopChan:   make(chan struct{}),
+		workerDone: make(chan struct{}),
 	}
 
 	// Start background cleanup worker
@@ -139,6 +145,7 @@ func (c *eventKeyCacheImpl) Size() int {
 
 // cleanupWorker runs periodic cleanup until Stop is called.
 func (c *eventKeyCacheImpl) cleanupWorker() {
+	defer close(c.workerDone)
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 

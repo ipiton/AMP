@@ -1,7 +1,6 @@
 package publishing
 
 import (
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -152,45 +151,33 @@ func TestEventKeyCache_ConcurrentAccess(t *testing.T) {
 // long since abandoned by their test. Stop() must actually terminate the
 // goroutine, not just be present on the interface.
 //
-// goleak isn't a direct dependency of this module (only pulled in
-// transitively via go.sum), so this uses a before/after runtime.NumGoroutine
-// bound with a short poll, per the task brief's documented fallback.
+// The worker signals its own exit via workerDone, so the assertion is
+// deterministic — the earlier runtime.NumGoroutine sampling raced with
+// unrelated tests' goroutines and flaked in full-package runs.
 func TestEventKeyCache_StopStopsCleanupWorker(t *testing.T) {
-	runtime.Gosched()
-	baseline := runtime.NumGoroutine()
-
 	cache := NewEventKeyCache(24 * time.Hour)
 
-	// Give the spawned goroutine a chance to actually start running before
-	// asserting on the "started" count, so this isn't racing scheduling.
-	var afterStart int
-	for i := 0; i < 100; i++ {
-		afterStart = runtime.NumGoroutine()
-		if afterStart > baseline {
-			break
-		}
-		time.Sleep(time.Millisecond)
+	impl, ok := cache.(*eventKeyCacheImpl)
+	if !ok {
+		t.Fatalf("NewEventKeyCache returned %T, want *eventKeyCacheImpl", cache)
 	}
-	if afterStart <= baseline {
-		t.Fatalf("expected goroutine count to rise above baseline %d after starting cache, got %d", baseline, afterStart)
+
+	// Before Stop the worker must be running: its done marker is open.
+	select {
+	case <-impl.workerDone:
+		t.Fatal("cleanup worker exited before Stop was called")
+	default:
 	}
 
 	cache.Stop()
 
-	// Cleanup goroutine exits promptly on stopChan close, but give the
-	// scheduler a little room rather than asserting in the same instant.
-	var afterStop int
-	ok := false
-	for i := 0; i < 200; i++ {
-		afterStop = runtime.NumGoroutine()
-		if afterStop <= baseline {
-			ok = true
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if !ok {
-		t.Fatalf("expected goroutine count to return to baseline %d after Stop, got %d", baseline, afterStop)
+	// The worker closes workerDone on exit — deterministic, no
+	// process-wide goroutine counting (the old NumGoroutine sampling raced
+	// with unrelated tests' goroutines and flaked ~50% in full-package runs).
+	select {
+	case <-impl.workerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup worker did not exit within 5s of Stop")
 	}
 
 	// Calling Stop again must not panic (double-close guard).
