@@ -226,29 +226,55 @@ func (p *EnhancedPagerDutyPublisher) extractRoutingKey(target *core.PublishingTa
 	return ""
 }
 
-// buildPayload builds TriggerEventPayload from formatted alert data
+// buildPayload builds TriggerEventPayload from formatted alert data.
+//
+// formatPagerDuty (formatter.go) nests summary/severity/timestamp/source under
+// formattedData["payload"] — mirroring the Events API v2 request shape it is
+// itself building toward (TriggerEventRequest.Payload) — not at the top level
+// of the map. Reading them at top level (review wave 5, finding C2) always
+// missed, so every trigger shipped payload.summary/payload.severity empty;
+// PagerDuty's Events API v2 requires both non-blank and returned 400. Only
+// custom_details was read correctly, because that access already went through
+// the nested "payload" map.
+//
+// Reads the nested map first and falls back to a flat top-level read (the
+// pre-fix shape) so a differently-shaped formatter implementation — a custom
+// AlertFormatter, or a future formatPagerDuty revision — still degrades to
+// something rather than silently dropping the field.
 func (p *EnhancedPagerDutyPublisher) buildPayload(formattedData map[string]any) TriggerEventPayload {
 	payload := TriggerEventPayload{
 		Source: "alert-history-service",
 	}
 
-	// Extract fields from formatted data
-	if summary, ok := formattedData["summary"].(string); ok {
+	// The real shape: everything (including custom_details) nested under
+	// "payload".
+	nested, hasNested := formattedData["payload"].(map[string]any)
+
+	stringField := func(key string) (string, bool) {
+		if hasNested {
+			if v, ok := nested[key].(string); ok {
+				return v, true
+			}
+		}
+		v, ok := formattedData[key].(string)
+		return v, ok
+	}
+
+	if summary, ok := stringField("summary"); ok {
 		payload.Summary = summary
 	}
-	if severity, ok := formattedData["severity"].(string); ok {
+	if severity, ok := stringField("severity"); ok {
 		payload.Severity = severity
 	}
-	if timestamp, ok := formattedData["timestamp"].(string); ok {
+	if timestamp, ok := stringField("timestamp"); ok {
 		payload.Timestamp = timestamp
 	}
-	if source, ok := formattedData["source"].(string); ok {
+	if source, ok := stringField("source"); ok {
 		payload.Source = source
 	}
 
-	// Extract custom_details from payload
-	if payloadMap, ok := formattedData["payload"].(map[string]any); ok {
-		if customDetails, ok := payloadMap["custom_details"].(map[string]any); ok {
+	if hasNested {
+		if customDetails, ok := nested["custom_details"].(map[string]any); ok {
 			payload.CustomDetails = customDetails
 		}
 	}

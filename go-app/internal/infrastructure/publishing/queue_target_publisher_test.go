@@ -476,6 +476,9 @@ func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
 		mu            sync.Mutex
 		gotPath       string
 		gotRoutingKey string
+		gotSummary    string
+		gotSeverity   string
+		gotSource     string
 		gotCalls      int
 	)
 
@@ -487,6 +490,9 @@ func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
 		mu.Lock()
 		gotPath = r.URL.Path
 		gotRoutingKey = req.RoutingKey
+		gotSummary = req.Payload.Summary
+		gotSeverity = req.Payload.Severity
+		gotSource = req.Payload.Source
 		gotCalls++
 		mu.Unlock()
 
@@ -525,6 +531,18 @@ func TestCreatePublisherForJob_PagerDutyActuallyCallsEventsAPI(t *testing.T) {
 	assert.Equal(t, 1, gotCalls)
 	assert.Equal(t, "/v2/events", gotPath, "must hit the PagerDuty Events API v2 endpoint, not some other path")
 	assert.Equal(t, routingKey, gotRoutingKey, "the target's routing_key must be honored")
+
+	// CONTENT, not just transport (review wave 5, finding C2/I1): buildPayload
+	// read summary/severity/timestamp/source at the TOP level of the formatted
+	// map, but formatPagerDuty nests all four under a "payload" key — so every
+	// trigger event shipped payload.summary/payload.severity empty, and the
+	// real Events API v2 requires both non-blank (400 otherwise). Only
+	// custom_details was ever read correctly, since that access already went
+	// through the nested map.
+	require.NotEmpty(t, gotSummary, "payload.summary is REQUIRED by the real Events API v2 — an empty one is a guaranteed 400")
+	assert.Contains(t, gotSummary, "HighCPUUsage", "the summary must actually describe THIS alert")
+	require.NotEmpty(t, gotSeverity, "payload.severity is REQUIRED by the real Events API v2")
+	assert.Equal(t, "alert-history-service", gotSource, "payload.source must be honored, not silently dropped")
 }
 
 // TestCreatePublisherForJob_MissingPagerDutyRoutingKeyDegradesGracefully
