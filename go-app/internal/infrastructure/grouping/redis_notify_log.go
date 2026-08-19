@@ -144,8 +144,10 @@ const (
 	// evict alerts that WERE delivered and make the same duplicates happen
 	// anyway, with a silent, order-dependent choice of which. At-least-once is
 	// the floor either way; the cap only forfeits the exactly-once refinement.
-	// A refusal is counted (GroupingMetrics.RecordDeliveredSetRefused) so the
-	// reversion is visible on a dashboard instead of only in a log line.
+	// A refusal is counted as RecordGroupOperation("delivered_state", "capped")
+	// — distinct from "error" for a backend failure — so the reversion is
+	// visible on a dashboard instead of only in a log line. See the
+	// RecordPartialDelivery call site in DefaultGroupManager.publishGroupAlerts.
 	maxDeliveredAlertsPerTarget = 500
 
 	// notifyLogClaimKeyPrefix stores the short-lived cross-replica publish
@@ -374,9 +376,26 @@ func (l *RedisNotifyLog) DeliveredAlerts(ctx context.Context, groupKey GroupKey,
 //
 // The cap counts only fields that are actually NEW, so re-recording an alert
 // already present — or overwriting its status — never consumes capacity.
-const recordPartialDeliveryScript = `
+//
+// Wrapped in redis.NewScript (re-review, finding r4) so calls go out as EVALSHA
+// and the script body travels only when the server has not cached it yet — the
+// body is sent on every fire that records partial progress otherwise.
+var recordPartialDeliveryScript = redis.NewScript(`
+	-- Validate the argument shape BEFORE touching the key (re-review, finding
+	-- r3): an odd tail would make the HSET loop read a nil value and error out
+	-- mid-write, after some fields had landed but before PEXPIRE ran — which
+	-- re-creates exactly the TTL-less key, permanently-suppressing failure mode
+	-- the script exists to prevent. Failing first keeps "an error means nothing
+	-- was written" true for a malformed call too.
+	if #ARGV < 4 or (#ARGV - 2) % 2 ~= 0 then
+		return redis.error_reply("recordPartialDelivery: expected cap, ttl and fingerprint/status pairs")
+	end
+
 	local cap = tonumber(ARGV[1])
 	local ttl = tonumber(ARGV[2])
+	if cap == nil or ttl == nil or ttl <= 0 then
+		return redis.error_reply("recordPartialDelivery: cap and ttl must be positive numbers")
+	end
 
 	local incoming = 0
 	for i = 3, #ARGV, 2 do
@@ -395,7 +414,7 @@ const recordPartialDeliveryScript = `
 	redis.call("PEXPIRE", KEYS[1], ttl)
 
 	return redis.call("HLEN", KEYS[1])
-`
+`)
 
 // RecordPartialDelivery implements GroupNotifyLog (task fu4): records the alerts
 // target accepted during an unconfirmed fire and refreshes the TTL to match what
@@ -434,7 +453,7 @@ func (l *RedisNotifyLog) RecordPartialDelivery(ctx context.Context, groupKey Gro
 	}
 
 	key := notifyLogDeliveredKey(groupKey, target)
-	result, err := l.client.Eval(ctx, recordPartialDeliveryScript, []string{key}, argv...).Int64()
+	result, err := recordPartialDeliveryScript.Run(ctx, l.client, []string{key}, argv...).Int64()
 	if err != nil {
 		return fmt.Errorf("nflog delivered record %s/%s: %w", groupKey, target, err)
 	}
