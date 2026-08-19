@@ -158,13 +158,18 @@ func NewHealthMonitor(
 
 // Start begins background health check worker.
 func (m *DefaultHealthMonitor) Start() error {
-	// Check if already started
-	if m.running.Load() {
+	// Atomically check-and-set the single-flight start gate. This MUST be a
+	// single CompareAndSwap, not a separate Load()-then-Store(true): two
+	// concurrent Start() calls could otherwise both observe running==false
+	// (the Load), and both proceed to spawn a worker and write m.cancel —
+	// the second write races the first (caught by -race) and leaks the
+	// first worker goroutine since only the last-written m.cancel is ever
+	// reachable from Stop(). CompareAndSwap makes "was it false, and is it
+	// now true" one atomic operation, so exactly one caller among any
+	// number of concurrent Start()s wins the race.
+	if !m.running.CompareAndSwap(false, true) {
 		return ErrAlreadyStarted
 	}
-
-	// Mark as running
-	m.running.Store(true)
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
