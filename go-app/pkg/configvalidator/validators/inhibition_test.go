@@ -39,14 +39,12 @@ func TestInhibitionValidator(t *testing.T) {
 			wantNoIssues: true,
 		},
 		{
-			// Fix round 1 (Phase 5 review, finding 2): source_matchers/
-			// target_matchers alone are NOT sufficient - the runtime
-			// inhibition loader (internal/infrastructure/inhibition) has
-			// no such fields and silently drops them, so a rule defined
-			// only this way would validate "clean" here and then load as
-			// a no-op rule at runtime. Both E150/E151 must fire, plus a
-			// W155 warning per side noting the list is unwired.
-			name: "matchers list syntax alone is not sufficient (not wired at runtime)",
+			// Wave 7 (FU-INHIBIT-MATCHERS): the runtime inhibition loader
+			// now implements source_matchers/target_matchers for real
+			// (internal/infrastructure/inhibition.InhibitionRule.
+			// CompileMatchers), so the matchers-form list alone must
+			// satisfy E150/E151 with no errors and no warnings.
+			name: "matchers list syntax alone is sufficient (wired at runtime)",
 			cfg: &config.AlertmanagerConfig{
 				InhibitRules: []*config.InhibitRule{
 					{
@@ -56,14 +54,12 @@ func TestInhibitionValidator(t *testing.T) {
 					},
 				},
 			},
-			wantErrCodes: []string{"E150", "E151"},
-			wantWarnCode: "W155",
+			wantNoIssues: true,
 		},
 		{
-			// Matchers list alongside the legacy maps that actually
-			// satisfy E150/E151: no errors, but still warn per-side that
-			// the list content itself is inert at runtime.
-			name: "matchers list alongside legacy fields warns but does not block",
+			// Matchers list alongside the legacy maps: both forms combine
+			// as AND at runtime, no errors, no warnings either.
+			name: "matchers list alongside legacy fields is fine, no warning",
 			cfg: &config.AlertmanagerConfig{
 				InhibitRules: []*config.InhibitRule{
 					{
@@ -74,8 +70,7 @@ func TestInhibitionValidator(t *testing.T) {
 					},
 				},
 			},
-			wantWarnCode:   "W155",
-			dontWantErrors: true,
+			wantNoIssues: true,
 		},
 		{
 			name: "missing source matchers",
