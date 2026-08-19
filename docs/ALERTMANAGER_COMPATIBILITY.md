@@ -228,17 +228,27 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
 
    | Duration | Value at the default | Role |
    |---|---|---|
-   | delivery-confirmation wait | 45s | per-target wait in `PublishGroupToTargets` |
+   | delivery-confirmation wait | 45s (max 2m) | per-target wait in `PublishGroupToTargets` |
    | timer-callback deadline | 60s (= wait + 15s) | bounds one whole notify fire (`TimerManagerConfig.CallbackTimeout`) |
-   | cross-replica publish-claim TTL | 60s | must cover the whole fire (`GroupNotifyLog.TryClaim`) |
+   | cross-replica publish-claim TTL | 65s (= callback + 5s) | must cover the fire *and* its post-delivery bookkeeping (`GroupNotifyLog.TryClaim`) |
+   | orphan-adoption grace | 90s (= claim + 25s) | a fire still delivering must never look abandoned (`grouping.reconciliation_grace`) |
 
-   The two grouping-side values are derived from the wait at wiring time
-   (`grouping.TimerCallbackTimeoutFor` / `NotifyLogClaimTTLFor`) and re-checked at startup
-   (`ServiceRegistry.validateNotifyTimingBudget`) — AMP refuses to start on an inconsistent triple, because both
-   failure modes are invisible at runtime: a callback deadline below the wait silently truncates every delivery, and
-   a claim TTL below it lets the claim expire mid-publish and reopens the double-publish window.
-   Post-delivery bookkeeping (`RecordSent`, claim release, resolved-alert pruning) deliberately runs on a **detached**
-   5s context, so a fire that spent its whole budget on a slow target still records the targets that *did* deliver.
+   All three grouping-side values are derived from the wait at wiring time (`grouping.TimerCallbackTimeoutFor` /
+   `NotifyLogClaimTTLFor` / `ReconciliationGraceFor`) and re-checked at startup
+   (`ServiceRegistry.validateNotifyTimingBudget`) — AMP refuses to start on an inconsistent set, because every
+   failure mode is invisible at runtime: a callback deadline below the wait silently truncates every delivery; a
+   claim TTL below it lets the claim expire mid-publish and reopens the double-publish window; an adoption grace
+   below it makes a live fire adoptable, and the adopting replica deletes the group's shared timer record while the
+   publishing replica is still using it.
+
+   Post-delivery bookkeeping (`RecordSent`, claim release, resolved-alert pruning) runs on a **detached** 5s context
+   that is created *after* the delivery wait returns — a detached context built before the wait would have had its
+   deadline consumed by the wait itself, which is the same failure in disguise.
+
+   One relationship is deliberately *not* satisfied: the distributed per-group timer lock (`lockTTL`, 30s, never
+   renewed) is shorter than a fire, so a long fire runs on with that lock expired. The publish claim, not the lock,
+   is what stops a second replica notifying the same group in that window — it is load-bearing, not a backstop, and
+   the startup log line reports both values.
 
    Residual sharp edges, all deliberate:
    - The wait is *shorter* than the queue's worst-case retry budget (~2min). A target still retrying past the
@@ -252,6 +262,13 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    - The timer manager's own distributed lock (`lockTTL`, 30s, no renewal) can now expire mid-fire, so a second
      replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
      that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
+   - For integrations with no batch wire shape (Slack, Telegram, PagerDuty, Email) one job covers the group by
+     looping `Publish` per alert, and a single failing alert makes the whole `(group, target)` unconfirmed — so the
+     next fire re-sends *every* alert to that target, including the ones that already landed. Pre-existing wire-shape
+     limitation; delivery confirmation makes the retry actually happen, so the duplicate is now reachable rather than
+     theoretical. Webhook/alertmanager targets are unaffected (one batched POST, one outcome).
+   - On queue shutdown, in-flight confirmed-delivery jobs are cancelled and deliberately **not** written to the DLQ:
+     the notify chain re-publishes to any unconfirmed target after restart, so a DLQ replay would double-deliver.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
    The original timer-continuation code cancelled its own context when arming the next interval timer
    (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `c6cfadc` (contexts
