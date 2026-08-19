@@ -133,6 +133,8 @@
   - configurable silence-sync intervals (2s backoff / 5min resync hardcoded constants)
   - ~0.25d each
 
+- [ ] **FU-STORAGE-RECONCILE-SIGNAL** — metric distinguishing "Redis down" from "reconciliation keeps failing" when failforward stays blocked (wave-5 review residual; today both look identical on the backend gauge). ~0.5d
+- [ ] **FU-FLAKE-DUPLICATE-METRIC-KEYS** — `internal/business/publishing.TestEdgeCase_DuplicateMetricKeys` is an order-dependent flake (concurrent CollectAll vs "last writer wins" assertion), pre-existing, documented across waves 2-5 gates. Fix the test's determinism. ~0.25d
 - [ ] **PARITY-C2-REMAINING-RECEIVERS** — нишевые:
   - VictorOps/Splunk On-Call — config определён (`VictorOpsConfig`)
   - WeChat — config определён (`WeChatConfig`)
