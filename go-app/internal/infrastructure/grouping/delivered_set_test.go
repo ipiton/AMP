@@ -572,3 +572,34 @@ func flipAlertStatus(t *testing.T, manager *DefaultGroupManager, groupKey GroupK
 	require.NoError(t, err)
 	return group
 }
+
+// TestDeliveredSet_ScriptRejectsMalformedArgsWithoutWriting pins the r3 guard
+// (re-review): the Lua script must validate its argument shape BEFORE touching
+// the key. An odd fingerprint/status tail used to reach the HSET loop, error out
+// part-way through it, and leave the hash created but with NO TTL — the
+// permanent-suppression failure mode the script exists to prevent.
+//
+// RecordPartialDelivery always builds even pairs, so this drives the script
+// directly: the invariant under test is the script's, and it is what keeps "an
+// error means nothing was written" true even for a malformed call.
+func TestDeliveredSet_ScriptRejectsMalformedArgsWithoutWriting(t *testing.T) {
+	log, mr, cleanup := setupTestRedisNotifyLog(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	key := notifyLogDeliveredKey("gk", "target-a")
+
+	for name, argv := range map[string][]any{
+		"odd fingerprint/status tail": {maxDeliveredAlertsPerTarget, int64(60000), "fp-1", "firing", "fp-2"},
+		"no pairs at all":             {maxDeliveredAlertsPerTarget, int64(60000)},
+		"non-numeric ttl":             {maxDeliveredAlertsPerTarget, "soon", "fp-1", "firing"},
+		"zero ttl":                    {maxDeliveredAlertsPerTarget, int64(0), "fp-1", "firing"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := recordPartialDeliveryScript.Run(ctx, log.client, []string{key}, argv...).Err()
+			require.Error(t, err, "a malformed call must be refused")
+			assert.False(t, mr.Exists(key),
+				"nothing may be written when the arguments are refused — a key without a TTL suppresses alerts forever")
+		})
+	}
+}
