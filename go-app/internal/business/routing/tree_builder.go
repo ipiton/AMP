@@ -286,9 +286,15 @@ func (b *TreeBuilder) parseMatchers(match map[string]string, matchRE map[string]
 // github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go:
 //
 //	Copyright 2018 Prometheus Team
-//	Licensed under the Apache License, Version 2 point 0 (see the upstream
-//	file's header for the full notice and the license URL); provided
-//	"AS IS", without warranties or conditions of any kind.
+//	Licensed under the Apache License, Version 2.0 (the "License");
+//	you may not use this file except in compliance with the License.
+//	You may obtain a copy of the License at
+//
+//	    http://www.apache.org/licenses/LICENSE-2.0
+//
+//	Unless required by applicable law or agreed to in writing, software
+//	distributed under the License is distributed on an "AS IS" BASIS,
+//	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //
 // (fix-round 2, Minor #6: the port named the upstream file but originally
 // carried no attribution — Apache-2.0 section 4 asks for the notice to be

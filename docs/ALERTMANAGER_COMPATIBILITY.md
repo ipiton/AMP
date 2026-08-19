@@ -369,7 +369,9 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
      silently replaced by stale data with no error, only the ordinary recovery log line. Reconciliation cost also
      grew with every outage, risking a permanently-blocked failforward if it ever exceeded `reconcileTimeout`.
      Fixed: every key written through is now `Delete`d from the fallback immediately after a successful
-     write-through, so the next degraded window starts empty — exactly like the very first outage does.
+     write-through, so the next degraded window starts (almost) empty. One narrow exception survives: a write
+     landing in the snapshot-to-flip window is not part of the reconciled snapshot, is therefore not pruned,
+     and can carry into a future outage as a fallback leftover.
    - **A group deleted and re-created under the same `GroupKey` during ONE outage could be deleted again on
      recovery (finding I-5, Important).** Deletion replay ran *after* the write-through, so a stale "still
      deleted" entry for a key that a later `Store` had already re-created deleted the just-written-through, fresh
