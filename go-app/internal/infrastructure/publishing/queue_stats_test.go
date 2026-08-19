@@ -18,8 +18,11 @@ func TestPublishingQueue_GetStatsTracksCumulativeCounters(t *testing.T) {
 	}))
 	defer server.Close()
 
+	factory := NewPublisherFactory(NewAlertFormatter(""), slog.Default(), nil, "")
+	t.Cleanup(factory.Shutdown)
+
 	queue := NewPublishingQueue(
-		NewPublisherFactory(NewAlertFormatter(""), slog.Default(), nil, ""),
+		factory,
 		nil,
 		NewLRUJobTrackingStore(16),
 		PublishingQueueConfig{

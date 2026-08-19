@@ -11,6 +11,15 @@ type IncidentIDCache interface {
 	Get(fingerprint string) (incidentID string, exists bool)
 	Delete(fingerprint string)
 	Size() int
+
+	// Stop stops the background cleanup goroutine started by
+	// NewIncidentIDCache. Safe to call once. Callers that own an
+	// IncidentIDCache for the lifetime of a component (see
+	// PublisherFactory.Shutdown) MUST call Stop on teardown, otherwise
+	// cleanup's goroutine leaks for the life of the process. Previously
+	// implemented on the concrete type only and unreachable through this
+	// interface, which is why it was never wired into any teardown path.
+	Stop()
 }
 
 // cacheEntry holds cached incident ID with expiration
@@ -25,6 +34,7 @@ type inMemoryIncidentCache struct {
 	ttl      time.Duration
 	ticker   *time.Ticker
 	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
 // NewIncidentIDCache creates a new incident ID cache with TTL
@@ -104,7 +114,10 @@ func (c *inMemoryIncidentCache) cleanup() {
 	}
 }
 
-// Stop stops the cleanup goroutine
+// Stop stops the cleanup goroutine. Safe to call more than once (only the
+// first call closes stopChan).
 func (c *inMemoryIncidentCache) Stop() {
-	close(c.stopChan)
+	c.stopOnce.Do(func() {
+		close(c.stopChan)
+	})
 }
