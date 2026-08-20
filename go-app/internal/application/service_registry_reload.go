@@ -179,6 +179,24 @@ func (r *ServiceRegistry) rollbackPostCommit(
 	return fmt.Errorf("%s reload failed, rolled back to the previous config: %w", stage, cause)
 }
 
+// ReloadStatus returns the full outcome of the last reload attempt: the
+// coordinator's own status plus the outstanding W6xx findings.
+//
+// This is what /health/reload serves and what the config-reloader sidecar
+// verifies against (slice 2). Composed here rather than in the coordinator
+// because only the registry holds both halves — the coordinator knows the phase
+// outcome, the registry owns the warning collector that the components and the
+// post-commit appliers write to.
+func (r *ServiceRegistry) ReloadStatus() appconfig.ReloadStatusSnapshot {
+	snapshot := appconfig.ReloadStatusSnapshot{
+		RestartRequired: r.restartWarnings.List(),
+	}
+	if r.reloadCoordinator != nil {
+		snapshot.CoordinatorStatus = r.reloadCoordinator.StatusSnapshot()
+	}
+	return snapshot
+}
+
 // registerReloadables wires the five infrastructure Reloadable components into
 // the reloader used by the ReloadCoordinator.
 func (r *ServiceRegistry) registerReloadables(reloader *appconfig.DefaultConfigReloader) {
