@@ -1061,9 +1061,16 @@ func (c *Config) Validate() error {
 	// Note: Redis is not recommended for Lite profile,
 	// but it is allowed for testing/development.
 
-	if c.Log.Level == "" {
-		return fmt.Errorf("log level cannot be empty")
-	}
+	// log.level is deliberately NOT required here (re-review I6). An unset level
+	// means "info" — pkg/logger.ParseLevel's own default, and what
+	// DefaultConfigValidator.validateLogConfig accepts. Requiring it here made
+	// the two rules contradict: `level: ""` failed LoadConfig outright, so the
+	// validator's acceptance was unreachable and a config could fail at load
+	// while the reload validator considered it fine. Same reasoning as
+	// log.format, which was never required here.
+	//
+	// A level that is set but MEANINGLESS ("trace") is still rejected — by
+	// validateLogConfig, which owns the accepted set for both fields.
 
 	if c.App.Name == "" {
 		return fmt.Errorf("app name cannot be empty")
