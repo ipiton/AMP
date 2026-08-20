@@ -123,7 +123,11 @@ func (s *DefaultConfigUpdateService) UpdateConfig(
 
 	// Phase 2: DIFF CALCULATION
 	diffStartTime := time.Now()
-	diff, err := s.calculateDiff(s.GetCurrentConfig(), newConfig, opts.Sections)
+	// Captured before atomicApply below replaces s.currentConfig: the
+	// Reloadable contract needs the previously active config, both for its
+	// section-changed gate and so components can compare old vs new fields.
+	oldConfig := s.GetCurrentConfig()
+	diff, err := s.calculateDiff(oldConfig, newConfig, opts.Sections)
 	if err != nil {
 		s.logger.Error("diff calculation failed", "error", err)
 		return nil, fmt.Errorf("diff calculation failed: %w", err)
@@ -168,7 +172,7 @@ func (s *DefaultConfigUpdateService) UpdateConfig(
 
 	// Phase 4: HOT RELOAD
 	reloadStartTime := time.Now()
-	reloadErrors := s.hotReload(ctx, newConfig, diff)
+	reloadErrors := s.hotReload(ctx, oldConfig, newConfig, diff)
 
 	if len(reloadErrors) > 0 {
 		// Check if any critical component failed
@@ -417,16 +421,24 @@ func (s *DefaultConfigUpdateService) atomicApply(
 // Phase 4: Hot Reload
 // ================================================================================
 
-// hotReload triggers hot reload for all affected components
+// hotReload triggers hot reload for all affected components.
+//
+// NOTE (INF-A slice 1): the SIGHUP/file path (ReloadCoordinator) treats ANY
+// component failure as a rejected reload. This API path still keeps its older
+// critical/non-critical split (see UpdateConfig's Phase 4) because its
+// rollback goes through versioned storage rather than an in-memory config
+// swap, and tightening it needs that path's own review. The signature change
+// here is mechanical.
 func (s *DefaultConfigUpdateService) hotReload(
 	ctx context.Context,
+	oldConfig *Config,
 	newConfig *Config,
 	diff *ConfigDiff,
 ) []ReloadError {
 	s.logger.Info("triggering hot reload", "affected_components", diff.Affected)
 
 	// Reload all affected components
-	reloadErrors := s.reloader.ReloadAll(ctx, newConfig, diff.Affected)
+	reloadErrors := s.reloader.ReloadAll(ctx, oldConfig, newConfig, diff.Affected)
 
 	return reloadErrors
 }
@@ -447,6 +459,7 @@ func (s *DefaultConfigUpdateService) rollback(ctx context.Context, targetVersion
 
 	// Update current config in memory
 	s.currentMu.Lock()
+	failedConfig := s.currentConfig
 	s.currentConfig = oldConfig
 	s.currentMu.Unlock()
 
@@ -455,7 +468,7 @@ func (s *DefaultConfigUpdateService) rollback(ctx context.Context, targetVersion
 	s.versionMu.Unlock()
 
 	// Reload components with old config
-	reloadErrors := s.reloader.ReloadAll(ctx, oldConfig, nil)
+	reloadErrors := s.reloader.ReloadAll(ctx, failedConfig, oldConfig, nil)
 	if len(reloadErrors) > 0 {
 		return fmt.Errorf("failed to reload with old config: %s", FormatReloadErrors(reloadErrors))
 	}

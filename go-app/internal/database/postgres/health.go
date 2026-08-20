@@ -36,7 +36,13 @@ func (h *DefaultHealthChecker) CheckHealth(ctx context.Context) error {
 	defer cancel()
 
 	// Выполняем простой запрос для проверки соединения
-	rows, err := h.pool.pool.Query(checkCtx, "SELECT 1")
+	livePool := h.pool.livePool()
+	if livePool == nil {
+		h.pool.metrics.RecordHealthCheck(false)
+		return ErrNotConnected
+	}
+
+	rows, err := livePool.Query(checkCtx, "SELECT 1")
 	if err != nil {
 		h.pool.metrics.RecordHealthCheck(false)
 		h.isHealthy = false
