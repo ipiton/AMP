@@ -1,0 +1,53 @@
+# Build image for the config-reloader sidecar (INF-A slice 2).
+#
+# Separate from the main Dockerfile on purpose: this container sits next to the
+# application in every pod, so it is built distroless/non-root/read-only rather
+# than on the application's alpine base. It needs no shell, no package manager,
+# no CA bundle for its own work (it talks to 127.0.0.1) and no writable
+# filesystem.
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /build
+
+COPY go-app/go.mod go-app/go.sum ./
+RUN go mod download
+
+COPY go-app/ ./
+
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG BUILD_DATE=unknown
+
+# CGO off so the binary runs on `static` — the smallest distroless base with no
+# libc at all.
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o config-reloader ./cmd/config-reloader
+
+# ------------------------------------------------------------------------------
+# Runtime: distroless static, non-root.
+# ------------------------------------------------------------------------------
+# `nonroot` variant runs as uid/gid 65532 and contains no shell, so an exec into
+# this container is impossible — which is the point for a sidecar whose only job
+# is to read one file and make two local HTTP calls.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+# OCI labels (documentation only; the chart does not depend on them).
+LABEL org.opencontainers.image.title="amp-config-reloader" \
+      org.opencontainers.image.description="Watches AMP's config file and triggers a verified hot reload." \
+      org.opencontainers.image.source="https://github.com/ipiton/AMP"
+
+COPY --from=builder /build/config-reloader /usr/local/bin/config-reloader
+
+# 65532:65532 is distroless' `nonroot` user. Repeated here so the image is
+# non-root even if a runtime overrides the base's default.
+USER 65532:65532
+
+# The sidecar's own metrics/health surface. The application's ports belong to
+# the application's container.
+EXPOSE 9091
+
+# No writable path is needed: the config file is mounted read-only and nothing
+# is written to disk. The chart also sets readOnlyRootFilesystem: true.
+ENTRYPOINT ["/usr/local/bin/config-reloader"]

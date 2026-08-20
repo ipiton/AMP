@@ -226,3 +226,59 @@ affinity:
           operator: In
           values:
           - "true"
+
+# ===============================
+# Config file + hot reload (INF-A)
+# ===============================
+# Production runs the config-reloader sidecar, so an edit to the config
+# ConfigMap takes effect in place instead of needing a rollout.
+#
+# NOTE for whoever merges track B: track B introduced this section's shape
+# (enabled / image / resources) on its own branch. Keep one copy of the block —
+# the keys below are a superset, and the sidecar reads all of them.
+configFile:
+  enabled: true
+
+  # Deliberately secret-free. `receivers:` entries carry credentials
+  # (slack api_url, pagerduty service_key, smtp auth), and this file lands in a
+  # plain ConfigMap — so real delivery targets belong in Kubernetes Secrets,
+  # which AMP's publishing discovery already picks up, or in an overlay that
+  # renders this content from a secret store.
+  #
+  # What lives here safely: the route tree's shape, grouping timings,
+  # inhibit_rules and templates globs.
+  content: |
+    route:
+      receiver: default
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      # No integrations = a blackhole receiver. Real targets come from
+      # Kubernetes Secrets via publishing discovery.
+      - name: default
+
+configReloader:
+  enabled: true
+
+  image:
+    repository: registry.b2binpay.tech/amp/config-reloader
+    tag: ""
+    pullPolicy: Always
+
+  resources:
+    limits:
+      cpu: 50m
+      memory: 64Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+  # http, not signal: signal needs shareProcessNamespace: true on the pod,
+  # which lets every container see the others' processes. Not worth it when a
+  # loopback POST does the same job.
+  method: http
+  interval: 10s
+  verifyTimeout: 30s
+  maxBackoff: 5m

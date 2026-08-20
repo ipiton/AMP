@@ -660,6 +660,110 @@ server:
   externalUrl: ""
 
 # ===============================
+# Config file + hot reload (INF-A)
+# ===============================
+# AMP is configured two ways, and they are complementary:
+#
+#   * env vars (this file's other sections, via the -config ConfigMap) —
+#     infrastructure settings: database, redis, profile, ports.
+#   * a config FILE — the Alertmanager-shaped sections that have no env-var
+#     equivalent at all: `route:`, `receivers:`, `inhibit_rules:`,
+#     `templates:`. Without a file, those cannot be expressed in this chart.
+#
+# configFile renders that file into its own ConfigMap and points AMP at it.
+# configReloader then makes edits to it take effect WITHOUT a pod restart.
+configFile:
+  # Render and mount a config file. Required by configReloader below.
+  enabled: false
+
+  # Where the file is mounted, and its name. AMP_CONFIG_FILE is set to
+  # "<mountPath>/<fileName>" for the application container.
+  mountPath: /etc/amp
+  fileName: config.yaml
+
+  # The file's contents, verbatim. Alertmanager-shaped; see
+  # config.yaml.example in the repo root.
+  #
+  # NOTE: no checksum/config annotation is attached to the pod for this
+  # ConfigMap, deliberately. Rolling the pod on every config edit is exactly
+  # what hot reload exists to avoid — with configReloader enabled the change is
+  # picked up in-place. `helm upgrade` therefore updates the ConfigMap and the
+  # running pods adopt it within configReloader.interval.
+  content: ""
+  # content: |
+  #   route:
+  #     receiver: default
+  #     group_by: ['alertname', 'cluster']
+  #     group_wait: 30s
+  #   receivers:
+  #     - name: default
+  #       slack_configs:
+  #         - api_url: https://hooks.slack.com/services/XXX
+  #           channel: '#alerts'
+
+# config-reloader sidecar: watches the mounted config file and asks AMP to
+# reload when its CONTENT changes (SHA256, not mtime — kubelet re-syncs a
+# ConfigMap volume periodically without changing the bytes).
+#
+# Every reload is verified against the application's /health/reload, so a
+# ConfigMap edit AMP rejects is reported as rejected instead of silently
+# counted as applied. See amp_config_reloader_last_reload_successful.
+configReloader:
+  enabled: false
+
+  image:
+    repository: registry.b2binpay.tech/amp/config-reloader
+    tag: ""            # defaults to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 50m
+      memory: 64Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+  # How often the file is hashed.
+  interval: 10s
+
+  # How the reload is triggered:
+  #   http   - POST /-/reload on 127.0.0.1 (DEFAULT, works across containers)
+  #   signal - SIGHUP to --pid, which REQUIRES shareProcessNamespace: true on
+  #            the pod. Without it every container is its own PID 1, so the
+  #            signal would go to the reloader itself; the binary refuses that
+  #            rather than reporting phantom successes.
+  method: http
+
+  # Only used by method: signal. Enabling this sets shareProcessNamespace on
+  # the pod, which lets EVERY container in the pod see the others' processes —
+  # a real if modest isolation trade-off, which is why http is the default.
+  shareProcessNamespace: false
+  pid: 1
+
+  # Port for the sidecar's own /metrics and /healthz.
+  metricsPort: 9091
+
+  # How long to wait for AMP to confirm a triggered reload.
+  verifyTimeout: 30s
+
+  # Cap on the retry backoff for a config AMP keeps rejecting. Retries thin out
+  # instead of firing every interval; any new edit resets it.
+  maxBackoff: 5m
+
+  logLevel: info
+  logFormat: json
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532   # distroless "nonroot"
+
+# ===============================
 # Scheduling Configuration
 # ===============================
 nodeSelector: {}
