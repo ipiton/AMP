@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,6 +51,11 @@ type ReloadCoordinator struct {
 	lastReloadTime   time.Time
 	lastReloadStatus string
 	reloadVersion    int64
+
+	// restartWarnings records the split state left by an incomplete rollback
+	// (W610). Optional — see SetRestartWarnings. Guarded by mu; nil-receiver
+	// safe on the RestartWarnings side.
+	restartWarnings *RestartWarnings
 
 	// Logger
 	logger *slog.Logger
@@ -476,18 +482,82 @@ func (rc *ReloadCoordinator) rollback(ctx context.Context, failedConfig *Config,
 	rc.reloadVersion--
 	rc.mu.Unlock()
 
-	// Re-reload components, this time driving them from the config that was
-	// just rejected back to the previous one. Passing failedConfig as "old"
-	// (rather than nil) keeps the section gate meaningful: only components
-	// whose sections actually differ get touched, so a rollback does not
-	// gratuitously rebuild pools for sections nobody edited.
-	reloadErrors := rc.reloader.ReloadAll(ctx, failedConfig, oldConfig, nil)
-	if len(reloadErrors) > 0 {
-		return fmt.Errorf("rollback reload failed: %d component(s) failed", len(reloadErrors))
+	// Drive components back from the config that was just rejected to the
+	// previous one. Passing failedConfig as "old" (rather than nil) keeps the
+	// section gate meaningful: only components whose sections actually differ
+	// get touched, so a rollback does not gratuitously rebuild pools for
+	// sections nobody edited.
+	//
+	// RollbackAll, not ReloadAll: this pass must be best-effort (fix-round
+	// I3). Stopping at the first failing leg would leave every later component
+	// on the rejected config with no record of it.
+	rollbackErrors := rc.reloader.RollbackAll(ctx, failedConfig, oldConfig)
+	if len(rollbackErrors) > 0 {
+		diverged := make([]string, 0, len(rollbackErrors))
+		for _, rollbackErr := range rollbackErrors {
+			diverged = append(diverged, rollbackErr.Component)
+		}
+		sort.Strings(diverged)
+
+		// The process is now genuinely split: currentConfig and every reader of
+		// it report oldConfig, while these components are still running
+		// failedConfig. No config edit can resolve that — only a restart — so
+		// it gets its own code and is never resolved by a later reload.
+		warnRestartRequired(rc.logger, rc.restartWarnings, RestartRequiredWarning{
+			Code:      WarnReloadRollbackIncomplete,
+			Component: "reload-coordinator",
+			Fields:    diverged,
+			Reason: fmt.Sprintf(
+				"reload was rejected but rollback could not be completed: these components are still running the REJECTED config while the reported config is the previous one (%s); restart to converge",
+				FormatReloadErrors(rollbackErrors),
+			),
+		})
+
+		return fmt.Errorf("rollback incomplete, %d component(s) still on the rejected config: %s",
+			len(rollbackErrors), strings.Join(diverged, ", "))
 	}
 
 	rc.logger.Info("rollback successful")
 	return nil
+}
+
+// RollbackCommitted rolls the coordinator and every registered component back
+// from the config it has already COMMITTED to previous.
+//
+// For callers that discover a failure after ReloadFromFile has already
+// returned success (fix-round I4): ServiceRegistry applies routing, templates,
+// receivers and inhibition rules outside the component registry, so their
+// failure surfaces only once phase 4 has swapped the config pointer and phase
+// 5 has told all five components to adopt it. Without this, that path reported
+// "reload failed" while the new config was fully live in every component —
+// the exact inverse of the split state I3 covers.
+//
+// Returns the rollback error, if any, with the same best-effort semantics as
+// the internal rollback: every component is attempted and a non-empty failure
+// set is reported as a split state (W610).
+func (rc *ReloadCoordinator) RollbackCommitted(ctx context.Context, previous *Config) error {
+	if previous == nil {
+		return fmt.Errorf("rollback: nil previous config")
+	}
+
+	failed := rc.GetCurrentConfig()
+	if err := rc.rollback(ctx, failed, previous); err != nil {
+		rc.updateReloadStatus("rollback_failed")
+		return err
+	}
+
+	rc.updateReloadStatus("rolled_back")
+	return nil
+}
+
+// SetRestartWarnings gives the coordinator somewhere to record the split state
+// left behind by an incomplete rollback (W610). Optional: without it the
+// condition is still returned as an error and logged, it just is not queryable
+// afterwards. Called by ServiceRegistry, which owns the collector.
+func (rc *ReloadCoordinator) SetRestartWarnings(warnings *RestartWarnings) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.restartWarnings = warnings
 }
 
 // healthCheck performs health check after reload (Phase 6)
