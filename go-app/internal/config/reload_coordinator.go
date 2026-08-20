@@ -524,36 +524,54 @@ func (rc *ReloadCoordinator) updateReloadStatus(status string) {
 	rc.lastReloadTime = time.Now()
 }
 
-// identifyAffectedComponents identifies components affected by config changes
+// sectionToComponent maps a changed config section to the name of the
+// component responsible for it. The registered Reloadable names ("logger",
+// "metrics", "llm", "redis", "database") MUST appear here: ReloadAll's name
+// gate drops any component the coordinator did not flag, so a missing entry
+// would silently skip that component whenever some OTHER section changed in
+// the same edit.
+//
+// The parity sections (routing/receivers/inhibition/silencing/grouping) have no
+// Reloadable of their own — ServiceRegistry.ReloadConfig applies them directly
+// — but they stay listed because the names are reported in logs and in
+// ReloadResult.
+var sectionToComponent = map[string]string{
+	"route":         "routing",
+	"routes":        "routing",
+	"receivers":     "receivers",
+	"inhibit_rules": "inhibition",
+	"inhibition":    "inhibition",
+	"silences":      "silencing",
+	"silencing":     "silencing",
+	"grouping":      "grouping",
+	"llm":           "llm",
+	"log":           "logger",
+	"metrics":       "metrics",
+	"database":      "database",
+	"redis":         "redis",
+}
+
+// identifyAffectedComponents identifies components affected by config changes.
+//
+// Added and Deleted fields count, not just Modified: adding a whole `redis:`
+// section is exactly the kind of edit that must reach the redis component, and
+// before INF-A slice 1 only Modified was consulted.
 func (rc *ReloadCoordinator) identifyAffectedComponents(diff *ConfigDiff) []string {
 	affected := make(map[string]bool)
 
-	// Check which sections changed
+	note := func(field string) {
+		if component, ok := sectionToComponent[sectionOf(field)]; ok {
+			affected[component] = true
+		}
+	}
 	for field := range diff.Modified {
-		if startsWith(field, "route") || startsWith(field, "routes") {
-			affected["routing"] = true
-		}
-		if startsWith(field, "receivers") {
-			affected["receivers"] = true
-		}
-		if startsWith(field, "inhibit_rules") {
-			affected["inhibition"] = true
-		}
-		if startsWith(field, "silences") {
-			affected["silencing"] = true
-		}
-		if startsWith(field, "grouping") {
-			affected["grouping"] = true
-		}
-		if startsWith(field, "llm") {
-			affected["llm"] = true
-		}
-		if startsWith(field, "database") {
-			affected["database"] = true
-		}
-		if startsWith(field, "redis") {
-			affected["redis"] = true
-		}
+		note(field)
+	}
+	for field := range diff.Added {
+		note(field)
+	}
+	for _, field := range diff.Deleted {
+		note(field)
 	}
 
 	// Convert to slice
@@ -563,6 +581,16 @@ func (rc *ReloadCoordinator) identifyAffectedComponents(diff *ConfigDiff) []stri
 	}
 
 	return components
+}
+
+// sectionOf extracts the top-level section token from a dotted diff field path,
+// stripping any index suffix ("receivers[0].name" -> "receivers").
+func sectionOf(field string) string {
+	section := strings.SplitN(field, ".", 2)[0]
+	if idx := strings.IndexByte(section, '['); idx >= 0 {
+		section = section[:idx]
+	}
+	return section
 }
 
 // isComponentCritical checks if component is critical
