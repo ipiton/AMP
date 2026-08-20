@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 )
@@ -11,23 +12,38 @@ import (
 // ================================================================================
 // Configuration Hot Reloader
 // ================================================================================
-// Orchestrates hot reload across multiple Reloadable components (TN-150).
+// Orchestrates hot reload across multiple Reloadable components (TN-150,
+// reworked by INF-A slice 1).
 //
 // Features:
-// - Component registry (register/unregister)
-// - Parallel reload execution with timeout
-// - Error collection and aggregation
-// - Critical vs non-critical failure handling
-// - Rollback trigger on critical failures
+// - Component registry (register/unregister), ordered by ReloadPriority
+// - Section-driven applicability: a component is reloaded only when one of
+//   its RelevantSections actually changed between old and new config
+// - Sequential, deterministic, fail-fast execution with timeout
+// - Error collection naming the component that rejected the reload
 //
 // Performance Target: < 300ms p95 for typical reload
-// Quality Target: 150% (Grade A+ EXCEPTIONAL)
-// Author: AI Assistant
-// Date: 2025-11-22
+
+// defaultReloadPriority is the ReloadPriority assumed for components that do
+// not implement OrderedReloadable. Chosen mid-range so such a component lands
+// after the logger (10) and before storage (90+) without having to opt in.
+const defaultReloadPriority = 100
+
+// reloadTimeout bounds the whole ReloadAll pass. Kept at the pre-INF-A
+// per-component value: reloads are sequential now, so this is a budget for
+// all of them together — which is the number an operator actually cares about
+// (how long can a SIGHUP hold before I know it failed).
+const reloadTimeout = 30 * time.Second
+
+// registeredComponent pairs a Reloadable with its resolved ordering key.
+type registeredComponent struct {
+	component Reloadable
+	priority  int
+}
 
 // DefaultConfigReloader implements ConfigReloader interface
 type DefaultConfigReloader struct {
-	components []Reloadable
+	components []registeredComponent
 	mu         sync.RWMutex
 	logger     *slog.Logger
 }
@@ -39,22 +55,28 @@ func NewConfigReloader(logger *slog.Logger) *DefaultConfigReloader {
 	}
 
 	return &DefaultConfigReloader{
-		components: make([]Reloadable, 0),
+		components: make([]registeredComponent, 0),
 		logger:     logger,
 	}
 }
 
 // Register implements ConfigReloader.Register
 //
-// Registers a component for hot reload
-// Can be called multiple times (idempotent)
+// Registers a component for hot reload. Registering the same Name() twice is
+// a no-op (idempotent). The registry is kept sorted by ReloadPriority so
+// ReloadAll's order is deterministic regardless of registration order; ties
+// keep registration order (stable sort).
 func (r *DefaultConfigReloader) Register(component Reloadable) {
+	if component == nil {
+		return
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	// Check if already registered (by name)
 	for _, existing := range r.components {
-		if existing.Name() == component.Name() {
+		if existing.component.Name() == component.Name() {
 			r.logger.Warn("component already registered, skipping",
 				"component", component.Name(),
 			)
@@ -62,10 +84,37 @@ func (r *DefaultConfigReloader) Register(component Reloadable) {
 		}
 	}
 
-	r.components = append(r.components, component)
+	// A typo in RelevantSections would make the component never reload —
+	// the worst failure mode for a hot-reload hook, because it looks like
+	// success. Name it at registration time, where it is cheap to spot.
+	for _, section := range component.RelevantSections() {
+		if !IsKnownSection(section) {
+			r.logger.Error("component declares an unknown config section; it will be treated as always-relevant",
+				"component", component.Name(),
+				"section", section,
+				"known_sections", KnownSections(),
+			)
+		}
+	}
+
+	priority := defaultReloadPriority
+	if ordered, ok := component.(OrderedReloadable); ok {
+		priority = ordered.ReloadPriority()
+	}
+
+	r.components = append(r.components, registeredComponent{
+		component: component,
+		priority:  priority,
+	})
+	sort.SliceStable(r.components, func(i, j int) bool {
+		return r.components[i].priority < r.components[j].priority
+	})
+
 	r.logger.Info("component registered for hot reload",
 		"component", component.Name(),
 		"critical", component.IsCritical(),
+		"sections", component.RelevantSections(),
+		"priority", priority,
 		"total_components", len(r.components),
 	)
 }
@@ -78,8 +127,8 @@ func (r *DefaultConfigReloader) Unregister(componentName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for i, component := range r.components {
-		if component.Name() == componentName {
+	for i, entry := range r.components {
+		if entry.component.Name() == componentName {
 			// Remove component from slice
 			r.components = append(r.components[:i], r.components[i+1:]...)
 			r.logger.Info("component unregistered from hot reload",
@@ -97,17 +146,13 @@ func (r *DefaultConfigReloader) Unregister(componentName string) {
 
 // ReloadAll implements ConfigReloader.ReloadAll
 //
-// Reloads all registered components in parallel
-// Returns errors if any component failed
-//
-// Rollback Policy:
-// - If ANY critical component fails: Return error (triggers rollback)
-// - If ONLY non-critical components fail: Return error list (no rollback)
-//
-// Performance: < 300ms p95 for typical reload (5-10 components)
+// Reloads the applicable components sequentially in ReloadPriority order and
+// stops at the first error. See the interface doc for why this is sequential
+// and fail-fast.
 func (r *DefaultConfigReloader) ReloadAll(
 	ctx context.Context,
-	cfg *Config,
+	oldCfg *Config,
+	newCfg *Config,
 	affectedComponents []string,
 ) []ReloadError {
 	r.mu.RLock()
@@ -115,106 +160,71 @@ func (r *DefaultConfigReloader) ReloadAll(
 
 	startTime := time.Now()
 
-	r.logger.Info("starting hot reload",
-		"total_components", len(r.components),
-		"affected_components", affectedComponents,
-	)
-
-	// Filter components if affected list specified
-	componentsToReload := r.filterComponents(affectedComponents)
+	// Filter components to those actually affected by this change
+	componentsToReload := r.filterComponents(oldCfg, newCfg, affectedComponents)
 	if len(componentsToReload) == 0 {
-		r.logger.Info("no components need reload")
+		r.logger.Info("no components need reload",
+			"total_components", len(r.components),
+			"affected_components", affectedComponents,
+		)
 		return nil
 	}
 
-	// Create context with timeout (30s default)
-	reloadCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	r.logger.Info("starting hot reload",
+		"total_components", len(r.components),
+		"components_to_reload", componentNames(componentsToReload),
+		"changed_sections", ChangedSections(oldCfg, newCfg),
+	)
+
+	reloadCtx, cancel := context.WithTimeout(ctx, reloadTimeout)
 	defer cancel()
 
-	// Channel for collecting reload results
-	type reloadResult struct {
-		component string
-		critical  bool
-		err       error
-		duration  time.Duration
-	}
-	results := make(chan reloadResult, len(componentsToReload))
+	reloadErrors := make([]ReloadError, 0, 1)
 
-	// Launch parallel reload goroutines
-	var wg sync.WaitGroup
-	for _, component := range componentsToReload {
-		wg.Add(1)
-		go func(comp Reloadable) {
-			defer wg.Done()
+	for _, comp := range componentsToReload {
+		compStart := time.Now()
+		r.logger.Info("reloading component",
+			"component", comp.Name(),
+			"critical", comp.IsCritical(),
+		)
 
-			compStartTime := time.Now()
-			r.logger.Info("reloading component",
+		err := comp.Reload(reloadCtx, oldCfg, newCfg)
+		duration := time.Since(compStart)
+
+		if err != nil {
+			r.logger.Error("component reload failed, rejecting the reload",
 				"component", comp.Name(),
 				"critical", comp.IsCritical(),
+				"error", err,
+				"duration_ms", duration.Milliseconds(),
 			)
-
-			err := comp.Reload(reloadCtx, cfg)
-			duration := time.Since(compStartTime)
-
-			results <- reloadResult{
-				component: comp.Name(),
-				critical:  comp.IsCritical(),
-				err:       err,
-				duration:  duration,
-			}
-		}(component)
-	}
-
-	// Wait for all goroutines to complete
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results
-	reloadErrors := make([]ReloadError, 0)
-	hasCriticalError := false
-
-	for result := range results {
-		if result.err != nil {
-			r.logger.Error("component reload failed",
-				"component", result.component,
-				"critical", result.critical,
-				"error", result.err,
-				"duration_ms", result.duration.Milliseconds(),
-			)
-
 			reloadErrors = append(reloadErrors, ReloadError{
-				Component: result.component,
-				Error:     result.err.Error(),
-				Critical:  result.critical,
-				Duration:  result.duration,
+				Component: comp.Name(),
+				Error:     err.Error(),
+				Critical:  comp.IsCritical(),
+				Duration:  duration,
 			})
-
-			if result.critical {
-				hasCriticalError = true
-			}
-		} else {
-			r.logger.Info("component reloaded successfully",
-				"component", result.component,
-				"duration_ms", result.duration.Milliseconds(),
-			)
+			// Fail-fast: every further component would apply changes that
+			// the coordinator is about to roll back anyway.
+			break
 		}
+
+		r.logger.Info("component reloaded successfully",
+			"component", comp.Name(),
+			"duration_ms", duration.Milliseconds(),
+		)
 	}
 
 	totalDuration := time.Since(startTime)
 
-	// Log summary
 	if len(reloadErrors) == 0 {
 		r.logger.Info("hot reload completed successfully",
 			"components_reloaded", len(componentsToReload),
 			"duration_ms", totalDuration.Milliseconds(),
 		)
 	} else {
-		r.logger.Warn("hot reload completed with errors",
-			"components_reloaded", len(componentsToReload),
-			"errors", len(reloadErrors),
-			"critical_errors", hasCriticalError,
+		r.logger.Warn("hot reload rejected",
+			"failed_component", reloadErrors[0].Component,
 			"duration_ms", totalDuration.Milliseconds(),
 		)
 	}
@@ -222,47 +232,183 @@ func (r *DefaultConfigReloader) ReloadAll(
 	return reloadErrors
 }
 
+// RollbackAll implements ConfigReloader.RollbackAll: same selection as
+// ReloadAll, but BEST EFFORT — every selected component is attempted even after
+// one fails, and all errors are returned.
+//
+// Fail-fast is right on the forward pass (stop applying a config that is about
+// to be rejected) and wrong here (fix-round I3): abandoning the remaining
+// components after a failed rollback leg guarantees MORE divergence, not less.
+// Each component left on the rejected config is a separate split state, so the
+// caller needs the full list, not the first name.
+func (r *DefaultConfigReloader) RollbackAll(
+	ctx context.Context,
+	failedCfg *Config,
+	previousCfg *Config,
+) []ReloadError {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	componentsToRollback := r.filterComponents(failedCfg, previousCfg, nil)
+	if len(componentsToRollback) == 0 {
+		r.logger.Info("no components need rollback")
+		return nil
+	}
+
+	r.logger.Warn("rolling back components",
+		"components", componentNames(componentsToRollback),
+	)
+
+	rollbackCtx, cancel := context.WithTimeout(ctx, reloadTimeout)
+	defer cancel()
+
+	rollbackErrors := make([]ReloadError, 0, len(componentsToRollback))
+	for _, comp := range componentsToRollback {
+		start := time.Now()
+		err := comp.Reload(rollbackCtx, failedCfg, previousCfg)
+		duration := time.Since(start)
+
+		if err != nil {
+			r.logger.Error("component rollback FAILED; it is still running the rejected config",
+				"component", comp.Name(),
+				"critical", comp.IsCritical(),
+				"error", err,
+				"duration_ms", duration.Milliseconds(),
+			)
+			rollbackErrors = append(rollbackErrors, ReloadError{
+				Component: comp.Name(),
+				Error:     err.Error(),
+				Critical:  comp.IsCritical(),
+				Duration:  duration,
+			})
+			continue
+		}
+
+		r.logger.Info("component rolled back to the previous config",
+			"component", comp.Name(),
+			"duration_ms", duration.Milliseconds(),
+		)
+	}
+
+	return rollbackErrors
+}
+
 // GetRegisteredComponents implements ConfigReloader.GetRegisteredComponents
 //
-// Returns list of registered component names
+// Returns registered component names in reload order.
 func (r *DefaultConfigReloader) GetRegisteredComponents() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	names := make([]string, len(r.components))
-	for i, component := range r.components {
-		names[i] = component.Name()
+	for i, entry := range r.components {
+		names[i] = entry.component.Name()
 	}
 
 	return names
+}
+
+// SelectComponents implements ConfigReloader.SelectComponents.
+func (r *DefaultConfigReloader) SelectComponents(
+	oldCfg *Config,
+	newCfg *Config,
+	affectedComponents []string,
+) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return componentNames(r.filterComponents(oldCfg, newCfg, affectedComponents))
 }
 
 // ================================================================================
 // Helper Functions
 // ================================================================================
 
-// filterComponents filters components by affected list
-func (r *DefaultConfigReloader) filterComponents(affectedComponents []string) []Reloadable {
-	// If no filter, return all components
-	if len(affectedComponents) == 0 {
-		return r.components
-	}
-
-	// Build set for O(1) lookup
-	affectedSet := make(map[string]bool)
-	for _, name := range affectedComponents {
-		affectedSet[name] = true
-	}
-
-	// Filter components
-	filtered := make([]Reloadable, 0)
-	for _, component := range r.components {
-		if affectedSet[component.Name()] {
-			filtered = append(filtered, component)
+// filterComponents selects the components to reload, in reload order.
+//
+// Two independent gates, both must pass:
+//  1. Name gate: when affectedComponents is non-empty the component's Name()
+//     must appear in it. This preserves the pre-INF-A behaviour (the
+//     coordinator/update service passes the diff's affected-component list)
+//     and lets a caller narrow a reload deliberately.
+//  2. Section gate: at least one of the component's RelevantSections must
+//     differ between oldCfg and newCfg. A component with no declared
+//     sections, or an unknown section, always passes (SectionChanged returns
+//     true for unknown names and for a nil oldCfg).
+//
+// Caller must hold at least r.mu.RLock.
+func (r *DefaultConfigReloader) filterComponents(
+	oldCfg *Config,
+	newCfg *Config,
+	affectedComponents []string,
+) []Reloadable {
+	var affectedSet map[string]bool
+	if len(affectedComponents) > 0 {
+		affectedSet = make(map[string]bool, len(affectedComponents))
+		for _, name := range affectedComponents {
+			affectedSet[name] = true
 		}
 	}
 
+	filtered := make([]Reloadable, 0, len(r.components))
+	for _, entry := range r.components {
+		component := entry.component
+
+		// Drift wins over BOTH gates (fix-round I2). A component whose live
+		// state no longer matches the config must always get a chance to
+		// re-raise its restart-required warning, even on a reload that
+		// touched only some other section — that edit's diff will not flag
+		// this component's name, and its section will look unchanged since
+		// the previous attempt, so both gates would drop it and the warning
+		// would silently disappear.
+		if needsResync(component, newCfg) {
+			filtered = append(filtered, component)
+			continue
+		}
+
+		if affectedSet != nil && !affectedSet[component.Name()] {
+			continue
+		}
+		if !sectionsChanged(oldCfg, newCfg, component.RelevantSections()) {
+			continue
+		}
+		filtered = append(filtered, component)
+	}
+
 	return filtered
+}
+
+// needsResync asks a ResyncReloadable whether its live state has drifted from
+// newCfg. Components that do not implement the interface never resync.
+func needsResync(component Reloadable, newCfg *Config) bool {
+	resyncable, ok := component.(ResyncReloadable)
+	if !ok {
+		return false
+	}
+	return resyncable.NeedsResync(newCfg)
+}
+
+// sectionsChanged reports whether any of the given sections changed. An empty
+// section list means "always relevant".
+func sectionsChanged(oldCfg, newCfg *Config, sections []string) bool {
+	if len(sections) == 0 {
+		return true
+	}
+	for _, section := range sections {
+		if SectionChanged(oldCfg, newCfg, section) {
+			return true
+		}
+	}
+	return false
+}
+
+// componentNames extracts Name() from a component slice, preserving order.
+func componentNames(components []Reloadable) []string {
+	names := make([]string, len(components))
+	for i, component := range components {
+		names[i] = component.Name()
+	}
+	return names
 }
 
 // HasCriticalErrors checks if error list contains critical errors

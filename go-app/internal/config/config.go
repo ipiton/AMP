@@ -333,6 +333,18 @@ type LLMConfig struct {
 
 // LogConfig holds logging-related configuration
 type LogConfig struct {
+	// Level and Format are validated by DefaultConfigValidator.validateLogConfig
+	// (a business rule), NOT by a `validate:"oneof=..."` tag here: a tag would
+	// report the same typo twice with two different codes. That validation runs
+	// in the coordinator's VALIDATE phase, so an unsupported value is rejected
+	// before anything is committed — LoggerReloadable's own rejection at apply
+	// time is only a backstop.
+	//
+	// The accepted sets are kept identical to pkg/logger.ParseLevel /
+	// buildDelegate — including "unset", which both treat as the default — by
+	// TestLogConfigFormat_ValidationMatchesTheHandler. They must not drift: a
+	// value the logger accepts but the validator rejects produces a config that
+	// BOOTS and then fails every reload.
 	Level      string `mapstructure:"level"`
 	Format     string `mapstructure:"format"`
 	Output     string `mapstructure:"output"`
@@ -1049,9 +1061,16 @@ func (c *Config) Validate() error {
 	// Note: Redis is not recommended for Lite profile,
 	// but it is allowed for testing/development.
 
-	if c.Log.Level == "" {
-		return fmt.Errorf("log level cannot be empty")
-	}
+	// log.level is deliberately NOT required here (re-review I6). An unset level
+	// means "info" — pkg/logger.ParseLevel's own default, and what
+	// DefaultConfigValidator.validateLogConfig accepts. Requiring it here made
+	// the two rules contradict: `level: ""` failed LoadConfig outright, so the
+	// validator's acceptance was unreachable and a config could fail at load
+	// while the reload validator considered it fine. Same reasoning as
+	// log.format, which was never required here.
+	//
+	// A level that is set but MEANINGLESS ("trace") is still rejected — by
+	// validateLogConfig, which owns the accepted set for both fields.
 
 	if c.App.Name == "" {
 		return fmt.Errorf("app name cannot be empty")

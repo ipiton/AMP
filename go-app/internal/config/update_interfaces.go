@@ -352,39 +352,34 @@ type ConfigValidator interface {
 // - Reload should be atomic (old or new config, never mixed state)
 // - Reload should be idempotent (can be called multiple times safely)
 //
+// Honesty rule (INF-A): a component that CANNOT be hot-swapped safely must
+// NOT pretend. Its Reload returns nil after logging a restart-required
+// warning (see RestartRequiredWarning / the W6xx codes in
+// reloadable_warnings.go) rather than performing a swap that cannot reach the
+// component's real consumers. "Reload succeeded" must never mean "the new
+// value is not actually in effect anywhere".
+//
 // Example Implementation:
 //
-//	type DatabasePool struct {
-//	    pool *pgxpool.Pool
-//	    config *config.Config
-//	    logger *slog.Logger
-//	}
+//	func (db *DatabasePool) RelevantSections() []string { return []string{"database"} }
 //
-//	func (db *DatabasePool) Reload(ctx context.Context, cfg *config.Config) error {
-//	    // Check if database config actually changed
-//	    if reflect.DeepEqual(db.config.Database, cfg.Database) {
-//	        db.logger.Info("database config unchanged, skipping reload")
-//	        return nil // No-op if config unchanged
-//	    }
-//
-//	    // Create new connection pool with new config
-//	    newPool, err := createPool(cfg.Database)
+//	func (db *DatabasePool) Reload(ctx context.Context, oldCfg, newCfg *config.Config) error {
+//	    // Create new connection pool with new config, verify it, swap it in.
+//	    newPool, err := createPool(newCfg.Database)
 //	    if err != nil {
 //	        return fmt.Errorf("failed to create new pool: %w", err)
 //	    }
+//	    if err := newPool.Ping(ctx); err != nil {
+//	        newPool.Close()
+//	        return fmt.Errorf("new pool failed verification: %w", err)
+//	    }
+//	    oldPool := db.swap(newPool)
 //
-//	    // Gracefully close old pool
-//	    oldPool := db.pool
-//	    db.pool = newPool
-//	    db.config = cfg
-//
-//	    // Close old pool in background (after active connections finish)
+//	    // Close old pool in background (after in-flight queries finish)
 //	    go func() {
 //	        time.Sleep(5 * time.Second) // Grace period
 //	        oldPool.Close()
 //	    }()
-//
-//	    db.logger.Info("database pool reloaded successfully")
 //	    return nil
 //	}
 //
@@ -394,27 +389,46 @@ type Reloadable interface {
 	// Reload reloads component with new configuration
 	//
 	// Implementation Requirements:
-	// 1. Check if config actually changed (optimization)
-	// 2. Validate new config before applying
-	// 3. Apply new config atomically
-	// 4. Gracefully close old resources
-	// 5. Return error if reload failed
+	// 1. Validate/verify the new config before applying it (dial, ping, parse)
+	// 2. Apply new config atomically
+	// 3. Gracefully release old resources
+	// 4. Return error if reload failed
 	//
 	// Parameters:
 	// - ctx: Context with timeout (typically 30s)
-	// - cfg: New configuration
+	// - oldCfg: Previously active configuration. May be nil, meaning "no
+	//   previous state known" — treat every relevant section as changed.
+	// - newCfg: New configuration (never nil)
 	//
 	// Returns:
-	// - error: If reload failed (triggers rollback if IsCritical)
+	// - error: If reload failed. ANY component error rejects the reload as a
+	//   whole and the coordinator rolls back to oldCfg (IsCritical only
+	//   affects logging/metrics severity, not that decision).
 	//
 	// Performance:
 	// - Should complete within ctx timeout (typically 30s)
 	// - Should be fast for unchanged config (< 10ms)
 	//
 	// Concurrency:
-	// - May be called concurrently with other Reloadable instances
-	// - Must be thread-safe
-	Reload(ctx context.Context, cfg *Config) error
+	// - Called sequentially by DefaultConfigReloader (deterministic order),
+	//   but concurrently with live traffic — must be thread-safe against the
+	//   component's own readers.
+	Reload(ctx context.Context, oldCfg, newCfg *Config) error
+
+	// RelevantSections returns the top-level config sections this component
+	// reads, using the same names as Config's `mapstructure` tags
+	// ("database", "redis", "log", "metrics", "llm", ...).
+	//
+	// The reloader calls Reload only when at least one of these sections
+	// actually differs between oldCfg and newCfg (SectionChanged), so an
+	// implementation does not need to re-derive "did anything change" — it
+	// only needs to decide WHICH fields within its sections it can apply.
+	//
+	// Returning nil/empty means "always reload me", which is legal but
+	// should be rare. Returning an unknown section name is a programming
+	// error: Register logs it loudly and the component is treated as
+	// always-relevant so the mistake cannot hide as a silent no-reload.
+	RelevantSections() []string
 
 	// Name returns component name for logging and metrics
 	//
@@ -427,21 +441,54 @@ type Reloadable interface {
 	// - Affected components list in diff
 	Name() string
 
-	// IsCritical returns true if reload failure should trigger rollback
+	// IsCritical marks components whose failure is an outage rather than a
+	// degradation. It drives log/metric severity and the wording of the
+	// rejection, NOT the rollback decision: since INF-A slice 1 ANY
+	// component error rejects the reload and restores the previous config,
+	// because a partially-applied config is worse than a rejected one.
 	//
-	// Critical Components (must succeed):
+	// Critical Components (an outage if they break):
 	// - database: Cannot function without database
 	// - redis: Required for distributed locking and caching
 	//
-	// Non-Critical Components (can fail gracefully):
+	// Non-Critical Components (a degradation if they break):
 	// - llm: Can continue without AI features
 	// - metrics: Can continue without metrics export
-	// - cache: Can fallback to no caching
-	//
-	// Rollback Policy:
-	// - If ANY critical component fails: Rollback entire config
-	// - If ONLY non-critical components fail: Continue with warning
+	// - logger: Can continue at the previous level/format
 	IsCritical() bool
+}
+
+// OrderedReloadable is an optional add-on to Reloadable: components that
+// implement it are reloaded in ascending ReloadPriority order.
+//
+// Components that do NOT implement it get defaultReloadPriority (100), and
+// ties keep registration order (stable sort), so ordering is always
+// deterministic — a hard requirement for the logger, which must be reloaded
+// FIRST so that every later component's reload is logged at the new level and
+// in the new format.
+type OrderedReloadable interface {
+	ReloadPriority() int
+}
+
+// ResyncReloadable is a second optional add-on to Reloadable: a component that
+// can tell whether its LIVE state still matches the config gets selected for
+// reload even when its own sections did not change in this particular edit.
+//
+// This is what makes a declined (restart-required) change durable
+// (fix-round I2). Without it: operator edits `database.host`, the pool declines
+// with W600, the coordinator still commits the config — and the NEXT reload of
+// an unrelated section sees no `database` diff, skips the component, and the
+// "restart required" fact disappears while the process is still on the old
+// host. With it, the component keeps being selected and keeps re-raising its
+// warning until the divergence is gone (reverted, or the process restarted).
+//
+// Implementations must be cheap: NeedsResync runs on every reload attempt for
+// every registered component.
+type ResyncReloadable interface {
+	// NeedsResync reports whether the component's live state differs from
+	// newCfg, i.e. whether it has something to say about this config even
+	// though its sections may be unchanged since the last attempt.
+	NeedsResync(newCfg *Config) bool
 }
 
 // ConfigReloader orchestrates hot reload across multiple Reloadable components
@@ -465,8 +512,9 @@ type ConfigReloader interface {
 	//
 	// Notes:
 	// - Components should be registered during initialization
-	// - Registration order doesn't matter (parallel execution)
-	// - Can register same component multiple times (idempotent)
+	// - Reload order is decided by OrderedReloadable.ReloadPriority, not by
+	//   registration order (registration order only breaks ties)
+	// - Registering the same component name twice is a no-op (idempotent)
 	Register(component Reloadable)
 
 	// Unregister removes a component from hot reload registry
@@ -479,32 +527,55 @@ type ConfigReloader interface {
 	// - No-op if component not registered
 	Unregister(componentName string)
 
-	// ReloadAll reloads all registered components in parallel
+	// ReloadAll reloads the applicable registered components, sequentially,
+	// in deterministic ReloadPriority order.
 	//
 	// Process:
-	// 1. Filter to affected components (if specified)
-	// 2. Create goroutine for each component
-	// 3. Call Reload() with timeout (30s)
-	// 4. Collect results
-	// 5. Check for critical failures
+	// 1. Select components: name in affectedComponents (when non-empty) AND
+	//    at least one RelevantSections entry differs between oldCfg/newCfg
+	// 2. Call Reload(ctx, oldCfg, newCfg) on each, in priority order
+	// 3. Stop at the FIRST error (fail-fast: do not keep applying changes to
+	//    further components once the reload is known to be rejected)
+	//
+	// Sequential rather than parallel (changed in INF-A slice 1): the logger
+	// must be swapped before anything else logs, and a deterministic,
+	// reproducible order is worth more here than the few milliseconds
+	// parallelism saved across a handful of components — every component's
+	// own Reload is either a no-op or a single verified swap.
 	//
 	// Parameters:
 	// - ctx: Context with timeout (typically 30s)
-	// - cfg: New configuration
-	// - affectedComponents: Component names to reload (nil = all)
+	// - oldCfg: Previously active configuration (nil = "reload everything")
+	// - newCfg: New configuration
+	// - affectedComponents: Component names to consider (nil/empty = all)
 	//
 	// Returns:
-	// - []ReloadError: List of reload errors (empty if all succeeded)
+	// - []ReloadError: reload errors; at most one, since selection is
+	//   fail-fast. Empty when every applicable component succeeded.
 	//
 	// Performance Target: < 300ms p95
-	//
-	// Rollback Decision:
-	// - Returns error if ANY critical component fails
-	// - Returns error list if ONLY non-critical components fail
-	ReloadAll(ctx context.Context, cfg *Config, affectedComponents []string) []ReloadError
+	ReloadAll(ctx context.Context, oldCfg, newCfg *Config, affectedComponents []string) []ReloadError
 
-	// GetRegisteredComponents returns list of registered component names
+	// RollbackAll drives the components back from a rejected config to the
+	// previous one. Same selection rules as ReloadAll, but BEST EFFORT: every
+	// selected component is attempted even after one fails, and every error is
+	// returned.
+	//
+	// Fail-fast is correct going forward and wrong going back — a component
+	// skipped during rollback stays on the rejected config, so stopping early
+	// creates more divergence than it avoids. The caller is expected to treat a
+	// non-empty result as a split state and say so loudly.
+	RollbackAll(ctx context.Context, failedCfg, previousCfg *Config) []ReloadError
+
+	// GetRegisteredComponents returns registered component names in reload
+	// order.
 	GetRegisteredComponents() []string
+
+	// SelectComponents returns the names of the components ReloadAll would
+	// reload for this config change, in reload order. The coordinator uses it
+	// to report per-component results without having to duplicate the
+	// selection rules.
+	SelectComponents(oldCfg, newCfg *Config, affectedComponents []string) []string
 }
 
 // ================================================================================

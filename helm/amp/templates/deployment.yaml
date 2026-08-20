@@ -29,11 +29,26 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- if .Values.configReloader.enabled }}
+      {{- if not .Values.configFile.enabled }}
+      {{- fail "configReloader.enabled=true requires configFile.enabled=true: the sidecar watches a config FILE, and without one it would poll a path that does not exist." }}
+      {{- end }}
+      {{- if and (eq .Values.configReloader.method "signal") (not .Values.configReloader.shareProcessNamespace) }}
+      {{- fail "configReloader.method=signal requires configReloader.shareProcessNamespace=true, otherwise the sidecar is its own PID 1 and SIGHUP would never reach AMP. Use method: http instead." }}
+      {{- end }}
+      {{- end }}
+      {{- if and .Values.configReloader.enabled .Values.configReloader.shareProcessNamespace (eq .Values.configReloader.method "signal") }}
+      # ONLY for configReloader.method=signal (review M14): it lets every
+      # container in the pod see the others' processes, which is the price of
+      # SIGHUP across a container boundary — and pointless cost for any other
+      # method, so a stray shareProcessNamespace=true with method: http no
+      # longer grants it.
+      shareProcessNamespace: true
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -132,6 +147,13 @@ spec:
             {{- end }}
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
+            {{- if .Values.configFile.enabled }}
+            # Points AMP at the mounted config FILE. Without this the process
+            # looks for ./config.yaml, finds nothing, and runs on env vars only —
+            # so route:/receivers: would be silently absent.
+            - name: AMP_CONFIG_FILE
+              value: {{ printf "%s/%s" .Values.configFile.mountPath .Values.configFile.fileName | quote }}
+            {{- end }}
 
           envFrom:
             - configMapRef:
@@ -177,17 +199,83 @@ spec:
           # Graceful shutdown: rely on SIGTERM handling in application
           # No preStop hook needed - our app handles SIGTERM properly
 
-          {{- if eq .Values.profile "lite" }}
+          {{- if or (eq .Values.profile "lite") .Values.configFile.enabled }}
           volumeMounts:
+            {{- if eq .Values.profile "lite" }}
             - name: data
               mountPath: {{ .Values.liteProfile.persistence.mountPath }}
+            {{- end }}
+            {{- if .Values.configFile.enabled }}
+            - name: config-file
+              mountPath: {{ .Values.configFile.mountPath }}
+              readOnly: true
+            {{- end }}
           {{- end }}
 
-      {{- if eq .Values.profile "lite" }}
+{{- if .Values.configReloader.enabled }}
+        # ----------------------------------------------------------------------
+        # config-reloader sidecar (INF-A slice 2)
+        # ----------------------------------------------------------------------
+        # Watches the mounted config file and asks AMP to reload when its
+        # CONTENT changes, then VERIFIES the reload against /health/reload — so
+        # a ConfigMap edit AMP rejects shows up as rejected instead of being
+        # silently counted as applied.
+        - name: config-reloader
+          image: "{{ .Values.configReloader.image.repository }}:{{ .Values.configReloader.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.configReloader.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.configReloader.securityContext | nindent 12 }}
+          args:
+            - --config-file={{ printf "%s/%s" .Values.configFile.mountPath .Values.configFile.fileName }}
+            - --interval={{ .Values.configReloader.interval }}
+            - --method={{ .Values.configReloader.method }}
+            {{- if eq .Values.configReloader.method "signal" }}
+            - --pid={{ .Values.configReloader.pid }}
+            {{- else }}
+            # 127.0.0.1: same pod, same network namespace. Never the Service —
+            # a reload must hit THIS replica, not a random one.
+            - --reload-url=http://127.0.0.1:{{ .Values.service.port }}/-/reload
+            {{- end }}
+            - --health-url=http://127.0.0.1:{{ .Values.service.port }}/health/reload
+            - --metrics-addr=:{{ .Values.configReloader.metricsPort }}
+            - --verify-timeout={{ .Values.configReloader.verifyTimeout }}
+            - --max-backoff={{ .Values.configReloader.maxBackoff }}
+            - --log-level={{ .Values.configReloader.logLevel }}
+            - --log-format={{ .Values.configReloader.logFormat }}
+          ports:
+            - name: reloader
+              containerPort: {{ .Values.configReloader.metricsPort }}
+              protocol: TCP
+          livenessProbe:
+            # The sidecar's OWN health, not the application's: a failing reload
+            # must not restart this container (it would lose its backoff state
+            # and retry immediately, which is the opposite of what we want).
+            httpGet:
+              path: /healthz
+              port: reloader
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.configReloader.resources | nindent 12 }}
+          volumeMounts:
+            - name: config-file
+              mountPath: {{ .Values.configFile.mountPath }}
+              readOnly: true
+{{- end }}
+
+      {{- if or (eq .Values.profile "lite") .Values.configFile.enabled }}
       volumes:
+        {{- if eq .Values.profile "lite" }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "amp.fullname" . }}-pvc
+        {{- end }}
+        {{- if .Values.configFile.enabled }}
+        - name: config-file
+          configMap:
+            name: {{ include "amp.fullname" . }}-configfile
+        {{- end }}
       {{- end }}
 
       {{- with .Values.nodeSelector }}

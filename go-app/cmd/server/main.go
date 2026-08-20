@@ -15,6 +15,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/application"
 	"github.com/ipiton/AMP/internal/config"
+	pkglogger "github.com/ipiton/AMP/pkg/logger"
 )
 
 const (
@@ -32,10 +33,17 @@ func main() {
 		"Prefix for the internal routes of web endpoints. Overrides server.route_prefix in config when set.")
 	flag.Parse()
 
-	// Setup structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	// Bootstrap logging: stdout/json/info, because config has not been read
+	// yet. installLogging below replaces this with the operator's `log:`
+	// settings — sink included — as soon as it has.
+	logHandler, err := pkglogger.NewSwappableHandler(os.Stdout, slog.LevelInfo, "json")
+	if err != nil {
+		// Cannot happen for the literals above, but a nil handler would panic
+		// on the first log line, so fail loudly instead.
+		fmt.Fprintf(os.Stderr, "failed to build log handler: %v\n", err)
+		os.Exit(1)
+	}
+	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
 	slog.Info("🚀 Starting Alertmanager++",
@@ -60,6 +68,13 @@ func main() {
 		cfg.Server.RoutePrefix = *routePrefixFlag
 	}
 
+	// Install the operator's log.* settings now that config exists. Before
+	// INF-A slice 1 the logger was hardcoded to JSON/info and cfg.Log was
+	// never read at all, so `log.level: debug` did nothing even across a
+	// restart.
+	logger, logHandler = installLogging(logger, logHandler, cfg)
+	slog.SetDefault(logger)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -67,6 +82,14 @@ func main() {
 	registry, err := application.NewServiceRegistry(cfg, logger)
 	if err != nil {
 		slog.Error("Failed to create service registry", "error", err)
+		os.Exit(1)
+	}
+
+	// Hand the swappable handler over BEFORE Initialize: that is when the
+	// registry registers LoggerReloadable, and a nil handler there would make
+	// every log.level change report "restart required".
+	if err := registry.SetLogHandler(logHandler); err != nil {
+		slog.Error("Failed to wire the swappable log handler", "error", err)
 		os.Exit(1)
 	}
 
@@ -204,4 +227,42 @@ func resolveRuntimeConfigPath() string {
 		return path
 	}
 	return "config.yaml"
+}
+
+// installLogging replaces the bootstrap logger with one built from the
+// operator's `log:` section, and returns the logger plus the swappable handler
+// that LoggerReloadable will later swap.
+//
+// A whole new handler is built rather than only swapping level/format, because
+// the output SINK (log.output/log.filename and the lumberjack rotation knobs)
+// is fixed at handler construction — pkglogger.SetupWriter is the only thing
+// that honours it. Fix-round I1: before this, SetupWriter had no caller in the
+// server binary at all, so the process always logged to stdout and
+// LoggerReloadable's W602 "restart to apply" was a lie. Now a restart really
+// does apply those fields, which is what makes that warning honest.
+//
+// On failure the bootstrap logger is kept: losing the requested format or sink
+// is a nuisance, exiting because of one YAML typo is an outage.
+func installLogging(
+	bootstrapLogger *slog.Logger,
+	bootstrapHandler *pkglogger.SwappableHandler,
+	cfg *config.Config,
+) (*slog.Logger, *pkglogger.SwappableHandler) {
+	if cfg == nil {
+		return bootstrapLogger, bootstrapHandler
+	}
+
+	logger, handler, err := pkglogger.NewSwappableLogger(config.LoggerConfigFrom(cfg.Log))
+	if err != nil {
+		slog.Warn("Ignoring log configuration; keeping the bootstrap stdout/json/info logger",
+			"level", cfg.Log.Level, "format", cfg.Log.Format, "output", cfg.Log.Output, "error", err)
+		return bootstrapLogger, bootstrapHandler
+	}
+
+	logger.Info("Log configuration applied",
+		"level", handler.Level().String(),
+		"format", handler.Format(),
+		"output", cfg.Log.Output,
+	)
+	return logger, handler
 }

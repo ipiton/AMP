@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,6 +51,17 @@ type ReloadCoordinator struct {
 	lastReloadTime   time.Time
 	lastReloadStatus string
 	reloadVersion    int64
+
+	// reloadAttempts counts COMPLETED reload outcomes (see updateReloadStatus),
+	// so a caller can tell "my trigger was processed" from "nothing happened"
+	// without trusting clocks — the config-reloader sidecar's verification
+	// step (slice 2).
+	reloadAttempts int64
+
+	// restartWarnings records the split state left by an incomplete rollback
+	// (W610). Optional — see SetRestartWarnings. Guarded by mu; nil-receiver
+	// safe on the RestartWarnings side.
+	restartWarnings *RestartWarnings
 
 	// Logger
 	logger *slog.Logger
@@ -109,7 +121,7 @@ func NewReloadCoordinator(
 		storage:          storage,
 		lockManager:      lockManager,
 		lastReloadTime:   time.Now(),
-		lastReloadStatus: "initial",
+		lastReloadStatus: ReloadStatusInitial,
 		reloadVersion:    1,
 		logger:           logger,
 	}
@@ -160,7 +172,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	phaseStart := time.Now()
 	newConfig, err := rc.loadAndParse(configPath)
 	if err != nil {
-		rc.updateReloadStatus("load_failed")
+		rc.updateReloadStatus(ReloadStatusLoadFailed)
 		rc.logger.Error("phase 1 (load) failed",
 			"error", err,
 			"duration_ms", time.Since(phaseStart).Milliseconds(),
@@ -175,7 +187,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	phaseStart = time.Now()
 	validationErrors := rc.validator.Validate(newConfig, nil)
 	if len(validationErrors) > 0 {
-		rc.updateReloadStatus("validation_failed")
+		rc.updateReloadStatus(ReloadStatusValidationFailed)
 		rc.logValidationErrors(validationErrors)
 		rc.logger.Error("phase 2 (validation) failed",
 			"error_count", len(validationErrors),
@@ -192,7 +204,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	oldConfig := rc.GetCurrentConfig()
 	diff, err := rc.comparator.Compare(oldConfig, newConfig, nil)
 	if err != nil {
-		rc.updateReloadStatus("diff_failed")
+		rc.updateReloadStatus(ReloadStatusDiffFailed)
 		rc.logger.Error("phase 3 (diff) failed",
 			"error", err,
 			"duration_ms", time.Since(phaseStart).Milliseconds(),
@@ -211,6 +223,11 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 
 	// If no changes, skip reload
 	if len(diff.Modified) == 0 && len(diff.Added) == 0 && len(diff.Deleted) == 0 {
+		// Recorded as its own status (slice 2): a comment-only edit changes the
+		// file's hash without changing the config, and the sidecar must be able
+		// to tell that outcome from "the signal never arrived". Before this the
+		// status was left untouched.
+		rc.updateReloadStatus(ReloadStatusNoChanges)
 		rc.logger.Info("no config changes detected, skipping reload",
 			"total_duration_ms", time.Since(startTime).Milliseconds(),
 		)
@@ -224,7 +241,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	// Phase 4: ATOMIC APPLY
 	phaseStart = time.Now()
 	if err := rc.atomicApply(ctx, oldConfig, newConfig, diff); err != nil {
-		rc.updateReloadStatus("apply_failed")
+		rc.updateReloadStatus(ReloadStatusApplyFailed)
 		rc.logger.Error("phase 4 (apply) failed",
 			"error", err,
 			"duration_ms", time.Since(phaseStart).Milliseconds(),
@@ -238,42 +255,55 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 
 	// Phase 5: COMPONENT RELOAD
 	phaseStart = time.Now()
-	componentResults := rc.reloadComponents(ctx, newConfig, affectedComponents)
+	componentResults := rc.reloadComponents(ctx, oldConfig, newConfig, affectedComponents)
 
-	// Check for critical failures
-	criticalFailed := false
+	// ANY component failure rejects the reload (INF-A slice 1). Before this,
+	// only components on a hardcoded "critical" list triggered a rollback and
+	// a non-critical failure was reported as an overall SUCCESS — which meant
+	// the config an operator could read back from the API was not the config
+	// that was actually in effect in that component. IsCritical now only
+	// grades severity in the log line and the error text.
+	failedComponents := make([]string, 0, 1)
 	for _, result := range componentResults {
-		if !result.Success && rc.isComponentCritical(result.Name) {
-			criticalFailed = true
-			rc.logger.Error("critical component reload failed",
-				"component", result.Name,
-				"error", result.Error,
-			)
+		if result.Success {
+			continue
 		}
+		failedComponents = append(failedComponents, result.Name)
+		logAt := rc.logger.Warn
+		if rc.isComponentCritical(result.Name) {
+			logAt = rc.logger.Error
+		}
+		logAt("component reload failed",
+			"component", result.Name,
+			"critical", rc.isComponentCritical(result.Name),
+			"error", result.Error,
+		)
 	}
 
 	rc.logger.Info("phase 5 (reload) completed",
 		"components_reloaded", len(componentResults),
-		"critical_failed", criticalFailed,
+		"failed_components", failedComponents,
 		"duration_ms", time.Since(phaseStart).Milliseconds(),
 	)
 
-	// Rollback if critical component failed
-	if criticalFailed {
-		rc.logger.Warn("rolling back due to critical component failure")
-		if rollbackErr := rc.rollback(ctx, oldConfig); rollbackErr != nil {
+	// Rollback if any component failed
+	if len(failedComponents) > 0 {
+		rc.logger.Warn("rolling back: component reload failed",
+			"failed_components", failedComponents)
+		if rollbackErr := rc.rollback(ctx, newConfig, oldConfig); rollbackErr != nil {
 			rc.logger.Error("rollback failed", "error", rollbackErr)
-			rc.updateReloadStatus("rollback_failed")
+			rc.updateReloadStatus(ReloadStatusRollbackFailed)
 			return nil, fmt.Errorf("reload failed and rollback failed: %w", rollbackErr)
 		}
-		rc.updateReloadStatus("rolled_back")
+		rc.updateReloadStatus(ReloadStatusRolledBack)
 		return &ReloadResult{
 			Version:            rc.reloadVersion - 1,
 			Success:            false,
 			RolledBack:         true,
 			ComponentsReloaded: componentResults,
 			Duration:           time.Since(startTime),
-			Error:              fmt.Errorf("critical component reload failed"),
+			Error: fmt.Errorf("component reload failed: %s",
+				strings.Join(failedComponents, ", ")),
 		}, nil
 	}
 
@@ -281,12 +311,12 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	phaseStart = time.Now()
 	if err := rc.healthCheck(ctx); err != nil {
 		rc.logger.Warn("health check failed after reload, rolling back", "error", err)
-		if rollbackErr := rc.rollback(ctx, oldConfig); rollbackErr != nil {
+		if rollbackErr := rc.rollback(ctx, newConfig, oldConfig); rollbackErr != nil {
 			rc.logger.Error("rollback failed", "error", rollbackErr)
-			rc.updateReloadStatus("rollback_failed")
+			rc.updateReloadStatus(ReloadStatusRollbackFailed)
 			return nil, fmt.Errorf("health check failed and rollback failed: %w", rollbackErr)
 		}
-		rc.updateReloadStatus("rolled_back")
+		rc.updateReloadStatus(ReloadStatusRolledBack)
 		return &ReloadResult{
 			Version:            rc.reloadVersion - 1,
 			Success:            false,
@@ -301,7 +331,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	)
 
 	// SUCCESS
-	rc.updateReloadStatus("success")
+	rc.updateReloadStatus(ReloadStatusSuccess)
 	duration := time.Since(startTime)
 
 	rc.logger.Info("reload completed successfully",
@@ -399,21 +429,29 @@ func (rc *ReloadCoordinator) atomicApply(
 // Performance Target: < 300ms p95
 func (rc *ReloadCoordinator) reloadComponents(
 	ctx context.Context,
+	oldConfig *Config,
 	newConfig *Config,
 	affectedComponents []string,
 ) []ComponentReloadResult {
 	startTime := time.Now()
 
+	// Ask the reloader which components it will actually touch instead of
+	// assuming it is every name the diff flagged: a diff-affected section may
+	// have no registered Reloadable at all (routing/receivers/silences are
+	// applied by ServiceRegistry.ReloadConfig, not through this registry), and
+	// reporting those as "reloaded: true" would be a fabricated result.
+	selected := rc.reloader.SelectComponents(oldConfig, newConfig, affectedComponents)
+
 	rc.logger.Info("reloading components",
 		"affected", affectedComponents,
+		"selected", selected,
 	)
 
-	// Call reloader (parallel execution)
-	reloadErrors := rc.reloader.ReloadAll(ctx, newConfig, affectedComponents)
+	reloadErrors := rc.reloader.ReloadAll(ctx, oldConfig, newConfig, affectedComponents)
 
 	// Convert to ComponentReloadResult
-	results := make([]ComponentReloadResult, 0, len(affectedComponents))
-	for _, compName := range affectedComponents {
+	results := make([]ComponentReloadResult, 0, len(selected))
+	for _, compName := range selected {
 		result := ComponentReloadResult{
 			Name:    compName,
 			Success: true,
@@ -444,7 +482,7 @@ func (rc *ReloadCoordinator) reloadComponents(
 // rollback rolls back to old configuration
 //
 // Performance Target: < 200ms p95
-func (rc *ReloadCoordinator) rollback(ctx context.Context, oldConfig *Config) error {
+func (rc *ReloadCoordinator) rollback(ctx context.Context, failedConfig *Config, oldConfig *Config) error {
 	rc.logger.Warn("initiating rollback to previous configuration")
 
 	// Atomic swap back to old config
@@ -455,14 +493,91 @@ func (rc *ReloadCoordinator) rollback(ctx context.Context, oldConfig *Config) er
 	rc.reloadVersion--
 	rc.mu.Unlock()
 
-	// Reload all components with old config
-	reloadErrors := rc.reloader.ReloadAll(ctx, oldConfig, nil)
-	if len(reloadErrors) > 0 {
-		return fmt.Errorf("rollback reload failed: %d component(s) failed", len(reloadErrors))
+	// Drive components back from the config that was just rejected to the
+	// previous one. Passing failedConfig as "old" (rather than nil) keeps the
+	// section gate meaningful: only components whose sections actually differ
+	// get touched, so a rollback does not gratuitously rebuild pools for
+	// sections nobody edited.
+	//
+	// RollbackAll, not ReloadAll: this pass must be best-effort (fix-round
+	// I3). Stopping at the first failing leg would leave every later component
+	// on the rejected config with no record of it.
+	rollbackErrors := rc.reloader.RollbackAll(ctx, failedConfig, oldConfig)
+	if len(rollbackErrors) > 0 {
+		diverged := make([]string, 0, len(rollbackErrors))
+		for _, rollbackErr := range rollbackErrors {
+			diverged = append(diverged, rollbackErr.Component)
+		}
+		sort.Strings(diverged)
+
+		// The cause goes to the LOG, not into the warning (re-review I5).
+		// Component errors carry arbitrary text — pgx failures embed
+		// `user=<user> database=<db>` and every dialed host:port — and
+		// RestartRequiredWarning is served verbatim by the unauthenticated
+		// /health/reload. Reason must stay a fixed string; the structured
+		// component names in Fields are the machine-readable part.
+		rc.logger.Error("rollback incomplete; components are still running the rejected config",
+			"diverged_components", diverged,
+			"errors", FormatReloadErrors(rollbackErrors))
+
+		// The process is now genuinely split: currentConfig and every reader of
+		// it report oldConfig, while these components are still running
+		// failedConfig. No config edit can resolve that — only a restart — so
+		// it gets its own code and is never resolved by a later reload.
+		warnRestartRequired(rc.logger, rc.restartWarnings, RestartRequiredWarning{
+			Code:      WarnReloadRollbackIncomplete,
+			Component: "reload-coordinator",
+			Fields:    diverged,
+			Reason: "reload was rejected but rollback could not be completed: the components named in " +
+				"fields are still running the REJECTED config while the reported config is the previous " +
+				"one; restart to converge, and see the server log for the underlying errors",
+		})
+
+		return fmt.Errorf("rollback incomplete, %d component(s) still on the rejected config: %s",
+			len(rollbackErrors), strings.Join(diverged, ", "))
 	}
 
 	rc.logger.Info("rollback successful")
 	return nil
+}
+
+// RollbackCommitted rolls the coordinator and every registered component back
+// from the config it has already COMMITTED to previous.
+//
+// For callers that discover a failure after ReloadFromFile has already
+// returned success (fix-round I4): ServiceRegistry applies routing, templates,
+// receivers and inhibition rules outside the component registry, so their
+// failure surfaces only once phase 4 has swapped the config pointer and phase
+// 5 has told all five components to adopt it. Without this, that path reported
+// "reload failed" while the new config was fully live in every component —
+// the exact inverse of the split state I3 covers.
+//
+// Returns the rollback error, if any, with the same best-effort semantics as
+// the internal rollback: every component is attempted and a non-empty failure
+// set is reported as a split state (W610).
+func (rc *ReloadCoordinator) RollbackCommitted(ctx context.Context, previous *Config) error {
+	if previous == nil {
+		return fmt.Errorf("rollback: nil previous config")
+	}
+
+	failed := rc.GetCurrentConfig()
+	if err := rc.rollback(ctx, failed, previous); err != nil {
+		rc.updateReloadStatus(ReloadStatusRollbackFailed)
+		return err
+	}
+
+	rc.updateReloadStatus(ReloadStatusRolledBack)
+	return nil
+}
+
+// SetRestartWarnings gives the coordinator somewhere to record the split state
+// left behind by an incomplete rollback (W610). Optional: without it the
+// condition is still returned as an error and logged, it just is not queryable
+// afterwards. Called by ServiceRegistry, which owns the collector.
+func (rc *ReloadCoordinator) SetRestartWarnings(warnings *RestartWarnings) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	rc.restartWarnings = warnings
 }
 
 // healthCheck performs health check after reload (Phase 6)
@@ -491,44 +606,75 @@ func (rc *ReloadCoordinator) GetReloadStatus() (version int64, status string, la
 	return rc.reloadVersion, rc.lastReloadStatus, rc.lastReloadTime
 }
 
-// updateReloadStatus updates reload status
+// updateReloadStatus records a terminal outcome for a reload attempt, and
+// counts it.
+//
+// The counter is bumped HERE, not at the start of ReloadFromFile (slice 2, and
+// a bug found by the end-to-end test): a caller polling for "my trigger was
+// processed" would otherwise catch the window between the counter advancing and
+// the outcome being recorded, and read the PREVIOUS status as if it were the
+// result of its own reload. Counting completions means a visible increment
+// always comes with the outcome that produced it.
+//
+// Every exit path of ReloadFromFile calls this exactly once, and so does
+// RollbackCommitted — a post-commit rollback is a second recorded outcome for
+// the same file change, which is why the sidecar re-reads after confirming.
 func (rc *ReloadCoordinator) updateReloadStatus(status string) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	rc.lastReloadStatus = status
 	rc.lastReloadTime = time.Now()
+	rc.reloadAttempts++
 }
 
-// identifyAffectedComponents identifies components affected by config changes
+// sectionToComponent maps a changed config section to the name of the
+// component responsible for it. The registered Reloadable names ("logger",
+// "metrics", "llm", "redis", "database") MUST appear here: ReloadAll's name
+// gate drops any component the coordinator did not flag, so a missing entry
+// would silently skip that component whenever some OTHER section changed in
+// the same edit.
+//
+// The parity sections (routing/receivers/inhibition/silencing/grouping) have no
+// Reloadable of their own — ServiceRegistry.ReloadConfig applies them directly
+// — but they stay listed because the names are reported in logs and in
+// ReloadResult.
+var sectionToComponent = map[string]string{
+	"route":         "routing",
+	"routes":        "routing",
+	"receivers":     "receivers",
+	"inhibit_rules": "inhibition",
+	"inhibition":    "inhibition",
+	"silences":      "silencing",
+	"silencing":     "silencing",
+	"grouping":      "grouping",
+	"llm":           "llm",
+	"log":           "logger",
+	"metrics":       "metrics",
+	"database":      "database",
+	"redis":         "redis",
+}
+
+// identifyAffectedComponents identifies components affected by config changes.
+//
+// Added and Deleted fields count, not just Modified: adding a whole `redis:`
+// section is exactly the kind of edit that must reach the redis component, and
+// before INF-A slice 1 only Modified was consulted.
 func (rc *ReloadCoordinator) identifyAffectedComponents(diff *ConfigDiff) []string {
 	affected := make(map[string]bool)
 
-	// Check which sections changed
+	note := func(field string) {
+		if component, ok := sectionToComponent[sectionOf(field)]; ok {
+			affected[component] = true
+		}
+	}
 	for field := range diff.Modified {
-		if startsWith(field, "route") || startsWith(field, "routes") {
-			affected["routing"] = true
-		}
-		if startsWith(field, "receivers") {
-			affected["receivers"] = true
-		}
-		if startsWith(field, "inhibit_rules") {
-			affected["inhibition"] = true
-		}
-		if startsWith(field, "silences") {
-			affected["silencing"] = true
-		}
-		if startsWith(field, "grouping") {
-			affected["grouping"] = true
-		}
-		if startsWith(field, "llm") {
-			affected["llm"] = true
-		}
-		if startsWith(field, "database") {
-			affected["database"] = true
-		}
-		if startsWith(field, "redis") {
-			affected["redis"] = true
-		}
+		note(field)
+	}
+	for field := range diff.Added {
+		note(field)
+	}
+	for _, field := range diff.Deleted {
+		note(field)
 	}
 
 	// Convert to slice
@@ -538,6 +684,16 @@ func (rc *ReloadCoordinator) identifyAffectedComponents(diff *ConfigDiff) []stri
 	}
 
 	return components
+}
+
+// sectionOf extracts the top-level section token from a dotted diff field path,
+// stripping any index suffix ("receivers[0].name" -> "receivers").
+func sectionOf(field string) string {
+	section := strings.SplitN(field, ".", 2)[0]
+	if idx := strings.IndexByte(section, '['); idx >= 0 {
+		section = section[:idx]
+	}
+	return section
 }
 
 // isComponentCritical checks if component is critical

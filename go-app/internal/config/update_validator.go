@@ -407,8 +407,11 @@ func (cv *DefaultConfigValidator) validateLLMConfig(cfg *LLMConfig) []Validation
 func (cv *DefaultConfigValidator) validateLogConfig(cfg *LogConfig) []ValidationErrorDetail {
 	errors := make([]ValidationErrorDetail, 0)
 
-	// Log level must be valid
-	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	// Log level must be valid. An UNSET level is legal and means "info" —
+	// pkg/logger.ParseLevel's own default (re-review residual 1). Rejecting it
+	// here made a config with an explicit `level: ""` boot fine and then fail
+	// EVERY reload, which the config-reloader sidecar would retry once per poll.
+	validLevels := map[string]bool{"": true, "debug": true, "info": true, "warn": true, "error": true}
 	if !validLevels[strings.ToLower(cfg.Level)] {
 		errors = append(errors, ValidationErrorDetail{
 			Field:      "log.level",
@@ -419,8 +422,9 @@ func (cv *DefaultConfigValidator) validateLogConfig(cfg *LogConfig) []Validation
 		})
 	}
 
-	// Log format must be valid
-	validFormats := map[string]bool{"json": true, "text": true}
+	// Log format must be valid. Unset means "json", matching
+	// pkg/logger.buildDelegate's own default — same reasoning as the level.
+	validFormats := map[string]bool{"": true, "json": true, "text": true}
 	if !validFormats[strings.ToLower(cfg.Format)] {
 		errors = append(errors, ValidationErrorDetail{
 			Field:      "log.format",
