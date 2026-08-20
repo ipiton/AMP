@@ -67,9 +67,16 @@ postgresql:
   # values file kept out of git, or wire postgresql.existingSecret + External
   # Secrets. Left empty on purpose — unlike secret.yaml's other credentials,
   # templates/postgresql-secret.yaml has no `default (randAlphaNum ...)`
-  # fallback, so an empty value here means an empty-password Secret (loud,
-  # obviously wrong) instead of silently keeping the old committed literal
-  # ("secure_password_123") that shipped in this file before this audit.
+  # fallback, so an empty value here means an empty-password Secret (the
+  # Postgres container itself then refuses to start — loud, at pod-start
+  # time). CORRECTION: this file never carried its own `postgresql.password`
+  # before this audit — the weak literal lives in the base chart's
+  # `values.yaml` (still there, see TECH-DEBT.md HELM-CHART-GAPS) and was
+  # silently INHERITED by any `helm install -f values-production.yaml` that
+  # didn't separately override it, because a values file with -f layers on
+  # top of, not instead of, the chart's own values.yaml. This explicit `""`
+  # is what actually changed: it shadows that inherited weak default instead
+  # of leaving the gap open.
   password: ""
   database: "alert_history"
   username: "alert_history"
@@ -143,7 +150,16 @@ cache:
   port: 6379
   auth:
     enabled: true
-    password: "" # Set via secret/CI — same rationale as postgresql.password above
+    # NOT the same rationale as postgresql.password above: templates/secret.yaml
+    # has no random-generation fallback for THIS key (by design — see that
+    # template's comment) and now `required`-guards it, so leaving this empty
+    # makes `helm template`/`helm install` FAIL OUTRIGHT instead of silently
+    # baking in a generated password that can never match your real
+    # DragonflyDB credential. This is intentional: install with
+    # `--set cache.auth.password=<real value>` (or wire it through CI/secret
+    # manager) — this file does not, and must not, carry a real or
+    # placeholder-looking value here.
+    password: ""
 
 # Chart gap, documented rather than silently worked around: templates/redis-statefulset.yaml
 # (this chart's OWN in-cluster Redis/Valkey) is gated only on `profile: standard`
