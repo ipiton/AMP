@@ -14,12 +14,16 @@
 - `values-production.yaml` rewritten after auditing every key against the app's actual config surface and the chart's real template capabilities (not just BACKLOG's wishlist):
   - Removed `postgresql.cluster.*` (rendered by no template — a 3-instance Postgres "cluster" this chart cannot build) in favor of the real `postgresql.replicas`/`postgresql.config.*` keys, with the single-primary-only limitation documented inline.
   - Removed the dead `dragonfly.*` block (no `dragonfly-*.yaml` template exists) in favor of pointing the already-wired `cache.host`/`cache.port`/`cache.auth` at an external DragonflyDB service, plus `valkey.replicas: 0` to stop deploying the chart's own unused Redis.
-  - Dropped the committed plaintext `postgresql.password` placeholder (now empty, must be supplied at install time — this Secret's template has no random-generation fallback).
+  - Added an explicit `postgresql.password: ""` override that shadows the base chart's weak literal default (`values.yaml` still ships it — this file never carried its own key, so it silently inherited that default before; corrected description, was previously misstated as "removed from this file"). Empty fails obviously (Postgres itself refuses to start on an empty password) rather than being supplied at all — must be set via `--set`/CI/`existingSecret`+ESO before install.
   - Enabled `postgresql.networkPolicy.enabled` and both PodDisruptionBudgets for production.
+
+### Fixed (fix round)
+- `templates/secret.yaml`'s `redis-password` had a `default (randAlphaNum 32)` fallback for `cache.auth.password` — unlike `postgresql.password`'s fallback (safe: the same StatefulSet reads the same generated value back), this one is read by the app alone against a cache the chart doesn't own (an external DragonflyDB), so a generated fallback silently bakes in a value that can't match the real credential — a well-formed but wrong Secret, not an obvious failure. Replaced with a `required` guard: `cache.auth.enabled: true` with an empty `cache.auth.password` now fails `helm template`/`helm install` outright instead of rendering successfully.
 
 ### Known gaps (see `docs/06-planning/TECH-DEBT.md`)
 - `valkey.enabled`/`cache.enabled` still don't gate whether `redis-statefulset.yaml` deploys (only `profile: standard` does); `valkey.replicas: 0` is a workaround, not a fix.
 - `postgresql.existingSecret` is honored by `templates/secret.yaml` but ignored by `templates/postgresql-secret.yaml`/`amp.postgresql.secretName` — has no effect on the credential actually used by the app and the StatefulSet.
+- Base `values.yaml`'s hardcoded weak `postgresql.password` default is unchanged (out of scope for the production-file audit) but now inconsistent with the rationale above — ledgered, not fixed.
 
 ## [1.1.0] - 2024-08-27
 

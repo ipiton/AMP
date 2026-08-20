@@ -224,6 +224,13 @@ postgresql:
   # Database configuration
   database: "alert_history"
   username: "alert_history"
+  # DEV-ONLY DEFAULT below — not safe for production. values-production.yaml
+  # deliberately overrides it to "" (its own comment explains why: this
+  # Secret's template has no random-generation fallback, so "" fails
+  # obviously instead of silently inheriting this literal). Ledgered as an
+  # inconsistency in docs/06-planning/TECH-DEBT.md (HELM-CHART-GAPS) rather
+  # than changed here — a no-default/required key would break the
+  # zero-config dev/test install path this default exists for.
   password: "secure_password_123"
   # Resource limits (TN-98: increased for production)
   resources:
