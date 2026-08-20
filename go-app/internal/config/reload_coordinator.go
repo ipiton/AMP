@@ -52,6 +52,12 @@ type ReloadCoordinator struct {
 	lastReloadStatus string
 	reloadVersion    int64
 
+	// reloadAttempts counts COMPLETED reload outcomes (see updateReloadStatus),
+	// so a caller can tell "my trigger was processed" from "nothing happened"
+	// without trusting clocks — the config-reloader sidecar's verification
+	// step (slice 2).
+	reloadAttempts int64
+
 	// restartWarnings records the split state left by an incomplete rollback
 	// (W610). Optional — see SetRestartWarnings. Guarded by mu; nil-receiver
 	// safe on the RestartWarnings side.
@@ -115,7 +121,7 @@ func NewReloadCoordinator(
 		storage:          storage,
 		lockManager:      lockManager,
 		lastReloadTime:   time.Now(),
-		lastReloadStatus: "initial",
+		lastReloadStatus: ReloadStatusInitial,
 		reloadVersion:    1,
 		logger:           logger,
 	}
@@ -166,7 +172,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	phaseStart := time.Now()
 	newConfig, err := rc.loadAndParse(configPath)
 	if err != nil {
-		rc.updateReloadStatus("load_failed")
+		rc.updateReloadStatus(ReloadStatusLoadFailed)
 		rc.logger.Error("phase 1 (load) failed",
 			"error", err,
 			"duration_ms", time.Since(phaseStart).Milliseconds(),
@@ -181,7 +187,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	phaseStart = time.Now()
 	validationErrors := rc.validator.Validate(newConfig, nil)
 	if len(validationErrors) > 0 {
-		rc.updateReloadStatus("validation_failed")
+		rc.updateReloadStatus(ReloadStatusValidationFailed)
 		rc.logValidationErrors(validationErrors)
 		rc.logger.Error("phase 2 (validation) failed",
 			"error_count", len(validationErrors),
@@ -198,7 +204,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	oldConfig := rc.GetCurrentConfig()
 	diff, err := rc.comparator.Compare(oldConfig, newConfig, nil)
 	if err != nil {
-		rc.updateReloadStatus("diff_failed")
+		rc.updateReloadStatus(ReloadStatusDiffFailed)
 		rc.logger.Error("phase 3 (diff) failed",
 			"error", err,
 			"duration_ms", time.Since(phaseStart).Milliseconds(),
@@ -217,6 +223,11 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 
 	// If no changes, skip reload
 	if len(diff.Modified) == 0 && len(diff.Added) == 0 && len(diff.Deleted) == 0 {
+		// Recorded as its own status (slice 2): a comment-only edit changes the
+		// file's hash without changing the config, and the sidecar must be able
+		// to tell that outcome from "the signal never arrived". Before this the
+		// status was left untouched.
+		rc.updateReloadStatus(ReloadStatusNoChanges)
 		rc.logger.Info("no config changes detected, skipping reload",
 			"total_duration_ms", time.Since(startTime).Milliseconds(),
 		)
@@ -230,7 +241,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	// Phase 4: ATOMIC APPLY
 	phaseStart = time.Now()
 	if err := rc.atomicApply(ctx, oldConfig, newConfig, diff); err != nil {
-		rc.updateReloadStatus("apply_failed")
+		rc.updateReloadStatus(ReloadStatusApplyFailed)
 		rc.logger.Error("phase 4 (apply) failed",
 			"error", err,
 			"duration_ms", time.Since(phaseStart).Milliseconds(),
@@ -281,10 +292,10 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 			"failed_components", failedComponents)
 		if rollbackErr := rc.rollback(ctx, newConfig, oldConfig); rollbackErr != nil {
 			rc.logger.Error("rollback failed", "error", rollbackErr)
-			rc.updateReloadStatus("rollback_failed")
+			rc.updateReloadStatus(ReloadStatusRollbackFailed)
 			return nil, fmt.Errorf("reload failed and rollback failed: %w", rollbackErr)
 		}
-		rc.updateReloadStatus("rolled_back")
+		rc.updateReloadStatus(ReloadStatusRolledBack)
 		return &ReloadResult{
 			Version:            rc.reloadVersion - 1,
 			Success:            false,
@@ -302,10 +313,10 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 		rc.logger.Warn("health check failed after reload, rolling back", "error", err)
 		if rollbackErr := rc.rollback(ctx, newConfig, oldConfig); rollbackErr != nil {
 			rc.logger.Error("rollback failed", "error", rollbackErr)
-			rc.updateReloadStatus("rollback_failed")
+			rc.updateReloadStatus(ReloadStatusRollbackFailed)
 			return nil, fmt.Errorf("health check failed and rollback failed: %w", rollbackErr)
 		}
-		rc.updateReloadStatus("rolled_back")
+		rc.updateReloadStatus(ReloadStatusRolledBack)
 		return &ReloadResult{
 			Version:            rc.reloadVersion - 1,
 			Success:            false,
@@ -320,7 +331,7 @@ func (rc *ReloadCoordinator) ReloadFromFile(ctx context.Context, configPath stri
 	)
 
 	// SUCCESS
-	rc.updateReloadStatus("success")
+	rc.updateReloadStatus(ReloadStatusSuccess)
 	duration := time.Since(startTime)
 
 	rc.logger.Info("reload completed successfully",
@@ -542,11 +553,11 @@ func (rc *ReloadCoordinator) RollbackCommitted(ctx context.Context, previous *Co
 
 	failed := rc.GetCurrentConfig()
 	if err := rc.rollback(ctx, failed, previous); err != nil {
-		rc.updateReloadStatus("rollback_failed")
+		rc.updateReloadStatus(ReloadStatusRollbackFailed)
 		return err
 	}
 
-	rc.updateReloadStatus("rolled_back")
+	rc.updateReloadStatus(ReloadStatusRolledBack)
 	return nil
 }
 
@@ -586,12 +597,25 @@ func (rc *ReloadCoordinator) GetReloadStatus() (version int64, status string, la
 	return rc.reloadVersion, rc.lastReloadStatus, rc.lastReloadTime
 }
 
-// updateReloadStatus updates reload status
+// updateReloadStatus records a terminal outcome for a reload attempt, and
+// counts it.
+//
+// The counter is bumped HERE, not at the start of ReloadFromFile (slice 2, and
+// a bug found by the end-to-end test): a caller polling for "my trigger was
+// processed" would otherwise catch the window between the counter advancing and
+// the outcome being recorded, and read the PREVIOUS status as if it were the
+// result of its own reload. Counting completions means a visible increment
+// always comes with the outcome that produced it.
+//
+// Every exit path of ReloadFromFile calls this exactly once, and so does
+// RollbackCommitted — a post-commit rollback is a second recorded outcome for
+// the same file change, which is why the sidecar re-reads after confirming.
 func (rc *ReloadCoordinator) updateReloadStatus(status string) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	rc.lastReloadStatus = status
 	rc.lastReloadTime = time.Now()
+	rc.reloadAttempts++
 }
 
 // sectionToComponent maps a changed config section to the name of the
