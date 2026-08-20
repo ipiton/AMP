@@ -144,6 +144,30 @@ type PublishingTarget struct {
 	// carry an `http_config` object in its JSON blob — same field name, same
 	// shape, no extra parsing code.
 	HTTPConfig *HTTPClientConfig `json:"http_config,omitempty"`
+	// Templates carries this integration's template-bearing PRESENTATION
+	// fields, keyed by their upstream Alertmanager config name — `title`,
+	// `text`, `color`, `channel`, `pretext`, `username`, `title_link`,
+	// `icon_emoji`, `icon_url` (slack); `description`, `severity`, `client`,
+	// `client_url`, `details.<key>` (pagerduty); `message` (telegram);
+	// `subject`, `html`, `text`, `headers.<Key>` (email).
+	//
+	// Each value is a Go text/template expression evaluated against the
+	// upstream notification data model at send time (see
+	// internal/business/templating). An absent key means "this integration
+	// does not template that field", and the fixed per-type formatter's own
+	// output is used for it — which is what keeps a template-less config
+	// byte-identical to its pre-templating behaviour.
+	//
+	// Populated for config-provisioned targets by
+	// business/publishing.BuildConfigTargets (which also fills in upstream's
+	// own defaults, e.g. `{{ template "slack.default.title" . }}`).
+	// Kubernetes-sourced targets may carry the same keys in their Secret JSON.
+	//
+	// NEVER holds a credential: the builder copies presentation fields only,
+	// and the values are rendered against alert labels/annotations. Anything
+	// secret (bot_token, routing_key, api_url, smtp password) travels in
+	// URL/Headers and is deliberately not reachable from a template.
+	Templates map[string]string `json:"templates,omitempty"`
 }
 
 // EnrichedAlert represents alert enriched with classification data

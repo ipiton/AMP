@@ -14,6 +14,7 @@ import (
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	businessrouting "github.com/ipiton/AMP/internal/business/routing"
 	businesssilencing "github.com/ipiton/AMP/internal/business/silencing"
+	"github.com/ipiton/AMP/internal/business/templating"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
@@ -162,6 +163,22 @@ type ServiceRegistry struct {
 	// cfg.Routing is nil (no `route:` section — lite/legacy mode).
 	routeTreeManager *businessrouting.RouteTreeManager // hot-reloadable route tree
 	routeEvaluator   services.RouteEvaluator           // wired into AlertProcessorConfig.RouteEvaluator
+
+	// Notification templates (notification-templates epic, slice 1): the
+	// upstream-compatible template library — embedded defaults plus every file
+	// matched by cfg.Routing.Templates (`templates:`) — behind an atomic swap
+	// so a config reload never re-parses a template a sender is executing.
+	//
+	// NEVER nil after Initialize: initializeTemplating falls back to the
+	// embedded defaults if the operator's globs fail, because a receiver that
+	// references `slack.default.title` must still render. Nil only before
+	// Initialize (and in tests that construct a bare registry), which is why
+	// TemplateRegistry() is the accessor rather than the field.
+	//
+	// Slice 1 wires the lifecycle only — no formatter reads it yet. Slice 2
+	// adds the per-integration template fields that turn this into rendered
+	// output on the wire.
+	templateRegistry *templating.Registry
 
 	// Grouping subsystem (task 2.2, alertmanager-parity): GroupManager (group
 	// lifecycle) + TimerManager (group_wait/group_interval/repeat_interval
@@ -337,6 +354,10 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 			"error", err)
 		r.addDegradedReason("routing engine unavailable: %v", err)
 	}
+
+	// Step 2.6.1: Load the notification template library (never fatal — falls
+	// back to the embedded upstream defaults; see initializeTemplating).
+	r.initializeTemplating()
 
 	// Step 2.7: Initialize grouping subsystem (non-fatal — graceful
 	// degradation). Task 2.2, alertmanager-parity. Disabled by default
@@ -1382,6 +1403,142 @@ func (r *ServiceRegistry) reloadRoutingTree() error {
 		return fmt.Errorf("route tree reload failed: %w", err)
 	}
 	return nil
+}
+
+// initializeTemplating loads the notification template library: the embedded
+// upstream defaults plus every file matched by cfg.Routing.Templates
+// (`templates:`).
+//
+// Never returns an error, and never leaves r.templateRegistry nil UNLESS the
+// operator turned templating off (publishing.templates.enabled=false) — that is a
+// deliberate difference from the other initialize* steps:
+//
+//   - internal/config.loadRouteConfig ALREADY validated the same globs through
+//     the same engine and failed the config load if they were malformed, so by
+//     the time this runs a failure means the files changed on disk in between.
+//   - Every receiver in the config may reference a default definition
+//     (`slack.default.title`, `email.default.subject`, ...). Leaving the
+//     registry nil because the operator's OWN file broke would take the
+//     shipped defaults down with it, which is strictly worse than ignoring the
+//     broken overrides — so a failure degrades to defaults-only and records a
+//     degraded reason.
+//
+// No route: section (lite/legacy mode) is not degradation at all: there are no
+// `templates:` globs to load, and the defaults are exactly what an unconfigured
+// deployment should render.
+func (r *ServiceRegistry) initializeTemplating() {
+	// Kill switch (slice-2 review C1). Leaving the registry nil is what makes
+	// this a WHOLESALE revert: initializePublishingRuntime only calls
+	// SetTemplateRegistry for a non-nil registry, so every publisher keeps the
+	// fixed formatter and no `templates:` file or presentation field is rendered
+	// anywhere. Read once at startup — flipping it takes a restart, and
+	// reloadTemplates deliberately stays a no-op while the registry is nil.
+	if !r.config.Publishing.Templates.IsEnabled() {
+		r.logger.Info("Notification templating disabled by publishing.templates.enabled=false; notifications render through AMP's fixed formatters (pre-TEMPLATES-EPIC behaviour)")
+		return
+	}
+
+	var globs []string
+	if r.config.Routing != nil {
+		globs = r.config.Routing.Templates
+	}
+
+	registry, err := templating.NewRegistry(globs, r.templateOptions())
+	if err != nil {
+		r.logger.Error("Notification template files failed to load; falling back to the built-in defaults",
+			"templates", globs, "error", err)
+		r.addDegradedReason("notification templates unavailable: %v", err)
+
+		// Defaults-only registry. This cannot fail: the templates are embedded
+		// in the binary and parsed by a unit test on every build.
+		registry, err = templating.NewRegistry(nil, r.templateOptions())
+		if err != nil {
+			r.logger.Error("Built-in notification templates failed to load", "error", err)
+			return
+		}
+	}
+
+	r.templateRegistry = registry
+	if len(globs) > 0 {
+		r.logger.Info("Notification templates loaded", "globs", globs,
+			"files", loadedTemplateFiles(registry),
+			"definitions", len(registry.Current().DefinitionNames()))
+		r.warnUnmatchedTemplateGlobs(registry)
+	}
+}
+
+// loadedTemplateFiles lists the template files actually parsed, so the
+// "templates loaded" log line differs between "your files loaded" and "your glob
+// matched nothing" — before this it was identical either way (review I3).
+func loadedTemplateFiles(registry *templating.Registry) []string {
+	var files []string
+	for _, match := range registry.Current().GlobMatches() {
+		files = append(files, match.Files...)
+	}
+	return files
+}
+
+// warnUnmatchedTemplateGlobs WARNs for every configured glob that matched no
+// files. An empty match stays legal (a ConfigMap may mount seconds later), but
+// it is also the ONLY symptom of a wrong path, so it must be visible.
+func (r *ServiceRegistry) warnUnmatchedTemplateGlobs(registry *templating.Registry) {
+	if unmatched := registry.Current().UnmatchedGlobs(); len(unmatched) > 0 {
+		r.logger.Warn("Notification template glob matched no files; the built-in defaults will be used for anything it was meant to override",
+			"globs", unmatched,
+			"hint", "paths are resolved relative to the config file's directory; a ConfigMap mounted after startup is the benign case")
+	}
+}
+
+// templateOptions builds the template execution guards from config
+// (publishing.templates.*), falling back to templating's own defaults for any
+// value the operator did not set (TEMPLATES-EPIC slice 2 / slice-1 review
+// Minor 5: the guards used to be compile-time constants).
+func (r *ServiceRegistry) templateOptions() templating.Options {
+	return templating.Options{
+		Timeout:        r.config.Publishing.Templates.RenderTimeout,
+		MaxOutputBytes: r.config.Publishing.Templates.MaxOutputBytes,
+	}
+}
+
+// TemplateRegistry exposes the live notification template library. Returns nil
+// before Initialize; callers must handle that (slice 2's formatters treat a nil
+// registry as "no templating configured" and use the fixed formatter).
+func (r *ServiceRegistry) TemplateRegistry() *templating.Registry {
+	return r.templateRegistry
+}
+
+// reloadTemplates rebuilds the template library from the new config's
+// `templates:` globs and swaps it in atomically.
+//
+// Failure is reported but NOT fatal, and the previous library stays live
+// (Registry.Reload only publishes a template that parsed cleanly) — same
+// posture as the inhibition-matcher branch in ReloadConfig, and for the same
+// reason: continuing to render with the last-known-good templates beats
+// reverting an operator's customisations because of one bad edit.
+func (r *ServiceRegistry) reloadTemplates() {
+	if r.templateRegistry == nil {
+		// Initialize never ran (or ran before this field existed): nothing live
+		// to swap, and building it here would skip the degraded-reason
+		// bookkeeping initializeTemplating owns.
+		return
+	}
+
+	var globs []string
+	if r.config.Routing != nil {
+		globs = r.config.Routing.Templates
+	}
+
+	if err := r.templateRegistry.Reload(globs); err != nil {
+		r.logger.Error("Notification template reload failed; keeping the previously loaded templates",
+			"templates", globs, "error", err)
+		return
+	}
+	r.logger.Info("Notification templates reloaded", "globs", globs,
+		"files", loadedTemplateFiles(r.templateRegistry),
+		"definitions", len(r.templateRegistry.Current().DefinitionNames()))
+	if len(globs) > 0 {
+		r.warnUnmatchedTemplateGlobs(r.templateRegistry)
+	}
 }
 
 // initializeGrouping wires the alert grouping subsystem (task 2.2,
@@ -2472,6 +2629,12 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	if err := r.reloadRoutingTree(); err != nil {
 		return err
 	}
+
+	// Notification templates: `templates:` globs are part of the same
+	// Alertmanager-shaped config section, so an edit to them must take effect on
+	// reload rather than needing a restart. Non-fatal by design — see
+	// reloadTemplates.
+	r.reloadTemplates()
 
 	// FU-RECEIVERS-INTEGRATION: rebuild the config-provisioned publishing
 	// targets from the new config and swap them into the discovery view. The

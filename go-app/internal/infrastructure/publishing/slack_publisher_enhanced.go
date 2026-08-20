@@ -223,6 +223,22 @@ func (p *EnhancedSlackPublisher) buildMessage(payload map[string]any) *SlackMess
 		message.Attachments = append(message.Attachments, p.buildAttachment(attachMap))
 	}
 
+	// Upstream slack_config presentation fields, when the template formatter
+	// rendered them onto the payload (TEMPLATES-EPIC slice 2). Absent for a
+	// target with no template fields, in which case the message is unchanged.
+	if channel, ok := payload["channel"].(string); ok {
+		message.Channel = channel
+	}
+	if username, ok := payload["username"].(string); ok {
+		message.Username = username
+	}
+	if iconEmoji, ok := payload["icon_emoji"].(string); ok {
+		message.IconEmoji = iconEmoji
+	}
+	if iconURL, ok := payload["icon_url"].(string); ok {
+		message.IconURL = iconURL
+	}
+
 	return message
 }
 
@@ -355,6 +371,21 @@ func (p *EnhancedSlackPublisher) buildAttachment(attachMap map[string]interface{
 			field.Text = fieldText
 		}
 		attachment.Fields = append(attachment.Fields, field)
+	}
+
+	// Upstream's own attachment presentation fields, filled by the template
+	// formatter from the receiver's slack_config (TEMPLATES-EPIC slice 2).
+	if title, ok := attachMap["title"].(string); ok {
+		attachment.Title = title
+	}
+	if titleLink, ok := attachMap["title_link"].(string); ok {
+		attachment.TitleLink = titleLink
+	}
+	if pretext, ok := attachMap["pretext"].(string); ok {
+		attachment.Pretext = pretext
+	}
+	if fallback, ok := attachMap["fallback"].(string); ok {
+		attachment.Fallback = fallback
 	}
 
 	return attachment

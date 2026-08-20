@@ -21,6 +21,23 @@ type SlackMessage struct {
 	// Attachments are legacy color-coded message attachments
 	// Used for color bars (critical=red, warning=orange, etc.)
 	Attachments []Attachment `json:"attachments,omitempty"`
+
+	// ------------------------------------------------------------------
+	// Upstream slack_config presentation fields (TEMPLATES-EPIC slice 2)
+	// ------------------------------------------------------------------
+	//
+	// Added so an operator's `slack_configs[].channel`/`username`/`icon_emoji`/
+	// `icon_url` can actually reach Slack. They were parsed and validated by
+	// routing.SlackConfig and then had nowhere to go: buildMessage could only
+	// carry text/blocks/attachments, so a configured channel was silently
+	// dropped (FU-INTEGRATION-FIELD-FIDELITY).
+	//
+	// All omitempty, so a message built without them serializes byte-identically
+	// to before — a template-less deployment sees no wire change at all.
+	Channel   string `json:"channel,omitempty"`
+	Username  string `json:"username,omitempty"`
+	IconEmoji string `json:"icon_emoji,omitempty"`
+	IconURL   string `json:"icon_url,omitempty"`
 }
 
 // Block represents a Slack Block Kit block
@@ -85,6 +102,22 @@ type Attachment struct {
 	// attachment shipped color-only. Cosmetic, not a rejection risk (legacy
 	// attachments don't require fields), unlike R1's context block.
 	Fields []Field `json:"fields,omitempty"`
+
+	// ------------------------------------------------------------------
+	// Upstream slack_config presentation fields (TEMPLATES-EPIC slice 2)
+	// ------------------------------------------------------------------
+	//
+	// Slack's legacy attachment shape is what upstream Alertmanager renders its
+	// `title`/`title_link`/`pretext`/`fallback` into, and these are the fields
+	// the template formatter fills from the receiver's config. Without them the
+	// rendered title had nowhere to live and never reached the wire.
+	//
+	// omitempty throughout: an attachment built by the fixed formatter (color +
+	// fields only) serializes exactly as it did before this epic.
+	Title     string `json:"title,omitempty"`
+	TitleLink string `json:"title_link,omitempty"`
+	Pretext   string `json:"pretext,omitempty"`
+	Fallback  string `json:"fallback,omitempty"`
 }
 
 // SlackResponse represents Slack webhook API response

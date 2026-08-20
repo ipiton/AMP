@@ -1368,10 +1368,34 @@ func (q *PublishingQueue) publishJob(publisher AlertPublisher, job *PublishingJo
 // occupying a worker), otherwise the queue-wide context, which is the
 // pre-fix-round behaviour for Submit/SubmitGroup jobs.
 func (q *PublishingQueue) jobContext(job *PublishingJob) context.Context {
+	ctx := q.ctx
 	if job.ctx != nil {
-		return job.ctx
+		ctx = job.ctx
 	}
-	return q.ctx
+
+	// TEMPLATES-EPIC slice 2: carry the group's identity/labels/receiver so the
+	// template renderer can build upstream's Data with a populated
+	// `.GroupLabels` and `.Receiver`. Only attached when the job actually came
+	// from the group path; see notification_context.go for why it travels on the
+	// context instead of through AlertPublisher's signature.
+	if job.GroupKey != "" || job.Receiver != "" || len(job.GroupLabels) > 0 {
+		// The labels are COPIED, not aliased (slice-2 review minor 6). The group
+		// is sealed before dispatch today, so sharing the map would be safe — but
+		// it is read during template rendering on a worker goroutine while the
+		// job object stays reachable from the caller, and one small allocation
+		// per job is a cheaper guarantee than that reasoning.
+		groupLabels := make(map[string]string, len(job.GroupLabels))
+		for key, value := range job.GroupLabels {
+			groupLabels[key] = value
+		}
+
+		ctx = withGroupNotificationContext(ctx, GroupNotificationContext{
+			GroupKey:    job.GroupKey,
+			Receiver:    job.Receiver,
+			GroupLabels: groupLabels,
+		})
+	}
+	return ctx
 }
 
 func (q *PublishingQueue) retryPublish(publisher AlertPublisher, job *PublishingJob) error {

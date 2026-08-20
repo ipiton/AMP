@@ -475,21 +475,30 @@ func webhookTarget(receiver string, index int, cfg *infraroute.WebhookConfig) (*
 		}
 		target.Headers[k] = v
 	}
+	// No Templates: upstream does not template webhook payloads (the v4 JSON
+	// body is struct-marshaled), so there is nothing to render and AMP's
+	// wave-2 batch marshaling stays untouched. See webhookTemplateFields.
+	target.Templates = webhookTemplateFields()
 	return target, nil
 }
 
 // slackTarget maps one slack_configs entry.
 //
-// Only api_url survives into the target, because that is all the publisher
-// layer consumes: createEnhancedSlackPublisher builds an
-// HTTPSlackWebhookClient from target.URL, and EnhancedSlackPublisher renders
-// the message body entirely through the shared AlertFormatter. channel /
-// username / icon_* / title / text / fields / actions / color / short_fields
-// are parsed and validated by routing.SlackConfig but NOT wired to the
-// runtime publisher — the same honest gap the Telegram Message field already
-// documents. They are deliberately NOT stuffed into Headers: Headers are HTTP
-// headers on every fallback publish path, so a "channel" header would be a
-// bogus wire header rather than a Slack field.
+// api_url becomes the target URL, and the PRESENTATION fields — title,
+// title_link, pretext, text, color, username, icon_emoji, icon_url, channel —
+// now travel in target.Templates, where the publishing layer's template
+// formatter renders them against the upstream notification data model
+// (TEMPLATES-EPIC slice 2, closing FU-INTEGRATION-FIELD-FIDELITY; before this
+// they were parsed, validated and then silently ignored by the runtime).
+// Upstream's own defaults are materialized by slackTemplateFields, so a config
+// that sets none of them still renders upstream's familiar output.
+//
+// They are deliberately NOT stuffed into Headers: Headers are HTTP headers on
+// every publish path, so a "channel" header would be a bogus wire header rather
+// than a Slack field.
+//
+// Still not expressible: fields / actions / short_fields (Slack Block Kit
+// structures that the wire senders do not model) and http_config.
 func slackTarget(receiver string, index int, cfg *infraroute.SlackConfig) (*core.PublishingTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil config entry")
@@ -504,6 +513,7 @@ func slackTarget(receiver string, index int, cfg *infraroute.SlackConfig) (*core
 
 	target := newConfigTarget(receiver, configKindSlack, index, "slack", core.FormatSlack, cfg.APIURL)
 	applySendResolved(target, cfg.SendResolved)
+	target.Templates = slackTemplateFields(cfg)
 	return target, nil
 }
 
@@ -538,6 +548,7 @@ func pagerDutyTarget(receiver string, index int, cfg *infraroute.PagerDutyConfig
 	target := newConfigTarget(receiver, configKindPagerDuty, index, "pagerduty", core.FormatPagerDuty, pagerDutyBaseURL(cfg.URL))
 	applySendResolved(target, cfg.SendResolved)
 	target.Headers["routing_key"] = routingKey
+	target.Templates = pagerDutyTemplateFields(cfg)
 	return target, nil
 }
 
@@ -592,6 +603,7 @@ func telegramTarget(receiver string, index int, cfg *infraroute.TelegramConfig) 
 	if cfg.DisableNotifications {
 		target.Headers["disable_notifications"] = "true"
 	}
+	target.Templates = telegramTemplateFields(cfg)
 	return target, nil
 }
 
@@ -684,6 +696,7 @@ func emailTarget(receiver string, index int, cfg *infraroute.EmailConfig, global
 	if s := strings.TrimSpace(cfg.Text); s != "" {
 		target.Headers["text_template"] = s
 	}
+	target.Templates = emailTemplateFields(cfg)
 	return target, nil
 }
 
