@@ -1,0 +1,24 @@
+{{- if .Values.configFile.enabled }}
+{{- if not .Values.configFile.content }}
+{{- fail "configFile.enabled=true requires configFile.content (the config.yaml body). An empty file would make AMP fall back to env-var-only configuration and the config-reloader sidecar watch nothing." }}
+{{- end }}
+---
+# AMP's Alertmanager-shaped config FILE (route:/receivers:/inhibit_rules:/
+# templates:), which has no env-var equivalent.
+#
+# Separate from <fullname>-config (the env-var ConfigMap) on purpose: this one is
+# mounted as a file and is meant to be edited in place and hot-reloaded, so it
+# must NOT participate in the pod's checksum/config annotations. See
+# values.yaml's configFile.content note.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "amp.fullname" . }}-configfile
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+data:
+  {{ .Values.configFile.fileName }}: |
+    {{- .Values.configFile.content | nindent 4 }}
+{{- end }}
