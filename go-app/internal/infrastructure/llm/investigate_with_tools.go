@@ -62,6 +62,8 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	tools []inv.ToolDefinition,
 	history []inv.AgentMessage,
 ) (*inv.AgentResponse, error) {
+	cfg, httpClient := c.snapshot()
+
 	msgs := buildOpenAIMessages(alert, classification, history)
 
 	openAITools := make([]openAITool, len(tools))
@@ -77,17 +79,17 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	}
 
 	payload := map[string]any{
-		"model":    c.config.Model,
+		"model":    cfg.Model,
 		"messages": msgs,
 	}
 	if len(openAITools) > 0 {
 		payload["tools"] = openAITools
 	}
-	if c.config.MaxTokens > 0 {
-		payload["max_tokens"] = c.config.MaxTokens
+	if cfg.MaxTokens > 0 {
+		payload["max_tokens"] = cfg.MaxTokens
 	}
-	if c.config.Temperature >= 0 {
-		payload["temperature"] = c.config.Temperature
+	if cfg.Temperature >= 0 {
+		payload["temperature"] = cfg.Temperature
 	}
 
 	body, err := json.Marshal(payload)
@@ -95,7 +97,7 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 		return nil, fmt.Errorf("marshal tools request: %w", err)
 	}
 
-	url := buildOpenAIChatCompletionsURL(c.config.BaseURL)
+	url := buildOpenAIChatCompletionsURL(cfg.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("create tools request: %w", err)
@@ -103,11 +105,11 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if c.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("tools request failed: %w", err)
 	}

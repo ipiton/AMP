@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
@@ -74,10 +75,50 @@ func DefaultConfig() Config {
 
 // HTTPLLMClient implements LLMClient interface using HTTP with circuit breaker protection.
 type HTTPLLMClient struct {
-	config         Config
-	httpClient     *http.Client
-	logger         *slog.Logger
+	// mu guards config+httpClient, which UpdateConfig replaces together on a
+	// config hot reload (INF-A slice 1). Every request path takes ONE snapshot
+	// via snapshot() and uses it throughout, so a reload can never make a
+	// single request mix a new BaseURL with an old APIKey.
+	mu         sync.RWMutex
+	config     Config
+	httpClient *http.Client
+
+	logger *slog.Logger
+
+	// circuitBreaker is NOT swapped by UpdateConfig: it carries live failure
+	// state (open/closed, counters) that a config edit must not reset, and its
+	// settings do not come from AMP's llm.* config section at all.
 	circuitBreaker *CircuitBreaker
+}
+
+// snapshot returns the live config and HTTP client as one coherent pair.
+func (c *HTTPLLMClient) snapshot() (Config, *http.Client) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.config, c.httpClient
+}
+
+// GetConfig returns the live configuration snapshot.
+func (c *HTTPLLMClient) GetConfig() Config {
+	cfg, _ := c.snapshot()
+	return cfg
+}
+
+// UpdateConfig atomically swaps the client's configuration — model, provider,
+// base URL, API key, token/temperature limits, retry policy.
+//
+// The HTTP client is rebuilt when the timeout changes rather than mutated:
+// http.Client.Timeout is read by in-flight requests, so writing to it while a
+// request is running is a data race. Requests already in flight keep the
+// client they snapshotted; new requests get the new one.
+func (c *HTTPLLMClient) UpdateConfig(config Config) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if config.Timeout != c.config.Timeout || c.httpClient == nil {
+		c.httpClient = &http.Client{Timeout: config.Timeout}
+	}
+	c.config = config
 }
 
 // NewHTTPLLMClient creates a new HTTP LLM client with optional circuit breaker.
@@ -149,12 +190,14 @@ func (c *HTTPLLMClient) ClassifyAlert(ctx context.Context, alert *core.Alert) (*
 // classifyAlertWithRetry implements retry logic using centralized resilience package.
 // REFACTORED (TN-040): Now uses internal/core/resilience.WithRetryFunc for consistency.
 func (c *HTTPLLMClient) classifyAlertWithRetry(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
+	cfg, _ := c.snapshot()
+
 	// Create retry policy from config (maintains backward compatibility)
 	policy := &resilience.RetryPolicy{
-		MaxRetries:    c.config.MaxRetries,
-		BaseDelay:     c.config.RetryDelay,
-		MaxDelay:      c.config.RetryDelay * 10, // Max 10x base delay
-		Multiplier:    c.config.RetryBackoff,
+		MaxRetries:    cfg.MaxRetries,
+		BaseDelay:     cfg.RetryDelay,
+		MaxDelay:      cfg.RetryDelay * 10, // Max 10x base delay
+		Multiplier:    cfg.RetryBackoff,
 		Jitter:        true,
 		ErrorChecker:  &llmErrorChecker{},
 		Logger:        c.logger,
@@ -189,13 +232,18 @@ func (e *llmErrorChecker) IsRetryable(err error) bool {
 
 // classifyAlertOnce performs a single classification request.
 func (c *HTTPLLMClient) classifyAlertOnce(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
-	if providerUsesOpenAI(c.config.Provider) {
-		return c.classifyAlertOpenAI(ctx, alert)
+	// One snapshot for the whole attempt, passed down: taking a fresh one in
+	// each branch would let a reload between the provider check and the
+	// request send an OpenAI-shaped body to a proxy URL.
+	cfg, httpClient := c.snapshot()
+
+	if providerUsesOpenAI(cfg.Provider) {
+		return c.classifyAlertOpenAI(ctx, alert, cfg, httpClient)
 	}
-	return c.classifyAlertProxy(ctx, alert)
+	return c.classifyAlertProxy(ctx, alert, cfg, httpClient)
 }
 
-func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
+func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Alert, cfg Config, httpClient *http.Client) (*core.ClassificationResult, error) {
 	// Convert core.Alert to LLM API format
 	llmAlert := CoreAlertToLLMRequest(alert)
 	if llmAlert == nil {
@@ -205,7 +253,7 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	// Prepare request payload
 	request := ClassificationRequest{
 		Alert: *llmAlert,
-		Model: c.config.Model,
+		Model: cfg.Model,
 		Prompt: `Analyze this alert and provide classification with:
 1. Severity (1=noise, 2=info, 3=warning, 4=critical)
 2. Category (infrastructure, application, security, etc.)
@@ -222,7 +270,7 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	}
 
 	// Create HTTP request
-	url := c.config.BaseURL + "/classify"
+	url := cfg.BaseURL + "/classify"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -233,19 +281,19 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
 
-	if c.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
 	// Log request
 	c.logger.Debug("Sending LLM classification request",
 		"url", url,
 		"alert", alert.AlertName,
-		"model", c.config.Model,
+		"model", cfg.Model,
 	)
 
 	// Send request
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -296,7 +344,7 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	return result, nil
 }
 
-func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
+func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Alert, cfg Config, httpClient *http.Client) (*core.ClassificationResult, error) {
 	llmAlert := CoreAlertToLLMRequest(alert)
 	if llmAlert == nil {
 		return nil, fmt.Errorf("failed to convert alert to LLM format")
@@ -308,7 +356,7 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 	}
 
 	request := map[string]any{
-		"model": c.config.Model,
+		"model": cfg.Model,
 		"messages": []map[string]string{
 			{
 				"role": "system",
@@ -324,11 +372,11 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 			"type": "json_object",
 		},
 	}
-	if c.config.MaxTokens > 0 {
-		request["max_tokens"] = c.config.MaxTokens
+	if cfg.MaxTokens > 0 {
+		request["max_tokens"] = cfg.MaxTokens
 	}
-	if c.config.Temperature >= 0 {
-		request["temperature"] = c.config.Temperature
+	if cfg.Temperature >= 0 {
+		request["temperature"] = cfg.Temperature
 	}
 
 	requestBody, err := json.Marshal(request)
@@ -336,7 +384,7 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 		return nil, fmt.Errorf("failed to marshal OpenAI request: %w", err)
 	}
 
-	url := buildOpenAIChatCompletionsURL(c.config.BaseURL)
+	url := buildOpenAIChatCompletionsURL(cfg.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OpenAI request: %w", err)
@@ -344,11 +392,11 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if c.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI request failed: %w", err)
 	}
@@ -399,9 +447,11 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 
 // Health checks if the LLM service is available.
 func (c *HTTPLLMClient) Health(ctx context.Context) error {
-	url := c.config.BaseURL + "/health"
-	if providerUsesOpenAI(c.config.Provider) {
-		url = buildOpenAIModelsURL(c.config.BaseURL)
+	cfg, httpClient := c.snapshot()
+
+	url := cfg.BaseURL + "/health"
+	if providerUsesOpenAI(cfg.Provider) {
+		url = buildOpenAIModelsURL(cfg.BaseURL)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -410,11 +460,11 @@ func (c *HTTPLLMClient) Health(ctx context.Context) error {
 	}
 
 	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if providerUsesOpenAI(c.config.Provider) && c.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	if providerUsesOpenAI(cfg.Provider) && cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("health check request failed: %w", err)
 	}
@@ -469,6 +519,8 @@ func unwrapJSONCodeFence(raw string) string {
 // InvestigateAlert calls the LLM with an investigation prompt and returns structured findings.
 // The classification parameter may be nil if classification was unavailable.
 func (c *HTTPLLMClient) InvestigateAlert(ctx context.Context, alert *core.Alert, classification *core.ClassificationResult) (*core.InvestigationResult, error) {
+	cfg, httpClient := c.snapshot()
+
 	if alert == nil {
 		return nil, fmt.Errorf("alert cannot be nil")
 	}
@@ -502,18 +554,18 @@ Return ONLY valid JSON with these keys:
 	userContent := fmt.Sprintf("Alert data:\n%s\n\nClassification context:\n%s\n\nProvide investigation findings.", string(llmAlertBytes), classificationInfo)
 
 	request := map[string]any{
-		"model": c.config.Model,
+		"model": cfg.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userContent},
 		},
 		"response_format": map[string]string{"type": "json_object"},
 	}
-	if c.config.MaxTokens > 0 {
-		request["max_tokens"] = c.config.MaxTokens
+	if cfg.MaxTokens > 0 {
+		request["max_tokens"] = cfg.MaxTokens
 	}
-	if c.config.Temperature >= 0 {
-		request["temperature"] = c.config.Temperature
+	if cfg.Temperature >= 0 {
+		request["temperature"] = cfg.Temperature
 	}
 
 	requestBody, err := json.Marshal(request)
@@ -521,7 +573,7 @@ Return ONLY valid JSON with these keys:
 		return nil, fmt.Errorf("failed to marshal investigation request: %w", err)
 	}
 
-	url := buildOpenAIChatCompletionsURL(c.config.BaseURL)
+	url := buildOpenAIChatCompletionsURL(cfg.BaseURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create investigation request: %w", err)
@@ -529,11 +581,11 @@ Return ONLY valid JSON with these keys:
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if c.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("investigation request failed: %w", err)
 	}

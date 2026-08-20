@@ -19,6 +19,12 @@ var (
 	// ErrConnectionClosed indicates that the connection pool is closed
 	ErrConnectionClosed = errors.New("database connection pool is closed")
 
+	// ErrPoolHandleShared indicates that Reload cannot swap the connection
+	// pool because a caller took a long-lived raw handle via SharePool().
+	// Callers should surface this as "restart required", not as a failure —
+	// see PostgresPool.Reload and internal/config/reloadable_database.go.
+	ErrPoolHandleShared = errors.New("database pool handle is shared; hot reload cannot replace it")
+
 	// ErrHealthCheckFailed indicates that health check failed
 	ErrHealthCheckFailed = errors.New("database health check failed")
 

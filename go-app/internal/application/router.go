@@ -45,8 +45,18 @@ func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/-/ready", handlers.AlertmanagerReadyHandler(rt.registry))
 	mux.HandleFunc("/-/reload", handlers.ReloadHandler(rt.registry))
 
-	// Metrics
-	mux.Handle("/metrics", promhttp.Handler())
+	// Reload verification (INF-A slice 2). Deliberately NOT one of the probe
+	// paths above: a config that needs a restart for one field is a healthy
+	// process, and wiring this into liveness would crash-loop a pod over a
+	// `metrics.path` edit. The config-reloader sidecar polls it after
+	// signalling; operators can curl it to ask "is my ConfigMap edit live?".
+	mux.HandleFunc("/health/reload", handlers.ReloadHealthHandler(rt.registry))
+
+	// Metrics. Wrapped in the registry's exposition gate so `metrics.enabled`
+	// is a live switch (INF-A slice 1) instead of dead config: a nil gate — a
+	// router built before Initialize — keeps the pre-gate "always exposed"
+	// behaviour.
+	mux.Handle("/metrics", rt.registry.MetricsGate().Wrap(promhttp.Handler()))
 
 	// Fallback for unknown routes
 	mux.HandleFunc("/-/", func(w http.ResponseWriter, r *http.Request) {
