@@ -232,6 +232,67 @@ func (r *DefaultConfigReloader) ReloadAll(
 	return reloadErrors
 }
 
+// RollbackAll implements ConfigReloader.RollbackAll: same selection as
+// ReloadAll, but BEST EFFORT — every selected component is attempted even after
+// one fails, and all errors are returned.
+//
+// Fail-fast is right on the forward pass (stop applying a config that is about
+// to be rejected) and wrong here (fix-round I3): abandoning the remaining
+// components after a failed rollback leg guarantees MORE divergence, not less.
+// Each component left on the rejected config is a separate split state, so the
+// caller needs the full list, not the first name.
+func (r *DefaultConfigReloader) RollbackAll(
+	ctx context.Context,
+	failedCfg *Config,
+	previousCfg *Config,
+) []ReloadError {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	componentsToRollback := r.filterComponents(failedCfg, previousCfg, nil)
+	if len(componentsToRollback) == 0 {
+		r.logger.Info("no components need rollback")
+		return nil
+	}
+
+	r.logger.Warn("rolling back components",
+		"components", componentNames(componentsToRollback),
+	)
+
+	rollbackCtx, cancel := context.WithTimeout(ctx, reloadTimeout)
+	defer cancel()
+
+	rollbackErrors := make([]ReloadError, 0, len(componentsToRollback))
+	for _, comp := range componentsToRollback {
+		start := time.Now()
+		err := comp.Reload(rollbackCtx, failedCfg, previousCfg)
+		duration := time.Since(start)
+
+		if err != nil {
+			r.logger.Error("component rollback FAILED; it is still running the rejected config",
+				"component", comp.Name(),
+				"critical", comp.IsCritical(),
+				"error", err,
+				"duration_ms", duration.Milliseconds(),
+			)
+			rollbackErrors = append(rollbackErrors, ReloadError{
+				Component: comp.Name(),
+				Error:     err.Error(),
+				Critical:  comp.IsCritical(),
+				Duration:  duration,
+			})
+			continue
+		}
+
+		r.logger.Info("component rolled back to the previous config",
+			"component", comp.Name(),
+			"duration_ms", duration.Milliseconds(),
+		)
+	}
+
+	return rollbackErrors
+}
+
 // GetRegisteredComponents implements ConfigReloader.GetRegisteredComponents
 //
 // Returns registered component names in reload order.
@@ -292,6 +353,19 @@ func (r *DefaultConfigReloader) filterComponents(
 	filtered := make([]Reloadable, 0, len(r.components))
 	for _, entry := range r.components {
 		component := entry.component
+
+		// Drift wins over BOTH gates (fix-round I2). A component whose live
+		// state no longer matches the config must always get a chance to
+		// re-raise its restart-required warning, even on a reload that
+		// touched only some other section — that edit's diff will not flag
+		// this component's name, and its section will look unchanged since
+		// the previous attempt, so both gates would drop it and the warning
+		// would silently disappear.
+		if needsResync(component, newCfg) {
+			filtered = append(filtered, component)
+			continue
+		}
+
 		if affectedSet != nil && !affectedSet[component.Name()] {
 			continue
 		}
@@ -302,6 +376,16 @@ func (r *DefaultConfigReloader) filterComponents(
 	}
 
 	return filtered
+}
+
+// needsResync asks a ResyncReloadable whether its live state has drifted from
+// newCfg. Components that do not implement the interface never resync.
+func needsResync(component Reloadable, newCfg *Config) bool {
+	resyncable, ok := component.(ResyncReloadable)
+	if !ok {
+		return false
+	}
+	return resyncable.NeedsResync(newCfg)
 }
 
 // sectionsChanged reports whether any of the given sections changed. An empty

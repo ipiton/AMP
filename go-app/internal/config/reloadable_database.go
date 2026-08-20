@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/ipiton/AMP/internal/database/postgres"
 )
@@ -62,9 +63,9 @@ func PostgresConfigFrom(cfg DatabaseConfig) *postgres.PostgresConfig {
 // connection finish on the old pool instead of being cut off.
 //
 // What it does when it CANNOT act: raises W600 (restart required) naming the
-// changed fields, and returns nil. It does NOT fail the reload — the rest of
-// the config is still valid and worth applying — and it does NOT pretend to
-// have applied anything.
+// fields that differ from what the live pool is running, and returns nil. It
+// does NOT fail the reload — the rest of the config is still valid and worth
+// applying — and it does NOT pretend to have applied anything.
 //
 // The standard profile hands the raw *pgxpool.Pool to the storage adapter, the
 // silence repository, the investigation repository and the investigation tools
@@ -79,20 +80,38 @@ type DatabaseReloadable struct {
 	pool     *postgres.PostgresPool
 	logger   *slog.Logger
 	warnings *RestartWarnings
+
+	// mu guards applied, which is the database config the live pool is
+	// ACTUALLY running — not the config the coordinator has committed. Every
+	// decision this component makes is taken against it, which is what keeps
+	// a declined change reported for as long as it is unapplied (fix-round
+	// I2): the coordinator commits the new config regardless, so comparing
+	// against oldCfg would make the divergence invisible from the next reload
+	// onwards.
+	mu      sync.Mutex
+	applied DatabaseConfig
 }
 
 // NewDatabaseReloadable wires a DatabaseReloadable over an existing pool.
 // A nil pool is legal (lite profile runs on SQLite and never builds one); in
 // that case a database.* change is reported as restart-required.
+//
+// bootCfg is the config the process started with — the state the live pool is
+// in before any reload.
 func NewDatabaseReloadable(
 	pool *postgres.PostgresPool,
+	bootCfg *Config,
 	warnings *RestartWarnings,
 	logger *slog.Logger,
 ) *DatabaseReloadable {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &DatabaseReloadable{pool: pool, logger: logger, warnings: warnings}
+	reloadable := &DatabaseReloadable{pool: pool, logger: logger, warnings: warnings}
+	if bootCfg != nil {
+		reloadable.applied = bootCfg.Database
+	}
+	return reloadable
 }
 
 // Name implements Reloadable.
@@ -107,21 +126,35 @@ func (d *DatabaseReloadable) IsCritical() bool { return true }
 // ReloadPriority implements OrderedReloadable.
 func (d *DatabaseReloadable) ReloadPriority() int { return databaseReloadPriority }
 
+// NeedsResync implements ResyncReloadable: true while the requested database
+// config differs from what the live pool is running.
+func (d *DatabaseReloadable) NeedsResync(newCfg *Config) bool {
+	if newCfg == nil {
+		return false
+	}
+	return len(d.drift(newCfg.Database)) > 0
+}
+
+// drift returns the field paths where the requested config differs from what
+// the live pool is running.
+func (d *DatabaseReloadable) drift(requested DatabaseConfig) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return changedFields("database", d.applied, requested)
+}
+
 // Reload implements Reloadable.
-func (d *DatabaseReloadable) Reload(ctx context.Context, oldCfg, newCfg *Config) error {
+func (d *DatabaseReloadable) Reload(ctx context.Context, _, newCfg *Config) error {
 	if newCfg == nil {
 		return fmt.Errorf("database reload: nil config")
 	}
 
-	var fields []string
-	if oldCfg != nil {
-		fields = changedFields("database", oldCfg.Database, newCfg.Database)
-		if len(fields) == 0 {
-			// The reloader's section gate should have skipped us; being
-			// defensive keeps a future caller from rebuilding a pool for
-			// nothing.
-			return nil
-		}
+	fields := d.drift(newCfg.Database)
+	if len(fields) == 0 {
+		// Live pool already matches: nothing to do, and any previous
+		// restart-required warning no longer describes reality.
+		d.warnings.Resolve(WarnDatabaseRestartRequired, d.Name())
+		return nil
 	}
 
 	if d.pool == nil {
@@ -149,6 +182,11 @@ func (d *DatabaseReloadable) Reload(ctx context.Context, oldCfg, newCfg *Config)
 		return fmt.Errorf("database pool reload failed: %w", err)
 	}
 
+	d.mu.Lock()
+	d.applied = newCfg.Database
+	d.mu.Unlock()
+
+	d.warnings.Resolve(WarnDatabaseRestartRequired, d.Name())
 	d.logger.Info("database pool reloaded from config", "fields", fields)
 	return nil
 }
@@ -157,4 +195,5 @@ func (d *DatabaseReloadable) Reload(ctx context.Context, oldCfg, newCfg *Config)
 var (
 	_ Reloadable        = (*DatabaseReloadable)(nil)
 	_ OrderedReloadable = (*DatabaseReloadable)(nil)
+	_ ResyncReloadable  = (*DatabaseReloadable)(nil)
 )
