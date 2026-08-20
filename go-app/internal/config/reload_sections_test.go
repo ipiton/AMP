@@ -1,8 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -137,7 +140,7 @@ func TestLogConfigFormat_ValidationMatchesTheHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects every value pkg/logger rejects", func(t *testing.T) {
+	t.Run("rejects every format pkg/logger rejects", func(t *testing.T) {
 		for _, format := range []string{"toml", "yaml", "logfmt"} {
 			cfg := &Config{Log: LogConfig{Level: "info", Format: format}}
 
@@ -151,10 +154,59 @@ func TestLogConfigFormat_ValidationMatchesTheHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects an unparseable level", func(t *testing.T) {
-		// ParseLevel silently falls back to info, so this one is validator-only:
-		// a typo must not be silently downgraded to the default.
+	t.Run("rejects a level pkg/logger would silently downgrade", func(t *testing.T) {
+		// ParseLevel never errors — it falls back to info — so the level side of
+		// the agreement can only be asserted one way: a typo must be REJECTED
+		// rather than silently becoming the default.
+		assert.Equal(t, slog.LevelInfo, pkglogger.ParseLevel("trace"),
+			"ParseLevel is lossy for unknown levels, which is why the validator must catch them")
+
 		errs := logFieldErrors(&Config{Log: LogConfig{Level: "trace", Format: "json"}})
 		assert.Contains(t, errs, "log.level")
+	})
+}
+
+// TestLogConfig_AgreementThroughLoadConfig closes the gap re-review I6 found:
+// the test above calls the validator directly, so it could not see the THIRD
+// rule for these fields — Config.Validate(), which runs inside LoadConfig (and
+// therefore in the coordinator's phase 1). That rule required a non-empty
+// log.level while the other two accepted it, so `level: ""` failed at load and
+// the validator's acceptance was unreachable.
+//
+// Everything here goes through LoadConfig, which is the only path an operator's
+// file actually takes.
+func TestLogConfig_AgreementThroughLoadConfig(t *testing.T) {
+	logConfigYAML := func(level, format string) string {
+		return fmt.Sprintf("app:\n  name: amp\nlog:\n  level: %s\n  format: %s\n", level, format)
+	}
+
+	load := func(t *testing.T, body string) (*Config, error) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		return LoadConfig(path)
+	}
+
+	t.Run("unset level and format load and mean the defaults", func(t *testing.T) {
+		cfg, err := load(t, logConfigYAML("\"\"", "\"\""))
+		require.NoError(t, err, "a config pkg/logger accepts must not fail to load")
+
+		// And the reload validator agrees, so the same file can also be reloaded.
+		for _, detail := range NewConfigValidator().Validate(cfg, []string{"log"}) {
+			assert.NotContains(t, []string{"log.level", "log.format"}, detail.Field,
+				"load-time and reload-time rules must agree: %+v", detail)
+		}
+
+		// The defaults pkg/logger would apply.
+		assert.Equal(t, slog.LevelInfo, pkglogger.ParseLevel(cfg.Log.Level))
+		_, err = pkglogger.NewSwappableHandler(io.Discard, pkglogger.ParseLevel(cfg.Log.Level), cfg.Log.Format)
+		require.NoError(t, err)
+	})
+
+	t.Run("explicit values load", func(t *testing.T) {
+		cfg, err := load(t, logConfigYAML("debug", "text"))
+		require.NoError(t, err)
+		assert.Equal(t, "debug", cfg.Log.Level)
+		assert.Equal(t, "text", cfg.Log.Format)
 	})
 }
