@@ -68,6 +68,16 @@ resources:
     memory: 512Mi
 
 # ===============================
+# Pod Disruption Budget (app Deployment)
+# ===============================
+# Disabled by default (replicaCount: 1 makes a PDB pointless / can block all
+# voluntary drains). Production sets enabled: true — see values-production.yaml.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1  # alternative to minAvailable; minAvailable wins if both are set
+
+# ===============================
 # Service Configuration (Load Balancing)
 # ===============================
 service:
@@ -508,6 +518,18 @@ publishing:
     retryInterval: "2s"
     stopTimeout: "10s"
     jobTrackingCapacity: 10000
+    # publishing.queue.delivery_confirmation_timeout (config.go viper default "45s",
+    # hard-capped at 2m by MaxDeliveryConfirmationTimeout). Per-target wait for a
+    # confirmed HTTP delivery before a fire is treated as unconfirmed/retried.
+    # grouping.reconciliationGrace below derives from this value when left unset
+    # — raise both together, never this alone (see that key's comment).
+    deliveryConfirmationTimeout: "45s"
+  templates:
+    # publishing.templates.enabled (config.go viper default true = upstream-compatible
+    # template rendering: templates:// files + per-integration presentation fields
+    # render for real). false reverts to AMP's pre-templates-epic fixed formatters
+    # wholesale. Read at startup only — flipping it needs a restart, not a reload.
+    enabled: true
   refresh:
     enabled: true
     interval: "5m"
@@ -529,6 +551,67 @@ publishing:
     tlsSkipVerify: false
     followRedirects: true
     maxRedirects: 3
+
+# ===============================
+# Grouping / Notify-Chain (alertmanager-parity waves 2-4)
+# ===============================
+# grouping.enabled turns on real group_by/group_wait/group_interval/repeat_interval
+# dispatch and cross-replica notify-log dedup (config.go default: disabled). Only
+# takes effect in the standard profile with a live Redis-backed TimerStorage; the
+# lite profile ignores it (see GroupingConfig's doc comment in config.go).
+grouping:
+  enabled: false
+  reconciliationInterval: "45s"
+  # reconciliation_grace deliberately has NO default here (empty string = key
+  # omitted from the rendered ConfigMap): ServiceRegistry derives the effective
+  # grace from the ACTUAL configured publishing.queue.deliveryConfirmationTimeout
+  # via grouping.ReconciliationGraceFor when this is left unset. An explicit value
+  # here always wins, and startup validation still rejects a result that violates
+  # the notify-timing budget (must exceed the publish-claim TTL, timeout + 20s).
+  reconciliationGrace: ""
+
+# ===============================
+# Storage snapshots (lite profile only — restart durability)
+# ===============================
+# storage.path/snapshotInterval back the lite profile's file-snapshot durability
+# for silences + notify-log dedup state (config.go default: path "" = disabled).
+# The standard profile already owns durability via Postgres/Redis and logs-and-skips
+# snapshotting even if a path is set here — never engaged, verified by dedicated tests.
+storage:
+  path: ""
+  snapshotInterval: "5m"
+
+# ===============================
+# Silence cross-replica sync intervals
+# ===============================
+# Restart-only knobs (config.go defaults shown; validated at startup: backoff must
+# stay strictly below the resync interval).
+silencing:
+  subscribeRetryBackoff: "2s"
+  periodicResyncInterval: "5m"
+
+# ===============================
+# Config-reloader sidecar (values shape only — no template yet)
+# ===============================
+# Agreed values contract for a parallel track building the actual sidecar
+# (health-checked /health/reload, Prometheus metrics on 9091, distroless
+# non-root image) and its Deployment/template wiring. This section exists so
+# that track's templates land against a stable values shape; it deploys
+# nothing on its own while enabled stays false. See BACKLOG.md
+# CONFIG-RELOADER-SIDECAR.
+configReloader:
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
 
 # ===============================
 # Rootly Integration (Priority)

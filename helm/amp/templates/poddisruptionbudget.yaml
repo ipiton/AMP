@@ -1,0 +1,22 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "amp.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+  annotations:
+    description: "Pod Disruption Budget for the AMP application Deployment - ensures availability during voluntary disruptions"
+spec:
+  selector:
+    matchLabels:
+      {{- include "amp.selectorLabels" . | nindent 6 }}
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+{{- end }}

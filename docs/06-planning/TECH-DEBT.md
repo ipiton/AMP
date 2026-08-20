@@ -13,6 +13,12 @@
 - [x] ~~**MANUAL-SQL-RISK**~~ — закрыто 2026-08-17. Все фильтры параметризованы (`$N` + args); реальные векторы устранены: `ORDER BY` whitelist в `silencing/filter_builder.go` и `template/repository_crud.go`, JSONB-экранирование через `buildJSONBContainmentFilter`/`json.Marshal`, имя таблицы в `migrations/manager.go` параметризовано. Регресс-тесты: `filter_builder_injection_test.go`.
 
 ## Medium
+- [ ] **HELM-CHART-GAPS** — найдено при аудите `values-production.yaml` (INF-B, 2026-08-20), не исправлено (слишком большой темплейт-скоуп для values-аудита):
+  - `valkey.enabled`/`cache.enabled` НЕ гейтят деплой `templates/redis-statefulset.yaml` — единственный гейт — `profile: standard`. Рабочий воркараунд — `valkey.replicas: 0` (заведён в values-production.yaml), но сами флаги мёртвые.
+  - `postgresql.existingSecret` читается `templates/secret.yaml` (другой Secret, `<fullname>-secrets`), но НЕ читается `templates/postgresql-secret.yaml`/хелпером `amp.postgresql.secretName` — реальный DB-пароль (`DATABASE_PASSWORD`, `POSTGRES_PASSWORD` в StatefulSet) всегда берётся из `postgresql.password`, existingSecret туда не долетает.
+  - BACKLOG когда-то просил "PostgreSQL cluster (3 instances)" — чарт этого не умеет: `postgresql-statefulset.yaml` — single-primary StatefulSet без репликации/failover. Реальная HA (CloudNativePG/Patroni) не реализована.
+
+
 - [x] ~~**ERROR-REINVENTION**~~ — закрыто 2026-08-17. Все вызыватели deprecated-шимов в `infrastructure/publishing` мигрированы на `pkg/httperror` (NewHTTPError*/PublishingClassifier/Is*), шимы с 0 ссылок удалены (`rootly_errors.go` целиком, Legacy*-алиасы, `NewWebhookErrorWithType`, поле `Workers`). Остался только живой `ErrorType`-классификатор webhook_client (лейблы метрик не 1:1 с httperror).
 - [x] ~~**GLOBAL-LOCK-CONTENTION**~~ — закрыто 2026-08-17 измерением: шардирование не нужно. Бенчмарк `alert_store_bench_test.go` (M1 Pro, 8 потоков): параллельный IngestBatch = 1.4 µs/op (~720K алертов/с) — на порядки выше целевой нагрузки. Дорогая операция — `List()` (O(n)-копия всего стора, 1.2 мс на 5000 алертов), и её шардирование мьютекса не ускоряет. Revisit только при профилировании реальной контенции.
 - [x] ~~**NOTIFICATION-TIMER-STUBS**~~ — закрыто через PARITY-A1 (2026-04-17).
