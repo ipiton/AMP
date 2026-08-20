@@ -195,8 +195,12 @@ func NewRedisTimerStorage(redisCache cache.Cache, logger *slog.Logger) (*RedisTi
 		return nil, fmt.Errorf("redis timer storage requires *cache.RedisCache, got %T", redisCache)
 	}
 
+	// ShareClient, not GetClient: this storage keeps the raw client for the
+	// process's lifetime, so RedisCache.Reload must refuse to swap it out from
+	// under us (config hot reload would otherwise leave group timers on a
+	// closed client, or on a different keyspace than the rest of grouping).
 	return &RedisTimerStorage{
-		client: concreteCache.GetClient(),
+		client: concreteCache.ShareClient(),
 		logger: logger,
 	}, nil
 }

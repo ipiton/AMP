@@ -45,8 +45,11 @@ func (rt *Router) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/-/ready", handlers.AlertmanagerReadyHandler(rt.registry))
 	mux.HandleFunc("/-/reload", handlers.ReloadHandler(rt.registry))
 
-	// Metrics
-	mux.Handle("/metrics", promhttp.Handler())
+	// Metrics. Wrapped in the registry's exposition gate so `metrics.enabled`
+	// is a live switch (INF-A slice 1) instead of dead config: a nil gate — a
+	// router built before Initialize — keeps the pre-gate "always exposed"
+	// behaviour.
+	mux.Handle("/metrics", rt.registry.MetricsGate().Wrap(promhttp.Handler()))
 
 	// Fallback for unknown routes
 	mux.HandleFunc("/-/", func(w http.ResponseWriter, r *http.Request) {
