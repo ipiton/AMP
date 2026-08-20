@@ -119,6 +119,21 @@ Honest, code-traceable gaps as of this branch:
    narrow and documented in `ALERTMANAGER_COMPATIBILITY.md` → *Notification templates*: the route-label feature is
    not ported (renders empty, never errors), `webhook_configs` is not templated (as upstream), and AMP adds a
    render timeout + output cap that fall back to the fixed formatter instead of dropping a notification.
+
+   **Two migration surprises worth planning for, both by design:**
+
+   - **Your Slack and email notifications change shape even if you configure no template.** Upstream's presentation
+     defaults are materialized for every `receivers:`-provisioned integration, so an untouched upstream config
+     renders UPSTREAM's output — Slack moves from AMP's Block Kit `blocks` to upstream's `attachments`
+     (`title`/`title_link`/`fallback`/`username`), email moves to `email.default.subject`/`html`. That is the
+     drop-in promise, but it is visible on the first notification after the upgrade. `publishing.templates.enabled:
+     false` restores AMP's fixed formatters wholesale (startup-time switch).
+   - **`{{ range .Alerts }}` iterates ONE alert per message** for Slack/PagerDuty/Telegram/Email. Upstream sends one
+     message per group; AMP sends one per alert, each with a one-element `.Alerts`. A template that upstream
+     rendered as a single aggregated message therefore arrives as N single-alert messages — same content, N
+     notifications. `.GroupLabels`/`.Receiver`/`.Status` are the group's and are correct; `__subject` always reads
+     `[FIRING:1]`. Webhook is unaffected (it batches the group, upstream's v4 shape). If your runbooks depend on one
+     message per group, keep that traffic on `webhook_configs` until wire-level batching lands for the others.
 5. **Repeat-notification continuation under replica restart** is implemented and hardened (task 6.2's timer
    reconciliation loop) but not proven by a long-duration regression test — worth an explicit check during the
    live `amtool`/Grafana audit.
