@@ -333,6 +333,18 @@ type LLMConfig struct {
 
 // LogConfig holds logging-related configuration
 type LogConfig struct {
+	// Level and Format are validated by DefaultConfigValidator.validateLogConfig
+	// (a business rule), NOT by a `validate:"oneof=..."` tag here: a tag would
+	// report the same typo twice with two different codes. That validation runs
+	// in the coordinator's VALIDATE phase, so an unsupported value is rejected
+	// before anything is committed — LoggerReloadable's own rejection at apply
+	// time is only a backstop.
+	//
+	// The accepted sets are kept identical to pkg/logger.ParseLevel /
+	// buildDelegate — including "unset", which both treat as the default — by
+	// TestLogConfigFormat_ValidationMatchesTheHandler. They must not drift: a
+	// value the logger accepts but the validator rejects produces a config that
+	// BOOTS and then fails every reload.
 	Level      string `mapstructure:"level"`
 	Format     string `mapstructure:"format"`
 	Output     string `mapstructure:"output"`

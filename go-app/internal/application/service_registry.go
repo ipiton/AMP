@@ -248,10 +248,12 @@ type ServiceRegistry struct {
 	// close it cleanly and avoid a leak if the pool is ever reinitialised.
 	investigationToolsDB *sql.DB
 
-	// llmClient is the live LLM client built by initializeInvestigation, kept
-	// so LLMReloadable can swap its provider/model settings on a config
-	// reload. Nil whenever the investigation pipeline was not built (lite
-	// profile, investigation.enabled=false, llm.enabled=false).
+	// llmClient is the process's single LLM client, built on demand by
+	// sharedLLMClient() for whichever consumer asks first (classification, or
+	// the investigation pipeline) and reused by the other — see that method
+	// for why there must be exactly one. It is the object LLMReloadable swaps
+	// on a config reload. Nil when no consumer was built at all
+	// (llm.enabled=false).
 	llmClient *llm.HTTPLLMClient
 
 	// State
