@@ -90,6 +90,11 @@ func (p *EnhancedPagerDutyPublisher) triggerEvent(ctx context.Context, enrichedA
 		Payload:     payload,
 		Links:       p.extractLinks(alert),
 		Images:      p.extractImages(alert),
+		// Top-level Events API fields the formatter may have templated
+		// (upstream's `client`/`client_url`). Empty unless something set them —
+		// the fixed formatter does not, so a non-templated payload is unchanged.
+		Client:    stringFromPayload(formattedPayload, "client"),
+		ClientURL: stringFromPayload(formattedPayload, "client_url"),
 	}
 
 	// Send to PagerDuty
@@ -280,6 +285,14 @@ func (p *EnhancedPagerDutyPublisher) buildPayload(formattedData map[string]any) 
 	}
 
 	return payload
+}
+
+// stringFromPayload reads one top-level string out of the formatter's payload,
+// returning "" when it is absent or of another type. Used for the Events API
+// fields that live OUTSIDE the nested "payload" map.
+func stringFromPayload(formattedData map[string]any, key string) string {
+	value, _ := formattedData[key].(string)
+	return value
 }
 
 // extractLinks extracts links from alert annotations

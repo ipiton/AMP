@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -344,6 +345,77 @@ func TestTemplatesDelivery_KillSwitchIgnoresAConfiguredTemplateFile(t *testing.T
 
 	assert.NotContains(t, got.body["text"], "SHOULD-NOT-SHIP")
 	assert.Contains(t, got.body, "blocks")
+}
+
+// TestTemplatesDelivery_PagerDutyDefaultsReachTheWire is the pagerduty
+// representative of the same question (slice-2 review I2): the shipped field map,
+// rendered, on the wire — Events API `summary` is upstream's `__subject`, the
+// client fields are upstream's, and upstream's four default `details.*` entries
+// arrive alongside AMP's own diagnostics rather than instead of them.
+func TestTemplatesDelivery_PagerDutyDefaultsReachTheWire(t *testing.T) {
+	pd := newRecordingEndpoint(t)
+
+	cfg := &infraroute.PagerDutyConfig{RoutingKey: "routing-key-value"}
+	cfg.Defaults() // as the parser does: severity "error", full events URL
+	cfg.URL = pd.server.URL + "/v2/enqueue"
+
+	routing := &infraroute.RouteConfig{Receivers: []*infraroute.Receiver{{
+		Name:             "team-x",
+		PagerDutyConfigs: []*infraroute.PagerDutyConfig{cfg},
+	}}}
+
+	stack := newStackFromRouting(t, routing, "team-x", alertnameGroupingConfig(),
+		withTemplatingFromConfig(t, appconfig.PublishingTemplateConfig{}, nil))
+
+	stack.ingest(t, "fp-1")
+	got := pd.waitForRequest(t, 3*time.Second)
+	require.Equal(t, "/v2/enqueue", got.path)
+
+	assert.Equal(t, upstreamDefaultLink, got.body["client_url"])
+	assert.Equal(t, "Alertmanager", got.body["client"])
+
+	nested, ok := got.body["payload"].(map[string]any)
+	require.True(t, ok, "events v2 payload: %#v", got.body)
+	assert.Equal(t, upstreamDefaultTitle, nested["summary"],
+		"pagerduty.default.description is upstream's __subject")
+
+	details, ok := nested["custom_details"].(map[string]any)
+	require.True(t, ok, "custom_details: %#v", nested)
+	assert.Equal(t, "1", details["num_firing"])
+	assert.Equal(t, "0", details["num_resolved"])
+	assert.Contains(t, details["firing"], `"labels"`,
+		"upstream's toJson dump of the firing partition")
+}
+
+// TestTemplatesDelivery_TelegramDefaultsReachTheWire: the telegram representative.
+// The body is upstream's `telegram.default.message` — blank-line runs and
+// `Labels:`/`Annotations:` sections — where AMP's fixed formatter would have sent
+// its own HTML-tagged layout.
+func TestTemplatesDelivery_TelegramDefaultsReachTheWire(t *testing.T) {
+	telegram := newRecordingEndpoint(t)
+
+	routing := &infraroute.RouteConfig{Receivers: []*infraroute.Receiver{{
+		Name: "team-x",
+		TelegramConfigs: []*infraroute.TelegramConfig{{
+			BotToken: "bot-token-value",
+			ChatID:   "12345",
+			APIURL:   telegram.server.URL,
+		}},
+	}}}
+
+	stack := newStackFromRouting(t, routing, "team-x", alertnameGroupingConfig(),
+		withTemplatingFromConfig(t, appconfig.PublishingTemplateConfig{}, nil))
+
+	stack.ingest(t, "fp-1")
+	got := telegram.waitForRequest(t, 3*time.Second)
+	assert.Equal(t, "/botbot-token-value/sendMessage", got.path)
+
+	text, _ := got.body["text"].(string)
+	assert.True(t, strings.HasPrefix(text, "\n\nAlerts Firing:\n"),
+		"upstream's own leading whitespace, not AMP's layout: %q", text)
+	assert.Contains(t, text, "Labels:\n - alertname = HighCPU\n - cluster = prod\n - severity = critical\n")
+	assert.Contains(t, text, " - summary = cpu is high\n")
+	assert.NotContains(t, text, "<b>", "AMP's fixed Telegram formatter is not what shipped")
 }
 
 // TestTemplatesDelivery_NoRegistryWiredIsThePreEpicPayload pins the pre-epic
