@@ -127,8 +127,19 @@ step_helm_values() {
     log "helm not found on PATH"
     return 1
   fi
-  helm lint "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" || return 1
-  helm template amp "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" >/dev/null
+  # values-production.yaml deliberately ships NO passwords: a `required`
+  # guard fails the render until they are supplied (--set in real installs,
+  # ESO in-cluster). The gate renders with placeholders so the guard's
+  # presence is exercised without weakening it — an EMPTY placeholder here
+  # would mask a regression that removed the guard.
+  local extra_sets=""
+  if [ "$values_file" = "values-production.yaml" ]; then
+    extra_sets="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder"
+  fi
+  # shellcheck disable=SC2086
+  helm lint "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets || return 1
+  # shellcheck disable=SC2086
+  helm template amp "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets >/dev/null
 }
 
 docker_available() {
