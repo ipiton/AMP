@@ -54,6 +54,17 @@ QUEUED ──> ACTIVE ──> [шаги pipeline] ──> DONE ──> MERGED
 - **Tests pass**: перед /end-task (go vet + test + build).
 - **No ignored errors**: нет `_, _ :=` в diff.
 
+## Release Process (cutting release notes)
+Источник — только `CHANGELOG.md`'s `[Unreleased]` блок (не git log, не память).
+Шаблон — `docs/RELEASE_NOTES_TEMPLATE.md`. Пример — `docs/RELEASE_NOTES_v0.1.0-draft.md`.
+
+1. **Collect**: скопировать весь `[Unreleased]` блок целиком — это единственный источник правды на момент релиза.
+2. **Split by section**: разнести bullet'ы по `### Added` (→ Features), `### Changed`/`### Improved` (→ Performance/Improvements), `### Breaking changes / migration notes` (→ Breaking Changes) в шаблон. Не пересочинять формулировки — конденсировать features можно, breaking changes — только копировать verbatim.
+3. **Verify breaking changes against migration notes**: каждый bullet под "Breaking changes" в CHANGELOG обычно ссылается на epic/wave-код (`FU-*`, `AMP-PARITY-WAVE*`) — сверить, что соответствующий "Added"-bullet выше в CHANGELOG содержит миграционные заметки (обычно секция "Migration notes" внутри самого Added-bullet), и что draft переносит upgrade-шаги, а не только факт breakage.
+4. **Backward compatibility**: явно перечислить, что НЕ меняется (например: K8s-Secret-provisioned targets, webhook payload shape) — раздел существует специально, чтобы не пришлось перечитывать код при каждом вопросе "а вот это не сломается?".
+5. **Upgrade steps**: свести breaking changes в конкретные действия (`grouping.reconciliation_grace: 20s` → убрать/поднять; `email_configs` → добавить `global.smtp_smarthost`; и т.п.) — читатель должен уйти со списком команд/диффов, не с списком фактов.
+6. После `/end-task` релиза: переименовать `*-draft.md` → `RELEASE_NOTES_vX.Y.Z.md`, обновить `CHANGELOG.md` (закрыть `[Unreleased]` в `## [X.Y.Z] - YYYY-MM-DD`).
+
 ## Stop Conditions
 Агент останавливается если:
 - Задача >2 дней и не нарезана.

@@ -34,20 +34,16 @@
   - Зависимость: RELOADABLE-COMPONENT-INTERFACES (sidecar бесполезен без per-component reload)
   - Источник: AMP-OSS `go-app/cmd/config-reloader/`
   - Оценка: ~1d (портирование + Helm templates)
+  - **Частично сделано INF-B (2026-08-20)**: values-шейп `configReloader.enabled/image/resources` уже в `helm/amp/values.yaml` (disabled), без темплейтов — по условиям брифа. Остаётся: Go-код sidecar + Dockerfile + template.
 
-- [ ] **HELM-PRODUCTION-VALUES** — Production-ready Helm values:
-  - PostgreSQL cluster (3 instances)
-  - DragonflyDB cache (вместо Redis)
-  - Publishing targets preset
-  - configReloader sidecar integration
-  - Источник: AMP-OSS `helm/amp/values-production.yaml` (207 строк)
-  - Оценка: ~0.5d (адаптация под текущий values.yaml)
+- [x] ~~**HELM-PRODUCTION-VALUES**~~ — закрыто INF-B (2026-08-20). `values-production.yaml` переписан по аудиту реального app config surface (waves 3-7: `delivery_confirmation_timeout`, `grouping.*`, `storage.*`, `silencing.*`, `templates.enabled`) и реальных возможностей чарта:
+  - PostgreSQL "cluster (3 instances)" — НЕ реализуемо текущим чартом (single-primary StatefulSet, без replication/failover); задокументировано как реальный гэп, не сделано вида. `postgresql.replicas`/`postgresql.config.*` протюнены на 20 реплик приложения.
+  - DragonflyDB — нет темплейта в чарте; подключается через уже существующие `cache.host`/`cache.port`/`cache.auth` (те же ключи, что читает `REDIS_ADDR`), плюс `valkey.replicas: 0` отключает ненужный чартовый Redis (потребовал фикса `redis-statefulset.yaml`: `default 1` глотал явный `0`).
+  - Publishing targets preset — был и остался (rootly/pagerduty/slack), без изменений.
+  - configReloader — values-шейп есть (см. пункт выше), sidecar integration НЕ сделан (нет темплейта, нет Go-кода — за рамками этой задачи).
+  - Побочные находки: PDB для app-деплоймента не существовало вообще (добавлен `templates/poddisruptionbudget.yaml`); закоммиченный plaintext-пароль Postgres убран. Оставшиеся гэпы чарта → `TECH-DEBT.md` (`HELM-CHART-GAPS`).
 
-- [ ] **RELEASE-NOTES-PROCESS** — Шаблон и процесс для release notes:
-  - Формат: changelog-compatible markdown
-  - Секции: features, performance, breaking changes, backward compatibility
-  - Источник: AMP-OSS `RELEASE_NOTES_v0.0.3.md` как шаблон
-  - Оценка: ~0.5d
+- [x] ~~**RELEASE-NOTES-PROCESS**~~ — закрыто INF-B (2026-08-20). `docs/RELEASE_NOTES_TEMPLATE.md` (features/performance/breaking changes/backward compatibility/upgrade steps, changelog-compatible markdown) + процесс в `WORKFLOW.md` + первый реальный артефакт `docs/RELEASE_NOTES_v0.1.0-draft.md`, сгенерированный из `CHANGELOG.md`'s `[Unreleased]` (весь parity-программ, все breaking changes verbatim).
 
 ## Alertmanager Full Parity — Phase A (production-viable)
 > Критичные gaps, блокирующие использование AMP как замены Alertmanager. После Phase A — AMP пригоден для production (без maintenance windows и HA).
