@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -416,6 +417,55 @@ func TestTemplatesDelivery_TelegramDefaultsReachTheWire(t *testing.T) {
 	assert.Contains(t, text, "Labels:\n - alertname = HighCPU\n - cluster = prod\n - severity = critical\n")
 	assert.Contains(t, text, " - summary = cpu is high\n")
 	assert.NotContains(t, text, "<b>", "AMP's fixed Telegram formatter is not what shipped")
+}
+
+// TestTemplatesDelivery_TwoAlertsBecomeTwoMessagesEachWithOneAlert pins the
+// epic's biggest DELIVERY divergence from upstream (slice-2 review I3).
+//
+// Upstream sends ONE message per group, so `{{ range .Alerts }}` in a migrated
+// template iterates the whole group. AMP sends one message PER ALERT for
+// slack/pagerduty/telegram/email, each carrying a one-element `.Alerts` — so the
+// same template renders N single-alert messages instead of one aggregated one.
+//
+// Group labels, receiver and status are upstream's; the alert SET is not. Making
+// it upstream-shaped means wire-level batching for those integrations (webhook
+// already has it), which is a separate epic — so this test exists to make the
+// shape a PINNED decision rather than an accident: it fails the moment the
+// batching shape changes in either direction.
+func TestTemplatesDelivery_TwoAlertsBecomeTwoMessagesEachWithOneAlert(t *testing.T) {
+	slack := newRecordingEndpoint(t)
+
+	// The title reports what the template can actually see: how many alerts are
+	// in `.Alerts`, and which one it is.
+	registry := writeTemplateLibrary(t,
+		`{{ define "slack.default.title" }}alerts={{ len .Alerts }} instance={{ (index .Alerts 0).Labels.instance }} group={{ .GroupLabels.alertname }}{{ end }}`)
+
+	stack := newStackFromRouting(t, slackRoutingConfig(slack.server.URL+"/services/T/B/C"),
+		"team-x", alertnameGroupingConfig(), withTemplateRegistry(registry))
+
+	// Two alerts, same group (grouped by alertname), different instance.
+	stack.ingestInstance(t, "fp-1", "server-1")
+	stack.ingestInstance(t, "fp-2", "server-2")
+
+	got := slack.waitForRequests(t, 2, 5*time.Second)
+	require.Len(t, got, 2,
+		"one message per alert — NOT one aggregated message per group as upstream would send")
+
+	titles := make([]string, 0, len(got))
+	for _, request := range got {
+		attachments, ok := request.body["attachments"].([]any)
+		require.True(t, ok, "payload: %#v", request.body)
+		require.NotEmpty(t, attachments)
+		attachment, _ := attachments[0].(map[string]any)
+		title, _ := attachment["title"].(string)
+		titles = append(titles, title)
+	}
+	sort.Strings(titles)
+
+	assert.Equal(t, []string{
+		"alerts=1 instance=server-1 group=HighCPU",
+		"alerts=1 instance=server-2 group=HighCPU",
+	}, titles, "each message's .Alerts holds exactly the one alert being delivered, with the group's labels intact")
 }
 
 // TestTemplatesDelivery_NoRegistryWiredIsThePreEpicPayload pins the pre-epic

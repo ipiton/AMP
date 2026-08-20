@@ -90,16 +90,27 @@ func (e *recordingEndpoint) all() []recordedRequest {
 
 func (e *recordingEndpoint) waitForRequest(t *testing.T, timeout time.Duration) recordedRequest {
 	t.Helper()
+	return e.waitForRequests(t, 1, timeout)[0]
+}
+
+// waitForRequests waits for at least count requests and returns them.
+//
+// It then waits one more settle interval and re-reads, so a test asserting "N
+// messages and no more" fails on an N+1 rather than racing it (used by the
+// one-message-per-alert divergence test).
+func (e *recordingEndpoint) waitForRequests(t *testing.T, count int, timeout time.Duration) []recordedRequest {
+	t.Helper()
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if got := e.all(); len(got) > 0 {
-			return got[0]
+		if got := e.all(); len(got) >= count {
+			time.Sleep(50 * time.Millisecond)
+			return e.all()
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("no request received within %s", timeout)
-	return recordedRequest{}
+	t.Fatalf("fewer than %d requests received within %s (got %d)", count, timeout, len(e.all()))
+	return nil
 }
 
 // configOnlyStack is the assembled runtime under test.
@@ -245,11 +256,24 @@ func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver
 
 func (s *configOnlyStack) ingest(t *testing.T, fingerprint string) {
 	t.Helper()
+	s.ingestInstance(t, fingerprint, "")
+}
+
+// ingestInstance adds one alert to the group, optionally carrying an `instance`
+// label so a test can tell two alerts of the SAME group apart on the wire.
+func (s *configOnlyStack) ingestInstance(t *testing.T, fingerprint, instance string) {
+	t.Helper()
+
+	labels := map[string]string{"alertname": "HighCPU", "severity": "critical", "cluster": "prod"}
+	if instance != "" {
+		labels["instance"] = instance
+	}
+
 	_, err := s.groupManager.AddAlertToGroup(context.Background(), &core.Alert{
 		Fingerprint: fingerprint,
 		AlertName:   "HighCPU",
 		Status:      core.StatusFiring,
-		Labels:      map[string]string{"alertname": "HighCPU", "severity": "critical", "cluster": "prod"},
+		Labels:      labels,
 		Annotations: map[string]string{"summary": "cpu is high", "description": "node-1 at 98%"},
 		StartsAt:    time.Now().UTC(),
 	}, s.groupKey)
