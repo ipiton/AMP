@@ -134,6 +134,12 @@ func (h *SwappableHandler) Format() string {
 }
 
 // Enabled implements slog.Handler.
+//
+// Enabled and Handle load the swappable state independently, so a record
+// admitted just before a Swap can be emitted by the new delegate — e.g. one
+// debug line printed immediately after a switch to info. Transient by
+// construction (it can only affect records already in flight) and preferred to
+// holding a lock across the whole emit path.
 func (h *SwappableHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.state.Load().delegate.Enabled(ctx, level)
 }

@@ -21,8 +21,11 @@ type RedisCache struct {
 	// config is replaced (never mutated in place) by Reload.
 	config atomic.Pointer[CacheConfig]
 
-	logger   *slog.Logger
-	isClosed bool
+	logger *slog.Logger
+
+	// isClosed is atomic because Reload reads it alongside every command path
+	// (review M8); it was a plain bool before this component existed.
+	isClosed atomic.Bool
 
 	// clientShared records that a caller took the raw *redis.Client out of
 	// this wrapper via ShareClient() and holds it for the rest of the
@@ -124,6 +127,12 @@ func (rc *RedisCache) Config() *CacheConfig {
 // outright. Making them follow the swap is tracked as
 // FU-REDIS-LIVE-CLIENT-HANDLE.
 func (rc *RedisCache) ShareClient() *redis.Client {
+	// Under reloadMu (review M1) — same reasoning as PostgresPool.SharePool:
+	// this flag is the safety mechanism, so handing out a client that Reload is
+	// concurrently replacing must be impossible, not just unlikely.
+	rc.reloadMu.Lock()
+	defer rc.reloadMu.Unlock()
+
 	rc.clientShared.Store(true)
 	return rc.liveClient()
 }
@@ -138,10 +147,17 @@ func (rc *RedisCache) IsClientShared() bool {
 // (INF-A slice 1, config hot reload).
 //
 // Sequence: build the new client -> PING-verify it -> atomic swap -> close the
-// replaced client. Unlike the database pool there is no drain window: go-redis
-// commands are individually short-lived and hold a pooled connection only for
-// the duration of one round trip, so a command in flight has either already
-// been written on the old client's connection or will be issued on the new one.
+// replaced client. There is no drain window, unlike the database pool: ordinary
+// go-redis commands hold a pooled connection only for one round trip, so a
+// command in flight has either already been written on the old client or will be
+// issued on the new one.
+//
+// That reasoning does NOT cover blocking commands or pub/sub subscriptions,
+// which hold a connection indefinitely and would be cut off by the close
+// (review M3). Nothing reaches this path today — the one pub/sub consumer, the
+// silence event bus, takes its client through ShareClient() and therefore makes
+// Reload refuse outright. Whoever lands FU-REDIS-LIVE-CLIENT-HANDLE must add a
+// drain window here (or explicitly re-subscribe) before that stops being true.
 //
 // Reload REFUSES (ErrClientHandleShared) when the raw client was handed out
 // through ShareClient() — see that method for the full reason.
@@ -152,7 +168,7 @@ func (rc *RedisCache) Reload(ctx context.Context, config *CacheConfig) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 	if rc.clientShared.Load() {
@@ -190,7 +206,7 @@ func (rc *RedisCache) Reload(ctx context.Context, config *CacheConfig) error {
 
 // Get получает значение по ключу и десериализует в dest
 func (rc *RedisCache) Get(ctx context.Context, key string, dest interface{}) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -218,7 +234,7 @@ func (rc *RedisCache) Get(ctx context.Context, key string, dest interface{}) err
 
 // Set сохраняет значение с указанным TTL
 func (rc *RedisCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -242,7 +258,7 @@ func (rc *RedisCache) Set(ctx context.Context, key string, value interface{}, tt
 
 // Delete удаляет значение по ключу
 func (rc *RedisCache) Delete(ctx context.Context, key string) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -265,7 +281,7 @@ func (rc *RedisCache) Delete(ctx context.Context, key string) error {
 
 // Exists проверяет существование ключа
 func (rc *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return false, ErrConnectionFailed
 	}
 
@@ -284,7 +300,7 @@ func (rc *RedisCache) Exists(ctx context.Context, key string) (bool, error) {
 
 // TTL возвращает оставшееся время жизни ключа
 func (rc *RedisCache) TTL(ctx context.Context, key string) (time.Duration, error) {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return 0, ErrConnectionFailed
 	}
 
@@ -302,7 +318,7 @@ func (rc *RedisCache) TTL(ctx context.Context, key string) (time.Duration, error
 
 // Expire устанавливает TTL для существующего ключа
 func (rc *RedisCache) Expire(ctx context.Context, key string, ttl time.Duration) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -325,7 +341,7 @@ func (rc *RedisCache) Expire(ctx context.Context, key string, ttl time.Duration)
 
 // HealthCheck проверяет здоровье cache
 func (rc *RedisCache) HealthCheck(ctx context.Context) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -340,7 +356,7 @@ func (rc *RedisCache) HealthCheck(ctx context.Context) error {
 
 // Ping проверяет соединение с cache
 func (rc *RedisCache) Ping(ctx context.Context) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -349,7 +365,7 @@ func (rc *RedisCache) Ping(ctx context.Context) error {
 
 // Flush очищает весь cache
 func (rc *RedisCache) Flush(ctx context.Context) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -366,11 +382,11 @@ func (rc *RedisCache) Flush(ctx context.Context) error {
 
 // Close закрывает соединение с Redis
 func (rc *RedisCache) Close() error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return nil
 	}
 
-	rc.isClosed = true
+	rc.isClosed.Store(true)
 	rc.logger.Info("Closing Redis cache connection")
 
 	if err := rc.liveClient().Close(); err != nil {
@@ -425,7 +441,7 @@ func (e *CacheError) WithCause(cause error) *CacheError {
 
 // SAdd adds one or more members to a SET (TN-128: Redis SET operations for alert tracking)
 func (rc *RedisCache) SAdd(ctx context.Context, key string, members ...interface{}) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -448,7 +464,7 @@ func (rc *RedisCache) SAdd(ctx context.Context, key string, members ...interface
 
 // SMembers returns all members of a SET (TN-128: Redis SET operations)
 func (rc *RedisCache) SMembers(ctx context.Context, key string) ([]string, error) {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return nil, ErrConnectionFailed
 	}
 
@@ -472,7 +488,7 @@ func (rc *RedisCache) SMembers(ctx context.Context, key string) ([]string, error
 
 // SRem removes one or more members from a SET (TN-128: Redis SET operations)
 func (rc *RedisCache) SRem(ctx context.Context, key string, members ...interface{}) error {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return ErrConnectionFailed
 	}
 
@@ -495,7 +511,7 @@ func (rc *RedisCache) SRem(ctx context.Context, key string, members ...interface
 
 // SCard returns the number of members in a SET (TN-128: Redis SET operations)
 func (rc *RedisCache) SCard(ctx context.Context, key string) (int64, error) {
-	if rc.isClosed {
+	if rc.isClosed.Load() {
 		return 0, ErrConnectionFailed
 	}
 

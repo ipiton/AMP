@@ -424,11 +424,19 @@ func (s *DefaultConfigUpdateService) atomicApply(
 // hotReload triggers hot reload for all affected components.
 //
 // NOTE (INF-A slice 1): the SIGHUP/file path (ReloadCoordinator) treats ANY
-// component failure as a rejected reload. This API path still keeps its older
-// critical/non-critical split (see UpdateConfig's Phase 4) because its
-// rollback goes through versioned storage rather than an in-memory config
-// swap, and tightening it needs that path's own review. The signature change
-// here is mechanical.
+// component failure as a rejected reload. This path still keeps its older
+// critical/non-critical split (see UpdateConfig's Phase 4) because its rollback
+// goes through versioned storage rather than an in-memory config swap, and
+// tightening it needs that path's own review. The signature change here is
+// mechanical.
+//
+// DefaultConfigUpdateService has no non-test caller and there is no PUT /config
+// route, so this divergence is not user-visible today. But slice 1 made the
+// latent hazard worse and whoever wires this path must fix it first (review M6):
+// ReloadAll is now FAIL-FAST, so a failure in the logger — priority 10, first in
+// the sequence — silently skips metrics, llm, redis and database, and Phase 4
+// then treats a non-critical logger error as "continue" and reports the update
+// applied. On the SIGHUP path that same failure rejects the whole reload.
 func (s *DefaultConfigUpdateService) hotReload(
 	ctx context.Context,
 	oldConfig *Config,

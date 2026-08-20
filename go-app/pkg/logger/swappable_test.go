@@ -3,6 +3,7 @@ package logger
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -153,4 +154,39 @@ func TestSwappableHandler_ConcurrentSwapAndLog(t *testing.T) {
 	wg.Wait()
 
 	assert.Contains(t, buf.String(), "concurrent")
+}
+
+// BenchmarkSwappableHandler_Handle measures the plain (undelivered) path.
+func BenchmarkSwappableHandler_Handle(b *testing.B) {
+	handler, err := NewSwappableHandler(io.Discard, slog.LevelInfo, "json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	logger := slog.New(handler)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		logger.Info("bench", "i", i)
+	}
+}
+
+// BenchmarkSwappableHandler_DerivedHandle measures the replay cost of the
+// recorded With()/WithGroup() derivations (review M4): every record rebuilds
+// them against the live delegate, which is what lets a pre-swap logger honour a
+// later level change. This is the number to watch if the replay ever needs
+// caching.
+func BenchmarkSwappableHandler_DerivedHandle(b *testing.B) {
+	handler, err := NewSwappableHandler(io.Discard, slog.LevelInfo, "json")
+	if err != nil {
+		b.Fatal(err)
+	}
+	logger := slog.New(handler).
+		With("component", "grouping").
+		With("replica", "amp-0").
+		WithGroup("phase")
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		logger.Info("bench", "i", i)
+	}
 }

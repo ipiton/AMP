@@ -218,6 +218,11 @@ func (p *PostgresPool) buildPool(
 // already holds a connection is never cut off mid-statement. Callers that
 // take a fresh connection after the swap get the new pool.
 //
+// Not restarted by a reload: the periodic health checker started by Connect
+// (review M7). It follows livePool(), so it keeps checking the CURRENT pool and
+// never breaks — but a changed HealthCheckPeriod keeps the old interval until
+// the process restarts.
+//
 // Reload REFUSES (ErrPoolHandleShared) when the raw *pgxpool.Pool was handed
 // out through SharePool(): those holders captured the pointer and would keep
 // using the replaced pool after this closed it. Making them follow the swap
@@ -264,6 +269,13 @@ func (p *PostgresPool) Reload(ctx context.Context, cfg *PostgresConfig) error {
 			if grace > 0 {
 				time.Sleep(grace)
 			}
+			// Close blocks until every acquired connection is returned, which
+			// is what makes the drain graceful rather than a deadline. The
+			// flip side (review M2): a connection a caller never releases
+			// pins this goroutine and the old pool for as long as it is held.
+			// Bounding it would mean cutting off a live query, so the leak is
+			// preferred and logged either side instead.
+			logger.Info("closing the previous PostgreSQL pool", "drain_grace", grace)
 			oldPool.Close()
 			logger.Info("previous PostgreSQL pool drained and closed", "drain_grace", grace)
 		}()
@@ -519,6 +531,14 @@ func (p *PostgresPool) Pool() *pgxpool.Pool {
 // limitation means giving those consumers a handle that follows the swap;
 // tracked as FU-DB-LIVE-POOL-HANDLE.
 func (p *PostgresPool) SharePool() *pgxpool.Pool {
+	// Under reloadMu (review M1): without it a SharePool racing a Reload could
+	// hand out the very pool that Reload is about to close. Reload's own
+	// double-check narrows that window but does not close it, and this flag is
+	// advertised as THE safety mechanism, so it has to be airtight rather than
+	// merely unreachable-in-practice.
+	p.reloadMu.Lock()
+	defer p.reloadMu.Unlock()
+
 	p.poolShared.Store(true)
 	return p.livePool()
 }
