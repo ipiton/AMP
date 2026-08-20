@@ -113,6 +113,12 @@ var ErrInvalidConfig = NewCacheError("invalid cache configuration", "CONFIG_ERRO
 // ErrConnectionFailed возвращается при проблемах с соединением
 var ErrConnectionFailed = NewCacheError("connection failed", "CONNECTION_ERROR")
 
+// ErrClientHandleShared indicates that RedisCache.Reload cannot swap the
+// client because a caller took a long-lived raw handle via ShareClient().
+// Callers should surface this as "restart required", not as a failure — see
+// RedisCache.Reload and internal/config/reloadable_redis.go.
+var ErrClientHandleShared = NewCacheError("redis client handle is shared; hot reload cannot replace it", "CLIENT_HANDLE_SHARED")
+
 // CacheError представляет ошибку cache
 type CacheError struct {
 	Message string
