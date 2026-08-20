@@ -77,6 +77,14 @@ type RestartRequiredWarning struct {
 	Fields []string `json:"fields"`
 
 	// Reason explains why the change cannot be applied live.
+	//
+	// A FIXED string, chosen at the call site — never a formatted error and
+	// never interpolated config (re-review I5). The whole struct is served
+	// verbatim by the unauthenticated GET /health/reload, and component errors
+	// carry arbitrary text: pgx embeds `user=<user> database=<db>` and every
+	// dialed host:port, the routing engine echoes receiver names and matcher
+	// messages. Causes belong in the log; the machine-readable part of a
+	// warning is Code plus the names in Fields.
 	Reason string `json:"reason"`
 
 	// At is when the warning was last raised.
