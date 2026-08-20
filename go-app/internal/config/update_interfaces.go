@@ -470,6 +470,27 @@ type OrderedReloadable interface {
 	ReloadPriority() int
 }
 
+// ResyncReloadable is a second optional add-on to Reloadable: a component that
+// can tell whether its LIVE state still matches the config gets selected for
+// reload even when its own sections did not change in this particular edit.
+//
+// This is what makes a declined (restart-required) change durable
+// (fix-round I2). Without it: operator edits `database.host`, the pool declines
+// with W600, the coordinator still commits the config — and the NEXT reload of
+// an unrelated section sees no `database` diff, skips the component, and the
+// "restart required" fact disappears while the process is still on the old
+// host. With it, the component keeps being selected and keeps re-raising its
+// warning until the divergence is gone (reverted, or the process restarted).
+//
+// Implementations must be cheap: NeedsResync runs on every reload attempt for
+// every registered component.
+type ResyncReloadable interface {
+	// NeedsResync reports whether the component's live state differs from
+	// newCfg, i.e. whether it has something to say about this config even
+	// though its sections may be unchanged since the last attempt.
+	NeedsResync(newCfg *Config) bool
+}
+
 // ConfigReloader orchestrates hot reload across multiple Reloadable components
 //
 // Responsibilities:
@@ -534,6 +555,17 @@ type ConfigReloader interface {
 	//
 	// Performance Target: < 300ms p95
 	ReloadAll(ctx context.Context, oldCfg, newCfg *Config, affectedComponents []string) []ReloadError
+
+	// RollbackAll drives the components back from a rejected config to the
+	// previous one. Same selection rules as ReloadAll, but BEST EFFORT: every
+	// selected component is attempted even after one fails, and every error is
+	// returned.
+	//
+	// Fail-fast is correct going forward and wrong going back — a component
+	// skipped during rollback stays on the rejected config, so stopping early
+	// creates more divergence than it avoids. The caller is expected to treat a
+	// non-empty result as a split state and say so loudly.
+	RollbackAll(ctx context.Context, failedCfg, previousCfg *Config) []ReloadError
 
 	// GetRegisteredComponents returns registered component names in reload
 	// order.

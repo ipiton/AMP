@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	infracache "github.com/ipiton/AMP/internal/infrastructure/cache"
 )
@@ -45,7 +46,10 @@ func CacheConfigFrom(cfg RedisConfig) *infracache.CacheConfig {
 // one.
 //
 // What it does when it CANNOT act: raises W601 (restart required) naming the
-// changed fields, and returns nil.
+// fields that differ from what the live client is running, and returns nil.
+// The warning is re-raised on every subsequent reload attempt while the
+// divergence lasts, and resolved the moment the config matches the live client
+// again (fix-round I2).
 //
 // In the standard profile the raw *redis.Client is handed at construction time
 // to leader election (silence GC claim TTLs), the cluster heartbeat registry,
@@ -67,6 +71,13 @@ type RedisReloadable struct {
 	cache    *infracache.RedisCache
 	logger   *slog.Logger
 	warnings *RestartWarnings
+
+	// mu guards applied — the redis config the live client is ACTUALLY
+	// running, not the one the coordinator has committed. See
+	// DatabaseReloadable.applied for why the distinction matters (fix-round
+	// I2).
+	mu      sync.Mutex
+	applied RedisConfig
 }
 
 // NewRedisReloadable wires a RedisReloadable over an existing Redis cache.
@@ -75,13 +86,18 @@ type RedisReloadable struct {
 // restart-required.
 func NewRedisReloadable(
 	redisCache *infracache.RedisCache,
+	bootCfg *Config,
 	warnings *RestartWarnings,
 	logger *slog.Logger,
 ) *RedisReloadable {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &RedisReloadable{cache: redisCache, logger: logger, warnings: warnings}
+	reloadable := &RedisReloadable{cache: redisCache, logger: logger, warnings: warnings}
+	if bootCfg != nil {
+		reloadable.applied = bootCfg.Redis
+	}
+	return reloadable
 }
 
 // Name implements Reloadable.
@@ -97,18 +113,34 @@ func (r *RedisReloadable) IsCritical() bool { return true }
 // ReloadPriority implements OrderedReloadable.
 func (r *RedisReloadable) ReloadPriority() int { return redisReloadPriority }
 
+// NeedsResync implements ResyncReloadable: true while the requested redis
+// config differs from what the live client is running.
+func (r *RedisReloadable) NeedsResync(newCfg *Config) bool {
+	if newCfg == nil {
+		return false
+	}
+	return len(r.drift(newCfg.Redis)) > 0
+}
+
+// drift returns the field paths where the requested config differs from what
+// the live client is running.
+func (r *RedisReloadable) drift(requested RedisConfig) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return changedFields("redis", r.applied, requested)
+}
+
 // Reload implements Reloadable.
-func (r *RedisReloadable) Reload(ctx context.Context, oldCfg, newCfg *Config) error {
+func (r *RedisReloadable) Reload(ctx context.Context, _, newCfg *Config) error {
 	if newCfg == nil {
 		return fmt.Errorf("redis reload: nil config")
 	}
 
-	var fields []string
-	if oldCfg != nil {
-		fields = changedFields("redis", oldCfg.Redis, newCfg.Redis)
-		if len(fields) == 0 {
-			return nil
-		}
+	fields := r.drift(newCfg.Redis)
+	if len(fields) == 0 {
+		// Live client already matches; drop any stale warning.
+		r.warnings.Resolve(WarnRedisRestartRequired, r.Name())
+		return nil
 	}
 
 	if r.cache == nil {
@@ -137,6 +169,11 @@ func (r *RedisReloadable) Reload(ctx context.Context, oldCfg, newCfg *Config) er
 		return fmt.Errorf("redis client reload failed: %w", err)
 	}
 
+	r.mu.Lock()
+	r.applied = newCfg.Redis
+	r.mu.Unlock()
+
+	r.warnings.Resolve(WarnRedisRestartRequired, r.Name())
 	r.logger.Info("redis client reloaded from config", "fields", fields)
 	return nil
 }
@@ -145,4 +182,5 @@ func (r *RedisReloadable) Reload(ctx context.Context, oldCfg, newCfg *Config) er
 var (
 	_ Reloadable        = (*RedisReloadable)(nil)
 	_ OrderedReloadable = (*RedisReloadable)(nil)
+	_ ResyncReloadable  = (*RedisReloadable)(nil)
 )

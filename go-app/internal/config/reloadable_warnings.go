@@ -41,6 +41,21 @@ const (
 	// WarnLLMRestartRequired: llm.* changed in a way that needs the
 	// investigation pipeline rebuilt (enable/disable, agent mode).
 	WarnLLMRestartRequired = "W604"
+
+	// WarnReloadRollbackIncomplete: a reload was rejected AND its rollback
+	// could not be completed, so some components are still running the
+	// rejected config while the coordinator reports the previous one. Unlike
+	// the W600-W604 family this is never resolved by editing config — the
+	// process is in a split state and must be restarted. Fields carries the
+	// diverged COMPONENT names (see RestartRequiredWarning.Fields).
+	WarnReloadRollbackIncomplete = "W610"
+
+	// WarnReloadPostCommitFailed: the coordinator committed a config and every
+	// registered component adopted it, but a ServiceRegistry-applied section
+	// (routing/templates/receivers/inhibition — not yet Reloadables, see
+	// FU-RELOAD-UNIFY-APPLIERS) then failed. Fields carries the failing stage
+	// name.
+	WarnReloadPostCommitFailed = "W611"
 )
 
 // RestartRequiredWarning is a single "this change needs a restart" finding.
@@ -51,9 +66,14 @@ type RestartRequiredWarning struct {
 	// Component is the Reloadable that refused the change ("database", ...).
 	Component string `json:"component"`
 
-	// Fields are the config field paths the operator changed, e.g.
-	// ["database.host", "database.port"]. Field NAMES only — never values,
-	// so a rotated password never reaches a log line or an API response.
+	// Fields are the config field paths still diverging from what the process
+	// is actually running, e.g. ["database.host", "database.port"]. Field
+	// NAMES only — never values, so a rotated password never reaches a log
+	// line or an API response.
+	//
+	// Exception: for WarnReloadRollbackIncomplete (W610) this carries
+	// COMPONENT names rather than field paths, because what diverged there is
+	// a set of components, not a set of fields. Still names, still no values.
 	Fields []string `json:"fields"`
 
 	// Reason explains why the change cannot be applied live.
@@ -119,8 +139,29 @@ func (w *RestartWarnings) List() []RestartRequiredWarning {
 	return out
 }
 
-// Clear drops every collected warning. Used when a reload applied cleanly, so
-// a stale "restart required" cannot outlive the change that caused it.
+// Resolve drops the warning for one code+component, if any.
+//
+// This is the counterpart to Record and the reason the collector is NOT
+// cleared wholesale between reloads any more (fix-round I2): a restart-required
+// fact must live exactly as long as the divergence that caused it. Each
+// component re-raises its own warning on every reload attempt while its live
+// state still differs from the config, and calls Resolve the moment it does
+// not — so reverting the edit clears the warning, and an unrelated reload
+// cannot erase it.
+func (w *RestartWarnings) Resolve(code, component string) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.byKey, code+"|"+component)
+}
+
+// Clear drops every collected warning.
+//
+// NOT used on the reload path — see Resolve. Kept for a process-lifetime reset
+// (tests, and any future caller that legitimately knows every divergence is
+// gone).
 func (w *RestartWarnings) Clear() {
 	if w == nil {
 		return

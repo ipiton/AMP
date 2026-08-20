@@ -23,7 +23,7 @@ func scrapeStatus(t *testing.T, gate *metricsv2.ExpositionGate) int {
 }
 
 func TestMetricsReloadable_Contract(t *testing.T) {
-	reloadable := NewMetricsReloadable(metricsv2.NewExpositionGate(true), NewRestartWarnings(), slog.Default())
+	reloadable := NewMetricsReloadable(metricsv2.NewExpositionGate(true), nil, NewRestartWarnings(), slog.Default())
 
 	assert.Equal(t, "metrics", reloadable.Name())
 	assert.Equal(t, []string{"metrics"}, reloadable.RelevantSections())
@@ -34,10 +34,9 @@ func TestMetricsReloadable_Contract(t *testing.T) {
 func TestMetricsReloadable_TogglesExposition(t *testing.T) {
 	gate := metricsv2.NewExpositionGate(true)
 	warnings := NewRestartWarnings()
-	reloadable := NewMetricsReloadable(gate, warnings, slog.Default())
-
 	oldCfg := &Config{Metrics: MetricsConfig{Enabled: true}}
 	newCfg := &Config{Metrics: MetricsConfig{Enabled: false}}
+	reloadable := NewMetricsReloadable(gate, oldCfg, warnings, slog.Default())
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
 	assert.False(t, gate.Enabled())
@@ -53,9 +52,9 @@ func TestMetricsReloadable_TogglesExposition(t *testing.T) {
 func TestMetricsReloadable_PathAndPortWarnW603AndDoNotTouchTheGate(t *testing.T) {
 	gate := metricsv2.NewExpositionGate(true)
 	warnings := NewRestartWarnings()
-	reloadable := NewMetricsReloadable(gate, warnings, slog.Default())
-
 	oldCfg := &Config{Metrics: MetricsConfig{Enabled: true, Path: "/metrics", Port: 9090}}
+	reloadable := NewMetricsReloadable(gate, oldCfg, warnings, slog.Default())
+
 	newCfg := &Config{Metrics: MetricsConfig{Enabled: true, Path: "/prom", Port: 9091}}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -71,11 +70,12 @@ func TestMetricsReloadable_PathAndPortWarnW603AndDoNotTouchTheGate(t *testing.T)
 }
 
 func TestMetricsReloadable_UnchangedSectionIsNoOp(t *testing.T) {
+	// Gate closed, and the boot config says closed: no drift, no action.
 	gate := metricsv2.NewExpositionGate(false)
 	warnings := NewRestartWarnings()
-	reloadable := NewMetricsReloadable(gate, warnings, slog.Default())
+	cfg := &Config{Metrics: MetricsConfig{Enabled: false}}
+	reloadable := NewMetricsReloadable(gate, cfg, warnings, slog.Default())
 
-	cfg := &Config{Metrics: MetricsConfig{Enabled: true}}
 	require.NoError(t, reloadable.Reload(context.Background(), cfg, cfg))
 
 	assert.False(t, gate.Enabled(), "a no-op reload must not silently re-open the gate")
@@ -84,10 +84,9 @@ func TestMetricsReloadable_UnchangedSectionIsNoOp(t *testing.T) {
 
 func TestMetricsReloadable_NilGateWarnsInsteadOfPretending(t *testing.T) {
 	warnings := NewRestartWarnings()
-	reloadable := NewMetricsReloadable(nil, warnings, slog.Default())
-
 	oldCfg := &Config{Metrics: MetricsConfig{Enabled: true}}
 	newCfg := &Config{Metrics: MetricsConfig{Enabled: false}}
+	reloadable := NewMetricsReloadable(nil, oldCfg, warnings, slog.Default())
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
 
@@ -98,6 +97,6 @@ func TestMetricsReloadable_NilGateWarnsInsteadOfPretending(t *testing.T) {
 }
 
 func TestMetricsReloadable_NilNewConfigIsAnError(t *testing.T) {
-	reloadable := NewMetricsReloadable(metricsv2.NewExpositionGate(true), nil, slog.Default())
+	reloadable := NewMetricsReloadable(metricsv2.NewExpositionGate(true), nil, nil, slog.Default())
 	require.Error(t, reloadable.Reload(context.Background(), &Config{}, nil))
 }

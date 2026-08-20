@@ -11,18 +11,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newLoggerFixture(t *testing.T) (*LoggerReloadable, *pkglogger.SwappableHandler, *RestartWarnings, *bytes.Buffer) {
+func newLoggerFixture(t *testing.T, bootCfg *Config) (*LoggerReloadable, *pkglogger.SwappableHandler, *RestartWarnings, *bytes.Buffer) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	handler, err := pkglogger.NewSwappableHandler(buf, slog.LevelInfo, "json")
 	require.NoError(t, err)
 
 	warnings := NewRestartWarnings()
-	return NewLoggerReloadable(handler, warnings, slog.New(handler)), handler, warnings, buf
+	return NewLoggerReloadable(handler, bootCfg, warnings, slog.New(handler)), handler, warnings, buf
+}
+
+// loggerBootCfg matches what newLoggerFixture's handler was built from.
+func loggerBootCfg() *Config {
+	return &Config{Log: LogConfig{Level: "info", Format: "json"}}
 }
 
 func TestLoggerReloadable_Contract(t *testing.T) {
-	reloadable, _, _, _ := newLoggerFixture(t)
+	reloadable, _, _, _ := newLoggerFixture(t, loggerBootCfg())
 
 	assert.Equal(t, "logger", reloadable.Name())
 	assert.Equal(t, []string{"log"}, reloadable.RelevantSections())
@@ -33,9 +38,9 @@ func TestLoggerReloadable_Contract(t *testing.T) {
 }
 
 func TestLoggerReloadable_AppliesLevelAndFormat(t *testing.T) {
-	reloadable, handler, warnings, buf := newLoggerFixture(t)
-
 	oldCfg := &Config{Log: LogConfig{Level: "info", Format: "json"}}
+	reloadable, handler, warnings, buf := newLoggerFixture(t, oldCfg)
+
 	newCfg := &Config{Log: LogConfig{Level: "debug", Format: "text"}}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -50,9 +55,9 @@ func TestLoggerReloadable_AppliesLevelAndFormat(t *testing.T) {
 }
 
 func TestLoggerReloadable_UnchangedSectionIsNoOp(t *testing.T) {
-	reloadable, handler, warnings, _ := newLoggerFixture(t)
-
 	cfg := &Config{Log: LogConfig{Level: "info", Format: "json"}}
+	reloadable, handler, warnings, _ := newLoggerFixture(t, cfg)
+
 	require.NoError(t, reloadable.Reload(context.Background(), cfg, cfg))
 
 	assert.Equal(t, slog.LevelInfo, handler.Level())
@@ -60,9 +65,9 @@ func TestLoggerReloadable_UnchangedSectionIsNoOp(t *testing.T) {
 }
 
 func TestLoggerReloadable_SinkChangeWarnsW602ButStillAppliesLevel(t *testing.T) {
-	reloadable, handler, warnings, _ := newLoggerFixture(t)
-
 	oldCfg := &Config{Log: LogConfig{Level: "info", Format: "json", Output: "stdout"}}
+	reloadable, handler, warnings, _ := newLoggerFixture(t, oldCfg)
+
 	newCfg := &Config{Log: LogConfig{Level: "warn", Format: "json", Output: "file", Filename: "amp.log"}}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -81,9 +86,9 @@ func TestLoggerReloadable_SinkChangeWarnsW602ButStillAppliesLevel(t *testing.T) 
 }
 
 func TestLoggerReloadable_SinkOnlyChangeDoesNotSwap(t *testing.T) {
-	reloadable, handler, warnings, _ := newLoggerFixture(t)
-
 	oldCfg := &Config{Log: LogConfig{Level: "info", Format: "json", MaxBackups: 3}}
+	reloadable, handler, warnings, _ := newLoggerFixture(t, oldCfg)
+
 	newCfg := &Config{Log: LogConfig{Level: "info", Format: "json", MaxBackups: 7}}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -94,9 +99,9 @@ func TestLoggerReloadable_SinkOnlyChangeDoesNotSwap(t *testing.T) {
 }
 
 func TestLoggerReloadable_BadFormatRejectsTheReload(t *testing.T) {
-	reloadable, handler, _, _ := newLoggerFixture(t)
-
 	oldCfg := &Config{Log: LogConfig{Level: "info", Format: "json"}}
+	reloadable, handler, _, _ := newLoggerFixture(t, oldCfg)
+
 	newCfg := &Config{Log: LogConfig{Level: "info", Format: "toml"}}
 
 	err := reloadable.Reload(context.Background(), oldCfg, newCfg)
@@ -109,10 +114,9 @@ func TestLoggerReloadable_BadFormatRejectsTheReload(t *testing.T) {
 
 func TestLoggerReloadable_NilHandlerWarnsInsteadOfPretending(t *testing.T) {
 	warnings := NewRestartWarnings()
-	reloadable := NewLoggerReloadable(nil, warnings, slog.Default())
-
 	oldCfg := &Config{Log: LogConfig{Level: "info"}}
 	newCfg := &Config{Log: LogConfig{Level: "debug"}}
+	reloadable := NewLoggerReloadable(nil, oldCfg, warnings, slog.Default())
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
 
@@ -123,7 +127,7 @@ func TestLoggerReloadable_NilHandlerWarnsInsteadOfPretending(t *testing.T) {
 }
 
 func TestLoggerReloadable_NilNewConfigIsAnError(t *testing.T) {
-	reloadable, _, _, _ := newLoggerFixture(t)
+	reloadable, _, _, _ := newLoggerFixture(t, loggerBootCfg())
 	require.Error(t, reloadable.Reload(context.Background(), &Config{}, nil))
 }
 

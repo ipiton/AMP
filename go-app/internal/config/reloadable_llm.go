@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
 )
@@ -44,6 +45,13 @@ type LLMReloadable struct {
 	client   *llm.HTTPLLMClient
 	logger   *slog.Logger
 	warnings *RestartWarnings
+
+	// mu guards applied — the llm config actually in effect. The transport
+	// half moves when UpdateConfig succeeds; enabled/agent_mode never move,
+	// so comparing against this keeps W604 alive for as long as the config
+	// asks for a pipeline shape this process does not have (fix-round I2).
+	mu      sync.Mutex
+	applied LLMConfig
 }
 
 // NewLLMReloadable wires an LLMReloadable over the live LLM client. A nil
@@ -52,13 +60,18 @@ type LLMReloadable struct {
 // that case an llm.* change is reported as restart-required.
 func NewLLMReloadable(
 	client *llm.HTTPLLMClient,
+	bootCfg *Config,
 	warnings *RestartWarnings,
 	logger *slog.Logger,
 ) *LLMReloadable {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &LLMReloadable{client: client, logger: logger, warnings: warnings}
+	reloadable := &LLMReloadable{client: client, logger: logger, warnings: warnings}
+	if bootCfg != nil {
+		reloadable.applied = bootCfg.LLM
+	}
+	return reloadable
 }
 
 // Name implements Reloadable.
@@ -73,57 +86,78 @@ func (l *LLMReloadable) IsCritical() bool { return false }
 // ReloadPriority implements OrderedReloadable.
 func (l *LLMReloadable) ReloadPriority() int { return llmReloadPriority }
 
+// NeedsResync implements ResyncReloadable: true while the requested llm config
+// differs from what is in effect.
+func (l *LLMReloadable) NeedsResync(newCfg *Config) bool {
+	if newCfg == nil {
+		return false
+	}
+	return len(l.drift(newCfg.LLM)) > 0
+}
+
+// drift returns the field paths where the requested config differs from what
+// is in effect.
+func (l *LLMReloadable) drift(requested LLMConfig) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return changedFields("llm", l.applied, requested)
+}
+
 // Reload implements Reloadable.
-func (l *LLMReloadable) Reload(_ context.Context, oldCfg, newCfg *Config) error {
+func (l *LLMReloadable) Reload(_ context.Context, _, newCfg *Config) error {
 	if newCfg == nil {
 		return fmt.Errorf("llm reload: nil config")
 	}
 
-	var fields []string
-	if oldCfg != nil {
-		fields = changedFields("llm", oldCfg.LLM, newCfg.LLM)
-		if len(fields) == 0 {
-			return nil
-		}
-	}
-
-	lifecycleFields := make([]string, 0, 2)
-	for _, field := range fields {
-		if llmRestartRequiredFields[field] {
-			lifecycleFields = append(lifecycleFields, field)
-		}
-	}
-	if len(lifecycleFields) > 0 {
-		warnRestartRequired(l.logger, l.warnings, RestartRequiredWarning{
-			Code:      WarnLLMRestartRequired,
-			Component: l.Name(),
-			Fields:    lifecycleFields,
-			Reason:    "llm.enabled and llm.agent_mode decide whether the investigation pipeline and the agentic tool loop are built at startup; they cannot be created or torn down on a running process — restart to apply (provider/model/api_key/timeout ARE applied live)",
-		})
-	}
-
-	if l.client == nil {
-		if len(fields) > len(lifecycleFields) {
-			warnRestartRequired(l.logger, l.warnings, RestartRequiredWarning{
-				Code:      WarnLLMRestartRequired,
-				Component: l.Name(),
-				Fields:    fields,
-				Reason:    "no LLM client in this process (investigation pipeline not built: lite profile, investigation.enabled=false, or llm.enabled=false at startup); restart to apply the new LLM settings",
-			})
-		}
+	fields := l.drift(newCfg.LLM)
+	if len(fields) == 0 {
+		l.warnings.Resolve(WarnLLMRestartRequired, l.Name())
 		return nil
 	}
 
-	// Only the transport-level half is applied; the lifecycle half was warned
-	// about above. Feeding the whole section in is intentional — the client's
-	// own config carries no enabled/agent_mode notion at all.
-	l.client.UpdateConfig(llmClientConfigFrom(newCfg.LLM, l.client.GetConfig()))
+	// Apply the transport half. Only the fields AMP's llm.* section owns move;
+	// llm.enabled/llm.agent_mode stay where they were, which is what leaves
+	// them visible in `remaining` below.
+	if l.client != nil {
+		l.client.UpdateConfig(llmClientConfigFrom(newCfg.LLM, l.client.GetConfig()))
 
-	l.logger.Info("LLM client reloaded from config",
-		"provider", newCfg.LLM.Provider,
-		"model", newCfg.LLM.Model,
-		"fields", fields,
-	)
+		l.mu.Lock()
+		lifecycle := LLMConfig{Enabled: l.applied.Enabled, AgentMode: l.applied.AgentMode}
+		l.applied = newCfg.LLM
+		l.applied.Enabled = lifecycle.Enabled
+		l.applied.AgentMode = lifecycle.AgentMode
+		l.mu.Unlock()
+
+		l.logger.Info("LLM client reloaded from config",
+			"provider", newCfg.LLM.Provider,
+			"model", newCfg.LLM.Model,
+			"fields", fields,
+		)
+	}
+
+	remaining := l.drift(newCfg.LLM)
+	if len(remaining) == 0 {
+		l.warnings.Resolve(WarnLLMRestartRequired, l.Name())
+		return nil
+	}
+
+	// ONE warning per component per attempt — see LoggerReloadable.Reload.
+	reason := "llm.enabled and llm.agent_mode decide whether the investigation pipeline and the agentic tool loop are built at startup; they cannot be created or torn down on a running process — restart to apply (provider/model/api_key/timeout ARE applied live)"
+	switch {
+	case l.client == nil:
+		reason = "no LLM client in this process (investigation pipeline and classification both skipped: lite profile, or llm.enabled=false at startup); restart to apply the new LLM settings"
+	case !onlyLifecycleFields(remaining):
+		// Should not happen: with a live client every transport field is
+		// applied above. Say so rather than blaming the pipeline shape.
+		reason = "the live LLM client did not adopt these fields; restart to apply"
+	}
+
+	warnRestartRequired(l.logger, l.warnings, RestartRequiredWarning{
+		Code:      WarnLLMRestartRequired,
+		Component: l.Name(),
+		Fields:    remaining,
+		Reason:    reason,
+	})
 	return nil
 }
 
@@ -151,8 +185,20 @@ func llmClientConfigFrom(cfg LLMConfig, current llm.Config) llm.Config {
 	return next
 }
 
+// onlyLifecycleFields reports whether every field is one of the pipeline-shape
+// fields that genuinely need a restart.
+func onlyLifecycleFields(fields []string) bool {
+	for _, field := range fields {
+		if !llmRestartRequiredFields[field] {
+			return false
+		}
+	}
+	return true
+}
+
 // Compile-time contract checks.
 var (
 	_ Reloadable        = (*LLMReloadable)(nil)
 	_ OrderedReloadable = (*LLMReloadable)(nil)
+	_ ResyncReloadable  = (*LLMReloadable)(nil)
 )

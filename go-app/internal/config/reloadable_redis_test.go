@@ -42,7 +42,7 @@ func redisConfigFor(server *miniredis.Miniredis, poolSize int) RedisConfig {
 
 func TestRedisReloadable_Contract(t *testing.T) {
 	cache, _ := newRedisFixture(t)
-	reloadable := NewRedisReloadable(cache, NewRestartWarnings(), slog.Default())
+	reloadable := NewRedisReloadable(cache, nil, NewRestartWarnings(), slog.Default())
 
 	assert.Equal(t, "redis", reloadable.Name())
 	assert.Equal(t, []string{"redis"}, reloadable.RelevantSections())
@@ -56,13 +56,13 @@ func TestRedisReloadable_Contract(t *testing.T) {
 func TestRedisReloadable_SwapsClientWhenHandleIsNotShared(t *testing.T) {
 	cache, oldServer := newRedisFixture(t)
 	warnings := NewRestartWarnings()
-	reloadable := NewRedisReloadable(cache, warnings, slog.Default())
+	oldCfg := &Config{Redis: redisConfigFor(oldServer, 4)}
+	reloadable := NewRedisReloadable(cache, oldCfg, warnings, slog.Default())
 
 	newServer, err := miniredis.Run()
 	require.NoError(t, err)
 	t.Cleanup(newServer.Close)
 
-	oldCfg := &Config{Redis: redisConfigFor(oldServer, 4)}
 	newCfg := &Config{Redis: redisConfigFor(newServer, 9)}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -80,7 +80,8 @@ func TestRedisReloadable_SwapsClientWhenHandleIsNotShared(t *testing.T) {
 func TestRedisReloadable_SharedHandleWarnsW601AndKeepsTheOldClient(t *testing.T) {
 	cache, oldServer := newRedisFixture(t)
 	warnings := NewRestartWarnings()
-	reloadable := NewRedisReloadable(cache, warnings, slog.Default())
+	oldCfg := &Config{Redis: redisConfigFor(oldServer, 4)}
+	reloadable := NewRedisReloadable(cache, oldCfg, warnings, slog.Default())
 
 	// This is what ServiceRegistry does for grouping/nflog/leader election.
 	shared := cache.ShareClient()
@@ -91,7 +92,6 @@ func TestRedisReloadable_SharedHandleWarnsW601AndKeepsTheOldClient(t *testing.T)
 	require.NoError(t, err)
 	t.Cleanup(newServer.Close)
 
-	oldCfg := &Config{Redis: redisConfigFor(oldServer, 4)}
 	newCfg := &Config{Redis: redisConfigFor(newServer, 4)}
 
 	// The reload as a whole is NOT failed — the rest of the config is valid.
@@ -114,9 +114,9 @@ func TestRedisReloadable_SharedHandleWarnsW601AndKeepsTheOldClient(t *testing.T)
 func TestRedisReloadable_UnreachableAddrRejectsTheReload(t *testing.T) {
 	cache, oldServer := newRedisFixture(t)
 	warnings := NewRestartWarnings()
-	reloadable := NewRedisReloadable(cache, warnings, slog.Default())
-
 	oldCfg := &Config{Redis: redisConfigFor(oldServer, 4)}
+	reloadable := NewRedisReloadable(cache, oldCfg, warnings, slog.Default())
+
 	newCfg := &Config{Redis: RedisConfig{
 		Addr:        "127.0.0.1:1", // nothing listens here
 		PoolSize:    4,
@@ -138,19 +138,17 @@ func TestRedisReloadable_UnreachableAddrRejectsTheReload(t *testing.T) {
 func TestRedisReloadable_UnchangedSectionIsNoOp(t *testing.T) {
 	cache, server := newRedisFixture(t)
 	warnings := NewRestartWarnings()
-	reloadable := NewRedisReloadable(cache, warnings, slog.Default())
-
 	cfg := &Config{Redis: redisConfigFor(server, 4)}
+	reloadable := NewRedisReloadable(cache, cfg, warnings, slog.Default())
 	require.NoError(t, reloadable.Reload(context.Background(), cfg, cfg))
 	assert.Empty(t, warnings.List())
 }
 
 func TestRedisReloadable_NilCacheWarnsInsteadOfPretending(t *testing.T) {
 	warnings := NewRestartWarnings()
-	reloadable := NewRedisReloadable(nil, warnings, slog.Default())
-
 	oldCfg := &Config{Redis: RedisConfig{Addr: "old:6379"}}
 	newCfg := &Config{Redis: RedisConfig{Addr: "new:6379"}}
+	reloadable := NewRedisReloadable(nil, oldCfg, warnings, slog.Default())
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
 

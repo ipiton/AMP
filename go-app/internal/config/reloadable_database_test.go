@@ -23,7 +23,7 @@ func databaseConfigFixture(host string, maxConns int) DatabaseConfig {
 }
 
 func TestDatabaseReloadable_Contract(t *testing.T) {
-	reloadable := NewDatabaseReloadable(nil, NewRestartWarnings(), slog.Default())
+	reloadable := NewDatabaseReloadable(nil, nil, NewRestartWarnings(), slog.Default())
 
 	assert.Equal(t, "database", reloadable.Name())
 	assert.Equal(t, []string{"database"}, reloadable.RelevantSections())
@@ -35,10 +35,9 @@ func TestDatabaseReloadable_Contract(t *testing.T) {
 
 func TestDatabaseReloadable_NilPoolWarnsW600InsteadOfPretending(t *testing.T) {
 	warnings := NewRestartWarnings()
-	reloadable := NewDatabaseReloadable(nil, warnings, slog.Default())
-
 	oldCfg := &Config{Database: databaseConfigFixture("db-1", 10)}
 	newCfg := &Config{Database: databaseConfigFixture("db-2", 10)}
+	reloadable := NewDatabaseReloadable(nil, oldCfg, warnings, slog.Default())
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
 
@@ -60,10 +59,9 @@ func TestDatabaseReloadable_SharedPoolWarnsW600(t *testing.T) {
 	require.True(t, pool.IsPoolShared())
 
 	warnings := NewRestartWarnings()
-	reloadable := NewDatabaseReloadable(pool, warnings, slog.Default())
-
 	oldCfg := &Config{Database: databaseConfigFixture("db-1", 10)}
 	newCfg := &Config{Database: databaseConfigFixture("db-1", 25)}
+	reloadable := NewDatabaseReloadable(pool, oldCfg, warnings, slog.Default())
 
 	// Not an error: the rest of the config is still worth applying.
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -83,9 +81,8 @@ func TestDatabaseReloadable_UnchangedSectionIsNoOp(t *testing.T) {
 	_ = pool.SharePool()
 
 	warnings := NewRestartWarnings()
-	reloadable := NewDatabaseReloadable(pool, warnings, slog.Default())
-
 	cfg := &Config{Database: databaseConfigFixture("db-1", 10)}
+	reloadable := NewDatabaseReloadable(pool, cfg, warnings, slog.Default())
 	require.NoError(t, reloadable.Reload(context.Background(), cfg, cfg))
 	assert.Empty(t, warnings.List(), "an unchanged section must not warn")
 }
@@ -98,13 +95,13 @@ func TestDatabaseReloadable_UnreachableHostRejectsTheReload(t *testing.T) {
 	require.False(t, pool.IsPoolShared())
 
 	warnings := NewRestartWarnings()
-	reloadable := NewDatabaseReloadable(pool, warnings, slog.Default())
+	oldCfg := &Config{Database: databaseConfigFixture("db-1", 10)}
+	reloadable := NewDatabaseReloadable(pool, oldCfg, warnings, slog.Default())
 
 	unreachable := databaseConfigFixture("127.0.0.1", 10)
 	unreachable.Port = 1 // nothing listens here
 	unreachable.ConnectTimeout = 500 * time.Millisecond
 
-	oldCfg := &Config{Database: databaseConfigFixture("db-1", 10)}
 	newCfg := &Config{Database: unreachable}
 
 	err := reloadable.Reload(context.Background(), oldCfg, newCfg)
@@ -117,7 +114,7 @@ func TestDatabaseReloadable_UnreachableHostRejectsTheReload(t *testing.T) {
 }
 
 func TestDatabaseReloadable_NilNewConfigIsAnError(t *testing.T) {
-	reloadable := NewDatabaseReloadable(nil, nil, slog.Default())
+	reloadable := NewDatabaseReloadable(nil, nil, nil, slog.Default())
 	require.Error(t, reloadable.Reload(context.Background(), &Config{}, nil))
 }
 

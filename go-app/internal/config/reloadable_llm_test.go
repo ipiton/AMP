@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newLLMFixture() (*LLMReloadable, *llm.HTTPLLMClient, *RestartWarnings) {
+func newLLMFixture(bootCfg *Config) (*LLMReloadable, *llm.HTTPLLMClient, *RestartWarnings) {
 	base := llm.DefaultConfig()
 	base.Provider = "proxy"
 	base.Model = "gpt-4o"
@@ -22,11 +22,16 @@ func newLLMFixture() (*LLMReloadable, *llm.HTTPLLMClient, *RestartWarnings) {
 
 	client := llm.NewHTTPLLMClient(base, slog.Default())
 	warnings := NewRestartWarnings()
-	return NewLLMReloadable(client, warnings, slog.Default()), client, warnings
+	return NewLLMReloadable(client, bootCfg, warnings, slog.Default()), client, warnings
+}
+
+// llmBootCfg is the config the fixture client was built from.
+func llmBootCfg() *Config {
+	return &Config{LLM: LLMConfig{Enabled: true, Provider: "proxy", Model: "gpt-4o", BaseURL: "http://llm-old.internal", Timeout: 30 * time.Second}}
 }
 
 func TestLLMReloadable_Contract(t *testing.T) {
-	reloadable, _, _ := newLLMFixture()
+	reloadable, _, _ := newLLMFixture(nil)
 
 	assert.Equal(t, "llm", reloadable.Name())
 	assert.Equal(t, []string{"llm"}, reloadable.RelevantSections())
@@ -35,9 +40,9 @@ func TestLLMReloadable_Contract(t *testing.T) {
 }
 
 func TestLLMReloadable_SwapsModelAndProvider(t *testing.T) {
-	reloadable, client, warnings := newLLMFixture()
+	oldCfg := llmBootCfg()
+	reloadable, client, warnings := newLLMFixture(oldCfg)
 
-	oldCfg := &Config{LLM: LLMConfig{Enabled: true, Provider: "proxy", Model: "gpt-4o", BaseURL: "http://llm-old.internal"}}
 	newCfg := &Config{LLM: LLMConfig{
 		Enabled:    true,
 		Provider:   "openai",
@@ -71,9 +76,9 @@ func TestLLMReloadable_PreservesFieldsAMPConfigDoesNotOwn(t *testing.T) {
 	base.EnableMetrics = false
 	base.CircuitBreaker.Enabled = false
 	client := llm.NewHTTPLLMClient(base, slog.Default())
-	reloadable := NewLLMReloadable(client, NewRestartWarnings(), slog.Default())
-
 	oldCfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
+	reloadable := NewLLMReloadable(client, oldCfg, NewRestartWarnings(), slog.Default())
+
 	newCfg := &Config{LLM: LLMConfig{Model: "claude"}}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -86,10 +91,10 @@ func TestLLMReloadable_PreservesFieldsAMPConfigDoesNotOwn(t *testing.T) {
 }
 
 func TestLLMReloadable_ZeroTimeoutAndRetriesKeepPreviousValues(t *testing.T) {
-	reloadable, client, _ := newLLMFixture()
+	oldCfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
+	reloadable, client, _ := newLLMFixture(oldCfg)
 	before := client.GetConfig()
 
-	oldCfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
 	newCfg := &Config{LLM: LLMConfig{Model: "gpt-5"}} // Timeout/MaxRetries left at zero
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -100,9 +105,9 @@ func TestLLMReloadable_ZeroTimeoutAndRetriesKeepPreviousValues(t *testing.T) {
 }
 
 func TestLLMReloadable_EnabledAndAgentModeWarnW604(t *testing.T) {
-	reloadable, client, warnings := newLLMFixture()
-
 	oldCfg := &Config{LLM: LLMConfig{Enabled: true, AgentMode: false, Model: "gpt-4o"}}
+	reloadable, client, warnings := newLLMFixture(oldCfg)
+
 	newCfg := &Config{LLM: LLMConfig{Enabled: false, AgentMode: true, Model: "gpt-4o"}}
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
@@ -118,10 +123,10 @@ func TestLLMReloadable_EnabledAndAgentModeWarnW604(t *testing.T) {
 }
 
 func TestLLMReloadable_UnchangedSectionIsNoOp(t *testing.T) {
-	reloadable, client, warnings := newLLMFixture()
+	cfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
+	reloadable, client, warnings := newLLMFixture(cfg)
 	before := client.GetConfig()
 
-	cfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
 	require.NoError(t, reloadable.Reload(context.Background(), cfg, cfg))
 
 	assert.Equal(t, before.Model, client.GetConfig().Model)
@@ -130,10 +135,9 @@ func TestLLMReloadable_UnchangedSectionIsNoOp(t *testing.T) {
 
 func TestLLMReloadable_NilClientWarnsInsteadOfPretending(t *testing.T) {
 	warnings := NewRestartWarnings()
-	reloadable := NewLLMReloadable(nil, warnings, slog.Default())
-
 	oldCfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
 	newCfg := &Config{LLM: LLMConfig{Model: "gpt-5"}}
+	reloadable := NewLLMReloadable(nil, oldCfg, warnings, slog.Default())
 
 	require.NoError(t, reloadable.Reload(context.Background(), oldCfg, newCfg))
 
@@ -147,7 +151,7 @@ func TestLLMReloadable_NilClientWarnsInsteadOfPretending(t *testing.T) {
 // investigation pipeline reads the client's config on worker goroutines while
 // a SIGHUP reload swaps it.
 func TestLLMReloadable_ConcurrentReloadAndRead(t *testing.T) {
-	reloadable, client, _ := newLLMFixture()
+	reloadable, client, _ := newLLMFixture(llmBootCfg())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
