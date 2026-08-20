@@ -570,3 +570,35 @@ func TestGroupNotificationContext_RoundTrip(t *testing.T) {
 	}
 	assert.Equal(t, want, groupNotificationContextFrom(withGroupNotificationContext(context.Background(), want)))
 }
+
+// TestJobContext_CopiesGroupLabels: the job's label map must not be aliased into
+// the context the renderer reads (slice-2 review minor 6). Safe today because the
+// group is sealed before dispatch — pinned so it stays safe by construction.
+func TestJobContext_CopiesGroupLabels(t *testing.T) {
+	factory := NewPublisherFactory(NewAlertFormatter(""), slog.Default(), nil, "")
+	t.Cleanup(factory.Shutdown)
+
+	queue := NewPublishingQueue(
+		factory,
+		nil,
+		NewLRUJobTrackingStore(4),
+		PublishingQueueConfig{
+			WorkerCount:             1,
+			HighPriorityQueueSize:   1,
+			MediumPriorityQueueSize: 1,
+			LowPriorityQueueSize:    1,
+		},
+		nil,
+		slog.Default(),
+	)
+
+	labels := map[string]string{"alertname": "HighCPU"}
+	job := &PublishingJob{GroupKey: "gk", Receiver: "team-x", GroupLabels: labels}
+
+	group := groupNotificationContextFrom(queue.jobContext(job))
+	labels["alertname"] = "MUTATED"
+	delete(labels, "alertname")
+
+	assert.Equal(t, map[string]string{"alertname": "HighCPU"}, group.GroupLabels,
+		"the rendered notification must not see a mutation of the caller's map")
+}

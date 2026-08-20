@@ -10,13 +10,19 @@ import (
 // ============================================================================
 //
 // These are the keys of PublishingTarget.Templates, and they are upstream
-// Alertmanager's own per-integration config field names. Three packages have to
-// agree on them and none of them may import another:
+// Alertmanager's own per-integration config field names. Two packages have to
+// agree on them and neither may import the other:
 //
 //   - business/publishing fills the map from the parsed `receivers:` config,
 //   - infrastructure/publishing renders the values and overlays them onto the
-//     wire payload,
-//   - discovery parses the same keys out of a Kubernetes Secret.
+//     wire payload.
+//
+// Templating is CONFIG-ONLY today: Kubernetes-Secret discovery does not populate
+// Templates at all (nothing under infrastructure/discovery or infrastructure/k8s
+// reads these keys), so a Secret-provisioned target keeps AMP's fixed formatters.
+// Parsing them out of a Secret would be the natural third consumer, which is why
+// the vocabulary lives here rather than in either package — but it is not
+// implemented, and an earlier version of this comment claimed it was.
 //
 // business/publishing already imports infrastructure/publishing, so the
 // constants cannot live in either of them without creating a cycle — and
