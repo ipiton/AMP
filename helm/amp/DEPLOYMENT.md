@@ -47,8 +47,14 @@ helm upgrade --install "$RELEASE" ./helm/amp \
   --namespace "$NAMESPACE" \
   --create-namespace \
   --set profile=standard \
-  -f helm/amp/values-production.yaml
+  -f helm/amp/values-production.yaml \
+  --set postgresql.password="$PG_PASSWORD" \
+  --set cache.auth.password="$CACHE_PASSWORD"
 ```
+
+The production values file deliberately ships NO passwords: rendering fails
+loud (a `required` guard) until both are supplied — via `--set` as above, or
+an ExternalSecret/ESO flow. Never commit real values into the values file.
 
 Inspect the resulting resources:
 
