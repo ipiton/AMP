@@ -37,7 +37,9 @@ import (
 	infrasilencing "github.com/ipiton/AMP/internal/infrastructure/silencing"
 	"github.com/ipiton/AMP/internal/infrastructure/snapshot"
 	"github.com/ipiton/AMP/internal/infrastructure/storage/memory"
+	pkglogger "github.com/ipiton/AMP/pkg/logger"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
+	metricsv2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -246,11 +248,28 @@ type ServiceRegistry struct {
 	// close it cleanly and avoid a leak if the pool is ever reinitialised.
 	investigationToolsDB *sql.DB
 
+	// llmClient is the live LLM client built by initializeInvestigation, kept
+	// so LLMReloadable can swap its provider/model settings on a config
+	// reload. Nil whenever the investigation pipeline was not built (lite
+	// profile, investigation.enabled=false, llm.enabled=false).
+	llmClient *llm.HTTPLLMClient
+
 	// State
 	startTime         time.Time
 	reloadCoordinator *appconfig.ReloadCoordinator
 	initialized       bool
 	degradedReasons   []string
+
+	// Hot-reload plumbing (INF-A slice 1).
+	//
+	// restartWarnings collects the W6xx "this change needs a restart"
+	// findings raised by the registered Reloadable components; metricsGate is
+	// the runtime on/off switch the router wraps /metrics with; logHandler is
+	// the process's swappable slog handler, supplied by cmd/server/main.go
+	// (which owns logger construction) via SetLogHandler before Initialize.
+	restartWarnings *appconfig.RestartWarnings
+	metricsGate     *metricsv2.ExpositionGate
+	logHandler      *pkglogger.SwappableHandler
 }
 
 // NewServiceRegistry creates a new service registry.
@@ -303,6 +322,12 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 		nil,
 		r.logger,
 	)
+
+	// Hot-reload plumbing (INF-A slice 1). Both must exist before the router
+	// is built (MetricsGate) and before components register (restartWarnings),
+	// so they are created here rather than in one of the initialize* steps.
+	r.restartWarnings = appconfig.NewRestartWarnings()
+	r.metricsGate = metricsv2.NewExpositionGate(r.config.Metrics.Enabled)
 
 	// Step 1: Initialize Infrastructure
 	if err := r.initializeInfrastructure(ctx); err != nil {
@@ -395,6 +420,12 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	if err := r.initializeAlertProcessor(ctx); err != nil {
 		return fmt.Errorf("alert processor initialization failed: %w", err)
 	}
+
+	// Step 5: register the config.Reloadable components (INF-A slice 1). Last,
+	// so every component it wraps (pool, cache, LLM client) already exists —
+	// a component wired with a nil dependency reports restart-required
+	// forever, which would be a silent downgrade of hot reload.
+	r.registerReloadables(reloader)
 
 	r.initialized = true
 	r.logger.Info("Service registry initialized successfully")
@@ -531,7 +562,7 @@ func (r *ServiceRegistry) initializeSilencePersistence(ctx context.Context) erro
 		return fmt.Errorf("postgres pool not available for silence repository")
 	}
 
-	r.silenceRepo = infrasilencing.NewPostgresSilenceRepository(r.database.Pool(), r.logger)
+	r.silenceRepo = infrasilencing.NewPostgresSilenceRepository(r.database.SharePool(), r.logger)
 	r.logger.Info("Silence repository initialized (DB-first silence writes enabled)")
 
 	if err := r.rehydrateSilenceStore(ctx); err != nil {
@@ -706,7 +737,7 @@ func (r *ServiceRegistry) initializeSilenceGCElection(manager *businesssilencing
 
 	manager.EnableLeaderGatedGC()
 	r.leaderElector = lock.NewLeaderElector(
-		redisCache.GetClient(),
+		redisCache.ShareClient(),
 		"amp:leader:silence-gc",
 		nil, // defaults: 20s TTL / ~7s renew / 2s retry — see lock.Default* constants
 		r.logger,
@@ -764,7 +795,7 @@ func (r *ServiceRegistry) initializeClusterHeartbeat(ctx context.Context) error 
 	}
 
 	address := r.config.Server.ExternalURL
-	registry := cluster.NewHeartbeatRegistry(redisCache.GetClient(), "", address, 0, 0, r.logger)
+	registry := cluster.NewHeartbeatRegistry(redisCache.ShareClient(), "", address, 0, 0, r.logger)
 	if err := registry.Start(ctx); err != nil {
 		return fmt.Errorf("cluster heartbeat start failed: %w", err)
 	}
@@ -823,7 +854,7 @@ func (r *ServiceRegistry) newSilenceEventBus(ctx context.Context) (*infrasilenci
 	if r.config.Profile == appconfig.ProfileStandard {
 		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
 			bus, err := infrasilencing.NewRedisSilenceEventBus(ctx, &infrasilencing.SilenceEventBusConfig{
-				Client: redisCache.GetClient(),
+				Client: redisCache.ShareClient(),
 				Logger: r.logger,
 			})
 			if err != nil {
@@ -1036,29 +1067,9 @@ func (r *ServiceRegistry) initializeDatabase(ctx context.Context) error {
 
 	r.logger.Info("Initializing PostgreSQL...")
 
-	// Build PostgreSQL config
-	dbCfg := postgres.DefaultConfig()
-	dbCfg.Host = r.config.Database.Host
-	dbCfg.Port = r.config.Database.Port
-	dbCfg.Database = r.config.Database.Database
-	dbCfg.User = r.config.Database.Username
-	dbCfg.Password = r.config.Database.Password
-	dbCfg.SSLMode = r.config.Database.SSLMode
-	if r.config.Database.MaxConnections > 0 {
-		dbCfg.MaxConns = int32(r.config.Database.MaxConnections)
-	}
-	if r.config.Database.MinConnections > 0 {
-		dbCfg.MinConns = int32(r.config.Database.MinConnections)
-	}
-	if r.config.Database.MaxConnLifetime > 0 {
-		dbCfg.MaxConnLifetime = r.config.Database.MaxConnLifetime
-	}
-	if r.config.Database.MaxConnIdleTime > 0 {
-		dbCfg.MaxConnIdleTime = r.config.Database.MaxConnIdleTime
-	}
-	if r.config.Database.ConnectTimeout > 0 {
-		dbCfg.ConnectTimeout = r.config.Database.ConnectTimeout
-	}
+	// Build PostgreSQL config. Shared with DatabaseReloadable so a hot reload
+	// produces the exact same pool config from the same YAML.
+	dbCfg := appconfig.PostgresConfigFrom(r.config.Database)
 
 	// Create and connect
 	pool := postgres.NewPostgresPool(dbCfg, r.logger)
@@ -1112,7 +1123,7 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 			return fmt.Errorf("postgres database is not initialized")
 		}
 
-		storageAdapter, err := infrastructure.NewPostgresStorageAdapter(r.database.Pool(), r.logger)
+		storageAdapter, err := infrastructure.NewPostgresStorageAdapter(r.database.SharePool(), r.logger)
 		if err != nil {
 			return fmt.Errorf("failed to create postgres storage adapter: %w", err)
 		}
@@ -1136,19 +1147,9 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
 	r.logger.Info("Initializing cache backend...")
 
-	cacheConfig := &infrastructurecache.CacheConfig{
-		Addr:            r.config.Redis.Addr,
-		Password:        r.config.Redis.Password,
-		DB:              r.config.Redis.DB,
-		PoolSize:        r.config.Redis.PoolSize,
-		MinIdleConns:    r.config.Redis.MinIdleConns,
-		DialTimeout:     r.config.Redis.DialTimeout,
-		ReadTimeout:     r.config.Redis.ReadTimeout,
-		WriteTimeout:    r.config.Redis.WriteTimeout,
-		MaxRetries:      r.config.Redis.MaxRetries,
-		MinRetryBackoff: r.config.Redis.MinRetryBackoff,
-		MaxRetryBackoff: r.config.Redis.MaxRetryBackoff,
-	}
+	// Shared with RedisReloadable so a hot reload produces the exact same
+	// client config from the same YAML.
+	cacheConfig := appconfig.CacheConfigFrom(r.config.Redis)
 
 	redisCache, err := infrastructurecache.NewRedisCache(cacheConfig, r.logger)
 	if err != nil {
@@ -1817,7 +1818,7 @@ func (r *ServiceRegistry) newGroupingStorage(ctx context.Context) (grouping.Grou
 	if r.config.Profile == appconfig.ProfileStandard {
 		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
 			groupStorage, err := grouping.NewRedisGroupStorage(ctx, &grouping.RedisGroupStorageConfig{
-				Client:  redisCache.GetClient(),
+				Client:  redisCache.ShareClient(),
 				Logger:  r.logger,
 				Metrics: r.metrics,
 			})
@@ -1919,7 +1920,7 @@ func (r *ServiceRegistry) newNotifyLog(ctx context.Context) (grouping.GroupNotif
 	if r.config.Profile == appconfig.ProfileStandard {
 		if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
 			notifyLog, err := grouping.NewRedisNotifyLog(ctx, &grouping.RedisNotifyLogConfig{
-				Client: redisCache.GetClient(),
+				Client: redisCache.ShareClient(),
 				Logger: r.logger,
 			})
 			if err != nil {
@@ -2101,7 +2102,7 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 
 	r.logger.Info("Initializing investigation pipeline...")
 
-	r.investigationRepo = investigationrepo.NewPostgresInvestigationRepository(r.database.Pool(), r.logger)
+	r.investigationRepo = investigationrepo.NewPostgresInvestigationRepository(r.database.SharePool(), r.logger)
 
 	llmCfg := llm.DefaultConfig()
 	llmCfg.Provider = r.config.LLM.Provider
@@ -2114,6 +2115,7 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 	llmCfg.MaxRetries = r.config.LLM.MaxRetries
 
 	llmClient := llm.NewHTTPLLMClient(llmCfg, r.logger)
+	r.llmClient = llmClient
 
 	qCfg := investigationinfra.DefaultQueueConfig()
 	if r.config.Investigation.WorkerCount > 0 {
@@ -2170,7 +2172,7 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 			// underlying pgx pool. We keep the handle on the registry so
 			// Shutdown can close it deterministically; without this it
 			// would leak if the pool is replaced (e.g. on hot-reload).
-			r.investigationToolsDB = stdlib.OpenDBFromPool(r.database.Pool())
+			r.investigationToolsDB = stdlib.OpenDBFromPool(r.database.SharePool())
 			registry.Register(invtools.NewDatabaseTool(r.investigationToolsDB))
 			r.logger.Info("Database investigation tool registered")
 		}
@@ -2572,6 +2574,11 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	if configPath == "" {
 		configPath = "config.yaml"
 	}
+
+	// Drop the previous attempt's restart-required findings: they describe a
+	// config edit that has already been superseded, and leaving them would let
+	// a stale "restart required" outlive the change that caused it.
+	r.restartWarnings.Clear()
 
 	result, err := r.reloadCoordinator.ReloadFromFile(ctx, configPath)
 	if err != nil {

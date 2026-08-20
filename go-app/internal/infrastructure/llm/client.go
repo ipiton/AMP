@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"sync"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"

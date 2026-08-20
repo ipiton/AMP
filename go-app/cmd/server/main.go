@@ -15,6 +15,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/application"
 	"github.com/ipiton/AMP/internal/config"
+	pkglogger "github.com/ipiton/AMP/pkg/logger"
 )
 
 const (
@@ -32,10 +33,21 @@ func main() {
 		"Prefix for the internal routes of web endpoints. Overrides server.route_prefix in config when set.")
 	flag.Parse()
 
-	// Setup structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	// Setup structured logging.
+	//
+	// The handler is swappable (INF-A slice 1) so `log.level` / `log.format`
+	// can be changed by SIGHUP instead of a restart — see
+	// pkg/logger.SwappableHandler and config.LoggerReloadable. It starts at
+	// JSON/info because config has not been read yet; applyLogConfig below
+	// swaps in the operator's settings as soon as it has.
+	logHandler, err := pkglogger.NewSwappableHandler(os.Stdout, slog.LevelInfo, "json")
+	if err != nil {
+		// Cannot happen for the literals above, but a nil handler would panic
+		// on the first log line, so fail loudly instead.
+		fmt.Fprintf(os.Stderr, "failed to build log handler: %v\n", err)
+		os.Exit(1)
+	}
+	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
 	slog.Info("🚀 Starting Alertmanager++",
@@ -60,6 +72,12 @@ func main() {
 		cfg.Server.RoutePrefix = *routePrefixFlag
 	}
 
+	// Apply the operator's log.* settings now that config exists. Before
+	// INF-A slice 1 the logger was hardcoded to JSON/info and cfg.Log was
+	// never read at all, so `log.level: debug` did nothing even across a
+	// restart.
+	applyLogConfig(logHandler, cfg)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -67,6 +85,14 @@ func main() {
 	registry, err := application.NewServiceRegistry(cfg, logger)
 	if err != nil {
 		slog.Error("Failed to create service registry", "error", err)
+		os.Exit(1)
+	}
+
+	// Hand the swappable handler over BEFORE Initialize: that is when the
+	// registry registers LoggerReloadable, and a nil handler there would make
+	// every log.level change report "restart required".
+	if err := registry.SetLogHandler(logHandler); err != nil {
+		slog.Error("Failed to wire the swappable log handler", "error", err)
 		os.Exit(1)
 	}
 
@@ -204,4 +230,25 @@ func resolveRuntimeConfigPath() string {
 		return path
 	}
 	return "config.yaml"
+}
+
+// applyLogConfig swaps the process logger onto the operator's configured level
+// and format. A bad format is logged and ignored rather than fatal: losing the
+// requested format is a nuisance, exiting because of one YAML typo is an
+// outage.
+func applyLogConfig(handler *pkglogger.SwappableHandler, cfg *config.Config) {
+	if handler == nil || cfg == nil {
+		return
+	}
+	if cfg.Log.Level == "" && cfg.Log.Format == "" {
+		return
+	}
+
+	level := pkglogger.ParseLevel(cfg.Log.Level)
+	if err := handler.Swap(level, cfg.Log.Format); err != nil {
+		slog.Warn("Ignoring log configuration; keeping JSON/info",
+			"level", cfg.Log.Level, "format", cfg.Log.Format, "error", err)
+		return
+	}
+	slog.Info("Log configuration applied", "level", level.String(), "format", handler.Format())
 }
