@@ -100,9 +100,19 @@ helm template amp "${CHART_DIR}" -f "${WORK_DIR}/on.yaml" \
 assert_contains "${WORK_DIR}/signal.yaml" "shareProcessNamespace: true" "shared PID namespace"
 assert_contains "${WORK_DIR}/signal.yaml" "--method=signal" "signal method"
 
-echo "production values enable the sidecar:"
+echo "http method never grants a shared PID namespace, even if asked:"
+helm template amp "${CHART_DIR}" -f "${WORK_DIR}/on.yaml" \
+  --set configReloader.shareProcessNamespace=true >"${WORK_DIR}/http-shared.yaml"
+assert_absent "${WORK_DIR}/http-shared.yaml" "shareProcessNamespace" "no shared PID namespace for method: http"
+
+echo "production values render the config file but NOT the sidecar:"
+# The sidecar stays disabled until a CI job publishes its image: pod readiness
+# requires all containers, so an unpullable sidecar would keep the pod out of the
+# Service and stall the rollout. The config FILE is useful on its own.
 helm template amp "${CHART_DIR}" -f "${CHART_DIR}/values-production.yaml" >"${WORK_DIR}/prod.yaml"
-assert_contains "${WORK_DIR}/prod.yaml" "name: config-reloader" "sidecar enabled in production"
+assert_contains "${WORK_DIR}/prod.yaml" "amp-configfile" "config file rendered in production"
+assert_contains "${WORK_DIR}/prod.yaml" "AMP_CONFIG_FILE" "AMP_CONFIG_FILE set in production"
+assert_absent "${WORK_DIR}/prod.yaml" "name: config-reloader" "sidecar NOT enabled while its image is unpublished"
 
 echo "misconfigurations are refused at render time:"
 assert_render_fails "sidecar without a config file" \

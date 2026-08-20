@@ -29,7 +29,6 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -42,10 +41,12 @@ spec:
       {{- fail "configReloader.method=signal requires configReloader.shareProcessNamespace=true, otherwise the sidecar is its own PID 1 and SIGHUP would never reach AMP. Use method: http instead." }}
       {{- end }}
       {{- end }}
-      {{- if and .Values.configReloader.enabled .Values.configReloader.shareProcessNamespace }}
-      # Only set for configReloader.method=signal: it lets every container in
-      # the pod see the others' processes, which is the price of SIGHUP across
-      # a container boundary.
+      {{- if and .Values.configReloader.enabled .Values.configReloader.shareProcessNamespace (eq .Values.configReloader.method "signal") }}
+      # ONLY for configReloader.method=signal (review M14): it lets every
+      # container in the pod see the others' processes, which is the price of
+      # SIGHUP across a container boundary — and pointless cost for any other
+      # method, so a stray shareProcessNamespace=true with method: http no
+      # longer grants it.
       shareProcessNamespace: true
       {{- end }}
       {{- with .Values.imagePullSecrets }}
