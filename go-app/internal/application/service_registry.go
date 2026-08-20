@@ -1237,17 +1237,14 @@ func (r *ServiceRegistry) initializeClassification(ctx context.Context) error {
 		r.cache = infrastructurecache.NewMemoryCache(r.logger)
 	}
 
-	llmConfig := llm.DefaultConfig()
-	llmConfig.Provider = r.config.LLM.Provider
-	llmConfig.BaseURL = r.config.LLM.BaseURL
-	llmConfig.APIKey = r.config.LLM.APIKey
-	llmConfig.Model = r.config.LLM.Model
-	llmConfig.MaxTokens = r.config.LLM.MaxTokens
-	llmConfig.Temperature = r.config.LLM.Temperature
-	llmConfig.Timeout = r.config.LLM.Timeout
-	llmConfig.MaxRetries = r.config.LLM.MaxRetries
-
-	llmClient := llm.NewHTTPLLMClient(llmConfig, r.logger)
+	// ONE client for the whole process (fix-round C1). Classification used to
+	// build its own, identically-configured *HTTPLLMClient while only the
+	// investigation pipeline's copy was registered for hot reload — so an
+	// llm.model/llm.api_key reload reported success while every alert
+	// classification, the higher-traffic path, kept the old model and the old
+	// credential.
+	llmClient := r.sharedLLMClient()
+	llmConfig := llmClient.GetConfig()
 
 	classificationConfig := services.DefaultClassificationConfig()
 	classificationConfig.EnableLLM = true
@@ -2104,18 +2101,9 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 
 	r.investigationRepo = investigationrepo.NewPostgresInvestigationRepository(r.database.SharePool(), r.logger)
 
-	llmCfg := llm.DefaultConfig()
-	llmCfg.Provider = r.config.LLM.Provider
-	llmCfg.BaseURL = r.config.LLM.BaseURL
-	llmCfg.APIKey = r.config.LLM.APIKey
-	llmCfg.Model = r.config.LLM.Model
-	llmCfg.MaxTokens = r.config.LLM.MaxTokens
-	llmCfg.Temperature = r.config.LLM.Temperature
-	llmCfg.Timeout = r.config.LLM.Timeout
-	llmCfg.MaxRetries = r.config.LLM.MaxRetries
-
-	llmClient := llm.NewHTTPLLMClient(llmCfg, r.logger)
-	r.llmClient = llmClient
+	// Same shared client as the classification path (fix-round C1): it is the
+	// object LLMReloadable swaps, so both consumers must be looking at it.
+	llmClient := r.sharedLLMClient()
 
 	qCfg := investigationinfra.DefaultQueueConfig()
 	if r.config.Investigation.WorkerCount > 0 {
@@ -2575,10 +2563,12 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 		configPath = "config.yaml"
 	}
 
-	// Drop the previous attempt's restart-required findings: they describe a
-	// config edit that has already been superseded, and leaving them would let
-	// a stale "restart required" outlive the change that caused it.
-	r.restartWarnings.Clear()
+	// Restart-required findings are NOT cleared here (fix-round I2). Each
+	// component re-raises its own warning on every attempt while its live
+	// state still differs from the config, and resolves it the moment it does
+	// not — so an unrelated reload can no longer erase the fact that an
+	// operator's earlier edit is still waiting for a restart.
+	previousConfig := r.config
 
 	result, err := r.reloadCoordinator.ReloadFromFile(ctx, configPath)
 	if err != nil {
@@ -2630,11 +2620,17 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 
 	// Task 1.4: hot-reload the route tree. reload_coordinator's
 	// identifyAffectedComponents already flags affected["routing"] when
-	// route:/receivers: fields change; unlike that (currently-unused)
-	// Reloadable-registry path, ServiceRegistry applies live-component
-	// updates directly here — same pattern as the inhibition matcher above.
+	// route:/receivers: fields change; ServiceRegistry applies these
+	// live-component updates directly here rather than as Reloadables — same
+	// pattern as the inhibition matcher above.
+	//
+	// This runs AFTER the coordinator has committed the config and after all
+	// five registered components adopted it, so a failure here must undo both
+	// (fix-round I4) instead of reporting "reload failed" over a fully-live new
+	// config. Folding these appliers into the component registry, so one
+	// failure policy covers everything, is FU-RELOAD-UNIFY-APPLIERS.
 	if err := r.reloadRoutingTree(); err != nil {
-		return err
+		return r.rollbackPostCommit(ctx, previousConfig, "routing", err)
 	}
 
 	// Notification templates: `templates:` globs are part of the same
