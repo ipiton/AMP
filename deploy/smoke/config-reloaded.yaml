@@ -1,0 +1,66 @@
+# PHASE-8 smoke e2e -- the "modified config" run.sh swaps in for the
+# /-/reload step. Identical to config.yaml except for one addition: a
+# blackhole receiver (upstream's `- name: 'null'` shape, valid since
+# AMP-PARITY-WAVE6-EPIC -- a receiver with no integrations loads instead of
+# failing validation) named distinctly enough that its presence in
+# GET /api/v2/status's config.original (StatusAPIHandler renders the
+# Alertmanager-shaped, secret-redacted route/receivers section -- see
+# AlertmanagerConfigYAML) proves the reload actually re-read this file
+# rather than silently keeping the old in-memory config.
+profile: lite
+
+storage:
+  backend: filesystem
+  filesystem_path: /tmp/amp-smoke.db
+  path: ""
+
+server:
+  port: 8080
+  host: 0.0.0.0
+
+log:
+  level: info
+  format: json
+  output: stdout
+
+metrics:
+  enabled: true
+  path: /metrics
+  namespace: alert_history
+
+publishing:
+  enabled: true
+
+grouping:
+  enabled: true
+  reconciliation_interval: 5s
+  reconciliation_grace: 3s
+
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: 3s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://webhook:8090/webhook
+        send_resolved: true
+
+  # The reload marker this script's step 5 greps for. Two separate facts,
+  # verified independently against the running container's logs -- don't
+  # conflate them:
+  #   - No integrations configured -> this DOES log a load-time WARNING
+  #     (configvalidator W024, "... has no integrations configured;
+  #     alerts routed here are dropped (blackhole receiver)") -- but that
+  #     warning fires because it's a blackhole receiver, not because of
+  #     the point below.
+  #   - Unreferenced by any route -> silently tolerated, no warning at
+  #     all. `infrastructure/routing.ReceiverConfig.Referenced` exists to
+  #     track this but is only ever assigned on a Clone(), never read
+  #     anywhere to gate a log line -- so "unused receiver" warnings are
+  #     not actually wired up, despite a comment elsewhere in the
+  #     codebase describing them as if they were.
+  - name: smoke-reload-marker

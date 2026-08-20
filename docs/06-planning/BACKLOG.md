@@ -286,4 +286,4 @@
   - Оценка: ~3d
 
 ## Release
-- [ ] **PHASE-8-RELEASE-ROLLOUT** — полный quality gate, smoke e2e, rollback runbook и controlled rollout.
+- [x] ~~**PHASE-8-RELEASE-ROLLOUT**~~ — полный quality gate, smoke e2e, rollback runbook и controlled rollout. `scripts/release-gate.sh` (build/lint/test/futureparity/-race/helm/amtool-compat, green on main), `deploy/smoke/` (single-node lite e2e: real webhook delivery, silence suppression, `/-/reload`), `docs/ROLLBACK_RUNBOOK.md`, `docs/ROLLOUT_PLAN.md`.
