@@ -189,13 +189,3 @@ func changedFields(section string, oldValue, newValue any) []string {
 	sort.Strings(changed)
 	return changed
 }
-
-// intersects reports whether any name in candidates appears in set.
-func intersects(candidates []string, set map[string]bool) bool {
-	for _, name := range candidates {
-		if set[name] {
-			return true
-		}
-	}
-	return false
-}
