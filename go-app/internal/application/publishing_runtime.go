@@ -122,6 +122,17 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, confi
 	// see initializeTemplating) degrades to "no templating", never to "no
 	// notifications".
 	//
+	// This is UNCONDITIONAL for every config-provisioned
+	// slack/pagerduty/telegram/email target, and it is meant to be: those targets
+	// carry upstream's own defaults (`{{ template "slack.default.title" . }}`
+	// etc.), so an untouched upstream config renders UPSTREAM's output — the
+	// drop-in promise — which also means a `receivers:` deployment that names no
+	// template at all sees its Slack payload change shape (Block Kit → upstream
+	// attachment) and its email body switch to `email.default.html`. That is the
+	// epic's headline breaking change; publishing.templates.enabled=false is the
+	// documented revert (registry stays nil above, so this whole block is
+	// skipped).
+	//
 	// The registry is a stable pointer that swaps its own contents on reload, so
 	// this is a one-time wiring: reloadTemplates does not need to re-enter here.
 	//
