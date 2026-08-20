@@ -15,7 +15,13 @@ metadata:
     app.kubernetes.io/part-of: cache-layer
 spec:
   # StatefulSet Configuration
-  replicas: {{ .Values.valkey.replicas | default 1 }}
+  # `| default 1` deliberately NOT used here: Helm/sprig's `default` treats an
+  # explicit 0 as "empty" and substitutes 1, defeating `valkey.replicas: 0` as
+  # a way to disable this StatefulSet's pod (e.g. when an external
+  # DragonflyDB serves cache.* instead — see values-production.yaml). The real
+  # default lives in values.yaml (`valkey.replicas: 1`), so callers never see
+  # a stray nil here.
+  replicas: {{ .Values.valkey.replicas | int }}
   serviceName: {{ include "amp.fullname" . }}-redis-headless
   podManagementPolicy: OrderedReady  # Sequential startup for deterministic primary selection
 

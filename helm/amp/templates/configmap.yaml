@@ -57,3 +57,21 @@ data:
   PUBLISHING_HEALTH_TLS_SKIP_VERIFY: {{ .Values.publishing.health.tlsSkipVerify | quote }}
   PUBLISHING_HEALTH_FOLLOW_REDIRECTS: {{ .Values.publishing.health.followRedirects | quote }}
   PUBLISHING_HEALTH_MAX_REDIRECTS: {{ .Values.publishing.health.maxRedirects | quote }}
+  PUBLISHING_QUEUE_DELIVERY_CONFIRMATION_TIMEOUT: {{ .Values.publishing.queue.deliveryConfirmationTimeout | quote }}
+  PUBLISHING_TEMPLATES_ENABLED: {{ .Values.publishing.templates.enabled | quote }}
+
+  GROUPING_ENABLED: {{ .Values.grouping.enabled | quote }}
+  GROUPING_RECONCILIATION_INTERVAL: {{ .Values.grouping.reconciliationInterval | quote }}
+  {{- if .Values.grouping.reconciliationGrace }}
+  # An explicit pin always wins over ServiceRegistry's own
+  # grouping.ReconciliationGraceFor(deliveryConfirmationTimeout) derivation.
+  GROUPING_RECONCILIATION_GRACE: {{ .Values.grouping.reconciliationGrace | quote }}
+  {{- end }}
+
+  {{- if .Values.storage.path }}
+  STORAGE_PATH: {{ .Values.storage.path | quote }}
+  STORAGE_SNAPSHOT_INTERVAL: {{ .Values.storage.snapshotInterval | quote }}
+  {{- end }}
+
+  SILENCING_SUBSCRIBE_RETRY_BACKOFF: {{ .Values.silencing.subscribeRetryBackoff | quote }}
+  SILENCING_PERIODIC_RESYNC_INTERVAL: {{ .Values.silencing.periodicResyncInterval | quote }}

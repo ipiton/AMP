@@ -1,5 +1,14 @@
 # Production-oriented values overrides for AMP with optional LLM settings
-# Usage: helm install amp ./helm/amp -f values-production.yaml
+# Usage:
+#   helm dependency build ./helm/amp   # fetches the valkey subchart (Chart.yaml dependency) once
+#   helm install amp ./helm/amp -f values-production.yaml
+#
+# Every key below was audited against the app's actual viper defaults
+# (go-app/internal/config/config.go) and the chart's own templates as of the
+# alertmanager-parity program (2026-08). Comments call out where a claim in
+# this file does NOT match what the chart can currently do — see the
+# PostgreSQL and Cache sections below — rather than asserting capabilities
+# the templates don't have.
 
 # ===============================
 # Application Configuration
@@ -7,6 +16,7 @@
 replicaCount: 3
 environment: production
 logLevel: info
+profile: "standard"
 
 # ===============================
 # Container Image Configuration
@@ -28,33 +38,122 @@ resources:
     memory: 1Gi
 
 # ===============================
+# Pod Disruption Budget (app Deployment)
+# ===============================
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2 # replicaCount 3 (up to 20 via HPA) — never drain below 2 on voluntary disruption
+
+# ===============================
 # PostgreSQL Database (Production)
 # ===============================
+# HONESTY NOTE (was previously wrong in this file): BACKLOG's "PostgreSQL
+# cluster (3 instances)" is NOT what this chart's templates/postgresql-statefulset.yaml
+# implements. It is a single-primary StatefulSet with no streaming replication
+# or failover logic — the old `postgresql.cluster.instances: 3` /
+# `postgresql.cluster.postgresql.parameters` keys below rendered NOTHING (no
+# template reads them) and would have silently shipped one instance while the
+# file claimed three. Setting `replicas: 3` on THIS template would start three
+# independent, uncoordinated Postgres processes each with its own PVC — not a
+# cluster, an active split-brain risk. Real multi-instance HA needs a proper
+# operator (CloudNativePG/Patroni) and is tracked as a gap in
+# docs/06-planning/TECH-DEBT.md (HELM-CHART-GAPS), not implemented here.
+# What IS real and enabled below: one primary, tuned for 20 replicas' worth of
+# connections, WAL archiving + daily base backups for PITR, and its own PDB.
 postgresql:
   enabled: true
-  cluster:
-    instances: 3
-    storage:
-      size: 50Gi
-    postgresql:
-      parameters:
-        max_connections: "500"
-        shared_buffers: "1GB"
-        effective_cache_size: "4GB"
+  replicas: 1
+  # MUST be set before install: --set postgresql.password=..., a CI-injected
+  # values file kept out of git, or wire postgresql.existingSecret + External
+  # Secrets. Left empty on purpose — unlike secret.yaml's other credentials,
+  # templates/postgresql-secret.yaml has no `default (randAlphaNum ...)`
+  # fallback, so an empty value here means an empty-password Secret (loud,
+  # obviously wrong) instead of silently keeping the old committed literal
+  # ("secure_password_123") that shipped in this file before this audit.
+  password: ""
+  database: "alert_history"
+  username: "alert_history"
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  persistence:
+    enabled: true
+    size: 50Gi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    retention: 30
+    walRetention: 7
+  monitoring:
+    prometheusRules:
+      enabled: true
+  networkPolicy:
+    enabled: true
+  config:
+    # 20 replicas (autoscaling.maxReplicas below) x ~20 conns/pod + headroom.
+    maxConnections: 500
+    superuserReservedConnections: 10
+    sharedBuffers: "1GB" # ~25% of the 4Gi memory limit above
+    effectiveCacheSize: "4GB"
+    workMem: "8MB"
+    maintenanceWorkMem: "128MB"
+    walBuffers: "16MB"
+    maxWalSize: "4GB"
+    minWalSize: "1GB"
+    checkpointCompletionTarget: 0.9
+    randomPageCost: 1.1
+    effectiveIoConcurrency: 200
+    sharedPreloadLibraries: "pg_stat_statements"
+    trackActivities: "on"
+    trackCounts: "on"
+    trackIoTiming: "on"
+    loggingCollector: "on"
+    logConnections: "off"
+    logDisconnections: "off"
+    logMinDurationStatement: 1000
+    autovacuum: "on"
+    autovacuumMaxWorkers: 3
+    autovacuumNaptime: "1min"
+    # Left "off" on purpose: the chart has no cert-mounting support for Postgres
+    # yet (templates/postgresql-configmap.yaml's own comment says the same) —
+    # flipping this without a cert path breaks startup. TLS-in-transit for this
+    # link must come from outside Postgres (mesh mTLS/NetworkPolicy) until a
+    # follow-up adds cert mounting.
+    ssl: "off"
 
 # ===============================
-# Cache Configuration (DragonflyDB)
+# Cache (DragonflyDB, Redis-compatible — external service)
 # ===============================
+# HONESTY NOTE (was previously wrong in this file): there is no dragonfly-*.yaml
+# under helm/amp/templates — the old top-level `dragonfly:` block below rendered
+# NOTHING; it was dead values with no consumer. DragonflyDB is Redis-wire-compatible,
+# so it needs no chart-side template at all: point the keys the app ALREADY reads
+# (`cache.host`/`cache.port`/`cache.auth`, wired to REDIS_ADDR/REDIS_PASSWORD in
+# templates/deployment.yaml) at your externally-run DragonflyDB Service.
 cache:
   enabled: true
-
-dragonfly:
-  enabled: true
-  host: "dragonfly"
+  host: "dragonfly.dragonfly.svc.cluster.local" # your external DragonflyDB Service DNS name
   port: 6379
   auth:
     enabled: true
-    password: ""  # Set via secret
+    password: "" # Set via secret/CI — same rationale as postgresql.password above
+
+# Chart gap, documented rather than silently worked around: templates/redis-statefulset.yaml
+# (this chart's OWN in-cluster Redis/Valkey) is gated only on `profile: standard`
+# — `valkey.enabled`/`cache.enabled` do NOT stop it from deploying (see
+# docs/06-planning/TECH-DEBT.md HELM-CHART-GAPS). Setting replicas to 0 is the
+# only override that actually works today: the Service/Secret/ConfigMap objects
+# still render (harmless — no data, no endpoints) but no Redis pod runs, so
+# DragonflyDB above is the only cache actually serving traffic.
+valkey:
+  replicas: 0
 
 # ===============================
 # LLM Configuration (Production)
@@ -62,7 +161,7 @@ dragonfly:
 llm:
   enabled: true
   proxyUrl: "https://llm-proxy.b2broker.tech"
-  apiKey: ""  # Set via secret or external secrets
+  apiKey: "" # Set via secret or external secrets
   model: "openai/gpt-4o"
   timeout: 30
   maxRetries: 3
@@ -70,7 +169,6 @@ llm:
   cacheTtl: 3600
   batchSize: 10
 
-  # Use external secrets for production
   externalSecrets:
     enabled: true
     secretStore: "vault-backend"
@@ -109,6 +207,20 @@ publishing:
     workerCount: 10
     maxRetries: 3
     retryInterval: "2s"
+    # publishing.queue.delivery_confirmation_timeout — kept at config.go's own
+    # default (45s, 2m hard cap). grouping.reconciliationGrace below is left
+    # unset so it derives from THIS value (90s at 45s) — raise both together,
+    # never this alone (see CHANGELOG "grouping.reconciliation_grace default
+    # changed 20s -> 90s" for the incident this guards against).
+    deliveryConfirmationTimeout: "45s"
+  templates:
+    # publishing.templates.enabled: true = upstream-compatible template rendering
+    # (the alertmanager-parity TEMPLATES-EPIC). This is the single biggest
+    # visible behavior change in this release for existing Slack/email/PagerDuty
+    # receivers — see docs/RELEASE_NOTES_v0.1.0-draft.md's breaking-changes
+    # section before upgrading a live deployment. Set to false to keep AMP's
+    # pre-epic fixed formatters (needs a restart either way, not a reload).
+    enabled: true
   refresh:
     enabled: true
     interval: "5m"
@@ -116,6 +228,41 @@ publishing:
     enabled: true
     checkInterval: "2m"
     httpTimeout: "5s"
+
+# ===============================
+# Grouping / Notify-Chain (Production)
+# ===============================
+# grouping.enabled turns on the real Alertmanager-parity grouping/dedup pipeline
+# (group_by/group_wait/group_interval/repeat_interval + Redis-backed cross-replica
+# notify-log dedup). At replicaCount 3 on the standard profile with Redis already
+# required for cache, this is the configuration production is built for — leaving
+# it false silently falls back to the older per-alert fan-out-to-every-target path.
+grouping:
+  enabled: true
+  reconciliationInterval: "45s"
+  # Deliberately unset — see publishing.queue.deliveryConfirmationTimeout comment
+  # above. Do not pin a literal here.
+  reconciliationGrace: ""
+
+# ===============================
+# Storage snapshots (lite-profile only — no-op on this profile)
+# ===============================
+# profile: standard above already owns durability via Postgres + Redis;
+# ServiceRegistry logs-and-skips file snapshotting here even if a path were set.
+# Left empty/disabled to match config.go's own default and avoid implying a
+# lite-profile feature is doing anything on this deployment.
+storage:
+  path: ""
+  snapshotInterval: "5m"
+
+# ===============================
+# Silence cross-replica sync (Production)
+# ===============================
+# Restart-only knobs, kept at config.go's defaults — listed explicitly so a
+# future change is a one-line diff instead of a rediscovery of the viper defaults.
+silencing:
+  subscribeRetryBackoff: "2s"
+  periodicResyncInterval: "5m"
 
 # `publishingTargets` is the Helm input shape.
 # The chart serializes each entry into a canonical runtime Secret:
@@ -129,7 +276,7 @@ publishingTargets:
     url: "https://api.rootly.com/webhooks/your-webhook-id"
     enabled: true
     secret:
-      apiKey: ""  # Set via external secrets
+      apiKey: "" # Set via external secrets
     filterConfig:
       severity: ["critical", "warning"]
       excludeNoise: true
@@ -143,7 +290,7 @@ publishingTargets:
     url: "https://events.pagerduty.com/v2/enqueue"
     enabled: true
     secret:
-      routingKey: ""  # Set via external secrets
+      routingKey: "" # Set via external secrets
     filterConfig:
       severity: ["critical"]
       excludeNoise: true
@@ -156,7 +303,7 @@ publishingTargets:
     url: "https://hooks.slack.com/your-webhook-url"
     enabled: true
     secret:
-      token: ""  # Set via external secrets
+      token: "" # Set via external secrets
     filterConfig:
       severity: ["critical", "warning"]
       namespaces: ["production"]
@@ -191,6 +338,11 @@ ingress:
 # ===============================
 # Security Configuration
 # ===============================
+# No debug endpoints: environment/logLevel above keep app.debug's own default
+# (config.go: false) and avoid IsDevelopment()'s implicit debug mode. Response
+# redaction (PagerDuty routing_key, Slack/webhook URLs, Telegram bot_token, etc.
+# in GET /api/v2/status's config.original) is unconditional in code, not a
+# values knob — nothing to set here for that.
 podSecurityContext:
   fsGroup: 65534
   runAsNonRoot: true
@@ -208,6 +360,10 @@ securityContext:
 # ===============================
 # Node Affinity (Production)
 # ===============================
+# nodeAffinity is PREFERRED, not required: a `required` rule against a node
+# label your cluster hasn't set leaves every pod Pending with no signal beyond
+# "0/N nodes match" — set this to `requiredDuringSchedulingIgnoredDuringExecution`
+# once `node-role.kubernetes.io/production=true` is actually labelled on your nodes.
 affinity:
   podAntiAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
@@ -219,9 +375,10 @@ affinity:
           - amp
       topologyKey: kubernetes.io/hostname
   nodeAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      nodeSelectorTerms:
-      - matchExpressions:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 50
+      preference:
+        matchExpressions:
         - key: node-role.kubernetes.io/production
           operator: In
           values:
