@@ -186,10 +186,14 @@ docker run --rm --network <net> --entrypoint amtool "$AMTOOL_IMG" \
   --alertmanager.url="$AM_URL" config show
 
 docker run --rm --network <net> --entrypoint amtool "$AMTOOL_IMG" \
+  --alertmanager.url="$AM_URL" silence add alertname=SpotCheck \
+  --comment="rollout spot-check" --author="rollout-plan"
+
+docker run --rm --network <net> --entrypoint amtool "$AMTOOL_IMG" \
   --alertmanager.url="$AM_URL" silence query
 ```
 
-All three are exercised by `scripts/release-gate.sh`'s `amtool-compat`
+All four are exercised by `scripts/release-gate.sh`'s `amtool-compat`
 step against `deploy/smoke/`'s single-node stack, and verified working
 during this rollout package's own testing — `alert query`, `config show`,
 `silence add`, and `silence query` all round-trip correctly against a

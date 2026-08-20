@@ -13,14 +13,26 @@
 #   1. Brings up the app (lite profile, no Postgres/Redis) + a minimal
 #      webhook sink (webhook_receiver.py), waits for both /healthz.
 #   2. POSTs an alert, waits group_wait+margin, asserts the webhook sink
-#      recorded EXACTLY ONE hit. Unlike deploy/e2e-ha (which predates
-#      AMP-PARITY-WAVE6-EPIC's config-target auto-provisioning and disables
-#      publishing.enabled because real delivery needed a live Kubernetes
-#      API), this is a REAL HTTP delivery -- config.yaml's `receivers:`
-#      block provisions the webhook target with zero Kubernetes Secrets.
-#   3. Creates a silence matching a second alertname, posts an alert with
-#      that alertname, waits group_wait+margin, asserts the webhook hit
-#      count did NOT increase (the notification was suppressed).
+#      recorded EXACTLY ONE hit AND inspects that hit's actual JSON body
+#      (v4 shape: version/receiver/groupLabels, plus the posted alertname
+#      and labels) -- not just the count. Unlike deploy/e2e-ha (which
+#      predates AMP-PARITY-WAVE6-EPIC's config-target auto-provisioning
+#      and disables publishing.enabled because real delivery needed a live
+#      Kubernetes API), this is a REAL HTTP delivery -- config.yaml's
+#      `receivers:` block provisions the webhook target with zero
+#      Kubernetes Secrets.
+#   3. Creates a silence matching a second alertname, THEN posts an alert
+#      with that alertname, and asserts NO hit ever arrives. This is a
+#      deliberate substitution for the brief's literal "post alert, let it
+#      fire, silence it, assert the NEXT fire is suppressed" sequence:
+#      that would need waiting out a full group_interval (on top of
+#      group_wait) to observe a real second fire, which doesn't fit this
+#      script's <2min budget. Silencing BEFORE the first post exercises
+#      the same matcher/suppression code path (silence lookup happens on
+#      every fire attempt, first or Nth) for a fraction of the wall-clock
+#      cost -- it does not, on its own, prove that an ALREADY-notified
+#      group's later repeat is suppressed; that specific case is
+#      deploy/e2e-ha's territory (longer timers, HA-focused already).
 #   4. Overwrites the running app's config with a modified copy (one added
 #      blackhole receiver) and posts /-/reload; asserts GET /api/v2/status's
 #      config.original now contains it -- proving the reload actually
@@ -45,6 +57,17 @@ GROUP_WAIT_MARGIN=8
 
 log() { printf '[smoke] %s\n' "$1"; }
 fail() { printf '[smoke] FAIL: %s\n' "$1" >&2; exit 1; }
+
+# Pick a JSON parser up front (same pattern as deploy/e2e-ha/run.sh) so a
+# missing-parser failure is a clear message here rather than a cryptic
+# empty-string comparison deep in Step 2's payload assertions.
+if command -v jq >/dev/null 2>&1; then
+  JSON_PARSER="jq"
+elif command -v python3 >/dev/null 2>&1; then
+  JSON_PARSER="python3"
+else
+  fail "neither jq nor python3 available to inspect the webhook payload"
+fi
 
 AMP_SMOKE_CONFIG_DIR="$(mktemp -d)"
 export AMP_SMOKE_CONFIG_DIR
@@ -82,6 +105,35 @@ wait_for_http() {
 
 hits() {
   curl -fsS "http://localhost:${WEBHOOK_PORT}/hits" 2>/dev/null || echo 0
+}
+
+last_payload() {
+  curl -fsS "http://localhost:${WEBHOOK_PORT}/last" 2>/dev/null || echo '{}'
+}
+
+payload_field() {
+  # payload_field <json> <jq-filter> <python-expr-over-"data">
+  # One shared extractor for every field check below, mirroring
+  # deploy/e2e-ha/run.sh's peer_count()'s jq/python3 split. Prints '' (not
+  # an error) on any parse/lookup failure so callers get a clean mismatch
+  # message instead of a raw traceback.
+  local json="$1" jq_filter="$2" py_expr="$3"
+  if [[ "$JSON_PARSER" == "jq" ]]; then
+    printf '%s' "$json" | jq -r "$jq_filter" 2>/dev/null || true
+  else
+    printf '%s' "$json" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print('')
+else:
+    try:
+        print($py_expr)
+    except Exception:
+        print('')
+" 2>/dev/null || true
+  fi
 }
 
 post_alert() {
@@ -126,6 +178,26 @@ after="$(hits)"
 delivered=$((after - before))
 [[ "$delivered" -eq 1 ]] || fail "expected exactly 1 webhook hit for '$ALERT_1', got $delivered (before=$before after=$after)"
 log "PASS: webhook received exactly 1 real delivery for '$ALERT_1'"
+
+# Content, not just count: the delivered body must actually be the v4
+# group payload (formatGroupUpstream, internal/infrastructure/publishing/
+# formatter.go) carrying THIS alert -- a stale/wrong/empty body would
+# still pass the count-only check above.
+payload="$(last_payload)"
+
+got_version="$(payload_field "$payload" '.version' "data.get('version','')")"
+[[ "$got_version" == "4" ]] || fail "webhook payload .version = '$got_version', expected '4' (v4 shape). payload: $payload"
+
+got_receiver="$(payload_field "$payload" '.receiver' "data.get('receiver','')")"
+[[ "$got_receiver" == "default" ]] || fail "webhook payload .receiver = '$got_receiver', expected 'default'. payload: $payload"
+
+got_alertname="$(payload_field "$payload" '.alerts[0].labels.alertname' "(data.get('alerts') or [{}])[0].get('labels',{}).get('alertname','')")"
+[[ "$got_alertname" == "$ALERT_1" ]] || fail "webhook payload .alerts[0].labels.alertname = '$got_alertname', expected '$ALERT_1'. payload: $payload"
+
+got_severity="$(payload_field "$payload" '.alerts[0].labels.severity' "(data.get('alerts') or [{}])[0].get('labels',{}).get('severity','')")"
+[[ "$got_severity" == "warning" ]] || fail "webhook payload .alerts[0].labels.severity = '$got_severity', expected 'warning'. payload: $payload"
+
+log "PASS: webhook payload is v4-shaped (version=4, receiver=default) and carries alertname='$ALERT_1' severity=warning"
 
 # --- Step 3: silence suppresses the next fire ------------------------------
 ALERT_2="SmokeTestAlertSilenced"
