@@ -1409,7 +1409,8 @@ func (r *ServiceRegistry) reloadRoutingTree() error {
 // upstream defaults plus every file matched by cfg.Routing.Templates
 // (`templates:`).
 //
-// Never returns an error, and never leaves r.templateRegistry nil — that is a
+// Never returns an error, and never leaves r.templateRegistry nil UNLESS the
+// operator turned templating off (publishing.templates.enabled=false) — that is a
 // deliberate difference from the other initialize* steps:
 //
 //   - internal/config.loadRouteConfig ALREADY validated the same globs through
@@ -1426,6 +1427,17 @@ func (r *ServiceRegistry) reloadRoutingTree() error {
 // `templates:` globs to load, and the defaults are exactly what an unconfigured
 // deployment should render.
 func (r *ServiceRegistry) initializeTemplating() {
+	// Kill switch (slice-2 review C1). Leaving the registry nil is what makes
+	// this a WHOLESALE revert: initializePublishingRuntime only calls
+	// SetTemplateRegistry for a non-nil registry, so every publisher keeps the
+	// fixed formatter and no `templates:` file or presentation field is rendered
+	// anywhere. Read once at startup — flipping it takes a restart, and
+	// reloadTemplates deliberately stays a no-op while the registry is nil.
+	if !r.config.Publishing.Templates.IsEnabled() {
+		r.logger.Info("Notification templating disabled by publishing.templates.enabled=false; notifications render through AMP's fixed formatters (pre-TEMPLATES-EPIC behaviour)")
+		return
+	}
+
 	var globs []string
 	if r.config.Routing != nil {
 		globs = r.config.Routing.Templates

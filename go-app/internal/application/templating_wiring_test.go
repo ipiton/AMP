@@ -193,6 +193,58 @@ func TestReloadTemplates_ReportsUnmatchedGlobsAfterSwap(t *testing.T) {
 	assert.Len(t, loadedTemplateFiles(r.TemplateRegistry()), 1)
 }
 
+// TestInitializeTemplating_KillSwitchDisablesItWholesale is the config half of
+// slice-2 review C1c: publishing.templates.enabled=false must leave the registry
+// NIL, because that is what makes the revert wholesale — initializePublishingRuntime
+// only wires a non-nil registry, so no publisher gets the template decorator and
+// no `templates:` file or presentation field is rendered anywhere.
+//
+// Asserted with a glob that WOULD have loaded, so the test fails if the switch is
+// only checked further down the path.
+func TestInitializeTemplating_KillSwitchDisablesItWholesale(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "custom.tmpl", `{{ define "slack.default.title" }}CUSTOM{{ end }}`)
+
+	r := templatingTestRegistry([]string{filepath.Join(dir, "*.tmpl")})
+	disabled := false
+	r.config.Publishing.Templates.Enabled = &disabled
+
+	r.initializeTemplating()
+
+	assert.Nil(t, r.TemplateRegistry(),
+		"a nil registry is the signal the publishing runtime reads as 'no templating'")
+	assert.Empty(t, r.degradedReasons, "an operator's deliberate choice is not degradation")
+}
+
+// TestInitializeTemplating_KillSwitchDefaultsToEnabled: absent must mean ON, since
+// that is the drop-in-parity default the epic ships.
+func TestInitializeTemplating_KillSwitchDefaultsToEnabled(t *testing.T) {
+	r := templatingTestRegistry(nil)
+	require.Nil(t, r.config.Publishing.Templates.Enabled, "the fixture must not set it")
+
+	r.initializeTemplating()
+
+	require.NotNil(t, r.TemplateRegistry())
+	assert.True(t, r.TemplateRegistry().Current().HasDefinition("slack.default.title"))
+}
+
+// TestReloadTemplates_KillSwitchSurvivesAReload: with templating off there is no
+// registry to swap, so a reload must stay a no-op rather than quietly enabling it.
+func TestReloadTemplates_KillSwitchSurvivesAReload(t *testing.T) {
+	dir := t.TempDir()
+	writeTemplate(t, dir, "custom.tmpl", `{{ define "slack.default.title" }}CUSTOM{{ end }}`)
+
+	r := templatingTestRegistry([]string{filepath.Join(dir, "*.tmpl")})
+	disabled := false
+	r.config.Publishing.Templates.Enabled = &disabled
+	r.initializeTemplating()
+
+	r.reloadTemplates()
+
+	assert.Nil(t, r.TemplateRegistry(),
+		"flipping the switch back on is a restart, not a reload — and a reload must not do it by accident")
+}
+
 // TestReloadTemplates_BeforeInitializeIsANoOp: reload must not construct the
 // registry behind initializeTemplating's back (that would skip the
 // degraded-reason bookkeeping).

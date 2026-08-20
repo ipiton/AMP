@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strings"
@@ -478,26 +479,54 @@ type PublishingConfig struct {
 	Templates PublishingTemplateConfig  `mapstructure:"templates"`
 }
 
-// PublishingTemplateConfig holds the notification-template execution guards
-// (TEMPLATES-EPIC slice 2; slice-1 review Minor 5 asked for these to be
-// operator-tunable instead of compile-time constants).
+// PublishingTemplateConfig holds the notification-templating switch and its
+// execution guards (TEMPLATES-EPIC slice 2; slice-1 review Minor 5 asked for the
+// guards to be operator-tunable instead of compile-time constants, slice-2
+// review C1 for the switch).
 //
-// Both default to templating's own defaults when zero/absent, so an existing
-// config behaves identically. They exist because the right values depend on the
-// deployment: a site that groups thousands of alerts into one email may
-// legitimately need a bigger cap than the 4 MiB default, and a site that would
-// rather drop formatting than delay a page may want a tighter timeout.
+// The guards default to templating's own defaults when zero/absent, so an
+// existing config behaves identically. They exist because the right values
+// depend on the deployment: a site that groups thousands of alerts into one
+// email may legitimately need a bigger cap than the 4 MiB default, and a site
+// that would rather drop formatting than delay a page may want a tighter
+// timeout.
 //
 // A render that exceeds either guard does NOT drop the notification — it falls
 // back to AMP's fixed formatter and increments
 // publishing_template_fallbacks_total with reason "timeout"/"output_cap", which
 // is the signal to retune.
 type PublishingTemplateConfig struct {
+	// Enabled is the epic's KILL SWITCH, and it defaults to TRUE (absent = on).
+	//
+	// True is upstream rendering: every `receivers:`-provisioned
+	// slack/pagerduty/telegram/email target renders through the upstream
+	// template library — upstream's defaults included — which is the drop-in
+	// parity this epic exists for, and which CHANGES the wire payload of a
+	// config that names no template at all (Slack: Block Kit → upstream
+	// attachment; email: AMP's body → upstream's `email.default.html`).
+	//
+	// False restores the pre-epic renderer WHOLESALE: the fixed per-integration
+	// formatters, `templates:` files and per-integration presentation fields
+	// ignored exactly as before slice 2. It exists so an operator who prefers
+	// AMP's formatting — or who is bisecting a notification-shape regression —
+	// has a one-line revert that does not need a rollback to an older image.
+	//
+	// A POINTER because absent must mean ON: a plain bool's zero value would
+	// silently disable templating for every hand-built config
+	// (tests, embedded profiles) and diverge from the viper default.
+	Enabled *bool `mapstructure:"enabled"`
+
 	// RenderTimeout bounds ONE template field render (default: 5s).
 	RenderTimeout time.Duration `mapstructure:"render_timeout"`
 
 	// MaxOutputBytes bounds the rendered size of ONE field (default: 4 MiB).
 	MaxOutputBytes int `mapstructure:"max_output_bytes"`
+}
+
+// IsEnabled reports whether upstream template rendering is on. Absent/nil is
+// ON — see the Enabled field for why the tri-state is deliberate.
+func (c PublishingTemplateConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // PublishingDiscoveryConfig holds target discovery settings.
@@ -934,6 +963,11 @@ func setDefaults() {
 	viper.SetDefault("publishing.queue.job_tracking_capacity", 10000)
 	viper.SetDefault("publishing.queue.delivery_confirmation_timeout", "45s")
 
+	// TEMPLATES-EPIC slice 2: upstream template rendering is ON by default
+	// (drop-in parity). See PublishingTemplateConfig.Enabled for what turning it
+	// off restores.
+	viper.SetDefault("publishing.templates.enabled", true)
+
 	viper.SetDefault("publishing.refresh.enabled", true)
 	viper.SetDefault("publishing.refresh.interval", "5m")
 	viper.SetDefault("publishing.refresh.max_retries", 5)
@@ -1192,6 +1226,42 @@ func (c *Config) validatePublishing() error {
 		if c.Publishing.Health.MaxRedirects < 0 {
 			return fmt.Errorf("publishing.health.max_redirects must be non-negative")
 		}
+	}
+
+	if err := c.validatePublishingTemplates(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validatePublishingTemplates validates the notification-templating block
+// (TEMPLATES-EPIC slice 2 review C1).
+//
+// The guards are rejected when NEGATIVE rather than when zero: zero/absent means
+// "use templating's own default", which is the documented contract of both
+// fields, while a negative value can only be a mistake that would otherwise
+// silently make every render fail its guard and fall back.
+//
+// Disabling templating while `templates:` globs are configured is legal — that
+// is exactly the "revert to AMP's formatting" case the switch exists for — but
+// it is WARNED about, because the other reading ("my template file stopped
+// working") is a support ticket nobody can diagnose from the outside.
+func (c *Config) validatePublishingTemplates() error {
+	if c.Publishing.Templates.RenderTimeout < 0 {
+		return fmt.Errorf("publishing.templates.render_timeout must be non-negative (0 = use the built-in default)")
+	}
+	if c.Publishing.Templates.MaxOutputBytes < 0 {
+		return fmt.Errorf("publishing.templates.max_output_bytes must be non-negative (0 = use the built-in default)")
+	}
+
+	if !c.Publishing.Templates.IsEnabled() {
+		globs := 0
+		if c.Routing != nil {
+			globs = len(c.Routing.Templates)
+		}
+		slog.Warn("Notification templating is DISABLED (publishing.templates.enabled=false): notifications render through AMP's fixed formatters, and `templates:` files plus every per-integration title/text/description/message/subject field are ignored",
+			"templates_globs_configured", globs)
 	}
 
 	return nil

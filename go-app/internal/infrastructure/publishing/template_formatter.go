@@ -237,9 +237,17 @@ type templateFormatter struct {
 
 // newTemplateFormatter wraps next for target. It returns next UNCHANGED when
 // there is nothing to render — no renderer, no target, or a target with no
-// template fields (webhook, or a K8s target whose Secret carries none). That is
-// the zero-behaviour-change guarantee for template-less deployments: the
-// decorator is not merely inert, it is absent.
+// template fields.
+//
+// Which targets those are, precisely (slice-2 review C1 corrected an earlier
+// comment here that read as a zero-behaviour-change guarantee for template-less
+// deployments): WEBHOOK targets, and K8s-Secret-provisioned targets, whose
+// discovery does not populate Templates. A config-provisioned
+// slack/pagerduty/telegram/email target NEVER reaches this branch — business/
+// publishing materializes upstream's own defaults for it, so it always carries
+// template fields and always gets the decorator. The wholesale opt-out is
+// publishing.templates.enabled=false, which leaves the registry nil so renderer
+// is nil here.
 func newTemplateFormatter(next AlertFormatter, renderer *templateRenderer, target *core.PublishingTarget) AlertFormatter {
 	if next == nil || renderer == nil || target == nil || len(target.Templates) == 0 {
 		return next
@@ -298,9 +306,14 @@ func (f *templateFormatter) FormatGroup(ctx context.Context, alerts []*core.Aler
 //
 // When a config templates `title`/`text`, the operator has asked for THEIR
 // formatting — so the AMP-specific `blocks` array is dropped rather than
-// rendered alongside it, which would deliver both versions in one message. That
-// is the visible behaviour change this epic is for, and it only ever happens for
-// a target that actually carries slack template fields.
+// rendered alongside it, which would deliver both versions in one message.
+//
+// Read that literally: EVERY config-provisioned slack target carries a title and
+// a text field, because business/publishing materializes upstream's defaults, so
+// `blocks` is dropped for every `receivers:`-based Slack receiver — not only for
+// one that named a template by hand. That is the epic's headline breaking change
+// (slice-2 review C1), pinned on the wire by
+// TestTemplatesDelivery_ProductionDefaultsRenderUpstreamShape.
 //
 // `text` (top level) stays populated because Slack REQUIRES a fallback string
 // for notification previews and screen readers: the rendered `fallback` field is
