@@ -15,15 +15,16 @@
 > Фичи, реализованные в AMP-OSS и отсутствующие в AMP.
 > Примечание: AMP уже имеет ReloadCoordinator (TN-152) с полным 6-фазным pipeline (load → validate → diff → apply → reload → health check). Задачи ниже — дополнения к существующей инфраструктуре.
 
-- [ ] **RELOADABLE-COMPONENT-INTERFACES** — Интерфейс `config.Reloadable` + per-component реализации поверх существующего ReloadCoordinator:
-  - DatabaseReloadable — graceful connection pool recreation, 5s drain period
-  - RedisReloadable — dynamic pool resizing, PING verification before swap
-  - LLMReloadable — atomic model swap (gpt-4 ↔ gpt-4-turbo), RWMutex protection
-  - LoggerReloadable — dynamic log level/format (json ↔ text)
-  - MetricsReloadable — enable/disable metrics collection
-  - Интеграция: подключить к ReloadCoordinator фазе "reload" для per-component graceful swap
-  - Источник: AMP-OSS `go-app/internal/infrastructure/*/reloadable.go`, `go-app/pkg/logger/reloadable.go`, `go-app/pkg/metrics/reloadable.go`
-  - Оценка: ~2d (портирование + wiring в Service Registry)
+- [x] ~~**RELOADABLE-COMPONENT-INTERFACES**~~ _(закрыто 2026-08-20, PROD-INFRA / INF-A slice 1; реализовано по спеке, не портировано — файлов AMP-OSS `reloadable.go` локально нет)_ — интерфейс `config.Reloadable` (`Reload(ctx, oldCfg, newCfg)` + `RelevantSections()` + опциональный `OrderedReloadable`), section-driven выбор компонентов, последовательный fail-fast прогон в детерминированном порядке, регистрация в `ServiceRegistry`. Любая ошибка компонента теперь отклоняет reload целиком (раньше non-critical падение отдавалось как success). Детали и migration notes — CHANGELOG.
+  - LoggerReloadable — **работает**: `log.level`/`log.format` (json ↔ text) через новый `pkg/logger.SwappableHandler`; производные логгеры (`With`/`WithGroup`) следуют за swap. Побочно: `cfg.Log` впервые применяется и на старте — до этого `main.go` жёстко ставил JSON/info.
+  - MetricsReloadable — **работает частично, задокументировано**: `metrics.enabled` — живой переключатель через `pkg/metrics/v2.ExpositionGate` (это gate на **exposition**, сбор метрик promauto-коллекторами не выключается). `metrics.path`/`metrics.port` процессом не читаются вообще → `W603`.
+  - LLMReloadable — **работает**: атомарный swap provider/base_url/api_key/model/max_tokens/temperature/timeout/max_retries под RWMutex-снапшотом в `HTTPLLMClient`. `llm.enabled`/`llm.agent_mode` требуют рестарта (`W604`) — они решают, собирается ли investigation pipeline вообще.
+  - DatabaseReloadable / RedisReloadable — машинерия реализована и протестирована (build → Ping/PING → atomic swap → 5s drain → close для Postgres), но **отказывает** пока выдан «сырой» handle: в standard-профиле это всегда, поэтому любое изменение `database.*`/`redis.*` = restart-required (`W600`/`W601`). Причина не в лени: consumers захватили `*pgxpool.Pool`/`*redis.Client` в конструкторах, закрытие сломает их, а частичный swap разведёт записи по двум БД / claim TTL и delivered-state по двум keyspace. Разблокируется через FU ниже.
+  - W6xx — apply-time предупреждения (имена полей, никогда значения), отдельно от validation-time W1xx–W3xx у `pkg/configvalidator`. Доступны через `ServiceRegistry.RestartWarnings()`.
+
+- [ ] **FU-DB-LIVE-POOL-HANDLE** _(открыт 2026-08-20 в INF-A slice 1)_ — дать consumers Postgres-пула handle, который следует за swap, вместо `*pgxpool.Pool`, захваченного в конструкторе (storage adapter, silence/investigation repositories, investigation tools `*sql.DB`). После этого `DatabaseReloadable` перестанет отдавать `W600` и станет реальным hot reload — swap-механизм уже готов и покрыт тестами (`internal/database/postgres/pool_reload_test.go`, включая «held connection» кейс). Оценка: ~0.5d.
+
+- [ ] **FU-REDIS-LIVE-CLIENT-HANDLE** _(открыт 2026-08-20 в INF-A slice 1)_ — то же для Redis: 6 consumers (`lock.LeaderElector`, `cluster.HeartbeatRegistry`, `RedisSilenceEventBus`, `RedisGroupStorage`, `RedisNotifyLog`, `RedisTimerStorage`) берут `*redis.Client` через `ShareClient()` и не следуют за swap. Без этого `redis.*` — restart-required (`W601`). Внимание: тут не только «неудобно» — на смене addr/db это split claim TTLs + split delivered-state, поэтому отказ обязателен до фикса. Оценка: ~0.5d.
 
 - [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven reload (~223 LOC Go):
   - SHA256 file change detection → SIGHUP signal to PID 1
@@ -31,7 +32,8 @@
   - Prometheus metrics (port 9091)
   - Dockerfile (distroless, non-root, read-only fs)
   - Helm integration: `configReloader` секция в values.yaml + sidecar template
-  - Зависимость: RELOADABLE-COMPONENT-INTERFACES (sidecar бесполезен без per-component reload)
+  - Зависимость: RELOADABLE-COMPONENT-INTERFACES — **снята 2026-08-20** (slice 1 закрыт)
+  - `/health/reload` должен отдавать и W6xx restart-required warnings (`ServiceRegistry.RestartWarnings()`): без этого оператор видит HTTP 200 на reload и не знает, что часть правки не применилась
   - Источник: AMP-OSS `go-app/cmd/config-reloader/`
   - Оценка: ~1d (портирование + Helm templates)
 
