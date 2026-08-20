@@ -23,6 +23,19 @@ type TriggerEventRequest struct {
 
 	// Images are images to include in the event for additional context
 	Images []EventImage `json:"images,omitempty"`
+
+	// Client / ClientURL name the system that raised the event and link back to
+	// it. Both are Events API v2 top-level fields, and both are upstream
+	// Alertmanager's own templated `pagerduty_configs[]` fields
+	// (`client`, `client_url`, defaulting to "Alertmanager" and the alertmanager
+	// URL). Added by the TEMPLATES-EPIC fix round for the same reason Slack's
+	// attachment gained title/title_link: the renderer produced them and
+	// buildPayload had nowhere to put them, so they were silently dropped.
+	//
+	// Both omitempty, so a payload built without them serializes exactly as
+	// before.
+	Client    string `json:"client,omitempty"`
+	ClientURL string `json:"client_url,omitempty"`
 }
 
 // TriggerEventPayload contains the core event data
