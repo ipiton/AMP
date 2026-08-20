@@ -27,6 +27,18 @@ type reloadHealth struct {
 	} `json:"restart_required"`
 }
 
+// statusInitial is the application's label for "no reload has been attempted
+// since startup" (config.ReloadStatusInitial). Duplicated as a literal rather
+// than imported: this binary must tolerate an application a version apart.
+const statusInitial = "initial"
+
+// neverReloaded reports whether the application says it has never reloaded.
+// Used to reject a confirmation that could only come from a failed baseline
+// read (review M11).
+func (h reloadHealth) neverReloaded() bool {
+	return h.Status == statusInitial
+}
+
 // verifier reads the application's reload status.
 type verifier struct {
 	url    string
@@ -71,6 +83,17 @@ func (v *verifier) fetch(ctx context.Context) (reloadHealth, error) {
 // (attempts unchanged) — a distinction a status label alone cannot make,
 // because a comment-only edit legitimately produces no state change beyond the
 // counter.
+//
+// Two known limits of a counter-based protocol (review M11/M12):
+//   - A concurrent reload from somewhere else (an operator curling /-/reload)
+//     between the baseline read and our trigger lets us confirm on their
+//     outcome. Narrowed by reading the baseline immediately before triggering;
+//     not eliminable without a per-trigger token.
+//   - A baseline of -1 means the pre-trigger read failed, so any counter value
+//     satisfies the comparison. We still refuse to confirm on a status of
+//     "initial", which is the one value that proves the application has never
+//     reloaded at all — otherwise a lost SIGHUP against a freshly started app
+//     would look confirmed.
 func (v *verifier) awaitAttempt(
 	ctx context.Context,
 	baseline int64,
@@ -87,7 +110,7 @@ func (v *verifier) awaitAttempt(
 			// The app may be briefly unreachable (restarting, or still
 			// applying); keep trying until the deadline.
 			lastErr = err
-		case health.Attempts > baseline:
+		case health.Attempts > baseline && !health.neverReloaded():
 			return health, nil
 		default:
 			lastErr = fmt.Errorf("attempts still %d (baseline %d)", health.Attempts, baseline)

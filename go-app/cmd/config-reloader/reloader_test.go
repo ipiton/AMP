@@ -411,3 +411,74 @@ func TestRestartRequiredFields(t *testing.T) {
 		[]string{"W600:database.host", "W600:database.port", "W610:reload-coordinator"},
 		restartRequiredFields(health))
 }
+
+// TestReloader_DoesNotConfirmAgainstAnAppThatNeverReloaded is review M11: when
+// the pre-trigger status read fails the baseline is -1, so any counter value
+// satisfies the comparison. A freshly started application reporting
+// attempts=0 / status=initial must NOT count as a confirmation — on the signal
+// path Notify succeeds even when the app is not processing anything, so this is
+// how a lost SIGHUP would otherwise be reported as a success.
+func TestReloader_DoesNotConfirmAgainstAnAppThatNeverReloaded(t *testing.T) {
+	var preReadFailed atomic.Bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Fail the FIRST read (the baseline), then serve a pristine app.
+		if preReadFailed.CompareAndSwap(false, true) {
+			http.Error(w, "unavailable", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"healthy": true, "status": "initial", "version": 1, "attempts": 0,
+		})
+	}))
+	defer server.Close()
+
+	path := writeConfig(t, "log:\n  level: info\n")
+	registry := prometheus.NewRegistry()
+	watcher := &reloader{
+		configPath:    path,
+		interval:      10 * time.Millisecond,
+		notifier:      &fakeNotifier{}, // "delivers", like SIGHUP always does
+		verifier:      &verifier{url: server.URL, client: server.Client()},
+		metrics:       newReloaderMetrics(registry),
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		verifyTimeout: 50 * time.Millisecond,
+		verifyPoll:    5 * time.Millisecond,
+		maxBackoff:    time.Minute,
+		now:           time.Now,
+	}
+
+	watcher.prime()
+	require.NoError(t, os.WriteFile(path, []byte("log:\n  level: debug\n"), 0o600))
+	watcher.tick(context.Background())
+
+	assert.Equal(t, float64(1), counterValue(t, registry, "amp_config_reloader_reloads_total", resultUnverified))
+	assert.Equal(t, float64(0), counterValue(t, registry, "amp_config_reloader_reloads_total", resultSuccess))
+}
+
+// TestReloader_UnchangedFileDoesNotChurnMetrics is review M15: the config gauges
+// only need republishing when the hash changes.
+func TestReloader_UnchangedFileDoesNotChurnMetrics(t *testing.T) {
+	path := writeConfig(t, "log:\n  level: info\n")
+	app := newFakeApp(t)
+	watcher, registry := newTestReloader(t, path, &fakeNotifier{}, app)
+
+	watcher.prime()
+	before := gaugeValue(t, registry, "amp_config_reloader_config_hash")
+	require.Positive(t, before, "prime must publish the hash")
+
+	for i := 0; i < 5; i++ {
+		watcher.tick(context.Background())
+	}
+
+	// Still exactly one config_info series, still the same hash value.
+	assert.Equal(t, before, gaugeValue(t, registry, "amp_config_reloader_config_hash"))
+	families, err := registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() == "amp_config_reloader_config_info" {
+			assert.Len(t, family.GetMetric(), 1, "exactly one config_info series")
+		}
+	}
+}

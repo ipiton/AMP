@@ -87,11 +87,14 @@ func (r *reloader) tick(ctx context.Context) {
 		return
 	}
 
-	r.metrics.observeConfig(hash)
-
 	if hash == r.appliedHash {
+		// Nothing to do, and nothing to re-publish: the gauges already carry
+		// this hash from prime() or from the reload that applied it (review
+		// M15 — resetting a label vector on every tick is pointless churn).
 		return
 	}
+
+	r.metrics.observeConfig(hash)
 
 	// A NEW pending hash resets the backoff: the operator has edited the file
 	// again, which is the most likely thing to have fixed a rejected config.
