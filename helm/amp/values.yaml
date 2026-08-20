@@ -709,8 +709,20 @@ configFile:
 # ConfigMap edit AMP rejects is reported as rejected instead of silently
 # counted as applied. See amp_config_reloader_last_reload_successful.
 configReloader:
+  # Keep false until the sidecar image is published — see the image block below.
   enabled: false
 
+  # !! NO CI JOB BUILDS THIS IMAGE YET !!
+  #
+  # `Dockerfile.config-reloader` exists in the repo root but nothing publishes
+  # it, and this repository path is a PLACEHOLDER guess — it must be pointed at
+  # whatever the build pipeline actually produces.
+  #
+  # Until that image exists, do NOT set configReloader.enabled=true anywhere
+  # that matters: pod readiness requires ALL containers, so an unpullable
+  # sidecar leaves ContainersReady false, keeps the pod out of the Service
+  # endpoints and stalls the rollout — with a perfectly healthy amp container.
+  # Enabling hot reload would take the deployment down.
   image:
     repository: registry.b2binpay.tech/amp/config-reloader
     tag: ""            # defaults to .Chart.AppVersion
@@ -733,6 +745,13 @@ configReloader:
   #            the pod. Without it every container is its own PID 1, so the
   #            signal would go to the reloader itself; the binary refuses that
   #            rather than reporting phantom successes.
+  #
+  # Verification caveat for `signal`: POST /-/reload is synchronous, so the
+  # sidecar always sees the final outcome. SIGHUP is not, so if a section AMP
+  # applies after the commit (routing/templates/receivers) fails and rolls the
+  # reload back, the sidecar can observe the FIRST outcome and re-check only
+  # best-effort. Do not alert on amp_config_reloader_last_reload_successful on a
+  # signal-method deployment until FU-RELOAD-UNIFY-APPLIERS lands.
   method: http
 
   # Only used by method: signal. Enabling this sets shareProcessNamespace on
