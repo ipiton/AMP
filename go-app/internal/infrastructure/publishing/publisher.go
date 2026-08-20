@@ -361,6 +361,12 @@ type PublisherFactory struct {
 	httpClientMap map[string]*http.Client
 
 	metrics *v2.PublishingMetrics // Unified publishing metrics (v2)
+
+	// templates carries the optional notification-template wiring
+	// (TEMPLATES-EPIC slice 2). Zero value = templating disabled, which is the
+	// pre-epic behaviour; enabled via SetTemplateRegistry. All of its logic
+	// lives in factory_templating.go.
+	templates templateWiringStore
 }
 
 // NewPublisherFactory creates a new publisher factory with unified v2 metrics.
@@ -450,7 +456,11 @@ func (f *PublisherFactory) CreateBasicPublisherForTarget(target *core.Publishing
 		return nil, fmt.Errorf("target %q: %w", target.Name, err)
 	}
 
-	base := NewHTTPPublisherWithHTTPClient(f.formatter, f.logger, httpClient)
+	// formatterFor, not the bare formatter: the basic path is also the
+	// credential-missing fallback for every enhanced publisher, and a target
+	// with template-bearing fields must keep rendering them here too
+	// (templates-epic merge, watch-list item 3).
+	base := NewHTTPPublisherWithHTTPClient(f.formatterFor(target), f.logger, httpClient)
 
 	switch TargetType(target.Type) {
 	case TargetTypeRootly:
@@ -571,7 +581,7 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		client,
 		f.rootlyCache,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -660,7 +670,7 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		client,
 		f.pagerDutyCache,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -705,7 +715,7 @@ func (f *PublisherFactory) createEnhancedSlackPublisher(target *core.PublishingT
 		client,
 		f.slackCache,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -781,7 +791,7 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 		messageThreadID,
 		disableNotifications,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 	), nil
 }
@@ -819,7 +829,7 @@ func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.Publishin
 	publisher := NewEnhancedWebhookPublisher(
 		client,
 		validator,
-		f.formatter,
+		f.formatterFor(target),
 		f.metrics, // Unified v2 metrics instance
 		f.logger,
 	)
@@ -861,7 +871,7 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 	return NewEnhancedEmailPublisher(
 		client,
 		f.metrics,
-		f.formatter,
+		f.formatterFor(target),
 		f.logger,
 		f.externalURL,
 	), nil

@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
+	"github.com/ipiton/AMP/internal/business/templating"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
@@ -44,6 +45,10 @@ import (
 // receive upstream's v4 group shape, and the Slack target must receive a
 // Slack-shaped message. A green "a POST happened" test is exactly what let two
 // payload bugs through in wave 5.
+
+// externalURLForTests is the AMP base URL the stack renders into notification
+// links (`{{ .ExternalURL }}` and every default template's alertmanager URL).
+const externalURLForTests = "http://amp.example.com"
 
 type recordedRequest struct {
 	path string
@@ -85,16 +90,27 @@ func (e *recordingEndpoint) all() []recordedRequest {
 
 func (e *recordingEndpoint) waitForRequest(t *testing.T, timeout time.Duration) recordedRequest {
 	t.Helper()
+	return e.waitForRequests(t, 1, timeout)[0]
+}
+
+// waitForRequests waits for at least count requests and returns them.
+//
+// It then waits one more settle interval and re-reads, so a test asserting "N
+// messages and no more" fails on an N+1 rather than racing it (used by the
+// one-message-per-alert divergence test).
+func (e *recordingEndpoint) waitForRequests(t *testing.T, count int, timeout time.Duration) []recordedRequest {
+	t.Helper()
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if got := e.all(); len(got) > 0 {
-			return got[0]
+		if got := e.all(); len(got) >= count {
+			time.Sleep(50 * time.Millisecond)
+			return e.all()
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("no request received within %s", timeout)
-	return recordedRequest{}
+	t.Fatalf("fewer than %d requests received within %s (got %d)", count, timeout, len(e.all()))
+	return nil
 }
 
 // configOnlyStack is the assembled runtime under test.
@@ -102,6 +118,26 @@ type configOnlyStack struct {
 	groupManager *grouping.DefaultGroupManager
 	groupKey     grouping.GroupKey
 	discovery    businesspublishing.TargetDiscoveryManager
+
+	// promRegistry is this stack's isolated Prometheus registry, so a test can
+	// assert on the metrics the delivery path emitted (TEMPLATES-EPIC slice 2
+	// asserts the template-fallback counter this way).
+	promRegistry *prometheus.Registry
+}
+
+// stackOption tunes the assembled stack. Kept as options rather than extra
+// parameters so the existing call sites stay untouched.
+type stackOption func(*stackSettings)
+
+type stackSettings struct {
+	templates *templating.Registry
+}
+
+// withTemplateRegistry wires notification templates into the publisher factory,
+// exactly as application.initializePublishingRuntime does in production
+// (TEMPLATES-EPIC slice 2).
+func withTemplateRegistry(registry *templating.Registry) stackOption {
+	return func(s *stackSettings) { s.templates = registry }
 }
 
 // newConfigOnlyStack loads configYAML from disk exactly as production does and
@@ -133,11 +169,17 @@ func newConfigOnlyStack(t *testing.T, configYAML string, receiver string) *confi
 // newStackFromRouting is the same assembly starting from an already-built
 // RouteConfig, for the cases a config FILE cannot express in a test (see the
 // Slack note above).
-func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver string, groupingConfig *grouping.GroupingConfig) *configOnlyStack {
+func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver string, groupingConfig *grouping.GroupingConfig, opts ...stackOption) *configOnlyStack {
 	t.Helper()
 
+	settings := &stackSettings{}
+	for _, opt := range opts {
+		opt(settings)
+	}
+
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(prometheus.NewRegistry())).Publishing
+	promRegistry := prometheus.NewRegistry()
+	metrics := v2.NewRegistry(v2.WithPrometheusRegisterer(promRegistry)).Publishing
 
 	// Config-only discovery: targets come from `receivers:`, nothing else.
 	discovery := businesspublishing.NewConfigOnlyTargetDiscoveryManager(logger, nil)
@@ -147,8 +189,11 @@ func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver
 	adapterDiscovery, err := NewDiscoveryAdapter(discovery)
 	require.NoError(t, err)
 
-	factory := infrapublishing.NewPublisherFactory(infrapublishing.NewAlertFormatter(""), logger, metrics, "")
+	factory := infrapublishing.NewPublisherFactory(infrapublishing.NewAlertFormatter(externalURLForTests), logger, metrics, externalURLForTests)
 	t.Cleanup(factory.Shutdown)
+	if settings.templates != nil {
+		factory.SetTemplateRegistry(settings.templates)
+	}
 
 	queue := infrapublishing.NewPublishingQueue(
 		factory,
@@ -205,16 +250,30 @@ func newStackFromRouting(t *testing.T, routing *infraroute.RouteConfig, receiver
 		groupManager: groupManager,
 		groupKey:     grouping.GroupKey(fmt.Sprintf("receiver=%s/alertname=HighCPU", receiver)),
 		discovery:    discovery,
+		promRegistry: promRegistry,
 	}
 }
 
 func (s *configOnlyStack) ingest(t *testing.T, fingerprint string) {
 	t.Helper()
+	s.ingestInstance(t, fingerprint, "")
+}
+
+// ingestInstance adds one alert to the group, optionally carrying an `instance`
+// label so a test can tell two alerts of the SAME group apart on the wire.
+func (s *configOnlyStack) ingestInstance(t *testing.T, fingerprint, instance string) {
+	t.Helper()
+
+	labels := map[string]string{"alertname": "HighCPU", "severity": "critical", "cluster": "prod"}
+	if instance != "" {
+		labels["instance"] = instance
+	}
+
 	_, err := s.groupManager.AddAlertToGroup(context.Background(), &core.Alert{
 		Fingerprint: fingerprint,
 		AlertName:   "HighCPU",
 		Status:      core.StatusFiring,
-		Labels:      map[string]string{"alertname": "HighCPU", "severity": "critical", "cluster": "prod"},
+		Labels:      labels,
 		Annotations: map[string]string{"summary": "cpu is high", "description": "node-1 at 98%"},
 		StartsAt:    time.Now().UTC(),
 	}, s.groupKey)

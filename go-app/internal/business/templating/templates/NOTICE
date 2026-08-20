@@ -1,0 +1,40 @@
+default.tmpl and email.tmpl in this directory are VERBATIM, byte-for-byte
+copies of the default notification template library shipped by upstream
+Alertmanager:
+
+    github.com/prometheus/alertmanager@v0.34.0/template/default.tmpl
+    github.com/prometheus/alertmanager@v0.34.0/template/email.tmpl
+
+    sha256(default.tmpl) = e2e218d762d2e0769d5c27b1b66e22c3f377567df7857d8ac0406dd73919b8db
+    sha256(email.tmpl)   = 5ad14d13249ad11b2d24f6bd4aefbcf62b5c2356160faedf35b79066ea4a4e7e
+
+They are the work of the Prometheus Team, licensed under the Apache License,
+Version 2.0:
+
+    Copyright 2015 Prometheus Team
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+email.tmpl additionally embeds HTML/CSS derived from
+https://github.com/mailgun/transactional-email-templates under the MIT
+License (Copyright (c) 2014 Mailgun) — the full MIT notice is retained inside
+email.tmpl itself, exactly as upstream ships it.
+
+DO NOT EDIT these files. They are copies, not AMP source: the whole point of
+carrying them is that a config written for upstream Alertmanager renders
+byte-identically here. Any AMP-specific template must be added as a separate
+file, and users override definitions via the `templates:` config globs (later
+definitions win — see FromGlobs in ../template.go).
+
+Re-syncing to a newer upstream release means re-copying both files and
+re-generating the golden expectations in ../golden_test.go (its header
+documents the generator).

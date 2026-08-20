@@ -2,6 +2,7 @@ package v2
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -161,6 +162,38 @@ type PublishingMetrics struct {
 	// circuitBreakerTripsTotal counts CB trips by target.
 	// Labels: target
 	circuitBreakerTripsTotal *prometheus.CounterVec
+
+	// ========================================================================
+	// Notification Template Metrics (TEMPLATES-EPIC slice 2)
+	// ========================================================================
+
+	// templateRendersTotal counts per-field template renders.
+	// Labels: integration (slack/pagerduty/telegram/email), outcome (success/error)
+	templateRendersTotal *prometheus.CounterVec
+
+	// templateFallbacksTotal counts notifications that fell back to AMP's
+	// fixed formatter because the operator's template could not be rendered.
+	// A non-zero rate here means someone's configured formatting is NOT
+	// reaching the wire, which is otherwise invisible.
+	// Labels: integration, reason (exec_error/timeout/output_cap/not_defined)
+	templateFallbacksTotal *prometheus.CounterVec
+
+	// templateAbandonedExecutions / templateInFlightAbandoned mirror
+	// templating.AbandonedExecutions() and
+	// templating.InFlightAbandonedExecutions(): renders whose timeout elapsed
+	// while the template burned CPU without writing, and how many of those are
+	// still running (slice-1 review I2 asked for a metric consumer for these).
+	//
+	// GaugeFunc, not Gauge: the source of truth is a process-wide counter owned
+	// by internal/business/templating, which pkg/metrics must not import (it
+	// would invert the dependency). Reading it at SCRAPE time means the value
+	// cannot go stale and needs no refresh goroutine. The reader is injected
+	// after construction via SetTemplateExecutionSource; until then both read 0.
+	templateAbandonedExecutions prometheus.GaugeFunc
+	templateInFlightAbandoned   prometheus.GaugeFunc
+
+	// templateExecutionSource holds the injected readers (nil until wired).
+	templateExecutionSource atomic.Pointer[TemplateExecutionSource]
 
 	// ========================================================================
 	// Health Check Metrics
@@ -379,6 +412,31 @@ func NewPublishingMetrics(registerer prometheus.Registerer) *PublishingMetrics {
 		"circuit_breaker_trips_total",
 		"Circuit breaker trips by target",
 		[]string{"target"})
+
+	// Notification templates (TEMPLATES-EPIC slice 2)
+	m.templateRendersTotal = newCounterVec(registerer, publishingSubsystem,
+		"template_renders_total",
+		"Notification template field renders by integration and outcome",
+		[]string{"integration", "outcome"})
+
+	m.templateFallbacksTotal = newCounterVec(registerer, publishingSubsystem,
+		"template_fallbacks_total",
+		"Notifications that fell back to the fixed formatter because a configured template failed, by integration and reason",
+		[]string{"integration", "reason"})
+
+	m.templateAbandonedExecutions = newGaugeFunc(registerer, publishingSubsystem,
+		"template_abandoned_executions",
+		"Template executions abandoned after their timeout elapsed (cumulative)",
+		func() float64 {
+			return m.readTemplateGauge(func(s *TemplateExecutionSource) func() float64 { return s.Abandoned })
+		})
+
+	m.templateInFlightAbandoned = newGaugeFunc(registerer, publishingSubsystem,
+		"template_in_flight_abandoned_executions",
+		"Abandoned template executions still running",
+		func() float64 {
+			return m.readTemplateGauge(func(s *TemplateExecutionSource) func() float64 { return s.InFlight })
+		})
 
 	// Health Checks
 	m.healthChecksTotal = newCounterVec(registerer, publishingSubsystem,
@@ -687,6 +745,72 @@ func (m *PublishingMetrics) SetCircuitBreakerState(target string, state CircuitB
 // RecordCircuitBreakerTrip records a circuit breaker trip.
 func (m *PublishingMetrics) RecordCircuitBreakerTrip(target string) {
 	m.circuitBreakerTripsTotal.WithLabelValues(target).Inc()
+}
+
+// ============================================================================
+// Notification Template Methods (TEMPLATES-EPIC slice 2)
+// ============================================================================
+
+// Template render outcomes and fallback reasons. Kept as constants so the
+// producer (infrastructure/publishing) and any dashboard agree on the label
+// values.
+const (
+	TemplateOutcomeSuccess = "success"
+	TemplateOutcomeError   = "error"
+
+	TemplateFallbackExecError  = "exec_error"
+	TemplateFallbackTimeout    = "timeout"
+	TemplateFallbackOutputCap  = "output_cap"
+	TemplateFallbackNotDefined = "not_defined"
+)
+
+// RecordTemplateRender records one template FIELD render.
+//
+// Deliberately labelled by integration and outcome only, not by field name:
+// a field label would multiply series by ~10 per integration for no
+// operational question anyone asks — "is my templating working" is answered by
+// the outcome, and WHICH field failed is a log line (the renderer logs it).
+func (m *PublishingMetrics) RecordTemplateRender(integration, outcome string) {
+	m.templateRendersTotal.WithLabelValues(integration, outcome).Inc()
+}
+
+// RecordTemplateFallback records a notification delivered with AMP's fixed
+// formatter output because the operator's template could not be rendered.
+//
+// This is the metric to alert on: the notification still went out (never
+// dropped), so nothing else in the pipeline looks wrong, yet the operator's
+// configured formatting is not what landed.
+func (m *PublishingMetrics) RecordTemplateFallback(integration, reason string) {
+	m.templateFallbacksTotal.WithLabelValues(integration, reason).Inc()
+}
+
+// TemplateExecutionSource supplies the template-execution gauges at scrape
+// time. Both funcs must be safe for concurrent use (the templating package's own
+// counters are atomics, so its accessors are).
+type TemplateExecutionSource struct {
+	Abandoned func() float64
+	InFlight  func() float64
+}
+
+// SetTemplateExecutionSource wires the readers behind
+// publishing_template_abandoned_executions and
+// publishing_template_in_flight_abandoned_executions. Called once by whoever
+// owns the templating registry (application.ServiceRegistry); a nil source
+// unwires them back to 0.
+func (m *PublishingMetrics) SetTemplateExecutionSource(source *TemplateExecutionSource) {
+	m.templateExecutionSource.Store(source)
+}
+
+// readTemplateGauge reads one injected gauge, yielding 0 while unwired.
+func (m *PublishingMetrics) readTemplateGauge(pick func(*TemplateExecutionSource) func() float64) float64 {
+	source := m.templateExecutionSource.Load()
+	if source == nil {
+		return 0
+	}
+	if fn := pick(source); fn != nil {
+		return fn()
+	}
+	return 0
 }
 
 // ============================================================================

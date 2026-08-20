@@ -165,6 +165,22 @@ func newGauge(registerer prometheus.Registerer, subsystem, name, help string) pr
 	return gauge
 }
 
+// newGaugeFunc creates a new GaugeFunc with the standard namespace.
+//
+// Pull-based: fn is evaluated at scrape time, so the value can never go stale
+// and no background goroutine is needed to refresh it. Used for gauges whose
+// source of truth lives in a package pkg/metrics must not import.
+func newGaugeFunc(registerer prometheus.Registerer, subsystem, name, help string, fn func() float64) prometheus.GaugeFunc {
+	gauge := prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Subsystem: subsystem,
+		Name:      name,
+		Help:      help,
+	}, fn)
+	registerer.MustRegister(gauge)
+	return gauge
+}
+
 // newGaugeVec creates a new GaugeVec with the standard namespace.
 func newGaugeVec(registerer prometheus.Registerer, subsystem, name, help string, labels []string) *prometheus.GaugeVec {
 	gauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
