@@ -510,6 +510,16 @@ func (rc *ReloadCoordinator) rollback(ctx context.Context, failedConfig *Config,
 		}
 		sort.Strings(diverged)
 
+		// The cause goes to the LOG, not into the warning (re-review I5).
+		// Component errors carry arbitrary text — pgx failures embed
+		// `user=<user> database=<db>` and every dialed host:port — and
+		// RestartRequiredWarning is served verbatim by the unauthenticated
+		// /health/reload. Reason must stay a fixed string; the structured
+		// component names in Fields are the machine-readable part.
+		rc.logger.Error("rollback incomplete; components are still running the rejected config",
+			"diverged_components", diverged,
+			"errors", FormatReloadErrors(rollbackErrors))
+
 		// The process is now genuinely split: currentConfig and every reader of
 		// it report oldConfig, while these components are still running
 		// failedConfig. No config edit can resolve that — only a restart — so
@@ -518,10 +528,9 @@ func (rc *ReloadCoordinator) rollback(ctx context.Context, failedConfig *Config,
 			Code:      WarnReloadRollbackIncomplete,
 			Component: "reload-coordinator",
 			Fields:    diverged,
-			Reason: fmt.Sprintf(
-				"reload was rejected but rollback could not be completed: these components are still running the REJECTED config while the reported config is the previous one (%s); restart to converge",
-				FormatReloadErrors(rollbackErrors),
-			),
+			Reason: "reload was rejected but rollback could not be completed: the components named in " +
+				"fields are still running the REJECTED config while the reported config is the previous " +
+				"one; restart to converge, and see the server log for the underlying errors",
 		})
 
 		return fmt.Errorf("rollback incomplete, %d component(s) still on the rejected config: %s",

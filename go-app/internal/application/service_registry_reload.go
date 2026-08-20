@@ -141,13 +141,17 @@ func (r *ServiceRegistry) rollbackPostCommit(
 	r.logger.Error("post-commit reload stage failed; rolling the whole reload back",
 		"stage", stage, "error", cause)
 
+	// Reason is a FIXED string (re-review I5). The cause is logged just above:
+	// it is the routing engine's own error text, which names receivers and
+	// echoes matcher validation messages, and RestartRequiredWarning is served
+	// verbatim by the unauthenticated /health/reload. The stage — the part an
+	// operator needs to act — is already structured, in Fields.
 	r.restartWarnings.Record(appconfig.RestartRequiredWarning{
 		Code:      appconfig.WarnReloadPostCommitFailed,
 		Component: "service-registry",
 		Fields:    []string{stage},
-		Reason: fmt.Sprintf(
-			"the %s stage failed after the config was committed; the reload was rolled back — check the error and re-apply: %v",
-			stage, cause),
+		Reason: "a config section applied after the commit (named in fields) failed; the reload was " +
+			"rolled back to the previous config — see the server log for the underlying error, then re-apply",
 	})
 
 	if previousConfig == nil {

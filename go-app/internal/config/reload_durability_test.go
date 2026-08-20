@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -309,4 +310,66 @@ func TestRestartWarnings_Resolve(t *testing.T) {
 
 	var nilWarnings *RestartWarnings
 	nilWarnings.Resolve(WarnRedisRestartRequired, "redis")
+}
+
+// TestSplitStateWarning_CarriesNoConfigValues is the re-review I5 guard: the
+// W610 warning is served verbatim by the UNAUTHENTICATED /health/reload, so the
+// component errors it is built from must not leak into it.
+//
+// The failing component here returns a pgx-shaped error, which is exactly what
+// a real database rejection produces: it embeds the user, the database name and
+// every dialed host:port (pgx redacts only the password).
+func TestSplitStateWarning_CarriesNoConfigValues(t *testing.T) {
+	const leakyError = `failed to connect to ` +
+		"`user=amp_prod database=amp_prod`" +
+		`: [::1]:5432 (db-prod-1.internal): dial error: connection refused`
+
+	initialPath := writeReloadConfigFile(t, "info", true)
+	initial, err := LoadConfig(initialPath)
+	require.NoError(t, err)
+	newPath := writeReloadConfigFile(t, "debug", false)
+
+	// Fails in BOTH directions, so the rollback leg fails and W610 is raised.
+	breaker := &fakeReloadable{
+		name:     "database",
+		priority: 90,
+		critical: true,
+		err:      fmt.Errorf("%s", leakyError),
+	}
+
+	reloader := NewConfigReloader(slog.Default())
+	reloader.Register(breaker)
+
+	warnings := NewRestartWarnings()
+	coordinator := NewReloadCoordinator(
+		initial, newPath,
+		&MockConfigValidator{}, NewConfigComparator(), reloader,
+		nil, nil, slog.Default(),
+	)
+	coordinator.SetRestartWarnings(warnings)
+
+	_, err = coordinator.ReloadFromFile(context.Background(), newPath)
+	require.Error(t, err)
+
+	list := warnings.List()
+	require.Len(t, list, 1)
+	warning := list[0]
+	require.Equal(t, WarnReloadRollbackIncomplete, warning.Code)
+
+	// The component name IS reported — that is the actionable part.
+	assert.Equal(t, []string{"database"}, warning.Fields)
+
+	// Nothing else from the error is. Assert on the whole serialized warning,
+	// which is what the endpoint actually writes.
+	serialized, err := json.Marshal(warning)
+	require.NoError(t, err)
+	body := string(serialized)
+
+	for _, leak := range []string{
+		"user=", "database=", "amp_prod", "db-prod-1.internal", "5432",
+		"connection refused", "dial error",
+	} {
+		assert.NotContains(t, body, leak,
+			"the unauthenticated /health/reload body must not echo config values or error text")
+	}
 }

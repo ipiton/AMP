@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/ipiton/AMP/internal/application/handlers"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	pkglogger "github.com/ipiton/AMP/pkg/logger"
 	"github.com/stretchr/testify/assert"
@@ -121,4 +124,40 @@ func TestRollbackPostCommit_NilPreviousReportsTheSplitRatherThanPretending(t *te
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no previous config was captured")
 	assert.Equal(t, "debug", registry.Config().Log.Level, "nothing to restore, so nothing was touched")
+}
+
+// TestRollbackPostCommit_WarningLeaksNoCauseThroughTheEndpoint is the
+// application-side half of re-review I5: the W611 warning reaches the
+// UNAUTHENTICATED /health/reload verbatim, so the routing engine's error text —
+// receiver names, matcher validation messages — must not ride along in it.
+func TestRollbackPostCommit_WarningLeaksNoCauseThroughTheEndpoint(t *testing.T) {
+	registry, previous, _ := newPostCommitRegistry(t)
+
+	cause := fmt.Errorf(
+		"route tree build failed: receiver %q is not defined; matcher `team=~\"payments-.*\"` invalid",
+		"pagerduty-secret-team")
+	err := registry.rollbackPostCommit(context.Background(), previous, "routing", cause)
+	require.Error(t, err)
+
+	// The operator still gets the cause — from the returned error and the log.
+	assert.ErrorIs(t, err, cause)
+
+	// The endpoint does not.
+	recorder := httptest.NewRecorder()
+	handlers.ReloadHealthHandler(registry)(
+		recorder, httptest.NewRequest(http.MethodGet, "/health/reload", nil))
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	body := recorder.Body.String()
+
+	// The actionable part IS present: the stage that failed.
+	assert.Contains(t, body, appconfig.WarnReloadPostCommitFailed)
+	assert.Contains(t, body, "routing")
+
+	for _, leak := range []string{
+		"pagerduty-secret-team", "payments-", "matcher", "not defined", "build failed",
+	} {
+		assert.NotContains(t, body, leak,
+			"the unauthenticated /health/reload body must not echo config content")
+	}
 }
