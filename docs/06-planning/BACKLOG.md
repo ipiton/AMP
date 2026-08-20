@@ -30,16 +30,13 @@
 
 - [ ] **FU-REDIS-LIVE-CLIENT-HANDLE** _(открыт 2026-08-20 в INF-A slice 1)_ — то же для Redis: 6 consumers (`lock.LeaderElector`, `cluster.HeartbeatRegistry`, `RedisSilenceEventBus`, `RedisGroupStorage`, `RedisNotifyLog`, `RedisTimerStorage`) берут `*redis.Client` через `ShareClient()` и не следуют за swap. Без этого `redis.*` — restart-required (`W601`). Внимание: тут не только «неудобно» — на смене addr/db это split claim TTLs + split delivered-state, поэтому отказ обязателен до фикса. Оценка: ~0.5d.
 
-- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven reload (~223 LOC Go):
-  - SHA256 file change detection → SIGHUP signal to PID 1
-  - Health check verification (`/health/reload`)
-  - Prometheus metrics (port 9091)
-  - Dockerfile (distroless, non-root, read-only fs)
-  - Helm integration: `configReloader` секция в values.yaml + sidecar template
-  - Зависимость: RELOADABLE-COMPONENT-INTERFACES — **снята 2026-08-20** (slice 1 закрыт)
-  - `/health/reload` должен отдавать и W6xx restart-required warnings (`ServiceRegistry.RestartWarnings()`): без этого оператор видит HTTP 200 на reload и не знает, что часть правки не применилась
-  - Источник: AMP-OSS `go-app/cmd/config-reloader/`
-  - Оценка: ~1d (портирование + Helm templates)
+- [x] ~~**CONFIG-RELOADER-SIDECAR**~~ _(закрыто 2026-08-20, PROD-INFRA / INF-A slice 2; реализовано по спеке — файлов AMP-OSS локально нет)_ — `cmd/config-reloader`: SHA256-поллинг (контент, не mtime — kubelet ре-синкает ConfigMap-том, не меняя байт), триггер через `POST /-/reload` или SIGHUP, **верификация каждого reload** через `/health/reload`, метрики на `:9091`. Distroless/non-root/read-only Dockerfile + Helm-секции `configFile`/`configReloader`.
+  - `/health/reload` отдаёт ПОЛНЫЙ исход: status/version/attempts/last_reload_time/split_state + W6xx `restart_required`. 200/503. `restart_required` НЕ делает endpoint unhealthy (reload применился; проба на этом пути иначе крэшлупила бы под из-за правки `metrics.path`), а split state (W610/W611) — делает.
+  - Побочно потребовалось от координатора: статус `no_changes` (правка только в комментарии меняет хеш файла, но не конфиг — раньше было неотличимо от потерянного сигнала) и счётчик ЗАВЕРШЁННЫХ попыток (инкремент вместе с записью исхода, иначе поллер читает предыдущий статус как свой результат — нашёл e2e-тест).
+  - `--method=signal` отказывается сигналить сам себя: без `shareProcessNamespace: true` каждый контейнер — свой PID 1, и дефолтный `--pid=1` отправил бы SIGHUP в reloader (который его игнорирует), рапортуя успех. Helm по умолчанию `http`; шаблон отказывается рендерить `signal` без shared namespace.
+  - Отклонённый конфиг ретраится с capped exponential backoff (сбрасывается любой новой правкой), а не раз в poll — одна битая ConfigMap не генерирует failed reload каждые 10s вечно.
+  - **В чарте не было конфиг-ФАЙЛА вообще** (только env-vars), поэтому пришлось добавить секцию `configFile`: ConfigMap + read-only mount + `AMP_CONFIG_FILE`. Без неё `route:`/`receivers:`/`inhibit_rules:`/`templates:` в чарте невыразимы. Эта ConfigMap намеренно НЕ участвует в `checksum/config` аннотациях пода — рестарт на каждую правку конфига это ровно то, чего hot reload избегает.
+  - Тестовая обвязка чарта: `helm/amp/tests/render-config-reloader.sh` (до этого у чарта тестов не было) — рендер off/on, non-root/read-only, и три misconfiguration-гарда.
 
 - [ ] **HELM-PRODUCTION-VALUES** — Production-ready Helm values:
   - PostgreSQL cluster (3 instances)
