@@ -1,0 +1,66 @@
+# PHASE-8 (release rollout package) -- single-node smoke e2e config.
+#
+# Lite profile, no Postgres/Redis: storage.filesystem_path is a throwaway
+# SQLite file, cache/lock fall back to in-memory (initializeCache/
+# initializeSilencePersistence degrade gracefully when Redis/Postgres are
+# absent -- see internal/application/service_registry.go). Silences are
+# memory-only for the duration of this container's life, which is exactly
+# what the smoke test needs (single run, no restart).
+#
+# publishing.enabled: true + a `receivers:` webhook_configs block means the
+# AMP-PARITY-WAVE6-EPIC config-target auto-provisioning
+# (businesspublishing.config_targets.go) gives this lite-profile,
+# no-Kubernetes container a REAL HTTP delivery path -- unlike deploy/e2e-ha,
+# which deliberately disables publishing because it predates that epic.
+# That is what lets this script assert an actual webhook hit instead of a
+# log-line/Redis-key proxy.
+profile: lite
+
+storage:
+  backend: filesystem
+  filesystem_path: /tmp/amp-smoke.db
+  # File-snapshot persistence (wave 6, FU-LITE-FILE-SNAPSHOT) is left
+  # disabled (empty path): this run never restarts the container, so there
+  # is nothing to persist across.
+  path: ""
+
+server:
+  port: 8080
+  host: 0.0.0.0
+
+log:
+  level: info
+  format: json
+  output: stdout
+
+metrics:
+  enabled: true
+  path: /metrics
+  namespace: alert_history
+
+publishing:
+  enabled: true
+
+# grouping.enabled must be explicit true (defaults to false) -- see
+# deploy/e2e-ha/config.yaml's own note. Short timers so the whole smoke run
+# stays well under the brief's <2min budget.
+grouping:
+  enabled: true
+  reconciliation_interval: 5s
+  reconciliation_grace: 3s
+
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: 3s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  # AMP-PARITY-WAVE6-EPIC: this webhook_configs block becomes a live
+  # in-memory PublishingTarget (`cfg:default/webhook0`) on load -- no
+  # Kubernetes Secret needed. It really gets dialed.
+  - name: default
+    webhook_configs:
+      - url: http://webhook:8090/webhook
+        send_resolved: true

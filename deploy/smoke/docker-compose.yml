@@ -1,0 +1,60 @@
+# PHASE-8 release rollout package: single-node smoke e2e.
+#
+# NOT part of the default `go test ./...` gate. Run via run.sh, or manually:
+#
+#   docker compose -f deploy/smoke/docker-compose.yml up --build
+#
+# Build context is the repo root (".." from here is deploy/, ".." again is
+# the repo root) -- same layout as deploy/e2e-ha, whose Dockerfile COPY
+# paths are rooted at go-app/ one level below the repo root.
+#
+# Two services only: the app (lite profile, no Postgres/Redis -- see
+# config.yaml) and a minimal webhook sink (webhook_receiver.py) that stands
+# in for a real alerting destination. This complements deploy/e2e-ha's
+# 2-replica HA test with a fast single-node pre-release check.
+name: amp-smoke
+
+services:
+  webhook:
+    image: python:3-alpine
+    volumes:
+      - ./webhook_receiver.py:/app/webhook_receiver.py:ro
+    working_dir: /app
+    command: ["python3", "webhook_receiver.py"]
+    ports:
+      - "18090:8090"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  amp:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      AMP_CONFIG_FILE: /app/config.yaml
+      # internal/infrastructure/routing/parser.go's https_production custom
+      # validator tag only allows a plaintext http:// webhook_configs[].url
+      # when this OS env var (NOT a config.yaml key) is "development" --
+      # otherwise a config with an http:// target fails route/receivers
+      # validation entirely and the app silently falls back to built-in
+      # defaults (profile: standard, needs Postgres). This smoke stack has
+      # no TLS-terminating sidecar, so plaintext HTTP to the webhook sink is
+      # the point.
+      ENVIRONMENT: development
+    volumes:
+      # AMP_SMOKE_CONFIG_DIR is a run.sh-managed mktemp scratch dir (never
+      # this repo's own deploy/smoke/), seeded with a copy of config.yaml.
+      # NOT :ro -- run.sh's reload step overwrites <dir>/config.yaml with
+      # config-reloaded.yaml's content, then POSTs /-/reload. Falls back to
+      # this directory for a manual `docker compose up` (read-only use only
+      # -- the fallback path IS the tracked config.yaml, so writing to it
+      # would dirty the repo).
+      - ${AMP_SMOKE_CONFIG_DIR:-.}/config.yaml:/app/config.yaml
+    ports:
+      - "18080:8080"
+    depends_on:
+      webhook:
+        condition: service_healthy

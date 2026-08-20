@@ -260,6 +260,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Consolidated metrics to v2 architecture
   - Full documentation: `tasks/code-quality-refactoring/`
 
+### PROD-INFRA
+- **PHASE-8-RELEASE-ROLLOUT** (2026-08-20): quality-gate script, single-node
+  smoke e2e, rollback runbook, controlled rollout plan.
+  - `scripts/release-gate.sh`: one entrypoint for build, `golangci-lint`,
+    `go test ./... -count=1`, the `futureparity` build tag's build+test,
+    `-race` on the concurrency-heavy packages (discovered via `go list`,
+    not hardcoded — currently `business/publishing`,
+    `infrastructure/publishing`, `infrastructure/grouping`,
+    `business/silencing`, `infrastructure/silencing`, `core/silencing`,
+    `business/templating`), `helm lint`+`helm template` for both
+    `values-dev.yaml`/`values-production.yaml` overlays, and a real
+    `amtool`-CLI compat smoke against `deploy/smoke/` when Docker is
+    available (skipped, not failed, otherwise). Every step runs
+    regardless of an earlier failure and a summary table prints last;
+    exit code is non-zero on any `FAIL`. Bash 3.2-compatible (macOS's
+    stock `/bin/bash`) as well as bash 4/5.
+  - `deploy/smoke/`: single-node lite-profile Docker Compose stack (no
+    Postgres/Redis) plus a minimal stdlib-only webhook sink
+    (`webhook_receiver.py`). `run.sh` posts an alert and asserts a REAL
+    HTTP delivery within `group_wait`+margin (enabled by
+    `AMP-PARITY-WAVE6-EPIC`'s config-target auto-provisioning, which
+    lets a lite/no-Kubernetes deployment provision live delivery targets
+    straight from `receivers:` — unlike `deploy/e2e-ha/`, which predates
+    that epic and runs with `publishing.enabled: false`), creates a
+    silence and asserts the next matching alert is suppressed, then
+    overwrites the running config and `POST /-/reload`s, asserting
+    `GET /api/v2/status`'s `config.original` reflects the change. Full
+    run is idempotent and self-cleaning (scratch config dir + Docker
+    stack torn down in an EXIT trap).
+  - `docs/ROLLBACK_RUNBOOK.md`: kill-switches before config-only rollback
+    before Helm/binary rollback; an audit of all 9 goose migrations
+    confirming every one is additive-only (never run `goose down` as
+    part of a rollback); the Redis nflog key-shape rollback gap (bounded
+    duplicate-notification window, self-resolving via TTL); the
+    lite-profile file-snapshot version check (`internal/infrastructure/snapshot`,
+    rejects a mismatched `Version`, starts empty); the full
+    breaking-changes list from this changelog reversed into rollback
+    traps (config-target-provisioned receivers going silent past the
+    wave-6 epic, blackhole receivers failing to boot on an older binary,
+    the PagerDuty endpoint fix reverting); and a documented-but-dead
+    finding worth flagging on its own — `docs/CONFIGURATION_GUIDE.md`'s
+    `POST /api/v2/config/rollback` (and the rest of that endpoint family)
+    is not mounted on any route (`router_contract_test.go` asserts
+    `/api/v2/config` is a 404); the backing `DefaultConfigUpdateService`/
+    `RollbackConfig` code is real but has zero call sites outside its own
+    definition — the only working config rollback path is a
+    `config.yaml` revert plus `/-/reload` or `SIGHUP`.
+  - `docs/ROLLOUT_PLAN.md`: lite/shadow → lite/single-low-criticality-route
+    → HA pair → full cutover, each with entry/exit criteria; a metric
+    watch-list naming the real `alert_history_*` metric family (the
+    brief's own `amp_*` shorthand doesn't match any actual metric
+    prefix); `amtool` spot-checks (`alert query`/`config show`/`silence
+    query`, verified working against a live instance); and a tested
+    silence-migration recipe (`amtool silence query -o json` →
+    `amtool silence import`, verified round-tripping against AMP
+    directly — AMP's silence API has no bulk-import endpoint, matching
+    upstream Alertmanager's own API exactly, but amtool's own import
+    command needs none).
+
 ## [0.0.1] - 2024-12-04
 
 ### Added
