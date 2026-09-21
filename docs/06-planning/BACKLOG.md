@@ -2,6 +2,64 @@
 
 Не в активной очереди, но учтено и перенесено из `.plans`.
 
+## Production Readiness — блокеры (аудит 2026-09-21)
+> Комплексный аудит: security, ops/deploy, функциональная зрелость, `go build`/`go vet`/`go test ./... -race` (все зелёные).
+> Вердикт: pilot-ready, **не** production-ready. Ниже — блокеры первого прод-релиза, сгруппированы по приоритету.
+> P0 = без этого нельзя выставлять сервис в прод; P1 = нужно для заявления «замена Alertmanager».
+> Рекомендуемый порядок: PROD-AUTH → PROD-RBAC-SCOPE → PROD-CI-IMAGES → PROD-RELEASE-V010 → остальное.
+
+### P0 — Security
+
+- [ ] **PROD-AUTH** — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
+  - Сделать: `web.config`-совместимый auth (basic + bearer, как upstream `--web.config.file` / `exporter-toolkit`), либо документированный обязательный auth-proxy. Минимум — защита мутирующих эндпоинтов, `/-/reload`, investigation, dashboard; `/-/healthy`, `/-/ready`, `/metrics` — настраиваемо.
+  - Заодно: удалить мёртвый blank-import `net/http/pprof` (`main.go:9`), чтобы pprof не открылся при рефакторинге на `DefaultServeMux`.
+  - Критерий: анонимный `POST /api/v2/silences` → 401 при включённом auth; тесты на middleware; раздел в `CONFIGURATION_GUIDE.md`.
+  - Оценка: ~2d. Требует `/spec` (security).
+- [ ] **PROD-INGRESS-HARDENING** — `helm/amp/values-production.yaml:337` включает Ingress на `/` без auth-аннотаций и allowlist. Зависит от PROD-AUTH: либо прод-профиль по умолчанию требует auth, либо Ingress выключен/закрыт (oauth2-proxy / basic-auth аннотации / `whitelist-source-range`). Плюс NetworkPolicy для самого AMP (сейчас есть только для postgres/redis). Оценка: ~0.5d.
+- [ ] **PROD-RBAC-SCOPE** — `helm/amp/templates/rbac.yaml:5-51`: `ClusterRole` `get/list/watch secrets,configmaps` + `ClusterRoleBinding`, создаётся при `serviceAccount.create=true` даже при `targetDiscovery.enabled: false`. Плюс namespaced Role с `create/update/patch secrets` (`rbac.yaml:63-74`). Компрометация пода = все секреты кластера.
+  - Сделать: namespaced read-only Role, только при `targetDiscovery.enabled`; cluster-scope — отдельный явный opt-in; убрать write-права, если не используются.
+  - Критерий: `helm template` с дефолтами не рендерит ClusterRole; тест в release-gate.
+  - Оценка: ~0.5d.
+- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. Оценка: ~0.25d.
+
+### P0 — Delivery
+
+- [ ] **PROD-CI-IMAGES** — CI нет вообще (`.github/` отсутствует и никогда не существовал). `values-production.yaml:25-26` ссылается на `ipiton/amp-llm:1.0.0` — образа не существует (прод-инсталл = ImagePullBackOff); образа config-reloader тоже нет.
+  - Сделать: GitHub Actions — build, `go vet`, `go test -race`, `scripts/release-gate.sh`, `deploy/e2e-ha` (сейчас HA e2e в гейт не входит), govulncheck; публикация `amp` и `amp-config-reloader` (multi-arch, теги по semver + sha) на push тега.
+  - Критерий: PR без зелёного CI не мержится; `docker pull` образов из `values-production.yaml` работает.
+  - Оценка: ~1.5d.
+- [ ] **PROD-RELEASE-V010** — релиза нет: теги только `v0.0.1`/`v0.0.2` (2025-12), 500+ коммитов после; `docs/RELEASE_NOTES_v0.1.0-draft.md` — «TBD»; `CHANGELOG.md` — только `[Unreleased]`. Версии не согласованы: `Chart.yaml` `version 0.1.0` / `appVersion 0.0.1` vs `tag: "1.0.0"` в values-production.
+  - Сделать: выровнять версии (Chart `appVersion` = тег образа, values ссылаются на `.Chart.AppVersion` по умолчанию), закрыть `CHANGELOG`, финализировать release notes, тег `v0.1.0`. Зависит от PROD-CI-IMAGES.
+  - Оценка: ~0.5d.
+- [ ] **PROD-HELM-CLEAN-CHECKOUT** — `helm/amp/charts` в `.gitignore:56` ⇒ на чистом checkout `helm template` падает (`missing in charts/ directory: valkey`); `helm lint` при этом PASS и маскирует проблему. Release-gate зелёный только на машине с локальным `charts/`.
+  - Сделать: `helm dependency build` в release-gate/CI (+ `Chart.lock` в git), либо вендорить сабчарт.
+  - Критерий: `git clone` → `scripts/release-gate.sh` зелёный без ручных шагов.
+  - Оценка: ~0.25d.
+
+### P0 — Reliability
+
+- [ ] **PROD-GRACEFUL-SHUTDOWN** — `go-app/cmd/server/main.go:139-176`:
+  - порядок инвертирован: `registry.Shutdown` до `server.Shutdown` ⇒ in-flight запросы попадают в остановленные сервисы;
+  - `main` выходит сразу по `ErrServerClosed`, не дожидаясь завершения `Shutdown`-горутины (drain/flush обрываются);
+  - таймаут 30s == `terminationGracePeriodSeconds: 30` — без запаса;
+  - нет preStop / readiness-flip по SIGTERM: `values.yaml:173` `preStopDelay: 5` — мёртвый ключ, `templates/deployment.yaml:200` явно без preStop.
+  - Сделать: SIGTERM → `/readyz` 503 → preStop sleep → `server.Shutdown` → `registry.Shutdown` → выход после завершения; таймаут < grace period; подключить `preStopDelay`.
+  - Критерий: тест на порядок shutdown; rolling update под нагрузкой (`deploy/e2e-ha`) без 5xx/потерянных алертов.
+  - Оценка: ~1d.
+- [ ] **PROD-POSTGRES-HA-DECISION** — `postgresql-statefulset.yaml` — single primary без репликации/failover (см. TECH-DEBT `HELM-CHART-GAPS`); `postgresql-poddisruptionbudget.yaml:23` `minAvailable: 1` при 1 реплике блокирует drain ноды; бэкапы (`pg_basebackup`) пишутся на PVC в том же кластере.
+  - Сделать (решение через `DECISIONS.md`): для прода — внешний managed PG / CloudNativePG как поддерживаемый путь, встроенный StatefulSet — только dev/pilot; PDB не рендерить при `replicas: 1`; off-cluster бэкапы (S3) или явная документация, что это ответственность оператора; один проверенный прогон restore по `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md`.
+  - Оценка: ~1d (без реализации CNPG).
+
+### P1 — Alertmanager compatibility (тихие расхождения)
+
+- [ ] **PROD-GROUPING-DEFAULT** — `go-app/internal/config/config.go:840`: `grouping.enabled` по умолчанию `false`. Verbatim `alertmanager.yml` с `route:` ⇒ каждый алерт уходит немедленно, без `group_wait`/`group_interval`/`repeat_interval`; `warnGroupingFallback` (`internal/core/services/alert_processor.go`) при `!groupingEnabled` сразу выходит — предупреждения нет. Не упомянуто в compat-доке и migration guide; включено только в `values-production.yaml`, smoke и e2e-ha.
+  - Сделать: default `true` при наличии `route:` (или всегда), либо громкий WARN на старте + явная строка в `ALERTMANAGER_COMPATIBILITY.md` и `MIGRATION_QUICK_START.md`.
+  - Оценка: ~0.5d.
+- [ ] **FU-TOPLEVEL-INHIBIT-RULES** — уже заведён ниже (секция «Follow-ups from Phase 1-7»); по итогам аудита повышен до блокера P1: verbatim upstream-конфиг молча не ингибирует ничего.
+- [ ] **PROD-LLM-ALERT-PATH-ISOLATION** — при `llm.enabled=true`: `EnrichmentModeManager.GetMode` захардкожен на `enriched` (`internal/core/services/enrichment_types.go`) ⇒ каждый алерт синхронно классифицируется LLM внутри `POST /api/v2/alerts` (таймаут 30s × `max_retries=3`, может превысить таймаут отправки Prometheus); `SimpleFilterEngine` дропает алерт при `severity=noise` или `confidence < 0.3` (`internal/core/services/filter_engine.go:90-97`) — решение LLM глушит алерт без выключателя. По умолчанию LLM выключен, поэтому P1, а не P0.
+  - Сделать: классификация асинхронно/вне ingest-пути (или жёсткий бюджет времени на запрос); LLM-дроп — только за явным флагом (default off), дропнутые алерты — метрика + лог; настоящий переключатель enrichment mode.
+  - Оценка: ~1.5d.
+
 ## Runtime gaps (найдены при закрытии FUTUREPARITY-GAP, 2026-08-17) — ВСЕ ЗАКРЫТЫ 2026-08-17
 
 - [x] ~~**RECEIVERS-JSON-CASE**~~ — json-тег на `ReceiverConfig`, `/api/v2/receivers` отдаёт `{"name":...}`.
