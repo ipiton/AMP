@@ -5,7 +5,7 @@
 ### 0. Parity quick wins (из разбора karma, 2026-09-23)
 > Перенесено из BACKLOG (секция «UI и экосистема — идеи из karma»). Обе задачи — про совместимость с экосистемой Alertmanager, друг от друга не зависят, вместе ~1d.
 
-- (KARMA-COMPAT переведён в WIP 2026-09-23, см. ниже)
+- (KARMA-COMPAT закрыт 2026-09-23, см. DONE.md)
 - [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
@@ -28,10 +28,7 @@
 
 ## WIP (Max 2)
 
-- [ ] **KARMA-COMPAT** (активна с 2026-09-23) — `alertmanager_build_info{version="0.27.0"}` (версия КОНТРАКТА) + `amp_build_info` (версия сборки) в `/metrics`: инструменты экосистемы читают версию оттуда, а не из `/api/v2/status`. Ветка `feature/karma-compat`, workspace `tasks/KARMA-COMPAT/`.
-  - Пройдено: research → spec → plan → implement → write-tests → testing → write-doc. Живая проверка со сборкой с ldflags зелёная, парити-сьют 20/0, ADR-009 записан.
-  - karma-шаг в release-gate **выведен из скоупа** решением пользователя 2026-09-23 (в слайсе только хермет-тест) — заведён как `KARMA-RELEASE-GATE` в BACKLOG вместе с `COMPAT-VERSION-CONFIG-KEY` и `STATUS-VERSIONINFO-CONTRACT`.
-  - Следующий шаг: `/end-task`. ~0.5d
+- (KARMA-COMPAT закрыт 2026-09-23, см. DONE.md; WIP свободен)
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 

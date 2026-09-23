@@ -130,8 +130,8 @@ amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",b
 
 ## Finalization
 - [x] `git diff --check` чистый, нерелевантные файлы не затронуты
-- [ ] `/write-tests` → `/testing` → `/write-doc` → `/end-task` по пайплайну
-- [ ] `DONE.md` + архив `tasks/archive/KARMA-COMPAT/` на `/end-task`
+- [x] `/write-tests` → `/testing` → `/write-doc` → `/end-task` по пайплайну
+- [x] `DONE.md` + архив `tasks/archive/KARMA-COMPAT/` на `/end-task`
 
 ## Блокеры и открытые допущения
 
@@ -139,3 +139,29 @@ amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",b
 - 🔴 **Допущение (F3, не доказано):** что `semver.MustParse("dev")` роняет karma паникой — `recover` в её `Pull()` не найден, но поиск по чужому репозиторию без авторизации ненадёжен. На решение не влияет: инвариант «всегда валидный semver» нужен в любом случае.
 - ⚠️ **Обязательство:** `version=0.27.0` — заявка на контракт. Если `/testing` вскроет расхождение с 0.27 в том, что karma реально использует (группы, сайленсы, статусы), останавливаемся и пересматриваем значение, а не «округляем вверх».
 - ⚠️ Точка вызова `Register` в `Initialize` предполагает, что дефолтный регистр — тот же, что отдаёт `/metrics`. Проверено по коду (`router.go:59` + `pkg/metrics/v2/registry.go:82`), но подтвердить руками на `/testing`: поднять сервер и увидеть обе метрики в реальной выдаче.
+
+---
+
+## Финальный статус (`/end-task`, 2026-09-23)
+
+**Закрыта.** Ветка `feature/karma-compat`, 5 коммитов: `383ce8c` (start) → `a51518c` (research) → `a2aaca6` (spec) → `c24b0da` (plan) → `adc6bf8` (implement) → `fb179d5` (tests) → `41d3c27` (testing) → `c018930` (docs). В `main` не влита — это шаг `/merge-to-main`.
+
+### Что поставлено
+
+`go-app/internal/buildinfo/metrics.go` (новый) + вызов `Register` в `ServiceRegistry.Initialize`; `go-app/internal/buildinfo/metrics_test.go` (6 тестов); `Masterminds/semver/v3` переведён в прямые зависимости БЕЗ смены версии. Документация: раздел про karma в `ALERTMANAGER_COMPATIBILITY.md`, ADR-009, `CHANGELOG.md`.
+
+### Что осталось незакрытым (осознанно, не скрыто)
+
+| Ограничение | Куда вынесено |
+|---|---|
+| karma сквозняком не запускалась — образ не тянется (`ghcr.io` → `denied`), совместимость проверена протокольно | `KARMA-RELEASE-GATE` (BACKLOG) |
+| Что `semver.MustParse("dev")` роняет karma паникой — не доказано (`recover` в её `Pull()` не найден, поиск по чужому репозиторию ненадёжен). На решение не влияет: инвариант «всегда валидный semver» нужен в любом случае | — (зафиксировано здесь) |
+| Переопределение compat-версии через конфиг | `COMPAT-VERSION-CONFIG-KEY` (BACKLOG) |
+| `versionInfo.version` в `/api/v2/status` намеренно не тронут | `STATUS-VERSIONINFO-CONTRACT` (BACKLOG) |
+| Чужой флейк `TestBackgroundWorker_WarmupPeriod` | `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md) |
+| `make test-upstream-parity` даёт ложное зелёное | `PARITY-GATE-DOES-NOT-GATE` (BACKLOG) |
+| `make quality-gates` пачкает дерево чужим форматированием | `QUALITY-GATES-DIRTIES-TREE` (BACKLOG) |
+
+### Обязательство, которое теперь несёт код
+
+`AlertmanagerCompatVersion = "0.27.0"` — публичная заявка на контракт. Поднимать её можно ТОЛЬКО вместе со строкой `**Alertmanager Version**: v0.27+` в `docs/ALERTMANAGER_COMPATIBILITY.md` и пересмотром реальной парности (ADR-009). Инвариант защищён тестом, но «свежесть» значения тест проверить не может — это ответственность того, кто будет её двигать.
