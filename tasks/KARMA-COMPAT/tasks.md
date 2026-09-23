@@ -104,20 +104,32 @@ amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",b
 
 ## Documentation & Cleanup
 
-- [ ] **D1. Compat-дока.** Раздел про дашборды/karma в `docs/ALERTMANAGER_COMPATIBILITY.md`:
+- [x] **D1. Compat-дока.** Раздел про дашборды/karma в `docs/ALERTMANAGER_COMPATIBILITY.md`:
   - как karma определяет версию (через `/metrics`, не через `/api/v2/status`) и что именно мы отдаём;
   - пример подключения (`ALERTMANAGER_URI`);
   - что работает: группы с `group_by`, сайленсы (создание/expire), `suppressed` со ссылкой на silence ID — проверено протокольно 2026-09-23;
   - что неприменимо: агрегация нескольких инстансов (AMP сам является инстансом), 24-часовая история karma (тянет из Prometheus; у AMP история в Postgres и наружу не выставлена — `HISTORY-API`);
   - `metrics.enabled: false` → 404 → karma уходит в fallback и продолжает работать;
   - честно: сквозной прогон karma не выполнялся, проверка протокольная.
-- [ ] **D2. ADR-009** в `docs/06-planning/DECISIONS.md` — AMP машиночитаемо заявляет версию реализуемого контракта Alertmanager: контекст, решение (две метрики), обоснование `0.27.0`, accepted risk (обязательство перед инструментами), следствие (менять только вместе с compat-докой).
-- [ ] **D3. CHANGELOG.** Запись в `[Unreleased] / Added` — обе метрики, с явной оговоркой, что `alertmanager_build_info.version` намеренно не равна версии AMP.
-- [ ] **D4. BACKLOG.** Завести вынесенные follow-up'ы: karma-шаг в release-gate (с заметкой: ghcr в текущей среде недоступен, Docker Hub `lmierzwa/karma` работает, но в README karma не задокументирован; пин `v0.132` — `v0.133` под 7-дневным карантином), конфиг-ключ переопределения compat-версии, `versionInfo.version` в `/api/v2/status`.
-- [ ] **D5. Planning.** `NEXT.md`: задача остаётся в WIP до `/end-task`; отметить, что karma-шаг выведен из скоупа.
+- [x] **D2. ADR-009** в `docs/06-planning/DECISIONS.md` — AMP машиночитаемо заявляет версию реализуемого контракта Alertmanager: контекст, решение (две метрики), обоснование `0.27.0`, accepted risk (обязательство перед инструментами), следствие (менять только вместе с compat-докой).
+- [x] **D3. CHANGELOG.** Запись в `[Unreleased] / Added` — обе метрики, с явной оговоркой, что `alertmanager_build_info.version` намеренно не равна версии AMP.
+- [x] **D4. BACKLOG.** Завести вынесенные follow-up'ы: karma-шаг в release-gate (с заметкой: ghcr в текущей среде недоступен, Docker Hub `lmierzwa/karma` работает, но в README karma не задокументирован; пин `v0.132` — `v0.133` под 7-дневным карантином), конфиг-ключ переопределения compat-версии, `versionInfo.version` в `/api/v2/status`.
+- [x] **D5. Planning.** `NEXT.md`: задача остаётся в WIP до `/end-task`; отметить, что karma-шаг выведен из скоупа.
+
+### Что записано (`/write-doc`, 2026-09-23)
+
+| Файл | Что добавлено |
+|---|---|
+| `docs/ALERTMANAGER_COMPATIBILITY.md` | новый раздел «Dashboards And Ecosystem Tooling (karma)»: механика пробы версии, таблица двух метрик, пример подключения (`ALERTMANAGER_URI`), что работает / что неприменимо, поведение при `metrics.enabled: false`, явная оговорка, что сама karma не запускалась; плюс переписана строка `GET /metrics` в таблице активного рантайма |
+| `docs/06-planning/DECISIONS.md` | **ADR-009**: AMP машиночитаемо заявляет версию контракта, а не свою; почему наивная реализация была бы регрессом; accepted risk и условие изменения константы |
+| `CHANGELOG.md` | запись в `[Unreleased] / Added` с явным «`version` намеренно НЕ равна версии AMP» |
+| `docs/06-planning/BACKLOG.md` | `KARMA-RELEASE-GATE`, `COMPAT-VERSION-CONFIG-KEY`, `STATUS-VERSIONINFO-CONTRACT` + два гейт-дефекта из `/testing`: `PARITY-GATE-DOES-NOT-GATE`, `QUALITY-GATES-DIRTIES-TREE`; сам `KARMA-COMPAT` переписан под фактический скоуп |
+| `docs/06-planning/BUGS.md` | `PUBLISHING-WARMUP-TEST-FLAKY` — чужой флейк, найденный на полном прогоне |
+| `docs/06-planning/NEXT.md` | WIP-строка приведена к факту: пройденные шаги, вынесенный из скоупа karma-гейт, следующий шаг `/end-task` |
+| `tasks/KARMA-COMPAT/Spec.md` | критерии приёмки отмечены закрытыми со ссылками на коммиты |
 
 ## Finalization
-- [ ] `git diff --check` чистый, нерелевантные файлы не затронуты
+- [x] `git diff --check` чистый, нерелевантные файлы не затронуты
 - [ ] `/write-tests` → `/testing` → `/write-doc` → `/end-task` по пайплайну
 - [ ] `DONE.md` + архив `tasks/archive/KARMA-COMPAT/` на `/end-task`
 

@@ -90,14 +90,16 @@ AMP не экспортирует `alertmanager_build_info`, а инструме
 
 ## Критерии приёмки
 
-- [ ] `GET /metrics` отдаёт `alertmanager_build_info{version="0.27.0",revision="…",branch="…",goversion="…"} 1`.
-- [ ] `GET /metrics` отдаёт `amp_build_info` с реальными значениями сборки; при сборке без ldflags там `dev`/`unknown`, и это **не** влияет на compat-метрику.
-- [ ] Тест из D5 зелёный и падает, если константу заменить на невалидный semver или на версию `< 0.22.0` (проверить намеренной поломкой при разработке).
-- [ ] Двойная регистрация не паникует (повторный `Register` возвращает ошибку, а не валит процесс).
-- [ ] `go vet ./...`, `go build ./...`, `go test ./...` зелёные; `git diff --check` чистый.
-- [ ] Раздел про karma в `ALERTMANAGER_COMPATIBILITY.md`, ADR-009 в `DECISIONS.md`, запись в `CHANGELOG.md`.
-- [ ] `NEXT.md`/`BACKLOG.md` отражают перенесённые follow-up'ы.
+- [x] `GET /metrics` отдаёт `alertmanager_build_info{version="0.27.0",revision="…",branch="…",goversion="…"} 1`.
+- [x] `GET /metrics` отдаёт `amp_build_info` с реальными значениями сборки; при сборке без ldflags там `dev`/`unknown`, и это **не** влияет на compat-метрику.
+- [x] Тест из D5 зелёный и падает, если константу заменить на невалидный semver или на версию `< 0.22.0` (проверить намеренной поломкой при разработке).
+- [x] Двойная регистрация не паникует. _Уточнение по факту реализации:_ формулировка «возвращает ошибку» разошлась с D4/S3 («`AlreadyRegisteredError` не считать фатальной»). Реализовано по D4: `Register` глотает `AlreadyRegisteredError` и возвращает `nil`, иначе вызыватель в `Initialize` обязан был бы отличать безобидную повторную регистрацию от настоящей ошибки. Покрыто `TestRegister_Idempotent`: второй вызов возвращает `nil` и не дублирует сэмплы.
+- [x] `go vet ./...`, `go build ./...`, `go test ./...` зелёные; `git diff --check` чистый.
+- [x] Раздел про karma в `ALERTMANAGER_COMPATIBILITY.md`, ADR-009 в `DECISIONS.md`, запись в `CHANGELOG.md`.
+- [x] `NEXT.md`/`BACKLOG.md` отражают перенесённые follow-up'ы.
 
+
+Все критерии закрыты: реализация — `/implement` (adc6bf8), тест с негативной проверкой — `/write-tests` (fb179d5), живой прогон и гейты — `/testing` (41d3c27), документация — `/write-doc`.
 ## Риски
 
 | Риск | Смягчение |
