@@ -2,6 +2,12 @@
 
 ## Queue
 
+### 0. Parity quick wins (из разбора karma, 2026-09-23)
+> Перенесено из BACKLOG (секция «UI и экосистема — идеи из karma»). Обе задачи — про совместимость с экосистемой Alertmanager, друг от друга не зависят, вместе ~1d.
+
+- [ ] **KARMA-COMPAT** — экспортировать `alertmanager_build_info{version,...}` (karma определяет версию из `/metrics`, а не из `/api/v2/status`); karma в `deploy/smoke` как проверку API-парности; раздел в `docs/ALERTMANAGER_COMPATIBILITY.md` + compose/Helm-пример. ~0.5d
+- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d
+
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Phase 5A/5B закрыты, осталось наполнить агента реальными tools.
 > Reference: SherlockOps, HolmesGPT, Keep.
@@ -10,9 +16,9 @@
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d
 
 ### 2. Operations (из AMP-OSS)
-- [ ] **RELOADABLE-COMPONENT-INTERFACES** — per-component Reloadable + wiring в ReloadCoordinator. ~2d
-- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven SIGHUP. ~1d
-- [ ] **HELM-PRODUCTION-VALUES** — `values-production.yaml` (PG cluster, DragonflyDB, sidecar). ~0.5d
+- [x] ~~**RELOADABLE-COMPONENT-INTERFACES**~~ — закрыто 2026-08-20 (INF-A slice 1), см. BACKLOG.
+- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven SIGHUP. Частично сделано INF-B (values-шейп есть, нет Go-кода sidecar + Dockerfile + template). ~1d
+- [x] ~~**HELM-PRODUCTION-VALUES**~~ — закрыто 2026-08-20 (INF-B), см. BACKLOG; остаточные гэпы чарта — в `TECH-DEBT.md` (`HELM-CHART-GAPS`).
 
 ### 3. Alertmanager Parity — Phase B (feature parity)
 > Необязательно для controlled replacement, но закрывает полный feature set Alertmanager.
@@ -25,7 +31,9 @@
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
-- Очередь обновлена 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.
+- Очередь обновлена 2026-09-23: перенесены KARMA-COMPAT и PARITY-RESOLVE-TIMEOUT-ENDSAT (группа 0), синхронизирован статус группы 2 (RELOADABLE-COMPONENT-INTERFACES и HELM-PRODUCTION-VALUES закрыты 2026-08-20, в очереди висели как открытые).
+- 🔴 **Блокеры прод-релиза живут в BACKLOG**, секция «Production Readiness — блокеры (аудит 2026-09-21)»: P0 по security (нет аутентификации на API), delivery (нет CI и опубликованных образов) и reliability (порядок graceful shutdown). Они приоритетнее всего, что ниже в этой очереди; в Queue не перенесены сознательно — при WIP max 2 берём их отдельным решением.
+- Предыдущее обновление 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.
 - **Приоритет 1**: PHASE-6B-RUNBOOK-ENGINE — markdown KB с auto-matching по alert labels, дополняет 6A tools и завершает Investigation Toolset.
 - **Приоритет 2**: PHASE-5C-PROVIDER-FALLBACK — primary→fallback chain для LLM, повышает устойчивость 5B/6A.
 - **Приоритет 3**: Operations (reloadable + sidecar) — закрывает hot reload story.
