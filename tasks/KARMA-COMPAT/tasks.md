@@ -9,17 +9,28 @@
 
 ## Implementation
 
-- [ ] **S1. Константа версии контракта.** В `go-app/internal/buildinfo/` добавить `AlertmanagerCompatVersion = "0.27.0"` с комментарием: значение привязано к `docs/ALERTMANAGER_COMPATIBILITY.md:5` («Alertmanager Version: v0.27+»), меняется только вместе с ней, обязано оставаться валидным semver `>= 0.22.0` (ниже — karma не найдёт маппер).
-- [ ] **S2. Коллекторы.** Новый файл `go-app/internal/buildinfo/metrics.go`:
+- [x] **S1. Константа версии контракта.** В `go-app/internal/buildinfo/` добавить `AlertmanagerCompatVersion = "0.27.0"` с комментарием: значение привязано к `docs/ALERTMANAGER_COMPATIBILITY.md:5` («Alertmanager Version: v0.27+»), меняется только вместе с ней, обязано оставаться валидным semver `>= 0.22.0` (ниже — karma не найдёт маппер).
+- [x] **S2. Коллекторы.** Новый файл `go-app/internal/buildinfo/metrics.go`:
   - `alertmanager_build_info{version,revision,branch,goversion} = 1`, где `version` = `AlertmanagerCompatVersion`, остальное — реальные (`Revision`, `Branch`, `runtime.Version()`);
   - `amp_build_info{version,revision,branch,goversion,build_user,build_date} = 1` — целиком из `buildinfo`;
   - оба как `prometheus.NewGaugeVec` + `WithLabelValues(...).Set(1)`; `version.NewCollector` НЕ использовать (D3).
   - Help-строки явные: у compat-метрики написать, что это версия реализуемого контракта Alertmanager, а не версия AMP.
-- [ ] **S3. Регистрация.** `func Register(r prometheus.Registerer) error` там же:
+- [x] **S3. Регистрация.** `func Register(r prometheus.Registerer) error` там же:
   - без `init()` и `promauto` (D4) — тест должен собирать чистый регистр;
   - повторный вызов не паникует: `prometheus.AlreadyRegisteredError` не считать фатальной.
-- [ ] **S4. Точка вызова.** В `ServiceRegistry.Initialize` рядом с созданием `metricsGate` (`go-app/internal/application/service_registry.go:332`) вызвать `buildinfo.Register(prometheus.DefaultRegisterer)`; ошибку логировать, но **не** ронять Initialize (иначе повторная инициализация реестра в тестах положит процесс). `cmd/` не трогаем — код в `internal/`.
-- [ ] **S5. go.mod.** `Masterminds/semver/v3` из indirect в direct (нужен только тесту, D5). Проверить, что `go mod tidy` не тянет ничего нового.
+- [x] **S4. Точка вызова.** В `ServiceRegistry.Initialize` рядом с созданием `metricsGate` (`go-app/internal/application/service_registry.go:332`) вызвать `buildinfo.Register(prometheus.DefaultRegisterer)`; ошибку логировать, но **не** ронять Initialize (иначе повторная инициализация реестра в тестах положит процесс). `cmd/` не трогаем — код в `internal/`.
+- [ ] **S5. go.mod** _(перенесено в `/write-tests`: зависимость нужна тесту, раньше он появится — `go mod tidy` будет ругаться на неиспользуемую прямую зависимость)_. `Masterminds/semver/v3` из indirect в direct (нужен только тесту, D5). Проверить, что `go mod tidy` не тянет ничего нового.
+
+### Проверено на живом сервере (S4, снимает допущение из блокеров)
+
+Lite-профиль на `:19093`, сборка без ldflags и сборка с реальными ldflags:
+
+```
+alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="c24b0da",version="0.27.0"} 1
+amp_build_info{...,version="v0.0.2-516-gc24b0da-dirty"} 1
+```
+
+Подтверждено: дефолтный регистр — тот же, что отдаёт `/metrics`; compat-версия остаётся `0.27.0` независимо от ldflags; реальная версия (та самая, что сломала бы karma) уезжает в `amp_build_info`.
 
 ## Testing
 
