@@ -5,7 +5,7 @@
 ### 0. Parity quick wins (из разбора karma, 2026-09-23)
 > Перенесено из BACKLOG (секция «UI и экосистема — идеи из karma»). Обе задачи — про совместимость с экосистемой Alertmanager, друг от друга не зависят, вместе ~1d.
 
-- [ ] **KARMA-COMPAT** — экспортировать `alertmanager_build_info{version,...}` (karma определяет версию из `/metrics`, а не из `/api/v2/status`); karma в `deploy/smoke` как проверку API-парности; раздел в `docs/ALERTMANAGER_COMPATIBILITY.md` + compose/Helm-пример. ~0.5d
+- (KARMA-COMPAT переведён в WIP 2026-09-23, см. ниже)
 - [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
@@ -27,6 +27,8 @@
 - (absorbed by AMP-PARITY, see DONE.md 2026-08-18)
 
 ## WIP (Max 2)
+
+- [ ] **KARMA-COMPAT** (активна с 2026-09-23) — `alertmanager_build_info` в `/metrics` (karma определяет версию оттуда, а не из `/api/v2/status`), karma в smoke как детектор регрессий API-парности, раздел в `docs/ALERTMANAGER_COMPATIBILITY.md`. Ветка `feature/karma-compat`, workspace `tasks/KARMA-COMPAT/`. Следующий шаг: `/research` (внешняя интеграция + развилка «эмулировать upstream-версию vs отдавать свою semver»). ~0.5d
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
