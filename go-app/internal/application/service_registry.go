@@ -11,6 +11,7 @@ import (
 	"time"
 
 	handlers "github.com/ipiton/AMP/internal/application/handlers"
+	"github.com/ipiton/AMP/internal/buildinfo"
 	businesspublishing "github.com/ipiton/AMP/internal/business/publishing"
 	businessrouting "github.com/ipiton/AMP/internal/business/routing"
 	businesssilencing "github.com/ipiton/AMP/internal/business/silencing"
@@ -41,6 +42,7 @@ import (
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 	metricsv2 "github.com/ipiton/AMP/pkg/metrics/v2"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // alertCacheWithLifecycle extends ActiveAlertCache with lifecycle management (Stop).
@@ -330,6 +332,16 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	// so they are created here rather than in one of the initialize* steps.
 	r.restartWarnings = appconfig.NewRestartWarnings()
 	r.metricsGate = metricsv2.NewExpositionGate(r.config.Metrics.Enabled)
+
+	// KARMA-COMPAT: build-info metrics go into the SAME default registry that
+	// /metrics serves (router.go wraps promhttp.Handler(), which gathers from
+	// prometheus.DefaultGatherer). Non-fatal on purpose — a missing build-info
+	// gauge degrades version discovery for dashboards, it does not stop AMP
+	// from routing alerts.
+	if err := buildinfo.Register(prometheus.DefaultRegisterer); err != nil {
+		r.logger.Warn("Build-info metrics registration failed, version discovery will fall back",
+			"error", err)
+	}
 
 	// Step 1: Initialize Infrastructure
 	if err := r.initializeInfrastructure(ctx); err != nil {
