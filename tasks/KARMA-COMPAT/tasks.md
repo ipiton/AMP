@@ -62,6 +62,46 @@ AlertmanagerCompatVersion="0.0.2": version "0.0.2" does not satisfy karma's mapp
 
 ⚠️ **Чужой флейк в полном прогоне:** `TestBackgroundWorker_WarmupPeriod` (`internal/business/publishing`) упал один раз на `go test ./...` («Expected call after warmup», ожидание 10 ms warmup под нагрузкой), 5 прогонов пакета подряд — зелёные. Пакета задача не касается. Кандидат в `BUGS.md` на шаге `/write-doc`.
 
+## Testing (`/testing`, 2026-09-23)
+
+Сборка `make build` с реальными ldflags (`version=v0.0.2-518-gfb179d5`), lite-профиль на `:19093`.
+
+### Зелёное
+
+| Проверка | Результат |
+|---|---|
+| Живая выдача `/metrics` | обе метрики на месте (ниже) |
+| Алгоритм karma **против живого сервера** | `families=94`, `version="0.27.0"` → `0.27.0` ⊨ `>=0.22.0` |
+| `metrics.enabled: false` | `/metrics` → **404** `metrics exposition is disabled`, `/api/v2/status` → 200 |
+| MVP-матрица (`./cmd/server/... ./internal/ui`) | 3 пакета `ok` |
+| `go test ./... -count=1` | два полных прогона подряд — без единого `FAIL` |
+| `go build`, `go vet ./...` | чисто |
+| `go test -race ./internal/buildinfo/` | 6 тестов зелёные |
+| `golangci-lint run` по `./internal/buildinfo/...` и `./internal/application/...` | `0 issues` |
+| Парити-сьют `TestUpstreamParity_*` (`-tags futureparity`) | **20 PASS / 0 FAIL** |
+| `gofmt -l` по затронутым файлам, `git diff --check` | чисто |
+
+```
+alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="fb179d5",version="0.27.0"} 1
+amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",build_user="vit",goversion="go1.27.1",revision="fb179d5",version="v0.0.2-518-gfb179d5"} 1
+```
+
+Живая проверка делалась временным тестом, который скрейпил `:19093` и гонял по ответу полный алгоритм karma (`expfmt` → лейбл `version` → `SplitN(...,"-",2)[0]` → `semver` → `>=0.22.0`). Файл удалён сразу после прогона, в дереве его нет.
+
+**Снято допущение из плана:** дефолтный регистр — действительно тот, что отдаёт `/metrics`; проверено не по коду, а на живой выдаче со сборкой с ldflags. Версия AMP (`v0.0.2-518-gfb179d5` — ровно та, что сломала бы karma) уходит только в `amp_build_info`.
+
+**Подтверждена D6:** при `metrics.enabled: false` эндпоинт отдаёт 404, API продолжает работать. Что karma после 404 уходит в fallback `999.0` — по-прежнему вывод из её кода, не наблюдение.
+
+**Заявка `version=0.27.0` выдержала проверку:** парити-сьют по тому, что karma реально использует (alerts, groups, silences, status, receivers, reload), зелёный целиком. Оснований пересматривать значение нет.
+
+### Красное / чужое
+
+Нового красного нет. Три предсуществующих наблюдения, к задаче отношения не имеющих:
+
+1. ⚠️ **Флейк `TestBackgroundWorker_WarmupPeriod`** (`internal/business/publishing`) — упал один раз из четырёх полных прогонов («Expected call after warmup»: ждёт 10 ms warmup, под параллельной нагрузкой не успевает). 5 одиночных прогонов пакета + 2 полных прогона после — зелёные. В `BUGS.md` на шаге `/write-doc`.
+2. ⚠️ **`make test-upstream-parity` ничего не проверяет.** Цель гоняет `-run UpstreamParity` без `-tags futureparity`, а весь сьют под этим тегом ⇒ «no tests to run» и зелёный выход. С тегом — 20 PASS. Гейт, который не гейтит; в `BACKLOG.md`.
+3. ⚠️ **`make quality-gates` пачкает дерево.** Шаг `go fmt ./...` перепишет 6 предсуществующе неотформатированных файлов (`cmd/server/futureparity_compat.go`, `internal/application/handlers/alerts_test.go`, `internal/core/investigation/{message,tool}.go`, `internal/infrastructure/inhibition/{matcher_impl,matchers_list_test}.go` — последние правки 17-19.08, до этой ветки). Поэтому гейт прогонялся по шагам (`gofmt -l` + `vet` + MVP-матрица), а не одной целью: иначе в диф задачи попали бы чужие форматные правки. В `BACKLOG.md`.
+
 ## Documentation & Cleanup
 
 - [ ] **D1. Compat-дока.** Раздел про дашборды/karma в `docs/ALERTMANAGER_COMPATIBILITY.md`:
