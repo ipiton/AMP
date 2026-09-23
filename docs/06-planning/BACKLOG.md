@@ -60,6 +60,32 @@
   - Сделать: классификация асинхронно/вне ingest-пути (или жёсткий бюджет времени на запрос); LLM-дроп — только за явным флагом (default off), дропнутые алерты — метрика + лог; настоящий переключатель enrichment mode.
   - Оценка: ~1.5d.
 
+## UI и экосистема — идеи из karma (разбор 2026-09-23)
+> `prymitive/karma` — read-only дашборд для Alertmanager (Go + React, Apache-2.0, активный). Не конкурент: закрывает ровно то, где у AMP дыра — UI.
+> Проверено эмпирически на AMP lite (`:19093`, 2 алерта + silence) против того, что karma реально запрашивает (её клиент `internal/mapper/v017/api.go`, `internal/verprobe`):
+> `/api/v2/alerts/groups` совпадает поле в поле (`labels`/`receiver.name`/`alerts[].labels|annotations|startsAt|fingerprint|generatorURL|status.state|silencedBy`), заглушенный алерт отдаётся как `suppressed` со ссылкой на silence ID, `GET/POST /api/v2/silences` + `DELETE /api/v2/silence/{id}` + ответ `{"silenceID":...}` — как upstream.
+> Сам бинарник karma не запускался (`docker pull ghcr.io/prymitive/karma` → `denied`); проверка протокольная, не end-to-end.
+> Что НЕ берём: агрегацию нескольких upstream-инстансов (у AMP обратный сценарий — он сам этот инстанс) и свой React-UI ради паритета с karma. Код из karma не копировать (Apache-2.0 → AGPL втягивается, но берём идеи).
+
+- [ ] **KARMA-COMPAT** — объявить karma поддерживаемым UI для AMP. Единственный реальный блокер — нет метрики `alertmanager_build_info`: karma определяет версию НЕ из `/api/v2/status`, а разбирая `/metrics` (`internal/verprobe/verprobe.go` ищет `alertmanager_build_info{version=...}`). У AMP все метрики с префиксом `alert_history_*`, этой нет ⇒ karma на каждом цикле опроса пишет `Error while discovering version`; не падает (пустая версия → fallback `999.0` → свежий маппер), но шумит, и любой другой инструмент экосистемы, который пробует версию, ошибётся.
+  - Сделать: экспортировать `alertmanager_build_info{version,revision,branch,goversion}` (значения из `internal/buildinfo`, `version` — semver, чтобы проходил `>=0.22.0`-констрейнт karma); karma в `deploy/smoke` как проверку парности (UI показал алерты = контракт соблюдён); раздел в `docs/ALERTMANAGER_COMPATIBILITY.md` + готовый compose/Helm-пример.
+  - Бонус: smoke с karma — дешёвый детектор регрессий API-парности.
+  - Оценка: ~0.5d.
+- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** — активный алерт отдаётся с `endsAt == startsAt` (воспроизведено: POST без `endsAt` → `GET /api/v2/alerts` вернул `startsAt=endsAt=updatedAt`). Upstream при отсутствии `endsAt` ставит `startsAt + resolve_timeout` (default 5m); `resolve_timeout` у AMP распарсен (`internal/infrastructure/routing/global.go:22,118-120`), но до ingest-пути не доходит. Потребитель, считающий `endsAt` в прошлом признаком resolved (ровно как сам Alertmanager), видит активные алерты отгоревшими. karma это поле не читает, так что баг от неё не зависит.
+  - Критерий: POST без `endsAt` ⇒ `endsAt = startsAt + global.resolve_timeout`; тест на дефолт и на явный `endsAt` (не перетирать).
+  - Оценка: ~0.5d.
+- [ ] **ACK-AS-SILENCE** — ack алерта/группы в один клик: короткий silence (default ~15m) с автором из аутентификации и шаблонным комментарием (karma: `alertAcknowledgement`, поддерживает `%NOW%`). У AMP уже есть всё, кроме самой операции и идентичности: `POST /api/v2/silences` + `created_by` (`migrations/20251104120000_create_silences_table.sql:18`), но автор сейчас самодекларируемый. Зависит от `PROD-AUTH`.
+  - Сделать: endpoint ack (матчеры из лейблов группы), настраиваемые duration/comment-шаблон, автор из auth-контекста; метрика ack'ов.
+  - Оценка: ~1d (после PROD-AUTH).
+- [ ] **HEALTHCHECK-DEADMAN** — dead man's switch: настраиваемый фильтр по лейблам «этот алерт обязан гореть всегда»; если совпадений нет — пайплайн сломан (karma: `alertmanager.healthcheck.filters`, показывает ошибку в UI). У AMP понятия нет вовсе, хотя для замены Alertmanager это базовая страховка от «тишины из-за поломки», а не от отсутствия проблем.
+  - Сделать: `healthcheck.filters` в конфиге, состояние в `/api/v2/status` + `/readyz`-независимая метрика (`amp_healthcheck_alert_present{name=...}`), чтобы на неё вешался `PrometheusRule` из `PROD-*`-пакета.
+  - Оценка: ~1d.
+- [ ] **HISTORY-API** — история уже лежит в Postgres и НЕ отдаётся наружу: `alerts`, `alert_classifications`, `alert_publishing_history` (`migrations/initial_schema.sql`), репозиторий `core.AlertHistoryRepository` (`internal/core/history.go:10-28`: GetHistory/GetAlertsByFingerprint/GetRecentAlerts/GetAggregatedStats/GetTopAlerts/GetFlappingAlerts) реализован в `internal/infrastructure/repository/postgres_history.go`, но его единственные потребители — несмонтированные хендлеры (`cmd/server/handlers/dashboard_overview.go:153`, `prometheus_query_handler.go:59`). Наружу торчит только `/api/v1/alerts/{fp}/investigation`.
+  - Контекст: karma рисует 24-часовую полоску срабатываний, ходя в **Prometheus** по `source`-ссылке алерта (пул воркеров + rewrite-правила) — обходной путь, потому что Alertmanager истории не хранит. У AMP она есть, точнее и без похода в Prometheus. Это ниша, где свой UI оправдан (история + LLM-расследования + доставка/DLQ — karma такого не умеет).
+  - Сделать: `GET /api/v1/alerts/{fingerprint}/history` (+ top/flapping), пагинация, лимиты; затем — опционально — собственный виджет поверх.
+  - Оценка: ~1-1.5d.
+- Отложено (не заводим задачами, фиксируем как идеи): ACL на сайленсы по группам пользователей (после `PROD-AUTH`), `readonly`-флаг инстанса как предохранитель для пилота, грамматика фильтров karma (`@state=active`, `@receiver=`, `@silenced`) как модель для `filter=` в `/api/v2/alerts`, раскраска/`valueOnly`/strip лейблов и annotation-actions — только если делаем свой UI.
+
 ## Runtime gaps (найдены при закрытии FUTUREPARITY-GAP, 2026-08-17) — ВСЕ ЗАКРЫТЫ 2026-08-17
 
 - [x] ~~**RECEIVERS-JSON-CASE**~~ — json-тег на `ReceiverConfig`, `/api/v2/receivers` отдаёт `{"name":...}`.
