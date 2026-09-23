@@ -88,7 +88,7 @@ Source of truth:
 | `POST /-/reload` | ✅ | ✅ | 🟢 | Hot reload; runs the same `LoadConfig` path (incl. configvalidator) as startup |
 | `GET /health`, `GET /healthz`, `GET /ready`, `GET /readyz` | N/A | ✅ | 🟢 | State-aware health/readiness routes |
 | `GET /-/healthy`, `GET /-/ready` | ✅ | ✅ | 🟢 | Alertmanager-style liveness/readiness routes |
-| `GET /metrics` | ✅ | ✅ | 🟢 | |
+| `GET /metrics` | ✅ | ✅ | 🟢 | Includes `alertmanager_build_info` — the metric ecosystem tooling probes for a version. Its `version` label is the **Alertmanager contract version AMP implements** (`0.27.0`), not AMP's own build version, which lives in `amp_build_info`. See [Dashboards And Ecosystem Tooling](#dashboards-and-ecosystem-tooling-karma). |
 | `--web.route-prefix` | ✅ | ✅ | 🟢 | Explicit prefix, or inherited from `external_url`'s path when unset |
 
 ---
@@ -123,6 +123,87 @@ The endpoints below are still **not** implemented (explicitly out of scope for t
 | `/health`, `/healthz`, `/ready`, `/readyz` | `GET` | |
 | `/-/healthy`, `/-/ready` | `GET` | |
 | `/metrics` | `GET` | |
+
+---
+
+## Dashboards And Ecosystem Tooling (karma)
+
+[karma](https://github.com/prymitive/karma) is a read-only Alertmanager dashboard. It works against AMP, and as of
+2026-09-23 AMP exports the build-info metric karma (and anything modelled on it) probes for.
+
+### How version discovery actually works
+
+karma does **not** read the version from `GET /api/v2/status`. It scrapes `GET /metrics`, parses the exposition
+format, and reads the `version` label off `alertmanager_build_info` (`internal/verprobe/verprobe.go`). It then cuts
+the value at the first `-`, parses the remainder as semver, and resolves an API mapper through a `>=0.22.0`
+constraint. **No mapper match means karma drops the connection and clears the alerts it had already shown** —
+which makes a wrong version strictly worse than no metric at all, since a missing/unparseable one only triggers
+karma's "assume latest" fallback.
+
+That is why AMP exports two separate metrics instead of one:
+
+| Metric | `version` label | Answers |
+|---|---|---|
+| `alertmanager_build_info{version,revision,branch,goversion}` | `0.27.0` — constant | "Which Alertmanager contract do I get?" |
+| `amp_build_info{version,revision,branch,goversion,build_user,build_date}` | e.g. `v0.0.2-518-gfb179d5` | "Which AMP build is this?" |
+
+Both are gauges with value `1`, matching the upstream `*_build_info` shape. The non-`version` labels on the compat
+metric are AMP's real build data — nothing is synthesised; `version` describes the contract, the rest describes the
+binary serving it.
+
+`0.27.0` is not a free-floating number: it is the machine-readable form of this document's own
+`**Alertmanager Version**: v0.27+ (API v2)` header. The constant lives in `go-app/internal/buildinfo/metrics.go`
+and moves only together with that line. Raising it "to look current" would claim upstream behaviour AMP has never
+been verified against. See [ADR-009](06-planning/DECISIONS.md) for the full decision.
+
+### Connecting karma
+
+Single-server setups need one variable:
+
+```bash
+docker run -p 8080:8080 -e ALERTMANAGER_URI=http://amp:9093 ghcr.io/prymitive/karma:latest
+```
+
+Multi-server YAML config (`alertmanager.servers[].uri`) works the same way — AMP is just an Alertmanager URI to karma.
+
+### What works
+
+Verified at the protocol level on 2026-09-23 against a live AMP lite instance, by replaying what karma's own client
+(`internal/mapper/v017/api.go`) requests:
+
+- `GET /api/v2/alerts/groups` matches field for field: `labels`, `receiver.name`, and per alert
+  `labels`/`annotations`/`startsAt`/`fingerprint`/`generatorURL`/`status.state`/`status.silencedBy`.
+- Group labels come from the matched route's `group_by`, and the receiver is resolved per group from the live route
+  tree — so karma's grouping view reflects the real routing tree, not a flat list.
+- A silenced alert is returned as `suppressed` with the silence ID in `status.silencedBy`, so karma renders the
+  silence badge and can link to it.
+- `GET/POST /api/v2/silences`, `GET/DELETE /api/v2/silence/{id}` and the `{"silenceID": ...}` create response behave
+  as upstream, so creating and expiring silences from karma's UI works.
+- The version probe itself: confirmed against the live `/metrics` of a binary built with real ldflags.
+
+### What does not apply
+
+- **Multi-instance aggregation.** karma's headline feature is merging several Alertmanager instances into one view.
+  AMP is itself that instance, so the scenario is inverted. Nothing stops you pointing karma at several AMP
+  replicas, but there is no AMP-side work here.
+- **The 24h alert history strip.** karma draws it by querying **Prometheus** over the alert's `source` link, because
+  Alertmanager keeps no history. AMP *does* keep history (in Postgres), but does not expose it over HTTP yet, so
+  karma cannot use it — it will keep going to Prometheus. See `HISTORY-API` in the backlog.
+- **`inhibited` state.** The `?inhibited=` filter parses, but inhibition is not yet reflected in `InhibitedBy`
+  (see Known Gaps), so karma's inhibition badge stays empty.
+
+### `metrics.enabled: false`
+
+The exposition gate returns **404** for `/metrics` while the API stays fully up (verified). karma's version probe
+then fails, it falls back to "assume latest" (`999.0`), picks the newest mapper and keeps working — the same state
+AMP was in before this metric existed. Nothing degrades beyond a log line per poll cycle on karma's side.
+
+### Honesty note
+
+The karma binary was **not** run end-to-end against AMP. Its container image could not be pulled in the environment
+where this was verified (`ghcr.io` returned `denied`). Everything above is verified either against AMP's live HTTP
+surface or by reproducing karma's own algorithm from its source; the claim "karma's UI renders AMP's alerts" is an
+inference from that, not an observation. Closing that gap is tracked as `KARMA-RELEASE-GATE` in the backlog.
 
 ---
 

@@ -28,11 +28,15 @@
 
 ## WIP (Max 2)
 
-- [ ] **KARMA-COMPAT** (активна с 2026-09-23) — `alertmanager_build_info` в `/metrics` (karma определяет версию оттуда, а не из `/api/v2/status`), karma в smoke как детектор регрессий API-парности, раздел в `docs/ALERTMANAGER_COMPATIBILITY.md`. Ветка `feature/karma-compat`, workspace `tasks/KARMA-COMPAT/`. Следующий шаг: `/research` (внешняя интеграция + развилка «эмулировать upstream-версию vs отдавать свою semver»). ~0.5d
+- [ ] **KARMA-COMPAT** (активна с 2026-09-23) — `alertmanager_build_info{version="0.27.0"}` (версия КОНТРАКТА) + `amp_build_info` (версия сборки) в `/metrics`: инструменты экосистемы читают версию оттуда, а не из `/api/v2/status`. Ветка `feature/karma-compat`, workspace `tasks/KARMA-COMPAT/`.
+  - Пройдено: research → spec → plan → implement → write-tests → testing → write-doc. Живая проверка со сборкой с ldflags зелёная, парити-сьют 20/0, ADR-009 записан.
+  - karma-шаг в release-gate **выведен из скоупа** решением пользователя 2026-09-23 (в слайсе только хермет-тест) — заведён как `KARMA-RELEASE-GATE` в BACKLOG вместе с `COMPAT-VERSION-CONFIG-KEY` и `STATUS-VERSIONINFO-CONTRACT`.
+  - Следующий шаг: `/end-task`. ~0.5d
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
+- 2026-09-23, по ходу KARMA-COMPAT заведено: `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md — флейк `TestBackgroundWorker_WarmupPeriod` под полным прогоном) и два гейт-дефекта в BACKLOG: `PARITY-GATE-DOES-NOT-GATE` (`make test-upstream-parity` гоняет сьют без его build-тега ⇒ «no tests to run» и ложное зелёное) и `QUALITY-GATES-DIRTIES-TREE` (`make quality-gates` переписывает 6 чужих неотформатированных файлов).
 - Очередь обновлена 2026-09-23: перенесены KARMA-COMPAT и PARITY-RESOLVE-TIMEOUT-ENDSAT (группа 0), синхронизирован статус группы 2 (RELOADABLE-COMPONENT-INTERFACES и HELM-PRODUCTION-VALUES закрыты 2026-08-20, в очереди висели как открытые).
 - 🔴 **Блокеры прод-релиза живут в BACKLOG**, секция «Production Readiness — блокеры (аудит 2026-09-21)»: P0 по security (нет аутентификации на API), delivery (нет CI и опубликованных образов) и reliability (порядок graceful shutdown). Они приоритетнее всего, что ниже в этой очереди; в Queue не перенесены сознательно — при WIP max 2 берём их отдельным решением.
 - Предыдущее обновление 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.
