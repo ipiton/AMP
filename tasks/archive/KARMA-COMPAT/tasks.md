@@ -1,0 +1,167 @@
+# Implementation Checklist: KARMA-COMPAT
+
+Ветка `feature/karma-compat`. Источник: `Spec.md` (решения D1-D6). Слайс один, резать не требуется: ~0.5d, один пакет + тест + доки.
+
+## Research & Spec
+- [x] Research завершён — `research.md` (F2: наивная реализация ломает karma; F3: `"dev"` не semver)
+- [x] Spec зафиксирован — `Spec.md` (D1-D6)
+- [x] Развилка по karma-шагу в гейте снята пользователем 2026-09-23: только хермет-тест
+
+## Implementation
+
+- [x] **S1. Константа версии контракта.** В `go-app/internal/buildinfo/` добавить `AlertmanagerCompatVersion = "0.27.0"` с комментарием: значение привязано к `docs/ALERTMANAGER_COMPATIBILITY.md:5` («Alertmanager Version: v0.27+»), меняется только вместе с ней, обязано оставаться валидным semver `>= 0.22.0` (ниже — karma не найдёт маппер).
+- [x] **S2. Коллекторы.** Новый файл `go-app/internal/buildinfo/metrics.go`:
+  - `alertmanager_build_info{version,revision,branch,goversion} = 1`, где `version` = `AlertmanagerCompatVersion`, остальное — реальные (`Revision`, `Branch`, `runtime.Version()`);
+  - `amp_build_info{version,revision,branch,goversion,build_user,build_date} = 1` — целиком из `buildinfo`;
+  - оба как `prometheus.NewGaugeVec` + `WithLabelValues(...).Set(1)`; `version.NewCollector` НЕ использовать (D3).
+  - Help-строки явные: у compat-метрики написать, что это версия реализуемого контракта Alertmanager, а не версия AMP.
+- [x] **S3. Регистрация.** `func Register(r prometheus.Registerer) error` там же:
+  - без `init()` и `promauto` (D4) — тест должен собирать чистый регистр;
+  - повторный вызов не паникует: `prometheus.AlreadyRegisteredError` не считать фатальной.
+- [x] **S4. Точка вызова.** В `ServiceRegistry.Initialize` рядом с созданием `metricsGate` (`go-app/internal/application/service_registry.go:332`) вызвать `buildinfo.Register(prometheus.DefaultRegisterer)`; ошибку логировать, но **не** ронять Initialize (иначе повторная инициализация реестра в тестах положит процесс). `cmd/` не трогаем — код в `internal/`.
+- [x] **S5. go.mod** _(перенесено в `/write-tests`: зависимость нужна тесту, раньше он появится — `go mod tidy` будет ругаться на неиспользуемую прямую зависимость)_. `Masterminds/semver/v3` из indirect в direct (нужен только тесту, D5). Проверить, что `go mod tidy` не тянет ничего нового.
+
+### Проверено на живом сервере (S4, снимает допущение из блокеров)
+
+Lite-профиль на `:19093`, сборка без ldflags и сборка с реальными ldflags:
+
+```
+alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="c24b0da",version="0.27.0"} 1
+amp_build_info{...,version="v0.0.2-516-gc24b0da-dirty"} 1
+```
+
+Подтверждено: дефолтный регистр — тот же, что отдаёт `/metrics`; compat-версия остаётся `0.27.0` независимо от ldflags; реальная версия (та самая, что сломала бы karma) уезжает в `amp_build_info`.
+
+## Testing
+
+- [x] **T1. Контракт karma (главный тест).** Воспроизвести цепочку целиком (D5): чистый `prometheus.NewRegistry()` → `Register` → `promhttp.HandlerFor` → прочитать тело → `expfmt.NewTextParser` (как `verprobe.Detect`) → достать лейбл `version` из `alertmanager_build_info` → `strings.SplitN(v, "-", 2)[0]` (как `fixSemVersion`) → `semver.NewConstraint(">=0.22.0").Check(semver.MustParse(...))`.
+- [x] **T2. Негативная проверка теста.** Временно подменить константу на `"dev"` и на `"0.0.2"`, убедиться, что T1 краснеет в обоих случаях, вернуть значение. Это критерий приёмки из Spec, а не факультатив: тест, который не ловит регресс, бесполезен.
+- [x] **T3. `amp_build_info`.** Присутствует, значения совпадают с `buildinfo.*`; при сборке без ldflags там `dev`/`unknown` и это **не** протекает в compat-метрику.
+- [x] **T4. Идемпотентность.** Двойной `Register` в один регистр не паникует и возвращает ошибку, которую вызыватель вправе проигнорировать.
+- [x] **T5. Гейты.** `go build ./...`, `go vet ./...`, `go test ./... -count=1` зелёные. Прогнать `-race` на затронутом пакете.
+
+### Результаты тестов (2026-09-23)
+
+`go-app/internal/buildinfo/metrics_test.go`, 6 тестов, зелёные (в т.ч. под `-race`).
+Главный — `TestAlertmanagerBuildInfo_KarmaVersionProbe`: чистый регистр → `promhttp` → `expfmt` → лейбл `version` → `SplitN(v,"-",2)[0]` → `semver.NewConstraint(">=0.22.0")`.
+
+**T2 выполнена, тест ловит регресс** — обе подмены константы краснеют:
+
+```
+AlertmanagerCompatVersion="dev":   version "dev" ... is not valid semver: Invalid Semantic Version
+AlertmanagerCompatVersion="0.0.2": version "0.0.2" does not satisfy karma's mapper constraint >=0.22.0
+```
+
+Падают оба теста (`KarmaVersionProbe` и `CompatVersionConstant`), значение возвращено, `git diff` по `metrics.go` пустой.
+
+Гейты: `go build ./...`, `go vet ./...` — чисто; `go test -race ./internal/buildinfo/` — зелено; `gofmt -l` пусто; `git diff --check` чисто.
+
+**S5:** `Masterminds/semver/v3` переведён в прямой блок `require` **без смены версии** — `v3.3.0`, та же, что уже была в `go.sum`. Промежуточный `go get` поднял её до `v3.5.0`, это откачено: обновление зависимости в скоуп задачи не входит.
+
+⚠️ `go mod tidy` не запускался: у репозитория **предсуществующий** дрейф `go.mod` (tidy хочет выкинуть `spf13/cobra`, `mattn/go-sqlite3`, `oklog/ulid/v2` — в `go-app` их не импортирует ни один файл — и переставить `docker`, `client_model`, `grpc`). Чистка не относится к задаче; правка сделана точечно, диф — 2 строки.
+
+⚠️ **Чужой флейк в полном прогоне:** `TestBackgroundWorker_WarmupPeriod` (`internal/business/publishing`) упал один раз на `go test ./...` («Expected call after warmup», ожидание 10 ms warmup под нагрузкой), 5 прогонов пакета подряд — зелёные. Пакета задача не касается. Кандидат в `BUGS.md` на шаге `/write-doc`.
+
+## Testing (`/testing`, 2026-09-23)
+
+Сборка `make build` с реальными ldflags (`version=v0.0.2-518-gfb179d5`), lite-профиль на `:19093`.
+
+### Зелёное
+
+| Проверка | Результат |
+|---|---|
+| Живая выдача `/metrics` | обе метрики на месте (ниже) |
+| Алгоритм karma **против живого сервера** | `families=94`, `version="0.27.0"` → `0.27.0` ⊨ `>=0.22.0` |
+| `metrics.enabled: false` | `/metrics` → **404** `metrics exposition is disabled`, `/api/v2/status` → 200 |
+| MVP-матрица (`./cmd/server/... ./internal/ui`) | 3 пакета `ok` |
+| `go test ./... -count=1` | два полных прогона подряд — без единого `FAIL` |
+| `go build`, `go vet ./...` | чисто |
+| `go test -race ./internal/buildinfo/` | 6 тестов зелёные |
+| `golangci-lint run` по `./internal/buildinfo/...` и `./internal/application/...` | `0 issues` |
+| Парити-сьют `TestUpstreamParity_*` (`-tags futureparity`) | **20 PASS / 0 FAIL** |
+| `gofmt -l` по затронутым файлам, `git diff --check` | чисто |
+
+```
+alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="fb179d5",version="0.27.0"} 1
+amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",build_user="vit",goversion="go1.27.1",revision="fb179d5",version="v0.0.2-518-gfb179d5"} 1
+```
+
+Живая проверка делалась временным тестом, который скрейпил `:19093` и гонял по ответу полный алгоритм karma (`expfmt` → лейбл `version` → `SplitN(...,"-",2)[0]` → `semver` → `>=0.22.0`). Файл удалён сразу после прогона, в дереве его нет.
+
+**Снято допущение из плана:** дефолтный регистр — действительно тот, что отдаёт `/metrics`; проверено не по коду, а на живой выдаче со сборкой с ldflags. Версия AMP (`v0.0.2-518-gfb179d5` — ровно та, что сломала бы karma) уходит только в `amp_build_info`.
+
+**Подтверждена D6:** при `metrics.enabled: false` эндпоинт отдаёт 404, API продолжает работать. Что karma после 404 уходит в fallback `999.0` — по-прежнему вывод из её кода, не наблюдение.
+
+**Заявка `version=0.27.0` выдержала проверку:** парити-сьют по тому, что karma реально использует (alerts, groups, silences, status, receivers, reload), зелёный целиком. Оснований пересматривать значение нет.
+
+### Красное / чужое
+
+Нового красного нет. Три предсуществующих наблюдения, к задаче отношения не имеющих:
+
+1. ⚠️ **Флейк `TestBackgroundWorker_WarmupPeriod`** (`internal/business/publishing`) — упал один раз из четырёх полных прогонов («Expected call after warmup»: ждёт 10 ms warmup, под параллельной нагрузкой не успевает). 5 одиночных прогонов пакета + 2 полных прогона после — зелёные. В `BUGS.md` на шаге `/write-doc`.
+2. ⚠️ **`make test-upstream-parity` ничего не проверяет.** Цель гоняет `-run UpstreamParity` без `-tags futureparity`, а весь сьют под этим тегом ⇒ «no tests to run» и зелёный выход. С тегом — 20 PASS. Гейт, который не гейтит; в `BACKLOG.md`.
+3. ⚠️ **`make quality-gates` пачкает дерево.** Шаг `go fmt ./...` перепишет 6 предсуществующе неотформатированных файлов (`cmd/server/futureparity_compat.go`, `internal/application/handlers/alerts_test.go`, `internal/core/investigation/{message,tool}.go`, `internal/infrastructure/inhibition/{matcher_impl,matchers_list_test}.go` — последние правки 17-19.08, до этой ветки). Поэтому гейт прогонялся по шагам (`gofmt -l` + `vet` + MVP-матрица), а не одной целью: иначе в диф задачи попали бы чужие форматные правки. В `BACKLOG.md`.
+
+## Documentation & Cleanup
+
+- [x] **D1. Compat-дока.** Раздел про дашборды/karma в `docs/ALERTMANAGER_COMPATIBILITY.md`:
+  - как karma определяет версию (через `/metrics`, не через `/api/v2/status`) и что именно мы отдаём;
+  - пример подключения (`ALERTMANAGER_URI`);
+  - что работает: группы с `group_by`, сайленсы (создание/expire), `suppressed` со ссылкой на silence ID — проверено протокольно 2026-09-23;
+  - что неприменимо: агрегация нескольких инстансов (AMP сам является инстансом), 24-часовая история karma (тянет из Prometheus; у AMP история в Postgres и наружу не выставлена — `HISTORY-API`);
+  - `metrics.enabled: false` → 404 → karma уходит в fallback и продолжает работать;
+  - честно: сквозной прогон karma не выполнялся, проверка протокольная.
+- [x] **D2. ADR-009** в `docs/06-planning/DECISIONS.md` — AMP машиночитаемо заявляет версию реализуемого контракта Alertmanager: контекст, решение (две метрики), обоснование `0.27.0`, accepted risk (обязательство перед инструментами), следствие (менять только вместе с compat-докой).
+- [x] **D3. CHANGELOG.** Запись в `[Unreleased] / Added` — обе метрики, с явной оговоркой, что `alertmanager_build_info.version` намеренно не равна версии AMP.
+- [x] **D4. BACKLOG.** Завести вынесенные follow-up'ы: karma-шаг в release-gate (с заметкой: ghcr в текущей среде недоступен, Docker Hub `lmierzwa/karma` работает, но в README karma не задокументирован; пин `v0.132` — `v0.133` под 7-дневным карантином), конфиг-ключ переопределения compat-версии, `versionInfo.version` в `/api/v2/status`.
+- [x] **D5. Planning.** `NEXT.md`: задача остаётся в WIP до `/end-task`; отметить, что karma-шаг выведен из скоупа.
+
+### Что записано (`/write-doc`, 2026-09-23)
+
+| Файл | Что добавлено |
+|---|---|
+| `docs/ALERTMANAGER_COMPATIBILITY.md` | новый раздел «Dashboards And Ecosystem Tooling (karma)»: механика пробы версии, таблица двух метрик, пример подключения (`ALERTMANAGER_URI`), что работает / что неприменимо, поведение при `metrics.enabled: false`, явная оговорка, что сама karma не запускалась; плюс переписана строка `GET /metrics` в таблице активного рантайма |
+| `docs/06-planning/DECISIONS.md` | **ADR-009**: AMP машиночитаемо заявляет версию контракта, а не свою; почему наивная реализация была бы регрессом; accepted risk и условие изменения константы |
+| `CHANGELOG.md` | запись в `[Unreleased] / Added` с явным «`version` намеренно НЕ равна версии AMP» |
+| `docs/06-planning/BACKLOG.md` | `KARMA-RELEASE-GATE`, `COMPAT-VERSION-CONFIG-KEY`, `STATUS-VERSIONINFO-CONTRACT` + два гейт-дефекта из `/testing`: `PARITY-GATE-DOES-NOT-GATE`, `QUALITY-GATES-DIRTIES-TREE`; сам `KARMA-COMPAT` переписан под фактический скоуп |
+| `docs/06-planning/BUGS.md` | `PUBLISHING-WARMUP-TEST-FLAKY` — чужой флейк, найденный на полном прогоне |
+| `docs/06-planning/NEXT.md` | WIP-строка приведена к факту: пройденные шаги, вынесенный из скоупа karma-гейт, следующий шаг `/end-task` |
+| `tasks/KARMA-COMPAT/Spec.md` | критерии приёмки отмечены закрытыми со ссылками на коммиты |
+
+## Finalization
+- [x] `git diff --check` чистый, нерелевантные файлы не затронуты
+- [x] `/write-tests` → `/testing` → `/write-doc` → `/end-task` по пайплайну
+- [x] `DONE.md` + архив `tasks/archive/KARMA-COMPAT/` на `/end-task`
+
+## Блокеры и открытые допущения
+
+- 🔴 **Допущение (не проверено сквозняком):** что karma после правки перестанет ошибаться и покажет алерты — вывод из чтения её кода, а не наблюдение. Образ karma в этой среде не тянется (ghcr → `denied`). Хермет-тест воспроизводит её алгоритм, но не заменяет живой прогон. В доке это должно быть сказано прямо.
+- 🔴 **Допущение (F3, не доказано):** что `semver.MustParse("dev")` роняет karma паникой — `recover` в её `Pull()` не найден, но поиск по чужому репозиторию без авторизации ненадёжен. На решение не влияет: инвариант «всегда валидный semver» нужен в любом случае.
+- ⚠️ **Обязательство:** `version=0.27.0` — заявка на контракт. Если `/testing` вскроет расхождение с 0.27 в том, что karma реально использует (группы, сайленсы, статусы), останавливаемся и пересматриваем значение, а не «округляем вверх».
+- ⚠️ Точка вызова `Register` в `Initialize` предполагает, что дефолтный регистр — тот же, что отдаёт `/metrics`. Проверено по коду (`router.go:59` + `pkg/metrics/v2/registry.go:82`), но подтвердить руками на `/testing`: поднять сервер и увидеть обе метрики в реальной выдаче.
+
+---
+
+## Финальный статус (`/end-task`, 2026-09-23)
+
+**Закрыта.** Ветка `feature/karma-compat`, 5 коммитов: `383ce8c` (start) → `a51518c` (research) → `a2aaca6` (spec) → `c24b0da` (plan) → `adc6bf8` (implement) → `fb179d5` (tests) → `41d3c27` (testing) → `c018930` (docs). В `main` не влита — это шаг `/merge-to-main`.
+
+### Что поставлено
+
+`go-app/internal/buildinfo/metrics.go` (новый) + вызов `Register` в `ServiceRegistry.Initialize`; `go-app/internal/buildinfo/metrics_test.go` (6 тестов); `Masterminds/semver/v3` переведён в прямые зависимости БЕЗ смены версии. Документация: раздел про karma в `ALERTMANAGER_COMPATIBILITY.md`, ADR-009, `CHANGELOG.md`.
+
+### Что осталось незакрытым (осознанно, не скрыто)
+
+| Ограничение | Куда вынесено |
+|---|---|
+| karma сквозняком не запускалась — образ не тянется (`ghcr.io` → `denied`), совместимость проверена протокольно | `KARMA-RELEASE-GATE` (BACKLOG) |
+| Что `semver.MustParse("dev")` роняет karma паникой — не доказано (`recover` в её `Pull()` не найден, поиск по чужому репозиторию ненадёжен). На решение не влияет: инвариант «всегда валидный semver» нужен в любом случае | — (зафиксировано здесь) |
+| Переопределение compat-версии через конфиг | `COMPAT-VERSION-CONFIG-KEY` (BACKLOG) |
+| `versionInfo.version` в `/api/v2/status` намеренно не тронут | `STATUS-VERSIONINFO-CONTRACT` (BACKLOG) |
+| Чужой флейк `TestBackgroundWorker_WarmupPeriod` | `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md) |
+| `make test-upstream-parity` даёт ложное зелёное | `PARITY-GATE-DOES-NOT-GATE` (BACKLOG) |
+| `make quality-gates` пачкает дерево чужим форматированием | `QUALITY-GATES-DIRTIES-TREE` (BACKLOG) |
+
+### Обязательство, которое теперь несёт код
+
+`AlertmanagerCompatVersion = "0.27.0"` — публичная заявка на контракт. Поднимать её можно ТОЛЬКО вместе со строкой `**Alertmanager Version**: v0.27+` в `docs/ALERTMANAGER_COMPATIBILITY.md` и пересмотром реальной парности (ADR-009). Инвариант защищён тестом, но «свежесть» значения тест проверить не может — это ответственность того, кто будет её двигать.

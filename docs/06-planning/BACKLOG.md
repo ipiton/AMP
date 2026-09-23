@@ -2,6 +2,100 @@
 
 Не в активной очереди, но учтено и перенесено из `.plans`.
 
+## Production Readiness — блокеры (аудит 2026-09-21)
+> Комплексный аудит: security, ops/deploy, функциональная зрелость, `go build`/`go vet`/`go test ./... -race` (все зелёные).
+> Вердикт: pilot-ready, **не** production-ready. Ниже — блокеры первого прод-релиза, сгруппированы по приоритету.
+> P0 = без этого нельзя выставлять сервис в прод; P1 = нужно для заявления «замена Alertmanager».
+> Рекомендуемый порядок: PROD-AUTH → PROD-RBAC-SCOPE → PROD-CI-IMAGES → PROD-RELEASE-V010 → остальное.
+
+### P0 — Security
+
+- [ ] **PROD-AUTH** — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
+  - Сделать: `web.config`-совместимый auth (basic + bearer, как upstream `--web.config.file` / `exporter-toolkit`), либо документированный обязательный auth-proxy. Минимум — защита мутирующих эндпоинтов, `/-/reload`, investigation, dashboard; `/-/healthy`, `/-/ready`, `/metrics` — настраиваемо.
+  - Заодно: удалить мёртвый blank-import `net/http/pprof` (`main.go:9`), чтобы pprof не открылся при рефакторинге на `DefaultServeMux`.
+  - Критерий: анонимный `POST /api/v2/silences` → 401 при включённом auth; тесты на middleware; раздел в `CONFIGURATION_GUIDE.md`.
+  - Оценка: ~2d. Требует `/spec` (security).
+- [ ] **PROD-INGRESS-HARDENING** — `helm/amp/values-production.yaml:337` включает Ingress на `/` без auth-аннотаций и allowlist. Зависит от PROD-AUTH: либо прод-профиль по умолчанию требует auth, либо Ingress выключен/закрыт (oauth2-proxy / basic-auth аннотации / `whitelist-source-range`). Плюс NetworkPolicy для самого AMP (сейчас есть только для postgres/redis). Оценка: ~0.5d.
+- [ ] **PROD-RBAC-SCOPE** — `helm/amp/templates/rbac.yaml:5-51`: `ClusterRole` `get/list/watch secrets,configmaps` + `ClusterRoleBinding`, создаётся при `serviceAccount.create=true` даже при `targetDiscovery.enabled: false`. Плюс namespaced Role с `create/update/patch secrets` (`rbac.yaml:63-74`). Компрометация пода = все секреты кластера.
+  - Сделать: namespaced read-only Role, только при `targetDiscovery.enabled`; cluster-scope — отдельный явный opt-in; убрать write-права, если не используются.
+  - Критерий: `helm template` с дефолтами не рендерит ClusterRole; тест в release-gate.
+  - Оценка: ~0.5d.
+- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. Оценка: ~0.25d.
+
+### P0 — Delivery
+
+- [ ] **PROD-CI-IMAGES** — CI нет вообще (`.github/` отсутствует и никогда не существовал). `values-production.yaml:25-26` ссылается на `ipiton/amp-llm:1.0.0` — образа не существует (прод-инсталл = ImagePullBackOff); образа config-reloader тоже нет.
+  - Сделать: GitHub Actions — build, `go vet`, `go test -race`, `scripts/release-gate.sh`, `deploy/e2e-ha` (сейчас HA e2e в гейт не входит), govulncheck; публикация `amp` и `amp-config-reloader` (multi-arch, теги по semver + sha) на push тега.
+  - Критерий: PR без зелёного CI не мержится; `docker pull` образов из `values-production.yaml` работает.
+  - Оценка: ~1.5d.
+- [ ] **PROD-RELEASE-V010** — релиза нет: теги только `v0.0.1`/`v0.0.2` (2025-12), 500+ коммитов после; `docs/RELEASE_NOTES_v0.1.0-draft.md` — «TBD»; `CHANGELOG.md` — только `[Unreleased]`. Версии не согласованы: `Chart.yaml` `version 0.1.0` / `appVersion 0.0.1` vs `tag: "1.0.0"` в values-production.
+  - Сделать: выровнять версии (Chart `appVersion` = тег образа, values ссылаются на `.Chart.AppVersion` по умолчанию), закрыть `CHANGELOG`, финализировать release notes, тег `v0.1.0`. Зависит от PROD-CI-IMAGES.
+  - Оценка: ~0.5d.
+- [ ] **PROD-HELM-CLEAN-CHECKOUT** — `helm/amp/charts` в `.gitignore:56` ⇒ на чистом checkout `helm template` падает (`missing in charts/ directory: valkey`); `helm lint` при этом PASS и маскирует проблему. Release-gate зелёный только на машине с локальным `charts/`.
+  - Сделать: `helm dependency build` в release-gate/CI (+ `Chart.lock` в git), либо вендорить сабчарт.
+  - Критерий: `git clone` → `scripts/release-gate.sh` зелёный без ручных шагов.
+  - Оценка: ~0.25d.
+
+### P0 — Reliability
+
+- [ ] **PROD-GRACEFUL-SHUTDOWN** — `go-app/cmd/server/main.go:139-176`:
+  - порядок инвертирован: `registry.Shutdown` до `server.Shutdown` ⇒ in-flight запросы попадают в остановленные сервисы;
+  - `main` выходит сразу по `ErrServerClosed`, не дожидаясь завершения `Shutdown`-горутины (drain/flush обрываются);
+  - таймаут 30s == `terminationGracePeriodSeconds: 30` — без запаса;
+  - нет preStop / readiness-flip по SIGTERM: `values.yaml:173` `preStopDelay: 5` — мёртвый ключ, `templates/deployment.yaml:200` явно без preStop.
+  - Сделать: SIGTERM → `/readyz` 503 → preStop sleep → `server.Shutdown` → `registry.Shutdown` → выход после завершения; таймаут < grace period; подключить `preStopDelay`.
+  - Критерий: тест на порядок shutdown; rolling update под нагрузкой (`deploy/e2e-ha`) без 5xx/потерянных алертов.
+  - Оценка: ~1d.
+- [ ] **PROD-POSTGRES-HA-DECISION** — `postgresql-statefulset.yaml` — single primary без репликации/failover (см. TECH-DEBT `HELM-CHART-GAPS`); `postgresql-poddisruptionbudget.yaml:23` `minAvailable: 1` при 1 реплике блокирует drain ноды; бэкапы (`pg_basebackup`) пишутся на PVC в том же кластере.
+  - Сделать (решение через `DECISIONS.md`): для прода — внешний managed PG / CloudNativePG как поддерживаемый путь, встроенный StatefulSet — только dev/pilot; PDB не рендерить при `replicas: 1`; off-cluster бэкапы (S3) или явная документация, что это ответственность оператора; один проверенный прогон restore по `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md`.
+  - Оценка: ~1d (без реализации CNPG).
+
+### P1 — Alertmanager compatibility (тихие расхождения)
+
+- [ ] **PROD-GROUPING-DEFAULT** — `go-app/internal/config/config.go:840`: `grouping.enabled` по умолчанию `false`. Verbatim `alertmanager.yml` с `route:` ⇒ каждый алерт уходит немедленно, без `group_wait`/`group_interval`/`repeat_interval`; `warnGroupingFallback` (`internal/core/services/alert_processor.go`) при `!groupingEnabled` сразу выходит — предупреждения нет. Не упомянуто в compat-доке и migration guide; включено только в `values-production.yaml`, smoke и e2e-ha.
+  - Сделать: default `true` при наличии `route:` (или всегда), либо громкий WARN на старте + явная строка в `ALERTMANAGER_COMPATIBILITY.md` и `MIGRATION_QUICK_START.md`.
+  - Оценка: ~0.5d.
+- [ ] **FU-TOPLEVEL-INHIBIT-RULES** — уже заведён ниже (секция «Follow-ups from Phase 1-7»); по итогам аудита повышен до блокера P1: verbatim upstream-конфиг молча не ингибирует ничего.
+- [ ] **PROD-LLM-ALERT-PATH-ISOLATION** — при `llm.enabled=true`: `EnrichmentModeManager.GetMode` захардкожен на `enriched` (`internal/core/services/enrichment_types.go`) ⇒ каждый алерт синхронно классифицируется LLM внутри `POST /api/v2/alerts` (таймаут 30s × `max_retries=3`, может превысить таймаут отправки Prometheus); `SimpleFilterEngine` дропает алерт при `severity=noise` или `confidence < 0.3` (`internal/core/services/filter_engine.go:90-97`) — решение LLM глушит алерт без выключателя. По умолчанию LLM выключен, поэтому P1, а не P0.
+  - Сделать: классификация асинхронно/вне ingest-пути (или жёсткий бюджет времени на запрос); LLM-дроп — только за явным флагом (default off), дропнутые алерты — метрика + лог; настоящий переключатель enrichment mode.
+  - Оценка: ~1.5d.
+
+## UI и экосистема — идеи из karma (разбор 2026-09-23)
+> `prymitive/karma` — read-only дашборд для Alertmanager (Go + React, Apache-2.0, активный). Не конкурент: закрывает ровно то, где у AMP дыра — UI.
+> Проверено эмпирически на AMP lite (`:19093`, 2 алерта + silence) против того, что karma реально запрашивает (её клиент `internal/mapper/v017/api.go`, `internal/verprobe`):
+> `/api/v2/alerts/groups` совпадает поле в поле (`labels`/`receiver.name`/`alerts[].labels|annotations|startsAt|fingerprint|generatorURL|status.state|silencedBy`), заглушенный алерт отдаётся как `suppressed` со ссылкой на silence ID, `GET/POST /api/v2/silences` + `DELETE /api/v2/silence/{id}` + ответ `{"silenceID":...}` — как upstream.
+> Сам бинарник karma не запускался (`docker pull ghcr.io/prymitive/karma` → `denied`); проверка протокольная, не end-to-end.
+> Что НЕ берём: агрегацию нескольких upstream-инстансов (у AMP обратный сценарий — он сам этот инстанс) и свой React-UI ради паритета с karma. Код из karma не копировать (Apache-2.0 → AGPL втягивается, но берём идеи).
+
+- [x] ~~**KARMA-COMPAT**~~ — **закрыт 2026-09-23** (см. DONE.md; karma-шаг в гейте вынесен в `KARMA-RELEASE-GATE`). Объявить karma поддерживаемым UI для AMP. Единственный реальный блокер — нет метрики `alertmanager_build_info`: karma определяет версию НЕ из `/api/v2/status`, а разбирая `/metrics` (`internal/verprobe/verprobe.go` ищет `alertmanager_build_info{version=...}`). У AMP все метрики с префиксом `alert_history_*`, этой нет ⇒ karma на каждом цикле опроса пишет `Error while discovering version`; не падает (пустая версия → fallback `999.0` → свежий маппер), но шумит, и любой другой инструмент экосистемы, который пробует версию, ошибётся.
+  - Сделано: `alertmanager_build_info` + `amp_build_info` (`go-app/internal/buildinfo/metrics.go`), тест, воспроизводящий алгоритм karma, раздел «Dashboards And Ecosystem Tooling» в `docs/ALERTMANAGER_COMPATIBILITY.md`, ADR-009.
+  - 🔴 Важная поправка по ходу research: наивное «отдать свою версию» было бы РЕГРЕССОМ, а не фиксом — `git describe` даёт `v0.0.2-…`, karma режет по дефису, `0.0.2` не проходит `>=0.22.0`, маппера нет, karma чистит показанные алерты. Сейчас она работает именно потому, что проба ломается и срабатывает fallback `999.0`. Отсюда две метрики вместо одной.
+  - Вынесено: прогон самой karma → `KARMA-RELEASE-GATE`; конфиг-ключ версии → `COMPAT-VERSION-CONFIG-KEY`; `versionInfo.version` → `STATUS-VERSIONINFO-CONTRACT`.
+  - Оценка: ~0.5d.
+- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** _(в очереди, NEXT.md группа 0)_ — активный алерт отдаётся с `endsAt == startsAt` (воспроизведено: POST без `endsAt` → `GET /api/v2/alerts` вернул `startsAt=endsAt=updatedAt`). Upstream при отсутствии `endsAt` ставит `startsAt + resolve_timeout` (default 5m); `resolve_timeout` у AMP распарсен (`internal/infrastructure/routing/global.go:22,118-120`), но до ingest-пути не доходит. Потребитель, считающий `endsAt` в прошлом признаком resolved (ровно как сам Alertmanager), видит активные алерты отгоревшими. karma это поле не читает, так что баг от неё не зависит.
+  - Критерий: POST без `endsAt` ⇒ `endsAt = startsAt + global.resolve_timeout`; тест на дефолт и на явный `endsAt` (не перетирать).
+  - Оценка: ~0.5d.
+- [ ] **ACK-AS-SILENCE** — ack алерта/группы в один клик: короткий silence (default ~15m) с автором из аутентификации и шаблонным комментарием (karma: `alertAcknowledgement`, поддерживает `%NOW%`). У AMP уже есть всё, кроме самой операции и идентичности: `POST /api/v2/silences` + `created_by` (`migrations/20251104120000_create_silences_table.sql:18`), но автор сейчас самодекларируемый. Зависит от `PROD-AUTH`.
+  - Сделать: endpoint ack (матчеры из лейблов группы), настраиваемые duration/comment-шаблон, автор из auth-контекста; метрика ack'ов.
+  - Оценка: ~1d (после PROD-AUTH).
+- [ ] **HEALTHCHECK-DEADMAN** — dead man's switch: настраиваемый фильтр по лейблам «этот алерт обязан гореть всегда»; если совпадений нет — пайплайн сломан (karma: `alertmanager.healthcheck.filters`, показывает ошибку в UI). У AMP понятия нет вовсе, хотя для замены Alertmanager это базовая страховка от «тишины из-за поломки», а не от отсутствия проблем.
+  - Сделать: `healthcheck.filters` в конфиге, состояние в `/api/v2/status` + `/readyz`-независимая метрика (`amp_healthcheck_alert_present{name=...}`), чтобы на неё вешался `PrometheusRule` из `PROD-*`-пакета.
+  - Оценка: ~1d.
+- [ ] **HISTORY-API** — история уже лежит в Postgres и НЕ отдаётся наружу: `alerts`, `alert_classifications`, `alert_publishing_history` (`migrations/initial_schema.sql`), репозиторий `core.AlertHistoryRepository` (`internal/core/history.go:10-28`: GetHistory/GetAlertsByFingerprint/GetRecentAlerts/GetAggregatedStats/GetTopAlerts/GetFlappingAlerts) реализован в `internal/infrastructure/repository/postgres_history.go`, но его единственные потребители — несмонтированные хендлеры (`cmd/server/handlers/dashboard_overview.go:153`, `prometheus_query_handler.go:59`). Наружу торчит только `/api/v1/alerts/{fp}/investigation`.
+  - Контекст: karma рисует 24-часовую полоску срабатываний, ходя в **Prometheus** по `source`-ссылке алерта (пул воркеров + rewrite-правила) — обходной путь, потому что Alertmanager истории не хранит. У AMP она есть, точнее и без похода в Prometheus. Это ниша, где свой UI оправдан (история + LLM-расследования + доставка/DLQ — karma такого не умеет).
+  - Сделать: `GET /api/v1/alerts/{fingerprint}/history` (+ top/flapping), пагинация, лимиты; затем — опционально — собственный виджет поверх.
+  - Оценка: ~1-1.5d.
+- [ ] **KARMA-RELEASE-GATE** — прогнать karma против AMP по-настоящему и превратить это в шаг гейта. Вынесено из `KARMA-COMPAT` решением 2026-09-23: в том слайсе сделан только хермет-тест, воспроизводящий алгоритм karma, а сама она не запускалась.
+  - Контекст среды: `docker pull ghcr.io/prymitive/karma` → `denied` (проверено на `:latest` и `:v0.133`; `quay.io/prometheus/alertmanager:v0.34.0` при этом тянется, то есть блокирован именно ghcr). Docker Hub `lmierzwa/karma` работает, но в README karma не задокументирован — использовать с оговоркой.
+  - 🔴 Пин `v0.132`: `v0.133` попадает под 7-дневный карантин свежих пакетов на момент разбора.
+  - Критерий: karma поднимается рядом с AMP в `deploy/smoke`, UI отдаёт алерты и группы, в логах karma нет `Error while discovering version`. Это дешёвый детектор регрессий API-парности, а не косметика.
+  - Оценка: ~0.5d.
+- [ ] **COMPAT-VERSION-CONFIG-KEY** — конфиг-ключ для переопределения `alertmanager_build_info{version}` (вариант C из `tasks/archive/KARMA-COMPAT/research.md`). Сейчас значение — константа, меняется только вместе со строкой 5 `ALERTMANAGER_COMPATIBILITY.md` (ADR-009). Заводить ТОЛЬКО когда появится реальный use case: оператору нужно солгать инструменту про версию. Сознательно не сделано, чтобы не плодить настройку без сценария.
+- [ ] **STATUS-VERSIONINFO-CONTRACT** — решить, что показывать в `versionInfo.version` у `GET /api/v2/status`. Сейчас там версия сборки AMP из ldflags. Семантика родственная ADR-009 (контракт vs билд), но karma это поле не читает, и менять его вслепую опаснее: у `/api/v2/status` другие потребители (`amtool`, Grafana). Нужна ревизия потребителей до правки.
+- [ ] **PARITY-GATE-DOES-NOT-GATE** — `make test-upstream-parity` ничего не проверяет. Цель гоняет `go test ./cmd/server -run UpstreamParity` без `-tags futureparity`, а весь сьют `TestUpstreamParity_*` живёт под этим тегом ⇒ «no tests to run» и зелёный выход. С тегом — 20 PASS / 0 FAIL (проверено 2026-09-23 на `/testing` KARMA-COMPAT). Починить цель (добавить тег) и решить, входит ли сьют в обязательные гейты. Тривиально по объёму, неприятно по смыслу: гейт парности сейчас даёт ложное зелёное.
+- [ ] **QUALITY-GATES-DIRTIES-TREE** — `make quality-gates` начинается с `go fmt ./...`, который переписывает 6 давно неотформатированных файлов (`cmd/server/futureparity_compat.go`, `internal/application/handlers/alerts_test.go`, `internal/core/investigation/{message,tool}.go`, `internal/infrastructure/inhibition/{matcher_impl,matchers_list_test}.go`; последние правки 17-19.08). Любая задача, честно прогнавшая гейт, тянет в свой диф чужие форматные правки. Решение: разово отформатировать репозиторий отдельным коммитом, а в гейте заменить `go fmt` на проверяющий `gofmt -l` (падать, а не чинить молча).
+- Отложено (не заводим задачами, фиксируем как идеи): ACL на сайленсы по группам пользователей (после `PROD-AUTH`), `readonly`-флаг инстанса как предохранитель для пилота, грамматика фильтров karma (`@state=active`, `@receiver=`, `@silenced`) как модель для `filter=` в `/api/v2/alerts`, раскраска/`valueOnly`/strip лейблов и annotation-actions — только если делаем свой UI.
+
 ## Runtime gaps (найдены при закрытии FUTUREPARITY-GAP, 2026-08-17) — ВСЕ ЗАКРЫТЫ 2026-08-17
 
 - [x] ~~**RECEIVERS-JSON-CASE**~~ — json-тег на `ReceiverConfig`, `/api/v2/receivers` отдаёт `{"name":...}`.
