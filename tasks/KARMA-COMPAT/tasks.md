@@ -19,7 +19,7 @@
   - без `init()` и `promauto` (D4) — тест должен собирать чистый регистр;
   - повторный вызов не паникует: `prometheus.AlreadyRegisteredError` не считать фатальной.
 - [x] **S4. Точка вызова.** В `ServiceRegistry.Initialize` рядом с созданием `metricsGate` (`go-app/internal/application/service_registry.go:332`) вызвать `buildinfo.Register(prometheus.DefaultRegisterer)`; ошибку логировать, но **не** ронять Initialize (иначе повторная инициализация реестра в тестах положит процесс). `cmd/` не трогаем — код в `internal/`.
-- [ ] **S5. go.mod** _(перенесено в `/write-tests`: зависимость нужна тесту, раньше он появится — `go mod tidy` будет ругаться на неиспользуемую прямую зависимость)_. `Masterminds/semver/v3` из indirect в direct (нужен только тесту, D5). Проверить, что `go mod tidy` не тянет ничего нового.
+- [x] **S5. go.mod** _(перенесено в `/write-tests`: зависимость нужна тесту, раньше он появится — `go mod tidy` будет ругаться на неиспользуемую прямую зависимость)_. `Masterminds/semver/v3` из indirect в direct (нужен только тесту, D5). Проверить, что `go mod tidy` не тянет ничего нового.
 
 ### Проверено на живом сервере (S4, снимает допущение из блокеров)
 
@@ -34,11 +34,33 @@ amp_build_info{...,version="v0.0.2-516-gc24b0da-dirty"} 1
 
 ## Testing
 
-- [ ] **T1. Контракт karma (главный тест).** Воспроизвести цепочку целиком (D5): чистый `prometheus.NewRegistry()` → `Register` → `promhttp.HandlerFor` → прочитать тело → `expfmt.NewTextParser` (как `verprobe.Detect`) → достать лейбл `version` из `alertmanager_build_info` → `strings.SplitN(v, "-", 2)[0]` (как `fixSemVersion`) → `semver.NewConstraint(">=0.22.0").Check(semver.MustParse(...))`.
-- [ ] **T2. Негативная проверка теста.** Временно подменить константу на `"dev"` и на `"0.0.2"`, убедиться, что T1 краснеет в обоих случаях, вернуть значение. Это критерий приёмки из Spec, а не факультатив: тест, который не ловит регресс, бесполезен.
-- [ ] **T3. `amp_build_info`.** Присутствует, значения совпадают с `buildinfo.*`; при сборке без ldflags там `dev`/`unknown` и это **не** протекает в compat-метрику.
-- [ ] **T4. Идемпотентность.** Двойной `Register` в один регистр не паникует и возвращает ошибку, которую вызыватель вправе проигнорировать.
-- [ ] **T5. Гейты.** `go build ./...`, `go vet ./...`, `go test ./... -count=1` зелёные. Прогнать `-race` на затронутом пакете.
+- [x] **T1. Контракт karma (главный тест).** Воспроизвести цепочку целиком (D5): чистый `prometheus.NewRegistry()` → `Register` → `promhttp.HandlerFor` → прочитать тело → `expfmt.NewTextParser` (как `verprobe.Detect`) → достать лейбл `version` из `alertmanager_build_info` → `strings.SplitN(v, "-", 2)[0]` (как `fixSemVersion`) → `semver.NewConstraint(">=0.22.0").Check(semver.MustParse(...))`.
+- [x] **T2. Негативная проверка теста.** Временно подменить константу на `"dev"` и на `"0.0.2"`, убедиться, что T1 краснеет в обоих случаях, вернуть значение. Это критерий приёмки из Spec, а не факультатив: тест, который не ловит регресс, бесполезен.
+- [x] **T3. `amp_build_info`.** Присутствует, значения совпадают с `buildinfo.*`; при сборке без ldflags там `dev`/`unknown` и это **не** протекает в compat-метрику.
+- [x] **T4. Идемпотентность.** Двойной `Register` в один регистр не паникует и возвращает ошибку, которую вызыватель вправе проигнорировать.
+- [x] **T5. Гейты.** `go build ./...`, `go vet ./...`, `go test ./... -count=1` зелёные. Прогнать `-race` на затронутом пакете.
+
+### Результаты тестов (2026-09-23)
+
+`go-app/internal/buildinfo/metrics_test.go`, 6 тестов, зелёные (в т.ч. под `-race`).
+Главный — `TestAlertmanagerBuildInfo_KarmaVersionProbe`: чистый регистр → `promhttp` → `expfmt` → лейбл `version` → `SplitN(v,"-",2)[0]` → `semver.NewConstraint(">=0.22.0")`.
+
+**T2 выполнена, тест ловит регресс** — обе подмены константы краснеют:
+
+```
+AlertmanagerCompatVersion="dev":   version "dev" ... is not valid semver: Invalid Semantic Version
+AlertmanagerCompatVersion="0.0.2": version "0.0.2" does not satisfy karma's mapper constraint >=0.22.0
+```
+
+Падают оба теста (`KarmaVersionProbe` и `CompatVersionConstant`), значение возвращено, `git diff` по `metrics.go` пустой.
+
+Гейты: `go build ./...`, `go vet ./...` — чисто; `go test -race ./internal/buildinfo/` — зелено; `gofmt -l` пусто; `git diff --check` чисто.
+
+**S5:** `Masterminds/semver/v3` переведён в прямой блок `require` **без смены версии** — `v3.3.0`, та же, что уже была в `go.sum`. Промежуточный `go get` поднял её до `v3.5.0`, это откачено: обновление зависимости в скоуп задачи не входит.
+
+⚠️ `go mod tidy` не запускался: у репозитория **предсуществующий** дрейф `go.mod` (tidy хочет выкинуть `spf13/cobra`, `mattn/go-sqlite3`, `oklog/ulid/v2` — в `go-app` их не импортирует ни один файл — и переставить `docker`, `client_model`, `grpc`). Чистка не относится к задаче; правка сделана точечно, диф — 2 строки.
+
+⚠️ **Чужой флейк в полном прогоне:** `TestBackgroundWorker_WarmupPeriod` (`internal/business/publishing`) упал один раз на `go test ./...` («Expected call after warmup», ожидание 10 ms warmup под нагрузкой), 5 прогонов пакета подряд — зелёные. Пакета задача не касается. Кандидат в `BUGS.md` на шаге `/write-doc`.
 
 ## Documentation & Cleanup
 
