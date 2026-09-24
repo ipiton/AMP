@@ -306,6 +306,8 @@ go-app/internal/infrastructure/routing/testdata/
 # Global Settings (Optional)
 # ============================================================================
 global:
+  # endsAt for alerts posted without one: receivedAt + resolve_timeout (re-sends extend it).
+  # AMP does not yet auto-resolve when it passes - see ALERTMANAGER_COMPATIBILITY.md, Known Gap #12.
   resolve_timeout: 5m
   http_config:
     proxy_url: http://proxy.corp:8080

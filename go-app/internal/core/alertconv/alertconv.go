@@ -147,6 +147,14 @@ type SilenceMatcher interface {
 	ActiveMatchingSilenceIDs(labels map[string]string, now time.Time) []string
 }
 
+// DefaultResolveTimeout is the upstream Alertmanager default for
+// `global.resolve_timeout`: an alert received without endsAt is considered
+// active until receivedAt + resolve_timeout, and every re-send extends that
+// window. It mirrors routing.GlobalConfig.Defaults(), which only applies when
+// the config has a `global:` section — callers without one (lite profile, a
+// config with no `route:`, a bare memory.AlertStore) fall back to this value.
+const DefaultResolveTimeout = 5 * time.Minute
+
 // ToGettableAlert converts an APIAlert into the Alertmanager API v2 gettable
 // shape, computing state/silencedBy from the silence store. It is
 // nil-tolerant to silences (nil ⇒ state derived from status only).
@@ -158,6 +166,13 @@ type SilenceMatcher interface {
 // dedup key, 64 hex chars) — see UpstreamFingerprint's doc comment. This is
 // the only place that substitution happens: every other consumer of
 // alert.Fingerprint keeps using the internal key untouched.
+//
+// EndsAt is always non-empty in the output (the API v2 schema requires it).
+// The memory store stamps firing alerts with receivedAt + resolve_timeout
+// (PARITY-RESOLVE-TIMEOUT-ENDSAT), so an empty EndsAt is only reachable for
+// alerts built outside the store. The fallback must never make a firing alert
+// look resolved: firing ⇒ UpdatedAt + DefaultResolveTimeout; resolved ⇒
+// UpdatedAt (the store sets the resolve time there).
 func ToGettableAlert(alert core.APIAlert, silences SilenceMatcher, now time.Time) core.APIGettableAlert {
 	silencedBy := make([]string, 0)
 	if alert.Status == "firing" && silences != nil {
@@ -176,6 +191,10 @@ func ToGettableAlert(alert core.APIAlert, silences SilenceMatcher, now time.Time
 	endsAt := alert.UpdatedAt
 	if alert.EndsAt != nil && *alert.EndsAt != "" {
 		endsAt = *alert.EndsAt
+	} else if alert.Status == "firing" {
+		if updatedAt, err := time.Parse(time.RFC3339, alert.UpdatedAt); err == nil {
+			endsAt = updatedAt.Add(DefaultResolveTimeout).UTC().Format(time.RFC3339)
+		}
 	}
 
 	return core.APIGettableAlert{

@@ -114,3 +114,50 @@ func TestToGettableAlert_FingerprintIsUpstreamShape_NotInternalKey(t *testing.T)
 		t.Fatalf("ToGettableAlert().Fingerprint = %q, want %q", got.Fingerprint, want)
 	}
 }
+
+// TestToGettableAlert_EmptyEndsAtFallback: the fallback must never make a
+// firing alert look resolved (PARITY-RESOLVE-TIMEOUT-ENDSAT). It used to
+// return UpdatedAt, which for a fresh alert equals startsAt — consumers that
+// treat a past endsAt as resolved saw every such alert as already resolved.
+func TestToGettableAlert_EmptyEndsAtFallback(t *testing.T) {
+	updatedAt := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC)
+	empty := ""
+
+	cases := []struct {
+		name   string
+		status string
+		endsAt *string
+		want   string
+	}{
+		{"firing nil ⇒ updatedAt + default timeout", "firing", nil, updatedAt.Add(DefaultResolveTimeout).Format(time.RFC3339)},
+		{"firing empty ⇒ updatedAt + default timeout", "firing", &empty, updatedAt.Add(DefaultResolveTimeout).Format(time.RFC3339)},
+		{"resolved nil ⇒ updatedAt (resolve time)", "resolved", nil, updatedAt.Format(time.RFC3339)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ToGettableAlert(core.APIAlert{
+				Labels:    map[string]string{"alertname": "A"},
+				StartsAt:  updatedAt.Format(time.RFC3339),
+				UpdatedAt: updatedAt.Format(time.RFC3339),
+				EndsAt:    tc.endsAt,
+				Status:    tc.status,
+			}, nil, updatedAt)
+			if got.EndsAt != tc.want {
+				t.Fatalf("EndsAt = %s, want %s", got.EndsAt, tc.want)
+			}
+		})
+	}
+
+	t.Run("explicit endsAt passes through", func(t *testing.T) {
+		explicit := "2026-09-24T12:00:00Z"
+		got := ToGettableAlert(core.APIAlert{
+			Labels:    map[string]string{"alertname": "A"},
+			UpdatedAt: updatedAt.Format(time.RFC3339),
+			EndsAt:    &explicit,
+			Status:    "firing",
+		}, nil, updatedAt)
+		if got.EndsAt != explicit {
+			t.Fatalf("EndsAt = %s, want %s", got.EndsAt, explicit)
+		}
+	})
+}
