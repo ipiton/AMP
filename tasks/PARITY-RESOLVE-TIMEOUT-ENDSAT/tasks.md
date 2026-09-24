@@ -40,18 +40,38 @@
 
 Тесты пишутся на `/write-tests`, здесь их состав. Отдельного `alert_store_test.go` сейчас нет (есть только `alert_store_bench_test.go`), создаём новый файл.
 
-- [ ] **T1. Стор, дефолт (AC1)** — `memory/alert_store_test.go`: `NewAlertStore()` без провайдера, `IngestBatch` firing без `endsAt` ⇒ `List` отдаёт `EndsAt == now + 5m`.
-- [ ] **T2. Стор, кастомный провайдер и reload (AC2, AC9)**: `SetResolveTimeout(1h)` ⇒ `now + 1h`; сменить провайдер на 10m, снова ingest другого алерта ⇒ 10m, у первого остаётся 1h (без ретроактивного пересчёта). Провайдер `0`/отрицательный ⇒ дефолт.
-- [ ] **T3. Явный `endsAt` и resolved (AC3, AC5)**: явный будущий `endsAt` сохраняется, в том числе при повторном POST; `status: resolved` без `endsAt` ⇒ время резолва; `endsAt` в прошлом ⇒ resolved, не перештампован.
-- [ ] **T4. Продление (AC4)**: два ingest одного алерта без `endsAt` с `now1 < now2` ⇒ `EndsAt == now2 + rt`, `UpdatedAt == now2`.
-- [ ] **T5. Rehydration (AC6)**: `RestoreFromPersistence([]*core.Alert{firing, EndsAt: nil}, now)` ⇒ `now + rt`; исходный `*core.Alert` не мутирован.
-- [ ] **T6. HTTP-уровень (AC1, AC7, AC8)** — `handlers/alerts_test.go` через `fakeRegistry`: POST postable-массива без `endsAt` ⇒ `GET /api/v2/alerts`, `GET /api/v1/alerts`, `GET /api/v2/alerts/groups` отдают один и тот же `endsAt > updatedAt`, ≈ `receivedAt + 5m`. Если у `fakeRegistry` есть наблюдаемый `AlertProcessor`/dedup, проверить, что в процессор ушёл `EndsAt == nil`; если нет — зафиксировать AC8 unit-тестом на `toAlertIngestInput`/порядок вызовов и отметить здесь, чем именно закрыт.
-- [ ] **T7. Проводка конфига (AC2, AC9)** — `internal/application`: табличный тест `resolveTimeoutFromConfig` (nil cfg / nil Routing / nil Global / nil ResolveTimeout / `1h`); тест, что после подмены `r.config` провайдер стора отдаёт новое значение.
-- [ ] **T8. `alertconv` (AC10, AC11)** — `alertconv_test.go`: фолбэк firing ⇒ `UpdatedAt + 5m`, resolved ⇒ `UpdatedAt`; `DefaultResolveTimeout == 5m` и совпадает с `routing.GlobalConfig{}.Defaults()` (если импорт `routing` из `alertconv_test` даёт цикл — тест кладём в `internal/application`).
-- [ ] **T9. Негативная проверка.** Временно убрать штамповку из S3 и убедиться, что T1/T4/T5/T6 краснеют; вернуть. Тест, который не ловит регресс, бесполезен.
-- [ ] **T10. Регрессы существующих тестов.** Прогнать `go test ./internal/... -count=1`; ассерты вида «firing ⇒ `EndsAt == nil`» или «`endsAt == updatedAt`» править под новый контракт с комментарием-ссылкой на задачу, не ослаблять.
+- [x] **T1. Стор, дефолт (AC1)** — `memory/alert_store_test.go`: `NewAlertStore()` без провайдера, `IngestBatch` firing без `endsAt` ⇒ `List` отдаёт `EndsAt == now + 5m`.
+- [x] **T2. Стор, кастомный провайдер и reload (AC2, AC9)**: `SetResolveTimeout(1h)` ⇒ `now + 1h`; сменить провайдер на 10m, снова ingest другого алерта ⇒ 10m, у первого остаётся 1h (без ретроактивного пересчёта). Провайдер `0`/отрицательный ⇒ дефолт.
+- [x] **T3. Явный `endsAt` и resolved (AC3, AC5)**: явный будущий `endsAt` сохраняется, в том числе при повторном POST; `status: resolved` без `endsAt` ⇒ время резолва; `endsAt` в прошлом ⇒ resolved, не перештампован.
+- [x] **T4. Продление (AC4)**: два ingest одного алерта без `endsAt` с `now1 < now2` ⇒ `EndsAt == now2 + rt`, `UpdatedAt == now2`.
+- [x] **T5. Rehydration (AC6)**: `RestoreFromPersistence([]*core.Alert{firing, EndsAt: nil}, now)` ⇒ `now + rt`; исходный `*core.Alert` не мутирован.
+- [x] **T6. HTTP-уровень (AC1, AC7, AC8)** — `handlers/alerts_test.go` через `fakeRegistry`: POST postable-массива без `endsAt` ⇒ `GET /api/v2/alerts`, `GET /api/v1/alerts`, `GET /api/v2/alerts/groups` отдают один и тот же `endsAt > updatedAt`, ≈ `receivedAt + 5m`. Если у `fakeRegistry` есть наблюдаемый `AlertProcessor`/dedup, проверить, что в процессор ушёл `EndsAt == nil`; если нет — зафиксировать AC8 unit-тестом на `toAlertIngestInput`/порядок вызовов и отметить здесь, чем именно закрыт.
+- [x] **T7. Проводка конфига (AC2, AC9)** — `internal/application`: табличный тест `resolveTimeoutFromConfig` (nil cfg / nil Routing / nil Global / nil ResolveTimeout / `1h`); тест, что после подмены `r.config` провайдер стора отдаёт новое значение.
+- [x] **T8. `alertconv` (AC10, AC11)** — `alertconv_test.go`: фолбэк firing ⇒ `UpdatedAt + 5m`, resolved ⇒ `UpdatedAt`; `DefaultResolveTimeout == 5m` и совпадает с `routing.GlobalConfig{}.Defaults()` (если импорт `routing` из `alertconv_test` даёт цикл — тест кладём в `internal/application`).
+- [x] **T9. Негативная проверка.** Временно убрать штамповку из S3 и убедиться, что T1/T4/T5/T6 краснеют; вернуть. Тест, который не ловит регресс, бесполезен.
+- [x] **T10. Регрессы существующих тестов.** Прогнать `go test ./internal/... -count=1`; ассерты вида «firing ⇒ `EndsAt == nil`» или «`endsAt == updatedAt`» править под новый контракт с комментарием-ссылкой на задачу, не ослаблять.
 - [ ] **T11. Гейты (AC12)**: `go build ./...`, `go vet ./...`, `go test ./... -count=1`; `-race` на `internal/infrastructure/storage/memory` и `internal/application/handlers`; `go test ./cmd/server -tags futureparity -count=1` без новых падений; `git diff --check`. Флейк `PUBLISHING-WARMUP-TEST-FLAKY` не считается регрессом, но фиксируется, если выстрелит.
 - [ ] **T12. Живая проверка (по возможности)**: lite-инстанс, `curl -XPOST /api/v2/alerts` без `endsAt` → `GET` показывает `endsAt ≈ now + 5m`; повторный POST сдвигает окно. Если поднять не получится — записать, что не проверено вживую.
+
+### Результат `/write-tests` (2026-09-24)
+
+Новые тесты (13 тест-функций), все зелёные, в том числе под `-race`:
+
+| Файл | Тесты | Закрывает |
+|---|---|---|
+| `internal/infrastructure/storage/memory/alert_store_test.go` (новый) | `TestAlertStore_FiringWithoutEndsAt_DefaultResolveTimeout`, `_ResolveTimeoutProvider`, `_ResolveTimeoutProvider_NonPositiveFallsBackToDefault`, `_ResendExtendsResolveTimeoutWindow`, `_ExplicitEndsAtIsKept`, `_ResolvedAlertsAreNotStamped`, `_RestoreFromPersistence_StampsFiringWithoutEndsAt` | T1-T5; AC1-AC6, AC9 |
+| `internal/core/alertconv/alertconv_test.go` | `TestToGettableAlert_EmptyEndsAtFallback` | T8; AC10 |
+| `internal/application/resolve_timeout_test.go` (новый) | `TestResolveTimeoutFromConfig`, `TestDefaultResolveTimeout_MatchesGlobalConfigDefaults`, `TestNewAlertStore_FollowsConfigReload`, `TestRehydrateAlertStore_StampsResolveTimeoutFromConfig` | T7, T8; AC2, AC6, AC9, AC11 |
+| `internal/application/handlers/alerts_endsat_test.go` (новый) | `TestAlertsHandler_PostWithoutEndsAt_ServesResolveTimeout`, `TestAlertsHandler_PostWithExplicitEndsAt_IsKept` | T6; AC1, AC3, AC7, AC8 |
+
+- **Изменение кода ради тестируемости:** создание стора с проводкой вынесено из `initializeInfrastructure` в `ServiceRegistry.newAlertStore()`. Поведение то же, но проводку можно проверить без БД.
+- **Как закрыт AC8 (открытый вопрос из плана).** `fakePublisher` в HTTP-тесте получает ровно тот `*core.Alert`, что прошёл через `ProcessAlert`; тест проверяет, что у него `EndsAt == nil`. Поведение dedup (`Ignored` на повторный POST) отдельно не тестируется: тестовый процессор собран без dedup-сервиса. Но dedup сравнивает только `core.Alert.EndsAt`, а он не меняется, поэтому этого достаточно. Сознательно не расширяли.
+- **T9, негативная проверка:**
+  - Вариант 1, штамповка в сторе выключена: краснеют 5 тестов стора и 2 теста `application` (reload и rehydration). HTTP-тест остаётся зелёным, и это ожидаемо: защитный фолбэк `ToGettableAlert` (`updatedAt + 5m`) даёт то же значение. Защита в два слоя, каждый слой покрыт своим тестом.
+  - Вариант 2, исходное поведение целиком (без штамповки и со старым фолбэком): краснеют `TestToGettableAlert_EmptyEndsAtFallback` и HTTP-тест `…PostWithoutEndsAt_ServesResolveTimeout`.
+  - Код восстановлен, диф с коммитом `ba8aac6` пуст.
+- **T10.** Существующие тесты править не пришлось: `go test -race` по `alertconv`, `storage/memory` и `internal/application/...` зелёный.
+- **Отложено на `/testing`:** T11 (полный `go test ./...`, `futureparity`, `git diff --check`) и T12 (живая проверка).
 
 ## Documentation
 
