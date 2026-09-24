@@ -50,8 +50,8 @@
 - [x] **T8. `alertconv` (AC10, AC11)** — `alertconv_test.go`: фолбэк firing ⇒ `UpdatedAt + 5m`, resolved ⇒ `UpdatedAt`; `DefaultResolveTimeout == 5m` и совпадает с `routing.GlobalConfig{}.Defaults()` (если импорт `routing` из `alertconv_test` даёт цикл — тест кладём в `internal/application`).
 - [x] **T9. Негативная проверка.** Временно убрать штамповку из S3 и убедиться, что T1/T4/T5/T6 краснеют; вернуть. Тест, который не ловит регресс, бесполезен.
 - [x] **T10. Регрессы существующих тестов.** Прогнать `go test ./internal/... -count=1`; ассерты вида «firing ⇒ `EndsAt == nil`» или «`endsAt == updatedAt`» править под новый контракт с комментарием-ссылкой на задачу, не ослаблять.
-- [ ] **T11. Гейты (AC12)**: `go build ./...`, `go vet ./...`, `go test ./... -count=1`; `-race` на `internal/infrastructure/storage/memory` и `internal/application/handlers`; `go test ./cmd/server -tags futureparity -count=1` без новых падений; `git diff --check`. Флейк `PUBLISHING-WARMUP-TEST-FLAKY` не считается регрессом, но фиксируется, если выстрелит.
-- [ ] **T12. Живая проверка (по возможности)**: lite-инстанс, `curl -XPOST /api/v2/alerts` без `endsAt` → `GET` показывает `endsAt ≈ now + 5m`; повторный POST сдвигает окно. Если поднять не получится — записать, что не проверено вживую.
+- [x] **T11. Гейты (AC12)**: `go build ./...`, `go vet ./...`, `go test ./... -count=1`; `-race` на `internal/infrastructure/storage/memory` и `internal/application/handlers`; `go test ./cmd/server -tags futureparity -count=1` без новых падений; `git diff --check`. Флейк `PUBLISHING-WARMUP-TEST-FLAKY` не считается регрессом, но фиксируется, если выстрелит.
+- [x] **T12. Живая проверка (по возможности)**: lite-инстанс, `curl -XPOST /api/v2/alerts` без `endsAt` → `GET` показывает `endsAt ≈ now + 5m`; повторный POST сдвигает окно. Если поднять не получится — записать, что не проверено вживую.
 
 ### Результат `/write-tests` (2026-09-24)
 
@@ -72,6 +72,37 @@
   - Код восстановлен, диф с коммитом `ba8aac6` пуст.
 - **T10.** Существующие тесты править не пришлось: `go test -race` по `alertconv`, `storage/memory` и `internal/application/...` зелёный.
 - **Отложено на `/testing`:** T11 (полный `go test ./...`, `futureparity`, `git diff --check`) и T12 (живая проверка).
+
+### Результат `/testing` (2026-09-24)
+
+**Зелёное:**
+- `go build ./...`, `go vet ./...` — чисто.
+- `go test ./... -count=1` — 50 пакетов `ok`, красные только 3 пакета из-за внешнего блокера (ниже).
+- `go test -race` по `alertconv`, `storage/memory`, `internal/application/...` — зелёный.
+- `go test ./cmd/server -tags futureparity -count=1` — зелёный.
+- `git diff main --check` — чисто; `gofmt -l` по изменённым Go-файлам — пусто.
+- Флейк `PUBLISHING-WARMUP-TEST-FLAKY` в этом прогоне не выстрелил.
+
+**Красное — внешний блокер среды, не этот диф:**
+- `internal/infrastructure/repository` (8 тестов `postgres_history`), `internal/infrastructure/inhibition` (2 теста `…_Redis`), `internal/database` (`TestRunMigrations_ConcurrentReplicas_FreshDB`). Все — testcontainers.
+- Первый прогон: `rootless Docker not found` (демон не был запущен). После ручного `dockerd` — `429 Too Many Requests` от Docker Hub на `postgres:16-alpine` и `redis:7-alpine`, прямой `docker pull` падает так же. Дальше не ретраили (правило «гейт упал дважды — стоп»).
+- Эти пакеты (Postgres-репозиторий истории, Redis-кэш inhibition, миграции) диф не затрагивает: он меняет memory store, `alertconv` и проводку в `ServiceRegistry`. Вывод «не регресс» сделан по коду, а не прогоном: прогнать их в этой среде не удалось.
+
+**Живая проверка (T12)** — lite-профиль на `127.0.0.1:19093`, сборка с этой ветки:
+
+| Сценарий | Результат |
+|---|---|
+| POST без `endsAt`, конфиг без `global:` | `startsAt=updatedAt=17:51:14`, `endsAt=17:56:14`, `state=active` |
+| Повторный POST с тем же `startsAt` | одна запись, `updatedAt 17:51:34→37`, `endsAt` сдвинулся до `17:56:37` |
+| POST с `endsAt: 2099-01-01` | отдаётся как есть |
+| `/api/v1/alerts`, `/api/v2/alerts/groups` | те же `endsAt`, что в `/api/v2/alerts` |
+| `global.resolve_timeout: 1h` | `endsAt = приём + 1h` |
+| `/-/reload` на `2m`, новый POST | новый алерт `+2m`, старый остался `+1h` |
+| рестарт (rehydration из SQLite) | оба алерта получили `рестарт + 2m` — текущий таймаут, свежее окно (Spec D3) |
+
+Контроль на сборке `main`: POST без `endsAt` ⇒ `startsAt=updatedAt=endsAt` — исходный баг воспроизведён вживую, фикс его закрывает.
+
+**Новая находка, вне скоупа (записана в BUGS.md как `ALERT-STORE-DEDUP-KEY-STARTSAT`).** Повторный POST **без `startsAt`** не продлевает окно, а создаёт вторую копию алерта. Ключ дедупликации стора — `fingerprint|startsAt`, а пустой `startsAt` каждый раз становится `now`. Воспроизводится и на `main` (две записи `MainNoStart` с разными `startsAt`), то есть это не регресс. Upstream сливает такие алерты по fingerprint и берёт самый ранний `startsAt`. Prometheus и `amtool` шлют `startsAt` сами, поэтому затронуты в основном curl-клиенты. Для них продление из этой задачи не срабатывает: окно продлевает только новая копия.
 
 ## Documentation
 
