@@ -123,10 +123,10 @@
 
 ## Finalization (`/end-task`)
 
-- [ ] Ветка не `main`; `requirements.md`, `research.md`, `Spec.md`, `tasks.md` на месте.
-- [ ] `DONE.md` — запись; `NEXT.md` — WIP очищен; `BACKLOG.md` — `PARITY-RESOLVE-TIMEOUT-ENDSAT` закрыт, `RESOLVE-TIMEOUT-AUTO-RESOLVE` остаётся открытым.
-- [ ] `BUGS.md` — дописать, если на тестах всплыло новое.
-- [ ] Архив `tasks/archive/PARITY-RESOLVE-TIMEOUT-ENDSAT/`.
+- [x] Ветка не `main`; `requirements.md`, `research.md`, `Spec.md`, `tasks.md` на месте.
+- [x] `DONE.md` — запись; `NEXT.md` — WIP очищен; `BACKLOG.md` — `PARITY-RESOLVE-TIMEOUT-ENDSAT` закрыт, `RESOLVE-TIMEOUT-AUTO-RESOLVE` остаётся открытым.
+- [x] `BUGS.md` — дописать, если на тестах всплыло новое.
+- [x] Архив `tasks/archive/PARITY-RESOLVE-TIMEOUT-ENDSAT/`.
 
 ## Blockers & Assumptions
 
@@ -135,3 +135,15 @@
 - **Допущение A3:** `fakeRegistry` в `handlers/alerts_test.go` использует настоящий `memory.NewAlertStore()`, так что HTTP-тест видит дефолт 5m без проводки. Если это не так — провайдер ставится в тестовой фикстуре.
 - **Открытый вопрос (не блокер):** как закрыть AC8 на HTTP-уровне зависит от того, можно ли наблюдать вход `ProcessAlert` в тестах; решается на `/write-tests`, результат записывается в T6.
 - Блокеров нет. `QUALITY-GATES-DIRTIES-TREE`: `make quality-gates` не гонять (он переформатирует чужие файлы) — запускать `go vet`/`go test`/`gofmt -l` по отдельности.
+
+## Final Status (2026-09-24)
+
+**DONE.** Все критерии Spec AC1-AC11 закрыты тестами и живой проверкой. AC12 выполнен частично (см. ниже).
+
+- Код: `alertconv.go`, `alert_store.go`, `service_registry.go`. Тесты: 14 новых в 4 файлах. Документация: compat-дока (матрица + Known Gap #12), CHANGELOG, ADR-010, CONFIGURATION_GUIDE.
+- 🔴 **AC12, полный `go test ./...`, не зелёный** по внешней причине: 11 testcontainers-тестов в 3 пакетах не запустились (Docker Hub `429`). Пакеты дифом не затронуты; вывод «не регресс» сделан по коду. Перепрогнать при доступе к образам: `go test ./internal/infrastructure/repository/ ./internal/infrastructure/inhibition/ ./internal/database/ -count=1`.
+- Остаточные ограничения и follow-ups:
+  - `RESOLVE-TIMEOUT-AUTO-RESOLVE` (BACKLOG): статус не истекает, resolved-нотификации по таймауту нет.
+  - `ALERT-STORE-DEDUP-KEY-STARTSAT` (BUGS.md): повтор без `startsAt` создаёт копию алерта, окно для таких клиентов не продлевается. Предсуществующий баг.
+  - Смешанные клиенты (Spec D5): берётся последний присланный `endsAt`. Не чиним.
+- Процессное отклонение: работа шла в назначенной сессией ветке `claude/determined-meitner-bn0ncl`, а не в `bugfix/<slug>` по `AGENTS.md`.
