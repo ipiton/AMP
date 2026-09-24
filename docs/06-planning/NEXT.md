@@ -28,7 +28,7 @@
 
 ## WIP (Max 2)
 
-- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** (старт 2026-09-24) — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d. Ветка `claude/determined-meitner-bn0ncl` (назначена сессией вместо `bugfix/parity-resolve-timeout-endsat`), workspace `tasks/PARITY-RESOLVE-TIMEOUT-ENDSAT/`.
+- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** (старт 2026-09-24) — POST без `endsAt` должен давать `endsAt = receivedAt + global.resolve_timeout` (как upstream) (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d. Ветка `claude/determined-meitner-bn0ncl` (назначена сессией вместо `bugfix/parity-resolve-timeout-endsat`), workspace `tasks/PARITY-RESOLVE-TIMEOUT-ENDSAT/`.
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 

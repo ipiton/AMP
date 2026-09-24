@@ -10,7 +10,7 @@ Upstream Alertmanager при отсутствии `endsAt` ставит `endsAt 
 
 ## Goals
 
-- [ ] POST алерта без `endsAt` ⇒ AMP хранит и отдаёт `endsAt = startsAt + global.resolve_timeout`.
+- [ ] POST алерта без `endsAt` ⇒ AMP хранит и отдаёт `endsAt = startsAt + global.resolve_timeout`. _(Уточнено на `/research`: upstream считает от времени приёма, `receivedAt + resolve_timeout`; см. `research.md` F2 и `Spec.md`.)_
 - [ ] Явно переданный `endsAt` не перетирается.
 - [ ] Значение `resolve_timeout` берётся из активного конфига (дефолт `5m`), а не захардкожено; поведение после `/-/reload` с новым значением — определить в `/spec`.
 - [ ] Выяснить на `/research`/`/spec`, какие ingest-пути затронуты (`/api/v2/alerts`, webhook `/webhook`, Prometheus-формат) и где правильно применять таймаут: на парсинге, в ingest-сервисе или на отдаче API.
@@ -25,7 +25,7 @@ Upstream Alertmanager при отсутствии `endsAt` ставит `endsAt 
 
 ## Success Criteria (Definition of Done)
 
-- [ ] Тест: POST без `endsAt` ⇒ `GET /api/v2/alerts` отдаёт `endsAt == startsAt + 5m` при дефолтном конфиге.
+- [ ] Тест: POST без `endsAt` ⇒ `GET /api/v2/alerts` отдаёт `endsAt == receivedAt + 5m` при дефолтном конфиге.
 - [ ] Тест: кастомный `global.resolve_timeout` учитывается.
 - [ ] Тест: явный `endsAt` сохраняется как есть.
 - [ ] Повторный POST того же алерта без `endsAt` продлевает окно (поведение upstream) — либо осознанное отклонение зафиксировано в `/spec`.
