@@ -106,10 +106,20 @@
 
 ## Documentation
 
-- [ ] **D1.** `docs/ALERTMANAGER_COMPATIBILITY.md`: поведение `endsAt`/`global.resolve_timeout` (время приёма + таймаут, продление, reload); known limitations: нет авто-резолва по таймауту (`RESOLVE-TIMEOUT-AUTO-RESOLVE`), смешанные клиенты (Spec D5), в БД `ends_at` пуст (ADR-010).
-- [ ] **D2.** `CHANGELOG.md` `[Unreleased]` → `### Fixed`: алерты без `endsAt` больше не отдаются как отгоревшие.
-- [ ] **D3.** `docs/06-planning/DECISIONS.md`: ADR-010 «Таймаутный `endsAt` — значение API-слоя, БД хранит присланное» (Spec D1).
-- [ ] **D4.** Doc-комментарии у `SetResolveTimeout`, `DefaultResolveTimeout` и изменённого фолбэка.
+- [x] **D1.** `docs/ALERTMANAGER_COMPATIBILITY.md`: поведение `endsAt`/`global.resolve_timeout` (время приёма + таймаут, продление, reload); known limitations: нет авто-резолва по таймауту (`RESOLVE-TIMEOUT-AUTO-RESOLVE`), смешанные клиенты (Spec D5), в БД `ends_at` пуст (ADR-010).
+- [x] **D2.** `CHANGELOG.md` `[Unreleased]` → `### Fixed`: алерты без `endsAt` больше не отдаются как отгоревшие.
+- [x] **D3.** `docs/06-planning/DECISIONS.md`: ADR-010 «Таймаутный `endsAt` — значение API-слоя, БД хранит присланное» (Spec D1).
+- [x] **D4.** Doc-комментарии у `SetResolveTimeout`, `DefaultResolveTimeout` и изменённого фолбэка.
+
+### Результат `/write-doc` (2026-09-24)
+
+- `docs/ALERTMANAGER_COMPATIBILITY.md`: строка в Feature Parity Matrix (🟡 — `endsAt` есть, авто-резолва нет) и Known Gap #12. В #12 четыре пункта: нет авто-резолва, БД хранит `NULL` / rehydration даёт свежее окно, повторы без `startsAt` дублируются (`ALERT-STORE-DEDUP-KEY-STARTSAT`), смешанные клиенты (Spec D5).
+- `CHANGELOG.md` `[Unreleased]`: новая секция `### Fixed` (до/после, скоуп, что не равно upstream).
+- `docs/06-planning/DECISIONS.md`: ADR-010.
+- `docs/CONFIGURATION_GUIDE.md`: комментарий к `global.resolve_timeout` в примере конфига. Сверх плана, но это единственное место, где оператор видит это поле, а смысл там не был описан.
+- Doc-комментарии в коде (D4) написаны ещё на `/implement`: `DefaultResolveTimeout`, `ToGettableAlert`, `SetResolveTimeout`, `stampResolveTimeout`, `RestoreFromPersistence`, `newAlertStore`, `resolveTimeoutFromConfig`.
+- Задачные документы: формулу (`receivedAt`, а не `startsAt`) исправили ещё на `/spec`. Реализация от Spec не отошла, кроме двух мелочей: вынесен `stampResolveTimeout` и добавлен `newAlertStore` ради тестируемости. Обе отмечены выше в этом файле, Spec не правили.
+- `git diff --check` — чисто.
 
 ## Finalization (`/end-task`)
 
