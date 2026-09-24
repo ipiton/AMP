@@ -11,23 +11,30 @@
 
 ## Implementation
 
-- [ ] **S1. Константа и защитный фолбэк** — `internal/core/alertconv/alertconv.go`:
+- [x] **S1. Константа и защитный фолбэк** — `internal/core/alertconv/alertconv.go`:
   - `const DefaultResolveTimeout = 5 * time.Minute`, в комментарии — upstream-смысл и ссылка на `routing.GlobalConfig.Defaults()`;
   - `ToGettableAlert` (D6): если `EndsAt` пуст, firing ⇒ `UpdatedAt + DefaultResolveTimeout` (разобрать RFC3339-строку `UpdatedAt`; если она не парсится — оставить старое поведение, не паниковать); resolved ⇒ `UpdatedAt`, как сейчас;
   - обновить doc-комментарий функции.
-- [ ] **S2. Провайдер таймаута в сторе** — `internal/infrastructure/storage/memory/alert_store.go`:
+- [x] **S2. Провайдер таймаута в сторе** — `internal/infrastructure/storage/memory/alert_store.go`:
   - поле `resolveTimeout func() time.Duration` под тем же `mu`;
   - `SetResolveTimeout(fn func() time.Duration)` в стиле `SetOnChange`;
   - приватный `currentResolveTimeout()`: `nil` или `<= 0` ⇒ `alertconv.DefaultResolveTimeout`. Читать провайдер **до** взятия `mu` на запись в `apply`, чтобы не держать лок, пока вызывается чужой код.
-- [ ] **S3. Штамповка при нормализации (D2)**:
+- [x] **S3. Штамповка при нормализации (D2)**:
   - `normalizeIngestInput` и `storedStateFromAlert` сейчас свободные функции. Передать в них `timeout time.Duration` параметром (не делать методами на `*AlertStore`, так они проще тестируются), значение берётся один раз на батч в `ingestBatchInternal` / `RestoreFromPersistence`;
   - строго **после** `NormalizeStatus`: `if status == "firing" && endsAt == nil { t := now.Add(timeout); endsAt = &t }`;
   - `resolveAlertLocked` и resolved-ветки не трогать (AC5).
-- [ ] **S4. Проводка из конфига (D3)** — `internal/application/service_registry.go`:
+- [x] **S4. Проводка из конфига (D3)** — `internal/application/service_registry.go`:
   - хелпер `resolveTimeoutFromConfig(cfg *appconfig.Config) time.Duration`: `cfg == nil`, `Routing == nil`, `Global == nil`, `ResolveTimeout == nil` или `<= 0` ⇒ `alertconv.DefaultResolveTimeout`;
   - сразу после `memory.NewAlertStore()` (`initializeInfrastructure`, ~`:463`): `r.alertStore.SetResolveTimeout(func() time.Duration { return resolveTimeoutFromConfig(r.config) })`. Замыкание читает `r.config` на каждый вызов, поэтому `/-/reload` подхватывается без дополнительной проводки;
   - проверить, что `rehydrateAlertStore` вызывается после этой строки (провайдер должен быть на месте к рестору).
-- [ ] **S5. Проверка «хендлеры не меняются».** `git diff --stat` не содержит `internal/application/handlers/alerts.go`; `core.Alert.EndsAt` до `ProcessAlert` остаётся `nil` (закрывается тестом T6).
+- [x] **S5. Проверка «хендлеры не меняются».** `git diff --stat` не содержит `internal/application/handlers/alerts.go`; `core.Alert.EndsAt` до `ProcessAlert` остаётся `nil` (закрывается тестом T6).
+
+### Результат `/implement` (2026-09-24)
+
+- Диф: `alertconv.go` +19, `alert_store.go` +60/−5, `service_registry.go` +18. `handlers/alerts.go` не тронут (S5): штамповка идёт в нормализации стора на копии, `core.Alert` уходит в `ProcessAlert` раньше и без `endsAt`.
+- Отклонение от плана в S3: хелпер `stampResolveTimeout(status, endsAt, now, timeout)` вынесен отдельной функцией, общей для обоих путей нормализации. В `storedStateFromAlert` статус теперь считается один раз до штамповки (раньше вычислялся прямо в литерале), значение то же.
+- Уже прогнано: `go build ./...`; `go vet` на трёх пакетах; `go test` на `alertconv`, `storage/memory`, `internal/application/...` — зелёные, существующие ассерты не пришлось править; `go test ./cmd/server -tags futureparity` — зелёный. `gofmt -l` показывает только 5 чужих файлов из `QUALITY-GATES-DIRTIES-TREE`, новых нет.
+- Временная sanity-проверка (тест-файл удалён): повторный ingest в 10:01 ⇒ `endsAt=10:06`, `updatedAt=10:01`; rehydration с провайдером 1h ⇒ `now+1h`, у ранее сохранённого алерта `endsAt` не пересчитан.
 
 ## Testing
 
