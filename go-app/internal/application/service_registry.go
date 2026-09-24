@@ -461,10 +461,7 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 	r.logger.Info("Business Metrics initialized")
 
 	// Initialize Memory Stores (compatibility mode)
-	r.alertStore = memory.NewAlertStore()
-	// Read on every ingest batch (not captured here) so /-/reload applies a new
-	// global.resolve_timeout to the next POST (PARITY-RESOLVE-TIMEOUT-ENDSAT).
-	r.alertStore.SetResolveTimeout(func() time.Duration { return resolveTimeoutFromConfig(r.config) })
+	r.alertStore = r.newAlertStore()
 	r.silenceStore = memory.NewSilenceStore()
 	r.logger.Info("Memory stores initialized (compatibility mode)")
 
@@ -502,6 +499,16 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 
 	r.logger.Info("Infrastructure services initialized")
 	return nil
+}
+
+// newAlertStore creates the in-memory alert store wired to the live
+// global.resolve_timeout. The provider reads r.config on every ingest batch
+// (not captured here), so /-/reload applies a new value to the next POST
+// (PARITY-RESOLVE-TIMEOUT-ENDSAT).
+func (r *ServiceRegistry) newAlertStore() *memory.AlertStore {
+	store := memory.NewAlertStore()
+	store.SetResolveTimeout(func() time.Duration { return resolveTimeoutFromConfig(r.config) })
+	return store
 }
 
 // resolveTimeoutFromConfig returns global.resolve_timeout from the active
