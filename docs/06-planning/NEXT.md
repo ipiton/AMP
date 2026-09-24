@@ -6,7 +6,7 @@
 > Перенесено из BACKLOG (секция «UI и экосистема — идеи из karma»). Обе задачи — про совместимость с экосистемой Alertmanager, друг от друга не зависят, вместе ~1d.
 
 - (KARMA-COMPAT закрыт 2026-09-23, см. DONE.md)
-- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d
+- (PARITY-RESOLVE-TIMEOUT-ENDSAT → WIP 2026-09-24)
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Phase 5A/5B закрыты, осталось наполнить агента реальными tools.
@@ -28,7 +28,7 @@
 
 ## WIP (Max 2)
 
-- (KARMA-COMPAT закрыт 2026-09-23, см. DONE.md; WIP свободен)
+- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** (старт 2026-09-24) — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d. Ветка `claude/determined-meitner-bn0ncl` (назначена сессией вместо `bugfix/parity-resolve-timeout-endsat`), workspace `tasks/PARITY-RESOLVE-TIMEOUT-ENDSAT/`.
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
