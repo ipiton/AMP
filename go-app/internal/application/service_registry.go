@@ -18,6 +18,7 @@ import (
 	"github.com/ipiton/AMP/internal/business/templating"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
 	"github.com/ipiton/AMP/internal/core/services"
 	coresilencing "github.com/ipiton/AMP/internal/core/silencing"
@@ -460,7 +461,7 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 	r.logger.Info("Business Metrics initialized")
 
 	// Initialize Memory Stores (compatibility mode)
-	r.alertStore = memory.NewAlertStore()
+	r.alertStore = r.newAlertStore()
 	r.silenceStore = memory.NewSilenceStore()
 	r.logger.Info("Memory stores initialized (compatibility mode)")
 
@@ -498,6 +499,30 @@ func (r *ServiceRegistry) initializeInfrastructure(ctx context.Context) error {
 
 	r.logger.Info("Infrastructure services initialized")
 	return nil
+}
+
+// newAlertStore creates the in-memory alert store wired to the live
+// global.resolve_timeout. The provider reads r.config on every ingest batch
+// (not captured here), so /-/reload applies a new value to the next POST
+// (PARITY-RESOLVE-TIMEOUT-ENDSAT).
+func (r *ServiceRegistry) newAlertStore() *memory.AlertStore {
+	store := memory.NewAlertStore()
+	store.SetResolveTimeout(func() time.Duration { return resolveTimeoutFromConfig(r.config) })
+	return store
+}
+
+// resolveTimeoutFromConfig returns global.resolve_timeout from the active
+// config, or alertconv.DefaultResolveTimeout when the config has no `route:`
+// / `global:` section (GlobalConfig.Defaults() only runs when `global:` is
+// present) or carries a non-positive value.
+func resolveTimeoutFromConfig(cfg *appconfig.Config) time.Duration {
+	if cfg == nil || cfg.Routing == nil || cfg.Routing.Global == nil || cfg.Routing.Global.ResolveTimeout == nil {
+		return alertconv.DefaultResolveTimeout
+	}
+	if d := time.Duration(*cfg.Routing.Global.ResolveTimeout); d > 0 {
+		return d
+	}
+	return alertconv.DefaultResolveTimeout
 }
 
 // rehydrateAlertStore loads firing alerts from persistent storage into the

@@ -6,7 +6,7 @@
 > Перенесено из BACKLOG (секция «UI и экосистема — идеи из karma»). Обе задачи — про совместимость с экосистемой Alertmanager, друг от друга не зависят, вместе ~1d.
 
 - (KARMA-COMPAT закрыт 2026-09-23, см. DONE.md)
-- [ ] **PARITY-RESOLVE-TIMEOUT-ENDSAT** — POST без `endsAt` должен давать `endsAt = startsAt + global.resolve_timeout` (сейчас `endsAt == startsAt` ⇒ потребитель считает активный алерт отгоревшим). ~0.5d
+- (PARITY-RESOLVE-TIMEOUT-ENDSAT закрыт 2026-09-24, см. DONE.md)
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Phase 5A/5B закрыты, осталось наполнить агента реальными tools.
@@ -28,11 +28,12 @@
 
 ## WIP (Max 2)
 
-- (KARMA-COMPAT закрыт 2026-09-23, см. DONE.md; WIP свободен)
+- (PARITY-RESOLVE-TIMEOUT-ENDSAT закрыт 2026-09-24, см. DONE.md; WIP свободен)
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
+- 2026-09-24, по ходу PARITY-RESOLVE-TIMEOUT-ENDSAT заведено: `RESOLVE-TIMEOUT-AUTO-RESOLVE` (BACKLOG — авто-резолв и resolved-нотификация по истечении `endsAt`, ~1d+) и `ALERT-STORE-DEDUP-KEY-STARTSAT` (BUGS.md — повторный POST без `startsAt` создаёт копию алерта в memory store; предсуществующий). Группа 0 очереди исчерпана.
 - 2026-09-23, по ходу KARMA-COMPAT заведено: `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md — флейк `TestBackgroundWorker_WarmupPeriod` под полным прогоном) и два гейт-дефекта в BACKLOG: `PARITY-GATE-DOES-NOT-GATE` (`make test-upstream-parity` гоняет сьют без его build-тега ⇒ «no tests to run» и ложное зелёное) и `QUALITY-GATES-DIRTIES-TREE` (`make quality-gates` переписывает 6 чужих неотформатированных файлов).
 - Очередь обновлена 2026-09-23: перенесены KARMA-COMPAT и PARITY-RESOLVE-TIMEOUT-ENDSAT (группа 0), синхронизирован статус группы 2 (RELOADABLE-COMPONENT-INTERFACES и HELM-PRODUCTION-VALUES закрыты 2026-08-20, в очереди висели как открытые).
 - 🔴 **Блокеры прод-релиза живут в BACKLOG**, секция «Production Readiness — блокеры (аудит 2026-09-21)»: P0 по security (нет аутентификации на API), delivery (нет CI и опубликованных образов) и reliability (порядок graceful shutdown). Они приоритетнее всего, что ниже в этой очереди; в Queue не перенесены сознательно — при WIP max 2 берём их отдельным решением.

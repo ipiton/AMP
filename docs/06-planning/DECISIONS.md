@@ -112,3 +112,19 @@
   - повышать `AlertmanagerCompatVersion` можно только вместе со строкой 5 `ALERTMANAGER_COMPATIBILITY.md` и пересмотром парности, а не «чтобы было свежее»;
   - при `metrics.enabled: false` `/metrics` отдаёт 404, проба падает, потребитель уходит в fallback — это приемлемая деградация, кода она не касается;
   - `versionInfo.version` в `/api/v2/status` намеренно НЕ тронут: karma его не читает, семантика родственная, но это отдельное решение (`STATUS-VERSIONINFO-CONTRACT` в BACKLOG).
+
+## ADR-010: `endsAt` из `resolve_timeout` — значение API-слоя, БД хранит присланное
+- **Дата**: 2026-09-24
+- **Контекст**: Алерт, пришедший без `endsAt`, отдавался из API с `endsAt == updatedAt`, то есть как отгоревший (`PARITY-RESOLVE-TIMEOUT-ENDSAT`). Upstream ставит `endsAt = receivedAt + resolve_timeout` и продлевает окно на каждом повторном POST. Вопрос был в том, где это значение появляется: на ingest, до `AlertProcessor.ProcessAlert`, или только в memory store, из которого читает API.
+- **Решение**:
+  - `endsAt` проставляет memory store (`internal/infrastructure/storage/memory/alert_store.go`) при нормализации: и на POST, и при rehydration из БД после рестарта. Только для горящих алертов без `endsAt`, строго после вычисления статуса;
+  - `core.Alert`, который уходит в dedup, БД, inhibition, классификацию и publishing, не меняется: `EndsAt` остаётся `nil`, в БД `ends_at = NULL`;
+  - `resolve_timeout` читается из живого конфига на каждый ingest-батч (`ServiceRegistry.newAlertStore`), фолбэк — `alertconv.DefaultResolveTimeout` (5m).
+- **Обоснование**:
+  - dedup считает изменение `EndsAt` поводом для update (`internal/core/services/deduplication.go`). Если штамповать до процессора, каждый повторный POST перестал бы быть дубликатом и гнал бы запись в БД, классификацию (LLM) и grouping;
+  - upstream сам обнуляет `endsAt` у горящих алертов перед отправкой нотификаций, так что receivers таймаутное значение и не должны видеть;
+  - БД хранит то, что прислал отправитель; таймаут — производное значение, зависящее от конфига в момент приёма.
+- **Следствие**:
+  - БД и API расходятся в `endsAt` для таймаутных алертов. При отладке через SQL `ends_at IS NULL` у горящего алерта означает «окно считается от времени приёма»;
+  - после рестарта rehydrated-алерт получает свежее окно `restartTime + resolve_timeout` по текущему конфигу, а не исходное;
+  - авто-резолв по истечении таймаута (`RESOLVE-TIMEOUT-AUTO-RESOLVE`) должен учитывать, что в БД для таких алертов `ends_at` пуст: срок истечения живёт только в memory store.
