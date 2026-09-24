@@ -20,6 +20,9 @@ type AlertStore struct {
 	// activeByBase indexes currently firing alerts by base fingerprint.
 	activeByBase map[string]map[string]struct{}
 	onChange     func()
+	// resolveTimeout supplies global.resolve_timeout at ingest time (see
+	// SetResolveTimeout). nil ⇒ alertconv.DefaultResolveTimeout.
+	resolveTimeout func() time.Duration
 }
 
 func NewAlertStore() *AlertStore {
@@ -38,8 +41,9 @@ func (s *AlertStore) ingestBatchInternal(inputs []core.AlertIngestInput, now tim
 		return nil
 	}
 
+	timeout := s.currentResolveTimeout()
 	for i := range inputs {
-		norm, err := normalizeIngestInput(inputs[i], now)
+		norm, err := normalizeIngestInput(inputs[i], now, timeout)
 		if err != nil {
 			return fmt.Errorf("alert[%d]: %w", i, err)
 		}
@@ -56,6 +60,44 @@ func (s *AlertStore) SetOnChange(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onChange = fn
+}
+
+// SetResolveTimeout sets the provider of global.resolve_timeout. A firing
+// alert ingested without endsAt is stored with endsAt = now + timeout (upstream
+// Alertmanager semantics, PARITY-RESOLVE-TIMEOUT-ENDSAT); every re-send
+// extends the window. The provider is called once per ingest batch, so a
+// config reload applies to the next batch and never rewrites stored alerts.
+// A nil provider, or one returning <= 0, means alertconv.DefaultResolveTimeout.
+func (s *AlertStore) SetResolveTimeout(fn func() time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolveTimeout = fn
+}
+
+// currentResolveTimeout resolves the provider outside the write lock: the
+// provider is caller code and must not run while s.mu is held.
+func (s *AlertStore) currentResolveTimeout() time.Duration {
+	s.mu.RLock()
+	fn := s.resolveTimeout
+	s.mu.RUnlock()
+
+	if fn != nil {
+		if d := fn(); d > 0 {
+			return d
+		}
+	}
+	return alertconv.DefaultResolveTimeout
+}
+
+// stampResolveTimeout returns endsAt, or now + timeout for a firing alert
+// that arrived without one. It runs AFTER status normalization, so the
+// synthesized endsAt never influences whether the alert is firing.
+func stampResolveTimeout(status string, endsAt *time.Time, now time.Time, timeout time.Duration) *time.Time {
+	if status != "firing" || endsAt != nil {
+		return endsAt
+	}
+	t := now.UTC().Add(timeout)
+	return &t
 }
 
 func (s *AlertStore) notifyChange() {
@@ -306,7 +348,12 @@ func (s *AlertStore) GroupAlerts(resolve AlertGroupingResolver, silences alertco
 // alerts after a restart. It intentionally skips onChange notifications and
 // takes []*core.Alert directly — no APIAlert/AlertIngestInput string
 // round-trip (DTO-FRAGMENTATION item 3).
+//
+// A persisted firing alert without endsAt (the database keeps what the sender
+// sent, ADR-010) gets a fresh now + resolve_timeout window, exactly as if it
+// had just been received.
 func (s *AlertStore) RestoreFromPersistence(alerts []*core.Alert, now time.Time) error {
+	timeout := s.currentResolveTimeout()
 	for i, alert := range alerts {
 		if alert == nil {
 			continue
@@ -314,14 +361,14 @@ func (s *AlertStore) RestoreFromPersistence(alerts []*core.Alert, now time.Time)
 		if alert.StartsAt.IsZero() {
 			return fmt.Errorf("persisted alert[%d]: startsAt is required", i)
 		}
-		s.apply(storedStateFromAlert(alert, now), now)
+		s.apply(storedStateFromAlert(alert, now, timeout), now)
 	}
 	return nil
 }
 
 // storedStateFromAlert converts a persisted domain alert into the internal
 // stored state, applying the same normalization as normalizeIngestInput.
-func storedStateFromAlert(alert *core.Alert, now time.Time) *core.StoredAlertState {
+func storedStateFromAlert(alert *core.Alert, now time.Time, timeout time.Duration) *core.StoredAlertState {
 	labels := alertconv.CloneStringMap(alert.Labels)
 	annotations := alertconv.CloneStringMap(alert.Annotations)
 
@@ -334,6 +381,8 @@ func storedStateFromAlert(alert *core.Alert, now time.Time) *core.StoredAlertSta
 	}
 
 	endsAt := cloneTimePtr(alert.EndsAt)
+	status := alertconv.NormalizeStatus(string(alert.Status), endsAt, now)
+	endsAt = stampResolveTimeout(status, endsAt, now, timeout)
 	generatorURL := ""
 	if alert.GeneratorURL != nil {
 		generatorURL = strings.TrimSpace(*alert.GeneratorURL)
@@ -347,14 +396,14 @@ func storedStateFromAlert(alert *core.Alert, now time.Time) *core.StoredAlertSta
 		StartsAt:        alert.StartsAt.UTC(),
 		EndsAt:          endsAt,
 		GeneratorURL:    generatorURL,
-		Status:          alertconv.NormalizeStatus(string(alert.Status), endsAt, now),
+		Status:          status,
 		UpdatedAt:       now.UTC(),
 	}
 }
 
 // Internal helpers
 
-func normalizeIngestInput(in core.AlertIngestInput, now time.Time) (*core.StoredAlertState, error) {
+func normalizeIngestInput(in core.AlertIngestInput, now time.Time, timeout time.Duration) (*core.StoredAlertState, error) {
 	startsAt, err := alertconv.ParseAlertTime(in.StartsAt)
 	if err != nil {
 		return nil, fmt.Errorf("invalid startsAt: %w", err)
@@ -369,6 +418,7 @@ func normalizeIngestInput(in core.AlertIngestInput, now time.Time) (*core.Stored
 	}
 
 	status := alertconv.NormalizeStatus(in.Status, endsAt, now)
+	endsAt = stampResolveTimeout(status, endsAt, now, timeout)
 	labels := alertconv.CloneStringMap(in.Labels)
 	annotations := alertconv.CloneStringMap(in.Annotations)
 
