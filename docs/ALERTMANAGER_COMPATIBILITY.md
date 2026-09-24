@@ -51,6 +51,7 @@ Source of truth:
 | `GET /api/v2/alerts/groups` upstream params | 🟢 Supported | Same state/receiver filters as above. Group labels come from the matched route's `group_by` and the receiver from the live route tree, per group (`alertGroupingResolver` in `internal/application/handlers/alerts.go`). AMP additionally accepts a `?group_by=` override, which upstream does not have. |
 | `GET /api/v2/status` nested `versionInfo` + `cluster` | 🟢 Supported | `internal/application/handlers/status_api.go`; `versionInfo` from ldflags-injected build vars, `cluster` from the Redis-heartbeat `ClusterStatus`. |
 | `GET /api/v2/status` `config.original` | 🟢 Supported, **secret-redacted** | Emits the Alertmanager-shaped section only (`route`/`receivers`/`inhibit_rules`/`time_intervals`/`global`), so `amtool config routes show` can re-parse it, with every secret-named field replaced by upstream's own `<secret>` placeholder (`AlertmanagerConfigYAML`). It is deliberately **not** the raw config file: this endpoint is unauthenticated, and the AMP config file also holds database/Redis/LLM credentials that are never exposed here. |
+| `endsAt` for alerts posted without one (`global.resolve_timeout`) | 🟡 Supported for the read API; no timeout-driven resolve | `PARITY-RESOLVE-TIMEOUT-ENDSAT`: a firing alert received without `endsAt` is stored with `endsAt = receivedAt + global.resolve_timeout` (default `5m`, as upstream), and every re-send extends the window. `GET /api/v2/alerts`, `GET /api/v1/alerts` and `GET /api/v2/alerts/groups` serve that value. An explicit `endsAt` is kept as sent. A `/-/reload` applies to the next POST and never rewrites stored alerts. The stamp happens in the in-memory store (`internal/infrastructure/storage/memory/alert_store.go`), so dedup, the database and notifications still see the alert exactly as sent (ADR-010). What is not upstream-equal yet: see [Known Gaps](#known-gaps-honesty-notes) #12. |
 | `POST /api/v1/alerts` alias | 🟢 Supported (POST only) | `internal/application/handlers/alerts.go` `V1AlertsHandler` delegates straight into the v2 ingest path (same payload shape). GET intentionally not restored — different legacy DTO, out of scope. |
 | `--web.route-prefix` / external-URL path inheritance | 🟢 Supported | `internal/application/route_prefix.go` `ResolveRoutePrefix` — explicit prefix wins; otherwise inherits from `external_url`'s path, matching upstream's own fallback rule. |
 | Config validation (E-codes/W-warnings) wired into startup + `/-/reload` | 🟢 Supported | `pkg/configvalidator` wired into `internal/config.LoadConfig`, used by both process start and `/-/reload` (same function). Only fires for configs with a top-level `route:` section. |
@@ -827,6 +828,23 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     `Preload` call poisoning `RouteMatcher`'s cache with an unanchored entry (the cache is keyed by raw pattern, the
     same way `RouteMatcher.regexMatch`'s own anchored cache-miss compile is). No behavior change for any running
     deployment - this doesn't route real traffic.
+12. **`resolve_timeout` sets `endsAt` but never resolves the alert.** Since `PARITY-RESOLVE-TIMEOUT-ENDSAT`, an alert
+    posted without `endsAt` gets `endsAt = receivedAt + global.resolve_timeout`, as upstream. Upstream then treats
+    the alert as resolved once that time passes and sends the resolved notification (`send_resolved`). AMP does
+    neither yet: the stored status only changes on an explicit resolved POST. An alert whose sender went quiet is
+    served with a past `endsAt` while `status.state` stays `active`, and no resolved notification goes out.
+    Consumers that judge by `endsAt` (as upstream itself does) see the correct picture; AMP's own state does not.
+    Tracked as `RESOLVE-TIMEOUT-AUTO-RESOLVE`. Three narrower edges:
+    - **The database keeps what the sender sent.** A timeout-stamped alert has `ends_at = NULL` in the database
+      while the API serves `receivedAt + resolve_timeout` (ADR-010). After a restart, rehydrated firing alerts get
+      a fresh `restartTime + resolve_timeout` window using the timeout in effect at that moment.
+    - **Re-sends without `startsAt` duplicate instead of extending.** The in-memory store keys alerts by
+      `fingerprint|startsAt`, and a missing `startsAt` becomes `now` on every POST, so each re-send creates a new
+      copy of the alert (preexisting; `ALERT-STORE-DEDUP-KEY-STARTSAT` in `BUGS.md`). Prometheus and `amtool`
+      send `startsAt` themselves; plain `curl` clients that omit it are affected.
+    - **Mixed senders.** Upstream prefers an explicit `endsAt` over a timeout one when merging the same alert; AMP
+      stores the latest value sent, so an alert first posted with an explicit `endsAt` and then without one gets
+      the timeout window.
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`

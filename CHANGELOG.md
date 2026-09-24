@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **PARITY-RESOLVE-TIMEOUT-ENDSAT** (2026-09-24): alerts posted without `endsAt` are no longer served as already resolved.
+  - **Before**: `GET /api/v2/alerts`, `GET /api/v1/alerts` and `GET /api/v2/alerts/groups` returned `endsAt == startsAt == updatedAt` for such an alert, so any consumer that treats a past `endsAt` as resolved (as Alertmanager itself does) saw an active alert as resolved as soon as it was posted.
+  - **Now**: as upstream, a firing alert received without `endsAt` is stored with `endsAt = receivedAt + global.resolve_timeout` (default `5m`), and every re-send extends the window. An explicit `endsAt` is kept as sent. `global.resolve_timeout` is read from the live config, so `/-/reload` applies to the next POST without rewriting stored alerts. Alerts restored from the database after a restart get a fresh window.
+  - **Scope**: this is a read-API value. Dedup, the database (`ends_at` stays `NULL`) and notification payloads see the alert exactly as sent (ADR-010).
+  - **Not yet upstream-equal**: once `endsAt` passes, AMP does not resolve the alert or send a resolved notification (`RESOLVE-TIMEOUT-AUTO-RESOLVE`). Re-sends that also omit `startsAt` create a duplicate instead of extending the window (preexisting, `ALERT-STORE-DEDUP-KEY-STARTSAT`). See Known Gap #12 in `docs/ALERTMANAGER_COMPATIBILITY.md`.
+
 ### Added
 - **KARMA-COMPAT** (2026-09-23): build-info metrics on `/metrics`, making AMP's Alertmanager contract version machine-readable for ecosystem tooling (`go-app/internal/buildinfo/metrics.go`).
   - **`alertmanager_build_info{version,revision,branch,goversion}`** (new): `version` is deliberately **NOT** AMP's own build version — it is the upstream Alertmanager contract version AMP implements (`0.27.0`), the machine-readable form of the `Alertmanager Version: v0.27+` header in `docs/ALERTMANAGER_COMPATIBILITY.md`. The other labels are AMP's real build data.
