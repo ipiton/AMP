@@ -40,7 +40,8 @@ if alert.EndsAt.IsZero() {
 
 - `POST /api/v2/alerts` и `POST /api/v1/alerts` → `handleAlertsPost` (`alerts.go:404`). Payload пробуется сначала как Prometheus-формат (`state`/`activeAt` или `groups`, детектор `webhook/detector.go:373`), иначе — legacy/Alertmanager-postable (`parseLegacyAlerts`). Обычный postable-массив идёт по второй ветке.
 - Цепочка: parse → silence-фильтр → `AlertProcessor.ProcessAlert` (dedup + БД + inhibition + classification + grouping/publishing) → `toAlertIngestInput` → `AlertStore.IngestBatch`.
-- `AlertStore.IngestBatch` вызывается **только** из `handleAlertsPost` (`alerts.go:453`). Восстановления стора из БД при старте нет — стор эфемерный.
+- `AlertStore.IngestBatch` вызывается **только** из `handleAlertsPost` (`alerts.go:453`).
+- ~~Восстановления стора из БД при старте нет~~ — **исправлено на `/spec`**: есть. `ServiceRegistry.rehydrateAlertStore` (`internal/application/service_registry.go:506`) грузит горящие алерты из БД через `AlertStore.RestoreFromPersistence` (`alert_store.go:309`, нормализация `storedStateFromAlert`). У таймаутного алерта в БД `EndsAt = NULL` ⇒ после рестарта он снова отдавался бы с `endsAt == updatedAt`. Поэтому штамповать надо в нормализации стора (покрывает оба пути), а не в хендлере — см. `Spec.md` D2.
 
 ### F4. Dedup: штамповать до `ProcessAlert` опасно
 
