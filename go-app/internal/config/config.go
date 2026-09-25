@@ -272,6 +272,32 @@ type ServerConfig struct {
 	// CORS controls cross-origin headers for the whole HTTP API
 	// (reuses the same config shape as webhook.cors).
 	CORS CORSWebhookConfig `mapstructure:"cors"`
+	// WebConfigFile is the path to an upstream-compatible web config file
+	// (`basic_auth_users` with bcrypt hashes), mirroring Alertmanager's
+	// --web.config.file (PROD-AUTH). Empty disables HTTP authentication.
+	// Overridable via the -web.config.file CLI flag; env:
+	// SERVER_WEB_CONFIG_FILE. Changing it requires a restart (W605).
+	WebConfigFile string `mapstructure:"web_config_file"`
+	// Auth holds AMP-specific authentication settings that deliberately
+	// live outside the web config file, so that file stays portable to
+	// upstream Alertmanager.
+	Auth ServerAuthConfig `mapstructure:"auth"`
+}
+
+// DefaultUnauthenticatedPaths are the paths served without credentials by
+// default when authentication is enabled: upstream's plain-text probe
+// endpoints. /healthz and /readyz stay protected — they answer with a JSON
+// report of internal components.
+func DefaultUnauthenticatedPaths() []string {
+	return []string{"/-/healthy", "/-/ready"}
+}
+
+// ServerAuthConfig holds AMP-specific HTTP authentication settings.
+type ServerAuthConfig struct {
+	// UnauthenticatedPaths are request paths (exact match, without the
+	// route prefix) served without credentials when authentication is
+	// enabled — for kubelet probes. Changing it requires a restart (W605).
+	UnauthenticatedPaths []string `mapstructure:"unauthenticated_paths"`
 }
 
 // WebSocketServerConfig holds WebSocket endpoint configuration
@@ -784,6 +810,8 @@ func setDefaults() {
 	viper.SetDefault("server.graceful_shutdown_timeout", "30s")
 	viper.SetDefault("server.external_url", "")
 	viper.SetDefault("server.route_prefix", "")
+	viper.SetDefault("server.web_config_file", "")
+	viper.SetDefault("server.auth.unauthenticated_paths", DefaultUnauthenticatedPaths())
 	viper.SetDefault("server.websocket.allowed_origins", "")
 	viper.SetDefault("server.cors.enabled", false)
 	viper.SetDefault("server.cors.allowed_origins", "")

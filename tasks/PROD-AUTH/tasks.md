@@ -13,38 +13,46 @@
 
 ## Срез 1 — Go (~1d)
 
-- [ ] **S1. Конфиг** — `internal/config/config.go`:
+Отклонения от плана, найденные по ходу:
+- **Фолбэк конфига теряет env** (BUGS `CONFIG-MISSING-FILE-DROPS-ENV`): без файла конфига `main` работает на минимальном `Config` и не видит `SERVER_WEB_CONFIG_FILE` ⇒ auth молча выключился бы. Обойдено в `main.go`: `resolveWebConfigFile` читает env напрямую (флаг > конфиг > env), а пустой список исключений в фолбэке заполняется `config.DefaultUnauthenticatedPaths()`. Корень не тронут.
+- **W605 и флаг**: `ServiceRegistry.SetWebConfigFlag` — при заданном `-web.config.file` правка `server.web_config_file` в конфиге не даёт ложного W605 (флаг всё равно побеждает).
+- `yaml.v3` (уже direct) для строгого парсинга; `x/crypto` переведён в direct вручную — `go mod tidy` тронул бы чужие зависимости.
+- `TestRegisterReloadables_RegistersAllFiveInReloadOrder` → `..._RegistersAllInReloadOrder`, в списке появился `web_auth`.
+- Ручной smoke на бинаре (lite, `:19199`): exempt 200 / `/healthz` 401 / анонимный POST silences 401 / с кредами 200 / метрики; смена пароля на лету; невалидный файл ⇒ старый набор + счётчик 1 + один ERROR; `/-/reload` при флаге без W605; `tls_server_config` ⇒ exit 1; фолбэк-конфиг + env на несуществующий файл ⇒ exit 1; без web-config ⇒ WARN и всё открыто. Пароли в лог не попали.
+
+
+- [x] **S1. Конфиг** — `internal/config/config.go`:
   - `ServerConfig.WebConfigFile string` (`mapstructure:"web_config_file"`);
   - `ServerConfig.Auth ServerAuthConfig` с `UnauthenticatedPaths []string` (`mapstructure:"unauthenticated_paths"`);
   - `viper.SetDefault("server.web_config_file", "")` (без дефолта `AutomaticEnv` не увидит `SERVER_WEB_CONFIG_FILE`) и `server.auth.unauthenticated_paths = ["/-/healthy", "/-/ready"]`;
   - тест: env `SERVER_WEB_CONFIG_FILE` доходит до `cfg.Server.WebConfigFile`; дефолтный список исключений.
-- [ ] **S2. Загрузчик файла (D3)** — `internal/application/webauth.go`:
+- [x] **S2. Загрузчик файла (D3)** — `internal/application/webauth.go`:
   - тип `webAuthConfig{ users map[string][]byte }` и `loadWebAuthConfig(path) (*webAuthConfig, error)`;
   - строгий YAML (`yaml.v3` `KnownFields(true)` — проверить, какой yaml уже используется в `internal/config`, и взять его);
   - до строгого парсинга — отдельная проверка верхнеуровневых ключей `tls_server_config` / `http_server_config` / `rate_limit` ⇒ ошибка с текстом из Spec D3;
   - пустое имя, не-bcrypt хеш (`bcrypt.Cost`), пустой/отсутствующий `basic_auth_users` ⇒ ошибка с именем пользователя (но не хешем);
   - `go.mod`: `golang.org/x/crypto` из indirect в direct (`go mod tidy`, убедиться, что версия не сдвинулась).
-- [ ] **S3. Middleware (D5, D6, D9)** — там же:
+- [x] **S3. Middleware (D5, D6, D9)** — там же:
   - `NewWebAuth(path string, unauthenticated []string, logger, metrics) (*WebAuth, error)` — грузит файл на старте (ошибка ⇒ наружу);
   - `(*WebAuth).Wrap(next http.Handler) http.Handler`;
   - порядок: exempt (точное совпадение `r.URL.Path`, set) → `r.BasicAuth()` (нет ⇒ `missing`) → пользователь/заглушка-хеш → кэш → bcrypt под мьютексом → 401 `WWW-Authenticate: Basic` / `next`;
   - кэш: `map[[32]byte]bool` под мьютексом, ключ `sha256(user\x00hash\x00pass)`, лимит 100, вытеснение ~10% случайных;
   - компаратор — поле `compare func(hash, pass []byte) error` (по умолчанию `bcrypt.CompareHashAndPassword`) для теста AC5;
   - хеш-заглушку сгенерировать один раз константой (cost 10, как у upstream), в комментарии — зачем.
-- [ ] **S4. Hot reload (D4)** — там же:
+- [x] **S4. Hot reload (D4)** — там же:
   - `atomic.Pointer[webAuthConfig]` + запомненные `ModTime`/`Size`; проверка не чаще раза в секунду (`atomic.Int64` с unix-nano последней проверки, чтобы не брать мьютекс на каждый запрос);
   - изменилось ⇒ `loadWebAuthConfig`; ок ⇒ swap + сброс кэша + `INFO users=N`; ошибка/файл пропал ⇒ оставить старое, `ERROR` один раз на пару `(ModTime, Size)`, `amp_http_auth_config_reload_failures_total++`;
   - часы — инъекция `now func() time.Time` для теста.
-- [ ] **S5. Метрики (D8)**: `amp_http_auth_failures_total{reason}`, `amp_http_auth_config_reload_failures_total`. Регистрация — тем же способом, что остальные `amp_*` в `internal/application` (посмотреть, есть ли общий registry/`promauto`; в тестах — свой `prometheus.NewRegistry()`, чтобы не ловить duplicate registration).
-- [ ] **S6. W605 restart-required** — `internal/config/reloadable_warnings.go` (+ константа `WarnWebAuthRestartRequired = "W605"`) и `internal/config/reloadable_webauth.go` по образцу `reloadable_metrics.go`: при изменении `server.web_config_file` или `server.auth.unauthenticated_paths` — `warnRestartRequired`, состояние не меняется. Зарегистрировать там же, где регистрируется metrics-reloadable. Если окажется, что restart-reloadables регистрируются так, что это тянет >~60 строк проводки — остановиться и зафиксировать в `research.md`/BUGS, а не городить.
-- [ ] **S7. `cmd/server/main.go`**:
+- [x] **S5. Метрики (D8)**: `amp_http_auth_failures_total{reason}`, `amp_http_auth_config_reload_failures_total`. Регистрация — тем же способом, что остальные `amp_*` в `internal/application` (посмотреть, есть ли общий registry/`promauto`; в тестах — свой `prometheus.NewRegistry()`, чтобы не ловить duplicate registration).
+- [x] **S6. W605 restart-required** — `internal/config/reloadable_warnings.go` (+ константа `WarnWebAuthRestartRequired = "W605"`) и `internal/config/reloadable_webauth.go` по образцу `reloadable_metrics.go`: при изменении `server.web_config_file` или `server.auth.unauthenticated_paths` — `warnRestartRequired`, состояние не меняется. Зарегистрировать там же, где регистрируется metrics-reloadable. Если окажется, что restart-reloadables регистрируются так, что это тянет >~60 строк проводки — остановиться и зафиксировать в `research.md`/BUGS, а не городить.
+- [x] **S7. `cmd/server/main.go`**:
   - флаг `-web.config.file` (help-текст как у upstream), после `flag.Parse` и загрузки конфига: флаг непустой ⇒ перекрывает `cfg.Server.WebConfigFile`;
   - путь непустой ⇒ `application.NewWebAuth(...)`; ошибка ⇒ `slog.Error` + `os.Exit(1)`; `INFO` (D7) с `users`, `unauthenticated_paths`;
   - путь пуст ⇒ `WARN` (текст из Spec D7);
   - `cfg.Webhook.Authentication.Enabled` ⇒ `WARN` (D8);
   - `rootHandler := application.WithRoutePrefix(authWrapped, prefix)` — auth строго внутри префикса;
   - удалить `_ "net/http/pprof"`.
-- [ ] **S8. Проверка среза 1**: `go build ./...`, `go vet ./...`, `go test ./internal/application/... ./internal/config/... ./cmd/...`, `git diff --check`; коммит `feat(auth): ...`.
+- [x] **S8. Проверка среза 1**: `go build ./...`, `go vet ./...`, `go test ./internal/application/... ./internal/config/... ./cmd/...`, `git diff --check`; коммит `feat(auth): ...`.
 
 ## Срез 2 — Helm, доки, ADR (~0.5d)
 

@@ -275,6 +275,9 @@ type ServiceRegistry struct {
 	restartWarnings *appconfig.RestartWarnings
 	metricsGate     *metricsv2.ExpositionGate
 	logHandler      *pkglogger.SwappableHandler
+	// webConfigFlag is the -web.config.file flag value, which pins the web
+	// config path over server.web_config_file (see SetWebConfigFlag).
+	webConfigFlag string
 }
 
 // NewServiceRegistry creates a new service registry.
