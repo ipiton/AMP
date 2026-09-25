@@ -60,6 +60,11 @@
   - Сделать: классификация асинхронно/вне ingest-пути (или жёсткий бюджет времени на запрос); LLM-дроп — только за явным флагом (default off), дропнутые алерты — метрика + лог; настоящий переключатель enrichment mode.
   - Оценка: ~1.5d.
 
+### Находки PROD-AUTH research (2026-09-25)
+
+- [ ] **DEAD-APPLICATION-MIDDLEWARE** — `internal/application/application.go` (`Application`, `setupMiddleware`, `startServer`) и `middleware.go` (`MiddlewareStack`) нигде не конструируются: `main.go` собирает сервер сам. Следствие: `server.cors.*` — мёртвый конфиг (CORS-middleware реализован и покрыт тестом, но в прод-пути его нет), panic-recovery тоже. Сделать: удалить мёртвый граф, CORS подключить в `main.go` (с учётом того, что `OPTIONS` preflight не несёт кредов и должен проходить до auth из PROD-AUTH). Оценка ~0.5d.
+- [ ] **DEAD-WEBHOOK-SECURITY-CONFIG** — `webhook.authentication.*`, `webhook.signature.*`, `webhook.rate_limiting.*` (`internal/config/config.go`, дефолты рядом с `:941`) парсятся, валидируются и редактируются, но в HTTP-пути не применяются; `rate_limiting.enabled` по умолчанию `true` «на бумаге». PROD-AUTH ставит только WARN на `webhook.authentication.enabled`. Сделать: удалить ключи (или реализовать rate limiting осознанно), отразить в CHANGELOG. Оценка ~0.5d.
+
 ## UI и экосистема — идеи из karma (разбор 2026-09-23)
 > `prymitive/karma` — read-only дашборд для Alertmanager (Go + React, Apache-2.0, активный). Не конкурент: закрывает ровно то, где у AMP дыра — UI.
 > Проверено эмпирически на AMP lite (`:19093`, 2 алерта + silence) против того, что karma реально запрашивает (её клиент `internal/mapper/v017/api.go`, `internal/verprobe`):
