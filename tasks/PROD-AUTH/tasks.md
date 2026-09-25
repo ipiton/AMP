@@ -85,7 +85,7 @@
 - [x] **T6** секреты в логах (AC10): захват `slog` в буфер, прогон отказов и reload — в выводе нет ни пароля, ни хеша, ни `Authorization`.
 - [x] **T7** W605 (S6): изменение `server.web_config_file` через reload ⇒ предупреждение W605 в `RestartWarnings`, состояние не меняется.
 - [x] **T8** интеграционный сквозной на реальном роутере (AC1 целиком): `NewRouter(registry).SetupRoutes(mux)` в существующем тестовом харнессе `internal/application` (если он поднимает registry без БД) — анонимный `POST /api/v2/silences` ⇒ 401, с кредами ⇒ 200. Если харнесс тяжёлый — достаточно T2 + ручной проверки на `/testing`.
-- [ ] **T9** ручная проверка на `/testing` (AC1, AC8): lite-инстанс без web-config (WARN в логе, всё открыто) и с web-config (`curl` без/с кредами, `amtool --http.config.file`, смена пароля на лету).
+- [x] **T9** ручная проверка на `/testing` (AC1, AC8): lite-инстанс без web-config (WARN в логе, всё открыто) и с web-config (`curl` без/с кредами, `amtool --http.config.file`, смена пароля на лету).
 - Где лежат тесты: `go-app/internal/application/webauth_test.go` (T1–T6, T8), `go-app/internal/config/reloadable_webauth_test.go` (T7 + откат снимает W605, nil-конфиг), `go-app/cmd/server/webauth_wiring_test.go` (флаг > конфиг > env для `SERVER_WEB_CONFIG_FILE`, без пути middleware не строится).
 - Сверх плана: length-prefix ключа кэша, отказ `NewWebAuth` на пустом пути и на отсутствующем файле, «ошибка загрузки не содержит хеш».
 - Отложено осознанно: T9 — ручная проверка на `/testing`. Helm (`webConfig`, `fail` при сочетании с `configReloader`, probes) юнит-тестами не покрыт: в репо нет helm-unittest, проверяется `helm lint` + `helm template` на `/testing`. Постоянство времени ответа (заглушка-хеш для неизвестного пользователя) тестом не измеряется — проверено только, что bcrypt вызывается и для неизвестного пользователя (T4).
@@ -95,3 +95,25 @@
 - [ ] AC1–AC13 сверены с фактом
 - [ ] `grep -rn 'net/http/pprof' cmd internal` пусто (AC9)
 - [ ] NEXT.md → WIP снят, DONE.md, BACKLOG `PROD-AUTH` закрыт, архив `tasks/archive/PROD-AUTH/`
+
+## Результат /testing (2026-09-25)
+
+### Зелёное
+- `make quality-gates-all` (gofmt + vet + полный тестовый набор): 53 пакета `ok`, `Full quality gates passed`.
+- `golangci-lint run` по `internal/application`, `internal/config`, `cmd/server`: `No issues found`.
+- `gofmt -l` по Go-файлам ветки — пусто; `git diff --check main...HEAD` — чисто.
+- Helm: `helm lint` — 0 failed. `helm template` по умолчанию: probes на `/-/healthy` и `/-/ready`, web-config не монтируется. С `webConfig.existingSecret=amp-web`: env `SERVER_WEB_CONFIG_FILE=/etc/amp/web/web-config.yml`, volume из секрета `amp-web`. `webConfig` + `configReloader.enabled` ⇒ `fail` с отсылкой к CONFIG-RELOADER-AUTH.
+- **T9, ручной smoke** (lite, `:19199`, собранный бинарь):
+  - без web-config: анонимный `POST /api/v2/silences` ⇒ 200, WARN «authentication is DISABLED» в логе;
+  - с `-web.config.file`: `/-/healthy`, `/-/ready` ⇒ 200 без кредов; `POST /api/v2/silences` анонимно ⇒ 401, с кредами ⇒ 200; `/metrics`, `/healthz` анонимно ⇒ 401;
+  - `amtool silence query` без `--http.config.file` ⇒ 401, с ним ⇒ список silences (upstream-клиент совместим);
+  - хеш из `htpasswd -nbBC 10` (`$2y$`) принимается;
+  - ротация пароля в файле без рестарта: старый ⇒ 401, новый ⇒ 200;
+  - невалидный файл: прежний пароль продолжает работать, `amp_http_auth_config_reload_failures_total 1`, один ERROR «Web config change rejected»;
+  - `POST /-/reload` анонимно ⇒ 401, с кредами ⇒ 200, W605 не выдаётся (путь закреплён флагом);
+  - пустой хеш в файле ⇒ процесс не стартует (ERROR «refusing to start…»);
+  - в логе нет паролей и bcrypt-хешей (`grep` по паролям и `$2[aby]$` — 0 совпадений).
+
+### Красное / вне скоупа
+- Новых падений нет.
+- Предсуществующее: `make quality-gates*` запускает `gofmt -w` и переформатирует 6 файлов, не относящихся к PROD-AUTH (`cmd/server/futureparity_compat.go`, `internal/application/handlers/alerts_test.go`, `internal/core/investigation/{message,tool}.go`, `internal/infrastructure/inhibition/{matcher_impl,matchers_list_test}.go`). Это дрейф форматирования в `main`; в ветку PROD-AUTH не включается.
