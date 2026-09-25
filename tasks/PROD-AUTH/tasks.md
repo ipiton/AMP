@@ -77,15 +77,18 @@
 
 ## Testing (на `/write-tests` и `/testing`)
 
-- [ ] **T1** загрузчик, табличный (AC7): валидный; нет файла; битый YAML; неизвестный ключ; `tls_server_config`; `http_server_config`; `rate_limit`; пустые users; нет `basic_auth_users`; пустое имя; не-bcrypt хеш.
-- [ ] **T2** middleware (AC1–3): без заголовка ⇒ 401 + `WWW-Authenticate: Basic` + `missing`; неверный пароль ⇒ 401 + `invalid`; неизвестный пользователь ⇒ 401 + `invalid`; валидные ⇒ `next` вызван; exempt `/-/healthy`, `/-/ready` ⇒ 200 без кредов; `/healthz`, `/metrics` ⇒ 401; кастомный exempt; `/-/healthy/` (слеш) **не** exempt.
-- [ ] **T3** route prefix (AC4): `WithRoutePrefix(auth.Wrap(mux), "/am")` — `/am/-/healthy` 200, `/am/api/v2/silences` 401, с кредами — 200.
-- [ ] **T4** кэш (AC5): два запроса с теми же кредами ⇒ компаратор вызван один раз; другой пароль ⇒ второй вызов; переполнение кэша не паникует и держит размер ≤ лимита.
-- [ ] **T5** hot reload (AC6): смена пароля в файле + сдвиг часов ⇒ старый 401, новый 200; невалидный файл ⇒ старый набор работает, счётчик +1, повторные запросы не увеличивают счётчик/ERROR повторно; удаление файла ⇒ старый набор; проверка не чаще раза в секунду (без сдвига часов изменение не видно).
-- [ ] **T6** секреты в логах (AC10): захват `slog` в буфер, прогон отказов и reload — в выводе нет ни пароля, ни хеша, ни `Authorization`.
-- [ ] **T7** W605 (S6): изменение `server.web_config_file` через reload ⇒ предупреждение W605 в `RestartWarnings`, состояние не меняется.
-- [ ] **T8** интеграционный сквозной на реальном роутере (AC1 целиком): `NewRouter(registry).SetupRoutes(mux)` в существующем тестовом харнессе `internal/application` (если он поднимает registry без БД) — анонимный `POST /api/v2/silences` ⇒ 401, с кредами ⇒ 200. Если харнесс тяжёлый — достаточно T2 + ручной проверки на `/testing`.
+- [x] **T1** загрузчик, табличный (AC7): валидный; нет файла; битый YAML; неизвестный ключ; `tls_server_config`; `http_server_config`; `rate_limit`; пустые users; нет `basic_auth_users`; пустое имя; не-bcrypt хеш.
+- [x] **T2** middleware (AC1–3): без заголовка ⇒ 401 + `WWW-Authenticate: Basic` + `missing`; неверный пароль ⇒ 401 + `invalid`; неизвестный пользователь ⇒ 401 + `invalid`; валидные ⇒ `next` вызван; exempt `/-/healthy`, `/-/ready` ⇒ 200 без кредов; `/healthz`, `/metrics` ⇒ 401; кастомный exempt; `/-/healthy/` (слеш) **не** exempt.
+- [x] **T3** route prefix (AC4): `WithRoutePrefix(auth.Wrap(mux), "/am")` — `/am/-/healthy` 200, `/am/api/v2/silences` 401, с кредами — 200.
+- [x] **T4** кэш (AC5): два запроса с теми же кредами ⇒ компаратор вызван один раз; другой пароль ⇒ второй вызов; переполнение кэша не паникует и держит размер ≤ лимита.
+- [x] **T5** hot reload (AC6): смена пароля в файле + сдвиг часов ⇒ старый 401, новый 200; невалидный файл ⇒ старый набор работает, счётчик +1, повторные запросы не увеличивают счётчик/ERROR повторно; удаление файла ⇒ старый набор; проверка не чаще раза в секунду (без сдвига часов изменение не видно).
+- [x] **T6** секреты в логах (AC10): захват `slog` в буфер, прогон отказов и reload — в выводе нет ни пароля, ни хеша, ни `Authorization`.
+- [x] **T7** W605 (S6): изменение `server.web_config_file` через reload ⇒ предупреждение W605 в `RestartWarnings`, состояние не меняется.
+- [x] **T8** интеграционный сквозной на реальном роутере (AC1 целиком): `NewRouter(registry).SetupRoutes(mux)` в существующем тестовом харнессе `internal/application` (если он поднимает registry без БД) — анонимный `POST /api/v2/silences` ⇒ 401, с кредами ⇒ 200. Если харнесс тяжёлый — достаточно T2 + ручной проверки на `/testing`.
 - [ ] **T9** ручная проверка на `/testing` (AC1, AC8): lite-инстанс без web-config (WARN в логе, всё открыто) и с web-config (`curl` без/с кредами, `amtool --http.config.file`, смена пароля на лету).
+- Где лежат тесты: `go-app/internal/application/webauth_test.go` (T1–T6, T8), `go-app/internal/config/reloadable_webauth_test.go` (T7 + откат снимает W605, nil-конфиг), `go-app/cmd/server/webauth_wiring_test.go` (флаг > конфиг > env для `SERVER_WEB_CONFIG_FILE`, без пути middleware не строится).
+- Сверх плана: length-prefix ключа кэша, отказ `NewWebAuth` на пустом пути и на отсутствующем файле, «ошибка загрузки не содержит хеш».
+- Отложено осознанно: T9 — ручная проверка на `/testing`. Helm (`webConfig`, `fail` при сочетании с `configReloader`, probes) юнит-тестами не покрыт: в репо нет helm-unittest, проверяется `helm lint` + `helm template` на `/testing`. Постоянство времени ответа (заглушка-хеш для неизвестного пользователя) тестом не измеряется — проверено только, что bcrypt вызывается и для неизвестного пользователя (T4).
 - [ ] `go vet ./...`, `go test ./...` (с учётом `PUBLISHING-WARMUP-TEST-FLAKY`), `go build ./...`, `git diff --check` (AC13).
 
 ## Finalization (`/end-task`)
