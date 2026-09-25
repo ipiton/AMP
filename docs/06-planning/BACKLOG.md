@@ -10,7 +10,7 @@
 
 ### P0 — Security
 
-- [ ] **PROD-AUTH** _(в WIP с 2026-09-25, `tasks/PROD-AUTH/`)_ — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
+- [x] **PROD-AUTH** _(закрыт 2026-09-25, `tasks/archive/PROD-AUTH/`, ADR-011; сделан basic auth по upstream `--web.config.file`, bearer → `PROD-AUTH-BEARER`)_ — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
   - Сделать: `web.config`-совместимый auth (basic + bearer, как upstream `--web.config.file` / `exporter-toolkit`), либо документированный обязательный auth-proxy. Минимум — защита мутирующих эндпоинтов, `/-/reload`, investigation, dashboard; `/-/healthy`, `/-/ready`, `/metrics` — настраиваемо.
   - Заодно: удалить мёртвый blank-import `net/http/pprof` (`main.go:9`), чтобы pprof не открылся при рефакторинге на `DefaultServeMux`.
   - Критерий: анонимный `POST /api/v2/silences` → 401 при включённом auth; тесты на middleware; раздел в `CONFIGURATION_GUIDE.md`.
@@ -20,7 +20,7 @@
   - Сделать: namespaced read-only Role, только при `targetDiscovery.enabled`; cluster-scope — отдельный явный opt-in; убрать write-права, если не используются.
   - Критерий: `helm template` с дефолтами не рендерит ClusterRole; тест в release-gate.
   - Оценка: ~0.5d.
-- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. Оценка: ~0.25d.
+- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. _(2026-09-25: PROD-AUTH закрыт — описать basic auth через `--web.config.file` / `webConfig.existingSecret`, ссылка на `CONFIGURATION_GUIDE.md` §4.)_ Оценка: ~0.25d.
 
 ### P0 — Delivery
 

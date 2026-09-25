@@ -99,9 +99,9 @@
 - Spec/requirements: допущения не изменились; отклонения реализации уже записаны в срезах выше.
 
 ## Finalization (`/end-task`)
-- [ ] AC1–AC13 сверены с фактом
-- [ ] `grep -rn 'net/http/pprof' cmd internal` пусто (AC9)
-- [ ] NEXT.md → WIP снят, DONE.md, BACKLOG `PROD-AUTH` закрыт, архив `tasks/archive/PROD-AUTH/`
+- [x] AC1–AC13 сверены с фактом: AC1–7, AC10 — тесты T1–T8 + smoke T9; AC8 — smoke (WARN, всё открыто); AC9 — grep; AC11 — `helm template`; AC12 — доки/CHANGELOG/ADR-011; AC13 — `quality-gates-all`, `go build ./...`, `git diff --check`
+- [x] `grep -rn 'net/http/pprof' cmd internal` пусто (AC9)
+- [x] NEXT.md → WIP снят, DONE.md, BACKLOG `PROD-AUTH` закрыт, архив `tasks/archive/PROD-AUTH/`
 
 ## Результат /testing (2026-09-25)
 
@@ -124,3 +124,16 @@
 ### Красное / вне скоупа
 - Новых падений нет.
 - Предсуществующее: `make quality-gates*` запускает `gofmt -w` и переформатирует 6 файлов, не относящихся к PROD-AUTH (`cmd/server/futureparity_compat.go`, `internal/application/handlers/alerts_test.go`, `internal/core/investigation/{message,tool}.go`, `internal/infrastructure/inhibition/{matcher_impl,matchers_list_test}.go`). Это дрейф форматирования в `main`; в ветку PROD-AUTH не включается.
+
+## Итоговый статус (2026-09-25)
+
+**DONE.** Ветка `feature/prod-auth`, 11 коммитов до `/end-task`. Все AC выполнены, гейты зелёные (см. «Результат /testing»).
+
+Оставшиеся ограничения (осознанные, не скрыты):
+- Только `basic_auth_users`; TLS, `http_server_config`, `rate_limit` отвергаются на старте. Bearer → `PROD-AUTH-BEARER`.
+- `configReloader` + `webConfig` в чарте несовместимы (Helm `fail`) → `CONFIG-RELOADER-AUTH`.
+- Смена `server.web_config_file` / `unauthenticated_paths` — только рестартом (W605); содержимое файла — hot reload.
+- Откат на образ до PROD-AUTH молча открывает API — предупреждение в `docs/ROLLBACK_RUNBOOK.md`.
+- Постоянство времени ответа для неизвестного пользователя (хеш-заглушка) не измерено тестом.
+- `webhook.authentication.*` по-прежнему не применяется (только WARN) → `DEAD-WEBHOOK-SECURITY-CONFIG`.
+- Предсуществующее, не из этой задачи: `CONFIG-MISSING-FILE-DROPS-ENV` (BUGS.md; для web config закрыто прямым чтением env), `QUALITY-GATES-DIRTIES-TREE` (BACKLOG).
