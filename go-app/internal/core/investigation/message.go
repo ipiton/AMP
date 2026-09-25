@@ -12,9 +12,9 @@ const (
 
 // ToolCallRequest is a single tool invocation requested by the LLM.
 type ToolCallRequest struct {
-	ID       string         `json:"id"`
-	Name     string         `json:"name"`
-	Params   map[string]any `json:"params"`
+	ID     string         `json:"id"`
+	Name   string         `json:"name"`
+	Params map[string]any `json:"params"`
 }
 
 // AgentMessage is one entry in the conversation history sent to/from the LLM.

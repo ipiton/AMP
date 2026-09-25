@@ -183,24 +183,24 @@ func TestMatchesAll_AbsentLabelUpstreamSemantics(t *testing.T) {
 			explain: `upstream: anchored ".*" matches "" so negated is false -> NOT matched (the pre-fix version returned true)`,
 		},
 		{
-			name:    `foo="bar" on absent label (non-empty operand, tables agree)`,
-			exprs:   []string{`foo="bar"`},
-			want:    false,
+			name:  `foo="bar" on absent label (non-empty operand, tables agree)`,
+			exprs: []string{`foo="bar"`},
+			want:  false,
 		},
 		{
-			name:    `foo!="bar" on absent label (non-empty operand, tables agree)`,
-			exprs:   []string{`foo!="bar"`},
-			want:    true,
+			name:  `foo!="bar" on absent label (non-empty operand, tables agree)`,
+			exprs: []string{`foo!="bar"`},
+			want:  true,
 		},
 		{
-			name:    `foo=~"bar" on absent label (non-empty operand, tables agree)`,
-			exprs:   []string{`foo=~"bar"`},
-			want:    false,
+			name:  `foo=~"bar" on absent label (non-empty operand, tables agree)`,
+			exprs: []string{`foo=~"bar"`},
+			want:  false,
 		},
 		{
-			name:    `foo!~"bar" on absent label (non-empty operand, tables agree)`,
-			exprs:   []string{`foo!~"bar"`},
-			want:    true,
+			name:  `foo!~"bar" on absent label (non-empty operand, tables agree)`,
+			exprs: []string{`foo!~"bar"`},
+			want:  true,
 		},
 	}
 
@@ -253,9 +253,9 @@ func TestRuleMatchesSide_LegacyMapForm_AbsentLabelUpstreamSemantics(t *testing.T
 			explain: `upstream: "" == "" -> matched (the pre-fix version returned false)`,
 		},
 		{
-			name:    `source_match: {foo: "bar"} on absent "foo" (non-empty operand, tables agree)`,
-			rule:    InhibitionRule{SourceMatch: map[string]string{"foo": "bar"}},
-			want:    false,
+			name: `source_match: {foo: "bar"} on absent "foo" (non-empty operand, tables agree)`,
+			rule: InhibitionRule{SourceMatch: map[string]string{"foo": "bar"}},
+			want: false,
 		},
 	}
 

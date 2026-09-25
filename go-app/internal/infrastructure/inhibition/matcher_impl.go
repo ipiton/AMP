@@ -348,7 +348,7 @@ func ruleMatchesTargetSide(rule *InhibitionRule, labels map[string]string) bool 
 	}
 
 	for key := range rule.TargetMatchRE {
-		actualValue := labels[key] // upstream semantics: absent == ""
+		actualValue := labels[key]              // upstream semantics: absent == ""
 		re, hasRE := rule.compiledTargetRE[key] // hasRE convention: see ruleMatchesSourceSide's twin guard above (R8)
 		if !hasRE || !re.MatchString(actualValue) {
 			return false

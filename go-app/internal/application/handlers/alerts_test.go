@@ -64,8 +64,8 @@ func (r *fakeRegistry) Config() *appconfig.Config {
 	}
 	return &appconfig.Config{}
 }
-func (r *fakeRegistry) StartTime() time.Time                     { return time.Now() }
-func (r *fakeRegistry) ReloadConfig(_ context.Context) error     { return nil }
+func (r *fakeRegistry) StartTime() time.Time                 { return time.Now() }
+func (r *fakeRegistry) ReloadConfig(_ context.Context) error { return nil }
 func (r *fakeRegistry) ClusterStatus(_ context.Context) ClusterStatus {
 	return ClusterStatus{Status: "disabled"}
 }
