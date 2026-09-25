@@ -92,6 +92,8 @@ basic_auth_users:
 
 Включать по умолчанию нельзя: пароль некому сгенерировать, все пилоты упадут. Фиксируется в `DECISIONS.md` (ADR-011).
 
+Явный отказ от auth (`server.auth.disabled: true`, глушащий WARN) рассмотрен и отклонён на согласовании Spec (2026-09-25): сервис без auth — это просто отсутствие web-config, WARN остаётся всегда. Случаи «auth снаружи» (Ingress/oauth2-proxy, mesh, NetworkPolicy) живут с одной WARN-строкой на старте.
+
 ### D8. Наблюдаемость
 
 - `amp_http_auth_failures_total{reason}`, `reason ∈ {missing, invalid}`. Имя пользователя в лейблы не попадает (кардинальность, утечка).
