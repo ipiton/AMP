@@ -128,3 +128,27 @@
   - БД и API расходятся в `endsAt` для таймаутных алертов. При отладке через SQL `ends_at IS NULL` у горящего алерта означает «окно считается от времени приёма»;
   - после рестарта rehydrated-алерт получает свежее окно `restartTime + resolve_timeout` по текущему конфигу, а не исходное;
   - авто-резолв по истечении таймаута (`RESOLVE-TIMEOUT-AUTO-RESOLVE`) должен учитывать, что в БД для таких алертов `ends_at` пуст: срок истечения живёт только в memory store.
+
+## ADR-011: HTTP-аутентификация — свой middleware в формате upstream `web.config`, по умолчанию выключена
+- **Дата**: 2026-09-25
+- **Контекст**: HTTP API AMP был полностью открыт (`PROD-AUTH`, P0 из аудита production readiness). Upstream Alertmanager защищается `--web.config.file` через `prometheus/exporter-toolkit`: только basic auth (bcrypt), на все пути без исключений, TLS там же.
+- **Решение**:
+  - формат файла — upstream (`basic_auth_users`), путь — флаг `-web.config.file`, `server.web_config_file` или `SERVER_WEB_CONFIG_FILE`;
+  - реализация — собственный middleware (`internal/application/webauth.go`), а не `exporter-toolkit/web.Serve`: алгоритм проверки перенесён 1:1 (хеш-заглушка для неизвестного пользователя, кэш вердиктов bcrypt, мьютекс), но добавлены исключения путей;
+  - без файла auth выключен, на старте громкий `WARN`. Явный opt-out (`server.auth.disabled`), глушащий WARN, рассмотрен и отклонён;
+  - только basic, без bearer;
+  - не реализованные ключи upstream (`tls_server_config`, `http_server_config`, `rate_limit`) — ошибка старта, а не молчаливое игнорирование.
+- **Обоснование**:
+  - `exporter-toolkit` не умеет исключать пути ⇒ kubelet-probes либо ломаются, либо креды попадают в pod spec; кроме того, он тянет 5–7 новых модулей и забирает Serve-цикл, который будет переделывать `PROD-GRACEFUL-SHUTDOWN`;
+  - включить auth по умолчанию нельзя: пароль некому сгенерировать, все существующие деплои упали бы;
+  - молча проигнорированный `tls_server_config` — ложное ощущение защиты;
+  - bearer upstream не принимает, все клиенты экосистемы (Prometheus, Grafana, amtool, karma) умеют basic.
+- **Осознанные отклонения от upstream**:
+  - пустой `basic_auth_users` — ошибка (upstream: auth выключен);
+  - невалидная правка файла оставляет прежних пользователей (upstream: `500` на всё) — правка не может ни открыть API, ни положить ingest;
+  - `server.auth.unauthenticated_paths` (дефолт `/-/healthy`, `/-/ready`, точное совпадение, без route prefix) — upstream исключений не имеет.
+- **Следствие**:
+  - смена пути к файлу и списка исключений — только рестартом (`W605`); содержимое файла подхватывается само;
+  - Helm-probes по умолчанию переведены на `/-/healthy`/`/-/ready`;
+  - config-reloader sidecar пока не умеет auth ⇒ чарт не рендерит его вместе с `webConfig` (`CONFIG-RELOADER-AUTH`);
+  - путь к файлу читается из env и напрямую, мимо viper: иначе при отсутствии файла конфига (`CONFIG-MISSING-FILE-DROPS-ENV`) auth молча выключился бы.

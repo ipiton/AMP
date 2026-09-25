@@ -56,18 +56,24 @@
 
 ## Срез 2 — Helm, доки, ADR (~0.5d)
 
-- [ ] **S9. Helm** (`helm/amp/`):
+Отклонения от плана:
+- **config-reloader sidecar уже существует** (план считал, что кода нет): он ходит в `/-/reload` и `/health/reload` без кредов и получил бы 401 даже при `method: signal`. Чарт теперь `fail`-ит комбинацию `configReloader` + `webConfig` с понятным сообщением (рядом с существующими `fail`-проверками sidecar); поддержка auth в sidecar — BACKLOG `CONFIG-RELOADER-AUTH`. Пункт `CONFIG-RELOADER-SIDECAR` в NEXT.md помечен как устаревший.
+- Переопределений путей probes в `values-*.yaml` нет; smoke/e2e-скрипты ходят в `/healthz` без auth — не тронуты.
+- Проверено: `helm lint` PASS; `helm template` дефолт (probes `/-/healthy`/`/-/ready`, web-config нет), `--set webConfig.existingSecret=amp-web` (env, volumeMount, secret volume), `profile=lite` + webConfig (оба volume), reloader + webConfig ⇒ `fail`, reloader без webConfig ⇒ рендерится. `charts/valkey` собран локально `helm dependency build`, не коммитится.
+
+
+- [x] **S9. Helm** (`helm/amp/`):
   - `values.yaml`: блок `webConfig` (`existingSecret: ""`, `secretKey: web-config.yml`, `mountPath: /etc/amp/web`) с комментарием про `htpasswd -nBC 10`; `probes.liveness.path`/`startup.path` → `/-/healthy`, `probes.readiness.path` → `/-/ready`; то же в `| default` в `templates/deployment.yaml`;
   - `templates/deployment.yaml`: при `webConfig.existingSecret` — volume (secret), `volumeMount` readOnly, env `SERVER_WEB_CONFIG_FILE`;
   - проверить `values-production.yaml` и прочие `values-*.yaml`: если там переопределены пути probes на `/healthz`/`/readyz` — перевести на `/-/healthy`/`/-/ready` (иначе с auth probe получит 401);
   - `helm template` дефолт / с `--set webConfig.existingSecret=amp-web` — глазами и `grep` (AC11). Внимание: `PROD-HELM-CLEAN-CHECKOUT` — если нет `charts/valkey`, сделать `helm dependency build` локально и не коммитить.
-- [ ] **S10. Доки**:
+- [x] **S10. Доки**:
   - `docs/CONFIGURATION_GUIDE.md` — раздел «Authentication»: флаг/ключ/env, формат файла, генерация хеша, `unauthenticated_paths`, hot reload и его отклонение от upstream, что даёт ошибку старта, Prometheus `basic_auth` пример, amtool `--http.config.file`, Helm `webConfig`;
   - `docs/ALERTMANAGER_COMPATIBILITY.md` — строка `--web.config.file`: поддержано `basic_auth_users`; `tls_server_config`/`http_server_config`/`rate_limit` ⇒ ошибка старта; отклонения (пустые users, reload без 500, исключения путей). Поправить `:53` «this endpoint is unauthenticated» → «unauthenticated unless web config is set»;
   - `CHANGELOG.md` `[Unreleased]` — Added (auth), Changed (Helm probe paths), Removed (pprof import); дефолт не меняется;
   - `docs/06-planning/DECISIONS.md` — ADR-011 (дефолт off + WARN, свой middleware вместо exporter-toolkit, отклонения D3/D4/D5, отклонённый opt-out);
   - BACKLOG: `PROD-AUTH-BEARER`; в `CONFIG-RELOADER-SIDECAR` (NEXT.md) — заметка «нужны basic-креды или SIGHUP, loopback-исключение запрещено»; в `PROD-INGRESS-HARDENING` — «auth теперь есть, решить обязательность в values-production».
-- [ ] **S11. Проверка среза 2**: `helm lint`, `helm template` (AC11), `git diff --check`; коммит `docs(auth): ...` / `feat(helm): ...`.
+- [x] **S11. Проверка среза 2**: `helm lint`, `helm template` (AC11), `git diff --check`; коммит `docs(auth): ...` / `feat(helm): ...`.
 
 ## Testing (на `/write-tests` и `/testing`)
 

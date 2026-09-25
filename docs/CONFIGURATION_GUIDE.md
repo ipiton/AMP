@@ -92,6 +92,7 @@ server:
   read_timeout: 30s
   write_timeout: 30s
   graceful_shutdown_timeout: 30s
+  # web_config_file: /etc/amp/web/web-config.yml  # enables basic auth, see "Enable HTTP Authentication"
 
 # ============================================================================
 # Database (PostgreSQL)
@@ -804,6 +805,67 @@ config.yaml
 config.yaml.example  ✅ Commit (no secrets)
 config.yaml          ❌ Don't commit (has secrets)
 ```
+
+---
+
+### 4. Enable HTTP Authentication
+
+By default the HTTP API has **no authentication**: anyone who can reach the port can post alerts, create or delete silences, trigger `/-/reload` and start LLM investigations. AMP logs a `WARN` at startup while this is the case. Enable basic auth with an upstream-compatible web config file — the same file Alertmanager takes as `--web.config.file`.
+
+**Web config file** (`web-config.yml`):
+```yaml
+basic_auth_users:
+  prometheus: $2y$10$...   # bcrypt hash, never the plain password
+  alice: $2y$10$...
+```
+
+Generate a hash with `htpasswd -nBC 10 <user> | cut -d: -f2`.
+
+**Point AMP at it** (first match wins):
+
+| Source | Example |
+|---|---|
+| CLI flag | `-web.config.file=/etc/amp/web/web-config.yml` (also `--web.config.file`) |
+| `config.yaml` | `server.web_config_file: /etc/amp/web/web-config.yml` |
+| Environment | `SERVER_WEB_CONFIG_FILE=/etc/amp/web/web-config.yml` |
+
+**What is checked at startup** — any of these stops the process with an error naming the problem (it never starts open by accident):
+- the file is missing or is not valid YAML;
+- `basic_auth_users` is missing or empty (upstream treats an empty list as "auth off"; AMP treats it as a mistake — to disable auth, remove the setting);
+- a password is not a bcrypt hash;
+- an unknown key, or an upstream key AMP does not implement: `tls_server_config` (terminate TLS at the ingress or service mesh), `http_server_config`, `rate_limit`.
+
+**Paths without credentials.** Only exact paths listed here bypass auth; the route prefix is not part of them:
+```yaml
+server:
+  auth:
+    unauthenticated_paths: ["/-/healthy", "/-/ready"]   # default
+```
+`/-/healthy` and `/-/ready` run the same checks as `/healthz` and `/readyz` but answer plain text, so they suit kubelet probes. `/healthz`, `/readyz` (JSON component reports) and `/metrics` stay protected — scrape `/metrics` with `basic_auth`, or add it to the list.
+
+**Rotating passwords.** Edits to the web config file apply without a restart (checked at most once per second). If an edited file fails the checks above, the previous users stay in effect, AMP logs an `ERROR` and increments `amp_http_auth_config_reload_failures_total` — an edit can never open the API or lock out ingest. Changing `server.web_config_file` or `server.auth.unauthenticated_paths` itself requires a restart (`/-/reload` reports warning `W605`).
+
+**Metrics:** `amp_http_auth_failures_total{reason="missing|invalid"}`, `amp_http_auth_config_reload_failures_total`.
+
+**Clients:**
+```yaml
+# Prometheus (prometheus.yml)
+alerting:
+  alertmanagers:
+    - static_configs: [{ targets: ["amp:9093"] }]
+      basic_auth:
+        username: prometheus
+        password_file: /etc/prometheus/amp-password
+```
+```yaml
+# amtool: --http.config.file=amtool-http.yml
+basic_auth:
+  username: alice
+  password_file: /home/alice/.amp-password
+```
+Grafana (Alertmanager data source) and karma use their own basic-auth settings. The built-in dashboard works through the browser's login prompt.
+
+**Helm:** create a Secret holding `web-config.yml` and set `webConfig.existingSecret`. Not yet compatible with `configReloader` (the chart refuses to render the combination). `webhook.authentication.*` is **not** enforced and never was — AMP logs a `WARN` if it is enabled.
 
 ---
 

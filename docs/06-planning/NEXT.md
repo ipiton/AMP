@@ -17,7 +17,7 @@
 
 ### 2. Operations (из AMP-OSS)
 - [x] ~~**RELOADABLE-COMPONENT-INTERFACES**~~ — закрыто 2026-08-20 (INF-A slice 1), см. BACKLOG.
-- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven SIGHUP. Частично сделано INF-B (values-шейп есть, нет Go-кода sidecar + Dockerfile + template). ~1d
+- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven SIGHUP. Частично сделано INF-B (values-шейп есть, нет Go-кода sidecar + Dockerfile + template). ~1d _(2026-09-25, замечено на PROD-AUTH: запись устарела — `cmd/config-reloader`, `Dockerfile.config-reloader` и шаблон в `deployment.yaml` уже есть (`7cf223a`…`e1038ea`); не хватает образа в CI (`PROD-CI-IMAGES`) и auth (`CONFIG-RELOADER-AUTH`). Статус пересмотреть.)_
 - [x] ~~**HELM-PRODUCTION-VALUES**~~ — закрыто 2026-08-20 (INF-B), см. BACKLOG; остаточные гэпы чарта — в `TECH-DEBT.md` (`HELM-CHART-GAPS`).
 
 ### 3. Alertmanager Parity — Phase B (feature parity)
