@@ -4,8 +4,8 @@ import "context"
 
 // ToolDefinition describes a tool for the LLM (OpenAI function spec).
 type ToolDefinition struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
 	Parameters  JSONSchemaObject `json:"parameters"`
 }
 

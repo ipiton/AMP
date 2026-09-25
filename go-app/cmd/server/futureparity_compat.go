@@ -27,7 +27,6 @@ const (
 	runtimeClusterNameEnv             = "AMP_CLUSTER_NAME"
 )
 
-
 type runtimeClusterContext struct {
 	status      string
 	name        string
