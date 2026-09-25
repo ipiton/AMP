@@ -515,7 +515,8 @@ Semantics worth knowing before you migrate:
   `oauth2.client_secret` are redacted to `<secret>` in `/api/v2/status`'s
   `config.original`. `cert_file`, `key_file` and `token_url` are also redacted
   there despite being paths/public endpoints — the redaction list is
-  deliberately conservative for an unauthenticated endpoint. Redaction affects
+  deliberately conservative for an endpoint that is unauthenticated unless
+  `--web.config.file` is set. Redaction affects
   only that rendering, never delivery.
 
 ### Still NOT supported for receivers

@@ -6,11 +6,13 @@
 - App-level `PodDisruptionBudget` (`templates/poddisruptionbudget.yaml` + `podDisruptionBudget.*` values, disabled by default) — previously only `postgresql.podDisruptionBudget` existed; the app `Deployment` itself had none despite `autoscaling`/pod anti-affinity assuming HA.
 - `values.yaml` gained real value-shape homes for the alertmanager-parity config surface: `publishing.queue.deliveryConfirmationTimeout`, `publishing.templates.enabled`, `grouping.*`, `storage.*`, `silencing.*`, wired into `templates/configmap.yaml`.
 - `configReloader.*` values shape (disabled, no template yet) — placeholder for a parallel track's sidecar.
+- `webConfig.existingSecret`/`secretKey`/`mountPath` (PROD-AUTH): mounts an upstream-format web config Secret and sets `SERVER_WEB_CONFIG_FILE`, enabling HTTP basic auth. Rendering fails if combined with `configReloader.enabled` (the sidecar has no credentials yet).
 
 ### Fixed
 - `templates/redis-statefulset.yaml`: `replicas: {{ .Values.valkey.replicas | default 1 }}` silently coerced an explicit `valkey.replicas: 0` back to `1` (Helm/sprig `default` treats `0` as empty). Now `{{ .Values.valkey.replicas | int }}` — `replicas: 0` is the documented way to disable this chart's own Redis/Valkey pod when pointing `cache.*` at an external Redis-compatible service.
 
 ### Changed
+- Liveness/readiness/startup probes moved from `/healthz`/`/readyz` to `/-/healthy`/`/-/ready`, which stay reachable when HTTP auth is enabled.
 - `values-production.yaml` rewritten after auditing every key against the app's actual config surface and the chart's real template capabilities (not just BACKLOG's wishlist):
   - Removed `postgresql.cluster.*` (rendered by no template — a 3-instance Postgres "cluster" this chart cannot build) in favor of the real `postgresql.replicas`/`postgresql.config.*` keys, with the single-primary-only limitation documented inline.
   - Removed the dead `dragonfly.*` block (no `dragonfly-*.yaml` template exists) in favor of pointing the already-wired `cache.host`/`cache.port`/`cache.auth` at an external DragonflyDB service, plus `valkey.replicas: 0` to stop deploying the chart's own unused Redis.

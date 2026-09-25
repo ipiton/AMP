@@ -141,6 +141,13 @@ helm upgrade "$RELEASE" ./helm/amp \
   --set image.tag=<previous-tag>
 ```
 
+> **HTTP auth and old images.** Images before PROD-AUTH ignore
+> `SERVER_WEB_CONFIG_FILE` / `-web.config.file`: rolling back to one silently
+> opens the API even though the chart still mounts the web config. Check the
+> startup log for `HTTP API authentication is DISABLED` and, if the previous
+> image predates auth, restrict network access until you roll forward. With auth
+> enabled, add `-u <user>:<password>` to the `curl` checks below.
+
 Then verify:
 
 ```bash

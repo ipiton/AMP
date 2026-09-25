@@ -89,7 +89,14 @@
 - Где лежат тесты: `go-app/internal/application/webauth_test.go` (T1–T6, T8), `go-app/internal/config/reloadable_webauth_test.go` (T7 + откат снимает W605, nil-конфиг), `go-app/cmd/server/webauth_wiring_test.go` (флаг > конфиг > env для `SERVER_WEB_CONFIG_FILE`, без пути middleware не строится).
 - Сверх плана: length-prefix ключа кэша, отказ `NewWebAuth` на пустом пути и на отсутствующем файле, «ошибка загрузки не содержит хеш».
 - Отложено осознанно: T9 — ручная проверка на `/testing`. Helm (`webConfig`, `fail` при сочетании с `configReloader`, probes) юнит-тестами не покрыт: в репо нет helm-unittest, проверяется `helm lint` + `helm template` на `/testing`. Постоянство времени ответа (заглушка-хеш для неизвестного пользователя) тестом не измеряется — проверено только, что bcrypt вызывается и для неизвестного пользователя (T4).
-- [ ] `go vet ./...`, `go test ./...` (с учётом `PUBLISHING-WARMUP-TEST-FLAKY`), `go build ./...`, `git diff --check` (AC13).
+- [x] `go vet ./...`, `go test ./...` (с учётом `PUBLISHING-WARMUP-TEST-FLAKY`), `go build ./...`, `git diff --check` (AC13).
+
+## /write-doc (2026-09-25)
+- Проверены против smoke `/testing`: `CONFIGURATION_GUIDE` §4 и `ALERTMANAGER_COMPATIBILITY` (строка `--web.config.file`) — правок не потребовали.
+- Добавлено: `helm/amp/README.md` (раздел HTTP Authentication, таблица `webConfig.*`), `helm/amp/DEPLOYMENT.md` (§4 HTTP Authentication — Secret из `htpasswd`, `curl -u`), `helm/amp/CHANGELOG.md` (`webConfig.*`, смена probes).
+- `docs/ROLLBACK_RUNBOOK.md`: откат на образ до PROD-AUTH молча открывает API (старый бинарь игнорирует `SERVER_WEB_CONFIG_FILE`) — предупреждение и `curl -u`.
+- `docs/ALERTMANAGER_COMPATIBILITY.md`: «unauthenticated endpoint» у редакции `/api/v2/status` уточнено до «unauthenticated unless `--web.config.file` is set».
+- Spec/requirements: допущения не изменились; отклонения реализации уже записаны в срезах выше.
 
 ## Finalization (`/end-task`)
 - [ ] AC1–AC13 сверены с фактом
