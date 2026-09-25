@@ -28,7 +28,7 @@
 
 ## WIP (Max 2)
 
-- [ ] **PROD-AUTH** (старт 2026-09-25) — аутентификация HTTP API (P0 security из BACKLOG «Production Readiness — блокеры»). Ветка `feature/prod-auth`, workspace `tasks/PROD-AUTH/`. Research и Spec готовы; следующий шаг: `/plan` (после согласования Spec).
+- [ ] **PROD-AUTH** (старт 2026-09-25) — аутентификация HTTP API (P0 security из BACKLOG «Production Readiness — блокеры»). Ветка `feature/prod-auth`, workspace `tasks/PROD-AUTH/`. Research, Spec (согласован), Plan готовы; следующий шаг: `/implement` (срез 1 — Go).
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
