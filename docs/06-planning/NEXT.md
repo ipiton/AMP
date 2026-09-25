@@ -28,11 +28,12 @@
 
 ## WIP (Max 2)
 
-- (PARITY-RESOLVE-TIMEOUT-ENDSAT закрыт 2026-09-24, см. DONE.md; WIP свободен)
+- [ ] **PROD-AUTH** (старт 2026-09-25) — аутентификация HTTP API (P0 security из BACKLOG «Production Readiness — блокеры»). Ветка `feature/prod-auth`, workspace `tasks/PROD-AUTH/`. Следующий шаг: `/research`.
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
+- 2026-09-25: в WIP взят PROD-AUTH напрямую из BACKLOG (отдельное решение, как предписано заметкой о прод-блокерах ниже), в обход PHASE-6B-RUNBOOK-ENGINE наверху Queue.
 - 2026-09-24, по ходу PARITY-RESOLVE-TIMEOUT-ENDSAT заведено: `RESOLVE-TIMEOUT-AUTO-RESOLVE` (BACKLOG — авто-резолв и resolved-нотификация по истечении `endsAt`, ~1d+) и `ALERT-STORE-DEDUP-KEY-STARTSAT` (BUGS.md — повторный POST без `startsAt` создаёт копию алерта в memory store; предсуществующий). Группа 0 очереди исчерпана.
 - 2026-09-23, по ходу KARMA-COMPAT заведено: `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md — флейк `TestBackgroundWorker_WarmupPeriod` под полным прогоном) и два гейт-дефекта в BACKLOG: `PARITY-GATE-DOES-NOT-GATE` (`make test-upstream-parity` гоняет сьют без его build-тега ⇒ «no tests to run» и ложное зелёное) и `QUALITY-GATES-DIRTIES-TREE` (`make quality-gates` переписывает 6 чужих неотформатированных файлов).
 - Очередь обновлена 2026-09-23: перенесены KARMA-COMPAT и PARITY-RESOLVE-TIMEOUT-ENDSAT (группа 0), синхронизирован статус группы 2 (RELOADABLE-COMPONENT-INTERFACES и HELM-PRODUCTION-VALUES закрыты 2026-08-20, в очереди висели как открытые).

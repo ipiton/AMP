@@ -10,7 +10,7 @@
 
 ### P0 — Security
 
-- [ ] **PROD-AUTH** — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
+- [ ] **PROD-AUTH** _(в WIP с 2026-09-25, `tasks/PROD-AUTH/`)_ — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
   - Сделать: `web.config`-совместимый auth (basic + bearer, как upstream `--web.config.file` / `exporter-toolkit`), либо документированный обязательный auth-proxy. Минимум — защита мутирующих эндпоинтов, `/-/reload`, investigation, dashboard; `/-/healthy`, `/-/ready`, `/metrics` — настраиваемо.
   - Заодно: удалить мёртвый blank-import `net/http/pprof` (`main.go:9`), чтобы pprof не открылся при рефакторинге на `DefaultServeMux`.
   - Критерий: анонимный `POST /api/v2/silences` → 401 при включённом auth; тесты на middleware; раздел в `CONFIGURATION_GUIDE.md`.
