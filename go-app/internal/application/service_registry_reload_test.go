@@ -33,16 +33,17 @@ func newReloadTestRegistry(t *testing.T) *ServiceRegistry {
 	return registry
 }
 
-func TestRegisterReloadables_RegistersAllFiveInReloadOrder(t *testing.T) {
+func TestRegisterReloadables_RegistersAllInReloadOrder(t *testing.T) {
 	registry := newReloadTestRegistry(t)
 	reloader := appconfig.NewConfigReloader(slog.Default())
 
 	registry.registerReloadables(reloader)
 
 	// Order is ReloadPriority order, not registration order: logger first so
-	// later reload lines honour the new level, storage last.
+	// later reload lines honour the new level, storage last. web_auth shares
+	// metrics' priority and registers after it (PROD-AUTH).
 	assert.Equal(t,
-		[]string{"logger", "metrics", "llm", "redis", "database"},
+		[]string{"logger", "metrics", "web_auth", "llm", "redis", "database"},
 		reloader.GetRegisteredComponents(),
 	)
 }

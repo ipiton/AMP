@@ -52,6 +52,18 @@ func (r *ServiceRegistry) SetLogHandler(handler *pkglogger.SwappableHandler) err
 	return nil
 }
 
+// SetWebConfigFlag records the -web.config.file flag value so the web-auth
+// Reloadable knows the path is pinned: with the flag set, a config-side
+// server.web_config_file edit is not a change the process would ever make,
+// so it must not raise W605. Must be called before Initialize.
+func (r *ServiceRegistry) SetWebConfigFlag(path string) error {
+	if r.initialized {
+		return fmt.Errorf("web config flag must be set before Initialize")
+	}
+	r.webConfigFlag = path
+	return nil
+}
+
 // sharedLLMClient returns the process's single *llm.HTTPLLMClient, building it
 // from r.config.LLM on first use.
 //
@@ -201,7 +213,7 @@ func (r *ServiceRegistry) ReloadStatus() appconfig.ReloadStatusSnapshot {
 	return snapshot
 }
 
-// registerReloadables wires the five infrastructure Reloadable components into
+// registerReloadables wires the infrastructure Reloadable components into
 // the reloader used by the ReloadCoordinator.
 func (r *ServiceRegistry) registerReloadables(reloader *appconfig.DefaultConfigReloader) {
 	if reloader == nil {
@@ -224,6 +236,7 @@ func (r *ServiceRegistry) registerReloadables(reloader *appconfig.DefaultConfigR
 	reloader.Register(appconfig.NewLLMReloadable(r.llmClient, bootCfg, r.restartWarnings, r.logger))
 	reloader.Register(appconfig.NewRedisReloadable(redisCache, bootCfg, r.restartWarnings, r.logger))
 	reloader.Register(appconfig.NewDatabaseReloadable(r.database, bootCfg, r.restartWarnings, r.logger))
+	reloader.Register(appconfig.NewWebAuthReloadable(bootCfg, r.webConfigFlag, r.restartWarnings, r.logger))
 
 	// Give the coordinator the same collector, so an incomplete rollback's
 	// W610 split-state warning is queryable and not just a log line.

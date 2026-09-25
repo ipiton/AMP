@@ -34,6 +34,9 @@ spec:
         {{- end }}
     spec:
       {{- if .Values.configReloader.enabled }}
+      {{- if .Values.webConfig.existingSecret }}
+      {{- fail "configReloader cannot be combined with webConfig yet: the sidecar calls /-/reload and /health/reload without credentials and would get 401 (see BACKLOG CONFIG-RELOADER-AUTH). Disable configReloader and reload with an authenticated POST /-/reload." }}
+      {{- end }}
       {{- if not .Values.configFile.enabled }}
       {{- fail "configReloader.enabled=true requires configFile.enabled=true: the sidecar watches a config FILE, and without one it would poll a path that does not exist." }}
       {{- end }}
@@ -154,6 +157,11 @@ spec:
             - name: AMP_CONFIG_FILE
               value: {{ printf "%s/%s" .Values.configFile.mountPath .Values.configFile.fileName | quote }}
             {{- end }}
+            {{- if .Values.webConfig.existingSecret }}
+            # PROD-AUTH: enables basic auth from the mounted web config file.
+            - name: SERVER_WEB_CONFIG_FILE
+              value: {{ printf "%s/%s" .Values.webConfig.mountPath .Values.webConfig.secretKey | quote }}
+            {{- end }}
 
           envFrom:
             - configMapRef:
@@ -162,7 +170,7 @@ spec:
 
           livenessProbe:
             httpGet:
-              path: {{ .Values.probes.liveness.path | default "/healthz" }}
+              path: {{ .Values.probes.liveness.path | default "/-/healthy" }}
               port: http
               scheme: HTTP
             initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds | default 30 }}
@@ -173,7 +181,7 @@ spec:
 
           readinessProbe:
             httpGet:
-              path: {{ .Values.probes.readiness.path | default "/readyz" }}
+              path: {{ .Values.probes.readiness.path | default "/-/ready" }}
               port: http
               scheme: HTTP
             initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds | default 10 }}
@@ -184,7 +192,7 @@ spec:
 
           startupProbe:
             httpGet:
-              path: {{ .Values.probes.startup.path | default "/healthz" }}
+              path: {{ .Values.probes.startup.path | default "/-/healthy" }}
               port: http
               scheme: HTTP
             initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds | default 10 }}
@@ -199,7 +207,7 @@ spec:
           # Graceful shutdown: rely on SIGTERM handling in application
           # No preStop hook needed - our app handles SIGTERM properly
 
-          {{- if or (eq .Values.profile "lite") .Values.configFile.enabled }}
+          {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret }}
           volumeMounts:
             {{- if eq .Values.profile "lite" }}
             - name: data
@@ -208,6 +216,11 @@ spec:
             {{- if .Values.configFile.enabled }}
             - name: config-file
               mountPath: {{ .Values.configFile.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.webConfig.existingSecret }}
+            - name: web-config
+              mountPath: {{ .Values.webConfig.mountPath }}
               readOnly: true
             {{- end }}
           {{- end }}
@@ -264,7 +277,7 @@ spec:
               readOnly: true
 {{- end }}
 
-      {{- if or (eq .Values.profile "lite") .Values.configFile.enabled }}
+      {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret }}
       volumes:
         {{- if eq .Values.profile "lite" }}
         - name: data
@@ -275,6 +288,14 @@ spec:
         - name: config-file
           configMap:
             name: {{ include "amp.fullname" . }}-configfile
+        {{- end }}
+        {{- if .Values.webConfig.existingSecret }}
+        - name: web-config
+          secret:
+            secretName: {{ .Values.webConfig.existingSecret }}
+            items:
+              - key: {{ .Values.webConfig.secretKey }}
+                path: {{ .Values.webConfig.secretKey }}
         {{- end }}
       {{- end }}
 

@@ -113,23 +113,50 @@ ingress:
 # ===============================
 probes:
   liveness:
-    path: /healthz  # Kubernetes liveness probe (12-Factor compliance)
+    # /-/healthy and /-/ready run the same liveness/readiness checks as
+    # /healthz and /readyz but answer plain text, so they stay reachable
+    # without credentials when webConfig enables authentication (PROD-AUTH).
+    path: /-/healthy
     initialDelaySeconds: 30
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
   readiness:
-    path: /readyz  # Kubernetes readiness probe (12-Factor compliance)
+    path: /-/ready
     initialDelaySeconds: 5
     periodSeconds: 5
     timeoutSeconds: 3
     failureThreshold: 3
   startup:
-    path: /healthz  # Startup probe
+    path: /-/healthy
     initialDelaySeconds: 10
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 30
+
+# ===============================
+# HTTP authentication (PROD-AUTH)
+# ===============================
+# Basic auth for the whole HTTP API, from an upstream-compatible web config
+# file (Alertmanager's --web.config.file format). Empty existingSecret = auth
+# disabled (AMP logs a WARN at startup).
+#
+# The chart does not create the Secret: the password must be bcrypt-hashed by
+# the operator, e.g.
+#   htpasswd -nBC 10 prometheus | cut -d: -f2
+#   kubectl create secret generic amp-web-config --from-file=web-config.yml
+# with web-config.yml:
+#   basic_auth_users:
+#     prometheus: $2y$10$...
+#
+# Probes use /-/healthy and /-/ready, which are unauthenticated by default
+# (server.auth.unauthenticated_paths). /metrics is protected: give the
+# ServiceMonitor basicAuth, or add /metrics to unauthenticated_paths.
+# Not yet compatible with configReloader (the sidecar cannot authenticate).
+webConfig:
+  existingSecret: ""
+  secretKey: web-config.yml
+  mountPath: /etc/amp/web
 
 # ===============================
 # Horizontal Pod Autoscaler

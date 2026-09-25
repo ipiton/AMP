@@ -83,7 +83,22 @@ helm upgrade --install "$RELEASE" ./helm/amp \
 
 The chart also exposes `llm.secret.*` and `llm.externalSecrets.*` values for secret-backed setups.
 
-## 4. Routing Alertmanager Traffic
+## 4. HTTP Authentication
+
+Without a web config the API is open to anyone who can reach the service. To enable basic auth, create a Secret with an upstream-format web config and set `webConfig.existingSecret`:
+
+```bash
+printf 'basic_auth_users:\n  prometheus: %s\n' "$(htpasswd -nbBC 10 prometheus "$AMP_PASSWORD" | cut -d: -f2)" > web-config.yml
+kubectl create secret generic amp-web-config -n "$NAMESPACE" --from-file=web-config.yml
+rm web-config.yml
+
+helm upgrade --install "$RELEASE" ./helm/amp -n "$NAMESPACE" --reuse-values \
+  --set webConfig.existingSecret=amp-web-config
+```
+
+With auth enabled, add `-u prometheus:"$AMP_PASSWORD"` to the `curl` checks in this guide (only `/-/healthy` and `/-/ready` answer without credentials) and configure `basic_auth` in Prometheus. Do not combine with `configReloader.enabled`: the chart refuses to render it.
+
+## 5. Routing Alertmanager Traffic
 
 The chart exposes the active runtime over the service HTTP port (`service.port`, default `8080`).
 Only redirect Alertmanager traffic after validating that the covered slice matches your operational needs.
@@ -98,7 +113,7 @@ alerting:
 
 If your Helm release name differs from `amp`, use the rendered service name instead.
 
-## 5. Post-Install Checks
+## 6. Post-Install Checks
 
 Helpful checks after install:
 
@@ -111,7 +126,7 @@ curl http://127.0.0.1:8080/api/v2/receivers
 curl http://127.0.0.1:8080/metrics
 ```
 
-## 6. Notes
+## 7. Notes
 
 - Keep `helm/amp/README.md` as the chart-level source of truth for compatibility claims and the currently mounted runtime surface.
 - Wider parity such as config/history APIs, broader dashboard parity, and other historical compatibility layers remains explicit follow-up work.

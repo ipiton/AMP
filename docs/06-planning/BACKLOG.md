@@ -10,17 +10,17 @@
 
 ### P0 — Security
 
-- [ ] **PROD-AUTH** — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
+- [x] **PROD-AUTH** _(закрыт 2026-09-25, `tasks/archive/PROD-AUTH/`, ADR-011; сделан basic auth по upstream `--web.config.file`, bearer → `PROD-AUTH-BEARER`)_ — HTTP API полностью без аутентификации. `go-app/cmd/server/main.go:121-128`: `http.Server.Handler` — голый mux + route prefix, без middleware. Анонимно доступны: `POST /api/v1|v2/alerts`, `POST/DELETE /api/v2/silences` (можно заглушить всё), `POST /-/reload`, `/api/v1/alerts/{fp}/investigation`, `/dashboard/*`. Auth-middleware в `internal/application/application.go:186` (`setupMiddleware`) — мёртвый код, `main` его не вызывает.
   - Сделать: `web.config`-совместимый auth (basic + bearer, как upstream `--web.config.file` / `exporter-toolkit`), либо документированный обязательный auth-proxy. Минимум — защита мутирующих эндпоинтов, `/-/reload`, investigation, dashboard; `/-/healthy`, `/-/ready`, `/metrics` — настраиваемо.
   - Заодно: удалить мёртвый blank-import `net/http/pprof` (`main.go:9`), чтобы pprof не открылся при рефакторинге на `DefaultServeMux`.
   - Критерий: анонимный `POST /api/v2/silences` → 401 при включённом auth; тесты на middleware; раздел в `CONFIGURATION_GUIDE.md`.
   - Оценка: ~2d. Требует `/spec` (security).
-- [ ] **PROD-INGRESS-HARDENING** — `helm/amp/values-production.yaml:337` включает Ingress на `/` без auth-аннотаций и allowlist. Зависит от PROD-AUTH: либо прод-профиль по умолчанию требует auth, либо Ingress выключен/закрыт (oauth2-proxy / basic-auth аннотации / `whitelist-source-range`). Плюс NetworkPolicy для самого AMP (сейчас есть только для postgres/redis). Оценка: ~0.5d.
+- [ ] **PROD-INGRESS-HARDENING** _(2026-09-25: auth в процессе появился — PROD-AUTH, `webConfig.existingSecret` в чарте; осталось решить, требовать ли его в `values-production.yaml`)_ — `helm/amp/values-production.yaml:337` включает Ingress на `/` без auth-аннотаций и allowlist. Зависит от PROD-AUTH: либо прод-профиль по умолчанию требует auth, либо Ingress выключен/закрыт (oauth2-proxy / basic-auth аннотации / `whitelist-source-range`). Плюс NetworkPolicy для самого AMP (сейчас есть только для postgres/redis). Оценка: ~0.5d.
 - [ ] **PROD-RBAC-SCOPE** — `helm/amp/templates/rbac.yaml:5-51`: `ClusterRole` `get/list/watch secrets,configmaps` + `ClusterRoleBinding`, создаётся при `serviceAccount.create=true` даже при `targetDiscovery.enabled: false`. Плюс namespaced Role с `create/update/patch secrets` (`rbac.yaml:63-74`). Компрометация пода = все секреты кластера.
   - Сделать: namespaced read-only Role, только при `targetDiscovery.enabled`; cluster-scope — отдельный явный opt-in; убрать write-права, если не используются.
   - Критерий: `helm template` с дефолтами не рендерит ClusterRole; тест в release-gate.
   - Оценка: ~0.5d.
-- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. Оценка: ~0.25d.
+- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. _(2026-09-25: PROD-AUTH закрыт — описать basic auth через `--web.config.file` / `webConfig.existingSecret`, ссылка на `CONFIGURATION_GUIDE.md` §4.)_ Оценка: ~0.25d.
 
 ### P0 — Delivery
 
@@ -59,6 +59,13 @@
 - [ ] **PROD-LLM-ALERT-PATH-ISOLATION** — при `llm.enabled=true`: `EnrichmentModeManager.GetMode` захардкожен на `enriched` (`internal/core/services/enrichment_types.go`) ⇒ каждый алерт синхронно классифицируется LLM внутри `POST /api/v2/alerts` (таймаут 30s × `max_retries=3`, может превысить таймаут отправки Prometheus); `SimpleFilterEngine` дропает алерт при `severity=noise` или `confidence < 0.3` (`internal/core/services/filter_engine.go:90-97`) — решение LLM глушит алерт без выключателя. По умолчанию LLM выключен, поэтому P1, а не P0.
   - Сделать: классификация асинхронно/вне ingest-пути (или жёсткий бюджет времени на запрос); LLM-дроп — только за явным флагом (default off), дропнутые алерты — метрика + лог; настоящий переключатель enrichment mode.
   - Оценка: ~1.5d.
+
+### Находки PROD-AUTH research (2026-09-25)
+
+- [ ] **CONFIG-RELOADER-AUTH** — `cmd/config-reloader` вызывает `POST /-/reload` и `GET /health/reload` без кредов ⇒ с включённым auth (PROD-AUTH) получает 401, причём `/health/reload` нужен ему даже при `method: signal`. Сейчас чарт отказывается рендерить `configReloader` вместе с `webConfig`. Сделать: флаги `--basic-auth-username` + `--basic-auth-password-file` (пароль в открытом виде — отдельный Secret, bcrypt-хеш из web-config не подходит), проводка в чарте, снять `fail`. Loopback-исключение запрещено: `kubectl port-forward` тоже приходит с `127.0.0.1`. Оценка ~0.5d.
+- [ ] **PROD-AUTH-BEARER** — bearer-токены для HTTP API в дополнение к basic. Отложено на `/spec` PROD-AUTH: upstream их не принимает, клиенты экосистемы работают на basic. Брать, если появится машинный клиент без удобного basic. Оценка ~0.5d.
+- [ ] **DEAD-APPLICATION-MIDDLEWARE** — `internal/application/application.go` (`Application`, `setupMiddleware`, `startServer`) и `middleware.go` (`MiddlewareStack`) нигде не конструируются: `main.go` собирает сервер сам. Следствие: `server.cors.*` — мёртвый конфиг (CORS-middleware реализован и покрыт тестом, но в прод-пути его нет), panic-recovery тоже. Сделать: удалить мёртвый граф, CORS подключить в `main.go` (с учётом того, что `OPTIONS` preflight не несёт кредов и должен проходить до auth из PROD-AUTH). Оценка ~0.5d.
+- [ ] **DEAD-WEBHOOK-SECURITY-CONFIG** — `webhook.authentication.*`, `webhook.signature.*`, `webhook.rate_limiting.*` (`internal/config/config.go`, дефолты рядом с `:941`) парсятся, валидируются и редактируются, но в HTTP-пути не применяются; `rate_limiting.enabled` по умолчанию `true` «на бумаге». PROD-AUTH ставит только WARN на `webhook.authentication.enabled`. Сделать: удалить ключи (или реализовать rate limiting осознанно), отразить в CHANGELOG. Оценка ~0.5d.
 
 ## UI и экосистема — идеи из karma (разбор 2026-09-23)
 > `prymitive/karma` — read-only дашборд для Alertmanager (Go + React, Apache-2.0, активный). Не конкурент: закрывает ровно то, где у AMP дыра — UI.

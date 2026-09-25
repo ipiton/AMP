@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Not yet upstream-equal**: once `endsAt` passes, AMP does not resolve the alert or send a resolved notification (`RESOLVE-TIMEOUT-AUTO-RESOLVE`). Re-sends that also omit `startsAt` create a duplicate instead of extending the window (preexisting, `ALERT-STORE-DEDUP-KEY-STARTSAT`). See Known Gap #12 in `docs/ALERTMANAGER_COMPATIBILITY.md`.
 
 ### Added
+- **PROD-AUTH** (2026-09-25): HTTP basic authentication for the whole API, from an upstream-compatible web config file (`go-app/internal/application/webauth.go`).
+  - **How**: `-web.config.file` flag (upstream's name), `server.web_config_file` or `SERVER_WEB_CONFIG_FILE`, pointing at a file with `basic_auth_users` (bcrypt hashes) — the same file Alertmanager takes. Anonymous requests get `401` with `WWW-Authenticate: Basic`.
+  - **Default unchanged**: without the file the API stays open, as before and as upstream; AMP now logs a `WARN` at startup saying so. No migration needed.
+  - **Probes**: `server.auth.unauthenticated_paths` (exact paths, default `/-/healthy`, `/-/ready`) are served without credentials. `/healthz`, `/readyz` and `/metrics` are protected.
+  - **Password rotation without restart**: file edits apply within a second; an invalid edit keeps the previous users (`ERROR` + `amp_http_auth_config_reload_failures_total`) instead of opening the API or failing every request.
+  - **Fails closed at startup**: a missing/invalid file, empty `basic_auth_users`, a non-bcrypt password, or an upstream key AMP does not implement (`tls_server_config`, `http_server_config`, `rate_limit`) stops the process. TLS is not implemented — terminate it at the ingress or mesh.
+  - **Metrics**: `amp_http_auth_failures_total{reason="missing|invalid"}`, `amp_http_auth_config_reload_failures_total`. Changing the file path or the exempt list via `/-/reload` raises restart-required warning `W605`.
+  - **Helm**: `webConfig.existingSecret` mounts the file and enables auth. Refuses to render together with `configReloader` (the sidecar cannot authenticate yet).
+  - **Not included**: bearer tokens, per-user permissions. `webhook.authentication.*` was never enforced; AMP now warns when it is enabled. See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication" and ADR-011.
 - **KARMA-COMPAT** (2026-09-23): build-info metrics on `/metrics`, making AMP's Alertmanager contract version machine-readable for ecosystem tooling (`go-app/internal/buildinfo/metrics.go`).
   - **`alertmanager_build_info{version,revision,branch,goversion}`** (new): `version` is deliberately **NOT** AMP's own build version — it is the upstream Alertmanager contract version AMP implements (`0.27.0`), the machine-readable form of the `Alertmanager Version: v0.27+` header in `docs/ALERTMANAGER_COMPATIBILITY.md`. The other labels are AMP's real build data.
   - **`amp_build_info{version,revision,branch,goversion,build_user,build_date}`** (new): AMP's own build metadata, unmodified.
@@ -214,6 +223,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler`, and `ReloadHandler` implemented in `internal/application/handlers`.
 
 ### Changed
+- **PROD-AUTH** (2026-09-25), Helm: default probe paths moved from `/healthz`/`/readyz` to `/-/healthy`/`/-/ready`. Same liveness/readiness checks, plain-text answers, reachable without credentials when auth is on. Explicitly set `probes.*.path` values are kept.
+- **PROD-AUTH** (2026-09-25): removed the unused `net/http/pprof` import from the server binary. pprof was never reachable (AMP does not serve `DefaultServeMux`); the import only risked exposing it anonymously in a future refactor.
 - **PHASE-5A-TAIL** (2026-04-24): investigation pipeline config surface finalized.
   - `InvestigationConfig` struct in `internal/config/config.go` (`enabled`, `worker_count`, `queue_size`, `max_retries`, `retry_interval`, `llm_timeout`, `only_firing`) + viper defaults.
   - `OnlyFiring` added to `infrastructure/investigation.QueueConfig`; `Submit` drops resolved alerts when set.

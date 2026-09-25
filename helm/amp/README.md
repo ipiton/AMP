@@ -76,6 +76,23 @@ helm install amp ./helm/amp \
 | `persistence.enabled` | Enable PVC (Lite) | `true` |
 | `persistence.size` | PVC size | `5Gi` |
 
+### HTTP Authentication
+
+The API is unauthenticated unless a web config is mounted (AMP logs a `WARN` at startup). Put an upstream-format `web-config.yml` (`basic_auth_users` with bcrypt hashes) into a Secret and point the chart at it:
+
+```bash
+kubectl create secret generic amp-web-config --from-file=web-config.yml
+helm upgrade --install amp ./helm/amp --set webConfig.existingSecret=amp-web-config
+```
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `webConfig.existingSecret` | Secret with the web config; enables basic auth | `""` |
+| `webConfig.secretKey` | Key inside the Secret | `web-config.yml` |
+| `webConfig.mountPath` | Directory the Secret is mounted at | `/etc/amp/web` |
+
+Liveness/readiness probes use `/-/healthy` and `/-/ready`, which stay reachable without credentials. Password edits in the Secret apply without a pod restart once kubelet syncs the volume. `configReloader.enabled` cannot be combined with `webConfig` yet (rendering fails). See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication".
+
 ## Alertmanager Compatibility
 
 AMP chart should currently be treated as a **controlled replacement** deployment path, not as a verified full Alertmanager drop-in replacement:

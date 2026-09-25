@@ -41,6 +41,10 @@ const (
 	// WarnLLMRestartRequired: llm.* changed in a way that needs the
 	// investigation pipeline rebuilt (enable/disable, agent mode).
 	WarnLLMRestartRequired = "W604"
+	// WarnWebAuthRestartRequired: server.web_config_file or
+	// server.auth.unauthenticated_paths changed. Both are read once when the
+	// HTTP server is built; the file's CONTENT (users) hot-reloads on its own.
+	WarnWebAuthRestartRequired = "W605"
 
 	// WarnReloadRollbackIncomplete: a reload was rejected AND its rollback
 	// could not be completed, so some components are still running the

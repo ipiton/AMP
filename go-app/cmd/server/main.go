@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ipiton/AMP/internal/application"
 	"github.com/ipiton/AMP/internal/config"
@@ -31,6 +32,10 @@ func main() {
 	// config.
 	routePrefixFlag := flag.String("web.route-prefix", "",
 		"Prefix for the internal routes of web endpoints. Overrides server.route_prefix in config when set.")
+	// -web.config.file mirrors upstream's flag (PROD-AUTH): a web config file
+	// with basic_auth_users enables HTTP basic authentication.
+	webConfigFlag := flag.String("web.config.file", "",
+		"Path to a web config file (basic_auth_users) that enables HTTP basic authentication. Overrides server.web_config_file in config when set.")
 	flag.Parse()
 
 	// Bootstrap logging: stdout/json/info, because config has not been read
@@ -68,12 +73,27 @@ func main() {
 		cfg.Server.RoutePrefix = *routePrefixFlag
 	}
 
+	cfg.Server.WebConfigFile = resolveWebConfigFile(*webConfigFlag, cfg.Server.WebConfigFile)
+	if cfg.Server.Auth.UnauthenticatedPaths == nil {
+		// The minimal fallback config above never saw viper's defaults.
+		cfg.Server.Auth.UnauthenticatedPaths = config.DefaultUnauthenticatedPaths()
+	}
+
 	// Install the operator's log.* settings now that config exists. Before
 	// INF-A slice 1 the logger was hardcoded to JSON/info and cfg.Log was
 	// never read at all, so `log.level: debug` did nothing even across a
 	// restart.
 	logger, logHandler = installLogging(logger, logHandler, cfg)
 	slog.SetDefault(logger)
+
+	// Load the web config before anything slow: a requested but unusable
+	// authentication setup must stop the process, never degrade to open.
+	webAuth, err := newWebAuth(cfg, logger, nil)
+	if err != nil {
+		slog.Error("Failed to load web config; refusing to start without the requested authentication", "error", err)
+		os.Exit(1)
+	}
+	logWebAuthState(logger, cfg, webAuth)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -90,6 +110,11 @@ func main() {
 	// every log.level change report "restart required".
 	if err := registry.SetLogHandler(logHandler); err != nil {
 		slog.Error("Failed to wire the swappable log handler", "error", err)
+		os.Exit(1)
+	}
+
+	if err := registry.SetWebConfigFlag(*webConfigFlag); err != nil {
+		slog.Error("Failed to wire the web config flag", "error", err)
 		os.Exit(1)
 	}
 
@@ -111,7 +136,13 @@ func main() {
 
 	// PARITY-B6: mount everything under server.route_prefix / -web.route-prefix
 	// when configured. Empty prefix (the default) leaves mux unwrapped.
-	rootHandler := application.WithRoutePrefix(mux, cfg.Server.RoutePrefix)
+	// PROD-AUTH: auth sits INSIDE the prefix, so unauthenticated_paths are
+	// written without it and do not depend on route_prefix.
+	var apiHandler http.Handler = mux
+	if webAuth != nil {
+		apiHandler = webAuth.Wrap(mux)
+	}
+	rootHandler := application.WithRoutePrefix(apiHandler, cfg.Server.RoutePrefix)
 
 	// Start server
 	port := cfg.Server.Port
@@ -174,6 +205,55 @@ func main() {
 	}
 
 	slog.Info("Server stopped gracefully")
+}
+
+// webConfigFileEnv is read directly, not only through viper: when the config
+// file is missing, main falls back to a minimal config that never saw the
+// environment, and losing this variable there would silently turn
+// authentication off.
+const webConfigFileEnv = "SERVER_WEB_CONFIG_FILE"
+
+// resolveWebConfigFile picks the web config path: the -web.config.file flag,
+// then server.web_config_file, then the environment variable.
+func resolveWebConfigFile(flagValue, configValue string) string {
+	if path := strings.TrimSpace(flagValue); path != "" {
+		return path
+	}
+	if path := strings.TrimSpace(configValue); path != "" {
+		return path
+	}
+	return strings.TrimSpace(os.Getenv(webConfigFileEnv))
+}
+
+// newWebAuth builds the basic-auth middleware, or returns nil when no web
+// config is set. reg nil means the default Prometheus registry.
+func newWebAuth(cfg *config.Config, logger *slog.Logger, reg prometheus.Registerer) (*application.WebAuth, error) {
+	if cfg.Server.WebConfigFile == "" {
+		return nil, nil
+	}
+	return application.NewWebAuth(application.WebAuthOptions{
+		Path:                 cfg.Server.WebConfigFile,
+		UnauthenticatedPaths: cfg.Server.Auth.UnauthenticatedPaths,
+		Logger:               logger,
+		Registerer:           reg,
+	})
+}
+
+// logWebAuthState says loudly when the API is open, and flags the legacy
+// webhook.authentication keys, which look like protection but are not read.
+func logWebAuthState(logger *slog.Logger, cfg *config.Config, webAuth *application.WebAuth) {
+	if webAuth == nil {
+		logger.Warn("HTTP API authentication is DISABLED: anyone with network access can create silences, post alerts and trigger reloads. Set -web.config.file or server.web_config_file.")
+	} else {
+		logger.Info("HTTP API basic authentication enabled",
+			"web_config_file", cfg.Server.WebConfigFile,
+			"users", webAuth.UserCount(),
+			"unauthenticated_paths", cfg.Server.Auth.UnauthenticatedPaths,
+		)
+	}
+	if cfg.Webhook.Authentication.Enabled {
+		logger.Warn("webhook.authentication.* is not enforced by AMP; use -web.config.file or server.web_config_file for HTTP authentication")
+	}
 }
 
 // configReloader is the slice of ServiceRegistry that watchReloadSignal needs.
