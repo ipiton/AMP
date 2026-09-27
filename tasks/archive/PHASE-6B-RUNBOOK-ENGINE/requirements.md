@@ -16,12 +16,12 @@ interface), `go-app/internal/infrastructure/investigation/` (queue, tools).
 точное размещение пакета фиксируется на `/spec`.
 
 ## Goals
-- [ ] Формат runbook: markdown + YAML frontmatter (`name`, `match` — map label→value, `tags`), тело — произвольный markdown (Symptoms / Common Causes / Investigation Steps / Remediation).
-- [ ] Загрузка runbooks из директории файловой системы (configurable path; K8s ConfigMap монтируется как директория — отдельной интеграции не нужно).
-- [ ] Matching по labels алерта (alertname, severity, namespace и т.п.): все ключи `match` должны совпасть; детерминированный порядок и лимит числа/размера подмешиваемых runbooks.
-- [ ] Инъекция matched runbooks в LLM context investigation-агента (system prompt / контекст первого запроса).
-- [ ] Конфиг `investigation.runbooks.*` (enabled, path, лимиты) + пример в `config.yaml.example`; выключено/пусто — поведение агента не меняется.
-- [ ] Невалидные runbook-файлы не роняют сервис: пропускаются с логом/метрикой.
+- [x] Формат runbook: markdown + YAML frontmatter (`name`, `match` — map label→value, `tags`), тело — произвольный markdown (Symptoms / Common Causes / Investigation Steps / Remediation).
+- [x] Загрузка runbooks из директории файловой системы (configurable path; K8s ConfigMap монтируется как директория — отдельной интеграции не нужно).
+- [x] Matching по labels алерта (alertname, severity, namespace и т.п.): все ключи `match` должны совпасть; детерминированный порядок и лимит числа/размера подмешиваемых runbooks.
+- [x] Инъекция matched runbooks в LLM context investigation-агента (system prompt / контекст первого запроса).
+- [x] Конфиг `investigation.runbooks.*` (enabled, path, лимиты) + пример в `config.yaml.example`; выключено/пусто — поведение агента не меняется.
+- [x] Невалидные runbook-файлы не роняют сервис: пропускаются с логом/метрикой.
 
 ## Non-Goals (кандидаты в BACKLOG)
 - Regex/glob-matching по labels (решить на `/spec`, по умолчанию — только equality).
@@ -37,13 +37,16 @@ interface), `go-app/internal/infrastructure/investigation/` (queue, tools).
 - Срез ~2d; если на `/spec` выйдет больше — нарезать (engine+matching отдельно от injection).
 
 ## Success Criteria (Definition of Done)
-- [ ] Unit-тесты: парсинг frontmatter, matching (совпадение/несовпадение/частичное), лимиты, битые файлы.
-- [ ] Тест agent loop: matched runbook попадает в контекст LLM; без runbooks — поведение прежнее.
-- [ ] `go vet`, `go test`, `go build` зелёные для затронутых пакетов.
-- [ ] Документация: `config.yaml.example`, README пакета investigation, CHANGELOG `[Unreleased]`.
-- [ ] Planning обновлён (NEXT/DONE/BACKLOG) на `/end-task`.
+- [x] Unit-тесты: парсинг frontmatter, matching (совпадение/несовпадение/частичное), лимиты, битые файлы.
+- [x] Тест agent loop: matched runbook попадает в контекст LLM; без runbooks — поведение прежнее.
+- [x] `go vet`, `go test`, `go build` зелёные для затронутых пакетов.
+- [x] Документация: `config.yaml.example`, README пакета investigation, CHANGELOG `[Unreleased]`.
+- [x] Planning обновлён (NEXT/DONE/BACKLOG) на `/end-task`.
 
 ## Open Questions (для /research)
 - Куда именно инжектить: system prompt в `infrastructure/llm` или отдельное сообщение в history agent loop?
 - Нужен ли runbook как tool (`get_runbook`) вместо/в дополнение к pre-injection?
 - Как сочетать с аннотацией `runbook_url` алерта (ссылка на внешний runbook)?
+
+## Final Status (2026-09-27)
+Все цели и критерии выполнены (см. `tasks.md` → Final Status). Отклонение от требований: для битых файлов — лог без метрики (согласовано на `/spec`, follow-up `RUNBOOKS-METRICS`). Open Questions закрыты в `research.md`/`Spec.md` (D1–D9).

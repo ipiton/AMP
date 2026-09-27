@@ -12,7 +12,7 @@
 > Цель: AI-powered alert investigation — главный USP AMP. Phase 5A/5B закрыты, осталось наполнить агента реальными tools.
 > Reference: SherlockOps, HolmesGPT, Keep.
 
-- (PHASE-6B-RUNBOOK-ENGINE → WIP 2026-09-27)
+- (PHASE-6B-RUNBOOK-ENGINE закрыт 2026-09-27, см. DONE.md)
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d
 
 ### 2. Operations (из AMP-OSS)
@@ -28,17 +28,18 @@
 
 ## WIP (Max 2)
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** (старт 2026-09-27) — Markdown knowledge base (YAML frontmatter) с auto-matching по alert labels и инъекцией matched runbooks в контекст investigation-агента. Ветка `claude/start-task-pyym8f`, workspace `tasks/PHASE-6B-RUNBOOK-ENGINE/`. Реализация и тесты готовы, `/testing` зелёный (кроме предсуществующих Docker-тестов), docs обновлены, следующий шаг: `/end-task`. ~2d
+- (PHASE-6B-RUNBOOK-ENGINE закрыт 2026-09-27, см. DONE.md; WIP свободен)
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
+- 2026-09-27, по ходу PHASE-6B-RUNBOOK-ENGINE заведено: 7 follow-ups в BACKLOG («PHASE-6B follow-ups»: search tool, 5A-путь, hot reload, regex, Helm `extraVolumes`, запись в БД, метрики) и 2 предсуществующих бага в BUGS.md — `INVESTIGATION-ALERT-TIME-NOT-SET`, `AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT`. Следующий по очереди — PHASE-5C-PROVIDER-FALLBACK.
 - 2026-09-24, по ходу PARITY-RESOLVE-TIMEOUT-ENDSAT заведено: `RESOLVE-TIMEOUT-AUTO-RESOLVE` (BACKLOG — авто-резолв и resolved-нотификация по истечении `endsAt`, ~1d+) и `ALERT-STORE-DEDUP-KEY-STARTSAT` (BUGS.md — повторный POST без `startsAt` создаёт копию алерта в memory store; предсуществующий). Группа 0 очереди исчерпана.
 - 2026-09-23, по ходу KARMA-COMPAT заведено: `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md — флейк `TestBackgroundWorker_WarmupPeriod` под полным прогоном) и два гейт-дефекта в BACKLOG: `PARITY-GATE-DOES-NOT-GATE` (`make test-upstream-parity` гоняет сьют без его build-тега ⇒ «no tests to run» и ложное зелёное) и `QUALITY-GATES-DIRTIES-TREE` (`make quality-gates` переписывает 6 чужих неотформатированных файлов).
 - Очередь обновлена 2026-09-23: перенесены KARMA-COMPAT и PARITY-RESOLVE-TIMEOUT-ENDSAT (группа 0), синхронизирован статус группы 2 (RELOADABLE-COMPONENT-INTERFACES и HELM-PRODUCTION-VALUES закрыты 2026-08-20, в очереди висели как открытые).
 - 🔴 **Блокеры прод-релиза живут в BACKLOG**, секция «Production Readiness — блокеры (аудит 2026-09-21)»: P0 по security (нет аутентификации на API), delivery (нет CI и опубликованных образов) и reliability (порядок graceful shutdown). Они приоритетнее всего, что ниже в этой очереди; в Queue не перенесены сознательно — при WIP max 2 берём их отдельным решением.
 - Предыдущее обновление 2026-05-08 после закрытия PHASE-6A (built-in tools для investigation-агента). Parity Phase A и Intelligence Phase 5A/5B/6A закрыты.
-- **Приоритет 1**: PHASE-6B-RUNBOOK-ENGINE — markdown KB с auto-matching по alert labels, дополняет 6A tools и завершает Investigation Toolset.
+- ~~**Приоритет 1**: PHASE-6B-RUNBOOK-ENGINE~~ — закрыт 2026-09-27.
 - **Приоритет 2**: PHASE-5C-PROVIDER-FALLBACK — primary→fallback chain для LLM, повышает устойчивость 5B/6A.
 - **Приоритет 3**: Operations (reloadable + sidecar) — закрывает hot reload story.
 - **Приоритет 4**: Parity Phase B — по запросу, не критично.

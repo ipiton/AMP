@@ -84,14 +84,28 @@
 - `CHANGELOG.md [Unreleased] → Added` — PHASE-6B. `docs/RELEASE_NOTES_*-draft.md` не трогали: по WORKFLOW release notes собираются из `[Unreleased]` при релизе.
 
 ## Finalization (`/end-task`)
-- [ ] F1 BACKLOG: follow-ups из Spec §3 — `search_runbooks` tool, runbooks в 5A, hot reload, regex matching, Helm `extraVolumes` (связать с `HELM-CHART-GAPS`), запись в БД/API, метрики runbooks.
-- [ ] F2 BUGS.md: `INVESTIGATION-ALERT-TIME-NOT-SET` — `WithAlertTime` не вызывается в prod (research §5); `AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT` — nil-deref в queue при неизвестном kind ответа LLM.
-- [ ] F3 DONE.md запись; NEXT.md: снять из WIP; BACKLOG PHASE-6B → закрыт.
-- [ ] F4 DECISIONS.md — если D1 (смена `AgentLLMClient`) считается truth-changing (скорее нет: внутренний интерфейс) — решить на `/end-task`.
-- [ ] F5 Архив `tasks/PHASE-6B-RUNBOOK-ENGINE/` → `tasks/archive/`.
+- [x] F1 BACKLOG: follow-ups из Spec §3 — `search_runbooks` tool, runbooks в 5A, hot reload, regex matching, Helm `extraVolumes` (связать с `HELM-CHART-GAPS`), запись в БД/API, метрики runbooks.
+- [x] F2 BUGS.md: `INVESTIGATION-ALERT-TIME-NOT-SET` — `WithAlertTime` не вызывается в prod (research §5); `AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT` — nil-deref в queue при неизвестном kind ответа LLM.
+- [x] F3 DONE.md запись; NEXT.md: снять из WIP; BACKLOG PHASE-6B → закрыт.
+- [x] F4 DECISIONS.md — если D1 (смена `AgentLLMClient`) считается truth-changing (скорее нет: внутренний интерфейс) — решить на `/end-task`.
+- [x] F5 Архив `tasks/PHASE-6B-RUNBOOK-ENGINE/` → `tasks/archive/`.
 
 ## Blockers / Assumptions
 - Блокеров нет; baseline зелёный.
 - Допущение: ветка остаётся `claude/start-task-pyym8f` (назначена сессией; конвенция `feature/<slug>` не соблюдена — зафиксировано на `/start-task`).
 - Допущение: `internal/application` тесты не требуют внешних сервисов для компиляции; если `go test ./internal/application` упадёт на предсуществующем — задокументировать, не чинить.
 - Риск объёма: если Slice 2 перерастёт ~1d — мержим Slice 1 отдельно (Spec §8).
+
+## Final Status (2026-09-27)
+
+**DONE.** Spec AC1–AC10 закрыты; AC8 — с оговоркой по полному прогону (ниже).
+
+- Код: `core/investigation/runbook/` (новый), `infrastructure/investigation/runbooks/` (новый), `core/investigation/agent_loop.go` (`PromptContext`, `SetRunbooks`, `RunbooksUsed`), `infrastructure/llm/investigate_with_tools.go`, `infrastructure/investigation/queue.go` (лог), `application/service_registry.go` (`configureRunbooks`), `config/investigation_runbooks.go` + `config.go`.
+- Тесты: 7 новых файлов; мутационная проверка инъекции в цикле. `-race` по затронутым пакетам и `internal/application` — зелёные; `golangci-lint` 0 issues.
+- 🔴 **Полный `go test ./...` не зелёный по внешней причине:** `internal/database`, `internal/infrastructure/inhibition`, `internal/infrastructure/repository` — testcontainers без Docker (`rootless Docker not found`), идентично на `main`. Перепрогнать при доступном Docker: `go test ./internal/database/ ./internal/infrastructure/inhibition/ ./internal/infrastructure/repository/ -count=1`.
+- Не проверено: реальный прогон с LLM endpoint (нет в окружении) — формат промпта закреплён тестами T5/T6. `make lint` не работает в облачном окружении (предустановленный golangci-lint собран go1.25) — линт прогнан временной сборкой v2.14.0.
+- F4: DECISIONS.md не менялся — смена `AgentLLMClient` внутренняя, продуктовой правды не меняет.
+- Остаточные ограничения и follow-ups:
+  - BACKLOG «PHASE-6B follow-ups»: `RUNBOOK-SEARCH-TOOL`, `RUNBOOKS-ONESHOT-PATH`, `RUNBOOKS-HOT-RELOAD`, `RUNBOOKS-REGEX-MATCH`, `HELM-EXTRA-VOLUMES`, `RUNBOOKS-IN-INVESTIGATION-RECORD`, `RUNBOOKS-METRICS`.
+  - BUGS.md (предсуществующие): `INVESTIGATION-ALERT-TIME-NOT-SET`, `AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT`.
+- Процессное отклонение: ветка `claude/start-task-pyym8f` (назначена сессией), а не `feature/<slug>` по `AGENTS.md`.

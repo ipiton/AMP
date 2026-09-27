@@ -51,7 +51,7 @@
 - [ ] **PHASE-6: Investigation Toolset + Runbooks** — Infrastructure tools для LLM-агента + knowledge base:
   - Built-in tools: Prometheus (PromQL), Loki (LogQL), Kubernetes (pods/events/logs), PostgreSQL (active queries/locks)
   - Cloud tools: AWS CloudWatch, GCP Monitoring (опционально)
-  - Runbook engine: markdown knowledge base с YAML frontmatter, автоматический match по alert labels
+  - Runbook engine: markdown knowledge base с YAML frontmatter, автоматический match по alert labels — ✅ PHASE-6B, 2026-09-27
   - MCP server support: расширяемые custom tools через MCP protocol
   - Environment routing: per-environment tool endpoints (prod/staging/dev)
 - [ ] **PHASE-7: UI/UX Workflow + Human-in-the-Loop** — Интеграция расследований в интерфейс:
