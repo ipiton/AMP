@@ -61,10 +61,11 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	classification *core.ClassificationResult,
 	tools []inv.ToolDefinition,
 	history []inv.AgentMessage,
+	pc inv.PromptContext,
 ) (*inv.AgentResponse, error) {
 	cfg, httpClient := c.snapshot()
 
-	msgs := buildOpenAIMessages(alert, classification, history)
+	msgs := buildOpenAIMessages(alert, classification, history, pc)
 
 	openAITools := make([]openAITool, len(tools))
 	for i, td := range tools {
@@ -138,7 +139,10 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 }
 
 // buildOpenAIMessages converts the investigation context + history into OpenAI message format.
-func buildOpenAIMessages(alert *core.Alert, classification *core.ClassificationResult, history []inv.AgentMessage) []openAIChatMessage {
+// Extra prompt context (e.g. matched runbooks) is appended to the end of the
+// system prompt, which is rebuilt on every iteration and so survives history
+// trimming.
+func buildOpenAIMessages(alert *core.Alert, classification *core.ClassificationResult, history []inv.AgentMessage, pc inv.PromptContext) []openAIChatMessage {
 	var msgs []openAIChatMessage
 
 	// Prepend system message if not already in history.
@@ -165,6 +169,9 @@ func buildOpenAIMessages(alert *core.Alert, classification *core.ClassificationR
 				"Alert: %s\nClassification: %s",
 			alertJSON, classCtx,
 		)
+		if pc.Runbooks != "" {
+			systemContent += "\n\n" + pc.Runbooks
+		}
 		msgs = append(msgs, openAIChatMessage{Role: "system", Content: systemContent})
 	}
 

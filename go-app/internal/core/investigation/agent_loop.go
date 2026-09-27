@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/investigation/runbook"
 )
 
 // AgentLLMClient is the minimal LLM interface the loop needs.
@@ -17,7 +18,15 @@ type AgentLLMClient interface {
 		classification *core.ClassificationResult,
 		tools []ToolDefinition,
 		history []AgentMessage,
+		pc PromptContext,
 	) (*AgentResponse, error)
+}
+
+// PromptContext carries optional extra context for the investigation prompt.
+// The zero value adds nothing, leaving the prompt unchanged.
+type PromptContext struct {
+	// Runbooks is the rendered runbook section (PHASE-6B); "" means none.
+	Runbooks string
 }
 
 // AgentLoopConfig configures loop behaviour.
@@ -45,6 +54,8 @@ type AgentRunResult struct {
 	IterationsUsed  int
 	ToolCallsCount  int
 	TerminationKind string // "final_answer" | "max_iterations" | "timeout" | "error"
+	// RunbooksUsed lists the names of the runbooks injected into the prompt.
+	RunbooksUsed []string
 }
 
 // AgentLoop executes the Think→Act→Observe loop.
@@ -52,6 +63,10 @@ type AgentLoop struct {
 	llm      AgentLLMClient
 	registry *ToolRegistry
 	config   AgentLoopConfig
+
+	runbooks    *runbook.Set
+	maxRunbooks int
+	maxChars    int
 }
 
 // NewAgentLoop creates a loop wired to the given LLM client and tool registry.
@@ -61,6 +76,29 @@ func NewAgentLoop(llm AgentLLMClient, registry *ToolRegistry, cfg AgentLoopConfi
 		panic("investigation: AgentLoopConfig.MaxHistoryMsgs must be >= 1")
 	}
 	return &AgentLoop{llm: llm, registry: registry, config: cfg}
+}
+
+// SetRunbooks enables runbook injection (PHASE-6B): for each run, up to
+// maxRunbooks runbooks matching the alert are rendered (bodies cut to maxChars
+// runes) into the system prompt of every iteration. A nil or empty set
+// disables injection. Must be called before the loop is used.
+func (a *AgentLoop) SetRunbooks(set *runbook.Set, maxRunbooks, maxChars int) {
+	a.runbooks = set
+	a.maxRunbooks = maxRunbooks
+	a.maxChars = maxChars
+}
+
+// promptContext matches the configured runbooks against alert once per run.
+func (a *AgentLoop) promptContext(alert *core.Alert) (PromptContext, []string) {
+	matched := a.runbooks.Match(alert, a.maxRunbooks)
+	if len(matched) == 0 {
+		return PromptContext{}, nil
+	}
+	names := make([]string, len(matched))
+	for i, rb := range matched {
+		names[i] = rb.Name
+	}
+	return PromptContext{Runbooks: runbook.Render(matched, a.maxChars)}, names
 }
 
 // Run performs the agentic investigation and returns a structured result.
@@ -82,11 +120,12 @@ func (a *AgentLoop) Run(
 	)
 
 	defs := a.registry.Definitions()
+	pc, runbooksUsed := a.promptContext(alert)
 
 	for iterations < a.config.MaxIterations {
 		history = trimHistory(history, a.config.MaxHistoryMsgs)
 
-		resp, err := a.llm.InvestigateWithTools(ctx, alert, classification, defs, history)
+		resp, err := a.llm.InvestigateWithTools(ctx, alert, classification, defs, history, pc)
 		if err != nil {
 			if ctx.Err() != nil {
 				return &AgentRunResult{
@@ -94,6 +133,7 @@ func (a *AgentLoop) Run(
 					IterationsUsed:  iterations,
 					ToolCallsCount:  toolCalls,
 					TerminationKind: "timeout",
+					RunbooksUsed:    runbooksUsed,
 				}, fmt.Errorf("agent loop context done: %w", ctx.Err())
 			}
 			return &AgentRunResult{
@@ -101,6 +141,7 @@ func (a *AgentLoop) Run(
 				IterationsUsed:  iterations,
 				ToolCallsCount:  toolCalls,
 				TerminationKind: "error",
+				RunbooksUsed:    runbooksUsed,
 			}, fmt.Errorf("llm call failed: %w", err)
 		}
 
@@ -123,6 +164,7 @@ func (a *AgentLoop) Run(
 				IterationsUsed:  iterations,
 				ToolCallsCount:  toolCalls,
 				TerminationKind: "final_answer",
+				RunbooksUsed:    runbooksUsed,
 			}, nil
 
 		case AgentResponseToolCalls:
@@ -193,6 +235,7 @@ func (a *AgentLoop) Run(
 		IterationsUsed:  iterations,
 		ToolCallsCount:  toolCalls,
 		TerminationKind: "max_iterations",
+		RunbooksUsed:    runbooksUsed,
 	}, nil
 }
 

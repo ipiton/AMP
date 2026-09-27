@@ -14,21 +14,27 @@
 ## Slice 1 — Engine + config (без wiring, поведение сервиса не меняется)
 Шов из Spec §8: после этого среза можно остановиться и смержить.
 
-- [ ] 1.1 `internal/core/investigation/runbook/runbook.go`: тип `Runbook`, `Parse(source, data)` — frontmatter split, `yaml.v3`, валидации §5.1 (name, match ≥1, пустые ключи/значения, 64 KiB), trim тела. *(AC1)*
-- [ ] 1.2 `internal/core/investigation/runbook/set.go`: `Set`, `NewSet` (сортировка D7), `Len`, `Match(alert, limit)` с `alertname`-fallback на `alert.AlertName` (D5). *(AC2)*
-- [ ] 1.3 `internal/core/investigation/runbook/render.go`: `Render(rbs, maxChars)` — фиксированный заголовок, обрезка в рунах + `\n…[truncated]`, пустой вход ⇒ `""`. *(AC3)*
-- [ ] 1.4 `internal/infrastructure/investigation/runbooks/loader.go`: `LoadDir(path, logger) (*runbook.Set, error)` — `WalkDir`, пропуск `.`-путей и не-`.md`, симлинки-файлы читаются, каталоги-симлинки не обходятся, битые файлы → warn + skip, итоговый info `loaded/skipped`; ошибка только на недоступный корень. *(AC4)*
-- [ ] 1.5 `internal/config/`: `InvestigationRunbooksConfig` + поле `InvestigationConfig.Runbooks`; `viper.SetDefault` для `enabled/path/max_runbooks/max_chars`. *(AC7)*
-- [ ] 1.6 Проверка среза: `go build ./...`, `go vet` + `go test` для `runbook`, `runbooks`, `config`.
+- [x] 1.1 `internal/core/investigation/runbook/runbook.go`: тип `Runbook`, `Parse(source, data)` — frontmatter split, `yaml.v3`, валидации §5.1 (name, match ≥1, пустые ключи/значения, 64 KiB), trim тела. *(AC1)*
+- [x] 1.2 `internal/core/investigation/runbook/set.go`: `Set`, `NewSet` (сортировка D7), `Len`, `Match(alert, limit)` с `alertname`-fallback на `alert.AlertName` (D5). *(AC2)*
+- [x] 1.3 `internal/core/investigation/runbook/render.go`: `Render(rbs, maxChars)` — фиксированный заголовок, обрезка в рунах + `\n…[truncated]`, пустой вход ⇒ `""`. *(AC3)*
+- [x] 1.4 `internal/infrastructure/investigation/runbooks/loader.go`: `LoadDir(path, logger) (*runbook.Set, error)` — `WalkDir`, пропуск `.`-путей и не-`.md`, симлинки-файлы читаются, каталоги-симлинки не обходятся, битые файлы → warn + skip, итоговый info `loaded/skipped`; ошибка только на недоступный корень. *(AC4)*
+- [x] 1.5 `internal/config/`: `InvestigationRunbooksConfig` + поле `InvestigationConfig.Runbooks`; `viper.SetDefault` для `enabled/path/max_runbooks/max_chars`. *(AC7)*
+- [x] 1.6 Проверка среза: `go build ./...`, `go vet` + `go test` для `runbook`, `runbooks`, `config`.
 
 ## Slice 2 — Prompt injection + wiring
-- [ ] 2.1 `internal/core/investigation/`: `PromptContext{Runbooks string}`; добавить `pc PromptContext` в `AgentLLMClient.InvestigateWithTools` (D1/D2).
-- [ ] 2.2 `internal/infrastructure/llm/investigate_with_tools.go`: принять `pc`, передать в `buildOpenAIMessages`; при `pc.Runbooks != ""` дописать `"\n\n"+pc.Runbooks` в конец system prompt, иначе строка неизменна (D3). *(AC5)*
-- [ ] 2.3 `AgentLoop`: `SetRunbooks(set, maxRunbooks, maxChars)`; в `Run()` один раз до цикла `Match`+`Render`, один `pc` на все итерации; `AgentRunResult.RunbooksUsed []string` заполняется на всех путях возврата (final/max_iterations/timeout/error). *(AC6)*
-- [ ] 2.4 Обновить `mockAgentLLM` в `agent_loop_test.go` под новую сигнатуру (+ захват `pc` по итерациям).
-- [ ] 2.5 `internal/infrastructure/investigation/queue.go`: логировать `runbooks` (`RunbooksUsed`) в `Investigation completed` и `Agent loop returned error`.
-- [ ] 2.6 `internal/application/service_registry.go` (блок agent mode): при `Runbooks.Enabled` — `LoadDir`, нормализация лимитов (`<=0` ⇒ 3 / 4000), ошибка корня ⇒ warn + skip (D8), пустой set ⇒ info, иначе `SetRunbooks` + info с количеством. Вне agent mode при `Enabled` — warn (D9).
-- [ ] 2.7 Проверка среза: `go build ./...`, `go vet ./...` для затронутых пакетов, `go test` для `core/investigation/...`, `infrastructure/investigation/...`, `infrastructure/llm/...`, `config`, `application`.
+- [x] 2.1 `internal/core/investigation/`: `PromptContext{Runbooks string}`; добавить `pc PromptContext` в `AgentLLMClient.InvestigateWithTools` (D1/D2).
+- [x] 2.2 `internal/infrastructure/llm/investigate_with_tools.go`: принять `pc`, передать в `buildOpenAIMessages`; при `pc.Runbooks != ""` дописать `"\n\n"+pc.Runbooks` в конец system prompt, иначе строка неизменна (D3). *(AC5)*
+- [x] 2.3 `AgentLoop`: `SetRunbooks(set, maxRunbooks, maxChars)`; в `Run()` один раз до цикла `Match`+`Render`, один `pc` на все итерации; `AgentRunResult.RunbooksUsed []string` заполняется на всех путях возврата (final/max_iterations/timeout/error). *(AC6)*
+- [x] 2.4 Обновить `mockAgentLLM` в `agent_loop_test.go` под новую сигнатуру (+ захват `pc` по итерациям).
+- [x] 2.5 `internal/infrastructure/investigation/queue.go`: логировать `runbooks` (`RunbooksUsed`) в `Investigation completed` и `Agent loop returned error`.
+- [x] 2.6 `internal/application/service_registry.go` (блок agent mode): при `Runbooks.Enabled` — `LoadDir`, нормализация лимитов (`<=0` ⇒ 3 / 4000), ошибка корня ⇒ warn + skip (D8), пустой set ⇒ info, иначе `SetRunbooks` + info с количеством. Вне agent mode при `Enabled` — warn (D9).
+- [x] 2.7 Проверка среза: `go build ./...`, `go vet ./...` для затронутых пакетов, `go test` для `core/investigation/...`, `infrastructure/investigation/...`, `infrastructure/llm/...`, `config`, `application`.
+
+### Implementation notes (2026-09-27)
+- Лимиты нормализуются методами `InvestigationRunbooksConfig.EffectiveMaxRunbooks/EffectiveMaxChars` (константы `DefaultRunbooks*` в `config`), wiring вынесен в `ServiceRegistry.configureRunbooks`.
+- `Parse` дополнительно снимает UTF-8 BOM и нормализует CRLF.
+- 2.7: `go build ./...`, `go vet` (application, config, core/investigation/..., infrastructure/investigation/..., infrastructure/llm) и `go test` пакетов investigation/llm/config — зелёные. `go test ./internal/application` — в `/testing`.
+- Попутная находка (предсуществующая, вне скоупа): `AgentLoop.Run` на неизвестном `resp.Kind` возвращает `(nil, err)`, а `queue.processJobWithAgent` сразу читает `agentRun.TerminationKind` ⇒ nil-deref panic в воркере. Завести в BUGS.md на `/end-task` (F2).
 
 ## Testing (`/write-tests`, `/testing`)
 - [ ] T1 `runbook/runbook_test.go` — AC1: валидный файл; table-driven невалидные случаи §5.1; неизвестные поля игнорируются; CRLF-переводы строк.
@@ -48,7 +54,7 @@
 
 ## Finalization (`/end-task`)
 - [ ] F1 BACKLOG: follow-ups из Spec §3 — `search_runbooks` tool, runbooks в 5A, hot reload, regex matching, Helm `extraVolumes` (связать с `HELM-CHART-GAPS`), запись в БД/API, метрики runbooks.
-- [ ] F2 BUGS.md: `INVESTIGATION-ALERT-TIME-NOT-SET` — `WithAlertTime` не вызывается в prod (research §5).
+- [ ] F2 BUGS.md: `INVESTIGATION-ALERT-TIME-NOT-SET` — `WithAlertTime` не вызывается в prod (research §5); `AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT` — nil-deref в queue при неизвестном kind ответа LLM.
 - [ ] F3 DONE.md запись; NEXT.md: снять из WIP; BACKLOG PHASE-6B → закрыт.
 - [ ] F4 DECISIONS.md — если D1 (смена `AgentLLMClient`) считается truth-changing (скорее нет: внутренний интерфейс) — решить на `/end-task`.
 - [ ] F5 Архив `tasks/PHASE-6B-RUNBOOK-ENGINE/` → `tasks/archive/`.

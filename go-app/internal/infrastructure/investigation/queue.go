@@ -276,6 +276,7 @@ func (q *InvestigationQueue) processJobWithAgent(start time.Time, job *core.Inve
 		q.logger.Warn("Agent loop returned error",
 			"id", job.ID,
 			"termination", agentRun.TerminationKind,
+			"runbooks", agentRun.RunbooksUsed,
 			"error", err,
 		)
 	}
@@ -315,6 +316,7 @@ func (q *InvestigationQueue) processJobWithAgent(start time.Time, job *core.Inve
 		"termination", agentRun.TerminationKind,
 		"iterations", agentRun.IterationsUsed,
 		"tool_calls", agentRun.ToolCallsCount,
+		"runbooks", agentRun.RunbooksUsed,
 		"duration", time.Since(start),
 	)
 }
