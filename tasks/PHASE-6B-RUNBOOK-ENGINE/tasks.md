@@ -72,10 +72,16 @@
 - Реальный LLM/e2e-прогон с runbooks не выполнялся (нет LLM endpoint); поведение промпта закреплено unit-тестами T5/T6.
 
 ## Documentation (`/write-doc`)
-- [ ] D1 `config.yaml.example` — закомментированная секция `investigation.runbooks` под `tools` (+ «requires llm.agent_mode=true»). *(AC9)*
-- [ ] D2 `internal/core/investigation/README.md` — раздел Runbooks: формат, matching (`alertname` fallback, специфичность, лимиты), загрузка (ConfigMap `..data`), доверие к каталогу (prompt injection), `runbook_url` не скачивается. *(AC9)*
-- [ ] D3 `CHANGELOG.md` `[Unreleased] → Added` — PHASE-6B. *(AC9)*
-- [ ] D4 Пример runbook `examples/runbooks/high-memory-usage.md` (если каталог `examples/` подходит по конвенции; иначе только в README).
+- [x] D1 `config.yaml.example` — закомментированная секция `investigation.runbooks` под `tools` (+ «requires llm.agent_mode=true»). *(AC9)*
+- [x] D2 `internal/core/investigation/README.md` — раздел Runbooks: формат, matching (`alertname` fallback, специфичность, лимиты), загрузка (ConfigMap `..data`), доверие к каталогу (prompt injection), `runbook_url` не скачивается. *(AC9)*
+- [x] D3 `CHANGELOG.md` `[Unreleased] → Added` — PHASE-6B. *(AC9)*
+- [x] D4 Пример runbook `examples/runbooks/high-memory-usage.md` (если каталог `examples/` подходит по конвенции; иначе только в README).
+
+### Doc notes (`/write-doc`, 2026-09-27)
+- `examples/runbooks/high-memory-usage.md` + раздел в `examples/README.md`; пример проверен временным тестом через `LoadDir` (грузится, матчится, рендерится), тест удалён.
+- `config.yaml.example` — секция валидна (проверено `yaml.safe_load`).
+- README пакета: раздел Runbooks (формат, matching, loading, config, trust) + Wiring; **исправлено** устаревшее утверждение «агент выставляет alert time в context» — теперь явно помечено как known gap (`WithAlertTime` не вызывается), со ссылкой на BUGS.md (заводится на `/end-task`, F2).
+- `CHANGELOG.md [Unreleased] → Added` — PHASE-6B. `docs/RELEASE_NOTES_*-draft.md` не трогали: по WORKFLOW release notes собираются из `[Unreleased]` при релизе.
 
 ## Finalization (`/end-task`)
 - [ ] F1 BACKLOG: follow-ups из Spec §3 — `search_runbooks` tool, runbooks в 5A, hot reload, regex matching, Helm `extraVolumes` (связать с `HELM-CHART-GAPS`), запись в БД/API, метрики runbooks.

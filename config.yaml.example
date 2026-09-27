@@ -130,6 +130,15 @@ investigation:
       kubeconfig: ""    # empty = in-cluster; or path like /home/user/.kube/config
     database:
       enabled: false    # set true to expose pg_stat_activity / pg_stat_statements
+  # Runbook engine (PHASE-6B). Requires llm.agent_mode=true.
+  # Markdown runbooks with YAML frontmatter, matched by alert labels and appended
+  # to the agent's system prompt. Loaded once at startup; a missing directory
+  # disables runbooks with a warning. Example: examples/runbooks/.
+  runbooks:
+    enabled: false
+    path: /etc/amp/runbooks   # scanned recursively for *.md; dot-entries skipped
+    max_runbooks: 3           # most specific matches first
+    max_chars: 4000           # per runbook body; longer bodies are truncated
 
 # ============================================================================
 # Logging Configuration

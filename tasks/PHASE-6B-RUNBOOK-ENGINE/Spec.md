@@ -1,6 +1,6 @@
 # Spec: PHASE-6B-RUNBOOK-ENGINE
 
-Статус: draft → ждёт approval перед `/plan`.
+Статус: approved 2026-09-27; реализован без отклонений от контрактов (мелкие дополнения — BOM/CRLF в `Parse`, методы `Effective*` в конфиге — см. `tasks.md`).
 Основа: `requirements.md`, `research.md` (2026-09-27).
 
 ## 1. Problem

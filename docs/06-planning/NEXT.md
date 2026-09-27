@@ -28,7 +28,7 @@
 
 ## WIP (Max 2)
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** (старт 2026-09-27) — Markdown knowledge base (YAML frontmatter) с auto-matching по alert labels и инъекцией matched runbooks в контекст investigation-агента. Ветка `claude/start-task-pyym8f`, workspace `tasks/PHASE-6B-RUNBOOK-ENGINE/`. Реализация и тесты готовы, `/testing` зелёный (кроме предсуществующих Docker-тестов), следующий шаг: `/write-doc`. ~2d
+- [ ] **PHASE-6B-RUNBOOK-ENGINE** (старт 2026-09-27) — Markdown knowledge base (YAML frontmatter) с auto-matching по alert labels и инъекцией matched runbooks в контекст investigation-агента. Ветка `claude/start-task-pyym8f`, workspace `tasks/PHASE-6B-RUNBOOK-ENGINE/`. Реализация и тесты готовы, `/testing` зелёный (кроме предсуществующих Docker-тестов), docs обновлены, следующий шаг: `/end-task`. ~2d
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
