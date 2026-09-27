@@ -12,7 +12,7 @@
 > Цель: AI-powered alert investigation — главный USP AMP. Phase 5A/5B закрыты, осталось наполнить агента реальными tools.
 > Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. ~2d
+- (PHASE-6B-RUNBOOK-ENGINE → WIP 2026-09-27)
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d
 
 ### 2. Operations (из AMP-OSS)
@@ -28,7 +28,7 @@
 
 ## WIP (Max 2)
 
-- (PARITY-RESOLVE-TIMEOUT-ENDSAT закрыт 2026-09-24, см. DONE.md; WIP свободен)
+- [ ] **PHASE-6B-RUNBOOK-ENGINE** (старт 2026-09-27) — Markdown knowledge base (YAML frontmatter) с auto-matching по alert labels и инъекцией matched runbooks в контекст investigation-агента. Ветка `claude/start-task-pyym8f`, workspace `tasks/PHASE-6B-RUNBOOK-ENGINE/`. Следующий шаг: `/research`. ~2d
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
