@@ -51,7 +51,25 @@
 - T6 проверен мутацией: подмена `pc` на пустой в `Run()` валит `TestAgentLoop_RunbooksInjectedEveryIteration`.
 - **Осознанно отложено:** unit-тест `ServiceRegistry.configureRunbooks` (wiring: warn при ошибке корня / вне agent mode) — поднимать `ServiceRegistry` в тесте тяжело, а вся логика ветвления — вызовы `LoadDir`/`Len`/`Effective*`, покрытые выше; проверяется `go build` + `go vet` пакета `application`. Логирование `runbooks` в queue — без теста (только поле лога).
 
-- [ ] T8 Прогон: `go vet` + `go test -race` затронутых пакетов, `go build ./...`, `git diff --check`, grep diff на `_, _ :=` / `_ =` для новых ошибок. *(AC8)*
+- [x] T8 Прогон: `go vet` + `go test -race` затронутых пакетов, `go build ./...`, `git diff --check`, grep diff на `_, _ :=` / `_ =` для новых ошибок. *(AC8)*
+
+### Testing results (`/testing`, 2026-09-27, HEAD `fdc3ccb`, go1.26.0)
+
+**Green**
+- `go build ./...` — ок.
+- `go vet` — `internal/application/...`, `core/investigation/...`, `infrastructure/investigation/...`, `infrastructure/llm/...`, `config/...` — ок.
+- `go test -race -count=1` — `core/investigation`, `core/investigation/runbook`, `infrastructure/investigation`, `infrastructure/investigation/runbooks`, `infrastructure/investigation/tools`, `infrastructure/llm`, `config` — все ok.
+- `go test -count=1 ./internal/application/...` — `application` ok (14.9s), `application/handlers` ok.
+- `go test -count=1 ./...` — все пакеты ok, кроме трёх предсуществующих (ниже).
+- `golangci-lint run` (v2.14.0, собран go1.26.0, конфиг репо `.golangci.yml`) по затронутым пакетам — **0 issues**.
+- `git diff --check main...HEAD` — чисто; `gofmt -l` по изменённым `.go` — чисто; `_, _ :=` / `_ =` в добавленных строках — нет.
+
+**Red — предсуществующие, вне скоупа (воспроизведены на `main` в отдельном worktree, идентичный вывод)**
+- `internal/database` `TestRunMigrations_ConcurrentReplicas_FreshDB`, `internal/infrastructure/inhibition` `TestIntegration_InhibitionStateManager_Redis`, `internal/infrastructure/repository` `TestGetTopAlerts_EmptyDatabase` — `panic: rootless Docker not found` (testcontainers; в облачном контейнере нет Docker). Ограничение окружения, не регрессия.
+
+**Environment notes**
+- Предустановленный `/usr/local/bin/golangci-lint` 2.5.0 собран go1.25 и отказывается грузить конфиг для go1.26 (`make lint` в этом окружении не работает). Линт прогнан временным бинарём v2.14.0 из scratchpad; версия отличается от 2.5.0, но набор линтеров закреплён в `.golangci.yml`.
+- Реальный LLM/e2e-прогон с runbooks не выполнялся (нет LLM endpoint); поведение промпта закреплено unit-тестами T5/T6.
 
 ## Documentation (`/write-doc`)
 - [ ] D1 `config.yaml.example` — закомментированная секция `investigation.runbooks` под `tools` (+ «requires llm.agent_mode=true»). *(AC9)*
