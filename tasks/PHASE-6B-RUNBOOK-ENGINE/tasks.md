@@ -37,13 +37,20 @@
 - Попутная находка (предсуществующая, вне скоупа): `AgentLoop.Run` на неизвестном `resp.Kind` возвращает `(nil, err)`, а `queue.processJobWithAgent` сразу читает `agentRun.TerminationKind` ⇒ nil-deref panic в воркере. Завести в BUGS.md на `/end-task` (F2).
 
 ## Testing (`/write-tests`, `/testing`)
-- [ ] T1 `runbook/runbook_test.go` — AC1: валидный файл; table-driven невалидные случаи §5.1; неизвестные поля игнорируются; CRLF-переводы строк.
-- [ ] T2 `runbook/set_test.go` — AC2: полное/частичное совпадение, лишние labels, `alertname` только в `AlertName`, приоритет labels над `AlertName`, `limit`, порядок D7, nil-алерт/пустой set.
-- [ ] T3 `runbook/render_test.go` — AC3: golden-строка, обрезка кириллицы по рунам, пустой вход.
-- [ ] T4 `runbooks/loader_test.go` — AC4 на `t.TempDir()`: рекурсия, `..data`/`.hidden`, `.txt`, битый файл, >64 KiB, несуществующий корень, симлинк-файл (skip, если симлинки недоступны).
-- [ ] T5 `llm` — AC5: `buildOpenAIMessages` с runbooks (секция в конце system); без runbooks — точное совпадение со строкой текущего промпта (регрессия).
-- [ ] T6 `agent_loop_test.go` — AC6: с set — непустой `pc.Runbooks` на каждой итерации (≥2 итерации через tool call), `RunbooksUsed`; без set — пустой `pc`; set без матча — пустой `pc` и пустой `RunbooksUsed`.
-- [ ] T7 `config` — AC7: дефолты; парсинг секции из YAML.
+- [x] T1 `runbook/runbook_test.go` — AC1: валидный файл; table-driven невалидные случаи §5.1; неизвестные поля игнорируются; CRLF-переводы строк.
+- [x] T2 `runbook/set_test.go` — AC2: полное/частичное совпадение, лишние labels, `alertname` только в `AlertName`, приоритет labels над `AlertName`, `limit`, порядок D7, nil-алерт/пустой set.
+- [x] T3 `runbook/render_test.go` — AC3: golden-строка, обрезка кириллицы по рунам, пустой вход.
+- [x] T4 `runbooks/loader_test.go` — AC4 на `t.TempDir()`: рекурсия, `..data`/`.hidden`, `.txt`, битый файл, >64 KiB, несуществующий корень, симлинк-файл (skip, если симлинки недоступны).
+- [x] T5 `llm` — AC5: `buildOpenAIMessages` с runbooks (секция в конце system); без runbooks — точное совпадение со строкой текущего промпта (регрессия).
+- [x] T6 `agent_loop_test.go` — AC6: с set — непустой `pc.Runbooks` на каждой итерации (≥2 итерации через tool call), `RunbooksUsed`; без set — пустой `pc`; set без матча — пустой `pc` и пустой `RunbooksUsed`.
+- [x] T7 `config` — AC7: дефолты; парсинг секции из YAML.
+### Test notes (`/write-tests`, 2026-09-27)
+- Файлы: `core/investigation/runbook/{runbook,set,render}_test.go`, `infrastructure/investigation/runbooks/loader_test.go`, `infrastructure/llm/investigate_with_tools_prompt_test.go`, `core/investigation/agent_loop_runbooks_test.go`, `config/investigation_runbooks_test.go`; мок `mockAgentLLM` записывает `PromptContext` каждой итерации.
+- T4 дополнительно воспроизводит реальную раскладку ConfigMap (`..<ts>/`, симлинк `..data`, ключи-симлинки) — runbook грузится ровно один раз; симлинк на каталог не обходится.
+- T5 закрепляет текущий system prompt точной строкой; `git diff main` по `buildOpenAIMessages` подтверждает, что формат не менялся, добавлен только хвост.
+- T6 проверен мутацией: подмена `pc` на пустой в `Run()` валит `TestAgentLoop_RunbooksInjectedEveryIteration`.
+- **Осознанно отложено:** unit-тест `ServiceRegistry.configureRunbooks` (wiring: warn при ошибке корня / вне agent mode) — поднимать `ServiceRegistry` в тесте тяжело, а вся логика ветвления — вызовы `LoadDir`/`Len`/`Effective*`, покрытые выше; проверяется `go build` + `go vet` пакета `application`. Логирование `runbooks` в queue — без теста (только поле лога).
+
 - [ ] T8 Прогон: `go vet` + `go test -race` затронутых пакетов, `go build ./...`, `git diff --check`, grep diff на `_, _ :=` / `_ =` для новых ошибок. *(AC8)*
 
 ## Documentation (`/write-doc`)
