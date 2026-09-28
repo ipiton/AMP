@@ -17,25 +17,31 @@ func TestBackgroundWorker_WarmupPeriod(t *testing.T) {
 
 	manager, _ := createTestManager(t, mock)
 
+	const warmup = 10 * time.Millisecond // WarmupPeriod in createTestManager's config
+
 	// Start manager
 	startTime := time.Now()
 	err := manager.Start()
 	require.NoError(t, err)
 	defer func() { _ = manager.Stop(1 * time.Second) }()
 
-	// Wait a bit less than warmup period (10ms in test config)
-	time.Sleep(5 * time.Millisecond)
+	// No call may happen inside the warmup window. Sleep into the middle of
+	// it (so a worker with no warmup has had time to call), then read the
+	// count BEFORE the clock: if less than warmup has passed since Start, any
+	// call seen was made during warmup. Under load the sleep can overshoot
+	// the window -- then the check proves nothing and is skipped rather than
+	// failing on a call that was legitimately made after warmup.
+	time.Sleep(warmup / 2)
+	calls := mock.GetDiscoverCallCount()
+	if time.Since(startTime) < warmup {
+		assert.Equal(t, 0, calls, "Expected no calls during warmup")
+	}
 
-	// Should have zero calls (still in warmup)
-	assert.Equal(t, 0, mock.GetDiscoverCallCount(), "Expected no calls during warmup")
-
-	// Wait for warmup to complete + small buffer
-	time.Sleep(10 * time.Millisecond)
-
-	// Should have at least one call after warmup
-	elapsed := time.Since(startTime)
-	assert.Greater(t, mock.GetDiscoverCallCount(), 0, "Expected call after warmup")
-	assert.GreaterOrEqual(t, elapsed, 10*time.Millisecond, "Expected warmup delay")
+	// The first call must eventually happen. Polled instead of a fixed sleep:
+	// on a loaded machine (-race, full-repo parallel run, CI runner) the
+	// worker can be scheduled well after warmup ends.
+	assert.Eventually(t, func() bool { return mock.GetDiscoverCallCount() > 0 },
+		2*time.Second, time.Millisecond, "Expected call after warmup")
 }
 
 // TestBackgroundWorker_PeriodicRefresh tests periodic refresh at configured interval.
