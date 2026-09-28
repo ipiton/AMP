@@ -68,7 +68,7 @@ Research показал, что даже готовый гейт в CI не пр
 
 Попутно в тех же файлах:
 
-- серверный runtime: `alpine:3.19` (EOL) → `alpine:3.22`. Это ветка, на которой собран `golang:1.26.8-alpine`, если на `/implement` не выяснится иное — сверить;
+- серверный runtime: `alpine:3.19` (EOL) → `alpine:3.24` — та же ветка, на которой собран `golang:1.26.8-alpine` (`/etc/alpine-release` = 3.24.2, сверено на `/plan`);
 - `Dockerfile.config-reloader`: `VERSION/REVISION/BUILD_DATE` передаются в OCI-метки через `metadata-action`, мёртвые `ARG` удаляются. Buildinfo сайдкару не нужен: у него нет `/api/v2/status`;
 - `.dockerignore` в корне исключает `.git`, `.claude`, `tasks`, `docs`, `helm`, `deploy` (оба Dockerfile копируют только `go-app/`; `*_test.go` не исключаем — безвредны). Цель — не тащить в build context worktrees и `.git`, на содержимое образа это не влияет.
 
@@ -197,5 +197,5 @@ Major-тег (`0`) не выпускаем до v1.
 | Отказ `groundhog2k.github.io` роняет гейт | Осознанно: FAIL виден в `helm-deps`. Вендорить сабчарт — альтернатива в BACKLOG `PROD-HELM-CLEAN-CHECKOUT`, если станет частым |
 | Пакеты GHCR private после первого push | Шаг в `docs/CI.md` + DoD `PROD-RELEASE-V010` |
 | `release.yml` не прогнан до первого тега | Сборка — та же, что в `images` на PR; отличие — login/metadata/push, проверяемые actionlint'ом. Первый тег — под присмотром владельца |
-| Смена `alpine:3.19` → `3.22` меняет runtime | `ca-certificates`, `tzdata`, `adduser` есть во всех ветках; критерий 6 проверяет старт образа |
+| Смена `alpine:3.19` → `3.24` меняет runtime | `ca-certificates`, `tzdata`, `adduser` есть во всех ветках; критерий 6 проверяет старт образа |
 | Сменили `repository` в values — кто-то переопределял через `--set image.repository` | Не затронуты (явный override сильнее). Migration note в CHANGELOG для тех, кто полагался на `ipiton/amp-llm` |
