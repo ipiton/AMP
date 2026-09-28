@@ -11,8 +11,8 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
 
 ## Допущения и блокеры
 
-- 🔴 **AC3 требует PR в GitHub.** Для этого нужен push ветки и открытие PR — внешние действия, **только с явного согласия** на `/testing`. Без PR проверяемы AC1, AC2, AC4 (частично, локальным `buildx`), AC5 (частично), AC6–AC10; AC3 и логи CI остаются непроверенными, и это фиксируется в отчёте честно.
-- 🔴 **`origin/main` отстаёт от локального `main`**: не запушены 20 коммитов, включая merge PROD-AUTH и PROD-RBAC-SCOPE (`origin/main` = `beab7df`, расхождения в обратную сторону нет — fast-forward). PR ветки против `origin/main` потащит в diff чужие изменения. Перед PR нужно запушить `main` — тоже с согласия владельца.
+- ✅ _(снято 2026-09-28: push `main`, ветки и PR ipiton/AMP#12 — с согласия владельца на `/testing`)_ **AC3 требует PR в GitHub.** Для этого нужен push ветки и открытие PR — внешние действия, **только с явного согласия** на `/testing`. Без PR проверяемы AC1, AC2, AC4 (частично, локальным `buildx`), AC5 (частично), AC6–AC10; AC3 и логи CI остаются непроверенными, и это фиксируется в отчёте честно.
+- ✅ _(снято 2026-09-28: `main` запушен fast-forward `beab7df..41b8c28`)_ **`origin/main` отставал от локального `main`**: не запушены 20 коммитов, включая merge PROD-AUTH и PROD-RBAC-SCOPE (`origin/main` = `beab7df`, расхождения в обратную сторону нет — fast-forward). PR ветки против `origin/main` потащит в diff чужие изменения. Перед PR нужно запушить `main` — тоже с согласия владельца.
 - **Первый прогон workflow в PR:** GitHub запускает `pull_request`-workflow из ветки PR, так что `ci.yml` отработает до мержа. `release.yml` не запустится (тег не пушим, D9).
 - **Секреты:** не нужны. Публикация — через `GITHUB_TOKEN`, а `ci.yml` вообще ничего не пушит.
 - **actionlint локально не установлен.** Запускать `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (релиз 2026-03-30, карантин пройден). Бинарник в репо не кладём.
@@ -106,21 +106,21 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
 
 ## Testing
 
-- [ ] AC1 — чистый checkout, helm-шаги PASS; негатив → `helm-deps` FAIL (I1a)
-- [ ] AC2 — actionlint 0; все `uses:` по SHA (I4, I5)
-- [ ] AC3 — PR в GitHub: `gate`, `images (amp)`, `images (config-reloader)`, `actionlint` зелёные; `govulncheck` — список находок; `e2e-ha` — результат и время. **Только после согласия на push `main` и ветки** (см. блокеры)
-- [ ] AC4 — лог `images`: обе платформы, Go-стадия на build-платформе (в PR); локально — эквивалент через `buildx` (I3)
-- [ ] AC5 — `go version go1.26.8` в логе `gate` (PR); локально — `go env GOTOOLCHAIN` / `go version` в `go-app` с `GOTOOLCHAIN=auto` на машине с Go < 1.26.8, если такая есть; иначе только CI
-- [ ] AC6 — `amp` стартует, `/healthz` 200; reloader `--help` (I3)
-- [ ] AC7 — нет `amp-llm`/`private-registry` в рендерах (I6)
-- [ ] AC8 — warmup-тест `-race -count=50` (I2)
-- [ ] AC9 — `release.yml`: права и триггер (I5)
-- [ ] Полный `./scripts/release-gate.sh` локально — PASS (финальный прогон на последнем коммите)
-- [ ] `git diff --check main...HEAD` — чисто
+- [x] AC1 — чистый checkout, helm-шаги PASS; негатив → `helm-deps` FAIL (I1a)
+- [x] AC2 — actionlint 0; все `uses:` по SHA (I4, I5)
+- [x] AC3 — PR в GitHub: `gate`, `images (amp)`, `images (config-reloader)`, `actionlint` зелёные; `govulncheck` — список находок; `e2e-ha` — результат и время. **Только после согласия на push `main` и ветки** (см. блокеры)
+- [x] AC4 — лог `images`: обе платформы, Go-стадия на build-платформе (в PR); локально — эквивалент через `buildx` (I3)
+- [x] AC5 — `go version go1.26.8` в логе `gate` (PR); локально — `go env GOTOOLCHAIN` / `go version` в `go-app` с `GOTOOLCHAIN=auto` на машине с Go < 1.26.8, если такая есть; иначе только CI
+- [x] AC6 — `amp` стартует, `/healthz` 200; reloader `--help` (I3)
+- [x] AC7 — нет `amp-llm`/`private-registry` в рендерах (I6)
+- [x] AC8 — warmup-тест `-race -count=50` (I2)
+- [x] AC9 — `release.yml`: права и триггер (I5)
+- [x] Полный `./scripts/release-gate.sh` локально — PASS (финальный прогон на последнем коммите)
+- [x] `git diff --check main...HEAD` — чисто
 
 ## Documentation & Cleanup
 
-- [ ] **D1. `docs/CI.md`** (English):
+- [x] **D1. `docs/CI.md`** (English):
   - workflows и триггеры;
   - таблица jobs: required / non-required и почему;
   - как воспроизвести локально;
@@ -128,18 +128,18 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
   - теги образов (D6);
   - критерии перевода `govulncheck` и `e2e-ha` в required;
   - как включить branch protection (required checks по именам).
-- [ ] **D2. `README.md`** — CI-бейдж `ci.yml`, ссылка на `docs/CI.md` в разделе про разработку/релиз.
-- [ ] **D3. `CHANGELOG.md` `[Unreleased]`**:
+- [x] **D2. `README.md`** — CI-бейдж `ci.yml`, ссылка на `docs/CI.md` в разделе про разработку/релиз.
+- [x] **D3. `CHANGELOG.md` `[Unreleased]`**:
   - Added: CI (PR gate), multi-arch образы в GHCR на тег;
   - Changed: `values-production.yaml` `image.repository` → `ghcr.io/ipiton/amp`, config-reloader → GHCR; runtime-база `alpine:3.24`; Go 1.26.8;
   - Breaking/migration note — для тех, кто полагался на `ipiton/amp-llm` / `registry.example.com` без явного override.
-- [ ] **D4. `docs/06-planning/DECISIONS.md`** — ADR-013: GHCR как реестр; гейт CI = `release-gate.sh`; два workflow ради `packages: write`; govulncheck/e2e-ha non-required до условий.
-- [ ] **D5. `BACKLOG.md`**:
+- [x] **D4. `docs/06-planning/DECISIONS.md`** — ADR-013: GHCR как реестр; гейт CI = `release-gate.sh`; два workflow ради `packages: write`; govulncheck/e2e-ha non-required до условий.
+- [x] **D5. `BACKLOG.md`**:
   - закрыть `PROD-CI-IMAGES` и `PROD-HELM-CLEAN-CHECKOUT` (ссылка на архив и ADR-013);
   - завести `PROD-DEPS-VULN` (находки govulncheck из AC3 или research §3; DoD: govulncheck → required), `CI-E2E-HA-REQUIRED` (10 зелёных прогонов), `CI-SUPPLY-CHAIN` (SBOM/provenance, cosign, Trivy, digest-пины базовых образов, Dependabot для actions, полный `-race`);
   - `PROD-RELEASE-V010`: дописать шаг «после первого push тега — пакеты GHCR в Public, `docker pull` без auth».
-- [ ] **D6. `BUGS.md`** — `PUBLISHING-WARMUP-TEST-FLAKY` → Resolved (коммит I2).
-- [ ] **D7. `NEXT.md`** — заметка о закрытии, следующий прод-блокер (`PROD-DEPS-VULN` / `PROD-RELEASE-V010`), CONFIG-RELOADER-SIDECAR: образ теперь собирается — обновить пометку в Queue.
+- [x] **D6. `BUGS.md`** — `PUBLISHING-WARMUP-TEST-FLAKY` → Resolved (коммит I2).
+- [x] **D7. `NEXT.md`** — заметка о закрытии, следующий прод-блокер (`PROD-DEPS-VULN` / `PROD-RELEASE-V010`), CONFIG-RELOADER-SIDECAR: образ теперь собирается — обновить пометку в Queue.
 
 ## Finalization (`/end-task`)
 
@@ -209,8 +209,49 @@ Research-прогону (PASS) повезло. Заведены в BUGS.md: `GRO
 5. **actionlint в CI** — `go run …@v1.7.12` после setup-go, а не docker-action: не требует ещё одного пина и совпадает с тем, как он запускается локально.
 6. `values-production.yaml` `configReloader`: комментарий «flip to true in the same change that adds the build job» заменён — job добавлен, но образа нет до первого релиза; `enabled: false` оставлен.
 
-### Осталось до `/testing`
+### Осталось до `/testing` _(всё закрыто на `/testing`, см. ниже)_
 
 - Полный release-gate на финальном коммите (после I6 гонялись только helm-шаги и рендер-тест; Go-код после `7597b0a` не менялся).
 - AC3, AC4 и AC5 в CI — нужен PR, см. блокеры в начале файла (push `main` и ветки — только с согласия).
 - Решение по флейкам `race` (варианты a/b/c выше).
+
+### `/testing` (2026-09-28)
+
+Коммиты `/testing`: `00c7737` test(silencing): move cache speed checks from asserts to benchmarks, `dd64d1e` docs(bugs): resolve SILENCING-CACHE-PERF-ASSERT-FLAKY. Решение по флейкам `race` — вариант (a): silencing чинится здесь, grouping — отдельной задачей (`GROUPING-TIMER-LOCK-FIX`).
+
+**Зелёное:**
+
+| Проверка | Где | Результат |
+|---|---|---|
+| Полный `./scripts/release-gate.sh` на `dd64d1e` | локально (arm64, macOS) | **RESULT: PASS**, 10/10 шагов: build 33s, lint 56s, test 157s, futureparity 38s, race 516s, helm-deps 2s, helm-dev/production/rbac ~1s, amtool-compat 164s; 0 `--- FAIL` |
+| `gate` | CI, PR ipiton/AMP#12 | SUCCESS, 7 мин 7 с; тот же скрипт — RESULT: PASS (race 190s, amtool-compat 81s) |
+| `images (amp)` | CI | SUCCESS, 4 мин 12 с |
+| `images (config-reloader)` | CI | SUCCESS, 2 мин |
+| `actionlint` | CI | SUCCESS, 17 с |
+| `e2e-ha` | CI | SUCCESS, 3 мин 3 с (первый прогон на shared runner) |
+| `TestCache_LargeDataset` | локально | 30/30 с `-race`, 30/30 без |
+
+**Красное — ожидаемое, не регресс ветки:**
+
+- `govulncheck` — FAILURE, 52 с: «Your code is affected by 9 vulnerabilities from 6 modules», те же 9, что в research §3, stdlib go1.26.8 чистая. Перечень с версиями фикса — в BACKLOG `PROD-DEPS-VULN`. Job не required (D7).
+
+**Известный риск, в этом прогоне не проявился:** `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` (2/30 на `main`, 3/30 на ветке под `-race`) — может покрасить `gate` ~1 раз из 15.
+
+**Критерии:**
+
+- AC1–AC2, AC6–AC9 — доказательства из `/implement` (выше) остаются в силе: после них менялись только тесты silencing и документы.
+- AC3 — выполнен: четыре required-кандидата зелёные, `govulncheck` красный ровно на находках research §3, `e2e-ha` — SUCCESS за 3 мин 3 с.
+- AC4 — лог `images (amp)` в CI: `[linux/amd64 builder] … GOARCH=amd64 go build` и `[linux/amd64->arm64 builder] … GOARCH=arm64 go build` — обе платформы, arm64 кросс-компилируется на amd64-раннере, без QEMU.
+- AC5 — лог `gate`: `go version go1.26.8 linux/amd64` (и в `setup-go`, и в шаге `go version`).
+
+### `/write-doc` (2026-09-28)
+
+- **`docs/CI.md`** (новый): workflows, таблица jobs (required / not yet и почему), воспроизведение локально, выпуск образов (теги, разовый перевод пакетов в Public), что не покрыто.
+- **`README.md`**: бейдж CI, `docs/CI.md` в Documentation и в How to Contribute (шаг `release-gate.sh`). Блок Docker: порт `9093:9093` → `8080:8080` (дефолт `server.port` = 8080, `EXPOSE 8080`; команда из README контейнер не открывала) и пометка, что до первого релиза образа нет — собирать локально.
+- **`docs/MIGRATION_QUICK_START.md`**: та же пометка про образ у `docker run`. Порт там не трогал — он зависит от смонтированного `config.yaml`.
+- **`CHANGELOG.md` `[Unreleased]`**: Added — PROD-CI-IMAGES (CI, публикация, `helm-deps`); Changed — репозитории образов в values с migration note, Go 1.26.8, alpine 3.24, кросс-компиляция, `.dockerignore`, дубль `configReloader:`, флейки, рендер-тест. Устаревший абзац PROD-INFRA про «no CI job builds its image» не переписан (история), к нему добавлена датированная пометка.
+- **`DECISIONS.md`**: ADR-013.
+- **`BACKLOG.md`**: закрыты `PROD-CI-IMAGES` (критерии «PR без зелёного CI не мержится» и «`docker pull` работает» перенесены — branch protection владельцем, первый тег в `PROD-RELEASE-V010`) и `PROD-HELM-CLEAN-CHECKOUT`; заведены `PROD-DEPS-VULN`, `CI-E2E-HA-REQUIRED`, `CI-SUPPLY-CHAIN`, `HELM-RENDER-TEST-IN-GATE`, `GROUPING-TIMER-LOCK-FIX`; `PROD-RELEASE-V010` дополнен шагами после первого тега (Public, `docker pull`, `image.tag` `1.0.0` vs `0.1.0`).
+- **`BUGS.md`**: `PUBLISHING-WARMUP-TEST-FLAKY` → Resolved; у grouping-бага — ссылка на задачу.
+- **`NEXT.md`**: статус WIP, заметка о новых задачах, пометка у `CONFIG-RELOADER-SIDECAR`.
+- `requirements.md` / `Spec.md` не менялись: отклонения реализации записаны выше («Отклонения от плана»), решения D1–D12 остались в силе.

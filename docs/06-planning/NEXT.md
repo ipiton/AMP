@@ -17,7 +17,7 @@
 
 ### 2. Operations (из AMP-OSS)
 - [x] ~~**RELOADABLE-COMPONENT-INTERFACES**~~ — закрыто 2026-08-20 (INF-A slice 1), см. BACKLOG.
-- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven SIGHUP. Частично сделано INF-B (values-шейп есть, нет Go-кода sidecar + Dockerfile + template). ~1d _(2026-09-25, замечено на PROD-AUTH: запись устарела — `cmd/config-reloader`, `Dockerfile.config-reloader` и шаблон в `deployment.yaml` уже есть (`7cf223a`…`e1038ea`); не хватает образа в CI (`PROD-CI-IMAGES`) и auth (`CONFIG-RELOADER-AUTH`). Статус пересмотреть.)_
+- [ ] **CONFIG-RELOADER-SIDECAR** — K8s sidecar для ConfigMap-driven SIGHUP. Частично сделано INF-B (values-шейп есть, нет Go-кода sidecar + Dockerfile + template). ~1d _(2026-09-25, замечено на PROD-AUTH: запись устарела — `cmd/config-reloader`, `Dockerfile.config-reloader` и шаблон в `deployment.yaml` уже есть (`7cf223a`…`e1038ea`); не хватает образа в CI (`PROD-CI-IMAGES`) и auth (`CONFIG-RELOADER-AUTH`). Статус пересмотреть.)_ _(2026-09-28, PROD-CI-IMAGES: образ собирается в CI и публикуется `release.yml` в `ghcr.io/ipiton/amp-config-reloader` по тегу `v*`, `configReloader.image.repository` указывает туда. Остаётся: первый релиз (`PROD-RELEASE-V010`), `CONFIG-RELOADER-AUTH`, затем `enabled: true` в production values.)_
 - [x] ~~**HELM-PRODUCTION-VALUES**~~ — закрыто 2026-08-20 (INF-B), см. BACKLOG; остаточные гэпы чарта — в `TECH-DEBT.md` (`HELM-CHART-GAPS`).
 
 ### 3. Alertmanager Parity — Phase B (feature parity)
@@ -28,11 +28,12 @@
 
 ## WIP (Max 2)
 
-- [ ] **PROD-CI-IMAGES** (взят 2026-09-28) — GitHub Actions (build, vet, `test -race`, release-gate, govulncheck) + публикация образов `amp` и `amp-config-reloader` (multi-arch, semver + sha). Ветка `feature/prod-ci-images`, workspace `tasks/PROD-CI-IMAGES/`. Источник: BACKLOG «Production Readiness — блокеры», P0 Delivery.
+- [ ] **PROD-CI-IMAGES** (взят 2026-09-28) — GitHub Actions (build, vet, `test -race`, release-gate, govulncheck) + публикация образов `amp` и `amp-config-reloader` (multi-arch, semver + sha). Ветка `feature/prod-ci-images`, workspace `tasks/PROD-CI-IMAGES/`. Источник: BACKLOG «Production Readiness — блокеры», P0 Delivery. _(2026-09-28: `/implement`, `/testing` и `/write-doc` пройдены; PR ipiton/AMP#12 — CI зелёный, кроме ожидаемо красного `govulncheck`. Осталось `/end-task`, `/merge-to-main`.)_
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
+- 2026-09-28: по ходу PROD-CI-IMAGES в BACKLOG заведены `PROD-DEPS-VULN` (P0, 9 уязвимостей от govulncheck — следующий прод-блокер, до `PROD-RELEASE-V010`), `CI-E2E-HA-REQUIRED`, `CI-SUPPLY-CHAIN`, `HELM-RENDER-TEST-IN-GATE`, `GROUPING-TIMER-LOCK-FIX` (флейк `-race`, краснит required `gate` ~1/15). `PROD-HELM-CLEAN-CHECKOUT` закрыт в том же срезе. Branch protection на `main` (required checks — `docs/CI.md`) включает владелец репозитория вручную.
 - 2026-09-28: в WIP взят PROD-CI-IMAGES напрямую из BACKLOG (следующий по рекомендованному порядку прод-блокеров). Зацеплен с `PROD-HELM-CLEAN-CHECKOUT`: release-gate на чистом checkout CI упадёт без `helm dependency build` — решить на `/research`/`/spec`, втягивать ли его в срез.
 - 2026-09-28: PROD-RBAC-SCOPE закрыт (RBAC чарта = одна Role `list secrets`, ADR-012), WIP свободен. Следующий прод-блокер по рекомендованному порядку BACKLOG — `PROD-CI-IMAGES`. По ходу заведён `INVESTIGATION-K8S-TOOL-HELM` (BACKLOG). Замечено: `helm/amp/README.md` называет `lite` профилем по умолчанию, в `values.yaml` — `standard` (не правили). PHASE-6B-RUNBOOK-ENGINE, судя по коммиту `ea7900e` («close task, archive workspace»), закрыт на невлитой ветке `origin/claude/start-task-pyym8f` — в Queue числится открытым, проверить и влить.
 - 2026-09-28: в WIP взят PROD-RBAC-SCOPE напрямую из BACKLOG (следующий по рекомендованному порядку прод-блокеров), в обход верха Queue.

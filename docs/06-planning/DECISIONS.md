@@ -170,3 +170,30 @@
   - правило: глагол/ресурс добавляется в `rbac.yaml` в том же изменении, где код начинает его вызывать; иначе 403 (громко: WARN, пустой кэш discovery);
   - RBAC не фильтрует `list` по label selector — Role читает все secrets discovery-namespace; рекомендация — отдельный namespace для publishing-target secrets (`helm/amp/README.md` → RBAC);
   - investigation Kubernetes tool (pods, pods/log, events, deployments) чартом не обслуживается — `INVESTIGATION-K8S-TOOL-HELM`.
+
+## ADR-013: CI = `release-gate.sh` без изменений; образы — в GHCR, отдельным workflow по тегу
+- **Дата**: 2026-09-28
+- **Контекст**: CI не было совсем, образы, на которые ссылается чарт (`ipiton/amp-llm`, `registry.example.com/amp/config-reloader`), проект не публикует (`PROD-CI-IMAGES`, P0-блокер доставки). Критерий «можно релизить» уже существовал — `scripts/release-gate.sh`, — но на чистой машине он падал на `helm dependency build`, а ошибка была скрыта (`PROD-HELM-CLEAN-CHECKOUT`).
+- **Решение**:
+  - job `gate` запускает `release-gate.sh` как есть, без пересказа его шагов в YAML. Скрипт сам добавляет репозитории из `Chart.lock` во временный helm-конфиг (шаг `helm-deps`);
+  - два workflow: `ci.yml` (PR и push в `main`, только `contents: read`) и `release.yml` (только push тега `v*`, `packages: write` на одном job'е, workflow-level `permissions: {}`);
+  - реестр — GHCR (`ghcr.io/ipiton/amp`, `ghcr.io/ipiton/amp-config-reloader`), авторизация через `GITHUB_TOKEN`, без внешних секретов;
+  - multi-arch `linux/amd64,linux/arm64` кросс-компиляцией на build-платформе (`$BUILDPLATFORM` + `TARGETOS`/`TARGETARCH`), а не Go под QEMU;
+  - теги образа: `X.Y.Z`, `X.Y`, `sha-<short>`, `latest` только для релизов без pre-release суффикса;
+  - Go закреплён патчем: `toolchain go1.26.8` в `go.mod` и `golang:1.26.8-alpine` в Dockerfile;
+  - все сторонние actions — по полному SHA; инструменты (`actionlint`, `govulncheck`, `golangci-lint`, `helm`) — точными версиями;
+  - required-кандидаты: `gate`, `images (amp)`, `images (config-reloader)`, `actionlint`. `govulncheck` и `e2e-ha` запускаются, но не required.
+- **Обоснование**:
+  - один источник правды для гейта: локальный прогон и CI не расходятся, красный CI воспроизводится одной командой;
+  - `packages: write` в PR-workflow дал бы любому PR (в т. ч. правке самого workflow) токен на push образов;
+  - GHCR — рядом с репозиторием, не требует секретов и отдельного аккаунта; Docker Hub дал бы rate limits и внешний секрет;
+  - `govulncheck` красный на зависимостях, которые старше CI (9 находок: grpc, otel, x/net, x/text, pgx) — required сделал бы все PR красными до `PROD-DEPS-VULN`; `e2e-ha` на фиксированных ожиданиях без статистики на shared runner'ах.
+- **Отклонено**:
+  - один workflow с `if:` на push образов — права выдаются на job, а job'ы PR и тега в одном файле легко перепутать; разделение проверяется глазами за секунду;
+  - `workflow_dispatch` для публикации — публикация без тега даёт образ без версии;
+  - вендоринг сабчарта valkey вместо `helm repo add` — больше диффа; вернуться, если отказ `groundhog2k.github.io` станет частым.
+- **Следствие**:
+  - пакеты GHCR создаются private — после первого тега их нужно один раз перевести в Public (шаг в `PROD-RELEASE-V010`, `docs/CI.md`);
+  - branch protection с required checks включает владелец репозитория вручную; имена job'ов — контракт, переименование ломает protection;
+  - новый шаг гейта сразу попадает в CI; нестабильный тест в шагах `test`/`race` краснит required `gate` (`GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`);
+  - версию Go поднимать в трёх местах сразу: `toolchain` в `go.mod`, оба Dockerfile.
