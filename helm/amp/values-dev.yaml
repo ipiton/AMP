@@ -12,7 +12,7 @@ logLevel: debug
 # Container Image Configuration
 # ===============================
 image:
-  repository: ipiton/amp-llm
+  repository: ghcr.io/ipiton/amp
   tag: "latest"
   pullPolicy: Always
 

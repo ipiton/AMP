@@ -1,0 +1,9 @@
+# Both Dockerfiles (Dockerfile, Dockerfile.config-reloader) copy only go-app/.
+# Keep the rest of the repo -- above all .git and the agent worktrees under
+# .claude/ -- out of the build context; the image contents do not change.
+.git
+.claude
+tasks
+docs
+helm
+deploy

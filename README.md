@@ -2,6 +2,7 @@
 
 > An alert management runtime that implements upstream Alertmanager's core pipeline mechanics (routing, grouping, notify chain, HA) on the control plane, with a Kubernetes-Secret-driven data plane
 
+[![CI](https://github.com/ipiton/AMP/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ipiton/AMP/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ipiton/AMP)](https://goreportcard.com/report/github.com/ipiton/AMP)
 
@@ -24,8 +25,10 @@ Top-level benchmark and resource comparison numbers have been removed from the R
 ### Using Docker
 
 ```bash
-docker run -p 9093:9093 ghcr.io/ipiton/amp:latest
+docker run -p 8080:8080 ghcr.io/ipiton/amp:latest
 ```
+
+Images (`linux/amd64`, `linux/arm64`) are published to GHCR by tagged releases. No release has been tagged yet, so until the first one this command has nothing to pull; build locally with `docker build -t amp .` meanwhile. See [CI And Image Publishing](docs/CI.md).
 
 ### Using Helm
 
@@ -172,6 +175,7 @@ Both rollback and prune support `dryRun=true` preview mode without mutating runt
 - **[Migration from Alertmanager](docs/MIGRATION_QUICK_START.md)** - Controlled migration quick start
 - **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Feature parity matrix, control-plane/data-plane split, and known gaps
 - **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
+- **[CI And Image Publishing](docs/CI.md)** - What CI checks, how to reproduce it locally, how images are released
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
 
 Compatibility note: AMP's control plane (routing/grouping/dispatch/silences/inhibition/time-windows/HA) implements upstream Alertmanager's core mechanics, with a short list of documented, tracked gaps. Its data plane is a deliberately different, permanent design: delivery targets come from `amp.receiver`-scoped Kubernetes Secrets, not from `receivers[].*_configs`. Treat AMP as a behaviour-level replacement candidate that needs delivery targets provisioned separately — not a config-level drop-in. Config write API and `/history*` remain explicit follow-up work.
@@ -245,7 +249,8 @@ We welcome contributions! See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for commu
 2. Create a feature branch
 3. Make your changes
 4. Add tests
-5. Submit a pull request
+5. Run `./scripts/release-gate.sh` — CI runs the same gate ([docs/CI.md](docs/CI.md))
+6. Submit a pull request
 
 ## 📄 License
 

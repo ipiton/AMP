@@ -11,8 +11,8 @@
 #
 # Runs, in order: go build, golangci-lint, go test ./... -count=1, the
 # futureparity build tag's build+test, -race on the concurrency-heavy
-# packages (publishing/grouping/silencing/templating), helm lint+template
-# for both values overlays, a helm RBAC-scope check, and an amtool-compat
+# packages (publishing/grouping/silencing/templating), the chart's
+# dependency fetch, helm lint+template for both values overlays, a helm RBAC-scope check, and an amtool-compat
 # smoke (skipped, not failed, when Docker is unavailable). Every step
 # runs regardless of an earlier failure -- a step's own PASS/FAIL never
 # short-circuits the rest -- so a red run still tells you everything
@@ -120,6 +120,36 @@ step_race() {
 
   log "race-testing ${#pkgs[@]} package(s): ${pkgs[*]}"
   ( cd "$GO_APP_DIR" && go test -race -count=1 "${pkgs[@]}" )
+}
+
+# PROD-HELM-CLEAN-CHECKOUT: helm/amp/charts/ is gitignored, so a fresh clone
+# (CI) has no subchart and `helm dependency build` refuses a repository URL
+# that was never `helm repo add`-ed. Register every repository Chart.lock
+# pins, then build. A failure is a FAIL row of its own, not a log line the
+# helm steps below would otherwise bury under "missing in charts/".
+# The repos go into a throwaway repository config, not the caller's own
+# ~/.config/helm: a local gate run must not edit the developer's repo list.
+step_helm_deps() {
+  if ! command -v helm >/dev/null 2>&1; then
+    log "helm not found on PATH"
+    return 1
+  fi
+  local repo_dir rc
+  repo_dir=$(mktemp -d) || return 1
+  (
+    export HELM_REPOSITORY_CONFIG="$repo_dir/repositories.yaml"
+    export HELM_REPOSITORY_CACHE="$repo_dir/cache"
+    url="" n=0
+    while IFS= read -r url; do
+      [[ -z "$url" ]] && continue
+      n=$((n + 1))
+      helm repo add "amp-dep-${n}" "$url" >/dev/null || exit 1
+    done <<< "$(sed -n 's/^[[:space:]-]*repository:[[:space:]]*//p' "$HELM_CHART_DIR/Chart.lock" | sort -u)"
+    helm dependency build "$HELM_CHART_DIR" >/dev/null
+  )
+  rc=$?
+  rm -r "$repo_dir"
+  return "$rc"
 }
 
 step_helm_values() {
@@ -253,11 +283,7 @@ run_step "test" "go test ./... -count=1 (go-app)" step_test
 run_step "futureparity" "build+test, futureparity tag, cmd/server" step_futureparity
 run_step "race" "go test -race, publishing/grouping/silencing/templating" step_race
 
-if command -v helm >/dev/null 2>&1; then
-  if ! ( cd "$ROOT_DIR" && helm dependency build "$HELM_CHART_DIR" >/dev/null 2>&1 ); then
-    log "helm dependency build failed -- helm steps below will fail on the missing chart dependency"
-  fi
-fi
+run_step "helm-deps" "helm repo add (Chart.lock) + dependency build" step_helm_deps
 run_step "helm-dev" "lint + template, values-dev.yaml" step_helm_values values-dev.yaml
 run_step "helm-production" "lint + template, values-production.yaml" step_helm_values values-production.yaml
 run_step "helm-rbac" "RBAC scope: namespaced list-secrets only" step_helm_rbac

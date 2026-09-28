@@ -254,11 +254,8 @@ func TestCache_Concurrent(t *testing.T) {
 	assert.LessOrEqual(t, len(all), numGoroutines, "Should have at most numGoroutines silences")
 }
 
-// TestCache_LargeDataset tests performance with 1000 silences.
-func TestCache_LargeDataset(t *testing.T) {
-	cache := newSilenceCache()
-
-	// Add 1000 silences
+// largeSilenceSet returns 1000 silences, a third each active/pending/expired.
+func largeSilenceSet() []*silencing.Silence {
 	silences := make([]*silencing.Silence, 1000)
 	for i := 0; i < 1000; i++ {
 		var status silencing.SilenceStatus
@@ -272,14 +269,18 @@ func TestCache_LargeDataset(t *testing.T) {
 		}
 		silences[i] = newTestSilence(string(rune('a'+i)), status)
 	}
+	return silences
+}
 
-	// Rebuild with 1000 silences
-	start := time.Now()
+// TestCache_LargeDataset checks the cache's indexes stay correct at 1000
+// silences. Speed is measured by the Benchmark* functions below, not here:
+// wall-clock thresholds in a unit test (<1ms / <10ms) failed on ordinary
+// scheduler noise, with and without -race (BUGS.md
+// SILENCING-CACHE-PERF-ASSERT-FLAKY).
+func TestCache_LargeDataset(t *testing.T) {
+	cache := newSilenceCache()
+	silences := largeSilenceSet()
 	cache.Rebuild(silences)
-	rebuildDuration := time.Since(start)
-
-	// Verify rebuild completed quickly (<10ms)
-	assert.Less(t, rebuildDuration, 10*time.Millisecond, "Rebuild should be fast")
 
 	// Verify all added
 	all := cache.GetAll()
@@ -289,25 +290,39 @@ func TestCache_LargeDataset(t *testing.T) {
 	actives := cache.GetByStatus(silencing.SilenceStatusActive)
 	assert.InDelta(t, 333, len(actives), 1, "Should have ~333 active silences")
 
-	// Test Get performance
-	start = time.Now()
-	for i := 0; i < 1000; i++ {
-		cache.Get(string(rune('a' + i)))
+	// Every silence is reachable by ID
+	for _, s := range silences {
+		_, ok := cache.Get(s.ID)
+		assert.True(t, ok, "silence %q missing from ID index", s.ID)
 	}
-	getDuration := time.Since(start)
+}
 
-	// Should be <1ms for 1000 gets (O(1) lookups)
-	assert.Less(t, getDuration, 1*time.Millisecond, "1000 Gets should be <1ms")
+func BenchmarkCache_Rebuild1000(b *testing.B) {
+	cache := newSilenceCache()
+	silences := largeSilenceSet()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.Rebuild(silences)
+	}
+}
 
-	// Test GetByStatus performance
-	start = time.Now()
-	for i := 0; i < 100; i++ {
+func BenchmarkCache_Get1000(b *testing.B) {
+	cache := newSilenceCache()
+	silences := largeSilenceSet()
+	cache.Rebuild(silences)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.Get(silences[i%len(silences)].ID)
+	}
+}
+
+func BenchmarkCache_GetByStatus1000(b *testing.B) {
+	cache := newSilenceCache()
+	cache.Rebuild(largeSilenceSet())
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		cache.GetByStatus(silencing.SilenceStatusActive)
 	}
-	getByStatusDuration := time.Since(start)
-
-	// Should be <10ms for 100 GetByStatus
-	assert.Less(t, getByStatusDuration, 10*time.Millisecond, "100 GetByStatus should be <10ms")
 }
 
 // TestCache_EmptyCache tests operations on empty cache.

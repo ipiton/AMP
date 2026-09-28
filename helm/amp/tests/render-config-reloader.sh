@@ -109,7 +109,12 @@ echo "production values render the config file but NOT the sidecar:"
 # The sidecar stays disabled until a CI job publishes its image: pod readiness
 # requires all containers, so an unpullable sidecar would keep the pod out of the
 # Service and stall the rollout. The config FILE is useful on its own.
-helm template amp "${CHART_DIR}" -f "${CHART_DIR}/values-production.yaml" >"${WORK_DIR}/prod.yaml"
+# values-production.yaml ships no passwords (a `required` guard fails the
+# render until they are supplied) -- placeholders, as scripts/release-gate.sh
+# does.
+helm template amp "${CHART_DIR}" -f "${CHART_DIR}/values-production.yaml" \
+  --set postgresql.password=render-test-placeholder \
+  --set cache.auth.password=render-test-placeholder >"${WORK_DIR}/prod.yaml"
 assert_contains "${WORK_DIR}/prod.yaml" "amp-configfile" "config file rendered in production"
 assert_contains "${WORK_DIR}/prod.yaml" "AMP_CONFIG_FILE" "AMP_CONFIG_FILE set in production"
 assert_absent "${WORK_DIR}/prod.yaml" "name: config-reloader" "sidecar NOT enabled while its image is unpublished"

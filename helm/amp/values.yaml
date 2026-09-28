@@ -615,29 +615,6 @@ silencing:
   periodicResyncInterval: "5m"
 
 # ===============================
-# Config-reloader sidecar (values shape only — no template yet)
-# ===============================
-# Agreed values contract for a parallel track building the actual sidecar
-# (health-checked /health/reload, Prometheus metrics on 9091, distroless
-# non-root image) and its Deployment/template wiring. This section exists so
-# that track's templates land against a stable values shape; it deploys
-# nothing on its own while enabled stays false. See BACKLOG.md
-# CONFIG-RELOADER-SIDECAR.
-configReloader:
-  enabled: false
-  image:
-    repository: ""
-    tag: ""
-    pullPolicy: IfNotPresent
-  resources:
-    limits:
-      cpu: 100m
-      memory: 128Mi
-    requests:
-      cpu: 50m
-      memory: 64Mi
-
-# ===============================
 # Rootly Integration (Priority)
 # ===============================
 rootly:
@@ -819,19 +796,19 @@ configReloader:
   # Keep false until the sidecar image is published — see the image block below.
   enabled: false
 
-  # !! NO CI JOB BUILDS THIS IMAGE YET !!
+  # Built from `Dockerfile.config-reloader` and published by
+  # .github/workflows/release.yml on every v* tag (docs/CI.md), next to
+  # ghcr.io/ipiton/amp with the same version tag.
   #
-  # `Dockerfile.config-reloader` exists in the repo root but nothing publishes
-  # it, and this repository path is a PLACEHOLDER guess — it must be pointed at
-  # whatever the build pipeline actually produces.
-  #
-  # Until that image exists, do NOT set configReloader.enabled=true anywhere
-  # that matters: pod readiness requires ALL containers, so an unpullable
-  # sidecar leaves ContainersReady false, keeps the pod out of the Service
-  # endpoints and stalls the rollout — with a perfectly healthy amp container.
-  # Enabling hot reload would take the deployment down.
+  # The tag defaults to .Chart.AppVersion, and no release has been published
+  # yet (PROD-RELEASE-V010). Until one exists, do NOT set
+  # configReloader.enabled=true anywhere that matters: pod readiness requires
+  # ALL containers, so an unpullable sidecar leaves ContainersReady false,
+  # keeps the pod out of the Service endpoints and stalls the rollout — with a
+  # perfectly healthy amp container. Enabling hot reload would take the
+  # deployment down.
   image:
-    repository: registry.example.com/amp/config-reloader
+    repository: ghcr.io/ipiton/amp-config-reloader
     tag: ""            # defaults to .Chart.AppVersion
     pullPolicy: IfNotPresent
 
