@@ -22,7 +22,9 @@ profile: "standard"
 # Container Image Configuration
 # ===============================
 image:
-  repository: ipiton/amp-llm
+  repository: ghcr.io/ipiton/amp
+  # No 1.0.0 image exists: versions and the first release are aligned in
+  # PROD-RELEASE-V010. Set the tag of a published release until then.
   tag: "1.0.0"
   pullPolicy: Always
 
@@ -433,8 +435,10 @@ configFile:
       - name: default
 
 configReloader:
-  # FALSE until the sidecar image is published. Flip to true in the same change
-  # that adds the build job.
+  # FALSE until the sidecar image is published. The build job exists
+  # (.github/workflows/release.yml), but nothing has been released yet: flip
+  # to true only once the tag this chart resolves to is actually in GHCR
+  # (PROD-RELEASE-V010).
   #
   # Enabling this against an image that does not exist takes production DOWN
   # rather than degrading it: pod readiness requires all containers, so the
@@ -444,9 +448,8 @@ configReloader:
   enabled: false
 
   image:
-    # PLACEHOLDER: no CI job builds Dockerfile.config-reloader yet, so this tag
-    # does not exist. Point it at whatever the pipeline publishes.
-    repository: registry.example.com/amp/config-reloader
+    # Published by .github/workflows/release.yml alongside ghcr.io/ipiton/amp.
+    repository: ghcr.io/ipiton/amp-config-reloader
     tag: ""
     pullPolicy: Always
 
