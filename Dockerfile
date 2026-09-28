@@ -1,5 +1,10 @@
 # Multi-stage build for Alertmanager++ (Go)
-FROM golang:1.26-alpine AS builder
+#
+# The builder runs on the BUILD platform and cross-compiles for the target
+# (TARGETOS/TARGETARCH, set by buildx per --platform): a multi-arch build
+# then compiles Go natively instead of under QEMU emulation. The Go patch
+# version matches the `toolchain` line in go-app/go.mod -- bump them together.
+FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS builder
 
 RUN apk add --no-cache git make ca-certificates
 
@@ -18,8 +23,10 @@ ARG REVISION=unknown
 ARG BRANCH=unknown
 ARG BUILD_DATE=unknown
 ARG BUILDINFO_PKG=github.com/ipiton/AMP/internal/buildinfo
+ARG TARGETOS
+ARG TARGETARCH
 
-RUN CGO_ENABLED=0 go build -ldflags="-s -w \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w \
     -X ${BUILDINFO_PKG}.Version=${VERSION} \
     -X ${BUILDINFO_PKG}.Revision=${REVISION} \
     -X ${BUILDINFO_PKG}.Branch=${BRANCH} \
@@ -28,7 +35,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w \
     -o amp ./cmd/server
 
 # Runtime
-FROM alpine:3.19
+# Same Alpine branch as the golang:1.26.8-alpine builder.
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata && \
     adduser -D -u 10001 appuser

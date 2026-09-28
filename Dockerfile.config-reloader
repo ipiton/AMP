@@ -5,7 +5,11 @@
 # than on the application's alpine base. It needs no shell, no package manager,
 # no CA bundle for its own work (it talks to 127.0.0.1) and no writable
 # filesystem.
-FROM golang:1.26-alpine AS builder
+#
+# Builder on the BUILD platform, cross-compiling for TARGETOS/TARGETARCH -- see
+# the main Dockerfile. Version/revision are not baked in: the sidecar has no
+# version endpoint; the release workflow puts them in OCI labels instead.
+FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS builder
 
 WORKDIR /build
 
@@ -14,13 +18,12 @@ RUN go mod download
 
 COPY go-app/ ./
 
-ARG VERSION=dev
-ARG REVISION=unknown
-ARG BUILD_DATE=unknown
+ARG TARGETOS
+ARG TARGETARCH
 
 # CGO off so the binary runs on `static` — the smallest distroless base with no
 # libc at all.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -trimpath \
     -ldflags="-s -w" \
     -o config-reloader ./cmd/config-reloader
