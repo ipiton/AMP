@@ -31,6 +31,8 @@ docker run -d \
   ghcr.io/ipiton/amp:latest
 ```
 
+The image is published to GHCR by tagged releases; until the first release, build it locally (`docker build -t amp .`) and use `amp` as the image name. See [CI And Image Publishing](CI.md).
+
 ---
 
 ### Step 2: Update Prometheus
