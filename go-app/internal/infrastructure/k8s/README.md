@@ -243,7 +243,7 @@ export K8S_CLIENT_RETRY_BACKOFF=200ms
 
 ### ServiceAccount
 
-The service must run with a ServiceAccount that has permissions to list and get Secrets.
+The service must run with a ServiceAccount that can `list` Secrets in the discovery namespace. Publishing discovery calls only `ListSecrets`; `GetSecret` has no callers, so `get` is not granted. The Helm chart renders this Role itself (`helm/amp/templates/rbac.yaml`, see `helm/amp/README.md` → "RBAC", ADR-012). Add a verb in the same change that makes the code call it.
 
 **Minimum required RBAC:**
 
@@ -257,24 +257,24 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: amp-secrets-reader
+  name: amp-secrets-lister
   namespace: default
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["get", "list"]
-  # Optional: restrict to specific label selector
-  # resourceNames: []
+  verbs: ["list"]
+  # RBAC cannot filter `list` by label selector: this reads every Secret in
+  # the namespace. Keep publishing-target Secrets in a dedicated namespace.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: amp-secrets-reader-binding
+  name: amp-secrets-lister
   namespace: default
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: amp-secrets-reader
+  name: amp-secrets-lister
 subjects:
 - kind: ServiceAccount
   name: amp

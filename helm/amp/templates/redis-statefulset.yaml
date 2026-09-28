@@ -53,6 +53,8 @@ spec:
     spec:
       # Service Account
       serviceAccountName: {{ include "amp.serviceAccountName" . }}
+      # No K8s API access needed; the SA's discovery Role is for AMP only.
+      automountServiceAccountToken: false
 
       # Security Context (Pod-level)
       securityContext:

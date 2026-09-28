@@ -12,11 +12,12 @@
 # Runs, in order: go build, golangci-lint, go test ./... -count=1, the
 # futureparity build tag's build+test, -race on the concurrency-heavy
 # packages (publishing/grouping/silencing/templating), helm lint+template
-# for both values overlays, and an amtool-compat smoke (skipped, not
-# failed, when Docker is unavailable). Every step runs regardless of an
-# earlier failure -- a step's own PASS/FAIL never short-circuits the rest
-# -- so a red run still tells you everything else that's wrong. Exit code
-# is non-zero if ANY step failed; a summary table prints last either way.
+# for both values overlays, a helm RBAC-scope check, and an amtool-compat
+# smoke (skipped, not failed, when Docker is unavailable). Every step
+# runs regardless of an earlier failure -- a step's own PASS/FAIL never
+# short-circuits the rest -- so a red run still tells you everything
+# else that's wrong. Exit code is non-zero if ANY step failed; a summary
+# table prints last either way.
 #
 # Bash 3.2-compatible (macOS's stock /bin/bash, frozen at 3.2 for
 # licensing reasons) as well as any bash 4+/5+ on Linux CI: no
@@ -142,6 +143,55 @@ step_helm_values() {
   helm template amp "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets >/dev/null
 }
 
+# PROD-RBAC-SCOPE (ADR-012): the chart grants exactly what the code calls --
+# one namespaced Role with `list` on secrets, for publishing target discovery,
+# rendered only when the code builds a K8s client (profile=standard). Fails on
+# any ClusterRole/ClusterRoleBinding, any verb other than `list`, a Role in
+# lite, and a standard render WITHOUT its Role (a "fix" by deleting RBAC would
+# break discovery with 403s). Relies on the chart writing `verbs: [...]` on one
+# line; a multi-line `verbs:` fails the check instead of slipping past it.
+step_helm_rbac() {
+  if ! command -v helm >/dev/null 2>&1; then
+    log "helm not found on PATH"
+    return 1
+  fi
+  local placeholders="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder"
+  local failed=0 variant args expect_roles rendered count bad_verbs kind
+  for variant in default dev production lite; do
+    case "$variant" in
+      default)    args="";                                                            expect_roles=1 ;;
+      dev)        args="-f $HELM_CHART_DIR/values-dev.yaml";                          expect_roles=1 ;;
+      production) args="-f $HELM_CHART_DIR/values-production.yaml $placeholders";     expect_roles=1 ;;
+      lite)       args="--set profile=lite";                                          expect_roles=0 ;;
+    esac
+    # shellcheck disable=SC2086
+    if ! rendered=$(helm template amp "$HELM_CHART_DIR" $args 2>&1); then
+      log "helm-rbac[$variant]: render failed: $rendered"
+      failed=1
+      continue
+    fi
+    # Here-strings, not `printf | grep -q`: under pipefail, grep -q exiting on
+    # the first match SIGPIPEs printf and the pipeline reports failure.
+    if grep -Eq '^kind: Cluster(Role|RoleBinding)$' <<<"$rendered"; then
+      log "helm-rbac[$variant]: renders a ClusterRole/ClusterRoleBinding"
+      failed=1
+    fi
+    bad_verbs=$(grep -E '^[[:space:]-]*verbs:' <<<"$rendered" | grep -Ev '^[[:space:]-]*verbs: \["list"\]$')
+    if [[ -n "$bad_verbs" ]]; then
+      log "helm-rbac[$variant]: verbs other than [\"list\"]: $(printf '%s' "$bad_verbs" | tr -s ' \n' ' ')"
+      failed=1
+    fi
+    for kind in Role RoleBinding; do
+      count=$(grep -c "^kind: ${kind}\$" <<<"$rendered")
+      if [[ "$count" -ne "$expect_roles" ]]; then
+        log "helm-rbac[$variant]: expected $expect_roles kind: $kind, got $count"
+        failed=1
+      fi
+    done
+  done
+  return "$failed"
+}
+
 docker_available() {
   command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
 }
@@ -210,6 +260,7 @@ if command -v helm >/dev/null 2>&1; then
 fi
 run_step "helm-dev" "lint + template, values-dev.yaml" step_helm_values values-dev.yaml
 run_step "helm-production" "lint + template, values-production.yaml" step_helm_values values-production.yaml
+run_step "helm-rbac" "RBAC scope: namespaced list-secrets only" step_helm_rbac
 
 if docker_available; then
   run_step "amtool-compat" "real amtool CLI vs deploy/smoke stack" step_amtool_compat

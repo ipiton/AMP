@@ -16,7 +16,7 @@
   - Критерий: анонимный `POST /api/v2/silences` → 401 при включённом auth; тесты на middleware; раздел в `CONFIGURATION_GUIDE.md`.
   - Оценка: ~2d. Требует `/spec` (security).
 - [ ] **PROD-INGRESS-HARDENING** _(2026-09-25: auth в процессе появился — PROD-AUTH, `webConfig.existingSecret` в чарте; осталось решить, требовать ли его в `values-production.yaml`)_ — `helm/amp/values-production.yaml:337` включает Ingress на `/` без auth-аннотаций и allowlist. Зависит от PROD-AUTH: либо прод-профиль по умолчанию требует auth, либо Ingress выключен/закрыт (oauth2-proxy / basic-auth аннотации / `whitelist-source-range`). Плюс NetworkPolicy для самого AMP (сейчас есть только для postgres/redis). Оценка: ~0.5d.
-- [ ] **PROD-RBAC-SCOPE** — `helm/amp/templates/rbac.yaml:5-51`: `ClusterRole` `get/list/watch secrets,configmaps` + `ClusterRoleBinding`, создаётся при `serviceAccount.create=true` даже при `targetDiscovery.enabled: false`. Плюс namespaced Role с `create/update/patch secrets` (`rbac.yaml:63-74`). Компрометация пода = все секреты кластера.
+- [x] **PROD-RBAC-SCOPE** _(закрыт 2026-09-28, `tasks/archive/PROD-RBAC-SCOPE/`, ADR-012; одна Role `list secrets` в discovery-namespace при `standard` + `publishing.enabled`, ничего cluster-scoped, Redis/backup без токена SA, шаг `helm-rbac` в release-gate; cluster opt-in не делали — кодом не поддерживается)_ — `helm/amp/templates/rbac.yaml:5-51`: `ClusterRole` `get/list/watch secrets,configmaps` + `ClusterRoleBinding`, создаётся при `serviceAccount.create=true` даже при `targetDiscovery.enabled: false`. Плюс namespaced Role с `create/update/patch secrets` (`rbac.yaml:63-74`). Компрометация пода = все секреты кластера.
   - Сделать: namespaced read-only Role, только при `targetDiscovery.enabled`; cluster-scope — отдельный явный opt-in; убрать write-права, если не используются.
   - Критерий: `helm template` с дефолтами не рендерит ClusterRole; тест в release-gate.
   - Оценка: ~0.5d.
@@ -59,6 +59,10 @@
 - [ ] **PROD-LLM-ALERT-PATH-ISOLATION** — при `llm.enabled=true`: `EnrichmentModeManager.GetMode` захардкожен на `enriched` (`internal/core/services/enrichment_types.go`) ⇒ каждый алерт синхронно классифицируется LLM внутри `POST /api/v2/alerts` (таймаут 30s × `max_retries=3`, может превысить таймаут отправки Prometheus); `SimpleFilterEngine` дропает алерт при `severity=noise` или `confidence < 0.3` (`internal/core/services/filter_engine.go:90-97`) — решение LLM глушит алерт без выключателя. По умолчанию LLM выключен, поэтому P1, а не P0.
   - Сделать: классификация асинхронно/вне ingest-пути (или жёсткий бюджет времени на запрос); LLM-дроп — только за явным флагом (default off), дропнутые алерты — метрика + лог; настоящий переключатель enrichment mode.
   - Оценка: ~1.5d.
+
+### Находки PROD-RBAC-SCOPE (2026-09-28)
+
+- [ ] **INVESTIGATION-K8S-TOOL-HELM** — investigation Kubernetes tool (`go-app/internal/infrastructure/investigation/tools/kubernetes.go`: `pods` list/get, `pods/log` get, `events` list, `deployments` list) чартом не проводится: в `values.yaml`/`configmap.yaml` нет `investigation.tools.*`, включить можно только через `configFile`, и RBAC чарта этих прав не даёт (ADR-012: права — только под реальные вызовы). Namespace выбирает LLM-агент (параметр tool'а, произвольный). Сделать: values `investigation.tools.kubernetes.{enabled,namespaces}`, отдельная opt-in Role/RoleBinding на перечисленные namespace (read-only; `pods/log` — осознанно, логи могут содержать секреты), ограничение namespace в самом tool'е (allowlist, иначе агент получит 403 и будет гадать), строка в `helm-rbac` гейте. Оценка ~1d.
 
 ### Находки PROD-AUTH research (2026-09-25)
 
