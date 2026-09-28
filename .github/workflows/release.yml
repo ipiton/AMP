@@ -1,0 +1,77 @@
+# Publishes ghcr.io/ipiton/amp and ghcr.io/ipiton/amp-config-reloader
+# (linux/amd64 + linux/arm64) when a v* tag is pushed. The only workflow with
+# `packages: write`, kept separate from ci.yml so no pull_request run ever
+# holds that permission (ADR-013). Deliberately no workflow_dispatch: a tag
+# is the one way to publish.
+#
+# The build itself is the one ci.yml's `images` job proves on every PR;
+# this adds only the registry login, tags/labels and push.
+#
+# After the FIRST publish, GHCR creates both packages as private -- the
+# owner flips them to Public once in the package settings (docs/CI.md),
+# or `docker pull` without credentials fails.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+jobs:
+  publish:
+    name: publish (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: amp
+            file: Dockerfile
+            image: ghcr.io/ipiton/amp
+          - name: config-reloader
+            file: Dockerfile.config-reloader
+            image: ghcr.io/ipiton/amp-config-reloader
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # v1.2.3 -> 1.2.3, 1.2, sha-<short>; `latest` only for a non-pre-release
+      # tag. No bare major tag while on 0.x.
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ matrix.image }}
+          flavor: latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+      # VERSION/REVISION/BRANCH/BUILD_DATE feed the server's buildinfo
+      # (GET /api/v2/status versionInfo); the reloader Dockerfile declares
+      # none of them, so buildx ignores them there.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+          cache-from: type=gha,scope=${{ matrix.name }}
