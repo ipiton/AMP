@@ -152,3 +152,21 @@
   - Helm-probes по умолчанию переведены на `/-/healthy`/`/-/ready`;
   - config-reloader sidecar пока не умеет auth ⇒ чарт не рендерит его вместе с `webConfig` (`CONFIG-RELOADER-AUTH`);
   - путь к файлу читается из env и напрямую, мимо viper: иначе при отсутствии файла конфига (`CONFIG-MISSING-FILE-DROPS-ENV`) auth молча выключился бы.
+
+## ADR-012: RBAC чарта = фактические вызовы кода, без cluster-scope
+- **Дата**: 2026-09-28
+- **Контекст**: чарт при любых values (включая `lite`) выдавал SA AMP `ClusterRole` на чтение `secrets`/`configmaps` во всём кластере и namespaced `Role` с `create/update/patch` на них же (`PROD-RBAC-SCOPE`, P0 из аудита production readiness). Тем же SA с автомонтируемым токеном пользуются Redis и backup-поды. Код при этом делает один вызов — `Secrets(ns).List(labelSelector)` в одном namespace, и только при `profile: standard` + `publishing.enabled`.
+- **Решение**:
+  - одна `Role` + `RoleBinding` с `list` на `secrets` в `publishing.discovery.namespace` (по умолчанию — namespace релиза); `get`, `watch`, `configmaps`, `namespaces` и write-глаголы не выдаются;
+  - рендер только при `serviceAccount.create && serviceAccount.rbac.create && profile == "standard" && publishing.enabled` — зеркало условия создания K8s-клиента в `publishing_runtime.go`;
+  - ничего cluster-scoped ни при каких values;
+  - Redis и backup-поды не монтируют токен SA;
+  - мёртвые values `targetDiscovery.*`, `serviceAccount.rbac.crossNamespace` удалены;
+  - `scripts/release-gate.sh` (`helm-rbac`) проверяет форму RBAC на дефолте, dev, production и lite.
+- **Отклонено**:
+  - явный opt-in на cluster-scope (требование исходной записи BACKLOG) — код не умеет multi-namespace discovery, opt-in расширял бы поверхность без функциональности;
+  - не рендерить RBAC вовсе и документировать ручную выдачу — ломает дефолтный `standard`-инсталл (discovery получает 403).
+- **Следствие**:
+  - правило: глагол/ресурс добавляется в `rbac.yaml` в том же изменении, где код начинает его вызывать; иначе 403 (громко: WARN, пустой кэш discovery);
+  - RBAC не фильтрует `list` по label selector — Role читает все secrets discovery-namespace; рекомендация — отдельный namespace для publishing-target secrets (`helm/amp/README.md` → RBAC);
+  - investigation Kubernetes tool (pods, pods/log, events, deployments) чартом не обслуживается — `INVESTIGATION-K8S-TOOL-HELM`.
