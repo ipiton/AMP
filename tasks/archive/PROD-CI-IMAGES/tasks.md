@@ -143,10 +143,10 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
 
 ## Finalization (`/end-task`)
 
-- [ ] Все AC проверены или явно помечены «не проверено: причина»
-- [ ] `DONE.md` — запись
-- [ ] Workspace → `tasks/archive/PROD-CI-IMAGES/`
-- [ ] Ветка не `main`, `git status` чистый
+- [x] Все AC проверены или явно помечены «не проверено: причина»
+- [x] `DONE.md` — запись
+- [x] Workspace → `tasks/archive/PROD-CI-IMAGES/`
+- [x] Ветка не `main`, `git status` чистый
 
 ## Результаты
 
@@ -255,3 +255,16 @@ Research-прогону (PASS) повезло. Заведены в BUGS.md: `GRO
 - **`BUGS.md`**: `PUBLISHING-WARMUP-TEST-FLAKY` → Resolved; у grouping-бага — ссылка на задачу.
 - **`NEXT.md`**: статус WIP, заметка о новых задачах, пометка у `CONFIG-RELOADER-SIDECAR`.
 - `requirements.md` / `Spec.md` не менялись: отклонения реализации записаны выше («Отклонения от плана»), решения D1–D12 остались в силе.
+
+## Итоговый статус (`/end-task`, 2026-09-28)
+
+**DONE.** AC1–AC10 выполнены. Доказательства — в разделах `/implement`, `/testing` и `/write-doc` выше. Локальный полный гейт — PASS. В PR ipiton/AMP#12 зелёные все required-кандидаты и `e2e-ha`.
+
+Остаточные ограничения (не скрыты, у каждого есть владелец):
+
+- `govulncheck` красный — 9 предсуществующих уязвимостей → `PROD-DEPS-VULN`.
+- Образы не опубликованы, `release.yml` ни разу не запускался → первый тег и перевод пакетов GHCR в Public в `PROD-RELEASE-V010`. `image.tag: "1.0.0"` в `values-production.yaml` пока указывает на несуществующий тег.
+- Required checks не enforced, пока владелец не включит branch protection на `main` (`docs/CI.md`).
+- `gate` может флейкать ~1/15 → `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` (BUGS) / `GROUPING-TIMER-LOCK-FIX` (BACKLOG).
+- Supply chain (SBOM, cosign, Trivy, digest-пины, Dependabot, полный `-race`) → `CI-SUPPLY-CHAIN`. `e2e-ha` в required → `CI-E2E-HA-REQUIRED`. Рендер-тест чарта в гейт → `HELM-RENDER-TEST-IN-GATE`.
+- `configReloader.enabled: false` везде до первого релиза и `CONFIG-RELOADER-AUTH`.
