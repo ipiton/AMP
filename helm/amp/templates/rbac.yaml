@@ -1,94 +1,48 @@
-# RBAC for dynamic secrets management and target discovery
-{{- if .Values.serviceAccount.create -}}
+# RBAC for publishing target discovery (PROD-RBAC-SCOPE, ADR-012).
+#
+# Grants exactly what the code calls: `Secrets(namespace).List(labelSelector)`
+# in ONE namespace (go-app/internal/business/publishing/discovery_impl.go).
+# The K8s client exists only when publishing is enabled and profile=standard
+# (go-app/internal/application/publishing_runtime.go, initializePublishingRuntime);
+# otherwise nothing is rendered. No cluster scope, no write verbs: add a verb
+# here in the same change that makes the code call it.
+#
+# RBAC cannot filter `list` by label selector, so this Role reads every secret
+# of the discovery namespace. Keep publishing-target secrets in a dedicated
+# namespace (publishing.discovery.namespace) to keep the rest out of reach.
+#
+# `verbs` stays on one line: scripts/release-gate.sh (step_helm_rbac) checks it.
+{{- if and .Values.serviceAccount.create .Values.serviceAccount.rbac.create (eq .Values.profile "standard") .Values.publishing.enabled }}
+{{- $releaseNamespace := .Values.namespace | default .Release.Namespace }}
+{{- $discoveryNamespace := .Values.publishing.discovery.namespace | default $releaseNamespace }}
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "amp.fullname" . }}-secrets-reader
-  labels:
-    {{- include "amp.labels" . | nindent 4 }}
-    app.kubernetes.io/component: rbac
-rules:
-# Allow reading secrets with specific labels for publishing targets discovery
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "list", "watch"]
-  resourceNames: []
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "list", "watch"]
-  # Only secrets with our labels
-  # Note: resourceNames filter is applied at namespace level
-
-# Allow reading configmaps for configuration discovery
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch"]
-  resourceNames: []
-
-# Allow reading namespaces for cross-namespace target discovery (if enabled)
-{{- if .Values.targetDiscovery.crossNamespace }}
-- apiGroups: [""]
-  resources: ["namespaces"]
-  verbs: ["get", "list", "watch"]
-{{- end }}
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ include "amp.fullname" . }}-secrets-reader
-  labels:
-    {{- include "amp.labels" . | nindent 4 }}
-    app.kubernetes.io/component: rbac
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ include "amp.fullname" . }}-secrets-reader
-subjects:
-- kind: ServiceAccount
-  name: {{ include "amp.serviceAccountName" . }}
-  namespace: {{ .Values.namespace | default .Release.Namespace }}
-
----
-# Namespace-scoped role for more restricted access if preferred
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "amp.fullname" . }}-namespace-secrets
-  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  name: {{ include "amp.fullname" . }}-secrets-lister
+  namespace: {{ $discoveryNamespace }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: rbac
 rules:
-# Full access to secrets in the same namespace
 - apiGroups: [""]
   resources: ["secrets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-  resourceNames: []
-
-# Full access to configmaps in the same namespace
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-  resourceNames: []
-
+  verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "amp.fullname" . }}-namespace-secrets
-  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  name: {{ include "amp.fullname" . }}-secrets-lister
+  namespace: {{ $discoveryNamespace }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: rbac
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "amp.fullname" . }}-namespace-secrets
+  name: {{ include "amp.fullname" . }}-secrets-lister
 subjects:
 - kind: ServiceAccount
   name: {{ include "amp.serviceAccountName" . }}
-  namespace: {{ .Values.namespace | default .Release.Namespace }}
-
+  namespace: {{ $releaseNamespace }}
 {{- end }}

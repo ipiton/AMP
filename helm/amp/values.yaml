@@ -33,11 +33,13 @@ serviceAccount:
   create: true
   annotations: {}
   name: ""
-  # RBAC for secrets management
+  # RBAC for publishing target discovery (templates/rbac.yaml, ADR-012):
+  # one Role with `list` on secrets in publishing.discovery.namespace
+  # (default: the release namespace). Rendered only when the app actually
+  # talks to the K8s API: profile=standard and publishing.enabled. Set to
+  # false to manage the ServiceAccount's permissions yourself.
   rbac:
     create: true
-    # Allow cross-namespace target discovery
-    crossNamespace: false
 
 # ===============================
 # Pod Security and Resource Configuration
@@ -211,16 +213,6 @@ secrets:
   externalSecrets:
     enabled: false
     secretStore: ""  # External secret store name
-
-# ===============================
-# Target Discovery Configuration (disabled - using static publishers)
-# ===============================
-targetDiscovery:
-  enabled: false
-  crossNamespace: false
-  namespaces: []
-  labels: []
-  refreshInterval: "300s"
 
 # ===============================
 # Lite Profile Configuration (TN-96)
@@ -531,8 +523,6 @@ migration:
 monitoring:
   prometheusEnabled: true
   healthCheckInterval: 30
-
-# (duplicate targetDiscovery section removed)
 
 # ===============================
 # Alert Publishing Configuration

@@ -29,6 +29,8 @@ spec:
         spec:
           restartPolicy: OnFailure
           serviceAccountName: {{ include "amp.serviceAccountName" . }}
+          # No K8s API access needed; the SA's discovery Role is for AMP only.
+          automountServiceAccountToken: false
           securityContext:
             fsGroup: 999
             runAsNonRoot: true
