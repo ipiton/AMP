@@ -28,11 +28,12 @@
 
 ## WIP (Max 2)
 
-- (PROD-RBAC-SCOPE закрыт 2026-09-28, см. DONE.md)
+- [ ] **PROD-CI-IMAGES** (взят 2026-09-28) — GitHub Actions (build, vet, `test -race`, release-gate, govulncheck) + публикация образов `amp` и `amp-config-reloader` (multi-arch, semver + sha). Ветка `feature/prod-ci-images`, workspace `tasks/PROD-CI-IMAGES/`. Источник: BACKLOG «Production Readiness — блокеры», P0 Delivery.
 
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
+- 2026-09-28: в WIP взят PROD-CI-IMAGES напрямую из BACKLOG (следующий по рекомендованному порядку прод-блокеров). Зацеплен с `PROD-HELM-CLEAN-CHECKOUT`: release-gate на чистом checkout CI упадёт без `helm dependency build` — решить на `/research`/`/spec`, втягивать ли его в срез.
 - 2026-09-28: PROD-RBAC-SCOPE закрыт (RBAC чарта = одна Role `list secrets`, ADR-012), WIP свободен. Следующий прод-блокер по рекомендованному порядку BACKLOG — `PROD-CI-IMAGES`. По ходу заведён `INVESTIGATION-K8S-TOOL-HELM` (BACKLOG). Замечено: `helm/amp/README.md` называет `lite` профилем по умолчанию, в `values.yaml` — `standard` (не правили). PHASE-6B-RUNBOOK-ENGINE, судя по коммиту `ea7900e` («close task, archive workspace»), закрыт на невлитой ветке `origin/claude/start-task-pyym8f` — в Queue числится открытым, проверить и влить.
 - 2026-09-28: в WIP взят PROD-RBAC-SCOPE напрямую из BACKLOG (следующий по рекомендованному порядку прод-блокеров), в обход верха Queue.
 - 2026-09-25: PROD-AUTH закрыт (basic auth по upstream `--web.config.file`, ADR-011), WIP свободен. Следующий прод-блокер по рекомендованному порядку BACKLOG — `PROD-RBAC-SCOPE`, затем `PROD-CI-IMAGES`. Попутно созрел `PROD-SECURITY-MD` (auth теперь есть — SECURITY.md можно переписать).
