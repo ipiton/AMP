@@ -1,18 +1,40 @@
-# /implement
+---
+description: Implement a Solo Kanban task from its checklist.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - AskUserQuestion
+user-invocable: true
+---
 
-Use:
+# Implement
 
-- `skills/solo-kanban-core/SKILL.md`
-- `skills/solo-kanban-delivery/SKILL.md`
+Implement the active task from `tasks.md`.
 
-## Goal
+## Context
 
-Execute the current planned slice.
+Read requirements, research, spec, and tasks before editing code.
 
-## Do
+## Steps
 
-1. Read `requirements.md`, `Spec.md`, and `tasks.md`.
-2. Implement only the agreed slice.
-3. Update the checklist as milestones are completed.
-4. If implementation changes product/runtime truth, update planning artifacts in the same task.
-5. Report what is done and what remains before `/testing`.
+1. Confirm the current branch and dirty worktree.
+2. Work through `tasks.md` in order. For each step: write the code, run its `verify:` command, re-read the change against the rules, fix what you find.
+3. Keep diffs scoped to the active task.
+4. Prefer existing project patterns.
+5. Update checklist status as steps are completed or blocked.
+6. Run step-level verification where practical.
+7. Record deviations from `Spec.md` in `tasks.md` or `Spec.md`.
+8. Do not write test files here. They are written in `write-tests`, after `deep-review` returns `pass` (or when no deep-review is required). If the repository enforces the verdict with a hook, a test write here will be refused.
+9. For refactors, follow `docs/solo-kanban/agent-policies.md` § Refactoring Policy: no behavior change, one change type per branch, small commits.
+
+## Stop Conditions
+
+Stop if scope expands, requirements are unclear, repeated checks fail, or the implementation requires unplanned security/data/API changes.
+
+## Output
+
+Summarize changed files, completed checklist items, verification run, and next command: `deep-review` when required by the tier or chosen as discretionary, otherwise `write-tests`.

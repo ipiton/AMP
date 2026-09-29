@@ -1,6 +1,26 @@
 # DONE
 
+Закрытые срезы и проверенные итоги **текущего месяца**. Прошлые месяцы — в `archive/DONE-YYYY-MM.md`. Проверка «закрыт ли slug» читает этот файл **и** все архивы:
+
+```bash
+grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
+```
+
+| Архив | Период |
+|---|---|
+| `archive/DONE-2026-08.md` | 2026-08 |
+| `archive/DONE-2026-05.md` | 2026-05 |
+| `archive/DONE-2026-04.md` | 2026-04 |
+| `archive/DONE-2026-03.md` | 2026-03 |
+| `archive/DONE-2026-02.md` | 2026-02 |
+
 ## 2026-09
+
+- 2026-09-29 — (TASK / Process) **SOLO-KANBAN-UPGRADE** — процесс переведён с ручного форка Solo Kanban 1.0 на 1.1 (ADR-014).
+  - **Vendored + overlay:** фреймворк в `docs/solo-kanban/` (upstream v1.1.0, `d7645a1`), команды, навыки и шаблоны заменены upstream-версиями. `scripts/solo-kanban-sync.sh` синхронизирует их с upstream; он идемпотентен и отказывается работать при отсутствующем каталоге, пустом наборе, dirty upstream или небезопасном пути в `VERSION`. `WORKFLOW.md` переписан как AMP-overlay: пути, гейты, релизный процесс, отклонения — без `deploy`, обязательный pre-release `deep-review`, `DECISIONS.md` без ротации. `AGENTS.md` и `CLAUDE.md` выровнены. Команды `plan`/`write-doc`/`end-task` заменены на `plan-task`/`finalize`, добавлены `deep-review`, `qa-check`, `plan-improve`. `GEMINI.md` и `.gemini/` удалены.
+  - **Planning:** в `NEXT.md` появились Flow Rules и owner inbox (`MAIN-BRANCH-PROTECTION`). `DONE.md` разнесён по месяцам в `archive/DONE-YYYY-MM.md` без потерь: 102 записи до и после. Закрытые записи удалены из `NEXT`/`BUGS`/`TECH-DEBT`; 20 закрытий, которые были записаны только там, перенесены в архивы по дате. `BUGS`/`TECH-DEBT` получили формат записи 1.1, заведён `HELM-README-DEFAULT-PROFILE-DRIFT`.
+  - **Проверка:** дискреционный `deep-review` независимым субагентом дал pass-with-fixes (2 major — скрипт мог удалить vendored-набор, потеря записей TECH-DEBT; обе исправлены); `review-verdict.json` → `pass`. Повторный sync без изменений, негативные сценарии скрипта → rc=2, grep по старым командам/Gemini пуст, `git diff --check` чист. Go-код не менялся — гейты `go test`/`release-gate.sh` не требовались.
+  - Follow-ups в BACKLOG: `BACKLOG-LIVE-STATE-CLEANUP`, `SOLO-KANBAN-VERDICT-HOOK`, `OWNER-INBOX-SCRIPT`. Глобальные `~/.codex/skills` не обновлялись (вне scope). Ветка `docs/solo-kanban-upgrade`, workspace `tasks/archive/SOLO-KANBAN-UPGRADE/`.
 
 - 2026-09-29 — (TASK / Security, P0) **PROD-DEPS-VULN** — закрыты все находки `govulncheck`, у которых есть фикс. Было: 9 достижимых уязвимостей в 6 модулях (grpc, otel, otel/sdk, x/net, x/text, pgx/v5), job `govulncheck` красный и не required.
   - **Апгрейд (вариант B, без правок Go-кода):** grpc v1.77.0 → v1.83.2, otel (`otel`, `sdk`, `trace`, OTLP trace exporters) v1.39.0 → v1.44.0 (не 1.43: его требует grpc ≥ 1.83.1), pgx v5.7.6 → v5.9.2, `x/crypto` v0.44.0 → v0.56.0, `x/net` v0.47.0 → v0.58.0, `x/text` v0.31.0 → v0.41.0; всего 21 модуль с транзитивкой. `go`/`toolchain` не менялись, `go mod tidy` не запускали. Все версии прошли 7-дневный карантин (самая свежая — `x/crypto` v0.56.0, 2026-09-02).
@@ -10,6 +30,7 @@
   - **Осознанные ограничения:** CI на GitHub не прогонялся — по решению пользователя (PR не открывали; состояние CI-пайплайна пользователь считает непроверенным); required не enforced до branch protection; GO-2026-5932 будут показывать сканеры образов; `go.mod` не tidy (`GO-MOD-TIDY-CHECK`); у `govulncheck` нет `schedule` (добавлено в `CI-SUPPLY-CHAIN`).
   - Документация: `CHANGELOG.md` (`### Security`, выровнена запись PROD-CI-IMAGES), `docs/CI.md` (required, GO-2026-5932, `GOTOOLCHAIN` при более новом локальном Go). Follow-ups в BACKLOG: `GO-MOD-TIDY-CHECK`, пункт в `CI-SUPPLY-CHAIN`.
   - Ветка `bugfix/prod-deps-vuln`, workspace `tasks/archive/PROD-DEPS-VULN/`. ~0.3d.
+- 2026-09-28 — (BUG / Test) **SILENCING-CACHE-PERF-ASSERT-FLAKY** — найдено и исправлено на `/testing` PROD-CI-IMAGES: `TestCache_LargeDataset` (`go-app/internal/business/silencing/cache_test.go`) проверял скорость порогами по wall-clock (`1000 Gets < 1ms`, `100 GetByStatus < 10ms`, `Rebuild < 10ms`) и падал ~2/30 под `-race` и 1/30 без него. Пороги убраны из unit-теста, тест проверяет только корректность индексов (все 1000 по ID, ~333 active), скорость — `BenchmarkCache_{Rebuild,Get,GetByStatus}1000`. После: 30/30 с `-race` и без. Кандидат того же класса, не падавший в замерах и не тронутый: `manager_alert_test.go:416` (`< 5ms`).
 - 2026-09-28 — (TASK / Delivery, P0) **PROD-CI-IMAGES** — у проекта появился CI и путь публикации образов, на которые ссылается чарт. Было: `.github/` не существовало, `values-dev`/`values-production` ссылались на `ipiton/amp-llm`, config-reloader — на `registry.example.com/...`; ни то ни другое проект не публикует (прод-инсталл = ImagePullBackOff).
   - **`ci.yml`** (PR + push в `main`, `contents: read`): `gate` = `scripts/release-gate.sh` без изменений; `images (amp)`/`images (config-reloader)` — multi-arch `buildx` без push; `actionlint`; `govulncheck` и `e2e-ha` — запускаются, не required. **`release.yml`** (только тег `v*`, единственный с `packages: write`): `ghcr.io/ipiton/amp` и `ghcr.io/ipiton/amp-config-reloader`, `linux/amd64,arm64`, теги `X.Y.Z`/`X.Y`/`sha-<short>`/`latest` (без pre-release). Все actions — по SHA. ADR-013.
   - **Втянут `PROD-HELM-CLEAN-CHECKOUT`:** шаг `helm-deps` в гейте добавляет репозитории из `Chart.lock` во временный helm-конфиг перед `helm dependency build` — гейт работает на чистом checkout, ошибка видна отдельной строкой.
@@ -52,128 +73,3 @@
   - **Осознанные ограничения:** сама karma сквозняком НЕ запускалась — её образ в среде проверки не тянется (`ghcr.io` → `denied`); совместимость проверена протокольно и воспроизведением её алгоритма, в доке это сказано прямо. Вынесено в BACKLOG: `KARMA-RELEASE-GATE` (реальный прогон как шаг гейта, решение пользователя — в этот слайс не тянуть), `COMPAT-VERSION-CONFIG-KEY`, `STATUS-VERSIONINFO-CONTRACT`.
   - Попутно найдено и заведено, не скрыто: `PUBLISHING-WARMUP-TEST-FLAKY` (BUGS.md — чужой флейк под полным прогоном), `PARITY-GATE-DOES-NOT-GATE` (`make test-upstream-parity` гоняет сьют без его build-тега ⇒ ложное зелёное), `QUALITY-GATES-DIRTIES-TREE` (`make quality-gates` переписывает 6 чужих неотформатированных файлов).
   - Ветка `feature/karma-compat`, 5 коммитов. ~0.5d.
-
-## 2026-08
-
-- 2026-08-18 — (TASK / Platform) **AMP-PARITY** — Alertmanager full parity epic delivered. 29 task slices across 7 Phases: Phase 1 routing tree + evaluator (1.1–1.5), Phase 2 grouping + publishing (2.1–2.4), Phase 3 time intervals (3.1–3.3), Phase 4 routing prefix (4.1–4.4), Phase 5 config validation + reload (5.1–5.4), Phase 6 HA + clustering (6.1–6.5), Phase 7 publishers + docs (7.1–7.4). Features: `mute_time_intervals`/`active_time_intervals` (PARITY-B1), telegram+advanced publishers (PARITY-B3), `route-prefix` (PARITY-B6), Redis-based clustering (PARITY-C1). E2E HA smoke green. Final review identified 7 blockers + 4 Important; fix wave dispatched. Known deferred: wire-level webhook batching, per-target nflog dedup, per-chat telegram rate limit, routing metrics restoration, receivers: integration auto-provisioning, and 9 others — see BACKLOG «AMP-PARITY Follow-ups».
-- 2026-08-17 — (TASK / Platform) **RUNTIME-GAPS-SWEEP** — закрыты все 5 runtime-гэпов из BACKLOG.md, найденных при futureparity-выравнивании: json-тег `name` для `/api/v2/receivers`; value-aware `MatchesSilenceMatchers` (upstream-семантика, `service!="api"` больше не эквивалентен `service="api"`); `getOnly`-guard — 405 на не-GET/HEAD для status/receivers/groups/probes; `silencedBy/inhibitedBy/mutedBy` всегда `[]`; `GroupAlerts` берёт receiver из конфига и не группирует resolved. Futureparity/phase0-ожидания обновлены на новые контракты. Гейт зелёный. Task-workspaces DEBT-STAGE* архивированы.
-- 2026-08-17 — (TASK / Platform) **DEBT-CLOSURE-SWEEP** — закрытие всех открытых пунктов BUGS.md (3/3) и TECH-DEBT.md (8/8) + security-слайс, ветка `debt/stage1-security`, 20 коммитов. Security: WebSocket CheckOrigin whitelist (CSWSH), OTLP TLS by default, MANUAL-SQL-RISK (ORDER BY whitelist, JSONB-экранирование, + найденная позже инъекция label-ключа в sqlite ListAlerts). Качество: golangci-lint ~400→0 c зафиксированным `.golangci.yml`, futureparity-сьют 196 FAIL→0 (singleton-state в compat seam), README-cleanup 23 файлов. Consistency: SPLIT-BRAIN закрыт DB-first + rehydration для алертов и silences (silences вообще не имели БД-пути — терялись на рестарте); PARITY-A2 hot-reload inhibit_rules; nil-validator panic на /-/reload починен. Архитектурный долг: dedup-фильтр Rule 7 реализован, CORS middleware, SimplePublisher/мёртвый PostgresDatabase (915 строк)/pkg/core удалены, конверсии alert-DTO слиты в `core/alertconv` с единым fingerprint (два алгоритма ломали дедуп), GLOBAL-LOCK закрыт бенчмарком (~720K ingest/s, шардирование не нужно). Новые runtime-гэпы вынесены в BACKLOG.md «Runtime gaps». Гейт: build/vet/lint 0 issues, 42 пакета тестов зелёные, futureparity зелёный.
-
-**Wave 2 (2026-08-18):** wire-level group batching (upstream-v4 alerts-array POST per group×target, groupLabels populated), per-target nflog dedup (enqueue-confirmation caveat → FU-RECORDSENT-DELIVERY-CONFIRMATION), telegram per-chat rate limiter, publishing refresh/LRU race fixes (chronic TestRefreshNow flake root-caused), 11 micro-cleanups (typed matcher errors, GC/sync stats, dead-code deletion, nil-metadata guards, reconciliation-grace runtime validation, PagerDuty key relax, docker-skip guards).
-
-## 2026-05
-
-- 2026-05-08 — (TASK / Platform) **PHASE-6A-BUILTIN-TOOLS** — четыре built-in tools для investigation-агента: `prometheus_query_range` (PromQL через HTTP API с авто-окном ±15min от alert time через `context.Context`), `loki_query_range` (LogQL, ns→ISO timestamp), `kubernetes` (один tool с action-dispatch: list_pods/get_pod/get_events/get_logs/get_deployments) и `database_diagnostics` (read-only: active_queries/slow_queries/replication_lag/connection_stats через `stdlib.OpenDBFromPool` поверх существующего pgx-пула, `*sql.DB` хранится в `ServiceRegistry` и закрывается в `Shutdown`). Результат — JSON в `ToolResult.Content` для function calling. Wiring в `ServiceRegistry` через новый `investigation.tools.*` config-блок. ~7d. Тесты: `internal/core/investigation`, `internal/infrastructure/investigation/tools`, `internal/application` и `internal/business/silencing` зелёные. Preexisting fails задокументированы: `infrastructure/repository` падает на testcontainers (Docker недоступен), `business/publishing.TestEdgeCase_DuplicateMetricKeys` flaky при параллельном запуске (PASS изолированно).
-
-## 2026-04
-
-- 2026-04-24 — (TASK / Platform) **PHASE-5A-TAIL** — хвост PHASE-5A: `InvestigationConfig` в `config.go` (Enabled/WorkerCount/QueueSize/MaxRetries/RetryInterval/LLMTimeout/OnlyFiring) + viper defaults, `OnlyFiring` в `QueueConfig.Submit`, wiring через `r.config.Investigation.*`, секции `investigation:` в `config.yaml.example` и `helm/amp/values.yaml`. ~0.5d. Проверка: `go vet ./...` чист, `go test ./internal/config/... ./internal/core/services/... ./internal/infrastructure/investigation/...` зелёные.
-- 2026-04-23 — (TASK / Platform) **PHASE-5B-LLM-AGENT** — Agentic investigation loop с tool calling. ~5d _(closed by forge)_
-
-- 2026-04-23 — (TASK / Platform) **PARITY-A5-WEB-EXTERNAL-URL** — callback-ссылки в нотификациях. ~0.5d _(closed by forge)_
-
-- 2026-04-22 — (TASK / Platform) **PARITY-A4-ADVANCED-FILTERING** — `filter` query param для alerts и silences. ~3d _(closed by forge)_
-- 2026-04-17 — (TASK / Platform) **PARITY-A1-NOTIFICATION-TRIGGERING** — `group_interval`/`repeat_interval` таймеры не триггерят нотификации. ~3d _(closed by forge)_
-- 2026-04-16 — (TASK / Platform) **PUBLISHING-HEALTH-REFRESH-DRIFT** — health/refresh logic-level assertions стабилизированы. _(closed by forge)_
-- 2026-04-16 — (TASK / Platform) **PARITY-A3-EMAIL-PUBLISHER** — SMTP client + EmailPublisher в factory. ~2-3d _(closed by forge)_
-- 2026-04-16 — (TASK / Platform) **PARITY-A2-INHIBITION-PIPELINE** — InhibitionMatcher подключён в AlertProcessor pipeline. ~2d _(closed by forge)_
-
-## 2026-03-16
-
-- **REPOSITORY-FLAPPING-TRANSITIONS-DRIFT** — завершен как атомарный SQL + test-fixture fix без изменения публичного контракта `GetFlappingAlerts`.
-- В `go-app/internal/infrastructure/repository/postgres_history.go` добавлен тайбрейкер `id` в window function: `LAG(status) OVER (PARTITION BY fingerprint ORDER BY starts_at, id)` — детерминированный порядок для строк с одинаковым `starts_at`.
-- В `go-app/internal/infrastructure/repository/postgres_history_test.go` фикстура `TestGetFlappingAlerts_MultipleTransitions` исправлена: каждая из 4 строк получила уникальный `starts_at` (+10m каждая), `created_at` синхронизирован с `starts_at`, assertion исправлен с `>= 4` на `>= 3` (N строк → N−1 переходов).
-- Проверка scope: `go vet ./internal/infrastructure/repository/...` чист, `go build ./...` проходит; тесты требуют Docker (testcontainers) — pre-existing инфраструктурный блокер среды; `git diff --check` чист.
-- Ограничение: тест-запуск не подтверждён локально из-за отсутствия Docker в среде выполнения агента; изменения корректны по семантике и проверены `go vet` + сборкой. Workspace архивирован в `tasks/archive/REPOSITORY-FLAPPING-TRANSITIONS-DRIFT/`.
-
-## 2026-03-09
-- **GRAFANA-DASHBOARD-BRANDING-DRIFT** — завершен как narrow visible dashboard title cleanup, а не как full Grafana identity/provisioning rewrite.
-- В [alert-history-service.json](/Users/vit/Documents/Projects/AMP/grafana/dashboards/alert-history-service.json) top-level title обновлен с `AMP - Alert History Service` на `AMP - Operations Dashboard`; `uid = amp-alert-history`, filename и весь dashboard content ниже сознательно оставлены без изменений.
-- Проверка scope: targeted search по `AMP - Alert History Service|AMP - Operations Dashboard|amp-alert-history`, `jq '{title,uid,version}' grafana/dashboards/alert-history-service.json`, manual review против `docs/06-planning/BUGS.md` / `docs/06-planning/DECISIONS.md` / `README.md`, `git diff --check`.
-- Ограничение: identity-shaped residual по `uid` и filename сознательно не маскировался этим task id и вынесен отдельно в `GRAFANA-DASHBOARD-IDENTITY-DRIFT`. Workspace архивирован в `tasks/archive/GRAFANA-DASHBOARD-BRANDING-DRIFT/`.
-- **CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT** — завершен как narrow self-contained example-code alignment slice, а не как full rewrite examples policy или strict `pkg/core/interfaces` conformance pass.
-- В [custom-publisher/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-publisher/main.go) local `PublishingTarget` переведен с `webhook_url`-centric shape на current canonical field names `url`, `headers`, `filter_config`, `format`, `enabled`; `Publish(...)` теперь строит request через `target.URL` и честно применяет `target.Headers`, а sample target object в `main()` синхронизирован с новой local shape.
-- Проверка scope: targeted search по `WebhookURL|webhook_url`, manual review против `docs/CONFIGURATION_GUIDE.md` / archived `PHASE-4` spec / `examples/README.md`, example sanity review, `git diff --check`.
-- Ограничение: `examples/` остаются вне `go-app` module root, поэтому отдельного repo-local compile gate для этого slice нет; broader examples policy и strict `pkg/core/interfaces` rewrite сознательно оставлены вне scope. Workspace архивирован в `tasks/archive/CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT/`.
-- **SOURCE-EXAMPLES-HISTORICAL-DRIFT** — завершен как source-example narrative/integration cleanup slice, а не как full alignment `examples/custom-*.go` to runtime internals.
-- В [custom-classifier/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-classifier/main.go) и [custom-publisher/main.go](/Users/vit/Documents/Projects/AMP/examples/custom-publisher/main.go) убраны historical `Alert History Service` references из top intro и footer/integration blocks; classifier guidance сужен до generic AMP classification flow, а publisher guidance больше не учит obsolete inline `publishing.targets` / `webhook_url` / `filters` story и вместо этого ссылается на current `publishing.*` + Secret discovery docs.
-- Проверка scope: targeted marker scans по `examples/custom-*.go`, manual review против `docs/CONFIGURATION_GUIDE.md` / `docs/MIGRATION_QUICK_START.md` / archived `PHASE-4` spec, narrative sanity review, `git diff --check`.
-- Ограничение: local executable `custom-publisher` demo shape сознательно не переписывался; residual code-shape mismatch вынесен в `CUSTOM-PUBLISHER-EXAMPLE-CODE-SHAPE-DRIFT`. Workspace архивирован в `tasks/archive/SOURCE-EXAMPLES-HISTORICAL-DRIFT/`.
-- **EXAMPLES-HISTORICAL-DOC-DRIFT** — завершен как Kubernetes example contract cleanup slice, а не как полный sweep по `examples/**`.
-- В [pagerduty-secret-example.yaml](/Users/vit/Documents/Projects/AMP/examples/k8s/pagerduty-secret-example.yaml) и [rootly-secret-example.yaml](/Users/vit/Documents/Projects/AMP/examples/k8s/rootly-secret-example.yaml) examples приведены к canonical publishing Secret contract: `publishing-target=true`, `stringData.config` / `data.config`, generic `monitoring` namespace вместо historical `alert-history`, без legacy `target.json` и discrete secret-field shape.
-- Проверка scope: targeted marker scan по `examples/k8s`, manual review против `docs/CONFIGURATION_GUIDE.md` / `docs/MIGRATION_QUICK_START.md` / archived `PHASE-4` spec, YAML sanity review, `git diff --check`.
-- Ограничение: `.go` source examples сознательно оставлены вне scope; остаточный prose/integration drift вынесен в `SOURCE-EXAMPLES-HISTORICAL-DRIFT`. Workspace архивирован в `tasks/archive/EXAMPLES-HISTORICAL-DOC-DRIFT/`.
-- **HELM-SECONDARY-TEMPLATE-HISTORICAL-DRIFT** — завершен как narrow residual Helm template cleanup без повторного broad sweep по `helm/amp/templates/**`.
-- В [postgresql-poddisruptionbudget.yaml](/Users/vit/Documents/Projects/AMP/helm/amp/templates/postgresql-poddisruptionbudget.yaml) и [postgresql-service-headless.yaml](/Users/vit/Documents/Projects/AMP/helm/amp/templates/postgresql-service-headless.yaml) `tn-98` приведен к `Operational hardening baseline`, а в [postgresql-exporter-configmap.yaml](/Users/vit/Documents/Projects/AMP/helm/amp/templates/postgresql-exporter-configmap.yaml) убраны `150% observability`, `50+ Metrics` и `150% Quality Target` из annotation/banner wording без правок SQL queries, metric names/descriptions или template semantics.
-- Проверка scope: targeted marker scan, manual review против `README.md` / `docs/06-planning/DECISIONS.md` / `helm/amp/README.md`, `helm template amp-dev ./helm/amp -f helm/amp/values-dev.yaml --set profile=lite`, `helm template amp ./helm/amp -f helm/amp/values-production.yaml --set profile=standard`, `git diff --check`.
-- Ограничение: `postgresql-configmap.yaml` сознательно оставлен вне scope как отдельный operational prose review, но текущий marker scan по `helm/amp/templates/**` больше не показывает confirmed historical markers этого класса. Workspace архивирован в `tasks/archive/HELM-SECONDARY-TEMPLATE-HISTORICAL-DRIFT/`.
-- **SECONDARY-REPO-DOC-HISTORICAL-DRIFT** — завершен как первый docs hygiene slice в broader secondary-doc domain: Helm operator-facing assets в `helm/amp/**` синхронизированы с current `AMP` / `controlled replacement` truth без расширения в `examples`, `grafana` или `go-app/internal/**`.
-- В [helm/amp/DEPLOYMENT.md](/Users/vit/Documents/Projects/AMP/helm/amp/DEPLOYMENT.md), [helm/amp/values.yaml](/Users/vit/Documents/Projects/AMP/helm/amp/values.yaml), [helm/amp/values-dev.yaml](/Users/vit/Documents/Projects/AMP/helm/amp/values-dev.yaml), [helm/amp/values-production.yaml](/Users/vit/Documents/Projects/AMP/helm/amp/values-production.yaml) и выбранных PostgreSQL templates убраны stale `Alert History` / `Production-Ready` markers; hardcoded `llm.apiKey` defaults в values-файлах санитизированы.
-- Проверка scope: targeted marker scan, secret-pattern scan, manual review против `README.md` / `docs/06-planning/DECISIONS.md` / `helm/amp/README.md`, `helm dependency build helm/amp`, `helm template amp-dev ./helm/amp -f helm/amp/values-dev.yaml --set profile=lite`, `helm template amp ./helm/amp -f helm/amp/values-production.yaml --set profile=standard`, `git diff --check`.
-- Ограничение: repo-wide secondary docs cleanup этим не закрыт; остаток явно декомпозирован в `HELM-SECONDARY-TEMPLATE-HISTORICAL-DRIFT`, `EXAMPLES-HISTORICAL-DOC-DRIFT`, `GRAFANA-DASHBOARD-BRANDING-DRIFT`, `INTERNAL-README-HISTORICAL-DRIFT`. Workspace архивирован в `tasks/archive/SECONDARY-REPO-DOC-HISTORICAL-DRIFT/`.
-- **APPLICATION-ROUTER-CONTRACT-DRIFT** — active `internal/application` contract suite приведен в соответствие с restored runtime surface без расширения production router scope.
-- В `go-app/internal/application/router_contract_test.go` helper `newActiveContractMux(...)` теперь поднимает minimal honest reload-capable state через temporary config, deterministic `startTime` и real `ReloadCoordinator`, а old absent-surface assertion разделен на restored operational endpoints и still-absent historical surface.
-- Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application -run TestActiveRuntimeContract -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application/... -count=1`, `git diff --check`.
-- Ограничение: полный test scope пришлось подтверждать вне sandbox из-за `httptest.NewServer` bind restriction; это не residual code drift и не потребовало нового planning bug. Workspace архивирован в `tasks/archive/APPLICATION-ROUTER-CONTRACT-DRIFT/`.
-- **RUNTIME-SURFACE-RESTORATION** — active runtime surface восстановлен для `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups` и `POST /-/reload`, а public/docs truth синхронизирован с этим mounted contract.
-- В `go-app/internal/application/router.go` эти endpoints снова смонтированы через `StatusAPIHandler`, `ReceiversHandler`, `AlertGroupsHandler` и `ReloadHandler`; `ServiceRegistry` получил `startTime` и `ReloadCoordinator`, а `Config` — minimal `receivers` snapshot.
-- Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application/handlers -count=1`, `git diff --check`.
-- Ограничение: active application contract suite все еще держит старое ожидание “wide surface absent” и вынесен в отдельный bug `APPLICATION-ROUTER-CONTRACT-DRIFT`; full `futureparity` historical path по-прежнему остается отдельным residual gap. Workspace уже архивирован в `tasks/archive/RUNTIME-SURFACE-RESTORATION/`.
-- **REPO-TEST-MATRIX-RED** — завершен как stabilization slice: panic/fixture/config-level red matrix сужен до двух отдельных logic-level follow-up bugs.
-- Устранены duplicate metrics, sqlite/Redis test-config drift, nil-logger panics, часть SQL/test-fixture проблем и retryable-error groundwork; green подтвержден для `internal/application/handlers`, `internal/infrastructure/k8s`, `internal/infrastructure/migrations`, `internal/infrastructure/webhook`, `pkg/telemetry`, `pkg/httperror`, а вне sandbox также для `internal/infrastructure/inhibition` и `internal/infrastructure/publishing`.
-- Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./internal/application/handlers ./internal/infrastructure/k8s ./internal/infrastructure/migrations ./internal/infrastructure/webhook ./pkg/telemetry ./pkg/httperror -count=1`, вне sandbox `go test ./internal/infrastructure/inhibition ./internal/infrastructure/publishing -count=1`, `git diff --check`.
-- Ограничение: оставшиеся логические падения вынесены отдельно в `PUBLISHING-HEALTH-REFRESH-DRIFT` и `REPOSITORY-FLAPPING-TRANSITIONS-DRIFT`; workspace уже архивирован в `tasks/archive/REPO-TEST-MATRIX-RED/`.
-- **FUTUREPARITY-SUITE-DRIFT** — завершен узкий code/test slice для opt-in historical `futureparity`: missing helper/env/bootstrap seams возвращены в explicit build-tagged compatibility owner без расширения active runtime.
-- В `go-app/cmd/server/futureparity_compat.go` собран historical compatibility harness, а в `go-app/cmd/server/futureparity_compat_test.go` добавлен tagged smoke path для route registration и deterministic `configSHA256`.
-- Проверка scope: `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -tags=futureparity -run TestDoesNotExist -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -tags=futureparity -run 'TestFutureParityHarness|TestFutureParityConfigHash' -count=1`, `cd go-app && GOCACHE=$(pwd)/.cache/go-build go test ./cmd/server -count=1`, `git diff --check`.
-- Ограничение: full `go test ./cmd/server -tags=futureparity -count=1` остается red на residual historical/runtime mismatch и одном sandbox-limited subtest; это не скрыто и вынесено в `docs/06-planning/BUGS.md` как `FUTUREPARITY-HISTORICAL-RUNTIME-GAP`; workspace архивирован в `tasks/archive/FUTUREPARITY-SUITE-DRIFT/`.
-- **REPO-DOC-LICENSE-DRIFT** — завершен narrow docs-only cleanup для `CONTRIBUTING.md`, `examples/README.md`, `go-app/pkg/core/README.md` и `go-app/internal/infrastructure/llm/README.md`.
-- В этих четырех файлах убраны scoped license/status/branding/package-contract drift: contribution clause выровнен под `AGPL-3.0`, examples index очищен от stale repo story, `pkg/core` и `llm` README сужены до factual local contract.
-- Проверка scope: targeted drift-marker scan, manual review против `LICENSE` / `README.md` / `DECISIONS.md`, link/path sanity и `git diff --check` проходят; кодовые runtime gates не требовались, потому что slice не меняет код.
-- Ограничение: более широкий historical repo-doc drift вне этого four-file scope не скрыт и остается открытым в `docs/06-planning/BUGS.md` как `SECONDARY-REPO-DOC-HISTORICAL-DRIFT`; workspace архивирован в `tasks/archive/REPO-DOC-LICENSE-DRIFT/`.
-- **UI-PLACEHOLDER-REMOVAL** — active `/dashboard/silences`, `/dashboard/llm` и `/dashboard/routing` больше не возвращают placeholder body и закреплены как honest read-only страницы на текущем `/dashboard/*` surface.
-- Render path вынесен в `go-app/cmd/server/legacy_dashboard.go` с отдельным simple template stack `go-app/cmd/server/templates/legacy/*`; page-facing runtime summaries собираются через `go-app/internal/application/legacy_dashboard.go`.
-- Default non-tagged coverage добавлена в `go-app/cmd/server/legacy_dashboard_test.go`; scope подтвержден через `go test ./cmd/server`, `go test ./internal/application/...`, `go build ./cmd/server`, `git diff --check`.
-- Ограничение: opt-in historical `futureparity` suite и полный repo gate остаются вне scope и по-прежнему отражаются отдельно в `docs/06-planning/BUGS.md`; workspace архивирован в `tasks/archive/UI-PLACEHOLDER-REMOVAL/`.
-- **PHASE-3-STORAGE-HARDENING** — active bootstrap/storage path hardened: `ProfileLite` теперь поднимает `SQLiteDatabase`, `ProfileStandard` идет через `PostgresPool + goose + thin Postgres storage adapter`, а required storage failures больше не маскируются под pseudo-healthy startup.
-- Health plane переведен на state-aware contract: `/health|/healthz` отражают liveness, `/ready|/readyz` отражают readiness, `/-/healthy|/-/ready` сохраняют plain-text Alertmanager-compatible probes, optional degradations видны как `degraded`.
-- Planning/public docs и ADR синхронизированы с новым runtime truth; workspace архивирован в `tasks/archive/PHASE-3-STORAGE-HARDENING/`.
-- Проверка scope: `go test ./internal/application/... ./internal/database`, `go test ./internal/infrastructure -run SQLiteDatabase`, `go build ./cmd/server`, `git diff --check` проходят.
-- Ограничение: полный `go test ./...` остается red на preexisting проблемах вне scope текущего slice; актуальный список зафиксирован в `docs/06-planning/BUGS.md`.
-
-## 2026-03-08
-- **DOCS-HONESTY-PASS** — top-level public/docs honesty slice завершен: README, migration/compatibility docs и chart surface переведены на `controlled replacement` / `active-runtime-first` narrative.
-- Убраны direct overclaims про `drop-in replacement`, `100% API compatibility`, неподтвержденные benchmark/resource figures, конфликтный install story и top-level license mismatch в core public/docs scope.
-- `helm/amp/README.md` и `helm/amp/Chart.yaml` выровнены с repo-local source of truth (`./helm/amp`, AGPL-3.0, phased parity); residual deeper repo-doc cleanup вынесен в `BUGS.md` как `REPO-DOC-LICENSE-DRIFT`.
-- Проверка scope: targeted review, search pass по overclaim markers и `git diff --check` для touched docs/metadata files проходят; workspace архивирован в `tasks/archive/DOCS-HONESTY-PASS/`.
-
-- **ALERTMANAGER-REPLACEMENT-SCOPE** — truth-alignment slice завершен: source of truth для replacement story закреплен за active runtime, current claim сужен до `controlled replacement`.
-- Historical wide-surface parity вынесен из default `cmd/server` path под build tag `futureparity`, а active router contract зафиксирован отдельными tests.
-- Planning/public docs синхронизированы с active-runtime-first narrative; follow-up work вынесен в `DOCS-HONESTY-PASS`, `RUNTIME-SURFACE-RESTORATION` и `FUTUREPARITY-SUITE-DRIFT`.
-- Ограничение: opt-in `futureparity` suite остается red, а полный docs honesty pass по performance/license/install claims еще не завершен; workspace архивирован в `tasks/archive/ALERTMANAGER-REPLACEMENT-SCOPE/`.
-
-- **PHASE-4-PRODUCTION-PUBLISHING-PATH** — active runtime переведен с `SimplePublisher` stub на real publishing path через adapter/coordinator/queue и explicit `metrics-only` fallback.
-- Добавлены typed `publishing.*` config, lifecycle wiring в `ServiceRegistry`, queue/mode/discovery metrics, canonical Kubernetes Secret contract (`publishing-target=true` + `data.config`) и Helm/runtime env alignment.
-- Документация и production examples синхронизированы с runtime contract; workspace архивирован в `tasks/archive/PHASE-4-PRODUCTION-PUBLISHING-PATH/`.
-- Проверка scope: `go build ./cmd/server` и targeted tests для измененного publishing path проходят.
-- Ограничение: full repo gate (`go vet ./...`, `go test ./...`, `make quality-gates`) остается red на preexisting проблемах вне scope задачи; они зафиксированы в `docs/06-planning/BUGS.md`.
-
-- **PHASE-2: Bootstrap Consolidation** — `go-app/cmd/server/main.go` разделен на компоненты.
-- Внедрены `ServiceRegistry`, `Router` и пакет `handlers`.
-- Хранилища вынесены в `internal/infrastructure/storage/memory`.
-- Чистый `main.go` (~200 строк) обеспечивает запуск и управление жизненным циклом.
-- Проверка: `go build ./cmd/server` (успешно).
-
-- **SOLO-KANBAN-INIT** — Процесс Solo Kanban и planning-структура синхронизированы с текущим состоянием репозитория.
-- Созданы и приведены в актуальное состояние `WORKFLOW.md`, `docs/06-planning/`, `tasks/solo-kanban-init/` и шаблоны задач.
-- Выполненные и открытые элементы из `.plans` перенесены в `DONE.md`, `NEXT.md`, `BACKLOG.md`, `BUGS.md`, `ROADMAP.md`.
-
-## 2026-02-27
-- **PHASE-1: API Unstabbing** — активный runtime в `go-app/cmd/server/main.go` переведен на реальные handlers для core API.
-- В активном пути были сняты ключевые stubs для ingest/silence/runtime bootstrap, но historical parity narrative позже разошёлся с текущим active router и больше не считается source of truth без отдельной проверки по коду.
-- Проверка: `make test`, `make test-upstream-parity`, `go test ./cmd/server -run Phase0 -v`.
-
-## 2026-02-25
-- **PHASE-0: Baseline and Contract Lock** — route inventory и baseline contract tests добавлены для активного runtime.
-- Источник фиксации: `.plans/phase0-baseline-report.md`.
-

@@ -1,18 +1,31 @@
-# /testing
+---
+description: Run quality gates and record Solo Kanban verification evidence.
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+user-invocable: true
+---
 
-Use:
+# Testing
 
-- `skills/solo-kanban-core/SKILL.md`
-- `skills/solo-kanban-delivery/SKILL.md`
+Run the strongest practical checks for the active task.
 
-## Goal
+## Steps
 
-Run verification for the current slice and record the result honestly.
+1. Read `tasks.md`, `Spec.md`, and current diff.
+2. Choose checks based on changed files: unit tests, type checks, lint, build, integration tests, docs checks, or project quality gates.
+3. Run targeted checks first if full checks are expensive.
+4. Run full project checks when risk or repository policy requires it.
+5. Record failed checks and fixes.
+6. Confirm or refute behavioral findings that `deep-review` deferred to testing; record the outcome in `tasks/<slug>/review-findings.md`.
+7. Mark skipped checks with explicit reasons.
 
-## Do
+## Output
 
-1. Run the strongest realistic checks for the touched scope.
-2. Record green checks and red checks separately.
-3. Distinguish new failures from preexisting blockers.
-4. Update `tasks.md` with the testing result.
-5. Do not claim a green gate if it is not actually green.
+Report pass/fail per check, fixes applied, skipped checks, and the next command (`deploy` when the `R` signal requires it, otherwise `finalize`).
+
+If a gate fails twice in a row, stop and diagnose instead of retrying — see `docs/solo-kanban/agent-policies.md` § Retry Policy.

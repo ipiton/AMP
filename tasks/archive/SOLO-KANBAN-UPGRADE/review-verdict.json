@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "docs/solo-kanban-upgrade",
+  "commit": "01b1c13",
+  "reviewed_at": "2026-09-29",
+  "findings": { "blocker": 0, "major": 2, "minor": 4, "nit": 4 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

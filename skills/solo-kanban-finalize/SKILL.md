@@ -1,38 +1,38 @@
 ---
 name: solo-kanban-finalize
-description: Finalization Solo Kanban skill for /end-task and /merge-to-main. Use when closing a task, updating planning artifacts, archiving the workspace, and merging locally without hiding open blockers.
+description: Use for Solo Kanban closure steps: finalize and merge-to-main, including docs updates, follow-up capture, archive movement, and merge readiness.
 ---
 
-# solo-kanban-finalize
+# Solo Kanban Finalize
 
-## Purpose
+Use with `solo-kanban-core`.
 
-Finalization skill for:
+## Steps Covered
 
-- `/end-task`
-- `/merge-to-main`
+- `finalize [--phase=docs-only|--phase=closure-only]`
+- `merge-to-main`
 
-Use together with all preceding Solo Kanban skills.
+## Finalize
 
-## Step Semantics
+Default behavior runs both phases, on the task branch.
 
-### `/end-task`
+### Phase 1: Documentation
 
-- remove task from WIP
-- add final entry to `DONE.md`
-- update `BUGS.md` and `BACKLOG.md` if needed
-- archive workspace under `tasks/archive/`
-- record final status and remaining limitations
+Update documentation, changelog, release notes, or knowledge artifacts affected by the task. Put owner inbox markers on anything that now waits on the owner. Record skipped docs checks with reasons.
 
-### `/merge-to-main`
+### Phase 2: Closure
 
-- merge the task branch to `main` locally
-- do not push unless explicitly requested
-- keep any documented open issues explicit
+1. Confirm success criteria.
+2. Confirm checks passed or skipped checks have explicit reasons.
+3. Confirm the **Deep Review gate** when deep-review ran or was required (any `S`, any `M`, pre-release, or 3+ signals): `tasks/<slug>/review-verdict.json` says `"gate": "pass"`.
+4. Confirm every `assumed` design premise is resolved or carried as a risk.
+5. Move follow-ups from research, review, and testing into `BUGS.md`, `TECH-DEBT.md`, or `BACKLOG.md`. For a bundle, delete the parent and all member entries.
+6. Add outcome to `DONE.md` (current month section).
+7. Delete the task's WIP line from `NEXT.md` (do not comment it out). Update `ROADMAP.md` if a milestone moved.
+8. Move `tasks/<slug>/` to `tasks/archive/<slug>/`, including review artifacts and `evidence/`.
+9. Commit closure changes.
+10. Sync the task branch with the integration branch as the last step. In planning-file conflicts keep both sides' live entries and compare slug sets against the result; do a large planning cleanup as a separate commit on the task branch after the sync commit, never inside it.
 
-## Finalization Quality Bar
+## Merge
 
-- branch is not `main` before merge
-- task artifacts are complete
-- planning files reflect the actual outcome
-- unresolved gates are documented, not hidden
+Mechanics only: confirm the working tree is clean, the task is finalized, and the branch is up to date with the integration branch. Merge, push, and delete the branch using repository policy. Write no planning files. Stop on unsafe conflicts.
