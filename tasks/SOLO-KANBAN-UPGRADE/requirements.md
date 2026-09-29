@@ -24,7 +24,7 @@ branch: docs/solo-kanban-upgrade
 - **Signals:** `X`
   - `X` — затрагивает все агентские адаптеры (Claude-команды, Codex-навыки, `AGENTS.md`, `CLAUDE.md`), шаблоны задач и planning-файлы.
 - **Tier:** Standard
-- **Notes:** дифф > 200 строк, но почти весь объём — побайтовая копия upstream. Рукописная часть (overlay, planning) < 200 строк. `deep-review` — дискреционный, запускаем по рукописной части.
+- **Notes:** **явный override tier'а** (по таблице фреймворка дифф > 200 строк = Full): почти весь объём — побайтовая копия upstream. Рукописная часть (overlay, planning) < 200 строк. `deep-review` — дискреционный, запускаем по рукописной части.
 
 ## User Stories
 
@@ -50,6 +50,7 @@ branch: docs/solo-kanban-upgrade
 - Не делаем хук, который механически запрещает тесты без verdict (шаг 7 Upgrading — опционально, в BACKLOG).
 - Не трогаем глобальные `~/.codex/skills` и другие репозитории.
 - Не ротируем `DECISIONS.md` (см. Spec).
+- Не чистим закрытые (`- [x]`) пункты `BACKLOG.md` под правило live state: их ~60, часть закрытий записана только там. Отдельная задача `BACKLOG-LIVE-STATE-CLEANUP` в BACKLOG.
 
 ## Constraints
 

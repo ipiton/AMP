@@ -47,10 +47,10 @@ Full:        start-task -> research -> spec -> plan-task -> implement -> deep-re
 
 ## Гейты AMP
 
-`testing` в AMP означает, в порядке усиления:
+`testing` в AMP означает:
 
 1. Затронутые пакеты: `cd go-app && go vet ./<pkg>/... && go test ./<pkg>/...`.
-2. Быстрый гейт: `make -C go-app quality-gates-fast`.
+2. Быстрый гейт: `make -C go-app quality-gates-fast` — только `go fmt` + `go vet` по всему модулю; `go fmt` переписывает файлы, после него проверить `git status`.
 3. Перед `finalize` задачи с изменением Go-кода или чарта: `scripts/release-gate.sh` (build, golangci-lint, тесты, `-race`, helm lint/template, RBAC-scope, amtool-smoke).
 
 Плюс всегда: `git diff --check`, в диффе нет проглоченных ошибок (`_, _ :=`). Если гейт красный из-за уже существующих проблем — не скрывать: запись в `BUGS.md` и в итог задачи.

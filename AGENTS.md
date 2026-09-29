@@ -11,7 +11,7 @@ Source of truth, in order:
 3. `docs/06-planning/BUGS.md`
 4. the task workspace under `tasks/<TASK-ID>/`
 
-If these files disagree, follow the most current planning artifact and keep the mismatch explicit in the task docs.
+If these files disagree, the earlier item wins; `WORKFLOW.md` also wins over the vendored framework. Keep the mismatch explicit in the task docs.
 
 ## Language
 
@@ -39,7 +39,7 @@ Standard:    start-task -> research -> spec -> plan-task -> implement -> write-t
 Full:        start-task -> research -> spec -> plan-task -> implement -> deep-review -> write-tests -> testing -> finalize -> merge
 ```
 
-`deep-review` is mandatory for any `S`, any `M`, 3+ signals, and before every `v*` release tag. It runs before `write-tests` and writes `tasks/<TASK-ID>/review-verdict.json`. AMP has no `deploy` step (see `WORKFLOW.md`).
+`deep-review` is mandatory for the Full tier (any `S`, any `M`, 3+ signals, or a diff over ~200 lines; see `docs/solo-kanban/workflow.md` § Tiers) and before every `v*` release tag. It runs before `write-tests` and writes `tasks/<TASK-ID>/review-verdict.json`. AMP has no `deploy` step (see `WORKFLOW.md`).
 
 ## Branching
 

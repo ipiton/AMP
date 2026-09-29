@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sync the vendored Solo Kanban framework from an upstream checkout.
 #
-#   scripts/solo-kanban-sync.sh [upstream-dir]   (default: ~/Documents/Projects/solo-kanban)
+#   scripts/solo-kanban-sync.sh [--allow-dirty] [upstream-dir]
+#                                 (default upstream: ~/Documents/Projects/solo-kanban)
 #
 # Vendored files are upstream copies with one deterministic rewrite: framework
 # doc paths (docs/workflow.md, ...) point at docs/solo-kanban/. Never edit them
@@ -13,20 +14,33 @@
 # Idempotent: a second run on the same upstream commit changes nothing.
 set -euo pipefail
 
+ALLOW_DIRTY=0
+if [ "${1:-}" = "--allow-dirty" ]; then
+  ALLOW_DIRTY=1
+  shift
+fi
 UPSTREAM="${1:-$HOME/Documents/Projects/solo-kanban}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION_FILE="$ROOT/docs/solo-kanban/VERSION"
 
-if [ ! -f "$UPSTREAM/docs/workflow.md" ] || [ ! -d "$UPSTREAM/agents/claude/commands" ]; then
-  echo "error: not a solo-kanban checkout: $UPSTREAM" >&2
-  exit 2
-fi
+# A missing source dir would otherwise look like "everything removed upstream"
+# and delete the whole vendored set.
+for dir in docs agents/claude/commands agents/codex/skills templates/task; do
+  if [ ! -d "$UPSTREAM/$dir" ]; then
+    echo "error: not a solo-kanban checkout (no $dir/): $UPSTREAM" >&2
+    exit 2
+  fi
+done
 
 version="$(git -C "$UPSTREAM" describe --tags --always)"
 commit="$(git -C "$UPSTREAM" rev-parse --short HEAD)"
 if [ -n "$(git -C "$UPSTREAM" status --porcelain)" ]; then
+  if [ "$ALLOW_DIRTY" -ne 1 ]; then
+    echo "error: upstream has uncommitted changes; commit them or pass --allow-dirty" >&2
+    exit 2
+  fi
   commit="$commit-dirty"
-  echo "warning: upstream has uncommitted changes; VERSION records $commit" >&2
+  echo "warning: vendoring a dirty upstream; VERSION records $commit" >&2
 fi
 
 rewrite() { # <src> <dst>
@@ -44,13 +58,23 @@ previous() { # <key> -> files vendored under <key> by the last sync
 # to src-dir), then delete what the last sync vendored under <key> but upstream
 # no longer has. Prints the resulting name list.
 sync_set() {
+  set -e # runs inside $(...), where bash 3.2 drops errexit
   local key="$1" src="$2" dst="$3"
   shift 3
+  if [ "$#" -eq 0 ]; then
+    echo "error: upstream has no files for '$key'; refusing to delete the vendored set" >&2
+    exit 2
+  fi
   local name
   for name in "$@"; do
     rewrite "$src/$name" "$dst/$name"
   done
   for name in $(previous "$key"); do
+    case "$name" in /* | *..*)
+      echo "error: unsafe path in VERSION ($key): $name" >&2
+      exit 2
+      ;;
+    esac
     case " $* " in *" $name "*) ;; *)
       rm -f "$dst/$name"
       rmdir "$(dirname "$dst/$name")" 2>/dev/null || true
