@@ -1,50 +1,57 @@
 ---
 name: solo-kanban-planning
-description: Planning-phase Solo Kanban skill for /start-task, /research, /spec, and /plan. Use when creating requirements, research, specs, task checklists, and branch/workspace state for a new slice.
+description: Use for Solo Kanban discovery and design steps: start-task, research, spec, plan-task, and plan-improve.
 ---
 
-# solo-kanban-planning
+# Solo Kanban Planning
 
-## Purpose
+Use with `solo-kanban-core`.
 
-Planning-phase skill for:
+## Steps Covered
 
-- `/start-task`
-- `/research`
-- `/spec`
-- `/plan`
+- `start-task`
+- `research [--grounded]`
+- `spec`
+- `plan-task [--parallel]`
+- `plan-improve`
 
-Use together with `skills/solo-kanban-core/SKILL.md`.
+## Start Task
 
-## Step Semantics
+1. Read planning state, WIP, and the owner inbox. An unblocked owner action outranks Queue position 1.
+2. Select from Queue or use the user's explicit task. A `*-BUNDLE` slug starts its members as phases of one task.
+3. Check duplicates in active and archived task workspaces and in the closure journal with its archives.
+4. Move task to WIP and commit the claim on the integration branch (planning files only). Delete the Queue line.
+5. Create branch or worktree if repository policy expects it.
+6. Create `tasks/<slug>/requirements.md` from template.
+7. Classify the **Risk Profile**: signals from `{C, S, M, X, R}` and derived tier `{Lightweight, Standard, Full}`. See `docs/solo-kanban/workflow.md` `Step Matrix`.
+8. Decide research level. Research triggers overlap with risk signals — one or more signals usually implies level 2 or 3.
 
-### `/start-task`
+## Research
 
-- move selected task from Queue to WIP in `NEXT.md`
-- create task workspace
-- create or switch to task branch
-- note dirty worktree if present
+Research triggers: external integration, multiple options, security, performance, infrastructure, data migration, or uncertainty. These overlap with risk signals; a task with any `S` / `M` signal almost always needs at least level 2 research.
 
-### `/research`
+Use `--grounded` when claims must be evidence-backed. Separate facts, assumptions, and open questions.
 
-- gather repo context before implementation
-- create `research.md`
-- record findings, options, recommendation, and next-step implication
+When a wrong choice is expensive, generate options with independent read-only agents, one lens each (`minimal-diff`, `reuse-first`, `reversibility`, `operational`). Merge them yourself; record convergence as an observation, not a confirmation.
 
-### `/spec`
+Store raw measured data in `tasks/<slug>/evidence/`.
 
-- create `Spec.md`
-- fix scope, non-goals, key decisions, acceptance criteria, risks
-- use active code + planning artifacts as truth
+Output: mini section in requirements, light `research.md`, or full `research.md`.
 
-### `/plan`
+## Spec
 
-- create `tasks.md`
-- split work into vertical slices when needed
-- include implementation, testing, docs, and finalization checklist
+Required for Standard and Full tier tasks. Start with **Design Premises**: statements about reality the design depends on, each classed `measured` / `call-path-traced` / `code-read` / `assumed`; every `assumed` premise also goes to Open Questions or Rollout / Rollback. Then capture target design, contracts, data changes, security, invariants, edge cases, impact, rollout/rollback, observability, **deep review decision**, and open questions.
 
-## Planning Quality Bar
+In the Deep Review section, record mandatory triggers (`S`, `M`, pre-release, 3+ signals) and discretionary triggers (large diff without S/M, `C+X`, novel pattern, author doubt). Decision must be one of: `required` / `recommended, will run` / `recommended, skipped (reason: ...)` / `not applicable`.
 
-- `requirements.md` must exist before `/spec`
-- `Spec.md` must exist before `/plan`
-- tasks should be explainable as small, mergeable slices
+If spec work reveals new signals, update `requirements.md` Risk Profile before continuing — tier may escalate.
+
+## Plan Task
+
+Create `tasks.md` with phases, numbered steps, touched files, verification commands, dependencies, tests, docs, and Definition of Done. Every step gets a `verify:` command. Do not prescribe test-first modes; put test steps in a phase after implementation.
+
+Use `--parallel` only when write scopes are disjoint and each lane can be verified independently.
+
+## Plan Improve
+
+Refine the existing plan without resetting completed work. Preserve completed items, split vague steps, add missing verification, and record why the plan changed.

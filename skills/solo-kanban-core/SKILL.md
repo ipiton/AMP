@@ -1,13 +1,9 @@
 ---
 name: solo-kanban-core
-description: Core Solo Kanban rules for this repository. Use before any workflow step to load source-of-truth files, WIP limits, task workspace conventions, planning artifact roles, and guardrails.
+description: Use for any Solo Kanban task to load repository planning state, WIP limits, task workspace conventions, source-of-truth ordering, and guardrails.
 ---
 
-# solo-kanban-core
-
-## Purpose
-
-Shared repository skill for all AI agents working in this repo.
+# Solo Kanban Core
 
 Use this skill before any Solo Kanban workflow step.
 
@@ -15,46 +11,48 @@ Use this skill before any Solo Kanban workflow step.
 
 Read in this order:
 
-1. `WORKFLOW.md`
-2. `AGENTS.md`
-3. `CLAUDE.md` or `GEMINI.md` when relevant
-4. `docs/06-planning/NEXT.md`
-5. `docs/06-planning/BUGS.md`
-6. current task workspace under `tasks/`
+1. local repository instructions (`AGENTS.md`, `CLAUDE.md`, README, or equivalent);
+2. workflow policy (`docs/solo-kanban/workflow.md` or local equivalent);
+3. agent policies (`docs/solo-kanban/agent-policies.md` or local equivalent);
+4. artifact contract (`docs/solo-kanban/artifact-contract.md` or local equivalent);
+5. planning files (`NEXT.md`, `DONE.md`, `BUGS.md`, `TECH-DEBT.md`, `BACKLOG.md`, `ROADMAP.md`, `DECISIONS.md`);
+6. current task workspace under `tasks/<slug>/`.
 
 ## Core Rules
 
-- Use Russian for communication and planning artifacts.
-- Use English for `README.md`, public product docs, identifiers, and commits.
-- Respect WIP max `2`.
+- Keep WIP within the limit in `NEXT.md` § Flow Rules, default 2.
+- Check the owner inbox (`Blocked-by:`, `Waiting-on:`, `Trigger:` markers) before selecting work.
 - Prefer vertical slices.
-- Keep all planning state in git-visible files.
-- Do not work directly on `main` unless explicitly asked.
+- Keep planning state git-visible.
+- Classify the **Risk Profile** before selecting pipeline steps. Pipeline tier (Lightweight / Standard / Full) is selected from risk signals, not from time estimate. See `docs/solo-kanban/workflow.md` `Step Matrix`.
+- Do not silently widen scope. If risk signals are discovered mid-task, update `requirements.md` Risk Profile before continuing.
+- Do not hide failing gates. A gate that could not read its input is not a passing gate.
+- Keep planning files live: delete closed entries instead of commenting them out.
+- Read `DONE.md` and `DECISIONS.md` together with their monthly archives.
+- Delegate wide searches to read-only sub-agents; use `grep` for exact tokens.
+- Do not work on the integration branch unless explicitly allowed.
+- Respect existing repository patterns and validation commands.
 
-## Task Workspace Contract
+## Workspace Contract
 
 Active task workspace:
 
-- `tasks/<TASK-ID>/requirements.md`
-- `tasks/<TASK-ID>/research.md` when needed
-- `tasks/<TASK-ID>/Spec.md`
-- `tasks/<TASK-ID>/tasks.md`
+- `tasks/<slug>/requirements.md` — includes Risk Profile
+- `tasks/<slug>/research.md` when research level requires it
+- `tasks/<slug>/Spec.md` for Standard and Full tier tasks (skip for Lightweight)
+- `tasks/<slug>/tasks.md` before implementation
+- `tasks/<slug>/review-findings.md` and `review-verdict.json` when `deep-review` runs (mandatory for Full tier with `S` / `M` / pre-release)
+- `tasks/<slug>/evidence/` when a premise is `measured`
 
 Completed task workspace:
 
-- `tasks/archive/<TASK-ID>/`
+- `tasks/archive/<slug>/`
 
 ## Planning Roles
 
-- `NEXT.md` = queue and WIP
+- `NEXT.md` = Queue and WIP
 - `DONE.md` = completed slices
-- `BUGS.md` = open blockers and residual drift
-- `BACKLOG.md` = follow-up work
-- `DECISIONS.md` = product/runtime truth changes
-
-## Guardrails
-
-- Keep diffs minimal.
-- Do not hide failing gates.
-- Do not silently widen scope.
-- Do not push or rewrite history unless explicitly requested.
+- `BUGS.md` = broken behavior (a security gap is a bug)
+- `TECH-DEBT.md` = working but risky implementation, plus bundles
+- `BACKLOG.md` = future work
+- `DECISIONS.md` = durable decisions (current month; past months in `archive/`)
