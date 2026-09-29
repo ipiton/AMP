@@ -3,9 +3,9 @@
 # `packages: write` (ADR-013).
 #
 # Required checks for branch protection (docs/CI.md): gate,
-# images (amp), images (config-reloader), actionlint. govulncheck and
-# e2e-ha run on every PR but are not required yet -- see docs/CI.md for
-# when each one becomes required.
+# images (amp), images (config-reloader), actionlint, govulncheck.
+# e2e-ha runs on every PR but is not required yet -- see docs/CI.md for
+# when it becomes required.
 #
 # Every third-party action is pinned to a full commit SHA; the trailing
 # comment names the release it resolves to.
@@ -91,8 +91,11 @@ jobs:
           cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
-  # Not required until PROD-DEPS-VULN clears the known findings: a red
-  # result here is expected and honest, not masked by continue-on-error.
+  # Required. Fails only on vulnerabilities reachable from our code; a
+  # new advisory can turn a PR red that did not touch dependencies, and
+  # the fix is a separate upgrade PR, not continue-on-error. Module-level
+  # entries without a fix (GO-2026-5932, x/crypto/openpgp) are listed but
+  # do not affect the exit code.
   govulncheck:
     runs-on: ubuntu-latest
     timeout-minutes: 15
