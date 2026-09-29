@@ -3,7 +3,7 @@ package routing
 // alertmanager-parity wave-5 item FU-GLOB-DEFAULT-VALUES.
 //
 // infraroute.GlobalConfig.GroupBy/GroupWait/GroupInterval/RepeatInterval
-// were dropped by the TN-137 dedup (3f8d69d) when this package's local
+// were dropped by the TN-137 dedup (449ae21) when this package's local
 // GlobalConfig (which had them) was deleted in favor of the canonical
 // infrastructure/routing type (which didn't). This restores them as a
 // fallback layer inheritGroupBy/inheritDuration consult BELOW parent-route

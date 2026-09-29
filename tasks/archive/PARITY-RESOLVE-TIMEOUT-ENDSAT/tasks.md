@@ -69,7 +69,7 @@
 - **T9, негативная проверка:**
   - Вариант 1, штамповка в сторе выключена: краснеют 5 тестов стора и 2 теста `application` (reload и rehydration). HTTP-тест остаётся зелёным, и это ожидаемо: защитный фолбэк `ToGettableAlert` (`updatedAt + 5m`) даёт то же значение. Защита в два слоя, каждый слой покрыт своим тестом.
   - Вариант 2, исходное поведение целиком (без штамповки и со старым фолбэком): краснеют `TestToGettableAlert_EmptyEndsAtFallback` и HTTP-тест `…PostWithoutEndsAt_ServesResolveTimeout`.
-  - Код восстановлен, диф с коммитом `ba8aac6` пуст.
+  - Код восстановлен, диф с коммитом `e2035f4` пуст.
 - **T10.** Существующие тесты править не пришлось: `go test -race` по `alertconv`, `storage/memory` и `internal/application/...` зелёный.
 - **Отложено на `/testing`:** T11 (полный `go test ./...`, `futureparity`, `git diff --check`) и T12 (живая проверка).
 

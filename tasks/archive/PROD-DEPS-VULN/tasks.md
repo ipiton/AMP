@@ -80,12 +80,12 @@
 - I2: `go build`, `go vet` — OK; `govulncheck@v1.8.0 ./...` → exit 0, «affected by 0 vulnerabilities»; `-show verbose`: Symbol и Package пусто, Module — только GO-2026-5932; `go mod verify` — all modules verified.
 - I4: `actionlint@v1.7.12` — чисто.
 - I5: прочих упоминаний «govulncheck красный» в `docs/CI.md` не осталось. Вне `docs/CI.md`: запись PROD-CI-IMAGES в `CHANGELOG.md` `[Unreleased]` (строка 19) говорит «govulncheck is red… (`PROD-DEPS-VULN`)», правится на W1. `SECURITY.md:131` упоминает govulncheck нейтрально, править не нужно.
-- Коммиты: `0194249` (`fix(deps)`), `2229973` (`ci:`).
+- Коммиты: `4def6ad` (`fix(deps)`), `90adada` (`ci:`).
 - Замечено, вне скоупа: `docs/CI.md` «Go Version» утверждает, что локальный Go с `GOTOOLCHAIN=auto` скачает `go1.26.8`. Это верно, только если локальный Go старше. Более новый локальный (1.27.1 на этой машине) используется как есть, и тогда `govulncheck` проверяет stdlib другой версии, не той, что в CI. Решить на `/write-doc`: одна фраза или follow-up.
 
 **/write-tests (2026-09-29)** — отдельно не запускался. Решение из плана в силе: новых тестов нет, поведение кода не менялось (0 строк Go). Регрессию ловят существующие тесты (ниже) и `govulncheck` в required.
 
-**/testing (2026-09-29)**, HEAD `22028d6`, `GOTOOLCHAIN=go1.26.8`, Docker (OrbStack) поднят.
+**/testing (2026-09-29)**, HEAD `bd11794`, `GOTOOLCHAIN=go1.26.8`, Docker (OrbStack) поднят.
 
 Зелёные:
 - T1 `scripts/release-gate.sh`: 9 из 10 шагов PASS с первого прогона (build 12s, lint 52s, test 90s, futureparity 20s, helm-deps/dev/production/rbac, amtool-compat 105s). Шаг `race` — см. «Красные». Повторный прогон шага `race` (тот же `go test -race -count=1` по тем же 7 пакетам) — все `ok`, exit 0.
@@ -96,7 +96,7 @@
 - `govulncheck` / `actionlint` — см. /implement выше.
 
 Красные — только предсуществующее:
-- T1, шаг `race`: `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (`distributed_timer_ownership_test.go:169`, «expected 1, actual 2») — это `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` из BUGS.md, симптом тот же. Отделено от апгрейда замером `go test -race -count=30 -run '^…OnlyLockWinnerFires$' ./internal/infrastructure/grouping/`: ветка `22028d6` — **0/30**, чистый `main` `5e5f4db` — **2/30** (как в BUGS.md: 2/30 на `41b8c28`). Апгрейд пакет `grouping` не затрагивает (redis/miniredis не поднимались). Не регресс, не чинили (скоуп — `GROUPING-TIMER-LOCK-FIX`).
+- T1, шаг `race`: `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (`distributed_timer_ownership_test.go:169`, «expected 1, actual 2») — это `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` из BUGS.md, симптом тот же. Отделено от апгрейда замером `go test -race -count=30 -run '^…OnlyLockWinnerFires$' ./internal/infrastructure/grouping/`: ветка `bd11794` — **0/30**, чистый `main` `9f54424` — **2/30** (как в BUGS.md: 2/30 на `8bca192`). Апгрейд пакет `grouping` не затрагивает (redis/miniredis не поднимались). Не регресс, не чинили (скоуп — `GROUPING-TIMER-LOCK-FIX`).
 
 Не проверено:
 - T5 CI на PR — **отложен по решению пользователя (2026-09-29): PR не открываем.** Jobs `gate`/`images`/`actionlint`/`govulncheck`/`e2e-ha` проверены только локальными эквивалентами (macOS, OrbStack). Первый прогон на GitHub-раннере будет на push в `main` после `/merge-to-main`: `ci.yml` срабатывает на `push: branches: [main]`, если `main` запушат. Остаточный риск: `govulncheck` в CI ещё ни разу не был зелёным, а Linux-раннер и актуальная на момент прогона vuln DB могут дать другой результат. Проверить после мержа и push.

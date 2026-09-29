@@ -1,6 +1,6 @@
 # Research: PROD-DEPS-VULN
 
-Дата: 2026-09-29. Эксперименты — в отдельном detached worktree от `dd04fc5` (удалён после research), toolchain принудительно `GOTOOLCHAIN=go1.26.8` (как `toolchain` в `go-app/go.mod` и `go-version-file` в CI; локальный `go` — 1.27.1, без форса результаты могли бы разойтись с CI).
+Дата: 2026-09-29. Эксперименты — в отдельном detached worktree от `d64eba3` (удалён после research), toolchain принудительно `GOTOOLCHAIN=go1.26.8` (как `toolchain` в `go-app/go.mod` и `go-version-file` в CI; локальный `go` — 1.27.1, без форса результаты могли бы разойтись с CI).
 
 ## 1. Исходное состояние (подтверждено)
 

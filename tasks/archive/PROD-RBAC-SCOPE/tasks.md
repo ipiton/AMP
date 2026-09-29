@@ -93,7 +93,7 @@
 
 ### `/testing` (2026-09-28)
 
-Полный `scripts/release-gate.sh` на рабочем дереве ветки (HEAD = `main` `e3c9b27` + незакоммиченные изменения задачи), `/bin/bash` 3.2 (macOS), Docker доступен, `helm/amp/charts/` собран `helm dependency build`:
+Полный `scripts/release-gate.sh` на рабочем дереве ветки (HEAD = `main` `a6474c0` + незакоммиченные изменения задачи), `/bin/bash` 3.2 (macOS), Docker доступен, `helm/amp/charts/` собран `helm dependency build`:
 
 | Шаг | Статус | Время |
 |---|---|---|

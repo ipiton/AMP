@@ -134,7 +134,7 @@ Docker Compose: redis + postgres + 2 реплики AMP, сборка образ
 
 ## 10. Базовая линия release-gate
 
-Локальный прогон `./scripts/release-gate.sh` на `main`@`41b8c28` (macOS arm64, go1.27.1, docker запущен), 2026-09-28: **PASS, 487 s**.
+Локальный прогон `./scripts/release-gate.sh` на `main`@`8bca192` (macOS arm64, go1.27.1, docker запущен), 2026-09-28: **PASS, 487 s**.
 
 | Шаг | Статус | Время |
 |---|---|---|
