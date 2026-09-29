@@ -29,7 +29,7 @@ Runs on the same pull request cancel each other; runs on `main` do not.
 
 ### Go Version
 
-`go-app/go.mod` carries `toolchain go1.26.8`. `setup-go` reads it in CI, and a local Go with `GOTOOLCHAIN=auto` (the default) downloads the same patch release. The image builders use `golang:1.26.8-alpine`. Bump all three together.
+`go-app/go.mod` carries `toolchain go1.26.8`. `setup-go` reads it in CI. A local Go older than that, with `GOTOOLCHAIN=auto` (the default), downloads the same patch release. A newer local Go is used as is, so run the checks with `GOTOOLCHAIN=go1.26.8` to match CI: `govulncheck` also reports standard library vulnerabilities, and those depend on the Go version. The image builders use `golang:1.26.8-alpine`. Bump all three together.
 
 ## Running It Locally
 

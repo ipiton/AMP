@@ -60,8 +60,8 @@
 
 ## Documentation (`/write-doc`)
 
-- [ ] **W1.** `CHANGELOG.md` `[Unreleased]`: новая секция `### Security` (её сейчас нет, поставить первой). `PROD-DEPS-VULN`: 9 reachable GO-ID + module-level fix, таблица «модуль: было → стало» для прямых зависимостей, `govulncheck` required, остаточный GO-2026-5932. Без breaking changes.
-- [ ] **W2.** Проверить другие упоминания «govulncheck не required / красный» вне `docs/CI.md`: `README.md`, `docs/MIGRATION_QUICK_START.md`, `SECURITY.md` (`grep -rn govulncheck`). Выровнять только фактически неверные.
+- [x] **W1.** `CHANGELOG.md` `[Unreleased]`: новая секция `### Security` (её сейчас нет, поставить первой). `PROD-DEPS-VULN`: 9 reachable GO-ID + module-level fix, таблица «модуль: было → стало» для прямых зависимостей, `govulncheck` required, остаточный GO-2026-5932. Без breaking changes.
+- [x] **W2.** Проверить другие упоминания «govulncheck не required / красный» вне `docs/CI.md`: `README.md`, `docs/MIGRATION_QUICK_START.md`, `SECURITY.md` (`grep -rn govulncheck`). Выровнять только фактически неверные.
 
 ## Finalization (`/end-task`)
 
@@ -100,3 +100,11 @@
 
 Не проверено:
 - T5 CI на PR — **отложен по решению пользователя (2026-09-29): PR не открываем.** Jobs `gate`/`images`/`actionlint`/`govulncheck`/`e2e-ha` проверены только локальными эквивалентами (macOS, OrbStack). Первый прогон на GitHub-раннере будет на push в `main` после `/merge-to-main`: `ci.yml` срабатывает на `push: branches: [main]`, если `main` запушат. Остаточный риск: `govulncheck` в CI ещё ни разу не был зелёным, а Linux-раннер и актуальная на момент прогона vuln DB могут дать другой результат. Проверить после мержа и push.
+
+**/write-doc (2026-09-29)**
+
+- W1 `CHANGELOG.md` `[Unreleased]`: новая `### Security` (первой) — `PROD-DEPS-VULN`: 9 reachable GO-ID по модулям, отдельно unreachable (GO-2026-6443, GO-2026-5942, 16 в `x/crypto`), версии было → стало, остаточный GO-2026-5932, `govulncheck` required. Запись PROD-CI-IMAGES в `### Added` выровнена: govulncheck больше не «red», стал required.
+- В research/Spec было «17 module-level находок в `x/crypto`». Из них фикс есть у 16, 17-я — сам GO-2026-5932. В CHANGELOG — 16, в Spec D1 уточнено.
+- `docs/CI.md` «Go Version»: замечание с /implement исправлено одной фразой. `GOTOOLCHAIN=auto` скачивает `go1.26.8`, только если локальный Go старше. Более новый используется как есть, поэтому проверки гнать с `GOTOOLCHAIN=go1.26.8` (stdlib-находки `govulncheck` зависят от версии Go).
+- W2: вне `docs/CI.md`/`CHANGELOG.md` govulncheck упоминается только в `SECURITY.md:130` («Static analysis with gosec, govulncheck»). После задачи это правда для govulncheck (каждый PR/push в `main`). Соседние пункты раздела («security scans on every commit», gosec) — декларативные, их переписывает отдельная `PROD-SECURITY-MD` (BACKLOG), не трогали. `README.md`, `docs/MIGRATION_QUICK_START.md` govulncheck не упоминают.
+- CI по решению пользователя в задаче не проверяется совсем (2026-09-29: «обойдемся без CI»). Состояние CI-пайплайна пользователь считает непроверенным, T5 остаётся открытым.

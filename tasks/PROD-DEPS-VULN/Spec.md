@@ -32,7 +32,7 @@
 | `google.golang.org/grpc` | v1.77.0 | **v1.83.2** | GO-2026-6348, -6061 (reachable), GO-2026-6443 (package) |
 | `go.opentelemetry.io/otel` + `sdk`, `trace`, `exporters/otlp/otlptrace`, `…/otlptracegrpc` | v1.39.0 | **v1.44.0** | GO-2026-5506, -5426, -4394. v1.44.0, а не v1.43, потому что его требует grpc ≥ 1.83.1 |
 | `github.com/jackc/pgx/v5` | v5.7.6 | **v5.9.2** | GO-2026-5004 |
-| `golang.org/x/crypto` | v0.44.0 | **v0.56.0** | 17 module-level находок |
+| `golang.org/x/crypto` | v0.44.0 | **v0.56.0** | 16 module-level находок с фиксом (17-я, GO-2026-5932, фикса не имеет) |
 | `golang.org/x/net` | v0.47.0 | **v0.58.0** | GO-2026-5026, -4918, -5942; минимум для grpc v1.83.2 |
 | `golang.org/x/text` | v0.31.0 | ≥ v0.39.0 (по MVS выйдет v0.41.0) | GO-2026-5970 |
 

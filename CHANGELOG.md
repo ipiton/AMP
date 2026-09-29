@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **PROD-DEPS-VULN** (2026-09-29): Go dependencies upgraded to clear every `govulncheck` finding that has a fix. No code changes, no configuration changes.
+  - **Reachable from AMP code** (9 findings, all fixed): `google.golang.org/grpc` GO-2026-6348, GO-2026-6061; `go.opentelemetry.io/otel` GO-2026-5506; `go.opentelemetry.io/otel/sdk` GO-2026-5426, GO-2026-4394; `golang.org/x/net` GO-2026-5026, GO-2026-4918; `golang.org/x/text` GO-2026-5970; `github.com/jackc/pgx/v5` GO-2026-5004.
+  - **Also fixed**, not reachable but reported by module-level scanners: GO-2026-6443 (grpc), GO-2026-5942 (`x/net`), 16 advisories in `golang.org/x/crypto`.
+  - **Versions**: grpc v1.77.0 → v1.83.2, OpenTelemetry (`otel`, `sdk`, `trace`, OTLP trace exporters) v1.39.0 → v1.44.0, pgx v5.7.6 → v5.9.2, `x/crypto` v0.44.0 → v0.56.0, `x/net` v0.47.0 → v0.58.0, `x/text` v0.31.0 → v0.41.0, plus the transitive modules they require. The Go version (`go 1.26.0`, toolchain `go1.26.8`) is unchanged.
+  - **Remaining**: GO-2026-5932 (`golang.org/x/crypto/openpgp` is unmaintained, no fix exists). AMP imports only `x/crypto/bcrypt`. Image scanners that match by module version will still list it.
+  - **CI**: `govulncheck` is now a required check (`docs/CI.md`).
+
 ### Fixed
 - **PARITY-RESOLVE-TIMEOUT-ENDSAT** (2026-09-24): alerts posted without `endsAt` are no longer served as already resolved.
   - **Before**: `GET /api/v2/alerts`, `GET /api/v1/alerts` and `GET /api/v2/alerts/groups` returned `endsAt == startsAt == updatedAt` for such an alert, so any consumer that treats a past `endsAt` as resolved (as Alertmanager itself does) saw an active alert as resolved as soon as it was posted.
@@ -16,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **PROD-CI-IMAGES** (2026-09-28): the project's first CI, and a publishing path for the images the chart references. See [`docs/CI.md`](docs/CI.md) and ADR-013.
-  - **`ci.yml`** (every PR and push to `main`, read-only token): `gate` runs `scripts/release-gate.sh` unchanged; `images (amp)` / `images (config-reloader)` build both Dockerfiles for `linux/amd64,linux/arm64` without pushing; `actionlint` checks the workflows. `govulncheck` and the two-replica `e2e-ha` scenario run too, but are not meant to be required yet: `govulncheck` is red on dependencies that predate CI (`PROD-DEPS-VULN`), `e2e-ha` has no track record on shared runners.
+  - **`ci.yml`** (every PR and push to `main`, read-only token): `gate` runs `scripts/release-gate.sh` unchanged; `images (amp)` / `images (config-reloader)` build both Dockerfiles for `linux/amd64,linux/arm64` without pushing; `actionlint` checks the workflows. `govulncheck` and the two-replica `e2e-ha` scenario run too. `govulncheck` became required once the dependencies were upgraded (`PROD-DEPS-VULN`, see Security above). `e2e-ha` is not required yet: it has no track record on shared runners.
   - **`release.yml`** (tags `v*` only, the one workflow with `packages: write`): publishes `ghcr.io/ipiton/amp` and `ghcr.io/ipiton/amp-config-reloader`, multi-arch, tagged `X.Y.Z`, `X.Y`, `sha-<short>`, and `latest` for releases without a pre-release suffix. Version, revision, branch and build date are injected into the binary. **No image has been published yet** — the first `v*` tag does that, after which both GHCR packages must be switched to Public once.
   - All third-party actions are pinned to full commit SHAs.
   - **`release-gate.sh` works on a clean checkout**: a new `helm-deps` step adds the chart repositories from `Chart.lock` (in a throwaway Helm repo config — your `~/.config/helm` is not touched) before `helm dependency build`. Previously the build failed silently and every Helm step after it failed with a misleading error on any machine without the repo already added (`PROD-HELM-CLEAN-CHECKOUT`).
