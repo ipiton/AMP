@@ -2,82 +2,42 @@
 
 ## Repo Workflow
 
-When working in this repository, follow the **Solo Kanban** process from `WORKFLOW.md`.
+This repository follows **Solo Kanban 1.1**. `WORKFLOW.md` is the AMP overlay: paths, language, gates, release process, and deviations from the framework. The framework itself is vendored in `docs/solo-kanban/`.
 
-Core source of truth:
+Source of truth, in order:
 
 1. `WORKFLOW.md`
-2. `docs/06-planning/NEXT.md`
+2. `docs/06-planning/NEXT.md` (Queue, WIP, Flow Rules)
 3. `docs/06-planning/BUGS.md`
-4. active task workspace in `tasks/`
+4. the active task workspace in `tasks/<TASK-ID>/`
 
 ## Operating Rules
 
 - Communicate in **Russian** unless the artifact is expected in English.
 - Keep `README.md` and public product docs in English.
-- Respect WIP max `2`.
-- Never start implementation from `main` unless explicitly requested.
+- Respect the WIP limit in `NEXT.md` § Flow Rules.
+- Never start implementation from `main` unless explicitly requested. The only direct write to `main` is the `start-task` claim commit (planning files only).
 - Prefer small vertical slices over broad multi-area rewrites.
 
-## Required Solo Kanban Pipeline
+## Pipeline
 
-Use this order:
+The tier comes from the Risk Profile in `requirements.md` (`docs/solo-kanban/workflow.md` § Step Matrix):
 
-1. `/start-task`
-2. `/research` when needed
-3. `/spec`
-4. `/plan`
-5. `/implement`
-6. `/write-tests`
-7. `/testing`
-8. `/write-doc`
-9. `/end-task`
-10. `/merge-to-main`
+```text
+Lightweight: implement -> testing -> finalize -> merge-to-main
+Standard:    start-task -> research -> spec -> plan-task -> implement -> write-tests -> testing -> finalize -> merge-to-main
+Full:        start-task -> research -> spec -> plan-task -> implement -> deep-review -> write-tests -> testing -> finalize -> merge-to-main
+```
 
-If the user explicitly asks for one of these steps, execute that step and preserve the workflow artifacts.
+- `deep-review` runs after `implement` and before `write-tests`; tests are written only after `tasks/<TASK-ID>/review-verdict.json` has `"gate": "pass"`.
+- `finalize` writes `DONE.md` / `NEXT.md` and archives the workspace **on the task branch**; `merge-to-main` is mechanical.
+- AMP has no `deploy` step; see `WORKFLOW.md` for how the `R` signal and pre-release review work here.
 
-## Local Commands And Skills
-
-- Claude command entry points live in `.claude/commands/`
-- Shared Solo Kanban skills live in `skills/`
-
-Prefer using the matching command file for the requested workflow step together with the shared skills.
-
-## Task Files
-
-Every active task should use:
-
-- `tasks/<TASK-ID>/requirements.md`
-- `tasks/<TASK-ID>/research.md` when applicable
-- `tasks/<TASK-ID>/Spec.md`
-- `tasks/<TASK-ID>/tasks.md`
-
-On task completion, archive to:
-
-- `tasks/archive/<TASK-ID>/`
-
-## Planning Updates
-
-Keep these files in sync with the real repo state:
-
-- `NEXT.md` for Queue/WIP
-- `DONE.md` for completed work
-- `BUGS.md` for unresolved blockers
-- `BACKLOG.md` for follow-up work
-- `DECISIONS.md` for truth-changing decisions
-
-Do not declare a task done without updating planning.
+Command files live in `.claude/commands/`, shared skills in `skills/`. Both are vendored — change local rules in `WORKFLOW.md`, not there.
 
 ## Quality Gates
 
-Before `/end-task`, verify:
-
-- branch is not `main`
-- required task artifacts exist
-- relevant checks were run
-- `git diff --check` passes
-
-If full tests are blocked by preexisting failures, document that explicitly instead of pretending the gate is green.
+Before `finalize`, run the AMP gates from `WORKFLOW.md` § Гейты AMP and `git diff --check`. If full gates are blocked by preexisting failures, document that explicitly instead of pretending the gate is green.
 
 ## Scope Discipline
 
