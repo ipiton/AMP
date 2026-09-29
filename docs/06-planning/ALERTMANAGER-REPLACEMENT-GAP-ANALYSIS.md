@@ -9,7 +9,7 @@
 
 ## Что закрыто этой веткой
 
-Всё ниже проверено против кода на branch `feat/alertmanager-parity` (base `ff6accc`), не принято на слово:
+Всё ниже проверено против кода на branch `feat/alertmanager-parity` (base `c79f2f8`), не принято на слово:
 
 - **Routing tree** (`internal/business/routing/`): рекурсивный matcher (`matcher.go` `RouteMatcher.FindMatchingRoutes`
   — не `evaluator.go`, который его лишь оборачивает; дети имеют приоритет
@@ -37,11 +37,11 @@
   процесса, и на `/-/reload` (тот же код-путь). Работает только для конфигов с top-level `route:` секцией — legacy
   single-receiver конфиги эту проверку пропускают, как и раньше.
 - **HA clustering**: Redis-backed nflog + send-claim для межреплик дедупа нотификаций (task 6.1); distributed
-  timer liveness reconciliation с targeted overdue-scan и очисткой orphaned timers (task 6.2, коммиты `84df74f`,
-  `dec49e7`); silence cache invalidation через Redis pub/sub (task 6.3); leader-elected GC для silence-очистки
+  timer liveness reconciliation с targeted overdue-scan и очисткой orphaned timers (task 6.2, коммиты `3707ade`,
+  `1c4a9f4`); silence cache invalidation через Redis pub/sub (task 6.3); leader-elected GC для silence-очистки
   (task 6.4, `internal/infrastructure/lock/election.go`); peer heartbeat + поле `cluster` в `/api/v2/status`
   (task 6.5). 2-реплика e2e (exactly-once delivery + failover при потере реплики) воспроизведена в
-  `deploy/e2e-ha/run.sh` (коммит `ff6accc`) — рабочий standalone-скрипт, **не в CI-гейте**.
+  `deploy/e2e-ha/run.sh` (коммит `c79f2f8`) — рабочий standalone-скрипт, **не в CI-гейте**.
 - **Receivers**: telegram теперь нативно поддержан (`internal/infrastructure/publishing/telegram_*.go`, глобальный
   rate-limiter 30 msg/s + retry/backoff). Остальная матрица приёмников — см. `docs/ALERTMANAGER_COMPATIBILITY.md`.
 - **Helm/Docker**: `Dockerfile` — `HEALTHCHECK` на `:8080/healthz`, `-ldflags` прокидывает версию/build info,

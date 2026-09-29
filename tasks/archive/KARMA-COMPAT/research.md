@@ -21,10 +21,10 @@
 
 ### F2. 🔴 Наивная реализация не улучшит, а сломает karma
 
-`go-app/Makefile:33`: `VERSION ?= $(shell git describe --tags --always --dirty || echo dev)`. Сейчас на этой ветке это даёт **`v0.0.2-513-g383ce8c`** (последние теги — `v0.0.1`/`v0.0.2` от 2025-12).
+`go-app/Makefile:33`: `VERSION ?= $(shell git describe --tags --always --dirty || echo dev)`. Сейчас на этой ветке это даёт **`v0.0.2-513-ga97c679`** (последние теги — `v0.0.1`/`v0.0.2` от 2025-12).
 
 Если положить `buildinfo.Version` в `alertmanager_build_info{version=...}` как есть:
-`v0.0.2-513-g383ce8c` → `fixSemVersion` → `v0.0.2` → `0.0.2 >= 0.22.0` = **false** → мапперов нет → karma очищает данные и показывает ошибку `can't find alert mapper for Alertmanager v0.0.2-513-g383ce8c`.
+`v0.0.2-513-ga97c679` → `fixSemVersion` → `v0.0.2` → `0.0.2 >= 0.22.0` = **false** → мапперов нет → karma очищает данные и показывает ошибку `can't find alert mapper for Alertmanager v0.0.2-513-ga97c679`.
 
 То есть сегодня karma (по коду) работает с AMP **именно потому, что проба версии не удаётся** и срабатывает fallback `999.0`. Добавление метрики «как есть» — регресс с «работает» на «не работает». Это главный вывод исследования, и он переворачивает наивную постановку задачи.
 

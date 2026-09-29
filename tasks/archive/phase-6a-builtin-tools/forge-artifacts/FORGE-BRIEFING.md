@@ -236,10 +236,10 @@ Prometheus → Loki → K8s → DB → Wiring
   - lint=pass
   - tests=fail
 - **Изменения предыдущей попытки:**
-6f7d01d feat(phase-6a): add smoke test, README, and config example for built-in tools
-c301d87 feat(phase-6a): wire 4 investigation tools into agentic loop
-375be1f fix(phase-6a): address review feedback on kubernetes and database tools
-b1e0cf9 feat(phase-6a): add built-in investigation tools (prometheus, loki, k8s, database)
+ccd7b14 feat(phase-6a): add smoke test, README, and config example for built-in tools
+23234f8 feat(phase-6a): wire 4 investigation tools into agentic loop
+3fab789 fix(phase-6a): address review feedback on kubernetes and database tools
+0602378 feat(phase-6a): add built-in investigation tools (prometheus, loki, k8s, database)
 - **Хронология:**
   - stage_completed (end-task)
   - stage_failed (review) reason=uncommitted_worktree_at_close

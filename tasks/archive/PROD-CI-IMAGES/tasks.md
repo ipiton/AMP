@@ -12,7 +12,7 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
 ## Допущения и блокеры
 
 - ✅ _(снято 2026-09-28: push `main`, ветки и PR ipiton/AMP#12 — с согласия владельца на `/testing`)_ **AC3 требует PR в GitHub.** Для этого нужен push ветки и открытие PR — внешние действия, **только с явного согласия** на `/testing`. Без PR проверяемы AC1, AC2, AC4 (частично, локальным `buildx`), AC5 (частично), AC6–AC10; AC3 и логи CI остаются непроверенными, и это фиксируется в отчёте честно.
-- ✅ _(снято 2026-09-28: `main` запушен fast-forward `beab7df..41b8c28`)_ **`origin/main` отставал от локального `main`**: не запушены 20 коммитов, включая merge PROD-AUTH и PROD-RBAC-SCOPE (`origin/main` = `beab7df`, расхождения в обратную сторону нет — fast-forward). PR ветки против `origin/main` потащит в diff чужие изменения. Перед PR нужно запушить `main` — тоже с согласия владельца.
+- ✅ _(снято 2026-09-28: `main` запушен fast-forward `4c25a14..8bca192`)_ **`origin/main` отставал от локального `main`**: не запушены 20 коммитов, включая merge PROD-AUTH и PROD-RBAC-SCOPE (`origin/main` = `4c25a14`, расхождения в обратную сторону нет — fast-forward). PR ветки против `origin/main` потащит в diff чужие изменения. Перед PR нужно запушить `main` — тоже с согласия владельца.
 - **Первый прогон workflow в PR:** GitHub запускает `pull_request`-workflow из ветки PR, так что `ci.yml` отработает до мержа. `release.yml` не запустится (тег не пушим, D9).
 - **Секреты:** не нужны. Публикация — через `GITHUB_TOKEN`, а `ci.yml` вообще ничего не пушит.
 - **actionlint локально не установлен.** Запускать `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` (релиз 2026-03-30, карантин пройден). Бинарник в репо не кладём.
@@ -156,14 +156,14 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
 
 | Коммит | Пункт |
 |---|---|
-| `75da0ec` fix(release-gate): add chart repos before dependency build | I1 |
-| `6c29cb7` test(publishing): make warmup test wait for the call instead of sleeping | I2 |
-| `7597b0a` build: pin go1.26.8 and cross-compile images for multi-arch | I3 |
-| `a53085a` docs(bugs): record two pre-existing -race flakes in the release gate | находка, см. ниже |
-| `c0a602d` ci: add PR workflow running release gate and image builds | I4 |
-| `d3fb66a` ci: add tag-triggered image publishing to GHCR | I5 |
-| `01c3d1d` feat(helm): point image repositories at GHCR | I6 |
-| `8c97cf6` test(helm): pass placeholder passwords to the production render | I6, отклонение 4 |
+| `873fca6` fix(release-gate): add chart repos before dependency build | I1 |
+| `f2f4929` test(publishing): make warmup test wait for the call instead of sleeping | I2 |
+| `92195a5` build: pin go1.26.8 and cross-compile images for multi-arch | I3 |
+| `c01d695` docs(bugs): record two pre-existing -race flakes in the release gate | находка, см. ниже |
+| `765c4f9` ci: add PR workflow running release gate and image builds | I4 |
+| `cd394cc` ci: add tag-triggered image publishing to GHCR | I5 |
+| `8decd2b` feat(helm): point image repositories at GHCR | I6 |
+| `c1eeeaf` test(helm): pass placeholder passwords to the production render | I6, отклонение 4 |
 
 Доказательства, собранные по ходу (формально перепроверяются на `/testing`):
 
@@ -183,7 +183,7 @@ I3 (Dockerfile) стоит до `ci.yml`: job `images` на PR должен ср
 
 ### Находка: предсуществующие флейки шага `race`
 
-Упали `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (grouping, 2 срабатывания вместо 1) и `TestCache_LargeDataset` (silencing, перф-пороги по wall-clock). Воспроизведены на **чистом `main`@`41b8c28`** во временном worktree:
+Упали `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (grouping, 2 срабатывания вместо 1) и `TestCache_LargeDataset` (silencing, перф-пороги по wall-clock). Воспроизведены на **чистом `main`@`8bca192`** во временном worktree:
 
 | Тест | Ветка | `main` |
 |---|---|---|
@@ -205,25 +205,25 @@ Research-прогону (PASS) повезло. Заведены в BUGS.md: `GRO
 3. **I6 шире spec D12:**
    - в `values.yaml` было **два** ключа `configReloader:` — действовал последний, первый («values shape only — no template yet», `repository: ""`) был мёртв; удалён, рендер не изменился;
    - `values-dev.yaml` тоже ссылался на `ipiton/amp-llm` (research/spec пропустили) — переведён на `ghcr.io/ipiton/amp`, тег `latest` не тронут.
-4. **`helm/amp/tests/render-config-reloader.sh` был сломан** с `0d08c5f` (обязательный `cache.auth.password` в production), в гейт не подключён — никто не заметил. Проверено на чартовых файлах, идентичных `main`: падает так же. Добавлены placeholder-пароли, как в release-gate. Подключение теста в гейт — follow-up (BACKLOG на `/write-doc`).
+4. **`helm/amp/tests/render-config-reloader.sh` был сломан** с `404b913` (обязательный `cache.auth.password` в production), в гейт не подключён — никто не заметил. Проверено на чартовых файлах, идентичных `main`: падает так же. Добавлены placeholder-пароли, как в release-gate. Подключение теста в гейт — follow-up (BACKLOG на `/write-doc`).
 5. **actionlint в CI** — `go run …@v1.7.12` после setup-go, а не docker-action: не требует ещё одного пина и совпадает с тем, как он запускается локально.
 6. `values-production.yaml` `configReloader`: комментарий «flip to true in the same change that adds the build job» заменён — job добавлен, но образа нет до первого релиза; `enabled: false` оставлен.
 
 ### Осталось до `/testing` _(всё закрыто на `/testing`, см. ниже)_
 
-- Полный release-gate на финальном коммите (после I6 гонялись только helm-шаги и рендер-тест; Go-код после `7597b0a` не менялся).
+- Полный release-gate на финальном коммите (после I6 гонялись только helm-шаги и рендер-тест; Go-код после `92195a5` не менялся).
 - AC3, AC4 и AC5 в CI — нужен PR, см. блокеры в начале файла (push `main` и ветки — только с согласия).
 - Решение по флейкам `race` (варианты a/b/c выше).
 
 ### `/testing` (2026-09-28)
 
-Коммиты `/testing`: `00c7737` test(silencing): move cache speed checks from asserts to benchmarks, `dd64d1e` docs(bugs): resolve SILENCING-CACHE-PERF-ASSERT-FLAKY. Решение по флейкам `race` — вариант (a): silencing чинится здесь, grouping — отдельной задачей (`GROUPING-TIMER-LOCK-FIX`).
+Коммиты `/testing`: `c5bff3c` test(silencing): move cache speed checks from asserts to benchmarks, `40722d2` docs(bugs): resolve SILENCING-CACHE-PERF-ASSERT-FLAKY. Решение по флейкам `race` — вариант (a): silencing чинится здесь, grouping — отдельной задачей (`GROUPING-TIMER-LOCK-FIX`).
 
 **Зелёное:**
 
 | Проверка | Где | Результат |
 |---|---|---|
-| Полный `./scripts/release-gate.sh` на `dd64d1e` | локально (arm64, macOS) | **RESULT: PASS**, 10/10 шагов: build 33s, lint 56s, test 157s, futureparity 38s, race 516s, helm-deps 2s, helm-dev/production/rbac ~1s, amtool-compat 164s; 0 `--- FAIL` |
+| Полный `./scripts/release-gate.sh` на `40722d2` | локально (arm64, macOS) | **RESULT: PASS**, 10/10 шагов: build 33s, lint 56s, test 157s, futureparity 38s, race 516s, helm-deps 2s, helm-dev/production/rbac ~1s, amtool-compat 164s; 0 `--- FAIL` |
 | `gate` | CI, PR ipiton/AMP#12 | SUCCESS, 7 мин 7 с; тот же скрипт — RESULT: PASS (race 190s, amtool-compat 81s) |
 | `images (amp)` | CI | SUCCESS, 4 мин 12 с |
 | `images (config-reloader)` | CI | SUCCESS, 2 мин |

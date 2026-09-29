@@ -99,7 +99,7 @@ type GlobalConfig struct {
 	// fields at all — its equivalent mechanism is simply setting these on
 	// the root `route:`, which cascades via the same parent-chain
 	// inheritance these fields sit below). It existed in this package's
-	// pre-dedup local GlobalConfig (deleted by 3f8d69d, TN-137) and is
+	// pre-dedup local GlobalConfig (deleted by 449ae21, TN-137) and is
 	// restored here on the canonical type; see tree_builder.go's
 	// inheritGroupBy/inheritDuration for the consulting side and
 	// docs/ALERTMANAGER_COMPATIBILITY.md for the parity note.

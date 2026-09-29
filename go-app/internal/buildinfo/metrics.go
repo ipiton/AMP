@@ -20,7 +20,7 @@ import (
 //
 //   - It must stay valid semver. Ecosystem tooling parses it with
 //     Masterminds/semver's MustParse, which PANICS on anything else — "dev"
-//     and "v0.0.2-513-g383ce8c" are not acceptable values.
+//     and "v0.0.2-513-ga97c679" are not acceptable values.
 //   - It must stay >= 0.22.0. karma (and anything modelled on it) resolves an
 //     API mapper through a `>=0.22.0` constraint and drops the connection
 //     entirely when no mapper matches, so a lower value is worse than

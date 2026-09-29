@@ -147,7 +147,7 @@ That is why AMP exports two separate metrics instead of one:
 | Metric | `version` label | Answers |
 |---|---|---|
 | `alertmanager_build_info{version,revision,branch,goversion}` | `0.27.0` — constant | "Which Alertmanager contract do I get?" |
-| `amp_build_info{version,revision,branch,goversion,build_user,build_date}` | e.g. `v0.0.2-518-gfb179d5` | "Which AMP build is this?" |
+| `amp_build_info{version,revision,branch,goversion,build_user,build_date}` | e.g. `v0.0.2-518-g3b3c52e` | "Which AMP build is this?" |
 
 Both are gauges with value `1`, matching the upstream `*_build_info` shape. The non-`version` labels on the compat
 metric are AMP's real build data — nothing is synthesised; `version` describes the contract, the rest describes the
@@ -668,10 +668,10 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
      the notify chain re-publishes to any unconfirmed target after restart, so a DLQ replay would double-deliver.
 3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
    The original timer-continuation code cancelled its own context when arming the next interval timer
-   (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `c6cfadc` (contexts
+   (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `e47bcca` (contexts
    rooted in the manager lifetime, continuation-handle identity check) with red→green regression tests including
    a full wait→interval→repeat chain (`≥3` publishes asserted) and no-`context canceled` log assertions; hardened
-   further in `985abb4`. Task 6.2's reconciliation loop (`84df74f`, `dec49e7`) covers replica-crash recovery.
+   further in `8791d43`. Task 6.2's reconciliation loop (`3707ade`, `1c4a9f4`) covers replica-crash recovery.
 4. **`inhibited` query param on `/api/v2/alerts` is structurally present but currently a no-op.** Inhibition state
    isn't yet threaded into `alertconv.ToGettableAlert`'s `InhibitedBy` field, so filtering on it can't yet change
    results — the notify-chain's own Inhibit step (which actually suppresses notifications) is unaffected by this.
@@ -774,7 +774,7 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    simply setting these on the root `route:`, which already cascades to every descendant via the same
    parent-chain inheritance this layer sits below. AMP had this fallback layer once (a pre-dedup, package-local
    `GlobalConfig`), lost it when that type was deleted in favor of the canonical `infrastructure/routing` one
-   (`3f8d69d`, TN-137), and this task put it back on the canonical type rather than reintroducing the duplicate.
+   (`449ae21`, TN-137), and this task put it back on the canonical type rather than reintroducing the duplicate.
 8. **`matchers:` list quote handling and grammar: aligned to upstream `pkg/labels`, not just internally consistent.**
    Closed in wave 5 (`FU-PARSEARGUMENT-QUOTE-HANDLING`): `pkg/configvalidator/matcher.Parse` never stripped quotes
    at all — for a regex matcher the quote-included literal was fed straight into `regexp.Compile`, so a config

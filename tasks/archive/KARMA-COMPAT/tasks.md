@@ -26,8 +26,8 @@
 Lite-профиль на `:19093`, сборка без ldflags и сборка с реальными ldflags:
 
 ```
-alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="c24b0da",version="0.27.0"} 1
-amp_build_info{...,version="v0.0.2-516-gc24b0da-dirty"} 1
+alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="0e4ce4f",version="0.27.0"} 1
+amp_build_info{...,version="v0.0.2-516-g0e4ce4f-dirty"} 1
 ```
 
 Подтверждено: дефолтный регистр — тот же, что отдаёт `/metrics`; compat-версия остаётся `0.27.0` независимо от ldflags; реальная версия (та самая, что сломала бы karma) уезжает в `amp_build_info`.
@@ -64,7 +64,7 @@ AlertmanagerCompatVersion="0.0.2": version "0.0.2" does not satisfy karma's mapp
 
 ## Testing (`/testing`, 2026-09-23)
 
-Сборка `make build` с реальными ldflags (`version=v0.0.2-518-gfb179d5`), lite-профиль на `:19093`.
+Сборка `make build` с реальными ldflags (`version=v0.0.2-518-g3b3c52e`), lite-профиль на `:19093`.
 
 ### Зелёное
 
@@ -82,13 +82,13 @@ AlertmanagerCompatVersion="0.0.2": version "0.0.2" does not satisfy karma's mapp
 | `gofmt -l` по затронутым файлам, `git diff --check` | чисто |
 
 ```
-alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="fb179d5",version="0.27.0"} 1
-amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",build_user="vit",goversion="go1.27.1",revision="fb179d5",version="v0.0.2-518-gfb179d5"} 1
+alertmanager_build_info{branch="feature/karma-compat",goversion="go1.27.1",revision="3b3c52e",version="0.27.0"} 1
+amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",build_user="vit",goversion="go1.27.1",revision="3b3c52e",version="v0.0.2-518-g3b3c52e"} 1
 ```
 
 Живая проверка делалась временным тестом, который скрейпил `:19093` и гонял по ответу полный алгоритм karma (`expfmt` → лейбл `version` → `SplitN(...,"-",2)[0]` → `semver` → `>=0.22.0`). Файл удалён сразу после прогона, в дереве его нет.
 
-**Снято допущение из плана:** дефолтный регистр — действительно тот, что отдаёт `/metrics`; проверено не по коду, а на живой выдаче со сборкой с ldflags. Версия AMP (`v0.0.2-518-gfb179d5` — ровно та, что сломала бы karma) уходит только в `amp_build_info`.
+**Снято допущение из плана:** дефолтный регистр — действительно тот, что отдаёт `/metrics`; проверено не по коду, а на живой выдаче со сборкой с ldflags. Версия AMP (`v0.0.2-518-g3b3c52e` — ровно та, что сломала бы karma) уходит только в `amp_build_info`.
 
 **Подтверждена D6:** при `metrics.enabled: false` эндпоинт отдаёт 404, API продолжает работать. Что karma после 404 уходит в fallback `999.0` — по-прежнему вывод из её кода, не наблюдение.
 
@@ -144,7 +144,7 @@ amp_build_info{branch="feature/karma-compat",build_date="2026-09-23T08:15:18Z",b
 
 ## Финальный статус (`/end-task`, 2026-09-23)
 
-**Закрыта.** Ветка `feature/karma-compat`, 5 коммитов: `383ce8c` (start) → `a51518c` (research) → `a2aaca6` (spec) → `c24b0da` (plan) → `adc6bf8` (implement) → `fb179d5` (tests) → `41d3c27` (testing) → `c018930` (docs). В `main` не влита — это шаг `/merge-to-main`.
+**Закрыта.** Ветка `feature/karma-compat`, 5 коммитов: `a97c679` (start) → `3ae6456` (research) → `b461a17` (spec) → `0e4ce4f` (plan) → `538ce2f` (implement) → `3b3c52e` (tests) → `8f90c88` (testing) → `de7fb81` (docs). В `main` не влита — это шаг `/merge-to-main`.
 
 ### Что поставлено
 
