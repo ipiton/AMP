@@ -65,11 +65,11 @@
 
 ## Finalization (`/end-task`)
 
-- [ ] **F1.** BACKLOG: `PROD-DEPS-VULN` закрыть (ссылка на DONE); завести `GO-MOD-TIDY-CHECK` (research §6, ~0.1d); в `CI-SUPPLY-CHAIN` добавить пункт `schedule` для `govulncheck`; в `PROD-RELEASE-V010` снять оговорку «лучше после PROD-DEPS-VULN».
-- [ ] **F2.** DONE.md: запись (что сделано, как проверено, осознанные ограничения: GO-2026-5932, `tidy` не делали, required не enforced до branch protection).
-- [ ] **F3.** NEXT.md: снять из WIP, заметка; следующий прод-блокер — `PROD-RELEASE-V010`.
-- [ ] **F4.** DECISIONS.md — не нужен (Spec «Scope»). Если на `/implement` понадобилось исключение из карантина, тогда нужен.
-- [ ] **F5.** Архив `tasks/PROD-DEPS-VULN/` → `tasks/archive/PROD-DEPS-VULN/`; ветка не `main`; `git diff --check`.
+- [x] **F1.** BACKLOG: `PROD-DEPS-VULN` закрыть (ссылка на DONE); завести `GO-MOD-TIDY-CHECK` (research §6, ~0.1d); в `CI-SUPPLY-CHAIN` добавить пункт `schedule` для `govulncheck`; в `PROD-RELEASE-V010` снять оговорку «лучше после PROD-DEPS-VULN».
+- [x] **F2.** DONE.md: запись (что сделано, как проверено, осознанные ограничения: GO-2026-5932, `tidy` не делали, required не enforced до branch protection).
+- [x] **F3.** NEXT.md: снять из WIP, заметка; следующий прод-блокер — `PROD-RELEASE-V010`.
+- [x] **F4.** DECISIONS.md — не нужен (Spec «Scope»). Если на `/implement` понадобилось исключение из карантина, тогда нужен.
+- [x] **F5.** Архив `tasks/PROD-DEPS-VULN/` → `tasks/archive/PROD-DEPS-VULN/`; ветка не `main`; `git diff --check`.
 
 ## Результаты / отклонения
 
@@ -108,3 +108,15 @@
 - `docs/CI.md` «Go Version»: замечание с /implement исправлено одной фразой. `GOTOOLCHAIN=auto` скачивает `go1.26.8`, только если локальный Go старше. Более новый используется как есть, поэтому проверки гнать с `GOTOOLCHAIN=go1.26.8` (stdlib-находки `govulncheck` зависят от версии Go).
 - W2: вне `docs/CI.md`/`CHANGELOG.md` govulncheck упоминается только в `SECURITY.md:130` («Static analysis with gosec, govulncheck»). После задачи это правда для govulncheck (каждый PR/push в `main`). Соседние пункты раздела («security scans on every commit», gosec) — декларативные, их переписывает отдельная `PROD-SECURITY-MD` (BACKLOG), не трогали. `README.md`, `docs/MIGRATION_QUICK_START.md` govulncheck не упоминают.
 - CI по решению пользователя в задаче не проверяется совсем (2026-09-29: «обойдемся без CI»). Состояние CI-пайплайна пользователь считает непроверенным, T5 остаётся открытым.
+
+## Итоговый статус (/end-task, 2026-09-29)
+
+**DONE.** Критерии приёмки Spec:
+- [x] версии ≥ D1, `go`/`toolchain` не изменились, tidy-дрейф не тронут;
+- [x] `govulncheck` exit 0, 0 reachable; verbose — package пусто, module — только GO-2026-5932;
+- [~] release-gate — PASS после повторного прогона шага `race` (первый прогон красный на предсуществующем флейке, см. /testing);
+- [ ] ~~jobs на PR~~ — не проверялось: CI в задаче исключён решением пользователя;
+- [x] `docs/CI.md` и шапка `ci.yml` согласованы (5 required);
+- [x] CHANGELOG `### Security`; BACKLOG: `PROD-DEPS-VULN` закрыт, `GO-MOD-TIDY-CHECK` заведён, `schedule` добавлен в `CI-SUPPLY-CHAIN`.
+
+Ограничения: CI на GitHub не прогонялся; required не enforced до branch protection; GO-2026-5932 остаётся (фикса нет); `go.mod` не tidy (`GO-MOD-TIDY-CHECK`); DECISIONS не менялся (исключений из карантина нет).
