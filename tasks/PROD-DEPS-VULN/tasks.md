@@ -55,7 +55,7 @@
 - [x] **T2.** pgx на реальном Postgres: `go test -count=1 -v ./internal/database/...` — `TestRunMigrations_ConcurrentReplicas_*`, `TestPostgresPool_Reload_*` = PASS, не SKIP.
 - [x] **T3.** `deploy/e2e-ha/run.sh` локально — PASS. Это единственное покрытие repository-пути silencing: его unit-тесты — заглушки со `t.Skip`.
 - [x] **T4.** Образы: `docker buildx build --platform linux/amd64,linux/arm64` для `Dockerfile` и `Dockerfile.config-reloader` (как job `images`, без push). Если локально нет multi-arch builder'а — хотя бы нативная архитектура, остальное — CI на PR.
-- [ ] **T5.** CI на PR (с подтверждения пользователя): зелёные `gate`, `images (amp)`, `images (config-reloader)`, `actionlint`, `govulncheck`, `e2e-ha`.
+- [ ] **T5.** _(отложен по решению пользователя: PR не открываем; первый прогон на GitHub — `ci.yml` на push в `main` после мержа)_ CI на PR: зелёные `gate`, `images (amp)`, `images (config-reloader)`, `actionlint`, `govulncheck`, `e2e-ha`.
 - [x] **T6.** `git diff main --stat` — затронуты только файлы из Spec «Scope»; `git diff --check` чистый.
 
 ## Documentation (`/write-doc`)
@@ -99,4 +99,4 @@
 - T1, шаг `race`: `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (`distributed_timer_ownership_test.go:169`, «expected 1, actual 2») — это `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` из BUGS.md, симптом тот же. Отделено от апгрейда замером `go test -race -count=30 -run '^…OnlyLockWinnerFires$' ./internal/infrastructure/grouping/`: ветка `22028d6` — **0/30**, чистый `main` `5e5f4db` — **2/30** (как в BUGS.md: 2/30 на `41b8c28`). Апгрейд пакет `grouping` не затрагивает (redis/miniredis не поднимались). Не регресс, не чинили (скоуп — `GROUPING-TIMER-LOCK-FIX`).
 
 Не проверено:
-- T5 CI на PR — нужен push ветки и PR (действие наружу), ждёт подтверждения пользователя. До этого jobs `gate`/`images`/`actionlint`/`govulncheck`/`e2e-ha` проверены только локальными эквивалентами.
+- T5 CI на PR — **отложен по решению пользователя (2026-09-29): PR не открываем.** Jobs `gate`/`images`/`actionlint`/`govulncheck`/`e2e-ha` проверены только локальными эквивалентами (macOS, OrbStack). Первый прогон на GitHub-раннере будет на push в `main` после `/merge-to-main`: `ci.yml` срабатывает на `push: branches: [main]`, если `main` запушат. Остаточный риск: `govulncheck` в CI ещё ни разу не был зелёным, а Linux-раннер и актуальная на момент прогона vuln DB могут дать другой результат. Проверить после мержа и push.
