@@ -28,6 +28,7 @@
 
 ## WIP (Max 2)
 
+- [ ] **SOLO-KANBAN-UPGRADE** (взято 2026-09-29) — обновить процесс до Solo Kanban 1.1: vendored-копия upstream в `docs/solo-kanban/` + скрипт синхронизации, AMP-overlay в `WORKFLOW.md`, новые команды (`plan-task`, `deep-review`, `finalize`, `qa-check`, `plan-improve`), удаление Gemini-адаптеров, Flow Rules в `NEXT.md`, ротация `DONE.md`. Ветка `docs/solo-kanban-upgrade`, workspace `tasks/SOLO-KANBAN-UPGRADE/`.
 - [x] **AMP-PARITY** (завершено 2026-08-18, см. DONE.md) — все фазы + финальная fix-волна и follow-ups влиты в main. Drop-in замена Alertmanager (routing tree, dispatcher/grouping, mute_time_intervals, API parity, config validation, Redis HA clustering, receivers). 29 task slices Phases 1-7 delivered; e2e+HA green. Plan: `docs/plans/alertmanager-parity.md`, ветка `feat/alertmanager-parity`, task workspace `tasks/AMP-PARITY/`. Follow-ups: BACKLOG «AMP-PARITY Follow-ups».
 
 ## Notes
