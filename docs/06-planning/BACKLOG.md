@@ -421,5 +421,12 @@
   - Runbook suggestions: если operator часто выполняет одни и те же шаги → предложить создать runbook
   - Оценка: ~3d
 
+
+## Process (Solo Kanban 1.1, из SOLO-KANBAN-UPGRADE 2026-09-29)
+
+- [ ] **BACKLOG-LIVE-STATE-CLEANUP** — в этом файле ~60 закрытых `- [x]`/`~~` пунктов, что противоречит правилу live state (`NEXT.md` § Flow Rules). Перед удалением у каждого проверить запись в `DONE.md`/`archive/DONE-*.md`; закрытия, записанные только здесь (INF-A, INF-B и др.), перенести в архив по дате. ~0.5d
+- [ ] **SOLO-KANBAN-VERDICT-HOOK** — hook, который механически запрещает `write-tests`, пока `tasks/<TASK-ID>/review-verdict.json` не содержит `"gate": "pass"` для текущей ветки и коммита (шаг 7 Upgrading во фреймворке, опционально). ~0.5d
+- [ ] **OWNER-INBOX-SCRIPT** — скрипт, который собирает разблокированные действия владельца (`Trigger: owner ready`, `Blocked-by:`, `Waiting-on:`) из planning-файлов для `start-task`: правило «больше 5 — новые roadmap-задачи не берём» сейчас проверяется глазами. ~0.3d
+
 ## Release
 - [x] ~~**PHASE-8-RELEASE-ROLLOUT**~~ — полный quality gate, smoke e2e, rollback runbook и controlled rollout. `scripts/release-gate.sh` (build/lint/test/futureparity/-race/helm/amtool-compat, green on main), `deploy/smoke/` (single-node lite e2e: real webhook delivery, silence suppression, `/-/reload`), `docs/ROLLBACK_RUNBOOK.md`, `docs/ROLLOUT_PLAN.md`.

@@ -16,7 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **SOLO-KANBAN-UPGRADE** (взято 2026-09-29) — обновить процесс до Solo Kanban 1.1: vendored-копия upstream в `docs/solo-kanban/` + скрипт синхронизации, AMP-overlay в `WORKFLOW.md`, новые команды (`plan-task`, `deep-review`, `finalize`, `qa-check`, `plan-improve`), удаление Gemini-адаптеров, Flow Rules в `NEXT.md`, ротация `DONE.md`. Ветка `docs/solo-kanban-upgrade`, workspace `tasks/SOLO-KANBAN-UPGRADE/`.
+_(пусто)_
 
 ## Queue
 

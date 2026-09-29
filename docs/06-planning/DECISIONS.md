@@ -197,3 +197,25 @@
   - branch protection с required checks включает владелец репозитория вручную; имена job'ов — контракт, переименование ломает protection;
   - новый шаг гейта сразу попадает в CI; нестабильный тест в шагах `test`/`race` краснит required `gate` (`GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`);
   - версию Go поднимать в трёх местах сразу: `toolchain` в `go.mod`, оба Dockerfile.
+
+## ADR-014: Solo Kanban 1.1 — vendored-копия upstream + AMP-overlay; `DECISIONS.md` не ротируется
+- **Дата**: 2026-09-29
+- **Контекст**: процесс AMP жил на Solo Kanban 1.0, скопированном и поправленном руками: команды, навыки и `WORKFLOW.md` разошлись с upstream, и обновить их можно было только ручным сравнением. В 1.1 появились Risk Profile, `deep-review` с verdict'ом, `finalize` на ветке задачи и ротация журналов (`SOLO-KANBAN-UPGRADE`).
+- **Решение**:
+  - фреймворк лежит в `docs/solo-kanban/`, команды — в `.claude/commands/`, навыки — в `skills/solo-kanban-*/`, шаблоны — в `tasks/templates/`. Всё это vendored: копия upstream с единственной заменой путей `docs/<name>.md` → `docs/solo-kanban/<name>.md`, руками не правится;
+  - обновление — `scripts/solo-kanban-sync.sh`; версия и коммит upstream — в `docs/solo-kanban/VERSION`;
+  - всё специфичное для AMP — в `WORKFLOW.md` (overlay), и при расхождении прав он;
+  - отклонения от фреймворка: шага `deploy` нет; `deep-review` обязателен перед каждым тегом `v*`; `DECISIONS.md` не ротируется;
+  - Gemini-адаптеры (`GEMINI.md`, `.gemini/`) удалены.
+- **Обоснование**:
+  - vendored + overlay делает обновление механическим: sync, затем ревью диффа. Локальные правила не теряются, потому что их нет в vendored-файлах;
+  - `DECISIONS.md` — реестр ADR с номерами, на которые ссылаются код и доки. Помесячная ротация разнесла бы ADR по файлам и сломала поиск по номеру;
+  - `deploy` в upstream рассчитан на сервис, который выкатывает агент. AMP — продукт, релиз идёт через тег и GHCR (ADR-013).
+- **Отклонено**:
+  - git submodule — лишний шаг при clone, и пути фреймворка не переписать;
+  - симлинки на локальный checkout upstream — не работают у того, у кого checkout'а нет;
+  - продолжать ручной форк 1.0 — именно из-за него процесс разошёлся с upstream.
+- **Следствие**:
+  - правка vendored-файла пропадёт при следующем sync: локальное правило пишется в `WORKFLOW.md`;
+  - «закрыт ли slug» проверяется по `DONE.md` **и** `archive/DONE-*.md`;
+  - дискреционный hook, запрещающий `write-tests` без `review-verdict.json`, пока не сделан (BACKLOG `SOLO-KANBAN-VERDICT-HOOK`).

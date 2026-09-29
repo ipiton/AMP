@@ -3,7 +3,7 @@ id: SOLO-KANBAN-UPGRADE
 slug: solo-kanban-upgrade
 stream: Process
 type: docs
-status: active
+status: complete
 created_at: 2026-09-29
 updated_at: 2026-09-29
 based_on:
@@ -48,7 +48,7 @@ based_on:
 
 ## Definition of Done
 
-- [ ] Критерии `requirements.md` выполнены
-- [ ] Discretionary `deep-review` проведён, verdict `pass`
+- [x] Критерии `requirements.md` выполнены
+- [x] Discretionary `deep-review` проведён, verdict `pass`
 - [x] `git diff --check` чист
-- [ ] Finalize: DONE, NEXT, ADR-014, архив workspace
+- [x] Finalize: DONE, NEXT, ADR-014, архив workspace
