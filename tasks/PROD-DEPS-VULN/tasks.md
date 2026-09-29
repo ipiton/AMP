@@ -18,7 +18,7 @@
 
 ## Implementation
 
-- [ ] **I1. Апгрейд зависимостей (D1)**, в `go-app/`:
+- [x] **I1. Апгрейд зависимостей (D1)**, в `go-app/`:
   ```
   GOTOOLCHAIN=go1.26.8 go get \
     google.golang.org/grpc@v1.83.2 \
@@ -30,22 +30,22 @@
     github.com/jackc/pgx/v5@v5.9.2 \
     golang.org/x/crypto@v0.56.0 \
     golang.org/x/net@v0.58.0 \
-    golang.org/x/text@v0.39.0
+    golang.org/x/text@v0.41.0
   ```
   - `go mod tidy` **не** запускать.
   - Сверить итог с research §3B/§4: `go.mod` +21/−21, `go`/`toolchain` не изменились, x/text по MVS = v0.41.0. Если выбрана версия, которой нет в таблице §4, проверить её `Time` через `go list -m -json` (карантин ≤ 2026-09-22).
-- [ ] **I2. Быстрая проверка:** `go build ./...`, `go vet ./...`, `govulncheck@v1.8.0 ./...` → exit 0; `-show verbose`: package-level пусто, module-level — только GO-2026-5932.
-- [ ] **I3. Коммит 1** (D5): `fix(deps): upgrade grpc, otel, pgx and x/* to clear govulncheck findings`, только `go-app/go.mod` + `go-app/go.sum`. В теле — список GO-ID.
-- [ ] **I4. `.github/workflows/ci.yml` (D3)** — только комментарии:
+- [x] **I2. Быстрая проверка:** `go build ./...`, `go vet ./...`, `govulncheck@v1.8.0 ./...` → exit 0; `-show verbose`: package-level пусто, module-level — только GO-2026-5932.
+- [x] **I3. Коммит 1** (D5): `fix(deps): upgrade grpc, otel, pgx and x/* to clear govulncheck findings`, только `go-app/go.mod` + `go-app/go.sum`. В теле — список GO-ID.
+- [x] **I4. `.github/workflows/ci.yml` (D3)** — только комментарии:
   - шапка: `govulncheck` — в списке required, `e2e-ha` остаётся не required;
   - над job'ом `govulncheck`: вместо «Not required until PROD-DEPS-VULN…» — required; red означает достижимую уязвимость, лечится апгрейдом; module-level находки (GO-2026-5932) exit code не портят.
   - `actionlint` (`go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12`) — чисто.
-- [ ] **I5. `docs/CI.md` (D3, D4):**
+- [x] **I5. `docs/CI.md` (D3, D4):**
   - таблица: `govulncheck` → `yes`, «Why» переписать: достижимая уязвимость = блокер релиза; компромисс — новая запись в vuln DB краснит и PR, который зависимости не трогал, лечится отдельным PR с апгрейдом;
   - абзац про branch protection: добавить `govulncheck` в список имён job'ов;
   - одна строка про GO-2026-5932 (ожидаема, из `x/crypto` используется только `bcrypt`, её покажут и сканеры образов);
   - прочие упоминания «govulncheck красный / PROD-DEPS-VULN» в `docs/CI.md` — найти (`grep -n`) и выровнять.
-- [ ] **I6. Коммит 2:** `ci: make govulncheck a required check` (`ci.yml` + `docs/CI.md`).
+- [x] **I6. Коммит 2:** `ci: make govulncheck a required check` (`ci.yml` + `docs/CI.md`).
 
 ## Testing (`/write-tests`, `/testing`)
 
@@ -73,4 +73,12 @@
 
 ## Результаты / отклонения
 
-_(заполняется по ходу)_
+**/implement (2026-09-29)**
+
+- _Отклонение I1:_ `golang.org/x/text@v0.39.0` в явном `go get` конфликтует: `x/crypto@v0.56.0`, `x/net@v0.58.0` и `grpc@v1.83.2` требуют `x/text@v0.41.0`. Если версия указана явно, `go get` не даёт MVS поднять её выше. Взята v0.41.0: research предсказывал её как итог MVS, карантин она проходит (2026-08-11). В команде I1 версия исправлена.
+- `go.mod` после `go get` **совпал с экспериментом research §3B построчно** (+21/−21, `go`/`toolchain` не изменились). В `go.sum` +46, в research было +62: там оставались записи промежуточных версий варианта A.
+- I2: `go build`, `go vet` — OK; `govulncheck@v1.8.0 ./...` → exit 0, «affected by 0 vulnerabilities»; `-show verbose`: Symbol и Package пусто, Module — только GO-2026-5932; `go mod verify` — all modules verified.
+- I4: `actionlint@v1.7.12` — чисто.
+- I5: прочих упоминаний «govulncheck красный» в `docs/CI.md` не осталось. Вне `docs/CI.md`: запись PROD-CI-IMAGES в `CHANGELOG.md` `[Unreleased]` (строка 19) говорит «govulncheck is red… (`PROD-DEPS-VULN`)», правится на W1. `SECURITY.md:131` упоминает govulncheck нейтрально, править не нужно.
+- Коммиты: `0194249` (`fix(deps)`), `2229973` (`ci:`).
+- Замечено, вне скоупа: `docs/CI.md` «Go Version» утверждает, что локальный Go с `GOTOOLCHAIN=auto` скачает `go1.26.8`. Это верно, только если локальный Go старше. Более новый локальный (1.27.1 на этой машине) используется как есть, и тогда `govulncheck` проверяет stdlib другой версии, не той, что в CI. Решить на `/write-doc`: одна фраза или follow-up.
