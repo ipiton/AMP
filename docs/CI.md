@@ -18,10 +18,12 @@ All third-party actions are pinned to a full commit SHA (the release tag is in a
 | `gate` | [`scripts/release-gate.sh`](../scripts/release-gate.sh): build, lint, tests, `futureparity`, `-race` on the concurrency-heavy packages, Helm lint/render/RBAC checks, `amtool` compatibility against a real smoke stack | yes | The release gate is the definition of "releasable". CI runs the same script, unchanged, instead of re-describing it in YAML. |
 | `images (amp)`, `images (config-reloader)` | `docker buildx build` of `Dockerfile` / `Dockerfile.config-reloader` for `linux/amd64,linux/arm64`, no push | yes | A change that breaks either image, on either architecture, is caught before the tag rather than by the release. |
 | `actionlint` | `actionlint` over `.github/workflows/` | yes | Workflow mistakes otherwise surface only when the workflow runs, and `release.yml` runs only on a tag. |
-| `govulncheck` | `govulncheck ./...` in `go-app` | not yet | Currently red: it reports reachable vulnerabilities in dependencies that predate CI (grpc, OpenTelemetry, `golang.org/x/net`, `golang.org/x/text`, pgx). Becomes required once those are upgraded (`PROD-DEPS-VULN`). |
+| `govulncheck` | `govulncheck ./...` in `go-app` | yes | A vulnerability reachable from AMP code blocks a release. It fails only on reachable (symbol-level) findings. The trade-off: the vulnerability database changes over time, so a new advisory can turn a pull request red even if it does not touch dependencies. The fix is a separate pull request that upgrades the module, not a skip. |
 | `e2e-ha` | [`deploy/e2e-ha/run.sh`](../deploy/e2e-ha/run.sh): a two-replica HA scenario in Docker | not yet | Built on fixed waits and new on shared runners. Becomes required after 10 consecutive green runs on `main` (`CI-E2E-HA-REQUIRED`). |
 
-"Required" means the check that should be listed in branch protection. The workflow itself does not enforce this. Branch protection is repository configuration: *Settings → Branches → `main` → Require status checks to pass*, with the job names exactly as shown above (`gate`, `images (amp)`, `images (config-reloader)`, `actionlint`).
+"Required" means the check that should be listed in branch protection. The workflow itself does not enforce this. Branch protection is repository configuration: *Settings → Branches → `main` → Require status checks to pass*, with the job names exactly as shown above (`gate`, `images (amp)`, `images (config-reloader)`, `actionlint`, `govulncheck`).
+
+`govulncheck` also lists module-level findings, which do not affect the exit code. One of them is expected and permanent: GO-2026-5932 (`golang.org/x/crypto/openpgp` is unmaintained and has no fix). AMP imports only `golang.org/x/crypto/bcrypt` from that module. Image scanners that match by module version will report it as well.
 
 Runs on the same pull request cancel each other; runs on `main` do not.
 
