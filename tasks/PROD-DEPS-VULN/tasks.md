@@ -51,12 +51,12 @@
 
 Новых тестов нет: поведение кода не меняется, регрессию ловят существующие тесты и сам `govulncheck` в required. На `/write-tests` зафиксировать это решение, тесты не выдумывать.
 
-- [ ] **T1.** `GOTOOLCHAIN=go1.26.8 ./scripts/release-gate.sh` → `RESULT: PASS` (все 10 шагов). Флейки перезапустить, записать ниже.
-- [ ] **T2.** pgx на реальном Postgres: `go test -count=1 -v ./internal/database/...` — `TestRunMigrations_ConcurrentReplicas_*`, `TestPostgresPool_Reload_*` = PASS, не SKIP.
-- [ ] **T3.** `deploy/e2e-ha/run.sh` локально — PASS. Это единственное покрытие repository-пути silencing: его unit-тесты — заглушки со `t.Skip`.
-- [ ] **T4.** Образы: `docker buildx build --platform linux/amd64,linux/arm64` для `Dockerfile` и `Dockerfile.config-reloader` (как job `images`, без push). Если локально нет multi-arch builder'а — хотя бы нативная архитектура, остальное — CI на PR.
+- [x] **T1.** `GOTOOLCHAIN=go1.26.8 ./scripts/release-gate.sh` → `RESULT: PASS` (все 10 шагов). Флейки перезапустить, записать ниже.
+- [x] **T2.** pgx на реальном Postgres: `go test -count=1 -v ./internal/database/...` — `TestRunMigrations_ConcurrentReplicas_*`, `TestPostgresPool_Reload_*` = PASS, не SKIP.
+- [x] **T3.** `deploy/e2e-ha/run.sh` локально — PASS. Это единственное покрытие repository-пути silencing: его unit-тесты — заглушки со `t.Skip`.
+- [x] **T4.** Образы: `docker buildx build --platform linux/amd64,linux/arm64` для `Dockerfile` и `Dockerfile.config-reloader` (как job `images`, без push). Если локально нет multi-arch builder'а — хотя бы нативная архитектура, остальное — CI на PR.
 - [ ] **T5.** CI на PR (с подтверждения пользователя): зелёные `gate`, `images (amp)`, `images (config-reloader)`, `actionlint`, `govulncheck`, `e2e-ha`.
-- [ ] **T6.** `git diff main --stat` — затронуты только файлы из Spec «Scope»; `git diff --check` чистый.
+- [x] **T6.** `git diff main --stat` — затронуты только файлы из Spec «Scope»; `git diff --check` чистый.
 
 ## Documentation (`/write-doc`)
 
@@ -82,3 +82,21 @@
 - I5: прочих упоминаний «govulncheck красный» в `docs/CI.md` не осталось. Вне `docs/CI.md`: запись PROD-CI-IMAGES в `CHANGELOG.md` `[Unreleased]` (строка 19) говорит «govulncheck is red… (`PROD-DEPS-VULN`)», правится на W1. `SECURITY.md:131` упоминает govulncheck нейтрально, править не нужно.
 - Коммиты: `0194249` (`fix(deps)`), `2229973` (`ci:`).
 - Замечено, вне скоупа: `docs/CI.md` «Go Version» утверждает, что локальный Go с `GOTOOLCHAIN=auto` скачает `go1.26.8`. Это верно, только если локальный Go старше. Более новый локальный (1.27.1 на этой машине) используется как есть, и тогда `govulncheck` проверяет stdlib другой версии, не той, что в CI. Решить на `/write-doc`: одна фраза или follow-up.
+
+**/write-tests (2026-09-29)** — отдельно не запускался. Решение из плана в силе: новых тестов нет, поведение кода не менялось (0 строк Go). Регрессию ловят существующие тесты (ниже) и `govulncheck` в required.
+
+**/testing (2026-09-29)**, HEAD `22028d6`, `GOTOOLCHAIN=go1.26.8`, Docker (OrbStack) поднят.
+
+Зелёные:
+- T1 `scripts/release-gate.sh`: 9 из 10 шагов PASS с первого прогона (build 12s, lint 52s, test 90s, futureparity 20s, helm-deps/dev/production/rbac, amtool-compat 105s). Шаг `race` — см. «Красные». Повторный прогон шага `race` (тот же `go test -race -count=1` по тем же 7 пакетам) — все `ok`, exit 0.
+- T2 pgx v5.9.2 на реальном Postgres (testcontainers): `TestRunMigrations_ConcurrentReplicas_FreshDB`, `TestPostgresPool_Reload_{NoInFlightQueryLoss,FailedVerificationKeepsOldPool,RefusesWhenHandleShared,RejectsInvalidConfig}` — PASS, без SKIP.
+- T3 `deploy/e2e-ha/run.sh` (образ AMP собирается compose'ом из текущего дерева): `ALL PASS`, 7 проверок, 1:33. Кластер `ready` с 2 peers, ровно одна публикация на группу, failover и adoption таймера.
+- T4 `docker buildx build --platform linux/amd64,linux/arm64`: `Dockerfile` и `Dockerfile.config-reloader` — exit 0. У `Dockerfile` arm64-слой `go build` в первом прогоне был `CACHED` (кэш от образа smoke-стенда из шага `amtool-compat`), поэтому `Dockerfile` пересобран с `--no-cache`: `go mod download` и оба `go build` выполнены заново, exit 0.
+- T6 `git diff main --stat` — только файлы из Spec «Scope» (+ task workspace и `NEXT.md`); `git diff main --check` — чисто.
+- `govulncheck` / `actionlint` — см. /implement выше.
+
+Красные — только предсуществующее:
+- T1, шаг `race`: `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (`distributed_timer_ownership_test.go:169`, «expected 1, actual 2») — это `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` из BUGS.md, симптом тот же. Отделено от апгрейда замером `go test -race -count=30 -run '^…OnlyLockWinnerFires$' ./internal/infrastructure/grouping/`: ветка `22028d6` — **0/30**, чистый `main` `5e5f4db` — **2/30** (как в BUGS.md: 2/30 на `41b8c28`). Апгрейд пакет `grouping` не затрагивает (redis/miniredis не поднимались). Не регресс, не чинили (скоуп — `GROUPING-TIMER-LOCK-FIX`).
+
+Не проверено:
+- T5 CI на PR — нужен push ветки и PR (действие наружу), ждёт подтверждения пользователя. До этого jobs `gate`/`images`/`actionlint`/`govulncheck`/`e2e-ha` проверены только локальными эквивалентами.
