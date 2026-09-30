@@ -52,6 +52,8 @@ updated_at: 2026-09-30
 
 ## Non-Goals
 
+- **Публикация релиза сейчас** — решение владельца 2026-09-30: теги `v0.1.0-rc.1` / `v0.1.0` не ставим до отдельного решения (Spec OQ1).
+
 - Включение `configReloader.enabled` в production values — `CONFIG-RELOADER-SIDECAR` / `CONFIG-RELOADER-AUTH`.
 - SBOM, подпись cosign, Trivy, digest-пины — `CI-SUPPLY-CHAIN`.
 - Публикация Helm-чарта в OCI/Helm-репозиторий (не заявлено в BACKLOG; при необходимости — отдельная задача).
