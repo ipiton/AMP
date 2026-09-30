@@ -14,8 +14,8 @@ based_on:
 
 # Implementation Plan: подготовка к первому релизу (версии без тега)
 
-**Based on:** requirements.md / research.md / Spec.md (v2.0)  
-**Date:** 2026-09-30  
+**Based on:** requirements.md / research.md / Spec.md (v2.0)
+**Date:** 2026-09-30
 **Tier:** Standard (`C R`), deep-review — recommended, skipped (Spec § Deep Review)
 
 ## Touched Files
