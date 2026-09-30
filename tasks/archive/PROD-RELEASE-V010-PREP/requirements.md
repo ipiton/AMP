@@ -4,7 +4,7 @@ slug: prod-release-v010-prep
 stream: Production Readiness / Delivery
 type: feature
 priority: high
-status: active
+status: complete
 created_at: 2026-09-30
 updated_at: 2026-09-30
 ---
@@ -45,12 +45,12 @@ updated_at: 2026-09-30
 
 ## Success Criteria
 
-- [ ] `Chart.yaml` `appVersion: "0.1.0"`; `image.tag: ""` в `values.yaml` и `values-production.yaml`; `values-dev.yaml` остаётся `latest` (осознанно).
-- [ ] `helm/amp/tests/render-image-tag.sh` зелёный; `scripts/release-gate.sh` зелёный (известный флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` — перезапуск с пометкой).
-- [ ] В `release.yml` есть guard: тег без `v` и pre-release суффикса == `appVersion`, иначе fail до login; `actionlint` чист; guard проверен локально на pass- и fail-кейсах.
-- [ ] Go: константы `appVersion` нет, 6 использований → `buildinfo.Version`; `go vet` + `go test ./cmd/server/...` зелёные.
-- [ ] Доки: `helm/amp/README.md:59` (дефолт `image.tag`), `docs/CI.md:68` (тег из `appVersion` + guard), `WORKFLOW.md` § Release Process (шаг: bump `version`/`appVersion` чарта; guard), записи в `CHANGELOG.md` `[Unreleased]` и `helm/amp/CHANGELOG.md` `[Unreleased]`.
-- [ ] BACKLOG: `PROD-RELEASE-V010` — пометка «на паузе по решению владельца 2026-09-30, подготовка сделана в `-PREP`, остаток: …»; новая строка `SERVICE-VERSION-ENV-DEAD`.
+- [x] `Chart.yaml` `appVersion: "0.1.0"`; `image.tag: ""` в `values.yaml` и `values-production.yaml`; `values-dev.yaml` остаётся `latest` (осознанно).
+- [x] `helm/amp/tests/render-image-tag.sh` зелёный; `scripts/release-gate.sh` зелёный (известный флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` — перезапуск с пометкой).
+- [x] В `release.yml` есть guard: тег без `v` и pre-release суффикса == `appVersion`, иначе fail до login; `actionlint` чист; guard проверен локально на pass- и fail-кейсах.
+- [x] Go: константы `appVersion` нет, 6 использований → `buildinfo.Version`; `go vet` + `go test ./cmd/server/...` зелёные.
+- [x] Доки: `helm/amp/README.md:59` (дефолт `image.tag`), `docs/CI.md:68` (тег из `appVersion` + guard), `WORKFLOW.md` § Release Process (шаг: bump `version`/`appVersion` чарта; guard), записи в `CHANGELOG.md` `[Unreleased]` и `helm/amp/CHANGELOG.md` `[Unreleased]`.
+- [x] BACKLOG: `PROD-RELEASE-V010` — пометка «на паузе по решению владельца 2026-09-30, подготовка сделана в `-PREP`, остаток: …»; новая строка `SERVICE-VERSION-ENV-DEAD`.
 
 ## Non-Goals
 

@@ -3,7 +3,7 @@ id: PROD-RELEASE-V010-PREP
 slug: prod-release-v010-prep
 stream: Production Readiness / Delivery
 type: feature
-status: active
+status: complete
 created_at: 2026-09-30
 updated_at: 2026-09-30
 based_on:
@@ -69,7 +69,7 @@ based_on:
 
 - [x] **4.1** Гейты AMP: `make -C go-app quality-gates-fast` (+ `git status` — `go fmt` не должен ничего переписать), `scripts/release-gate.sh` (флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` на `race` — один перезапуск с пометкой; дважды красный — стоп), `git diff --check`, нет `_, _ :=` в диффе. <!-- depends: Phase 1-3 | verify: scripts/release-gate.sh  # RESULT: PASS -->
 - [x] **4.2** Локальная сборка образа с `--build-arg VERSION=0.1.0-local` и проверка стартового лога `"version":"0.1.0-local"` (опционально, если Docker доступен; иначе — пометка). <!-- depends: 1.3 | verify: docker run --rm <img> 2>&1 | head -5 | grep '"version":"0.1.0-local"' -->
-- [ ] **4.3** `finalize`: `DONE.md` (запись 2026-09), удалить WIP-строку из `NEXT.md`, архив `tasks/PROD-RELEASE-V010-PREP/` → `tasks/archive/`; `PROD-RELEASE-V010` остаётся открытым в BACKLOG. <!-- depends: 4.1 | verify: test -d tasks/archive/PROD-RELEASE-V010-PREP && ! grep -n 'PROD-RELEASE-V010-PREP' docs/06-planning/NEXT.md -->
+- [x] **4.3** `finalize`: `DONE.md` (запись 2026-09), удалить WIP-строку из `NEXT.md`, архив `tasks/PROD-RELEASE-V010-PREP/` → `tasks/archive/`; `PROD-RELEASE-V010` остаётся открытым в BACKLOG. <!-- depends: 4.1 | verify: test -d tasks/archive/PROD-RELEASE-V010-PREP && ! grep -n 'PROD-RELEASE-V010-PREP' docs/06-planning/NEXT.md -->
 - [ ] **4.4** `merge-to-main`, зелёный `ci` на merge-коммите. Тегов не ставить (Spec I4). <!-- depends: 4.3 | verify: gh run list -L 1 --branch main -->
 
 ## Implementation Notes (2026-09-30)
@@ -106,11 +106,11 @@ Skipped: реальный запуск `release.yml` (тег) — вне scope, 
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required — recommended, skipped (Spec § Deep Review)
-- [ ] Tests for changed behavior are added or updated (`render-image-tag.sh`)
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
-- [ ] Ни одного git-тега и push в реестр (Spec I4)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required — recommended, skipped (Spec § Deep Review)
+- [x] Tests for changed behavior are added or updated (`render-image-tag.sh`)
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
+- [x] Ни одного git-тега и push в реестр (Spec I4)
