@@ -16,7 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-_(пусто)_
+- [ ] **PROD-RELEASE-V010** — первый релиз `v0.1.0`: выровнять версии (Chart `appVersion` = тег образа, values → `.Chart.AppVersion`), закрыть `CHANGELOG`, финализировать release notes, pre-release `deep-review`, тег (публикует образы в GHCR). Источник: `BACKLOG.md` § «Production Readiness — блокеры», P0 Delivery. Ветка `feature/prod-release-v010`, workspace `tasks/PROD-RELEASE-V010/`. Started 2026-09-30. ~0.5d
 
 ## Queue
 
