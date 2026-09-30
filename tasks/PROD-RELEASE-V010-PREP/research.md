@@ -1,5 +1,7 @@
 # Research: PROD-RELEASE-V010
 
+> Выполнен под родительскую задачу `PROD-RELEASE-V010` (весь релиз). С 2026-09-30 workspace принадлежит срезу `PROD-RELEASE-V010-PREP`: для него действуют Q-A (A1), Q-C (C1) и F1/F2/F6; Q-B (rc-тег), Q-D (CHANGELOG) и F5 (release notes) — вход для `PROD-RELEASE-V010`, когда владелец снимет паузу.
+
 **Level:** 2 (light). Триггеры: infrastructure (первый запуск `release.yml`), несколько вариантов (rc-тег, guard версии), необратимая операция (тег + публичные образы).
 **Mode:** обычный; живые наблюдения — `evidence/github-state-2026-09-30.txt`.
 
