@@ -59,9 +59,9 @@ based_on:
 
 ## Phase 3: Тесты (write-tests)
 
-- [ ] **3.1** `helm/amp/tests/render-image-tag.sh` по Spec §2: bash 3.2, `set -euo pipefail`, `trap` на временный каталог, here-string вместо `printf | grep -q`, `appVersion` из `Chart.yaml`; кейсы: default, production, lite → `amp:<appVersion>`; reloader enabled → `amp-config-reloader:<appVersion>`; `--set image.tag=9.9.9` → `amp:9.9.9`. PASS/FAIL по кейсу, exit ≠ 0 при любом FAIL. `chmod +x`. <!-- depends: 1.1 | verify: helm/amp/tests/render-image-tag.sh -->
-- [ ] **3.2** Мутационная проверка теста: временно вернуть `values.yaml` `tag: "0.0.1"` → тест FAIL; вернуть `appVersion: "0.0.1"` → FAIL; откатить правки. <!-- depends: 3.1 | verify: git status --short helm/amp  # только ожидаемые файлы -->
-- [ ] **3.3** Go: новых тестов не требуется (источник строки, поведение не меняется); подтвердить, что существующие тесты `cmd/server` зелёные. <!-- depends: 1.3 | verify: cd go-app && go test ./cmd/server/... -count=1 -->
+- [x] **3.1** `helm/amp/tests/render-image-tag.sh` по Spec §2: bash 3.2, `set -euo pipefail`, `trap` на временный каталог, here-string вместо `printf | grep -q`, `appVersion` из `Chart.yaml`; кейсы: default, production, lite → `amp:<appVersion>`; reloader enabled → `amp-config-reloader:<appVersion>`; `--set image.tag=9.9.9` → `amp:9.9.9`. PASS/FAIL по кейсу, exit ≠ 0 при любом FAIL. `chmod +x`. <!-- depends: 1.1 | verify: helm/amp/tests/render-image-tag.sh -->
+- [x] **3.2** Мутационная проверка теста: временно вернуть `values.yaml` `tag: "0.0.1"` → тест FAIL; вернуть `appVersion: "0.0.1"` → FAIL; откатить правки. <!-- depends: 3.1 | verify: git status --short helm/amp  # только ожидаемые файлы -->
+- [x] **3.3** Go: новых тестов не требуется (источник строки, поведение не меняется); подтвердить, что существующие тесты `cmd/server` зелёные. <!-- depends: 1.3 | verify: cd go-app && go test ./cmd/server/... -count=1 -->
 
 **Phase verification:** `helm/amp/tests/render-image-tag.sh && helm/amp/tests/render-config-reloader.sh`.
 
@@ -79,6 +79,13 @@ based_on:
 - 1.4: тело шага извлекается из `release.yml` через YAML-парсер, не копией руками; 8/8 кейсов как ожидалось (`evidence/guard-local-2026-09-30.txt`). Шелл CI — `bash -e`, локально `bash`; для этого скрипта разница не влияет (нет команд, чей ненулевой код до `exit 1` что-то меняет).
 - 2.4: старая запись PROD-CI-IMAGES в `CHANGELOG.md` («`values-production.yaml` pins `1.0.0`») не переписывалась — это история того изменения; новая запись PREP её отменяет.
 - Отклонений от Spec нет.
+
+## Test Notes (write-tests, 2026-09-30)
+
+- 3.1: `helm/amp/tests/render-image-tag.sh` — 10 assertions (default/production/lite: ровно один `amp:<appVersion>` и нет пустого тега; reloader: `amp-config-reloader:<appVersion>` и app рядом; пин `9.9.9` выигрывает). Под `/bin/bash` 3.2.57 — all passed.
+- 3.2: 5 мутаций, каждая → rc=1 (`evidence/render-image-tag-mutations-2026-09-30.txt`): `values.yaml` `0.0.1`, `values-production.yaml` `1.0.0`, шаблон без `default .Chart.AppVersion`, reloader на `latest`, шаблон игнорирует пин. Мутация `appVersion: "0.0.1"` из плана заменена на эти: тест читает `appVersion` из `Chart.yaml`, так что смена одного `appVersion` при пустых values — легитимная правка, а не регрессия; рассинхрон тега и `appVersion` ловит guard (`evidence/guard-local-2026-09-30.txt`).
+- 3.3: `go test ./cmd/server/...` зелёный; новых Go-тестов нет — меняется источник строки версии, не поведение, а сам `buildinfo` уже покрыт `internal/buildinfo/metrics_test.go`.
+- Пробелы: guard проверен только локальным прогоном тела шага, реальный запуск — первый тег в `PROD-RELEASE-V010`; `render-image-tag.sh` в release-gate не входит (`HELM-RENDER-TEST-IN-GATE`).
 
 ## Definition of Done
 

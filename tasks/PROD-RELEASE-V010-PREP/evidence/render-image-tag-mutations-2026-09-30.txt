@@ -1,0 +1,20 @@
+# mutation runs of helm/amp/tests/render-image-tag.sh, 2026-09-30 (expected rc=1 each)
+== values.yaml tag back to 0.0.1: rc=1
+  FAIL one app container on ghcr.io/ipiton/amp:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+  FAIL one app container on ghcr.io/ipiton/amp:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+  FAIL app container unchanged next to the sidecar (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+== values-production.yaml tag back to 1.0.0: rc=1
+  FAIL one app container on ghcr.io/ipiton/amp:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+== deployment.yaml loses default .Chart.AppVersion (app): rc=1
+  FAIL one app container on ghcr.io/ipiton/amp:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+  FAIL tag is never empty (unexpected: image: "ghcr.io/ipiton/amp:")
+  FAIL one app container on ghcr.io/ipiton/amp:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+  FAIL tag is never empty (unexpected: image: "ghcr.io/ipiton/amp:")
+  FAIL one app container on ghcr.io/ipiton/amp:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+  FAIL tag is never empty (unexpected: image: "ghcr.io/ipiton/amp:")
+  FAIL app container unchanged next to the sidecar (want 1 x 'image: "ghcr.io/ipiton/amp:0.1.0"', got 0)
+== deployment.yaml reloader pinned to latest: rc=1
+  FAIL sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0 (want 1 x 'image: "ghcr.io/ipiton/amp-config-reloader:0.1.0"', got 0)
+== explicit pin ignored: rc=1
+  FAIL app container on the pinned tag (want 1 x 'image: "ghcr.io/ipiton/amp:9.9.9"', got 0)
+  FAIL appVersion not used when pinned (unexpected: image: "ghcr.io/ipiton/amp:0.1.0")
