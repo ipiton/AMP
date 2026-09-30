@@ -1,0 +1,24 @@
+# captured 2026-09-30
+## gh run list -L 3
+completed	success	Merge branch 'docs/solo-kanban-upgrade'	ci	main	push	36602606895	10m0s	2026-09-29T17:06:39Z
+completed	success	Merge branch 'docs/rewritten-sha-refs'	ci	main	push	36557214322	16m14s	2026-09-29T10:42:27Z
+completed	failure	Merge branch 'bugfix/prod-deps-vuln' (PROD-DEPS-VULN)	ci	main	push	36556853447	8m53s	2026-09-29T10:38:56Z
+
+## jobs of 36556853447 (failed)
+gate	failure
+images (config-reloader)	success
+e2e-ha	success
+govulncheck	success
+images (amp)	success
+actionlint	success
+## failing test
+gate	UNKNOWN STEP	2026-09-29T10:43:20.2514932Z --- FAIL: TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer (0.03s)
+gate	UNKNOWN STEP	2026-09-29T10:47:44.4367336Z [release-gate] RESULT: FAIL
+
+## remote tags
+v0.0.2
+v0.0.1
+## branch protection
+{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"404"}gh: Branch not protected (HTTP 404)
+## anonymous GHCR
+Get "https://ghcr.io/v2/ipiton/amp/manifests/latest": denied: denied
