@@ -20,8 +20,6 @@ import (
 	pkglogger "github.com/ipiton/AMP/pkg/logger"
 )
 
-const appName = "Alertmanager++"
-
 const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
 
 func main() {
