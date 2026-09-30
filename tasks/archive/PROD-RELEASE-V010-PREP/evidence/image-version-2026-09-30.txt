@@ -4,6 +4,6 @@
 ## GET /api/v2/status versionInfo
 {'version': '0.1.0-local', 'revision': 'unknown', 'branch': 'unknown', 'buildUser': 'docker', 'buildDate': 'unknown', 'goVersion': 'go1.26.8'}
 ## legacy dashboard version strings
-/dashboard:    1 0.1.0-local 
-/dashboard/alerts:    1 0.1.0-local 
-/dashboard/silences:    1 0.1.0-local 
+/dashboard:    1 0.1.0-local
+/dashboard/alerts:    1 0.1.0-local
+/dashboard/silences:    1 0.1.0-local
