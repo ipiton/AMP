@@ -56,7 +56,7 @@ helm install amp ./helm/amp \
 | `profile` | Deployment profile (lite/standard) | `lite` |
 | `replicaCount` | Number of replicas | `1` |
 | `image.repository` | Image repository | `ghcr.io/ipiton/amp` |
-| `image.tag` | Image tag | `latest` |
+| `image.tag` | Image tag | `""` (defaults to `.Chart.AppVersion`) |
 
 ### LLM Configuration (BYOK)
 

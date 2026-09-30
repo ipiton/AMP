@@ -15,14 +15,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ipiton/AMP/internal/application"
+	"github.com/ipiton/AMP/internal/buildinfo"
 	"github.com/ipiton/AMP/internal/config"
 	pkglogger "github.com/ipiton/AMP/pkg/logger"
 )
 
-const (
-	appName    = "Alertmanager++"
-	appVersion = "0.0.1"
-)
+const appName = "Alertmanager++"
 
 const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
 
@@ -52,7 +50,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	slog.Info("🚀 Starting Alertmanager++",
-		"version", appVersion,
+		"version", buildinfo.Version,
 		"profile", "OSS Core",
 	)
 

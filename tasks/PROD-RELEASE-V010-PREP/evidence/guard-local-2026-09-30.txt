@@ -1,0 +1,10 @@
+# local run of the release.yml guard step body (parsed from the workflow YAML), 2026-09-30
+# expected: rc=0 x4, rc=1 with ::error:: x4
+real Chart.yaml, expect pass   TAG=v0.1.0           rc=0 
+real Chart.yaml, expect pass   TAG=v0.1.0-rc.1      rc=0 
+real Chart.yaml, expect fail   TAG=v0.1.1           rc=1 ::error::tag v0.1.1 does not match helm/amp/Chart.yaml appVersion '0.1.0'
+real Chart.yaml, expect fail   TAG=v1.0.0           rc=1 ::error::tag v1.0.0 does not match helm/amp/Chart.yaml appVersion '0.1.0'
+real Chart.yaml, expect fail   TAG=v0.1.0+build.1   rc=1 ::error::tag v0.1.0+build.1 does not match helm/amp/Chart.yaml appVersion '0.1.0'
+unquoted, expect pass          TAG=v0.1.0           rc=0 
+unquoted, expect pass          TAG=v0.1.0-rc.2      rc=0 
+no appVersion, expect fail     TAG=v0.1.0           rc=1 ::error::tag v0.1.0 does not match helm/amp/Chart.yaml appVersion ''
