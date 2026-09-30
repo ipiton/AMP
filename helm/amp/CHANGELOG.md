@@ -12,6 +12,7 @@
 - `templates/redis-statefulset.yaml`: `replicas: {{ .Values.valkey.replicas | default 1 }}` silently coerced an explicit `valkey.replicas: 0` back to `1` (Helm/sprig `default` treats `0` as empty). Now `{{ .Values.valkey.replicas | int }}` — `replicas: 0` is the documented way to disable this chart's own Redis/Valkey pod when pointing `cache.*` at an external Redis-compatible service.
 
 ### Changed
+- `appVersion` is `0.1.0`, and `image.tag` is empty in `values.yaml` (was `0.0.1`) and `values-production.yaml` (was `1.0.0`), so the app image defaults to `.Chart.AppVersion` like the config-reloader image. An explicit `image.tag` still wins.
 - Liveness/readiness/startup probes moved from `/healthz`/`/readyz` to `/-/healthy`/`/-/ready`, which stay reachable when HTTP auth is enabled.
 - `values-production.yaml` rewritten after auditing every key against the app's actual config surface and the chart's real template capabilities (not just BACKLOG's wishlist):
   - Removed `postgresql.cluster.*` (rendered by no template — a 3-instance Postgres "cluster" this chart cannot build) in favor of the real `postgresql.replicas`/`postgresql.config.*` keys, with the single-primary-only limitation documented inline.

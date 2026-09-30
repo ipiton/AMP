@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/application"
+	"github.com/ipiton/AMP/internal/buildinfo"
 )
 
 //go:embed templates/*
@@ -88,7 +89,7 @@ func (h legacyDashboardHandlers) dashboardHandler(w http.ResponseWriter, r *http
 		Title:       "Dashboard - Alertmanager++",
 		Heading:     "Dashboard",
 		Description: "Active runtime summary for the current server path.",
-		Version:     appVersion,
+		Version:     buildinfo.Version,
 		CurrentPage: "overview",
 		GeneratedAt: now.Format(time.RFC3339),
 		Content:     h.provider.LegacyDashboardOverview(r.Context(), now),
@@ -101,7 +102,7 @@ func (h legacyDashboardHandlers) alertsPageHandler(w http.ResponseWriter, r *htt
 		Title:       "Alerts - Alertmanager++",
 		Heading:     "Alerts",
 		Description: "Read-only alert inventory from the active compatibility store.",
-		Version:     appVersion,
+		Version:     buildinfo.Version,
 		CurrentPage: "alerts",
 		GeneratedAt: now.Format(time.RFC3339),
 		Content:     h.provider.LegacyDashboardAlerts(now),
@@ -114,7 +115,7 @@ func (h legacyDashboardHandlers) silencesPageHandler(w http.ResponseWriter, r *h
 		Title:       "Silences - Alertmanager++",
 		Heading:     "Silences",
 		Description: "Read-only silence state for the active runtime.",
-		Version:     appVersion,
+		Version:     buildinfo.Version,
 		CurrentPage: "silences",
 		GeneratedAt: now.Format(time.RFC3339),
 		Content:     h.provider.LegacyDashboardSilences(now),
@@ -127,7 +128,7 @@ func (h legacyDashboardHandlers) llmPageHandler(w http.ResponseWriter, r *http.R
 		Title:       "LLM - Alertmanager++",
 		Heading:     "LLM",
 		Description: "Config and coarse runtime state for alert classification.",
-		Version:     appVersion,
+		Version:     buildinfo.Version,
 		CurrentPage: "llm",
 		GeneratedAt: now.Format(time.RFC3339),
 		Content:     h.provider.LegacyDashboardLLM(),
@@ -140,7 +141,7 @@ func (h legacyDashboardHandlers) routingPageHandler(w http.ResponseWriter, r *ht
 		Title:       "Routing - Alertmanager++",
 		Heading:     "Routing",
 		Description: "Read-only summary of publishing and routing reality in the active runtime.",
-		Version:     appVersion,
+		Version:     buildinfo.Version,
 		CurrentPage: "routing",
 		GeneratedAt: now.Format(time.RFC3339),
 		Content:     h.provider.LegacyDashboardRouting(),

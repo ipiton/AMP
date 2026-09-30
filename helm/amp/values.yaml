@@ -19,7 +19,7 @@ profile: "standard"  # Options: "lite" | "standard"
 # ===============================
 image:
   repository: ghcr.io/ipiton/amp
-  tag: "0.0.1"
+  tag: ""            # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

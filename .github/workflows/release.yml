@@ -2,7 +2,8 @@
 # (linux/amd64 + linux/arm64) when a v* tag is pushed. The only workflow with
 # `packages: write`, kept separate from ci.yml so no pull_request run ever
 # holds that permission (ADR-013). Deliberately no workflow_dispatch: a tag
-# is the one way to publish.
+# is the one way to publish, and the tag must match helm/amp/Chart.yaml
+# appVersion.
 #
 # The build itself is the one ci.yml's `images` job proves on every PR;
 # this adds only the registry login, tags/labels and push.
@@ -40,6 +41,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The chart pulls .Chart.AppVersion by default, so the tag must match
+      # it: v0.1.0 and v0.1.0-rc.1 both require appVersion "0.1.0".
+      - name: check tag matches Chart appVersion
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          app="$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' helm/amp/Chart.yaml)"
+          want="${TAG#v}"
+          want="${want%%-*}"
+          if [ -z "$app" ] || [ "$want" != "$app" ]; then
+            echo "::error::tag $TAG does not match helm/amp/Chart.yaml appVersion '$app'"
+            exit 1
+          fi
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0

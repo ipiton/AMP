@@ -1,0 +1,9 @@
+# docker build --build-arg VERSION=0.1.0-local, run with deploy/smoke/config.yaml (lite), 2026-09-30
+## startup log
+{"time":"2026-09-30T12:14:03.658535312Z","level":"INFO","msg":"🚀 Starting Alertmanager++","version":"0.1.0-local","profile":"OSS Core"}
+## GET /api/v2/status versionInfo
+{'version': '0.1.0-local', 'revision': 'unknown', 'branch': 'unknown', 'buildUser': 'docker', 'buildDate': 'unknown', 'goVersion': 'go1.26.8'}
+## legacy dashboard version strings
+/dashboard:    1 0.1.0-local
+/dashboard/alerts:    1 0.1.0-local
+/dashboard/silences:    1 0.1.0-local

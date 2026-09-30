@@ -65,7 +65,7 @@ Both Dockerfiles compile Go on the build machine's own architecture and cross-co
    The binary's version, revision, branch and build date (`amp_build_info`, `/api/v2/status`) are injected from the tag and commit.
 3. **Once, after the very first release:** GHCR creates new packages as **private**. Open *GitHub → Packages → `amp`* and *`amp-config-reloader`* → *Package settings → Change visibility → Public*. Until then, `docker pull` and a Helm install without an image pull secret fail with `unauthorized`.
 
-A tag must match the chart: `helm/amp/values-production.yaml` pins `image.tag`, and that tag has to exist in GHCR before a production install can pull it.
+A tag must match the chart: the chart pulls `.Chart.AppVersion` unless `image.tag` is set, so bump `appVersion` (and `version`) in `helm/amp/Chart.yaml` in the release commit. `release.yml` checks this before logging in to the registry and publishes nothing when the tag without its `v` and pre-release suffix differs from `appVersion` (`v0.1.0` and `v0.1.0-rc.1` both need `appVersion: "0.1.0"`).
 
 ## Not Covered Yet
 

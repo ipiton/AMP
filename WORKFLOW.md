@@ -65,6 +65,8 @@ Full:        start-task -> research -> spec -> plan-task -> implement -> deep-re
 Источник — только `CHANGELOG.md`'s `[Unreleased]` блок (не git log, не память).
 Шаблон — `docs/RELEASE_NOTES_TEMPLATE.md`. Пример — `docs/RELEASE_NOTES_v0.1.0-draft.md`.
 
+0. **Bump chart version**: поднять `version` и `appVersion` в `helm/amp/Chart.yaml` до версии релиза в релизном коммите. Тег образа по умолчанию берётся из `appVersion`, а `release.yml` не публикует тег, который с ним не совпадает (`v0.1.0` и `v0.1.0-rc.1` требуют `appVersion: "0.1.0"`).
+
 1. **Collect**: скопировать весь `[Unreleased]` блок целиком — это единственный источник правды на момент релиза.
 2. **Split by section**: разнести bullet'ы по `### Added` (→ Features), `### Changed`/`### Improved` (→ Performance/Improvements), `### Breaking changes / migration notes` (→ Breaking Changes) в шаблон. Не пересочинять формулировки — конденсировать features можно, breaking changes — только копировать verbatim.
 3. **Verify breaking changes against migration notes**: каждый bullet под "Breaking changes" в CHANGELOG обычно ссылается на epic/wave-код (`FU-*`, `AMP-PARITY-WAVE*`) — сверить, что соответствующий "Added"-bullet выше в CHANGELOG содержит миграционные заметки (обычно секция "Migration notes" внутри самого Added-bullet), и что draft переносит upgrade-шаги, а не только факт breakage.

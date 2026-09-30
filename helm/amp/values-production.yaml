@@ -23,9 +23,7 @@ profile: "standard"
 # ===============================
 image:
   repository: ghcr.io/ipiton/amp
-  # No 1.0.0 image exists: versions and the first release are aligned in
-  # PROD-RELEASE-V010. Set the tag of a published release until then.
-  tag: "1.0.0"
+  tag: ""            # defaults to .Chart.AppVersion
   pullPolicy: Always
 
 # ===============================

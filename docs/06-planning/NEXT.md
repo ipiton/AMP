@@ -16,7 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-RELEASE-V010-PREP** — подготовка к первому релизу без тега: `appVersion` `0.1.0` как единственный источник версии (values → `.Chart.AppVersion`), helm-тест тегов образов, guard «тег == `appVersion`» в `release.yml`, версия бинаря из `buildinfo.Version`. Сам релиз (`PROD-RELEASE-V010`) — на паузе по решению владельца 2026-09-30. Ветка `feature/prod-release-v010-prep`, workspace `tasks/PROD-RELEASE-V010-PREP/`. Started 2026-09-30. ~0.3d
+_(пусто)_
 
 ## Queue
 
