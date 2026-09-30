@@ -60,7 +60,7 @@ updated_at: 2026-09-30
 
 ## Constraints
 
-- **Scope:** `helm/amp/{Chart.yaml,values*.yaml}`, возможно `helm/amp/README.md`/`CHANGELOG.md` чарта, `CHANGELOG.md`, `docs/RELEASE_NOTES_*`, при решении о guard — `.github/workflows/release.yml` или `scripts/release-gate.sh`. Go-код не меняется.
+- **Scope:** `helm/amp/{Chart.yaml,values*.yaml}`, возможно `helm/amp/README.md`/`CHANGELOG.md` чарта, `CHANGELOG.md`, `docs/RELEASE_NOTES_*`, `.github/workflows/release.yml` (guard). Go-код — только источник строки версии (`cmd/server/main.go` константа `appVersion = "0.0.1"` → `buildinfo.Version`, найдено на `/spec`, OQ3); поведение не меняется.
 - **Security:** публичные образы; `release.yml` — единственный workflow с `packages: write`, не расширять права.
 - **Compatibility:** смена дефолтного `image.tag` — в release notes / migration notes. Тег образа без `v` (`0.1.0`), git-тег с `v` (`v0.1.0`). Тег необратим — перед push всё проверено, повторного `v0.1.0` не бывает (исправление = `v0.1.1`).
 
