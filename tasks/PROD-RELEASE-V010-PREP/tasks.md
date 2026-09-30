@@ -67,8 +67,8 @@ based_on:
 
 ## Phase 4: Testing и finalize
 
-- [ ] **4.1** Гейты AMP: `make -C go-app quality-gates-fast` (+ `git status` — `go fmt` не должен ничего переписать), `scripts/release-gate.sh` (флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` на `race` — один перезапуск с пометкой; дважды красный — стоп), `git diff --check`, нет `_, _ :=` в диффе. <!-- depends: Phase 1-3 | verify: scripts/release-gate.sh  # RESULT: PASS -->
-- [ ] **4.2** Локальная сборка образа с `--build-arg VERSION=0.1.0-local` и проверка стартового лога `"version":"0.1.0-local"` (опционально, если Docker доступен; иначе — пометка). <!-- depends: 1.3 | verify: docker run --rm <img> 2>&1 | head -5 | grep '"version":"0.1.0-local"' -->
+- [x] **4.1** Гейты AMP: `make -C go-app quality-gates-fast` (+ `git status` — `go fmt` не должен ничего переписать), `scripts/release-gate.sh` (флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` на `race` — один перезапуск с пометкой; дважды красный — стоп), `git diff --check`, нет `_, _ :=` в диффе. <!-- depends: Phase 1-3 | verify: scripts/release-gate.sh  # RESULT: PASS -->
+- [x] **4.2** Локальная сборка образа с `--build-arg VERSION=0.1.0-local` и проверка стартового лога `"version":"0.1.0-local"` (опционально, если Docker доступен; иначе — пометка). <!-- depends: 1.3 | verify: docker run --rm <img> 2>&1 | head -5 | grep '"version":"0.1.0-local"' -->
 - [ ] **4.3** `finalize`: `DONE.md` (запись 2026-09), удалить WIP-строку из `NEXT.md`, архив `tasks/PROD-RELEASE-V010-PREP/` → `tasks/archive/`; `PROD-RELEASE-V010` остаётся открытым в BACKLOG. <!-- depends: 4.1 | verify: test -d tasks/archive/PROD-RELEASE-V010-PREP && ! grep -n 'PROD-RELEASE-V010-PREP' docs/06-planning/NEXT.md -->
 - [ ] **4.4** `merge-to-main`, зелёный `ci` на merge-коммите. Тегов не ставить (Spec I4). <!-- depends: 4.3 | verify: gh run list -L 1 --branch main -->
 
@@ -86,6 +86,23 @@ based_on:
 - 3.2: 5 мутаций, каждая → rc=1 (`evidence/render-image-tag-mutations-2026-09-30.txt`): `values.yaml` `0.0.1`, `values-production.yaml` `1.0.0`, шаблон без `default .Chart.AppVersion`, reloader на `latest`, шаблон игнорирует пин. Мутация `appVersion: "0.0.1"` из плана заменена на эти: тест читает `appVersion` из `Chart.yaml`, так что смена одного `appVersion` при пустых values — легитимная правка, а не регрессия; рассинхрон тега и `appVersion` ловит guard (`evidence/guard-local-2026-09-30.txt`).
 - 3.3: `go test ./cmd/server/...` зелёный; новых Go-тестов нет — меняется источник строки версии, не поведение, а сам `buildinfo` уже покрыт `internal/buildinfo/metrics_test.go`.
 - Пробелы: guard проверен только локальным прогоном тела шага, реальный запуск — первый тег в `PROD-RELEASE-V010`; `render-image-tag.sh` в release-gate не входит (`HELM-RENDER-TEST-IN-GATE`).
+
+## Testing Results (2026-09-30)
+
+| Check | Result | Notes |
+|---|---|---|
+| `make -C go-app quality-gates-fast` | PASS | `go fmt` ничего не переписал (`git status` чист) |
+| `git diff --check main...HEAD` | FAIL → fixed → PASS | хвостовые пробелы в `Spec.md`/`tasks.md` (markdown-переносы из шаблона) и в evidence; ранее `git diff --check` гонялся только по рабочему дереву и их не видел |
+| `_, _ :=` в диффе | PASS | нет |
+| `scripts/release-gate.sh`, прогон 1 | FAIL (9/10) | `lint`: `cmd/server/main.go:23:7: const appName is unused` — следствие 1.3 (см. Implementation Notes), исправлено коммитом `3998564` |
+| `scripts/release-gate.sh`, прогон 2 | **PASS 10/10** | build, lint, test, futureparity, race (257s, grouping-флейк не проявился), helm-deps/dev/production/rbac, amtool-compat |
+| `helm/amp/tests/render-image-tag.sh` | PASS | + 5 мутаций → FAIL (write-tests) |
+| `helm/amp/tests/render-config-reloader.sh` | PASS | |
+| `actionlint` v1.7.12 | PASS | |
+| guard, локальный прогон тела шага | PASS 8/8 | `evidence/guard-local-2026-09-30.txt` |
+| образ `--build-arg VERSION=0.1.0-local` | PASS | стартовый лог, `/api/v2/status`, 3 страницы дашборда — `0.1.0-local`, `0.0.1` нет (`evidence/image-version-2026-09-30.txt`). Первый запуск без конфига упал на `database host is required` (profile standard по умолчанию) — ожидаемо, повторён со `deploy/smoke/config.yaml` (lite) |
+
+Skipped: реальный запуск `release.yml` (тег) — вне scope, `PROD-RELEASE-V010`; CI на GitHub — после `merge-to-main`.
 
 ## Definition of Done
 
