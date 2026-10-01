@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "11 fix-here finding(s) open",
+  "branch": "feature/prod-ingress-hardening",
+  "commit": "d64390c",
+  "reviewed_at": "2026-10-01",
+  "findings": {
+    "blocker": 0,
+    "major": 2,
+    "minor": 10,
+    "nit": 5
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
