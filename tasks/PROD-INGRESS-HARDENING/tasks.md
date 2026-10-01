@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: Закрыть внешний и внутрикластерный доступ к AMP в прод-профиле
 
-**Based on:** requirements.md / research.md / Spec.md v1.0
+**Based on:** requirements.md / research.md / Spec.md v1.1
 **Date:** 2026-10-01
 
 Обозначения в verify:
@@ -27,10 +27,12 @@ based_on:
 - `helm/amp/templates/ingress.yaml` — guard D1.
 - `helm/amp/templates/networkpolicy.yaml` — новый: политика AMP и guard пустых источников.
 - `helm/amp/templates/deployment.yaml` — метка `app.kubernetes.io/component: application` в pod template.
-- `helm/amp/values.yaml` — `ingress.externalAuth`, секция `networkPolicy`.
+- `helm/amp/templates/service.yaml` — та же метка в `metadata.labels`.
+- `helm/amp/templates/servicemonitor.yaml` — D7: gate, селектор, метки, basicAuth, guard.
+- `helm/amp/values.yaml` — `ingress.externalAuth`, секция `networkPolicy`, `monitoring.serviceMonitor.*`.
 - `helm/amp/values-production.yaml` — `networkPolicy.enabled: true` + примеры, комментарий у `ingress:`.
 - `scripts/release-gate.sh` — placeholder'ы для prod-рендера, шаг `helm-tests`.
-- `helm/amp/tests/render-ingress-auth.sh`, `helm/amp/tests/render-networkpolicy.sh` — новые (phase 5).
+- `helm/amp/tests/render-ingress-auth.sh`, `render-networkpolicy.sh`, `render-servicemonitor.sh` — новые (phase 5).
 - `helm/amp/README.md`, `docs/CONFIGURATION_GUIDE.md`, `CHANGELOG.md`, `helm/amp/CHANGELOG.md`, `docs/06-planning/DECISIONS.md` — docs, ADR-015.
 
 ## Phase 1: Чарт
@@ -40,6 +42,9 @@ based_on:
 - [ ] **1.1** `values.yaml`: добавить `ingress.externalAuth: false` и комментарий: что значит `true`, чарт этого не проверяет, guard D1. <!-- verify: helm template amp helm/amp >/dev/null && grep -n "externalAuth" helm/amp/values.yaml -->
 - [ ] **1.2** `values.yaml`: секция `networkPolicy` (`enabled: false`, `ingressController`, `alertSenders`, `metricsScrapers`, `extraIngress` — пустые списки). В комментариях: роли, пример с `kubernetes.io/metadata.name`, `ipBlock` для LB/NodePort, fail-open на CNI без поддержки, kill-switch, отсутствие egress. <!-- verify: helm template amp helm/amp | grep -c "kind: NetworkPolicy" → 0 -->
 - [ ] **1.3** `deployment.yaml`: `app.kubernetes.io/component: application` в `spec.template.metadata.labels` (после `selectorLabels`, до `podLabels`); `spec.selector` не трогать. <!-- verify: helm template amp helm/amp -s templates/deployment.yaml | grep -n -B2 -A4 "component: application" — метка только в template, в selector.matchLabels её нет -->
+
+- [ ] **1.3a** `service.yaml`: `app.kubernetes.io/component: application` в `metadata.labels`; `spec.selector` не трогать. <!-- verify: helm template amp helm/amp -s templates/service.yaml — метка в metadata, selector = только name+instance -->
+- [ ] **1.3b** `values.yaml`: `monitoring.serviceMonitor.{enabled: true, interval: 30s, scrapeTimeout: 10s, labels: {}, basicAuth.{secretName: "", usernameKey: username, passwordKey: password}}` с комментариями (пароль в открытом виде, не bcrypt; Secret в namespace релиза; `labels` для `serviceMonitorSelector`). <!-- verify: helm template amp helm/amp >/dev/null -->
 
 > **Wave 2** — зависит от Wave 1
 
@@ -52,26 +57,34 @@ based_on:
   - `extraIngress` — как есть;
   - `fail` при отсутствии действующих источников.
   <!-- depends: 1.2, 1.3 | verify: helm template amp helm/amp --set networkPolicy.enabled=true → fail "no sources"; + $SRC → NetworkPolicy, port: http, без Egress; kubeconform/`helm lint` чисто -->
+- [ ] **1.5a** `servicemonitor.yaml` по D7:
+  - gate `monitoring.prometheusEnabled && monitoring.serviceMonitor.enabled`;
+  - `namespace` как у Service, `amp.labels` + `serviceMonitor.labels` (старые `app`/`release` убрать);
+  - селектор selectorLabels + `component: application`, `namespaceSelector.matchNames`;
+  - endpoint `port: http`, `/metrics`, interval/timeout из values, `basicAuth` при `secretName`;
+  - `fail` при `webConfig.existingSecret` без `basicAuth.secretName`.
+  <!-- depends: 1.3a, 1.3b | verify: helm template default → 1 app ServiceMonitor с component в селекторе; --set monitoring.prometheusEnabled=false → 0; --set webConfig.existingSecret=s → fail "no credentials"; + --set monitoring.serviceMonitor.basicAuth.secretName=m → basicAuth.username.name=m -->
 - [ ] **1.6** `values-production.yaml`:
   - `networkPolicy.enabled: true`, списки пустые, закомментированные примеры для ingress-nginx и monitoring;
-  - комментарий у `ingress:` про требование webConfig/externalAuth.
-  <!-- depends: 1.4, 1.5 | verify: helm template amp helm/amp $PROD → fail (auth); + --set webConfig.existingSecret=s → fail (sources); + $SRC → рендер с Ingress и NetworkPolicy -->
+  - комментарий у `ingress:` про требование webConfig/externalAuth;
+  - комментарий у `monitoring:` про `serviceMonitor.basicAuth` и `networkPolicy.metricsScrapers`.
+  <!-- depends: 1.4, 1.5, 1.5a | verify: helm template amp helm/amp $PROD → fail (auth); + --set webConfig.existingSecret=s → fail (sources или ServiceMonitor); + $SRC + --set monitoring.serviceMonitor.basicAuth.secretName=m → рендер с Ingress, NetworkPolicy, ServiceMonitor с basicAuth -->
 
 **Phase verification:**
 - `helm template` для default/dev/lite рендерится, NetworkPolicy и Ingress там нет;
-- `diff` рендера default до/после — только метка component;
+- `diff` рендера default до/после — метка component (pod template, Service metadata) и переписанный ServiceMonitor, больше ничего;
 - `helm lint helm/amp $PROD --set webConfig.existingSecret=s $SRC`.
 
 ## Phase 2: Гейт
 
-- [ ] **2.1** `release-gate.sh`: в `step_helm_values` (prod) и `step_helm_rbac` (production) добавить `--set webConfig.existingSecret=release-gate-placeholder` и источник-placeholder (`--set-json` или временный values-файл). Комментарий — почему placeholder, а не ослабление guard. <!-- depends: 1.6 | verify: scripts/release-gate.sh — шаги helm-production и helm-rbac PASS -->
+- [ ] **2.1** `release-gate.sh`: в `step_helm_values` (prod) и `step_helm_rbac` (production) добавить `--set webConfig.existingSecret=release-gate-placeholder`, `--set monitoring.serviceMonitor.basicAuth.secretName=release-gate-placeholder` и источник-placeholder (`--set-json` или временный values-файл). Комментарий — почему placeholder, а не ослабление guard. <!-- depends: 1.6 | verify: scripts/release-gate.sh — шаги helm-production и helm-rbac PASS -->
 - [ ] **2.2** `release-gate.sh`: шаг `helm-tests` — запуск всех `helm/amp/tests/*.sh`; падение любого — FAIL шага с именем скрипта. <!-- verify: шаг PASS на текущих двух тестах; временно сломанный тест (exit 1) → FAIL шага -->
 
 **Phase verification:** `scripts/release-gate.sh` все шаги PASS.
 
 ## Phase 3: Документация и ADR
 
-- [ ] **3.1** `DECISIONS.md` ADR-015: guard на Ingress вместо «прод-профиля», смысл `externalAuth`, ingress-only без egress, селектор Service не меняем, fail на пустых источниках. <!-- verify: grep -n "ADR-015" docs/06-planning/DECISIONS.md -->
+- [ ] **3.1** `DECISIONS.md` ADR-015: guard на Ingress вместо «прод-профиля», смысл `externalAuth`, ingress-only без egress, селектор Service не меняем, fail на пустых источниках, ServiceMonitor с обязательным basicAuth при webConfig. <!-- verify: grep -n "ADR-015" docs/06-planning/DECISIONS.md -->
 - [ ] **3.2** `helm/amp/README.md` раздел «Network exposure»:
   - guard и два выхода;
   - примеры аннотаций nginx `auth-url`/`auth-secret` для `externalAuth`;
@@ -79,7 +92,8 @@ based_on:
   - smoke-проверка «чужой pod → timeout»;
   - обнаружение потерь (`prometheus_notifications_errors_total`/`_dropped_total`);
   - kill-switch;
-  - probes на нестандартном CNI.
+  - probes на нестандартном CNI;
+  - ServiceMonitor: `labels` для `serviceMonitorSelector`, Secret для basicAuth (`kubectl create secret generic … --from-literal=username=… --from-literal=password=…`), связка с `metricsScrapers`.
   <!-- verify: ручная вычитка; команды из README прогнаны через helm template -->
 - [ ] **3.3** `docs/CONFIGURATION_GUIDE.md`: §4 — ссылка на README; у `helm install -f values-production.yaml` (`:707`) — что задать до установки. <!-- verify: grep -n "externalAuth\|networkPolicy" docs/CONFIGURATION_GUIDE.md -->
 - [ ] **3.4** `CHANGELOG.md` `[Unreleased]`: `### Security` и `### Breaking changes / migration notes` (шаги апгрейда для values-production); `helm/amp/CHANGELOG.md`. <!-- verify: grep -n "PROD-INGRESS-HARDENING" CHANGELOG.md helm/amp/CHANGELOG.md -->
@@ -94,14 +108,15 @@ based_on:
 
 - [ ] **5.1** `helm/amp/tests/render-ingress-auth.sh` — кейсы из Spec §Test Plan. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-ingress-auth.sh → rc=0 -->
 - [ ] **5.2** `helm/amp/tests/render-networkpolicy.sh` — кейсы из Spec §Test Plan, включая совпадение `from` политики redis с метками pod'а и неизменный `spec.selector`. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-networkpolicy.sh → rc=0 -->
-- [ ] **5.3** Мутации: убрать guard D1 / метку / guard пустых источников / добавить Egress — каждая ловится тестом; откатить. <!-- depends: 5.1, 5.2 | verify: записать результат в testing-лог -->
+- [ ] **5.2a** `helm/amp/tests/render-servicemonitor.sh` — кейсы из Spec §Test Plan, включая «селектор совпадает только с Service AMP». <!-- depends: 4.1 | verify: bash helm/amp/tests/render-servicemonitor.sh → rc=0 -->
+- [ ] **5.3** Мутации: убрать guard D1 / метку / guard пустых источников / добавить Egress / убрать guard basicAuth / убрать component из селектора ServiceMonitor — каждая ловится тестом; откатить. <!-- depends: 5.1, 5.2 | verify: записать результат в testing-лог -->
 
 ## Phase 6: Testing и finalize
 
 - [ ] **6.1** `scripts/release-gate.sh` целиком (шаг `helm-tests` подхватывает новые тесты); `git diff --check`; Go-код не менялся — `quality-gates-fast` для контроля. <!-- verify: все шаги PASS -->
 - [ ] **6.2** Опционально: kind + Calico smoke (разрешённый отправитель, чужой pod, probes, kill-switch). Если дорого — осознанное ограничение в итоге. <!-- verify: лог в evidence/ или запись «не выполнялось» -->
 - [ ] **6.3** `/finalize`:
-  - BUGS `SERVICEMONITOR-DEAD`, `SERVICE-METRICS-PORT-MISROUTED`;
+  - BUGS `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT`;
   - TECH-DEBT: sticky-аннотации, хардкод `name: monitoring`;
   - BACKLOG: `PROD-INGRESS-HARDENING`, `HELM-RENDER-TEST-IN-GATE` → закрыты;
   - DONE: ротация `DONE.md` → `archive/DONE-2026-09.md` (первая задача октября).

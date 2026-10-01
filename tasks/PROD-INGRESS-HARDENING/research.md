@@ -99,7 +99,8 @@ Research level 3: триггеры security + infrastructure + нескольк�
 
 ## 4) Decision
 
-- **Chosen:** Option A. ServiceMonitor и порт `metrics` в задачу не входят — отдельные записи.
+- **Chosen:** Option A. Порт `metrics` — отдельная запись.
+- **Обновление 2026-10-01 (решение владельца):** починка ServiceMonitor включена в задачу (элемент Option C): gate по `monitoring.*`, селектор по `component: application`, `basicAuth`, `fail` при webConfig без basicAuth. Запись `SERVICEMONITOR-DEAD` не заводится.
 - **Why:**
   - Только guard на Ingress закрывает US1/US3 в любом профиле (Q1). Opt-out `ingress.externalAuth` даёт явный путь для oauth2-proxy и аннотаций Ingress.
   - Именованные списки показывают оператору, кого перечислить. `fail` на пустой политике превращает «тихую потерю алертов» в ошибку рендера — худший исход для alerting-системы.
@@ -133,7 +134,6 @@ Research level 3: триггеры security + infrastructure + нескольк�
   - `render-networkpolicy.sh`: выкл по умолчанию; пустые источники → fail; пиры проходят как есть; правило контроллера есть только при `ingress.enabled`; только порт `http`; нет Egress; метка на pod'е есть, `spec.selector` не изменился; `from` политики redis матчит pod AMP.
   - `release-gate.sh`: placeholder'ы для `webConfig.existingSecret` и пиров в обоих местах. Тесты подключить шагом в гейт (пересекается с `HELM-RENDER-TEST-IN-GATE`).
 - **Out of scope, завести записи:**
-  - BUGS: `SERVICEMONITOR-DEAD` — безусловный рендер ломает установку без CRD, селектор не матчит Service, нет basicAuth;
   - BUGS: `SERVICE-METRICS-PORT-MISROUTED` — Service `metrics:9090` ведёт на экспортёры postgres/redis;
   - TECH-DEBT: nginx sticky-аннотации в `ingress.yaml` и хардкод `name: monitoring` в политиках postgres/redis.
 

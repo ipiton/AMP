@@ -31,13 +31,15 @@ updated_at: 2026-10-01
 
 1. Как оператор, ставящий AMP по `values-production.yaml`, я хочу, чтобы чарт не позволил случайно выставить анонимный API в интернет, чтобы забытая настройка auth не превращалась в «любой может заглушить все алерты».
 2. Как оператор, я хочу NetworkPolicy для подов AMP с понятными точками расширения (откуда приходят алерты, кто скрейпит метрики), чтобы компрометация соседнего пода не давала доступ к API в обход Ingress.
-3. Как оператор с собственным auth-proxy (oauth2-proxy, basic-auth аннотации Ingress), я хочу явный и документированный способ сказать чарту «защиту обеспечиваю я», не отключая проверку молча.
+3. Как оператор с prometheus-operator, я хочу, чтобы ServiceMonitor из чарта реально скрейпил AMP и работал с включённым auth, чтобы прод-профиль с обязательным auth не оставлял меня без метрик.
+4. Как оператор с собственным auth-proxy (oauth2-proxy, basic-auth аннотации Ingress), я хочу явный и документированный способ сказать чарту «защиту обеспечиваю я», не отключая проверку молча.
 
 ## Success Criteria
 
 - [ ] Прод-профиль не рендерит Ingress, открытый без защиты: решение (fail при пустом `webConfig.existingSecret` / Ingress выключен по умолчанию / явный opt-out) выбрано на `/spec` и зафиксировано в ADR.
 - [ ] NetworkPolicy для подов AMP в чарте: ingress-правила на `http` и `metrics` порты с настраиваемыми источниками; включена в `values-production.yaml`; egress-политика — решение на `/spec`.
 - [ ] Render-тест(ы) в `helm/amp/tests/` покрывают: прод-профиль без auth, с auth, с opt-out; NetworkPolicy вкл/выкл и источники.
+- [ ] Bundled ServiceMonitor AMP рабочий: рендерится только при `monitoring.prometheusEnabled` и `monitoring.serviceMonitor.enabled`, селектит именно Service AMP, поддерживает `basicAuth` из Secret; при включённом `webConfig` без `basicAuth` — `fail` (скрейп, который всегда получает 401). _(Включено решением владельца 2026-10-01.)_
 - [ ] `scripts/release-gate.sh` зелёный (helm lint/template, RBAC-шаг).
 - [ ] `CONFIGURATION_GUIDE.md` / `helm/amp/README.md` описывают прод-требование и NetworkPolicy; `CHANGELOG.md` `[Unreleased]` — запись с migration notes (breaking для `values-production.yaml`).
 
@@ -52,7 +54,7 @@ updated_at: 2026-10-01
 
 ## Constraints
 
-- **Scope:** `helm/amp/` (templates, values, values-production, tests, README), `docs/CONFIGURATION_GUIDE.md`, `CHANGELOG.md`, `docs/06-planning/DECISIONS.md`.
+- **Scope:** `helm/amp/` (templates включая `servicemonitor.yaml`/`service.yaml`, values, values-production, tests, README), `docs/CONFIGURATION_GUIDE.md`, `CHANGELOG.md`, `docs/06-planning/DECISIONS.md`.
 - **Security:** fail-closed: отсутствие настройки не должно давать открытый Ingress в прод-профиле. Секреты (web-config, basic-auth для Ingress) — только через `existingSecret`, не через values в открытом виде.
 - **Compatibility:** дефолтный `values.yaml` (pilot/dev) не ломается — Ingress там выключен. `values-production.yaml` — breaking, нужен migration note. NetworkPolicy должна не ломать: HA-реплики AMP друг с другом (если общаются напрямую), Prometheus-скрейп `/metrics`, отправку алертов от Prometheus, probes (kubelet), config-reloader sidecar (тот же под — не затрагивается).
 
