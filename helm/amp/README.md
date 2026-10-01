@@ -107,6 +107,96 @@ The chart grants the AMP ServiceAccount exactly what the app calls: publishing t
 - The Redis StatefulSet and the PostgreSQL backup CronJob share the ServiceAccount but do not mount its token.
 - Verify: `kubectl auth can-i list secrets -n <discovery-namespace> --as=system:serviceaccount:<release-namespace>:<serviceaccount>` → `yes`; the same for `get`, or for any other namespace → `no`.
 
+### Network Exposure
+
+The whole API — including `POST /api/v2/silences` and `POST /-/reload` — sits on one port (`http`), so whoever reaches it can silence every alert. The chart closes the two ways in, and fails the render instead of guessing (ADR-015).
+
+**Ingress requires authentication.** `ingress.enabled: true` renders only with one of:
+
+- `webConfig.existingSecret` — in-process basic auth (see HTTP Authentication above);
+- `ingress.externalAuth: true` — your controller or a proxy enforces auth. The chart does not check this; it is your statement. Add the controller's auth annotations, for ingress-nginx for example:
+
+  ```yaml
+  ingress:
+    externalAuth: true
+    annotations:
+      nginx.ingress.kubernetes.io/auth-type: basic
+      nginx.ingress.kubernetes.io/auth-secret: amp-ingress-auth   # htpasswd file
+      # or oauth2-proxy:
+      # nginx.ingress.kubernetes.io/auth-url: https://oauth2.example.com/oauth2/auth
+      # nginx.ingress.kubernetes.io/auth-signin: https://oauth2.example.com/oauth2/start?rd=$escaped_request_uri
+  ```
+
+  The NetworkPolicy below admits the controller's pods, not this one Ingress: any other Ingress on the same controller can route to AMP without your auth annotations — from the same namespace, or from anywhere through an `ExternalName` Service unless ingress-nginx runs with `--disable-svc-external-name`. Prefer `webConfig.existingSecret`: it does not depend on the controller.
+
+The guard covers the Ingress only. `service.type: NodePort` or `LoadBalancer` (`values-dev.yaml` uses NodePort) exposes the API without either check — pair it with `webConfig.existingSecret`.
+
+**NetworkPolicy for the AMP pods.** `networkPolicy.enabled: true` admits traffic to the `http` port from the listed sources only. Egress is not restricted: notification targets are arbitrary.
+
+| Parameter | Who | Default |
+|-----------|-----|---------|
+| `networkPolicy.ingressController` | ingress controller pods; used only with `ingress.enabled` | `[]` |
+| `networkPolicy.alertSenders` | Prometheus / vmalert posting to the Service directly | `[]` |
+| `networkPolicy.metricsScrapers` | the Prometheus scraping `/metrics` | `[]` |
+| `networkPolicy.extraIngress` | raw `NetworkPolicyIngressRule`s, rendered as-is | `[]` |
+
+Each list holds `NetworkPolicyPeer`s. Select namespaces by the automatic `kubernetes.io/metadata.name` label:
+
+```yaml
+networkPolicy:
+  enabled: true
+  ingressController:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+  alertSenders:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+  metricsScrapers:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+```
+
+- An enabled policy with no effective source fails the render: it would drop every alert sender.
+- Senders outside the cluster that come through the Ingress are covered by `ingressController`. Through a LoadBalancer or NodePort they arrive from node or LB addresses: add an `ipBlock`.
+- An ingress controller with `hostNetwork: true` connects from the node IPs, which no `namespaceSelector` matches: list the node CIDR as an `ipBlock` in `ingressController`. Whether an `ipBlock` matches node traffic depends on the CNI (Cilium, for one, classifies it as `host`/`remote-node`, not by CIDR): confirm with the check below.
+- Probes come from the kubelet on the node and are not affected on conformant CNIs. If pods start failing `Readiness probe failed: ... timeout` right after enabling the policy, your CNI filters node traffic: add the node CIDR as an `ipBlock` in `extraIngress`.
+- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides (`8080` is the default `service.port`; run the first check from a namespace you did not list):
+
+  ```bash
+  SVC=$(kubectl get svc -n <namespace> -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application -o name)
+  # from a namespace that is not listed: must fail (timeout or connection refused, depending on the CNI)
+  kubectl run np-check -n default --rm -it --image=curlimages/curl --restart=Never -- \
+    curl -m 5 http://${SVC#service/}.<namespace>:8080/-/healthy
+  # from a listed source, e.g. the Prometheus pod: must answer
+  kubectl exec -n monitoring <prometheus-pod> -- wget -qO- -T 5 http://${SVC#service/}.<namespace>:8080/-/healthy
+  ```
+
+- **If alerts stop arriving**, the sender sees it first: Prometheus `rate(prometheus_notifications_errors_total[5m]) > 0` or `prometheus_notifications_dropped_total` growing; vmalert `rate(vmalert_alerts_send_errors_total[5m]) > 0`. Kill-switch, no pod restart: `helm upgrade <release> ./helm/amp --reuse-values --set networkPolicy.enabled=false` (on a release already running this chart version; see the migration notes in `CHANGELOG.md` for the first upgrade).
+
+AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis pods share the chart's selector labels and have their own component), so external policies can select them too.
+
+**ServiceMonitor.** Rendered when `monitoring.prometheusEnabled` and `monitoring.serviceMonitor.enabled` are both true (default); it needs the prometheus-operator CRDs. It scrapes `/metrics` on the AMP Service only.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `monitoring.serviceMonitor.enabled` | render the AMP ServiceMonitor | `true` |
+| `monitoring.serviceMonitor.labels` | extra labels, e.g. what your Prometheus `serviceMonitorSelector` matches | `{}` |
+| `monitoring.serviceMonitor.interval` / `scrapeTimeout` | scrape timing | `30s` / `10s` |
+| `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` | `""` |
+| `monitoring.serviceMonitor.basicAuth.usernameKey` / `passwordKey` | keys in that Secret | `username` / `password` |
+
+With web auth on, `/metrics` needs credentials and the render fails without them. Create the Secret in the namespace AMP runs in (`namespace`, by default the release namespace) from the plain password of a `web-config.yml` user (not its bcrypt hash):
+
+```bash
+kubectl create secret generic amp-metrics-auth -n <namespace> \
+  --from-literal=username=prometheus --from-literal=password='<plain password>'
+helm upgrade amp ./helm/amp --reuse-values \
+  --set monitoring.serviceMonitor.basicAuth.secretName=amp-metrics-auth
+```
+
+With a NetworkPolicy, list that Prometheus in `networkPolicy.metricsScrapers` (or `alertSenders`), or its scrapes time out.
+
+**`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`), and at least one NetworkPolicy source. The render reports one missing setting at a time.
+
 ## Alertmanager Compatibility
 
 AMP chart should currently be treated as a **controlled replacement** deployment path, not as a verified full Alertmanager drop-in replacement:

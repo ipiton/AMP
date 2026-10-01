@@ -1,17 +1,48 @@
+{{- /* Nil-safe with the values.yaml defaults: `helm upgrade --reuse-values`
+from a chart without monitoring.serviceMonitor must still render the
+ServiceMonitor -- and run the credentials guard -- not silently drop both. */ -}}
+{{- $mon := .Values.monitoring | default dict }}
+{{- $sm := $mon.serviceMonitor | default dict }}
+{{- $auth := $sm.basicAuth | default dict }}
+{{- if and $mon.prometheusEnabled (dig "enabled" true $sm) }}
+{{- /* PROD-INGRESS-HARDENING (ADR-015): with web auth on, /metrics answers
+401 to a scrape without credentials -- a failure visible only as empty graphs. */ -}}
+{{- if and .Values.webConfig.existingSecret (not $auth.secretName) }}
+{{- fail "webConfig.existingSecret protects /metrics, but the ServiceMonitor has no credentials and would only get 401. Set monitoring.serviceMonitor.basicAuth.secretName or monitoring.serviceMonitor.enabled=false." }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "amp.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
   labels:
-    release: {{ .Release.Name }}
-    app: {{ include "amp.name" . }}
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: application
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
+  # Only the AMP Service: the postgres/redis Services share selectorLabels but
+  # carry their own component.
   selector:
     matchLabels:
-      app: {{ include "amp.name" . }}
-      release: {{ .Release.Name }}
+      {{- include "amp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: application
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace | default .Release.Namespace }}
   endpoints:
     - port: http
       path: /metrics
-      interval: 30s
-      scrapeTimeout: 10s
+      interval: {{ $sm.interval | default "30s" }}
+      scrapeTimeout: {{ $sm.scrapeTimeout | default "10s" }}
+      {{- with $auth.secretName }}
+      basicAuth:
+        username:
+          name: {{ . }}
+          key: {{ $auth.usernameKey | default "username" }}
+        password:
+          name: {{ . }}
+          key: {{ $auth.passwordKey | default "password" }}
+      {{- end }}
+{{- end }}

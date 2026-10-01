@@ -1,0 +1,16 @@
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   10s      go build ./... (go-app)
+lint             PASS   23s      golangci-lint run (go-app)
+test             PASS   68s      go test ./... -count=1 (go-app)
+futureparity     PASS   19s      build+test, futureparity tag, cmd/server
+race             PASS   391s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   3s       helm repo add (Chart.lock) + dependency build
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-rbac        PASS   0s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   4s       helm/amp/tests/*.sh render tests
+amtool-compat    PASS   29s      real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: PASS
+rc=0

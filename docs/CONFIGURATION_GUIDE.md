@@ -704,7 +704,11 @@ kubectl create configmap amp-config \
 kubectl create configmap alertmanager-config \
   --from-file=alertmanager.yaml
 
-helm install amp ./helm/amp -n monitoring -f values-production.yaml
+# values-production.yaml renders only once auth and network sources are set
+# (helm/amp/README.md -> Network Exposure): webConfig.existingSecret or
+# ingress.externalAuth=true, monitoring.serviceMonitor.basicAuth.secretName,
+# and at least one networkPolicy source.
+helm install amp ./helm/amp -n monitoring -f values-production.yaml -f my-values.yaml
 
 # Verify runtime-discoverable publishing targets exist
 kubectl get secret -n monitoring -l publishing-target=true
@@ -865,7 +869,7 @@ basic_auth:
 ```
 Grafana (Alertmanager data source) and karma use their own basic-auth settings. The built-in dashboard works through the browser's login prompt.
 
-**Helm:** create a Secret holding `web-config.yml` and set `webConfig.existingSecret`. Not yet compatible with `configReloader` (the chart refuses to render the combination). `webhook.authentication.*` is **not** enforced and never was — AMP logs a `WARN` if it is enabled.
+**Helm:** create a Secret holding `web-config.yml` and set `webConfig.existingSecret`. Not yet compatible with `configReloader` (the chart refuses to render the combination). The chart's ServiceMonitor then needs `monitoring.serviceMonitor.basicAuth.secretName`, and an `ingress.enabled: true` renders only with `webConfig.existingSecret` or `ingress.externalAuth: true` — see `helm/amp/README.md` → Network Exposure (Ingress auth, NetworkPolicy, ServiceMonitor). `webhook.authentication.*` is **not** enforced and never was — AMP logs a `WARN` if it is enabled.
 
 ---
 

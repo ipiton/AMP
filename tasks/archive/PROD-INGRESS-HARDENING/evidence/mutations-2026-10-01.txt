@@ -1,0 +1,16 @@
+# Mutation run 2026-10-01 @ 7bc8c8e + uncommitted tests; each mutation applied to a copy of helm/amp, then the named test run
+CAUGHT ingress guard removed [render-ingress-auth.sh] rc=1 ['FAIL defaults + ingress.enabled (guard not tied to the prod file) (render succeeded, expected failure)', 'FAIL values-production.yaml without auth (render succeeded, expected f
+CAUGHT externalAuth truthiness [render-ingress-auth.sh] rc=1 ['FAIL --set-string ingress.externalAuth=false (render succeeded, expected failure)', 'FAIL --set-string ingress.externalAuth=no (render succeeded, expected failure)']
+CAUGHT pod label removed [render-networkpolicy.sh] rc=1 ['FAIL pod template carries the label (missing: app.kubernetes.io/component: application)']
+CAUGHT podLabels guard removed [render-networkpolicy.sh] rc=1 ['FAIL podLabels with app.kubernetes.io/component (render succeeded, expected failure)']
+CAUGHT component in Deployment selector [render-networkpolicy.sh] rc=1 ['FAIL Deployment selector unchanged (immutable) (unexpected: app.kubernetes.io/component)']
+CAUGHT no-sources guard removed [render-networkpolicy.sh] rc=1 ['FAIL values-production.yaml with no sources (wrong error: Error: execution error at (amp/templates/ingress.yaml:7:4): ingress.enabled=true exposes the whole AMP API (silenc
+CAUGHT Egress added [render-networkpolicy.sh] rc=1 ['FAIL no Egress policyType (unexpected: Egress)']
+CAUGHT controller ignores ingress.enabled [render-networkpolicy.sh] rc=1 ['FAIL ingressController only, Ingress off (render succeeded, expected failure)', 'FAIL controller peers dropped while ingress.enabled=false (unexpected: np-test-co
+CAUGHT np not nil-safe [render-networkpolicy.sh] rc=1 ['FAIL reuse: render failed: Error: amp/templates/networkpolicy.yaml:4:14', 'FAIL renders (missing: kind: Deployment)']
+CAUGHT sm basicAuth guard removed [render-servicemonitor.sh] rc=1 ['FAIL webConfig.existingSecret without basicAuth (render succeeded, expected failure)', 'FAIL ...and the credentials guard still runs (render succeeded, expected failure)
+CAUGHT sm selector without component [render-servicemonitor.sh] rc=1 ['FAIL selects by component (missing: app.kubernetes.io/component: application)', "FAIL selector picks 'amp-postgres-exporter amp-postgres-headless amp-postgres amp-red
+CAUGHT sm not nil-safe (enabled) [render-servicemonitor.sh] rc=1 ['FAIL still rendered (missing: kind: ServiceMonitor)', 'FAIL default interval (missing: interval: 30s)']
+CAUGHT sm interval default dropped [render-servicemonitor.sh] rc=1 ['FAIL default interval (missing: interval: 30s)']
+CAUGHT helmignore unanchored [render-ingress-auth.sh] rc=1 ['FAIL helm test hook still rendered (missing: # Source: amp/templates/tests/)', 'FAIL helm test hook packaged (missing: amp/templates/tests/)']
+CAUGHT service component in selector [render-networkpolicy.sh] rc=1 ['FAIL Service selector unchanged (unexpected: app.kubernetes.io/component)']

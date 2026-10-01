@@ -1,4 +1,11 @@
 {{- if .Values.ingress.enabled -}}
+{{- /* PROD-INGRESS-HARDENING (ADR-015): keyed on the Ingress, not on a
+"production" profile -- no values key tells production apart. */ -}}
+{{- /* Only a real `true` (bool, or the string "true" from --set-string)
+waives the requirement: a truthiness check would let "false"/"no" through. */ -}}
+{{- if and (not .Values.webConfig.existingSecret) (ne (toString .Values.ingress.externalAuth) "true") }}
+{{- fail "ingress.enabled=true exposes the whole AMP API (silences, /-/reload, investigation) without authentication. Set webConfig.existingSecret (in-process basic auth) or ingress.externalAuth=true (auth enforced by the ingress/proxy)." }}
+{{- end }}
 {{- $fullName := include "amp.fullname" . -}}
 {{- $svcPort := .Values.service.port -}}
 {{- if and .Values.ingress.className (not (hasKey .Values.ingress.annotations "kubernetes.io/ingress.class")) }}

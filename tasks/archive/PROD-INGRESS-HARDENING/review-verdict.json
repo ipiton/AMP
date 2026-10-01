@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/prod-ingress-hardening",
+  "commit": "093f8a7",
+  "reviewed_at": "2026-10-01",
+  "findings": {
+    "blocker": 0,
+    "major": 2,
+    "minor": 11,
+    "nit": 7
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

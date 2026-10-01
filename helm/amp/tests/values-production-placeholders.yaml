@@ -1,0 +1,21 @@
+# Placeholders that let values-production.yaml render in the release gate and
+# the render tests. values-production.yaml deliberately renders NOTHING until
+# the operator supplies these (PROD-INGRESS-HARDENING, ADR-015); the gate fills
+# them instead of weakening the guards. Never use this file for a real install.
+#
+#   helm template amp helm/amp -f helm/amp/values-production.yaml \
+#     -f helm/amp/tests/values-production-placeholders.yaml \
+#     --set postgresql.password=... --set cache.auth.password=...
+webConfig:
+  existingSecret: release-gate-placeholder
+
+monitoring:
+  serviceMonitor:
+    basicAuth:
+      secretName: release-gate-placeholder
+
+networkPolicy:
+  alertSenders:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: release-gate-placeholder

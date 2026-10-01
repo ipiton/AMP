@@ -20,6 +20,30 @@
 - **Refs:** замечено на PROD-RBAC-SCOPE (2026-09-28), ранее жило только в заметках `NEXT.md`.
 - **Status:** open
 
+### [low][Helm][~0.2d] SERVICE-METRICS-PORT-MISROUTED
+- **Title:** порт `metrics` Service AMP ведёт на экспортёры postgres/redis, а не на AMP
+- **Problem:** `templates/service.yaml` открывает `metrics` (`service.metricsPort`, 9090) с `targetPort: metrics` и селектором `amp.selectorLabels`. Под этот селектор попадают и pod'ы postgres/redis, у которых тоже есть порт `metrics` (экспортёры). AMP на 9090 ничего не слушает: метрики отдаются на `http` (`/metrics`), контейнерный порт `metrics` в `deployment.yaml` мёртвый. Запрос на `<release>-amp:9090` уходит экспортёру.
+- **Impact:** всё, что скрейпит `metrics` Service AMP (старый ServiceMonitor, ручные конфиги Prometheus), получает метрики БД под видом AMP. Ловушка для оператора, не для приёма алертов.
+- **Fix:** убрать порт `metrics` из Service и `containerPort` из Deployment (или ограничить селектор Service компонентом — только отдельным релизом, D3 в Spec PROD-INGRESS-HARDENING).
+- **Refs:** ADR-015; `tasks/archive/PROD-INGRESS-HARDENING/Spec.md` D3; подтверждено deep-review (R10), 2026-10-01.
+- **Status:** open
+
+### [low][Helm][~0.2d] MONITORING-CRD-DEFAULT
+- **Title:** дефолты чарта требуют CRD prometheus-operator
+- **Problem:** `monitoring.prometheusEnabled: true` по умолчанию, поэтому `helm install` с дефолтами рендерит `ServiceMonitor` (AMP и redis) и `PrometheusRule` redis. В кластере без CRD `monitoring.coreos.com` install падает на `no matches for kind "ServiceMonitor"`.
+- **Impact:** первый install в чистый кластер требует знать про `--set monitoring.prometheusEnabled=false`.
+- **Fix:** гейтить на `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"` или сменить дефолт на `false` (breaking для тех, кто на него полагается).
+- **Refs:** ADR-015; `tasks/archive/PROD-INGRESS-HARDENING/Spec.md` D7; 2026-10-01.
+- **Status:** open
+
+### [low][Helm][~0.25d] HELM-NAMESPACE-OVERRIDE-SPLIT
+- **Title:** `namespace` разносит объекты AMP и redis по разным namespace
+- **Problem:** шаблоны приложения ставят `namespace: {{ .Values.namespace | default .Release.Namespace }}`, а `redis-*.yaml` — `.Release.Namespace`. При `namespace` ≠ namespace релиза Redis, его Service и NetworkPolicy оказываются в другом namespace, чем AMP: политика redis выбирает AMP pod'ы через `podSelector` без `namespaceSelector` и их не видит, а `cache.host` указывает на Service не там.
+- **Impact:** редкая конфигурация (`namespace` задан явно), но тихо: AMP теряет Redis при `valkey.networkPolicy.enabled`.
+- **Fix:** один источник namespace для всех шаблонов (хелпер `amp.namespace`).
+- **Refs:** deep-review PROD-INGRESS-HARDENING R16, `tasks/archive/PROD-INGRESS-HARDENING/review-findings.md`; 2026-10-01.
+- **Status:** open
+
 ## Entry Format
 
 ```markdown

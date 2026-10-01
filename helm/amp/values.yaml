@@ -94,9 +94,18 @@ service:
 # ===============================
 # Ingress Configuration
 # ===============================
+# PROD-INGRESS-HARDENING (ADR-015): an Ingress publishes the whole AMP API,
+# including POST /api/v2/silences and POST /-/reload. The chart refuses to
+# render one unless the API is protected, either in-process
+# (webConfig.existingSecret, below) or by the ingress/proxy in front of it
+# (externalAuth: true).
 ingress:
   enabled: false
   className: ""
+  # true = authentication is enforced by the ingress controller or a proxy
+  # (oauth2-proxy, nginx auth-url / auth-secret annotations, ...). The chart
+  # cannot verify this: it is the operator's statement, not a check.
+  externalAuth: false
   annotations: {}
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
@@ -109,6 +118,44 @@ ingress:
   #  - secretName: amp-tls
   #    hosts:
   #      - amp.local
+
+# ===============================
+# NetworkPolicy for AMP pods (PROD-INGRESS-HARDENING, ADR-015)
+# ===============================
+# Restricts INGRESS to the AMP pods to the sources listed below, on the `http`
+# port only (API, /metrics and probes all share it). Egress is not restricted:
+# notification targets (Slack, PagerDuty, webhooks, LLM APIs) are arbitrary,
+# and a default-deny egress would silently stop delivery.
+#
+# Every list is a list of NetworkPolicyPeer (namespaceSelector / podSelector /
+# ipBlock). Prefer the automatic namespace label kubernetes.io/metadata.name:
+#   alertSenders:
+#     - namespaceSelector:
+#         matchLabels:
+#           kubernetes.io/metadata.name: monitoring
+#       podSelector:
+#         matchLabels:
+#           app.kubernetes.io/name: prometheus
+# Senders reaching AMP through a LoadBalancer/NodePort arrive from node or LB
+# addresses: use an ipBlock.
+#
+# Enabled with no effective source, the chart fails to render: such a policy
+# would drop every alert sender. Kubelet probes come from the node and are not
+# affected on conformant CNIs. On a CNI without NetworkPolicy support the
+# object is accepted and does nothing.
+#
+# Kill-switch if real traffic is blocked (removes the policy, no restart):
+#   helm upgrade <release> <chart> --reuse-values --set networkPolicy.enabled=false
+networkPolicy:
+  enabled: false
+  # Ingress controller pods. Used only when ingress.enabled is true.
+  ingressController: []
+  # Prometheus, vmalert, ... posting alerts to the Service directly.
+  alertSenders: []
+  # Whoever scrapes /metrics (the Prometheus behind the ServiceMonitor below).
+  metricsScrapers: []
+  # Raw NetworkPolicyIngressRule entries, rendered as-is.
+  extraIngress: []
 
 # ===============================
 # Health Probes Configuration (12-Factor App)
@@ -523,6 +570,25 @@ migration:
 monitoring:
   prometheusEnabled: true
   healthCheckInterval: 30
+  # ServiceMonitor for AMP itself (prometheus-operator). Rendered only when
+  # prometheusEnabled is also true. Scrapes /metrics on the `http` port.
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels on the ServiceMonitor, e.g. what the Prometheus
+    # serviceMonitorSelector matches on (release: kube-prometheus-stack).
+    labels: {}
+    # With webConfig.existingSecret, /metrics requires credentials and the chart
+    # refuses to render a ServiceMonitor without them (it would only ever get
+    # 401). The Secret lives in the release namespace and holds the PLAIN
+    # username/password of a web-config user, not the bcrypt hash:
+    #   kubectl create secret generic amp-metrics-auth \
+    #     --from-literal=username=prometheus --from-literal=password=...
+    basicAuth:
+      secretName: ""
+      usernameKey: username
+      passwordKey: password
 
 # ===============================
 # Alert Publishing Configuration
