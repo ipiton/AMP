@@ -330,12 +330,26 @@ publishingTargets:
 monitoring:
   prometheusEnabled: true
   healthCheckInterval: 30
+  # With webConfig.existingSecret set (see ingress below), the ServiceMonitor
+  # needs credentials or the render fails: set
+  # serviceMonitor.basicAuth.secretName (Secret with the plain username and
+  # password, see values.yaml). Its Prometheus must also be listed in
+  # networkPolicy.metricsScrapers below, or scrapes time out.
+  serviceMonitor:
+    enabled: true
 
 # ===============================
 # Ingress Configuration (Production)
 # ===============================
+# PROD-INGRESS-HARDENING (ADR-015): the render fails until the API behind this
+# Ingress is protected. Either
+#   - webConfig.existingSecret: <Secret with web-config.yml> (in-process basic
+#     auth, see values.yaml `webConfig`), or
+#   - ingress.externalAuth: true, together with the auth annotations of your
+#     controller (oauth2-proxy / nginx auth-url, auth-secret).
 ingress:
   enabled: true
+  externalAuth: false
   className: "nginx"
   annotations:
     kubernetes.io/ingress.class: nginx
@@ -350,6 +364,38 @@ ingress:
     - secretName: amp-tls
       hosts:
         - amp.your-domain.com
+
+# ===============================
+# NetworkPolicy (Production)
+# ===============================
+# Enabled, with NO default sources: the render fails until you name yours. A
+# guessed default (namespace "ingress-nginx", "monitoring") that misses would
+# drop alerts silently; a failed render does not. Semantics, ipBlock and the
+# kill-switch: values.yaml `networkPolicy`.
+networkPolicy:
+  enabled: true
+  ingressController: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+  #    podSelector:
+  #      matchLabels:
+  #        app.kubernetes.io/name: ingress-nginx
+  alertSenders: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: monitoring
+  #    podSelector:
+  #      matchLabels:
+  #        app.kubernetes.io/name: prometheus
+  metricsScrapers: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: monitoring
+  #    podSelector:
+  #      matchLabels:
+  #        app.kubernetes.io/name: prometheus
+  extraIngress: []
 
 # ===============================
 # Security Configuration

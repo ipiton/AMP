@@ -23,6 +23,9 @@ spec:
     metadata:
       labels:
         {{- include "amp.selectorLabels" . | nindent 8 }}
+        # Template only, never spec.selector (immutable): tells AMP pods apart
+        # from the postgres/redis pods, which share selectorLabels.
+        app.kubernetes.io/component: application
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

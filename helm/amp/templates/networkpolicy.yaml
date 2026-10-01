@@ -1,0 +1,45 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+PROD-INGRESS-HARDENING (ADR-015): ingress-only policy for the AMP pods. One
+rule per source role so the rendered object says who is let in and why; every
+rule opens the `http` port only (API, /metrics and probes share it). No Egress
+policyType: notification targets are arbitrary.
+*/ -}}
+{{- $np := .Values.networkPolicy }}
+{{- $controller := list }}
+{{- if .Values.ingress.enabled }}
+{{- $controller = $np.ingressController }}
+{{- end }}
+{{- if not (or $controller $np.alertSenders $np.metricsScrapers $np.extraIngress) }}
+{{- fail "networkPolicy.enabled=true with no sources would block every alert sender. Set networkPolicy.alertSenders / ingressController (with ingress.enabled) / metricsScrapers / extraIngress, or networkPolicy.enabled=false." }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "amp.fullname" . }}
+  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: application
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "amp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: application
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- range $role, $peers := dict "ingress-controller" $controller "alert-senders" $np.alertSenders "metrics-scrapers" $np.metricsScrapers }}
+    {{- if $peers }}
+    # {{ $role }}
+    - from:
+        {{- toYaml $peers | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: http
+    {{- end }}
+    {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

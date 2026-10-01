@@ -5,6 +5,11 @@ metadata:
   namespace: {{ .Values.namespace | default .Release.Namespace }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
+    # Metadata only, so the ServiceMonitor can select this Service and not the
+    # postgres/redis ones. spec.selector stays selectorLabels: changing it in
+    # the same release would drop the old pods from the endpoints before the
+    # new ones are ready.
+    app.kubernetes.io/component: application
   {{- with .Values.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}

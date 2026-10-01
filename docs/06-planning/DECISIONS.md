@@ -219,3 +219,28 @@
   - правка vendored-файла пропадёт при следующем sync: локальное правило пишется в `WORKFLOW.md`;
   - «закрыт ли slug» проверяется по `DONE.md` **и** `archive/DONE-*.md`;
   - дискреционный hook, запрещающий `write-tests` без `review-verdict.json`, пока не сделан (BACKLOG `SOLO-KANBAN-VERDICT-HOOK`).
+
+## ADR-015: Сетевая экспозиция в чарте — guard на Ingress, ingress-only NetworkPolicy, ServiceMonitor с обязательными кредами
+- **Дата**: 2026-10-01
+- **Контекст**: `values-production.yaml` открывал весь HTTP API на Ingress без auth (`PROD-INGRESS-HARDENING`, P0). Под AMP был доступен любому pod'у кластера. Bundled ServiceMonitor рендерился безусловно и не матчил ни один Service. Механизм auth в процессе к этому моменту уже был (ADR-011), но чарт его не требовал.
+- **Решение**:
+  - `fail` при `ingress.enabled` без `webConfig.existingSecret` и без `ingress.externalAuth: true`, в **любом** профиле. Признака «прод» в values нет: `environment: production` стоит и в дефолтном `values.yaml`;
+  - `ingress.externalAuth: true` — заявление оператора, что auth обеспечивает Ingress или proxy. Чарт это не проверяет: аннотации зависят от контроллера;
+  - `templates/networkpolicy.yaml`: только `policyTypes: [Ingress]` и только порт `http`. Источники — списки `NetworkPolicyPeer` по ролям: `ingressController` (учитывается при `ingress.enabled`), `alertSenders`, `metricsScrapers`, плюс `extraIngress`. Включённая политика без источников — `fail`. В `values-production.yaml` политика включена, а списки пустые;
+  - pod'ы AMP получают метку `app.kubernetes.io/component: application` в template; Service получает её в `metadata`. `spec.selector` Deployment и Service не меняются;
+  - ServiceMonitor рендерится только при `monitoring.prometheusEnabled && monitoring.serviceMonitor.enabled`. Он селектит Service AMP по `component: application` и поддерживает `basicAuth` из Secret. Если `webConfig` задан, а креды не заданы, — `fail`.
+- **Обоснование**:
+  - для alerting-системы худший исход — тишина. Каждая опасная комбинация (открытый Ingress, политика без отправителей, скрейп, обречённый на 401) обнаруживается на `helm upgrade`, а не по пропавшим алертам или пустым графикам. Упавший рендер ничего не меняет в кластере;
+  - угаданные дефолтные источники (`ingress-nginx`, `monitoring`) при промахе молча режут отправителей, поэтому дефолтов нет;
+  - egress не ограничиваем: адреса нотификаций (Slack, PagerDuty, webhooks, LLM API) произвольны, и default-deny молча убьёт доставку;
+  - селектор Service не меняем: helm применит Service раньше, чем новые pod'ы станут ready, и старые pod'ы выпадут из endpoints — приём алертов прервётся.
+- **Отклонено**:
+  - выключить Ingress в `values-production.yaml` — любой `ingress.enabled=true` снова открывал бы анонимный API;
+  - конвенции Bitnami целиком (`allowExternal`, client-label) — `allowExternal: true` по умолчанию fail-open;
+  - один сырой список `networkPolicy.from` — в values не видно, кого именно надо перечислить;
+  - предупреждение в `NOTES.txt` вместо `fail` для ServiceMonitor без кредов — пустые графики замечают поздно. Выход без кредов и так есть: `monitoring.serviceMonitor.enabled=false`.
+- **Следствие**:
+  - breaking для `values-production.yaml`: нужны auth, креды ServiceMonitor и хотя бы один источник (migration notes в `CHANGELOG.md`). При upgrade — один rolling restart из-за метки;
+  - kill-switch — `--set networkPolicy.enabled=false`, удаляет политику без рестарта;
+  - на CNI без NetworkPolicy политика ничего не делает (fail-open), проверка — в `helm/amp/README.md` → Network Exposure;
+  - дефолты по-прежнему требуют CRD prometheus-operator (ServiceMonitor, PrometheusRule redis), BUGS `MONITORING-CRD-DEFAULT`. Порт Service `metrics:9090` ведёт на экспортёры postgres/redis, BUGS `SERVICE-METRICS-PORT-MISROUTED`.

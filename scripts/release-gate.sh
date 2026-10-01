@@ -162,10 +162,13 @@ step_helm_values() {
   # guard fails the render until they are supplied (--set in real installs,
   # ESO in-cluster). The gate renders with placeholders so the guard's
   # presence is exercised without weakening it — an EMPTY placeholder here
-  # would mask a regression that removed the guard.
+  # would mask a regression that removed the guard. The same holds for the
+  # PROD-INGRESS-HARDENING guards (auth behind the Ingress, ServiceMonitor
+  # credentials, NetworkPolicy sources): their placeholders live in a values
+  # file, because peer lists do not survive the unquoted expansion below.
   local extra_sets=""
   if [ "$values_file" = "values-production.yaml" ]; then
-    extra_sets="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder"
+    extra_sets="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder -f $HELM_CHART_DIR/tests/values-production-placeholders.yaml"
   fi
   # shellcheck disable=SC2086
   helm lint "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets || return 1
@@ -185,7 +188,7 @@ step_helm_rbac() {
     log "helm not found on PATH"
     return 1
   fi
-  local placeholders="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder"
+  local placeholders="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder -f $HELM_CHART_DIR/tests/values-production-placeholders.yaml"
   local failed=0 variant args expect_roles rendered count bad_verbs kind
   for variant in default dev production lite; do
     case "$variant" in
@@ -219,6 +222,29 @@ step_helm_rbac() {
       fi
     done
   done
+  return "$failed"
+}
+
+# Every helm/amp/tests/*.sh render test (HELM-RENDER-TEST-IN-GATE). They were
+# outside the gate and one stayed broken unnoticed; a failure names the script.
+step_helm_tests() {
+  if ! command -v helm >/dev/null 2>&1; then
+    log "helm not found on PATH"
+    return 1
+  fi
+  local failed=0 found=0 t
+  for t in "$HELM_CHART_DIR"/tests/*.sh; do
+    [[ -e "$t" ]] || continue
+    found=1
+    if ! bash "$t"; then
+      log "helm-tests: $(basename "$t") failed"
+      failed=1
+    fi
+  done
+  if [[ "$found" -eq 0 ]]; then
+    log "helm-tests: no tests found in $HELM_CHART_DIR/tests"
+    return 1
+  fi
   return "$failed"
 }
 
@@ -287,6 +313,7 @@ run_step "helm-deps" "helm repo add (Chart.lock) + dependency build" step_helm_d
 run_step "helm-dev" "lint + template, values-dev.yaml" step_helm_values values-dev.yaml
 run_step "helm-production" "lint + template, values-production.yaml" step_helm_values values-production.yaml
 run_step "helm-rbac" "RBAC scope: namespaced list-secrets only" step_helm_rbac
+run_step "helm-tests" "helm/amp/tests/*.sh render tests" step_helm_tests
 
 if docker_available; then
   run_step "amtool-compat" "real amtool CLI vs deploy/smoke stack" step_amtool_compat

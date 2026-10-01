@@ -3,12 +3,18 @@
 ## [Unreleased]
 
 ### Added
+- `templates/networkpolicy.yaml` + `networkPolicy.*` (PROD-INGRESS-HARDENING, ADR-015): ingress-only NetworkPolicy for the AMP pods, `http` port only, sources `ingressController` (with `ingress.enabled`) / `alertSenders` / `metricsScrapers` / `extraIngress`. Enabled with no source, rendering fails. Enabled in `values-production.yaml` with no sources.
+- `ingress.externalAuth` (default `false`): `ingress.enabled` now fails to render unless `webConfig.existingSecret` is set or this declares auth at the ingress/proxy.
+- `monitoring.serviceMonitor.{enabled,interval,scrapeTimeout,labels,basicAuth.*}`; rendering fails with `webConfig.existingSecret` and no `basicAuth.secretName`.
+- `app.kubernetes.io/component: application` on the AMP pod template and the AMP Service metadata (selectors unchanged).
 - App-level `PodDisruptionBudget` (`templates/poddisruptionbudget.yaml` + `podDisruptionBudget.*` values, disabled by default) — previously only `postgresql.podDisruptionBudget` existed; the app `Deployment` itself had none despite `autoscaling`/pod anti-affinity assuming HA.
 - `values.yaml` gained real value-shape homes for the alertmanager-parity config surface: `publishing.queue.deliveryConfirmationTimeout`, `publishing.templates.enabled`, `grouping.*`, `storage.*`, `silencing.*`, wired into `templates/configmap.yaml`.
 - `configReloader.*` values shape (disabled, no template yet) — placeholder for a parallel track's sidecar.
 - `webConfig.existingSecret`/`secretKey`/`mountPath` (PROD-AUTH): mounts an upstream-format web config Secret and sets `SERVER_WEB_CONFIG_FILE`, enabling HTTP basic auth. Rendering fails if combined with `configReloader.enabled` (the sidecar has no credentials yet).
 
 ### Fixed
+- `templates/servicemonitor.yaml` rendered unconditionally and selected `app`/`release` labels the Service never carried, so it scraped nothing. Now gated on `monitoring.prometheusEnabled` + `monitoring.serviceMonitor.enabled` and selects the AMP Service by `component: application`.
+- `templates/redis-networkpolicy.yaml` admitted pods with `component: application`, which no pod carried: enabling `valkey.networkPolicy` cut AMP off Redis. Fixed by the new pod label.
 - `templates/redis-statefulset.yaml`: `replicas: {{ .Values.valkey.replicas | default 1 }}` silently coerced an explicit `valkey.replicas: 0` back to `1` (Helm/sprig `default` treats `0` as empty). Now `{{ .Values.valkey.replicas | int }}` — `replicas: 0` is the documented way to disable this chart's own Redis/Valkey pod when pointing `cache.*` at an external Redis-compatible service.
 
 ### Changed
