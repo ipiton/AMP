@@ -107,9 +107,9 @@ based_on:
 ## Phase 5: Тесты (после `gate: pass`)
 
 - [ ] **5.0** Адаптировать существующие `render-config-reloader.sh` (`:115-117`) и `render-image-tag.sh` (`:68-70`): prod-рендер + `-f values-production-placeholders.yaml`. Сейчас оба падают на guard'ах этой задачи (gate 2026-10-01: шаг `helm-tests` FAIL, «networkPolicy.enabled=true with no sources»). Отложено из `implement`: тестовые файлы правятся только после verdict. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-config-reloader.sh && bash helm/amp/tests/render-image-tag.sh -->
-- [ ] **5.1** `helm/amp/tests/render-ingress-auth.sh` — кейсы из Spec §Test Plan. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-ingress-auth.sh → rc=0 -->
-- [ ] **5.2** `helm/amp/tests/render-networkpolicy.sh` — кейсы из Spec §Test Plan, включая совпадение `from` политики redis с метками pod'а и неизменный `spec.selector`. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-networkpolicy.sh → rc=0 -->
-- [ ] **5.2a** `helm/amp/tests/render-servicemonitor.sh` — кейсы из Spec §Test Plan, включая «селектор совпадает только с Service AMP». <!-- depends: 4.1 | verify: bash helm/amp/tests/render-servicemonitor.sh → rc=0 -->
+- [ ] **5.1** `helm/amp/tests/render-ingress-auth.sh` — кейсы из Spec §Test Plan + `--set-string ingress.externalAuth=false|no` → fail, строка `"true"` → рендер (R3). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-ingress-auth.sh → rc=0 -->
+- [ ] **5.2** `helm/amp/tests/render-networkpolicy.sh` — кейсы из Spec §Test Plan, включая совпадение `from` политики redis с метками pod'а и неизменный `spec.selector`; `podLabels` с `app.kubernetes.io/component` → fail (R2); values без секции `networkPolicy` (как `--reuse-values` со старого релиза) → рендер без политики (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-networkpolicy.sh → rc=0 -->
+- [ ] **5.2a** `helm/amp/tests/render-servicemonitor.sh` — кейсы из Spec §Test Plan, включая «селектор совпадает только с Service AMP»; values без `monitoring.serviceMonitor` → ServiceMonitor с дефолтами 30s/10s, а с `webConfig` — fail (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-servicemonitor.sh → rc=0 -->
 - [ ] **5.3** Мутации: убрать guard D1 / метку / guard пустых источников / добавить Egress / убрать guard basicAuth / убрать component из селектора ServiceMonitor — каждая ловится тестом; откатить. <!-- depends: 5.1, 5.2 | verify: записать результат в testing-лог -->
 
 ## Phase 6: Testing и finalize
@@ -117,7 +117,8 @@ based_on:
 - [ ] **6.1** `scripts/release-gate.sh` целиком (шаг `helm-tests` подхватывает новые тесты); `git diff --check`; Go-код не менялся — `quality-gates-fast` для контроля. <!-- verify: все шаги PASS -->
 - [ ] **6.2** Опционально: kind + Calico smoke (разрешённый отправитель, чужой pod, probes, kill-switch). Если дорого — осознанное ограничение в итоге. <!-- verify: лог в evidence/ или запись «не выполнялось» -->
 - [ ] **6.3** `/finalize`:
-  - BUGS `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT`;
+  - BUGS `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT` — заведены в fix-раунде review (R10); `HELM-NAMESPACE-OVERRIDE-SPLIT` (R16);
+  - BACKLOG `SERVICE-TYPE-EXPOSURE-GUARD` (R4); дописать `CONFIG-RELOADER-SIDECAR` (R12), `CONFIG-RELOADER-AUTH` (R13); TECH-DEBT R14, R17 (`HELM-CHART-GAPS`);
   - TECH-DEBT: sticky-аннотации, хардкод `name: monitoring`;
   - BACKLOG: `PROD-INGRESS-HARDENING`, `HELM-RENDER-TEST-IN-GATE` → закрыты;
   - DONE: ротация `DONE.md` → `archive/DONE-2026-09.md` (первая задача октября).
@@ -135,6 +136,21 @@ based_on:
 - Ручной прогон guard'ов: 12 комбинаций values (ingress без auth / с webConfig / с externalAuth; политика без источников / только контроллер без Ingress / с alertSenders; ServiceMonitor с webConfig без кредов; prometheusEnabled=false; prod как есть / по шагам / полностью) — каждая даёт ожидаемый fail или рендер.
 - Дифф рендеров default/dev/lite с базой: метка `component` в pod template и metadata Service, переписанный ServiceMonitor. Больше ничего, не считая случайно генерируемого пароля.
 - `helm lint` prod с placeholder'ами, `shellcheck scripts/release-gate.sh`, `git diff --check` — чисто.
+
+## Review fix log (2026-10-01)
+
+Находки deep-review со `fix-here` (R1–R8, R10, R11, R16):
+- шаблоны: nil-safe чтение `networkPolicy` и `monitoring.serviceMonitor` (R1), `fail` на `podLabels` с component (R2), `externalAuth` только `true`/`"true"` (R3);
+- доки: README (оговорки про `service.type` и общий контроллер, hostNetwork, vmalert, двусторонний smoke, namespace Secret'а), CHANGELOG (формулировка Security, первый upgrade без `--reuse-values`, общий случай `webConfig` + ServiceMonitor, `podLabels`);
+- BUGS: `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT`; `helm/amp/.helmignore` с `tests/`.
+
+Проверено:
+- матрица из 12 guard'ов без изменений;
+- R2: `podLabels.component` → fail, другие ключи рендерятся;
+- R3: строки `false`/`no`/`"false"`/`True`/`1` → fail, bool `true` и строка `"true"` → Ingress;
+- R1: чарт ветки со значениями `main:helm/amp/values.yaml` рендерится. ServiceMonitor на месте с 30s/10s, политики AMP нет, с `webConfig` guard срабатывает;
+- рендеры default/dev/lite совпадают с прошлым прогоном, не считая случайных паролей;
+- `helm lint` prod с placeholder'ами чист, в `helm package` нет `tests/`.
 
 ## Definition of Done
 

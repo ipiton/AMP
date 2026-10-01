@@ -127,6 +127,10 @@ The whole API — including `POST /api/v2/silences` and `POST /-/reload` — sit
       # nginx.ingress.kubernetes.io/auth-signin: https://oauth2.example.com/oauth2/start?rd=$escaped_request_uri
   ```
 
+  The NetworkPolicy below admits the controller's pods, not this one Ingress: any other Ingress on the same controller can route to AMP without your auth annotations — from the same namespace, or from anywhere through an `ExternalName` Service unless ingress-nginx runs with `--disable-svc-external-name`. Prefer `webConfig.existingSecret`: it does not depend on the controller.
+
+The guard covers the Ingress only. `service.type: NodePort` or `LoadBalancer` (`values-dev.yaml` uses NodePort) exposes the API without either check — pair it with `webConfig.existingSecret`.
+
 **NetworkPolicy for the AMP pods.** `networkPolicy.enabled: true` admits traffic to the `http` port from the listed sources only. Egress is not restricted: notification targets are arbitrary.
 
 | Parameter | Who | Default |
@@ -153,9 +157,20 @@ networkPolicy:
 
 - An enabled policy with no effective source fails the render: it would drop every alert sender.
 - Senders outside the cluster that come through the Ingress are covered by `ingressController`. Through a LoadBalancer or NodePort they arrive from node or LB addresses: add an `ipBlock`.
+- An ingress controller with `hostNetwork: true` connects from the node IPs, which no `namespaceSelector` matches: list the node CIDR as an `ipBlock` in `ingressController`.
 - Probes come from the kubelet on the node and are not affected on conformant CNIs. If pods start failing `Readiness probe failed: ... timeout` right after enabling the policy, your CNI filters node traffic: add the node CIDR as an `ipBlock` in `extraIngress`.
-- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install: `kubectl run np-check -n default --rm -it --image=curlimages/curl --restart=Never -- curl -m 5 http://<release>.<namespace>:8080/-/healthy` must time out from a namespace that is not listed.
-- **If alerts stop arriving**, the sender sees it first: `rate(prometheus_notifications_errors_total[5m]) > 0` or `prometheus_notifications_dropped_total` growing. Kill-switch, no pod restart: `helm upgrade <release> ./helm/amp --reuse-values --set networkPolicy.enabled=false`.
+- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides:
+
+  ```bash
+  SVC=$(kubectl get svc -n <namespace> -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application -o name)
+  # from a namespace that is not listed: must fail (timeout or connection refused, depending on the CNI)
+  kubectl run np-check -n default --rm -it --image=curlimages/curl --restart=Never -- \
+    curl -m 5 http://${SVC#service/}.<namespace>:8080/-/healthy
+  # from a listed source, e.g. the Prometheus pod: must answer
+  kubectl exec -n monitoring <prometheus-pod> -- wget -qO- -T 5 http://${SVC#service/}.<namespace>:8080/-/healthy
+  ```
+
+- **If alerts stop arriving**, the sender sees it first: Prometheus `rate(prometheus_notifications_errors_total[5m]) > 0` or `prometheus_notifications_dropped_total` growing; vmalert `rate(vmalert_alerts_send_errors_total[5m]) > 0`. Kill-switch, no pod restart: `helm upgrade <release> ./helm/amp --reuse-values --set networkPolicy.enabled=false` (on a release already running this chart version; see the migration notes in `CHANGELOG.md` for the first upgrade).
 
 AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis pods share the chart's selector labels and have their own component), so external policies can select them too.
 
@@ -169,10 +184,10 @@ AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis po
 | `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` | `""` |
 | `monitoring.serviceMonitor.basicAuth.usernameKey` / `passwordKey` | keys in that Secret | `username` / `password` |
 
-With web auth on, `/metrics` needs credentials and the render fails without them. Create the Secret in the release namespace from the plain password of a `web-config.yml` user (not its bcrypt hash):
+With web auth on, `/metrics` needs credentials and the render fails without them. Create the Secret in the namespace AMP runs in (`namespace`, by default the release namespace) from the plain password of a `web-config.yml` user (not its bcrypt hash):
 
 ```bash
-kubectl create secret generic amp-metrics-auth \
+kubectl create secret generic amp-metrics-auth -n <namespace> \
   --from-literal=username=prometheus --from-literal=password='<plain password>'
 helm upgrade amp ./helm/amp --reuse-values \
   --set monitoring.serviceMonitor.basicAuth.secretName=amp-metrics-auth

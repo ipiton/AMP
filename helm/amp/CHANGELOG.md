@@ -4,9 +4,10 @@
 
 ### Added
 - `templates/networkpolicy.yaml` + `networkPolicy.*` (PROD-INGRESS-HARDENING, ADR-015): ingress-only NetworkPolicy for the AMP pods, `http` port only, sources `ingressController` (with `ingress.enabled`) / `alertSenders` / `metricsScrapers` / `extraIngress`. Enabled with no source, rendering fails. Enabled in `values-production.yaml` with no sources.
-- `ingress.externalAuth` (default `false`): `ingress.enabled` now fails to render unless `webConfig.existingSecret` is set or this declares auth at the ingress/proxy.
+- `ingress.externalAuth` (default `false`): `ingress.enabled` now fails to render unless `webConfig.existingSecret` is set or this declares auth at the ingress/proxy (only `true` or the string `"true"` counts).
 - `monitoring.serviceMonitor.{enabled,interval,scrapeTimeout,labels,basicAuth.*}`; rendering fails with `webConfig.existingSecret` and no `basicAuth.secretName`.
-- `app.kubernetes.io/component: application` on the AMP pod template and the AMP Service metadata (selectors unchanged).
+- `app.kubernetes.io/component: application` on the AMP pod template and the AMP Service metadata (selectors unchanged); `podLabels` setting this key fails the render.
+- `.helmignore`: `tests/` (render tests and their placeholder values) stays out of the packaged chart.
 - App-level `PodDisruptionBudget` (`templates/poddisruptionbudget.yaml` + `podDisruptionBudget.*` values, disabled by default) — previously only `postgresql.podDisruptionBudget` existed; the app `Deployment` itself had none despite `autoscaling`/pod anti-affinity assuming HA.
 - `values.yaml` gained real value-shape homes for the alertmanager-parity config surface: `publishing.queue.deliveryConfirmationTimeout`, `publishing.templates.enabled`, `grouping.*`, `storage.*`, `silencing.*`, wired into `templates/configmap.yaml`.
 - `configReloader.*` values shape (disabled, no template yet) — placeholder for a parallel track's sidecar.

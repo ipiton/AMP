@@ -26,6 +26,9 @@ spec:
         # Template only, never spec.selector (immutable): tells AMP pods apart
         # from the postgres/redis pods, which share selectorLabels.
         app.kubernetes.io/component: application
+        {{- if hasKey (.Values.podLabels | default dict) "app.kubernetes.io/component" }}
+        {{- fail "podLabels must not set app.kubernetes.io/component: the AMP NetworkPolicy, the ServiceMonitor and the Redis NetworkPolicy select AMP pods by component=application, and overriding it would silently leave them matching nothing." }}
+        {{- end }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

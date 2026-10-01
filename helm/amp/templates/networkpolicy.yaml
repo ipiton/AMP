@@ -1,11 +1,13 @@
-{{- if .Values.networkPolicy.enabled }}
+{{- /* `| default dict`: `helm upgrade --reuse-values` from a chart without
+this section passes no networkPolicy key at all -- treat it as disabled. */ -}}
+{{- $np := .Values.networkPolicy | default dict }}
+{{- if $np.enabled }}
 {{- /*
 PROD-INGRESS-HARDENING (ADR-015): ingress-only policy for the AMP pods. One
 rule per source role so the rendered object says who is let in and why; every
 rule opens the `http` port only (API, /metrics and probes share it). No Egress
 policyType: notification targets are arbitrary.
 */ -}}
-{{- $np := .Values.networkPolicy }}
 {{- $controller := list }}
 {{- if .Values.ingress.enabled }}
 {{- $controller = $np.ingressController }}

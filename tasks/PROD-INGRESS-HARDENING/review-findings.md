@@ -16,7 +16,7 @@
 - **Issue:** с `--reuse-values` helm берёт values релиза вместо дефолтов нового чарта, и ключей `networkPolicy` и `monitoring.serviceMonitor` там нет. Рендер падает: `networkpolicy.yaml:1:14 nil pointer evaluating interface {}.enabled`. Если добавить `--set networkPolicy.enabled=false`, `$sm.enabled` оказывается nil: ServiceMonitor AMP не рендерится, helm удаляет старый, а guard basicAuth не выполняется. Воспроизведено: чарт ветки со значениями `main:helm/amp/values.yaml`. Нашли оба ревьюера независимо.
 - **Recommendation:** nil-safe чтение (`dig` с дефолтами, как в `values.yaml`). В migration notes — первый upgrade через `-f` или `--reset-then-reuse-values`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R2 — `podLabels` перетирает `app.kubernetes.io/component`, и NetworkPolicy не выбирает ни одного pod'а
@@ -25,7 +25,7 @@
 - **Issue:** `podLabels` рендерится после метки component. При дублирующемся ключе выигрывает последний, поэтому `podLabels: {app.kubernetes.io/component: x}` снимает метку молча. Политика AMP после этого не выбирает ни одного pod'а: API открыт внутри кластера, хотя оператор считает его закрытым. ServiceMonitor и `from` политики redis тоже теряют AMP. Воспроизведено: в отрендеренном pod template оба ключа подряд.
 - **Recommendation:** `fail`, если `podLabels` содержит этот ключ.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R3 — `ingress.externalAuth: "false"` (строка) проходит guard
@@ -34,7 +34,7 @@
 - **Issue:** проверка по truthiness. `--set-string ingress.externalAuth=false`, `"false"` или `"no"` в values-файле рендерят Ingress без auth. Воспроизведено.
 - **Recommendation:** принимать только `true` (bool или строку `"true"`), всё остальное считать «нет».
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R4 — Заявление CHANGELOG «the chart no longer exposes an unauthenticated API» сильнее реализации
@@ -43,7 +43,7 @@
 - **Issue:** guard смотрит только на Ingress. С анонимным API по-прежнему рендерятся: `service.type: NodePort/LoadBalancer` (`values-dev.yaml` — NodePort без auth), дефолты внутри кластера, prod с `externalAuth: true` и `networkPolicy.enabled: false`.
 - **Recommendation:** переформулировать («an Ingress no longer…»); в README — оговорка про `service.type`. Guard на `service.type` — в BACKLOG.
 - **Disposition:** fix-here (формулировка, README); guard `service.type` — defer-backlog
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** BACKLOG `SERVICE-TYPE-EXPOSURE-GUARD` (finalize)
 
 ### R5 — `externalAuth` + `ingressController` пускает любой Ingress того же контроллера
@@ -52,7 +52,7 @@
 - **Issue:** политика пускает pod'ы контроллера, а не конкретный Ingress. Другой Ingress на том же контроллере может дойти до AMP без auth-аннотаций: в том же namespace или через `ExternalName` Service, если ingress-nginx запущен без `--disable-svc-external-name`.
 - **Recommendation:** описать в README; рекомендовать `webConfig` как контроль, который от контроллера не зависит.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R6 — Миграционные заметки не называют общий случай `webConfig` + ServiceMonitor
@@ -61,7 +61,7 @@
 - **Issue:** любой install с `webConfig.existingSecret` и дефолтным `monitoring.prometheusEnabled: true`, не только prod, теперь падает на рендере.
 - **Recommendation:** добавить пункт.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R7 — Smoke-проверка в README неточна
@@ -73,7 +73,7 @@
   - Нет позитивной проверки: политика, закрывающая всё, тоже «проходит».
 - **Recommendation:** имя через `kubectl get svc -l app.kubernetes.io/component=application`; «must fail»; добавить проверку из разрешённого источника.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R8 — Сигналы потерь только для Prometheus; hostNetwork-контроллер не описан
@@ -82,7 +82,7 @@
 - **Issue:** у vmalert метрика другая (`vmalert_alerts_send_errors_total`). ingress-nginx в `hostNetwork` приходит с IP нод, и `namespaceSelector` его не совпадёт.
 - **Recommendation:** добавить метрику vmalert и случай hostNetwork → `ipBlock`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R9 — Шаг `helm-tests` красный на HEAD
@@ -100,7 +100,7 @@
 - **Issue:** `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT` есть только в ADR. Сам дефект misrouted ревьюер подтвердил.
 - **Recommendation:** завести записи. План — `finalize` 6.3; переносится в эту фазу, чтобы ссылки не висели.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** `docs/06-planning/BUGS.md`
 
 ### R11 — Чарт пакует `tests/` вместе с placeholder-файлом
@@ -109,7 +109,7 @@
 - **Issue:** `helm package` включит `tests/values-production-placeholders.yaml` («never use for a real install»).
 - **Recommendation:** `.helmignore` с `tests/`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R12 — Политика закрывает порт `reloader` (9091) sidecar'а для скрейпа
@@ -153,7 +153,7 @@
 - **Issue:** предсуществующее: при `namespace` ≠ release redis и его политика в другом namespace. Формулировка README про Secret неточна: он должен быть в namespace AMP.
 - **Recommendation:** README — «namespace AMP»; само расхождение — BUGS.
 - **Disposition:** fix-here (формулировка README); расхождение — defer-bug
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** BUGS `HELM-NAMESPACE-OVERRIDE-SPLIT` (finalize)
 
 ### R17 — Предсуществующее: сабчарт valkey с deny-all политикой, хардкод `name: monitoring`/`name: kube-system`

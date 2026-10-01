@@ -1,8 +1,13 @@
-{{- $sm := .Values.monitoring.serviceMonitor }}
-{{- if and .Values.monitoring.prometheusEnabled $sm.enabled }}
+{{- /* Nil-safe with the values.yaml defaults: `helm upgrade --reuse-values`
+from a chart without monitoring.serviceMonitor must still render the
+ServiceMonitor -- and run the credentials guard -- not silently drop both. */ -}}
+{{- $mon := .Values.monitoring | default dict }}
+{{- $sm := $mon.serviceMonitor | default dict }}
+{{- $auth := $sm.basicAuth | default dict }}
+{{- if and $mon.prometheusEnabled (dig "enabled" true $sm) }}
 {{- /* PROD-INGRESS-HARDENING (ADR-015): with web auth on, /metrics answers
 401 to a scrape without credentials -- a failure visible only as empty graphs. */ -}}
-{{- if and .Values.webConfig.existingSecret (not $sm.basicAuth.secretName) }}
+{{- if and .Values.webConfig.existingSecret (not $auth.secretName) }}
 {{- fail "webConfig.existingSecret protects /metrics, but the ServiceMonitor has no credentials and would only get 401. Set monitoring.serviceMonitor.basicAuth.secretName or monitoring.serviceMonitor.enabled=false." }}
 {{- end }}
 apiVersion: monitoring.coreos.com/v1
@@ -29,15 +34,15 @@ spec:
   endpoints:
     - port: http
       path: /metrics
-      interval: {{ $sm.interval }}
-      scrapeTimeout: {{ $sm.scrapeTimeout }}
-      {{- with $sm.basicAuth.secretName }}
+      interval: {{ $sm.interval | default "30s" }}
+      scrapeTimeout: {{ $sm.scrapeTimeout | default "10s" }}
+      {{- with $auth.secretName }}
       basicAuth:
         username:
           name: {{ . }}
-          key: {{ $sm.basicAuth.usernameKey }}
+          key: {{ $auth.usernameKey | default "username" }}
         password:
           name: {{ . }}
-          key: {{ $sm.basicAuth.passwordKey }}
+          key: {{ $auth.passwordKey | default "password" }}
       {{- end }}
 {{- end }}
