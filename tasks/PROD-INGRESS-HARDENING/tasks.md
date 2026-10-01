@@ -106,12 +106,12 @@ based_on:
 
 ## Phase 5: Тесты (после `gate: pass`)
 
-- [ ] **5.0** Адаптировать существующие `render-config-reloader.sh` (`:115-117`) и `render-image-tag.sh` (`:68-70`): prod-рендер + `-f values-production-placeholders.yaml`. Сейчас оба падают на guard'ах этой задачи (gate 2026-10-01: шаг `helm-tests` FAIL, «networkPolicy.enabled=true with no sources»). Отложено из `implement`: тестовые файлы правятся только после verdict. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-config-reloader.sh && bash helm/amp/tests/render-image-tag.sh -->
-- [ ] **5.1** `helm/amp/tests/render-ingress-auth.sh` — кейсы из Spec §Test Plan + `--set-string ingress.externalAuth=false|no` → fail, строка `"true"` → рендер (R3). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-ingress-auth.sh → rc=0 -->
-- [ ] **5.2** `helm/amp/tests/render-networkpolicy.sh` — кейсы из Spec §Test Plan, включая совпадение `from` политики redis с метками pod'а и неизменный `spec.selector`; `podLabels` с `app.kubernetes.io/component` → fail (R2); values без секции `networkPolicy` (как `--reuse-values` со старого релиза) → рендер без политики (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-networkpolicy.sh → rc=0 -->
-- [ ] **5.2a** `helm/amp/tests/render-servicemonitor.sh` — кейсы из Spec §Test Plan, включая «селектор совпадает только с Service AMP»; values без `monitoring.serviceMonitor` → ServiceMonitor с дефолтами 30s/10s, а с `webConfig` — fail (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-servicemonitor.sh → rc=0 -->
-- [ ] **5.2b** В одном из render-тестов: дефолтный рендер содержит `templates/tests/postgresql-test-connection.yaml` (R18). <!-- depends: 4.1 | verify: тест падает при `tests/` в `.helmignore` -->
-- [ ] **5.3** Мутации: убрать guard D1 / метку / guard пустых источников / добавить Egress / убрать guard basicAuth / убрать component из селектора ServiceMonitor — каждая ловится тестом; откатить. <!-- depends: 5.1, 5.2 | verify: записать результат в testing-лог -->
+- [x] **5.0** Адаптировать существующие `render-config-reloader.sh` (`:115-117`) и `render-image-tag.sh` (`:68-70`): prod-рендер + `-f values-production-placeholders.yaml`. Сейчас оба падают на guard'ах этой задачи (gate 2026-10-01: шаг `helm-tests` FAIL, «networkPolicy.enabled=true with no sources»). Отложено из `implement`: тестовые файлы правятся только после verdict. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-config-reloader.sh && bash helm/amp/tests/render-image-tag.sh -->
+- [x] **5.1** `helm/amp/tests/render-ingress-auth.sh` — кейсы из Spec §Test Plan + `--set-string ingress.externalAuth=false|no` → fail, строка `"true"` → рендер (R3). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-ingress-auth.sh → rc=0 -->
+- [x] **5.2** `helm/amp/tests/render-networkpolicy.sh` — кейсы из Spec §Test Plan, включая совпадение `from` политики redis с метками pod'а и неизменный `spec.selector`; `podLabels` с `app.kubernetes.io/component` → fail (R2); values без секции `networkPolicy` (как `--reuse-values` со старого релиза) → рендер без политики (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-networkpolicy.sh → rc=0 -->
+- [x] **5.2a** `helm/amp/tests/render-servicemonitor.sh` — кейсы из Spec §Test Plan, включая «селектор совпадает только с Service AMP»; values без `monitoring.serviceMonitor` → ServiceMonitor с дефолтами 30s/10s, а с `webConfig` — fail (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-servicemonitor.sh → rc=0 -->
+- [x] **5.2b** В одном из render-тестов: дефолтный рендер содержит `templates/tests/postgresql-test-connection.yaml` (R18). <!-- depends: 4.1 | verify: тест падает при `tests/` в `.helmignore` -->
+- [x] **5.3** Мутации: убрать guard D1 / метку / guard пустых источников / добавить Egress / убрать guard basicAuth / убрать component из селектора ServiceMonitor — каждая ловится тестом; откатить. <!-- depends: 5.1, 5.2 | verify: записать результат в testing-лог -->
 
 ## Phase 6: Testing и finalize
 
@@ -153,6 +153,15 @@ based_on:
 - рендеры default/dev/lite совпадают с прошлым прогоном, не считая случайных паролей;
 - `helm lint` prod с placeholder'ами чист, в `helm package` нет `tests/`.
 - Повторное ревью (R18): неякорный `tests/` в `.helmignore` выкидывал и `templates/tests/postgresql-test-connection.yaml` (hook `helm test`) — из пакета и из `helm template`. Сравнение рендеров выше делалось до появления `.helmignore`, поэтому регрессию не поймало. Исправлено на `/tests/`: hook снова рендерится, в пакете `templates/tests/` есть, корневого `tests/` нет. Плюс доки по R19, R20.
+
+## Write-tests log (2026-10-01)
+
+- 5.0: `render-config-reloader.sh`, `render-image-tag.sh` — prod-рендер с `-f tests/values-production-placeholders.yaml`. Негативный кейс «prod как есть → fail» (R9) живёт в `render-ingress-auth.sh`.
+- 5.1 `render-ingress-auth.sh` (16 assert'ов): Ingress нет по дефолту; без auth fail на дефолтах и в prod; строковые `externalAuth` (`false`/`no`/`"false"`/`True`/`1`) fail; `webConfig`, bool `true`, строка `"true"` рендерят Ingress. 5.2b там же: hook `templates/tests/` рендерится и пакуется, `tests/` не пакуется.
+- 5.2 `render-networkpolicy.sh` (29): guard пустых источников (prod, дефолты, только контроллер без Ingress); политика prod — podSelector с component, правило на роль, один порт `http`, без Egress; контроллер только с `ingress.enabled`; `extraIngress`; метка только в pod template, селекторы Deployment и Service без неё; `podLabels` с component → fail; `from` политики redis; `networkPolicy=null` → рендер без политики.
+- 5.2a `render-servicemonitor.sh` (21): дефолт (port `http`, `/metrics`, 30s/10s, без basicAuth); селектор выбирает ровно Service `amp`, а без component — 7 Service'ов; гейты `prometheusEnabled`/`serviceMonitor.enabled`, redis не затронут; guard basicAuth, ключи по умолчанию и свои; labels, interval; `monitoring.serviceMonitor=null` → рендер с дефолтами, guard работает.
+- 5.3 мутации: 15 из 15 пойманы (`evidence/mutations-2026-10-01.txt`).
+- Совместимость: helper'ы написаны под macOS bash 3.2 и BSD awk (без `mapfile`, без перевода строки в `awk -v`); извлечение документов — awk, без yq. `shellcheck helm/amp/tests/*.sh` чист.
 
 ## Definition of Done
 

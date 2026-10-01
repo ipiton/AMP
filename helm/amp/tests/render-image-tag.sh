@@ -62,10 +62,11 @@ if [ -z "${APP_VERSION}" ]; then
 fi
 echo "Chart appVersion: ${APP_VERSION}"
 
-# values-production.yaml ships no passwords (a `required` guard fails the
-# render until they are supplied) -- placeholders, as scripts/release-gate.sh
-# does.
+# values-production.yaml ships no passwords, auth or NetworkPolicy sources
+# (guards fail the render until they are supplied) -- placeholders, as
+# scripts/release-gate.sh does.
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
+  -f "${CHART_DIR}/tests/values-production-placeholders.yaml"
   --set postgresql.password=render-test-placeholder
   --set cache.auth.password=render-test-placeholder)
 
