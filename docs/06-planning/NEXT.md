@@ -16,7 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-_(пусто)_
+- [ ] **PROD-INGRESS-HARDENING** — прод-блокер P0 Security из `BACKLOG.md`: Ingress в `values-production.yaml` без auth/allowlist, NetworkPolicy для самого AMP нет. Ветка `feature/prod-ingress-hardening`, workspace `tasks/PROD-INGRESS-HARDENING/`. Начато 2026-10-01. ~0.5d
 
 ## Queue
 
