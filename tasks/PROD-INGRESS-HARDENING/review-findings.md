@@ -91,8 +91,8 @@
 - **Issue:** известно и запланировано как 5.0. Ревьюер B: в 5.0 добавить кейс «prod без placeholder'ов → fail», чтобы guard'ы проверялись, а не только обходились. Запись `HELM-RENDER-TEST-IN-GATE` закрыть в BACKLOG.
 - **Recommendation:** 5.0 в `write-tests` + негативный кейс; закрыть запись в BACKLOG на finalize.
 - **Disposition:** fix-here (write-tests 5.0, finalize)
-- **Status:** deferred
-- **Follow-up:** `tasks.md` 5.0, 6.3
+- **Status:** fixed
+- **Follow-up:** `tasks.md` 5.0 (сделано, gate `helm-tests` PASS на testing), 6.3 — закрыть `HELM-RENDER-TEST-IN-GATE`
 
 ### R10 — ADR-015 ссылается на BUGS-записи, которых ещё нет
 - **Severity:** minor

@@ -115,8 +115,8 @@ based_on:
 
 ## Phase 6: Testing и finalize
 
-- [ ] **6.1** `scripts/release-gate.sh` целиком (шаг `helm-tests` подхватывает новые тесты); `git diff --check`; Go-код не менялся — `quality-gates-fast` для контроля. <!-- verify: все шаги PASS -->
-- [ ] **6.2** Опционально: kind + Calico smoke (разрешённый отправитель, чужой pod, probes, kill-switch). Если дорого — осознанное ограничение в итоге. <!-- verify: лог в evidence/ или запись «не выполнялось» -->
+- [x] **6.1** `scripts/release-gate.sh` целиком (шаг `helm-tests` подхватывает новые тесты); `git diff --check`; Go-код не менялся — `quality-gates-fast` для контроля. <!-- verify: все шаги PASS -->
+- [x] **6.2** Опционально: kind + Calico smoke (разрешённый отправитель, чужой pod, probes, kill-switch). Если дорого — осознанное ограничение в итоге. <!-- verify: лог в evidence/ или запись «не выполнялось» -->
 - [ ] **6.3** `/finalize`:
   - BUGS `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT` — заведены в fix-раунде review (R10); `HELM-NAMESPACE-OVERRIDE-SPLIT` (R16);
   - BACKLOG `SERVICE-TYPE-EXPOSURE-GUARD` (R4); дописать `CONFIG-RELOADER-SIDECAR` (R12), `CONFIG-RELOADER-AUTH` (R13); TECH-DEBT R14, R17 (`HELM-CHART-GAPS`);
@@ -162,6 +162,13 @@ based_on:
 - 5.2a `render-servicemonitor.sh` (21): дефолт (port `http`, `/metrics`, 30s/10s, без basicAuth); селектор выбирает ровно Service `amp`, а без component — 7 Service'ов; гейты `prometheusEnabled`/`serviceMonitor.enabled`, redis не затронут; guard basicAuth, ключи по умолчанию и свои; labels, interval; `monitoring.serviceMonitor=null` → рендер с дефолтами, guard работает.
 - 5.3 мутации: 15 из 15 пойманы (`evidence/mutations-2026-10-01.txt`).
 - Совместимость: helper'ы написаны под macOS bash 3.2 и BSD awk (без `mapfile`, без перевода строки в `awk -v`); извлечение документов — awk, без yq. `shellcheck helm/amp/tests/*.sh` чист.
+
+## Testing log (2026-10-01) @ 45090d0
+
+- `scripts/release-gate.sh` целиком — RESULT: PASS, 11/11 (build, lint, test, futureparity, race 391s, helm-deps, helm-dev, helm-production, helm-rbac, helm-tests, amtool-compat); сводка в `evidence/release-gate-2026-10-01.txt`. `helm-tests` (красный на implement, R9) теперь зелёный: 5 render-тестов.
+- `git diff --check main...HEAD` — чисто; `shellcheck` gate + `helm/amp/tests/*.sh` — чисто.
+- `quality-gates-fast` не запускался: Go-код не менялся (0 строк `*.go` в диффе), а build/lint/vet покрыты гейтом.
+- 6.2 kind + Calico smoke — **не выполнялся**: `kind` не установлен, ставить новый инструмент в рамках задачи не стали. Не проверены вживую: kubelet probes через политику (premise `assumed`), реальное отсечение чужого pod'а, kill-switch, совет `ipBlock` для hostNetwork. Компенсация — двусторонняя smoke-проверка в README для оператора после install.
 
 ## Definition of Done
 
