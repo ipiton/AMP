@@ -36,12 +36,12 @@ updated_at: 2026-10-01
 
 ## Success Criteria
 
-- [ ] Прод-профиль не рендерит Ingress, открытый без защиты: решение (fail при пустом `webConfig.existingSecret` / Ingress выключен по умолчанию / явный opt-out) выбрано на `/spec` и зафиксировано в ADR.
-- [ ] NetworkPolicy для подов AMP в чарте: ingress-правила на `http` и `metrics` порты с настраиваемыми источниками; включена в `values-production.yaml`; egress-политика — решение на `/spec`.
-- [ ] Render-тест(ы) в `helm/amp/tests/` покрывают: прод-профиль без auth, с auth, с opt-out; NetworkPolicy вкл/выкл и источники.
-- [ ] Bundled ServiceMonitor AMP рабочий: рендерится только при `monitoring.prometheusEnabled` и `monitoring.serviceMonitor.enabled`, селектит именно Service AMP, поддерживает `basicAuth` из Secret; при включённом `webConfig` без `basicAuth` — `fail` (скрейп, который всегда получает 401). _(Включено решением владельца 2026-10-01.)_
-- [ ] `scripts/release-gate.sh` зелёный (helm lint/template, RBAC-шаг).
-- [ ] `CONFIGURATION_GUIDE.md` / `helm/amp/README.md` описывают прод-требование и NetworkPolicy; `CHANGELOG.md` `[Unreleased]` — запись с migration notes (breaking для `values-production.yaml`).
+- [x] Прод-профиль не рендерит Ingress, открытый без защиты: решение (fail при пустом `webConfig.existingSecret` / Ingress выключен по умолчанию / явный opt-out) выбрано на `/spec` и зафиксировано в ADR.
+- [x] NetworkPolicy для подов AMP в чарте: ingress-правила на `http` и `metrics` порты с настраиваемыми источниками; включена в `values-production.yaml`; egress-политика — решение на `/spec`. _(Сделано: только `http` — порт `metrics` у AMP мёртвый, Spec D4 / BUGS `SERVICE-METRICS-PORT-MISROUTED`; egress не ограничивается, D2.)_
+- [x] Render-тест(ы) в `helm/amp/tests/` покрывают: прод-профиль без auth, с auth, с opt-out; NetworkPolicy вкл/выкл и источники.
+- [x] Bundled ServiceMonitor AMP рабочий: рендерится только при `monitoring.prometheusEnabled` и `monitoring.serviceMonitor.enabled`, селектит именно Service AMP, поддерживает `basicAuth` из Secret; при включённом `webConfig` без `basicAuth` — `fail` (скрейп, который всегда получает 401). _(Включено решением владельца 2026-10-01.)_
+- [x] `scripts/release-gate.sh` зелёный (helm lint/template, RBAC-шаг).
+- [x] `CONFIGURATION_GUIDE.md` / `helm/amp/README.md` описывают прод-требование и NetworkPolicy; `CHANGELOG.md` `[Unreleased]` — запись с migration notes (breaking для `values-production.yaml`).
 
 ## Non-Goals
 

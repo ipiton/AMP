@@ -137,7 +137,7 @@
 - **Recommendation:** перейти на bash-массивы.
 - **Disposition:** defer-tech-debt
 - **Status:** deferred
-- **Follow-up:** TECH-DEBT (finalize)
+- **Follow-up:** TECH-DEBT `RELEASE-GATE-UNQUOTED-ARGS`
 
 ### R15 — Пиры неверной формы рендерятся
 - **Severity:** nit

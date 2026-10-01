@@ -33,7 +33,15 @@
 - **Problem:** `monitoring.prometheusEnabled: true` по умолчанию, поэтому `helm install` с дефолтами рендерит `ServiceMonitor` (AMP и redis) и `PrometheusRule` redis. В кластере без CRD `monitoring.coreos.com` install падает на `no matches for kind "ServiceMonitor"`.
 - **Impact:** первый install в чистый кластер требует знать про `--set monitoring.prometheusEnabled=false`.
 - **Fix:** гейтить на `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"` или сменить дефолт на `false` (breaking для тех, кто на него полагается).
-- **Refs:** ADR-015; Spec PROD-INGRESS-HARDENING D7; 2026-10-01.
+- **Refs:** ADR-015; `tasks/archive/PROD-INGRESS-HARDENING/Spec.md` D7; 2026-10-01.
+- **Status:** open
+
+### [low][Helm][~0.25d] HELM-NAMESPACE-OVERRIDE-SPLIT
+- **Title:** `namespace` разносит объекты AMP и redis по разным namespace
+- **Problem:** шаблоны приложения ставят `namespace: {{ .Values.namespace | default .Release.Namespace }}`, а `redis-*.yaml` — `.Release.Namespace`. При `namespace` ≠ namespace релиза Redis, его Service и NetworkPolicy оказываются в другом namespace, чем AMP: политика redis выбирает AMP pod'ы через `podSelector` без `namespaceSelector` и их не видит, а `cache.host` указывает на Service не там.
+- **Impact:** редкая конфигурация (`namespace` задан явно), но тихо: AMP теряет Redis при `valkey.networkPolicy.enabled`.
+- **Fix:** один источник namespace для всех шаблонов (хелпер `amp.namespace`).
+- **Refs:** deep-review PROD-INGRESS-HARDENING R16, `tasks/archive/PROD-INGRESS-HARDENING/review-findings.md`; 2026-10-01.
 - **Status:** open
 
 ## Entry Format

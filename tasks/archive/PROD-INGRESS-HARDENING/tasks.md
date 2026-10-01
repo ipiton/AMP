@@ -117,7 +117,7 @@ based_on:
 
 - [x] **6.1** `scripts/release-gate.sh` целиком (шаг `helm-tests` подхватывает новые тесты); `git diff --check`; Go-код не менялся — `quality-gates-fast` для контроля. <!-- verify: все шаги PASS -->
 - [x] **6.2** Опционально: kind + Calico smoke (разрешённый отправитель, чужой pod, probes, kill-switch). Если дорого — осознанное ограничение в итоге. <!-- verify: лог в evidence/ или запись «не выполнялось» -->
-- [ ] **6.3** `/finalize`:
+- [x] **6.3** `/finalize`:
   - BUGS `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT` — заведены в fix-раунде review (R10); `HELM-NAMESPACE-OVERRIDE-SPLIT` (R16);
   - BACKLOG `SERVICE-TYPE-EXPOSURE-GUARD` (R4); дописать `CONFIG-RELOADER-SIDECAR` (R12), `CONFIG-RELOADER-AUTH` (R13); TECH-DEBT R14, R17 (`HELM-CHART-GAPS`);
   - TECH-DEBT: sticky-аннотации, хардкод `name: monitoring`;
@@ -172,10 +172,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
