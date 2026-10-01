@@ -110,6 +110,7 @@ based_on:
 - [ ] **5.1** `helm/amp/tests/render-ingress-auth.sh` — кейсы из Spec §Test Plan + `--set-string ingress.externalAuth=false|no` → fail, строка `"true"` → рендер (R3). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-ingress-auth.sh → rc=0 -->
 - [ ] **5.2** `helm/amp/tests/render-networkpolicy.sh` — кейсы из Spec §Test Plan, включая совпадение `from` политики redis с метками pod'а и неизменный `spec.selector`; `podLabels` с `app.kubernetes.io/component` → fail (R2); values без секции `networkPolicy` (как `--reuse-values` со старого релиза) → рендер без политики (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-networkpolicy.sh → rc=0 -->
 - [ ] **5.2a** `helm/amp/tests/render-servicemonitor.sh` — кейсы из Spec §Test Plan, включая «селектор совпадает только с Service AMP»; values без `monitoring.serviceMonitor` → ServiceMonitor с дефолтами 30s/10s, а с `webConfig` — fail (R1). <!-- depends: 4.1 | verify: bash helm/amp/tests/render-servicemonitor.sh → rc=0 -->
+- [ ] **5.2b** В одном из render-тестов: дефолтный рендер содержит `templates/tests/postgresql-test-connection.yaml` (R18). <!-- depends: 4.1 | verify: тест падает при `tests/` в `.helmignore` -->
 - [ ] **5.3** Мутации: убрать guard D1 / метку / guard пустых источников / добавить Egress / убрать guard basicAuth / убрать component из селектора ServiceMonitor — каждая ловится тестом; откатить. <!-- depends: 5.1, 5.2 | verify: записать результат в testing-лог -->
 
 ## Phase 6: Testing и finalize
@@ -142,7 +143,7 @@ based_on:
 Находки deep-review со `fix-here` (R1–R8, R10, R11, R16):
 - шаблоны: nil-safe чтение `networkPolicy` и `monitoring.serviceMonitor` (R1), `fail` на `podLabels` с component (R2), `externalAuth` только `true`/`"true"` (R3);
 - доки: README (оговорки про `service.type` и общий контроллер, hostNetwork, vmalert, двусторонний smoke, namespace Secret'а), CHANGELOG (формулировка Security, первый upgrade без `--reuse-values`, общий случай `webConfig` + ServiceMonitor, `podLabels`);
-- BUGS: `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT`; `helm/amp/.helmignore` с `tests/`.
+- BUGS: `SERVICE-METRICS-PORT-MISROUTED`, `MONITORING-CRD-DEFAULT`; `helm/amp/.helmignore` с `/tests/`.
 
 Проверено:
 - матрица из 12 guard'ов без изменений;
@@ -151,6 +152,7 @@ based_on:
 - R1: чарт ветки со значениями `main:helm/amp/values.yaml` рендерится. ServiceMonitor на месте с 30s/10s, политики AMP нет, с `webConfig` guard срабатывает;
 - рендеры default/dev/lite совпадают с прошлым прогоном, не считая случайных паролей;
 - `helm lint` prod с placeholder'ами чист, в `helm package` нет `tests/`.
+- Повторное ревью (R18): неякорный `tests/` в `.helmignore` выкидывал и `templates/tests/postgresql-test-connection.yaml` (hook `helm test`) — из пакета и из `helm template`. Сравнение рендеров выше делалось до появления `.helmignore`, поэтому регрессию не поймало. Исправлено на `/tests/`: hook снова рендерится, в пакете `templates/tests/` есть, корневого `tests/` нет. Плюс доки по R19, R20.
 
 ## Definition of Done
 

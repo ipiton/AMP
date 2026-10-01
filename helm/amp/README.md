@@ -157,9 +157,9 @@ networkPolicy:
 
 - An enabled policy with no effective source fails the render: it would drop every alert sender.
 - Senders outside the cluster that come through the Ingress are covered by `ingressController`. Through a LoadBalancer or NodePort they arrive from node or LB addresses: add an `ipBlock`.
-- An ingress controller with `hostNetwork: true` connects from the node IPs, which no `namespaceSelector` matches: list the node CIDR as an `ipBlock` in `ingressController`.
+- An ingress controller with `hostNetwork: true` connects from the node IPs, which no `namespaceSelector` matches: list the node CIDR as an `ipBlock` in `ingressController`. Whether an `ipBlock` matches node traffic depends on the CNI (Cilium, for one, classifies it as `host`/`remote-node`, not by CIDR): confirm with the check below.
 - Probes come from the kubelet on the node and are not affected on conformant CNIs. If pods start failing `Readiness probe failed: ... timeout` right after enabling the policy, your CNI filters node traffic: add the node CIDR as an `ipBlock` in `extraIngress`.
-- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides:
+- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides (`8080` is the default `service.port`; run the first check from a namespace you did not list):
 
   ```bash
   SVC=$(kubectl get svc -n <namespace> -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application -o name)

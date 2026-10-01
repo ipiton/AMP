@@ -3,7 +3,7 @@
 **Trigger classification:** mandatory (`S`; 3 сигнала `S C R`)
 **Reviewer perspective:** два независимых агента без доступа к рассуждениям автора и друг к другу. Reviewer A — security / premises / correctness, Reviewer B — contract / rollout / gate. Автор сводил и воспроизвёл R1, R2, R3 рендером.
 **Reviewed at:** 2026-10-01
-**Reviewed tree:** feature/prod-ingress-hardening @ d64390c
+**Reviewed tree:** feature/prod-ingress-hardening @ d64390c; повторное ревью фиксов (независимый агент) — @ c5a03f7, R1–R8, R10, R11, R16 подтверждены, новые R18–R20
 **Verdict:** fix_required (см. `review-verdict.json`)
 
 Поле `Status` в каждой находке читает скрипт verdict'а: `open` | `fixed` | `deferred` | `rejected`.
@@ -162,6 +162,33 @@
 - **Disposition:** defer-tech-debt
 - **Status:** deferred
 - **Follow-up:** TECH-DEBT `HELM-CHART-GAPS` (дописать на finalize)
+
+### R18 — Неякорный `tests/` в `.helmignore` выкидывает hook `helm test`
+- **Severity:** minor
+- **Location:** `helm/amp/.helmignore` (c5a03f7)
+- **Issue:** шаблон совпадает на любой глубине и убирает `templates/tests/postgresql-test-connection.yaml` из пакета и из `helm template`. Найдено повторным ревью фиксов, воспроизведено.
+- **Recommendation:** `/tests/`; render-тест на наличие hook'а.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** `tasks.md` 5.2b
+
+### R19 — Smoke-проверка: порт и namespace «чужого» pod'а захардкожены
+- **Severity:** nit
+- **Location:** `helm/amp/README.md` → Network Exposure
+- **Issue:** `8080` — дефолт `service.port`; `-n default` неверен, если `default` в списке источников.
+- **Recommendation:** оговорить оба.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
+
+### R20 — Совет `ipBlock` для hostNetwork-контроллера зависит от CNI
+- **Severity:** nit
+- **Location:** `helm/amp/README.md`, `CHANGELOG.md`
+- **Issue:** на Cilium трафик нод идёт с identity `host`/`remote-node`, CIDR-правило его может не выбрать.
+- **Recommendation:** пометить как CNI-зависимое, проверять smoke-проверкой.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
 
 ## Premises
 
