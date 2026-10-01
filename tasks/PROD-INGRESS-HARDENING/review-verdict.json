@@ -1,14 +1,14 @@
 {
-  "gate": "fix_required",
-  "reason": "11 fix-here finding(s) open",
+  "gate": "pass",
+  "reason": null,
   "branch": "feature/prod-ingress-hardening",
-  "commit": "d64390c",
+  "commit": "093f8a7",
   "reviewed_at": "2026-10-01",
   "findings": {
     "blocker": 0,
     "major": 2,
-    "minor": 10,
-    "nit": 5
+    "minor": 11,
+    "nit": 7
   },
   "open": {
     "blocker": 0,

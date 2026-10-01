@@ -102,7 +102,7 @@ based_on:
 
 ## Phase 4: Deep review (обязателен)
 
-- [ ] **4.1** `/deep-review` по диффу phases 1–3 → `review-findings.md`, `review-verdict.json`. <!-- depends: 1.*, 2.*, 3.* | verify: jq -r .gate tasks/PROD-INGRESS-HARDENING/review-verdict.json → pass -->
+- [x] **4.1** `/deep-review` по диффу phases 1–3 → `review-findings.md`, `review-verdict.json`. <!-- depends: 1.*, 2.*, 3.* | verify: jq -r .gate tasks/PROD-INGRESS-HARDENING/review-verdict.json → pass -->
 
 ## Phase 5: Тесты (после `gate: pass`)
 

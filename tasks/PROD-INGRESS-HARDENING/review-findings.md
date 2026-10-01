@@ -4,7 +4,7 @@
 **Reviewer perspective:** два независимых агента без доступа к рассуждениям автора и друг к другу. Reviewer A — security / premises / correctness, Reviewer B — contract / rollout / gate. Автор сводил и воспроизвёл R1, R2, R3 рендером.
 **Reviewed at:** 2026-10-01
 **Reviewed tree:** feature/prod-ingress-hardening @ d64390c; повторное ревью фиксов (независимый агент) — @ c5a03f7, R1–R8, R10, R11, R16 подтверждены, новые R18–R20
-**Verdict:** fix_required (см. `review-verdict.json`)
+**Verdict:** pass @ 093f8a7 (см. `review-verdict.json`; первый прогон @ d64390c — fix_required)
 
 Поле `Status` в каждой находке читает скрипт verdict'а: `open` | `fixed` | `deferred` | `rejected`.
 
