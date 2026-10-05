@@ -67,3 +67,16 @@ updated_at: 2026-10-05
 - Source: `SECURITY.md`, `BACKLOG.md` § PROD-SECURITY-MD, `gh api` (репо public, PVR выключен).
 - Key finding: расхождения — auth (API key/JWT), TLS, CORS, версии, контакт; NetworkPolicy и RBAC теперь есть, а в файле «Planned».
 - Decision: канал — GitHub Private Vulnerability Reporting (решение владельца 2026-10-05); переписать файл по фактам со ссылками на ADR/доки.
+
+## Verification (2026-10-05)
+
+| Check | Result |
+|---|---|
+| `git diff --check main...HEAD` | PASS |
+| Плейсхолдеры (`INSERT`/`TODO`/`TBD`) в `SECURITY.md` | нет; `JWT`/`API key` — только в «Not provided» и чек-листе секретов |
+| Относительные ссылки `SECURITY.md`, `README.md` | 11/11 существуют |
+| Утверждения «Provided» сверены с кодом/чартом/CI | auth — `cmd/server/main.go` (`webAuth.Wrap`), `CONFIGURATION_GUIDE.md` §4; TLS сервера нет, `tls_server_config`/`rate_limit` отвергаются; CORS — `internal/application/middleware.go`, не подключён (`main` не вызывает `setupMiddleware`); `automountServiceAccountToken: false` — redis, backup cronjob; securityContext — `helm/amp/values.yaml`; CI — `docs/CI.md`, `.github/workflows/ci.yml`; gosec в `.golangci.yml` нет |
+| Private Vulnerability Reporting | `{"enabled":false}` — включает владелец |
+| Go/Helm гейты (`quality-gates-fast`, `release-gate.sh`) | SKIP: дифф только markdown, Go-код и чарт не тронуты (`WORKFLOW.md` § Гейты AMP требует release-gate для Go/чарта) |
+
+Отклонение: критерий про supply chain выполнен без слова «required» — branch protection не включён (`MAIN-BRANCH-PROTECTION`), required-статус не enforced.
