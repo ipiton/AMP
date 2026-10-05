@@ -16,6 +16,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **PROD-SECURITY-MD** — привести `SECURITY.md` к фактическому состоянию (auth, TLS, NetworkPolicy, версии), канал — GitHub Private Vulnerability Reporting. Прод-блокер P0 из `BACKLOG.md`. Ветка `docs/prod-security-md`, workspace `tasks/PROD-SECURITY-MD/`. ~0.25d
+
 ## Queue
 
 ### Owner
