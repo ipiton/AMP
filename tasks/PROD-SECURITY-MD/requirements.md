@@ -31,14 +31,14 @@ updated_at: 2026-10-05
 
 ## Success Criteria
 
-- [ ] Канал сообщения — GitHub Private Vulnerability Reporting (`https://github.com/ipiton/AMP/security/advisories/new`); email не публикуется; `[INSERT SECURITY EMAIL]` нет.
-- [ ] Supported Versions соответствует реальности (линия `0.x`, патчи — в последний минорный релиз / `main`).
-- [ ] Auth описан как есть: basic auth по upstream `--web.config.file` (`basic_auth_users`, bcrypt), в чарте — `webConfig.existingSecret`; ссылка на `docs/CONFIGURATION_GUIDE.md` §4. Bearer/JWT/API keys — не заявлены (bearer → `PROD-AUTH-BEARER`).
-- [ ] TLS: сервер AMP TLS не терминирует — TLS на Ingress/mesh; заявление «TLS support» убрано или уточнено (исходящий `http_config.tls_config` для receivers — отдельно, если упоминается).
-- [ ] Network: NetworkPolicy AMP (ADR-015), guard Ingress без auth, namespaced RBAC (ADR-012) — как Current.
-- [ ] Supply chain / testing: govulncheck required в CI, release-gate; убраны неподтверждённые «security scans on every commit», gosec — только если реально запускается.
-- [ ] Каждое оставшееся «Current» проверено по коду (CORS, rate limiting, audit logging, input validation) — неподтверждённое снято или переведено в Planned/оператор.
-- [ ] `Last Updated` актуален.
+- [x] Канал сообщения — GitHub Private Vulnerability Reporting (`https://github.com/ipiton/AMP/security/advisories/new`); email не публикуется; `[INSERT SECURITY EMAIL]` нет.
+- [x] Supported Versions соответствует реальности (линия `0.x`, патчи — в последний минорный релиз / `main`).
+- [x] Auth описан как есть: basic auth по upstream `--web.config.file` (`basic_auth_users`, bcrypt), в чарте — `webConfig.existingSecret`; ссылка на `docs/CONFIGURATION_GUIDE.md` §4. Bearer/JWT/API keys — не заявлены (bearer → `PROD-AUTH-BEARER`).
+- [x] TLS: сервер AMP TLS не терминирует — TLS на Ingress/mesh; заявление «TLS support» убрано или уточнено (исходящий `http_config.tls_config` для receivers — отдельно, если упоминается).
+- [x] Network: NetworkPolicy AMP (ADR-015), guard Ingress без auth, namespaced RBAC (ADR-012) — как Current.
+- [x] Supply chain / testing: govulncheck required в CI, release-gate; убраны неподтверждённые «security scans on every commit», gosec — только если реально запускается.
+- [x] Каждое оставшееся «Current» проверено по коду (CORS, rate limiting, audit logging, input validation) — неподтверждённое снято или переведено в Planned/оператор.
+- [x] `Last Updated` актуален.
 
 ## Non-Goals
 

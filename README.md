@@ -230,14 +230,12 @@ See [examples/](examples/) for complete working implementations:
 
 ## 🔐 Security
 
-Security is a top priority. We follow industry best practices:
+- HTTP basic auth via the upstream `--web.config.file` format (off by default)
+- No TLS termination in AMP: terminate TLS at the ingress or service mesh
+- Namespaced, least-privilege RBAC and an optional NetworkPolicy in the Helm chart
+- `govulncheck` on every pull request
 
-- TLS 1.2+ for all connections
-- No secrets in logs
-- RBAC for Kubernetes deployments
-- Regular security audits
-
-See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+See [SECURITY.md](SECURITY.md) for the full security posture and private vulnerability reporting.
 
 ## 🤝 Contributing
 
