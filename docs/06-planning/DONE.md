@@ -17,6 +17,13 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-05 — (TASK / Security, P0) **PROD-SECURITY-MD** — `SECURITY.md` описывает фактическое состояние вместо шаблона 2025-12.
+  - **Канал:** GitHub Private Vulnerability Reporting (решение владельца), email не публикуется; `[INSERT SECURITY EMAIL]` убран. Ответ — best effort, подтверждение в течение 5 рабочих дней.
+  - **Снято как ложное:** API key / JWT auth, серверный TLS, «configurable CORS» (код есть в `internal/application/middleware.go`, но `main` его не подключает), gosec, «security scans on every commit», версии `1.x`.
+  - **Описано как есть:** basic auth (`--web.config.file`, ADR-011), TLS — на ingress/mesh, исходящий `tls_config` у receivers; guard Ingress, NetworkPolicy (ADR-015), namespaced RBAC (ADR-012), securityContext; CI с release-gate и `govulncheck`; отдельный список «Not provided» (CORS, rate limiting, audit log, SBOM/подпись). Чек-лист прод-деплоя переписан под настройки AMP. Раздел Security в `README.md` выровнен.
+  - **Проверка:** docs-only, tier Lightweight; `git diff --check`, ссылки 11/11, утверждения сверены с кодом/чартом/CI; Go/Helm гейты не запускались — код и чарт не тронуты.
+  - **Владелец:** PVR в репо выключен → `PRIVATE-VULN-REPORTING` в `NEXT.md` § Owner. «govulncheck — required» в `SECURITY.md` не заявлен, пока нет branch protection (`MAIN-BRANCH-PROTECTION`).
+  - Ветка `docs/prod-security-md`, workspace `tasks/archive/PROD-SECURITY-MD/`. ~0.25d.
 - 2026-10-01 — (TASK / Security, P0) **PROD-INGRESS-HARDENING** — чарт больше не публикует API через Ingress без auth, у pod'ов AMP появилась своя NetworkPolicy, ServiceMonitor заработал (ADR-015).
   - **Ingress guard** (`templates/ingress.yaml`): `ingress.enabled: true` рендерится только с `webConfig.existingSecret` или `ingress.externalAuth: true` (принимается только `true`/`"true"`). Привязан к Ingress, а не к прод-профилю: действует для любых values.
   - **NetworkPolicy AMP** (`templates/networkpolicy.yaml`, `networkPolicy.*`): ingress-only, порт `http`, правило на роль — `ingressController` (только при `ingress.enabled`) / `alertSenders` / `metricsScrapers` + сырой `extraIngress`; без источников — `fail`. Egress не ограничен. Включена в `values-production.yaml`, по умолчанию выключена. Метка `app.kubernetes.io/component: application` на pod template и metadata Service, селекторы не тронуты; `podLabels` не может её перекрыть. Попутно ожила политика redis (`valkey.networkPolicy`), которая ждала эту метку.

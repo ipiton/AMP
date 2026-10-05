@@ -16,12 +16,12 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-SECURITY-MD** — привести `SECURITY.md` к фактическому состоянию (auth, TLS, NetworkPolicy, версии), канал — GitHub Private Vulnerability Reporting. Прод-блокер P0 из `BACKLOG.md`. Ветка `docs/prod-security-md`, workspace `tasks/PROD-SECURITY-MD/`. ~0.25d
-
 ## Queue
 
 ### Owner
 
+- [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
+  Trigger: owner ready.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `~5min`
   Trigger: owner ready.
 

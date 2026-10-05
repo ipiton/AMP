@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **PROD-SECURITY-MD** (2026-10-05): `SECURITY.md` now describes what AMP actually provides. Vulnerabilities are reported privately through GitHub (Security → Report a vulnerability) instead of a placeholder email. Removed claims of API key / JWT auth, server-side TLS and CORS, which AMP does not implement; NetworkPolicy and namespaced RBAC are listed as provided; supported versions reflect the `0.x` line. The README security section is aligned.
 - **PROD-INGRESS-HARDENING** (2026-10-01): an Ingress rendered by the Helm chart no longer exposes the API without authentication, and the AMP pods can be closed to in-cluster traffic. A `NodePort`/`LoadBalancer` Service is not covered (pair it with `webConfig.existingSecret`). See `helm/amp/README.md` → Network Exposure and ADR-015.
   - **Ingress requires authentication**: `ingress.enabled: true` fails to render unless `webConfig.existingSecret` (in-process basic auth) is set or `ingress.externalAuth: true` declares that the ingress controller or a proxy enforces auth. This holds for every values file, not only `values-production.yaml`.
   - **NetworkPolicy for the AMP pods** (`networkPolicy.*`, new): ingress-only, `http` port only, from the listed `ingressController` / `alertSenders` / `metricsScrapers` peers plus raw `extraIngress` rules. Enabled with no source, it fails to render instead of dropping every alert sender. Egress is not restricted. Enabled in `values-production.yaml`, off by default.
