@@ -4,7 +4,7 @@ slug: prod-security-md
 stream: Security
 type: docs
 priority: high
-status: active
+status: done
 created_at: 2026-10-05
 updated_at: 2026-10-05
 ---

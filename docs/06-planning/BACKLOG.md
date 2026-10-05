@@ -20,7 +20,7 @@
   - Сделать: namespaced read-only Role, только при `targetDiscovery.enabled`; cluster-scope — отдельный явный opt-in; убрать write-права, если не используются.
   - Критерий: `helm template` с дефолтами не рендерит ClusterRole; тест в release-gate.
   - Оценка: ~0.5d.
-- [ ] **PROD-SECURITY-MD** — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. _(2026-09-25: PROD-AUTH закрыт — описать basic auth через `--web.config.file` / `webConfig.existingSecret`, ссылка на `CONFIGURATION_GUIDE.md` §4.)_ Оценка: ~0.25d.
+- [x] **PROD-SECURITY-MD** _(закрыт 2026-10-05, `tasks/archive/PROD-SECURITY-MD/`; канал — GitHub Private Vulnerability Reporting, сняты заявления про API key/JWT, серверный TLS, CORS; включение PVR — owner-пункт в `NEXT.md`)_ — `SECURITY.md` расходится с кодом: заявлены «API key & JWT support» (стр. 62), «TLS support» (стр. 70), которых нет; контакт — `[INSERT SECURITY EMAIL]` (стр. 17, 152). Переписать под фактическое состояние (TLS — на Ingress/mesh, auth — после PROD-AUTH), указать реальный контакт. _(2026-09-25: PROD-AUTH закрыт — описать basic auth через `--web.config.file` / `webConfig.existingSecret`, ссылка на `CONFIGURATION_GUIDE.md` §4.)_ Оценка: ~0.25d.
 
 ### P0 — Delivery
 
