@@ -41,7 +41,7 @@
 
 ### P0 — Reliability
 
-- [ ] **PROD-GRACEFUL-SHUTDOWN** — `go-app/cmd/server/main.go:139-176`:
+- [x] **PROD-GRACEFUL-SHUTDOWN** _(закрыт 2026-10-06, `tasks/archive/PROD-GRACEFUL-SHUTDOWN/`; SIGTERM → readiness 503 → drain HTTP → `registry.Shutdown` → выход после завершения, `server.graceful_shutdown_timeout` подключён (`0` → 30s); чарт: preStop `sleep preStopDelay`, `gracefulShutdown.timeoutSeconds`, grace 30 → 40, WARNING в `NOTES.txt` вместо `fail`; rolling update в k8s вживую не проверен → `K8S-LIVE-ROLLOUT-CHECK`)_ — `go-app/cmd/server/main.go:139-176`:
   - порядок инвертирован: `registry.Shutdown` до `server.Shutdown` ⇒ in-flight запросы попадают в остановленные сервисы;
   - `main` выходит сразу по `ErrServerClosed`, не дожидаясь завершения `Shutdown`-горутины (drain/flush обрываются);
   - таймаут 30s == `terminationGracePeriodSeconds: 30` — без запаса;
@@ -75,6 +75,10 @@
 - [x] **HELM-RENDER-TEST-IN-GATE** _(закрыт 2026-10-01 в PROD-INGRESS-HARDENING: шаг `helm-tests` в `scripts/release-gate.sh` запускает все `helm/amp/tests/*.sh`, падает, если тестов нет)_ — `helm/amp/tests/render-config-reloader.sh` не входит в release-gate и был сломан с `404b913` (обязательные пароли в production values) незамеченным; починен в PROD-CI-IMAGES. Сделать: шаг `helm-tests` в `scripts/release-gate.sh` (запуск всех `helm/amp/tests/*.sh`). Оценка ~0.1d.
 - [ ] **GROUPING-TIMER-LOCK-FIX** — починить `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` (BUGS.md): флейк `-race` ~1/15 в `internal/infrastructure/grouping`, краснит required `gate`. Гипотеза — TOCTOU: distributed lock отпускается сразу после callback'а, опоздавшая реплика берёт его и срабатывает повторно. Сначала подтвердить (продуктовый дефект или тест), затем фикс в `timer_manager_impl.go` + детерминированный тест. Оценка ~0.5–1d, нужен `/research`.
 - [ ] **GO-MOD-TIDY-CHECK** — `go-app/go.mod` на `main` не tidy: `go mod tidy` без апгрейдов удаляет неиспользуемые `mattn/go-sqlite3`, `oklog/ulid/v2`, `spf13/cobra` (+ `inconshreveable/mousetrap`) и переводит в direct `google.golang.org/grpc`, `docker/docker`, `prometheus/client_model`. CI это не ловит. В PROD-DEPS-VULN сознательно не трогали, чтобы не смешивать с security-диффом. Сделать: `go mod tidy` отдельным коммитом + шаг `go mod tidy -diff` в `scripts/release-gate.sh`. Оценка ~0.1d.
+
+### Находки PROD-GRACEFUL-SHUTDOWN (2026-10-06)
+
+- [ ] **K8S-LIVE-ROLLOUT-CHECK** — проверить на живом кластере (kind/k3d) то, что после PROD-GRACEFUL-SHUTDOWN проверено только рендером и тестами в процессе. Rolling update AMP под непрерывным `POST /api/v2/alerts` должен пройти без 5xx и без потерянных алертов. Для этого нужно, чтобы kubelet снимал endpoint'ы параллельно с preStop `sleep` (premise `assumed` в `tasks/archive/PROD-GRACEFUL-SHUTDOWN/Spec.md`). Заодно — непроверенное вживую из PROD-INGRESS-HARDENING: kubelet probes через NetworkPolicy, реальное отсечение трафика политикой. Сделать: сценарий (скрипт в `deploy/`, по образцу `e2e-ha`) с kind, нагрузкой и подсчётом ответов, прогон, вывод в `docs/CI.md` — включать ли в CI. Оценка ~1d.
 
 ### Находки PROD-INGRESS-HARDENING (2026-10-01)
 

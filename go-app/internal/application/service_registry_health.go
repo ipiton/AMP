@@ -35,7 +35,18 @@ func (r *ServiceRegistry) Liveness(ctx context.Context) error {
 	return nil
 }
 
+// BeginShutdown marks the registry as shutting down: from now on Readiness
+// fails and the readiness report carries a "shutdown" check. Liveness is
+// unaffected. Called first in the shutdown sequence, before the HTTP server
+// stops accepting connections.
+func (r *ServiceRegistry) BeginShutdown() {
+	r.shuttingDown.Store(true)
+}
+
 func (r *ServiceRegistry) Readiness(ctx context.Context) error {
+	if r.shuttingDown.Load() {
+		return fmt.Errorf("service shutting down")
+	}
 	if !r.initialized {
 		return fmt.Errorf("service registry not initialized")
 	}
@@ -111,6 +122,15 @@ func (r *ServiceRegistry) buildHealthReport(ctx context.Context, readiness bool)
 		} else {
 			checks["database"]["status"] = "healthy"
 		}
+	}
+
+	if readiness && r.shuttingDown.Load() {
+		checks["shutdown"] = map[string]any{
+			"status":   "unhealthy",
+			"required": true,
+			"error":    "service shutting down",
+		}
+		requiredHealthy = false
 	}
 
 	status := "healthy"

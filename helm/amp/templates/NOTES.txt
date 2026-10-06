@@ -61,6 +61,17 @@ See: tasks/TN-97-hpa-configuration/DATABASE_CONNECTIONS_ANALYSIS.md
 {{- end }}
 {{- end }}
 
+{{- $grace := int (.Values.gracefulShutdown.terminationGracePeriodSeconds | default 40) }}
+{{- $preStop := int .Values.gracefulShutdown.preStopDelay }}
+{{- $timeout := int (.Values.gracefulShutdown.timeoutSeconds | default 30) }}
+{{- if lt $grace (add $preStop $timeout) }}
+
+⚠️  WARNING: gracefulShutdown.terminationGracePeriodSeconds ({{ $grace }}) is less than
+   preStopDelay ({{ $preStop }}) + timeoutSeconds ({{ $timeout }}) = {{ add $preStop $timeout }}.
+   The kubelet may SIGKILL AMP before in-flight requests drain and the final
+   state is written. Raise terminationGracePeriodSeconds to at least {{ add $preStop $timeout }}.
+{{- end }}
+
 =============================================================================
   Getting Started
 =============================================================================

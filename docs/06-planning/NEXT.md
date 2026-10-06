@@ -16,8 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-GRACEFUL-SHUTDOWN** — исправить shutdown: SIGTERM → readiness 503 → preStop → `server.Shutdown` → `registry.Shutdown` → выход после drain; таймаут меньше grace period, подключить `preStopDelay` в чарте. Прод-блокер P0 из `BACKLOG.md`. Ветка `bugfix/prod-graceful-shutdown`, workspace `tasks/PROD-GRACEFUL-SHUTDOWN/`. ~1d
-
 ## Queue
 
 ### Owner

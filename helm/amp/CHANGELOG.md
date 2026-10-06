@@ -14,11 +14,13 @@
 - `webConfig.existingSecret`/`secretKey`/`mountPath` (PROD-AUTH): mounts an upstream-format web config Secret and sets `SERVER_WEB_CONFIG_FILE`, enabling HTTP basic auth. Rendering fails if combined with `configReloader.enabled` (the sidecar has no credentials yet).
 
 ### Fixed
+- `templates/deployment.yaml` (PROD-GRACEFUL-SHUTDOWN): `gracefulShutdown.preStopDelay` was a dead key and the template said no preStop was needed. The AMP container now gets `lifecycle.preStop.exec: ["sleep", "<preStopDelay>"]` (omitted when `0`), and `SERVER_GRACEFUL_SHUTDOWN_TIMEOUT` from the new `gracefulShutdown.timeoutSeconds` (default `30`).
 - `templates/servicemonitor.yaml` rendered unconditionally and selected `app`/`release` labels the Service never carried, so it scraped nothing. Now gated on `monitoring.prometheusEnabled` + `monitoring.serviceMonitor.enabled` and selects the AMP Service by `component: application`.
 - `templates/redis-networkpolicy.yaml` admitted pods with `component: application`, which no pod carried: enabling `valkey.networkPolicy` cut AMP off Redis. Fixed by the new pod label.
 - `templates/redis-statefulset.yaml`: `replicas: {{ .Values.valkey.replicas | default 1 }}` silently coerced an explicit `valkey.replicas: 0` back to `1` (Helm/sprig `default` treats `0` as empty). Now `{{ .Values.valkey.replicas | int }}` — `replicas: 0` is the documented way to disable this chart's own Redis/Valkey pod when pointing `cache.*` at an external Redis-compatible service.
 
 ### Changed
+- `gracefulShutdown.terminationGracePeriodSeconds` default `30` → `40`, so preStop (`5`) + AMP's shutdown budget (`30`) fit. `NOTES.txt` prints a `WARNING` when `terminationGracePeriodSeconds < preStopDelay + timeoutSeconds`; rendering does not fail.
 - `appVersion` is `0.1.0`, and `image.tag` is empty in `values.yaml` (was `0.0.1`) and `values-production.yaml` (was `1.0.0`), so the app image defaults to `.Chart.AppVersion` like the config-reloader image. An explicit `image.tag` still wins.
 - Liveness/readiness/startup probes moved from `/healthz`/`/readyz` to `/-/healthy`/`/-/ready`, which stay reachable when HTTP auth is enabled.
 - `values-production.yaml` rewritten after auditing every key against the app's actual config surface and the chart's real template capabilities (not just BACKLOG's wishlist):

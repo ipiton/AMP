@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	handlers "github.com/ipiton/AMP/internal/application/handlers"
@@ -73,6 +74,12 @@ type alertCacheWithLifecycle interface {
 type ServiceRegistry struct {
 	config *appconfig.Config
 	logger *slog.Logger
+
+	// shuttingDown is set by BeginShutdown on SIGTERM/SIGINT (PROD-GRACEFUL-
+	// SHUTDOWN) and only ever flips readiness: load balancers stop sending
+	// traffic while in-flight requests drain, liveness stays green so the
+	// kubelet does not kill the pod mid-drain.
+	shuttingDown atomic.Bool
 
 	// Infrastructure Services
 	database       *postgres.PostgresPool

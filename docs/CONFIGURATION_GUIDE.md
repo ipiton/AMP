@@ -232,6 +232,19 @@ export LLM_API_KEY=sk-your-openai-key  # Optional
 
 **Requires:** Application restart
 
+### Graceful Shutdown
+
+On `SIGTERM` or `SIGINT` AMP stops in this order:
+
+1. `/-/ready` and `/readyz` start answering `503`; `/-/healthy` and `/healthz` stay `200`, so a liveness probe does not kill the process mid-drain.
+2. The HTTP server stops accepting connections and waits for in-flight requests.
+3. Services stop: the lite profile writes its final file snapshot, queues and storage close.
+4. The process exits: `0` on a clean shutdown, `1` if the drain or a service stop failed.
+
+`server.graceful_shutdown_timeout` (default `30s`, env `SERVER_GRACEFUL_SHUTDOWN_TIMEOUT`) bounds steps 2-3 together. `0` or a negative value means `30s`. The final lite snapshot is written even when the budget runs out. A second signal during shutdown is ignored.
+
+AMP itself does not wait before step 2. In Kubernetes the chart's preStop hook provides that pause while the pod leaves Service endpoints. Keep `terminationGracePeriodSeconds` ≥ `preStopDelay` + `timeoutSeconds` (see `helm/amp/README.md` → "Graceful Shutdown").
+
 ### Dynamic Publishing Runtime
 
 `publishing.*` controls the real outbound delivery path used by the active runtime.
