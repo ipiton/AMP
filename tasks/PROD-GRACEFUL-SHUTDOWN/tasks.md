@@ -77,16 +77,16 @@ based_on:
 
 ## Phase 4: тесты (write-tests)
 
-- [ ] **4.1** `cmd/server/shutdown_test.go`, фейки с журналом вызовов:
+- [x] **4.1** `cmd/server/shutdown_test.go`, фейки с журналом вызовов:
   - порядок `BeginShutdown` → `server.Shutdown` → `registry.Shutdown`;
   - `registry.Shutdown` вызывается при ошибке `server.Shutdown`, обе ошибки в результате;
   - `ctx` переданный в Shutdown имеет дедлайн ≈ timeout;
   - `effectiveShutdownTimeout(0)` и отрицательный → 30s.
 
   <!-- verify: cd go-app && go test -race -run 'Shutdown' ./cmd/server/ -->
-- [ ] **4.2** `cmd/server/shutdown_test.go`, реальный `http.Server` на `127.0.0.1:0`: медленный handler (держит запрос до сигнала из теста) → сигнал → in-flight запрос получает 200, новое соединение после завершения `server.Shutdown` отклоняется, `runShutdown` вернул `nil`. <!-- verify: cd go-app && go test -race -count=20 -run 'Shutdown' ./cmd/server/ -->
-- [ ] **4.3** `internal/application`: после `BeginShutdown` `Readiness` → ошибка, `ReadinessReport["ready"] == false` с проверкой `shutdown`, `LivenessReport` не содержит `shutdown`. Fixture registry — по образцу `service_registry_storage_test.go`. <!-- verify: cd go-app && go test -race -run 'Shutdown|Readiness' ./internal/application/ -->
-- [ ] **4.4** `helm/amp/tests/render-graceful-shutdown.sh` по образцу `render-image-tag.sh`:
+- [x] **4.2** `cmd/server/shutdown_test.go`, реальный `http.Server` на `127.0.0.1:0`: медленный handler (держит запрос до сигнала из теста) → сигнал → in-flight запрос получает 200, новое соединение после завершения `server.Shutdown` отклоняется, `runShutdown` вернул `nil`. <!-- verify: cd go-app && go test -race -count=20 -run 'Shutdown' ./cmd/server/ -->
+- [x] **4.3** `internal/application`: после `BeginShutdown` `Readiness` → ошибка, `ReadinessReport["ready"] == false` с проверкой `shutdown`, `LivenessReport` не содержит `shutdown`. Fixture registry — по образцу `service_registry_storage_test.go`. <!-- verify: cd go-app && go test -race -run 'Shutdown|Readiness' ./internal/application/ -->
+- [x] **4.4** `helm/amp/tests/render-graceful-shutdown.sh` по образцу `render-image-tag.sh`:
   - дефолты: preStop `sleep 5`, env `30s`, grace 40, без WARNING;
   - `preStopDelay=0`: нет `lifecycle`;
   - grace 30: рендер проходит, WARNING в `helm install --dry-run=client`;
@@ -95,6 +95,14 @@ based_on:
   <!-- verify: bash helm/amp/tests/render-graceful-shutdown.sh -->
 
 **Phase verification:** `cd go-app && go test -race ./cmd/server/... ./internal/application/...` и `bash helm/amp/tests/render-graceful-shutdown.sh`
+
+_Результат 2026-10-06:_
+- `go test -race -count=20 -run Shutdown ./cmd/server/` — 140/140 (7 тестов × 20).
+- `go test -race -run 'BeginShutdown|Readiness' ./internal/application/` — 10/10.
+- `render-graceful-shutdown.sh` — 17/17.
+- Мутация «registry до HTTP» (старый порядок) роняет все три теста последовательности: `OrderAndBudget`, `StopsServicesWhenDrainFails`, `DrainsInFlightRequestBeforeServices`.
+- 4.3 сделан на фейке `contractStorageRuntime` (`router_contract_test.go`), без полного `Initialize`, плюс проверка проб через `AlertmanagerReadyHandler`/`AlertmanagerHealthyHandler`.
+- Пробел: `main` (ожидание `shutdownDone`, код выхода 1) unit-тестом не покрыт — `main()` не вызывается из тестов. Покрыто smoke 1.4 (exit 0) и чтением кода.
 
 ## Phase 5: testing и finalize
 
