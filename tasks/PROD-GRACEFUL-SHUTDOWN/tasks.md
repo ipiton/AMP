@@ -114,7 +114,8 @@ _Результат 2026-10-06:_
     - `scripts/release-gate.sh` — **RESULT: PASS**: build 22s, lint 151s, test 256s, futureparity 40s, race 625s, helm-deps 10s, helm-dev, helm-production, helm-rbac 2s, helm-tests 6s (в том числе новый `render-graceful-shutdown.sh`), amtool-compat 586s. Флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` в этом прогоне не проявился, и это не значит, что он исправлен.
     - Шаг `race` release-gate покрывает 7 пакетов, `cmd/server` и `internal/application` в него не входят. Для них `-race` прогнан отдельно (выше).
     - `git diff main --check`: найдены 2 хвостовых пробела (markdown-переносы из шаблонов в `Spec.md`/`tasks.md`), убраны. `_, _ :=` в коде диффа нет. Единственное совпадение — текст самого шага 5.2.
-    - Не запускалось: rolling update на живом k8s (кластера нет, premise `assumed` в Spec), `deploy/e2e-ha` (compose-сценарий не проверяет остановку под нагрузкой и в гейт не входит; изменённый путь остановки в нём задевает только `compose restart`/`kill`). Deep review не требовался (Spec § Deep Review), `review-findings.md` нет.
+    - `deploy/e2e-ha/run.sh` (вне гейта) — **ALL PASS**, все 5 сценариев, включая `compose restart amp-b` (SIGTERM → новый путь остановки) и `kill amp-a`. `run.sh` не выводит логи контейнеров, поэтому порядок шагов остановки там не наблюдался: подтверждено только, что HA-сценарии не сломаны.
+    - Не запускалось: rolling update на живом k8s (кластера нет, premise `assumed` в Spec). Deep review не требовался (Spec § Deep Review), `review-findings.md` нет.
 - [ ] **5.3** Итог: rolling update в k8s вживую не проверен (premise `assumed`) — записать в `DONE.md` и итог задачи. `BUGS.md` `CONFIG-MISSING-FILE-DROPS-ENV` — дописать, что из-за него не доходит `gracefulShutdown.timeoutSeconds`. `BACKLOG.md` — отметить PROD-GRACEFUL-SHUTDOWN закрытым. <!-- verify: grep -n "PROD-GRACEFUL-SHUTDOWN" docs/06-planning/DONE.md docs/06-planning/BACKLOG.md -->
 
 ## Definition of Done
