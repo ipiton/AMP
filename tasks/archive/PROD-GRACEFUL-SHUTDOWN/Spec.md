@@ -3,7 +3,7 @@ id: PROD-GRACEFUL-SHUTDOWN
 slug: prod-graceful-shutdown
 stream: Production Readiness / Reliability
 type: bug
-status: draft
+status: complete
 created_at: 2026-10-06
 updated_at: 2026-10-06
 based_on:
@@ -14,7 +14,7 @@ based_on:
 # Specification: корректный graceful shutdown AMP
 
 **Version:** 1.0
-**Status:** Draft
+**Status:** Implemented
 
 ## Summary
 
@@ -110,11 +110,11 @@ AMP по SIGTERM сначала снимает себя с readiness, потом
 
 ## Invariants
 
-- [ ] Liveness (`/-/healthy`, `/healthz`) во время остановки не меняется.
-- [ ] Финальный snapshot lite пишется и при исчерпанном бюджете.
-- [ ] Без сигнала поведение сервера не меняется (readiness, обработка запросов, SIGHUP-reload).
-- [ ] Чарт с дефолтами рендерится и проходит `helm-tests`, включая prod-рендер с `values-production-placeholders.yaml`.
-- [ ] Новых зависимостей нет.
+- [x] Liveness (`/-/healthy`, `/healthz`) во время остановки не меняется.
+- [x] Финальный snapshot lite пишется и при исчерпанном бюджете. _(code-read: `writeSnapshot` без `ctx`; `StopsServicesWhenDrainFails` проверяет, что registry вызывается после неудачного drain)_
+- [x] Без сигнала поведение сервера не меняется (readiness, обработка запросов, SIGHUP-reload).
+- [x] Чарт с дефолтами рендерится и проходит `helm-tests`, включая prod-рендер с `values-production-placeholders.yaml`.
+- [x] Новых зависимостей нет.
 
 ## Edge Cases
 
@@ -162,4 +162,4 @@ AMP по SIGTERM сначала снимает себя с readiness, потом
 
 ## Open Questions
 
-- [ ] Порядок preStop и снятия endpoint'ов в Kubernetes — `assumed`, проверка возможна только на живом кластере. Принято как известное ограничение (Rollout / Rollback).
+- [x] Порядок preStop и снятия endpoint'ов в Kubernetes — `assumed`, проверка возможна только на живом кластере. Принято как известное ограничение (Rollout / Rollback); проверка вынесена в `BACKLOG.md` `K8S-LIVE-ROLLOUT-CHECK`.

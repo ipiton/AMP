@@ -17,6 +17,13 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-06 — (TASK / Reliability, P0) **PROD-GRACEFUL-SHUTDOWN** — остановка AMP больше не обрывает in-flight запросы и teardown сервисов.
+  - **Приложение** (`cmd/server/shutdown.go`, `runShutdown`): SIGTERM/SIGINT → `/-/ready` и `/readyz` 503 (`ServiceRegistry.BeginShutdown`, liveness не трогается) → `server.Shutdown` (drain) → `registry.Shutdown` (финальный snapshot lite, flush, хранилища) → `main` выходит только после этого, код 1 при ошибке. Раньше registry останавливался до HTTP, а `main` выходил, не дожидаясь. Подключён мёртвый ключ `server.graceful_shutdown_timeout`: один бюджет на всю цепочку, `0` → 30s (защита от `CONFIG-MISSING-FILE-DROPS-ENV`).
+  - **Чарт**: preStop `sleep {{ preStopDelay }}` (ключ был мёртвым), новый `gracefulShutdown.timeoutSeconds` → env, `terminationGracePeriodSeconds` 30 → 40. Несогласованный бюджет — WARNING в `NOTES.txt` без `fail`: решение владельца, чтобы не вносить сигнал `C` и не поднимать тир до Full.
+  - **Проверка:** tier Standard (`R X`), deep-review не требовался. Unit-тесты на порядок, бюджет, drain на реальном `http.Server`, readiness/liveness; мутация «старый порядок» роняет 3 теста. `render-graceful-shutdown.sh` 17/17. `release-gate.sh` PASS (11 шагов), `e2e-ha` ALL PASS, smoke lite с SIGTERM — exit 0, порядок в логе верный.
+  - **Не проверено:** rolling update в живом k8s (preStop ∥ снятие endpoint'ов — `assumed`) → `K8S-LIVE-ROLLOUT-CHECK` в BACKLOG. Ожидание в самом `main()` unit-тестом не покрыто.
+  - Документация: `docs/CONFIGURATION_GUIDE.md` § Graceful Shutdown, `helm/amp/README.md` § Graceful Shutdown, `CHANGELOG.md` (Fixed + migration notes), `helm/amp/CHANGELOG.md`.
+  - Ветка `bugfix/prod-graceful-shutdown`, workspace `tasks/archive/PROD-GRACEFUL-SHUTDOWN/`. ~1d.
 - 2026-10-05 — (TASK / Security, P0) **PROD-SECURITY-MD** — `SECURITY.md` описывает фактическое состояние вместо шаблона 2025-12.
   - **Канал:** GitHub Private Vulnerability Reporting (решение владельца), email не публикуется; `[INSERT SECURITY EMAIL]` убран. Ответ — best effort, подтверждение в течение 5 рабочих дней.
   - **Снято как ложное:** API key / JWT auth, серверный TLS, «configurable CORS» (код есть в `internal/application/middleware.go`, но `main` его не подключает), gosec, «security scans on every commit», версии `1.x`.

@@ -3,7 +3,7 @@ id: PROD-GRACEFUL-SHUTDOWN
 slug: prod-graceful-shutdown
 stream: Production Readiness / Reliability
 type: bug
-status: active
+status: complete
 created_at: 2026-10-06
 updated_at: 2026-10-06
 based_on:
@@ -116,14 +116,14 @@ _Результат 2026-10-06:_
     - `git diff main --check`: найдены 2 хвостовых пробела (markdown-переносы из шаблонов в `Spec.md`/`tasks.md`), убраны. `_, _ :=` в коде диффа нет. Единственное совпадение — текст самого шага 5.2.
     - `deploy/e2e-ha/run.sh` (вне гейта) — **ALL PASS**, все 5 сценариев, включая `compose restart amp-b` (SIGTERM → новый путь остановки) и `kill amp-a`. `run.sh` не выводит логи контейнеров, поэтому порядок шагов остановки там не наблюдался: подтверждено только, что HA-сценарии не сломаны.
     - Не запускалось: rolling update на живом k8s (кластера нет, premise `assumed` в Spec). Deep review не требовался (Spec § Deep Review), `review-findings.md` нет.
-- [ ] **5.3** Итог: rolling update в k8s вживую не проверен (premise `assumed`) — записать в `DONE.md` и итог задачи. `BUGS.md` `CONFIG-MISSING-FILE-DROPS-ENV` — дописать, что из-за него не доходит `gracefulShutdown.timeoutSeconds`. `BACKLOG.md` — отметить PROD-GRACEFUL-SHUTDOWN закрытым. <!-- verify: grep -n "PROD-GRACEFUL-SHUTDOWN" docs/06-planning/DONE.md docs/06-planning/BACKLOG.md -->
+- [x] **5.3** Итог: rolling update в k8s вживую не проверен (premise `assumed`) — записать в `DONE.md` и итог задачи. `BUGS.md` `CONFIG-MISSING-FILE-DROPS-ENV` — дописать, что из-за него не доходит `gracefulShutdown.timeoutSeconds`. `BACKLOG.md` — отметить PROD-GRACEFUL-SHUTDOWN закрытым. <!-- verify: grep -n "PROD-GRACEFUL-SHUTDOWN" docs/06-planning/DONE.md docs/06-planning/BACKLOG.md -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required (не требуется — Spec § Deep Review)
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required (не требуется — Spec § Deep Review)
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed

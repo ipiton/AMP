@@ -4,7 +4,7 @@ slug: prod-graceful-shutdown
 stream: Production Readiness / Reliability
 type: bug
 priority: high
-status: active
+status: complete
 created_at: 2026-10-06
 updated_at: 2026-10-06
 ---
@@ -38,15 +38,15 @@ updated_at: 2026-10-06
 
 ## Success Criteria
 
-- [ ] По SIGTERM/SIGINT `/-/ready` отвечает 503 сразу, а `/-/healthy` продолжает отвечать 200, чтобы liveness не убил pod во время drain.
-- [ ] Порядок остановки: readiness 503 → задержка (preStop или внутри процесса, решение — на `/spec`) → `server.Shutdown` (новые соединения не принимаются, in-flight дорабатывают) → `registry.Shutdown` → выход из `main`.
-- [ ] `main` возвращает управление только после завершения shutdown-последовательности. Ошибки shutdown видны в логе и в коде выхода.
-- [ ] Таймаут shutdown в приложении настраивается и по умолчанию строго меньше `terminationGracePeriodSeconds` с учётом задержки. Чарт не даёт отрендерить несогласованную комбинацию (или явно её документирует, решение — на `/spec`).
-- [ ] `gracefulShutdown.preStopDelay` используется в шаблоне. Комментарий «No preStop hook needed» убран или заменён правдой.
-- [ ] Unit-тест на порядок shutdown и на то, что `main` ждёт завершения. Render-тест чарта в `helm/amp/tests/` (входит в шаг `helm-tests` release-gate).
-- [ ] Проверка остановки под нагрузкой: без 5xx и потерянных алертов (форма проверки — см. Open unknowns).
-- [ ] `CHANGELOG.md` `[Unreleased]`: запись о новом поведении. Если меняются дефолты чарта, то с migration notes. `helm/amp/CHANGELOG.md` — при изменении чарта.
-- [ ] Гейты AMP из `WORKFLOW.md` § Гейты AMP, включая `scripts/release-gate.sh`, зелёные, или известные красные задокументированы (флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`).
+- [x] По SIGTERM/SIGINT `/-/ready` отвечает 503 сразу, а `/-/healthy` продолжает отвечать 200, чтобы liveness не убил pod во время drain.
+- [x] Порядок остановки: readiness 503 → задержка (preStop или внутри процесса, решение — на `/spec`) → `server.Shutdown` (новые соединения не принимаются, in-flight дорабатывают) → `registry.Shutdown` → выход из `main`. _(задержка — preStop в чарте, Spec D п.5)_
+- [x] `main` возвращает управление только после завершения shutdown-последовательности. Ошибки shutdown видны в логе и в коде выхода.
+- [x] Таймаут shutdown в приложении настраивается и по умолчанию строго меньше `terminationGracePeriodSeconds` с учётом задержки. Чарт не даёт отрендерить несогласованную комбинацию (или явно её документирует, решение — на `/spec`). _(без `fail`: WARNING в `NOTES.txt`, решение владельца на `/spec`)_
+- [x] `gracefulShutdown.preStopDelay` используется в шаблоне. Комментарий «No preStop hook needed» убран или заменён правдой.
+- [x] Unit-тест на порядок shutdown и на то, что `main` ждёт завершения. Render-тест чарта в `helm/amp/tests/` (входит в шаг `helm-tests` release-gate). _(частично: порядок и drain — unit-тестами `shutdown_test.go`; ожидание в самом `main()` unit-тестом не покрыто, `main()` из тестов не вызывается — smoke 1.4, exit 0)_
+- [x] Проверка остановки под нагрузкой: без 5xx и потерянных алертов (форма проверки — см. Open unknowns). _(частично: in-flight запрос дорабатывает с 200 на реальном `http.Server`, `e2e-ha` ALL PASS; rolling update в k8s без 5xx вживую не проверен — кластера нет, follow-up `K8S-LIVE-ROLLOUT-CHECK`)_
+- [x] `CHANGELOG.md` `[Unreleased]`: запись о новом поведении. Если меняются дефолты чарта, то с migration notes. `helm/amp/CHANGELOG.md` — при изменении чарта.
+- [x] Гейты AMP из `WORKFLOW.md` § Гейты AMP, включая `scripts/release-gate.sh`, зелёные, или известные красные задокументированы (флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`).
 
 ## Non-Goals
 

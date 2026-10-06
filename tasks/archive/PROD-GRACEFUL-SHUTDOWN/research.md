@@ -40,4 +40,4 @@ updated_at: 2026-10-06
 
 ## Follow-ups
 
-- [ ] Spec: как чарт задаёт таймаут, пока не исправлен `CONFIG-MISSING-FILE-DROPS-ENV`: флаг CLI или только дефолт в коде.
+- [x] Spec: как чарт задаёт таймаут, пока не исправлен `CONFIG-MISSING-FILE-DROPS-ENV`: флаг CLI или только дефолт в коде. _(Решено в Spec: env `SERVER_GRACEFUL_SHUTDOWN_TIMEOUT` + фолбэк 30s в коде, флаг CLI не вводим; ограничение задокументировано.)_
