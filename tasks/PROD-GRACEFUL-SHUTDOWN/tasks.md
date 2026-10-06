@@ -33,8 +33,8 @@ based_on:
 
 > **Wave 1** - независимые шаги
 
-- [ ] **1.1** `ServiceRegistry`: поле `shuttingDown atomic.Bool`, метод `BeginShutdown()`. `Readiness` возвращает `service shutting down` первым условием. `buildHealthReport` при `readiness && shuttingDown` добавляет проверку `shutdown` (`status: unhealthy`, `required: true`), так что `ready: false`. Liveness-отчёт без изменений. <!-- verify: cd go-app && go build ./... && go vet ./internal/application/ -->
-- [ ] **1.2** `cmd/server/shutdown.go`:
+- [x] **1.1** `ServiceRegistry`: поле `shuttingDown atomic.Bool`, метод `BeginShutdown()`. `Readiness` возвращает `service shutting down` первым условием. `buildHealthReport` при `readiness && shuttingDown` добавляет проверку `shutdown` (`status: unhealthy`, `required: true`), так что `ready: false`. Liveness-отчёт без изменений. <!-- verify: cd go-app && go build ./... && go vet ./internal/application/ -->
+- [x] **1.2** `cmd/server/shutdown.go`:
   - интерфейсы `readinessGate` (`BeginShutdown()`) и `shutdowner` (`Shutdown(ctx) error`);
   - `const defaultGracefulShutdownTimeout = 30 * time.Second`;
   - `effectiveShutdownTimeout(d)` — `d ≤ 0` → дефолт;
@@ -45,30 +45,33 @@ based_on:
 
 > **Wave 2** - depends on Wave 1
 
-- [ ] **1.3** `main.go`: удалить старую горутину и захардкоженные 30s. `sigCh` + `signal.Notify(SIGINT, SIGTERM)`, `shutdownDone := make(chan error, 1)`, горутина `shutdownDone <- runShutdown(...)` с таймаутом `effectiveShutdownTimeout(cfg.Server.GracefulShutdownTimeout)`. После `ListenAndServe`: не `ErrServerClosed` → `os.Exit(1)` как сейчас, иначе `<-shutdownDone`, ошибка → `slog.Error` + `os.Exit(1)`, иначе `Server stopped gracefully`. <!-- depends: 1.1, 1.2 | verify: cd go-app && go build ./cmd/server/ && go vet ./cmd/server/ && grep -n "30 \* time.Second" cmd/server/main.go | wc -l → 0 -->
-- [ ] **1.4** Ручной smoke lite: собрать бинарь, запустить с `PROFILE=lite`, во время `curl /-/ready` послать SIGTERM. В логе — последовательность Spec § Observability, код выхода 0, финальный snapshot записан. <!-- depends: 1.3 | verify: ручная проверка лога и `echo $?`; результат — строкой под шагом, в evidence не кладём (повторяемо) -->
+- [x] **1.3** `main.go`: удалить старую горутину и захардкоженные 30s. `sigCh` + `signal.Notify(SIGINT, SIGTERM)`, `shutdownDone := make(chan error, 1)`, горутина `shutdownDone <- runShutdown(...)` с таймаутом `effectiveShutdownTimeout(cfg.Server.GracefulShutdownTimeout)`. После `ListenAndServe`: не `ErrServerClosed` → `os.Exit(1)` как сейчас, иначе `<-shutdownDone`, ошибка → `slog.Error` + `os.Exit(1)`, иначе `Server stopped gracefully`. <!-- depends: 1.1, 1.2 | verify: cd go-app && go build ./cmd/server/ && go vet ./cmd/server/ && grep -n "30 \* time.Second" cmd/server/main.go | wc -l → 0 -->
+  - _Отклонение verify:_ `grep "30 \* time.Second"` даёт не 0, а 3 совпадения, все чужие (`ReadTimeout`/`WriteTimeout` сервера и таймаут SIGHUP-reload). Захардкоженный таймаут shutdown удалён.
+- [x] **1.4** Ручной smoke lite: собрать бинарь, запустить с `PROFILE=lite`, во время `curl /-/ready` послать SIGTERM. В логе — последовательность Spec § Observability, код выхода 0, финальный snapshot записан. <!-- depends: 1.3 | verify: ручная проверка лога и `echo $?`; результат — строкой под шагом, в evidence не кладём (повторяемо) -->
+  - _Результат 2026-10-06:_ lite, `graceful_shutdown_timeout: 7s` из файла. В логе по порядку: `Shutdown signal received` (timeout=7s) → `Readiness set to not ready` → `HTTP server drained` → `Writing final file snapshot` → `Services stopped` → `Server stopped gracefully`, exit 0. Фолбэк при отсутствии файла конфига smoke'ом не проверить: процесс уходит в standard и падает на Postgres до установки обработчика. Фолбэк покрывается unit-тестом 4.1.
 
 **Phase verification:** `cd go-app && go vet ./cmd/server/... ./internal/application/... && go test ./cmd/server/... ./internal/application/...`
 
 ## Phase 2: чарт
 
-- [ ] **2.1** `values.yaml`: `gracefulShutdown.terminationGracePeriodSeconds: 40`, новый `timeoutSeconds: 30` (комментарий: передаётся в `server.graceful_shutdown_timeout`, пока открыт `CONFIG-MISSING-FILE-DROPS-ENV` — в дефолтном деплое приложение берёт 30s), `preStopDelay: 5` с правдивым комментарием. <!-- verify: helm lint helm/amp -->
-- [ ] **2.2** `deployment.yaml`:
+- [x] **2.1** `values.yaml`: `gracefulShutdown.terminationGracePeriodSeconds: 40`, новый `timeoutSeconds: 30` (комментарий: передаётся в `server.graceful_shutdown_timeout`, пока открыт `CONFIG-MISSING-FILE-DROPS-ENV` — в дефолтном деплое приложение берёт 30s), `preStopDelay: 5` с правдивым комментарием. <!-- verify: helm lint helm/amp -->
+- [x] **2.2** `deployment.yaml`:
   - `terminationGracePeriodSeconds` default 40;
   - env `SERVER_GRACEFUL_SHUTDOWN_TIMEOUT: "{{ timeoutSeconds }}s"`;
   - `lifecycle.preStop.exec.command: ["sleep", "<preStopDelay>"]` под `if gt (int preStopDelay) 0`;
   - комментарий «No preStop hook needed» заменить описанием последовательности.
 
   <!-- depends: 2.1 | verify: helm template amp helm/amp | grep -A4 preStop -->
-- [ ] **2.3** `NOTES.txt`: если `terminationGracePeriodSeconds < preStopDelay + timeoutSeconds` — `WARNING` с тремя числами и последствием (SIGKILL посреди drain). <!-- depends: 2.1 | verify: helm install amp helm/amp --dry-run=client --set gracefulShutdown.terminationGracePeriodSeconds=30 | grep WARNING -->
+- [x] **2.3** `NOTES.txt`: если `terminationGracePeriodSeconds < preStopDelay + timeoutSeconds` — `WARNING` с тремя числами и последствием (SIGKILL посреди drain). <!-- depends: 2.1 | verify: helm install amp helm/amp --dry-run=client --set gracefulShutdown.terminationGracePeriodSeconds=30 | grep WARNING -->
+  - _Результат:_ WARNING при grace 30 печатается, при дефолтах — нет; `preStopDelay=0` убирает `lifecycle` из deployment AMP; prod-рендер (placeholders + пароли) содержит preStop `sleep 5`, env `30s`, grace 40; 5 существующих `helm/amp/tests/*.sh` — ok.
 
 **Phase verification:** `helm lint helm/amp && helm template amp helm/amp -f helm/amp/values-production.yaml -f helm/amp/tests/values-production-placeholders.yaml >/dev/null && for t in helm/amp/tests/*.sh; do bash "$t" || echo "FAIL $t"; done`
 
 ## Phase 3: документация
 
-- [ ] **3.1** `docs/CONFIGURATION_GUIDE.md`: `server.graceful_shutdown_timeout` — фактическое поведение (бюджет на drain HTTP + остановку сервисов, `0` → 30s), последовательность остановки, связь с `gracefulShutdown.*` чарта. <!-- verify: git diff --check -->
-- [ ] **3.2** `helm/amp/README.md`: ключи `gracefulShutdown.*`, правило бюджета, зависимость preStop от `sleep` в образе, ограничение `CONFIG-MISSING-FILE-DROPS-ENV`. <!-- verify: git diff --check -->
-- [ ] **3.3** `CHANGELOG.md` `[Unreleased]` (Fixed: порядок shutdown, readiness 503, ожидание; Changed: grace 30 → 40, preStop, рекомендация поднять явно заданный grace) и `helm/amp/CHANGELOG.md`. <!-- verify: git diff --check -->
+- [x] **3.1** `docs/CONFIGURATION_GUIDE.md`: `server.graceful_shutdown_timeout` — фактическое поведение (бюджет на drain HTTP + остановку сервисов, `0` → 30s), последовательность остановки, связь с `gracefulShutdown.*` чарта. <!-- verify: git diff --check -->
+- [x] **3.2** `helm/amp/README.md`: ключи `gracefulShutdown.*`, правило бюджета, зависимость preStop от `sleep` в образе, ограничение `CONFIG-MISSING-FILE-DROPS-ENV`. <!-- verify: git diff --check -->
+- [x] **3.3** `CHANGELOG.md` `[Unreleased]` (Fixed: порядок shutdown, readiness 503, ожидание; Changed: grace 30 → 40, preStop, рекомендация поднять явно заданный grace) и `helm/amp/CHANGELOG.md`. <!-- verify: git diff --check -->
 
 **Phase verification:** `git diff --check`
 

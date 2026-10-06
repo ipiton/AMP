@@ -244,9 +244,19 @@ strategy:
 # ===============================
 # Graceful Shutdown Configuration (12-Factor App)
 # ===============================
+# On pod termination: preStop sleeps preStopDelay seconds while Kubernetes
+# removes the pod from Service endpoints, then SIGTERM makes AMP report not
+# ready, drain in-flight HTTP requests and stop its services (final snapshot,
+# flushes) within timeoutSeconds. Keep
+#   terminationGracePeriodSeconds >= preStopDelay + timeoutSeconds
+# or the kubelet may SIGKILL the pod mid-drain; NOTES.txt warns when it is not.
 gracefulShutdown:
-  terminationGracePeriodSeconds: 30  # Time to wait for graceful shutdown
-  preStopDelay: 5  # Delay before starting shutdown to allow load balancer updates
+  terminationGracePeriodSeconds: 40  # Total budget before SIGKILL, counted from the start of preStop
+  preStopDelay: 5  # Seconds the preStop hook sleeps (needs `sleep` in the image); 0 disables the hook
+  # Passed to AMP as server.graceful_shutdown_timeout. While BUGS.md
+  # CONFIG-MISSING-FILE-DROPS-ENV is open, a deployment without
+  # configFile.enabled ignores this env var and AMP uses its own 30s default.
+  timeoutSeconds: 30
 
 # ===============================
 # Secrets Management Configuration

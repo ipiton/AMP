@@ -163,23 +163,15 @@ func main() {
 	signal.Notify(hupChan, syscall.SIGHUP)
 	go watchReloadSignal(ctx, hupChan, registry, slog.Default())
 
-	// Graceful shutdown
+	// Graceful shutdown (PROD-GRACEFUL-SHUTDOWN): readiness off, HTTP drain,
+	// then services. main waits on shutdownDone after ListenAndServe returns,
+	// so the drain and the final snapshot are never cut off by process exit.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	shutdownDone := make(chan error, 1)
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-
-		slog.Info("Shutting down server...")
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 30*time.Second)
-		defer shutdownCancel()
-
-		if err := registry.Shutdown(shutdownCtx); err != nil {
-			slog.Error("Registry shutdown error", "error", err)
-		}
-
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			slog.Error("Server shutdown error", "error", err)
-		}
+		shutdownDone <- runShutdown(sigChan, registry, server, registry,
+			effectiveShutdownTimeout(cfg.Server.GracefulShutdownTimeout), slog.Default())
 	}()
 
 	// alertmanager-parity wave-5 item 4 (FU-DOUBLE-NORMALIZE-ROUTES): computed
@@ -197,6 +189,11 @@ func main() {
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		slog.Error("Server error", "error", err)
+		os.Exit(1)
+	}
+
+	if err := <-shutdownDone; err != nil {
+		slog.Error("Shutdown finished with errors", "error", err)
 		os.Exit(1)
 	}
 

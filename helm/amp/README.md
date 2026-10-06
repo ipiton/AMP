@@ -93,6 +93,23 @@ helm upgrade --install amp ./helm/amp --set webConfig.existingSecret=amp-web-con
 
 Liveness/readiness probes use `/-/healthy` and `/-/ready`, which stay reachable without credentials. Password edits in the Secret apply without a pod restart once kubelet syncs the volume. `configReloader.enabled` cannot be combined with `webConfig` yet (rendering fails). See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication".
 
+### Graceful Shutdown
+
+On termination the pod first runs a preStop `sleep` while Kubernetes removes it from Service endpoints, then AMP gets `SIGTERM`: readiness turns `503`, in-flight requests drain, services stop (the lite profile writes its final snapshot). Details: `docs/CONFIGURATION_GUIDE.md` → "Graceful Shutdown".
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `gracefulShutdown.terminationGracePeriodSeconds` | Total budget before `SIGKILL`, counted from the start of preStop | `40` |
+| `gracefulShutdown.preStopDelay` | Seconds the preStop hook sleeps; `0` removes the hook | `5` |
+| `gracefulShutdown.timeoutSeconds` | AMP's budget for drain + service shutdown (`server.graceful_shutdown_timeout`) | `30` |
+
+Keep `terminationGracePeriodSeconds` ≥ `preStopDelay` + `timeoutSeconds`. Otherwise install/upgrade still succeeds, but the notes print a `WARNING` and a slow drain can be cut off by `SIGKILL`.
+
+Limitations:
+
+- The hook runs `sleep` from the image (`alpine` today). In an image without `sleep` the hook fails, the kubelet logs `FailedPreStopHook` and sends `SIGTERM` immediately: no delay, the pod still stops.
+- Without `configFile.enabled`, AMP currently ignores its environment (`BUGS.md` → `CONFIG-MISSING-FILE-DROPS-ENV`). Then `timeoutSeconds` does not reach the process, and AMP uses its own `30s` default whatever the value says.
+
 ### RBAC
 
 The chart grants the AMP ServiceAccount exactly what the app calls: publishing target discovery lists Secrets labelled `publishing.discovery.labelSelector` in **one** namespace. It renders one `Role` (`list` on `secrets`) and its `RoleBinding`, and nothing cluster-scoped.

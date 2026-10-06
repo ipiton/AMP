@@ -65,7 +65,7 @@ spec:
       serviceAccountName: {{ include "amp.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 30 }}
+      terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 40 }}
       containers:
         - name: amp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -156,6 +156,9 @@ spec:
             {{- end }}
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
+            # PROD-GRACEFUL-SHUTDOWN: budget for HTTP drain + service shutdown.
+            - name: SERVER_GRACEFUL_SHUTDOWN_TIMEOUT
+              value: {{ printf "%ds" (int (.Values.gracefulShutdown.timeoutSeconds | default 30)) | quote }}
             {{- if .Values.configFile.enabled }}
             # Points AMP at the mounted config FILE. Without this the process
             # looks for ./config.yaml, finds nothing, and runs on env vars only —
@@ -210,8 +213,15 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
 
-          # Graceful shutdown: rely on SIGTERM handling in application
-          # No preStop hook needed - our app handles SIGTERM properly
+          # Graceful shutdown (PROD-GRACEFUL-SHUTDOWN): preStop sleeps while the
+          # pod leaves Service endpoints; SIGTERM then flips readiness, drains
+          # in-flight requests and stops services within timeoutSeconds.
+          {{- if gt (int .Values.gracefulShutdown.preStopDelay) 0 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", {{ .Values.gracefulShutdown.preStopDelay | int | toString | quote }}]
+          {{- end }}
 
           {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret }}
           volumeMounts:
