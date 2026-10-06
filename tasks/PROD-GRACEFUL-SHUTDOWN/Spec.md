@@ -13,7 +13,7 @@ based_on:
 
 # Specification: корректный graceful shutdown AMP
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary

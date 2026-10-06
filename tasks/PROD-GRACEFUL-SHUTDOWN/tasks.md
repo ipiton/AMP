@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: корректный graceful shutdown AMP
 
-**Based on:** requirements.md / research.md / Spec.md v1.0  
+**Based on:** requirements.md / research.md / Spec.md v1.0
 **Date:** 2026-10-06
 
 ## Touched Files
@@ -106,8 +106,15 @@ _Результат 2026-10-06:_
 
 ## Phase 5: testing и finalize
 
-- [ ] **5.1** Гейты `WORKFLOW.md` § Гейты AMP: `go vet`/`go test` затронутых пакетов, `make -C go-app quality-gates-fast` + `git status`, `scripts/release-gate.sh`. Флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` — известный, не скрывать. <!-- verify: scripts/release-gate.sh -->
-- [ ] **5.2** `git diff --check`, нет `_, _ :=` в диффе. <!-- verify: git diff main...HEAD --check && git diff main...HEAD | grep -n '^+.*_, _ :=' ; test $? -eq 1 -->
+- [x] **5.1** Гейты `WORKFLOW.md` § Гейты AMP: `go vet`/`go test` затронутых пакетов, `make -C go-app quality-gates-fast` + `git status`, `scripts/release-gate.sh`. Флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` — известный, не скрывать. <!-- verify: scripts/release-gate.sh -->
+- [x] **5.2** `git diff --check`, нет `_, _ :=` в диффе. <!-- verify: git diff main...HEAD --check && git diff main...HEAD | grep -n '^+.*_, _ :=' ; test $? -eq 1 -->
+  - _Результат 2026-10-06 (`/testing`):_
+    - Затронутые пакеты: `go vet` + `go test ./cmd/server/... ./internal/application/...` — 514/514. `-race`: `cmd/server` `-count=20` 140/140, `internal/application` 10/10 (см. Phase 4).
+    - `make -C go-app quality-gates-fast` — PASS, `go fmt` файлов не переписал (`git status` чистый).
+    - `scripts/release-gate.sh` — **RESULT: PASS**: build 22s, lint 151s, test 256s, futureparity 40s, race 625s, helm-deps 10s, helm-dev, helm-production, helm-rbac 2s, helm-tests 6s (в том числе новый `render-graceful-shutdown.sh`), amtool-compat 586s. Флейк `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` в этом прогоне не проявился, и это не значит, что он исправлен.
+    - Шаг `race` release-gate покрывает 7 пакетов, `cmd/server` и `internal/application` в него не входят. Для них `-race` прогнан отдельно (выше).
+    - `git diff main --check`: найдены 2 хвостовых пробела (markdown-переносы из шаблонов в `Spec.md`/`tasks.md`), убраны. `_, _ :=` в коде диффа нет. Единственное совпадение — текст самого шага 5.2.
+    - Не запускалось: rolling update на живом k8s (кластера нет, premise `assumed` в Spec), `deploy/e2e-ha` (compose-сценарий не проверяет остановку под нагрузкой и в гейт не входит; изменённый путь остановки в нём задевает только `compose restart`/`kill`). Deep review не требовался (Spec § Deep Review), `review-findings.md` нет.
 - [ ] **5.3** Итог: rolling update в k8s вживую не проверен (premise `assumed`) — записать в `DONE.md` и итог задачи. `BUGS.md` `CONFIG-MISSING-FILE-DROPS-ENV` — дописать, что из-за него не доходит `gracefulShutdown.timeoutSeconds`. `BACKLOG.md` — отметить PROD-GRACEFUL-SHUTDOWN закрытым. <!-- verify: grep -n "PROD-GRACEFUL-SHUTDOWN" docs/06-planning/DONE.md docs/06-planning/BACKLOG.md -->
 
 ## Definition of Done
