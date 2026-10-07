@@ -358,38 +358,16 @@
 
 - [x] **PHASE-6A-BUILTIN-TOOLS** — закрыт 2026-05-08. См. `DONE.md` и `CHANGELOG.md` (раздел Added). Реализация лежит в `go-app/internal/infrastructure/investigation/tools/` (prometheus, loki, kubernetes, database) + wiring через `investigation.tools.*` в `config.yaml.example`.
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base:
-  - `internal/investigation/runbooks/engine.go`
-  - **Формат runbook** (как SherlockOps):
-    ```yaml
-    ---
-    name: High Memory Usage
-    match:
-      alertname: HighMemoryUsage
-      severity: critical
-    tags: [memory, oom, kubernetes]
-    ---
-    ## Symptoms
-    Pod memory usage exceeds 90% of limit.
+- [x] **PHASE-6B-RUNBOOK-ENGINE** — закрыт 2026-09-27. См. `DONE.md` и `CHANGELOG.md` (Added). Логика — `go-app/internal/core/investigation/runbook/`, загрузка — `go-app/internal/infrastructure/investigation/runbooks/`, конфиг `investigation.runbooks.*`, инъекция в system prompt через `PromptContext`. Формат/matching — `go-app/internal/core/investigation/README.md`. Архив: `tasks/archive/PHASE-6B-RUNBOOK-ENGINE/`.
 
-    ## Common Causes
-    1. Memory leak in application
-    2. Insufficient memory limits
-    3. Cache not bounded
-
-    ## Investigation Steps
-    1. Check `container_memory_working_set_bytes` trend
-    2. Look for OOMKilled events
-    3. Check recent deployments
-
-    ## Remediation
-    - Short-term: increase memory limit
-    - Long-term: profile application memory usage
-    ```
-  - **Matching**: по alert labels (alertname, severity, namespace, etc.)
-  - **Injection в LLM context**: matched runbooks добавляются в system prompt
-  - **Storage**: filesystem directory (configurable path) или ConfigMap в K8s
-  - Оценка: ~2d
+- **PHASE-6B follow-ups** (осознанно вне среза, Spec §3):
+  - [ ] **RUNBOOK-SEARCH-TOOL** — tool `search_runbooks`/`get_runbook` поверх того же `runbook.Set`: LLM сам запрашивает runbooks по тегам/имени, в дополнение к pre-injection (не тратит контекст, когда не нужно). ~0.5d
+  - [ ] **RUNBOOKS-ONESHOT-PATH** — runbooks в one-shot пути 5A (`InvestigateAlert`, `llm.agent_mode=false`): второй интерфейс (`infrastructure/investigation/queue.go` `LLMClient`) и свой промпт в `llm/client.go`. ~0.5d
+  - [ ] **RUNBOOKS-HOT-RELOAD** — перечитывать каталог по SIGHUP/`/-/reload` (`config.Reloadable` + атомарная подмена `*runbook.Set` в `AgentLoop`); сейчас только при старте. ~0.5d
+  - [ ] **RUNBOOKS-REGEX-MATCH** — regex/glob/negative matching в `match` (сейчас только точное равенство). Решить синтаксис (как у Alertmanager matchers?). ~0.5d
+  - [ ] **HELM-EXTRA-VOLUMES** — `extraVolumes`/`extraVolumeMounts` в `helm/amp/templates/deployment.yaml`, чтобы монтировать ConfigMap с runbooks без патча Deployment. Связано с `HELM-CHART-GAPS` (TECH-DEBT.md). ~0.5d
+  - [ ] **RUNBOOKS-IN-INVESTIGATION-RECORD** — сохранять `RunbooksUsed` в БД/отдавать в API investigation (сейчас только лог очереди). ~0.5d
+  - [ ] **RUNBOOKS-METRICS** — Prometheus-счётчики: загружено/пропущено при старте, матчей на расследование (в срезе выбран лог, Spec §5.8). ~0.25d
 
 - [ ] **PHASE-6C-MCP-TOOLS** — Extensible tools через MCP protocol:
   - MCP server support — custom tools без изменения core code

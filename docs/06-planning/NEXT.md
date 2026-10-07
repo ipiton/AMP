@@ -28,7 +28,6 @@ Queue и WIP — источник правды для выбора задачи.
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. ~2d. Перед стартом проверить невлитую ветку `claude/start-task-pyym8f`: по коммиту `c7ae269` («close task, archive workspace») задача там уже закрыта.
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d
 
 ### 2. Operations
