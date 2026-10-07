@@ -408,7 +408,7 @@ postgresql:
     autovacuumNaptime: "1min"
 
     # Security (TN-98: production hardening)
-    ssl: "off"  # Enable in production with certs
+    ssl: "off"  # The bundled PostgreSQL has no TLS support yet (no certificate mount); see HELM-DEFAULTS-VALIDATE
 
 # ===============================
 # Valkey Cache Configuration (Redis-compatible, Standard Profile Only)

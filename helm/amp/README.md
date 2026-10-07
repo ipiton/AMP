@@ -12,7 +12,7 @@ Alertmanager++ (AMP) chart packages the current repository runtime with:
 
 ## Quick Start
 
-> **Read before installing (status 2026-10-07).** The chart defaults do not start. With `llm.enabled: true` and no `llm.apiKey` (the default) the pod fails with `CreateContainerConfigError`: the `llm-api-key` Secret key is missing. With LLM off, the `standard` profile with the bundled PostgreSQL still does not start: the bundled PostgreSQL has no TLS support, and `environment: production` (the default) rejects `sslmode=disable`, so AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file below sets `llm.enabled: false` and hits the PostgreSQL check; it starts with an external PostgreSQL that uses TLS, or in the `lite` profile. Tracked as `HELM-DEFAULTS-VALIDATE` in `docs/06-planning/BACKLOG.md`. Grouping is also off by default, and the default HPA starts two replicas. Use a values file like the one below until these are fixed (P0 in `docs/06-planning/BACKLOG.md`). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing (status 2026-10-07).** The chart defaults do not start. With `llm.enabled: true` and no `llm.apiKey` (the default) the pod fails with `CreateContainerConfigError`: the `llm-api-key` Secret key is missing. With LLM off, the `standard` profile with the bundled PostgreSQL still does not start: the bundled PostgreSQL has no TLS support, and `environment: production` (the default) rejects `sslmode=disable`, so AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file below sets `llm.enabled: false` and hits the PostgreSQL check; it starts in the `lite` profile, or with an external PostgreSQL with TLS: with `postgresql.enabled: false` the chart passes no `DATABASE_*` variables, so set `database:` (host, port, database, username, password) in `configFile.content` — `ssl_mode` defaults to `require`, the password must be at least 12 characters under `environment: production`, and it is stored in plain text in the config ConfigMap. Tracked as `HELM-DEFAULTS-VALIDATE` in `docs/06-planning/BACKLOG.md`. Grouping is also off by default, and the default HPA starts two replicas. Use a values file like the one below until these are fixed (P0 in `docs/06-planning/BACKLOG.md`). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
 ```yaml
 # values-small.yaml — one replica, standard profile
@@ -62,7 +62,7 @@ helm install amp ./helm/amp -f values-small.yaml
 ### Lite Profile
 Single process, no external dependencies:
 ```bash
-helm install amp ./helm/amp --set profile=lite
+helm install amp ./helm/amp --set profile=lite --set llm.enabled=false  # LLM on without llm.apiKey: the pod does not start
 ```
 - SQLite storage (PVC-based), memory cache
 - **No grouping**: `grouping.enabled` is ignored in this profile, so alerts are not batched the way Alertmanager does

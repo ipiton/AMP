@@ -89,6 +89,35 @@
 - **Disposition:** reject (reason: вне задачи, поведения не несёт. Spec P2 дополнен упоминанием.)
 - **Follow-up:** n/a
 
+## Round 2 — fix verification (`c55bd22..fdd6b28`)
+
+**Reviewer:** независимый агент (свежий контекст). F1, F3, F4, F5-comment, F7 — закрыты (подтверждено рендером всех вариантов, `helm/amp/tests/*.sh`, бинарём). Побочных эффектов `enableServiceLinks: false` нет: service-link переменные не читаются; `KUBERNETES_SERVICE_*` инжектируются независимо; config-reloader настраивается args. Verdict раунда: fix_required (F2 неполон, N1, N2).
+
+### F2 (round 2) — ещё три устаревших места
+- **Severity:** major (продолжение F2)
+- **Location:** `docs/ALERTMANAGER_COMPATIBILITY.md:22-25` (вводное предупреждение, «four gaps … ignores its environment»), `README.md:181` («four of them»), `CHANGELOG.md:32` (запись PROD-GRACEFUL-SHUTDOWN: «timeout does not reach AMP yet»)
+- **Disposition:** fix-here — исправлено.
+
+### N1 — «внешний PostgreSQL с TLS» без указания, как его задать
+- **Severity:** minor
+- **Location:** `docs/MIGRATION_QUICK_START.md:24`, `helm/amp/README.md:15`, `CHANGELOG.md` breaking note 4
+- **Issue:** при `postgresql.enabled: false` чарт не передаёт `DATABASE_*` (`deployment.yaml:94-112`, ветка `else`), `extraEnv` нет. Единственный путь — `database:` в `configFile.content`, пароль оказывается в ConfigMap открытым текстом. `ssl_mode` по умолчанию `require` (`config.go:835`) — проверено бинарём.
+- **Disposition:** fix-here — в доках описан фактический путь и цена (пароль в ConfigMap, ≥12 символов в production). Values для внешней БД со ссылкой на Secret — в `HELM-DEFAULTS-VALIDATE` (finalize).
+
+### N2 — команда для lite в README чарта не стартует на дефолтах
+- **Severity:** minor
+- **Location:** `helm/amp/README.md` § Lite Profile; `README.md:17` («in the `standard` profile»)
+- **Issue:** `--set profile=lite` без `llm.enabled=false` → тот же `CreateContainerConfigError`. Существовало до задачи, но противоречит новому предупреждению.
+- **Disposition:** fix-here — `--set llm.enabled=false` в команде; уточнение «standard» убрано.
+
+### N3 — обход через `environment` не назван
+- **Severity:** nit
+- **Disposition:** reject (reason: ослабление проверки TLS сменой `environment` — решение владельца в `HELM-DEFAULTS-VALIDATE`; доки не рекомендуют обход безопасности.)
+
+### N4 — комментарий `values.yaml:411` «Enable in production with certs»
+- **Severity:** nit (существовал до задачи)
+- **Disposition:** fix-here — комментарий говорит, что TLS у встроенного Postgres нет.
+
 ## Premises (reviewer B)
 
 P1, P3–P8 — подтверждены, класс заслужен. P2 верна для рантайм-вызовов, но список неполон: пропущен мёртвый `example.go`. Поиск охватил весь репозиторий: `cmd/config-reloader` `LoadConfig` не вызывает. P7 закрывает вопрос из implementation notes: `unauthenticated_paths: null`, пустое значение, `auth: {}`, пустой файл дают дефолты; `[]` — явный opt-out оператора. nil не получается ни в одном случае.

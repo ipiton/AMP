@@ -19,10 +19,10 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** four gaps bite on a verbatim upstream config
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** three gaps bite on a verbatim upstream config
 and none of them is reported at startup — a top-level `inhibit_rules:` is ignored (#9), grouping is off by default
-(#13), a built-in filter drops some alerts (#14), and without a loaded config file the process ignores its
-environment (#15). Each is a P0 in `docs/06-planning/BACKLOG.md`.
+(#13), and a built-in filter drops some alerts (#14). Separately, the Helm chart's default values do not start (#15).
+Each is a P0 in `docs/06-planning/BACKLOG.md`.
 
 Source of truth:
 - `go-app/internal/business/routing/` (route tree, matcher, evaluator)
