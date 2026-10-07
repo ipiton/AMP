@@ -4,7 +4,7 @@
 **Reviewer perspective:** два независимых агента (general-purpose), свежий контекст, без доступа к выводам друг друга: (A) security / fail-open / correctness / edge cases; (B) design premises / contract / docs / maintainability. Свод и диспозиции — сессия-автор; ключевые утверждения F1 и F4 перепроверены grep'ом.
 **Reviewed at:** 2026-10-07
 **Reviewed tree:** `bugfix/prod-config-file-fallback` @ `43b0024` (diff `e757730..43b0024`)
-**Verdict:** fix_required (see `review-verdict.json`)
+**Verdict:** pass after round 3 (rounds 1–2: fix_required; see `review-verdict.json`)
 
 ## Findings
 
@@ -117,6 +117,25 @@
 ### N4 — комментарий `values.yaml:411` «Enable in production with certs»
 - **Severity:** nit (существовал до задачи)
 - **Disposition:** fix-here — комментарий говорит, что TLS у встроенного Postgres нет.
+
+## Round 3 — docs fix check (`fdd6b28..216fa19`)
+
+**Reviewer:** независимый агент (свежий контекст). F2-round2, N1, N2, N4 — закрыты; факты N1 сверены с кодом и рендером (`postgresql.enabled=false` → 0 строк `DATABASE_`, `ssl_mode` `require`, ≥12 символов, `configFile.content` → ConfigMap). Grep по репозиторию: устаревших утверждений не осталось, кроме отложенного `shutdown_test.go:139`. Доки согласованы между собой. Verdict раунда: **pass**.
+
+### R3-1 — баннер README чарта: «hits the PostgreSQL check», но затем «Use a values file like the one below»
+- **Severity:** nit (существовал до задачи)
+- **Location:** `helm/amp/README.md:15`
+- **Disposition:** fix-here — doc-only, вносится на `finalize`.
+
+### R3-2 — сниппет называет `configFile.enabled` «optional», а путь внешней БД требует файл
+- **Severity:** nit
+- **Location:** `helm/amp/README.md:30`, фраза о внешнем PostgreSQL
+- **Disposition:** fix-here — doc-only, вносится на `finalize`: «(requires `configFile.enabled: true`)».
+
+### R3-3 — п. 15 compat-доки не называет обход
+- **Severity:** nit
+- **Location:** `docs/ALERTMANAGER_COMPATIBILITY.md:868-875`
+- **Disposition:** fix-here — doc-only, ссылка на `helm/amp/README.md` на `finalize`.
 
 ## Premises (reviewer B)
 

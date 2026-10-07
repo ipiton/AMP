@@ -77,7 +77,7 @@ based_on:
 
 ## Gate: deep-review
 
-- [ ] **R.1** `/deep-review` (обязателен: `C X R`). Фокус: fail-closed — нет пути, при котором ошибка конфига ведёт к старту; отсутствие утечки секретов в ERROR-логе; семантика явного пути; harness. `write-tests` — только после `review-verdict.json` `"gate": "pass"`. <!-- depends: Phase 1, Phase 2 | verify: jq -r .gate tasks/PROD-CONFIG-FILE-FALLBACK/review-verdict.json == pass -->
+- [x] **R.1** `/deep-review` (обязателен: `C X R`). Фокус: fail-closed — нет пути, при котором ошибка конфига ведёт к старту; отсутствие утечки секретов в ERROR-логе; семантика явного пути; harness. `write-tests` — только после `review-verdict.json` `"gate": "pass"`. <!-- depends: Phase 1, Phase 2 | verify: jq -r .gate tasks/PROD-CONFIG-FILE-FALLBACK/review-verdict.json == pass -->
 
 ## Phase 3: Tests (`write-tests`, после verdict `pass`)
 
@@ -102,6 +102,8 @@ based_on:
 
 - [ ] **4.1** Гейты AMP (WORKFLOW.md § Гейты): `go vet` + `go test` затронутых пакетов, `make -C go-app quality-gates-fast` (после — `git status`), `scripts/release-gate.sh`, `git diff --check`, нет `_, _ :=` в диффе. <!-- verify: все команды exit 0; вывод — в testing-отчёт -->
 - [ ] **4.2** `finalize`:
+  - doc-nit R3-1..R3-3 из `review-findings.md` (README чарта, compat п. 15);
+  - TECH-DEBT: `CONFIG-GLOBAL-VIPER-STATE` (F5), `CONFIG-VALIDATION-ERROR-REDACTION` (F6), `CONFIG-PATH-RESOLUTION-DUP` (F8); `HELM-DEFAULTS-VALIDATE` — включить values внешней БД со ссылкой на Secret (N1);
   - `BUGS.md` — закрыть `CONFIG-MISSING-FILE-DROPS-ENV`;
   - `BUGS.md` — новый баг `HELM-DEFAULTS-FAIL-VALIDATION`: production + `sslmode=disable` в `values.yaml`/`values-production.yaml`; `llm.enabled: true` без `apiKey` → нет ключа `llm-api-key` → `CreateContainerConfigError`; LLM по умолчанию на example-прокси;
   - `BACKLOG.md` — P0 `HELM-DEFAULTS-VALIDATE` первой после закрытых, с `Waiting-on:` решения владельца по TLS/`environment`/LLM-дефолту; убрать `PROD-CONFIG-FILE-FALLBACK` из P0;
