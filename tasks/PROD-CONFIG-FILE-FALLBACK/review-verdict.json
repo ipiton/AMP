@@ -1,0 +1,9 @@
+{
+  "gate": "fix_required",
+  "reason": "fix-here: F1, F2, F3, F4, F7 (+ F5 invariant comment)",
+  "branch": "bugfix/prod-config-file-fallback",
+  "commit": "43b0024",
+  "reviewed_at": "2026-10-07",
+  "findings": { "blocker": 0, "major": 3, "minor": 3, "nit": 4 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}
