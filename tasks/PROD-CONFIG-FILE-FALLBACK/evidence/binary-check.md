@@ -22,3 +22,15 @@ The test DB password did not appear in any log (`grep -c` = 0 for all runs).
 | g | README `values-small.yaml` + `--set profile=lite`: rendered env + rendered `config.yaml` (local overrides: `STORAGE_FILESYSTEM_PATH`, `SERVER_HOST=127.0.0.1`, `SERVER_PORT=18094`) | running | no `failed to load configuration`; `GET :18094/-/healthy` → 200 |
 
 Render: `enableServiceLinks: false` present on the `amp` Deployment pod spec for `profile=standard` and `profile=lite`.
+
+## Testing — финальный код (`53f33dd`), 2026-10-07
+
+| # | Setup | Exit | Log |
+|---|---|---|---|
+| a | lite, без файла (`PROFILE=lite STORAGE_BACKEND=filesystem`) | running | INFO `no config file, using environment and defaults`; `GET /-/healthy` → 200 |
+| h | как (a) + `GROUPING_ENABLED=true GROUPING_RECONCILIATION_GRACE=120s` | running | без `failed to load configuration`; `/-/healthy` → 200 |
+| b | `AMP_CONFIG_FILE=/nonexistent.yaml` | 1 | `config file "/nonexistent.yaml" from AMP_CONFIG_FILE does not exist` |
+| c | `AMP_CONFIG_FILE=bad.yaml` (битый YAML) | 1 | `failed to load configuration` |
+| d | env дефолтного рендера чарта, без файла | 1 | `config validation failed: … database SSL mode 'disable' is not allowed in production` |
+
+Тестовый пароль БД не встретился ни в одном логе.

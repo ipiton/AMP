@@ -141,6 +141,11 @@
 
 P1, P3–P8 — подтверждены, класс заслужен. P2 верна для рантайм-вызовов, но список неполон: пропущен мёртвый `example.go`. Поиск охватил весь репозиторий: `cmd/config-reloader` `LoadConfig` не вызывает. P7 закрывает вопрос из implementation notes: `unauthenticated_paths: null`, пустое значение, `auth: {}`, пустой файл дают дефолты; `[]` — явный opt-out оператора. nil не получается ни в одном случае.
 
+## Testing (2026-10-07, `53f33dd`)
+
+- **Изменение после вердикта — `viper.BindEnv("grouping.reconciliation_grace")` (`cc94862`)**: подтверждено. `GROUPING_RECONCILIATION_GRACE=120s` даёт `2m0s`, unset — ноль (деривация в `ServiceRegistry` сохранена): `TestLoadConfig_ReconciliationGraceFromEnv`. Бинарь с этим env стартует, `/-/healthy` → 200 (`evidence/binary-check.md` § Testing, h). Новых рисков нет: `BindEnv` не задаёт значение, только имя env.
+- Fail-closed (F1-класс): explicit missing file, битый YAML, провал валидации — exit 1 на финальном коде (b, c, d).
+
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.

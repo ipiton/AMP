@@ -13,7 +13,7 @@ based_on:
 
 # Specification: отсутствие файла конфига не должно выбрасывать env
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary
@@ -102,7 +102,7 @@ Not applicable.
 - `TestChartEnvKeysKnownToViper` — тест P4. Вариант реализации выбирает `plan-task`:
   - (a) Go-тест в `internal/config` со списком env-имён, извлечённых из `helm/amp/templates/{deployment,configmap}.yaml` regex'ом по `- name: X` и `^X:`;
   - (b) скрипт `helm/amp/tests/render-env-keys.sh` + Go-хелпер.
-  
+
   Предпочтительно (a): без `helm` в Go-тестах, и тест ловит новые env-имена, добавленные в шаблоны.
 - Docs:
   - `docs/ALERTMANAGER_COMPATIBILITY.md` п. 15 — переписать: файл больше не обязателен, невалидный конфиг фатален;
