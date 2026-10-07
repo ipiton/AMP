@@ -18,15 +18,13 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-CONFIG-FILE-FALLBACK` → `PROD-DEPS-OTEL-145` → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (ждёт владельца) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-CONFIG-FILE-FALLBACK` → `PROD-DEPS-OTEL-145` → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. Включать после `PROD-DEPS-OTEL-145`: сейчас required `govulncheck` красный на `main`. `~5min`
-  Trigger: owner ready.
-- [ ] **RELEASE-V010-DECISION** — решить, выпускать ли `v0.1.0`. `PROD-RELEASE-V010` стоит на паузе с 2026-09-30 (`Waiting-on` в BACKLOG); без релиза образа в GHCR нет и чарт с дефолтами уходит в `ImagePullBackOff`. Варианты: релиз после закрытия P0 из BACKLOG; `v0.1.0-rc.1` раньше — для проверки публикации; не выпускать и собирать образ локально. `~5min`
   Trigger: owner ready.
 - [ ] **RUNBOOK-BRANCH-DECISION** — ветка `claude/start-task-pyym8f`: `PHASE-6B-RUNBOOK-ENGINE` реализован и закрыт там (10 коммитов, `c7ae269`, 2026-09-27), в `main` не влит. Решить: rebase + review + merge или удалить ветку. `~5min`
   Trigger: owner ready.
