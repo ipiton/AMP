@@ -912,6 +912,12 @@ func setDefaults() {
 	//
 	// ServiceRegistry.validateNotifyTimingBudget rechecks (2) at startup
 	// against the actual publishing.queue.delivery_confirmation_timeout.
+	//
+	// BindEnv, not SetDefault: AutomaticEnv only resolves keys viper already
+	// knows, so without it GROUPING_RECONCILIATION_GRACE (the Helm chart's
+	// grouping.reconciliationGrace pin) never reached the config. BindEnv
+	// errors only when called without a key.
+	_ = viper.BindEnv("grouping.reconciliation_grace")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)
