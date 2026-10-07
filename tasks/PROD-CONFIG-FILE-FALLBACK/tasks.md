@@ -35,8 +35,8 @@ based_on:
 
 > **Wave 1** — независимые шаги
 
-- [ ] **1.1** `LoadConfig`: при ошибке `ReadInConfig`, если `errors.Is(err, fs.ErrNotExist)`, продолжить без файла; иначе `failed to read config file: %w`. Комментарий — почему не `ConfigFileNotFoundError` (`SetConfigFile` не ищет файл). <!-- verify: cd go-app && go build ./... && go vet ./internal/config/ && go test ./internal/config/ -count=1 -->
-- [ ] **1.2** `main.go`: `resolveRuntimeConfigPath() (string, bool)` — `explicit=true`, когда `AMP_CONFIG_FILE` непуст после `TrimSpace`. Маленькая функция `checkConfigPath(path string, explicit bool) error`:
+- [x] **1.1** `LoadConfig`: при ошибке `ReadInConfig`, если `errors.Is(err, fs.ErrNotExist)`, продолжить без файла; иначе `failed to read config file: %w`. Комментарий — почему не `ConfigFileNotFoundError` (`SetConfigFile` не ищет файл). <!-- verify: cd go-app && go build ./... && go vet ./internal/config/ && go test ./internal/config/ -count=1 -->
+- [x] **1.2** `main.go`: `resolveRuntimeConfigPath() (string, bool)` — `explicit=true`, когда `AMP_CONFIG_FILE` непуст после `TrimSpace`. Маленькая функция `checkConfigPath(path string, explicit bool) error`:
   - явный путь + `os.Stat` → `fs.ErrNotExist` ⇒ ошибка `config file %q from AMP_CONFIG_FILE does not exist`;
   - дефолтный путь без файла ⇒ `nil` и INFO `no config file, using environment and defaults` (`path`).
   
@@ -44,29 +44,36 @@ based_on:
 
 > **Wave 2** — зависит от Wave 1
 
-- [ ] **1.3** `main.go`: `checkConfigPath`, затем `LoadConfig`; любая ошибка → `slog.Error("failed to load configuration", "path", path, "error", err)` + `os.Exit(1)`. Удалить минимальный фолбэк (`:57-62`) и патч `UnauthenticatedPaths` (`:73-76`). <!-- depends: 1.1, 1.2 | verify: cd go-app && go build ./cmd/server/ && grep -n "Config file not found\|DefaultUnauthenticatedPaths" cmd/server/main.go; test $? -eq 1 -->
-- [ ] **1.4** Ручная проверка бинаря (`go build -o $SCRATCH/amp ./cmd/server`) в пустом каталоге:
+- [x] **1.3** `main.go`: `checkConfigPath`, затем `LoadConfig`; любая ошибка → `slog.Error("failed to load configuration", "path", path, "error", err)` + `os.Exit(1)`. Удалить минимальный фолбэк (`:57-62`) и патч `UnauthenticatedPaths` (`:73-76`). <!-- depends: 1.1, 1.2 | verify: cd go-app && go build ./cmd/server/ && grep -n "Config file not found\|DefaultUnauthenticatedPaths" cmd/server/main.go; test $? -eq 1 -->
+- [x] **1.4** Ручная проверка бинаря (`go build -o $SCRATCH/amp ./cmd/server`) в пустом каталоге:
   - (a) без файла, `PROFILE=lite STORAGE_BACKEND=filesystem STORAGE_FILESYSTEM_PATH=$SCRATCH/db SERVER_PORT=18093` → старт, слушает `:18093` (не 9093), `curl /-/healthy` = 200;
   - (b) `AMP_CONFIG_FILE=/nonexistent.yaml` → exit 1 с путём;
   - (c) файл с битым YAML → exit 1;
   - (d) env дефолтного чарта (`evidence/chart-default-env.txt`, пароль подставить ≥12 символов) → exit 1 с `database SSL mode 'disable' is not allowed in production`.
   
   Результаты — в `evidence/binary-check.md`. <!-- depends: 1.3 | verify: каждый из 4 сценариев дал ожидаемый код выхода/лог; записано в evidence -->
-- [ ] **1.5** `go test ./cmd/server/... -count=1` — harness `futureparity` и `route_prefix` зелёные без `config.yaml` в cwd (Spec P5). Если красный — выяснить причину, а не подгонять тест; при расхождении с P5 обновить Spec. <!-- depends: 1.3 | verify: cd go-app && go test ./cmd/server/... -count=1 -->
+- [x] **1.5** `go test ./cmd/server/... -count=1` — harness `futureparity` и `route_prefix` зелёные без `config.yaml` в cwd (Spec P5). Если красный — выяснить причину, а не подгонять тест; при расхождении с P5 обновить Spec. <!-- depends: 1.3 | verify: cd go-app && go test ./cmd/server/... -count=1 -->
 
 **Phase verification:** `cd go-app && go vet ./internal/config/... ./cmd/server/... && go test ./internal/config/... ./cmd/server/... -count=1`; `evidence/binary-check.md` записан.
 
 ## Phase 2: Docs
 
-- [ ] **2.1** `docs/ALERTMANAGER_COMPATIBILITY.md` п. 15: файл конфига необязателен (env + дефолты); невалидный или нечитаемый конфиг и отсутствующий явный `AMP_CONFIG_FILE` — exit 1; дефолтные values чарта пока не проходят валидацию в `standard` → `HELM-DEFAULTS-VALIDATE`. <!-- verify: grep -n "Config file not found" docs/ALERTMANAGER_COMPATIBILITY.md; test $? -eq 1 -->
-- [ ] **2.2** `helm/amp/README.md`:
+- [x] **2.1** `docs/ALERTMANAGER_COMPATIBILITY.md` п. 15: файл конфига необязателен (env + дефолты); невалидный или нечитаемый конфиг и отсутствующий явный `AMP_CONFIG_FILE` — exit 1; дефолтные values чарта пока не проходят валидацию в `standard` → `HELM-DEFAULTS-VALIDATE`. <!-- verify: grep -n "Config file not found" docs/ALERTMANAGER_COMPATIBILITY.md; test $? -eq 1 -->
+- [x] **2.2** `helm/amp/README.md`:
   - в предупреждении «Read before installing» заменить причину: теперь `configFile` не обязателен, а `standard` падает на `database SSL mode 'disable' is not allowed in production` (`environment: production` + встроенный Postgres без TLS). Обход до `HELM-DEFAULTS-VALIDATE` описать фактом, без рекомендации ослаблять безопасность: TLS для Postgres (`postgresql.config.ssl: "on"` с сертификатами) или внешний PG с TLS;
   - § Graceful Shutdown (стр. 132): убрать оговорку про игнорируемый env.
   
   Сниппет `values-small.yaml` проверить так же, как 1.4(d): рендер → env + файл → загрузка; результат — в `evidence/binary-check.md`. <!-- depends: 1.4 | verify: grep -n "CONFIG-MISSING-FILE-DROPS-ENV" helm/amp/README.md; test $? -eq 1 -->
-- [ ] **2.3** `CHANGELOG.md` `[Unreleased]`: `### Fixed` — `PROD-CONFIG-FILE-FALLBACK` плюс migration notes из Spec § Rollout (четыре пункта). <!-- verify: grep -n "PROD-CONFIG-FILE-FALLBACK" CHANGELOG.md -->
+- [x] **2.3** `CHANGELOG.md` `[Unreleased]`: `### Fixed` — `PROD-CONFIG-FILE-FALLBACK` плюс migration notes из Spec § Rollout (четыре пункта). <!-- verify: grep -n "PROD-CONFIG-FILE-FALLBACK" CHANGELOG.md -->
 
 **Phase verification:** `git diff --check`; ссылки на `HELM-DEFAULTS-VALIDATE` в доках совпадают с именем задачи, которое заведёт `finalize`.
+
+## Implementation notes (2026-10-07)
+
+- Отклонений от Spec нет. `checkConfigPath` при ошибке `os.Stat`, отличной от `ErrNotExist`, возвращает `nil` — ошибка придёт из `LoadConfig` с полным контекстом (каталог, права).
+- Удаление патча `UnauthenticatedPaths` в `main.go` делает старт и hot-reload согласованными: reload патч никогда не применял, и `ReloadableWebAuth` сравнивал «пропатченный» стартовый список с непропатченным из reload. Поведение для явного `unauthenticated_paths: null` в файле — вопрос к `deep-review`.
+- Утверждение в compat-доке «upstream likewise refuses to start» сверено: `alertmanager@v0.32.0` `cmd/alertmanager/main.go:567` (`configCoordinator.Reload()` → `return 1`).
+- 1.4/2.2 — `evidence/binary-check.md` (сценарии a–f). README-сниппет `values-small.yaml` падает на той же проверке SSL, с `sslmode=require` конфиг загружается.
 
 ## Gate: deep-review
 

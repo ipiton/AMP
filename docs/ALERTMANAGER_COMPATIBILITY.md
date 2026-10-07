@@ -865,11 +865,13 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     of the same fingerprint and status within one minute. The rules are hard-coded, there is no metric, and the
     drop is logged at INFO. Upstream drops none of these. The Helm `filters:` key does not configure it. Tracked
     as `PROD-HARDCODED-FILTER` (P0); bug `HARDCODED-FILTER-DROPS-ALERTS`.
-15. **No config file means no configuration at all.** Without a readable config file (`AMP_CONFIG_FILE` unset and no
-    `./config.yaml`), and also when the file fails validation, AMP logs `Config file not found, using defaults`
-    and runs on a minimal built-in config that ignores every environment variable. In the standard profile this
-    exits with `database host is required`. The Helm chart defaults to `configFile.enabled: false`, so set it to
-    `true`. Tracked as `PROD-CONFIG-FILE-FALLBACK` (P0); bug `CONFIG-MISSING-FILE-DROPS-ENV`.
+15. **A config error stops AMP; the Helm defaults do not pass validation yet.** Without a config file
+    (`AMP_CONFIG_FILE` unset and no `./config.yaml`) AMP reads its environment and built-in defaults. An
+    `AMP_CONFIG_FILE` that does not exist, an unreadable or malformed file, or a config that fails validation exits
+    with `failed to load configuration` — upstream likewise refuses to start on a bad `--config.file`. The Helm
+    chart's default values fail validation in the standard profile (`environment: production` with the bundled
+    PostgreSQL without TLS): AMP exits with `database SSL mode 'disable' is not allowed in production`. Tracked as
+    `HELM-DEFAULTS-VALIDATE` (P0).
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`

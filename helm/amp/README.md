@@ -12,7 +12,7 @@ Alertmanager++ (AMP) chart packages the current repository runtime with:
 
 ## Quick Start
 
-> **Read before installing (status 2026-10-07).** With the chart defaults the `standard` profile does not start: without `configFile.enabled: true` the process finds no config file, ignores its environment and exits (`database host is required`) — `BUGS.md` → `CONFIG-MISSING-FILE-DROPS-ENV`. Grouping is also off by default, and the default HPA starts two replicas. Use a values file like the one below until these are fixed (P0 in `docs/06-planning/BACKLOG.md`). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing (status 2026-10-07).** With the chart defaults the `standard` profile does not start: `environment: production` rejects the bundled PostgreSQL without TLS (`postgresql.config.ssl: "off"` → `sslmode=disable`), and AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file below hits the same check; it loads once PostgreSQL uses TLS (`postgresql.config.ssl: "on"` with certificates, or an external server) — `HELM-DEFAULTS-VALIDATE` in `docs/06-planning/BACKLOG.md`. Grouping is also off by default, and the default HPA starts two replicas. Use a values file like the one below until these are fixed (P0 in `docs/06-planning/BACKLOG.md`). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
 ```yaml
 # values-small.yaml — one replica, standard profile
@@ -28,7 +28,7 @@ postgresql:
   podDisruptionBudget:
     enabled: false        # minAvailable: 1 with one replica blocks node drain
 configFile:
-  enabled: true           # required: without a file the environment is ignored
+  enabled: true           # optional: without a file AMP reads its environment only
   content: |
     route:
       receiver: default
@@ -129,7 +129,6 @@ Keep `terminationGracePeriodSeconds` ≥ `preStopDelay` + `timeoutSeconds`. Othe
 Limitations:
 
 - The hook runs `sleep` from the image (`alpine` today). In an image without `sleep` the hook fails, the kubelet logs `FailedPreStopHook` and sends `SIGTERM` immediately: no delay, the pod still stops.
-- Without `configFile.enabled`, AMP currently ignores its environment (`BUGS.md` → `CONFIG-MISSING-FILE-DROPS-ENV`). Then `timeoutSeconds` does not reach the process, and AMP uses its own `30s` default whatever the value says.
 
 ### RBAC
 
