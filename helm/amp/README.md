@@ -12,40 +12,61 @@ Alertmanager++ (AMP) chart packages the current repository runtime with:
 
 ## Quick Start
 
-```bash
-# Install with default values (Lite profile)
-helm install amp ./helm/amp
+> **Read before installing (status 2026-10-07).** With the chart defaults the `standard` profile does not start: without `configFile.enabled: true` the process finds no config file, ignores its environment and exits (`database host is required`) — `BUGS.md` → `CONFIG-MISSING-FILE-DROPS-ENV`. Grouping is also off by default, and the default HPA starts two replicas. Use a values file like the one below until these are fixed (P0 in `docs/06-planning/BACKLOG.md`). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
-# Install with LLM enabled
-helm install amp ./helm/amp \
-  --set llm.enabled=true \
-  --set llm.provider=openai \
-  --set llm.apiKey=sk-your-key
+```yaml
+# values-small.yaml — one replica, standard profile
+profile: standard
+replicaCount: 1
+autoscaling:
+  enabled: false          # default HPA starts 2 replicas
+grouping:
+  enabled: true           # default false: every alert is sent at once
+llm:
+  enabled: false
+postgresql:
+  podDisruptionBudget:
+    enabled: false        # minAvailable: 1 with one replica blocks node drain
+configFile:
+  enabled: true           # required: without a file the environment is ignored
+  content: |
+    route:
+      receiver: default
+      group_by: ['alertname']
+    receivers:
+      - name: default
+        webhook_configs:
+          - url: https://example.invalid/hook   # plain http:// fails validation
+    inhibition:           # NOT a top-level inhibit_rules: — that key is ignored
+      inhibit_rules: []
 ```
+
+```bash
+helm install amp ./helm/amp -f values-small.yaml
+```
+
+The default `resources` request about 1.6 vCPU / 2.1 GiB in total for AMP, PostgreSQL and two Redis instances; lower them for a small node.
 
 ## Deployment Profiles
 
-### Lite Profile (Default)
-Single-node, no external dependencies:
+### Standard Profile (Default)
+PostgreSQL + Redis, required for Alertmanager-style grouping:
+```bash
+helm install amp ./helm/amp -f values-small.yaml
+```
+- PostgreSQL storage (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
+- Redis cache (`amp-redis`); the `valkey` subchart is also deployed and not used by default — `TECH-DEBT.md` → `HELM-CHART-GAPS`
+- HPA enabled by default (2–10 replicas)
+- Perfect for: anything that needs `group_wait`/`group_interval`/`repeat_interval`
+
+### Lite Profile
+Single process, no external dependencies:
 ```bash
 helm install amp ./helm/amp --set profile=lite
 ```
-- SQLite storage (PVC-based)
-- Memory cache
-- Perfect for: dev, testing, <1K alerts/day
-
-### Standard Profile
-HA-ready with PostgreSQL + Redis:
-```bash
-helm install amp ./helm/amp \
-  --set profile=standard \
-  --set postgresql.enabled=true \
-  --set cache.enabled=true
-```
-- PostgreSQL storage
-- Redis/Valkey cache
-- HPA (2-10 replicas)
-- Perfect for: production, >1K alerts/day
+- SQLite storage (PVC-based), memory cache
+- **No grouping**: `grouping.enabled` is ignored in this profile, so alerts are not batched the way Alertmanager does
+- Perfect for: dev, testing, smoke checks
 
 ## Configuration
 
@@ -53,7 +74,7 @@ helm install amp ./helm/amp \
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `profile` | Deployment profile (lite/standard) | `lite` |
+| `profile` | Deployment profile (lite/standard) | `standard` |
 | `replicaCount` | Number of replicas | `1` |
 | `image.repository` | Image repository | `ghcr.io/ipiton/amp` |
 | `image.tag` | Image tag | `""` (defaults to `.Chart.AppVersion`) |
@@ -224,8 +245,10 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - amp:9093  # Was: alertmanager:9093
+          - amp.<namespace>.svc:8080  # Service port is 8080 (was: alertmanager:9093)
 ```
+
+With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. Known gaps that bite on a copied `alertmanager.yml` — top-level `inhibit_rules:` ignored, a built-in filter that drops some alerts, partial per-integration fields — are listed in [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md) § Known Gaps. The chart's `PrometheusRule` objects carry no configurable labels, so a Prometheus with a `ruleSelector` (kube-prometheus-stack selects `release: <name>`) will not load them (`HELM-PROMRULE-LABELS`).
 
 Current active runtime surface mounted by the repository bootstrap:
 - `POST /api/v2/alerts`
@@ -238,7 +261,7 @@ Current active runtime surface mounted by the repository bootstrap:
 - `POST /-/reload`
 - `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
 
-Wider parity such as config/history APIs, inhibition/classification surfaces, and broader dashboard surfaces remains explicit follow-up work.
+Inhibition rules are applied (`GET /api/v2/inhibitions` shows active ones) when nested under `inhibition:`. Config write and history APIs, classification surfaces and broader dashboard surfaces remain explicit follow-up work.
 
 ## Upgrading
 

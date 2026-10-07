@@ -18,21 +18,31 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## Queue
 
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-CONFIG-FILE-FALLBACK` → `PROD-DEPS-OTEL-145` → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (ждёт владельца) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+
 ### Owner
 
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
-- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `~5min`
+- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. Включать после `PROD-DEPS-OTEL-145`: сейчас required `govulncheck` красный на `main`. `~5min`
+  Trigger: owner ready.
+- [ ] **RELEASE-V010-DECISION** — решить, выпускать ли `v0.1.0`. `PROD-RELEASE-V010` стоит на паузе с 2026-09-30 (`Waiting-on` в BACKLOG); без релиза образа в GHCR нет и чарт с дефолтами уходит в `ImagePullBackOff`. Варианты: релиз после закрытия P0 из BACKLOG; `v0.1.0-rc.1` раньше — для проверки публикации; не выпускать и собирать образ локально. `~5min`
+  Trigger: owner ready.
+- [ ] **RUNBOOK-BRANCH-DECISION** — ветка `claude/start-task-pyym8f`: `PHASE-6B-RUNBOOK-ENGINE` реализован и закрыт там (10 коммитов, `c7ae269`, 2026-09-27), в `main` не влит. Решить: rebase + review + merge или удалить ветку. `~5min`
   Trigger: owner ready.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. ~2d. Перед стартом проверить невлитую ветку `claude/start-task-pyym8f`: по коммиту `c7ae269` («close task, archive workspace») задача там уже закрыта.
-- [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d
+- [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. Код готов в ветке `claude/start-task-pyym8f`; задача — влить после `RUNBOOK-BRANCH-DECISION`: rebase на текущий `main`, конфликт-разбор, release-gate, review. ~0.5–1d.
+  Blocked-by: RUNBOOK-BRANCH-DECISION.
+- [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `PROD-LLM-ALERT-PATH-ISOLATION`: пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
 ### 2. Operations
-- [ ] **CONFIG-RELOADER-SIDECAR** — остаток: `cmd/config-reloader`, `Dockerfile.config-reloader`, шаблон в `deployment.yaml` и публикация образа в GHCR (`release.yml`) уже есть. Не хватает первого релиза (`PROD-RELEASE-V010`), `CONFIG-RELOADER-AUTH`, затем `enabled: true` в production values. Статус пересмотреть. ~1d
+
+- [ ] **HELM-SINGLE-NODE-DEFAULTS** — дефолты чарта под одну ноду (HPA выкл., requests, PDB, пример `values-small.yaml`); первая P1 из BACKLOG, нужна для внедрения на однонодовый k3s. ~0.5–1d.
+
+`CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
 ## Ссылки
 

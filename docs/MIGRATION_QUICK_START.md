@@ -14,13 +14,16 @@ Current runtime note (2026-03-09): this guide covers AMP's current controlled re
 
 #### Kubernetes (Helm)
 ```bash
-# Install from the repository-local chart
+# Install from the repository-local chart with a values file —
+# helm/amp/README.md § Quick Start has a working values-small.yaml
 helm install amp ./helm/amp \
-  --set profile=standard \
+  -f values-small.yaml \
   --namespace monitoring
 ```
 
-If you expect real outbound notifications in Kubernetes, also configure at least one publishing target through Helm values or a canonical target Secret. Without discovered targets AMP will ingest alerts but stay in `metrics-only` mode.
+Do not install with chart defaults alone (status 2026-10-07): without `configFile.enabled: true` the process ignores its environment and exits in the `standard` profile; grouping stays off unless `grouping.enabled: true`; inhibition rules must sit under `inhibition:`, not at the top level. See [Known Gaps](ALERTMANAGER_COMPATIBILITY.md#known-gaps-honesty-notes) #9 and #13–#15.
+
+Put your routes and receivers into `configFile.content`; receivers declared there become delivery targets. Without any target AMP ingests alerts but stays in `metrics-only` mode.
 
 #### Docker
 ```bash

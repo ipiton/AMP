@@ -9,12 +9,12 @@
 ## ✨ Features
 
 - **Control-Plane Parity** - Real routing tree, dispatcher/grouping semantics (`group_by`/`group_wait`/`group_interval`/`repeat_interval`), notify chain, mute/active time intervals, silences, inhibition, and HA clustering (Redis-backed dedup, leader election, peer heartbeat) mirror upstream Alertmanager's mechanics, not just its API shape
-- **Data Plane Is Different By Design** - Delivery targets are discovered from `amp.receiver`-scoped Kubernetes Secrets, not built from `receivers[].*_configs`; see [API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md) before migrating
+- **Config-Driven Delivery** - `receivers[].*_configs` from your `alertmanager.yml` become delivery targets (webhook, Slack, PagerDuty, Telegram, email); `amp.receiver`-scoped Kubernetes Secrets still work as a second source. Some per-integration fields are parsed but not delivered — see [API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md) before migrating
 - **Lean Go Runtime** - Current top-level docs avoid unverified benchmark/resource claims until a reproducible benchmark report is published
 - **Extensible Architecture** - Code-level extension points for custom classifiers and publishers
 - **Controlled Migration** - Pilot-oriented quick start for scoped deployments and explicit verification
 
-Current runtime note (2026-08-18): AMP is a **behaviour-level replacement candidate**, not a config-level drop-in — `feat/alertmanager-parity` landed a real routing tree, dispatcher/grouping semantics, mute/active time intervals, HA clustering, and config validation wired into startup + `/-/reload`. Its control plane (routing, grouping, dispatch, silences, inhibition, time-based muting, HA) mirrors upstream's mechanics; its data plane does not — delivery endpoints come exclusively from `amp.receiver`-scoped Kubernetes Secrets, never from `receivers[].*_configs`. Budget for provisioning those Secrets explicitly as a migration step. The active runtime source of truth is `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`; the full control-plane/data-plane breakdown is in `docs/ALERTMANAGER_COMPATIBILITY.md`.
+Current runtime note (2026-10-07): AMP is a **pilot-ready replacement candidate, not production-ready yet**. Its control plane (routing, grouping, dispatch, silences, inhibition, time-based muting, HA) mirrors upstream's mechanics, and since AMP-PARITY-WAVE6 the receivers in a copied `alertmanager.yml` deliver without any Kubernetes Secrets. Four gaps bite on a verbatim upstream config and are not reported at startup: a top-level `inhibit_rules:` is ignored (nest it under `inhibition:`), grouping is off by default (`grouping.enabled: true`), a built-in filter drops some alerts (names starting with `test`, `environment=test`, namespaces `tmp`/`dev-sandbox`), and without a loaded config file the process ignores its environment. They are tracked as P0 in `docs/06-planning/BACKLOG.md` and listed in [Known Gaps](docs/ALERTMANAGER_COMPATIBILITY.md#known-gaps-honesty-notes). The active runtime source of truth is `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`; the full control-plane/data-plane breakdown is in `docs/ALERTMANAGER_COMPATIBILITY.md`.
 
 ## 📊 Performance Note
 
@@ -178,7 +178,7 @@ Both rollback and prune support `dryRun=true` preview mode without mutating runt
 - **[CI And Image Publishing](docs/CI.md)** - What CI checks, how to reproduce it locally, how images are released
 - **[Security Policy](SECURITY.md)** - Vulnerability reporting
 
-Compatibility note: AMP's control plane (routing/grouping/dispatch/silences/inhibition/time-windows/HA) implements upstream Alertmanager's core mechanics, with a short list of documented, tracked gaps. Its data plane is a deliberately different, permanent design: delivery targets come from `amp.receiver`-scoped Kubernetes Secrets, not from `receivers[].*_configs`. Treat AMP as a behaviour-level replacement candidate that needs delivery targets provisioned separately — not a config-level drop-in. Config write API and `/history*` remain explicit follow-up work.
+Compatibility note: AMP's control plane (routing/grouping/dispatch/silences/inhibition/time-windows/HA) implements upstream Alertmanager's core mechanics, with a documented, tracked list of gaps. Receivers from `alertmanager.yml` deliver; per-integration field fidelity is partial, and `amp.receiver`-scoped Secrets remain a second target source (an endpoint declared in both delivers twice). Before migrating, read the Known Gaps — four of them change behaviour on a verbatim upstream config. Config write API and `/history*` remain explicit follow-up work.
 
 ## 🏗️ Architecture
 

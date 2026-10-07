@@ -19,6 +19,11 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** four gaps bite on a verbatim upstream config
+and none of them is reported at startup — a top-level `inhibit_rules:` is ignored (#9), grouping is off by default
+(#13), a built-in filter drops some alerts (#14), and without a loaded config file the process ignores its
+environment (#15). Each is a P0 in `docs/06-planning/BACKLOG.md`.
+
 Source of truth:
 - `go-app/internal/business/routing/` (route tree, matcher, evaluator)
 - `go-app/internal/infrastructure/grouping/` (dispatcher, timers, notify chain)
@@ -65,7 +70,7 @@ Source of truth:
 | HA: leader-elected silence GC | 🟢 Supported | `internal/infrastructure/lock/election.go` + `internal/business/silencing/manager_impl.go` (task 6.4). |
 | HA: peer heartbeat + `cluster` status field | 🟢 Supported | `internal/infrastructure/cluster/heartbeat.go` (task 6.5). |
 | HA: 2-replica end-to-end (exactly-once delivery, failover, in-flight adoption) | 🟡 Verified via standalone script, not CI-gated | `deploy/e2e-ha/` (`docker-compose.yml` + `run.sh`) exercises six steps, including a genuine cross-replica concurrent fire (replica B restarted after ingest so `RestoreTimers` arms a local timer for a group replica A also holds one for) and orphan adoption (replica A killed mid-`group_wait`, replica B's reconciliation loop must pick the timer up). Still **not** wired into `go test ./...` or any build tag — must be run explicitly. |
-| Inhibition (`inhibit_rules:`) | 🟢 Supported | `internal/infrastructure/inhibition/` matcher/parser/cache, wired into the notify chain's Inhibit step and hot-reloadable. `GET /api/v2/inhibitions` (read-only, AMP-native diagnostic endpoint, not upstream API) reflects active inhibitions. |
+| Inhibition (`inhibit_rules:`) | 🟡 Supported under `inhibition:` only | A top-level `inhibit_rules:` key — upstream's own placement — is parsed and silently ignored; nest the rules under `inhibition: inhibit_rules:` (Known Gap #9). `internal/infrastructure/inhibition/` matcher/parser/cache, wired into the notify chain's Inhibit step and hot-reloadable. `GET /api/v2/inhibitions` (read-only, AMP-native diagnostic endpoint, not upstream API) reflects active inhibitions. |
 | Config write API (`POST/PUT /api/v2/config*`) | 🔴 Not implemented | Explicitly out of scope for task 7.4 (see brief). |
 | `/history*` API | 🔴 Not implemented | Explicitly out of scope for task 7.4. |
 | **Lite profile restart durability** (`--storage.path` equivalent) | 🟢 Supported, opt-in | `storage.path` + `storage.snapshot_interval` (wave 6, `FU-LITE-FILE-SNAPSHOT`, `internal/infrastructure/snapshot/`) — silences (`memory.SilenceStore`) and the notification log's dedup entries + per-target delivered-state (`grouping.notifyDedupLog`) are written atomically (tmp file + rename + fsync, mode 0600) to `storage.path` on a periodic timer and on graceful shutdown, and reloaded at startup before the HTTP server starts serving. Format is plain versioned JSON (stdlib `encoding/json`), not upstream's protobuf+snappy — deliberately kept simple. TTL semantics are respected at load: an entry/delivered-state whose freshness window has already elapsed (computed from the snapshot's own timestamps vs now) is dropped, not resurrected. **Opt-in, unlike upstream**: `storage.path` defaults to empty (snapshotting OFF), not upstream's `data/` — an AMP upgrade must never start writing files as a side effect. **File, not directory**: upstream's `--storage.path` is a directory holding separate `nflog`/`silences` files; AMP's `storage.path` names a single combined snapshot file — point it at a file path, not a directory, when migrating a runbook from upstream. Standard profile: Postgres (`PostgresSilenceRepository`)/Redis (`RedisNotifyLog`) already own durability; setting `storage.path` there is logged and ignored, not wired in. Groups/alerts are NOT snapshotted, matching upstream — alerts re-arrive via Prometheus's resend behavior and groups rebuild from there. |
@@ -847,6 +852,24 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     - **Mixed senders.** Upstream prefers an explicit `endsAt` over a timeout one when merging the same alert; AMP
       stores the latest value sent, so an alert first posted with an explicit `endsAt` and then without one gets
       the timeout window.
+13. **Grouping is off by default.** `grouping.enabled` defaults to `false` (`internal/config/config.go`), so a
+    verbatim `alertmanager.yml` with a `route:` tree sends every alert as soon as it arrives —
+    `group_wait`/`group_interval`/`repeat_interval` have no effect and nothing warns about it. Set
+    `grouping.enabled: true` (Helm: `grouping.enabled`); `helm/amp/values-production.yaml`, the smoke stack and
+    `deploy/e2e-ha` already do. The lite profile ignores the key entirely — grouping needs the standard profile
+    with Redis. Tracked as `PROD-GROUPING-DEFAULT` (P0).
+14. **A built-in filter drops some alerts before routing.** `SimpleFilterEngine`
+    (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM, and silently drops:
+    alert names starting with `test` (case-insensitive), alerts labelled `environment=test` or `testing`, alerts
+    from namespaces `dev-sandbox` and `tmp`, resolved alerts older than 24 h, alerts without a name, and a repeat
+    of the same fingerprint and status within one minute. The rules are hard-coded, there is no metric, and the
+    drop is logged at INFO. Upstream drops none of these. The Helm `filters:` key does not configure it. Tracked
+    as `PROD-HARDCODED-FILTER` (P0); bug `HARDCODED-FILTER-DROPS-ALERTS`.
+15. **No config file means no configuration at all.** Without a readable config file (`AMP_CONFIG_FILE` unset and no
+    `./config.yaml`), and also when the file fails validation, AMP logs `Config file not found, using defaults`
+    and runs on a minimal built-in config that ignores every environment variable. In the standard profile this
+    exits with `database host is required`. The Helm chart defaults to `configFile.enabled: false`, so set it to
+    `true`. Tracked as `PROD-CONFIG-FILE-FALLBACK` (P0); bug `CONFIG-MISSING-FILE-DROPS-ENV`.
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`
@@ -939,13 +962,12 @@ clustering) mirrors upstream Alertmanager's mechanics, not just its API shape. S
 [`*_file` secret variants](#_file-secret-variants-fu7-b)). What is still not upstream-equal is per-integration FIELD
 fidelity (Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`, per-integration
 `http_config`) — see [Per-integration field fidelity](#per-integration-field-fidelity).
-`alertmanager.yml` both routes and delivers. What is still not upstream-equal is per-integration FIELD fidelity
-(Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`,
-`*_file` secret variants) — see [Per-integration field fidelity](#per-integration-field-fidelity).
 
 Concretely, a migration is:
-1. Copy your `route:` / `receivers:` / `inhibit_rules:` / `time_intervals:` / `global:` across — semantics carry
-   over, and the receivers' integrations become live delivery targets on load. No Kubernetes Secrets required.
+1. Copy your `route:` / `receivers:` / `time_intervals:` / `global:` across — semantics carry over, and the
+   receivers' integrations become live delivery targets on load. No Kubernetes Secrets required. Move
+   `inhibit_rules:` under `inhibition:` (a top-level key is ignored, Known Gap #9), set `grouping.enabled: true`
+   (Known Gap #13), and make sure the file is actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
 2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
    formatting, PagerDuty categorisation, per-integration HTTP settings). `*_file` credentials are delivered
    (FU7-B) — no action needed for those.
@@ -963,6 +985,8 @@ Treat AMP as a strong replacement candidate if you rely on:
 - standard health/readiness monitoring and hot configuration reload (`POST /-/reload` **and** `SIGHUP`)
 
 Still validate before a blanket swap:
+- that none of your alerts match the built-in filter (Known Gap #14): names starting with `test`, `environment=test`,
+  namespaces `dev-sandbox`/`tmp`
 - that every field you depend on inside a `*_configs` block is in the "Mapped (delivered)" column of the
   field-fidelity table, not the "Parsed but NOT delivered" one
 - exact wire-level webhook payload shape if a downstream integration depends on upstream's single alerts-array POST
