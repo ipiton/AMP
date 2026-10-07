@@ -661,6 +661,9 @@ func LoadConfig(configPath string) (*Config, error) {
 		// A missing file is not an error: continue with defaults and env
 		// vars. With SetConfigFile viper does not search for the file, so it
 		// reports absence as *fs.PathError, never ConfigFileNotFoundError.
+		// viper is global and keeps the last file it read: a missing file is
+		// only safe on the first load. Reload checks the file exists first
+		// (ReloadCoordinator.loadAndParse) — TECH-DEBT CONFIG-GLOBAL-VIPER-STATE.
 		if err := viper.ReadInConfig(); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}

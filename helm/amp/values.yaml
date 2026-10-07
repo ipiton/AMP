@@ -253,9 +253,7 @@ strategy:
 gracefulShutdown:
   terminationGracePeriodSeconds: 40  # Total budget before SIGKILL, counted from the start of preStop
   preStopDelay: 5  # Seconds the preStop hook sleeps (needs `sleep` in the image); 0 disables the hook
-  # Passed to AMP as server.graceful_shutdown_timeout. While BUGS.md
-  # CONFIG-MISSING-FILE-DROPS-ENV is open, a deployment without
-  # configFile.enabled ignores this env var and AMP uses its own 30s default.
+  # Passed to AMP as server.graceful_shutdown_timeout; 0 means 30s.
   timeoutSeconds: 30
 
 # ===============================

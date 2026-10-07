@@ -144,9 +144,6 @@ func main() {
 
 	// Start server
 	port := cfg.Server.Port
-	if port == 0 {
-		port = 9093
-	}
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
@@ -202,10 +199,10 @@ func main() {
 	slog.Info("Server stopped gracefully")
 }
 
-// webConfigFileEnv is read directly, not only through viper: when the config
-// file is missing, main falls back to a minimal config that never saw the
-// environment, and losing this variable there would silently turn
-// authentication off.
+// webConfigFileEnv is also read directly, not only through viper
+// (server.web_config_file). The direct read predates config loading from the
+// environment without a file (PROD-CONFIG-FILE-FALLBACK) and is kept as a
+// second path to the auth setting.
 const webConfigFileEnv = "SERVER_WEB_CONFIG_FILE"
 
 // resolveWebConfigFile picks the web config path: the -web.config.file flag,
