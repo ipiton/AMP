@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -656,11 +658,11 @@ func LoadConfig(configPath string) (*Config, error) {
 		viper.SetConfigFile(configPath)
 		viper.SetConfigType("yaml")
 
-		if err := viper.ReadInConfig(); err != nil {
-			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				return nil, fmt.Errorf("failed to read config file: %w", err)
-			}
-			// Config file not found, continue with defaults and env vars
+		// A missing file is not an error: continue with defaults and env
+		// vars. With SetConfigFile viper does not search for the file, so it
+		// reports absence as *fs.PathError, never ConfigFileNotFoundError.
+		if err := viper.ReadInConfig(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 	}
 
