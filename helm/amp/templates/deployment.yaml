@@ -63,6 +63,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "amp.serviceAccountName" . }}
+      # AMP reads configuration from the environment (viper AutomaticEnv):
+      # service-link variables such as METRICS_PORT=tcp://... from a Service
+      # named "metrics" would collide with config keys and fail startup.
+      enableServiceLinks: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 40 }}

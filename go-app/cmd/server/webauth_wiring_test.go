@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// PROD-AUTH: the web config path must survive the config-file fallback in
-// main, which does not read env; losing it would silently open the API.
+// PROD-AUTH: the web config path is also read from env directly, as a
+// second path to the auth setting next to server.web_config_file.
 func TestResolveWebConfigFile_Precedence(t *testing.T) {
 	t.Setenv(webConfigFileEnv, " /env.yml ")
 

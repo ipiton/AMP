@@ -1,0 +1,10 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/prod-config-file-fallback",
+  "commit": "216fa19",
+  "reviewed_at": "2026-10-07",
+  "rounds": 3,
+  "findings": { "blocker": 0, "major": 4, "minor": 5, "nit": 9 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

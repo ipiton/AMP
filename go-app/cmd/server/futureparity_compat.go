@@ -120,7 +120,8 @@ func newFutureParityCompatibilityRegistry() (*application.ServiceRegistry, error
 }
 
 func loadFutureParityCompatibilityConfig(logger *slog.Logger) *appconfig.Config {
-	cfg, err := appconfig.LoadConfig(resolveRuntimeConfigPath())
+	configPath, _ := resolveRuntimeConfigPath()
+	cfg, err := appconfig.LoadConfig(configPath)
 	if err != nil {
 		logger.Warn("futureparity config load failed, using compatibility defaults", "error", err)
 		cfg = futureParityDefaultConfig()

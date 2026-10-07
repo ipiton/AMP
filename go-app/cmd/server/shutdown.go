@@ -9,10 +9,8 @@ import (
 )
 
 // defaultGracefulShutdownTimeout is used when server.graceful_shutdown_timeout
-// is zero or negative. Zero is what main sees whenever the config file is
-// missing: the minimal fallback config never read viper's defaults or the
-// environment (BUGS.md CONFIG-MISSING-FILE-DROPS-ENV), and a zero budget would
-// cancel the HTTP drain immediately.
+// is zero or negative (e.g. set to 0 explicitly): a zero budget would cancel
+// the HTTP drain immediately.
 const defaultGracefulShutdownTimeout = 30 * time.Second
 
 // readinessGate is the slice of ServiceRegistry that flips readiness to

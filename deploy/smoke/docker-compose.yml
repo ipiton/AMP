@@ -39,8 +39,8 @@ services:
       # validator tag only allows a plaintext http:// webhook_configs[].url
       # when this OS env var (NOT a config.yaml key) is "development" --
       # otherwise a config with an http:// target fails route/receivers
-      # validation entirely and the app silently falls back to built-in
-      # defaults (profile: standard, needs Postgres). This smoke stack has
+      # validation entirely and the app exits with "failed to load
+      # configuration". This smoke stack has
       # no TLS-terminating sidecar, so plaintext HTTP to the webhook sink is
       # the point.
       ENVIRONMENT: development

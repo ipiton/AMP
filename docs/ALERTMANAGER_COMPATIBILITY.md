@@ -19,10 +19,10 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** four gaps bite on a verbatim upstream config
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** three gaps bite on a verbatim upstream config
 and none of them is reported at startup — a top-level `inhibit_rules:` is ignored (#9), grouping is off by default
-(#13), a built-in filter drops some alerts (#14), and without a loaded config file the process ignores its
-environment (#15). Each is a P0 in `docs/06-planning/BACKLOG.md`.
+(#13), and a built-in filter drops some alerts (#14). Separately, the Helm chart's default values do not start (#15).
+Each is a P0 in `docs/06-planning/BACKLOG.md`.
 
 Source of truth:
 - `go-app/internal/business/routing/` (route tree, matcher, evaluator)
@@ -865,11 +865,15 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     of the same fingerprint and status within one minute. The rules are hard-coded, there is no metric, and the
     drop is logged at INFO. Upstream drops none of these. The Helm `filters:` key does not configure it. Tracked
     as `PROD-HARDCODED-FILTER` (P0); bug `HARDCODED-FILTER-DROPS-ALERTS`.
-15. **No config file means no configuration at all.** Without a readable config file (`AMP_CONFIG_FILE` unset and no
-    `./config.yaml`), and also when the file fails validation, AMP logs `Config file not found, using defaults`
-    and runs on a minimal built-in config that ignores every environment variable. In the standard profile this
-    exits with `database host is required`. The Helm chart defaults to `configFile.enabled: false`, so set it to
-    `true`. Tracked as `PROD-CONFIG-FILE-FALLBACK` (P0); bug `CONFIG-MISSING-FILE-DROPS-ENV`.
+15. **A config error stops AMP; the Helm defaults do not pass validation yet.** Without a config file
+    (`AMP_CONFIG_FILE` unset and no `./config.yaml`) AMP reads its environment and built-in defaults. An
+    `AMP_CONFIG_FILE` that does not exist, an unreadable or malformed file, or a config that fails validation exits
+    with `failed to load configuration` — upstream likewise refuses to start on a bad `--config.file`. The Helm
+    chart's default values do not start: the default `llm.enabled: true` without `llm.apiKey` leaves the pod in
+    `CreateContainerConfigError`, and with LLM off the standard profile with the bundled PostgreSQL (no TLS support)
+    fails validation under the default `environment: production` — `database SSL mode 'disable' is not allowed in
+    production`. Workaround: the `lite` profile or an external PostgreSQL with TLS, see the Quick Start in
+    [`helm/amp/README.md`](../helm/amp/README.md#quick-start). Tracked as `HELM-DEFAULTS-VALIDATE` (P0).
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -52,13 +54,17 @@ func main() {
 		"profile", "OSS Core",
 	)
 
-	// Load configuration
-	cfg, err := config.LoadConfig(resolveRuntimeConfigPath())
+	// Load configuration. Any failure is fatal: starting on a partial or
+	// built-in config would silently drop routes, receivers and auth.
+	configPath, explicitConfigPath := resolveRuntimeConfigPath()
+	if err := checkConfigPath(configPath, explicitConfigPath); err != nil {
+		slog.Error("failed to load configuration", "path", configPath, "error", err)
+		os.Exit(1)
+	}
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
-		slog.Warn("Config file not found, using defaults", "error", err)
-		cfg = &config.Config{
-			Server: config.ServerConfig{Port: 9093},
-		}
+		slog.Error("failed to load configuration", "path", configPath, "error", err)
+		os.Exit(1)
 	}
 	// PARITY-B6: effective route prefix — explicit -web.route-prefix flag
 	// wins; otherwise use server.route_prefix, falling back to inheriting
@@ -70,10 +76,6 @@ func main() {
 	}
 
 	cfg.Server.WebConfigFile = resolveWebConfigFile(*webConfigFlag, cfg.Server.WebConfigFile)
-	if cfg.Server.Auth.UnauthenticatedPaths == nil {
-		// The minimal fallback config above never saw viper's defaults.
-		cfg.Server.Auth.UnauthenticatedPaths = config.DefaultUnauthenticatedPaths()
-	}
 
 	// Install the operator's log.* settings now that config exists. Before
 	// INF-A slice 1 the logger was hardcoded to JSON/info and cfg.Log was
@@ -142,9 +144,6 @@ func main() {
 
 	// Start server
 	port := cfg.Server.Port
-	if port == 0 {
-		port = 9093
-	}
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
@@ -200,10 +199,10 @@ func main() {
 	slog.Info("Server stopped gracefully")
 }
 
-// webConfigFileEnv is read directly, not only through viper: when the config
-// file is missing, main falls back to a minimal config that never saw the
-// environment, and losing this variable there would silently turn
-// authentication off.
+// webConfigFileEnv is also read directly, not only through viper
+// (server.web_config_file). The direct read predates config loading from the
+// environment without a file (PROD-CONFIG-FILE-FALLBACK) and is kept as a
+// second path to the auth setting.
 const webConfigFileEnv = "SERVER_WEB_CONFIG_FILE"
 
 // resolveWebConfigFile picks the web config path: the -web.config.file flag,
@@ -294,12 +293,32 @@ func watchReloadSignal(ctx context.Context, sigChan <-chan os.Signal, reloader c
 	}
 }
 
-func resolveRuntimeConfigPath() string {
+// resolveRuntimeConfigPath returns the config file path and whether it was
+// set explicitly via AMP_CONFIG_FILE rather than defaulted to ./config.yaml.
+func resolveRuntimeConfigPath() (string, bool) {
 	path := strings.TrimSpace(os.Getenv(runtimeConfigFileEnv))
 	if path != "" {
-		return path
+		return path, true
 	}
-	return "config.yaml"
+	return "config.yaml", false
+}
+
+// checkConfigPath rejects an explicit AMP_CONFIG_FILE that does not exist:
+// that is almost always a broken mount, and running on env and defaults
+// instead would start without the operator's routes, receivers and auth.
+// A missing default ./config.yaml is fine — configuration then comes from
+// the environment (the Helm chart's default, configFile.enabled: false).
+func checkConfigPath(path string, explicit bool) error {
+	_, err := os.Stat(path)
+	if err == nil || !errors.Is(err, fs.ErrNotExist) {
+		// Other stat errors surface from LoadConfig with full context.
+		return nil
+	}
+	if explicit {
+		return fmt.Errorf("config file %q from %s does not exist", path, runtimeConfigFileEnv)
+	}
+	slog.Info("no config file, using environment and defaults", "path", path)
+	return nil
 }
 
 // installLogging replaces the bootstrap logger with one built from the

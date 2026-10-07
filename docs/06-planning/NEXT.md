@@ -16,11 +16,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-CONFIG-FILE-FALLBACK** — починить `CONFIG-MISSING-FILE-DROPS-ENV`: отсутствие файла конфига — не ошибка (env + дефолты viper), любая другая ошибка `LoadConfig` — выход, а не минимальный фолбэк; тест «нет файла + env → env применён», сценарий с `configFile.enabled: false`. Прод-блокер P0 из `BACKLOG.md`. Ветка `bugfix/prod-config-file-fallback`, workspace `tasks/PROD-CONFIG-FILE-FALLBACK/`. ~0.5d
+_пусто_
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-CONFIG-FILE-FALLBACK` → `PROD-DEPS-OTEL-145` → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-DEPS-OTEL-145` → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 

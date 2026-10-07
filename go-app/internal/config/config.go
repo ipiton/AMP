@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -656,11 +658,14 @@ func LoadConfig(configPath string) (*Config, error) {
 		viper.SetConfigFile(configPath)
 		viper.SetConfigType("yaml")
 
-		if err := viper.ReadInConfig(); err != nil {
-			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-				return nil, fmt.Errorf("failed to read config file: %w", err)
-			}
-			// Config file not found, continue with defaults and env vars
+		// A missing file is not an error: continue with defaults and env
+		// vars. With SetConfigFile viper does not search for the file, so it
+		// reports absence as *fs.PathError, never ConfigFileNotFoundError.
+		// viper is global and keeps the last file it read: a missing file is
+		// only safe on the first load. Reload checks the file exists first
+		// (ReloadCoordinator.loadAndParse) — TECH-DEBT CONFIG-GLOBAL-VIPER-STATE.
+		if err := viper.ReadInConfig(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 	}
 
@@ -907,6 +912,12 @@ func setDefaults() {
 	//
 	// ServiceRegistry.validateNotifyTimingBudget rechecks (2) at startup
 	// against the actual publishing.queue.delivery_confirmation_timeout.
+	//
+	// BindEnv, not SetDefault: AutomaticEnv only resolves keys viper already
+	// knows, so without it GROUPING_RECONCILIATION_GRACE (the Helm chart's
+	// grouping.reconciliationGrace pin) never reached the config. BindEnv
+	// errors only when called without a key.
+	_ = viper.BindEnv("grouping.reconciliation_grace")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)
