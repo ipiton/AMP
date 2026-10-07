@@ -34,11 +34,11 @@ updated_at: 2026-10-07
 
 ## Success Criteria
 
-- [ ] Отсутствующий файл конфига (и по дефолтному пути, и по явному `AMP_CONFIG_FILE`) — не ошибка: конфиг собирается из дефолтов viper + env; на старте — INFO/WARN с путём.
+- [ ] Отсутствующий файл по дефолтному пути (`./config.yaml`, `AMP_CONFIG_FILE` не задан) — не ошибка: конфиг собирается из дефолтов viper + env; на старте — INFO с путём. Явный `AMP_CONFIG_FILE` без файла — exit 1 (fail-closed: почти всегда ошибка монтирования; решение — `Spec.md` § Target Design п. 2).
 - [ ] Любая другая ошибка `LoadConfig` (нет прав, битый YAML, unmarshal, `Validate`, inhibition) — выход с ненулевым кодом и сообщением; минимальный фолбэк `Config{Server: {Port: 9093}}` из `main.go` удалён.
 - [ ] Ключи, которые чарт передаёт через `amp-config`/env деплоймента, реально доходят до `Config` без файла (проверить, что viper `AutomaticEnv` + `Unmarshal` видит каждый ключ — в т.ч. без `SetDefault`); расхождения имён исправлены или задокументированы.
 - [ ] Unit-тест: «нет файла + env → env применён»; тест: «битый/невалидный файл → ошибка».
-- [ ] Render- или smoke-сценарий с `configFile.enabled: false` (дефолтный путь чарта) в гейте.
+- [ ] Тест в гейте: env-имена из шаблонов чарта (`configFile.enabled: false`, дефолтный путь) соответствуют ключам viper и доходят до `Config`. Живой старт дефолтного чарта — в `HELM-DEFAULTS-VALIDATE`: дефолтные values не проходят `Validate` (`research.md`).
 - [ ] Проверено, что тесты/e2e/smoke не полагаются на фолбэк; обходные пути, появившиеся из-за бага (`resolveWebConfigFile` env-чтение, `DefaultUnauthenticatedPaths` после фолбэка, `effectiveShutdownTimeout`), пересмотрены — оставить как страховку или упростить, решение записать.
 - [ ] `CHANGELOG.md` `[Unreleased]`: фикс + migration note (невалидный конфиг теперь фатален; env из ConfigMap начинает действовать). Баг `CONFIG-MISSING-FILE-DROPS-ENV` закрыт в `BUGS.md`.
 
