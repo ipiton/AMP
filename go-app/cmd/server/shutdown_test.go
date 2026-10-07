@@ -135,8 +135,7 @@ func TestEffectiveShutdownTimeout(t *testing.T) {
 		configured time.Duration
 		want       time.Duration
 	}{
-		// Zero is what main gets when the config file is missing
-		// (CONFIG-MISSING-FILE-DROPS-ENV); it must not mean "no drain".
+		// An explicit 0 must not mean "no drain".
 		{name: "zero falls back", configured: 0, want: defaultGracefulShutdownTimeout},
 		{name: "negative falls back", configured: -time.Second, want: defaultGracefulShutdownTimeout},
 		{name: "configured value kept", configured: 7 * time.Second, want: 7 * time.Second},

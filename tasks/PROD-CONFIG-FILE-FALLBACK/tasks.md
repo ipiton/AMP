@@ -81,7 +81,7 @@ based_on:
 
 ## Phase 3: Tests (`write-tests`, после verdict `pass`)
 
-- [ ] **3.1** `config_load_test.go`:
+- [x] **3.1** `config_load_test.go`:
   - `TestLoadConfig_MissingFile_UsesEnv` — `t.Setenv` для `PROFILE=lite`, `SERVER_PORT=18080`, `GROUPING_ENABLED=true`; `viper.Reset()` в начале; проверить поля и непустой `Server.Auth.UnauthenticatedPaths`;
   - `TestLoadConfig_MalformedYAML_ReturnsError`;
   - `TestLoadConfig_InvalidConfig_ReturnsError` (`server.external_url: "::bad"`);
@@ -89,14 +89,25 @@ based_on:
   - `TestLoadConfig_DirectoryPath_ReturnsError`.
   
   Изоляция глобального viper — по образцу соседних тестов. <!-- depends: R.1 | verify: cd go-app && go test ./internal/config/ -run 'TestLoadConfig_' -count=1 -v -->
-- [ ] **3.2** `chart_env_keys_test.go` — `TestChartEnvKeysKnownToViper`:
+- [x] **3.2** `chart_env_keys_test.go` — `TestChartEnvKeysKnownToViper`:
   - извлечь env-имена из `../../../helm/amp/templates/deployment.yaml` (`- name: ([A-Z][A-Z0-9_]+)` в контейнере `amp`) и `configmap.yaml` (`^([A-Z][A-Z0-9_]+):`);
   - после `setDefaults()` каждое имя, кроме явного allowlist (`SERVICE_NAME`, `SERVICE_VERSION`, `AMP_CONFIG_FILE`, `SERVER_WEB_CONFIG_FILE` — если не ключи, и прочих, читаемых через `os.Getenv`; каждое с комментарием-причиной), должно соответствовать ключу из `viper.AllKeys()`.
   
   Мутационная проверка: временно добавить `FOO_BAR:` в `configmap.yaml` → тест красный. <!-- depends: R.1 | verify: cd go-app && go test ./internal/config/ -run TestChartEnvKeysKnownToViper -count=1 -v -->
-- [ ] **3.3** Тест `checkConfigPath` в `cmd/server`: явный отсутствующий путь → ошибка с путём; дефолтный отсутствующий → `nil`; явный существующий → `nil`; `resolveRuntimeConfigPath` с пробелами в `AMP_CONFIG_FILE` → `explicit=false`. <!-- depends: R.1 | verify: cd go-app && go test ./cmd/server/ -run 'ConfigPath' -count=1 -v -->
+- [x] **3.3** Тест `checkConfigPath` в `cmd/server`: явный отсутствующий путь → ошибка с путём; дефолтный отсутствующий → `nil`; явный существующий → `nil`; `resolveRuntimeConfigPath` с пробелами в `AMP_CONFIG_FILE` → `explicit=false`. <!-- depends: R.1 | verify: cd go-app && go test ./cmd/server/ -run 'ConfigPath' -count=1 -v -->
 
 **Phase verification:** `cd go-app && go test ./internal/config/... ./cmd/server/... -count=1 -race`.
+
+## Write-tests notes (2026-10-07)
+
+- **Отклонение после вердикта (код, 1 строка):** `TestChartEnvKeysKnownToViper` нашёл, что `GROUPING_RECONCILIATION_GRACE` из `templates/configmap.yaml` не доходит до `Config`. У `grouping.reconciliation_grace` намеренно нет `SetDefault`, а `AutomaticEnv` видит только известные ключи. Probe в research этого не поймал: в дефолтном рендере ключ не выводится (`{{- if }}`). Фикс — `viper.BindEnv("grouping.reconciliation_grace")` в `setDefaults` (`config.go`), семантика «unset → деривация» сохранена и закреплена тестом. Покрывает критерий 3 requirements. Изменение после `review-verdict.json` (`216fa19`) — на проверку `qa-check`/`testing`.
+- Мутационные проверки (откат и восстановление, дерево чистое):
+  - `FOO_BAR:` в `configmap.yaml` → `TestChartEnvKeysKnownToViper` красный;
+  - удалить `BindEnv` → `TestLoadConfig_ReconciliationGraceFromEnv` и `TestChartEnvKeysKnownToViper` красные;
+  - заменить `fs.ErrNotExist` → `MissingFile_UsesEnv`, `ReconciliationGraceFromEnv`, `DanglingSymlink` красные.
+- `TestLoadConfig_EnvOverridesFile` уже был в `config_test.go` — инвариант «env перекрывает файл» покрыт им, дубль не добавлялся.
+- Устаревшие комментарии в `shutdown_test.go` (F2) и `webauth_wiring_test.go` обновлены.
+- F5 (stale viper) тестом не закреплён: это зафиксированное поведение долга `CONFIG-GLOBAL-VIPER-STATE`, а не контракт.
 
 ## Phase 4: Gates и закрытие (`testing` → `finalize`)
 
