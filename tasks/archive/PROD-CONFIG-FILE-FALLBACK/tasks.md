@@ -121,7 +121,7 @@ based_on:
 ## Phase 4: Gates и закрытие (`testing` → `finalize`)
 
 - [x] **4.1** Гейты AMP (WORKFLOW.md § Гейты): `go vet` + `go test` затронутых пакетов, `make -C go-app quality-gates-fast` (после — `git status`), `scripts/release-gate.sh`, `git diff --check`, нет `_, _ :=` в диффе. <!-- verify: все команды exit 0; вывод — в testing-отчёт -->
-- [ ] **4.2** `finalize`:
+- [x] **4.2** `finalize`:
   - doc-nit R3-1..R3-3 из `review-findings.md` (README чарта, compat п. 15);
   - TECH-DEBT: `CONFIG-GLOBAL-VIPER-STATE` (F5), `CONFIG-VALIDATION-ERROR-REDACTION` (F6), `CONFIG-PATH-RESOLUTION-DUP` (F8); `HELM-DEFAULTS-VALIDATE` — включить values внешней БД со ссылкой на Secret (N1);
   - `BUGS.md` — закрыть `CONFIG-MISSING-FILE-DROPS-ENV`;
@@ -133,10 +133,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated (CHANGELOG, compat doc, chart README, BUGS, BACKLOG, NEXT, DONE)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated (CHANGELOG, compat doc, chart README, BUGS, BACKLOG, NEXT, DONE)

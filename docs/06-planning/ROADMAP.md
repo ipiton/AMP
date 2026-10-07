@@ -9,7 +9,7 @@
 
 ## Stream: Storage & Reliability
 - [x] **PHASE-3: Storage Hardening** — Стабильный startup/shutdown, migrations, health decomposition.
-- [ ] **PROD-READINESS** _(добавлен 2026-10-07)_ — путь от pilot-ready к production-ready: P0 из `BACKLOG.md` § «Production Readiness» (фолбэк конфига без файла, красный `govulncheck`, флейк таймера группировки, группировка по умолчанию, верхнеуровневый `inhibit_rules:`, жёсткий фильтр, релиз, решение по HA Postgres). Security- и shutdown-блокеры аудита 2026-09-21 закрыты (PROD-AUTH, -INGRESS-HARDENING, -RBAC-SCOPE, -SECURITY-MD, -CI-IMAGES, -DEPS-VULN, -GRACEFUL-SHUTDOWN).
+- [ ] **PROD-READINESS** _(добавлен 2026-10-07)_ — путь от pilot-ready к production-ready: P0 из `BACKLOG.md` § «Production Readiness» (дефолтные values чарта не проходят валидацию, красный `govulncheck`, флейк таймера группировки, группировка по умолчанию, верхнеуровневый `inhibit_rules:`, жёсткий фильтр, релиз, решение по HA Postgres). Security- и shutdown-блокеры аудита 2026-09-21 закрыты (PROD-AUTH, -INGRESS-HARDENING, -RBAC-SCOPE, -SECURITY-MD, -CI-IMAGES, -DEPS-VULN, -GRACEFUL-SHUTDOWN, -CONFIG-FILE-FALLBACK).
 
 ## Stream: Delivery & Publishing
 - [x] **PHASE-4: Production Publishing Path** — Реальный publisher path, retries/rate limits и метрики.

@@ -28,7 +28,31 @@
 - **Refs:** `helm/amp/templates/{redis-statefulset,secret,postgresql-secret,postgresql-statefulset}.yaml`
 - **Status:** open
 
+### [medium][Config][~0.5d] CONFIG-GLOBAL-VIPER-STATE
+- **Title:** `LoadConfig` на глобальном viper держит значения прошлого файла
+- **Problem:** `config.LoadConfig` работает на глобальном `viper`. Отсутствующий файл не ошибка (PROD-CONFIG-FILE-FALLBACK), но `ReadInConfig` при этом не сбрасывает прочитанное ранее: повторный `LoadConfig` после исчезновения файла вернёт старые значения и `Routing == nil` без ошибки. Старт не затронут; reload проверяет файл до вызова (`ReloadCoordinator.loadAndParse`), остаётся окно TOCTOU между `os.ReadFile` и `LoadConfig` — при атомарной смене ConfigMap на практике недостижимо. Инвариант записан комментарием в `LoadConfig`.
+- **Impact:** любой новый вызов `LoadConfig` вне старта может молча получить смесь старого и нового конфига; тесты вынуждены звать `resetViper`.
+- **Fix:** `viper.New()` на каждый вызов (или reload передаёт уже прочитанные байты).
+- **Refs:** `go-app/internal/config/config.go` (`LoadConfig`, `loadRouteConfig`), `reload_coordinator.go`; `tasks/archive/PROD-CONFIG-FILE-FALLBACK/review-findings.md` F5.
+- **Status:** open
+
+### [medium][Security][~0.5d] CONFIG-VALIDATION-ERROR-REDACTION
+- **Title:** ошибки валидации конфига печатают URL с секретами
+- **Problem:** сообщения валидаторов (E114/E116, проверка `external_url`) эхом печатают значение: Slack webhook URL (это credential), userinfo в `external_url`. С PROD-CONFIG-FILE-FALLBACK невалидный конфиг — ERROR `failed to load configuration` и exit 1, т. е. строка повторяется на каждом рестарте crash loop. Не регресс: раньше то же уходило в WARN. Ошибки YAML и mapstructure значений не печатают.
+- **Impact:** секреты ресиверов попадают в логи пода и в агрегатор логов.
+- **Fix:** редактировать userinfo, query и path URL в сообщениях валидаторов (показывать схему и хост).
+- **Refs:** `go-app/internal/config`, `cmd/server/main.go`; review-findings F6.
+- **Status:** open
+
 ## Low
+
+### [low][Config][~0.1d] CONFIG-PATH-RESOLUTION-DUP
+- **Title:** путь конфига разрешается в двух местах по-разному
+- **Problem:** `cmd/server` берёт `AMP_CONFIG_FILE` с `TrimSpace` (`resolveRuntimeConfigPath`), reload в `service_registry.go:327-330`, `:2642-2645` — без. Значение из пробелов или с пробелом в начале старт и reload разрешают по-разному. Существовало до PROD-CONFIG-FILE-FALLBACK.
+- **Impact:** редкий: reload читает другой файл, чем старт.
+- **Fix:** передавать в `ServiceRegistry` путь, уже разрешённый в `main`.
+- **Refs:** review-findings F8.
+- **Status:** open
 
 ### [low][Gate][~0.1d] RELEASE-GATE-UNQUOTED-ARGS
 - **Title:** `scripts/release-gate.sh` собирает аргументы helm строкой без кавычек
