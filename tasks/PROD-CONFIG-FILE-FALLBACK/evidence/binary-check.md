@@ -14,3 +14,11 @@ directory under `env -i` (only `HOME` plus the listed variables).
 | f | as (e) but `DATABASE_SSL_MODE=require` | running → exits on DB | config loads; `Failed to ping database` (no Postgres locally) — validation passes |
 
 The test DB password did not appear in any log (`grep -c` = 0 for all runs).
+
+## Fix round 1 (deep-review F1/F3/F4) — 2026-10-07
+
+| # | Setup | Exit | Log |
+|---|---|---|---|
+| g | README `values-small.yaml` + `--set profile=lite`: rendered env + rendered `config.yaml` (local overrides: `STORAGE_FILESYSTEM_PATH`, `SERVER_HOST=127.0.0.1`, `SERVER_PORT=18094`) | running | no `failed to load configuration`; `GET :18094/-/healthy` → 200 |
+
+Render: `enableServiceLinks: false` present on the `amp` Deployment pod spec for `profile=standard` and `profile=lite`.

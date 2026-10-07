@@ -21,7 +21,7 @@ helm install amp ./helm/amp \
   --namespace monitoring
 ```
 
-Do not install with chart defaults alone (status 2026-10-07): without `configFile.enabled: true` the process ignores its environment and exits in the `standard` profile; grouping stays off unless `grouping.enabled: true`; inhibition rules must sit under `inhibition:`, not at the top level. See [Known Gaps](ALERTMANAGER_COMPATIBILITY.md#known-gaps-honesty-notes) #9 and #13–#15.
+Do not install with chart defaults alone (status 2026-10-07): with the default `llm.enabled: true` and no `llm.apiKey` the pod cannot start (the `llm-api-key` Secret key is missing); with the bundled PostgreSQL the `standard` profile does not start either — the bundled PostgreSQL has no TLS support, and `environment: production` (the default) rejects `sslmode=disable`, so AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file above has the same problem; it starts with an external PostgreSQL that uses TLS (`postgresql.enabled: false` plus your server's connection settings), or in the `lite` profile. Tracked as `HELM-DEFAULTS-VALIDATE`. Also, grouping stays off unless `grouping.enabled: true`; inhibition rules must sit under `inhibition:`, not at the top level. See [Known Gaps](ALERTMANAGER_COMPATIBILITY.md#known-gaps-honesty-notes) #9 and #13–#15.
 
 Put your routes and receivers into `configFile.content`; receivers declared there become delivery targets. Without any target AMP ingests alerts but stays in `metrics-only` mode.
 

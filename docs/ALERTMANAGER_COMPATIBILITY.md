@@ -869,9 +869,10 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     (`AMP_CONFIG_FILE` unset and no `./config.yaml`) AMP reads its environment and built-in defaults. An
     `AMP_CONFIG_FILE` that does not exist, an unreadable or malformed file, or a config that fails validation exits
     with `failed to load configuration` — upstream likewise refuses to start on a bad `--config.file`. The Helm
-    chart's default values fail validation in the standard profile (`environment: production` with the bundled
-    PostgreSQL without TLS): AMP exits with `database SSL mode 'disable' is not allowed in production`. Tracked as
-    `HELM-DEFAULTS-VALIDATE` (P0).
+    chart's default values do not start: the default `llm.enabled: true` without `llm.apiKey` leaves the pod in
+    `CreateContainerConfigError`, and with LLM off the standard profile with the bundled PostgreSQL (no TLS support)
+    fails validation under the default `environment: production` — `database SSL mode 'disable' is not allowed in
+    production`. Tracked as `HELM-DEFAULTS-VALIDATE` (P0).
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`
