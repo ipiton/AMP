@@ -31,6 +31,7 @@ import (
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	inhibitionpkg "github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	investigationinfra "github.com/ipiton/AMP/internal/infrastructure/investigation"
+	invrunbooks "github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks"
 	invtools "github.com/ipiton/AMP/internal/infrastructure/investigation/tools"
 	"github.com/ipiton/AMP/internal/infrastructure/k8s"
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
@@ -2215,8 +2216,11 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 		}
 
 		agentLoop := coreinv.NewAgentLoop(llmClient, registry, coreinv.DefaultAgentLoopConfig())
+		r.configureRunbooks(agentLoop)
 		r.investigationQueue.SetAgentLoop(agentLoop)
 		r.logger.Info("Agentic investigation loop enabled")
+	} else if r.config.Investigation.Runbooks.Enabled {
+		r.logger.Warn("investigation.runbooks.enabled is set but runbooks require llm.agent_mode=true; runbooks disabled")
 	}
 
 	r.investigationQueue.Start()
@@ -2227,6 +2231,34 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 		"agent_mode", r.config.LLM.AgentMode,
 	)
 	return nil
+}
+
+// configureRunbooks loads investigation runbooks (PHASE-6B) into agentLoop.
+// A missing or unreadable runbooks directory disables runbooks with a warning
+// instead of failing startup.
+func (r *ServiceRegistry) configureRunbooks(agentLoop *coreinv.AgentLoop) {
+	rbCfg := r.config.Investigation.Runbooks
+	if !rbCfg.Enabled {
+		return
+	}
+
+	set, err := invrunbooks.LoadDir(rbCfg.Path, r.logger)
+	if err != nil {
+		r.logger.Warn("Investigation runbooks unavailable, continuing without runbooks", "path", rbCfg.Path, "error", err)
+		return
+	}
+	if set.Len() == 0 {
+		r.logger.Info("No investigation runbooks loaded, runbook injection inactive", "path", rbCfg.Path)
+		return
+	}
+
+	agentLoop.SetRunbooks(set, rbCfg.EffectiveMaxRunbooks(), rbCfg.EffectiveMaxChars())
+	r.logger.Info("Investigation runbooks enabled",
+		"path", rbCfg.Path,
+		"runbooks", set.Len(),
+		"max_runbooks", rbCfg.EffectiveMaxRunbooks(),
+		"max_chars", rbCfg.EffectiveMaxChars(),
+	)
 }
 
 // initializeAlertProcessor initializes the alert processor.

@@ -26,14 +26,10 @@ Queue и WIP — источник правды для выбора задачи.
   Trigger: owner ready.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. Включать после `PROD-DEPS-OTEL-145`: сейчас required `govulncheck` красный на `main`. `~5min`
   Trigger: owner ready.
-- [ ] **RUNBOOK-BRANCH-DECISION** — ветка `claude/start-task-pyym8f`: `PHASE-6B-RUNBOOK-ENGINE` реализован и закрыт там (10 коммитов, `c7ae269`, 2026-09-27), в `main` не влит. Решить: rebase + review + merge или удалить ветку. `~5min`
-  Trigger: owner ready.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-6B-RUNBOOK-ENGINE** — Markdown knowledge base с auto-matching по alert labels. Код готов в ветке `claude/start-task-pyym8f`; задача — влить после `RUNBOOK-BRANCH-DECISION`: rebase на текущий `main`, конфликт-разбор, release-gate, review. ~0.5–1d.
-  Blocked-by: RUNBOOK-BRANCH-DECISION.
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `PROD-LLM-ALERT-PATH-ISOLATION`: пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
 ### 2. Operations

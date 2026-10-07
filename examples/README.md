@@ -28,6 +28,13 @@ Files:
 - [k8s/pagerduty-secret-example.yaml](./k8s/pagerduty-secret-example.yaml)
 - [k8s/rootly-secret-example.yaml](./k8s/rootly-secret-example.yaml)
 
+### `runbooks/`
+
+Example investigation runbook for the runbook engine (`investigation.runbooks`, requires `llm.agent_mode: true`). Point `investigation.runbooks.path` at a directory of such files; format and matching rules are in [go-app/internal/core/investigation/README.md](../go-app/internal/core/investigation/README.md).
+
+Files:
+- [runbooks/high-memory-usage.md](./runbooks/high-memory-usage.md)
+
 ## How To Use These Examples
 
 - Read the source to understand the current interface shape and data flow.

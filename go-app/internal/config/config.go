@@ -90,6 +90,8 @@ type InvestigationConfig struct {
 	OnlyFiring bool `mapstructure:"only_firing"`
 	// Tools configures built-in investigation tools (PHASE-6A).
 	Tools InvestigationToolsConfig `mapstructure:"tools" yaml:"tools,omitempty"`
+	// Runbooks configures the runbook engine (PHASE-6B).
+	Runbooks InvestigationRunbooksConfig `mapstructure:"runbooks" yaml:"runbooks,omitempty"`
 }
 
 // GroupingConfig controls the alert grouping subsystem (task 2.2,
@@ -914,6 +916,10 @@ func setDefaults() {
 	viper.SetDefault("investigation.retry_interval", "5s")
 	viper.SetDefault("investigation.llm_timeout", "60s")
 	viper.SetDefault("investigation.only_firing", true)
+	viper.SetDefault("investigation.runbooks.enabled", false)
+	viper.SetDefault("investigation.runbooks.path", DefaultRunbooksPath)
+	viper.SetDefault("investigation.runbooks.max_runbooks", DefaultRunbooksMaxRunbooks)
+	viper.SetDefault("investigation.runbooks.max_chars", DefaultRunbooksMaxChars)
 
 	// Log defaults
 	viper.SetDefault("log.level", "info")

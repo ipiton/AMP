@@ -45,7 +45,7 @@
 > Вдохновлено: [SherlockOps](https://github.com/Duops/SherlockOps) (двухфазный pipeline, agentic investigation), [Robusta+HolmesGPT](https://github.com/robusta-dev/holmesgpt) (K8s enrichment, AI RCA), [Keep](https://github.com/keephq/keep) (AIOps).
 
 - [~] **PHASE-5: Two-Phase Alert Pipeline + LLM Investigation** — сделано: async investigation (очередь, workers, retry, сохранение, `GET /api/v1/alerts/{fingerprint}/investigation`; PHASE-5A, 5A-TAIL) и agentic loop с tool calling (PHASE-5B). Не сделано: доставка результата в Slack/Telegram/Teams; fallback провайдеров (PHASE-5C). **Расхождение с замыслом:** Phase 1 не «<100ms без изменений» — при `llm.enabled` классификация синхронна в `POST /api/v2/alerts` и может дропнуть алерт (`PROD-LLM-ALERT-PATH-ISOLATION`, P1).
-- [~] **PHASE-6: Investigation Toolset + Runbooks** — built-in tools Prometheus/Loki/Kubernetes/PostgreSQL сделаны (PHASE-6A, 2026-05-08); runbook engine (PHASE-6B) реализован в невлитой ветке `claude/start-task-pyym8f`; MCP tools (6C) и environment routing (6D) — не начаты. Kubernetes tool чартом не проводится (`INVESTIGATION-K8S-TOOL-HELM`).
+- [~] **PHASE-6: Investigation Toolset + Runbooks** — built-in tools Prometheus/Loki/Kubernetes/PostgreSQL сделаны (PHASE-6A, 2026-05-08); runbook engine (PHASE-6B) сделан 2026-09-27 и влит в `main` 2026-10-07; MCP tools (6C) и environment routing (6D) — не начаты. Kubernetes tool чартом не проводится (`INVESTIGATION-K8S-TOOL-HELM`).
 - [ ] **PHASE-7: UI/UX Workflow + Human-in-the-Loop** — timeline расследования в dashboard, human approval для remediation, feedback loop.
 
 ## Stream: Release

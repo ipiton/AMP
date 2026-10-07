@@ -14,6 +14,7 @@ import (
 type mockAgentLLM struct {
 	responses []investigation.AgentResponse
 	callCount int
+	prompts   []investigation.PromptContext
 }
 
 func (m *mockAgentLLM) InvestigateWithTools(
@@ -22,7 +23,9 @@ func (m *mockAgentLLM) InvestigateWithTools(
 	_ *core.ClassificationResult,
 	_ []investigation.ToolDefinition,
 	_ []investigation.AgentMessage,
+	pc investigation.PromptContext,
 ) (*investigation.AgentResponse, error) {
+	m.prompts = append(m.prompts, pc)
 	if m.callCount >= len(m.responses) {
 		return nil, errors.New("mockAgentLLM: no more responses")
 	}
