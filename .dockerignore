@@ -7,3 +7,9 @@ tasks
 docs
 helm
 deploy
+# Local outputs of go-app/Makefile, all gitignored: the Go build/module
+# cache (GOCACHE, GOMODCACHE, GOPATH -- gigabytes once filled) and the
+# binaries. The image downloads modules and builds the binary itself.
+go-app/.cache
+go-app/server
+go-app/server_unix
