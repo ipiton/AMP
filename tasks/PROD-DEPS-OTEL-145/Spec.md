@@ -12,7 +12,7 @@ based_on:
 
 # Specification: OpenTelemetry v1.45.0 (GO-2026-6505)
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary
@@ -23,7 +23,7 @@ based_on:
 
 | Requirement / Criterion | Covered by |
 |---|---|
-| otel-модули согласованно на v1.45.0, карантин проверен | Target Design, Design Premises P1–P2, `evidence/spec-trial-go.mod.diff` |
+| otel-модули согласованно на v1.45.0, карантин проверен | Target Design, Design Premises P1–P2, `evidence/go.mod.diff` |
 | `govulncheck ./...` — 0 достижимых | Design Premises P3; повторный прогон в `testing` |
 | `scripts/release-gate.sh` зелёный | `testing` |
 | `CHANGELOG.md` `[Unreleased]` (Security) | Component Architecture, `finalize` |
@@ -41,7 +41,7 @@ based_on:
 
 | # | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|---|
-| P1 | `go get` пяти direct otel-модулей @v1.45.0 меняет только otel-семейство + `go-logr/logr` v1.4.4, `otel/proto/otlp` v1.11.0, `genproto/googleapis/{api,rpc}` @20260803; `grpc`, `x/*`, `go`/`toolchain` не меняются | пробный `go get` 2026-10-08, дифф `evidence/spec-trial-go.mod.diff`, откатан | measured | дифф шире — пересмотреть минимальность, проверить даты новой транзитивки |
+| P1 | `go get` пяти direct otel-модулей @v1.45.0 меняет только otel-семейство + `go-logr/logr` v1.4.4, `otel/proto/otlp` v1.11.0, `genproto/googleapis/{api,rpc}` @20260803; `grpc`, `x/*`, `go`/`toolchain` не меняются | пробный `go get` 2026-10-08, дифф `evidence/go.mod.diff`, откатан | measured | дифф шире — пересмотреть минимальность, проверить даты новой транзитивки |
 | P2 | Все новые версии старше 7 дней: otel* 2026-08-03, genproto 2026-08-03, otlp proto 2026-07-22, logr 2026-07-20 | `go list -m -json <mod>@<ver>` → `Time`, 2026-10-08 | measured | взять предыдущую версию модуля или зафиксировать исключение |
 | P3 | После апгрейда `govulncheck ./...` — 0 достижимых уязвимостей, 1 недостижимая в required-модулях (ожидаемо GO-2026-5932, `x/crypto/openpgp`, без фикса) | пробный прогон `govulncheck@v1.8.0` на апгрейженном дереве, 2026-10-08 (локально go1.27.1; предупреждения о версии source-processing — шум) | measured | искать новую advisory, при необходимости v1.46.0 |
 | P4 | `pkg/telemetry` не импортируется ни одним пакетом модуля; `go list -deps ./cmd/...` его не содержит ⇒ GO-2026-6505 не попадает в поставляемые бинари, govulncheck считает путь достижимым через экспортированный `NewTracer` | `go list -f '{{.Imports}}' ./...`, `go list -deps ./cmd/...` по всему модулю | call-path-traced | если бы бинари его тянули — уязвимость реально эксплуатируема в проде, приоритет выше, но решение то же |

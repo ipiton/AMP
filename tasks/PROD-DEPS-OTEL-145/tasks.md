@@ -13,7 +13,7 @@ based_on:
 
 # Implementation Plan: OpenTelemetry v1.45.0 (GO-2026-6505)
 
-**Based on:** requirements.md (Research mini) / Spec.md  
+**Based on:** requirements.md (Research mini) / Spec.md
 **Date:** 2026-10-08
 
 ## Touched Files
@@ -27,7 +27,7 @@ based_on:
 
 > **Wave 1**
 
-- [x] **1.1** `cd go-app && go get go.opentelemetry.io/otel@v1.45.0 go.opentelemetry.io/otel/sdk@v1.45.0 go.opentelemetry.io/otel/trace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0` (без `-u`, без `go mod tidy`). <!-- verify: diff <(git diff go-app/go.mod) tasks/PROD-DEPS-OTEL-145/evidence/spec-trial-go.mod.diff — пусто (совпадает с Spec P1) -->
+- [x] **1.1** `cd go-app && go get go.opentelemetry.io/otel@v1.45.0 go.opentelemetry.io/otel/sdk@v1.45.0 go.opentelemetry.io/otel/trace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0` (без `-u`, без `go mod tidy`). <!-- verify: diff <(git diff go-app/go.mod) tasks/PROD-DEPS-OTEL-145/evidence/go.mod.diff — пусто (совпадает с Spec P1) -->
 
 > **Wave 2** — depends on Wave 1
 
@@ -44,7 +44,7 @@ based_on:
 
 ### Implementation notes (2026-10-08)
 
-- 1.1: дифф `go.mod` побайтно совпал с `evidence/spec-trial-go.mod.diff`.
+- 1.1: дифф `go.mod` побайтно совпал с пробным диффом из `spec`. В `testing` evidence перегенерирован из коммита `8acbb3b` как `git diff -U0` (`evidence/go.mod.diff`): контекстные строки патча (пробел + таб) краснили `git diff --check`; содержимое изменений то же.
 - 1.2: вне otel/logr/genproto изменений в `go.mod` нет.
 - 1.3: `GOFLAGS=-mod=readonly go build ./...` OK, `go test ./pkg/telemetry/...` OK.
 - 1.4: `evidence/govulncheck.txt` — 0 достижимых, 1 недостижимая в required-модулях (GO-2026-5932, по `-show verbose`).
