@@ -27,20 +27,29 @@ based_on:
 
 > **Wave 1**
 
-- [ ] **1.1** `cd go-app && go get go.opentelemetry.io/otel@v1.45.0 go.opentelemetry.io/otel/sdk@v1.45.0 go.opentelemetry.io/otel/trace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0` (без `-u`, без `go mod tidy`). <!-- verify: diff <(git diff go-app/go.mod) tasks/PROD-DEPS-OTEL-145/evidence/spec-trial-go.mod.diff — пусто (совпадает с Spec P1) -->
+- [x] **1.1** `cd go-app && go get go.opentelemetry.io/otel@v1.45.0 go.opentelemetry.io/otel/sdk@v1.45.0 go.opentelemetry.io/otel/trace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0` (без `-u`, без `go mod tidy`). <!-- verify: diff <(git diff go-app/go.mod) tasks/PROD-DEPS-OTEL-145/evidence/spec-trial-go.mod.diff — пусто (совпадает с Spec P1) -->
 
 > **Wave 2** — depends on Wave 1
 
-- [ ] **1.2** Проверить инварианты: `go`/`toolchain`, `grpc`, `x/*` и не-otel direct-зависимости не изменились. <!-- depends: 1.1 | verify: git diff go-app/go.mod | grep '^[-+]' | grep -v -E 'opentelemetry|go-logr/logr|genproto|^(\+\+\+|---)' — пусто -->
-- [ ] **1.3** Сборка и тесты затронутого пакета в readonly-режиме (ловит недостающие хеши в `go.sum`, Spec Edge Case 1). <!-- depends: 1.1 | verify: cd go-app && GOFLAGS=-mod=readonly go build ./... && go vet ./pkg/telemetry/... && go test ./pkg/telemetry/... -->
-- [ ] **1.4** `govulncheck` — 0 достижимых. <!-- depends: 1.1 | verify: cd go-app && go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... → "Your code is affected by 0 vulnerabilities"; вывод в evidence/govulncheck.txt -->
-- [ ] **1.5** Коммит `fix(deps): bump OpenTelemetry to v1.45.0 (GO-2026-6505)` — только `go-app/go.mod`, `go-app/go.sum`. <!-- depends: 1.2, 1.3, 1.4 | verify: git show --stat HEAD — два файла -->
+- [x] **1.2** Проверить инварианты: `go`/`toolchain`, `grpc`, `x/*` и не-otel direct-зависимости не изменились. <!-- depends: 1.1 | verify: git diff go-app/go.mod | grep '^[-+]' | grep -v -E 'opentelemetry|go-logr/logr|genproto|^(\+\+\+|---)' — пусто -->
+- [x] **1.3** Сборка и тесты затронутого пакета в readonly-режиме (ловит недостающие хеши в `go.sum`, Spec Edge Case 1). <!-- depends: 1.1 | verify: cd go-app && GOFLAGS=-mod=readonly go build ./... && go vet ./pkg/telemetry/... && go test ./pkg/telemetry/... -->
+- [x] **1.4** `govulncheck` — 0 достижимых. <!-- depends: 1.1 | verify: cd go-app && go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... → "Your code is affected by 0 vulnerabilities"; вывод в evidence/govulncheck.txt -->
+- [x] **1.5** Коммит `fix(deps): bump OpenTelemetry to v1.45.0 (GO-2026-6505)` — только `go-app/go.mod`, `go-app/go.sum`. <!-- depends: 1.2, 1.3, 1.4 | verify: git show --stat HEAD — два файла -->
 
 **Phase verification:** `make -C go-app quality-gates-fast` + `git status` чистый после `go fmt`.
 
 ## Phase 2: Docs
 
-- [ ] **2.1** `CHANGELOG.md` `[Unreleased]` → `### Security`: `PROD-DEPS-OTEL-145` (дата, GO-2026-6505, otel v1.44.0 → v1.45.0, URL экспортёра больше не пишется в INFO-лог; в бинари AMP уязвимый путь не входил — `pkg/telemetry` не импортируется). Отдельный коммит `docs(changelog): …`. <!-- verify: grep -n "PROD-DEPS-OTEL-145" CHANGELOG.md -->
+- [x] **2.1** `CHANGELOG.md` `[Unreleased]` → `### Security`: `PROD-DEPS-OTEL-145` (дата, GO-2026-6505, otel v1.44.0 → v1.45.0, URL экспортёра больше не пишется в INFO-лог; в бинари AMP уязвимый путь не входил — `pkg/telemetry` не импортируется). Отдельный коммит `docs(changelog): …`. <!-- verify: grep -n "PROD-DEPS-OTEL-145" CHANGELOG.md -->
+
+### Implementation notes (2026-10-08)
+
+- 1.1: дифф `go.mod` побайтно совпал с `evidence/spec-trial-go.mod.diff`.
+- 1.2: вне otel/logr/genproto изменений в `go.mod` нет.
+- 1.3: `GOFLAGS=-mod=readonly go build ./...` OK, `go test ./pkg/telemetry/...` OK.
+- 1.4: `evidence/govulncheck.txt` — 0 достижимых, 1 недостижимая в required-модулях (GO-2026-5932, по `-show verbose`).
+- Phase verification: `make -C go-app quality-gates-fast` — passed, `go fmt` файлов не менял.
+- 1.5: `go.sum` — только добавления (+21): старые хеши остались, т. к. `go mod tidy` не запускался (Spec § Target Design, `GO-MOD-TIDY-CHECK`). Отклонений от Spec нет.
 
 ## Phase 3: Deep review
 
