@@ -4,7 +4,7 @@ slug: prod-deps-otel-145
 stream: Security
 type: bug
 priority: critical
-status: active
+status: complete
 created_at: 2026-10-08
 updated_at: 2026-10-08
 ---
@@ -32,11 +32,11 @@ updated_at: 2026-10-08
 
 ## Success Criteria
 
-- [ ] `go.opentelemetry.io/otel`, `otel/sdk`, `otel/trace`, `otel/metric`, `otlptrace`, `otlptracegrpc` подняты согласованно до v1.45.0 (+ неизбежная транзитивка); дата публикации проверена против карантина 7 дней.
-- [ ] `govulncheck ./...` в `go-app` — 0 достижимых уязвимостей (недостижимые без фикса, например GO-2026-5932 в `x/crypto`, — допустимы и перечислены).
-- [ ] `scripts/release-gate.sh` зелёный (или красный только из-за известных флейков, перепрогон зафиксирован).
-- [ ] Запись в `CHANGELOG.md` `[Unreleased]` (Security).
-- [ ] CI на PR: job `govulncheck` зелёный.
+- [x] `go.opentelemetry.io/otel`, `otel/sdk`, `otel/trace`, `otel/metric`, `otlptrace`, `otlptracegrpc` подняты согласованно до v1.45.0 (+ неизбежная транзитивка); дата публикации проверена против карантина 7 дней.
+- [x] `govulncheck ./...` в `go-app` — 0 достижимых уязвимостей (недостижимые без фикса, например GO-2026-5932 в `x/crypto`, — допустимы и перечислены).
+- [x] `scripts/release-gate.sh` зелёный (или красный только из-за известных флейков, перепрогон зафиксирован).
+- [x] Запись в `CHANGELOG.md` `[Unreleased]` (Security).
+- [~] CI на PR: job `govulncheck` зелёный. _(PR не открывался по решению владельца; эквивалент — `govulncheck` на `go1.26.8` в deep-review; подтверждение — CI на `main` после push)_
 
 ## Non-Goals
 

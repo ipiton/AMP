@@ -3,7 +3,7 @@ id: PROD-DEPS-OTEL-145
 slug: prod-deps-otel-145
 stream: Security
 type: bug
-status: active
+status: complete
 created_at: 2026-10-08
 updated_at: 2026-10-08
 based_on:
@@ -70,8 +70,8 @@ based_on:
 
 - [x] **5.1** `scripts/release-gate.sh` — зелёный (флейки `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` / `PUBLISHING-WARMUP-TEST-FLAKY` — перепрогон и фиксация). <!-- depends: 4.1 | verify: exit 0, вывод в evidence/release-gate.txt -->
 - [x] **5.2** `git diff --check main...HEAD`; нет `_, _ :=` в диффе. <!-- depends: 5.1 | verify: пустой вывод -->
-- [ ] **5.3** PR → CI: `gate` и `govulncheck` зелёные (закрывает Spec P6). <!-- depends: 5.2 | verify: gh pr checks -->
-- [ ] **5.4** `/finalize`: DONE.md, NEXT.md (WIP → пусто), BACKLOG (P0 → Закрыто), предложить `DEAD-PKG-TELEMETRY` (Spec § Open Questions), отметить, что `MAIN-BRANCH-PROTECTION` разблокирован. <!-- depends: 5.3 | verify: workspace в tasks/archive/ -->
+- [~] **5.3** _(пропущен: владелец выбрал `finalize` без PR; P6 закрыт измерением ревьюера на `go1.26.8`, остаточный риск — CI на `main` после push, перед включением `MAIN-BRANCH-PROTECTION`)_ PR → CI: `gate` и `govulncheck` зелёные (закрывает Spec P6). <!-- depends: 5.2 | verify: gh pr checks -->
+- [x] **5.4** `/finalize`: DONE.md, NEXT.md (WIP → пусто), BACKLOG (P0 → Закрыто), предложить `DEAD-PKG-TELEMETRY` (Spec § Open Questions), отметить, что `MAIN-BRANCH-PROTECTION` разблокирован. <!-- depends: 5.3 | verify: workspace в tasks/archive/ -->
 
 ### Testing notes (2026-10-08)
 
@@ -97,10 +97,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed

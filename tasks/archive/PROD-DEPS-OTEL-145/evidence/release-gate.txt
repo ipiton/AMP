@@ -262,7 +262,7 @@ values without monitoring.serviceMonitor (--reuse-values from an old release):
 
 all assertions passed
 [release-gate] ==> amtool-compat
- Image python:3-alpine Pulling 
+ Image python:3-alpine Pulling
  de6af1da8f48 Pulling fs layer 0B
  541523bae70c Pulling fs layer 0B
  9625030534d1 Pulling fs layer 0B
@@ -496,8 +496,8 @@ all assertions passed
  9625030534d1 Extracting 2B
  9625030534d1 Pull complete 0B
  de6af1da8f48 Pull complete 0B
- Image python:3-alpine Pulled 
- Image amp-smoke-amp Building 
+ Image python:3-alpine Pulled
+ Image amp-smoke-amp Building
 #1 [internal] load local bake definitions
 #1 reading from stdin 510B done
 #1 DONE 0.0s
@@ -710,11 +710,11 @@ Dockerfile:9
 
    7 |     FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS builder
 
-   8 |     
+   8 |
 
    9 | >>> RUN apk add --no-cache git make ca-certificates
 
-  10 |     
+  10 |
 
   11 |     WORKDIR /build
 
@@ -727,7 +727,7 @@ failed to solve: process "/bin/sh -c apk add --no-cache git make ca-certificates
 View build details: docker-desktop://dashboard/build/default/default/ptnj4v2raxqqp4c51wgl28fu1
 
 [release-gate] docker compose up failed for the amtool-compat smoke stack
-[release-gate] 
+[release-gate]
 [release-gate] ==================== SUMMARY ====================
 STEP             STATUS TIME     NOTE
 build            PASS   28s      go build ./... (go-app)

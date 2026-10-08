@@ -3,7 +3,7 @@ id: PROD-DEPS-OTEL-145
 slug: prod-deps-otel-145
 stream: Security
 type: bug
-status: draft
+status: complete
 created_at: 2026-10-08
 updated_at: 2026-10-08
 based_on:
@@ -76,10 +76,10 @@ Not applicable.
 
 ## Invariants
 
-- [ ] `go`/`toolchain` в `go.mod` не меняются.
-- [ ] `grpc`, `x/crypto`, `x/net`, `x/text` остаются на версиях из `PROD-DEPS-VULN`.
-- [ ] Ни одна не-otel direct-зависимость не меняется.
-- [ ] Go-код не меняется.
+- [x] `go`/`toolchain` в `go.mod` не меняются.
+- [x] `grpc`, `x/crypto`, `x/net`, `x/text` остаются на версиях из `PROD-DEPS-VULN`.
+- [x] Ни одна не-otel direct-зависимость не меняется.
+- [x] Go-код не меняется.
 
 ## Edge Cases
 
@@ -114,5 +114,5 @@ Not applicable.
 
 ## Open Questions
 
-- [ ] **P6 (assumed):** совпадёт ли результат govulncheck в CI (go1.26.x) с локальным — закрывается job'ом на PR.
-- [ ] **Follow-up, не в этой задаче:** `go-app/pkg/telemetry` — мёртвый пакет (нет импортёров), при этом тянет OTLP/gRPC-экспортёр в граф govulncheck и сам логирует endpoint в INFO. Удаление сняло бы этот класс красных `govulncheck` для кода, которого нет в бинарях. Предложить в `finalize` как TECH-DEBT/BACKLOG (`DEAD-PKG-TELEMETRY`), решение — за владельцем.
+- [x] **P6 (assumed):** закрыт измерением в deep-review — `GOTOOLCHAIN=go1.26.8 govulncheck` даёт тот же результат, что локальный go1.27.1. Остаточный риск (среда CI, обновление vuln DB) — CI на `main` после push; учтён в Owner `MAIN-BRANCH-PROTECTION`.
+- [x] **Follow-up, не в этой задаче:** `go-app/pkg/telemetry` — мёртвый пакет (нет импортёров), при этом тянет OTLP/gRPC-экспортёр в граф govulncheck и сам логирует endpoint в INFO. Удаление сняло бы этот класс красных `govulncheck` для кода, которого нет в бинарях. Предложить в `finalize` как TECH-DEBT/BACKLOG (`DEAD-PKG-TELEMETRY`), решение — за владельцем. → заведён в BACKLOG P2.
