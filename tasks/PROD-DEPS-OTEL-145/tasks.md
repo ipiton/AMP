@@ -53,7 +53,7 @@ based_on:
 
 ## Phase 3: Deep review
 
-- [ ] **3.1** `/deep-review` (обязателен: `S`) по диффу ветки: модули/версии против Spec P1–P2, инварианты, вывод govulncheck. <!-- depends: 1.5, 2.1 | verify: jq -r .gate tasks/PROD-DEPS-OTEL-145/review-verdict.json → pass -->
+- [x] **3.1** `/deep-review` (обязателен: `S`) по диффу ветки: модули/версии против Spec P1–P2, инварианты, вывод govulncheck. <!-- depends: 1.5, 2.1 | verify: jq -r .gate tasks/PROD-DEPS-OTEL-145/review-verdict.json → pass -->
 
 ## Phase 4: Tests
 

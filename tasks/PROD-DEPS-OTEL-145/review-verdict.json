@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/prod-deps-otel-145",
+  "commit": "d71d640",
+  "reviewed_at": "2026-10-08",
+  "findings": {
+    "blocker": 0,
+    "major": 0,
+    "minor": 0,
+    "nit": 0
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
