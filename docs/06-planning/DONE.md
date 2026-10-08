@@ -17,6 +17,12 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-08 — (BUG / Security, P0) **PROD-DEPS-OTEL-145** — закрыт GO-2026-6505 (OTLP-экспортёр OpenTelemetry-Go писал URL эндпоинта в INFO-лог), из-за которого required `govulncheck` был красным на `main` с 2026-10-05.
+  - **Апгрейд:** `otel`, `otel/sdk`, `otel/trace`, `otlptrace`, `otlptracegrpc` (+ `otel/metric`) v1.44.0 → v1.45.0; транзитивка — `go-logr/logr` v1.4.4, `otel/proto/otlp` v1.11.0, `genproto` 20260803. Все версии старше 66 дней; `go`/`toolchain`, `grpc`, `x/*` не менялись; Go-код не менялся, `go mod tidy` не запускали.
+  - **Находка:** уязвимый путь в бинари не входил — `pkg/telemetry` не импортирует ни один пакет, `govulncheck` считал его достижимым через экспортированный API → `DEAD-PKG-TELEMETRY` (BACKLOG P2).
+  - **Заодно (по просьбе владельца):** `.dockerignore` исключает `go-app/.cache` (локальный кэш Go, 2,3 GB) и бинари `go-app/server*` — контекст сборки 2,5 GB → 70 kB, оба образа собираются.
+  - **Проверка:** Full tier (`S`); deep-review (независимый агент) → pass без находок, в том числе `govulncheck` на `go1.26.8` = локальному; release-gate 10/11 PASS + `amtool-compat` PASS на перепрогоне (первый — DNS в `docker build`); `govulncheck` 0 достижимых. CI на PR не гонялся (владелец выбрал finalize без PR) — подтверждается CI на `main` после push.
+  - **Follow-ups:** BACKLOG `DEAD-PKG-TELEMETRY`; Owner `MAIN-BRANCH-PROTECTION` — включать после зелёного CI на `main`. Архив: `tasks/archive/PROD-DEPS-OTEL-145/`.
 - 2026-10-07 — (BUG / Config) **PROD-CONFIG-FILE-FALLBACK** — закрыт P0-баг `CONFIG-MISSING-FILE-DROPS-ENV`: без файла конфига AMP игнорировал env и стартовал на минимальном фолбэке, а ошибки валидации глотались.
   - **Код:** `LoadConfig` — отсутствие файла не ошибка (env + дефолты viper); `main` — любая ошибка конфига и явный несуществующий `AMP_CONFIG_FILE` дают exit 1 (`failed to load configuration`), фолбэк `Config{Port: 9093}` и его заплатки удалены. `GROUPING_RECONCILIATION_GRACE` из чарта не доходил до конфига (нет ключа у viper) — `BindEnv`. Чарт: `enableServiceLinks: false` (service-link env вида `METRICS_PORT=tcp://…` пересекались с ключами конфига).
   - **Тесты:** `config_load_test.go` (нет файла + env, ошибки чтения/валидации, dangling symlink, grace из env, все env-имена шаблонов чарта известны viper), `cmd/server/config_path_test.go`.

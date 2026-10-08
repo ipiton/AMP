@@ -16,17 +16,17 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-DEPS-OTEL-145** — поднять `otel*` v1.44.0 → v1.45.0 (GO-2026-6505), required `govulncheck` зелёный. Ветка `bugfix/prod-deps-otel-145`, workspace `tasks/PROD-DEPS-OTEL-145/`. Взята 2026-10-08 из BACKLOG § P0.
+_пусто_
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-DEPS-OTEL-145` → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `GROUPING-TIMER-LOCK-FIX` → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
-- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. Включать после `PROD-DEPS-OTEL-145`: сейчас required `govulncheck` красный на `main`. `~5min`
+- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. `~5min`
   Trigger: owner ready.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
