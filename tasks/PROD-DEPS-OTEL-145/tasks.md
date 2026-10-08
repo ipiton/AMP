@@ -87,7 +87,7 @@ based_on:
 
 Флейки `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` / `PUBLISHING-WARMUP-TEST-FLAKY` в этом прогоне не проявились. Поведенческих находок deep-review, отложенных в testing, нет. Не выполнено: 5.3 (CI на PR) — требует push ветки.
 
-Наблюдение вне scope: в первом прогоне `docker build` передал контекст 2,5 GB, в перепрогоне — 5 MB; вероятно, в контекст попадает gitignored-кэш `go-app/.cache/` (go mod cache), когда он заполнен. Проверить `.dockerignore` — кандидат в follow-up на `finalize`.
+Наблюдение вне scope (подтверждено): `.dockerignore` в корне не исключает `go-app/.cache/` (локальный go mod cache, gitignored, 2,3 GB), а smoke-стек собирается с контекстом `../..`. Первый `docker build` передал 2,5 GB контекста, перепрогон — 5 MB (BuildKit дослал только изменения); `COPY go-app/ ./` тянет кэш в builder-стадию. В CI кэша нет, на образ не влияет (multi-stage), только время локальной сборки. Кандидат в follow-up на `finalize` (`DOCKERIGNORE-GO-CACHE`).
 
 ## Definition of Done
 
