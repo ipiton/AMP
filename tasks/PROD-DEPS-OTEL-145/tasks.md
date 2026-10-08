@@ -87,7 +87,13 @@ based_on:
 
 Флейки `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` / `PUBLISHING-WARMUP-TEST-FLAKY` в этом прогоне не проявились. Поведенческих находок deep-review, отложенных в testing, нет. Не выполнено: 5.3 (CI на PR) — требует push ветки.
 
-Наблюдение вне scope (подтверждено): `.dockerignore` в корне не исключает `go-app/.cache/` (локальный go mod cache, gitignored, 2,3 GB), а smoke-стек собирается с контекстом `../..`. Первый `docker build` передал 2,5 GB контекста, перепрогон — 5 MB (BuildKit дослал только изменения); `COPY go-app/ ./` тянет кэш в builder-стадию. В CI кэша нет, на образ не влияет (multi-stage), только время локальной сборки. Кандидат в follow-up на `finalize` (`DOCKERIGNORE-GO-CACHE`).
+### Scope extension: `.dockerignore` (2026-10-08, по просьбе владельца)
+
+Владелец попросил сразу поправить наблюдение из testing, отдельной задачи `DOCKERIGNORE-GO-CACHE` не заводим.
+
+- Причина: `go-app/Makefile:15-17` кладёт GOCACHE/GOMODCACHE/GOPATH в `go-app/.cache/` (2,3 GB), `:26` собирает `go-app/server` (77 MB); оба gitignored, но в `.dockerignore` их не было. Контекст сборки — корень репо (`deploy/*/docker-compose.yml`, CI): первый `docker build` в release-gate передал 2,5 GB, а `COPY go-app/ ./` тянул кэш в builder-стадию.
+- Фикс: `go-app/.cache`, `go-app/server`, `go-app/server_unix` в `.dockerignore`. Отдельный коммит `build:`.
+- Проверка: пробный `COPY go-app/ /x` без кэша BuildKit — контекст 70 kB вместо 88,9 MB (после первого исключения) / 2,5 GB (до), `/x` = 9,9 MB = объём отслеживаемых файлов `go-app`, `.cache`/`server` отсутствуют; оба реальных образа (`Dockerfile`, `Dockerfile.config-reloader`) собираются. Dockerfile'ы на исключённое не опираются (`go mod download` + `go build` внутри образа). На CI и содержимое образа не влияет: в CI этих файлов нет, образ multi-stage.
 
 ## Definition of Done
 
