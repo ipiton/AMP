@@ -16,7 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-_пусто_
+- [ ] **PROD-DEPS-OTEL-145** — поднять `otel*` v1.44.0 → v1.45.0 (GO-2026-6505), required `govulncheck` зелёный. Ветка `bugfix/prod-deps-otel-145`, workspace `tasks/PROD-DEPS-OTEL-145/`. Взята 2026-10-08 из BACKLOG § P0.
 
 ## Queue
 
