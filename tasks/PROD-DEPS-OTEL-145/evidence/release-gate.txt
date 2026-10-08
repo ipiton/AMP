@@ -1,0 +1,746 @@
+[release-gate] ==> build
+[release-gate] ==> lint
+0 issues.
+[release-gate] ==> test
+ok  	github.com/ipiton/AMP/cmd/config-reloader	1.712s
+ok  	github.com/ipiton/AMP/cmd/server	3.221s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	4.402s
+?   	github.com/ipiton/AMP/internal/alertmanager/config	[no test files]
+ok  	github.com/ipiton/AMP/internal/application	23.390s
+ok  	github.com/ipiton/AMP/internal/application/handlers	7.546s
+ok  	github.com/ipiton/AMP/internal/buildinfo	5.853s
+ok  	github.com/ipiton/AMP/internal/business/publishing	37.930s
+ok  	github.com/ipiton/AMP/internal/business/routing	7.134s
+ok  	github.com/ipiton/AMP/internal/business/silencing	8.584s
+?   	github.com/ipiton/AMP/internal/business/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/business/templating	8.860s
+ok  	github.com/ipiton/AMP/internal/config	8.748s
+ok  	github.com/ipiton/AMP/internal/core	7.268s
+ok  	github.com/ipiton/AMP/internal/core/alertconv	7.034s
+?   	github.com/ipiton/AMP/internal/core/domain	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/investigation	6.194s
+ok  	github.com/ipiton/AMP/internal/core/investigation/runbook	4.834s
+?   	github.com/ipiton/AMP/internal/core/resilience	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/services	4.753s
+ok  	github.com/ipiton/AMP/internal/core/silencing	4.409s
+ok  	github.com/ipiton/AMP/internal/database	226.507s
+ok  	github.com/ipiton/AMP/internal/database/postgres	274.938s
+ok  	github.com/ipiton/AMP/internal/infrastructure	1.581s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cache	1.810s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cluster	1.899s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	12.989s
+ok  	github.com/ipiton/AMP/internal/infrastructure/inhibition	139.543s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation	2.798s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks	1.889s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/tools	0.806s
+ok  	github.com/ipiton/AMP/internal/infrastructure/k8s	1.845s
+ok  	github.com/ipiton/AMP/internal/infrastructure/llm	1.076s
+ok  	github.com/ipiton/AMP/internal/infrastructure/lock	4.752s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	55.259s
+ok  	github.com/ipiton/AMP/internal/infrastructure/repository	353.025s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing	5.981s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval	3.667s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	0.809s
+ok  	github.com/ipiton/AMP/internal/infrastructure/snapshot	3.698s
+ok  	github.com/ipiton/AMP/internal/infrastructure/storage/memory	3.229s
+?   	github.com/ipiton/AMP/internal/infrastructure/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/infrastructure/webhook	3.491s
+ok  	github.com/ipiton/AMP/internal/notification/template	0.715s
+ok  	github.com/ipiton/AMP/internal/notification/template/defaults	0.321s
+ok  	github.com/ipiton/AMP/internal/notification/url	0.471s
+ok  	github.com/ipiton/AMP/internal/realtime	1.675s
+?   	github.com/ipiton/AMP/internal/storage	[no test files]
+ok  	github.com/ipiton/AMP/internal/ui	0.498s
+?   	github.com/ipiton/AMP/pkg/aiclassifier	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator	0.377s
+ok  	github.com/ipiton/AMP/pkg/configvalidator/matcher	0.325s
+?   	github.com/ipiton/AMP/pkg/configvalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/configvalidator/types	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator/validators	0.329s
+ok  	github.com/ipiton/AMP/pkg/httperror	0.239s
+ok  	github.com/ipiton/AMP/pkg/logger	0.274s
+ok  	github.com/ipiton/AMP/pkg/metrics	0.353s
+ok  	github.com/ipiton/AMP/pkg/metrics/v2	0.504s
+ok  	github.com/ipiton/AMP/pkg/middleware	3.357s
+ok  	github.com/ipiton/AMP/pkg/retry	1.342s
+ok  	github.com/ipiton/AMP/pkg/telemetry	1.983s
+?   	github.com/ipiton/AMP/pkg/templatevalidator	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/formatters	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/fuzzy	1.401s
+?   	github.com/ipiton/AMP/pkg/templatevalidator/models	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/utils	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/validators	0.883s
+[release-gate] ==> futureparity
+ok  	github.com/ipiton/AMP/cmd/server	1.411s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	1.547s
+[release-gate] ==> race
+[release-gate] race-testing 7 package(s): github.com/ipiton/AMP/internal/business/publishing github.com/ipiton/AMP/internal/business/silencing github.com/ipiton/AMP/internal/business/templating github.com/ipiton/AMP/internal/core/silencing github.com/ipiton/AMP/internal/infrastructure/grouping github.com/ipiton/AMP/internal/infrastructure/publishing github.com/ipiton/AMP/internal/infrastructure/silencing
+ok  	github.com/ipiton/AMP/internal/business/publishing	36.139s
+ok  	github.com/ipiton/AMP/internal/business/silencing	4.594s
+ok  	github.com/ipiton/AMP/internal/business/templating	9.887s
+ok  	github.com/ipiton/AMP/internal/core/silencing	2.391s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	12.987s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	434.771s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	1.908s
+[release-gate] ==> helm-deps
+[release-gate] ==> helm-dev
+==> Linting /Users/vit/Documents/Projects/AMP/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-production
+==> Linting /Users/vit/Documents/Projects/AMP/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-rbac
+[release-gate] ==> helm-tests
+chart renders with the sidecar OFF (default):
+  ok   no sidecar container
+  ok   no config-file ConfigMap
+  ok   no AMP_CONFIG_FILE env
+  ok   no shared PID namespace
+chart renders with the sidecar ON:
+  ok   sidecar container
+  ok   config-file ConfigMap
+  ok   AMP_CONFIG_FILE env for the app
+  ok   sidecar watches the mounted file
+  ok   reload is verified over loopback
+  ok   sidecar filesystem is read-only
+  ok   sidecar runs non-root
+  ok   http method needs no shared PID namespace
+signal method requests a shared PID namespace:
+  ok   shared PID namespace
+  ok   signal method
+http method never grants a shared PID namespace, even if asked:
+  ok   no shared PID namespace for method: http
+production values render the config file but NOT the sidecar:
+  ok   config file rendered in production
+  ok   AMP_CONFIG_FILE set in production
+  ok   sidecar NOT enabled while its image is unpublished
+misconfigurations are refused at render time:
+  ok   sidecar without a config file
+  ok   config file without content
+  ok   signal method without a shared PID namespace
+
+all assertions passed
+defaults: preStop, timeout env and a grace period that fits both
+  ok   preStop sleeps preStopDelay (5)
+  ok   timeout env set
+  ok   timeout env carries timeoutSeconds (30s)
+  ok   grace period 40 >= 5 + 30
+  ok   stale 'no preStop' comment gone
+  ok   no budget warning with defaults
+preStopDelay=0 removes the hook
+  ok   no preStop hook
+  ok   no lifecycle block
+custom values flow through
+  ok   preStop sleeps 10
+  ok   timeout env 45s
+  ok   grace period 60
+  ok   no warning when 60 >= 10 + 45
+an old grace period (30) still renders, with a warning
+  ok   render does not fail
+  ok   budget warning printed
+  ok   warning names the required minimum
+production values
+  ok   preStop in production
+  ok   grace period 40 in production
+
+all assertions passed
+Chart appVersion: 0.1.0
+default: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+production: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+lite: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+config-reloader image defaults to appVersion:
+  ok   sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0
+  ok   app container unchanged next to the sidecar
+an explicit image.tag still wins:
+  ok   app container on the pinned tag
+  ok   appVersion not used when pinned
+
+all assertions passed
+defaults render no Ingress:
+  ok   no Ingress by default
+an Ingress without auth is refused:
+  ok   defaults + ingress.enabled (guard not tied to the prod file)
+  ok   values-production.yaml without auth
+  ok   values-production.yaml as shipped
+only a real true waives in-process auth:
+  ok   --set-string ingress.externalAuth=false
+  ok   --set-string ingress.externalAuth=no
+  ok   --set-string ingress.externalAuth="false"
+  ok   --set-string ingress.externalAuth=True
+  ok   --set-string ingress.externalAuth=1
+an Ingress with auth renders:
+  ok   prod + webConfig.existingSecret
+  ok   prod + ingress.externalAuth=true
+  ok   --set-string ingress.externalAuth=true
+chart packaging keeps the helm test hook and drops the render tests:
+  ok   helm test hook still rendered
+  ok   helm test hook packaged
+  ok   render tests not packaged
+
+all assertions passed
+defaults render no AMP NetworkPolicy:
+  ok   no AMP policy by default
+an enabled policy with no effective source is refused:
+  ok   values-production.yaml with no sources
+  ok   defaults + networkPolicy.enabled
+  ok   ingressController only, Ingress off
+production policy (placeholder sender):
+  ok   selects the AMP pods by component
+  ok   alert-senders rule
+  ok   peers rendered as given
+  ok   one rule, http port only
+  ok   no Egress policyType
+  ok   no controller rule with no controller peers
+one rule per role; the controller only with an Ingress:
+  ok   controller peers dropped while ingress.enabled=false
+  ok   metrics-scrapers rule
+  ok   sender + scraper rules, http only
+  ok   controller rule with ingress.enabled
+  ok   controller peers rendered
+  ok   controller + sender rules
+extraIngress is rendered as-is:
+  ok   raw rule rendered
+the component label lives in the pod template only:
+  ok   pod template carries the label
+  ok   Deployment selector found
+  ok   Deployment selector unchanged (immutable)
+  ok   Service selector found
+  ok   Service selector unchanged
+podLabels cannot override the component label:
+  ok   podLabels with app.kubernetes.io/component
+  ok   other podLabels still render
+the Redis NetworkPolicy admits the AMP pods:
+  ok   first Redis rule selects component: application
+  ok   ...on the Redis port
+values without the networkPolicy section (--reuse-values from an old release):
+  ok   renders
+  ok   no AMP policy
+
+all assertions passed
+default ServiceMonitor:
+  ok   rendered by default
+  ok   selects by component
+  ok   scrapes the http port
+  ok   ...at /metrics
+  ok   default interval
+  ok   default scrape timeout
+  ok   no credentials without web auth
+its selector matches the AMP Service only:
+  ok   selector (3 labels) picks exactly: amp
+  ok   component is what tells the Services apart (7 match without it)
+gated on prometheusEnabled and serviceMonitor.enabled:
+  ok   off with monitoring.prometheusEnabled=false
+  ok   off with serviceMonitor.enabled=false
+  ok   Redis ServiceMonitor unaffected
+web auth needs credentials:
+  ok   webConfig.existingSecret without basicAuth
+  ok   username from the Secret
+  ok   ...default key
+  ok   password from the Secret
+  ok   ...default key
+  ok   custom username key
+  ok   custom password key
+labels and timing:
+  ok   extra labels in metadata
+  ok   interval override
+values without monitoring.serviceMonitor (--reuse-values from an old release):
+  ok   still rendered
+  ok   default interval
+  ok   default scrape timeout
+  ok   ...and the credentials guard still runs
+
+all assertions passed
+[release-gate] ==> amtool-compat
+ Image python:3-alpine Pulling 
+ de6af1da8f48 Pulling fs layer 0B
+ 541523bae70c Pulling fs layer 0B
+ 9625030534d1 Pulling fs layer 0B
+ de6af1da8f48 Downloading 248B
+ de6af1da8f48 Downloading 248B
+ de6af1da8f48 Download complete 0B
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 23089a3f4466 Downloading 22.87kB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 23089a3f4466 Download complete 0B
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Downloading 419.1kB
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Downloading 419.1kB
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Downloading 419.1kB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Download complete 0B
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Extracting 1B
+ d8f9920c60a3 Downloading 614kB
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 1.049MB
+ d8f9920c60a3 Downloading 614kB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 1.049MB
+ d8f9920c60a3 Downloading 614kB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 1.049MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 2.097MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 2.097MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 2.097MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 2.097MB
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 2.097MB
+ d8f9920c60a3 Download complete 0B
+ 541523bae70c Extracting 1B
+ 9625030534d1 Downloading 2.097MB
+ 541523bae70c Extracting 2B
+ 9625030534d1 Downloading 2.097MB
+ 541523bae70c Pull complete 0B
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 2.097MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 3.146MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 4.194MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 5.243MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 6.291MB
+ 9625030534d1 Downloading 7.34MB
+ 9625030534d1 Downloading 7.34MB
+ 9625030534d1 Downloading 7.34MB
+ 9625030534d1 Downloading 7.34MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 8.389MB
+ 9625030534d1 Downloading 9.437MB
+ 9625030534d1 Downloading 9.437MB
+ 9625030534d1 Downloading 9.437MB
+ 9625030534d1 Downloading 9.437MB
+ 9625030534d1 Downloading 9.437MB
+ 9625030534d1 Downloading 9.437MB
+ 9625030534d1 Downloading 10.49MB
+ 9625030534d1 Downloading 10.49MB
+ 9625030534d1 Downloading 10.49MB
+ 9625030534d1 Downloading 10.49MB
+ 9625030534d1 Downloading 11.53MB
+ 9625030534d1 Downloading 11.53MB
+ 9625030534d1 Downloading 11.53MB
+ 9625030534d1 Downloading 11.53MB
+ 9625030534d1 Downloading 12.58MB
+ 9625030534d1 Downloading 12.58MB
+ 9625030534d1 Downloading 12.58MB
+ 9625030534d1 Downloading 12.58MB
+ 9625030534d1 Downloading 12.58MB
+ 9625030534d1 Downloading 13.63MB
+ 9625030534d1 Downloading 13.63MB
+ 9625030534d1 Downloading 13.63MB
+ 9625030534d1 Downloading 13.63MB
+ 9625030534d1 Downloading 14.07MB
+ 9625030534d1 Downloading 14.68MB
+ 9625030534d1 Downloading 14.68MB
+ 9625030534d1 Downloading 14.68MB
+ 9625030534d1 Downloading 14.68MB
+ 9625030534d1 Downloading 15.73MB
+ 9625030534d1 Downloading 15.73MB
+ 9625030534d1 Download complete 0B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 1B
+ 9625030534d1 Extracting 2B
+ 9625030534d1 Extracting 2B
+ 9625030534d1 Extracting 2B
+ 9625030534d1 Pull complete 0B
+ de6af1da8f48 Pull complete 0B
+ Image python:3-alpine Pulled 
+ Image amp-smoke-amp Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 510B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.75kB 0.1s done
+#2 DONE 0.4s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.8-alpine
+#3 ...
+
+#4 [auth] library/golang:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#5 [auth] library/alpine:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [internal] load metadata for docker.io/library/alpine:3.24
+#6 DONE 7.1s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.8-alpine
+#3 DONE 7.1s
+
+#7 [internal] load .dockerignore
+#7 transferring context:
+#7 transferring context: 307B done
+#7 DONE 0.8s
+
+#8 [internal] load build context
+#8 DONE 0.0s
+
+#9 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#9 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#9 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.7s done
+#9 DONE 0.7s
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 resolve docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 resolve docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c 0.7s done
+#10 DONE 0.8s
+
+#9 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#9 DONE 1.2s
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 DONE 4.6s
+
+#8 [internal] load build context
+#8 transferring context: 48.66MB 3.0s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:1c522d23c63ba5abba715a4b79c16b23ad435a83db46c9e74756a214b4407337 126B / 126B 0.9s done
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 2.10MB / 64.22MB 4.5s
+#10 sha256:c0a950d26132f1fa89f86eab9e0be7f020b80281607d4bd2902c7b0be5862cd1 249.81kB / 249.81kB 2.3s done
+#10 extracting sha256:c0a950d26132f1fa89f86eab9e0be7f020b80281607d4bd2902c7b0be5862cd1
+#10 extracting sha256:c0a950d26132f1fa89f86eab9e0be7f020b80281607d4bd2902c7b0be5862cd1 2.0s done
+#10 ...
+
+#11 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#11 5.693 (1/2) Installing ca-certificates (20260909-r0)
+#11 5.985 (2/2) Installing tzdata (2026e-r0)
+#11 6.664 Executing busybox-1.37.0-r31.trigger
+#11 6.724 Executing ca-certificates-20260909-r0.trigger
+#11 6.880 OK: 9191 KiB in 18 packages
+#11 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 6.29MB / 64.22MB 8.3s
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 9.44MB / 64.22MB 13.5s
+#10 ...
+
+#8 [internal] load build context
+#8 transferring context: 313.92MB 17.6s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 ...
+
+#11 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#11 DONE 22.1s
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 12.58MB / 64.22MB 18.7s
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 16.78MB / 64.22MB 21.8s
+#10 ...
+
+#12 [stage-1 3/5] WORKDIR /app
+#12 DONE 5.3s
+
+#8 [internal] load build context
+#8 transferring context: 511.71MB 27.1s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 19.92MB / 64.22MB 26.9s
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 22.02MB / 64.22MB 32.0s
+#10 ...
+
+#8 [internal] load build context
+#8 transferring context: 613.56MB 36.2s
+#8 transferring context: 652.49MB 41.5s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 26.21MB / 64.22MB 43.7s
+#10 ...
+
+#8 [internal] load build context
+#8 transferring context: 730.73MB 46.6s
+#8 transferring context: 852.40MB 51.7s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 37.75MB / 64.22MB 53.7s
+#10 ...
+
+#8 [internal] load build context
+#8 transferring context: 917.19MB 56.9s
+#8 transferring context: 1.01GB 62.0s
+#8 transferring context: 1.11GB 67.2s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 49.28MB / 64.22MB 64.4s
+#10 ...
+
+#8 [internal] load build context
+#8 transferring context: 1.22GB 72.2s
+#8 transferring context: 1.35GB 77.4s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 58.72MB / 64.22MB 74.7s
+#10 ...
+
+#8 [internal] load build context
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 64.22MB / 64.22MB 77.9s done
+#10 DONE 82.8s
+
+#8 [internal] load build context
+#8 transferring context: 1.42GB 82.5s
+#8 transferring context: 1.51GB 87.7s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 extracting sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6
+#10 ...
+
+#8 [internal] load build context
+#8 transferring context: 1.59GB 92.9s
+#8 transferring context: 1.71GB 97.9s
+#8 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#10 extracting sha256:51fb0b9b10a77a100f12ca35704e0bf2e54f625945c6087b132491dec45b4ed6 17.7s done
+#10 extracting sha256:1c522d23c63ba5abba715a4b79c16b23ad435a83db46c9e74756a214b4407337
+#10 extracting sha256:1c522d23c63ba5abba715a4b79c16b23ad435a83db46c9e74756a214b4407337 1.4s done
+#10 extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1
+#10 extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 0.9s done
+#10 DONE 102.8s
+
+#8 [internal] load build context
+#8 transferring context: 1.78GB 103.0s
+#8 transferring context: 1.87GB 108.1s
+#8 ...
+
+#13 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#13 8.636 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/APKINDEX.tar.gz: DNS: transient error (try again later)
+#13 ...
+
+#8 [internal] load build context
+#8 transferring context: 1.95GB 113.3s
+#8 transferring context: 2.03GB 118.3s
+#8 transferring context: 2.12GB 123.4s
+#8 ...
+
+#13 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#13 11.60 ERROR: unable to select packages:
+#13 11.60   git (no such package):
+#13 11.60     required by: world[git]
+#13 11.60   make (no such package):
+#13 11.60     required by: world[make]
+#13 ...
+
+#8 [internal] load build context
+#8 transferring context: 2.28GB 128.4s
+#8 transferring context: 2.42GB 133.6s
+#8 transferring context: 2.50GB 138.5s done
+#8 DONE 140.1s
+
+#13 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#13 ERROR: process "/bin/sh -c apk add --no-cache git make ca-certificates" did not complete successfully: exit code: 2
+------
+ > [builder 2/7] RUN apk add --no-cache git make ca-certificates:
+8.636 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/APKINDEX.tar.gz: DNS: transient error (try again later)
+11.60 ERROR: unable to select packages:
+11.60   git (no such package):
+11.60     required by: world[git]
+11.60   make (no such package):
+11.60     required by: world[make]
+------
+Dockerfile:9
+
+--------------------
+
+   7 |     FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS builder
+
+   8 |     
+
+   9 | >>> RUN apk add --no-cache git make ca-certificates
+
+  10 |     
+
+  11 |     WORKDIR /build
+
+--------------------
+
+failed to solve: process "/bin/sh -c apk add --no-cache git make ca-certificates" did not complete successfully: exit code: 2
+
+
+
+View build details: docker-desktop://dashboard/build/default/default/ptnj4v2raxqqp4c51wgl28fu1
+
+[release-gate] docker compose up failed for the amtool-compat smoke stack
+[release-gate] 
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   28s      go build ./... (go-app)
+lint             PASS   140s     golangci-lint run (go-app)
+test             PASS   428s     go test ./... -count=1 (go-app)
+futureparity     PASS   33s      build+test, futureparity tag, cmd/server
+race             PASS   548s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   3s       helm repo add (Chart.lock) + dependency build
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   1s       lint + template, values-production.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   9s       helm/amp/tests/*.sh render tests
+amtool-compat    FAIL   196s     real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+exit=1

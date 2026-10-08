@@ -68,10 +68,26 @@ based_on:
 
 ## Phase 5: Testing & finalize
 
-- [ ] **5.1** `scripts/release-gate.sh` — зелёный (флейки `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` / `PUBLISHING-WARMUP-TEST-FLAKY` — перепрогон и фиксация). <!-- depends: 4.1 | verify: exit 0, вывод в evidence/release-gate.txt -->
-- [ ] **5.2** `git diff --check main...HEAD`; нет `_, _ :=` в диффе. <!-- depends: 5.1 | verify: пустой вывод -->
+- [x] **5.1** `scripts/release-gate.sh` — зелёный (флейки `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` / `PUBLISHING-WARMUP-TEST-FLAKY` — перепрогон и фиксация). <!-- depends: 4.1 | verify: exit 0, вывод в evidence/release-gate.txt -->
+- [x] **5.2** `git diff --check main...HEAD`; нет `_, _ :=` в диффе. <!-- depends: 5.1 | verify: пустой вывод -->
 - [ ] **5.3** PR → CI: `gate` и `govulncheck` зелёные (закрывает Spec P6). <!-- depends: 5.2 | verify: gh pr checks -->
 - [ ] **5.4** `/finalize`: DONE.md, NEXT.md (WIP → пусто), BACKLOG (P0 → Закрыто), предложить `DEAD-PKG-TELEMETRY` (Spec § Open Questions), отметить, что `MAIN-BRANCH-PROTECTION` разблокирован. <!-- depends: 5.3 | verify: workspace в tasks/archive/ -->
+
+### Testing notes (2026-10-08)
+
+| Проверка | Результат |
+|---|---|
+| `scripts/release-gate.sh` (`evidence/release-gate.txt`) | 10/11 PASS: build, lint, test, futureparity, race, helm-deps, helm-dev, helm-production, helm-rbac, helm-tests. `amtool-compat` FAIL: `apk add` в `docker build` — `dl-cdn.alpinelinux.org: DNS: transient error`, окружение, не дифф |
+| `amtool-compat` перепрогон, один раз по Retry Policy (`evidence/amtool-compat-rerun.txt`) | PASS (`rc=0`): тот же код шага, извлечённый из скрипта без правок; `apk add` OK, `amtool alert query` / `config show` / `silence add` / `silence query` OK |
+| `govulncheck@v1.8.0` (`evidence/govulncheck.txt`, + ревью на `go1.26.8`) | 0 достижимых |
+| `GOFLAGS=-mod=readonly go test ./pkg/telemetry/...` | 14 passed |
+| `make -C go-app quality-gates-fast` | passed, `go fmt` без изменений |
+| `git diff --check main...HEAD` | чисто после `7093b84` (до этого — только артефакты задачи: trailing `  ` из шаблона, контекстные строки патча в evidence) |
+| `_, _ :=` в диффе | нет (единственное совпадение grep — текст шага 5.2 в этом файле) |
+
+Флейки `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` / `PUBLISHING-WARMUP-TEST-FLAKY` в этом прогоне не проявились. Поведенческих находок deep-review, отложенных в testing, нет. Не выполнено: 5.3 (CI на PR) — требует push ветки.
+
+Наблюдение вне scope: в первом прогоне `docker build` передал контекст 2,5 GB, в перепрогоне — 5 MB; вероятно, в контекст попадает gitignored-кэш `go-app/.cache/` (go mod cache), когда он заполнен. Проверить `.dockerignore` — кандидат в follow-up на `finalize`.
 
 ## Definition of Done
 
