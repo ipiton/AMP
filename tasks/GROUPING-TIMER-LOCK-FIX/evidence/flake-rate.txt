@@ -1,0 +1,15 @@
+# GROUPING-TIMER-LOCK-FIX — замеры флейка, 2026-10-09, ветка bugfix/grouping-timer-lock-fix @ fcfde9e (код = main ebdac9a)
+# go test -race [-cpu=1] -count=N -run 'TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires$' ./internal/infrastructure/grouping/
+
+-race -count=60 (GOMAXPROCS по умолчанию):  0/60 FAIL
+-race -cpu=1 -count=100:                     4/100 FAIL
+-race -cpu=1 -count=100:                     0/100 FAIL
+-race -cpu=1 -count=200:                     4/200 FAIL
+  все падения: "Not equal: expected: int(1) actual: int64(2)" —
+  "two replicas racing the same group's timer must fire exactly once"
+итого -cpu=1: 8/400 (2%)
+
+# Детерминированный repro (временный тест, удалён после замера):
+# A: StartTimer(group_wait, 20ms) -> срабатывает, onTimerExpired завершён;
+# redis keys после этого: []  (ни timer-записи, ни lock'а)
+# затем tmB.onTimerExpired(nil, groupKey, GroupWaitTimer) -> publishCount = 2
