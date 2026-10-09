@@ -13,3 +13,11 @@
 # A: StartTimer(group_wait, 20ms) -> срабатывает, onTimerExpired завершён;
 # redis keys после этого: []  (ни timer-записи, ни lock'а)
 # затем tmB.onTimerExpired(nil, groupKey, GroupWaitTimer) -> publishCount = 2
+
+# После фикса (implement, 2026-10-09, рабочее дерево на 346530a + правка timer_manager_impl.go)
+-race -cpu=1 -count=400:  9/400 FAIL, из них "actual: 2" (двойное срабатывание) — 0
+-race -cpu=1 -count=200:  1/200 FAIL, тоже не двойное срабатывание
+  все падения — distributed_timer_ownership_test.go:171:
+  "the losing replica must log a quiet skip via onTimerExpired's existing ErrLockAlreadyAcquired branch"
+  Опоздавшая реплика теперь отсеивается веткой fireStillDue ("Timer fire already handled elsewhere"),
+  а не веткой lock'а. Ассерт проверяет механизм, а не результат; правка — write-tests (tasks.md 3.5).

@@ -31,21 +31,21 @@ based_on:
 
 > **Wave 1**
 
-- [ ] **1.1** Неэкспортируемая чистая функция `fireStillDue(stored *GroupTimer, firedHandle *timerHandle, timerType TimerType, now time.Time) (bool, string)`. Правило из Spec § Target Design п. 2. Причины: `type_changed`, `rescheduled`; `not_found` обрабатывается у вызывающего. <!-- verify: cd go-app && go build ./... && go vet G -->
+- [x] **1.1** Неэкспортируемая чистая функция `fireStillDue(stored *GroupTimer, firedHandle *timerHandle, timerType TimerType, now time.Time) (bool, string)`. Правило из Spec § Target Design п. 2. Причины: `type_changed`, `rescheduled`; `not_found` обрабатывается у вызывающего. <!-- verify: cd go-app && go build ./... && go vet G -->
 
 > **Wave 2**
 
-- [ ] **1.2** В `onTimerExpired` сразу после успешного `AcquireLock` и defer `release()`, до блока `GetGroup`:
+- [x] **1.2** В `onTimerExpired` сразу после успешного `AcquireLock` и defer `release()`, до блока `GetGroup`:
   - `LoadTimer` с 5s-контекстом от `tm.ctx`;
   - `errors.Is(err, ErrTimerNotFound)` или `!fireStillDue` ⇒ Debug `"Timer fire already handled elsewhere, skipping"` (`group_key`, `timer_type`, `reason`) + `dropLocalHandle` + return;
   - другая ошибка ⇒ Error `"Failed to load timer for expiration check"` + `dropLocalHandle` + return. <!-- depends: 1.1 | verify: cd go-app && go build ./... && go vet G -->
-- [ ] **1.3** Doc-comment `onTimerExpired`: lock — «не одновременно», перечитанная запись storage — «ещё не обработано»; ссылка на `GROUPING-TIMER-LOCK-FIX`. Комментарий у `AcquireLock` («exactly-once delivery», `:867`) — уточнить. <!-- depends: 1.2 | verify: review diff -->
+- [x] **1.3** Doc-comment `onTimerExpired`: lock — «не одновременно», перечитанная запись storage — «ещё не обработано»; ссылка на `GROUPING-TIMER-LOCK-FIX`. Комментарий у `AcquireLock` («exactly-once delivery», `:867`) — уточнить. <!-- depends: 1.2 | verify: review diff -->
 
 > **Wave 3** — смоук до deep-review (новые тесты не пишем)
 
-- [ ] **1.4** Существующие тесты пакета и application зелёные под `-race`. <!-- depends: 1.2 | verify: cd go-app && go test -race ./internal/infrastructure/grouping/... ./internal/application/... -->
-- [ ] **1.5** Флейк исчез на рычаге из research. <!-- depends: 1.2 | verify: cd go-app && go test -race -cpu=1 -count=400 -run 'TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires$' G  → 0 FAIL (до фикса 8/400) -->
-- [ ] **1.6** Spec Open Question / Edge Case 11: минимальные допустимые `group_wait`/`group_interval` в валидации конфига против round-trip `ResetTimer` (`:631`). Если «воскрешение» реально — запись в `docs/06-planning/TECH-DEBT.md`, вывод — в Notes ниже. <!-- verify: grep валидации интервалов в internal/config + запись в Notes -->
+- [x] **1.4** Существующие тесты пакета и application зелёные под `-race`. <!-- depends: 1.2 | verify: cd go-app && go test -race ./internal/infrastructure/grouping/... ./internal/application/... -->
+- [x] **1.5** Флейк исчез на рычаге из research. <!-- depends: 1.2 | verify: cd go-app && go test -race -cpu=1 -count=400 -run 'TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires$' G  → 0 FAIL (до фикса 8/400) -->
+- [x] **1.6** Spec Open Question / Edge Case 11: минимальные допустимые `group_wait`/`group_interval` в валидации конфига против round-trip `ResetTimer` (`:631`). Если «воскрешение» реально — запись в `docs/06-planning/TECH-DEBT.md`, вывод — в Notes ниже. <!-- verify: grep валидации интервалов в internal/config + запись в Notes -->
 
 **Phase verification:** `cd go-app && go vet G && go test -race ./internal/infrastructure/grouping/... ./internal/application/...`
 
@@ -61,6 +61,8 @@ based_on:
 - [ ] **3.2** T2/T3: continuation другого типа; запись того же типа в будущем с чужим `expiresAt` ⇒ skip, handle сброшен, запись в storage не тронута. <!-- depends: 2.1 | verify: go test -race -run 'Continuation|Rescheduled' G -->
 - [ ] **3.3** T4: табличный тест `fireStillDue` (7 строк из Spec § Test Plan). <!-- depends: 2.1 | verify: go test -run FireStillDue G -->
 - [ ] **3.4** T5: ошибка `LoadTimer` (miniredis закрыт или обёртка storage с ошибкой) ⇒ callback не вызван, handle сброшен. <!-- depends: 2.1 | verify: go test -race -run LoadTimerError G -->
+
+- [ ] **3.5** `TwoReplicasRace…` (`distributed_timer_ownership_test.go:171`): ассерт лога требует ветку `ErrLockAlreadyAcquired`, а опоздавший проигравший теперь уходит через `fireStillDue`. Принимать любой из двух тихих skip'ов («Lock already acquired by another instance» / «Timer fire already handled elsewhere»), ассерт `publishCount == 1` не трогать. <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=400 -run 'TwoReplicasRace' G → 0/400 -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/grouping/...`
 
@@ -83,7 +85,10 @@ based_on:
 
 ## Notes
 
-<!-- Сюда — выводы 1.6, отклонения от Spec, Testing notes. -->
+- **1.4** (2026-10-09): `go build ./...`, `go vet G`, `go test -race ./internal/infrastructure/grouping/... ./internal/application/...` — 1054 passed, 3 пакета.
+- **1.6 / Spec Edge Case 11:** `ResetTimer` в прод-коде не вызывается: grep `\.ResetTimer(` по `internal`, `cmd` без `_test.go` пуст. `alert_processor.go:450-462` объясняет, почему его намеренно не зовут (upstream не продлевает `group_interval`). «Воскрешение» записи сейчас недостижимо, TECH-DEBT не заводим. Если `ResetTimer` начнут вызывать — пересмотреть.
+- **1.5** (2026-10-09): двойных срабатываний 0/600 (`-cpu=1`, 400 + 200). Падения 10/600 — только ассерт лога `:171`, закреплявший механизм (ветку lock'а), а не результат → шаг 3.5. Сырые данные — `evidence/flake-rate.txt`. Флейк в CI до 3.5 остаётся: тот же тест, другой ассерт.
+- **Отклонения от Spec:** нет. `not_found` возвращается самой `fireStillDue` (`stored == nil`), а не обрабатывается у вызывающего, как сказано в плане 1.1, — так ветка одна.
 
 ## Definition of Done
 

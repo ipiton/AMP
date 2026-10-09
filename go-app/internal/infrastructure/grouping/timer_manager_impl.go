@@ -859,12 +859,47 @@ func (tm *DefaultTimerManager) dropLocalHandle(firedHandle *timerHandle, groupKe
 	}
 }
 
+// fireStillDue reports whether stored — the timer entry re-read from storage
+// under the distributed lock — still describes the fire onTimerExpired was
+// entered for, i.e. nobody has handled it yet (GROUPING-TIMER-LOCK-FIX).
+//
+// A handled fire always changes the entry before its lock is released: it is
+// deleted, or overwritten by a continuation of another type or with a later
+// ExpiresAt. So the fire is still due only if the entry exists, has the fired
+// type, and either:
+//   - is this replica's own entry (ExpiresAt equals the local handle's) —
+//     clock-independent, so the replica that wrote the entry always fires it,
+//     even if its wall clock lags; or
+//   - is already overdue — the reconcile/restore paths (firedHandle == nil)
+//     and a replica whose entry a peer overwrote within the same generation.
+//
+// A peer's entry that is not yet due is skipped: its writer fires it, and in
+// the Redis-backed (multi-replica) setup reconciliation adopts it if the
+// writer dies. The returned reason is for logging only.
+func fireStillDue(stored *GroupTimer, firedHandle *timerHandle, timerType TimerType, now time.Time) (bool, string) {
+	if stored == nil {
+		return false, "not_found"
+	}
+	if stored.TimerType != timerType {
+		return false, "type_changed"
+	}
+	if firedHandle != nil && stored.ExpiresAt.Equal(firedHandle.expiresAt) {
+		return true, ""
+	}
+	if !stored.ExpiresAt.After(now) {
+		return true, ""
+	}
+	return false, "rescheduled"
+}
+
 func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey GroupKey, timerType TimerType) {
 	tm.logger.Info("Timer expired",
 		"group_key", groupKey,
 		"timer_type", timerType)
 
-	// Acquire distributed lock for exactly-once delivery
+	// Acquire distributed lock: no two replicas run this group's fire
+	// concurrently. Exactly-once additionally needs the storage re-check
+	// below — the lock alone does not mean "not handled yet".
 	lockCtx, lockCancel := context.WithTimeout(tm.ctx, 5*time.Second)
 	defer lockCancel()
 
@@ -897,6 +932,38 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 				"error", err)
 		}
 	}()
+
+	// The lock only rules out two replicas firing this group at the SAME
+	// time; it says nothing about whether this fire was already handled.
+	// The winner releases it right after its callbacks, so a replica whose
+	// own Go timer for the same group fires a moment later used to win a
+	// free lock and run the callbacks a second time (GROUPING-TIMER-LOCK-FIX).
+	// The storage entry is the "not handled yet" marker: every handled fire
+	// either deletes it or replaces it with a continuation before releasing
+	// the lock — see fireStillDue.
+	loadCtx, loadCancel := context.WithTimeout(tm.ctx, 5*time.Second)
+	stored, err := tm.storage.LoadTimer(loadCtx, groupKey)
+	loadCancel()
+	if err != nil && !errors.Is(err, ErrTimerNotFound) {
+		tm.logger.Error("Failed to load timer for expiration check",
+			"group_key", groupKey,
+			"timer_type", timerType,
+			"error", err)
+		// Same posture as a lock-store failure above: this fire is lost,
+		// the storage entry is left for reconciliation to retry.
+		tm.dropLocalHandle(firedHandle, groupKey)
+		return
+	}
+	if due, reason := fireStillDue(stored, firedHandle, timerType, time.Now()); !due {
+		tm.logger.Debug("Timer fire already handled elsewhere, skipping",
+			"group_key", groupKey,
+			"timer_type", timerType,
+			"reason", reason)
+		// Storage is deliberately untouched: it holds whatever replaced
+		// this fire (or nothing), not this fire's leftover.
+		tm.dropLocalHandle(firedHandle, groupKey)
+		return
+	}
 
 	// Get group snapshot
 	groupCtx, groupCancel := context.WithTimeout(tm.ctx, 5*time.Second)
