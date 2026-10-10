@@ -94,7 +94,7 @@ based_on:
 - [x] **2d.5** H4 — «Group publishing skipped (metrics-only mode)» возвращён на Info.
 - [x] **2d.6** D3 — `deploy/e2e-ha/run.sh` шаг 4: опрос вместо фиксированного `sleep`. <!-- verify: evidence/e2e-ha.md -->
 - [x] **2d.7** Доки: CHANGELOG (Changed, notes п.1, 4, 7, 10), compat-док (#13, строка про prune), `CONFIGURATION_GUIDE.md`, `ROLLBACK_RUNBOOK.md` (откат только образа). Spec v1.3 (D5–D7).
-- [ ] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись).
+- [ ] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись; N1 — при сбое дольше `repeat_interval` группа с несколькими target'ами не оседает; нет метрики fallback), `RedisGroupStorage.Store` читает и меняет группу без блокировки, `storage.Delete` без проверки версии (M3, M4).
 
 ## Phase 2e: Fix round после deep-review R4 (2026-10-10)
 
@@ -108,7 +108,7 @@ based_on:
 
 ## Phase 3: Deep Review
 
-- [ ] **3.1** `/deep-review` (Spec § Deep Review: required). Фокус: установки без `route:` (нет WARN, нет degraded); Edge Case 5 (дерево не собралось); полнота поиска потребителей флага; честность migration note; доки про `lite`. <!-- depends: Phase 1, Phase 2 | verify: tasks/PROD-GROUPING-DEFAULT/review-verdict.json -->
+- [x] **3.1** `/deep-review` (Spec § Deep Review: required). Фокус: установки без `route:` (нет WARN, нет degraded); Edge Case 5 (дерево не собралось); полнота поиска потребителей флага; честность migration note; доки про `lite`. <!-- depends: Phase 1, Phase 2 | verify: tasks/PROD-GROUPING-DEFAULT/review-verdict.json -->
 
 **Phase verification:** `review-verdict.json` — `"gate": "pass"`.
 
