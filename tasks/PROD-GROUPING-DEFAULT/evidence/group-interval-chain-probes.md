@@ -29,3 +29,38 @@ publishes after 3 flushes with nflog failing: 1
 ## Не покрыто этими прогонами
 
 Redis-реализации (`RedisNotifyLog`, `RedisTimerStorage`), две реплики, реальный `PublishingCoordinator` с очередью, живой бинарь.
+
+## R3 fix round (рабочее дерево поверх `6594d28`, 2026-10-10; `go test -overlay -race`)
+
+```
+=== RUN   TestR4_H1_NoResolveTarget
+    r4_probe_test.go:118: H1: notifications after partial resolve: 1; group size: 1
+    r4_probe_test.go:129: H1: after re-fire and a new alert: 2
+--- PASS: TestR4_H1_NoResolveTarget (0.00s)
+=== RUN   TestR4_ResolveTarget
+    r4_probe_test.go:146: resolve target: notifications=2 size=1
+--- PASS: TestR4_ResolveTarget (0.00s)
+=== RUN   TestR4_H6_CoveredResolvedIsPruned
+    r4_probe_test.go:165: H6: notifications=0 size=1
+--- PASS: TestR4_H6_CoveredResolvedIsPruned (0.00s)
+=== RUN   TestR4_NoConsultNoPrune
+--- PASS: TestR4_NoConsultNoPrune (0.00s)
+=== RUN   TestR4_ResilientLog
+    r4_probe_test.go:197: wrapper: notifications with reads failing: 2
+    r4_probe_test.go:214: wrapper: local entries before sweep=101 after=0
+--- PASS: TestR4_ResilientLog (0.00s)
+=== RUN   TestR4_HA_Race
+    r4_probe_test.go:262: T5: B observed holding a local timer 0 times; started A=75 B=0; expired A=74 B=0; notifications=1
+--- PASS: TestR4_HA_Race (1.50s)
+PASS
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	3.077s
+```
+
+- H1: target с `send_resolved: false`; `[a,b firing]` → 1 нотификация; `a` resolved → по-прежнему 1, в группе остался 1 алерт (`a` удалён); `a` снова firing → 1 (получатель о resolve не знал); новый `c` → 2.
+- Target с `send_resolved: true`: resolve уходит один раз (2), удаляется, три следующих flush ничего не шлют.
+- H6: запись nflog уже покрывает `a:resolved|b:firing`, а `a` ещё в группе → flush без отправки удаляет `a`.
+- Publisher, который никого не опрашивает (metrics-only): resolved не удаляется.
+- `resilientNotifyLog`: после своей отправки три flush при падающем чтении → публикаций 1; новый алерт → 2; свежая обёртка без локальной записи — fail-open; 101 локальная запись → 0 после прохода вытеснения.
+- H8: две «реплики» на общих in-memory storage, ingest через не-владельца во время 74 срабатываний таймера, под `-race` — отчётов о гонке нет (в R3 на этом же сценарии было 4).
+
+Публикация эмулирует порядок вызовов coordinator'а (фильтр `send_resolved` → `targetAlerts`); реальный `PublishingCoordinator` — в тестах фазы 4.

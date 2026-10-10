@@ -192,77 +192,77 @@
 - **Location:** `manager_impl.go:1434-1438` (`targetAlerts`), `publishing/coordinator.go:694-707` (`filterAlertsForTarget`)
 - **Issue:** сигнатура для dedup считается по всей группе, а не по набору, который причитается target'у после фильтра. Отправлено `{a,b firing}`; `a` resolved → групповая сигнатура содержит новый `a:resolved` → target без resolved получает `b:firing` повторно. Upstream `needsUpdate` смотрит resolved только при `SendResolved()`. Было и до ветки (при точном сравнении), но срабатывало раз в `repeat_interval`; с постоянным тиком — на ближайшем `group_interval` после каждого resolve. Формулировка «upstream's rule» (`CHANGELOG.md:304`, doc-комментарий `signatureCovers`) для таких target'ов неверна (D1).
 - **Evidence:** прогон ревьюера A на эмуляции порядка вызовов coordinator'а: 2 нотификации (upstream: 1); ревьюер B пришёл к тому же чтением кода независимо. На реальном `PublishingCoordinator` не прогонялось.
-- **Disposition:** открыт — решение владельца (см. «Решение по R3»)
+- **Disposition:** fix-here — сигнатура по набору получателя (`targetAlerts`); доки исправлены (D1)
 
 ### H2 — `localSent` может подавить нотификацию, которую общий nflog отправил бы
 - **Severity:** minor (внесено `daab077`)
 - **Issue:** HA: реплика A отправила `{a,b firing}`; B отправила `a:resolved`; `a` снова firing; у A чтение nflog падает → `localSent` A покрывает `a:firing` → пропуск до восстановления чтения (максимум `repeat_interval`). Противоречит принципу «дубликат лучше потери». Нужны смена владельца + flap + сбой чтения nflog. Подтверждено прогоном.
-- **Disposition:** открыт
+- **Disposition:** fix-here (ограничено) — память отправок вынесена в `resilientNotifyLog`, вытеснение по TTL; остаточное ограничение описано в CHANGELOG и doc-комментарии, TECH-DEBT
 
 ### H3 — `localSent` не вытесняет записи групп, удалённых не этим процессом
 - **Severity:** minor (внесено `daab077`)
 - **Issue:** `Forget` вызывается только в двух путях удаления группы этим процессом; группа, удалённая другой репликой или по TTL Redis, оставляет запись до рестарта. Прогон: 100 групп → `localSent` 100 записей при 0 в общем nflog. Медленная утечка при churn ключей в HA.
-- **Disposition:** открыт
+- **Disposition:** fix-here — вытеснение локальных записей по TTL
 
 ### H4 — в metrics-only режиме понижение логов расходится с заявленным
 - **Severity:** minor
 - **Issue:** ревьюер A: через `coordinator.go:661` (пустые outcomes без ошибки) не остаётся повторяющегося сигнала выше Debug. Ревьюер B (D2): через `MetricsOnlyPublisher` (`publishing_metrics_only.go:69`, `manager_impl.go:1503`) Info + Warn остаются на каждый flush каждой группы бессрочно — и на них опирается `deploy/e2e-ha/run.sh:127`, `:203`. Оба пути существуют; `CHANGELOG.md:306` не описывает ни один.
-- **Disposition:** открыт
+- **Disposition:** fix-here — «Group publishing skipped (metrics-only mode)» возвращён на Info; CHANGELOG описывает оба пути
 
 ### H5 — resolved-only нотификация для группы, о которой получатель не знал
 - **Severity:** minor (не регрессия)
 - **Issue:** алерт сработал и разрешился до первого flush → уходит «resolved». Upstream при отсутствии записи шлёт только при непустом firing. Прогон: 1 (upstream: 0).
-- **Disposition:** открыт
+- **Disposition:** defer-bugs — исправление требует отличать «записи нет» от «запись не покрывает» и теряет resolve после простоя получателя дольше TTL записи; расхождение названо в compat-доке #13
 
 ### H6 — resolved, признанный дубликатом, не удаляется из группы
 - **Severity:** minor (не регрессия; станет частым при исправлении H1 через сигнатуру по candidates)
 - **Issue:** при пустых outcomes prune не вызывается; алерт остаётся до следующей реальной отправки и объявляется resolved повторно.
-- **Disposition:** открыт
+- **Disposition:** fix-here — flush, на котором все опрошенные target'ы покрыты, удаляет resolved
 
 ### H7 — legacy-таймер `repeat_interval` после апгрейда держит задержку F1 до своего срока
 - **Severity:** minor
 - **Issue:** `HasTimer` = true, re-arm не срабатывает; новый алерт в такой группе ждёт остаток `repeat_interval` (до 4h), один раз на группу, пережившую апгрейд. Migration note п.10 этого последствия не называет (D8).
-- **Disposition:** открыт
+- **Disposition:** defer-tech-debt — timer manager не знает `group_interval` группы; последствие названо в migration note п.10
 
 ### H8 — гонка на `len(group.Alerts)` без `group.mu`
 - **Severity:** minor (предсуществующее, G7; экспозиция выросла)
 - **Issue:** `manager_impl.go:1901`, `:1913`, `:1961`, `:1972`, `memory_group_storage.go:264`. Прогон ingest + flush под `-race`: 4 отчёта DATA RACE. Тест «ingest во время flush» под `-race` упадёт.
-- **Disposition:** открыт
+- **Disposition:** fix-here — `alertCount(group)`
 
 ### H9 — `HasTimer` добавляет Redis GET на каждый алерт у реплики без локального handle
 - **Severity:** minor (perf)
 - **Issue:** в HA это (N−1)/N алертов; при ошибке GET — Warn + Error на каждый алерт без rate-limit. Не под мьютексом менеджера, deadlock'а нет.
-- **Disposition:** открыт
+- **Disposition:** defer-tech-debt
 
 ### H10 — мелочи в коде
 - **Severity:** nit
 - **Issue:** комментарии «exact alert set» (`dedup.go:110-112`, `manager_impl.go:1292`, `:1427`); метрика `timer_rearm/success` пишется до результата `StartTimer` (`manager_impl.go:948`); fingerprint из API с символом `|` ломает разбор сигнатуры (`handlers/alerts.go:543`); в lite `localSent` дублирует основной nflog.
-- **Disposition:** открыт
+- **Disposition:** fix-here (комментарии, порядок метрики); символ `|` в fingerprint — defer-bugs
 
 ### D3 — `deploy/e2e-ha` шаг 4 стал чувствителен ко времени
 - **Severity:** minor
 - **Issue:** `run.sh:299-307`: проверка ровно 2 публикаций приходится на ≈50–61s после POST, третий flush — на ~68s; запас 7–18s вместо 1h. CI гоняет e2e-ha на каждом PR (не required). Комментарии `run.sh:313-314`, `deploy/e2e-ha/config.yaml:67-73` («exactly once») устарели. Шаги 3, 5, 6 и smoke не затронуты. Выведено расчётом, стек не запускался.
-- **Disposition:** открыт
+- **Disposition:** fix-here — опрос вместо `sleep`; прогон `evidence/e2e-ha.md` ALL PASS
 
 ### D4 — комментарий и CHANGELOG о `localSent` сильнее кода
 - **Severity:** minor
 - **Issue:** `manager_impl.go:1625-1627`, `CHANGELOG.md:305`: при неудачной записи в nflog и успешном чтении `localSent` не спрашивается — реплика шлёт повтор на каждом `group_interval`.
-- **Disposition:** открыт
+- **Disposition:** fix-here — формулировки; уточнение: неудачная запись при успешном чтении даёт один повтор (следующий `RecordSent` его закрывает), а не повтор на каждом flush
 
 ### D5–D7 — Spec v1.2: противоречия, уехавшие строки, завышенные классы evidence
 - **Severity:** minor
 - **Issue:** Premise 11 и п.6 против п.9; Invariant «nflog не тронуты»; «Metrics: не меняются» против `timer_rearm`; Premise 10 против правила подмножества; Edge Case 14 занижает число дублей. Номера строк `service_registry.go`, `config.go`, `alert_processor.go`. Premise 3 `measured` снят на `21dde05` с явным `true`; Premise 10 `measured` — пробы вне дерева, без Redis.
-- **Disposition:** открыт
+- **Disposition:** fix-here — Spec v1.3
 
 ### D8 — пробелы migration notes и runbook
 - **Severity:** minor
 - **Issue:** lite: рестарт в окне `group_wait` теряет ожидающую нотификацию (snapshot хранит только silences и nflog); WARN «alert group has no timer scheduled…» и операция `timer_rearm` не описаны; п.7 — `validateNotifyTimingBudget` не работает в metrics-only; п.1 — в списке non-batch целей нет Rootly; откат только образа при новых values оставляет группировку на старой цепочке (задержка F1); `ROLLBACK_RUNBOOK.md:39` — алерты, уже сидящие в группах, при выключении не отправляются.
-- **Disposition:** открыт
+- **Disposition:** fix-here — migration notes п.1, 4, 7, 10, runbook; уточнение: в lite ожидающая нотификация не теряется, а уходит после повторной отправки алерта Prometheus
 
 ### D9–D10 — формулировки и нетронутые устаревшие места
 - **Severity:** nit
 - **Issue:** «alerts changed» без оговорки про подмножество (`CONFIGURATION_GUIDE.md:255`, `timer_models.go:37`, `manager_impl.go:1949`); `tasks.md:66`; комментарии `config.go:101`, `service_registry.go:1594`, `memory_group_storage.go:216`, `redis_notify_log.go:14`, `timer_manager_impl.go:868`.
-- **Disposition:** открыт
+- **Disposition:** fix-here частично — формулировки про набор; исторические нарративы в комментариях оставлены
 
 ### Проверено в R3, замечаний нет
 `go vet` + `go test -race -count=1` по `grouping`, `publishing`, `application`, `core`, `config`; `signatureCovers` на таблице случаев (сужение, новый firing, новый resolved, re-fire после resolved, firing→resolved→firing между отправками, пустые строки) — как upstream при `send_resolved: true`; совместимость записей nflog; отсутствие окна «таймера нет ни локально, ни в storage» у живой цепочки; `fireStillDue` и lock при одновременном re-arm; `helm lint`, `helm template` (дефолт, `false`, lite, production); env против файла; стартовые логи дословно; в `docs/`, `deploy/`, `helm/`, `scripts/`, `.github/` нет зависимостей от пониженных строк.
@@ -273,6 +273,8 @@
 ## Решение по R3
 
 Гейт не пройден третий раз подряд. Раунд закрыл то, ради чего запускался (G1–G3), но каждое исправление в notify-chain открывает следующий слой: H2 и H3 внесены самим `daab077`, H1 — предсуществующее расхождение с upstream, которое постоянный тик делает заметным. Работа остановлена по правилу § Scope Discipline; исправления по R3 не начаты. Требуется решение владельца — варианты в итоге сессии 2026-10-10.
+
+**Решение владельца 2026-10-10: «полноценное решение корня».** Общая причина R2–R3: решение «слать или нет» принималось на уровне группы, а знание о том, что причитается получателю, жило в coordinator'е; память собственных отправок была вторым источником правды внутри менеджера. Fix-раунд: dedup считается по набору получателя, flush без отправки при покрытых получателях считается успешным (prune), память отправок вынесена в обёртку над Redis-nflog. Проверка — Round 4.
 
 ## Anti-Pattern Check
 

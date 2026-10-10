@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: группировка включена по умолчанию
 
-**Based on:** requirements.md / research.md / Spec.md v1.2
+**Based on:** requirements.md / research.md / Spec.md v1.3
 **Date:** 2026-10-10
 
 Пути — от корня репозитория. Go-команды выполняются из `go-app/`. Оценка: ~0.5–1d → ~2d после расширения scope (цепочка `group_interval`, 2026-10-10); срез не выделяется.
@@ -63,7 +63,7 @@ based_on:
 **Phase verification:** `helm lint helm/amp` + все `helm/amp/tests/*.sh` зелёные + `git diff --check`. _(2026-10-10: lint 0 failed, 6/6 render-тестов PASS, `quality-gates-fast` PASS, fmt ничего не переписал.)_
 
 **Заметки implement (2026-10-10):**
-- `docs/ROLLBACK_RUNBOOK.md` уже описывает `grouping.enabled` как startup-only выключатель — не менялся.
+- `docs/ROLLBACK_RUNBOOK.md` уже описывал `grouping.enabled` как startup-only выключатель; на fix-раундах R1–R3 дополнен (стартовый WARN, срок жизни групп в Redis, откат только образа).
 - `docs/RELEASE_NOTES_v0.1.0-draft.md:167` упоминает `grouping.enabled: false` в старом контексте; draft целиком пересобирается в `PROD-RELEASE-V010` — не трогали.
 - `values-production.yaml`: комментарий утверждал, что `false` «falls back to the older per-alert fan-out-to-every-target path» — устарело с wave 6 (receiver scoping), исправлено заодно с формулировкой.
 - Для deep-review: `GroupingConfig.Enabled` имеет тег `yaml:"enabled,omitempty"`. Целиком `Config` в YAML не сериализуется (grep `yaml.Marshal`: только `Routing` и subset-карты), JSON-сериализация тегом не затронута — риска «явный `false` теряется при round-trip» не найдено, но стоит перепроверить.
@@ -85,6 +85,17 @@ based_on:
 - [x] **2c.5** Доки: G5 (migration note п.10), G6 (п.1, п.5), остаток F3 (`helm/amp/README.md`, `values.yaml`, `ROLLBACK_RUNBOOK.md`), F9 (п.9, runbook), запись Changed. Spec v1.2.
 - [ ] **2c.6** Follow-ups при `finalize` (дополнение к 2b.5): BUGS — gauge активных таймеров уходит в минус при удалении группы из callback'а; гонка на `len(group.Alerts)`; TECH-DEBT — `CleanupExpiredGroups` не вызывается в проде; уточнить текст `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` и `GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` (последствие теперь ограничено `ensureGroupTimer`); конвертация legacy `repeat_interval` в `RestoreTimers`.
 
+## Phase 2d: Fix round после deep-review R3 (2026-10-10, решение владельца: «полноценное решение корня»)
+
+- [x] **2d.1** H1 — сигнатура dedup считается по набору получателя (`targetAlerts`), под ней же делается `RecordSent`. <!-- verify: evidence/group-interval-chain-probes.md § R3 -->
+- [x] **2d.2** H6 — flush, на котором все опрошенные target'ы покрыты, удаляет resolved-алерты; без опроса (metrics-only) — нет.
+- [x] **2d.3** H2/H3/D4 — `localSent` убран из менеджера; `resilientNotifyLog` (`notify_log_fallback.go`) подключён в `newNotifyLog` только для Redis; вытеснение локальных записей по TTL.
+- [x] **2d.4** H8 — `alertCount(group)` вместо `len(group.Alerts)` в callback'ах таймеров и `MemoryGroupStorage.Load`. H10 — метрика `timer_rearm` после результата `StartTimer`, комментарии «exact alert set».
+- [x] **2d.5** H4 — «Group publishing skipped (metrics-only mode)» возвращён на Info.
+- [x] **2d.6** D3 — `deploy/e2e-ha/run.sh` шаг 4: опрос вместо фиксированного `sleep`. <!-- verify: evidence/e2e-ha.md -->
+- [x] **2d.7** Доки: CHANGELOG (Changed, notes п.1, 4, 7, 10), compat-док (#13, строка про prune), `CONFIGURATION_GUIDE.md`, `ROLLBACK_RUNBOOK.md` (откат только образа). Spec v1.3 (D5–D7).
+- [ ] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись).
+
 ## Phase 3: Deep Review
 
 - [ ] **3.1** `/deep-review` (Spec § Deep Review: required). Фокус: установки без `route:` (нет WARN, нет degraded); Edge Case 5 (дерево не собралось); полнота поиска потребителей флага; честность migration note; доки про `lite`. <!-- depends: Phase 1, Phase 2 | verify: tasks/PROD-GROUPING-DEFAULT/review-verdict.json -->
@@ -100,6 +111,7 @@ based_on:
 - [ ] **4.6** `helm/amp/tests/render-grouping-default.sh` по образцу `render-image-tag.sh`: дефолт → `"true"`; `--set grouping.enabled=false` → `"false"`; `values-production.yaml` + `tests/values-production-placeholders.yaml` → `"true"`. Исполняемый бит. <!-- depends: 3.1 | verify: helm/amp/tests/render-grouping-default.sh → 0 FAIL -->
 - [ ] **4.7** `internal/infrastructure/grouping`: (а) после fire `group_interval` следующий таймер — `group_interval`; (б) неизменная группа: N flush'ей в пределах `repeat_interval` → одна публикация; (в) алерт, добавленный после первого `group_interval`, уходит на следующем flush; (г) resolve в нотифицированной группе уходит на следующем flush, группа удаляется, таймер не ставится; (д) fire legacy-таймера `repeat_interval` переводит группу на `group_interval`; (е) напоминание после `repeat_interval`. Переименовать `TestTimerChain_GroupWaitToRepeatInterval`. <!-- depends: 3.1 | verify: cd go-app && go test -race -run 'TimerChain|GroupInterval' ./internal/infrastructure/grouping/... -->
 - [ ] **4.9** v1.2: `signatureCovers` (табличный: равные, подмножество, новый алерт, смена статуса, повторный firing); `IsDuplicate` обеих реализаций на суженном наборе (Redis — miniredis); `ensureGroupTimer` (нет таймера → `group_wait`; есть таймер → не тронут; ошибка `HasTimer` → не тронут; таймер только в storage → не тронут); `HasTimer`; fallback на `localSent` при ошибке `IsDuplicate` (своя отправка не повторяется, новый алерт уходит, `Forget` чистит). Исправить тесты, проходящие и на старом коде (`TestTimerChain_GroupWaitToRepeatInterval`, `TestTimerContinuation_FullChainFiresRepeatIntervalTwice`: `repeat_interval` ≫ `group_interval`). <!-- depends: 3.1 | verify: cd go-app && go test -race ./internal/infrastructure/grouping/... -->
+- [ ] **4.10** v1.3: target с `send_resolved: false` через реальный `PublishingCoordinator` — частичный resolve не даёт повтора, resolved удаляется из группы; `RecordSent` получает сигнатуру набора получателя; покрытый resolved удаляется на flush без отправки, а при publisher'е, который никого не опрашивал, — нет; `resilientNotifyLog` (своя отправка при ошибке чтения → дубликат; чужая → ошибка наверх; `Forget`; вытеснение по TTL; сквозные методы); проводка: `newNotifyLog` для Redis возвращает обёртку, для in-memory — нет (snapshot-интерфейс не теряется); ingest во время flush под `-race`; `timer_rearm` со статусом `error`. Тесты на `localSent` из 4.9 заменяются тестами обёртки. <!-- depends: 3.1 | verify: cd go-app && go test -race ./internal/infrastructure/grouping/... ./internal/application/... -->
 - [ ] **4.8** F7: `TestLoadConfig_MissingFile_UsesEnv` — `GROUPING_ENABLED=false` + `assert.False`. <!-- depends: 3.1 | verify: cd go-app && go test -run TestLoadConfig_MissingFile_UsesEnv ./internal/config/... -->
 - [ ] **4.5** Мутационная проверка: вернуть `startGroupIntervalTimer` → `repeat_interval`-цепочку → 4.7 (а, в) падают; вернуть `GroupingEnabled: r.config.Grouping.Enabled` → 4.4 падает; вернуть дефолт `false` → 1.5 и 4.3 падают; убрать WARN → 4.2 падает. <!-- depends: 4.1–4.4 | verify: вручную, результат в tasks.md -->
 

@@ -204,6 +204,11 @@ depends on. That means:
   outlive their timers (about a day): after `grouping.enabled` is switched
   off and on again, a group that is still there notifies again once the next
   alert joins it.
+- **Rolling back the image only** (chart values unchanged) to a version from
+  before `PROD-GROUPING-DEFAULT` keeps grouping on, because the chart passes
+  `GROUPING_ENABLED` from values, but on the old timer chain: an alert joining
+  an already-notified group waits up to `repeat_interval`. Set
+  `grouping.enabled=false` as well if that delay is not acceptable.
 - **Key-shape gap**: nflog entries moved from one bare key per
   group+receiver (`nflog:entry:{groupKey}`) to one key per group+receiver
   **+target** (`nflog:entry:{groupKey}:{target}`) in the wave-2 change
