@@ -3,7 +3,7 @@ id: GROUPING-TIMER-LOCK-FIX
 slug: grouping-timer-lock-fix
 stream: Reliability / Grouping
 type: bug
-status: draft
+status: complete
 created_at: 2026-10-09
 updated_at: 2026-10-10
 based_on:

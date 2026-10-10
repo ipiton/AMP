@@ -4,7 +4,7 @@ slug: grouping-timer-lock-fix
 stream: Reliability / Grouping
 type: bug
 priority: high
-status: active
+status: complete
 created_at: 2026-10-09
 updated_at: 2026-10-09
 ---

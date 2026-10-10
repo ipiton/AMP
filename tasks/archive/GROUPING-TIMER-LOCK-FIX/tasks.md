@@ -3,9 +3,9 @@ id: GROUPING-TIMER-LOCK-FIX
 slug: grouping-timer-lock-fix
 stream: Reliability / Grouping
 type: bug
-status: active
+status: complete
 created_at: 2026-10-09
-updated_at: 2026-10-09
+updated_at: 2026-10-10
 based_on:
   - requirements.md
   - research.md
@@ -78,12 +78,13 @@ based_on:
 
 ## Phase 5: Finalize
 
-- [ ] **5.1** `/finalize`:
+- [x] **5.1** `/finalize`:
   - `BUGS.md` — удалить `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`;
   - `BACKLOG.md` — P0 `GROUPING-TIMER-LOCK-FIX` в «Закрыто»;
   - строку P0 в `NEXT.md` и WIP — обновить;
   - `DONE.md` — запись;
   - архив workspace.
+  - Сделано 2026-10-10. Follow-ups: BUGS `GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` (F7); TECH-DEBT `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` (F6), `TIMER-ACTIVE-GAUGE-DRIFT` (N3 + F2); BACKLOG P2 `TIMER-FIRE-OUTCOME-METRIC` (F8).
   <!-- verify: grep -c GROUPING-TIMER-LOCK-RELEASED docs/06-planning/BUGS.md → 0 -->
 
 ## Notes
@@ -122,10 +123,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed

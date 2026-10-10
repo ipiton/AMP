@@ -62,7 +62,7 @@
 - **Issue:** раньше локальный handle срабатывал независимо от storage. Теперь при eviction (allkeys-lru), FLUSHDB или failover на отстающую реплику Redis будет `not_found` ⇒ skip, а reconciliation ключа не видит. Group storage имеет failback (`StorageManager`), timer storage — нет (`service_registry.go:1897-1911`). Отличить «удалено обработчиком» от «потеряно» без нового маркера нельзя.
 - **Recommendation:** зафиксировать как известный компромисс (Spec Edge Cases + TECH-DEBT).
 - **Disposition:** defer-tech-debt
-- **Follow-up:** `TECH-DEBT.md` — заводится на finalize
+- **Follow-up:** `TECH-DEBT.md` → `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` (finalize 2026-10-10)
 
 ### F7 — транзиентная ошибка в callback рвёт цепочку; двойное срабатывание раньше это маскировало
 - **Severity:** minor (предсуществующий, needs-testing)
@@ -70,7 +70,7 @@
 - **Issue:** при транзиентной ошибке `Load` continuation не заводится, а `onTimerExpired` удаляет запись ⇒ группа больше не нотифицирует. Раньше опоздавшая реплика иногда случайно «повторяла»; теперь она отсеивается по `not_found`.
 - **Recommendation:** отдельный баг: в callback различать not-found и транзиентную ошибку; при транзиентной не удалять таймер.
 - **Disposition:** defer-bug
-- **Follow-up:** `BUGS.md` — заводится на finalize
+- **Follow-up:** `BUGS.md` → `GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` (finalize 2026-10-10)
 
 ### F8 — skip виден только в Debug, метрики нет
 - **Severity:** minor
@@ -78,7 +78,7 @@
 - **Issue:** так же, как у ветки «lock занят». Поднимать до Info нельзя: `rescheduled`/`type_changed` — штатный исход каждого HA-срабатывания. Ложный skip в Redis-режиме страхует reconcile (Warn `adopting orphaned group timer`).
 - **Recommendation:** счётчик исходов срабатывания `outcome=fired|lock_held|skipped_<reason>|load_error` — отдельной задачей.
 - **Disposition:** defer-backlog
-- **Follow-up:** `BACKLOG.md` P2 — заводится на finalize
+- **Follow-up:** `BACKLOG.md` P2 → `TIMER-FIRE-OUTCOME-METRIC` (finalize 2026-10-10)
 
 ### F9 — устаревшие комментарии про exactly-once; doc-comment `onTimerExpired` оторван от функции
 - **Severity:** nit
@@ -137,7 +137,7 @@
 - **Issue:** при замене handle'а не из callback (например, `group_wait` пересозданной группы на той же реплике) skip не удаляет чужой handle ⇒ `Inc` старого не компенсирован. Раньше его компенсировал `Dec` полного пути. Корень предсуществующий; на доставку не влияет.
 - **Recommendation:** вместе с остальным дрейфом gauge (`gm == nil`/`GroupNotFound` без `Dec`, `nil`-handle `Dec` без `Inc`).
 - **Disposition:** defer-tech-debt
-- **Follow-up:** `TECH-DEBT.md` — заводится на finalize
+- **Follow-up:** `TECH-DEBT.md` → `TIMER-ACTIVE-GAUGE-DRIFT` (finalize 2026-10-10)
 
 ## Anti-Pattern Check
 
