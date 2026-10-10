@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: две реплики не должны срабатывать на один таймер группы
 
-**Based on:** requirements.md / research.md / Spec.md v1.0  
+**Based on:** requirements.md / research.md / Spec.md v1.0
 **Date:** 2026-10-09
 
 Пути ниже — относительно `go-app/`, если не указано иное. `G` = `./internal/infrastructure/grouping/`.
@@ -71,10 +71,10 @@ based_on:
 
 ## Phase 4: Testing & Docs
 
-- [ ] **4.1** Гейты AMP: `make -C go-app quality-gates-fast` → `git status` (go fmt); `scripts/release-gate.sh`; `git diff --check`; в диффе нет `_, _ :=`. <!-- depends: 3.* | verify: вывод гейтов в Testing notes -->
-- [ ] **4.2** T8 повторно на финальном коде: `-race -cpu=1 -count=400` ⇒ 0/400, результат дописать в `evidence/flake-rate.txt`. <!-- depends: 3.* | verify: файл evidence -->
-- [ ] **4.3** e2e-ha: локально `deploy/e2e-ha/run.sh`, если Docker доступен; иначе — CI job после push, явно отметить. <!-- depends: 3.* | verify: PASS шагов 3–6 -->
-- [ ] **4.4** `CHANGELOG.md` `[Unreleased]` → `### Fixed`: в HA повторное срабатывание таймера группы опоздавшей репликой больше не вызывает повторную обработку (пробелы, где nflog не спасал). <!-- verify: git diff CHANGELOG.md -->
+- [x] **4.1** Гейты AMP: `make -C go-app quality-gates-fast` → `git status` (go fmt); `scripts/release-gate.sh`; `git diff --check`; в диффе нет `_, _ :=`. <!-- depends: 3.* | verify: вывод гейтов в Testing notes -->
+- [x] **4.2** T8 повторно на финальном коде: `-race -cpu=1 -count=400` ⇒ 0/400, результат дописать в `evidence/flake-rate.txt`. <!-- depends: 3.* | verify: файл evidence -->
+- [x] **4.3** e2e-ha: локально `deploy/e2e-ha/run.sh`, если Docker доступен; иначе — CI job после push, явно отметить. <!-- depends: 3.* | verify: PASS шагов 3–6 -->
+- [x] **4.4** `CHANGELOG.md` `[Unreleased]` → `### Fixed`: в HA повторное срабатывание таймера группы опоздавшей репликой больше не вызывает повторную обработку (пробелы, где nflog не спасал). <!-- verify: git diff CHANGELOG.md -->
 
 ## Phase 5: Finalize
 
@@ -109,6 +109,14 @@ based_on:
   - `-race -cpu=1 -count=200` T1/T1b/T1c — 600/600.
   - `go test -race ./internal/infrastructure/grouping/... ./internal/application/...` — 1075 passed.
   - `gofmt -l` пуст, `git diff --check` чистый.
+- **testing** (2026-10-10):
+  - `make -C go-app quality-gates-fast` — PASS, `go fmt` файлов не изменил;
+  - `scripts/release-gate.sh` — `RESULT: PASS` (build, lint, test, futureparity, race, helm-*, amtool-compat);
+  - `git diff --check main` — чистый после удаления хвостовых пробелов (markdown-перенос) в `Spec.md:16` и `tasks.md:17`;
+  - `_, _ :=` в диффе нет;
+  - T8 — 0/800 (`evidence/flake-rate.txt`);
+  - e2e-ha локально (Docker) — `ALL PASS`, шаги 1–6;
+  - CHANGELOG `[Unreleased]` → Fixed.
 - **Отклонения от плана (write-tests):** новые тесты собраны в отдельный файл `timer_fire_dedup_test.go`, а не разнесены по `distributed_timer_ownership_test.go` и `timer_manager_impl_test.go`: у них общий хелпер реплики `newSharedRedisReplica`, им же теперь пользуется `TwoReplicasRace…`.
 - **Отклонения от Spec:** нет. `not_found` возвращается самой `fireStillDue` (`stored == nil`), а не обрабатывается у вызывающего, как сказано в плане 1.1, — так ветка одна.
 

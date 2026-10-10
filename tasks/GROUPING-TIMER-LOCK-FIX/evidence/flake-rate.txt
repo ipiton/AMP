@@ -21,3 +21,10 @@
   "the losing replica must log a quiet skip via onTimerExpired's existing ErrLockAlreadyAcquired branch"
   Опоздавшая реплика теперь отсеивается веткой fireStillDue ("Timer fire already handled elsewhere"),
   а не веткой lock'а. Ассерт проверяет механизм, а не результат; правка — write-tests (tasks.md 3.5).
+
+# Финальный код (write-tests, 2026-10-10; код продукта = d459a6e, тесты = 2115771)
+# ассерт лога :171 заменён проверкой исхода (tasks.md 3.5)
+-race -cpu=1 -count=400 -run 'TwoReplicasRace...$':  0/400 FAIL (прогон 1)
+-race -cpu=1 -count=400 -run 'TwoReplicasRace...$':  0/400 FAIL (прогон 2)
+-race -cpu=1 -count=200 -run 'OverwrittenEntry|SkipperDoesNotHoldLock|LateReplica':  600/600 passed
+итого: двойных срабатываний 0/800 (до фикса 8/400), падений теста 0/800

@@ -13,7 +13,7 @@ based_on:
 
 # Specification: две реплики не должны срабатывать на один таймер группы
 
-**Version:** 1.1 (deep-review round 1: F1 — предпроверка до lock'а; F2 — gauge; F3 — премисы)  
+**Version:** 1.1 (deep-review round 1: F1 — предпроверка до lock'а; F2 — gauge; F3 — премисы)
 **Status:** Draft
 
 ## Summary

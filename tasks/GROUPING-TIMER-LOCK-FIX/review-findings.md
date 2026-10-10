@@ -100,7 +100,7 @@
 - JSON round-trip `ExpiresAt` (RFC3339Nano, `Equal`).
 - Смешанные версии при rolling upgrade.
 - Прошлые fix rounds `7aaba3f`, `e47bcca`, `8791d43`, `7c6c416`, `0171418` не задеты, кроме допущения ветки «lock занят» (F1).
-- **Needs-testing:** e2e-ha шаги 3–6 — прогон в `tasks.md` 4.3.
+- **Needs-testing:** e2e-ha шаги 3–6 — прогон в `tasks.md` 4.3. **Подтверждено** (testing, 2026-10-10, `deploy/e2e-ha/run.sh` локально, `ALL PASS`): шаг 4 — обе реплики держали таймер, прошла ровно одна публикация; шаг 5 — B подобрала таймер упавшей A; шаг 6 — B одна доставляет ровно один раз.
 
 ### Премисы Spec (ревьюер A)
 - #1 верна, но класс завышен: это grep + code-read, а не `call-path-traced`. «Фейков нет» неточно: `lockFailingTimerStorage` (`timer_wedge_regression_test.go:168`) встраивает `TimerStorage`, но делегирует `LoadTimer` — безвредно. → исправить класс (в рамках F3).
