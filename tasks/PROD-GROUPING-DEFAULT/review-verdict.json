@@ -1,18 +1,18 @@
 {
   "gate": "fix_required",
-  "reason": "R2: F1 closed; 3 majors open on the grouped path exposed by the group_interval tick (G1 dedup on a narrowed alert set, G2 group left without a timer, G3 fail-open dedup per tick); second consecutive fail, owner decision on scope pending",
+  "reason": "R3: G1-G3 closed and confirmed by probes; open: 1 major (H1: per-target dedup signature ignores send_resolved filtering, pre-existing, exposed by the group_interval tick) and minors introduced by daab077 (H2 localSent may suppress, H3 localSent unbounded), doc gaps D3-D8; third consecutive fail, work stopped, owner decision pending",
   "branch": "bugfix/prod-grouping-default",
-  "commit": "7668135",
+  "commit": "8418ab6",
   "reviewed_at": "2026-10-10",
-  "round": 2,
+  "round": 3,
   "findings": {
     "blocker": 0,
-    "major": 3,
-    "minor": 4,
-    "nit": 1
+    "major": 1,
+    "minor": 12,
+    "nit": 2
   },
   "open": {
     "blocker": 0,
-    "major_without_disposition": 3
+    "major_without_disposition": 1
   }
 }
