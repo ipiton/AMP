@@ -251,6 +251,9 @@ AMP itself does not wait before step 2. In Kubernetes the chart's preStop hook p
 
 - It only takes effect when the Alertmanager config has a `route:` tree. Without one, alerts are published directly.
 - `grouping.enabled: false` publishes every alert as soon as it arrives. With a `route:` tree configured AMP logs a warning at startup, because the tree's timings are then ignored.
+- Under the Helm chart set it in values (`grouping.enabled`). The chart always passes `GROUPING_ENABLED`, and the environment overrides the config file, so the key inside `configFile.content` has no effect there.
+- A group is flushed after `group_wait` and then every `group_interval`. A flush notifies when the group's alerts changed, or when `repeat_interval` has passed since the last notification, so a reminder goes out at the first flush after `repeat_interval`.
+- Grouped notifications do not carry the LLM classification; direct publishing does.
 - The key is read at startup. Changing it needs a restart; `/-/reload` does not apply it.
 - Standard profile: groups, timers and the notification log are kept in Redis and shared across replicas. Lite profile: in memory, single replica.
 

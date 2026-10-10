@@ -32,8 +32,8 @@ func scopingDecision(receiver string) *RoutingDecision {
 	}
 }
 
-// Path 1: grouping.enabled is false — the DEFAULT — so every alert takes the
-// direct publish path.
+// Path 1: grouping.enabled is false (explicit opt-out), so every alert takes
+// the direct publish path.
 func TestProcessAlert_GroupingDisabled_PublishesToRoutedReceiverOnly(t *testing.T) {
 	publisher := &fakePublisher{}
 	evaluator := &fakeRouteEvaluator{decision: scopingDecision("team-x")}

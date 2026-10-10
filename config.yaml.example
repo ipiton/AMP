@@ -264,6 +264,10 @@ telemetry:
 #   resolve_timeout: 5m
 
 route:
+  # Alerts are grouped on this tree's group_by and timings by default
+  # (grouping.enabled: true). Set grouping.enabled: false to publish every
+  # alert as soon as it arrives.
+  #
   # Root route: receiver + defaults inherited by all child routes unless
   # overridden.
   receiver: default

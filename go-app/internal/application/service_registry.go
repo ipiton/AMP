@@ -222,8 +222,8 @@ type ServiceRegistry struct {
 	// Redis is unavailable), type-asserted against grouping.NflogSnapshotter
 	// so file-snapshot persistence (wave 6, FU-LITE-FILE-SNAPSHOT) can
 	// save/restore its state without reaching into groupManager's private
-	// notifyLog field. nil when grouping is disabled (cfg.Grouping.Enabled=
-	// false, the default) or the standard profile selected the Redis-backed
+	// notifyLog field. nil when grouping is not running (cfg.Grouping.Enabled=
+	// false, or no route: tree) or the standard profile selected the Redis-backed
 	// RedisNotifyLog, which owns its own durability and does not implement
 	// NflogSnapshotter.
 	memoryNotifyLog grouping.NflogSnapshotter
@@ -411,8 +411,8 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	r.initializeTemplating()
 
 	// Step 2.7: Initialize grouping subsystem (non-fatal — graceful
-	// degradation). Task 2.2, alertmanager-parity. Disabled by default
-	// (grouping.enabled=false) and a clean skip without a route: tree.
+	// degradation). Task 2.2, alertmanager-parity. Enabled by default
+	// (grouping.enabled=true); a clean skip without a route: tree.
 	if err := r.initializeGrouping(ctx); err != nil {
 		r.logger.Warn("Grouping subsystem initialization failed, continuing without alert grouping",
 			"error", err)
@@ -1628,7 +1628,11 @@ func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 
 	groupingCfg, err := r.config.BuildGroupingConfig()
 	if err != nil {
-		r.logger.Info("Grouping subsystem disabled: no route tree configured", "error", err)
+		// ErrGroupingRequiresRouteTree, the only error BuildGroupingConfig
+		// returns: the normal state of an install without a route: tree now
+		// that grouping.enabled defaults to true, so it is not logged as an
+		// error.
+		r.logger.Info("Grouping subsystem not started: no route: tree configured, alerts are published directly")
 		return nil
 	}
 

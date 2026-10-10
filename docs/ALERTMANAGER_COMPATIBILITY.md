@@ -638,9 +638,9 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
      duplicate notification, never a dropped one. The pipeline is at-least-once, same as upstream. Giving up also
      **abandons** the job (its context is cancelled), so one hanging endpoint cannot pin workers and starve healthy
      targets into false "unconfirmed" results.
-   - After the `group_interval` fire, AMP's timer chain moves to `repeat_interval`, so an endpoint that is down for
-     a long time gets one fast retry and then retries at `repeat_interval` cadence (upstream keeps flushing at
-     `group_interval`). Independent of this fix; not tracked as a parity blocker.
+   - A group keeps flushing at `group_interval`, as upstream does (`PROD-GROUPING-DEFAULT`; the chain used to move
+     to a `repeat_interval` timer after the first `group_interval` fire), so an endpoint that is down is retried
+     every `group_interval`.
    - The timer manager's own distributed lock (`lockTTL`, 30s, no renewal) can now expire mid-fire, so a second
      replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
      that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
@@ -854,12 +854,22 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
       the timeout window.
 13. **Grouping is on by default** (closed by `PROD-GROUPING-DEFAULT`). `grouping.enabled` defaults to `true`
     (`internal/config/config.go`, Helm: `grouping.enabled`), so a verbatim `alertmanager.yml` with a `route:` tree
-    groups the way upstream does: `group_by`/`group_wait`/`group_interval`/`repeat_interval` apply, with upstream's
-    30s/5m/4h when the route sets none. It used to default to `false`, and every alert was sent as soon as it
-    arrived with nothing warning about it. Notes:
+    is grouped on its `group_by`/`group_wait`/`group_interval`/`repeat_interval`, with upstream's 30s/5m/4h when
+    the route sets none: a group is flushed after `group_wait` and then every `group_interval`, and an unchanged
+    group is re-notified at the first flush after `repeat_interval`. It used to default to `false`, and every
+    alert was sent as soon as it arrived with nothing warning about it. Notes:
     - Without a `route:` tree there is nothing to group by; alerts are published directly, as before.
     - `grouping.enabled: false` still turns grouping off. With a `route:` tree configured AMP logs a warning at
-      startup, because the tree's timings then do nothing.
+      startup, because the tree's timings then do nothing. Under the Helm chart set it in values: the chart's
+      `GROUPING_ENABLED` overrides the key in `configFile.content`.
+    - A grouped notification does not carry the LLM classification (the "AI Classification" block, the
+      classification-based PagerDuty severity); direct publishing does.
+    - Open defects of the grouped path now apply to every config with a `route:` tree: a transient group-storage
+      error in a timer callback can stop a group's timer chain (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` in
+      `docs/06-planning/BUGS.md`), and a timer key lost from Redis makes the group go quiet until its next alert
+      (`TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` in `docs/06-planning/TECH-DEBT.md`) — the chart's bundled Redis
+      evicts keys under memory pressure (`allkeys-lru`). See also #12: an alert that is never resolved keeps its
+      group, and its reminders, alive.
     - The key is read at startup only: changing it needs a restart, not `/-/reload`.
     - Both profiles group. The standard profile keeps groups, timers and the notification log in Redis, shared
       across replicas; the lite profile keeps them in memory (single replica).

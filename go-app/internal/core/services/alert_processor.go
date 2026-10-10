@@ -103,13 +103,14 @@ type AlertProcessor struct {
 	routingUnavailableWarner *rateLimitedWarner
 
 	// Grouping subsystem wiring (task 2.3, alertmanager-parity). groupingEnabled
-	// mirrors config.Grouping.Enabled and is tracked separately from
-	// groupManager/groupKeyGenerator being non-nil: an operator can set
-	// grouping.enabled=true without a `route:` tree configured (ServiceRegistry
-	// then leaves groupManager nil — see initializeGrouping's "no route tree"
-	// skip). shouldGroup() treats that combination as "can't group this alert"
+	// is config.Grouping.Enabled AND a `route:` tree being configured (see
+	// ServiceRegistry) and is tracked separately from
+	// groupManager/groupKeyGenerator being non-nil: with a `route:` tree the
+	// subsystem can still fail to come up, leaving groupManager nil.
+	// shouldGroup() treats that combination as "can't group this alert"
 	// and falls back to direct publish with a warning (see warnGroupingFallback)
-	// rather than silently dropping the intent to group.
+	// rather than silently dropping the intent to group. Without a `route:`
+	// tree it is false, so a legacy install publishes directly with no warning.
 	groupingEnabled   bool
 	groupManager      GroupManager
 	groupKeyGenerator *grouping.GroupKeyGenerator
@@ -156,7 +157,8 @@ type AlertProcessorConfig struct {
 	BusinessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
 	RouteEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
 
-	// GroupingEnabled mirrors config.Grouping.Enabled (task 2.3). When true,
+	// GroupingEnabled is config.Grouping.Enabled AND a `route:` tree being
+	// configured (task 2.3; see ServiceRegistry). When true,
 	// alerts with a computed RoutingDecision AND a non-nil GroupManager flow
 	// into groups instead of being published directly — see shouldGroup().
 	// When true but GroupManager/GroupKeyGenerator/the per-alert
@@ -365,7 +367,8 @@ var ErrRoutingUnavailable = errors.New("routing unavailable")
 // published directly (task 2.3).
 //
 // Mutual exclusion contract: the grouping path is taken only when ALL of the
-// following hold — config.Grouping.Enabled (groupingEnabled), a GroupManager
+// following hold — grouping is enabled for a configured `route:` tree
+// (groupingEnabled), a GroupManager
 // is wired (requires a `route:` tree at startup, see ServiceRegistry.
 // initializeGrouping), and a RoutingDecision was computed for THIS alert
 // (route evaluation succeeded). Any gap falls back to direct publish — see
@@ -377,7 +380,7 @@ func (p *AlertProcessor) shouldGroup(decision *RoutingDecision) bool {
 // warnGroupingFallback logs when grouping is enabled but this specific alert
 // can't take the grouping path (no GroupManager/GroupKeyGenerator wired, or
 // route evaluation failed/was never configured for this alert) — task 2.3
-// constraint: grouping.enabled=true without a usable routing decision falls
+// constraint: grouping enabled for a `route:` tree but without a usable routing decision falls
 // back to direct publish LOUDLY rather than silently.
 //
 // Rate-limited to one Warn per fallbackWarnWindow (task fu2-d item 4):
