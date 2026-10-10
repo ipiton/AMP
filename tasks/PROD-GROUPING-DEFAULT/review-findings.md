@@ -4,7 +4,7 @@
 **Reviewer perspective:** R1 — два независимых агента (general-purpose, read-only), не видевших выводов автора и друг друга: (A) корректность + премисы + контракт конфига + сопровождаемость; (B) runtime/rollout + observability + точность доков + история git. F1 перепроверен автором по коду после получения отчёта.
 **Reviewed at:** 2026-10-10
 **Reviewed tree:** bugfix/prod-grouping-default @ 177c57b
-**Verdict:** R1 — fix_required (see `review-verdict.json`)
+**Verdict:** R1 — fix_required; R2 — fix_required (see `review-verdict.json`)
 
 Сама правка (дефолт, эффективный флаг, стартовый WARN, чарт) обоими ревьюерами признана корректной. Блокер — не в диффе, а в том, что смена дефолта выводит на всех пользователей `route:` существующий дефект группового пути.
 
@@ -15,8 +15,8 @@
 - **Location:** `go-app/internal/infrastructure/grouping/manager_impl.go` — `StartTimer` вызывается только в `:881` (`group_wait`, при создании группы), `:920` (`group_interval`, из callback'а `group_wait`), `:1824` (`repeat_interval`); `onGroupIntervalExpired` (`:1907-1955`) после публикации всегда ставит `repeat_interval`. Доки: `CHANGELOG.md` (migration note п.1), `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #13.
 - **Issue:** цепочка таймеров — `group_wait` → один `group_interval` → дальше только `repeat_interval`. Алерт, пришедший в существующую группу, таймер не трогает (закреплено тестом `alert_processor_test.go:404-414`). Новый алерт в группе старше `group_wait + group_interval` уйдёт только на ближайшем `repeat_interval` — до 4h по умолчанию; upstream отправил бы его на следующем `group_interval` (5m). Ревьюер B подтвердил запуском (`go test -overlay`, `group_wait=200ms`, `group_interval=300ms`, `repeat_interval=1h`: алерт B, добавленный через 1s, за 3s не доставлен, висит таймер `repeat_interval`). Resolved идёт тем же путём (по чтению кода, отдельно не прогонялось). Худший случай — минимальный verbatim-конфиг `route: {receiver: default}` без `group_by`: одна группа на receiver, через ~5.5 мин после первого алерта все новые ждут до 4h. До смены дефолта они уходили сразу. Дефект предсуществующий; в compat-доке (`:641-643`) описан только как «retry cadence» упавшего endpoint'а. Формулировки «groups the way upstream does» и «later ones follow `group_interval` (5m)» в новых доках неверны.
 - **Recommendation:** до смены дефолта починить цепочку (после flush снова ставить `group_interval`, пока в группе есть недоставленные изменения, либо тикать `group_interval` постоянно с nflog-дедупом, как upstream). Альтернатива — не менять дефолт (вариант B из research: WARN + честные доки).
-- **Disposition:** открыт — решение владельца (см. «Решение по F1» ниже)
-- **Follow-up:** запись в `BUGS.md` — после решения.
+- **Disposition:** fix-here — решение владельца 2026-10-10 «вариант 2»; исправлено в `c344711`, подтверждено запуском обоими ревьюерами R2 (см. Round 2).
+- **Follow-up:** n/a
 
 ### F2 — на групповом пути LLM-классификация не попадает в нотификацию
 - **Severity:** major
@@ -115,6 +115,73 @@
 ## Решение по F1
 
 Требуется решение владельца — см. итог сессии 2026-10-10. Варианты: (1) починить цепочку `group_interval` отдельной задачей, эту задачу поставить на паузу и довести после; (2) чинить цепочку в рамках этой задачи (scope +1–2d, механика таймеров); (3) не менять дефолт — вариант B из research (WARN + честные доки).
+
+## Round 2 — 2026-10-10
+
+**Reviewed tree:** bugfix/prod-grouping-default @ 7668135 (фиксы `c344711`, `ce06bd1`, артефакты `7668135`).
+**Reviewer perspective:** два независимых агента, read-only, прогоны через `go test -overlay`: (A) коммит цепочки таймеров, сравнение с базой `c344711^`; (B) закрытие F2–F11, точность доков, флаг и стартовые логи, чарт, гигиена.
+
+**Статус находок R1:** F1, F2, F4, F5, F10, F11 — закрыты (F1 и F5 — запуском). F3 — частично (нет оговорки в `helm/amp/README.md`, комментарии `values.yaml`, `ROLLBACK_RUNBOOK.md:39`). F6 — частично (остатки про `repeat_interval`-таймер, см. G8). F8, F9 — частично (см. G2). F7 — в `write-tests`, как запланировано.
+
+Блокеров нет. Постоянный тик `group_interval` сам по себе корректен (неизменная группа: 16 тиков — одна нотификация; полный resolve закрывает группу; HA на miniredis — один flush на тик; утечек нет), но он вывел наружу три слабых места, которые раньше прятались за редким `repeat_interval`-таймером.
+
+### G1 — лишняя нотификация через `group_interval`, когда отправленный набор сузился
+- **Severity:** major (найдено обоими ревьюерами независимо)
+- **Location:** `go-app/internal/infrastructure/grouping/manager_impl.go` Step 4b (`alertSetSignature` + `IsDuplicate`), `RecordSent`, `pruneResolvedAlerts`; сравнение на точное равенство — `dedup.go:123`, `redis_notify_log.go:274`
+- **Issue:** dedup сравнивает точную сигнатуру набора. После нотификации с resolved-алертом он удаляется из группы, сигнатура остатка другая — следующий flush повторно шлёт оставшиеся firing. То же при silence/inhibit части группы (сузился — нотификация, вернулся — ещё одна). Upstream (`DedupStage.needsUpdate`) шлёт, только если появился firing/resolved, которого не было в прошлой отправке, либо истёк `repeat_interval`. Запуском: `[A,B] → [A, B resolved] → [A]` — третья лишняя; silence на B и снятие — две лишние; на базе в обоих сценариях одна. Формулировки «as upstream does» в CHANGELOG, compat-доке и комментарии `onGroupIntervalExpired` неверны.
+- **Recommendation:** хранить в nflog множества firing/resolved и сравнивать как upstream; минимум — после prune перезаписывать запись сигнатурой остатка (не покрывает silence/inhibit).
+- **Disposition:** открыт — решение владельца (см. «Решение по R2»)
+
+### G2 — группа без таймера молчит бессрочно; тик проходит уязвимый участок в ~48 раз чаще
+- **Severity:** major (предсуществующий, усилен)
+- **Location:** `timer_manager_impl.go:1014-1044`, `:1087-1108`; `manager_impl.go:282`, `:1887-1893`; `redis_timer_storage.go:245` (TTL записи таймера = `ExpiresAt` + 10m)
+- **Issue:** таймер ставится только при создании группы; `RestoreTimers` и reconciliation видят только сохранённые таймеры. Разовая ошибка `SaveTimer` при re-arm, окно деградации group storage дольше `group_interval` или разрыв с Redis дольше ~`group_interval`+10m оставляют группу без таймера: новые алерты и resolve не уходят (запуском: R6, R9 ревьюера A; in-memory прогон ревьюера B). Следствия для доков: фраза Known Gap #13 «go quiet until its next alert» неверна (следующий алерт таймер не ставит; та же неточность в записи TECH-DEBT); выключение группировки дольше ~`group_interval`+10m и повторное включение в пределах суток оставляет в Redis группы без таймеров — их алерты не доставляются; `ROLLBACK_RUNBOOK.md:196-199` «no manual cleanup needed» неверно.
+- **Recommendation:** самовосстановление — в `AddAlertToGroup` для существующей группы ставить `group_interval`, если таймера нет; не удалять запись таймера, если callback вернул ошибку, а группа жива; отличать not-found от транзиентной ошибки. До фикса — честные доки.
+- **Disposition:** открыт — решение владельца
+
+### G3 — fail-open dedup срабатывает на каждом тике
+- **Severity:** major (усилен)
+- **Location:** `manager_impl.go:1333-1341`, `:1378-1388`
+- **Issue:** при ошибке чтения nflog отправка идёт во все target'ы; раньше это случалось раз в `repeat_interval`, теперь — каждый `group_interval` для каждой группы, пока ошибка длится (запуском: +4 нотификации за 3 тика при `repeat_interval=1h`). Реалистичный случай — таймауты отдельных GET к Redis.
+- **Recommendation:** при ошибке nflog на тике пропускать target'ы, которым эта реплика уже отправляла; fail-open оставить для первой отправки.
+- **Disposition:** открыт — решение владельца
+
+### G4 — шум в логах на каждый тик
+- **Severity:** minor
+- **Location:** `manager_impl.go:1119`, `:1143` (Info на каждый silenced/inhibited алерт), `:1430`; `publishing/coordinator.go:659` (Info в metrics-only), `:778` (Warn + Error для receiver без целей)
+- **Issue:** понижены только логи таймер-менеджера; перечисленные строки теперь пишутся раз в `group_interval` на группу.
+- **Disposition:** fix-here вместе с цепочкой
+
+### G5 — legacy-таймер `repeat_interval` после апгрейда живёт до своего срока
+- **Severity:** minor (новый)
+- **Location:** `timer_manager_impl.go:1232-1267`
+- **Issue:** группы в repeat-фазе на момент апгрейда держат старое поведение до `repeat_interval`; при rolling upgrade старая реплика продолжает ставить такие таймеры. Корректность не страдает. В CHANGELOG не описано.
+- **Disposition:** fix-here (migration note либо конвертация в `RestoreTimers`)
+
+### G6 — migration note п.5 и Invariant 4 неверны после смены цепочки
+- **Severity:** minor
+- **Issue:** «Nothing changes… if you already set `grouping.enabled: true`» — у таких установок меняется каденс. П.1: «a single notification» верно только для webhook/alertmanager-целей; Slack, PagerDuty, Telegram, Email получают сообщение на алерт.
+- **Disposition:** fix-here
+
+### G7 — предсуществующее, вне диффа
+- **Severity:** minor
+- **Issue:** gauge активных таймеров уходит в минус при удалении группы из callback'а (двойной `DecActiveTimers`, `timer_manager_impl.go:577`, `:1118`); `CleanupExpiredGroups` в проде не вызывается — группа с недоставляемыми resolved тикает бессрочно (~10–12 round-trip'ов Redis на тик); гонка на `len(group.Alerts)` без `group.mu` (`memory_group_storage.go:264`, `manager_impl.go:1836`, `:1895`, `:1946`).
+- **Disposition:** defer-bugs / defer-tech-debt
+
+### G8 — остатки формулировок и артефактов
+- **Severity:** nit
+- **Issue:** про `repeat_interval`-таймер: `docs/ALERTMANAGER_COMPATIBILITY.md:330`, `:348`; `timer_manager.go:171`, `:257-258`; `timer_manager_impl.go:832`, `:850`, `:1144`; `manager.go:988`; `manager_impl.go:1442-1443`, `:1755`, `:1827`; `redis_notify_log.go:35`; `memory_group_storage.go:216`; `redis_group_storage.go:292`; `publishing/coordinator.go:730`; `alert_processor.go:806-809`. Тесты, которые проходят и на старом коде (`TestTimerChain_GroupWaitToRepeatInterval`, `TestTimerContinuation_FullChainFiresRepeatIntervalTwice` — `repeat == group_interval`). Spec: п.2 называет переменную `groupingActive`, которой нет; Premise «Dedup решает» класса `measured` без файла в `evidence/`; Premise 5 — строки `config.go:1194-1205`.
+- **Disposition:** fix-here (тесты — в `write-tests`)
+
+### Проверено в R2, замечаний нет
+Эффективный флаг и три стартовых состояния (запуском); `BuildGroupingConfig` возвращает только `ErrGroupingRequiresRouteTree`; env против файла — пять комбинаций (запуском); `helm template` / `helm lint`; `fireStillDue` при неизменном типе таймера; напоминание на первом тике после `repeat_interval`; `go test -race` по `grouping` и `publishing`; `git diff --check`, нет AI-атрибуции и секретов.
+
+### Не проверялось в R2
+Реальный Redis и rolling upgrade со смешанными версиями; реальный `PublishingCoordinator` с очередью под постоянным тиком; нагрузка на 10k групп; `helm upgrade --reuse-values`; рендер `values-production.yaml`; полный `go test ./...`, `release-gate.sh`, smoke/e2e-ha.
+
+## Решение по R2
+
+Гейт deep-review не пройден второй раз подряд (правило `CLAUDE.md` § Scope Discipline: остановиться и задокументировать блокер), оценка задачи вышла за ~2 дня (правило: резать на срезы). G1–G3 — не дефекты смены дефолта, а свойства группового пути, которые смена дефолта делает видимыми всем конфигам с `route:`. Требуется решение владельца — варианты в итоге сессии 2026-10-10.
 
 ## Anti-Pattern Check
 
