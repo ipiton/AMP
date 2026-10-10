@@ -51,7 +51,7 @@ based_on:
 
 ## Phase 2: Deep Review
 
-- [ ] **2.1** `/deep-review` (Spec § Deep Review: recommended, will run). Фокус: ложный skip (группа замолкает), пути `nil`-handle (reconcile/restore), continuation, lite-режим. <!-- depends: 1.2–1.6 | verify: tasks/GROUPING-TIMER-LOCK-FIX/review-verdict.json → "gate": "pass" -->
+- [x] **2.1** `/deep-review` (Spec § Deep Review: recommended, will run). Фокус: ложный skip (группа замолкает), пути `nil`-handle (reconcile/restore), continuation, lite-режим. <!-- depends: 1.2–1.6 | verify: tasks/GROUPING-TIMER-LOCK-FIX/review-verdict.json → "gate": "pass" -->
 
 **Phase verification:** `review-verdict.json` `gate: pass`.
 
@@ -98,6 +98,7 @@ based_on:
   - F3 — Spec v1.1 (премисы, Edge Cases 12–13).
   - F4/F5 — шаги 3.5–3.8.
   - Отложено на finalize: F6 → TECH-DEBT, F7 → BUGS, F8 → BACKLOG.
+- **Deep-review round 2** (2026-10-10, `93b686f`): pass, 3 nit. N1/N2 исправлены в `d459a6e`, N3 (дрейф gauge при внешнем `StartTimer`) → TECH-DEBT на finalize, вместе с остальным дрейфом gauge. Verdict — `d459a6e`.
 - **Отклонения от Spec:** нет. `not_found` возвращается самой `fireStillDue` (`stored == nil`), а не обрабатывается у вызывающего, как сказано в плане 1.1, — так ветка одна.
 
 ## Definition of Done

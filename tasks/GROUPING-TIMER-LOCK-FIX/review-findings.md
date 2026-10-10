@@ -1,10 +1,10 @@
 # Deep Review Findings: две реплики не должны срабатывать на один таймер группы
 
 **Trigger classification:** discretionary-running (author doubt / novel pattern — распределённая корректность в HA-пути; Spec § Deep Review)
-**Reviewer perspective:** два независимых агента (general-purpose), не видевших выводов друг друга: (A) корректность/конкурентность + премисы + сопровождаемость; (B) runtime/observability + история + тест-стратегия
+**Reviewer perspective:** R1 — два независимых агента (general-purpose), не видевших выводов друг друга: (A) корректность/конкурентность + премисы + сопровождаемость; (B) runtime/observability + история + тест-стратегия. R2 — третий независимый агент, в R1 не участвовал
 **Reviewed at:** 2026-10-10
-**Reviewed tree:** bugfix/grouping-timer-lock-fix @ 291bd7d
-**Verdict:** fix_required (round 1, see `review-verdict.json`)
+**Reviewed tree:** R1 — bugfix/grouping-timer-lock-fix @ 291bd7d; R2 — @ 93b686f (+ `d459a6e`: только комментарий и Spec, nit N1/N2)
+**Verdict:** R1 — fix_required; R2 — pass (see `review-verdict.json`)
 
 ## Round 1 — Findings
 
@@ -15,6 +15,7 @@
 - **Recommendation:** предпроверка без lock'а: до `AcquireLock` выполнить `LoadTimer` + `fireStillDue`; при `!due` — drop и return, lock не трогать. Проверку под lock'ом оставить (double-checked). + детерминированный тест: «lock держит пропускающая реплика ⇒ автор записи всё равно срабатывает» (или эквивалент через предпроверку).
 - **Disposition:** fix-here
 - **Follow-up:** n/a
+- **Status:** fixed (93b686f; подтверждено R2)
 
 ### F2 — gauge `active_timers` дрейфует на пути skip
 - **Severity:** minor (A: nit, B: minor — принят старший)
@@ -23,6 +24,7 @@
 - **Recommendation:** `DecActiveTimers()` в `dropLocalHandle`, когда handle реально удалён.
 - **Disposition:** fix-here
 - **Follow-up:** n/a. Обратный дрейф (`Dec` без `Inc` на `nil`-handle путях reconcile/restore) — предсуществующий, вне scope.
+- **Status:** fixed (93b686f; подтверждено R2)
 
 ### F3 — премиса «обработанное срабатывание меняет запись до release» неполна; нет премисы про ветку «lock занят»
 - **Severity:** minor
@@ -31,6 +33,7 @@
 - **Recommendation:** уточнить премису и комментарии; добавить премису про ветку «lock занят».
 - **Disposition:** fix-here (docs)
 - **Follow-up:** n/a
+- **Status:** fixed (93b686f (Spec v1.1); подтверждено R2)
 
 ### F4 — ассерт лога в `TwoReplicasRace…` закрепляет механизм, а не исход
 - **Severity:** minor
@@ -39,6 +42,7 @@
 - **Recommendation:** заменить ассерт лога проверками исхода: `publishCount == 1`; суммарный `totalExpired == 1`; пустой `tm.timers` у обеих реплик (гард finding 3 / `7aaba3f`); в логе нет `Failed to load timer for expiration check`. Поправить doc-comment теста.
 - **Disposition:** fix-here (в write-tests, шаг 3.5)
 - **Follow-up:** n/a
+- **Status:** planned (write-tests, `tasks.md` 3.3–3.8; покрытие подтверждено R2)
 
 ### F5 — пробелы в тест-плане
 - **Severity:** minor
@@ -50,6 +54,7 @@
   - (d) регрессия lite/memory: цепочка continuation не рвётся.
 - **Disposition:** fix-here (в write-tests): (a), (b) и тест F1; (c), (d) — по возможности
 - **Follow-up:** n/a
+- **Status:** planned (write-tests, `tasks.md` 3.3–3.8; покрытие подтверждено R2)
 
 ### F6 — пропажа ключа таймера в Redis теперь глушит живой handle
 - **Severity:** minor
@@ -81,6 +86,7 @@
 - **Recommendation:** одна фраза у reconcile (lock + re-check). `fireStillDue` вынести выше doc-блока `onTimerExpired`, чтобы не усугублять разрыв. Слияние doc-блока с `dropLocalHandle` — предсуществующее, не трогаем.
 - **Disposition:** fix-here
 - **Follow-up:** n/a
+- **Status:** fixed (93b686f; подтверждено R2)
 
 ### Проверено ревьюерами, проблем нет
 - Continuation другого и того же типа.
@@ -102,6 +108,36 @@
 - #3, #4 верны, класс заслужен.
 - #5 верна; reconciliation в standard можно выключить (`reconciliation_interval: 0`) — учесть в Risks (в рамках F3).
 - #6 measured — формально да.
+
+## Round 2 — Findings
+
+Проверка R1: F1 исправлен (probe ревьюера на копии go-app: две реплики, задержка Redis 0,5 мс, сдвиг часов через обёртку `SaveTimer`, 150 прогонов на сдвиг; при 0, ±1, ±3, ±10 мс — 0 без срабатывания, 0 двойных; мутация «без предпроверки» — 12/60 без срабатывания при +3 мс, 26/60 при +10 мс). F2 исправлен, двойного `Dec` нет (identity guard; после `dropLocalHandle` всегда return). F3 исправлен, F9 — кроме N1. F4/F5 покрыты планом 3.3–3.8; F5d — существующие `TestTimerContinuation_*` на in-memory storage. Edge Case 12 описан верно, нужно было лишь дополнить continuation предыдущего держателя (сделано в `d459a6e`). Гонка предпроверки с той же репликой, reconcile/restore, протухание lock'а посреди callback (как до фикса, страхует nflog), 2 GET на срабатывание — проблем нет. `go test -race ./internal/infrastructure/grouping/...` — ok.
+
+### N1 — doc-comment `fireStillDue` говорит «under the distributed lock»
+- **Severity:** nit
+- **Location:** `go-app/internal/infrastructure/grouping/timer_manager_impl.go:759`
+- **Issue:** запись перечитывается и до lock'а.
+- **Recommendation:** «before and again under the distributed lock».
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+- **Status:** fixed (d459a6e)
+
+### N2 — Spec: Component Architecture и порядок Edge Cases
+- **Severity:** nit
+- **Location:** `Spec.md` § Component Architecture, § Edge Cases
+- **Issue:** «проверка после `AcquireLock`» при двух проверках; нумерация 10, 12, 13, 11.
+- **Recommendation:** синхронизировать.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+- **Status:** fixed (d459a6e)
+
+### N3 — gauge +1, если сработавший handle заменил внешний `StartTimer` во время предпроверки
+- **Severity:** nit
+- **Location:** `timer_manager_impl.go:441-445` (`StartTimer` заменяет handle без `Dec`), `dropLocalHandle`
+- **Issue:** при замене handle'а не из callback (например, `group_wait` пересозданной группы на той же реплике) skip не удаляет чужой handle ⇒ `Inc` старого не компенсирован. Раньше его компенсировал `Dec` полного пути. Корень предсуществующий; на доставку не влияет.
+- **Recommendation:** вместе с остальным дрейфом gauge (`gm == nil`/`GroupNotFound` без `Dec`, `nil`-handle `Dec` без `Inc`).
+- **Disposition:** defer-tech-debt
+- **Follow-up:** `TECH-DEBT.md` — заводится на finalize
 
 ## Anti-Pattern Check
 
