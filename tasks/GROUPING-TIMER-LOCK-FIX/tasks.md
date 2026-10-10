@@ -62,7 +62,10 @@ based_on:
 - [ ] **3.3** T4: табличный тест `fireStillDue` (7 строк из Spec § Test Plan). <!-- depends: 2.1 | verify: go test -run FireStillDue G -->
 - [ ] **3.4** T5: ошибка `LoadTimer` (miniredis закрыт или обёртка storage с ошибкой) ⇒ callback не вызван, handle сброшен. <!-- depends: 2.1 | verify: go test -race -run LoadTimerError G -->
 
-- [ ] **3.5** `TwoReplicasRace…` (`distributed_timer_ownership_test.go:171`): ассерт лога требует ветку `ErrLockAlreadyAcquired`, а опоздавший проигравший теперь уходит через `fireStillDue`. Принимать любой из двух тихих skip'ов («Lock already acquired by another instance» / «Timer fire already handled elsewhere»), ассерт `publishCount == 1` не трогать. <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=400 -run 'TwoReplicasRace' G → 0/400 -->
+- [ ] **3.6** (R1 F1) T1b: пропускающая реплика не держит lock — автор записи срабатывает. <!-- depends: 2.1 | verify: go test -race -run SkipperDoesNotHoldLock G; мутация: перенести предпроверку под lock → FAIL -->
+- [ ] **3.7** (R1 F5b) T1c: обе реплики `StartTimer`, вторая перезаписывает ⇒ ровно 1, не 0. <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=200 -run OverwrittenEntry G -->
+- [ ] **3.8** (R1 F2) T5b: gauge — `DecActiveTimers` в `dropLocalHandle` только при удалении. <!-- depends: 2.1 | verify: go test -run DropLocalHandle G -->
+- [ ] **3.5** `TwoReplicasRace…` (`distributed_timer_ownership_test.go:171`): ассерт лога требует ветку `ErrLockAlreadyAcquired`, а опоздавший проигравший теперь уходит через `fireStillDue`. По R1 F4: ассерт лога заменить исходом — `publishCount == 1`, суммарный `totalExpired == 1`, пустой `tm.timers` у обеих реплик, в логе нет `Failed to load timer for expiration check`; поправить doc-comment теста. T4 (3.3) дополнить строкой R1 F5a (JSON round-trip). <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=400 -run 'TwoReplicasRace' G → 0/400 -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/grouping/...`
 
@@ -88,6 +91,13 @@ based_on:
 - **1.4** (2026-10-09): `go build ./...`, `go vet G`, `go test -race ./internal/infrastructure/grouping/... ./internal/application/...` — 1054 passed, 3 пакета.
 - **1.6 / Spec Edge Case 11:** `ResetTimer` в прод-коде не вызывается: grep `\.ResetTimer(` по `internal`, `cmd` без `_test.go` пуст. `alert_processor.go:450-462` объясняет, почему его намеренно не зовут (upstream не продлевает `group_interval`). «Воскрешение» записи сейчас недостижимо, TECH-DEBT не заводим. Если `ResetTimer` начнут вызывать — пересмотреть.
 - **1.5** (2026-10-09): двойных срабатываний 0/600 (`-cpu=1`, 400 + 200). Падения 10/600 — только ассерт лога `:171`, закреплявший механизм (ветку lock'а), а не результат → шаг 3.5. Сырые данные — `evidence/flake-rate.txt`. Флейк в CI до 3.5 остаётся: тот же тест, другой ассерт.
+- **Deep-review round 1** (2026-10-10, `291bd7d`): fix_required, 1 major. Исправлено в коде:
+  - F1 — предпроверка `skipHandledFire` до `AcquireLock` + double-check под lock'ом;
+  - F2 — `DecActiveTimers` в `dropLocalHandle`;
+  - F9 — `fireStillDue` перенесена выше doc-блока `onTimerExpired`, комментарий reconcile.
+  - F3 — Spec v1.1 (премисы, Edge Cases 12–13).
+  - F4/F5 — шаги 3.5–3.8.
+  - Отложено на finalize: F6 → TECH-DEBT, F7 → BUGS, F8 → BACKLOG.
 - **Отклонения от Spec:** нет. `not_found` возвращается самой `fireStillDue` (`stored == nil`), а не обрабатывается у вызывающего, как сказано в плане 1.1, — так ветка одна.
 
 ## Definition of Done

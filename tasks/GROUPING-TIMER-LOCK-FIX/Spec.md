@@ -5,7 +5,7 @@ stream: Reliability / Grouping
 type: bug
 status: draft
 created_at: 2026-10-09
-updated_at: 2026-10-09
+updated_at: 2026-10-10
 based_on:
   - requirements.md
   - research.md
@@ -13,12 +13,12 @@ based_on:
 
 # Specification: две реплики не должны срабатывать на один таймер группы
 
-**Version:** 1.0  
+**Version:** 1.1 (deep-review round 1: F1 — предпроверка до lock'а; F2 — gauge; F3 — премисы)  
 **Status:** Draft
 
 ## Summary
 
-`onTimerExpired` после захвата distributed lock'а перечитывает запись таймера из `TimerStorage` и вызывает callbacks, только если эта запись — всё ещё то срабатывание, которое пришло обработать. Если другая реплика уже обработала его (запись удалена или заменена continuation'ом), срабатывание тихо пропускается.
+`onTimerExpired` перечитывает запись таймера из `TimerStorage` — до захвата distributed lock'а и повторно под ним — и вызывает callbacks, только если эта запись — всё ещё то срабатывание, которое пришло обработать. Если другая реплика уже обработала его (запись удалена или заменена continuation'ом), срабатывание тихо пропускается.
 
 ## Requirements Coverage
 
@@ -50,25 +50,26 @@ based_on:
 
 | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|
-| `TimerStorage` реализуют только `RedisTimerStorage` и `InMemoryTimerStorage`; обе на отсутствующую запись возвращают `ErrTimerNotFound` | grep `func (.*) LoadTimer(` по всему `go-app`: 2 реализации, фейков в тестах нет; `redis_timer_storage.go:297-322`, `memory_timer_storage.go:133-149` | call-path-traced | у неизвестной реализации not-found выглядел бы как ошибка ⇒ пропуск + drop, срабатывание теряется до reconciliation |
-| Каждое обработанное срабатывание меняет запись в storage до `release()`: либо `DeleteTimer`, либо новая запись continuation (`StartTimer` → `SaveTimer` с другим типом или будущим `ExpiresAt`) | `timer_manager_impl.go:990-1018`, `StartTimer` `:466` | code-read | если callback не трогает storage, а `DeleteTimer` упал, запись остаётся «просроченной» и повторное срабатывание возможно — как сейчас (Edge Case 6) |
+| `TimerStorage` реализуют только `RedisTimerStorage` и `InMemoryTimerStorage`; обе на отсутствующую запись возвращают `ErrTimerNotFound` | grep `func (.*) LoadTimer(` по всему `go-app`: 2 реализации; тестовая обёртка `lockFailingTimerStorage` (`timer_wedge_regression_test.go:168`) встраивает `TimerStorage` и делегирует `LoadTimer`; `redis_timer_storage.go:297-322`, `memory_timer_storage.go:133-149` | code-read (grep + чтение; понижено deep-review R1) | у неизвестной реализации not-found выглядел бы как ошибка ⇒ пропуск + drop, срабатывание теряется до reconciliation |
+| Каждое обработанное срабатывание меняет запись в storage до `release()` **или до истечения `lockTTL`** (30s, без продления; callback ждёт подтверждения доставки и может пережить TTL — `manager_impl.go:36-41`): либо `DeleteTimer`, либо новая запись continuation (`StartTimer` → `SaveTimer` с другим типом или будущим `ExpiresAt`) | `timer_manager_impl.go` cleanup после callbacks, `StartTimer` | code-read | если callback не трогает storage, а `DeleteTimer` упал, запись остаётся «просроченной» и повторное срабатывание возможно — как сейчас (Edge Case 6). После истечения TTL посреди срабатывания реплика того же поколения увидит неизменённую запись; для неё это требует опоздания >30s, а тогда запись чужая и в будущем ⇒ skip. Страхует nflog-claim |
+| Ветка «lock занят» (`7aaba3f`) сбрасывает handle, считая, что держатель lock'а обработает срабатывание. Значит, реплика, которая собирается **пропустить**, не должна держать lock: иначе автор записи, сработавший в этот момент, тоже сдастся (deep-review R1 F1, воспроизведено стенд-тестом при сдвиге часов от 1 мс) | `timer_manager_impl.go` ветка `ErrLockAlreadyAcquired`; замер ревьюера A в `review-findings.md` F1 | code-read + measured (ревьюером) | 0 срабатываний: задержка до reconciliation, а при `reconciliation_interval: 0` — тишина до рестарта реплики |
 | Handle несёт `expiresAt`, равный записанному в storage: `StartTimer` (`timer.ExpiresAt` → handle), `RestoreTimers` (`:1161`, из той же записи); `ResetTimer` пересохраняет запись с тем же `ExpiresAt` (`:624-631`, меняются только метаданные) | code-read всех трёх мест создания `timerHandle` | code-read | при расхождении своя запись не распознаётся как своя ⇒ решает только правило «запись просрочена», а при обратном скачке часов срабатывание откладывается до reconciliation (в lite — теряется) |
 | Сравнение `ExpiresAt` через JSON сохраняет точность до наносекунд (RFC3339Nano), монотонная часть отбрасывается, `Equal` сравнивает момент времени | stdlib `time.Time.MarshalJSON`; `InMemoryTimerStorage` хранит `Clone` | code-read | `Equal` с handle никогда не совпадёт ⇒ см. строку выше |
-| Reconciliation работает только с Redis-хранилищем; в lite (memory) реплика одна, и запись в storage всегда её собственная | `config.go:122-125`, `service_registry.go:1691` | code-read | — |
+| Reconciliation работает только с Redis-хранилищем; в lite (memory) реплика одна, и запись в storage всегда её собственная. В standard reconciliation можно выключить (`reconciliation_interval: 0`, `config.go:130`) — тогда страховки от ложного skip нет | `config.go:122-130`, `service_registry.go:1691` | code-read | — |
 | Детерминированный repro (опоздавший `onTimerExpired` после `release()`) даёт 2 срабатывания | временный тест, `evidence/flake-rate.txt` | measured | — |
 
 `assumed`-премис нет.
 
 ## Target Design
 
-1. В `onTimerExpired` сразу после успешного `AcquireLock` (до `GetGroup`): `stored, err := tm.storage.LoadTimer(ctx, groupKey)` с тем же 5s-контекстом от `tm.ctx`.
+1. В `onTimerExpired` проверка `skipHandledFire` выполняется дважды: **до** `AcquireLock` (реплика, которая пропускает, не держит lock — см. премису про ветку «lock занят») и **повторно под lock'ом** (double-checked: запись мог обработать предыдущий держатель между предпроверкой и захватом). Внутри: `LoadTimer` с 5s-контекстом от `tm.ctx`.
 2. Решение `fireStillDue(stored, firedHandle, timerType, now)` — срабатывание всё ещё актуально, если выполнены все условия:
    - запись есть;
    - `stored.TimerType == timerType`;
    - и одно из двух:
      - **своя запись**: `firedHandle != nil && stored.ExpiresAt.Equal(firedHandle.expiresAt)`;
      - **запись просрочена**: `!stored.ExpiresAt.After(now)`.
-3. Не актуально (`ErrTimerNotFound`, другой тип, чужая запись ещё в будущем) ⇒ Debug-лог с причиной, `dropLocalHandle(firedHandle, groupKey)`, return. Storage не трогаем. Lock отпускается штатным defer.
+3. Не актуально (`ErrTimerNotFound`, другой тип, чужая запись ещё в будущем) ⇒ Debug-лог с причиной, `dropLocalHandle(firedHandle, groupKey)`, return. Storage не трогаем. `dropLocalHandle` теперь делает `DecActiveTimers`, когда реально удаляет handle (deep-review R1 F2: иначе gauge растёт на каждом отсеянном HA-срабатывании).
 4. Другая ошибка `LoadTimer` ⇒ та же ветка, что у ошибки lock-store: Error-лог, `dropLocalHandle`, return. Повтор — через reconciliation.
 
 Почему так: после обработки срабатывание всегда меняет запись (удаляет или заменяет continuation), поэтому сама запись и есть маркер «уже сработало», новые ключи не нужны. Правило «своя запись» не зависит от часов: автор последней записи гарантированно сработает, даже если его wall clock отстаёт. Правило «запись просрочена» нужно для `nil`-handle путей (reconcile/restore) и для реплики, чью запись перезаписал сосед. Если она не сработает (её часы отстают), сработает автор записи или reconciliation.
@@ -123,6 +124,8 @@ based_on:
 8. `ResetTimer` при уже выстрелившем старом handle ⇒ запись с новым `ExpiresAt` в будущем, не своя для старого handle ⇒ skip; сработает новый handle.
 9. Ошибка `LoadTimer` (Redis недоступен) ⇒ Error, drop, повтор через reconciliation спустя grace. Раньше в этой ситуации падал и `AcquireLock`, так что поведение то же.
 10. Обратный скачок wall clock на реплике-авторе ⇒ правило «своя запись» всё равно срабатывает.
+12. Предпроверка без lock'а: A пропускает чужую ещё не наступившую запись, не беря lock ⇒ B (автор) берёт свободный lock и срабатывает. Остаточное окно: запись перезаписана новым `StartTimer` ровно между предпроверкой A и его захватом lock'а, и A пропускает её уже под lock'ом. Автор новой записи сработает через полную длительность таймера, а lock к тому времени давно свободен. Двойного пропуска нет, если длительность таймера больше пары RTT Redis.
+13. Ключ таймера потерян в Redis (eviction allkeys-lru, FLUSHDB, failover на отстающую реплику) ⇒ `not_found` ⇒ живой handle пропускает срабатывание, reconciliation ключа не видит. Раньше handle срабатывал независимо от storage. Отличить «удалено обработчиком» от «потеряно» без нового маркера нельзя. Принято как компромисс → TECH-DEBT (deep-review R1 F6).
 11. Предсуществующее, вне scope: `ResetTimer` пересохраняет запись после запуска Go-таймера (`:631`). При длительности короче round-trip в Redis таймер может сработать и удалить запись до пересохранения ⇒ запись «воскреснет» и будет подобрана reconciliation. На implement проверить, реально ли это при минимальных интервалах конфига; если да — запись в TECH-DEBT.
 
 ## Impact Analysis
@@ -151,7 +154,9 @@ based_on:
 - T1 — детерминированный: A срабатывает, после этого `tmB.onTimerExpired(nil, …)` ⇒ callback ровно один раз (без фикса — 2).
 - T2 — continuation другого типа в storage ⇒ skip.
 - T3 — запись того же типа с `ExpiresAt` в будущем, handle с другим `expiresAt` ⇒ skip.
-- T4 — таблица `fireStillDue`:
+- T1b (deep-review R1 F1) — «пропускающая реплика не держит lock»: у A чужая будущая запись, у B своя ⇒ A пропускает, не захватывая lock, B срабатывает. Детерминированно: A вызывает `onTimerExpired`, затем проверяем, что ключ lock'а не создан, и B срабатывает ровно 1 раз.
+- T1c (R1 F5b) — сквозной: обе реплики делают `StartTimer` (вторая перезаписывает) ⇒ callback ровно 1 раз, не 0.
+- T4 — таблица `fireStillDue` (+ строка R1 F5a: `stored.ExpiresAt` после JSON round-trip от `handle.expiresAt`, `now` раньше ⇒ due):
   - своя запись в будущем ⇒ fire;
   - чужая просроченная ⇒ fire;
   - чужая в будущем ⇒ skip;
@@ -160,6 +165,8 @@ based_on:
   - другой тип ⇒ skip;
   - нет записи ⇒ skip.
 - T5 — ошибка `LoadTimer` ⇒ callback не вызван, handle сброшен, запись не тронута.
+- T5b (R1 F2) — `dropLocalHandle` декрементирует gauge ровно один раз и только если handle удалён (identity guard).
+- T6b (R1 F4) — `TwoReplicasRace…`: ассерт лога заменён исходом (`publishCount == 1`, суммарный `totalExpired == 1`, пустой `tm.timers` у обеих, нет `Failed to load timer`).
 - T6 — существующие regression-тесты пакета зелёные (continuation, wedge, orphan adoption, restore).
 - T7 — `go test -race ./internal/infrastructure/grouping/... ./internal/application/...`.
 - T8 — `-race -cpu=1 -count=400 -run TwoReplicasRace…` ⇒ 0/400 (до фикса 8/400).
