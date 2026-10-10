@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "6 fix-here finding(s) open",
+  "branch": "bugfix/grouping-timer-lock-fix",
+  "commit": "291bd7d",
+  "reviewed_at": "2026-10-10",
+  "findings": {
+    "blocker": 0,
+    "major": 1,
+    "minor": 7,
+    "nit": 1
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
