@@ -276,6 +276,68 @@
 
 **Решение владельца 2026-10-10: «полноценное решение корня».** Общая причина R2–R3: решение «слать или нет» принималось на уровне группы, а знание о том, что причитается получателю, жило в coordinator'е; память собственных отправок была вторым источником правды внутри менеджера. Fix-раунд: dedup считается по набору получателя, flush без отправки при покрытых получателях считается успешным (prune), память отправок вынесена в обёртку над Redis-nflog. Проверка — Round 4.
 
+## Round 4 — 2026-10-10
+
+Коммиты под ревью: `245c95d`, `5df0a32` (fix-раунд R3, Spec v1.3). Два независимых агента, только чтение: A — корректность notify-chain и HA (вердикт fix_required), B — контракты, доки, артефакты (вердикт pass с замечаниями).
+
+### K1 — ответ обёртки из локальной памяти считался покрытием и запускал prune
+- **Severity:** major
+- **Issue:** при нечитаемом nflog `resilientNotifyLog.IsDuplicate` отвечал «дубликат» по своей записи; менеджер засчитывал target как покрытый и на flush без отправки удалял resolved-алерты. Если запись устарела (набор изменился, resolve ещё не отправлен), resolve терялся навсегда: алерта в группе больше нет.
+- **Disposition:** fix-here — sentinel `ErrNotifyLogAnsweredLocally`: target'у не шлём, покрытым не считаем, prune не выполняется. Проба `TestR5_K1_LocalAnswerDoesNotPrune`.
+
+### K2 — комментарий обёртки не называл её ограничение
+- **Severity:** minor
+- **Issue:** doc-комментарий `resilientNotifyLog` обещал «не повторяет свои отправки» без оговорки, что устаревшая запись может придержать нотификацию, включая первую у вновь сработавшей группы.
+- **Disposition:** fix-here — комментарий; CHANGELOG (верхняя граница `repeat_interval`, память не переживает рестарт); TECH-DEBT при finalize (2d.8).
+
+### K3 / L5 — шаг 4 `deploy/e2e-ha/run.sh` мог пройти вхолостую
+- **Severity:** minor
+- **Issue:** опрос «до появления второй публикации» проходил и тогда, когда вторая публикация случилась до рестарта реплики B, то есть без гонки двух таймеров.
+- **Disposition:** fix-here — перед опросом публикаций должно быть ровно одна, иначе сценарий падает как холостой. Одновременность срабатывания по-прежнему не доказывается выводом — записано в `evidence/e2e-ha.md`.
+
+### K4 — doc-комментарий `DeliveredAlerts` оторван вставленной функцией
+- **Severity:** nit
+- **Disposition:** fix-here — `evictExpired` перенесён выше.
+
+### K5 — prune удалял алерт без проверки текущего статуса
+- **Severity:** minor
+- **Issue:** между отправкой и `pruneResolvedAlerts` алерт мог снова стать firing (ingest идёт параллельно с flush); удаление по fingerprint выбрасывало уже активный алерт из группы до следующей отправки Prometheus.
+- **Disposition:** fix-here — `removeAlertFromGroup` с условием «всё ещё resolved» под блокировкой группы. Проба `TestR5_K5_PruneKeepsRefiredAlert`.
+
+### L1–L4, L15 — комментарии и контракты
+- **Severity:** nit
+- **Issue:** комментарий prune называл одно место вызова из двух; контракт `PublishGroup`/`targetAlerts` не говорил, что dedup до вызова не выполнен и что ноль outcomes при опрошенных target'ах означает «покрыто»; комментарии coordinator'а про ноль outcomes; `dedup.go` — «upstream needsUpdate rule» без оговорки про H5.
+- **Disposition:** fix-here
+
+### L6, L13 — evidence утверждал больше, чем показывал вывод
+- **Severity:** minor (L6), nit (L13)
+- **Issue:** `evidence/e2e-ha.md` — «`RedisNotifyLog` под обёрткой работает», хотя metrics-only publisher не вызывает `targetAlerts`, и из методов обёртки выполнялся только `TryClaim`; привязка к рабочему дереву, а не к коммиту. Пробы: два утверждения без строки в выводе, файл проб вне дерева.
+- **Disposition:** fix-here — текст сужен, прогон повторён на коде R4; файл проб сохранён в `evidence/r4-probes.go.txt` с командой запуска.
+
+### L7 — `ROLLBACK_RUNBOOK.md`
+- **Severity:** minor
+- **Issue:** строка про `grouping.enabled: false` не говорила, что алерты, уже сидящие в группах, прямым путём не уходят; не описан `helm rollback` на чарт с прежним дефолтом; при откате только образа версии по-разному сравнивают набор с nflog.
+- **Disposition:** fix-here
+
+### L8–L10 — CHANGELOG
+- **Severity:** minor
+- **Issue:** не сказано, что при нечитаемом nflog предупреждение пишется на каждом flush и метрики этого состояния нет; что в metrics-only / без target'ов resolved не удаляются и группы живут до рестарта или TTL; что локальная память ограничена `repeat_interval` и не переживает рестарт.
+- **Disposition:** fix-here — текст; метрика состояния fallback — defer-tech-debt (вместе с ограничением обёртки, 2d.8).
+
+### L11, L12, L14 — Spec, доки про профили, tasks
+- **Severity:** nit
+- **Issue:** Component Architecture и Impact Analysis без файлов `grouping`/`publishing` и логики `run.sh`; неверные номера Premises для G1–G3; устаревшие номера строк; Summary без v1.3; синтетические target'ы; «kept in Redis» без оговорки про fallback; правило dedup без «среди причитающихся target'у»; двойной `verify` у 5.5; Spec писал про запись в BUGS как о существующей.
+- **Disposition:** fix-here — Spec v1.4, `CONFIGURATION_GUIDE.md`, `values.yaml`, compat-док, `tasks.md`. Записи в BUGS / TECH-DEBT создаются на finalize (2d.8) — это порядок конвейера, не дефект.
+
+### Найдено при исправлении R4
+После правки K1 проба HA под `-race` показала чтение `len(group.Alerts)` без блокировки в трёх проверках callback'ов таймера и в логе `AddAlertToGroup` (остаток H8). Исправлено там же (`alertCount`); 10 прогонов подряд без отчётов о гонке.
+
+### Проверено в R4, замечаний нет
+`helm lint`, `helm template` (дефолт, `--set grouping.enabled=false`, lite); `go vet` по `grouping`, `publishing`, `application`; тексты логов и имя операции `timer_rearm` дословно совпадают с доками; классы evidence в Design Premises не завышены; per-target сигнатура и `RecordSent` под ней; поведение `send_resolved: false` соответствует upstream.
+
+### Не проверялось в R4
+Реальная доставка получателю и `RecordSent`/`IsDuplicate` на реальном Redis (e2e-ha — metrics-only); rolling upgrade; `helm upgrade --reuse-values`; поведение при недоступном Redis на живом стенде.
+
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.

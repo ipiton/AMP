@@ -345,7 +345,8 @@ pointing at a receiver the config does not declare remains a loud error.
 
 `blackhole_drops_total` is a "is this receiver dropping" signal, not delivery
 volume: it counts once per alert on the non-grouped path and once per group
-fire (at most once per `repeat_interval` per group) on the grouped one.
+notification on the grouped one (a flush that has something new for the
+receiver, or the `repeat_interval` re-notification of an unchanged group).
 
 ### Matrix
 
@@ -876,7 +877,8 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
       group, and its reminders, alive.
     - The key is read at startup only: changing it needs a restart, not `/-/reload`.
     - Both profiles group. The standard profile keeps groups, timers and the notification log in Redis, shared
-      across replicas; the lite profile keeps them in memory (single replica).
+      across replicas, and falls back to in-memory state that replicas do not share when Redis is
+      unavailable; the lite profile keeps them in memory (single replica).
 14. **A built-in filter drops some alerts before routing.** `SimpleFilterEngine`
     (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM, and silently drops:
     alert names starting with `test` (case-insensitive), alerts labelled `environment=test` or `testing`, alerts

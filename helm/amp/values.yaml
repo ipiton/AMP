@@ -656,8 +656,9 @@ publishing:
 # grouping.enabled (default true, same as config.go) gives real
 # group_by/group_wait/group_interval/repeat_interval dispatch and notify-log dedup.
 # It only takes effect when the loaded config has a route: tree; without one alerts
-# are published directly. Standard profile: state in Redis, shared across replicas.
-# Lite profile: state in memory, single replica. Set false to publish every alert
+# are published directly. Standard profile: state in Redis, shared across replicas
+# (in memory, not shared, when Redis is unavailable). Lite profile: state in
+# memory, single replica. Set false to publish every alert
 # as soon as it arrives (AMP then warns at startup if a route: tree is configured).
 # Read at startup only -- changing it needs a pod restart, not a config reload.
 # Set it here, not in configFile.content: the chart passes this value as
