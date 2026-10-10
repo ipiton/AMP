@@ -61,8 +61,8 @@ receivers:
 }
 
 // TestLoadConfig_GroupingDefaults verifies grouping.enabled defaults to
-// false (task 2.2: task 2.3 flips its effect on the ingest pipeline, so it
-// must stay off until then).
+// true (PROD-GROUPING-DEFAULT): a verbatim alertmanager.yml must group the
+// way upstream does without an AMP-specific key.
 func TestLoadConfig_GroupingDefaults(t *testing.T) {
 	resetViper()
 	unsetEnvKeys("SERVER_PORT")
@@ -75,7 +75,7 @@ server:
 
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
-	assert.False(t, cfg.Grouping.Enabled)
+	assert.True(t, cfg.Grouping.Enabled)
 }
 
 // TestLoadConfig_GroupingEnabledOverride verifies the `grouping.enabled: true`

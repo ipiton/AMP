@@ -195,8 +195,8 @@ type ServiceRegistry struct {
 
 	// Grouping subsystem (task 2.2, alertmanager-parity): GroupManager (group
 	// lifecycle) + TimerManager (group_wait/group_interval/repeat_interval
-	// timers). All three nil unless cfg.Grouping.Enabled is true AND a
-	// route: tree is configured (grouping.enabled defaults to false).
+	// timers). All three nil unless cfg.Grouping.Enabled is true (the
+	// default) AND a route: tree is configured.
 	// groupKeyGenerator is the SAME instance passed to both
 	// DefaultGroupManagerConfig.KeyGenerator (below) and
 	// AlertProcessorConfig.GroupKeyGenerator (task 2.3) — a single source of
@@ -1609,14 +1609,20 @@ func (r *ServiceRegistry) reloadTemplates() {
 // ServiceRegistry.Shutdown — graceful teardown.
 //
 // Skip conditions (clean skip, no degradation):
-//   - cfg.Grouping.Enabled == false (default): subsystem fully disabled.
+//   - cfg.Grouping.Enabled == false (explicit opt-out; the default is
+//     true): subsystem fully disabled. With a route: tree configured this
+//     is logged at Warn, because the tree's timings then do nothing.
 //   - No route: tree configured (cfg.Routing == nil): BuildGroupingConfig
 //     returns ErrGroupingRequiresRouteTree — the grouping package has no
 //     config of its own for group_by/group_wait/group_interval/
 //     repeat_interval, so there is nothing to build it from.
 func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 	if !r.config.Grouping.Enabled {
-		r.logger.Info("Grouping subsystem disabled (grouping.enabled=false)")
+		if r.config.HasRouteTree() {
+			r.logger.Warn("Grouping is DISABLED (grouping.enabled=false) but a route: tree is configured: group_by/group_wait/group_interval/repeat_interval are ignored and every alert is published immediately")
+		} else {
+			r.logger.Info("Grouping subsystem disabled (grouping.enabled=false)")
+		}
 		return nil
 	}
 
@@ -2316,8 +2322,12 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		InhibitionState:    r.inhibitionState,
 		InhibitionCache:    r.inhibitionCache,
 		BusinessMetrics:    r.metrics,
-		RouteEvaluator:     r.routeEvaluator,          // task 1.4: may be nil (lite/legacy mode, no route: section)
-		GroupingEnabled:    r.config.Grouping.Enabled, // task 2.3
+		RouteEvaluator:     r.routeEvaluator, // task 1.4: may be nil (lite/legacy mode, no route: section)
+		// grouping.enabled defaults to true, so it only means "group" when
+		// there is a route: tree to group by. Without one initializeGrouping
+		// skips cleanly, and passing the raw flag would make every alert
+		// trip warnGroupingFallback on a setup that never asked for grouping.
+		GroupingEnabled: r.config.Grouping.Enabled && r.config.HasRouteTree(),
 		// Re-review finding R1: a CONFIGURED route tree must never degrade into
 		// an unscoped publish, even when the tree failed to build
 		// (initializeRouting is non-fatal) or Evaluate fails for an alert.

@@ -26,7 +26,7 @@ type FilterEngine interface {
 }
 
 // Publisher defines the interface for alert publishing on the NON-GROUPED
-// path: `grouping.enabled: false` (the default), or a grouping failure that
+// path: `grouping.enabled: false`, no `route:` tree, or a grouping failure that
 // falls open to a direct publish.
 //
 // Both methods take the RECEIVER the alert was routed to (slice-1 review
