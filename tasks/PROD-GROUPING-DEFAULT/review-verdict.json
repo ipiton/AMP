@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "F1 blocker open: group_interval fires once, later alerts in a group wait for repeat_interval; owner decision pending",
+  "branch": "bugfix/prod-grouping-default",
+  "commit": "177c57b",
+  "reviewed_at": "2026-10-10",
+  "findings": {
+    "blocker": 1,
+    "major": 2,
+    "minor": 6,
+    "nit": 2
+  },
+  "open": {
+    "blocker": 1,
+    "major_without_disposition": 0
+  }
+}
