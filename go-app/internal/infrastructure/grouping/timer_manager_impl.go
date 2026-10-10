@@ -756,7 +756,7 @@ func (tm *DefaultTimerManager) handleTimerExpiration(handle *timerHandle, timer 
 }
 
 // fireStillDue reports whether stored — the timer entry re-read from storage
-// under the distributed lock — still describes the fire onTimerExpired was
+// before and again under the distributed lock — still describes the fire onTimerExpired was
 // entered for, i.e. nobody has handled it yet (GROUPING-TIMER-LOCK-FIX).
 //
 // A handled fire always changes the entry before its lock is released: it is
