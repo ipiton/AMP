@@ -296,9 +296,22 @@ printf '%s' "$restored_one" | grep -q '"restored":0' &&
   fail "replica B restored 0 timers ($restored_one) -- it does not hold a local timer for '$ALERT_1', so the concurrent-fire scenario is vacuous"
 log "replica B restored timers from shared Redis: $restored_one"
 
-log "waiting for group_interval (${GROUP_INTERVAL}s) so both replicas' timers for '$ALERT_1' fire together"
-sleep "$GROUP_INTERVAL"
-
+log "waiting up to $((GROUP_INTERVAL + 15))s for the group_interval fire both replicas' timers for '$ALERT_1' race for"
+# Polled, not a fixed sleep: the group is flushed on EVERY group_interval, and
+# the metrics-only publisher never records a send, so each later flush adds one
+# more publish. Counting right after the second publish appears keeps the
+# assertion independent of how long the restart above took.
+concurrent_total=0
+for _ in $(seq 1 $((GROUP_INTERVAL + 15))); do
+  concurrent_a=$(undelivered_count amp-a "$ALERT_1")
+  concurrent_b=$(undelivered_count amp-b "$ALERT_1")
+  concurrent_total=$((concurrent_a + concurrent_b))
+  [[ "$concurrent_total" -ge 2 ]] && break
+  sleep 1
+done
+# Both replicas fire at the same instant; give the loser's log line, if any,
+# time to land before counting.
+sleep 3
 concurrent_a=$(undelivered_count amp-a "$ALERT_1")
 concurrent_b=$(undelivered_count amp-b "$ALERT_1")
 concurrent_total=$((concurrent_a + concurrent_b))
@@ -310,8 +323,9 @@ log "PASS: both replicas held a timer for '$ALERT_1' and exactly one publish got
 # --- Step 5: ORPHAN ADOPTION after the owner dies (finding 9b) ----------
 # POST to replica A and kill A BEFORE group_wait expires, so the group_wait
 # timer is left in shared Redis with no live owner and no local handle
-# anywhere. Nothing re-arms it: AddAlertToGroup only arms group_wait for BRAND
-# NEW groups, and RestoreTimers is startup-only. Replica B's reconciliation
+# anywhere. Nothing re-arms it here: AddAlertToGroup arms group_wait only for a
+# new group or for one whose timer record is gone from storage (this one is
+# still there), and RestoreTimers is startup-only. Replica B's reconciliation
 # loop is the only thing that can save this group -- and it could not before
 # finding 2's fix, because the adoption grace equalled the storage TTL grace.
 ALERT_3="E2EHaTestAlertAdopted"

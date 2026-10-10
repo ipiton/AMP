@@ -723,8 +723,8 @@ type TargetPublishOutcome struct {
 // and MUST call targetAlerts(target.Name, alerts) once per candidate target
 // BEFORE attempting delivery, then deliver exactly the returned subset:
 //
-//   - an EMPTY/nil result means "this target already received this exact alert
-//     set within repeat_interval — do not send, and do not include it in the
+//   - an EMPTY/nil result means "the last send to this target already covered
+//     these alerts within repeat_interval — do not send, and do not include it in the
 //     returned outcomes". This is what makes a retry after a partial failure
 //     resend ONLY the targets that failed last time: targets that already
 //     succeeded have an nflog entry, so they are excluded silently.
@@ -857,7 +857,7 @@ type GroupTimeIntervalLookup interface {
 // GroupNotifyLog is the notify-stage chain's Dedup step (task 2.4, Step 4;
 // Redis-backed cross-replica variant added by task 6.1). It answers the
 // same question upstream Alertmanager's nflog answers: "did we already
-// send a notification for this exact alert set, for this group+receiver,
+// send a notification covering this alert set, for this group+receiver,
 // within repeat_interval?" — and, since task 6.1, additionally arbitrates
 // which of several concurrently-firing replicas is allowed to publish.
 //
@@ -893,7 +893,9 @@ type GroupNotifyLog interface {
 	// duplicate) already carried every alert of this alert set, each with
 	// the same status — see signatureCovers. A set that only shrank since
 	// that send is therefore a duplicate; one with a new, newly resolved or
-	// re-fired alert is not. Does not record anything.
+	// re-fired alert is not. Does not record anything. signature describes
+	// the alerts this target is owed (after its own send_resolved filtering),
+	// not the whole group.
 	//
 	// target scopes the check to one publishing target (task fwb,
 	// alertmanager-parity wave 2 — mirrors upstream nflog's

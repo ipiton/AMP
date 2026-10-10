@@ -623,7 +623,7 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // submitted for it, and the job carries exactly the alerts it returns.
 //
 //   - empty/nil → the target is excluded entirely (no job, no result), because
-//     it already confirmed delivery of this exact alert set within
+//     its last confirmed delivery already covered these alerts within
 //     repeat_interval. This is what makes a retry after a partial failure
 //     resend to ONLY the targets that failed last cycle.
 //   - a subset → a non-batch target that already accepted some of these alerts
@@ -656,9 +656,10 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 
 	// TN-060: Check mode before publishing (metrics-only mode fallback)
 	if c.modeManager != nil && c.modeManager.IsMetricsOnly() {
-		// Debug: reached on every group flush (once per group_interval per
-		// group) for as long as the mode lasts.
-		c.logger.Debug("Group publishing skipped (metrics-only mode)",
+		// Info, on every group flush for as long as the mode lasts: besides
+		// the mode gauge this is the only recurring sign that grouped
+		// notifications are not being delivered.
+		c.logger.Info("Group publishing skipped (metrics-only mode)",
 			"receiver", receiverName,
 			"alert_count", len(alerts),
 		)

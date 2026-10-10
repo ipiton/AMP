@@ -1986,7 +1986,7 @@ func (r *ServiceRegistry) newNotifyLog(ctx context.Context) (grouping.GroupNotif
 			}
 
 			r.logger.Info("Notification log (nflog) using Redis storage (cross-replica dedup)")
-			return notifyLog, nil
+			return grouping.NewResilientNotifyLog(notifyLog, r.logger), nil
 		}
 
 		r.logger.Warn("Standard profile without a Redis cache backend, nflog falls back to in-memory (no cross-replica dedup)")

@@ -104,16 +104,6 @@ type DefaultGroupManager struct {
 	// protocol.
 	notifyLog GroupNotifyLog
 
-	// localSent mirrors, in this process only, every send notifyLog was asked
-	// to record. It is consulted ONLY when notifyLog.IsDuplicate fails: the
-	// group is flushed every group_interval, so answering every failed lookup
-	// with "not a duplicate" would re-notify every target of every group on
-	// every flush for as long as the notification log is unreachable
-	// (PROD-GROUPING-DEFAULT, review finding G3). What this replica sent
-	// itself it does not send again; what only another replica sent it cannot
-	// know about, so that case stays fail-open. Always non-nil.
-	localSent *notifyDedupLog
-
 	// notifyLogClaimTTL is the TTL passed to notifyLog.TryClaim (task rec fix
 	// round 1: was a package constant). Always positive — see
 	// defaultNotifyLogClaimTTL and notify_budget.go for the sizing chain it
@@ -201,7 +191,6 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		silenceChecker:     cfg.SilenceChecker,     // Optional (task 2.4)
 		timeIntervalLookup: cfg.TimeIntervalLookup, // Optional (task 3.2)
 		notifyLog:          notifyLog,              // task 2.4/6.1: always-on dedup + cross-replica claim
-		localSent:          newNotifyDedupLog(),    // per-process fallback for a failed notifyLog lookup
 		notifyLogClaimTTL:  claimTTL,               // task rec fix round 1: derived from the delivery-confirmation wait
 		publishLocks:       newGroupPublishLocks(), // task 2.4 fix round 1: serialize per group key
 		logger:             cfg.Logger,
@@ -405,7 +394,6 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 		// notify-log would grow independent of active groups. Best-effort:
 		// a failure here (Redis down) just means the entry outlives the
 		// group until its own TTL expires — not fatal.
-		_ = m.localSent.Forget(ctx, groupKey)
 		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
 			m.logger.Warn("failed to forget nflog entry for deleted group",
 				"group_key", groupKey,
@@ -537,7 +525,6 @@ func (m *DefaultGroupManager) CleanupExpiredGroups(
 		// Forget this group's dedup entry (task 2.4). Best-effort — see the
 		// same Forget call in RemoveAlertFromGroup for why a failure here
 		// isn't fatal.
-		_ = m.localSent.Forget(ctx, groupKey)
 		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
 			m.logger.Warn("failed to forget nflog entry for expired group",
 				"group_key", groupKey,
@@ -944,13 +931,15 @@ func (m *DefaultGroupManager) ensureGroupTimer(ctx context.Context, groupKey Gro
 
 	m.logger.Warn("alert group has no timer scheduled, re-arming group_wait",
 		"group_key", groupKey)
-	if m.metrics != nil {
-		m.metrics.RecordGroupOperation("timer_rearm", "success")
-	}
+	status := "success"
 	if startErr := m.startGroupWaitTimer(ctx, groupKey, groupTimings(group)); startErr != nil {
+		status = "error"
 		m.logger.Warn("failed to re-arm group_wait timer for a group without one",
 			"group_key", groupKey,
 			"error", startErr)
+	}
+	if m.metrics != nil {
+		m.metrics.RecordGroupOperation("timer_rearm", status)
 	}
 }
 
@@ -1288,8 +1277,8 @@ func (m *DefaultGroupManager) isTimeMuted(groupKey GroupKey, names *TimeInterval
 // time — see filterInhibited/filterSilenced. TimeMute (task 3.2) is also
 // send-time, but — unlike Inhibit/Silence — suppresses the WHOLE group at
 // once rather than filtering individual alerts (see isTimeMuted). If
-// filtering removes every alert, TimeMute applies, or Dedup finds this
-// exact alert set was already sent within repeat_interval, nothing is
+// filtering removes every alert, TimeMute applies, or Dedup finds every
+// target already covered within repeat_interval, nothing is
 // published — that is the normal "suppressed" case, not a failure, and is
 // only logged at Debug. Suppression at any step means RecordSent is never
 // called, so the group's group_interval
@@ -1424,34 +1413,43 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// it once per candidate target BEFORE attempting delivery and sends
 	// exactly what it returns:
 	//
-	//   - nil       → this target already received this EXACT alert set within
-	//                 repeat_interval: skipped, not resent, no outcome.
+	//   - nil       → the last send to this target already covered every
+	//                 alert it is owed now, within repeat_interval: skipped,
+	//                 not resent, no outcome.
 	//   - a subset  → this target is a non-batch integration (one wire message
 	//                 per alert) that already accepted SOME of these alerts on
 	//                 an earlier fire; only the remainder is sent, so the ones
 	//                 that landed are not duplicated.
 	//   - the input → nothing is known to have been delivered: send everything.
-	signature := alertSetSignature(alerts)
+	//
+	// The signature is computed from candidates — what THIS target is owed
+	// after its own send_resolved filtering — not from the whole group, as
+	// upstream's DedupStage does per integration. A target that does not take
+	// resolved alerts therefore sees no change when one alert of the group
+	// resolves, and is not re-notified about the alerts still firing
+	// (PROD-GROUPING-DEFAULT, review finding H1).
 	repeatInterval := m.effectiveRepeatInterval(group)
 	ttl := time.Now().Add(-repeatInterval)
+	// offered, consulted and covered are written by targetAlerts and read
+	// after PublishGroup returns. Guarded because the publisher is free to
+	// consult targets concurrently.
+	var decisionsMu sync.Mutex
+	offered := make(map[string]string) // target -> signature of the set it was offered
+	consulted, covered := 0, 0
 	targetAlerts := func(target string, candidates []*core.Alert) []*core.Alert {
+		signature := alertSetSignature(candidates)
+		decisionsMu.Lock()
+		offered[target] = signature
+		consulted++
+		decisionsMu.Unlock()
+
 		dup, dupErr := m.notifyLog.IsDuplicate(ctx, group.Key, target, signature, ttl)
 		if dupErr != nil {
-			// The shared log is unreachable. Fall back to what THIS process
-			// sent (see localSent): without it every flush — one per
-			// group_interval — would re-notify this target for as long as
-			// the outage lasts.
-			if sentHere, _ := m.localSent.IsDuplicate(ctx, group.Key, target, signature, ttl); sentHere {
-				m.logger.Warn("nflog duplicate check failed for target; this replica already sent this alert set, skipping",
-					"group_key", group.Key,
-					"receiver", receiver,
-					"target", target,
-					"error", dupErr)
-				return nil
-			}
-			// Nothing sent from here: fail-open, a duplicate across replicas
-			// beats a dropped notification — same documented trade-off as
-			// the claim check above.
+			// Fail-open: a duplicate across replicas beats a dropped
+			// notification — same documented trade-off as the claim check
+			// above. The Redis-backed log is wrapped so that this is reached
+			// only for sends this replica did not make itself (see
+			// resilientNotifyLog).
 			m.logger.Error("nflog duplicate check failed for target, proceeding fail-open (duplicate-across-replicas risk accepted)",
 				"group_key", group.Key,
 				"receiver", receiver,
@@ -1465,9 +1463,18 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 				"receiver", receiver,
 				"target", target,
 				"repeat_interval", repeatInterval)
+			decisionsMu.Lock()
+			covered++
+			decisionsMu.Unlock()
 			return nil
 		}
-		return m.alertsStillOwed(ctx, group.Key, receiver, target, candidates)
+		owed := m.alertsStillOwed(ctx, group.Key, receiver, target, candidates)
+		if len(owed) == 0 {
+			decisionsMu.Lock()
+			covered++
+			decisionsMu.Unlock()
+		}
+		return owed
 	}
 
 	// groupLabels (review finding 1, fwb fix round 1): the resolved
@@ -1536,6 +1543,26 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		m.logger.Debug("group notification produced no new target outcomes (fully deduped this cycle, or no targets)",
 			"group_key", group.Key,
 			"receiver", receiver)
+
+		// Every target the publisher consulted is already covered: each has
+		// either been told about the resolved alerts in this set or does not
+		// take them. Nobody is still owed them, so they leave the group now,
+		// as upstream's aggrGroup.flush does after a flush that DedupStage
+		// turned into a no-op. Without this a resolved alert left behind by a
+		// send that was recorded but not followed by pruning (crash, failed
+		// prune, a send_resolved: false target) would stay in the group and
+		// be announced again on the next real send (review finding H6).
+		//
+		// consulted == 0 means the publisher never asked (metrics-only mode,
+		// no targets): nothing is known to be covered, nothing is pruned.
+		decisionsMu.Lock()
+		allCovered := consulted > 0 && covered == consulted
+		decisionsMu.Unlock()
+		if allCovered {
+			pruneCtx, cancelPrune := m.bookkeepingContext(ctx)
+			defer cancelPrune()
+			m.pruneResolvedAlerts(pruneCtx, group.Key, alerts)
+		}
 		return
 	}
 
@@ -1622,10 +1649,16 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		// fire — the very failure this task removes, in the opposite
 		// direction. recordCtx is created just above, AFTER the wait, so its
 		// own deadline is not spent by the wait either.
-		// Mirrored locally first, so a failed write below (or a failed read
-		// on a later flush) does not make this replica re-send — see
-		// localSent. In-memory, never fails.
-		_ = m.localSent.RecordSent(recordCtx, group.Key, outcome.Target, signature, now, repeatInterval)
+		//
+		// The entry carries the signature of the set this target was offered
+		// (see targetAlerts). A publisher that reports an outcome for a
+		// target it never consulted is recorded against the whole set.
+		decisionsMu.Lock()
+		signature, wasOffered := offered[outcome.Target]
+		decisionsMu.Unlock()
+		if !wasOffered {
+			signature = alertSetSignature(alerts)
+		}
 		if recErr := m.notifyLog.RecordSent(recordCtx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see
@@ -1898,7 +1931,7 @@ func (m *DefaultGroupManager) cancelGroupTimers(ctx context.Context, groupKey Gr
 func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
 	m.logger.Info("group_wait timer expired, sending first notification",
 		"group_key", groupKey,
-		"alert_count", len(group.Alerts))
+		"alert_count", alertCount(group))
 
 	// Check if group still exists and has alerts (load from storage for freshness,
 	// matching the pattern used in onGroupIntervalExpired/onRepeatIntervalExpired).
@@ -1958,7 +1991,7 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 	// and most fires are deduplicated no-ops.
 	m.logger.Debug("group_interval timer expired, flushing group",
 		"group_key", groupKey,
-		"alert_count", len(group.Alerts))
+		"alert_count", alertCount(group))
 
 	// Check if group still exists and has alerts (TN-125: load from storage)
 	currentGroup, err := m.storage.Load(ctx, groupKey)
@@ -2009,7 +2042,7 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
 	m.logger.Info("repeat_interval timer expired, sending reminder notification",
 		"group_key", groupKey,
-		"alert_count", len(group.Alerts))
+		"alert_count", alertCount(group))
 
 	// Check if group still exists and has alerts (TN-125: load from storage)
 	currentGroup, err := m.storage.Load(ctx, groupKey)

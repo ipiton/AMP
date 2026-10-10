@@ -261,7 +261,7 @@ func (m *MemoryGroupStorage) Load(ctx context.Context, groupKey GroupKey) (*Aler
 
 	m.logger.Debug("Loaded group from memory",
 		"group_key", groupKey,
-		"alerts_count", len(group.Alerts),
+		"alerts_count", alertCount(group),
 		"duration_us", time.Since(start).Microseconds())
 
 	if m.metrics != nil {

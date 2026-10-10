@@ -15,7 +15,7 @@ import (
 // notifyDedupLog is a minimal in-memory notification-log (task 2.4, notify-
 // stage chain Step 3: Dedup), implementing GroupNotifyLog. It answers the
 // same question upstream Alertmanager's nflog answers: "did we already
-// send a notification for this exact alert set, for this group+receiver+
+// send a notification covering this alert set, for this group+receiver+
 // target, within repeat_interval?"
 //
 // Deliberately minimal: keyed by (GroupKey, target) — GroupKey alone is
@@ -107,8 +107,8 @@ func newNotifyDedupLog() *notifyDedupLog {
 	}
 }
 
-// IsDuplicate reports whether a notification for (groupKey, target) carrying
-// exactly this alert set was already sent within ttl (the group's effective
+// IsDuplicate reports whether the last notification for (groupKey, target)
+// already covered this alert set (see signatureCovers) and was sent within ttl (the group's effective
 // repeat_interval). It does NOT record anything — call RecordSent after a
 // successful publish. Implements GroupNotifyLog; ctx is unused (in-memory,
 // never blocks), and the error return is always nil.
@@ -184,6 +184,19 @@ func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target
 // round 1, finding I1): this is the only read path, so expiring on read gives
 // the same observable behaviour as the Redis TTL with no extra goroutine, and it
 // reclaims the memory at the same time.
+// evictExpired drops every sent entry older than its own TTL. Used by
+// resilientNotifyLog, whose local record is not otherwise cleaned up for
+// groups deleted by another replica.
+func (l *notifyDedupLog) evictExpired(now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, entry := range l.entries {
+		if now.Sub(entry.sentAt) > entry.ttl {
+			delete(l.entries, key)
+		}
+	}
+}
+
 func (l *notifyDedupLog) DeliveredAlerts(_ context.Context, groupKey GroupKey, target string) ([]string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

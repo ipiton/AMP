@@ -34,7 +34,8 @@ const (
 
 	// GroupIntervalTimer sets the interval between flushes of an existing group.
 	// It is re-armed after every fire, so a group is flushed every
-	// group_interval; a flush only notifies if the alert set changed or
+	// group_interval; a flush only notifies a target that is owed an alert, or
+	// an alert status, its last notification did not carry, or once
 	// repeat_interval has passed since the last successful send.
 	//
 	// Example: an alert joining an already-notified group is sent with the
