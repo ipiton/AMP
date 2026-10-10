@@ -22,8 +22,8 @@ based_on:
 ## Touched Files
 
 - `internal/infrastructure/grouping/timer_manager_impl.go` — `fireStillDue`, проверка в `onTimerExpired` после `AcquireLock`, doc-comment.
-- `internal/infrastructure/grouping/distributed_timer_ownership_test.go` — T1–T3, T5 (две реплики на miniredis).
-- `internal/infrastructure/grouping/timer_manager_impl_test.go` — T4 (таблица `fireStillDue`).
+- `internal/infrastructure/grouping/timer_fire_dedup_test.go` (новый) — T1, T1b, T1c, T2/T3, T4, T5, T5b, F5d.
+- `internal/infrastructure/grouping/distributed_timer_ownership_test.go` — T6b (шаг 3.5).
 - `CHANGELOG.md` (корень) — `[Unreleased]` → Fixed.
 - `internal/infrastructure/grouping/README.md` — раздела про HA-таймеры нет (grep `lock`/`HA` 2026-10-09), не трогаем.
 
@@ -57,15 +57,15 @@ based_on:
 
 ## Phase 3: Tests (write-tests, после verdict pass)
 
-- [ ] **3.1** T1: детерминированный тест опоздавшей реплики (A срабатывает → `tmB.onTimerExpired(nil, …)` ⇒ callback 1 раз). Мутационная проверка: без проверки из 1.2 тест падает. <!-- depends: 2.1 | verify: go test -race -run LateReplica G; временно закомментировать проверку → FAIL -->
-- [ ] **3.2** T2/T3: continuation другого типа; запись того же типа в будущем с чужим `expiresAt` ⇒ skip, handle сброшен, запись в storage не тронута. <!-- depends: 2.1 | verify: go test -race -run 'Continuation|Rescheduled' G -->
-- [ ] **3.3** T4: табличный тест `fireStillDue` (7 строк из Spec § Test Plan). <!-- depends: 2.1 | verify: go test -run FireStillDue G -->
-- [ ] **3.4** T5: ошибка `LoadTimer` (miniredis закрыт или обёртка storage с ошибкой) ⇒ callback не вызван, handle сброшен. <!-- depends: 2.1 | verify: go test -race -run LoadTimerError G -->
+- [x] **3.1** T1: детерминированный тест опоздавшей реплики (A срабатывает → `tmB.onTimerExpired(nil, …)` ⇒ callback 1 раз). Мутационная проверка: без проверки из 1.2 тест падает. <!-- depends: 2.1 | verify: go test -race -run LateReplica G; временно закомментировать проверку → FAIL -->
+- [x] **3.2** T2/T3: continuation другого типа; запись того же типа в будущем с чужим `expiresAt` ⇒ skip, handle сброшен, запись в storage не тронута. <!-- depends: 2.1 | verify: go test -race -run 'Continuation|Rescheduled' G -->
+- [x] **3.3** T4: табличный тест `fireStillDue` (7 строк из Spec § Test Plan). <!-- depends: 2.1 | verify: go test -run FireStillDue G -->
+- [x] **3.4** T5: ошибка `LoadTimer` (miniredis закрыт или обёртка storage с ошибкой) ⇒ callback не вызван, handle сброшен. <!-- depends: 2.1 | verify: go test -race -run LoadTimerError G -->
 
-- [ ] **3.6** (R1 F1) T1b: пропускающая реплика не держит lock — автор записи срабатывает. <!-- depends: 2.1 | verify: go test -race -run SkipperDoesNotHoldLock G; мутация: перенести предпроверку под lock → FAIL -->
-- [ ] **3.7** (R1 F5b) T1c: обе реплики `StartTimer`, вторая перезаписывает ⇒ ровно 1, не 0. <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=200 -run OverwrittenEntry G -->
-- [ ] **3.8** (R1 F2) T5b: gauge — `DecActiveTimers` в `dropLocalHandle` только при удалении. <!-- depends: 2.1 | verify: go test -run DropLocalHandle G -->
-- [ ] **3.5** `TwoReplicasRace…` (`distributed_timer_ownership_test.go:171`): ассерт лога требует ветку `ErrLockAlreadyAcquired`, а опоздавший проигравший теперь уходит через `fireStillDue`. По R1 F4: ассерт лога заменить исходом — `publishCount == 1`, суммарный `totalExpired == 1`, пустой `tm.timers` у обеих реплик, в логе нет `Failed to load timer for expiration check`; поправить doc-comment теста. T4 (3.3) дополнить строкой R1 F5a (JSON round-trip). <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=400 -run 'TwoReplicasRace' G → 0/400 -->
+- [x] **3.6** (R1 F1) T1b: пропускающая реплика не держит lock — автор записи срабатывает. <!-- depends: 2.1 | verify: go test -race -run SkipperDoesNotHoldLock G; мутация: перенести предпроверку под lock → FAIL -->
+- [x] **3.7** (R1 F5b) T1c: обе реплики `StartTimer`, вторая перезаписывает ⇒ ровно 1, не 0. <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=200 -run OverwrittenEntry G -->
+- [x] **3.8** (R1 F2) T5b: gauge — `DecActiveTimers` в `dropLocalHandle` только при удалении. <!-- depends: 2.1 | verify: go test -run DropLocalHandle G -->
+- [x] **3.5** `TwoReplicasRace…` (`distributed_timer_ownership_test.go:171`): ассерт лога требует ветку `ErrLockAlreadyAcquired`, а опоздавший проигравший теперь уходит через `fireStillDue`. По R1 F4: ассерт лога заменить исходом — `publishCount == 1`, суммарный `totalExpired == 1`, пустой `tm.timers` у обеих реплик, в логе нет `Failed to load timer for expiration check`; поправить doc-comment теста. T4 (3.3) дополнить строкой R1 F5a (JSON round-trip). <!-- depends: 2.1 | verify: go test -race -cpu=1 -count=400 -run 'TwoReplicasRace' G → 0/400 -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/grouping/...`
 
@@ -99,6 +99,17 @@ based_on:
   - F4/F5 — шаги 3.5–3.8.
   - Отложено на finalize: F6 → TECH-DEBT, F7 → BUGS, F8 → BACKLOG.
 - **Deep-review round 2** (2026-10-10, `93b686f`): pass, 3 nit. N1/N2 исправлены в `d459a6e`, N3 (дрейф gauge при внешнем `StartTimer`) → TECH-DEBT на finalize, вместе с остальным дрейфом gauge. Verdict — `d459a6e`.
+- **write-tests** (2026-10-10, на `d459a6e` + тесты):
+  - 3.1–3.8 — `timer_fire_dedup_test.go`: 9 тестов; добавлен R1 F5d — цепочка continuation в lite/memory не рвётся; `TwoReplicasRace…` — проверка лога заменена проверкой результата.
+  - Мутации (исходник восстановлен, `git diff --stat` тот же):
+    - без сверки — падают T1, T1b, T2/T3, T5;
+    - сверка только под lock'ом — падает T1b («must not hold the fire lock»);
+    - без `Dec` в `dropLocalHandle` — падает T5b.
+  - `-race -cpu=1 -count=400 TwoReplicasRace` — 0/400, два прогона.
+  - `-race -cpu=1 -count=200` T1/T1b/T1c — 600/600.
+  - `go test -race ./internal/infrastructure/grouping/... ./internal/application/...` — 1075 passed.
+  - `gofmt -l` пуст, `git diff --check` чистый.
+- **Отклонения от плана (write-tests):** новые тесты собраны в отдельный файл `timer_fire_dedup_test.go`, а не разнесены по `distributed_timer_ownership_test.go` и `timer_manager_impl_test.go`: у них общий хелпер реплики `newSharedRedisReplica`, им же теперь пользуется `TwoReplicasRace…`.
 - **Отклонения от Spec:** нет. `not_found` возвращается самой `fireStillDue` (`stored == nil`), а не обрабатывается у вызывающего, как сказано в плане 1.1, — так ветка одна.
 
 ## Definition of Done
