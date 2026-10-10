@@ -103,3 +103,20 @@ ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	3.080s
 - K1: своя отправка `[a,b firing]` записана; чтение журнала падает, `a` resolved → flush ничего не шлёт (нотификаций 1) и `a` остаётся в группе (размер 2); чтение восстановлено → resolve уходит (2), `a` удалён (размер 1). До правки на первом шаге `a` удалялся, и resolve не уходил никогда.
 - K5: алерт стал firing между отправкой и prune → остаётся в группе; соседний resolved удалён.
 - `TestR4_HA_Race`: 10 прогонов подряд под `-race` без отчётов о гонке (после замены `len(group.Alerts)` на `alertCount` в callback'ах).
+
+## R5 (пробы независимого ревьюера, `evidence/r5-probes.go.txt`; код коммита `fix(grouping): do not prune after a send while a target is held back`; `-race -count=3`, отчётов о гонке 0)
+
+```
+    m_probe_test.go:67: outage flush: sent=map[A:[fp_a:firing|fp_b:resolved] B:[fp_a:firing|fp_b:resolved]] size=2
+    m_probe_test.go:71: after recovery: sent=map[A:[fp_a:firing|fp_b:resolved fp_a:firing|fp_b:resolved] B:[fp_a:firing|fp_b:resolved]] size=1
+    m_probe_test.go:73: A later got: fp_a:firing|fp_b:resolved
+--- PASS: TestM1_MixedLocalAnswerAndSendPrunes (0.00s)
+--- PASS: TestM_ErrorsIs (0.00s)
+--- PASS: TestM_K5_Concurrent (0.06s)
+--- PASS: TestM_IngestIngest (0.00s)
+--- PASS: TestM_IngestIngest (0.01s)
+--- PASS: TestM_K5_Concurrent (0.02s)
+```
+
+- M1: target A придержан локальным ответом, B отправлено fail-open → `b:resolved` остаётся в группе (размер 2); после восстановления чтения A получает resolve, алерт удалён. До правки: размер 1 сразу после сбойного flush, A resolve не получал.
+- `TestM_IngestIngest`, `TestM_K5_Concurrent`: до правки `MemoryGroupStorage.Store` — отчёты о гонке (чтение `group.Alerts` без блокировки), после — нет.

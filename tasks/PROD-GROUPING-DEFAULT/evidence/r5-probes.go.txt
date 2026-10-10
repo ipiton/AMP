@@ -1,0 +1,126 @@
+package grouping
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/ipiton/AMP/internal/core"
+	"github.com/stretchr/testify/require"
+)
+
+// two real targets A and B; failB makes B report an unconfirmed delivery.
+type mPub struct {
+	mu    sync.Mutex
+	sent  map[string][]string
+	failB bool
+}
+
+func (p *mPub) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, ta func(string, []*core.Alert) []*core.Alert) ([]TargetPublishOutcome, error) {
+	var out []TargetPublishOutcome
+	for _, tg := range []string{"A", "B"} {
+		owed := ta(tg, alerts)
+		if len(owed) == 0 {
+			continue
+		}
+		if tg == "B" && p.failB {
+			out = append(out, TargetPublishOutcome{Target: tg, Success: false})
+			continue
+		}
+		p.mu.Lock()
+		if p.sent == nil {
+			p.sent = map[string][]string{}
+		}
+		p.sent[tg] = append(p.sent[tg], alertSetSignature(owed))
+		p.mu.Unlock()
+		out = append(out, TargetPublishOutcome{Target: tg, Success: true})
+	}
+	return out, nil
+}
+
+func TestM1_MixedLocalAnswerAndSendPrunes(t *testing.T) {
+	pub := &mPub{failB: true}
+	flaky := &r4FlakyLog{notifyDedupLog: newNotifyDedupLog()}
+	m := r4Mgr(t, pub, NewResilientNotifyLog(flaky))
+	r4Add(t, m, "a", core.StatusFiring)
+	r4Add(t, m, "b", core.StatusResolved)
+	r4Flush(t, m) // A ok (recorded locally + shared), B failed -> partial, no prune
+	require.Equal(t, 2, r4Size(t, m))
+	pub.failB = false
+
+	// another replica announces b firing again to both targets (shared log only)
+	r4Add(t, m, "b", core.StatusFiring)
+	g, _ := m.GetGroup(context.Background(), r4gk)
+	var all []*core.Alert
+	for _, a := range g.Alerts {
+		all = append(all, a)
+	}
+	sig := alertSetSignature(all)
+	for _, tg := range []string{"A", "B"} {
+		require.NoError(t, flaky.notifyDedupLog.RecordSent(context.Background(), r4gk, tg, sig, time.Now(), time.Hour))
+	}
+
+	r4Add(t, m, "b", core.StatusResolved)
+	flaky.fail.Store(true)
+	r4Flush(t, m)
+	t.Logf("outage flush: sent=%v size=%d", pub.sent, r4Size(t, m))
+	flaky.fail.Store(false)
+	r4Flush(t, m)
+	r4Flush(t, m)
+	t.Logf("after recovery: sent=%v size=%d", pub.sent, r4Size(t, m))
+	for _, s := range pub.sent["A"][1:] {
+		t.Logf("A later got: %s", s)
+	}
+	if len(pub.sent["A"]) == 1 && r4Size(t, m) == 1 {
+		t.Errorf("LOST: target A last heard b firing (from the other replica), b:resolved pruned without A being told")
+	}
+}
+
+// errors.Is through %w: %w and through an extra wrap
+func TestM_ErrorsIs(t *testing.T) {
+	flaky := &r4FlakyLog{notifyDedupLog: newNotifyDedupLog()}
+	w := NewResilientNotifyLog(flaky)
+	require.NoError(t, w.RecordSent(context.Background(), r4gk, "t", "a:firing", time.Now(), time.Hour))
+	flaky.fail.Store(true)
+	dup, err := w.IsDuplicate(context.Background(), r4gk, "t", "a:firing", time.Now().Add(-time.Hour))
+	require.True(t, dup)
+	require.ErrorIs(t, err, ErrNotifyLogAnsweredLocally)
+	dup, err = w.IsDuplicate(context.Background(), r4gk, "other", "a:firing", time.Now().Add(-time.Hour))
+	require.False(t, dup)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrNotifyLogAnsweredLocally)
+}
+
+// K5 under concurrency: prune vs ingest flipping status, -race
+func TestM_K5_Concurrent(t *testing.T) {
+	m := r4Mgr(t, &r4Publisher{}, nil)
+	r4Add(t, m, "keep", core.StatusFiring)
+	for i := 0; i < 300; i++ {
+		r4Add(t, m, "a", core.StatusResolved)
+		snap := []*core.Alert{createTestAlert("a", core.StatusResolved, r4lb)}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); r4Add(t, m, "a", core.StatusFiring) }()
+		go func() { defer wg.Done(); m.pruneResolvedAlerts(context.Background(), r4gk, snap) }()
+		wg.Wait()
+		require.Equal(t, 2, r4Size(t, m), "iteration %d: firing alert lost", i)
+		// public Remove still removes a firing alert
+		ok, err := m.RemoveAlertFromGroup(context.Background(), "fp_a", r4gk)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+}
+
+// ingest vs ingest on the same group, no prune involved
+func TestM_IngestIngest(t *testing.T) {
+	m := r4Mgr(t, &r4Publisher{}, nil)
+	r4Add(t, m, "keep", core.StatusFiring)
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); r4Add(t, m, "x", core.StatusFiring) }()
+		go func() { defer wg.Done(); r4Add(t, m, "y", core.StatusFiring) }()
+	}
+	wg.Wait()
+}

@@ -338,6 +338,39 @@
 ### Не проверялось в R4
 Реальная доставка получателю и `RecordSent`/`IsDuplicate` на реальном Redis (e2e-ha — metrics-only); rolling upgrade; `helm upgrade --reuse-values`; поведение при недоступном Redis на живом стенде.
 
+## Round 5 — 2026-10-10 (проверка дельты `51a949a`)
+
+Один независимый агент, только чтение, со своими пробами. Вердикт: fix_required.
+
+### M1 — K1 не закрыт на пути с отправкой
+- **Severity:** major
+- **Issue:** target, придержанный локальным ответом, не попадал в outcomes; если другому target'у отправка удалась, `allSucceeded` оставался истинным и prune удалял resolved. Придержанный target resolve не получал никогда. Подтверждено пробой ревьюера.
+- **Disposition:** fix-here — счётчик придержанных target'ов; при ненулевом prune не выполняется и после успешной отправки. Проба ревьюера проходит: после восстановления чтения target получает resolve.
+
+### M2 — CHANGELOG расходился с кодом
+- **Severity:** minor
+- **Issue:** «resolved alerts stay… every flush logs a warning» — верно только для flush с придержанным target'ом; для target'а без локальной записи пишется Error и идёт отправка.
+- **Disposition:** fix-here
+
+### M3 — `MemoryGroupStorage.Store` читает группу без её блокировки
+- **Severity:** minor (предсуществующее, вне дельты)
+- **Issue:** два параллельных ingest в одну группу: итерация по `group.Alerts` в `Store` против записи под блокировкой — гонка, потенциально `concurrent map iteration and map write` в lite и в memory-fallback. С группировкой по умолчанию путь становится общим.
+- **Disposition:** fix-here — `Store` читает группу под `group.mu.RLock`; неблокированное чтение `Metadata.State` в debug-логе убрано. `RedisGroupStorage.Store` (`json.Marshal` и `Version++` без блокировки) — defer-tech-debt: объект там обычно свой у каждого вызова, пробой не воспроизведено.
+
+### M4 — проверка K5 атомарна только в пределах объекта группы
+- **Severity:** nit
+- **Disposition:** fix-here в Spec (оговорка про Redis); `storage.Delete` без проверки версии — defer-tech-debt.
+
+### M5 — узкое окно ложного падения шага 4 e2e-ha
+- **Severity:** nit
+- **Disposition:** accept — падение громкое, холостого прохода нет; записано в `evidence/e2e-ha.md`.
+
+### Проверено в R5, замечаний нет
+K1 в ветке без outcomes (смешанные target'ы, синтетические `suppressed:`/`blackhole:`, локальный ответ + неуспех другого); `errors.Is` через `%w: %w`; других потребителей `IsDuplicate` нет; K5 — блокировки, ранний выход, публичный `RemoveAlertFromGroup`; `alertCount` в callback'ах; комментарии и Spec п.8, Edge Case 20.
+
+### Не проверялось в R5
+`deploy/e2e-ha/run.sh` на стенде (только чтение); реальный Redis при сбое; доки `693a099` вне указанных абзацев.
+
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.
