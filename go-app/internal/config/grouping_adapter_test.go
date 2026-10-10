@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -96,4 +97,54 @@ grouping:
 	cfg, err := LoadConfig(path)
 	require.NoError(t, err)
 	assert.True(t, cfg.Grouping.Enabled)
+}
+
+// TestLoadConfig_GroupingDisabledExplicitly verifies that the default (true)
+// does not shadow an explicit opt-out, from the file or from the environment.
+func TestLoadConfig_GroupingDisabledExplicitly(t *testing.T) {
+	t.Run("yaml", func(t *testing.T) {
+		resetViper()
+		unsetEnvKeys("SERVER_PORT", "GROUPING_ENABLED")
+
+		path := writeTempYAML(t, `
+server:
+  port: 8080
+
+grouping:
+  enabled: false
+`)
+
+		cfg, err := LoadConfig(path)
+		require.NoError(t, err)
+		assert.False(t, cfg.Grouping.Enabled)
+	})
+
+	t.Run("env without a file", func(t *testing.T) {
+		resetViper()
+		t.Setenv("GROUPING_ENABLED", "false")
+
+		cfg, err := LoadConfig(filepath.Join(t.TempDir(), "absent.yaml"))
+		require.NoError(t, err)
+		assert.False(t, cfg.Grouping.Enabled)
+	})
+
+	// The Helm chart always sets GROUPING_ENABLED, so under the chart the
+	// key inside the config file has no effect.
+	t.Run("env overrides yaml", func(t *testing.T) {
+		resetViper()
+		unsetEnvKeys("SERVER_PORT")
+		t.Setenv("GROUPING_ENABLED", "true")
+
+		path := writeTempYAML(t, `
+server:
+  port: 8080
+
+grouping:
+  enabled: false
+`)
+
+		cfg, err := LoadConfig(path)
+		require.NoError(t, err)
+		assert.True(t, cfg.Grouping.Enabled)
+	})
 }

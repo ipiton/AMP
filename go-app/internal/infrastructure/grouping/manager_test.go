@@ -1041,7 +1041,7 @@ func TestOnRepeatIntervalExpired_EmptyGroup(t *testing.T) {
 	assert.Empty(t, pub.calls(), "no notification should be published for non-existent group")
 }
 
-// TestTimerChain_GroupWaitToRepeatInterval is an integration test that starts
+// TestTimerChain_GroupWaitToGroupInterval is an integration test that starts
 // a group, waits for the group_wait timer to fire, and verifies the chain
 // continues into group_interval.
 //
@@ -1054,7 +1054,7 @@ func TestOnRepeatIntervalExpired_EmptyGroup(t *testing.T) {
 // alert before the group_interval timer is expected to fire, changing the
 // alert set's signature, to verify the chain still delivers a fresh
 // notification when there IS something new — not merely that timers fire.
-func TestTimerChain_GroupWaitToRepeatInterval(t *testing.T) {
+func TestTimerChain_GroupWaitToGroupInterval(t *testing.T) {
 	pub := &mockPublisher{}
 	manager, _ := createTestManagerWithPublisher(t, pub)
 	ctx := context.Background()

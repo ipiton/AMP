@@ -20,7 +20,8 @@ func TestLoadConfig_MissingFile_UsesEnv(t *testing.T) {
 	t.Setenv("PROFILE", "lite")
 	t.Setenv("STORAGE_BACKEND", "filesystem")
 	t.Setenv("SERVER_PORT", "18080")
-	t.Setenv("GROUPING_ENABLED", "true")
+	// false, because true is the default and would prove nothing.
+	t.Setenv("GROUPING_ENABLED", "false")
 	t.Setenv("SERVER_GRACEFUL_SHUTDOWN_TIMEOUT", "12s")
 
 	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "absent.yaml"))
@@ -28,7 +29,7 @@ func TestLoadConfig_MissingFile_UsesEnv(t *testing.T) {
 
 	assert.Equal(t, ProfileLite, cfg.Profile)
 	assert.Equal(t, 18080, cfg.Server.Port)
-	assert.True(t, cfg.Grouping.Enabled)
+	assert.False(t, cfg.Grouping.Enabled)
 	assert.Equal(t, "12s", cfg.Server.GracefulShutdownTimeout.String())
 	// main no longer patches these in; they must come from viper's defaults,
 	// or the kubelet probes would need credentials once auth is on.

@@ -1,7 +1,9 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -41,13 +43,19 @@ func minimalRouteTree() *infraroute.RouteConfig {
 	}
 }
 
-func TestInitializeGrouping_DisabledByDefault(t *testing.T) {
+// disabledWithRouteTreeWarning is what the operator sees at startup when a
+// copied alertmanager.yml is loaded with grouping turned off.
+const disabledWithRouteTreeWarning = "Grouping is DISABLED (grouping.enabled=false) but a route: tree is configured"
+
+func TestInitializeGrouping_DisabledExplicitly(t *testing.T) {
 	cfg := &appconfig.Config{
 		Profile:  appconfig.ProfileLite,
 		Grouping: appconfig.GroupingConfig{Enabled: false},
 		Routing:  minimalRouteTree(),
 	}
 	r := newTestRegistryForGrouping(cfg)
+	logs := &bytes.Buffer{}
+	r.logger = slog.New(slog.NewTextHandler(logs, nil))
 
 	if err := r.initializeGrouping(context.Background()); err != nil {
 		t.Fatalf("initializeGrouping() error = %v, want nil (disabled is a clean skip)", err)
@@ -57,6 +65,31 @@ func TestInitializeGrouping_DisabledByDefault(t *testing.T) {
 	}
 	if r.groupTimerManager != nil {
 		t.Fatalf("groupTimerManager must stay nil when grouping.enabled=false")
+	}
+	if got := strings.Count(logs.String(), disabledWithRouteTreeWarning); got != 1 {
+		t.Fatalf("startup warning logged %d times, want once; logs:\n%s", got, logs.String())
+	}
+	if !strings.Contains(logs.String(), "level=WARN") {
+		t.Fatalf("the notice must be a WARN; logs:\n%s", logs.String())
+	}
+}
+
+// Without a route: tree there is nothing to group by, so turning the key off
+// changes nothing and must not warn.
+func TestInitializeGrouping_DisabledWithoutRouteTreeDoesNotWarn(t *testing.T) {
+	cfg := &appconfig.Config{
+		Profile:  appconfig.ProfileLite,
+		Grouping: appconfig.GroupingConfig{Enabled: false},
+	}
+	r := newTestRegistryForGrouping(cfg)
+	logs := &bytes.Buffer{}
+	r.logger = slog.New(slog.NewTextHandler(logs, nil))
+
+	if err := r.initializeGrouping(context.Background()); err != nil {
+		t.Fatalf("initializeGrouping() error = %v", err)
+	}
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Fatalf("no warning expected without a route: tree; logs:\n%s", logs.String())
 	}
 }
 
@@ -826,5 +859,52 @@ func TestInitializeGrouping_StandardWithLiveRedis_LeavesMemoryNotifyLogNil(t *te
 	}
 	if r.memoryNotifyLog != nil {
 		t.Fatal("memoryNotifyLog must stay nil when the Redis-backed RedisNotifyLog was selected — Redis owns its own durability")
+	}
+}
+
+// With Redis, the notification log must remember this replica's own sends: a
+// Redis outage would otherwise re-send every notified group on every flush.
+func TestNewNotifyLog_StandardWithRedisRemembersOwnSendsDuringOutage(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis.Run() error = %v", err)
+	}
+	defer mr.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	redisCache, err := infracache.NewRedisCache(&infracache.CacheConfig{
+		Addr:        mr.Addr(),
+		PoolSize:    5,
+		DialTimeout: time.Second,
+		ReadTimeout: time.Second,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewRedisCache() error = %v", err)
+	}
+	defer redisCache.Close()
+
+	r := newTestRegistryForGrouping(&appconfig.Config{Profile: appconfig.ProfileStandard})
+	r.cache = redisCache
+
+	ctx := context.Background()
+	notifyLog, err := r.newNotifyLog(ctx)
+	if err != nil {
+		t.Fatalf("newNotifyLog() error = %v", err)
+	}
+
+	groupKey := grouping.GroupKey("receiver=default/alertname=HighCPU")
+	now := time.Now()
+	if err := notifyLog.RecordSent(ctx, groupKey, "target", "fp-1:firing", now, time.Hour); err != nil {
+		t.Fatalf("RecordSent() error = %v", err)
+	}
+
+	mr.Close()
+
+	dup, err := notifyLog.IsDuplicate(ctx, groupKey, "target", "fp-1:firing", now.Add(-time.Hour))
+	if !dup {
+		t.Fatalf("IsDuplicate() = false during the outage, want true for this replica's own send (err = %v)", err)
+	}
+	if !errors.Is(err, grouping.ErrNotifyLogAnsweredLocally) {
+		t.Fatalf("IsDuplicate() error = %v, want ErrNotifyLogAnsweredLocally so the caller does not treat the target as covered", err)
 	}
 }
