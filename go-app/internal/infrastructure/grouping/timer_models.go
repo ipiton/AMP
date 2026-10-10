@@ -17,8 +17,9 @@ import (
 //
 // Three timer types are supported, matching Alertmanager behavior:
 //   - GroupWaitTimer: delay before first notification (default: 30s)
-//   - GroupIntervalTimer: interval between notifications when group changes (default: 5m)
-//   - RepeatIntervalTimer: interval between notifications without changes (default: 4h)
+//   - GroupIntervalTimer: interval between flushes of an existing group (default: 5m)
+//   - RepeatIntervalTimer: legacy, no longer armed — repeat_interval is applied
+//     as the Dedup TTL at flush time, not as a timer
 type TimerType string
 
 const (
@@ -31,21 +32,21 @@ const (
 	// Default: 30 seconds
 	GroupWaitTimer TimerType = "group_wait"
 
-	// GroupIntervalTimer sets the interval between notifications when a group changes.
-	// When a new alert is added to an existing group, this timer is reset.
+	// GroupIntervalTimer sets the interval between flushes of an existing group.
+	// It is re-armed after every fire, so a group is flushed every
+	// group_interval; a flush only notifies if the alert set changed or
+	// repeat_interval has passed since the last successful send.
 	//
-	// Example: After sending a notification, if a new alert arrives, wait 5 minutes
-	// before sending another notification (allowing more alerts to batch).
+	// Example: an alert joining an already-notified group is sent with the
+	// next flush, at most group_interval later.
 	//
 	// Default: 5 minutes
 	GroupIntervalTimer TimerType = "group_interval"
 
-	// RepeatIntervalTimer sets the interval between notifications when a group
-	// hasn't changed. This provides periodic reminders for ongoing issues.
-	//
-	// Example: Send a reminder notification every 4 hours even if no new alerts arrived.
-	//
-	// Default: 4 hours
+	// RepeatIntervalTimer is no longer armed. Reminders for an unchanged group
+	// are sent by the first group_interval flush after repeat_interval has
+	// passed. The type stays valid so that timers persisted by an older
+	// release still load and fire (see onRepeatIntervalExpired).
 	RepeatIntervalTimer TimerType = "repeat_interval"
 )
 

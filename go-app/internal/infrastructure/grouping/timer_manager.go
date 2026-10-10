@@ -53,9 +53,12 @@ import (
 // Timer Flow:
 //  1. New group created → StartTimer(GroupWaitTimer, 30s)
 //  2. Timer expires → callback triggered → notification sent
-//  3. Alert added to group → ResetTimer(GroupIntervalTimer, 5m)
-//  4. Timer expires → callback triggered → notification sent
-//  5. No changes → RepeatIntervalTimer (4h) → periodic notifications
+//  3. After that flush → StartTimer(GroupIntervalTimer, 5m)
+//  4. Timer expires → callback flushes the group and re-arms GroupIntervalTimer,
+//     for as long as the group exists; an unchanged group is only re-notified
+//     once repeat_interval has passed (the notify chain's Dedup step decides)
+//  5. RepeatIntervalTimer is no longer armed; it is handled only for timers
+//     persisted by an older release
 type GroupTimerManager interface {
 	// === Timer Lifecycle ===
 

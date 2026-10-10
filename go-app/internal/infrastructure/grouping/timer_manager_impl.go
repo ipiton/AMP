@@ -513,7 +513,11 @@ func (tm *DefaultTimerManager) StartTimer(
 		tm.metrics.RecordTimerOperationDuration("start", float64(time.Since(startTime)))
 	}
 
-	tm.logger.Info("Started timer",
+	// Debug, not Info: with group_interval re-armed on every fire (see
+	// DefaultGroupManager.onGroupIntervalExpired) each live group goes through
+	// start/expire/processed once per group_interval; timer metrics carry the
+	// same signal.
+	tm.logger.Debug("Started timer",
 		"group_key", groupKey,
 		"timer_type", timerType,
 		"duration", duration,
@@ -927,7 +931,7 @@ func (tm *DefaultTimerManager) dropLocalHandle(firedHandle *timerHandle, groupKe
 }
 
 func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey GroupKey, timerType TimerType) {
-	tm.logger.Info("Timer expired",
+	tm.logger.Debug("Timer expired",
 		"group_key", groupKey,
 		"timer_type", timerType)
 
@@ -1114,7 +1118,7 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 		tm.metrics.DecActiveTimers()
 	}
 
-	tm.logger.Info("Timer expiration processed",
+	tm.logger.Debug("Timer expiration processed",
 		"group_key", groupKey,
 		"timer_type", timerType,
 		"lock_id", lockID)

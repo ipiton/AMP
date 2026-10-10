@@ -1018,7 +1018,7 @@ func receiverFromGroupKey(key GroupKey) string {
 // group panicked mid-chain and — because the panic unwound the timer
 // callback — wedged the group (final review finding 12).
 //
-// nil is a valid return: startGroupIntervalTimer/startRepeatIntervalTimer both
+// nil is a valid return: startGroupWaitTimer/startGroupIntervalTimer both
 // document nil timings as "use the root Route.* defaults".
 func groupTimings(group *AlertGroup) *GroupTimings {
 	if group == nil || group.Metadata == nil {
@@ -1232,7 +1232,7 @@ func (m *DefaultGroupManager) isTimeMuted(groupKey GroupKey, names *TimeInterval
 // exact alert set was already sent within repeat_interval, nothing is
 // published — that is the normal "suppressed" case, not a failure, and is
 // only logged at Debug. Suppression at any step means RecordSent is never
-// called, so the group's already-scheduled group_interval/repeat_interval
+// called, so the group's group_interval
 // timer keeps ticking and will retry with the group's then-current state
 // (e.g. once a mute window ends).
 //
@@ -1798,45 +1798,6 @@ func alertCount(group *AlertGroup) int {
 	return len(group.Alerts)
 }
 
-// startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
-// This timer provides periodic reminders for ongoing alert groups with no new changes.
-//
-// timings is the group's own per-route override (task 2.4), or nil to use
-// the grouping config's root Route.repeat_interval.
-//
-// Called after the group_interval notification is sent (when switching to "steady" mode).
-func (m *DefaultGroupManager) startRepeatIntervalTimer(ctx context.Context, groupKey GroupKey, timings *GroupTimings) error {
-	if m.timerManager == nil {
-		return nil // Timer functionality disabled
-	}
-
-	// Get repeat_interval duration: per-group override (task 2.4) takes
-	// precedence over the root Route.* default (default: 4h, via helper).
-	duration := 4 * time.Hour
-	if m.config != nil && m.config.Route != nil {
-		duration = m.config.Route.GetEffectiveRepeatInterval()
-	}
-	if timings != nil && timings.RepeatInterval > 0 {
-		duration = timings.RepeatInterval
-	}
-
-	// Start repeat_interval timer
-	_, err := m.timerManager.StartTimer(ctx, groupKey, RepeatIntervalTimer, duration)
-	if err != nil {
-		m.logger.Error("failed to start repeat_interval timer",
-			"group_key", groupKey,
-			"duration", duration,
-			"error", err)
-		return fmt.Errorf("start repeat_interval timer: %w", err)
-	}
-
-	m.logger.Debug("started repeat_interval timer",
-		"group_key", groupKey,
-		"duration", duration)
-
-	return nil
-}
-
 // cancelGroupTimers cancels all timers for a group.
 // Called when a group is deleted (empty after alert removal).
 func (m *DefaultGroupManager) cancelGroupTimers(ctx context.Context, groupKey GroupKey) {
@@ -1905,10 +1866,20 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 }
 
 // onGroupIntervalExpired is the callback for group_interval timer expiration.
-// This sends an update notification for the group and starts the repeat_interval timer
-// for periodic reminders.
+// It flushes the group and re-arms group_interval, so the group is flushed
+// every group_interval for as long as it exists — upstream Alertmanager's
+// aggrGroup does the same. Whether a flush actually notifies is decided by
+// publishGroupAlerts' Dedup step, not by the timer: a changed alert set is
+// sent at once, an unchanged one only after repeat_interval has passed since
+// the last successful send.
+//
+// The chain used to switch to a repeat_interval timer here. An alert joining
+// the group after that switch was then held back until repeat_interval (4h by
+// default) instead of group_interval (PROD-GROUPING-DEFAULT, review finding F1).
 func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
-	m.logger.Info("group_interval timer expired, sending update notification",
+	// Debug, not Info: this fires every group_interval for every live group,
+	// and most fires are deduplicated no-ops.
+	m.logger.Debug("group_interval timer expired, flushing group",
 		"group_key", groupKey,
 		"alert_count", len(group.Alerts))
 
@@ -1941,11 +1912,11 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 		return nil
 	}
 
-	// Switch to repeat_interval for periodic reminders.
-	// group_interval fires once after a notification is sent; subsequent reminders
-	// use repeat_interval (Alertmanager-compatible behaviour).
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
-		m.logger.Error("failed to start repeat_interval timer after group_interval",
+	// Keep flushing at group_interval. repeat_interval is not a timer of its
+	// own: it is the Dedup TTL that decides when an unchanged group is due a
+	// reminder (see effectiveRepeatInterval).
+	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
+		m.logger.Error("failed to re-arm group_interval timer",
 			"group_key", groupKey,
 			"error", err)
 		return err
@@ -1955,8 +1926,9 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 }
 
 // onRepeatIntervalExpired is the callback for repeat_interval timer expiration.
-// This sends a periodic reminder notification for an ongoing alert group and
-// restarts the repeat_interval timer so reminders continue.
+// Nothing arms a repeat_interval timer any more (see onGroupIntervalExpired);
+// this only handles timers persisted by a release that still did. It flushes
+// the group and moves it onto the group_interval cadence.
 func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
 	m.logger.Info("repeat_interval timer expired, sending reminder notification",
 		"group_key", groupKey,
@@ -1991,9 +1963,9 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 		return nil
 	}
 
-	// Restart repeat_interval for the next reminder
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
-		m.logger.Error("failed to restart repeat_interval timer",
+	// Continue on the group_interval cadence, like every other group.
+	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
+		m.logger.Error("failed to arm group_interval timer after a legacy repeat_interval fire",
 			"group_key", groupKey,
 			"error", err)
 		return err
