@@ -327,7 +327,7 @@ all decline them, delivers nothing but still **settles**: the fire records
 against a synthetic `suppressed:<receiver>` pseudo-target (never a real one, so
 no real notification is suppressed) and the group's resolved alerts are pruned,
 tearing the group down. Without that, the group would keep its resolved alerts
-and re-arm its `repeat_interval` timer forever — one silent no-op fire per
+and re-arm its `group_interval` timer forever — one silent no-op fire per
 interval, one undead group per key. Upstream reaches the same end state: its
 retry stage filters the resolved alerts out, succeeds, and `aggrGroup.flush`
 prunes.

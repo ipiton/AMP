@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: группировка включена по умолчанию
 
-**Based on:** requirements.md / research.md / Spec.md v1.1
+**Based on:** requirements.md / research.md / Spec.md v1.2
 **Date:** 2026-10-10
 
 Пути — от корня репозитория. Go-команды выполняются из `go-app/`. Оценка: ~0.5–1d → ~2d после расширения scope (цепочка `group_interval`, 2026-10-10); срез не выделяется.
@@ -76,6 +76,15 @@ based_on:
 - [x] **2b.4** Spec v1.1 (Premises 5, 8, 11–13, Target Design п.6–7, Invariants, Edge Cases 9–12, Rollout / Rollback), `requirements.md` (scope), `research.md` § 7.
 - [ ] **2b.5** Follow-ups при `finalize`: BACKLOG — пронос classification в группу (F2), `noeviction` для Redis чарта (F8); TECH-DEBT — «restart required» для `grouping.*` на reload (F11).
 
+## Phase 2c: Fix round после deep-review R2 (2026-10-10)
+
+- [x] **2c.1** G1 — `signatureCovers` в `dedup.go`, использован в `notifyDedupLog.IsDuplicate` и `RedisNotifyLog.IsDuplicate`; doc-комментарий интерфейса. <!-- verify: evidence/group-interval-chain-probes.md -->
+- [x] **2c.2** G2 — `GroupTimerManager.HasTimer` + `DefaultGroupManager.ensureGroupTimer` из `AddAlertToGroup` для существующей группы.
+- [x] **2c.3** G3 — `localSent` в `DefaultGroupManager`: запись при подтверждённой отправке, чтение при ошибке `IsDuplicate`, `Forget` вместе с группой.
+- [x] **2c.4** G4 — per-flush логи в Debug (`manager_impl.go`, `publishing/coordinator.go`). G8 — комментарии про `repeat_interval`-таймер.
+- [x] **2c.5** Доки: G5 (migration note п.10), G6 (п.1, п.5), остаток F3 (`helm/amp/README.md`, `values.yaml`, `ROLLBACK_RUNBOOK.md`), F9 (п.9, runbook), запись Changed. Spec v1.2.
+- [ ] **2c.6** Follow-ups при `finalize` (дополнение к 2b.5): BUGS — gauge активных таймеров уходит в минус при удалении группы из callback'а; гонка на `len(group.Alerts)`; TECH-DEBT — `CleanupExpiredGroups` не вызывается в проде; уточнить текст `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` и `GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` (последствие теперь ограничено `ensureGroupTimer`); конвертация legacy `repeat_interval` в `RestoreTimers`.
+
 ## Phase 3: Deep Review
 
 - [ ] **3.1** `/deep-review` (Spec § Deep Review: required). Фокус: установки без `route:` (нет WARN, нет degraded); Edge Case 5 (дерево не собралось); полнота поиска потребителей флага; честность migration note; доки про `lite`. <!-- depends: Phase 1, Phase 2 | verify: tasks/PROD-GROUPING-DEFAULT/review-verdict.json -->
@@ -90,6 +99,7 @@ based_on:
 - [ ] **4.4** Тест эффективного флага: включено + нет `route:` → `AlertProcessor` собран с `GroupingEnabled == false`, алерт публикуется напрямую, fallback-WARN не пишется; включено + `route:` → `true`. Если сборка процессора в registry не тестируется изолированно — вынести выражение флага в неэкспортируемый метод registry и тестировать его (отклонение записать в Spec). <!-- depends: 3.1 | verify: cd go-app && go test -run 'GroupingActive|EffectiveGrouping' ./internal/application/... -->
 - [ ] **4.6** `helm/amp/tests/render-grouping-default.sh` по образцу `render-image-tag.sh`: дефолт → `"true"`; `--set grouping.enabled=false` → `"false"`; `values-production.yaml` + `tests/values-production-placeholders.yaml` → `"true"`. Исполняемый бит. <!-- depends: 3.1 | verify: helm/amp/tests/render-grouping-default.sh → 0 FAIL -->
 - [ ] **4.7** `internal/infrastructure/grouping`: (а) после fire `group_interval` следующий таймер — `group_interval`; (б) неизменная группа: N flush'ей в пределах `repeat_interval` → одна публикация; (в) алерт, добавленный после первого `group_interval`, уходит на следующем flush; (г) resolve в нотифицированной группе уходит на следующем flush, группа удаляется, таймер не ставится; (д) fire legacy-таймера `repeat_interval` переводит группу на `group_interval`; (е) напоминание после `repeat_interval`. Переименовать `TestTimerChain_GroupWaitToRepeatInterval`. <!-- depends: 3.1 | verify: cd go-app && go test -race -run 'TimerChain|GroupInterval' ./internal/infrastructure/grouping/... -->
+- [ ] **4.9** v1.2: `signatureCovers` (табличный: равные, подмножество, новый алерт, смена статуса, повторный firing); `IsDuplicate` обеих реализаций на суженном наборе (Redis — miniredis); `ensureGroupTimer` (нет таймера → `group_wait`; есть таймер → не тронут; ошибка `HasTimer` → не тронут; таймер только в storage → не тронут); `HasTimer`; fallback на `localSent` при ошибке `IsDuplicate` (своя отправка не повторяется, новый алерт уходит, `Forget` чистит). Исправить тесты, проходящие и на старом коде (`TestTimerChain_GroupWaitToRepeatInterval`, `TestTimerContinuation_FullChainFiresRepeatIntervalTwice`: `repeat_interval` ≫ `group_interval`). <!-- depends: 3.1 | verify: cd go-app && go test -race ./internal/infrastructure/grouping/... -->
 - [ ] **4.8** F7: `TestLoadConfig_MissingFile_UsesEnv` — `GROUPING_ENABLED=false` + `assert.False`. <!-- depends: 3.1 | verify: cd go-app && go test -run TestLoadConfig_MissingFile_UsesEnv ./internal/config/... -->
 - [ ] **4.5** Мутационная проверка: вернуть `startGroupIntervalTimer` → `repeat_interval`-цепочку → 4.7 (а, в) падают; вернуть `GroupingEnabled: r.config.Grouping.Enabled` → 4.4 падает; вернуть дефолт `false` → 1.5 и 4.3 падают; убрать WARN → 4.2 падает. <!-- depends: 4.1–4.4 | verify: вручную, результат в tasks.md -->
 
@@ -100,6 +110,7 @@ based_on:
 - [ ] **5.1** `/testing`: гейты `WORKFLOW.md` § Гейты AMP — `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`. <!-- depends: Phase 4 | verify: release-gate RESULT: PASS -->
 - [ ] **5.2** Smoke на дефолте (Spec Open Question): временная копия `deploy/smoke/config.yaml` без секции `grouping:` → `./deploy/smoke/run.sh` ALL PASS; вывод в `evidence/`. Если `run.sh` не принимает путь к конфигу — временно убрать секцию в рабочем дереве и откатить. <!-- depends: 5.1 | verify: evidence/smoke-lite-default.md -->
 - [ ] **5.3** Стартовый лог бинаря: (а) `route:` + дефолт → «Initializing grouping subsystem...»; (б) `route:` + `grouping.enabled: false` → WARN один раз; (в) без `route:` → INFO «not started», без `error`, WARN нет.
+- [ ] **5.6** `deploy/e2e-ha/run.sh` (если доступен Docker): шаги 3–6 зелёные при постоянном тике (Spec Edge Case 16); при недоступности — записать как непроверенное. <!-- depends: 5.1 | verify: evidence/e2e-ha.md -->
 - [ ] **5.5** Живой бинарь, `lite`, короткие тайминги (`group_wait` 2s, `group_interval` 5s, `repeat_interval` 1h): второй алерт той же группы, отправленный после первого `group_interval`, доставлен в пределах ~`group_interval`; неизменная группа за это время не повторяется. <!-- depends: 5.1 | verify: evidence/group-interval-chain.md --> <!-- depends: 5.1 | verify: вывод в evidence/startup-logs.md -->
 - [ ] **5.4** `/finalize`: `DONE.md`, BACKLOG P0 → «Закрыто», `NEXT.md` (WIP очистить, строку Queue обновить), архив workspace. <!-- depends: 5.1–5.3 -->
 

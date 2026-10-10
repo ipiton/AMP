@@ -987,7 +987,7 @@ type GroupNotifyLog interface {
 	// TryClaim attempts to acquire a short-lived cross-replica publish
 	// claim for groupKey, valid for at most claimTTL. acquired == false
 	// means another replica currently holds the claim — the caller must
-	// skip this fire (the group's own group_interval/repeat_interval timer
+	// skip this fire (the group's own group_interval timer
 	// will retry later). release must be called exactly once after a
 	// successful (acquired == true) claim, as soon as the check-publish-
 	// record sequence finishes (success OR failure) — do not hold it for

@@ -177,7 +177,7 @@ type GroupTimerManager interface {
 	//
 	// Callback responsibilities:
 	//   - Send notification (via Publisher)
-	//   - Start next timer (group_interval → repeat_interval)
+	//   - Start next timer (group_wait → group_interval → group_interval …)
 	//   - Update metrics
 	//
 	// Parameters:
@@ -263,8 +263,8 @@ type GroupTimerManager interface {
 //  1. Send notification via Publisher
 //  2. Start next timer based on type:
 //     - group_wait → group_interval (5m)
-//     - group_interval → repeat_interval (4h)
-//     - repeat_interval → repeat_interval (4h)
+//     - group_interval → group_interval (5m)
+//     - repeat_interval (legacy, persisted by an older release) → group_interval
 //  3. Log and record metrics
 //
 // Error handling:

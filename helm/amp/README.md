@@ -64,6 +64,7 @@ helm install amp ./helm/amp --set profile=lite --set llm.enabled=false  # LLM on
 ```
 - SQLite storage (PVC-based), memory cache
 - Grouping works (`group_wait`/`group_interval`/`repeat_interval`), with groups and timers kept in memory — one replica only
+- Turn grouping off with the `grouping.enabled` value, not in `configFile.content`: the chart passes the value as `GROUPING_ENABLED`, which overrides the config file
 - Perfect for: dev, testing, smoke checks
 
 ## Configuration

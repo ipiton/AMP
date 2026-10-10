@@ -1512,8 +1512,8 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		}
 
 		// "No targets for receiver" and any other publish error: log +
-		// metric, do NOT retry-loop here — the next scheduled timer
-		// (group_interval/repeat_interval) will naturally retry with the
+		// metric, do NOT retry-loop here — the next scheduled flush
+		// (group_interval) will naturally retry with the
 		// group's then-current state (task 2.4 dispatch decision, carried
 		// from task 1.5's "no targets" semantics note).
 		m.logger.Error("failed to publish group notification",
@@ -1829,7 +1829,7 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 //
 // Used by the three timer callbacks after publishGroupAlerts: that call may
 // have deleted the group (all its alerts resolved — see pruneResolvedAlerts),
-// and scheduling the next group_interval/repeat_interval timer for a deleted
+// and scheduling the next group_interval timer for a deleted
 // group would resurrect the very notification loop finding 8 is about.
 //
 // FAIL-OPEN on transient errors (wave re-review, Important 1). Only a

@@ -32,7 +32,7 @@
 //  1. TryClaim: SET NX PX claimTTL a random claim ID. Only one replica can
 //     win this for a given groupKey at a time. Losing replicas skip this
 //     fire entirely — no error, no publish — and rely on their own
-//     already-scheduled group_interval/repeat_interval timer to retry
+//     already-scheduled group_interval timer to retry
 //     later, by which point the winning replica's RecordSent (if it
 //     published) will make IsDuplicate suppress the retry anyway.
 //  2. The claim winner calls IsDuplicate against "nflog:entry:{groupKey}".

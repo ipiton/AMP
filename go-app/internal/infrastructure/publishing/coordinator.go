@@ -729,7 +729,7 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		//     zero outcomes makes publishGroupAlerts skip RecordSent AND
 		//     pruneResolvedAlerts, which is the only caller of
 		//     RemoveAlertFromGroup — so the group keeps its resolved alerts and
-		//     re-arms its repeat_interval timer forever, one silent no-op fire
+		//     re-arms its group_interval timer forever, one silent no-op fire
 		//     per interval, one undead group per key. Upstream settles here: its
 		//     RetryStage filters the resolved alerts out, SUCCEEDS, records, and
 		//     aggrGroup.flush prunes. The synthetic outcome below is the same

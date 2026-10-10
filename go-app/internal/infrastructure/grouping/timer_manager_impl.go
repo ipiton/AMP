@@ -1159,8 +1159,8 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 // a callback that returned an error: the loop in onTimerExpired continues
 // to the next callback, and this timer is still removed from active state
 // below as usual (so a permanently-panicking callback can't wedge a group
-// forever — timer_wait/interval/repeat_interval get rescheduled from
-// scratch next time an alert lands in this group, same as after a normal
+// forever — the group's timer is re-armed the next time an alert joins
+// it, see DefaultGroupManager.ensureGroupTimer; same as after a normal
 // error return).
 func (tm *DefaultTimerManager) invokeCallbackSafely(
 	ctx context.Context,

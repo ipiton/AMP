@@ -45,7 +45,11 @@ is the redacted, Alertmanager-shaped route/receivers view (see
 it won't show these flags directly (they're outside the Alertmanager
 section), so confirm via the startup log line instead
 (`"Publishing disabled by config"` / `"Notification templates wired into
-publishing"` absent, etc.) after the restart.
+publishing"` absent, etc.) after the restart. For `grouping.enabled: false`
+the line is `Grouping is DISABLED (grouping.enabled=false) but a route: tree
+is configured`. Under the Helm chart set it in values
+(`--set grouping.enabled=false`): the chart's `GROUPING_ENABLED` overrides the
+key in `configFile.content`.
 
 ---
 
@@ -196,7 +200,10 @@ depends on. That means:
 
 - nflog dedup entries, timer state, and lock keys all carry their own TTLs
   (`repeat_interval`, `timer_lock_ttl`, etc.) and expire on their own — no
-  manual cleanup needed after a rollback either direction.
+  manual cleanup needed after a rollback either direction. Group records
+  outlive their timers (about a day): after `grouping.enabled` is switched
+  off and on again, a group that is still there notifies again once the next
+  alert joins it.
 - **Key-shape gap**: nflog entries moved from one bare key per
   group+receiver (`nflog:entry:{groupKey}`) to one key per group+receiver
   **+target** (`nflog:entry:{groupKey}:{target}`) in the wave-2 change

@@ -660,6 +660,8 @@ publishing:
 # Lite profile: state in memory, single replica. Set false to publish every alert
 # as soon as it arrives (AMP then warns at startup if a route: tree is configured).
 # Read at startup only -- changing it needs a pod restart, not a config reload.
+# Set it here, not in configFile.content: the chart passes this value as
+# GROUPING_ENABLED, which overrides the key in the config file.
 grouping:
   enabled: true
   reconciliationInterval: "45s"

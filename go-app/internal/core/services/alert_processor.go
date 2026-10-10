@@ -804,9 +804,10 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert,
 	// directly (mutually exclusive — see shouldGroup). Classification is not
 	// carried into the group (AlertGroup stores raw *core.Alert only) — the
 	// notify chain built on top of groups (task 2.4) does not yet have a
-	// classification-aware path either, so this is a scoped, documented gap
-	// rather than a regression: today's direct-publish PublishWithClassification
-	// is unaffected when grouping is disabled. A grouping failure falls
+	// classification-aware path either. A documented gap (CHANGELOG migration
+	// notes, ALERTMANAGER_COMPATIBILITY Known Gap #13) that applies to every
+	// config with a route: tree now that grouping is on by default; direct
+	// publish (PublishToReceiverWithClassification) keeps the classification. A grouping failure falls
 	// through to direct publish below exactly once (fail-open, see
 	// routeAlertToGroup) — never both.
 	if p.shouldGroup(decision) {

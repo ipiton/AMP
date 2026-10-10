@@ -13,12 +13,12 @@ based_on:
 
 # Specification: группировка включена по умолчанию
 
-**Version:** 1.1 (2026-10-10: после deep-review R1 — в scope добавлена цепочка `group_interval`, решение владельца «вариант 2»; исправлены Premises 5, 8, Invariants, Rollout / Rollback)
+**Version:** 1.2 (2026-10-10: после deep-review R2 — dedup по подмножеству, самовосстановление таймера, локальная память отправок; решение владельца «вариант 2» повторно). История: 1.1 (2026-10-10: после deep-review R1 — в scope добавлена цепочка `group_interval`, решение владельца «вариант 2»; исправлены Premises 5, 8, Invariants, Rollout / Rollback)
 **Status:** Draft
 
 ## Summary
 
-`grouping.enabled` по умолчанию становится `true` в коде и в чарте, чтобы скопированный `alertmanager.yml` с `route:` группировал алерты как upstream. Без `route:` поведение не меняется, а явное выключение при наличии `route:` сопровождается предупреждением на старте. Чтобы «как upstream» было правдой, цепочка таймеров группы переводится на постоянный flush каждые `group_interval` (v1.1).
+`grouping.enabled` по умолчанию становится `true` в коде и в чарте, чтобы скопированный `alertmanager.yml` с `route:` группировал алерты как upstream. Без `route:` поведение не меняется, а явное выключение при наличии `route:` сопровождается предупреждением на старте. Чтобы «как upstream» было правдой, цепочка таймеров группы переводится на постоянный flush каждые `group_interval` (v1.1), а notify-chain — на правило upstream «слать, если есть что-то новое» и на устойчивость к потере таймера и ошибкам nflog (v1.2).
 
 ## Requirements Coverage
 
@@ -32,6 +32,7 @@ based_on:
 | Доки отражают новое поведение | Target Design п.5; Component Architecture |
 | CHANGELOG: Changed + migration note | Impact Analysis; Rollout / Rollback |
 | Новый алерт существующей группы уходит не позже `group_interval` (v1.1, review F1) | Target Design п.6; Premises 11–13; тесты цепочки в `write-tests` |
+| Постоянный flush не даёт лишних нотификаций и не оставляет группу без таймера (v1.2, review G1–G3) | Target Design п.8–10; Premises 14–16; `evidence/group-interval-chain-probes.md` |
 | Гейты, `deep-review` | Deep Review; `testing` по `WORKFLOW.md` § Гейты AMP |
 | BACKLOG / NEXT | `finalize` |
 
@@ -55,26 +56,36 @@ based_on:
 | Без `route:` подсистема не поднимается и ничего не деградирует | `service_registry.go:1623-1627` (`ErrGroupingRequiresRouteTree` → INFO, `return nil`) | code-read | установки без `route:` получат degraded или ошибку старта |
 | В `lite` группировка работает целиком: алерт уходит после `group_wait` | `./deploy/smoke/run.sh` 2026-10-10: `profile: lite`, ALL PASS — `evidence/smoke-lite-grouping.md` | measured | `lite`-установки с `route:` перестанут доставлять |
 | В `standard` без Redis включённая группировка не добавляет degraded-причину сверх той, что уже ставит кэш | `service_registry.go:1210` (кэш), `:1929` и `:1982` (только WARN) | code-read | здоровая по `/health` установка станет degraded после апгрейда |
-| `validateGrouping` не зависит от `Enabled`; второй гейт — `validateNotifyTimingBudget` — зависит: проверка `reconciliation_grace > claim TTL` выполняется только при поднятом timer manager | `config.go:1191-1202`; `publishing_runtime.go:498-526` (review F4) | code-read | `standard` + Redis + `route:` с явным `grouping.reconciliation_grace` ≤ claim TTL после апгрейда не стартует — учтено в migration note п.7; без явного grace значения согласованы |
+| `validateGrouping` не зависит от `Enabled`; второй гейт — `validateNotifyTimingBudget` — зависит: проверка `reconciliation_grace > claim TTL` выполняется только при поднятом timer manager | `config.go:1194-1205`; `publishing_runtime.go:498-526` (review F4) | code-read | `standard` + Redis + `route:` с явным `grouping.reconciliation_grace` ≤ claim TTL после апгрейда не стартует — учтено в migration note п.7; без явного grace значения согласованы |
 | От дефолта `false` зависит один тест в `config`, `application`, `core`, `cmd` | прогон с перевёрнутым дефолтом — `evidence/default-flip-test-run.md` | measured | неожиданные падения на `/testing`; остальной модуль закрывает release-gate |
 | Чарт перекрывает дефолт кода: `GROUPING_ENABLED` передаётся всегда | `templates/configmap.yaml:63`; `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/chart-default-env.txt:44` | code-read | правка только кода не дойдёт до Helm-установок |
 | Флаг читается только на старте | grep `Grouping` по `reload_sections.go`, `reloadable_*.go`, `service_registry_reload.go` — пусто. `reload_coordinator.go:649`, `:706` называет `grouping` компонентом, но подсистему не пересоздаёт и «restart required» для `grouping.*` не выдаёт (review F11, defer-tech-debt) | call-path-traced | WARN на старте не покроет включение/выключение через reload |
 | Без таймингов в `route:` действуют upstream-дефолты 30s / 5m / 4h | `internal/infrastructure/grouping/config.go:158-164` | code-read | migration note назовёт неверную задержку |
-| Dedup в `publishGroupAlerts` уже решает «слать или нет» на каждом flush: неизменный набор в пределах `repeat_interval` пропускается, изменённый — отправляется | `manager_impl.go` Step 4b (`alertSetSignature`, `IsDuplicate` с `ttl = now − repeat_interval`, per-target); overlay-прогон 2026-10-10: неизменный flush → публикаций 1, после добавления алерта → 2 | measured | постоянный тик `group_interval` дал бы нотификацию каждые 5m по неизменной группе |
+| Dedup в `publishGroupAlerts` уже решает «слать или нет» на каждом flush: неизменный набор в пределах `repeat_interval` пропускается, изменённый — отправляется | `manager_impl.go` Step 4b (`alertSetSignature`, `IsDuplicate` с `ttl = now − repeat_interval`, per-target); `evidence/group-interval-chain-probes.md` (F1) | measured | постоянный тик `group_interval` дал бы нотификацию каждые 5m по неизменной группе |
 | Таймеры группы ставятся только в `manager_impl.go` (до правки — три вызова `StartTimer`, после — два: `group_wait` и `group_interval`); `AddAlertToGroup` для существующей группы таймер не трогает | grep `StartTimer\|ResetTimer` по `internal/` вне тестов | call-path-traced | остался бы путь, возвращающий группу на `repeat_interval` |
 | Таймеры `repeat_interval`, сохранённые в Redis версией до апгрейда, должны сработать и перейти на `group_interval` | `onRepeatIntervalExpired` оставлен, после flush ставит `group_interval`; `TimerType.IsValid` принимает тип | code-read | группы, созданные до апгрейда, останутся на старой цепочке или не загрузятся |
+| Сигнатура в nflog хранится открытым списком `fingerprint:status` через `\|` в обеих реализациях, поэтому сравнение по подмножеству не требует смены формата записи и совместимо с записями прежней версии | `dedup.go` (`alertSetSignature`, `dedupEntry.signature`), `redis_notify_log.go` (`notifyLogEntry.Signature`, JSON), `nflog_snapshot.go` | code-read | старые записи в Redis после апгрейда читались бы неверно — дубли или пропуски на `repeat_interval` |
+| У `GroupTimerManager` одна реализация; новый метод интерфейса `HasTimer` не ломает сторонних реализаций | grep `) GetTimer(` по `go-app` — только `DefaultTimerManager`; `go vet ./...` зелёный | call-path-traced | не соберутся моки/альтернативные реализации |
+| Запись таймера в storage существует всё время, пока callback выполняется (удаляется только в хвосте `onTimerExpired`, если callback не перевзвёл), поэтому `HasTimer` на другой реплике во время fire не даёт ложного «таймера нет» | `timer_manager_impl.go` — хвост `onTimerExpired` (`continuationTookOver`) | code-read | приём алерта на не-владельце во время fire перезапускал бы `group_wait`; `StartTimer` из callback'а затем заменил бы его — один таймер, но лишний flush |
 | Операторы существующих установок с `route:` без явного ключа прочитают migration note до апгрейда | не проверяемо | assumed | нотификации неожиданно задержатся на `group_wait` — см. Rollout / Rollback |
 
 ## Target Design
 
 1. **Дефолт кода.** `viper.SetDefault("grouping.enabled", true)`. Doc-комментарий `GroupingConfig.Enabled` переписывается: включено по умолчанию, действует только при наличии `route:`, читается на старте.
-2. **Эффективный флаг.** В `ServiceRegistry` — локальное значение `groupingActive := r.config.Grouping.Enabled && r.config.HasRouteTree()` в месте сборки `AlertProcessorConfig` (`:2320`): `GroupingEnabled: groupingActive`. Отдельный метод или поле не вводятся. Смысл `warnGroupingFallback` сохраняется для случая «`route:` есть, включено, подсистема не поднялась или у алерта нет routing decision».
+2. **Эффективный флаг.** В `ServiceRegistry` — в месте сборки `AlertProcessorConfig` (`:2320`): `GroupingEnabled: r.config.Grouping.Enabled && r.config.HasRouteTree()` (выражение записано прямо в поле). Отдельный метод или поле не вводятся. Смысл `warnGroupingFallback` сохраняется для случая «`route:` есть, включено, подсистема не поднялась или у алерта нет routing decision».
 3. **WARN при явном выключении.** В `initializeGrouping`, ветка `!Enabled`: если `HasRouteTree()` — `Warn` «Grouping is DISABLED (grouping.enabled=false) but a route: tree is configured: group_by/group_wait/group_interval/repeat_interval are ignored and every alert is published immediately»; иначе прежний INFO. Один раз на старт.
 4. **Чарт.** `helm/amp/values.yaml`: `grouping.enabled: true`, комментарий переписан (включено по умолчанию; `lite` — in-memory, `standard` — Redis). `values-production.yaml`, `values-dev.yaml` не меняются по значениям; комментарий «turns on» в production выравнивается. Новый `helm/amp/tests/render-grouping-default.sh`: дефолт → `GROUPING_ENABLED: "true"`; `--set grouping.enabled=false` → `"false"`; `values-production.yaml` (с placeholders) → `"true"`.
 5. **Доки и комментарии.** Known Gap #13 переписывается в «закрыт, как отключить»; из шагов миграции убирается ручное включение; `README.md`, `MIGRATION_QUICK_START.md`, `helm/amp/README.md` — убрать «off by default» и «lite игнорирует»; `deploy/*/config.yaml` — комментарий «must be explicit true» заменить на «default; kept explicit»; стейл-комментарии в `service_registry.go` (`:199`, `:1612`) и `alert_processor.go:29`.
 
 6. **Цепочка таймеров (v1.1).** `onGroupIntervalExpired` после flush снова ставит `group_interval` (раньше — `repeat_interval`). `repeat_interval` перестаёт быть таймером: это TTL Dedup-шага, поэтому напоминание по неизменной группе уходит на первом flush после `repeat_interval` (как upstream; на практике — `repeat_interval`, округлённый вверх до тика `group_interval`). `onRepeatIntervalExpired` остаётся только для таймеров, сохранённых прежней версией, и тоже переводит группу на `group_interval`; `startRepeatIntervalTimer` удаляется. `AddAlertToGroup` таймер по-прежнему не трогает (тест `alert_processor_test.go:404-414` остаётся в силе). Логи таймера (`Started timer`, `Timer expired`, `Timer expiration processed`, «group_interval timer expired») понижаются до Debug: теперь они возникают раз в `group_interval` на каждую живую группу.
 7. **INFO без `route:` (v1.1, review F5).** «Grouping subsystem not started: no route: tree configured, alerts are published directly», без атрибута `error`.
+
+8. **Dedup по правилу upstream (v1.2, review G1).** `IsDuplicate` в обеих реализациях считает дубликатом набор, каждый элемент которого (`fingerprint:status`) уже был в последней отправке (`signatureCovers`), а не только точное совпадение. Набор, который лишь сузился (resolved отправлен и удалён, алерт заглушён silence/inhibit), ждёт `repeat_interval`. Формат записи nflog не меняется.
+9. **Самовосстановление таймера (v1.2, review G2).** `AddAlertToGroup` для существующей группы вызывает `ensureGroupTimer`: если у группы нет таймера ни локально, ни в storage (`GroupTimerManager.HasTimer`), ставится `group_wait`. Если таймер есть или проверка не удалась — ничего не делается (инвариант «алерт не перезапускает таймер» сохраняется). Событие — WARN и метрика операции `timer_rearm`.
+10. **Локальная память отправок (v1.2, review G3).** Менеджер ведёт in-memory `localSent` (тот же `notifyDedupLog`), куда пишется каждая подтверждённая отправка. Используется только при ошибке `notifyLog.IsDuplicate`: что эта реплика отправила сама — не шлётся повторно; о чём у неё записи нет — отправляется (прежний fail-open). Очищается вместе с группой (`Forget`).
+11. **Логи на каждый flush (v1.2, review G4).** В Debug переведены: «alert dropped… silenced/inhibited at send time», «Group publishing skipped (metrics-only mode)», «No publishing targets matched receiver…» (ошибка по-прежнему логируется вызывающим на Error).
+
+Не делается в этой задаче: различение not-found и транзиентной ошибки в callback'ах (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN`) и маркер обработанного срабатывания (`TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE`) — п.9 ограничивает их последствие «до следующего алерта в группе», корневые фиксы остаются в BUGS/TECH-DEBT. Конвертация legacy-таймера `repeat_interval` при `RestoreTimers` (review G5) — описано в migration note п.10.
 
 Отвергнутая альтернатива для п.6: сбрасывать таймер на `group_interval` при добавлении алерта в существующую группу. Требует различать типы таймеров в `AddAlertToGroup`, взаимодействует с `fireStillDue` в HA и не покрывает resolved и ретрай недоставленного; постоянный тик покрывает всё одним изменением и совпадает с upstream.
 
@@ -112,7 +123,9 @@ based_on:
 - [ ] Конфиг без `route:`: прямая публикация, нет WARN про группировку, нет новой degraded-причины.
 - [ ] Явное выключение выключает группировку по приоритету источников viper: env перекрывает файл. Под Helm действует только values `grouping.enabled` (чарт всегда передаёт `GROUPING_ENABLED`); ключ в `configFile.content` там не работает (review F3).
 - [ ] `route:` есть, включено, подсистема не поднялась — `warnGroupingFallback` по-прежнему пишет WARN (громкий fallback не теряется).
-- [ ] `values-production.yaml`, `deploy/smoke`, `deploy/e2e-ha` ведут себя как до изменения.
+- [ ] `values-production.yaml`, `deploy/smoke`, `deploy/e2e-ha`: значение флага прежнее; меняется только каденс flush (v1.1) — review G6.
+- [ ] Набор, который только сузился относительно последней отправки, не нотифицируется до `repeat_interval`; набор с новым алертом, новым resolved или повторным firing — нотифицируется на ближайшем flush.
+- [ ] Алерт, пришедший в группу с существующим таймером, таймер не перезапускает; в группу без таймера — ставит `group_wait`.
 - [ ] nflog, distributed lock, `fireStillDue` и reconciliation не тронуты; в цепочке таймеров меняется только тип следующего таймера после fire.
 - [ ] Неизменная группа не нотифицируется чаще, чем раз в `repeat_interval`.
 - [ ] Алерт или resolve, пришедший в уже нотифицированную группу, уходит не позже чем через `group_interval`.
@@ -132,6 +145,10 @@ based_on:
 10. Группа, полностью подавленная silence/inhibit/time-mute → no-op flush каждый `group_interval`, отправка на первом flush после снятия подавления.
 11. Таймер `repeat_interval` в Redis от прежней версии → срабатывает в свой срок (до 4h), затем группа идёт по `group_interval`.
 12. `helm upgrade --reuse-values` → остаётся прежний `false`, на старте WARN о выключенной группировке.
+13. Resolved-алерт, совпадающий с уже отправленным (алерт сработал и разрешился между двумя flush после того, как его resolve уже был в последней отправке) → считается дубликатом, остаётся в группе до следующей отправки (изменение набора или `repeat_interval`) и уходит в её составе.
+14. nflog недоступен на чтение → реплика не повторяет свои отправки; первая отправка и новые алерты идут (fail-open); другая реплика без локальной записи может дать один дубль.
+15. Группировку выключили и включили, пока запись группы жива, а таймер истёк → группа получает `group_wait` при следующем алерте в ней.
+16. `deploy/e2e-ha`: шаг 4 ждёт ровно 2 публикации за окно «рестарт B + `group_interval`»; при постоянном тике третья придёт через ещё один `group_interval` (30s) — запас меньше, чем был; проверить прогоном на `/testing`.
 
 ## Impact Analysis
 
