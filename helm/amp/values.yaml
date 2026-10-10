@@ -653,12 +653,15 @@ publishing:
 # ===============================
 # Grouping / Notify-Chain (alertmanager-parity waves 2-4)
 # ===============================
-# grouping.enabled turns on real group_by/group_wait/group_interval/repeat_interval
-# dispatch and cross-replica notify-log dedup (config.go default: disabled). Only
-# takes effect in the standard profile with a live Redis-backed TimerStorage; the
-# lite profile ignores it (see GroupingConfig's doc comment in config.go).
+# grouping.enabled (default true, same as config.go) gives real
+# group_by/group_wait/group_interval/repeat_interval dispatch and notify-log dedup.
+# It only takes effect when the loaded config has a route: tree; without one alerts
+# are published directly. Standard profile: state in Redis, shared across replicas.
+# Lite profile: state in memory, single replica. Set false to publish every alert
+# as soon as it arrives (AMP then warns at startup if a route: tree is configured).
+# Read at startup only -- changing it needs a pod restart, not a config reload.
 grouping:
-  enabled: false
+  enabled: true
   reconciliationInterval: "45s"
   # reconciliation_grace deliberately has NO default here (empty string = key
   # omitted from the rendered ConfigMap): ServiceRegistry derives the effective

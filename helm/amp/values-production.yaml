@@ -248,11 +248,12 @@ publishing:
 # ===============================
 # Grouping / Notify-Chain (Production)
 # ===============================
-# grouping.enabled turns on the real Alertmanager-parity grouping/dedup pipeline
-# (group_by/group_wait/group_interval/repeat_interval + Redis-backed cross-replica
-# notify-log dedup). At replicaCount 3 on the standard profile with Redis already
-# required for cache, this is the configuration production is built for — leaving
-# it false silently falls back to the older per-alert fan-out-to-every-target path.
+# grouping.enabled is the chart default (true); kept explicit here. It is the real
+# Alertmanager-parity grouping/dedup pipeline (group_by/group_wait/group_interval/
+# repeat_interval + Redis-backed cross-replica notify-log dedup). At replicaCount 3
+# on the standard profile with Redis already required for cache, this is the
+# configuration production is built for — false publishes every alert on arrival
+# and ignores the route tree's timings.
 grouping:
   enabled: true
   reconciliationInterval: "45s"

@@ -19,9 +19,9 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** three gaps bite on a verbatim upstream config
-and none of them is reported at startup — a top-level `inhibit_rules:` is ignored (#9), grouping is off by default
-(#13), and a built-in filter drops some alerts (#14). Separately, the Helm chart's default values do not start (#15).
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** two gaps bite on a verbatim upstream config
+and neither is reported at startup — a top-level `inhibit_rules:` is ignored (#9) and a built-in filter drops some
+alerts (#14). Grouping (#13) is on by default since `PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15).
 Each is a P0 in `docs/06-planning/BACKLOG.md`.
 
 Source of truth:
@@ -852,12 +852,17 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     - **Mixed senders.** Upstream prefers an explicit `endsAt` over a timeout one when merging the same alert; AMP
       stores the latest value sent, so an alert first posted with an explicit `endsAt` and then without one gets
       the timeout window.
-13. **Grouping is off by default.** `grouping.enabled` defaults to `false` (`internal/config/config.go`), so a
-    verbatim `alertmanager.yml` with a `route:` tree sends every alert as soon as it arrives —
-    `group_wait`/`group_interval`/`repeat_interval` have no effect and nothing warns about it. Set
-    `grouping.enabled: true` (Helm: `grouping.enabled`); `helm/amp/values-production.yaml`, the smoke stack and
-    `deploy/e2e-ha` already do. The lite profile ignores the key entirely — grouping needs the standard profile
-    with Redis. Tracked as `PROD-GROUPING-DEFAULT` (P0).
+13. **Grouping is on by default** (closed by `PROD-GROUPING-DEFAULT`). `grouping.enabled` defaults to `true`
+    (`internal/config/config.go`, Helm: `grouping.enabled`), so a verbatim `alertmanager.yml` with a `route:` tree
+    groups the way upstream does: `group_by`/`group_wait`/`group_interval`/`repeat_interval` apply, with upstream's
+    30s/5m/4h when the route sets none. It used to default to `false`, and every alert was sent as soon as it
+    arrived with nothing warning about it. Notes:
+    - Without a `route:` tree there is nothing to group by; alerts are published directly, as before.
+    - `grouping.enabled: false` still turns grouping off. With a `route:` tree configured AMP logs a warning at
+      startup, because the tree's timings then do nothing.
+    - The key is read at startup only: changing it needs a restart, not `/-/reload`.
+    - Both profiles group. The standard profile keeps groups, timers and the notification log in Redis, shared
+      across replicas; the lite profile keeps them in memory (single replica).
 14. **A built-in filter drops some alerts before routing.** `SimpleFilterEngine`
     (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM, and silently drops:
     alert names starting with `test` (case-insensitive), alerts labelled `environment=test` or `testing`, alerts
@@ -970,8 +975,8 @@ fidelity (Slack channel/title/color, PagerDuty severity/details, Telegram `parse
 Concretely, a migration is:
 1. Copy your `route:` / `receivers:` / `time_intervals:` / `global:` across — semantics carry over, and the
    receivers' integrations become live delivery targets on load. No Kubernetes Secrets required. Move
-   `inhibit_rules:` under `inhibition:` (a top-level key is ignored, Known Gap #9), set `grouping.enabled: true`
-   (Known Gap #13), and make sure the file is actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
+   `inhibit_rules:` under `inhibition:` (a top-level key is ignored, Known Gap #9), and make sure the file is
+   actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
 2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
    formatting, PagerDuty categorisation, per-integration HTTP settings). `*_file` credentials are delivered
    (FU7-B) — no action needed for those.

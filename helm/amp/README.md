@@ -12,7 +12,7 @@ Alertmanager++ (AMP) chart packages the current repository runtime with:
 
 ## Quick Start
 
-> **Read before installing (status 2026-10-07).** The chart defaults do not start. With `llm.enabled: true` and no `llm.apiKey` (the default) the pod fails with `CreateContainerConfigError`: the `llm-api-key` Secret key is missing. With LLM off, the `standard` profile with the bundled PostgreSQL still does not start: the bundled PostgreSQL has no TLS support, and `environment: production` (the default) rejects `sslmode=disable`, so AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file below sets `llm.enabled: false` and hits the PostgreSQL check; it starts in the `lite` profile, or with an external PostgreSQL with TLS: with `postgresql.enabled: false` the chart passes no `DATABASE_*` variables, so set `database:` (host, port, database, username, password) in `configFile.content` (requires `configFile.enabled: true`) — `ssl_mode` defaults to `require`, the password must be at least 12 characters under `environment: production`, and it is stored in plain text in the config ConfigMap. Tracked as `HELM-DEFAULTS-VALIDATE` in `docs/06-planning/BACKLOG.md`. Grouping is also off by default, and the default HPA starts two replicas. Until these are fixed (P0 in `docs/06-planning/BACKLOG.md`), start from the values file below and pick one of these two routes for the database. No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing (status 2026-10-07).** The chart defaults do not start. With `llm.enabled: true` and no `llm.apiKey` (the default) the pod fails with `CreateContainerConfigError`: the `llm-api-key` Secret key is missing. With LLM off, the `standard` profile with the bundled PostgreSQL still does not start: the bundled PostgreSQL has no TLS support, and `environment: production` (the default) rejects `sslmode=disable`, so AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file below sets `llm.enabled: false` and hits the PostgreSQL check; it starts in the `lite` profile, or with an external PostgreSQL with TLS: with `postgresql.enabled: false` the chart passes no `DATABASE_*` variables, so set `database:` (host, port, database, username, password) in `configFile.content` (requires `configFile.enabled: true`) — `ssl_mode` defaults to `require`, the password must be at least 12 characters under `environment: production`, and it is stored in plain text in the config ConfigMap. Tracked as `HELM-DEFAULTS-VALIDATE` in `docs/06-planning/BACKLOG.md`. The default HPA also starts two replicas. Until these are fixed (P0 in `docs/06-planning/BACKLOG.md`), start from the values file below and pick one of these two routes for the database. No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
 ```yaml
 # values-small.yaml — one replica, standard profile
@@ -20,8 +20,6 @@ profile: standard
 replicaCount: 1
 autoscaling:
   enabled: false          # default HPA starts 2 replicas
-grouping:
-  enabled: true           # default false: every alert is sent at once
 llm:
   enabled: false
 postgresql:
@@ -50,14 +48,14 @@ The default `resources` request about 1.6 vCPU / 2.1 GiB in total for AMP, Postg
 ## Deployment Profiles
 
 ### Standard Profile (Default)
-PostgreSQL + Redis, required for Alertmanager-style grouping:
+PostgreSQL + Redis; grouping state is shared across replicas:
 ```bash
 helm install amp ./helm/amp -f values-small.yaml
 ```
 - PostgreSQL storage (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
 - Redis cache (`amp-redis`); the `valkey` subchart is also deployed and not used by default — `TECH-DEBT.md` → `HELM-CHART-GAPS`
 - HPA enabled by default (2–10 replicas)
-- Perfect for: anything that needs `group_wait`/`group_interval`/`repeat_interval`
+- Perfect for: more than one replica — group timers and notification dedup live in Redis
 
 ### Lite Profile
 Single process, no external dependencies:
@@ -65,7 +63,7 @@ Single process, no external dependencies:
 helm install amp ./helm/amp --set profile=lite --set llm.enabled=false  # LLM on without llm.apiKey: the pod does not start
 ```
 - SQLite storage (PVC-based), memory cache
-- **No grouping**: `grouping.enabled` is ignored in this profile, so alerts are not batched the way Alertmanager does
+- Grouping works (`group_wait`/`group_interval`/`repeat_interval`), with groups and timers kept in memory — one replica only
 - Perfect for: dev, testing, smoke checks
 
 ## Configuration

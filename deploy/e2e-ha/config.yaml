@@ -77,9 +77,10 @@ publishing:
 # Short group_wait/group_interval so the e2e test doesn't need to wait
 # upstream's production defaults (30s/5m) — this is a timing test, not a
 # config-defaults test.
-# grouping.enabled must be explicit true (defaults to false) — without it
-# the alert ingest pipeline never consults the group manager/timers at all,
-# regardless of the route: tree below.
+# grouping.enabled is the default since PROD-GROUPING-DEFAULT; kept explicit
+# because this test is about grouping — with false the alert ingest pipeline
+# never consults the group manager/timers at all, regardless of the route:
+# tree below.
 grouping:
   enabled: true
   # Short reconciliation so the orphan-adoption scenario in run.sh (kill a

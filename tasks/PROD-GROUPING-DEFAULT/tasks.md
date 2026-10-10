@@ -37,15 +37,15 @@ based_on:
 
 > **Wave 1** — независимые шаги
 
-- [ ] **1.1** `config.go`: `viper.SetDefault("grouping.enabled", true)`; doc-комментарий `GroupingConfig.Enabled` — включено по умолчанию, действует только при наличии `route:`, читается на старте (не hot-reload). <!-- verify: cd go-app && go build ./... && grep -n 'SetDefault("grouping.enabled", true)' internal/config/config.go -->
-- [ ] **1.2** `service_registry.go`, `initializeGrouping`, ветка `!Enabled`: при `r.config.HasRouteTree()` — `Warn` из Spec § Target Design п.3, иначе прежний INFO. Комментарии `:199` и `:1612` — убрать «default(s) to false». <!-- verify: cd go-app && go vet ./internal/application/... -->
-- [ ] **1.3** `service_registry.go`, сборка `AlertProcessorConfig` (`:2320`): `GroupingEnabled: r.config.Grouping.Enabled && r.config.HasRouteTree()` с комментарием, зачем (без `route:` нет ложного fallback-WARN). <!-- verify: cd go-app && go vet ./internal/application/... -->
-- [ ] **1.4** `alert_processor.go:29`: комментарий `Publisher` — убрать «(the default)». Логика не трогается. <!-- verify: git diff go-app/internal/core/services/alert_processor.go — только комментарий -->
+- [x] **1.1** `config.go`: `viper.SetDefault("grouping.enabled", true)`; doc-комментарий `GroupingConfig.Enabled` — включено по умолчанию, действует только при наличии `route:`, читается на старте (не hot-reload). <!-- verify: cd go-app && go build ./... && grep -n 'SetDefault("grouping.enabled", true)' internal/config/config.go -->
+- [x] **1.2** `service_registry.go`, `initializeGrouping`, ветка `!Enabled`: при `r.config.HasRouteTree()` — `Warn` из Spec § Target Design п.3, иначе прежний INFO. Комментарии `:199` и `:1612` — убрать «default(s) to false». <!-- verify: cd go-app && go vet ./internal/application/... -->
+- [x] **1.3** `service_registry.go`, сборка `AlertProcessorConfig` (`:2320`): `GroupingEnabled: r.config.Grouping.Enabled && r.config.HasRouteTree()` с комментарием, зачем (без `route:` нет ложного fallback-WARN). <!-- verify: cd go-app && go vet ./internal/application/... -->
+- [x] **1.4** `alert_processor.go:29`: комментарий `Publisher` — убрать «(the default)». Логика не трогается. <!-- verify: git diff go-app/internal/core/services/alert_processor.go — только комментарий -->
 
 > **Wave 2** — смоук до deep-review (новые тесты не пишем)
 
-- [ ] **1.5** Минимальная правка существующего теста, чтобы пакет собирался зелёным: `TestLoadConfig_GroupingDefaults` ждёт `true` (комментарий теста обновить). <!-- depends: 1.1 | verify: cd go-app && go test ./internal/config/... -->
-- [ ] **1.6** Существующие тесты затронутых деревьев зелёные. <!-- depends: 1.1–1.5 | verify: cd go-app && go vet ./internal/config/... ./internal/application/... ./internal/core/... && go test ./internal/config/... ./internal/application/... ./internal/core/... ./cmd/... -->
+- [x] **1.5** Минимальная правка существующего теста, чтобы пакет собирался зелёным: `TestLoadConfig_GroupingDefaults` ждёт `true` (комментарий теста обновить). <!-- depends: 1.1 | verify: cd go-app && go test ./internal/config/... -->
+- [x] **1.6** Существующие тесты затронутых деревьев зелёные. <!-- depends: 1.1–1.5 | verify: cd go-app && go vet ./internal/config/... ./internal/application/... ./internal/core/... && go test ./internal/config/... ./internal/application/... ./internal/core/... ./cmd/... -->
 
 **Phase verification:** `make -C go-app quality-gates-fast` + `git status` (fmt ничего не переписал) + `git diff --check`.
 
@@ -53,14 +53,20 @@ based_on:
 
 > **Wave 1** — независимые шаги
 
-- [ ] **2.1** `helm/amp/values.yaml`: `grouping.enabled: true`; комментарий — включено по умолчанию, действует при наличии `route:`, `lite` — in-memory, `standard` — Redis, выключение возвращает прямую публикацию. `values-production.yaml:251` — формулировка «turns on» → «kept explicit». <!-- verify: helm template t helm/amp | grep 'GROUPING_ENABLED: "true"' -->
-- [ ] **2.2** `helm/amp/tests/render-grouping-default.sh` по образцу `render-image-tag.sh`: дефолт → `"true"`; `--set grouping.enabled=false` → `"false"`; `values-production.yaml` + `tests/values-production-placeholders.yaml` → `"true"`. Исполняемый бит. <!-- depends: 2.1 | verify: helm/amp/tests/render-grouping-default.sh → 0 FAIL -->
-- [ ] **2.3** `deploy/smoke/config.yaml:44`, `deploy/e2e-ha/config.yaml:80`: «must be explicit true (defaults to false)» → «default since PROD-GROUPING-DEFAULT; kept explicit». Значения не менять. <!-- verify: git diff deploy/ — только комментарии -->
-- [ ] **2.4** `docs/ALERTMANAGER_COMPATIBILITY.md`: Known Gap #13 — группировка включена по умолчанию при наличии `route:`, как отключить, флаг читается на старте, `lite` группирует in-memory; шаг миграции (`:973`) — убрать ручное включение. Проверить таблицу статусов выше по файлу на «off by default». <!-- verify: grep -n -i 'off by default\|defaults to .false.\|ignores the key' docs/ALERTMANAGER_COMPATIBILITY.md → пусто -->
-- [ ] **2.5** `README.md:17` (три ловушки → две), `docs/MIGRATION_QUICK_START.md:24`, `docs/CONFIGURATION_GUIDE.md` (ключ `grouping.enabled`: дефолт, не hot-reload), `helm/amp/README.md` (`:23` пример `values-small.yaml`, `:53`, `:68` «No grouping» в lite). <!-- verify: grep -rn -i 'grouping stays off\|grouping is off\|grouping.enabled. is ignored\|default false: every alert' README.md docs/*.md helm/amp/README.md → пусто -->
-- [ ] **2.6** `CHANGELOG.md` `[Unreleased]`: `### Changed` + запись в breaking changes / migration notes (задержка на `group_wait` 30s по умолчанию, сгруппированный payload, откат `grouping.enabled: false` + рестарт). `helm/amp/CHANGELOG.md` — дефолт values. <!-- verify: grep -n 'PROD-GROUPING-DEFAULT' CHANGELOG.md helm/amp/CHANGELOG.md -->
+- [x] **2.1** `helm/amp/values.yaml`: `grouping.enabled: true`; комментарий — включено по умолчанию, действует при наличии `route:`, `lite` — in-memory, `standard` — Redis, выключение возвращает прямую публикацию. `values-production.yaml:251` — формулировка «turns on» → «kept explicit». <!-- verify: helm template t helm/amp | grep 'GROUPING_ENABLED: "true"' -->
+- [~] **2.2** Перенесён в фазу 4 как **4.6**: render-тест — тестовый файл, по правилу `implement` пишется после вердикта deep-review. Рендер проверен вручную: дефолт → `GROUPING_ENABLED: "true"`, `--set grouping.enabled=false` → `"false"`.
+- [x] **2.3** `deploy/smoke/config.yaml:44`, `deploy/e2e-ha/config.yaml:80`: «must be explicit true (defaults to false)» → «default since PROD-GROUPING-DEFAULT; kept explicit». Значения не менять. <!-- verify: git diff deploy/ — только комментарии -->
+- [x] **2.4** `docs/ALERTMANAGER_COMPATIBILITY.md`: Known Gap #13 — группировка включена по умолчанию при наличии `route:`, как отключить, флаг читается на старте, `lite` группирует in-memory; шаг миграции (`:973`) — убрать ручное включение. Проверить таблицу статусов выше по файлу на «off by default». <!-- verify: grep -n -i 'off by default\|defaults to .false.\|ignores the key' docs/ALERTMANAGER_COMPATIBILITY.md → пусто -->
+- [x] **2.5** `README.md:17` (три ловушки → две), `docs/MIGRATION_QUICK_START.md:24`, `docs/CONFIGURATION_GUIDE.md` (ключ `grouping.enabled`: дефолт, не hot-reload), `helm/amp/README.md` (`:23` пример `values-small.yaml`, `:53`, `:68` «No grouping» в lite). <!-- verify: grep -rn -i 'grouping stays off\|grouping is off\|grouping.enabled. is ignored\|default false: every alert' README.md docs/*.md helm/amp/README.md → пусто -->
+- [x] **2.6** `CHANGELOG.md` `[Unreleased]`: `### Changed` + запись в breaking changes / migration notes (задержка на `group_wait` 30s по умолчанию, сгруппированный payload, откат `grouping.enabled: false` + рестарт). `helm/amp/CHANGELOG.md` — дефолт values. <!-- verify: grep -n 'PROD-GROUPING-DEFAULT' CHANGELOG.md helm/amp/CHANGELOG.md -->
 
-**Phase verification:** `helm lint helm/amp` + все `helm/amp/tests/*.sh` зелёные + `git diff --check`.
+**Phase verification:** `helm lint helm/amp` + все `helm/amp/tests/*.sh` зелёные + `git diff --check`. _(2026-10-10: lint 0 failed, 6/6 render-тестов PASS, `quality-gates-fast` PASS, fmt ничего не переписал.)_
+
+**Заметки implement (2026-10-10):**
+- `docs/ROLLBACK_RUNBOOK.md` уже описывает `grouping.enabled` как startup-only выключатель — не менялся.
+- `docs/RELEASE_NOTES_v0.1.0-draft.md:167` упоминает `grouping.enabled: false` в старом контексте; draft целиком пересобирается в `PROD-RELEASE-V010` — не трогали.
+- `values-production.yaml`: комментарий утверждал, что `false` «falls back to the older per-alert fan-out-to-every-target path» — устарело с wave 6 (receiver scoping), исправлено заодно с формулировкой.
+- Для deep-review: `GroupingConfig.Enabled` имеет тег `yaml:"enabled,omitempty"`. Целиком `Config` в YAML не сериализуется (grep `yaml.Marshal`: только `Routing` и subset-карты), JSON-сериализация тегом не затронута — риска «явный `false` теряется при round-trip» не найдено, но стоит перепроверить.
 
 ## Phase 3: Deep Review
 
@@ -74,6 +80,7 @@ based_on:
 - [ ] **4.2** `service_registry_grouping_test.go`: переименовать `TestInitializeGrouping_DisabledByDefault` → `…DisabledExplicitly`, добавить проверку WARN через захват логов; случай «выключено, `route:` нет» → WARN нет. <!-- depends: 3.1 | verify: cd go-app && go test -run 'TestInitializeGrouping' ./internal/application/... -->
 - [ ] **4.3** Тест «конфиг из `LoadConfig` с `route:` и без `grouping:` → `initializeGrouping` поднимает groupManager (lite)». <!-- depends: 3.1 | verify: cd go-app && go test -run 'GroupingDefault' ./internal/application/... -->
 - [ ] **4.4** Тест эффективного флага: включено + нет `route:` → `AlertProcessor` собран с `GroupingEnabled == false`, алерт публикуется напрямую, fallback-WARN не пишется; включено + `route:` → `true`. Если сборка процессора в registry не тестируется изолированно — вынести выражение флага в неэкспортируемый метод registry и тестировать его (отклонение записать в Spec). <!-- depends: 3.1 | verify: cd go-app && go test -run 'GroupingActive|EffectiveGrouping' ./internal/application/... -->
+- [ ] **4.6** `helm/amp/tests/render-grouping-default.sh` по образцу `render-image-tag.sh`: дефолт → `"true"`; `--set grouping.enabled=false` → `"false"`; `values-production.yaml` + `tests/values-production-placeholders.yaml` → `"true"`. Исполняемый бит. <!-- depends: 3.1 | verify: helm/amp/tests/render-grouping-default.sh → 0 FAIL -->
 - [ ] **4.5** Мутационная проверка: вернуть `GroupingEnabled: r.config.Grouping.Enabled` → 4.4 падает; вернуть дефолт `false` → 1.5 и 4.3 падают; убрать WARN → 4.2 падает. <!-- depends: 4.1–4.4 | verify: вручную, результат в tasks.md -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/config/... ./internal/application/... ./internal/core/...`

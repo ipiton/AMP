@@ -245,6 +245,15 @@ On `SIGTERM` or `SIGINT` AMP stops in this order:
 
 AMP itself does not wait before step 2. In Kubernetes the chart's preStop hook provides that pause while the pod leaves Service endpoints. Keep `terminationGracePeriodSeconds` ≥ `preStopDelay` + `timeoutSeconds` (see `helm/amp/README.md` → "Graceful Shutdown").
 
+### Grouping
+
+`grouping.enabled` (default `true`, env `GROUPING_ENABLED`, Helm `grouping.enabled`) makes AMP dispatch alerts in groups on the `route:` tree's `group_by` / `group_wait` / `group_interval` / `repeat_interval`, as Alertmanager does.
+
+- It only takes effect when the Alertmanager config has a `route:` tree. Without one, alerts are published directly.
+- `grouping.enabled: false` publishes every alert as soon as it arrives. With a `route:` tree configured AMP logs a warning at startup, because the tree's timings are then ignored.
+- The key is read at startup. Changing it needs a restart; `/-/reload` does not apply it.
+- Standard profile: groups, timers and the notification log are kept in Redis and shared across replicas. Lite profile: in memory, single replica.
+
 ### Dynamic Publishing Runtime
 
 `publishing.*` controls the real outbound delivery path used by the active runtime.
