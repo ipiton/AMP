@@ -94,7 +94,7 @@ based_on:
 - [x] **2d.5** H4 — «Group publishing skipped (metrics-only mode)» возвращён на Info.
 - [x] **2d.6** D3 — `deploy/e2e-ha/run.sh` шаг 4: опрос вместо фиксированного `sleep`. <!-- verify: evidence/e2e-ha.md -->
 - [x] **2d.7** Доки: CHANGELOG (Changed, notes п.1, 4, 7, 10), compat-док (#13, строка про prune), `CONFIGURATION_GUIDE.md`, `ROLLBACK_RUNBOOK.md` (откат только образа). Spec v1.3 (D5–D7).
-- [ ] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись; N1 — при сбое дольше `repeat_interval` группа с несколькими target'ами не оседает; нет метрики fallback), `RedisGroupStorage.Store` читает и меняет группу без блокировки, `storage.Delete` без проверки версии (M3, M4).
+- [ ] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись; N1 — при сбое дольше `repeat_interval` группа с несколькими target'ами не оседает; нет метрики fallback), `RedisGroupStorage.Store` читает и меняет группу без блокировки, `storage.Delete` без проверки версии (M3, M4). Добавлено на `testing`: BUGS — флейк `TestSyncWorker_PeriodicExecution` (`business/silencing`, `Times(3)` против `Sleep(250ms)`), `TestRunMigrations_ConcurrentReplicas_FreshDB` паникует вместо skip при медленном Docker (`requireDocker`), ERROR «Failed to connect to Redis» при старте `lite` без Redis.
 
 ## Phase 2e: Fix round после deep-review R4 (2026-10-10)
 
@@ -137,11 +137,11 @@ based_on:
 
 ## Phase 5: Testing и Finalize
 
-- [ ] **5.1** `/testing`: гейты `WORKFLOW.md` § Гейты AMP — `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`. <!-- depends: Phase 4 | verify: release-gate RESULT: PASS -->
-- [ ] **5.2** Smoke на дефолте (Spec Open Question): временная копия `deploy/smoke/config.yaml` без секции `grouping:` → `./deploy/smoke/run.sh` ALL PASS; вывод в `evidence/`. Если `run.sh` не принимает путь к конфигу — временно убрать секцию в рабочем дереве и откатить. <!-- depends: 5.1 | verify: evidence/smoke-lite-default.md -->
-- [ ] **5.3** Стартовый лог бинаря: (а) `route:` + дефолт → «Initializing grouping subsystem...»; (б) `route:` + `grouping.enabled: false` → WARN один раз; (в) без `route:` → INFO «not started», без `error`, WARN нет. <!-- depends: 5.1 | verify: вывод в evidence/startup-logs.md -->
-- [ ] **5.6** `deploy/e2e-ha/run.sh` (если доступен Docker): шаги 3–6 зелёные при постоянном тике (Spec Edge Case 16); при недоступности — записать как непроверенное. <!-- depends: 5.1 | verify: evidence/e2e-ha.md -->
-- [ ] **5.5** Живой бинарь, `lite`, короткие тайминги (`group_wait` 2s, `group_interval` 5s, `repeat_interval` 1h): второй алерт той же группы, отправленный после первого `group_interval`, доставлен в пределах ~`group_interval`; неизменная группа за это время не повторяется. <!-- depends: 5.1 | verify: evidence/group-interval-chain.md -->
+- [x] **5.1** `/testing`: гейты `WORKFLOW.md` § Гейты AMP — `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`. **Итог:** `quality-gates-fast` и `git diff --check` зелёные; `scripts/release-gate.sh` — RESULT PASS с третьего прогона. Прогон 1: lint FAIL (5 замечаний в новых тестах задачи, исправлено в `4fc7300`) и `TestRunMigrations_ConcurrentReplicas_FreshDB` (Docker не ответил за 2 с под параллельной нагрузкой; в одиночку проходит). Прогон 2: `race` FAIL — `TestSyncWorker_PeriodicExecution` в `business/silencing` (тайминговый флейк: `Times(3)` при `Sleep(250ms)` и тике 100 мс; пакет задачей не тронут, 6/6 в одиночку). Прогон 3: все 11 шагов PASS. <!-- depends: Phase 4 | verify: release-gate RESULT: PASS -->
+- [x] **5.2** Smoke на дефолте (Spec Open Question): временная копия `deploy/smoke/config.yaml` без секции `grouping:` → `./deploy/smoke/run.sh` ALL PASS; вывод в `evidence/`. Если `run.sh` не принимает путь к конфигу — временно убрать секцию в рабочем дереве и откатить. **Итог:** ALL PASS без секции `grouping:` — `evidence/smoke-lite-default.md`. <!-- depends: 5.1 | verify: evidence/smoke-lite-default.md -->
+- [x] **5.3** Стартовый лог бинаря: (а) `route:` + дефолт → «Initializing grouping subsystem...»; (б) `route:` + `grouping.enabled: false` → WARN один раз; (в) без `route:` → INFO «not started», без `error`, WARN нет. **Итог:** все три варианта совпали с ожиданием — `evidence/startup-logs.md`. Попутно: в `lite` без Redis при старте есть ERROR «Failed to connect to Redis» (не из этой задачи). <!-- depends: 5.1 | verify: вывод в evidence/startup-logs.md -->
+- [x] **5.6** `deploy/e2e-ha/run.sh` (если доступен Docker): шаги 3–6 зелёные при постоянном тике (Spec Edge Case 16); при недоступности — записать как непроверенное. **Итог:** ALL PASS на `4fc7300` — `evidence/e2e-ha.md`. <!-- depends: 5.1 | verify: evidence/e2e-ha.md -->
+- [x] **5.5** Живой бинарь, `lite`, короткие тайминги (`group_wait` 2s, `group_interval` 5s, `repeat_interval` 1h): второй алерт той же группы, отправленный после первого `group_interval`, доставлен в пределах ~`group_interval`; неизменная группа за это время не повторяется. **Итог:** две доставки с интервалом 10.03 с (второй тик `group_interval`), `i2` доставлен через ~2.9 с после POST, повторов неизменной группы нет — `evidence/group-interval-chain.md`. <!-- depends: 5.1 | verify: evidence/group-interval-chain.md -->
 - [ ] **5.4** `/finalize`: `DONE.md`, BACKLOG P0 → «Закрыто», `NEXT.md` (WIP очистить, строку Queue обновить), архив workspace. <!-- depends: 5.1–5.3 -->
 
 **Phase verification:** release-gate PASS, evidence приложены.
@@ -153,5 +153,5 @@ based_on:
 - [ ] Contracts from `Spec.md` are implemented or deviations are recorded
 - [ ] Deep review verdict is `pass`
 - [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
+- [x] Phase checks pass
 - [ ] Docs/planning are updated if behavior, contracts, or process changed
