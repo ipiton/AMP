@@ -47,9 +47,25 @@
 ### [medium][Grouping][~1d] TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE
 - **Title:** пропажа ключа таймера в Redis глушит живой локальный таймер
 - **Problem:** после `GROUPING-TIMER-LOCK-FIX` срабатывание сверяется с записью в timer storage, и отсутствие записи значит «уже обработано» (`fireStillDue`, `not_found`). Если ключ пропал не из-за обработчика — eviction (`allkeys-lru`), `FLUSHDB`, failover на отстающую реплику Redis, — локальный таймер тоже пропускает срабатывание, а reconciliation ключа не видит. Различить «удалён обработчиком» и «потерян» без отдельного маркера нельзя. У group storage есть failback (`StorageManager`), у timer storage — нет (`service_registry.go:1897-1911`).
-- **Impact:** группа молчит до следующего алерта в ней; только HA-режим с Redis.
+- **Impact:** группа молчит до следующего алерта в ней; только HA-режим с Redis. _(PROD-GROUPING-DEFAULT, 2026-10-10: следующий алерт перевзводит таймер через `ensureGroupTimer`; группировка теперь включена по умолчанию, а Redis чарта по умолчанию `allkeys-lru` — см. `HELM-REDIS-NOEVICTION` в BACKLOG.)_
 - **Fix:** маркер обработанного срабатывания (например, `fired:{groupKey}:{expiresAt}` с TTL) вместо отсутствия записи, либо требование `noeviction` для Redis AMP в чарте и доках.
 - **Refs:** `go-app/internal/infrastructure/grouping/timer_manager_impl.go` (`fireStillDue`, `skipHandledFire`); `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` F6.
+- **Status:** open
+
+### [medium][Grouping][~1d] NOTIFY-LOG-FALLBACK-LIMITS
+- **Title:** ограничения `resilientNotifyLog` при недоступном журнале нотификаций
+- **Problem:** обёртка над `RedisNotifyLog` при ошибке чтения отвечает из локальной памяти реплики. (1) Локальная запись может быть устаревшей: другая реплика успела отправить более новый набор — ответ «дубликат» придерживает target, покрытым он не считается, prune не выполняется (это намеренно, Spec п.8, 10). (2) При сбое дольше `repeat_interval` группа с несколькими target'ами не оседает: локальные записи истекают в разное время, каждый раз один target получает fail-open отправку, другой придержан — resolved-алерт уходит каждому target'у раз в `repeat_interval`, пока журнал не читается. (3) Нет метрики состояния fallback — видно только по Warn-логу.
+- **Impact:** при длительной недоступности Redis — повторы resolved раз в `repeat_interval` на target; после восстановления первый flush удаляет алерт. Оператор не видит по метрикам, что дедуп работает из локальной памяти.
+- **Fix:** gauge/counter «nflog отвечает локально»; для (2) — общий срок годности локальных записей группы либо отказ от fail-open для resolved-only набора.
+- **Refs:** `go-app/internal/infrastructure/grouping/notify_log_fallback.go`; `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` K-серия, M1, N1; `Spec.md` Edge Cases 19–20.
+- **Status:** open
+
+### [medium][Grouping][~0.5d] GROUP-CLEANUP-NOT-WIRED
+- **Title:** `CleanupExpiredGroups` не вызывается в проде
+- **Problem:** `CleanupExpiredGroups`/`RemoveAlertFromGroup` вне тестов не вызываются; авто-резолва нет. Группа, чьи resolved-алерты не удаётся доставить (или алерт без resolved), тикает каждый `group_interval` бессрочно — в HA ~10–12 round-trip'ов Redis на тик; алерт без resolved напоминает каждый `repeat_interval`. По чтению кода.
+- **Impact:** рост числа групп и фоновой нагрузки на Redis со временем; с группировкой по умолчанию касается всех установок с `route:`.
+- **Fix:** периодический вызов `CleanupExpiredGroups` из timer manager/registry с порогом по `UpdatedAt`; тест на снятие таймера вместе с группой.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` F8, G7.
 - **Status:** open
 
 ## Low
@@ -57,7 +73,7 @@
 ### [low][Grouping][~0.25d] TIMER-ACTIVE-GAUGE-DRIFT
 - **Title:** `alert_history_timer_active_total` расходится с числом таймеров
 - **Problem:** `Inc`/`Dec` гейджа не сбалансированы на нескольких путях `DefaultTimerManager`: `StartTimer` заменяет существующий handle без `Dec` (`timer_manager_impl.go:441-445`), и если сработавший handle заменён внешним `StartTimer` во время проверки записи, `Inc` старого не компенсируется; ветки `gm == nil` и `GroupNotFound` в `onTimerExpired` удаляют handle без `Dec`; срабатывание с `nil`-handle (restore/reconcile) делает `Dec` без `Inc`. Ранний выход через `dropLocalHandle` сбалансирован в `GROUPING-TIMER-LOCK-FIX`.
-- **Impact:** гейдж годится только для тренда; на доставку не влияет.
+- **Impact:** гейдж годится только для тренда; на доставку не влияет. _(PROD-GROUPING-DEFAULT G7: ещё один путь — удаление группы из callback'а даёт двойной `DecActiveTimers`, гейдж уходит в минус.)_
 - **Fix:** считать гейдж от `len(tm.timers)` (GaugeFunc) вместо `Inc`/`Dec` по путям.
 - **Refs:** `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` N3, F2.
 - **Status:** open
@@ -76,6 +92,38 @@
 - **Impact:** чекаут в каталоге с пробелом роняет helm-шаги гейта; следующий `--set` со спецсимволами — тихая порча аргументов.
 - **Fix:** bash-массивы аргументов в `step_helm_values`/`step_helm_rbac`.
 - **Refs:** deep-review PROD-INGRESS-HARDENING R14; 2026-10-01.
+- **Status:** open
+
+### [low][Grouping][~0.5d] GROUP-HASTIMER-REDIS-GET-PER-ALERT
+- **Title:** `HasTimer` делает Redis GET на каждый алерт у реплики без локального handle
+- **Problem:** `ensureGroupTimer` спрашивает `HasTimer`; у реплики, не владеющей таймером группы, это поход в Redis — в HA (N−1)/N алертов. При ошибке GET пишутся Warn и Error на каждый алерт, без rate-limit.
+- **Impact:** лишний round-trip на ingest-пути и шум в логах при сбое Redis; на корректность не влияет.
+- **Fix:** короткий локальный кэш «таймер есть» на группу; rate-limit логов ошибки.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H9; `go-app/internal/infrastructure/grouping/manager_impl.go` (`ensureGroupTimer`), `timer_manager_impl.go` (`HasTimer`).
+- **Status:** open
+
+### [low][Grouping][~0.5d] LEGACY-REPEAT-TIMER-AFTER-UPGRADE
+- **Title:** legacy-таймер `repeat_interval` после апгрейда держит задержку до своего срока
+- **Problem:** группа, пережившая апгрейд с таймером типа `repeat_interval`, считается «с таймером» (`HasTimer` = true), перевзвод не срабатывает; `RestoreTimers` такой таймер в `group_interval` не конвертирует — timer manager не знает `group_interval` группы. Новый алерт в такой группе ждёт остаток `repeat_interval` (до 4h), один раз на группу.
+- **Impact:** разовая задержка нотификации после апгрейда HA-установки с живыми группами; названо в migration note п.10.
+- **Fix:** при `RestoreTimers` сжимать legacy-таймер до `min(остаток, group_interval)` — нужен доступ к параметрам маршрута группы.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H7.
+- **Status:** open
+
+### [low][Grouping][~0.5d] REDIS-GROUP-STORAGE-UNLOCKED-WRITES
+- **Title:** `RedisGroupStorage.Store`/`Delete` без блокировки группы и проверки версии
+- **Problem:** `RedisGroupStorage.Store` делает `json.Marshal` и `Version++` без `group.mu` (в `MemoryGroupStorage.Store` это исправлено в PROD-GROUPING-DEFAULT); `storage.Delete` не проверяет версию, поэтому проверка «алерт всё ещё resolved» перед prune атомарна только в пределах объекта группы одной реплики. Пробой не воспроизведён: в Redis-режиме объект группы обычно свой у каждого вызова.
+- **Impact:** теоретическая гонка между репликами: prune может удалить группу, в которую другая реплика только что добавила алерт.
+- **Fix:** `Store` под `group.mu.RLock`; `Delete` с проверкой версии (Lua/WATCH).
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` M3, M4; `Spec.md` п.10 (оговорка про Redis).
+- **Status:** open
+
+### [low][Config][~0.25d] GROUPING-RELOAD-NO-RESTART-HINT
+- **Title:** `/-/reload` с изменённым `grouping.*` не сообщает «restart required»
+- **Problem:** `grouping.enabled` и остальные ключи `grouping.*` читаются один раз при старте; `reload_coordinator.go` числит `grouping` компонентом, но изменение этих ключей на reload молча не применяется и предупреждения W6xx нет. Предсуществующее.
+- **Impact:** оператор меняет `grouping.enabled` в файле, делает reload и считает, что режим сменился.
+- **Fix:** предупреждение W6xx «restart required» при изменении `grouping.*` на reload.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` F11; `go-app/internal/config/reload_coordinator.go`.
 - **Status:** open
 
 ## Entry Format

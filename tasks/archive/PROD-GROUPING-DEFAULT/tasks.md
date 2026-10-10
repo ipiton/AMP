@@ -74,7 +74,7 @@ based_on:
 - [x] **2b.2** F5 — INFO без `route:` без атрибута `error`. F6 — стейл-комментарии (`alert_processor.go`, `service_registry.go`, `publish_receiver_scoping_test.go`), `CHANGELOG.md` («the default at the time»), `config.yaml.example`, дата в `README.md`. <!-- verify: cd go-app && go vet ./internal/application/... ./internal/core/... -->
 - [x] **2b.3** Доки: F2 (classification), F3 (Helm: только values), F4 (`reconciliation_grace`), F8 (ссылки на открытые дефекты), F9 (rollout/rollback в HA), F10 (`--reuse-values`) — `CHANGELOG.md`, `helm/amp/CHANGELOG.md`, `docs/CONFIGURATION_GUIDE.md`, `docs/ALERTMANAGER_COMPATIBILITY.md` (включая оговорку про retry cadence). <!-- verify: git diff --check && helm lint helm/amp -->
 - [x] **2b.4** Spec v1.1 (Premises 5, 8, 11–13, Target Design п.6–7, Invariants, Edge Cases 9–12, Rollout / Rollback), `requirements.md` (scope), `research.md` § 7.
-- [ ] **2b.5** Follow-ups при `finalize`: BACKLOG — пронос classification в группу (F2), `noeviction` для Redis чарта (F8); TECH-DEBT — «restart required» для `grouping.*` на reload (F11).
+- [x] **2b.5** Follow-ups при `finalize`: BACKLOG — пронос classification в группу (F2), `noeviction` для Redis чарта (F8); TECH-DEBT — «restart required» для `grouping.*` на reload (F11).
 
 ## Phase 2c: Fix round после deep-review R2 (2026-10-10)
 
@@ -83,7 +83,7 @@ based_on:
 - [x] **2c.3** G3 — `localSent` в `DefaultGroupManager`: запись при подтверждённой отправке, чтение при ошибке `IsDuplicate`, `Forget` вместе с группой.
 - [x] **2c.4** G4 — per-flush логи в Debug (`manager_impl.go`, `publishing/coordinator.go`). G8 — комментарии про `repeat_interval`-таймер.
 - [x] **2c.5** Доки: G5 (migration note п.10), G6 (п.1, п.5), остаток F3 (`helm/amp/README.md`, `values.yaml`, `ROLLBACK_RUNBOOK.md`), F9 (п.9, runbook), запись Changed. Spec v1.2.
-- [ ] **2c.6** Follow-ups при `finalize` (дополнение к 2b.5): BUGS — gauge активных таймеров уходит в минус при удалении группы из callback'а; гонка на `len(group.Alerts)`; TECH-DEBT — `CleanupExpiredGroups` не вызывается в проде; уточнить текст `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` и `GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` (последствие теперь ограничено `ensureGroupTimer`); конвертация legacy `repeat_interval` в `RestoreTimers`.
+- [x] **2c.6** Follow-ups при `finalize` (дополнение к 2b.5): BUGS — gauge активных таймеров уходит в минус при удалении группы из callback'а; гонка на `len(group.Alerts)`; TECH-DEBT — `CleanupExpiredGroups` не вызывается в проде; уточнить текст `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` и `GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` (последствие теперь ограничено `ensureGroupTimer`); конвертация legacy `repeat_interval` в `RestoreTimers`.
 
 ## Phase 2d: Fix round после deep-review R3 (2026-10-10, решение владельца: «полноценное решение корня»)
 
@@ -94,7 +94,7 @@ based_on:
 - [x] **2d.5** H4 — «Group publishing skipped (metrics-only mode)» возвращён на Info.
 - [x] **2d.6** D3 — `deploy/e2e-ha/run.sh` шаг 4: опрос вместо фиксированного `sleep`. <!-- verify: evidence/e2e-ha.md -->
 - [x] **2d.7** Доки: CHANGELOG (Changed, notes п.1, 4, 7, 10), compat-док (#13, строка про prune), `CONFIGURATION_GUIDE.md`, `ROLLBACK_RUNBOOK.md` (откат только образа). Spec v1.3 (D5–D7).
-- [ ] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись; N1 — при сбое дольше `repeat_interval` группа с несколькими target'ами не оседает; нет метрики fallback), `RedisGroupStorage.Store` читает и меняет группу без блокировки, `storage.Delete` без проверки версии (M3, M4). Добавлено на `testing`: BUGS — флейк `TestSyncWorker_PeriodicExecution` (`business/silencing`, `Times(3)` против `Sleep(250ms)`), `TestRunMigrations_ConcurrentReplicas_FreshDB` паникует вместо skip при медленном Docker (`requireDocker`), ERROR «Failed to connect to Redis» при старте `lite` без Redis.
+- [x] **2d.8** Follow-ups при `finalize` (дополнение к 2b.5, 2c.6): BUGS — H5 (resolved-only нотификация для неизвестной получателю группы), символ `|` в fingerprint ломает разбор сигнатуры; TECH-DEBT — H9 (Redis GET на алерт у реплики без локального handle, логи без rate-limit), H7 (legacy `repeat_interval`-таймер не сжимается при `RestoreTimers`), ограничение `resilientNotifyLog` (устаревшая локальная запись; N1 — при сбое дольше `repeat_interval` группа с несколькими target'ами не оседает; нет метрики fallback), `RedisGroupStorage.Store` читает и меняет группу без блокировки, `storage.Delete` без проверки версии (M3, M4). Добавлено на `testing`: BUGS — флейк `TestSyncWorker_PeriodicExecution` (`business/silencing`, `Times(3)` против `Sleep(250ms)`), `TestRunMigrations_ConcurrentReplicas_FreshDB` паникует вместо skip при медленном Docker (`requireDocker`), ERROR «Failed to connect to Redis» при старте `lite` без Redis.
 
 ## Phase 2e: Fix round после deep-review R4 (2026-10-10)
 
@@ -142,16 +142,16 @@ based_on:
 - [x] **5.3** Стартовый лог бинаря: (а) `route:` + дефолт → «Initializing grouping subsystem...»; (б) `route:` + `grouping.enabled: false` → WARN один раз; (в) без `route:` → INFO «not started», без `error`, WARN нет. **Итог:** все три варианта совпали с ожиданием — `evidence/startup-logs.md`. Попутно: в `lite` без Redis при старте есть ERROR «Failed to connect to Redis» (не из этой задачи). <!-- depends: 5.1 | verify: вывод в evidence/startup-logs.md -->
 - [x] **5.6** `deploy/e2e-ha/run.sh` (если доступен Docker): шаги 3–6 зелёные при постоянном тике (Spec Edge Case 16); при недоступности — записать как непроверенное. **Итог:** ALL PASS на `4fc7300` — `evidence/e2e-ha.md`. <!-- depends: 5.1 | verify: evidence/e2e-ha.md -->
 - [x] **5.5** Живой бинарь, `lite`, короткие тайминги (`group_wait` 2s, `group_interval` 5s, `repeat_interval` 1h): второй алерт той же группы, отправленный после первого `group_interval`, доставлен в пределах ~`group_interval`; неизменная группа за это время не повторяется. **Итог:** две доставки с интервалом 10.03 с (второй тик `group_interval`), `i2` доставлен через ~2.9 с после POST, повторов неизменной группы нет — `evidence/group-interval-chain.md`. <!-- depends: 5.1 | verify: evidence/group-interval-chain.md -->
-- [ ] **5.4** `/finalize`: `DONE.md`, BACKLOG P0 → «Закрыто», `NEXT.md` (WIP очистить, строку Queue обновить), архив workspace. <!-- depends: 5.1–5.3 -->
+- [x] **5.4** `/finalize`: `DONE.md`, BACKLOG P0 → «Закрыто», `NEXT.md` (WIP очистить, строку Queue обновить), архив workspace. <!-- depends: 5.1–5.3 -->
 
 **Phase verification:** release-gate PASS, evidence приложены.
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
 - [x] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] Docs/planning are updated if behavior, contracts, or process changed

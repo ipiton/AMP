@@ -35,16 +35,16 @@ updated_at: 2026-10-10
 
 ## Success Criteria
 
-- [ ] Конфиг с `route:` и без секции `grouping:` включает подсистему группировки: тест на загрузку конфига (дефолт) и тест, что алерт идёт в группу, а не в прямую публикацию.
-- [ ] Конфиг без `route:` стартует как раньше: чистый пропуск, без ошибки и без degraded-причины.
-- [ ] Явный `grouping.enabled: false` при наличии `route:` по-прежнему выключает группировку, и на старте пишется WARN (один раз, не на каждый алерт).
-- [ ] Проверено и зафиксировано в `research.md` поведение по профилям: `lite` (in-memory storage) и `standard` без рабочего Redis (fallback + degraded-причина) — новый дефолт не делает здоровую установку degraded и не ломает старт.
-- [ ] Чарт: `grouping.enabled` в `values.yaml` согласован с дефолтом кода, комментарии в `values.yaml` / `values-production.yaml` и `deploy/*/config.yaml` («must be explicit true») актуализированы; render-тест на `GROUPING_ENABLED`.
-- [ ] Доки: `ALERTMANAGER_COMPATIBILITY.md` Known Gap #13 и шаг миграции, `MIGRATION_QUICK_START.md`, `README.md` (runtime note), `CONFIGURATION_GUIDE.md` — отражают новое поведение; doc-комментарий `GroupingConfig.Enabled` переписан.
-- [ ] `CHANGELOG.md` `[Unreleased]`: Changed + запись в breaking changes / migration notes (как вернуть прямую доставку).
-- [ ] Алерт или resolve, пришедший в уже нотифицированную группу, уходит не позже чем через `group_interval`; неизменная группа напоминает не чаще `repeat_interval` (добавлено 2026-10-10).
-- [ ] Гейты: затронутые пакеты `go vet` + `go test`, `quality-gates-fast`, `scripts/release-gate.sh` PASS; `deep-review` → `"gate": "pass"`.
-- [ ] BACKLOG P0 `PROD-GROUPING-DEFAULT` перенесён в «Закрыто», `NEXT.md` WIP очищен.
+- [x] Конфиг с `route:` и без секции `grouping:` включает подсистему группировки: тест на загрузку конфига (дефолт) и тест, что алерт идёт в группу, а не в прямую публикацию.
+- [x] Конфиг без `route:` стартует как раньше: чистый пропуск, без ошибки и без degraded-причины.
+- [x] Явный `grouping.enabled: false` при наличии `route:` по-прежнему выключает группировку, и на старте пишется WARN (один раз, не на каждый алерт).
+- [x] Проверено и зафиксировано в `research.md` поведение по профилям: `lite` (in-memory storage) и `standard` без рабочего Redis (fallback + degraded-причина) — новый дефолт не делает здоровую установку degraded и не ломает старт.
+- [x] Чарт: `grouping.enabled` в `values.yaml` согласован с дефолтом кода, комментарии в `values.yaml` / `values-production.yaml` и `deploy/*/config.yaml` («must be explicit true») актуализированы; render-тест на `GROUPING_ENABLED`.
+- [x] Доки: `ALERTMANAGER_COMPATIBILITY.md` Known Gap #13 и шаг миграции, `MIGRATION_QUICK_START.md`, `README.md` (runtime note), `CONFIGURATION_GUIDE.md` — отражают новое поведение; doc-комментарий `GroupingConfig.Enabled` переписан.
+- [x] `CHANGELOG.md` `[Unreleased]`: Changed + запись в breaking changes / migration notes (как вернуть прямую доставку).
+- [x] Алерт или resolve, пришедший в уже нотифицированную группу, уходит не позже чем через `group_interval`; неизменная группа напоминает не чаще `repeat_interval` (добавлено 2026-10-10).
+- [x] Гейты: затронутые пакеты `go vet` + `go test`, `quality-gates-fast`, `scripts/release-gate.sh` PASS; `deep-review` → `"gate": "pass"`.
+- [x] BACKLOG P0 `PROD-GROUPING-DEFAULT` перенесён в «Закрыто», `NEXT.md` WIP очищен.
 
 ## Non-Goals
 
