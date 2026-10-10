@@ -656,7 +656,9 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 
 	// TN-060: Check mode before publishing (metrics-only mode fallback)
 	if c.modeManager != nil && c.modeManager.IsMetricsOnly() {
-		c.logger.Info("Group publishing skipped (metrics-only mode)",
+		// Debug: reached on every group flush (once per group_interval per
+		// group) for as long as the mode lasts.
+		c.logger.Debug("Group publishing skipped (metrics-only mode)",
 			"receiver", receiverName,
 			"alert_count", len(alerts),
 		)
@@ -775,7 +777,9 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 			}}, nil
 		}
 
-		c.logger.Warn("No publishing targets matched receiver for group notification; publishing none",
+		// Debug: the returned error is logged at Error by the caller, once per
+		// flush.
+		c.logger.Debug("No publishing targets matched receiver for group notification; publishing none",
 			"receiver", receiverName,
 			"alert_count", len(alerts),
 		)

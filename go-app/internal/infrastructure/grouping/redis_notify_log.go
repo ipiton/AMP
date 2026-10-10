@@ -270,9 +270,10 @@ func (l *RedisNotifyLog) IsDuplicate(ctx context.Context, groupKey GroupKey, tar
 		return false, fmt.Errorf("nflog unmarshal %s/%s: %w", groupKey, target, err)
 	}
 
-	if entry.Signature != signature {
-		// Alert set changed since the last send — never a duplicate,
-		// matches notifyDedupLog/upstream nflog semantics.
+	if !signatureCovers(entry.Signature, signature) {
+		// The alert set carries something the last send did not — never a
+		// duplicate, matches notifyDedupLog/upstream nflog semantics (see
+		// signatureCovers).
 		return false, nil
 	}
 	return entry.SentAt.After(ttl), nil

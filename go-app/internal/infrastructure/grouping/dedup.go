@@ -120,12 +120,40 @@ func (l *notifyDedupLog) IsDuplicate(_ context.Context, groupKey GroupKey, targe
 	if !ok {
 		return false, nil
 	}
-	if entry.signature != signature {
-		// Alert set changed since the last send (new alert, one resolved,
-		// etc.) — never a duplicate, matches upstream nflog semantics.
+	if !signatureCovers(entry.signature, signature) {
+		// The alert set carries something the last send did not (a new
+		// alert, one that resolved, one that fired again) — never a
+		// duplicate, matches upstream nflog semantics.
 		return false, nil
 	}
 	return entry.sentAt.After(ttl), nil
+}
+
+// signatureCovers reports whether every alert of current (an
+// alertSetSignature) was already part of sent, with the same status.
+//
+// This is upstream DedupStage's needsUpdate rule: a flush notifies when it
+// has a firing or resolved alert the last notification did not carry, not
+// whenever the set differs. A group that only SHRANK — a resolved alert was
+// notified and then pruned, or an alert became silenced or inhibited — has
+// nothing new to say and waits for repeat_interval like an unchanged one.
+// With the group flushed every group_interval, exact-match comparison
+// re-sent the remaining alerts one group_interval after every partial
+// resolve (PROD-GROUPING-DEFAULT, review finding G1).
+func signatureCovers(sent string, current string) bool {
+	if sent == current {
+		return true
+	}
+	sentKeys := make(map[string]struct{})
+	for _, key := range strings.Split(sent, "|") {
+		sentKeys[key] = struct{}{}
+	}
+	for _, key := range strings.Split(current, "|") {
+		if _, ok := sentKeys[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // RecordSent records that a notification carrying signature for

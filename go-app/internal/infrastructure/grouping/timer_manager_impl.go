@@ -659,6 +659,24 @@ func (tm *DefaultTimerManager) ResetTimer(
 	return timer, nil
 }
 
+// HasTimer implements GroupTimerManager.HasTimer.
+func (tm *DefaultTimerManager) HasTimer(ctx context.Context, groupKey GroupKey) (bool, error) {
+	tm.timersMu.RLock()
+	_, exists := tm.timers[groupKey]
+	tm.timersMu.RUnlock()
+	if exists {
+		return true, nil
+	}
+
+	if _, err := tm.storage.LoadTimer(ctx, groupKey); err != nil {
+		if errors.Is(err, ErrTimerNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // GetTimer retrieves information about a timer.
 //
 // Returns a copy to prevent external mutation.

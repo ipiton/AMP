@@ -104,6 +104,16 @@ type DefaultGroupManager struct {
 	// protocol.
 	notifyLog GroupNotifyLog
 
+	// localSent mirrors, in this process only, every send notifyLog was asked
+	// to record. It is consulted ONLY when notifyLog.IsDuplicate fails: the
+	// group is flushed every group_interval, so answering every failed lookup
+	// with "not a duplicate" would re-notify every target of every group on
+	// every flush for as long as the notification log is unreachable
+	// (PROD-GROUPING-DEFAULT, review finding G3). What this replica sent
+	// itself it does not send again; what only another replica sent it cannot
+	// know about, so that case stays fail-open. Always non-nil.
+	localSent *notifyDedupLog
+
 	// notifyLogClaimTTL is the TTL passed to notifyLog.TryClaim (task rec fix
 	// round 1: was a package constant). Always positive — see
 	// defaultNotifyLogClaimTTL and notify_budget.go for the sizing chain it
@@ -191,6 +201,7 @@ func NewDefaultGroupManager(ctx context.Context, cfg DefaultGroupManagerConfig) 
 		silenceChecker:     cfg.SilenceChecker,     // Optional (task 2.4)
 		timeIntervalLookup: cfg.TimeIntervalLookup, // Optional (task 3.2)
 		notifyLog:          notifyLog,              // task 2.4/6.1: always-on dedup + cross-replica claim
+		localSent:          newNotifyDedupLog(),    // per-process fallback for a failed notifyLog lookup
 		notifyLogClaimTTL:  claimTTL,               // task rec fix round 1: derived from the delivery-confirmation wait
 		publishLocks:       newGroupPublishLocks(), // task 2.4 fix round 1: serialize per group key
 		logger:             cfg.Logger,
@@ -285,6 +296,8 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 				"group_key", groupKey,
 				"error", startErr)
 		}
+	} else {
+		m.ensureGroupTimer(ctx, groupKey, group)
 	}
 
 	// Add alert to group (thread-safe)
@@ -392,6 +405,7 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 		// notify-log would grow independent of active groups. Best-effort:
 		// a failure here (Redis down) just means the entry outlives the
 		// group until its own TTL expires — not fatal.
+		_ = m.localSent.Forget(ctx, groupKey)
 		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
 			m.logger.Warn("failed to forget nflog entry for deleted group",
 				"group_key", groupKey,
@@ -523,6 +537,7 @@ func (m *DefaultGroupManager) CleanupExpiredGroups(
 		// Forget this group's dedup entry (task 2.4). Best-effort — see the
 		// same Forget call in RemoveAlertFromGroup for why a failure here
 		// isn't fatal.
+		_ = m.localSent.Forget(ctx, groupKey)
 		if forgetErr := m.notifyLog.Forget(ctx, groupKey); forgetErr != nil {
 			m.logger.Warn("failed to forget nflog entry for expired group",
 				"group_key", groupKey,
@@ -894,6 +909,51 @@ func (m *DefaultGroupManager) startGroupWaitTimer(ctx context.Context, groupKey 
 	return nil
 }
 
+// ensureGroupTimer re-arms the timer of an existing group that has none.
+//
+// A group's timers are otherwise only ever scheduled from each other's
+// callbacks, so a group that loses its timer — a failed save while re-arming,
+// a storage error inside a callback, a timer key evicted from Redis, grouping
+// switched off and on again while the group's record was still there — never
+// gets another one: it keeps accepting alerts and never notifies
+// (PROD-GROUPING-DEFAULT, review finding G2). The next alert joining the group
+// is the point where that is noticed and repaired.
+//
+// group_wait, not group_interval: such a group is already overdue. Dedup in
+// publishGroupAlerts keeps the resulting flush from re-notifying what was
+// already sent.
+//
+// A group that HAS a timer is left alone — an alert joining a group must not
+// restart its timer, or a steady stream of alerts would postpone the
+// notification forever. A failed lookup is treated the same way.
+func (m *DefaultGroupManager) ensureGroupTimer(ctx context.Context, groupKey GroupKey, group *AlertGroup) {
+	if m.timerManager == nil {
+		return
+	}
+
+	scheduled, err := m.timerManager.HasTimer(ctx, groupKey)
+	if err != nil {
+		m.logger.Warn("could not check whether the group has a timer, leaving it as is",
+			"group_key", groupKey,
+			"error", err)
+		return
+	}
+	if scheduled {
+		return
+	}
+
+	m.logger.Warn("alert group has no timer scheduled, re-arming group_wait",
+		"group_key", groupKey)
+	if m.metrics != nil {
+		m.metrics.RecordGroupOperation("timer_rearm", "success")
+	}
+	if startErr := m.startGroupWaitTimer(ctx, groupKey, groupTimings(group)); startErr != nil {
+		m.logger.Warn("failed to re-arm group_wait timer for a group without one",
+			"group_key", groupKey,
+			"error", startErr)
+	}
+}
+
 // startGroupIntervalTimer starts a group_interval timer for an existing group.
 // This timer ensures minimum time between notifications for the same group.
 //
@@ -1116,7 +1176,7 @@ func (m *DefaultGroupManager) filterInhibited(ctx context.Context, groupKey Grou
 		}
 
 		if result != nil && result.Matched {
-			m.logger.Info("alert dropped from group notification: inhibited at send time",
+			m.logger.Debug("alert dropped from group notification: inhibited at send time",
 				"group_key", groupKey,
 				"fingerprint", alert.Fingerprint)
 			continue
@@ -1140,7 +1200,7 @@ func (m *DefaultGroupManager) filterSilenced(groupKey GroupKey, alerts []*core.A
 	kept := make([]*core.Alert, 0, len(alerts))
 	for _, alert := range alerts {
 		if m.silenceChecker.HasActiveMatch(alert.Labels, now) {
-			m.logger.Info("alert dropped from group notification: silenced at send time",
+			m.logger.Debug("alert dropped from group notification: silenced at send time",
 				"group_key", groupKey,
 				"fingerprint", alert.Fingerprint)
 			continue
@@ -1377,8 +1437,21 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	targetAlerts := func(target string, candidates []*core.Alert) []*core.Alert {
 		dup, dupErr := m.notifyLog.IsDuplicate(ctx, group.Key, target, signature, ttl)
 		if dupErr != nil {
-			// Fail-open (Redis down): proceed as not-a-duplicate — same
-			// documented trade-off as the claim check above.
+			// The shared log is unreachable. Fall back to what THIS process
+			// sent (see localSent): without it every flush — one per
+			// group_interval — would re-notify this target for as long as
+			// the outage lasts.
+			if sentHere, _ := m.localSent.IsDuplicate(ctx, group.Key, target, signature, ttl); sentHere {
+				m.logger.Warn("nflog duplicate check failed for target; this replica already sent this alert set, skipping",
+					"group_key", group.Key,
+					"receiver", receiver,
+					"target", target,
+					"error", dupErr)
+				return nil
+			}
+			// Nothing sent from here: fail-open, a duplicate across replicas
+			// beats a dropped notification — same documented trade-off as
+			// the claim check above.
 			m.logger.Error("nflog duplicate check failed for target, proceeding fail-open (duplicate-across-replicas risk accepted)",
 				"group_key", group.Key,
 				"receiver", receiver,
@@ -1549,6 +1622,10 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		// fire — the very failure this task removes, in the opposite
 		// direction. recordCtx is created just above, AFTER the wait, so its
 		// own deadline is not spent by the wait either.
+		// Mirrored locally first, so a failed write below (or a failed read
+		// on a later flush) does not make this replica re-send — see
+		// localSent. In-memory, never fails.
+		_ = m.localSent.RecordSent(recordCtx, group.Key, outcome.Target, signature, now, repeatInterval)
 		if recErr := m.notifyLog.RecordSent(recordCtx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see

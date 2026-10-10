@@ -888,10 +888,12 @@ type GroupTimeIntervalLookup interface {
 // needed there — only cross-process/cross-replica callers need Redis's
 // claim.
 type GroupNotifyLog interface {
-	// IsDuplicate reports whether a notification for groupKey carrying
-	// exactly this alert set was already sent to target within ttl (a
-	// cutoff time: "sent after ttl" counts as duplicate). Does not record
-	// anything.
+	// IsDuplicate reports whether the last notification sent to target for
+	// groupKey within ttl (a cutoff time: "sent after ttl" counts as
+	// duplicate) already carried every alert of this alert set, each with
+	// the same status — see signatureCovers. A set that only shrank since
+	// that send is therefore a duplicate; one with a new, newly resolved or
+	// re-fired alert is not. Does not record anything.
 	//
 	// target scopes the check to one publishing target (task fwb,
 	// alertmanager-parity wave 2 — mirrors upstream nflog's

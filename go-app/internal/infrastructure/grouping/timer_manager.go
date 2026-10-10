@@ -122,6 +122,15 @@ type GroupTimerManager interface {
 
 	// === Query Operations ===
 
+	// HasTimer reports whether any timer is scheduled for the group: one this
+	// process holds, or one recorded in timer storage (in an HA deployment it
+	// may belong to another replica, or be waiting for reconciliation to
+	// adopt it).
+	//
+	// A storage error is returned as an error, not as false: the caller must
+	// not conclude "no timer" from a failed lookup.
+	HasTimer(ctx context.Context, groupKey GroupKey) (bool, error)
+
 	// GetTimer retrieves information about a timer for a group.
 	//
 	// Returns a copy of the timer to prevent external mutation.
