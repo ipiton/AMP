@@ -91,3 +91,15 @@ updated_at: 2026-10-10
 - Files: `go-app/internal/config/config.go`, `go-app/internal/config/grouping_adapter.go`, `go-app/internal/application/service_registry.go`, `go-app/internal/core/services/alert_processor.go`, `go-app/internal/infrastructure/grouping/config.go`, `helm/amp/values.yaml`, `helm/amp/templates/configmap.yaml`
 - Docs: `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #13, `docs/06-planning/BACKLOG.md` § Production Readiness
 - Evidence: `evidence/default-flip-test-run.md`
+
+## 7) Addendum 2026-10-10 — цепочка `group_interval` (после deep-review R1)
+
+- **Вопрос:** как сделать, чтобы новый алерт существующей группы уходил через `group_interval`, а не `repeat_interval` (review F1).
+- **Findings (codebase):**
+  - `publishGroupAlerts` (Step 4b) уже содержит upstream-логику DedupStage: сигнатура набора алертов + `IsDuplicate` с `ttl = now − repeat_interval`, по каждому target. Неизменный набор в пределах `repeat_interval` не отправляется, изменённый — отправляется сразу.
+  - Таймеры ставятся только в трёх местах `manager_impl.go`; `onGroupIntervalExpired` всегда переходил на `repeat_interval`.
+  - Логи таймер-менеджера на каждый start/expire — Info; при тике раз в `group_interval` это 3 строки на группу каждые 5m.
+- **Options:** (a) тикать `group_interval` постоянно, решение об отправке оставить Dedup — как upstream `aggrGroup`; (b) сбрасывать таймер на `group_interval` при добавлении алерта в существующую группу.
+- **Chosen:** (a). Одно изменение покрывает новые алерты, resolved и ретрай недоставленного; не трогает `AddAlertToGroup`, lock и `fireStillDue`; (b) требует ветвления по типу таймера и отдельной обработки HA.
+- **Measured:** overlay-прогон (`go test -overlay`, без файла в дереве): после неизменного flush таймер — `group_interval`, публикаций 1; после добавления алерта следующий flush даёт вторую публикацию. `go test -race` по `internal/infrastructure/{grouping,publishing}`, `internal/{application,core,config}`, `cmd` — зелёные; из существующих тестов поменялось одно утверждение (`resolved_prune_test.go`: следующий таймер — `group_interval`).
+- **Не измерялось:** нагрузка от тика на большом числе групп; поведение таймера `repeat_interval`, сохранённого прежней версией в Redis (только чтение кода).

@@ -42,6 +42,7 @@ updated_at: 2026-10-10
 - [ ] Чарт: `grouping.enabled` в `values.yaml` согласован с дефолтом кода, комментарии в `values.yaml` / `values-production.yaml` и `deploy/*/config.yaml` («must be explicit true») актуализированы; render-тест на `GROUPING_ENABLED`.
 - [ ] Доки: `ALERTMANAGER_COMPATIBILITY.md` Known Gap #13 и шаг миграции, `MIGRATION_QUICK_START.md`, `README.md` (runtime note), `CONFIGURATION_GUIDE.md` — отражают новое поведение; doc-комментарий `GroupingConfig.Enabled` переписан.
 - [ ] `CHANGELOG.md` `[Unreleased]`: Changed + запись в breaking changes / migration notes (как вернуть прямую доставку).
+- [ ] Алерт или resolve, пришедший в уже нотифицированную группу, уходит не позже чем через `group_interval`; неизменная группа напоминает не чаще `repeat_interval` (добавлено 2026-10-10).
 - [ ] Гейты: затронутые пакеты `go vet` + `go test`, `quality-gates-fast`, `scripts/release-gate.sh` PASS; `deep-review` → `"gate": "pass"`.
 - [ ] BACKLOG P0 `PROD-GROUPING-DEFAULT` перенесён в «Закрыто», `NEXT.md` WIP очищен.
 
@@ -49,12 +50,14 @@ updated_at: 2026-10-10
 
 - Верхнеуровневый `inhibit_rules:` (`FU-TOPLEVEL-INHIBIT-RULES`) и встроенный фильтр (`PROD-HARDCODED-FILTER`) — отдельные P0.
 - Дефолты чарта под одну ноду, HPA, requests (`HELM-SINGLE-NODE-DEFAULTS`) и нестартующие дефолтные values (`HELM-DEFAULTS-VALIDATE`).
-- Изменения в механике таймеров, nflog, reconciliation; follow-ups `GROUPING-TIMER-LOCK-FIX` (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN`, `TIMER-*`).
+- Изменения в nflog, distributed lock и reconciliation; follow-ups `GROUPING-TIMER-LOCK-FIX` (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN`, `TIMER-*`). Цепочка `group_interval` → `repeat_interval` из non-goals исключена 2026-10-10 (см. Scope).
+- Пронос LLM-классификации в групповую нотификацию (review F2) — отдельная задача.
 - Удаление ключа `grouping.enabled` как такового.
 
 ## Constraints
 
-- **Scope:** `go-app/internal/config` (дефолт, doc-комментарий), стартовый лог в `internal/application/service_registry.go`, `helm/amp/values*.yaml` + render-тест, `deploy/*/config.yaml` (только комментарии), доки и CHANGELOG. Существующие тесты, завязанные на дефолт `false`, правятся по месту.
+- **Scope (расширен 2026-10-10, решение владельца после deep-review R1, «вариант 2»):** `go-app/internal/infrastructure/grouping` — группа должна flush'иться каждые `group_interval` (review F1: без этого новый дефолт задерживает алерты существующей группы до `repeat_interval`). Оценка задачи: ~0.5–1d → ~2d; срез не выделяется — смена дефолта без этого фикса не выпускается.
+- **Scope (исходный):** `go-app/internal/config` (дефолт, doc-комментарий), стартовый лог в `internal/application/service_registry.go`, `helm/amp/values*.yaml` + render-тест, `deploy/*/config.yaml` (только комментарии), доки и CHANGELOG. Существующие тесты, завязанные на дефолт `false`, правятся по месту.
 - **Security:** не применимо (auth, права, секреты не затрагиваются).
 - **Compatibility:** breaking для установок с `route:` без явного `grouping.enabled`: нотификации начнут группироваться и задерживаться на `group_wait`. Откат — `grouping.enabled: false`. В `standard` группировка использует Redis; при его отсутствии — in-memory fallback с degraded-причиной (проверить в research, приемлемо ли это как дефолт). Миграций данных нет.
 

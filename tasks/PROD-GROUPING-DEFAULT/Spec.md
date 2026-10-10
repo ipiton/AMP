@@ -13,12 +13,12 @@ based_on:
 
 # Specification: группировка включена по умолчанию
 
-**Version:** 1.0
+**Version:** 1.1 (2026-10-10: после deep-review R1 — в scope добавлена цепочка `group_interval`, решение владельца «вариант 2»; исправлены Premises 5, 8, Invariants, Rollout / Rollback)
 **Status:** Draft
 
 ## Summary
 
-`grouping.enabled` по умолчанию становится `true` в коде и в чарте, чтобы скопированный `alertmanager.yml` с `route:` группировал алерты как upstream. Без `route:` поведение не меняется, а явное выключение при наличии `route:` сопровождается предупреждением на старте.
+`grouping.enabled` по умолчанию становится `true` в коде и в чарте, чтобы скопированный `alertmanager.yml` с `route:` группировал алерты как upstream. Без `route:` поведение не меняется, а явное выключение при наличии `route:` сопровождается предупреждением на старте. Чтобы «как upstream» было правдой, цепочка таймеров группы переводится на постоянный flush каждые `group_interval` (v1.1).
 
 ## Requirements Coverage
 
@@ -31,6 +31,7 @@ based_on:
 | Чарт согласован с кодом, render-тест | Target Design п.4; `helm/amp/tests/render-grouping-default.sh` |
 | Доки отражают новое поведение | Target Design п.5; Component Architecture |
 | CHANGELOG: Changed + migration note | Impact Analysis; Rollout / Rollback |
+| Новый алерт существующей группы уходит не позже `group_interval` (v1.1, review F1) | Target Design п.6; Premises 11–13; тесты цепочки в `write-tests` |
 | Гейты, `deep-review` | Deep Review; `testing` по `WORKFLOW.md` § Гейты AMP |
 | BACKLOG / NEXT | `finalize` |
 
@@ -54,11 +55,14 @@ based_on:
 | Без `route:` подсистема не поднимается и ничего не деградирует | `service_registry.go:1623-1627` (`ErrGroupingRequiresRouteTree` → INFO, `return nil`) | code-read | установки без `route:` получат degraded или ошибку старта |
 | В `lite` группировка работает целиком: алерт уходит после `group_wait` | `./deploy/smoke/run.sh` 2026-10-10: `profile: lite`, ALL PASS — `evidence/smoke-lite-grouping.md` | measured | `lite`-установки с `route:` перестанут доставлять |
 | В `standard` без Redis включённая группировка не добавляет degraded-причину сверх той, что уже ставит кэш | `service_registry.go:1210` (кэш), `:1929` и `:1982` (только WARN) | code-read | здоровая по `/health` установка станет degraded после апгрейда |
-| `validateGrouping` не зависит от `Enabled` | `config.go:1191-1202` — проверяет только interval/grace, выполняется всегда | code-read | конфиг, проходивший валидацию, начнёт падать с exit 1 |
+| `validateGrouping` не зависит от `Enabled`; второй гейт — `validateNotifyTimingBudget` — зависит: проверка `reconciliation_grace > claim TTL` выполняется только при поднятом timer manager | `config.go:1191-1202`; `publishing_runtime.go:498-526` (review F4) | code-read | `standard` + Redis + `route:` с явным `grouping.reconciliation_grace` ≤ claim TTL после апгрейда не стартует — учтено в migration note п.7; без явного grace значения согласованы |
 | От дефолта `false` зависит один тест в `config`, `application`, `core`, `cmd` | прогон с перевёрнутым дефолтом — `evidence/default-flip-test-run.md` | measured | неожиданные падения на `/testing`; остальной модуль закрывает release-gate |
 | Чарт перекрывает дефолт кода: `GROUPING_ENABLED` передаётся всегда | `templates/configmap.yaml:63`; `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/chart-default-env.txt:44` | code-read | правка только кода не дойдёт до Helm-установок |
-| Флаг читается только на старте | grep `Grouping` по `reload_sections.go`, `reloadable_*.go`, `service_registry_reload.go` — пусто | call-path-traced | WARN на старте не покроет включение/выключение через reload |
+| Флаг читается только на старте | grep `Grouping` по `reload_sections.go`, `reloadable_*.go`, `service_registry_reload.go` — пусто. `reload_coordinator.go:649`, `:706` называет `grouping` компонентом, но подсистему не пересоздаёт и «restart required» для `grouping.*` не выдаёт (review F11, defer-tech-debt) | call-path-traced | WARN на старте не покроет включение/выключение через reload |
 | Без таймингов в `route:` действуют upstream-дефолты 30s / 5m / 4h | `internal/infrastructure/grouping/config.go:158-164` | code-read | migration note назовёт неверную задержку |
+| Dedup в `publishGroupAlerts` уже решает «слать или нет» на каждом flush: неизменный набор в пределах `repeat_interval` пропускается, изменённый — отправляется | `manager_impl.go` Step 4b (`alertSetSignature`, `IsDuplicate` с `ttl = now − repeat_interval`, per-target); overlay-прогон 2026-10-10: неизменный flush → публикаций 1, после добавления алерта → 2 | measured | постоянный тик `group_interval` дал бы нотификацию каждые 5m по неизменной группе |
+| Таймеры группы ставятся только в `manager_impl.go` (до правки — три вызова `StartTimer`, после — два: `group_wait` и `group_interval`); `AddAlertToGroup` для существующей группы таймер не трогает | grep `StartTimer\|ResetTimer` по `internal/` вне тестов | call-path-traced | остался бы путь, возвращающий группу на `repeat_interval` |
+| Таймеры `repeat_interval`, сохранённые в Redis версией до апгрейда, должны сработать и перейти на `group_interval` | `onRepeatIntervalExpired` оставлен, после flush ставит `group_interval`; `TimerType.IsValid` принимает тип | code-read | группы, созданные до апгрейда, останутся на старой цепочке или не загрузятся |
 | Операторы существующих установок с `route:` без явного ключа прочитают migration note до апгрейда | не проверяемо | assumed | нотификации неожиданно задержатся на `group_wait` — см. Rollout / Rollback |
 
 ## Target Design
@@ -68,6 +72,11 @@ based_on:
 3. **WARN при явном выключении.** В `initializeGrouping`, ветка `!Enabled`: если `HasRouteTree()` — `Warn` «Grouping is DISABLED (grouping.enabled=false) but a route: tree is configured: group_by/group_wait/group_interval/repeat_interval are ignored and every alert is published immediately»; иначе прежний INFO. Один раз на старт.
 4. **Чарт.** `helm/amp/values.yaml`: `grouping.enabled: true`, комментарий переписан (включено по умолчанию; `lite` — in-memory, `standard` — Redis). `values-production.yaml`, `values-dev.yaml` не меняются по значениям; комментарий «turns on» в production выравнивается. Новый `helm/amp/tests/render-grouping-default.sh`: дефолт → `GROUPING_ENABLED: "true"`; `--set grouping.enabled=false` → `"false"`; `values-production.yaml` (с placeholders) → `"true"`.
 5. **Доки и комментарии.** Known Gap #13 переписывается в «закрыт, как отключить»; из шагов миграции убирается ручное включение; `README.md`, `MIGRATION_QUICK_START.md`, `helm/amp/README.md` — убрать «off by default» и «lite игнорирует»; `deploy/*/config.yaml` — комментарий «must be explicit true» заменить на «default; kept explicit»; стейл-комментарии в `service_registry.go` (`:199`, `:1612`) и `alert_processor.go:29`.
+
+6. **Цепочка таймеров (v1.1).** `onGroupIntervalExpired` после flush снова ставит `group_interval` (раньше — `repeat_interval`). `repeat_interval` перестаёт быть таймером: это TTL Dedup-шага, поэтому напоминание по неизменной группе уходит на первом flush после `repeat_interval` (как upstream; на практике — `repeat_interval`, округлённый вверх до тика `group_interval`). `onRepeatIntervalExpired` остаётся только для таймеров, сохранённых прежней версией, и тоже переводит группу на `group_interval`; `startRepeatIntervalTimer` удаляется. `AddAlertToGroup` таймер по-прежнему не трогает (тест `alert_processor_test.go:404-414` остаётся в силе). Логи таймера (`Started timer`, `Timer expired`, `Timer expiration processed`, «group_interval timer expired») понижаются до Debug: теперь они возникают раз в `group_interval` на каждую живую группу.
+7. **INFO без `route:` (v1.1, review F5).** «Grouping subsystem not started: no route: tree configured, alerts are published directly», без атрибута `error`.
+
+Отвергнутая альтернатива для п.6: сбрасывать таймер на `group_interval` при добавлении алерта в существующую группу. Требует различать типы таймеров в `AddAlertToGroup`, взаимодействует с `fireStillDue` в HA и не покрывает resolved и ретрай недоставленного; постоянный тик покрывает всё одним изменением и совпадает с upstream.
 
 Итог: дефолт меняется в двух местах, которые его задают — viper и values чарта. Подсистема и раньше чисто пропускала конфиг без `route:`, поэтому условная логика в загрузке конфига не нужна. Единственный побочный эффект — ложное предупреждение `AlertProcessor` на установках без `route:` — снимается тем, что процессору передаётся «включено и есть дерево». Оператор, сознательно выключивший группировку при наличии `route:`, видит одно предупреждение на старте. Откат для любой установки — один ключ.
 
@@ -101,10 +110,13 @@ based_on:
 ## Invariants
 
 - [ ] Конфиг без `route:`: прямая публикация, нет WARN про группировку, нет новой degraded-причины.
-- [ ] Явный `grouping.enabled: false` (файл, env, values) всегда выключает группировку.
+- [ ] Явное выключение выключает группировку по приоритету источников viper: env перекрывает файл. Под Helm действует только values `grouping.enabled` (чарт всегда передаёт `GROUPING_ENABLED`); ключ в `configFile.content` там не работает (review F3).
 - [ ] `route:` есть, включено, подсистема не поднялась — `warnGroupingFallback` по-прежнему пишет WARN (громкий fallback не теряется).
 - [ ] `values-production.yaml`, `deploy/smoke`, `deploy/e2e-ha` ведут себя как до изменения.
-- [ ] Механика таймеров, nflog и reconciliation не тронута.
+- [ ] nflog, distributed lock, `fireStillDue` и reconciliation не тронуты; в цепочке таймеров меняется только тип следующего таймера после fire.
+- [ ] Неизменная группа не нотифицируется чаще, чем раз в `repeat_interval`.
+- [ ] Алерт или resolve, пришедший в уже нотифицированную группу, уходит не позже чем через `group_interval`.
+- [ ] Группа, удалённая после fire (все алерты resolved и доставлены), следующий таймер не получает.
 
 ## Edge Cases
 
@@ -116,27 +128,34 @@ based_on:
 6. Чарт с `--set grouping.enabled=false` → `GROUPING_ENABLED: "false"` перекрывает дефолт кода.
 7. Апгрейд `standard` HA с `route:` без явного ключа → реплики начинают делить таймеры через Redis; двойное срабатывание закрыто `GROUPING-TIMER-LOCK-FIX`.
 8. Включение/выключение через `/-/reload` → не действует до рестарта (как и раньше); отмечается в доке.
+9. Группа с недоступным получателем → ретрай каждый `group_interval` (раньше — один быстрый ретрай, затем `repeat_interval`).
+10. Группа, полностью подавленная silence/inhibit/time-mute → no-op flush каждый `group_interval`, отправка на первом flush после снятия подавления.
+11. Таймер `repeat_interval` в Redis от прежней версии → срабатывает в свой срок (до 4h), затем группа идёт по `group_interval`.
+12. `helm upgrade --reuse-values` → остаётся прежний `false`, на старте WARN о выключенной группировке.
 
 ## Impact Analysis
 
-- **Affected modules:** `internal/config`, `internal/application`, `internal/core/services` (комментарии), Helm-чарт, `deploy/` (комментарии), публичные доки.
+- **Affected modules:** `internal/infrastructure/grouping` (цепочка таймеров, уровни логов — v1.1), `internal/config`, `internal/application`, `internal/core/services` (комментарии), Helm-чарт, `deploy/` (комментарии), публичные доки.
 - **Breaking changes:** установки с `route:` без явного `grouping.enabled` (в чарте — без `grouping.enabled` в своих values) начинают группировать: первая нотификация группы задерживается на `group_wait` (30s, если не задано), повторы подчиняются `group_interval` / `repeat_interval`, несколько алертов группы приходят одной нотификацией. Запись в `CHANGELOG.md` `[Unreleased]`: `### Changed` + breaking/migration note; то же в `helm/amp/CHANGELOG.md`.
 - **New dependencies:** нет.
 - **Risks:**
   - Неожиданная задержка нотификаций после апгрейда → migration note с откатом одним ключом; стартовый лог «Initializing grouping subsystem...» уже есть.
   - Получатели, рассчитанные на «один алерт — один вызов», получат сгруппированный payload → в migration note.
   - Diff может превысить ~200 строк за счёт доков — тир уже Full, эскалации нет.
+  - Нагрузка (v1.1): каждая живая группа раз в `group_interval` делает `storage.Load`, фильтры, claim и dedup-проверку на target (раньше — раз в `repeat_interval`). Upstream работает так же; под нагрузкой не измерялось.
+  - На групповом пути нотификация не несёт LLM-классификацию (review F2) — в migration note; пронос — отдельная задача в BACKLOG.
+  - Открытые дефекты группового пути (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN`, `TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE`) теперь касаются всех конфигов с `route:` (review F8) — ссылка в Known Gap #13.
 
 ## Rollout / Rollback
 
-- **Rollout:** обычный релиз; специальных шагов нет. Изменение вступает в силу при рестарте с новой версией.
-- **Rollback:** `grouping.enabled: false` в конфиге, `GROUPING_ENABLED=false` или `--set grouping.enabled=false` + рестарт. Группы и таймеры, оставшиеся в Redis, после выключения не читаются и истекают по TTL.
+- **Rollout:** обычный релиз; изменение вступает в силу при рестарте с новой версией. При rolling upgrade в HA старые реплики публикуют напрямую, новые группируют — на время раскатки возможны дубли (review F9, в migration note).
+- **Rollback:** под Helm — `--set grouping.enabled=false`; без чарта — `grouping.enabled: false` в файле или `GROUPING_ENABLED=false`; затем рестарт. Группы в Redis после выключения не читаются и истекают по TTL (24h + 60s), таймеры — вскоре после своего срока; алерты, ждавшие в группе в момент выключения, прямым путём не отправляются.
 - **Feature flag:** сам `grouping.enabled`.
 - **Риск (assumed):** оператор не прочитал migration note — смягчается тем, что новое поведение совпадает с upstream и с тем, что `route:` декларирует; WARN для обратного случая (явный `false`) есть.
 
 ## Observability
 
-- **Logs:** новый WARN на старте при `grouping.enabled=false` + `route:`; INFO без `route:` — без изменений; ложный fallback-WARN на установках без `route:` не появляется.
+- **Logs:** новый WARN на старте при `grouping.enabled=false` + `route:`; INFO без `route:` — нейтральный текст без `error`; ложный fallback-WARN на установках без `route:` не появляется; покадровые логи таймеров — Debug (v1.1).
 - **Metrics:** не меняются. Метрика исхода срабатывания таймера — отдельная задача `TIMER-FIRE-OUTCOME-METRIC`.
 - **Alerts:** не применимо.
 
