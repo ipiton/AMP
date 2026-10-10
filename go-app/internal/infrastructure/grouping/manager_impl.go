@@ -327,8 +327,7 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 		"alert", alert.AlertName,
 		"fingerprint", alert.Fingerprint,
 		"group_size", alertCount(group),
-		"is_new", isNewAlert,
-		"state", group.Metadata.State)
+		"is_new", isNewAlert)
 
 	// Return shallow copy (150% enhancement: prevent external mutation)
 	return group.Clone(), nil
@@ -1446,12 +1445,13 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// (PROD-GROUPING-DEFAULT, review finding H1).
 	repeatInterval := m.effectiveRepeatInterval(group)
 	ttl := time.Now().Add(-repeatInterval)
-	// offered, consulted and covered are written by targetAlerts and read
-	// after PublishGroup returns. Guarded because the publisher is free to
-	// consult targets concurrently.
+	// offered, consulted, covered and heldBack are written by targetAlerts
+	// and read after PublishGroup returns. Guarded because the publisher is
+	// free to consult targets concurrently.
 	var decisionsMu sync.Mutex
 	offered := make(map[string]string) // target -> signature of the set it was offered
 	consulted, covered := 0, 0
+	heldBack := 0 // targets skipped on this replica's own record, the shared log being unreadable
 	targetAlerts := func(target string, candidates []*core.Alert) []*core.Alert {
 		signature := alertSetSignature(candidates)
 		decisionsMu.Lock()
@@ -1464,7 +1464,11 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 			// The shared log could not be read and this replica's own record
 			// says it already sent this set. Enough to not send again, but
 			// not proof that the target is covered — another replica may have
-			// sent something newer — so it does not count towards pruning.
+			// sent something newer — so it does not count towards pruning,
+			// and it blocks pruning after a send to the other targets too.
+			decisionsMu.Lock()
+			heldBack++
+			decisionsMu.Unlock()
 			m.logger.Warn("nflog duplicate check failed for target; this replica already sent this alert set, skipping",
 				"group_key", group.Key,
 				"receiver", receiver,
@@ -1731,6 +1735,20 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 			"receiver", receiver,
 			"alert_count", len(alerts),
 			"target_count", len(outcomes))
+		return
+	}
+
+	decisionsMu.Lock()
+	unverified := heldBack
+	decisionsMu.Unlock()
+	if unverified > 0 {
+		// A target was skipped without proof that it has seen the resolved
+		// alerts (see ErrNotifyLogAnsweredLocally). Keep them, as after a
+		// partial failure, until the shared log can be read again.
+		m.logger.Debug("resolved alerts kept: notification log unreadable for some targets",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"targets_unverified", unverified)
 		return
 	}
 

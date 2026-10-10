@@ -142,8 +142,11 @@ func (m *MemoryGroupStorage) Store(ctx context.Context, group *AlertGroup) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Deep copy to prevent external modifications
-	// Note: AlertGroup has internal mutex, but we copy data structures
+	// Deep copy to prevent external modifications. The caller's group is
+	// read under its own lock: the manager stores a group it shares with
+	// concurrent ingest.
+	group.mu.RLock()
+	defer group.mu.RUnlock()
 	groupCopy := &AlertGroup{
 		Key:      group.Key,
 		Alerts:   make(map[string]*core.Alert, len(group.Alerts)),
