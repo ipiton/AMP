@@ -316,7 +316,7 @@ func TestNotifyLogOutage_LocalAnswerDoesNotPruneResolved(t *testing.T) {
 
 	// Another replica announces b firing again: only the shared log knows.
 	addPerTargetAlert(t, m, "b", core.StatusFiring)
-	require.NoError(t, shared.notifyDedupLog.RecordSent(context.Background(), perTargetGroupKey, "t", currentSignature(t, m), time.Now(), time.Hour))
+	require.NoError(t, shared.RecordSent(context.Background(), perTargetGroupKey, "t", currentSignature(t, m), time.Now(), time.Hour))
 
 	addPerTargetAlert(t, m, "b", core.StatusResolved)
 	shared.fail.Store(true)
@@ -348,7 +348,7 @@ func TestNotifyLogOutage_SendToOneTargetDoesNotPruneForHeldBackTarget(t *testing
 	addPerTargetAlert(t, m, "b", core.StatusFiring)
 	refired := currentSignature(t, m)
 	for _, target := range []string{"A", "B"} {
-		require.NoError(t, shared.notifyDedupLog.RecordSent(context.Background(), perTargetGroupKey, target, refired, time.Now(), time.Hour))
+		require.NoError(t, shared.RecordSent(context.Background(), perTargetGroupKey, target, refired, time.Now(), time.Hour))
 	}
 
 	addPerTargetAlert(t, m, "b", core.StatusResolved)

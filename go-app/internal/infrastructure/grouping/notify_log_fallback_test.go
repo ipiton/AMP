@@ -18,7 +18,7 @@ func TestResilientNotifyLog_ReadablePrimaryAnswers(t *testing.T) {
 	now := time.Now()
 
 	// On record in the shared log only, as after a send by another replica.
-	require.NoError(t, primary.notifyDedupLog.RecordSent(ctx, fallbackGroupKey, "t", "a:firing", now, time.Hour))
+	require.NoError(t, primary.RecordSent(ctx, fallbackGroupKey, "t", "a:firing", now, time.Hour))
 
 	dup, err := log.IsDuplicate(ctx, fallbackGroupKey, "t", "a:firing", now.Add(-time.Hour))
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestResilientNotifyLog_UnreadablePrimary(t *testing.T) {
 	since := now.Add(-time.Hour)
 
 	require.NoError(t, log.RecordSent(ctx, fallbackGroupKey, "mine", "a:firing", now, time.Hour))
-	require.NoError(t, primary.notifyDedupLog.RecordSent(ctx, fallbackGroupKey, "theirs", "a:firing", now, time.Hour))
+	require.NoError(t, primary.RecordSent(ctx, fallbackGroupKey, "theirs", "a:firing", now, time.Hour))
 	primary.fail.Store(true)
 
 	t.Run("own send is a duplicate, marked as a local answer", func(t *testing.T) {

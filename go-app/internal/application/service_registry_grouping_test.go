@@ -881,7 +881,7 @@ func TestNewNotifyLog_StandardWithRedisRemembersOwnSendsDuringOutage(t *testing.
 	if err != nil {
 		t.Fatalf("NewRedisCache() error = %v", err)
 	}
-	defer redisCache.Close()
+	defer func() { _ = redisCache.Close() }()
 
 	r := newTestRegistryForGrouping(&appconfig.Config{Profile: appconfig.ProfileStandard})
 	r.cache = redisCache
