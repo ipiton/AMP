@@ -16,11 +16,10 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **GROUPING-TIMER-LOCK-FIX** — P0 из BACKLOG (баг `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`): флейк `-race` в `internal/infrastructure/grouping`, две реплики срабатывают на один таймер группы. Ветка `bugfix/grouping-timer-lock-fix`, workspace `tasks/GROUPING-TIMER-LOCK-FIX/`. Взят 2026-10-09.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `GROUPING-TIMER-LOCK-FIX` (в WIP) → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-GROUPING-DEFAULT` → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 

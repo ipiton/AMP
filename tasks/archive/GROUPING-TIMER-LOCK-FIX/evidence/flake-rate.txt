@@ -1,0 +1,30 @@
+# GROUPING-TIMER-LOCK-FIX — замеры флейка, 2026-10-09, ветка bugfix/grouping-timer-lock-fix @ fcfde9e (код = main ebdac9a)
+# go test -race [-cpu=1] -count=N -run 'TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires$' ./internal/infrastructure/grouping/
+
+-race -count=60 (GOMAXPROCS по умолчанию):  0/60 FAIL
+-race -cpu=1 -count=100:                     4/100 FAIL
+-race -cpu=1 -count=100:                     0/100 FAIL
+-race -cpu=1 -count=200:                     4/200 FAIL
+  все падения: "Not equal: expected: int(1) actual: int64(2)" —
+  "two replicas racing the same group's timer must fire exactly once"
+итого -cpu=1: 8/400 (2%)
+
+# Детерминированный repro (временный тест, удалён после замера):
+# A: StartTimer(group_wait, 20ms) -> срабатывает, onTimerExpired завершён;
+# redis keys после этого: []  (ни timer-записи, ни lock'а)
+# затем tmB.onTimerExpired(nil, groupKey, GroupWaitTimer) -> publishCount = 2
+
+# После фикса (implement, 2026-10-09, рабочее дерево на 346530a + правка timer_manager_impl.go)
+-race -cpu=1 -count=400:  9/400 FAIL, из них "actual: 2" (двойное срабатывание) — 0
+-race -cpu=1 -count=200:  1/200 FAIL, тоже не двойное срабатывание
+  все падения — distributed_timer_ownership_test.go:171:
+  "the losing replica must log a quiet skip via onTimerExpired's existing ErrLockAlreadyAcquired branch"
+  Опоздавшая реплика теперь отсеивается веткой fireStillDue ("Timer fire already handled elsewhere"),
+  а не веткой lock'а. Ассерт проверяет механизм, а не результат; правка — write-tests (tasks.md 3.5).
+
+# Финальный код (write-tests, 2026-10-10; код продукта = d459a6e, тесты = 2115771)
+# ассерт лога :171 заменён проверкой исхода (tasks.md 3.5)
+-race -cpu=1 -count=400 -run 'TwoReplicasRace...$':  0/400 FAIL (прогон 1)
+-race -cpu=1 -count=400 -run 'TwoReplicasRace...$':  0/400 FAIL (прогон 2)
+-race -cpu=1 -count=200 -run 'OverwrittenEntry|SkipperDoesNotHoldLock|LateReplica':  600/600 passed
+итого: двойных срабатываний 0/800 (до фикса 8/400), падений теста 0/800

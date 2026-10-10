@@ -755,6 +755,68 @@ func (tm *DefaultTimerManager) handleTimerExpiration(handle *timerHandle, timer 
 	}
 }
 
+// fireStillDue reports whether stored — the timer entry re-read from storage
+// before and again under the distributed lock — still describes the fire onTimerExpired was
+// entered for, i.e. nobody has handled it yet (GROUPING-TIMER-LOCK-FIX).
+//
+// A handled fire always changes the entry before its lock is released: it is
+// deleted, or overwritten by a continuation of another type or with a later
+// ExpiresAt. So the fire is still due only if the entry exists, has the fired
+// type, and either:
+//   - is this replica's own entry (ExpiresAt equals the local handle's) —
+//     clock-independent, so the replica that wrote the entry always fires it,
+//     even if its wall clock lags; or
+//   - is already overdue — the reconcile/restore paths (firedHandle == nil)
+//     and a replica whose entry a peer overwrote within the same generation.
+//
+// A peer's entry that is not yet due is skipped: its writer fires it, and in
+// the Redis-backed (multi-replica) setup reconciliation adopts it if the
+// writer dies. The returned reason is for logging only.
+func fireStillDue(stored *GroupTimer, firedHandle *timerHandle, timerType TimerType, now time.Time) (bool, string) {
+	if stored == nil {
+		return false, "not_found"
+	}
+	if stored.TimerType != timerType {
+		return false, "type_changed"
+	}
+	if firedHandle != nil && stored.ExpiresAt.Equal(firedHandle.expiresAt) {
+		return true, ""
+	}
+	if !stored.ExpiresAt.After(now) {
+		return true, ""
+	}
+	return false, "rescheduled"
+}
+
+// skipHandledFire re-reads groupKey's timer entry and, if the fire is no
+// longer due (see fireStillDue) or the entry cannot be read, drops the local
+// handle and reports true: the caller must return without firing. Storage is
+// never touched here — the entry holds whatever replaced this fire (or
+// nothing), and on a read error it is left for reconciliation to retry, the
+// same posture as a lock-store failure.
+func (tm *DefaultTimerManager) skipHandledFire(firedHandle *timerHandle, groupKey GroupKey, timerType TimerType) bool {
+	loadCtx, loadCancel := context.WithTimeout(tm.ctx, 5*time.Second)
+	stored, err := tm.storage.LoadTimer(loadCtx, groupKey)
+	loadCancel()
+	if err != nil && !errors.Is(err, ErrTimerNotFound) {
+		tm.logger.Error("Failed to load timer for expiration check",
+			"group_key", groupKey,
+			"timer_type", timerType,
+			"error", err)
+		tm.dropLocalHandle(firedHandle, groupKey)
+		return true
+	}
+	if due, reason := fireStillDue(stored, firedHandle, timerType, time.Now()); !due {
+		tm.logger.Debug("Timer fire already handled elsewhere, skipping",
+			"group_key", groupKey,
+			"timer_type", timerType,
+			"reason", reason)
+		tm.dropLocalHandle(firedHandle, groupKey)
+		return true
+	}
+	return false
+}
+
 // onTimerExpired handles timer expiration with distributed lock.
 //
 // P0 fix (task 6.2 fix round 2): every internal operation here is bounded
@@ -856,6 +918,11 @@ func (tm *DefaultTimerManager) dropLocalHandle(firedHandle *timerHandle, groupKe
 
 	if current, ok := tm.timers[groupKey]; ok && current == firedHandle {
 		delete(tm.timers, groupKey)
+		// Balances the IncActiveTimers of StartTimer/RestoreTimers that
+		// created this handle; the full expiry path decrements at its end.
+		if tm.metrics != nil {
+			tm.metrics.DecActiveTimers()
+		}
 	}
 }
 
@@ -864,7 +931,20 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 		"group_key", groupKey,
 		"timer_type", timerType)
 
-	// Acquire distributed lock for exactly-once delivery
+	// The lock only rules out two replicas firing this group at the SAME
+	// time; it says nothing about whether this fire was already handled.
+	// The winner releases it right after its callbacks, so a replica whose
+	// own Go timer for the same group fired a moment later used to win a free
+	// lock and run the callbacks a second time (GROUPING-TIMER-LOCK-FIX).
+	// Hence the storage re-check, done BEFORE taking the lock: a replica that
+	// is going to skip must not hold the lock while doing so, or the entry's
+	// writer, firing at that moment, would take the ErrLockAlreadyAcquired
+	// branch below — which assumes the lock holder handles the fire — and
+	// give up too, leaving nobody to fire the group.
+	if tm.skipHandledFire(firedHandle, groupKey, timerType) {
+		return
+	}
+
 	lockCtx, lockCancel := context.WithTimeout(tm.ctx, 5*time.Second)
 	defer lockCancel()
 
@@ -897,6 +977,12 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 				"error", err)
 		}
 	}()
+
+	// Double-checked under the lock: the entry may have been handled by the
+	// previous lock holder between the pre-check above and AcquireLock.
+	if tm.skipHandledFire(firedHandle, groupKey, timerType) {
+		return
+	}
 
 	// Get group snapshot
 	groupCtx, groupCancel := context.WithTimeout(tm.ctx, 5*time.Second)
@@ -1235,9 +1321,9 @@ func (tm *DefaultTimerManager) reconciliationLoop() {
 // RestoreTimers, which may never happen (e.g. the pod was rescheduled
 // elsewhere and a fresh replica took its place with an empty local timers
 // map, or simply comes up in a different order relative to other
-// replicas). Correctness (no double publish) was already guaranteed by
-// task 6.1's nflog claim plus this same AcquireLock; this loop only closes
-// the "nobody fires it at all" gap.
+// replicas). Correctness (no double publish) comes from task 6.1's nflog
+// claim plus onTimerExpired's lock and storage re-check (fireStillDue); this
+// loop only closes the "nobody fires it at all" gap.
 func (tm *DefaultTimerManager) reconcileOrphanedTimers() {
 	ctx, cancel := context.WithTimeout(tm.ctx, 10*time.Second)
 	defer cancel()

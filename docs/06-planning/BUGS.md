@@ -6,13 +6,13 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
-### [high][Grouping][~0.5-1d] GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER
-- **Title:** две реплики срабатывают на один таймер группы, флейк `-race` в required `gate`
-- **Problem:** `TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires` (`go-app/internal/infrastructure/grouping/distributed_timer_ownership_test.go:169`) флейкает под `-race`: callback срабатывает **2 раза вместо 1**. Частота: 2/30 на `main`@`8bca192`, 3/30 на `feature/prod-ci-images` (2026-09-28); 2/30 на `main`@`9f54424` (2026-09-29, PROD-DEPS-VULN). Гипотеза по коду: `onTimerExpired` отпускает lock через `defer release()` сразу после callback'а, реплика, дошедшая до `AcquireLock` позже, берёт свободный lock и срабатывает повторно — TOCTOU («одновременно», а не «уже сработало»), а не тайминг теста. В проде повторную доставку, по комментариям кода, должен отсекать nflog-claim (task 6.1); тест его стабит.
-- **Impact:** шаг `race` required-гейта `gate` краснеет примерно в 1 прогоне из 15; в HA (2+ реплики, дефолт HPA чарта) — возможная повторная нотификация, если nflog-claim не защищает.
-- **Fix:** задача `GROUPING-TIMER-LOCK-FIX`: подтвердить механизм и защищённость прода (e2e-ha шаг 4), затем фикс продукта или теста + детерминированный тест.
-- **Refs:** `timer_manager_impl.go` (`onTimerExpired`); найдено на `/implement` PROD-CI-IMAGES; `docs/06-planning/archive/DONE-2026-09.md`.
-- **Status:** in-progress
+### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
+- **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
+- **Problem:** `onGroupWaitExpired` (`go-app/internal/infrastructure/grouping/manager_impl.go:1866-1873`) на любой ошибке `storage.Load` возвращает `nil` без continuation, а `onTimerExpired` после callback'ов удаляет запись таймера (`timer_manager_impl.go`, cleanup после callback'ов). При транзиентной ошибке Redis группа после этого больше не нотифицирует: таймера нет ни локально, ни в storage, reconciliation подобрать нечего. Предсуществующий дефект; раньше его иногда маскировало повторное срабатывание опоздавшей реплики, после `GROUPING-TIMER-LOCK-FIX` она отсеивается по `not_found`.
+- **Impact:** в HA (Redis) группа может замолчать до следующего нового алерта в ней.
+- **Fix:** в callback различать not-found группы и транзиентную ошибку; при транзиентной возвращать ошибку и не удалять запись таймера, чтобы reconciliation повторил. Тест с `loadFailingGroupStorage`.
+- **Refs:** `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` F7.
+- **Status:** open
 
 - [ ] **ALERT-STORE-DEDUP-KEY-STARTSAT** — повторный `POST /api/v2/alerts` без `startsAt` создаёт в memory store **новую копию** алерта, а не обновляет существующую: ключ дедупликации стора — `fingerprint|startsAt` (`go-app/internal/infrastructure/storage/memory/alert_store.go`, `dedupKey`), а пустой `startsAt` на каждом POST превращается в `now`. В итоге `GET /api/v2/alerts` отдаёт один и тот же алерт N раз с разными `startsAt`. Upstream сливает по fingerprint и сохраняет самый ранний `startsAt`. Воспроизведено вживую на `main` и на ветке `PARITY-RESOLVE-TIMEOUT-ENDSAT` (2026-09-24, lite, два POST `{"labels":{"alertname":"X"}}`). Prometheus и `amtool` шлют `startsAt` сами, поэтому затронуты в основном curl и самописные клиенты. Из-за этого для них не работает и продление окна `resolve_timeout`. Не регресс. Найдено на `/testing` PARITY-RESOLVE-TIMEOUT-ENDSAT. Чинить отдельной задачей: для отсутствующего `startsAt` брать `startsAt` уже горящего алерта с тем же fingerprint. Смотреть осторожно: dedup в БД (`deduplication.go`) и resolved-путь стора завязаны на тот же ключ.
 
@@ -39,7 +39,7 @@
 ### [medium][Test][~0.25d] GROUPING-ORPHAN-ADOPTION-TEST-FLAKY
 - **Title:** `TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica` флейкает
 - **Problem:** `go-app/internal/application/service_registry_grouping_test.go:585` — `continuation timer type = "group_wait", want "group_interval"`. Замер 2026-10-07 под нагрузкой (параллельно с release-gate), `-count=80`: 6 падений на `main` @ `fa682d4`, 7 на ветке с runbook engine — предсуществующий, не от слияния. Без нагрузки на `main` 0/40. Гипотеза: тест ждёт `stats.ReconciledTimers >= 1` и сразу читает storage, а счётчик растёт раньше, чем `onGroupWaitExpired` записывает continuation `group_interval`, — тест читает ещё старую запись `group_wait`.
-- **Impact:** шаг `test` required-гейта `gate` краснеет случайно; вместе с `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` это второй флейк в grouping.
+- **Impact:** шаг `test` required-гейта `gate` краснеет случайно; после `GROUPING-TIMER-LOCK-FIX` (2026-10-10) — последний известный флейк в grouping.
 - **Fix:** в тесте ждать опросом, пока тип записи станет `group_interval` (с тем же дедлайном), а не читать один раз; если запись `group_wait` держится дольше дедлайна — это уже продуктовый дефект.
 - **Refs:** release-gate 2026-10-07 на `feature/phase-6b-runbook-engine`, `~/amp-audit/gate-runbook.log`.
 - **Status:** open

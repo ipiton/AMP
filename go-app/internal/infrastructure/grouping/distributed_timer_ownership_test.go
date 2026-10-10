@@ -23,9 +23,9 @@ import (
 // timer_manager_impl.go); what this file newly proves and newly adds is:
 //
 //  1. TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires
-//     — the pre-existing per-fire lock actually arbitrates correctly between
-//     two independent DefaultTimerManager instances sharing one Redis
-//     backend (no test previously exercised this at the manager level, only
+//     — the per-fire lock plus the storage re-check (GROUPING-TIMER-LOCK-FIX)
+//     actually arbitrate correctly between two independent
+//     DefaultTimerManager instances sharing one Redis backend (no test previously exercised this at the manager level, only
 //     at RedisTimerStorage's own unit level).
 //  2. TestDefaultTimerManager_ReconciliationLoop_AdoptsOrphanedTimer — the
 //     NEW periodic reconciliation loop (task 6.2) that adopts a timer left
@@ -98,81 +98,48 @@ func newTimerStorageGroupManagerStub(t *testing.T, logger *slog.Logger, groupKey
 // (almost) the same time — e.g. both independently observed the group as
 // "not yet created" against shared Redis GroupStorage and both raced to
 // create it — so both end up with their own local Go timer for the same
-// GroupKey. When both fire, only the RedisTimerStorage.AcquireLock winner
-// must run its callback; the loser must skip quietly (not error).
+// GroupKey. Exactly one of them must run its callback. Which branch of
+// onTimerExpired turns the other one away is timing-dependent — the fire
+// lock, or the storage re-check (fireStillDue, GROUPING-TIMER-LOCK-FIX) when
+// it arrives after the winner released the lock — so the test asserts the
+// outcome, not the branch.
 func TestDefaultTimerManager_TwoReplicasRaceSameGroupTimer_OnlyLockWinnerFires(t *testing.T) {
-	mr, err := miniredis.Run()
-	require.NoError(t, err)
-	defer mr.Close()
+	mr := miniredis.RunT(t)
 
 	var logBuf syncBuffer
-	// Level: Debug — onTimerExpired logs the AcquireLock loser's quiet skip
-	// at Debug (see timer_manager_impl.go), which the default Info level
-	// would otherwise filter out of logBuf before the assertion below.
-	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 	const groupKey = GroupKey("alertname=RaceGroup")
 	var publishCount atomic.Int64
 
-	newReplica := func() (*DefaultTimerManager, func()) {
-		redisCache, err := cache.NewRedisCache(&cache.CacheConfig{
-			Addr:        mr.Addr(),
-			DB:          0,
-			PoolSize:    5,
-			DialTimeout: time.Second,
-			ReadTimeout: time.Second,
-		}, logger)
-		require.NoError(t, err)
-
-		storage, err := NewRedisTimerStorage(redisCache, logger)
-		require.NoError(t, err)
-
-		gm := newTimerStorageGroupManagerStub(t, logger, groupKey)
-
-		tm, err := NewDefaultTimerManager(TimerManagerConfig{
-			Storage:      storage,
-			GroupManager: gm,
-			Logger:       logger,
-		})
-		require.NoError(t, err)
-
-		// Stands in for the notify-chain's eventual publisher call — the
-		// point under test is whether this callback runs at all on this
-		// replica, not the chain behind it (task 6.1 already covers that).
-		tm.OnTimerExpired(func(_ context.Context, _ GroupKey, _ TimerType, _ *AlertGroup) error {
-			publishCount.Add(1)
-			return nil
-		})
-
-		return tm, func() { _ = redisCache.Close() }
-	}
-
-	tmA, closeA := newReplica()
-	defer closeA()
-	tmB, closeB := newReplica()
-	defer closeB()
+	tmA, _ := newSharedRedisReplica(t, mr, logger, groupKey, &publishCount, nil)
+	tmB, _ := newSharedRedisReplica(t, mr, logger, groupKey, &publishCount, nil)
 
 	ctx := context.Background()
 	const fireIn = 80 * time.Millisecond
-	_, err = tmA.StartTimer(ctx, groupKey, GroupWaitTimer, fireIn)
+	_, err := tmA.StartTimer(ctx, groupKey, GroupWaitTimer, fireIn)
 	require.NoError(t, err)
 	_, err = tmB.StartTimer(ctx, groupKey, GroupWaitTimer, fireIn)
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool { return publishCount.Load() >= 1 }, 2*time.Second, 10*time.Millisecond,
-		"at least one replica must fire")
+	require.Eventually(t, func() bool {
+		return publishCount.Load() >= 1 && !tmA.hasLocalHandle(groupKey) && !tmB.hasLocalHandle(groupKey)
+	}, 2*time.Second, 10*time.Millisecond,
+		"one replica must fire and both must drop their local handles")
 
-	// Give the loser's goroutine time to reach (and lose) its own
-	// AcquireLock attempt before asserting the final count.
+	// Give a late loser time to (wrongly) fire before asserting the count.
 	time.Sleep(200 * time.Millisecond)
 
 	require.EqualValues(t, 1, publishCount.Load(),
-		"two replicas racing the same group's timer must fire exactly once — the AcquireLock loser must skip, not also run the callback")
-	require.Contains(t, logBuf.String(), "Lock already acquired by another instance",
-		"the losing replica must log a quiet skip via onTimerExpired's existing ErrLockAlreadyAcquired branch")
+		"two replicas racing the same group's timer must fire exactly once")
 
-	require.NoError(t, tmA.Shutdown(context.Background()))
-	require.NoError(t, tmB.Shutdown(context.Background()))
+	statsA, err := tmA.GetStats(ctx)
+	require.NoError(t, err)
+	statsB, err := tmB.GetStats(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, statsA.ExpiredTimers+statsB.ExpiredTimers,
+		"exactly one replica must process the expiration")
+	require.NotContains(t, logBuf.String(), "Failed to load timer for expiration check")
 }
 
 // TestDefaultTimerManager_ReconciliationLoop_AdoptsOrphanedTimer simulates a

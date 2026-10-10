@@ -38,7 +38,7 @@
 - [x] **PARITY-B6: web.route-prefix** — `--web.route-prefix` и наследование из `external_url` (AMP-PARITY, 2026-08-18).
 
 ### Phase C: Enterprise HA
-- [x] **PARITY-C1: Clustering (Redis-based)** — Redis nflog + send-claim, распределённые таймеры, pub/sub для silences, leader election, heartbeat (AMP-PARITY Phase 6, 2026-08-18). Открыто: `GROUPING-TIMER-LOCK-FIX` (P0), `CI-E2E-HA-REQUIRED`.
+- [x] **PARITY-C1: Clustering (Redis-based)** — Redis nflog + send-claim, распределённые таймеры, pub/sub для silences, leader election, heartbeat (AMP-PARITY Phase 6, 2026-08-18). Открыто: `CI-E2E-HA-REQUIRED`; двойное срабатывание таймера группы закрыто `GROUPING-TIMER-LOCK-FIX` (2026-10-10).
 - [ ] **PARITY-C2: Remaining Receivers** — VictorOps/Splunk On-Call, WeChat, Pushover, SNS, Webex. Config определён для VictorOps/WeChat. ~5-7d (по 1-2d каждый)
 
 ## Stream: Intelligence (ML/LLM/MCP)

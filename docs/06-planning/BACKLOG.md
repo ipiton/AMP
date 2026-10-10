@@ -15,8 +15,6 @@
   - Сделать: дефолт `llm.enabled` (выключить или не ссылаться на отсутствующий ключ Secret); TLS встроенного PostgreSQL или иной дефолт `environment`/`ssl_mode` для встроенной БД; values внешней БД с паролем из Secret (сейчас только `database:` в `configFile.content`, пароль в ConfigMap); render-тест + запуск бинаря на env дефолтного рендера.
   - Оценка: ~0.5–1d после решения. _Источник: PROD-CONFIG-FILE-FALLBACK, 2026-10-07._
   Waiting-on: решение владельца — TLS для встроенного PostgreSQL vs. ослабление проверки `ssl_mode` для `environment`, дефолт `llm.enabled`.
-- [ ] **GROUPING-TIMER-LOCK-FIX** — починить `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` (BUGS.md): флейк `-race` ~1/15 в `internal/infrastructure/grouping`, краснит required `gate`. Гипотеза — TOCTOU: distributed lock отпускается сразу после callback'а, опоздавшая реплика берёт его и срабатывает повторно. Сначала подтвердить (продуктовый дефект или тест), затем фикс в `timer_manager_impl.go` + детерминированный тест. Оценка ~0.5–1d, нужен `/research`.
-  - _Источник: PROD-CI-IMAGES (2026-09-28)._
 - [ ] **PROD-GROUPING-DEFAULT** — _(повышен до P0 аудитом 2026-10-06: на первом же реальном `alertmanager.yml` каждый алерт уходит сразу)_ `go-app/internal/config/config.go:868`: `grouping.enabled` по умолчанию `false`. Verbatim `alertmanager.yml` с `route:` ⇒ каждый алерт уходит немедленно, без `group_wait`/`group_interval`/`repeat_interval`; `warnGroupingFallback` (`internal/core/services/alert_processor.go`) при `!groupingEnabled` сразу выходит — предупреждения нет. Не упомянуто в compat-доке и migration guide; включено только в `values-production.yaml`, smoke и e2e-ha.
   - Сделать: default `true` при наличии `route:` (или всегда), либо громкий WARN на старте + явная строка в `ALERTMANAGER_COMPATIBILITY.md` и `MIGRATION_QUICK_START.md`.
   - Оценка: ~0.5d.
@@ -37,7 +35,7 @@
 ### P1 — первое реальное внедрение и заявление «замена Alertmanager»
 
 - [ ] **HELM-SINGLE-NODE-DEFAULTS** — дефолты чарта рассчитаны на HA и не ставятся в маленький кластер (проверено `helm template` и на однонодовом k3s 4 vCPU, где свободно 750m CPU):
-  - `autoscaling.enabled: true` с `minReplicas: 2` перекрывает `replicaCount: 1` — на двух репликах вылезает `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER`;
+  - `autoscaling.enabled: true` с `minReplicas: 2` перекрывает `replicaCount: 1` — две реплики по умолчанию (двойное срабатывание таймера группы закрыто `GROUPING-TIMER-LOCK-FIX` 2026-10-10);
   - запросы ≈1,6 vCPU / 2,1 GiB (AMP 500m, Postgres 500m + exporter, два Redis) — под в `Pending`;
   - PVC 71 Gi, из них 50 Gi — локальные бэкапы.
   - Сделать: HPA по умолчанию выключен; requests по умолчанию под одну ноду (ориентир из аудита — 260m / 640 Mi суммарно); пример `values-small.yaml` в `helm/amp/`; PDB Postgres не рендерить при `replicas: 1` (пересекается с `PROD-POSTGRES-HA-DECISION`); лишний Redis — TECH-DEBT `HELM-CHART-GAPS`.
@@ -72,11 +70,15 @@
   - _Источник: PROD-AUTH research (2026-09-25)._
 - [ ] **DEAD-WEBHOOK-SECURITY-CONFIG** — `webhook.authentication.*`, `webhook.signature.*`, `webhook.rate_limiting.*` (`internal/config/config.go`, дефолты рядом с `:941`) парсятся, валидируются и редактируются, но в HTTP-пути не применяются; `rate_limiting.enabled` по умолчанию `true` «на бумаге». PROD-AUTH ставит только WARN на `webhook.authentication.enabled`. Сделать: удалить ключи (или реализовать rate limiting осознанно), отразить в CHANGELOG. Оценка ~0.5d.
   - _Источник: PROD-AUTH research (2026-09-25)._
+- [ ] **TIMER-FIRE-OUTCOME-METRIC** — исход срабатывания таймера группы виден только в DEBUG-логе (`Lock already acquired by another instance`, `Timer fire already handled elsewhere, skipping` с `reason`). Поднимать до INFO нельзя: в HA пропуск — штатный исход каждого срабатывания. Сделать: счётчик `alert_history_timer_fire_outcome_total{outcome=fired|lock_held|skipped_not_found|skipped_type_changed|skipped_rescheduled|load_error}` в `onTimerExpired`, строка в доке метрик. Даст алерт на ложный пропуск (рост `skipped_*` без `fired`) и на `load_error`. Оценка ~0.25d.
+  - _Источник: GROUPING-TIMER-LOCK-FIX deep-review F8 (2026-10-10)._
 - [ ] **PROD-AUTH-BEARER** — bearer-токены для HTTP API в дополнение к basic. Отложено на `/spec` PROD-AUTH: upstream их не принимает, клиенты экосистемы работают на basic. Брать, если появится машинный клиент без удобного basic. Оценка ~0.5d.
   - _Источник: PROD-AUTH research (2026-09-25)._
 
 ### Закрыто
 
+- [x] **GROUPING-TIMER-LOCK-FIX** _(закрыт 2026-10-10, `tasks/archive/GROUPING-TIMER-LOCK-FIX/`; TOCTOU подтверждён детерминированно; `onTimerExpired` сверяет запись таймера в storage до lock'а и под ним — опоздавшая реплика пропускает уже обработанное срабатывание; флейк 8/400 → 0/800, e2e-ha ALL PASS)_ — починить `GROUPING-TIMER-LOCK-RELEASED-BEFORE-LOSER` (BUGS.md): флейк `-race` ~1/15 в `internal/infrastructure/grouping`, краснит required `gate`. Гипотеза — TOCTOU: distributed lock отпускается сразу после callback'а, опоздавшая реплика берёт его и срабатывает повторно. Сначала подтвердить (продуктовый дефект или тест), затем фикс в `timer_manager_impl.go` + детерминированный тест. Оценка ~0.5–1d, нужен `/research`.
+  - _Источник: PROD-CI-IMAGES (2026-09-28)._
 - [x] **PROD-DEPS-OTEL-145** _(закрыт 2026-10-08, `tasks/archive/PROD-DEPS-OTEL-145/`; otel v1.44.0 → v1.45.0 без правок кода, `govulncheck` — 0 достижимых; уязвимый путь в бинари не входил — `pkg/telemetry` никто не импортирует → `DEAD-PKG-TELEMETRY`; заодно `.dockerignore` — локальный кэш Go и бинари вне контекста сборки)_ — required job `govulncheck` красный на `main` с 2026-10-05 (два прогона подряд, остальные job'ы зелёные): GO-2026-6505 (OpenTelemetry-Go: конфиг экспортёра пишет URL эндпоинта в INFO-лог) в `go.opentelemetry.io/otel/exporters/otlp/otlptrace`, `otlptracegrpc` и `otel/sdk` v1.44.0, фикс — v1.45.0; достижимо из `pkg/telemetry/tracer.go`. Пока красный — красный любой PR, branch protection включать бессмысленно.
   - Сделать: поднять `otel*` до v1.45.0 (карантин 7 дней — сверить дату релиза), release-gate и `govulncheck` зелёные. Повтор такой ситуации закрывает `schedule:` для `govulncheck` из `CI-SUPPLY-CHAIN`.
   - Оценка: ~0.1d. _Источник: аудит 2026-10-06._

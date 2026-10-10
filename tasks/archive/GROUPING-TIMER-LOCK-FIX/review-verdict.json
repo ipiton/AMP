@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/grouping-timer-lock-fix",
+  "commit": "d459a6e",
+  "reviewed_at": "2026-10-10",
+  "findings": {
+    "blocker": 0,
+    "major": 0,
+    "minor": 0,
+    "nit": 3
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
