@@ -41,8 +41,8 @@ metrics:
 publishing:
   enabled: true
 
-# grouping.enabled must be explicit true (defaults to false) -- see
-# deploy/e2e-ha/config.yaml's own note. Short timers so the whole smoke run
+# grouping.enabled is the default since PROD-GROUPING-DEFAULT; kept explicit
+# -- see deploy/e2e-ha/config.yaml's own note. Short timers so the whole smoke run
 # stays well under the brief's <2min budget.
 grouping:
   enabled: true

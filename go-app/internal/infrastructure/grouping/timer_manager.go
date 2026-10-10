@@ -53,9 +53,12 @@ import (
 // Timer Flow:
 //  1. New group created → StartTimer(GroupWaitTimer, 30s)
 //  2. Timer expires → callback triggered → notification sent
-//  3. Alert added to group → ResetTimer(GroupIntervalTimer, 5m)
-//  4. Timer expires → callback triggered → notification sent
-//  5. No changes → RepeatIntervalTimer (4h) → periodic notifications
+//  3. After that flush → StartTimer(GroupIntervalTimer, 5m)
+//  4. Timer expires → callback flushes the group and re-arms GroupIntervalTimer,
+//     for as long as the group exists; an unchanged group is only re-notified
+//     once repeat_interval has passed (the notify chain's Dedup step decides)
+//  5. RepeatIntervalTimer is no longer armed; it is handled only for timers
+//     persisted by an older release
 type GroupTimerManager interface {
 	// === Timer Lifecycle ===
 
@@ -119,6 +122,15 @@ type GroupTimerManager interface {
 
 	// === Query Operations ===
 
+	// HasTimer reports whether any timer is scheduled for the group: one this
+	// process holds, or one recorded in timer storage (in an HA deployment it
+	// may belong to another replica, or be waiting for reconciliation to
+	// adopt it).
+	//
+	// A storage error is returned as an error, not as false: the caller must
+	// not conclude "no timer" from a failed lookup.
+	HasTimer(ctx context.Context, groupKey GroupKey) (bool, error)
+
 	// GetTimer retrieves information about a timer for a group.
 	//
 	// Returns a copy of the timer to prevent external mutation.
@@ -165,7 +177,7 @@ type GroupTimerManager interface {
 	//
 	// Callback responsibilities:
 	//   - Send notification (via Publisher)
-	//   - Start next timer (group_interval → repeat_interval)
+	//   - Start next timer (group_wait → group_interval → group_interval …)
 	//   - Update metrics
 	//
 	// Parameters:
@@ -251,8 +263,8 @@ type GroupTimerManager interface {
 //  1. Send notification via Publisher
 //  2. Start next timer based on type:
 //     - group_wait → group_interval (5m)
-//     - group_interval → repeat_interval (4h)
-//     - repeat_interval → repeat_interval (4h)
+//     - group_interval → group_interval (5m)
+//     - repeat_interval (legacy, persisted by an older release) → group_interval
 //  3. Log and record metrics
 //
 // Error handling:

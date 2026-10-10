@@ -203,19 +203,16 @@ func TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer(t *testing.T) 
 	require.NotContains(t, logs, "Failed to save timer to storage")
 }
 
-// TestTimerContinuation_FullChainFiresRepeatIntervalTwice drives the whole
-// group_wait -> group_interval -> repeat_interval chain with short,
-// identical timings and asserts the fake publisher observes at least 3
-// publishes: #1 is group_wait's first notification, #2 is
-// group_interval's follow-up, #3 is the first repeat_interval reminder —
-// the earliest publish count that actually proves the repeat_interval leg
-// itself fired, not just group_interval (fix round 3: with all three
-// timings equal, require.Eventually could satisfy a ">= 2" assertion as
-// soon as the group_interval leg alone completed, never reaching
-// repeat_interval, and still report green). Before the fix, every
-// continuation failed silently, so only the first publish ever happened,
-// no matter how long the test waited.
-func TestTimerContinuation_FullChainFiresRepeatIntervalTwice(t *testing.T) {
+// TestTimerContinuation_FullChainKeepsNotifying drives the timer chain with
+// short, identical timings and asserts the fake publisher observes at least 3
+// publishes. Since PROD-GROUPING-DEFAULT the chain is group_wait followed by
+// group_interval on every flush, and repeat_interval (equal to the tick here)
+// is what lets the unchanged group be notified again; what this test guards
+// is unchanged: every continuation timer must actually be created. Before
+// the fix, every continuation failed silently, so only the first publish ever
+// happened, no matter how long the test waited. That the chain stays on
+// group_interval is asserted in group_interval_chain_test.go.
+func TestTimerContinuation_FullChainKeepsNotifying(t *testing.T) {
 	var logBuf syncBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
@@ -229,7 +226,7 @@ func TestTimerContinuation_FullChainFiresRepeatIntervalTwice(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool { return len(pub.calls()) >= 3 }, 5*time.Second, 10*time.Millisecond,
-		"the full group_wait->group_interval->repeat_interval chain must keep publishing through the repeat_interval leg — "+
+		"the timer chain must keep publishing after the first notification — "+
 			"before the fix, every continuation after the first notification failed silently")
 
 	logs := logBuf.String()

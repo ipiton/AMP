@@ -16,11 +16,9 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-GROUPING-DEFAULT** — P0 из BACKLOG: `grouping.enabled` по умолчанию `false`, verbatim `alertmanager.yml` с `route:` шлёт каждый алерт сразу и без предупреждения. Ветка `bugfix/prod-grouping-default`, workspace `tasks/PROD-GROUPING-DEFAULT/`. Взят 2026-10-10.
-
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-GROUPING-DEFAULT` (в WIP) → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 

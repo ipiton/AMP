@@ -36,7 +36,7 @@ means the container must actually restart (a `/-/reload` or `SIGHUP` is
 |---|---|---|---|
 | Slack/email/PagerDuty/Telegram notifications changed shape after the templates epic (Block Kit → upstream attachments, etc.) | `publishing.templates.enabled: false` | Restores AMP's pre-epic fixed formatters wholesale; `templates:` files and every per-integration presentation field (`title`, `text`, `description`, …) are ignored exactly as before. | Yes |
 | Notifications flowing to receivers you didn't expect, or you need delivery off entirely | `publishing.enabled: false` | Falls back to `MetricsOnlyPublisher` — alerts still ingest, group, silence-match; nothing is ever dialed. | No — read every time `initializePublishing` runs, i.e. effectively on restart only in practice since it's not part of the reload path either; treat as restart-required. |
-| Grouping/timer subsystem behaving badly (HA races, reconciliation storms) | `grouping.enabled: false` | Alerts no longer group/dedup/timer at all — every alert reaches the publish step immediately, ungrouped. This is a big behavior change, not a scalpel; only use it as a stop-the-bleeding measure. | Yes |
+| Grouping/timer subsystem behaving badly (HA races, reconciliation storms) | `grouping.enabled: false` | Alerts no longer group/dedup/timer at all — every alert reaches the publish step immediately, ungrouped. Alerts already waiting in a group when the switch is flipped are not sent by the direct path; they go out only when Prometheus re-sends them. This is a big behavior change, not a scalpel; only use it as a stop-the-bleeding measure. | Yes |
 | Investigation/LLM pipeline misbehaving | `investigation.enabled: false` | Stops the async investigation workers; alert ingest/publish path is untouched. | Yes |
 
 **Verify a flag flip actually landed**: `GET /api/v2/status` → `config.original`
@@ -45,7 +45,11 @@ is the redacted, Alertmanager-shaped route/receivers view (see
 it won't show these flags directly (they're outside the Alertmanager
 section), so confirm via the startup log line instead
 (`"Publishing disabled by config"` / `"Notification templates wired into
-publishing"` absent, etc.) after the restart.
+publishing"` absent, etc.) after the restart. For `grouping.enabled: false`
+the line is `Grouping is DISABLED (grouping.enabled=false) but a route: tree
+is configured`. Under the Helm chart set it in values
+(`--set grouping.enabled=false`): the chart's `GROUPING_ENABLED` overrides the
+key in `configFile.content`.
 
 ---
 
@@ -196,7 +200,21 @@ depends on. That means:
 
 - nflog dedup entries, timer state, and lock keys all carry their own TTLs
   (`repeat_interval`, `timer_lock_ttl`, etc.) and expire on their own — no
-  manual cleanup needed after a rollback either direction.
+  manual cleanup needed after a rollback either direction. Group records
+  outlive their timers (about a day): after `grouping.enabled` is switched
+  off and on again, a group that is still there notifies again once the next
+  alert joins it.
+- **Rolling back the image only** (chart values unchanged) to a version from
+  before `PROD-GROUPING-DEFAULT` keeps grouping on, because the chart passes
+  `GROUPING_ENABLED` from values, but on the old timer chain: an alert joining
+  an already-notified group waits up to `repeat_interval`. Set
+  `grouping.enabled=false` as well if that delay is not acceptable. The two
+  versions also compare a group against the notification log differently, so
+  a group notified by one version can be notified once more by the other.
+- **`helm rollback` to a chart from before `PROD-GROUPING-DEFAULT`** brings
+  back that chart's default, `grouping.enabled: false`, unless your values set
+  the key: grouping is then off after the rollback, with the consequences in
+  the kill-switch table above.
 - **Key-shape gap**: nflog entries moved from one bare key per
   group+receiver (`nflog:entry:{groupKey}`) to one key per group+receiver
   **+target** (`nflog:entry:{groupKey}:{target}`) in the wave-2 change

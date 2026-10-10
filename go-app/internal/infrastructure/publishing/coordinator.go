@@ -623,7 +623,7 @@ func (c *PublishingCoordinator) PublishToTargets(ctx context.Context, enrichedAl
 // submitted for it, and the job carries exactly the alerts it returns.
 //
 //   - empty/nil → the target is excluded entirely (no job, no result), because
-//     it already confirmed delivery of this exact alert set within
+//     its last confirmed delivery already covered these alerts within
 //     repeat_interval. This is what makes a retry after a partial failure
 //     resend to ONLY the targets that failed last cycle.
 //   - a subset → a non-batch target that already accepted some of these alerts
@@ -656,6 +656,9 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 
 	// TN-060: Check mode before publishing (metrics-only mode fallback)
 	if c.modeManager != nil && c.modeManager.IsMetricsOnly() {
+		// Info, on every group flush for as long as the mode lasts: besides
+		// the mode gauge this is the only recurring sign that grouped
+		// notifications are not being delivered.
 		c.logger.Info("Group publishing skipped (metrics-only mode)",
 			"receiver", receiverName,
 			"alert_count", len(alerts),
@@ -719,15 +722,16 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		//  1. suppressedByFilter == 0 — every target was already covered this
 		//     cycle (the fu4/fwb dedup steady state). Nothing new happened, and
 		//     the fire that DID deliver already wrote its nflog entry and pruned
-		//     the group. Report no outcomes; the manager logs Debug and stops.
+		//     the group. Report no outcomes; the manager then drops any resolved
+		//     alerts still in the group, since every consulted target is covered.
 		//
 		//  2. suppressedByFilter > 0 — the alerts still owed are resolved ones
 		//     that every candidate target declines (send_resolved: false). This
 		//     MUST report a successful outcome, not "nothing new": returning
-		//     zero outcomes makes publishGroupAlerts skip RecordSent AND
-		//     pruneResolvedAlerts, which is the only caller of
+		//     zero outcomes with no target consulted makes publishGroupAlerts
+		//     skip RecordSent AND pruneResolvedAlerts, which is the only caller of
 		//     RemoveAlertFromGroup — so the group keeps its resolved alerts and
-		//     re-arms its repeat_interval timer forever, one silent no-op fire
+		//     re-arms its group_interval timer forever, one silent no-op fire
 		//     per interval, one undead group per key. Upstream settles here: its
 		//     RetryStage filters the resolved alerts out, SUCCEEDS, records, and
 		//     aggrGroup.flush prunes. The synthetic outcome below is the same
@@ -775,7 +779,9 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 			}}, nil
 		}
 
-		c.logger.Warn("No publishing targets matched receiver for group notification; publishing none",
+		// Debug: the returned error is logged at Error by the caller, once per
+		// flush.
+		c.logger.Debug("No publishing targets matched receiver for group notification; publishing none",
 			"receiver", receiverName,
 			"alert_count", len(alerts),
 		)

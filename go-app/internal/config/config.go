@@ -107,11 +107,14 @@ type InvestigationConfig struct {
 // compatibility), so the adapter reuses it directly instead of re-parsing a
 // second copy of the same fields.
 type GroupingConfig struct {
-	// Enabled turns on the grouping subsystem (group manager + timers).
-	// Defaults to false: this task (2.2) only wires storage + timer
-	// lifecycle (start/restore/shutdown); the alert ingest pipeline does not
-	// consult the grouping subsystem yet — that lands in task 2.3, which
-	// flips this flag's effect on the request path.
+	// Enabled turns on the grouping subsystem (group manager + timers):
+	// alerts flow into groups and are dispatched on the route tree's
+	// group_wait/group_interval/repeat_interval instead of being published
+	// one by one. Defaults to true (PROD-GROUPING-DEFAULT), matching upstream
+	// Alertmanager, which always groups. Only takes effect when a `route:`
+	// tree is configured — without one there is nothing to group by and
+	// alerts are published directly. Read at startup only; changing it needs
+	// a restart, not a reload.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
 
 	// ReconciliationInterval controls the standard profile's periodic
@@ -872,7 +875,7 @@ func setDefaults() {
 	viper.SetDefault("silencing.periodic_resync_interval", "5m")
 
 	// Grouping subsystem defaults (task 2.2, alertmanager-parity)
-	viper.SetDefault("grouping.enabled", false)
+	viper.SetDefault("grouping.enabled", true)
 	// Distributed timer reconciliation defaults (task 6.2). Only takes
 	// effect in the standard profile with a live Redis-backed TimerStorage
 	// — see ServiceRegistry.initializeGrouping and GroupingConfig's doc

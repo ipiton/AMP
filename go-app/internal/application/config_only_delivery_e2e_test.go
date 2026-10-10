@@ -472,3 +472,68 @@ func TestConfigOnlyDelivery_SlackWireShape(t *testing.T) {
 	_, hasBlocks := got.body["blocks"]
 	assert.True(t, hasAttachments || hasBlocks, "Slack payload must carry blocks or attachments: %v", got.body)
 }
+
+// TestConfigOnlyDelivery_SendResolvedFalseNotRenotifiedOnPartialResolve: one
+// alert of a group resolves, the target does not take resolved alerts. The
+// alerts still firing were already notified, so the target must hear nothing
+// until something new happens — and the resolved alert must leave the group
+// (PROD-GROUPING-DEFAULT, review finding H1). With the group flushed every
+// group_interval, the target used to be re-notified one interval after every
+// partial resolve.
+func TestConfigOnlyDelivery_SendResolvedFalseNotRenotifiedOnPartialResolve(t *testing.T) {
+	webhook := newRecordingEndpoint(t)
+
+	configYAML := fmt.Sprintf(`
+server:
+  port: 8080
+
+route:
+  receiver: team-x
+  group_by: [alertname]
+  group_wait: 40ms
+  group_interval: 80ms
+  repeat_interval: 1h
+
+receivers:
+  - name: team-x
+    webhook_configs:
+      - url: %s/hook
+        send_resolved: false
+`, webhook.server.URL)
+
+	stack := newConfigOnlyStack(t, configYAML, "team-x")
+
+	stack.ingestInstance(t, "fp-1", "node-1")
+	stack.ingestInstance(t, "fp-2", "node-2")
+	first := webhook.waitForRequest(t, 5*time.Second)
+	require.Len(t, first.body["alerts"], 2, "both alerts go out in one notification")
+
+	endsAt := time.Now().UTC()
+	_, err := stack.groupManager.AddAlertToGroup(context.Background(), &core.Alert{
+		Fingerprint: "fp-1",
+		AlertName:   "HighCPU",
+		Status:      core.StatusResolved,
+		Labels:      map[string]string{"alertname": "HighCPU", "severity": "critical", "cluster": "prod", "instance": "node-1"},
+		Annotations: map[string]string{"summary": "cpu is high"},
+		StartsAt:    time.Now().UTC().Add(-time.Minute),
+		EndsAt:      &endsAt,
+	}, stack.groupKey)
+	require.NoError(t, err)
+
+	// The resolved alert leaves the group on a flush that sends nothing.
+	require.Eventually(t, func() bool {
+		group, err := stack.groupManager.GetGroup(context.Background(), stack.groupKey)
+		return err == nil && group.Size() == 1
+	}, 5*time.Second, 10*time.Millisecond, "the resolved alert must be pruned although the target was not notified")
+
+	// Several more flushes: still nothing new for this target.
+	time.Sleep(400 * time.Millisecond)
+	require.Len(t, webhook.all(), 1, "the alert still firing must not be notified again")
+
+	stack.ingestInstance(t, "fp-3", "node-3")
+	require.Eventually(t, func() bool { return len(webhook.all()) == 2 }, 5*time.Second, 10*time.Millisecond,
+		"a new alert is notified on the next flush")
+	second := webhook.all()[1]
+	assert.Equal(t, "firing", second.body["status"])
+	assert.Len(t, second.body["alerts"], 2, "the two alerts still firing")
+}

@@ -513,7 +513,11 @@ func (tm *DefaultTimerManager) StartTimer(
 		tm.metrics.RecordTimerOperationDuration("start", float64(time.Since(startTime)))
 	}
 
-	tm.logger.Info("Started timer",
+	// Debug, not Info: with group_interval re-armed on every fire (see
+	// DefaultGroupManager.onGroupIntervalExpired) each live group goes through
+	// start/expire/processed once per group_interval; timer metrics carry the
+	// same signal.
+	tm.logger.Debug("Started timer",
 		"group_key", groupKey,
 		"timer_type", timerType,
 		"duration", duration,
@@ -653,6 +657,24 @@ func (tm *DefaultTimerManager) ResetTimer(
 		"latency", float64(time.Since(startTime)))
 
 	return timer, nil
+}
+
+// HasTimer implements GroupTimerManager.HasTimer.
+func (tm *DefaultTimerManager) HasTimer(ctx context.Context, groupKey GroupKey) (bool, error) {
+	tm.timersMu.RLock()
+	_, exists := tm.timers[groupKey]
+	tm.timersMu.RUnlock()
+	if exists {
+		return true, nil
+	}
+
+	if _, err := tm.storage.LoadTimer(ctx, groupKey); err != nil {
+		if errors.Is(err, ErrTimerNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // GetTimer retrieves information about a timer.
@@ -927,7 +949,7 @@ func (tm *DefaultTimerManager) dropLocalHandle(firedHandle *timerHandle, groupKe
 }
 
 func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey GroupKey, timerType TimerType) {
-	tm.logger.Info("Timer expired",
+	tm.logger.Debug("Timer expired",
 		"group_key", groupKey,
 		"timer_type", timerType)
 
@@ -1114,7 +1136,7 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 		tm.metrics.DecActiveTimers()
 	}
 
-	tm.logger.Info("Timer expiration processed",
+	tm.logger.Debug("Timer expiration processed",
 		"group_key", groupKey,
 		"timer_type", timerType,
 		"lock_id", lockID)
@@ -1137,8 +1159,8 @@ func (tm *DefaultTimerManager) onTimerExpired(firedHandle *timerHandle, groupKey
 // a callback that returned an error: the loop in onTimerExpired continues
 // to the next callback, and this timer is still removed from active state
 // below as usual (so a permanently-panicking callback can't wedge a group
-// forever — timer_wait/interval/repeat_interval get rescheduled from
-// scratch next time an alert lands in this group, same as after a normal
+// forever — the group's timer is re-armed the next time an alert joins
+// it, see DefaultGroupManager.ensureGroupTimer; same as after a normal
 // error return).
 func (tm *DefaultTimerManager) invokeCallbackSafely(
 	ctx context.Context,

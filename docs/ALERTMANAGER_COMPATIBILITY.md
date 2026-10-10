@@ -19,9 +19,9 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** three gaps bite on a verbatim upstream config
-and none of them is reported at startup — a top-level `inhibit_rules:` is ignored (#9), grouping is off by default
-(#13), and a built-in filter drops some alerts (#14). Separately, the Helm chart's default values do not start (#15).
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** two gaps bite on a verbatim upstream config
+and neither is reported at startup — a top-level `inhibit_rules:` is ignored (#9) and a built-in filter drops some
+alerts (#14). Grouping (#13) is on by default since `PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15).
 Each is a P0 in `docs/06-planning/BACKLOG.md`.
 
 Source of truth:
@@ -62,7 +62,7 @@ Source of truth:
 | `--web.config.file` (HTTP authentication) | 🟡 `basic_auth_users` only | `PROD-AUTH`, `internal/application/webauth.go`. Same file format and request behaviour as upstream's exporter-toolkit (bcrypt, `WWW-Authenticate: Basic`, a placeholder hash for unknown users, cached verdicts, file changes picked up without restart). Also settable as `server.web_config_file` / `SERVER_WEB_CONFIG_FILE`. **Load errors** instead of silent ignores: `tls_server_config` (terminate TLS at the ingress/mesh), `http_server_config`, `rate_limit`. **Deliberate divergences**: an empty `basic_auth_users` is an error, not "auth off"; an invalid edit keeps the previous users instead of answering 500 to every request; `server.auth.unauthenticated_paths` (default `/-/healthy`, `/-/ready`) are served without credentials — upstream protects every path. No bearer tokens (upstream has none either). Default without the file: open, with a startup `WARN`. See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication" and ADR-011. |
 | Config validation (E-codes/W-warnings) wired into startup + `/-/reload` | 🟢 Supported | `pkg/configvalidator` wired into `internal/config.LoadConfig`, used by both process start and `/-/reload` (same function). Only fires for configs with a top-level `route:` section. |
 | Hot reload triggers: `SIGHUP` **and** `POST /-/reload` | 🟢 Supported | Both, as upstream. `SIGHUP` is handled by `watchReloadSignal` in `cmd/server/main.go`; it is repeatable and survives a failed reload (the previous config stays active). Routing-only edits (`route:`/`receivers:`/`time_intervals:` and nothing else) are applied — they were silently discarded before the final fix wave, with `/-/reload` still answering 200 OK. |
-| Resolved notification sent once, then the group is dropped | 🟢 Supported | `pruneResolvedAlerts` in `internal/infrastructure/grouping/manager_impl.go` removes resolved alerts after a *confirmed* delivery, matching upstream `aggrGroup.flush`; the group is deleted (and its timers cancelled) once that empties it. Alerts suppressed by inhibition/silence are kept, since they were never announced. |
+| Resolved notification sent once, then the group is dropped | 🟢 Supported | `pruneResolvedAlerts` in `internal/infrastructure/grouping/manager_impl.go` removes resolved alerts after a *confirmed* delivery, or on a flush where every target is already covered by its last notification, matching upstream `aggrGroup.flush`; the group is deleted (and its timers cancelled) once that empties it. Alerts suppressed by inhibition/silence are kept, since they were never announced. |
 | `inhibit_rules[].source_matchers` / `target_matchers` (`matchers:` list syntax) | 🟢 Supported | Wave 7 (`FU-INHIBIT-MATCHERS`): the inhibition engine (`internal/infrastructure/inhibition`) parses and evaluates the matchers-form list, reusing the wave-5 upstream-verbatim grammar port (`pkg/configvalidator/matcher.Parse`) and anchoring `=~`/`!~` the same way `internal/business/routing` does (`^(?:pattern)$`). Coexists with the legacy `source_match`/`source_match_re`/`target_match`/`target_match_re` maps on the same rule (both forms AND together, matching upstream), and applies on hot-reload like legacy rules. **Fix round 1** (first review round found the initial cut REJECT-worthy) closed: the config-loader bridge that dropped these fields before `pkg/configvalidator` ever saw them (`route:`-gated configs refused to load at all); upstream's `excludeTwoSidedMatch` mutual-inhibition guard (two alerts each matching both sides no longer silently mute each other); absent-label evaluation now matches upstream's no-presence-check semantics exactly for every operator (`=`/`!=`/`=~`/`!~`); `equal:` treats a label absent on both alerts as equal; and legacy `*_match_re` is now anchored the same as the matchers-form `=~`/`!~` (also fixed: an inline `source_match_re`/`target_match_re` rule, with no matchers-form fields at all, used to never get its regex compiled at all - a pre-existing, silent no-op bug the fix round closed in the same pass). See Known Gap #9 for one narrower divergence left open (label-name charset). |
 | HA: Redis nflog + send-claim for cross-replica dedup | 🟢 Supported | `internal/infrastructure/grouping/redis_notify_log.go` (task 6.1). |
 | HA: distributed timer liveness / reconciliation | 🟢 Supported | `internal/infrastructure/grouping/timer_manager_impl.go` + `manager_impl.go` reconciliation loop (task 6.2, hardened in fix round 1: targeted overdue-timer scan, no leftover-timer error-log spam). Final fix wave: the adoption window was effectively 0s (`reconciliation_grace` equalled the timer record's Redis TTL grace, so a timer became adoptable exactly as its key expired), and three early returns in `onTimerExpired` left a dead local handle that made reconciliation skip the group forever. Both fixed and covered by regression tests plus a live e2e scenario. |
@@ -327,7 +327,7 @@ all decline them, delivers nothing but still **settles**: the fire records
 against a synthetic `suppressed:<receiver>` pseudo-target (never a real one, so
 no real notification is suppressed) and the group's resolved alerts are pruned,
 tearing the group down. Without that, the group would keep its resolved alerts
-and re-arm its `repeat_interval` timer forever — one silent no-op fire per
+and re-arm its `group_interval` timer forever — one silent no-op fire per
 interval, one undead group per key. Upstream reaches the same end state: its
 retry stage filters the resolved alerts out, succeeds, and `aggrGroup.flush`
 prunes.
@@ -345,7 +345,8 @@ pointing at a receiver the config does not declare remains a loud error.
 
 `blackhole_drops_total` is a "is this receiver dropping" signal, not delivery
 volume: it counts once per alert on the non-grouped path and once per group
-fire (at most once per `repeat_interval` per group) on the grouped one.
+notification on the grouped one (a flush that has something new for the
+receiver, or the `repeat_interval` re-notification of an unchanged group).
 
 ### Matrix
 
@@ -638,9 +639,9 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
      duplicate notification, never a dropped one. The pipeline is at-least-once, same as upstream. Giving up also
      **abandons** the job (its context is cancelled), so one hanging endpoint cannot pin workers and starve healthy
      targets into false "unconfirmed" results.
-   - After the `group_interval` fire, AMP's timer chain moves to `repeat_interval`, so an endpoint that is down for
-     a long time gets one fast retry and then retries at `repeat_interval` cadence (upstream keeps flushing at
-     `group_interval`). Independent of this fix; not tracked as a parity blocker.
+   - A group keeps flushing at `group_interval`, as upstream does (`PROD-GROUPING-DEFAULT`; the chain used to move
+     to a `repeat_interval` timer after the first `group_interval` fire), so an endpoint that is down is retried
+     every `group_interval`.
    - The timer manager's own distributed lock (`lockTTL`, 30s, no renewal) can now expire mid-fire, so a second
      replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
      that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
@@ -852,12 +853,32 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     - **Mixed senders.** Upstream prefers an explicit `endsAt` over a timeout one when merging the same alert; AMP
       stores the latest value sent, so an alert first posted with an explicit `endsAt` and then without one gets
       the timeout window.
-13. **Grouping is off by default.** `grouping.enabled` defaults to `false` (`internal/config/config.go`), so a
-    verbatim `alertmanager.yml` with a `route:` tree sends every alert as soon as it arrives —
-    `group_wait`/`group_interval`/`repeat_interval` have no effect and nothing warns about it. Set
-    `grouping.enabled: true` (Helm: `grouping.enabled`); `helm/amp/values-production.yaml`, the smoke stack and
-    `deploy/e2e-ha` already do. The lite profile ignores the key entirely — grouping needs the standard profile
-    with Redis. Tracked as `PROD-GROUPING-DEFAULT` (P0).
+13. **Grouping is on by default** (closed by `PROD-GROUPING-DEFAULT`). `grouping.enabled` defaults to `true`
+    (`internal/config/config.go`, Helm: `grouping.enabled`), so a verbatim `alertmanager.yml` with a `route:` tree
+    is grouped on its `group_by`/`group_wait`/`group_interval`/`repeat_interval`, with upstream's 30s/5m/4h when
+    the route sets none: a group is flushed after `group_wait` and then every `group_interval`, and an unchanged
+    group is re-notified at the first flush after `repeat_interval`. It used to default to `false`, and every
+    alert was sent as soon as it arrived with nothing warning about it. Notes:
+    - Without a `route:` tree there is nothing to group by; alerts are published directly, as before.
+    - `grouping.enabled: false` still turns grouping off. With a `route:` tree configured AMP logs a warning at
+      startup, because the tree's timings then do nothing. Under the Helm chart set it in values: the chart's
+      `GROUPING_ENABLED` overrides the key in `configFile.content`.
+    - Whether a flush notifies is decided per target, on the alerts that target is owed (after its
+      `send_resolved` filtering): a new alert or a new status sends at once, a set that only shrank waits for
+      `repeat_interval`. Not upstream-equal: an alert that fired and resolved before the group's first
+      notification is still announced as resolved (upstream sends nothing).
+    - A grouped notification does not carry the LLM classification (the "AI Classification" block, the
+      classification-based PagerDuty severity); direct publishing does.
+    - Open defects of the grouped path now apply to every config with a `route:` tree: a transient group-storage
+      error in a timer callback can stop a group's timer chain (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` in
+      `docs/06-planning/BUGS.md`), and a timer key lost from Redis makes the group go quiet until its next alert
+      (`TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` in `docs/06-planning/TECH-DEBT.md`) — the chart's bundled Redis
+      evicts keys under memory pressure (`allkeys-lru`). See also #12: an alert that is never resolved keeps its
+      group, and its reminders, alive.
+    - The key is read at startup only: changing it needs a restart, not `/-/reload`.
+    - Both profiles group. The standard profile keeps groups, timers and the notification log in Redis, shared
+      across replicas, and falls back to in-memory state that replicas do not share when Redis is
+      unavailable; the lite profile keeps them in memory (single replica).
 14. **A built-in filter drops some alerts before routing.** `SimpleFilterEngine`
     (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM, and silently drops:
     alert names starting with `test` (case-insensitive), alerts labelled `environment=test` or `testing`, alerts
@@ -970,8 +991,8 @@ fidelity (Slack channel/title/color, PagerDuty severity/details, Telegram `parse
 Concretely, a migration is:
 1. Copy your `route:` / `receivers:` / `time_intervals:` / `global:` across — semantics carry over, and the
    receivers' integrations become live delivery targets on load. No Kubernetes Secrets required. Move
-   `inhibit_rules:` under `inhibition:` (a top-level key is ignored, Known Gap #9), set `grouping.enabled: true`
-   (Known Gap #13), and make sure the file is actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
+   `inhibit_rules:` under `inhibition:` (a top-level key is ignored, Known Gap #9), and make sure the file is
+   actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
 2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
    formatting, PagerDuty categorisation, per-integration HTTP settings). `*_file` credentials are delivered
    (FU7-B) — no action needed for those.

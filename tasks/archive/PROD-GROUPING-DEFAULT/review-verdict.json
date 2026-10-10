@@ -1,0 +1,18 @@
+{
+  "gate": "pass",
+  "reason": "R4-R6: K1 (local answer counted as covered) and its send-path variant M1 fixed and confirmed by the reviewer's own probes; K5, M3 fixed; remaining items are nits with dispositions (defer-tech-debt / accept). Not verified: real delivery and nflog read/write on real Redis (e2e-ha is metrics-only), rolling upgrade",
+  "branch": "bugfix/prod-grouping-default",
+  "commit": "e0523bf",
+  "reviewed_at": "2026-10-10",
+  "round": 6,
+  "findings": {
+    "blocker": 0,
+    "major": 2,
+    "minor": 9,
+    "nit": 8
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

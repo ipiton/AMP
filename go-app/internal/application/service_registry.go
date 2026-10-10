@@ -195,8 +195,8 @@ type ServiceRegistry struct {
 
 	// Grouping subsystem (task 2.2, alertmanager-parity): GroupManager (group
 	// lifecycle) + TimerManager (group_wait/group_interval/repeat_interval
-	// timers). All three nil unless cfg.Grouping.Enabled is true AND a
-	// route: tree is configured (grouping.enabled defaults to false).
+	// timers). All three nil unless cfg.Grouping.Enabled is true (the
+	// default) AND a route: tree is configured.
 	// groupKeyGenerator is the SAME instance passed to both
 	// DefaultGroupManagerConfig.KeyGenerator (below) and
 	// AlertProcessorConfig.GroupKeyGenerator (task 2.3) — a single source of
@@ -222,8 +222,8 @@ type ServiceRegistry struct {
 	// Redis is unavailable), type-asserted against grouping.NflogSnapshotter
 	// so file-snapshot persistence (wave 6, FU-LITE-FILE-SNAPSHOT) can
 	// save/restore its state without reaching into groupManager's private
-	// notifyLog field. nil when grouping is disabled (cfg.Grouping.Enabled=
-	// false, the default) or the standard profile selected the Redis-backed
+	// notifyLog field. nil when grouping is not running (cfg.Grouping.Enabled=
+	// false, or no route: tree) or the standard profile selected the Redis-backed
 	// RedisNotifyLog, which owns its own durability and does not implement
 	// NflogSnapshotter.
 	memoryNotifyLog grouping.NflogSnapshotter
@@ -411,8 +411,8 @@ func (r *ServiceRegistry) Initialize(ctx context.Context) error {
 	r.initializeTemplating()
 
 	// Step 2.7: Initialize grouping subsystem (non-fatal — graceful
-	// degradation). Task 2.2, alertmanager-parity. Disabled by default
-	// (grouping.enabled=false) and a clean skip without a route: tree.
+	// degradation). Task 2.2, alertmanager-parity. Enabled by default
+	// (grouping.enabled=true); a clean skip without a route: tree.
 	if err := r.initializeGrouping(ctx); err != nil {
 		r.logger.Warn("Grouping subsystem initialization failed, continuing without alert grouping",
 			"error", err)
@@ -1609,20 +1609,30 @@ func (r *ServiceRegistry) reloadTemplates() {
 // ServiceRegistry.Shutdown — graceful teardown.
 //
 // Skip conditions (clean skip, no degradation):
-//   - cfg.Grouping.Enabled == false (default): subsystem fully disabled.
+//   - cfg.Grouping.Enabled == false (explicit opt-out; the default is
+//     true): subsystem fully disabled. With a route: tree configured this
+//     is logged at Warn, because the tree's timings then do nothing.
 //   - No route: tree configured (cfg.Routing == nil): BuildGroupingConfig
 //     returns ErrGroupingRequiresRouteTree — the grouping package has no
 //     config of its own for group_by/group_wait/group_interval/
 //     repeat_interval, so there is nothing to build it from.
 func (r *ServiceRegistry) initializeGrouping(ctx context.Context) error {
 	if !r.config.Grouping.Enabled {
-		r.logger.Info("Grouping subsystem disabled (grouping.enabled=false)")
+		if r.config.HasRouteTree() {
+			r.logger.Warn("Grouping is DISABLED (grouping.enabled=false) but a route: tree is configured: group_by/group_wait/group_interval/repeat_interval are ignored and every alert is published immediately")
+		} else {
+			r.logger.Info("Grouping subsystem disabled (grouping.enabled=false)")
+		}
 		return nil
 	}
 
 	groupingCfg, err := r.config.BuildGroupingConfig()
 	if err != nil {
-		r.logger.Info("Grouping subsystem disabled: no route tree configured", "error", err)
+		// ErrGroupingRequiresRouteTree, the only error BuildGroupingConfig
+		// returns: the normal state of an install without a route: tree now
+		// that grouping.enabled defaults to true, so it is not logged as an
+		// error.
+		r.logger.Info("Grouping subsystem not started: no route: tree configured, alerts are published directly")
 		return nil
 	}
 
@@ -1976,7 +1986,7 @@ func (r *ServiceRegistry) newNotifyLog(ctx context.Context) (grouping.GroupNotif
 			}
 
 			r.logger.Info("Notification log (nflog) using Redis storage (cross-replica dedup)")
-			return notifyLog, nil
+			return grouping.NewResilientNotifyLog(notifyLog), nil
 		}
 
 		r.logger.Warn("Standard profile without a Redis cache backend, nflog falls back to in-memory (no cross-replica dedup)")
@@ -2316,8 +2326,12 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		InhibitionState:    r.inhibitionState,
 		InhibitionCache:    r.inhibitionCache,
 		BusinessMetrics:    r.metrics,
-		RouteEvaluator:     r.routeEvaluator,          // task 1.4: may be nil (lite/legacy mode, no route: section)
-		GroupingEnabled:    r.config.Grouping.Enabled, // task 2.3
+		RouteEvaluator:     r.routeEvaluator, // task 1.4: may be nil (lite/legacy mode, no route: section)
+		// grouping.enabled defaults to true, so it only means "group" when
+		// there is a route: tree to group by. Without one initializeGrouping
+		// skips cleanly, and passing the raw flag would make every alert
+		// trip warnGroupingFallback on a setup that never asked for grouping.
+		GroupingEnabled: r.config.Grouping.Enabled && r.config.HasRouteTree(),
 		// Re-review finding R1: a CONFIGURED route tree must never degrade into
 		// an unscoped publish, even when the tree failed to build
 		// (initializeRouting is non-fatal) or Evaluate fails for an alert.

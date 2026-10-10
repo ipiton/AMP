@@ -235,8 +235,8 @@ func TestTimerCallback_TransientLoadErrorAfterPublish_KeepsTimerChain(t *testing
 	// Must be the NEXT timer in the chain, not the leftover group_wait entry
 	// AddAlertToGroup created — that distinction is what makes this assertion
 	// prove the callback continued rather than returned early.
-	assert.Equal(t, RepeatIntervalTimer, timer.TimerType,
-		"onGroupIntervalExpired must have armed repeat_interval despite the transient probe error")
+	assert.Equal(t, GroupIntervalTimer, timer.TimerType,
+		"onGroupIntervalExpired must have re-armed group_interval despite the transient probe error")
 }
 
 // loadFailingAfterNGroupStorage passes the first failAfter Load calls through,

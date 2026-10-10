@@ -285,6 +285,8 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 				"group_key", groupKey,
 				"error", startErr)
 		}
+	} else {
+		m.ensureGroupTimer(ctx, groupKey, group)
 	}
 
 	// Add alert to group (thread-safe)
@@ -324,9 +326,8 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 		"group_key", groupKey,
 		"alert", alert.AlertName,
 		"fingerprint", alert.Fingerprint,
-		"group_size", len(group.Alerts),
-		"is_new", isNewAlert,
-		"state", group.Metadata.State)
+		"group_size", alertCount(group),
+		"is_new", isNewAlert)
 
 	// Return shallow copy (150% enhancement: prevent external mutation)
 	return group.Clone(), nil
@@ -337,6 +338,18 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 	ctx context.Context,
 	fingerprint string,
 	groupKey GroupKey,
+) (bool, error) {
+	return m.removeAlertFromGroup(ctx, fingerprint, groupKey, nil)
+}
+
+// removeAlertFromGroup is RemoveAlertFromGroup with an optional guard: when
+// onlyIf is non-nil the alert is removed only if onlyIf accepts the alert the
+// group holds NOW, checked under the group lock.
+func (m *DefaultGroupManager) removeAlertFromGroup(
+	ctx context.Context,
+	fingerprint string,
+	groupKey GroupKey,
+	onlyIf func(*core.Alert) bool,
 ) (bool, error) {
 	startTime := time.Now()
 
@@ -355,7 +368,11 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 
 	// Remove alert from group
 	group.mu.Lock()
-	_, existed := group.Alerts[fingerprint]
+	current, existed := group.Alerts[fingerprint]
+	if existed && onlyIf != nil && !onlyIf(current) {
+		group.mu.Unlock()
+		return false, nil
+	}
 	delete(group.Alerts, fingerprint)
 	groupSize := len(group.Alerts)
 	group.mu.Unlock()
@@ -894,6 +911,53 @@ func (m *DefaultGroupManager) startGroupWaitTimer(ctx context.Context, groupKey 
 	return nil
 }
 
+// ensureGroupTimer re-arms the timer of an existing group that has none.
+//
+// A group's timers are otherwise only ever scheduled from each other's
+// callbacks, so a group that loses its timer — a failed save while re-arming,
+// a storage error inside a callback, a timer key evicted from Redis, grouping
+// switched off and on again while the group's record was still there — never
+// gets another one: it keeps accepting alerts and never notifies
+// (PROD-GROUPING-DEFAULT, review finding G2). The next alert joining the group
+// is the point where that is noticed and repaired.
+//
+// group_wait, not group_interval: such a group is already overdue. Dedup in
+// publishGroupAlerts keeps the resulting flush from re-notifying what was
+// already sent.
+//
+// A group that HAS a timer is left alone — an alert joining a group must not
+// restart its timer, or a steady stream of alerts would postpone the
+// notification forever. A failed lookup is treated the same way.
+func (m *DefaultGroupManager) ensureGroupTimer(ctx context.Context, groupKey GroupKey, group *AlertGroup) {
+	if m.timerManager == nil {
+		return
+	}
+
+	scheduled, err := m.timerManager.HasTimer(ctx, groupKey)
+	if err != nil {
+		m.logger.Warn("could not check whether the group has a timer, leaving it as is",
+			"group_key", groupKey,
+			"error", err)
+		return
+	}
+	if scheduled {
+		return
+	}
+
+	m.logger.Warn("alert group has no timer scheduled, re-arming group_wait",
+		"group_key", groupKey)
+	status := "success"
+	if startErr := m.startGroupWaitTimer(ctx, groupKey, groupTimings(group)); startErr != nil {
+		status = "error"
+		m.logger.Warn("failed to re-arm group_wait timer for a group without one",
+			"group_key", groupKey,
+			"error", startErr)
+	}
+	if m.metrics != nil {
+		m.metrics.RecordGroupOperation("timer_rearm", status)
+	}
+}
+
 // startGroupIntervalTimer starts a group_interval timer for an existing group.
 // This timer ensures minimum time between notifications for the same group.
 //
@@ -1018,7 +1082,7 @@ func receiverFromGroupKey(key GroupKey) string {
 // group panicked mid-chain and — because the panic unwound the timer
 // callback — wedged the group (final review finding 12).
 //
-// nil is a valid return: startGroupIntervalTimer/startRepeatIntervalTimer both
+// nil is a valid return: startGroupWaitTimer/startGroupIntervalTimer both
 // document nil timings as "use the root Route.* defaults".
 func groupTimings(group *AlertGroup) *GroupTimings {
 	if group == nil || group.Metadata == nil {
@@ -1116,7 +1180,7 @@ func (m *DefaultGroupManager) filterInhibited(ctx context.Context, groupKey Grou
 		}
 
 		if result != nil && result.Matched {
-			m.logger.Info("alert dropped from group notification: inhibited at send time",
+			m.logger.Debug("alert dropped from group notification: inhibited at send time",
 				"group_key", groupKey,
 				"fingerprint", alert.Fingerprint)
 			continue
@@ -1140,7 +1204,7 @@ func (m *DefaultGroupManager) filterSilenced(groupKey GroupKey, alerts []*core.A
 	kept := make([]*core.Alert, 0, len(alerts))
 	for _, alert := range alerts {
 		if m.silenceChecker.HasActiveMatch(alert.Labels, now) {
-			m.logger.Info("alert dropped from group notification: silenced at send time",
+			m.logger.Debug("alert dropped from group notification: silenced at send time",
 				"group_key", groupKey,
 				"fingerprint", alert.Fingerprint)
 			continue
@@ -1228,11 +1292,11 @@ func (m *DefaultGroupManager) isTimeMuted(groupKey GroupKey, names *TimeInterval
 // time — see filterInhibited/filterSilenced. TimeMute (task 3.2) is also
 // send-time, but — unlike Inhibit/Silence — suppresses the WHOLE group at
 // once rather than filtering individual alerts (see isTimeMuted). If
-// filtering removes every alert, TimeMute applies, or Dedup finds this
-// exact alert set was already sent within repeat_interval, nothing is
+// filtering removes every alert, TimeMute applies, or Dedup finds every
+// target already covered within repeat_interval, nothing is
 // published — that is the normal "suppressed" case, not a failure, and is
 // only logged at Debug. Suppression at any step means RecordSent is never
-// called, so the group's already-scheduled group_interval/repeat_interval
+// called, so the group's group_interval
 // timer keeps ticking and will retry with the group's then-current state
 // (e.g. once a mute window ends).
 //
@@ -1364,21 +1428,59 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 	// it once per candidate target BEFORE attempting delivery and sends
 	// exactly what it returns:
 	//
-	//   - nil       → this target already received this EXACT alert set within
-	//                 repeat_interval: skipped, not resent, no outcome.
+	//   - nil       → the last send to this target already covered every
+	//                 alert it is owed now, within repeat_interval: skipped,
+	//                 not resent, no outcome.
 	//   - a subset  → this target is a non-batch integration (one wire message
 	//                 per alert) that already accepted SOME of these alerts on
 	//                 an earlier fire; only the remainder is sent, so the ones
 	//                 that landed are not duplicated.
 	//   - the input → nothing is known to have been delivered: send everything.
-	signature := alertSetSignature(alerts)
+	//
+	// The signature is computed from candidates — what THIS target is owed
+	// after its own send_resolved filtering — not from the whole group, as
+	// upstream's DedupStage does per integration. A target that does not take
+	// resolved alerts therefore sees no change when one alert of the group
+	// resolves, and is not re-notified about the alerts still firing
+	// (PROD-GROUPING-DEFAULT, review finding H1).
 	repeatInterval := m.effectiveRepeatInterval(group)
 	ttl := time.Now().Add(-repeatInterval)
+	// offered, consulted, covered and heldBack are written by targetAlerts
+	// and read after PublishGroup returns. Guarded because the publisher is
+	// free to consult targets concurrently.
+	var decisionsMu sync.Mutex
+	offered := make(map[string]string) // target -> signature of the set it was offered
+	consulted, covered := 0, 0
+	heldBack := 0 // targets skipped on this replica's own record, the shared log being unreadable
 	targetAlerts := func(target string, candidates []*core.Alert) []*core.Alert {
+		signature := alertSetSignature(candidates)
+		decisionsMu.Lock()
+		offered[target] = signature
+		consulted++
+		decisionsMu.Unlock()
+
 		dup, dupErr := m.notifyLog.IsDuplicate(ctx, group.Key, target, signature, ttl)
+		if errors.Is(dupErr, ErrNotifyLogAnsweredLocally) {
+			// The shared log could not be read and this replica's own record
+			// says it already sent this set. Enough to not send again, but
+			// not proof that the target is covered — another replica may have
+			// sent something newer — so it does not count towards pruning,
+			// and it blocks pruning after a send to the other targets too.
+			decisionsMu.Lock()
+			heldBack++
+			decisionsMu.Unlock()
+			m.logger.Warn("nflog duplicate check failed for target; this replica already sent this alert set, skipping",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"target", target,
+				"error", dupErr)
+			return nil
+		}
 		if dupErr != nil {
-			// Fail-open (Redis down): proceed as not-a-duplicate — same
-			// documented trade-off as the claim check above.
+			// Fail-open: a duplicate across replicas beats a dropped
+			// notification — same documented trade-off as the claim check
+			// above. Sends this replica made itself are handled just above
+			// (see resilientNotifyLog).
 			m.logger.Error("nflog duplicate check failed for target, proceeding fail-open (duplicate-across-replicas risk accepted)",
 				"group_key", group.Key,
 				"receiver", receiver,
@@ -1392,9 +1494,18 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 				"receiver", receiver,
 				"target", target,
 				"repeat_interval", repeatInterval)
+			decisionsMu.Lock()
+			covered++
+			decisionsMu.Unlock()
 			return nil
 		}
-		return m.alertsStillOwed(ctx, group.Key, receiver, target, candidates)
+		owed := m.alertsStillOwed(ctx, group.Key, receiver, target, candidates)
+		if len(owed) == 0 {
+			decisionsMu.Lock()
+			covered++
+			decisionsMu.Unlock()
+		}
+		return owed
 	}
 
 	// groupLabels (review finding 1, fwb fix round 1): the resolved
@@ -1439,8 +1550,8 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		}
 
 		// "No targets for receiver" and any other publish error: log +
-		// metric, do NOT retry-loop here — the next scheduled timer
-		// (group_interval/repeat_interval) will naturally retry with the
+		// metric, do NOT retry-loop here — the next scheduled flush
+		// (group_interval) will naturally retry with the
 		// group's then-current state (task 2.4 dispatch decision, carried
 		// from task 1.5's "no targets" semantics note).
 		m.logger.Error("failed to publish group notification",
@@ -1463,6 +1574,26 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		m.logger.Debug("group notification produced no new target outcomes (fully deduped this cycle, or no targets)",
 			"group_key", group.Key,
 			"receiver", receiver)
+
+		// Every target the publisher consulted is already covered: each has
+		// either been told about the resolved alerts in this set or does not
+		// take them. Nobody is still owed them, so they leave the group now,
+		// as upstream's aggrGroup.flush does after a flush that DedupStage
+		// turned into a no-op. Without this a resolved alert left behind by a
+		// send that was recorded but not followed by pruning (crash, failed
+		// prune, a send_resolved: false target) would stay in the group and
+		// be announced again on the next real send (review finding H6).
+		//
+		// consulted == 0 means the publisher never asked (metrics-only mode,
+		// no targets): nothing is known to be covered, nothing is pruned.
+		decisionsMu.Lock()
+		allCovered := consulted > 0 && covered == consulted
+		decisionsMu.Unlock()
+		if allCovered {
+			pruneCtx, cancelPrune := m.bookkeepingContext(ctx)
+			defer cancelPrune()
+			m.pruneResolvedAlerts(pruneCtx, group.Key, alerts)
+		}
 		return
 	}
 
@@ -1549,6 +1680,16 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		// fire — the very failure this task removes, in the opposite
 		// direction. recordCtx is created just above, AFTER the wait, so its
 		// own deadline is not spent by the wait either.
+		//
+		// The entry carries the signature of the set this target was offered
+		// (see targetAlerts). A publisher that reports an outcome for a
+		// target it never consulted is recorded against the whole set.
+		decisionsMu.Lock()
+		signature, wasOffered := offered[outcome.Target]
+		decisionsMu.Unlock()
+		if !wasOffered {
+			signature = alertSetSignature(alerts)
+		}
 		if recErr := m.notifyLog.RecordSent(recordCtx, group.Key, outcome.Target, signature, now, repeatInterval); recErr != nil {
 			// Confirmed delivery already happened — a failure here only
 			// means the NEXT fire (this or another replica) might not see
@@ -1594,6 +1735,20 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 			"receiver", receiver,
 			"alert_count", len(alerts),
 			"target_count", len(outcomes))
+		return
+	}
+
+	decisionsMu.Lock()
+	unverified := heldBack
+	decisionsMu.Unlock()
+	if unverified > 0 {
+		// A target was skipped without proof that it has seen the resolved
+		// alerts (see ErrNotifyLogAnsweredLocally). Keep them, as after a
+		// partial failure, until the shared log can be read again.
+		m.logger.Debug("resolved alerts kept: notification log unreadable for some targets",
+			"group_key", group.Key,
+			"receiver", receiver,
+			"targets_unverified", unverified)
 		return
 	}
 
@@ -1694,9 +1849,9 @@ func (m *DefaultGroupManager) alertsStillOwed(ctx context.Context, groupKey Grou
 	return remaining
 }
 
-// pruneResolvedAlerts removes from the group every alert that was RESOLVED in
-// the notification just confirmed delivered, deleting the group entirely once
-// that empties it.
+// pruneResolvedAlerts removes from the group every alert that is RESOLVED in
+// alerts and that every target has been told about (or does not take),
+// deleting the group entirely once that empties it.
 //
 // Upstream parity: this is exactly what Alertmanager's aggrGroup.flush does
 // after a successful notify — resolved alerts are deleted from the aggregation
@@ -1709,11 +1864,17 @@ func (m *DefaultGroupManager) alertsStillOwed(ctx context.Context, groupKey Grou
 // eventually reaped it. Operators saw a resolved alert paging them every
 // repeat_interval.
 //
-// Only called after a CONFIRMED delivery (publisher returned nil and RecordSent
-// was reached): pruning before that would drop the resolved state before anyone
-// was told about it.
+// Called from two places in publishGroupAlerts: after a delivery every target
+// CONFIRMED, and after a flush that sent nothing because every target the
+// publisher consulted was already covered by its last notification. Pruning
+// in any other case would drop the resolved state before anyone was told
+// about it.
 //
-// alerts is the post-filter set actually sent, so alerts suppressed by
+// An alert is removed only if the group still holds it as resolved: ingest
+// does not take the publish lock, so it may have started firing again since
+// alerts was read, and a firing alert must not be dropped.
+//
+// alerts is the post-filter set of this flush, so alerts suppressed by
 // inhibition/silence are deliberately left in place — they were not announced
 // as resolved, so they must not be forgotten. Errors are logged, never fatal:
 // the worst case is the pre-fix behaviour for one more interval.
@@ -1727,9 +1888,11 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 		// RemoveAlertFromGroup handles the whole teardown when this empties
 		// the group: storage delete, DecActiveGroups, cancelGroupTimers and
 		// notifyLog.Forget.
-		removed, err := m.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
+		removed, err := m.removeAlertFromGroup(ctx, alert.Fingerprint, groupKey, func(current *core.Alert) bool {
+			return current != nil && current.Status == core.StatusResolved
+		})
 		if err != nil {
-			m.logger.Warn("failed to prune resolved alert after successful group notification",
+			m.logger.Warn("failed to prune resolved alert after group flush",
 				"group_key", groupKey,
 				"fingerprint", alert.Fingerprint,
 				"error", err)
@@ -1741,7 +1904,7 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 	}
 
 	if pruned > 0 {
-		m.logger.Info("pruned resolved alerts after group notification (upstream aggrGroup.flush semantics)",
+		m.logger.Info("pruned resolved alerts after group flush (upstream aggrGroup.flush semantics)",
 			"group_key", groupKey,
 			"pruned", pruned)
 	}
@@ -1752,7 +1915,7 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 //
 // Used by the three timer callbacks after publishGroupAlerts: that call may
 // have deleted the group (all its alerts resolved — see pruneResolvedAlerts),
-// and scheduling the next group_interval/repeat_interval timer for a deleted
+// and scheduling the next group_interval timer for a deleted
 // group would resurrect the very notification loop finding 8 is about.
 //
 // FAIL-OPEN on transient errors (wave re-review, Important 1). Only a
@@ -1798,45 +1961,6 @@ func alertCount(group *AlertGroup) int {
 	return len(group.Alerts)
 }
 
-// startRepeatIntervalTimer starts a repeat_interval timer for an existing group.
-// This timer provides periodic reminders for ongoing alert groups with no new changes.
-//
-// timings is the group's own per-route override (task 2.4), or nil to use
-// the grouping config's root Route.repeat_interval.
-//
-// Called after the group_interval notification is sent (when switching to "steady" mode).
-func (m *DefaultGroupManager) startRepeatIntervalTimer(ctx context.Context, groupKey GroupKey, timings *GroupTimings) error {
-	if m.timerManager == nil {
-		return nil // Timer functionality disabled
-	}
-
-	// Get repeat_interval duration: per-group override (task 2.4) takes
-	// precedence over the root Route.* default (default: 4h, via helper).
-	duration := 4 * time.Hour
-	if m.config != nil && m.config.Route != nil {
-		duration = m.config.Route.GetEffectiveRepeatInterval()
-	}
-	if timings != nil && timings.RepeatInterval > 0 {
-		duration = timings.RepeatInterval
-	}
-
-	// Start repeat_interval timer
-	_, err := m.timerManager.StartTimer(ctx, groupKey, RepeatIntervalTimer, duration)
-	if err != nil {
-		m.logger.Error("failed to start repeat_interval timer",
-			"group_key", groupKey,
-			"duration", duration,
-			"error", err)
-		return fmt.Errorf("start repeat_interval timer: %w", err)
-	}
-
-	m.logger.Debug("started repeat_interval timer",
-		"group_key", groupKey,
-		"duration", duration)
-
-	return nil
-}
-
 // cancelGroupTimers cancels all timers for a group.
 // Called when a group is deleted (empty after alert removal).
 func (m *DefaultGroupManager) cancelGroupTimers(ctx context.Context, groupKey GroupKey) {
@@ -1860,7 +1984,7 @@ func (m *DefaultGroupManager) cancelGroupTimers(ctx context.Context, groupKey Gr
 func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
 	m.logger.Info("group_wait timer expired, sending first notification",
 		"group_key", groupKey,
-		"alert_count", len(group.Alerts))
+		"alert_count", alertCount(group))
 
 	// Check if group still exists and has alerts (load from storage for freshness,
 	// matching the pattern used in onGroupIntervalExpired/onRepeatIntervalExpired).
@@ -1872,7 +1996,7 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 		return nil
 	}
 
-	if len(currentGroup.Alerts) == 0 {
+	if alertCount(currentGroup) == 0 {
 		m.logger.Debug("group is empty, not sending notification",
 			"group_key", groupKey)
 		return nil
@@ -1905,12 +2029,22 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 }
 
 // onGroupIntervalExpired is the callback for group_interval timer expiration.
-// This sends an update notification for the group and starts the repeat_interval timer
-// for periodic reminders.
+// It flushes the group and re-arms group_interval, so the group is flushed
+// every group_interval for as long as it exists — upstream Alertmanager's
+// aggrGroup does the same. Whether a flush actually notifies is decided by
+// publishGroupAlerts' Dedup step, not by the timer: a changed alert set is
+// sent at once, an unchanged one only after repeat_interval has passed since
+// the last successful send.
+//
+// The chain used to switch to a repeat_interval timer here. An alert joining
+// the group after that switch was then held back until repeat_interval (4h by
+// default) instead of group_interval (PROD-GROUPING-DEFAULT, review finding F1).
 func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
-	m.logger.Info("group_interval timer expired, sending update notification",
+	// Debug, not Info: this fires every group_interval for every live group,
+	// and most fires are deduplicated no-ops.
+	m.logger.Debug("group_interval timer expired, flushing group",
 		"group_key", groupKey,
-		"alert_count", len(group.Alerts))
+		"alert_count", alertCount(group))
 
 	// Check if group still exists and has alerts (TN-125: load from storage)
 	currentGroup, err := m.storage.Load(ctx, groupKey)
@@ -1921,7 +2055,7 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 		return nil
 	}
 
-	if len(currentGroup.Alerts) == 0 {
+	if alertCount(currentGroup) == 0 {
 		m.logger.Debug("group is empty, not sending notification",
 			"group_key", groupKey)
 		return nil
@@ -1941,11 +2075,11 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 		return nil
 	}
 
-	// Switch to repeat_interval for periodic reminders.
-	// group_interval fires once after a notification is sent; subsequent reminders
-	// use repeat_interval (Alertmanager-compatible behaviour).
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
-		m.logger.Error("failed to start repeat_interval timer after group_interval",
+	// Keep flushing at group_interval. repeat_interval is not a timer of its
+	// own: it is the Dedup TTL that decides when an unchanged group is due a
+	// reminder (see effectiveRepeatInterval).
+	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
+		m.logger.Error("failed to re-arm group_interval timer",
 			"group_key", groupKey,
 			"error", err)
 		return err
@@ -1955,12 +2089,13 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 }
 
 // onRepeatIntervalExpired is the callback for repeat_interval timer expiration.
-// This sends a periodic reminder notification for an ongoing alert group and
-// restarts the repeat_interval timer so reminders continue.
+// Nothing arms a repeat_interval timer any more (see onGroupIntervalExpired);
+// this only handles timers persisted by a release that still did. It flushes
+// the group and moves it onto the group_interval cadence.
 func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, groupKey GroupKey, timerType TimerType, group *AlertGroup) error {
 	m.logger.Info("repeat_interval timer expired, sending reminder notification",
 		"group_key", groupKey,
-		"alert_count", len(group.Alerts))
+		"alert_count", alertCount(group))
 
 	// Check if group still exists and has alerts (TN-125: load from storage)
 	currentGroup, err := m.storage.Load(ctx, groupKey)
@@ -1971,7 +2106,7 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 		return nil
 	}
 
-	if len(currentGroup.Alerts) == 0 {
+	if alertCount(currentGroup) == 0 {
 		m.logger.Debug("group is empty, stopping repeat_interval",
 			"group_key", groupKey)
 		return nil
@@ -1991,9 +2126,9 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 		return nil
 	}
 
-	// Restart repeat_interval for the next reminder
-	if err := m.startRepeatIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
-		m.logger.Error("failed to restart repeat_interval timer",
+	// Continue on the group_interval cadence, like every other group.
+	if err := m.startGroupIntervalTimer(ctx, groupKey, groupTimings(currentGroup)); err != nil {
+		m.logger.Error("failed to arm group_interval timer after a legacy repeat_interval fire",
 			"group_key", groupKey,
 			"error", err)
 		return err

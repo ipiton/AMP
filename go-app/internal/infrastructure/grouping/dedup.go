@@ -15,7 +15,7 @@ import (
 // notifyDedupLog is a minimal in-memory notification-log (task 2.4, notify-
 // stage chain Step 3: Dedup), implementing GroupNotifyLog. It answers the
 // same question upstream Alertmanager's nflog answers: "did we already
-// send a notification for this exact alert set, for this group+receiver+
+// send a notification covering this alert set, for this group+receiver+
 // target, within repeat_interval?"
 //
 // Deliberately minimal: keyed by (GroupKey, target) — GroupKey alone is
@@ -29,8 +29,9 @@ import (
 // restart can therefore cause one duplicate notification per active
 // group/target — acceptable for this slice).
 //
-// Used by the lite profile (always) and by the standard profile as the
-// fallback when Redis is unavailable at grouping-init time. Its TryClaim is
+// Used by the lite profile (always), by the standard profile as the
+// fallback when Redis is unavailable at grouping-init time, and as the
+// per-process record inside resilientNotifyLog. Its TryClaim is
 // a no-op (always succeeds) because DefaultGroupManager's own per-GroupKey
 // publishLocks already fully serialize same-process callers — see
 // GroupNotifyLog's doc comment. The cross-replica, Redis-backed
@@ -107,8 +108,8 @@ func newNotifyDedupLog() *notifyDedupLog {
 	}
 }
 
-// IsDuplicate reports whether a notification for (groupKey, target) carrying
-// exactly this alert set was already sent within ttl (the group's effective
+// IsDuplicate reports whether the last notification for (groupKey, target)
+// already covered this alert set (see signatureCovers) and was sent within ttl (the group's effective
 // repeat_interval). It does NOT record anything — call RecordSent after a
 // successful publish. Implements GroupNotifyLog; ctx is unused (in-memory,
 // never blocks), and the error return is always nil.
@@ -120,12 +121,42 @@ func (l *notifyDedupLog) IsDuplicate(_ context.Context, groupKey GroupKey, targe
 	if !ok {
 		return false, nil
 	}
-	if entry.signature != signature {
-		// Alert set changed since the last send (new alert, one resolved,
-		// etc.) — never a duplicate, matches upstream nflog semantics.
+	if !signatureCovers(entry.signature, signature) {
+		// The alert set carries something the last send did not (a new
+		// alert, one that resolved, one that fired again) — never a
+		// duplicate, matches upstream nflog semantics.
 		return false, nil
 	}
 	return entry.sentAt.After(ttl), nil
+}
+
+// signatureCovers reports whether every alert of current (an
+// alertSetSignature) was already part of sent, with the same status.
+//
+// This follows upstream DedupStage's needsUpdate rule (with one known
+// difference: a resolved-only set with no prior entry is still sent here,
+// upstream sends nothing): a flush notifies when it
+// has a firing or resolved alert the last notification did not carry, not
+// whenever the set differs. A group that only SHRANK — a resolved alert was
+// notified and then pruned, or an alert became silenced or inhibited — has
+// nothing new to say and waits for repeat_interval like an unchanged one.
+// With the group flushed every group_interval, exact-match comparison
+// re-sent the remaining alerts one group_interval after every partial
+// resolve (PROD-GROUPING-DEFAULT, review finding G1).
+func signatureCovers(sent string, current string) bool {
+	if sent == current {
+		return true
+	}
+	sentKeys := make(map[string]struct{})
+	for _, key := range strings.Split(sent, "|") {
+		sentKeys[key] = struct{}{}
+	}
+	for _, key := range strings.Split(current, "|") {
+		if _, ok := sentKeys[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // RecordSent records that a notification carrying signature for
@@ -146,6 +177,19 @@ func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target
 	l.entries[key] = dedupEntry{signature: signature, sentAt: now, ttl: deliveredStateTTL(repeatInterval)}
 	delete(l.delivered, key)
 	return nil
+}
+
+// evictExpired drops every sent entry older than its own TTL. Used by
+// resilientNotifyLog, whose local record is not otherwise cleaned up for
+// groups deleted by another replica.
+func (l *notifyDedupLog) evictExpired(now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, entry := range l.entries {
+		if now.Sub(entry.sentAt) > entry.ttl {
+			delete(l.entries, key)
+		}
+	}
 }
 
 // DeliveredAlerts implements GroupNotifyLog (task fu4): the delivery keys of
@@ -346,9 +390,9 @@ func deliveredStateTTL(repeatInterval time.Duration) time.Duration {
 // alertSetSignature computes a deterministic signature for alerts: sorted
 // core.Alert.DeliveryKey values ("fingerprint:status") joined by "|".
 // Order-independent (a group's alerts map iteration order is not stable) and
-// status-sensitive (an alert flipping firing<->resolved changes the signature,
-// so it is never treated as a duplicate of the prior send — matching upstream
-// nflog, where a changed alert set always triggers a fresh notification).
+// status-sensitive (an alert flipping firing<->resolved changes its element,
+// which the prior send did not carry, so the set is not a duplicate of it —
+// see signatureCovers for the comparison).
 //
 // The per-element format is core.Alert.DeliveryKey and NOT an inline
 // concatenation (task fu4): the per-(group, target) delivered set that

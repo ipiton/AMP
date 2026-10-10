@@ -1,0 +1,318 @@
+package grouping
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/ipiton/AMP/internal/core"
+	"github.com/stretchr/testify/require"
+)
+
+type r4Publisher struct {
+	mu        sync.Mutex
+	sent      [][]*core.Alert
+	noResolve bool // send_resolved: false
+	mute      bool // never consults targets, reports nothing (metrics-only mode)
+}
+
+func (p *r4Publisher) count() int { p.mu.Lock(); defer p.mu.Unlock(); return len(p.sent) }
+
+func (p *r4Publisher) PublishGroup(_ context.Context, _ string, alerts []*core.Alert, _ string, _ map[string]string, targetAlerts func(string, []*core.Alert) []*core.Alert) ([]TargetPublishOutcome, error) {
+	if p.mute {
+		return nil, nil
+	}
+	wanted := alerts
+	if p.noResolve {
+		wanted = nil
+		for _, a := range alerts {
+			if a.Status != core.StatusResolved {
+				wanted = append(wanted, a)
+			}
+		}
+		if len(wanted) == 0 {
+			if len(targetAlerts("suppressed", alerts)) == 0 {
+				return nil, nil
+			}
+			return []TargetPublishOutcome{{Target: "suppressed", Success: true}}, nil
+		}
+	}
+	owed := targetAlerts("t", wanted)
+	if len(owed) == 0 {
+		return nil, nil
+	}
+	p.mu.Lock()
+	p.sent = append(p.sent, owed)
+	p.mu.Unlock()
+	return []TargetPublishOutcome{{Target: "t", Success: true}}, nil
+}
+
+type r4FlakyLog struct {
+	*notifyDedupLog
+	fail atomic.Bool
+}
+
+func (l *r4FlakyLog) IsDuplicate(ctx context.Context, gk GroupKey, target, sig string, ttl time.Time) (bool, error) {
+	if l.fail.Load() {
+		return false, errors.New("redis: i/o timeout")
+	}
+	return l.notifyDedupLog.IsDuplicate(ctx, gk, target, sig, ttl)
+}
+
+func r4Mgr(t *testing.T, pub GroupNotificationPublisher, nl GroupNotifyLog) *DefaultGroupManager {
+	t.Helper()
+	m, err := NewDefaultGroupManager(context.Background(), DefaultGroupManagerConfig{
+		KeyGenerator: NewGroupKeyGenerator(),
+		Config: &GroupingConfig{Route: &Route{Receiver: "default", GroupBy: []string{"alertname"},
+			GroupWait: &Duration{time.Hour}, GroupInterval: &Duration{time.Hour}, RepeatInterval: &Duration{time.Hour}}},
+		Logger:    slog.Default(),
+		Storage:   NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()}),
+		Publisher: pub,
+		NotifyLog: nl,
+	})
+	require.NoError(t, err)
+	return m
+}
+
+var (
+	r4gk = GroupKey("receiver=default/alertname=X")
+	r4lb = map[string]string{"alertname": "X"}
+)
+
+func r4Add(t *testing.T, m *DefaultGroupManager, fp string, st core.AlertStatus) {
+	t.Helper()
+	_, err := m.AddAlertToGroup(context.Background(), createTestAlert(fp, st, r4lb), r4gk)
+	require.NoError(t, err)
+}
+
+func r4Flush(t *testing.T, m *DefaultGroupManager) {
+	t.Helper()
+	g, err := m.GetGroup(context.Background(), r4gk)
+	require.NoError(t, err)
+	m.publishGroupAlerts(context.Background(), g)
+}
+
+func r4Size(t *testing.T, m *DefaultGroupManager) int {
+	t.Helper()
+	g, err := m.GetGroup(context.Background(), r4gk)
+	require.NoError(t, err)
+	return alertCount(g)
+}
+
+// H1 + H6: send_resolved:false target is not re-notified on a partial
+// resolve, and the resolved alert leaves the group.
+func TestR4_H1_NoResolveTarget(t *testing.T) {
+	pub := &r4Publisher{noResolve: true}
+	m := r4Mgr(t, pub, nil)
+	r4Add(t, m, "a", core.StatusFiring)
+	r4Add(t, m, "b", core.StatusFiring)
+	r4Flush(t, m)
+	require.Equal(t, 1, pub.count())
+
+	r4Add(t, m, "a", core.StatusResolved)
+	r4Flush(t, m)
+	t.Logf("H1: notifications after partial resolve: %d; group size: %d", pub.count(), r4Size(t, m))
+	require.Equal(t, 1, pub.count())
+	require.Equal(t, 1, r4Size(t, m))
+
+	// fires again: this target was never told it resolved, so nothing new
+	r4Add(t, m, "a", core.StatusFiring)
+	r4Flush(t, m)
+	require.Equal(t, 1, pub.count())
+	r4Add(t, m, "c", core.StatusFiring)
+	r4Flush(t, m)
+	require.Equal(t, 2, pub.count())
+	t.Logf("H1: after re-fire and a new alert: %d", pub.count())
+}
+
+// send_resolved:true target still gets the resolve, once, and it is pruned.
+func TestR4_ResolveTarget(t *testing.T) {
+	pub := &r4Publisher{}
+	m := r4Mgr(t, pub, nil)
+	r4Add(t, m, "a", core.StatusFiring)
+	r4Add(t, m, "b", core.StatusFiring)
+	r4Flush(t, m)
+	r4Add(t, m, "a", core.StatusResolved)
+	r4Flush(t, m)
+	require.Equal(t, 2, pub.count())
+	require.Equal(t, 1, r4Size(t, m))
+	r4Flush(t, m)
+	r4Flush(t, m)
+	require.Equal(t, 2, pub.count())
+	t.Logf("resolve target: notifications=%d size=%d", pub.count(), r4Size(t, m))
+}
+
+// H6: a send recorded but not followed by pruning leaves a resolved alert in
+// the group; the next flush is a dedup no-op and must prune it.
+func TestR4_H6_CoveredResolvedIsPruned(t *testing.T) {
+	pub := &r4Publisher{}
+	nl := newNotifyDedupLog()
+	m := r4Mgr(t, pub, nl)
+	r4Add(t, m, "a", core.StatusResolved)
+	r4Add(t, m, "b", core.StatusFiring)
+	g, _ := m.GetGroup(context.Background(), r4gk)
+	var all []*core.Alert
+	for _, a := range g.Alerts {
+		all = append(all, a)
+	}
+	sig := alertSetSignature(all)
+	require.NoError(t, nl.RecordSent(context.Background(), r4gk, "t", sig, time.Now(), time.Hour))
+	r4Flush(t, m)
+	t.Logf("H6: notifications=%d size=%d", pub.count(), r4Size(t, m))
+	require.Equal(t, 0, pub.count())
+	require.Equal(t, 1, r4Size(t, m))
+}
+
+// A publisher that consults nobody (metrics-only) must not cause pruning.
+func TestR4_NoConsultNoPrune(t *testing.T) {
+	pub := &r4Publisher{mute: true}
+	m := r4Mgr(t, pub, nil)
+	r4Add(t, m, "a", core.StatusResolved)
+	r4Add(t, m, "b", core.StatusFiring)
+	r4Flush(t, m)
+	require.Equal(t, 2, r4Size(t, m))
+}
+
+// Wrapper: own sends are not repeated while reads fail; new alerts go out;
+// unknown sends fail open; expired local entries are evicted.
+func TestR4_ResilientLog(t *testing.T) {
+	pub := &r4Publisher{}
+	flaky := &r4FlakyLog{notifyDedupLog: newNotifyDedupLog()}
+	wrapped := NewResilientNotifyLog(flaky)
+	m := r4Mgr(t, pub, wrapped)
+	r4Add(t, m, "a", core.StatusFiring)
+	r4Flush(t, m)
+	flaky.fail.Store(true)
+	r4Flush(t, m)
+	r4Flush(t, m)
+	r4Flush(t, m)
+	require.Equal(t, 1, pub.count())
+	r4Add(t, m, "b", core.StatusFiring)
+	r4Flush(t, m)
+	require.Equal(t, 2, pub.count())
+	t.Logf("wrapper: notifications with reads failing: %d", pub.count())
+
+	// a fresh process (empty local record) fails open
+	pub2 := &r4Publisher{}
+	m2 := r4Mgr(t, pub2, NewResilientNotifyLog(flaky))
+	r4Add(t, m2, "a", core.StatusFiring)
+	r4Flush(t, m2)
+	require.Equal(t, 1, pub2.count())
+
+	rl := wrapped.(*resilientNotifyLog)
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		_ = rl.local.RecordSent(context.Background(), GroupKey("g"+time.Duration(i).String()), "t", "x:firing", now, time.Minute)
+	}
+	before := len(rl.local.entries)
+	rl.lastSweep = time.Time{}
+	rl.sweep(now.Add(24 * time.Hour))
+	t.Logf("wrapper: local entries before sweep=%d after=%d", before, len(rl.local.entries))
+	require.Zero(t, len(rl.local.entries))
+}
+
+// T5: two "replicas" sharing group storage, timer storage and nflog. A owns
+// the timer chain; alerts keep arriving through B. B must never re-arm, and
+// the total number of flush chains must stay 1.
+func TestR4_HA_Race(t *testing.T) {
+	pub := &mockPublisher{}
+	gs := NewMemoryGroupStorage(&MemoryGroupStorageConfig{Logger: slog.Default()})
+	ts := NewInMemoryTimerStorage(nil)
+	nl := newNotifyDedupLog()
+	cfg := &GroupingConfig{Route: &Route{Receiver: "default", GroupBy: []string{"alertname"},
+		GroupWait: &Duration{20 * time.Millisecond}, GroupInterval: &Duration{20 * time.Millisecond}, RepeatInterval: &Duration{time.Hour}}}
+	mk := func() (*DefaultGroupManager, *DefaultTimerManager) {
+		tm, err := NewDefaultTimerManager(TimerManagerConfig{Storage: ts, Logger: slog.Default()})
+		require.NoError(t, err)
+		gm, err := NewDefaultGroupManager(context.Background(), DefaultGroupManagerConfig{
+			KeyGenerator: NewGroupKeyGenerator(), Config: cfg, Logger: slog.Default(),
+			Storage: gs, TimerManager: tm, Publisher: pub, NotifyLog: nl})
+		require.NoError(t, err)
+		require.NoError(t, tm.SetGroupManager(gm))
+		return gm, tm
+	}
+	a, tmA := mk()
+	b, tmB := mk()
+	defer tmA.Shutdown(context.Background())
+	defer tmB.Shutdown(context.Background())
+	ctx := context.Background()
+	gk := GroupKey("receiver=default/alertname=HA")
+	lb := map[string]string{"alertname": "HA"}
+	_, err := a.AddAlertToGroup(ctx, createTestAlert("first", core.StatusFiring, lb), gk)
+	require.NoError(t, err)
+
+	bRearmed := 0
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		_, err := b.AddAlertToGroup(ctx, createTestAlert("first", core.StatusFiring, lb), gk)
+		require.NoError(t, err)
+		tmB.timersMu.RLock()
+		if _, ok := tmB.timers[gk]; ok {
+			bRearmed++
+		}
+		tmB.timersMu.RUnlock()
+		time.Sleep(200 * time.Microsecond)
+	}
+	stA, _ := tmA.GetStats(ctx)
+	stB, _ := tmB.GetStats(ctx)
+	t.Logf("T5: B observed holding a local timer %d times; expired A=%d B=%d; notifications=%d",
+		bRearmed, stA.ExpiredTimers, stB.ExpiredTimers, len(pub.calls()))
+}
+
+// K1: an answer from the local record must not lead to pruning.
+func TestR5_K1_LocalAnswerDoesNotPrune(t *testing.T) {
+	pub := &r4Publisher{}
+	flaky := &r4FlakyLog{notifyDedupLog: newNotifyDedupLog()}
+	m := r4Mgr(t, pub, NewResilientNotifyLog(flaky))
+	r4Add(t, m, "a", core.StatusFiring)
+	r4Add(t, m, "b", core.StatusResolved)
+	r4Flush(t, m) // this replica sends a:firing|b:resolved, b pruned
+	require.Equal(t, 1, pub.count())
+	require.Equal(t, 1, r4Size(t, m))
+
+	// "another replica" announced b firing again: shared log is newer
+	r4Add(t, m, "b", core.StatusFiring)
+	g, _ := m.GetGroup(context.Background(), r4gk)
+	var all []*core.Alert
+	for _, a := range g.Alerts {
+		all = append(all, a)
+	}
+	require.NoError(t, flaky.notifyDedupLog.RecordSent(context.Background(), r4gk, "t", alertSetSignature(all), time.Now(), time.Hour))
+
+	r4Add(t, m, "b", core.StatusResolved)
+	flaky.fail.Store(true)
+	r4Flush(t, m)
+	t.Logf("K1: outage: notifications=%d size=%d", pub.count(), r4Size(t, m))
+	require.Equal(t, 1, pub.count())
+	require.Equal(t, 2, r4Size(t, m), "b:resolved must stay until someone is told")
+
+	flaky.fail.Store(false)
+	r4Flush(t, m)
+	t.Logf("K1: reads back: notifications=%d size=%d", pub.count(), r4Size(t, m))
+	require.Equal(t, 2, pub.count())
+	require.Equal(t, 1, r4Size(t, m))
+}
+
+// K5: prune must not drop an alert that fired again after the flush read it.
+func TestR5_K5_PruneKeepsRefiredAlert(t *testing.T) {
+	m := r4Mgr(t, &r4Publisher{}, nil)
+	r4Add(t, m, "a", core.StatusResolved)
+	r4Add(t, m, "b", core.StatusFiring)
+	g, _ := m.GetGroup(context.Background(), r4gk)
+	var snapshot []*core.Alert
+	for _, a := range g.Alerts {
+		cp := *a
+		snapshot = append(snapshot, &cp)
+	}
+	r4Add(t, m, "a", core.StatusFiring) // fires again before prune
+	m.pruneResolvedAlerts(context.Background(), r4gk, snapshot)
+	require.Equal(t, 2, r4Size(t, m))
+	r4Add(t, m, "a", core.StatusResolved)
+	m.pruneResolvedAlerts(context.Background(), r4gk, snapshot)
+	require.Equal(t, 1, r4Size(t, m))
+	t.Logf("K5: re-fired alert kept, resolved one pruned")
+}
