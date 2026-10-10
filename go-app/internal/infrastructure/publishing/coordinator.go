@@ -722,13 +722,14 @@ func (c *PublishingCoordinator) PublishGroupToTargets(ctx context.Context, alert
 		//  1. suppressedByFilter == 0 — every target was already covered this
 		//     cycle (the fu4/fwb dedup steady state). Nothing new happened, and
 		//     the fire that DID deliver already wrote its nflog entry and pruned
-		//     the group. Report no outcomes; the manager logs Debug and stops.
+		//     the group. Report no outcomes; the manager then drops any resolved
+		//     alerts still in the group, since every consulted target is covered.
 		//
 		//  2. suppressedByFilter > 0 — the alerts still owed are resolved ones
 		//     that every candidate target declines (send_resolved: false). This
 		//     MUST report a successful outcome, not "nothing new": returning
-		//     zero outcomes makes publishGroupAlerts skip RecordSent AND
-		//     pruneResolvedAlerts, which is the only caller of
+		//     zero outcomes with no target consulted makes publishGroupAlerts
+		//     skip RecordSent AND pruneResolvedAlerts, which is the only caller of
 		//     RemoveAlertFromGroup — so the group keeps its resolved alerts and
 		//     re-arms its group_interval timer forever, one silent no-op fire
 		//     per interval, one undead group per key. Upstream settles here: its

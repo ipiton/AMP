@@ -326,7 +326,7 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 		"group_key", groupKey,
 		"alert", alert.AlertName,
 		"fingerprint", alert.Fingerprint,
-		"group_size", len(group.Alerts),
+		"group_size", alertCount(group),
 		"is_new", isNewAlert,
 		"state", group.Metadata.State)
 
@@ -339,6 +339,18 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 	ctx context.Context,
 	fingerprint string,
 	groupKey GroupKey,
+) (bool, error) {
+	return m.removeAlertFromGroup(ctx, fingerprint, groupKey, nil)
+}
+
+// removeAlertFromGroup is RemoveAlertFromGroup with an optional guard: when
+// onlyIf is non-nil the alert is removed only if onlyIf accepts the alert the
+// group holds NOW, checked under the group lock.
+func (m *DefaultGroupManager) removeAlertFromGroup(
+	ctx context.Context,
+	fingerprint string,
+	groupKey GroupKey,
+	onlyIf func(*core.Alert) bool,
 ) (bool, error) {
 	startTime := time.Now()
 
@@ -357,7 +369,11 @@ func (m *DefaultGroupManager) RemoveAlertFromGroup(
 
 	// Remove alert from group
 	group.mu.Lock()
-	_, existed := group.Alerts[fingerprint]
+	current, existed := group.Alerts[fingerprint]
+	if existed && onlyIf != nil && !onlyIf(current) {
+		group.mu.Unlock()
+		return false, nil
+	}
 	delete(group.Alerts, fingerprint)
 	groupSize := len(group.Alerts)
 	group.mu.Unlock()
@@ -1444,12 +1460,23 @@ func (m *DefaultGroupManager) publishGroupAlerts(ctx context.Context, group *Ale
 		decisionsMu.Unlock()
 
 		dup, dupErr := m.notifyLog.IsDuplicate(ctx, group.Key, target, signature, ttl)
+		if errors.Is(dupErr, ErrNotifyLogAnsweredLocally) {
+			// The shared log could not be read and this replica's own record
+			// says it already sent this set. Enough to not send again, but
+			// not proof that the target is covered — another replica may have
+			// sent something newer — so it does not count towards pruning.
+			m.logger.Warn("nflog duplicate check failed for target; this replica already sent this alert set, skipping",
+				"group_key", group.Key,
+				"receiver", receiver,
+				"target", target,
+				"error", dupErr)
+			return nil
+		}
 		if dupErr != nil {
 			// Fail-open: a duplicate across replicas beats a dropped
 			// notification — same documented trade-off as the claim check
-			// above. The Redis-backed log is wrapped so that this is reached
-			// only for sends this replica did not make itself (see
-			// resilientNotifyLog).
+			// above. Sends this replica made itself are handled just above
+			// (see resilientNotifyLog).
 			m.logger.Error("nflog duplicate check failed for target, proceeding fail-open (duplicate-across-replicas risk accepted)",
 				"group_key", group.Key,
 				"receiver", receiver,
@@ -1804,9 +1831,9 @@ func (m *DefaultGroupManager) alertsStillOwed(ctx context.Context, groupKey Grou
 	return remaining
 }
 
-// pruneResolvedAlerts removes from the group every alert that was RESOLVED in
-// the notification just confirmed delivered, deleting the group entirely once
-// that empties it.
+// pruneResolvedAlerts removes from the group every alert that is RESOLVED in
+// alerts and that every target has been told about (or does not take),
+// deleting the group entirely once that empties it.
 //
 // Upstream parity: this is exactly what Alertmanager's aggrGroup.flush does
 // after a successful notify — resolved alerts are deleted from the aggregation
@@ -1819,11 +1846,17 @@ func (m *DefaultGroupManager) alertsStillOwed(ctx context.Context, groupKey Grou
 // eventually reaped it. Operators saw a resolved alert paging them every
 // repeat_interval.
 //
-// Only called after a CONFIRMED delivery (publisher returned nil and RecordSent
-// was reached): pruning before that would drop the resolved state before anyone
-// was told about it.
+// Called from two places in publishGroupAlerts: after a delivery every target
+// CONFIRMED, and after a flush that sent nothing because every target the
+// publisher consulted was already covered by its last notification. Pruning
+// in any other case would drop the resolved state before anyone was told
+// about it.
 //
-// alerts is the post-filter set actually sent, so alerts suppressed by
+// An alert is removed only if the group still holds it as resolved: ingest
+// does not take the publish lock, so it may have started firing again since
+// alerts was read, and a firing alert must not be dropped.
+//
+// alerts is the post-filter set of this flush, so alerts suppressed by
 // inhibition/silence are deliberately left in place — they were not announced
 // as resolved, so they must not be forgotten. Errors are logged, never fatal:
 // the worst case is the pre-fix behaviour for one more interval.
@@ -1837,9 +1870,11 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 		// RemoveAlertFromGroup handles the whole teardown when this empties
 		// the group: storage delete, DecActiveGroups, cancelGroupTimers and
 		// notifyLog.Forget.
-		removed, err := m.RemoveAlertFromGroup(ctx, alert.Fingerprint, groupKey)
+		removed, err := m.removeAlertFromGroup(ctx, alert.Fingerprint, groupKey, func(current *core.Alert) bool {
+			return current != nil && current.Status == core.StatusResolved
+		})
 		if err != nil {
-			m.logger.Warn("failed to prune resolved alert after successful group notification",
+			m.logger.Warn("failed to prune resolved alert after group flush",
 				"group_key", groupKey,
 				"fingerprint", alert.Fingerprint,
 				"error", err)
@@ -1851,7 +1886,7 @@ func (m *DefaultGroupManager) pruneResolvedAlerts(ctx context.Context, groupKey 
 	}
 
 	if pruned > 0 {
-		m.logger.Info("pruned resolved alerts after group notification (upstream aggrGroup.flush semantics)",
+		m.logger.Info("pruned resolved alerts after group flush (upstream aggrGroup.flush semantics)",
 			"group_key", groupKey,
 			"pruned", pruned)
 	}
@@ -1943,7 +1978,7 @@ func (m *DefaultGroupManager) onGroupWaitExpired(ctx context.Context, groupKey G
 		return nil
 	}
 
-	if len(currentGroup.Alerts) == 0 {
+	if alertCount(currentGroup) == 0 {
 		m.logger.Debug("group is empty, not sending notification",
 			"group_key", groupKey)
 		return nil
@@ -2002,7 +2037,7 @@ func (m *DefaultGroupManager) onGroupIntervalExpired(ctx context.Context, groupK
 		return nil
 	}
 
-	if len(currentGroup.Alerts) == 0 {
+	if alertCount(currentGroup) == 0 {
 		m.logger.Debug("group is empty, not sending notification",
 			"group_key", groupKey)
 		return nil
@@ -2053,7 +2088,7 @@ func (m *DefaultGroupManager) onRepeatIntervalExpired(ctx context.Context, group
 		return nil
 	}
 
-	if len(currentGroup.Alerts) == 0 {
+	if alertCount(currentGroup) == 0 {
 		m.logger.Debug("group is empty, stopping repeat_interval",
 			"group_key", groupKey)
 		return nil

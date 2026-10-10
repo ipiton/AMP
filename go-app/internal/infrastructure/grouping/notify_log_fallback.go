@@ -2,14 +2,22 @@ package grouping
 
 import (
 	"context"
-	"log/slog"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
 
-// localSentSweepInterval bounds how often resilientNotifyLog scans its local
+// ownSendsSweepInterval bounds how often resilientNotifyLog scans its local
 // record for expired entries.
-const localSentSweepInterval = time.Minute
+const ownSendsSweepInterval = time.Minute
+
+// ErrNotifyLogAnsweredLocally is returned by resilientNotifyLog.IsDuplicate
+// TOGETHER WITH true when the wrapped log could not be read and the answer
+// comes from this replica's own record. The caller should not send, and must
+// not treat the target as known to be up to date either. It wraps the wrapped
+// log's error.
+var ErrNotifyLogAnsweredLocally = errors.New("notification log unreadable, answered from this replica's own record")
 
 // resilientNotifyLog wraps a notification log whose reads can fail (the
 // Redis-backed one) and remembers, in this process only, every send it was
@@ -19,22 +27,25 @@ const localSentSweepInterval = time.Minute
 // returns an error. A group is flushed every group_interval, so answering
 // every failed lookup with "not a duplicate" would re-notify every target of
 // every group on every flush for as long as the log is unreachable. What this
-// replica sent itself it does not send again; a send made by another replica
-// is unknown here, so that case still returns the error and the caller
-// fails open.
+// replica sent itself it does not send again (true with
+// ErrNotifyLogAnsweredLocally); a send made by another replica is unknown
+// here, so that case still returns the wrapped error and the caller fails
+// open.
 //
-// Known limit: if another replica sent a newer notification for the same
-// (group, target) and the wrapped log then becomes unreadable, the local
-// record is stale and can suppress one notification until reads recover or
-// repeat_interval elapses.
+// Known limit: the local record knows nothing about what other replicas did
+// since. If another replica sent a newer notification for the same (group,
+// target), or resolved and deleted the group, and the wrapped log then
+// becomes unreadable, the stale record holds back the notifications it
+// covers — including the first one of a group that fired again — until reads
+// recover or repeat_interval has passed since this replica's own send.
 //
-// Local entries expire on the wrapped log's schedule (repeat_interval plus
-// grace), so a group deleted by another replica does not leave one behind.
+// Local entries are dropped by Forget and, for groups this replica did not
+// delete itself, by a sweep that runs on RecordSent and removes entries older
+// than their TTL (repeat_interval plus grace).
 type resilientNotifyLog struct {
 	GroupNotifyLog
 
-	local  *notifyDedupLog
-	logger *slog.Logger
+	local *notifyDedupLog
 
 	sweepMu   sync.Mutex
 	lastSweep time.Time
@@ -42,14 +53,10 @@ type resilientNotifyLog struct {
 
 // NewResilientNotifyLog wraps primary with a per-process record of this
 // replica's own sends, used when primary cannot answer IsDuplicate.
-func NewResilientNotifyLog(primary GroupNotifyLog, logger *slog.Logger) GroupNotifyLog {
-	if logger == nil {
-		logger = slog.Default()
-	}
+func NewResilientNotifyLog(primary GroupNotifyLog) GroupNotifyLog {
 	return &resilientNotifyLog{
 		GroupNotifyLog: primary,
 		local:          newNotifyDedupLog(),
-		logger:         logger,
 	}
 }
 
@@ -61,11 +68,7 @@ func (l *resilientNotifyLog) IsDuplicate(ctx context.Context, groupKey GroupKey,
 	}
 
 	if sentHere, _ := l.local.IsDuplicate(ctx, groupKey, target, signature, ttl); sentHere {
-		l.logger.Warn("nflog duplicate check failed for target; this replica already sent this alert set, skipping",
-			"group_key", groupKey,
-			"target", target,
-			"error", err)
-		return true, nil
+		return true, fmt.Errorf("%w: %w", ErrNotifyLogAnsweredLocally, err)
 	}
 	return false, err
 }
@@ -86,7 +89,7 @@ func (l *resilientNotifyLog) Forget(ctx context.Context, groupKey GroupKey) erro
 
 func (l *resilientNotifyLog) sweep(now time.Time) {
 	l.sweepMu.Lock()
-	due := now.Sub(l.lastSweep) >= localSentSweepInterval
+	due := now.Sub(l.lastSweep) >= ownSendsSweepInterval
 	if due {
 		l.lastSweep = now
 	}

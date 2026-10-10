@@ -691,9 +691,9 @@ type TargetPublishOutcome struct {
 // alertmanager-parity), when a group timer fires — one call per group
 // notification, not one call per alert as the pre-2.4 PublishToAll loop did.
 //
-// alerts have already been through the notify-stage chain
-// (Inhibit -> Silence -> Dedup, see publishGroupAlerts) by the time this is
-// called; PublishGroup only needs to deliver them. receiver is the matched
+// alerts have already been through Inhibit, Silence and TimeMute (see
+// publishGroupAlerts) by the time this is called. Dedup is NOT done yet: it
+// is per target and happens through targetAlerts, below. receiver is the matched
 // route's receiver name (parsed from the group key — see
 // receiverFromGroupKey), passed through so the implementation can do
 // receiver-scoped target selection (task 1.5's PublishToTargets).
@@ -720,8 +720,13 @@ type TargetPublishOutcome struct {
 // targetAlerts implements the notification log's per-target dedup (task fwb)
 // AND its per-alert refinement (task fu4). PublishGroup's implementation
 // resolves its own receiver-scoped target list internally (as it always has)
-// and MUST call targetAlerts(target.Name, alerts) once per candidate target
-// BEFORE attempting delivery, then deliver exactly the returned subset:
+// and MUST call targetAlerts once per candidate target BEFORE attempting
+// delivery, passing the alerts THAT target is owed (after its own filtering,
+// e.g. send_resolved) — the notification log entry for the target is keyed on
+// exactly that set — then deliver exactly the returned subset, and report an
+// outcome for every target that got a non-empty result. Returning no outcomes
+// after consulting at least one target tells the caller that every consulted
+// target is already covered, and it then drops the group's resolved alerts.
 //
 //   - an EMPTY/nil result means "the last send to this target already covered
 //     these alerts within repeat_interval — do not send, and do not include it in the
@@ -896,6 +901,10 @@ type GroupNotifyLog interface {
 	// re-fired alert is not. Does not record anything. signature describes
 	// the alerts this target is owed (after its own send_resolved filtering),
 	// not the whole group.
+	//
+	// An implementation that could not read its store but can vouch for the
+	// answer from elsewhere returns true together with an error wrapping
+	// ErrNotifyLogAnsweredLocally.
 	//
 	// target scopes the check to one publishing target (task fwb,
 	// alertmanager-parity wave 2 — mirrors upstream nflog's

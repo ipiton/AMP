@@ -29,8 +29,9 @@ import (
 // restart can therefore cause one duplicate notification per active
 // group/target — acceptable for this slice).
 //
-// Used by the lite profile (always) and by the standard profile as the
-// fallback when Redis is unavailable at grouping-init time. Its TryClaim is
+// Used by the lite profile (always), by the standard profile as the
+// fallback when Redis is unavailable at grouping-init time, and as the
+// per-process record inside resilientNotifyLog. Its TryClaim is
 // a no-op (always succeeds) because DefaultGroupManager's own per-GroupKey
 // publishLocks already fully serialize same-process callers — see
 // GroupNotifyLog's doc comment. The cross-replica, Redis-backed
@@ -132,7 +133,9 @@ func (l *notifyDedupLog) IsDuplicate(_ context.Context, groupKey GroupKey, targe
 // signatureCovers reports whether every alert of current (an
 // alertSetSignature) was already part of sent, with the same status.
 //
-// This is upstream DedupStage's needsUpdate rule: a flush notifies when it
+// This follows upstream DedupStage's needsUpdate rule (with one known
+// difference: a resolved-only set with no prior entry is still sent here,
+// upstream sends nothing): a flush notifies when it
 // has a firing or resolved alert the last notification did not carry, not
 // whenever the set differs. A group that only SHRANK — a resolved alert was
 // notified and then pruned, or an alert became silenced or inhibited — has
@@ -176,14 +179,6 @@ func (l *notifyDedupLog) RecordSent(_ context.Context, groupKey GroupKey, target
 	return nil
 }
 
-// DeliveredAlerts implements GroupNotifyLog (task fu4): the delivery keys of
-// the alerts target accepted while the group stayed unconfirmed. ctx is unused
-// (in-memory) and the error is always nil.
-//
-// Expired state is dropped here rather than by a background sweeper (review
-// round 1, finding I1): this is the only read path, so expiring on read gives
-// the same observable behaviour as the Redis TTL with no extra goroutine, and it
-// reclaims the memory at the same time.
 // evictExpired drops every sent entry older than its own TTL. Used by
 // resilientNotifyLog, whose local record is not otherwise cleaned up for
 // groups deleted by another replica.
@@ -197,6 +192,14 @@ func (l *notifyDedupLog) evictExpired(now time.Time) {
 	}
 }
 
+// DeliveredAlerts implements GroupNotifyLog (task fu4): the delivery keys of
+// the alerts target accepted while the group stayed unconfirmed. ctx is unused
+// (in-memory) and the error is always nil.
+//
+// Expired state is dropped here rather than by a background sweeper (review
+// round 1, finding I1): this is the only read path, so expiring on read gives
+// the same observable behaviour as the Redis TTL with no extra goroutine, and it
+// reclaims the memory at the same time.
 func (l *notifyDedupLog) DeliveredAlerts(_ context.Context, groupKey GroupKey, target string) ([]string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -387,9 +390,9 @@ func deliveredStateTTL(repeatInterval time.Duration) time.Duration {
 // alertSetSignature computes a deterministic signature for alerts: sorted
 // core.Alert.DeliveryKey values ("fingerprint:status") joined by "|".
 // Order-independent (a group's alerts map iteration order is not stable) and
-// status-sensitive (an alert flipping firing<->resolved changes the signature,
-// so it is never treated as a duplicate of the prior send — matching upstream
-// nflog, where a changed alert set always triggers a fresh notification).
+// status-sensitive (an alert flipping firing<->resolved changes its element,
+// which the prior send did not carry, so the set is not a duplicate of it —
+// see signatureCovers for the comparison).
 //
 // The per-element format is core.Alert.DeliveryKey and NOT an inline
 // concatenation (task fu4): the per-(group, target) delivered set that

@@ -296,12 +296,15 @@ printf '%s' "$restored_one" | grep -q '"restored":0' &&
   fail "replica B restored 0 timers ($restored_one) -- it does not hold a local timer for '$ALERT_1', so the concurrent-fire scenario is vacuous"
 log "replica B restored timers from shared Redis: $restored_one"
 
-log "waiting up to $((GROUP_INTERVAL + 15))s for the group_interval fire both replicas' timers for '$ALERT_1' race for"
+log "polling (up to $((GROUP_INTERVAL + 15)) times) for the group_interval fire both replicas' timers for '$ALERT_1' race for"
 # Polled, not a fixed sleep: the group is flushed on EVERY group_interval, and
 # the metrics-only publisher never records a send, so each later flush adds one
 # more publish. Counting right after the second publish appears keeps the
 # assertion independent of how long the restart above took.
-concurrent_total=0
+baseline=$(( $(undelivered_count amp-a "$ALERT_1") + $(undelivered_count amp-b "$ALERT_1") ))
+[[ "$baseline" -eq 1 ]] ||
+  fail "'$ALERT_1' was already published $baseline time(s) before replica B was back -- the group_interval fire happened without B, the concurrent-fire scenario is vacuous (the restart took too long)"
+concurrent_total=$baseline
 for _ in $(seq 1 $((GROUP_INTERVAL + 15))); do
   concurrent_a=$(undelivered_count amp-a "$ALERT_1")
   concurrent_b=$(undelivered_count amp-b "$ALERT_1")
