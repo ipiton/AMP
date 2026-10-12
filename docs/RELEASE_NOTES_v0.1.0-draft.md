@@ -319,8 +319,6 @@ as such).
 - `FU-MATCHER-LABEL-CHARSET` — `pkg/configvalidator/matcher.Parse`'s
   label-name charset is narrower than upstream's (no `:`); a colon-containing
   label in a `matchers:` entry hard-fails config load.
-- `FU-TOPLEVEL-INHIBIT-RULES` — a top-level `inhibit_rules:` key (upstream's
-  own placement) is parsed but not consumed.
 - `FU-HEALTH-HTTP-CONFIG` — publisher health probes ignore per-target
   `http_config` (one process-wide client); a proxied/mTLS/auth-gated target
   can report unhealthy while still delivering.

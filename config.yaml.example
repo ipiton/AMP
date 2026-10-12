@@ -435,7 +435,8 @@ receivers:
 # ============================================================================
 # Inhibition Rules (Alertmanager parity, PARITY-A2)
 # Suppress target alerts while a source alert is firing on the same labels.
-# Compatible with Alertmanager inhibit_rules format.
+# Compatible with Alertmanager inhibit_rules format. Upstream's top-level
+# `inhibit_rules:` is applied as well; both lists are merged, top-level first.
 # ============================================================================
 inhibition:
   # Optional: path to a separate YAML file with inhibit_rules

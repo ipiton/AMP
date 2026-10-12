@@ -502,13 +502,13 @@ if result.Matched {
 
 ```promql
 # Check inhibition rate
-rate(alert_history_business_inhibition_checks_total{result="inhibited"}[5m])
+rate(alert_history_inhibition_check_total{result="inhibited"}[5m])
 
 # Check most active inhibition rules
-topk(10, rate(alert_history_business_inhibition_matches_total[5m]))
+topk(10, rate(alert_history_inhibition_match_total[5m]))
 
 # Check cache hit rate
-sum(rate(alert_history_business_inhibition_cache_hits_total[5m])) by (cache_level)
+sum(rate(alert_history_inhibition_cache_hits_total[5m])) by (tier)
 ```
 
 ---

@@ -122,8 +122,8 @@ route:
 **Description**: Route duration fields must be positive.
 **Solution**: Set `group_wait`, `group_interval`, `repeat_interval` to positive durations.
 
-### E027/E028: superseded by E150/E151
-See "Inhibition Errors" below - implemented under E150 (source) and E151
+### E027/E028: superseded by W150/W151 (formerly E150/E151)
+See "Inhibition Errors" below - implemented under W150 (source) and W151
 (target), not E027/E028. As of wave 7 (`FU-INHIBIT-MATCHERS`),
 `source_matchers`/`target_matchers` alone DO satisfy either — the runtime
 loader now implements the matchers-form list syntax the same as the
@@ -314,17 +314,26 @@ maps.
 
 ---
 
-## **Inhibition Errors** (E150-E154)
+## **Inhibition Errors** (E152-E154) and Warnings (W150-W151)
 
-### E150: Source Match Required
-**Severity**: Error
-**Solution**: Define `source_match`, `source_match_re`, or `source_matchers`
-(upstream's modern list syntax — any of the three satisfies this, wave 7).
+Formerly E150/E151 (errors). Upstream Alertmanager accepts an inhibit rule with
+an empty side — kube-prometheus-stack ships `- target_matchers: [alertname =
+InfoInhibitor]` with no source — so since `FU-TOPLEVEL-INHIBIT-RULES` these are
+warnings and the rule loads.
 
-### E151: Target Match Required
-**Severity**: Error
-**Solution**: Define `target_match`, `target_match_re`, or `target_matchers`
-(upstream's modern list syntax — any of the three satisfies this, wave 7).
+### W150: No Source Condition
+**Severity**: Warning
+**Meaning**: The rule has none of `source_match`, `source_match_re`,
+`source_matchers`, so every firing alert can act as its source.
+**Solution**: Add a source condition unless this is intended.
+
+### W151: No Target Condition
+**Severity**: Warning
+**Meaning**: The rule has none of `target_match`, `target_match_re`,
+`target_matchers`, so it can mute any alert. With no source condition either,
+it mutes nothing: an alert matching both sides never inhibits itself or another
+such alert (upstream's two-sided-match rule).
+**Solution**: Add a target condition unless this is intended.
 
 ### E152: Invalid Label in 'Equal'
 **Severity**: Error
@@ -512,7 +521,7 @@ this code is retired rather than reused.
 | E010-E099 | Structural | 19 |
 | E100-E109 | Route | 10 |
 | E110-E149 | Receiver | 33 |
-| E150-E159 | Inhibition | 5 |
+| E150-E159 | Inhibition | 3 |
 | E200-E209 | Global | 10 |
 | **W000-W399** | **Warnings** | **60+** |
 | **I000-I399** | **Info** | **10+** |

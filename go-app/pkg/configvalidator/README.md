@@ -253,9 +253,8 @@ for _, mode := range modes {
 - `E118` - Email 'to' address required
 - `E122` - PagerDuty key required
 
-### Inhibition Errors (E150-E154)
-- `E150` - Source matchers required
-- `E151` - Target matchers required
+### Inhibition Errors (E152-E154)
+- `W150` / `W151` - Rule has no source / target condition (warnings; formerly errors E150/E151)
 - `E152` - Invalid label name
 - `E153` - Invalid matcher format
 
