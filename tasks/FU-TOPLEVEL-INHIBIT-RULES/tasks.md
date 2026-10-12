@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: верхнеуровневый `inhibit_rules:` молча игнорируется
 
-**Based on:** requirements.md / research.md / Spec.md v1.0  
+**Based on:** requirements.md / research.md / Spec.md v1.0
 **Date:** 2026-10-12
 
 Пути ниже — относительно `go-app/`, если не указано иное. `C` = `./internal/config/`.
@@ -97,9 +97,9 @@ based_on:
 
 ## Phase 5: Testing (гейты AMP)
 
-- [ ] **5.1** `make -C go-app quality-gates-fast` + `git status` после `go fmt`. <!-- verify: exit 0, нет непредвиденных изменений -->
-- [ ] **5.2** `scripts/release-gate.sh` (код Go изменён). <!-- verify: RESULT: PASS -->
-- [ ] **5.3** `git diff --check main...`, в диффе нет `_, _ :=`. <!-- verify: пусто -->
+- [x] **5.1** `make -C go-app quality-gates-fast` + `git status` после `go fmt`. _2026-10-12: passed, `go fmt` ничего не переписал._ <!-- verify: exit 0, нет непредвиденных изменений -->
+- [x] **5.2** `scripts/release-gate.sh` (код Go изменён). _2026-10-12 @ `294e412`: `RESULT: PASS` — build, golangci-lint, test, futureparity, race, helm-deps/dev/production/rbac/tests, amtool-compat._ <!-- verify: RESULT: PASS -->
+- [x] **5.3** `git diff --check main...`, в диффе нет `_, _ :=`. _2026-10-12: найдены хвостовые пробелы в шапках Spec.md:16 и tasks.md:17 (markdown hard break из шаблона) — убраны; `_, _ :=` нет._ <!-- verify: пусто -->
 
 ## Notes
 

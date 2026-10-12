@@ -13,7 +13,7 @@ based_on:
 
 # Specification: верхнеуровневый `inhibit_rules:` молча игнорируется
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary

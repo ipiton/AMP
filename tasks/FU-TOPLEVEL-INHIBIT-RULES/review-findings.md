@@ -147,6 +147,15 @@
 
 - T7: свежий `prometheus.NewRegistry()` как Default, lite + filesystem, `NewServiceRegistry` + `Initialize`, `inhibitionMatcher != nil`; через `Gather` проверить, что `alert_history_inhibition_cache_*` в реестре теста (`sync.Once` в `GetCacheMetrics` иначе маскирует регрессию). Черновик ревьюера B: `scratchpad/reviewB/inhib_startup_test.go`.
 
+## Testing (write-tests @ `294e412`, testing)
+
+Ни одна находка не была отложена на `testing`. Исправления fix-here подтверждены тестами, каждый тест проверен мутацией:
+- **F1** — `TestTopLevelInhibitRules_LabelNameCasePreserved` (оба размещения); если `loadInhibitRulesYAML` ничего не делает → FAIL.
+- **F2 / N4** — `TestTopLevelInhibitRules_ConfigValidator` (target-only InfoInhibitor грузится и подавляет при `route:`), `validators/inhibition_test.go` (W150/W151 без ошибок, текст сообщений закреплён).
+- **F11** — `TestRoutingFingerprint_SeesInhibitMatchersChange` + `TestAlertmanagerConfigYAML_KeepsInhibitMatchers` (matchers-форма видна fingerprint и `config.original`; сам `Clone()` отдельным тестом не закреплён — одна строка, покрыта код-ридом R2).
+- **Panic метрик** — `pkg/metrics/inhibition_cache_collision_test.go`; на `metrics.go` из `60b1584^` → FAIL с исходным текстом panic'а.
+- **T7 отступил от Notes:** вместо старта `ServiceRegistry` — совместная регистрация `GetCacheMetrics` + `NewBusinessMetrics` в свежем registry. Старт в общем тест-бинаре `internal/application` зависит от порядка тестов из-за `sync.Once`; guard через `Gather` оставлен.
+
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.
