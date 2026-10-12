@@ -72,7 +72,7 @@ func (v *InhibitionValidator) Validate(_ context.Context, cfg *config.Alertmanag
 		}
 		if !hasTargetCondition {
 			result.AddWarning(newWarning("W151", "inhibit_rules", path,
-				"inhibit rule has no target condition: it can mute any alert",
+				"inhibit rule has no target condition: it can mute any alert (with no source condition either, it mutes nothing)",
 				"Define 'target_match', 'target_match_re', or 'target_matchers' unless this is intended"))
 		}
 

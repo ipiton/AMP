@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (Full tier: `C X R`, 3 сигнала — после Deviation 1.8)
 **Reviewer perspective:** R1 — два независимых агента (general-purpose, read-only, `go test -overlay` в scratchpad), не видевших выводов автора и друг друга: (A) корректность + премисы + контракт конфига + сопровождаемость; (B) runtime/rollout + observability + cross-boundary + история git. F1 и F2 перепроверены автором по коду после получения отчётов.
 **Reviewed at:** 2026-10-12
-**Reviewed tree:** `bugfix/fu-toplevel-inhibit-rules` @ `60b1584`
-**Verdict:** fix_required (см. `review-verdict.json`)
+**Reviewed tree:** R1 — `bugfix/fu-toplevel-inhibit-rules` @ `60b1584`; R2 — @ `21a84cc`
+**Verdict:** R1 fix_required → R2 pass (см. `review-verdict.json`)
 
 ## Findings
 
@@ -90,6 +90,50 @@
 - **Severity:** nit
 - **Location:** `go-app/internal/config/inhibition_adapter.go:65-68`.
 - **Disposition:** fix-here (после F1; смягчить с учётом F3)
+
+## Round 2 (@ `21a84cc`, третий независимый агент, в R1 не участвовал)
+
+Закрыты: **F1** (регистр сохраняется для обоих размещений; все пути загрузки — `main.go:64`, `futureparity_compat.go:124`, `reload_coordinator.go:365` — идут через `LoadConfig`; int/bool/float/null-скаляры, anchors/merge-keys, `null`, env `INHIBITION_CONFIG_FILE` — без регрессий против viper), **F2** (W150/W151; пустая сторона = «всё» в runtime, правило с обеими пустыми сторонами глушит ничего — как upstream; других потребителей E150/E151 нет), **F9**, **F11**, **F12**. **F8** — Phase 4 не выполнена (ожидаемо), план дополнен (N5).
+
+### N1 — строгий yaml.v3 ломает ранее загружавшиеся вложенные формы
+- **Severity:** minor
+- **Location:** `go-app/internal/config/config.go:741-749`
+- **Issue:** `equal: cluster` (скаляр) и `inhibit_rules:` как одна map под `inhibition:` грузились на `main` (weak decode viper), теперь exit 1. Upstream отвергает обе формы — паритет, но громкий апгрейд-брейк.
+- **Disposition:** fix-here (migration note в CHANGELOG, tasks.md 4.3)
+
+### N2 — ключи секции в другом регистре теперь игнорируются
+- **Severity:** minor
+- **Location:** `go-app/internal/config/config.go:741-752`
+- **Issue:** `Inhibition:`, `Inhibit_Rules:`, `Source_Match:` viper сопоставлял без учёта регистра; yaml.v3 — нет, и результат перезаписывает viper ⇒ правила или сторона правила пропадают молча. Upstream такие ключи отвергает как неизвестные. Вероятно, редкость.
+- **Disposition:** defer-tech-debt (громкая ошибка на ключ, совпадающий без учёта регистра) + migration note в CHANGELOG (4.3)
+- **Follow-up:** `TECH-DEBT.md` — на `finalize`
+
+### N3 — путь `inhibition.config_file` по-прежнему отвергает одностороннее правило
+- **Severity:** minor
+- **Location:** `go-app/internal/infrastructure/inhibition/parser.go:349-357`, `models.go:192-207`
+- **Issue:** target-only правило kube-prometheus-stack грузится на верхнем уровне и inline, но не из `config_file`. Формат `config_file` — AMP-специфичный, verbatim upstream туда не попадает.
+- **Disposition:** defer-backlog (ослабить `validateSemantics` — правка движка ингибиции, Non-Goal задачи)
+- **Follow-up:** `BACKLOG.md` — на `finalize`
+
+### N4 — текст W151 неверен для правила с обеими пустыми сторонами
+- **Severity:** nit
+- **Location:** `go-app/pkg/configvalidator/validators/inhibition.go:74-76`
+- **Disposition:** fix-here — сделано после R2 (только строка сообщения), закрепить в тесте 3.4
+
+### N5 — E150/E151 как ошибки остались в доках валидатора
+- **Severity:** nit
+- **Location:** `go-app/pkg/configvalidator/ERROR_CODES.md:317-326,515`, `go-app/pkg/configvalidator/README.md:256-258`; тесты — 3.4
+- **Disposition:** fix-here (tasks.md 4.4)
+
+### S1 (подозрение) — разорванное чтение файла на reload
+- **Severity:** minor
+- **Location:** `config.go:687,729,786`, `reload_coordinator.go:359`
+- **Issue:** один reload читает файл 3–4 раза; подмена symlink ConfigMap между чтениями может склеить версии. Класс уже был с `loadRouteConfig`, задача добавляет одно чтение.
+- **Disposition:** defer-tech-debt (рядом с `CONFIG-GLOBAL-VIPER-STATE`: читать байты один раз)
+
+### S2 (подозрение) — отсутствующий файл на повторной загрузке
+- **Severity:** nit
+- **Disposition:** reject (reason: reload проверяет существование файла до загрузки — путь недостижим)
 
 ## Подтверждено чистым
 
