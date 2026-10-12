@@ -243,3 +243,27 @@ func TestIsSecretKey(t *testing.T) {
 	assert.True(t, isSecretKey("slack_api_url", "global"), "global.slack_api_url is upstream SecretURL")
 	assert.False(t, isSecretKey("api_url", "telegram_configs"), "the Telegram Bot API base is public")
 }
+
+// FU-TOPLEVEL-INHIBIT-RULES: routing.InhibitRule used to carry only the legacy
+// maps, so a top-level rule in upstream's matchers form reached config.original
+// with both sides gone and amtool/karma saw a rule that matched everything.
+func TestAlertmanagerConfigYAML_KeepsInhibitMatchers(t *testing.T) {
+	parsed, err := infraroute.NewRouteConfigParser().Parse([]byte(`
+route:
+  receiver: default
+receivers:
+  - name: default
+inhibit_rules:
+  - source_matchers: ['alertname="ClusterDown"']
+    target_matchers: ['severity=~"warning|info"']
+    equal: [cluster]
+`))
+	require.NoError(t, err)
+
+	var reparsed infraroute.RouteConfig
+	require.NoError(t, yaml.Unmarshal([]byte(AlertmanagerConfigYAML(&appconfig.Config{Routing: parsed})), &reparsed))
+	require.Len(t, reparsed.InhibitRules, 1)
+	assert.Equal(t, []string{`alertname="ClusterDown"`}, reparsed.InhibitRules[0].SourceMatchers)
+	assert.Equal(t, []string{`severity=~"warning|info"`}, reparsed.InhibitRules[0].TargetMatchers)
+	assert.Equal(t, []string{"cluster"}, reparsed.InhibitRules[0].Equal)
+}

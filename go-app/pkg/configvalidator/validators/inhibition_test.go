@@ -2,6 +2,7 @@ package validators
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ipiton/AMP/internal/alertmanager/config"
@@ -43,7 +44,7 @@ func TestInhibitionValidator(t *testing.T) {
 			// now implements source_matchers/target_matchers for real
 			// (internal/infrastructure/inhibition.InhibitionRule.
 			// CompileMatchers), so the matchers-form list alone must
-			// satisfy E150/E151 with no errors and no warnings.
+			// satisfy W150/W151 with no errors and no warnings.
 			name: "matchers list syntax alone is sufficient (wired at runtime)",
 			cfg: &config.AlertmanagerConfig{
 				InhibitRules: []*config.InhibitRule{
@@ -73,13 +74,16 @@ func TestInhibitionValidator(t *testing.T) {
 			wantNoIssues: true,
 		},
 		{
+			// Legal upstream (kube-prometheus-stack ships a target-only
+			// InfoInhibitor rule): a warning, never an error.
 			name: "missing source matchers",
 			cfg: &config.AlertmanagerConfig{
 				InhibitRules: []*config.InhibitRule{
-					{TargetMatch: map[string]string{"alertname": "InstanceDown"}},
+					{TargetMatchers: []string{"alertname = InfoInhibitor"}},
 				},
 			},
-			wantErrCode: "E150",
+			wantWarnCode:   "W150",
+			dontWantErrors: true,
 		},
 		{
 			name: "missing target matchers",
@@ -88,7 +92,8 @@ func TestInhibitionValidator(t *testing.T) {
 					{SourceMatch: map[string]string{"alertname": "NodeDown"}},
 				},
 			},
-			wantErrCode: "E151",
+			wantWarnCode:   "W151",
+			dontWantErrors: true,
 		},
 		{
 			name: "invalid equal label name",
@@ -165,5 +170,29 @@ func TestInhibitionValidator(t *testing.T) {
 				t.Fatalf("expected warning code %s, got %+v", tt.wantWarnCode, result.Warnings)
 			}
 		})
+	}
+}
+
+// TestInhibitionValidator_EmptySidesMessages pins the W150/W151 wording: an
+// operator reading it must learn what the runtime actually does with an empty
+// side, including that a rule with both sides empty mutes nothing (the
+// runtime refuses to let an alert inhibit itself).
+func TestInhibitionValidator_EmptySidesMessages(t *testing.T) {
+	result := runInhibitionValidator(&config.AlertmanagerConfig{
+		InhibitRules: []*config.InhibitRule{{Equal: []string{"cluster"}}},
+	})
+
+	if len(result.Errors) != 0 {
+		t.Fatalf("expected no errors, got %+v", result.Errors)
+	}
+	messages := map[string]string{}
+	for _, w := range result.Warnings {
+		messages[w.Code] = w.Message
+	}
+	if got := messages["W150"]; !strings.Contains(got, "every alert can act as its source") {
+		t.Fatalf("W150 message = %q", got)
+	}
+	if got := messages["W151"]; !strings.Contains(got, "it can mute any alert") || !strings.Contains(got, "it mutes nothing") {
+		t.Fatalf("W151 message = %q", got)
 	}
 }
