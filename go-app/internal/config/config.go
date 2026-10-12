@@ -45,6 +45,13 @@ type Config struct {
 	Silencing     SilencingConfig     `mapstructure:"silencing" yaml:"silencing,omitempty"`
 	Receivers     []ReceiverConfig    `mapstructure:"receivers"`
 
+	// InhibitRules is upstream Alertmanager's own top-level `inhibit_rules:`
+	// placement. It is merged with Inhibition.Rules by Config.InhibitionRules,
+	// so a verbatim alertmanager.yml inhibits without moving its rules under
+	// `inhibition:` (FU-TOPLEVEL-INHIBIT-RULES; before that the key was parsed
+	// and silently ignored). Not `json:"-"`: the reload diff must see it.
+	InhibitRules []InhibitionRuleConfig `mapstructure:"inhibit_rules" yaml:"inhibit_rules,omitempty"`
+
 	// Routing holds the full Alertmanager-compatible route tree and receiver
 	// definitions (top-level `route:` + `receivers:` + `global:` YAML
 	// sections), parsed via the existing infrastructure/routing.Parse()
@@ -686,8 +693,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Task 5.4 (carried fix): fail fast if the external inhibition rules
 	// file (inhibition.config_file) is missing or malformed, instead of
 	// silently dropping all file-based inhibition rules at startup/reload
-	// time (see internal/config/inhibition_adapter.go).
-	if _, err := cfg.Inhibition.ToInhibitionRules(); err != nil {
+	// time (see internal/config/inhibition_adapter.go). Covers top-level
+	// `inhibit_rules:` too (FU-TOPLEVEL-INHIBIT-RULES).
+	if _, err := cfg.InhibitionRules(); err != nil {
 		return nil, fmt.Errorf("inhibition config validation failed: %w", err)
 	}
 
@@ -795,7 +803,7 @@ func LoadConfigFromEnv() (*Config, error) {
 	}
 
 	// Task 5.4 (carried fix): same fail-fast as LoadConfig - see there.
-	if _, err := cfg.Inhibition.ToInhibitionRules(); err != nil {
+	if _, err := cfg.InhibitionRules(); err != nil {
 		return nil, fmt.Errorf("inhibition config validation failed: %w", err)
 	}
 

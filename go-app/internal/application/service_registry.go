@@ -1330,7 +1330,7 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 		return fmt.Errorf("context cancelled before inhibition init: %w", err)
 	}
 
-	rules, err := r.config.Inhibition.ToInhibitionRules()
+	rules, err := r.config.InhibitionRules()
 	if err != nil {
 		// Task 5.4 (carried fix): a broken inhibition.config_file is
 		// normally already caught at LoadConfig time (fail-fast); this is
@@ -1344,7 +1344,10 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 		return nil
 	}
 
-	r.logger.Info("Initializing inhibition subsystem...", "rules", len(rules))
+	r.logger.Info("Initializing inhibition subsystem...",
+		"rules", len(rules),
+		"top_level_rules", len(r.config.InhibitRules),
+	)
 
 	alertCache := inhibitionpkg.NewTwoTierAlertCache(r.cache, r.logger)
 	stateManager := inhibitionpkg.NewDefaultStateManager(r.cache, r.logger, r.metrics)
@@ -2696,7 +2699,7 @@ func (r *ServiceRegistry) ReloadConfig(ctx context.Context) error {
 	// ReloadFromFile, before the atomic config swap above), so an error
 	// here would only come from the file changing on disk in that narrow
 	// window; report it rather than silently keeping stale rules.
-	newRules, rulesErr := r.config.Inhibition.ToInhibitionRules()
+	newRules, rulesErr := r.config.InhibitionRules()
 	if rulesErr != nil {
 		r.logger.Error("Failed to load inhibition rules after config reload; live matcher rules unchanged", "error", rulesErr)
 	} else if r.inhibitionMatcher != nil {
