@@ -1,14 +1,14 @@
 {
-  "gate": "fix_required",
-  "reason": "F1 (viper lowercases label names in *_match maps) and F2 (E150/E151 reject source-less/target-less rules upstream accepts) are major, fix-here",
+  "gate": "pass",
+  "reason": null,
   "branch": "bugfix/fu-toplevel-inhibit-rules",
-  "commit": "60b1584",
+  "commit": "bee0261",
   "reviewed_at": "2026-10-12",
   "findings": {
     "blocker": 0,
     "major": 2,
-    "minor": 6,
-    "nit": 4
+    "minor": 9,
+    "nit": 7
   },
   "open": {
     "blocker": 0,
