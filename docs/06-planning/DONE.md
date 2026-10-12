@@ -17,6 +17,13 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-12 — (BUG / Parity / Inhibition, P0) **FU-TOPLEVEL-INHIBIT-RULES** — верхнеуровневый `inhibit_rules:` (размещение upstream) применяется: verbatim `alertmanager.yml` ингибирует, а не молча игнорирует правила.
+  - **Слияние:** `Config.InhibitionRules()` — top-level, затем `inhibition.inhibit_rules`, затем `config_file`; через него идут старт, hot reload и fail-fast `LoadConfig`. Ошибка называет источник (`top-level inhibition rule "inhibit_rules[0]"`); `configvalidator` видит оба списка. `routing.InhibitRule` получил `source_matchers`/`target_matchers` — `config.original` и fingerprint их видят.
+  - **Panic на старте** (найден смоуком, чинили здесь по решению владельца): с `a822faf` (PARITY-A2, 2026-04-16) любой конфиг хотя бы с одним inhibit-правилом ронял AMP — `BusinessMetrics.InhibitionCache*` дублировали имена `inhibition.GetCacheMetrics`. Мёртвые дубли удалены.
+  - **Deep-review** (2 раунда, Full tier): регистр имён label'ов (viper приводил `clusterName` к нижнему) — правила перечитываются через yaml.v3, для обоих размещений; E150/E151 → W150/W151 (upstream принимает одностороннее правило kube-prometheus-stack InfoInhibitor).
+  - **Проверено:** тесты T1–T8 с мутациями (каждая ловится), T7 падает на `metrics.go` до фикса; `quality-gates-fast`, `scripts/release-gate.sh` PASS @ `294e412`; смоуки бинаря (подавление, mixed-case, одностороннее правило, битый matcher → exit 1).
+  - **Follow-ups:** BUGS `INHIBIT-RELOAD-ROLLBACK-KEEPS-RULES`; BACKLOG `FU-INHIBIT-RELOAD-ENGINE-OFF`, `FU-INHIBIT-UNNAMED-RULES`, `FU-INHIBIT-CONFIG-FILE-ONE-SIDED`; TECH-DEBT `INHIBIT-CONFIG-LOUDNESS`, дополнен `CONFIG-GLOBAL-VIPER-STATE`. Миграция: строгий разбор правил и «оживающие» правила — в CHANGELOG.
+
 - 2026-10-10 — (BUG / Grouping, P0) **PROD-GROUPING-DEFAULT** — `grouping.enabled` по умолчанию `true`: verbatim `alertmanager.yml` с `route:` теперь группирует, а не шлёт каждый алерт сразу и молча.
   - **Дефолт:** код (`config.go`) и чарт (`values.yaml`, `GROUPING_ENABLED`) согласованы. Без `route:` — чистый пропуск (INFO «not started», без degraded-причины и без WARN на каждый алерт); `route:` + явный `false` — WARN один раз на старте. Утверждение доков «lite игнорирует `grouping.enabled`» оказалось неверным — исправлено.
   - **Цепочка `group_interval`** (deep-review F1, по решению владельца — корень, а не заплатка): после `group_wait` таймер группы тикает каждый `group_interval` постоянно; новый алерт или resolve в уже нотифицированной группе уходит не позже `group_interval` (раньше — по `repeat_interval`, до 4h). `ensureGroupTimer` перевзводит таймер группе без таймера.

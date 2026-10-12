@@ -33,13 +33,13 @@ updated_at: 2026-10-12
 
 ## Success Criteria
 
-- [ ] Верхнеуровневый `inhibit_rules:` применяется в runtime при старте и при hot reload — со всеми формами upstream (`source_match`/`_re`, `target_match`/`_re`, `source_matchers`/`target_matchers`, `equal`).
-- [ ] Ошибка в верхнеуровневом правиле (битый regex/matcher) валит старт и отклоняет reload так же, как для `inhibition.inhibit_rules`, и проходит через `configvalidator`.
-- [ ] Семантика при одновременном наличии обоих источников определена в Spec и покрыта тестом (объединение или явная ошибка — решение в research/spec).
-- [ ] Изменение верхнеуровневого `inhibit_rules:` при hot reload доходит до движка ингибиции (diff/fingerprint его видят).
-- [ ] Мёртвое поле `RouteConfig.InhibitRules` / тип-плейсхолдер `routing.InhibitRule` убраны или перестают вводить в заблуждение.
-- [ ] Доки: `ALERTMANAGER_COMPATIBILITY.md` (Known Gap #9 закрыт, строка Inhibition 🟢, инструкции по миграции стр. ~994), `CHANGELOG.md` `[Unreleased]` (Fixed + migration note о том, что ранее неактивные правила начнут работать).
-- [ ] Гейты AMP из `WORKFLOW.md` зелёные, включая `scripts/release-gate.sh`.
+- [x] Верхнеуровневый `inhibit_rules:` применяется в runtime при старте и при hot reload — со всеми формами upstream (`source_match`/`_re`, `target_match`/`_re`, `source_matchers`/`target_matchers`, `equal`).
+- [x] Ошибка в верхнеуровневом правиле (битый regex/matcher) валит старт и отклоняет reload так же, как для `inhibition.inhibit_rules`, и проходит через `configvalidator`.
+- [x] Семантика при одновременном наличии обоих источников определена в Spec и покрыта тестом (объединение или явная ошибка — решение в research/spec).
+- [x] Изменение верхнеуровневого `inhibit_rules:` при hot reload доходит до движка ингибиции (diff/fingerprint его видят).
+- [x] Мёртвое поле `RouteConfig.InhibitRules` / тип-плейсхолдер `routing.InhibitRule` убраны или перестают вводить в заблуждение.
+- [x] Доки: `ALERTMANAGER_COMPATIBILITY.md` (Known Gap #9 закрыт, строка Inhibition 🟢, инструкции по миграции стр. ~994), `CHANGELOG.md` `[Unreleased]` (Fixed + migration note о том, что ранее неактивные правила начнут работать).
+- [x] Гейты AMP из `WORKFLOW.md` зелёные, включая `scripts/release-gate.sh`.
 
 ## Non-Goals
 

@@ -102,9 +102,9 @@ AMP начинает читать верхнеуровневый `inhibit_rules:
 
 ## Invariants
 
-- [ ] Конфиг только с `inhibition.inhibit_rules` ведёт себя побайтно так же (те же правила, тот же порядок, те же ошибки).
-- [ ] Ошибка в любом правиле любого источника никогда не приводит к частичной загрузке: старт падает, reload отклоняется, живые правила не меняются.
-- [ ] Семантика сопоставления (`internal/infrastructure/inhibition`) не меняется.
+- [x] Конфиг только с `inhibition.inhibit_rules` ведёт себя побайтно так же (те же правила, тот же порядок, те же ошибки). _T2, T3 (inline-префикс)._
+- [x] Ошибка в любом правиле любого источника никогда не приводит к частичной загрузке: старт падает, reload отклоняется, живые правила не меняются. _T3; исключение — откат reload после коммита при падении `reloadRoutingTree` (предсуществующее, review F3 → BUGS `INHIBIT-RELOAD-ROLLBACK-KEEPS-RULES`)._
+- [x] Семантика сопоставления (`internal/infrastructure/inhibition`) не меняется. _Пакет не тронут (только README)._
 
 ## Edge Cases
 
@@ -150,5 +150,5 @@ AMP начинает читать верхнеуровневый `inhibit_rules:
 
 ## Open Questions
 
-- [ ] Показывать ли вложенные `inhibition.inhibit_rules` в `/api/v2/status` `config.original` (karma-badge, amtool) — вне scope; при необходимости — отдельная запись в BACKLOG на `finalize`.
-- [ ] P7 (`assumed`): масштаб «оживающих» правил у пользователей неизвестен — закрывается migration note, не кодом.
+- [x] Показывать ли вложенные `inhibition.inhibit_rules` в `/api/v2/status` `config.original` (karma-badge, amtool) — вне scope. _Finalize: BACKLOG-запись не заводим — `config.original` отдаёт upstream-форму, а вложенное размещение AMP-специфично; спроса нет._
+- [x] P7 (`assumed`, carried as risk → CHANGELOG migration note 1): масштаб «оживающих» правил у пользователей неизвестен — закрывается migration note, не кодом.

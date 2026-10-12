@@ -33,7 +33,8 @@
 - **Problem:** `config.LoadConfig` работает на глобальном `viper`. Отсутствующий файл не ошибка (PROD-CONFIG-FILE-FALLBACK), но `ReadInConfig` при этом не сбрасывает прочитанное ранее: повторный `LoadConfig` после исчезновения файла вернёт старые значения и `Routing == nil` без ошибки. Старт не затронут; reload проверяет файл до вызова (`ReloadCoordinator.loadAndParse`), остаётся окно TOCTOU между `os.ReadFile` и `LoadConfig` — при атомарной смене ConfigMap на практике недостижимо. Инвариант записан комментарием в `LoadConfig`.
 - **Impact:** любой новый вызов `LoadConfig` вне старта может молча получить смесь старого и нового конфига; тесты вынуждены звать `resetViper`.
 - **Fix:** `viper.New()` на каждый вызов (или reload передаёт уже прочитанные байты).
-- **Refs:** `go-app/internal/config/config.go` (`LoadConfig`, `loadRouteConfig`), `reload_coordinator.go`; `tasks/archive/PROD-CONFIG-FILE-FALLBACK/review-findings.md` F5.
+- _(FU-TOPLEVEL-INHIBIT-RULES S1, 2026-10-12)_ тот же корень: один reload читает файл 3–4 раза (`reload_coordinator.loadAndParse`, viper, `loadInhibitRulesYAML`, `loadRouteConfig`); подмена symlink ConfigMap между чтениями может склеить две версии. Фикс «прочитать байты один раз и передать дальше» закрывает и это.
+- **Refs:** `go-app/internal/config/config.go` (`LoadConfig`, `loadRouteConfig`, `loadInhibitRulesYAML`), `reload_coordinator.go`; `tasks/archive/PROD-CONFIG-FILE-FALLBACK/review-findings.md` F5; `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` S1.
 - **Status:** open
 
 ### [medium][Security][~0.5d] CONFIG-VALIDATION-ERROR-REDACTION
@@ -69,6 +70,17 @@
 - **Status:** open
 
 ## Low
+
+### [low][Config][~0.25d] INHIBIT-CONFIG-LOUDNESS
+- **Title:** мелкие шероховатости загрузки inhibit-правил
+- **Problem:**
+  - Индексы ошибок валидатора для вложенных правил сдвигаются, если есть верхнеуровневые: правило `inhibition.inhibit_rules[j]` репортится как `inhibit_rules[len(top)+j]` (`go-app/internal/config/alertmanager_validation.go:101-105`) (F6).
+  - Ключи секции в другом регистре (`Inhibition:`, `Inhibit_Rules:`, `Source_Match:`) yaml.v3 не узнаёт, и правила под ними пропадают молча (`config.go`, `loadInhibitRulesYAML`). Upstream такие ключи отвергает как неизвестные; в CHANGELOG — migration note (R2 N2).
+  - `reload_coordinator.go:645-646` маппит `inhibit_rules`/`inhibition` в компонент, а diff отдаёт имена Go-полей (`InhibitRules`/`Inhibition`) ⇒ `affected_components` для ингибиции всегда пуст. На применение не влияет: правила пересобираются на каждом reload (F7).
+- **Impact:** вводящие в заблуждение путь в ошибке, `affected_components` и молча пропущенная секция.
+- **Fix:** валидировать списки раздельно (или перенумеровывать в `formatConfigValidatorErrors`); ошибка на ключ, совпадающий с известным без учёта регистра; маппинг компонентов по mapstructure/yaml-имени.
+- **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F6, F7, N2.
+- **Status:** open
 
 ### [low][Grouping][~0.25d] TIMER-ACTIVE-GAUGE-DRIFT
 - **Title:** `alert_history_timer_active_total` расходится с числом таймеров

@@ -69,7 +69,7 @@ based_on:
 
 ## Phase 2: Deep Review
 
-- [ ] **2.1** `/deep-review` (Spec § Deep Review: recommended, will run). Фокус: потребитель, оставшийся на старом пути; частичная загрузка при ошибке; reload, отброшенный как no-change; неизменность поведения для конфигов только с `inhibition:`. <!-- depends: 1.1–1.8 | verify: tasks/FU-TOPLEVEL-INHIBIT-RULES/review-verdict.json → "gate": "pass" -->
+- [x] **2.1** `/deep-review` (Spec § Deep Review: recommended, will run). Фокус: потребитель, оставшийся на старом пути; частичная загрузка при ошибке; reload, отброшенный как no-change; неизменность поведения для конфигов только с `inhibition:`. <!-- depends: 1.1–1.8 | verify: tasks/FU-TOPLEVEL-INHIBIT-RULES/review-verdict.json → "gate": "pass" -->
 
 **Phase verification:** `review-verdict.json` `gate: pass`.
 
@@ -117,10 +117,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
