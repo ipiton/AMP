@@ -37,9 +37,56 @@ import (
 // `hasRE := rule.compiledSourceRE[key]; if !hasRE { return false }` made
 // every inline legacy regex rule a permanent, silent no-op.
 func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, error) {
-	rules := make([]inhibition.InhibitionRule, 0, len(c.Rules))
+	rules, err := compileInhibitionRules(c.Rules, "inline")
+	if err != nil {
+		return nil, err
+	}
 
-	for i, r := range c.Rules {
+	if c.ConfigFile != "" {
+		parser := inhibition.NewParser()
+		cfg, err := parser.ParseFile(c.ConfigFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inhibition config_file %q: %w", c.ConfigFile, err)
+		}
+		if cfg != nil {
+			rules = append(rules, cfg.Rules...)
+		}
+	}
+
+	return rules, nil
+}
+
+// InhibitionRules returns every inhibition rule the config defines, in this
+// order: upstream's top-level `inhibit_rules:` (c.InhibitRules), then AMP's
+// `inhibition.inhibit_rules`, then `inhibition.config_file`. Both placements
+// are merged, as inline rules and config_file already were; a rule present in
+// both just inhibits the same alerts twice over.
+//
+// Startup, hot reload and the fail-fast in LoadConfig all build the engine's
+// rules through it (FU-TOPLEVEL-INHIBIT-RULES — before, the top-level key was
+// parsed and silently ignored). A rule that fails to compile fails the whole
+// call, so LoadConfig never accepts a config with only part of its rules.
+func (c *Config) InhibitionRules() ([]inhibition.InhibitionRule, error) {
+	topLevel, err := compileInhibitionRules(c.InhibitRules, "top-level")
+	if err != nil {
+		return nil, err
+	}
+
+	wrapped, err := c.Inhibition.ToInhibitionRules()
+	if err != nil {
+		return nil, err
+	}
+
+	return append(topLevel, wrapped...), nil
+}
+
+// compileInhibitionRules converts config rules into runtime rules and compiles
+// them. source ("inline", "top-level") names where the rules came from in the
+// error, so an unnamed broken rule can be told apart between the two lists.
+func compileInhibitionRules(cfgRules []InhibitionRuleConfig, source string) ([]inhibition.InhibitionRule, error) {
+	rules := make([]inhibition.InhibitionRule, 0, len(cfgRules))
+
+	for i, r := range cfgRules {
 		rule := inhibition.InhibitionRule{
 			SourceMatch:    r.SourceMatch,
 			SourceMatchRE:  r.SourceMatchRE,
@@ -56,21 +103,10 @@ func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, err
 			if name == "" {
 				name = fmt.Sprintf("inhibit_rules[%d]", i)
 			}
-			return nil, fmt.Errorf("inline inhibition rule %q: %w", name, err)
+			return nil, fmt.Errorf("%s inhibition rule %q: %w", source, name, err)
 		}
 
 		rules = append(rules, rule)
-	}
-
-	if c.ConfigFile != "" {
-		parser := inhibition.NewParser()
-		cfg, err := parser.ParseFile(c.ConfigFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse inhibition config_file %q: %w", c.ConfigFile, err)
-		}
-		if cfg != nil {
-			rules = append(rules, cfg.Rules...)
-		}
 	}
 
 	return rules, nil

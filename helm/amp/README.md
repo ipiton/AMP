@@ -35,8 +35,7 @@ configFile:
       - name: default
         webhook_configs:
           - url: https://example.invalid/hook   # plain http:// fails validation
-    inhibition:           # NOT a top-level inhibit_rules: — that key is ignored
-      inhibit_rules: []
+    inhibit_rules: []     # upstream placement; `inhibition: inhibit_rules:` works too
 ```
 
 ```bash
@@ -246,7 +245,7 @@ alerting:
           - amp.<namespace>.svc:8080  # Service port is 8080 (was: alertmanager:9093)
 ```
 
-With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. Known gaps that bite on a copied `alertmanager.yml` — top-level `inhibit_rules:` ignored, a built-in filter that drops some alerts, partial per-integration fields — are listed in [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md) § Known Gaps. The chart's `PrometheusRule` objects carry no configurable labels, so a Prometheus with a `ruleSelector` (kube-prometheus-stack selects `release: <name>`) will not load them (`HELM-PROMRULE-LABELS`).
+With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. Known gaps that bite on a copied `alertmanager.yml` — a built-in filter that drops some alerts, partial per-integration fields — are listed in [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md) § Known Gaps. The chart's `PrometheusRule` objects carry no configurable labels, so a Prometheus with a `ruleSelector` (kube-prometheus-stack selects `release: <name>`) will not load them (`HELM-PROMRULE-LABELS`).
 
 Current active runtime surface mounted by the repository bootstrap:
 - `POST /api/v2/alerts`
@@ -259,7 +258,7 @@ Current active runtime surface mounted by the repository bootstrap:
 - `POST /-/reload`
 - `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
 
-Inhibition rules are applied (`GET /api/v2/inhibitions` shows active ones) when nested under `inhibition:`. Config write and history APIs, classification surfaces and broader dashboard surfaces remain explicit follow-up work.
+Inhibition rules are applied (`GET /api/v2/inhibitions` shows active ones), both upstream's top-level `inhibit_rules:` and AMP's `inhibition: inhibit_rules:`. Config write and history APIs, classification surfaces and broader dashboard surfaces remain explicit follow-up work.
 
 ## Upgrading
 

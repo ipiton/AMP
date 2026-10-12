@@ -19,9 +19,9 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** two gaps bite on a verbatim upstream config
-and neither is reported at startup — a top-level `inhibit_rules:` is ignored (#9) and a built-in filter drops some
-alerts (#14). Grouping (#13) is on by default since `PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15).
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** one gap bites on a verbatim upstream config
+and is not reported at startup — a built-in filter drops some alerts (#14). The top-level `inhibit_rules:` the
+audit also found ignored (#9) is applied since `FU-TOPLEVEL-INHIBIT-RULES` (2026-10-12). Grouping (#13) is on by default since `PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15).
 Each is a P0 in `docs/06-planning/BACKLOG.md`.
 
 Source of truth:
@@ -70,7 +70,7 @@ Source of truth:
 | HA: leader-elected silence GC | 🟢 Supported | `internal/infrastructure/lock/election.go` + `internal/business/silencing/manager_impl.go` (task 6.4). |
 | HA: peer heartbeat + `cluster` status field | 🟢 Supported | `internal/infrastructure/cluster/heartbeat.go` (task 6.5). |
 | HA: 2-replica end-to-end (exactly-once delivery, failover, in-flight adoption) | 🟡 Verified via standalone script, not CI-gated | `deploy/e2e-ha/` (`docker-compose.yml` + `run.sh`) exercises six steps, including a genuine cross-replica concurrent fire (replica B restarted after ingest so `RestoreTimers` arms a local timer for a group replica A also holds one for) and orphan adoption (replica A killed mid-`group_wait`, replica B's reconciliation loop must pick the timer up). Still **not** wired into `go test ./...` or any build tag — must be run explicitly. |
-| Inhibition (`inhibit_rules:`) | 🟡 Supported under `inhibition:` only | A top-level `inhibit_rules:` key — upstream's own placement — is parsed and silently ignored; nest the rules under `inhibition: inhibit_rules:` (Known Gap #9). `internal/infrastructure/inhibition/` matcher/parser/cache, wired into the notify chain's Inhibit step and hot-reloadable. `GET /api/v2/inhibitions` (read-only, AMP-native diagnostic endpoint, not upstream API) reflects active inhibitions. |
+| Inhibition (`inhibit_rules:`) | 🟢 Supported | Upstream's top-level `inhibit_rules:` and AMP's `inhibition: inhibit_rules:` (plus `inhibition.config_file`) are all applied, merged in that order (`Config.InhibitionRules`, `FU-TOPLEVEL-INHIBIT-RULES`); every upstream form works (`source_match`/`_re`, `target_match`/`_re`, `source_matchers`/`target_matchers`, `equal`), label names keep their case, and a rule with an empty side is accepted as upstream does (warning W150/W151, not an error) — except in `config_file`, which still requires both sides. A broken rule fails startup and rejects `/-/reload`. Limits: a rule without `name` (every verbatim upstream rule) shows as `rule=""` in `/api/v2/inhibitions` and metrics; rules that appear on reload when the config had none at startup need a restart (see [Replacement Guidance](#replacement-guidance)). `internal/infrastructure/inhibition/` matcher/parser/cache, wired into the notify chain's Inhibit step and hot-reloadable. `GET /api/v2/inhibitions` (read-only, AMP-native diagnostic endpoint, not upstream API) reflects active inhibitions. |
 | Config write API (`POST/PUT /api/v2/config*`) | 🔴 Not implemented | Explicitly out of scope for task 7.4 (see brief). |
 | `/history*` API | 🔴 Not implemented | Explicitly out of scope for task 7.4. |
 | **Lite profile restart durability** (`--storage.path` equivalent) | 🟢 Supported, opt-in | `storage.path` + `storage.snapshot_interval` (wave 6, `FU-LITE-FILE-SNAPSHOT`, `internal/infrastructure/snapshot/`) — silences (`memory.SilenceStore`) and the notification log's dedup entries + per-target delivered-state (`grouping.notifyDedupLog`) are written atomically (tmp file + rename + fsync, mode 0600) to `storage.path` on a periodic timer and on graceful shutdown, and reloaded at startup before the HTTP server starts serving. Format is plain versioned JSON (stdlib `encoding/json`), not upstream's protobuf+snappy — deliberately kept simple. TTL semantics are respected at load: an entry/delivered-state whose freshness window has already elapsed (computed from the snapshot's own timestamps vs now) is dropped, not resurrected. **Opt-in, unlike upstream**: `storage.path` defaults to empty (snapshotting OFF), not upstream's `data/` — an AMP upgrade must never start writing files as a side effect. **File, not directory**: upstream's `--storage.path` is a directory holding separate `nflog`/`silences` files; AMP's `storage.path` names a single combined snapshot file — point it at a file path, not a directory, when migrating a runbook from upstream. Standard profile: Postgres (`PostgresSilenceRepository`)/Redis (`RedisNotifyLog`) already own durability; setting `storage.path` there is logged and ignored, not wired in. Groups/alerts are NOT snapshotted, matching upstream — alerts re-arrive via Prometheus's resend behavior and groups rebuild from there. |
@@ -807,7 +807,9 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
    string"). The round-1 guard in `Parse` contradicted both parsers' "verbatim upstream grammar" claim; dropped so
    `label=` now parses the same way in both, matching upstream. Both `unquoteMatcherValue` ports also gained an
    explicit copyright/license attribution comment for the upstream file they port from (Apache-2.0 §4).
-9. **A top-level `inhibit_rules:` key (upstream's own placement) is parsed and then silently ignored.**
+9. **Closed (`FU-TOPLEVEL-INHIBIT-RULES`, 2026-10-12).** A top-level `inhibit_rules:` key is now applied, merged
+   with `inhibition.inhibit_rules`; the original note is kept below for history. **Was: a top-level `inhibit_rules:`
+   key (upstream's own placement) is parsed and then silently ignored.**
    `internal/infrastructure/routing.RouteConfig.InhibitRules` accepts it, but no code path ever reads that field -
    the only inhibition rules that reach `internal/infrastructure/inhibition` are AMP's own
    `inhibition.inhibit_rules` wrapper (`internal/config.InhibitionConfig`, wired through `ToInhibitionRules`). A
@@ -990,8 +992,9 @@ fidelity (Slack channel/title/color, PagerDuty severity/details, Telegram `parse
 
 Concretely, a migration is:
 1. Copy your `route:` / `receivers:` / `time_intervals:` / `global:` across — semantics carry over, and the
-   receivers' integrations become live delivery targets on load. No Kubernetes Secrets required. Move
-   `inhibit_rules:` under `inhibition:` (a top-level key is ignored, Known Gap #9), and make sure the file is
+   receivers' integrations become live delivery targets on load. No Kubernetes Secrets required. Copy
+   `inhibit_rules:` as is — the top-level key is applied. If AMP started with no inhibit rules at all, adding
+   them later by `/-/reload` only logs "restart required": restart once. Make sure the file is
    actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
 2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
    formatting, PagerDuty categorisation, per-integration HTTP settings). `*_file` credentials are delivered

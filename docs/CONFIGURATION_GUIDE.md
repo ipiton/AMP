@@ -415,9 +415,8 @@ receivers:
 # ============================================================================
 # Inhibition Rules (Optional)
 # ============================================================================
-# AMP reads inhibition rules only under `inhibition:`; a top-level
-# `inhibit_rules:` (upstream placement) is silently ignored — Known Gap #9
-# in docs/ALERTMANAGER_COMPATIBILITY.md, FU-TOPLEVEL-INHIBIT-RULES.
+# A top-level `inhibit_rules:` (upstream placement) works the same way;
+# AMP applies both lists, top-level first (FU-TOPLEVEL-INHIBIT-RULES).
 inhibition:
   inhibit_rules:
     # Inhibit warnings when critical alert is firing
@@ -711,9 +710,8 @@ receivers:
       - to: "dba-team@example.com"
         from: "alerts@example.com"
 
-# AMP reads inhibition rules only under `inhibition:`; a top-level
-# `inhibit_rules:` (upstream placement) is silently ignored — Known Gap #9
-# in docs/ALERTMANAGER_COMPATIBILITY.md, FU-TOPLEVEL-INHIBIT-RULES.
+# A top-level `inhibit_rules:` (upstream placement) works the same way;
+# AMP applies both lists, top-level first (FU-TOPLEVEL-INHIBIT-RULES).
 inhibition:
   inhibit_rules:
     - source_match:

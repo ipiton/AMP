@@ -20,6 +20,14 @@
 
 - [ ] **AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT** — `AgentLoop.Run` (`go-app/internal/core/investigation/agent_loop.go`, ветка `default` в `switch resp.Kind`) возвращает `(nil, err)`, а `InvestigationQueue.processJobWithAgent` (`go-app/internal/infrastructure/investigation/queue.go`) на ошибке сразу читает `agentRun.TerminationKind` ⇒ nil-pointer panic в воркере. Сейчас недостижимо из прод-клиента (`parseOpenAIAgentResponse` отдаёт только два известных kind), но любой новый `AgentLLMClient` или мок с иным kind роняет воркер. Фикс: возвращать `&AgentRunResult{TerminationKind: "error", ...}` и/или nil-guard в queue + тест. Не регресс. Найдено на `/implement` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
 
+### [medium][Inhibition][~0.25d] INHIBIT-RELOAD-ROLLBACK-KEEPS-RULES
+- **Title:** откат reload после коммита оставляет новые inhibit-правила
+- **Problem:** `ServiceRegistry.ReloadConfig` применяет правила матчеру (`UpdateRules`, `go-app/internal/application/service_registry.go:2702-2717`) до `reloadRoutingTree`; если тот падает, `rollbackPostCommit` восстанавливает config, routing, шаблоны и targets, но не правила матчера.
+- **Impact:** отклонённый `/-/reload` (ошибка дерева маршрутов) оставляет в работе inhibit-правила из отвергнутого конфига — до следующего успешного reload или рестарта. Было и до `FU-TOPLEVEL-INHIBIT-RULES`.
+- **Fix:** применять ингибицию после `reloadRoutingTree` либо в откате звать `UpdateRules(previousConfig.InhibitionRules())`; тест с падающим `reloadRoutingTree`.
+- **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F3.
+- **Status:** open
+
 ### [high][Helm][~0.5-1d] HELM-DEFAULTS-FAIL-VALIDATION
 - **Title:** дефолтные values чарта не стартуют
 - **Problem:** `helm install` без своих values не поднимает AMP. (1) `llm.enabled: true` при пустом `llm.apiKey`: Secret не получает ключ `llm-api-key`, Deployment на него ссылается ⇒ pod `CreateContainerConfigError`; LLM по умолчанию смотрит на example-прокси. (2) При `llm.enabled: false` профиль `standard` со встроенным PostgreSQL падает на валидации: `environment: production` (дефолт `values.yaml`/`values-production.yaml`) запрещает `sslmode=disable`, а встроенный PostgreSQL TLS не умеет ⇒ `database SSL mode 'disable' is not allowed in production`, exit 1. (3) При `postgresql.enabled: false` чарт не передаёт `DATABASE_*`: единственный путь — `database:` в `configFile.content`, пароль в ConfigMap открытым текстом.

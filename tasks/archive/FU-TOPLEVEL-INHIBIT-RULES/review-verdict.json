@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/fu-toplevel-inhibit-rules",
+  "commit": "bee0261",
+  "reviewed_at": "2026-10-12",
+  "findings": {
+    "blocker": 0,
+    "major": 2,
+    "minor": 9,
+    "nit": 7
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

@@ -33,7 +33,11 @@
 //     warning that internal/infrastructure/inhibition.InhibitionRule had
 //     no matching fields and silently dropped them. The runtime now
 //     implements them (InhibitionRule.CompileMatchers), so they satisfy
-//     E150/E151 on their own here too, matching what actually loads.
+//     W150/W151 on their own here too, matching what actually loads.
+//   - (Changed, FU-TOPLEVEL-INHIBIT-RULES): a rule with no source or no
+//     target condition is a warning (W150/W151), not an error (formerly
+//     E150/E151): upstream accepts it and the runtime treats the empty side
+//     as matching every alert.
 //   - time_intervals / mute_time_intervals (top-level) and route-level
 //     mute_time_intervals / active_time_intervals: accepted structurally
 //     (an Info note, code I001, is added when present) but not resolved

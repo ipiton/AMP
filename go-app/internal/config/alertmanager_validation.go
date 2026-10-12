@@ -19,9 +19,9 @@ import (
 // AMP's own config file mixes AMP-only top-level sections (server,
 // database, redis, llm, storage, ...) with an Alertmanager-shaped subset
 // (route, receivers, global, templates, time_intervals,
-// mute_time_intervals - task 1.3) plus AMP's own `inhibition:` wrapper
-// (task 3.x) around what upstream Alertmanager keeps as a bare top-level
-// `inhibit_rules:` key.
+// mute_time_intervals - task 1.3) plus inhibition rules in two placements:
+// upstream's bare top-level `inhibit_rules:` and AMP's own `inhibition:`
+// wrapper (task 3.x). Both are merged at runtime (FU-TOPLEVEL-INHIBIT-RULES).
 //
 // pkg/configvalidator only understands the upstream Alertmanager shape
 // (internal/alertmanager/config.AlertmanagerConfig) and, via its own
@@ -29,8 +29,8 @@ import (
 // hard error) - feeding it the whole raw AMP config file directly would
 // make every AMP-only section ("server", "database", ...) fail as an
 // "unknown field". validateAlertmanagerSubset instead extracts just the
-// known Alertmanager-shaped keys, bridges in AMP's own inline
-// inhibition rules, and calls configvalidator.Validator.ValidateConfig
+// known Alertmanager-shaped keys, bridges in the inhibition rules from
+// both placements, and calls configvalidator.Validator.ValidateConfig
 // directly (bypassing its strict YAML parser) against the resulting
 // *amcfg.AlertmanagerConfig.
 //
@@ -60,8 +60,8 @@ var alertmanagerSubsetKeys = []string{
 //
 // data must be the same bytes the caller is about to hand to
 // infraroute.Parse() / has already used for viper (loadRouteConfig's
-// contract); cfg.Inhibition.Rules must already be populated (viper's
-// mapstructure pass happens before this in LoadConfig).
+// contract); cfg.InhibitRules and cfg.Inhibition.Rules must already be
+// populated (loadInhibitRulesYAML runs before this in LoadConfig).
 func validateAlertmanagerSubset(data []byte, cfg *Config) error {
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
@@ -95,8 +95,13 @@ func validateAlertmanagerSubset(data []byte, cfg *Config) error {
 		}
 	}
 
-	if len(cfg.Inhibition.Rules) > 0 {
-		amConfig.InhibitRules = toAlertmanagerInhibitRules(cfg.Inhibition.Rules)
+	// Both placements reach the runtime (Config.InhibitionRules), so both are
+	// validated: top-level `inhibit_rules:` first, then `inhibition.inhibit_rules`.
+	if n := len(cfg.InhibitRules) + len(cfg.Inhibition.Rules); n > 0 {
+		all := make([]InhibitionRuleConfig, 0, n)
+		all = append(all, cfg.InhibitRules...)
+		all = append(all, cfg.Inhibition.Rules...)
+		amConfig.InhibitRules = toAlertmanagerInhibitRules(all)
 	}
 
 	// result.Valid is deliberately not consulted below - we branch on
@@ -174,8 +179,8 @@ func logUnsupportedReceiverIntegrations(cfg *amcfg.AlertmanagerConfig) {
 	}
 }
 
-// toAlertmanagerInhibitRules bridges AMP's inline inhibition rules
-// (nested under `inhibition.inhibit_rules`, task 3.x) into the shape
+// toAlertmanagerInhibitRules bridges AMP's config-form inhibition rules
+// (top-level `inhibit_rules:` and `inhibition.inhibit_rules`) into the shape
 // pkg/configvalidator's InhibitionValidator checks (a top-level
 // `inhibit_rules:` list, matching upstream Alertmanager).
 func toAlertmanagerInhibitRules(rules []InhibitionRuleConfig) []*amcfg.InhibitRule {

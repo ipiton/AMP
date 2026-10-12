@@ -1077,13 +1077,11 @@ type BusinessMetrics struct {
 	InhibitionMatchTotal       *prometheus.CounterVec
 	InhibitionDuration         *prometheus.HistogramVec
 
-	// Inhibition cache metrics
-	InhibitionCacheHits       prometheus.Counter
-	InhibitionCacheMisses     prometheus.Counter
-	InhibitionCacheEvictions  prometheus.Counter
-	InhibitionCacheSize       prometheus.Gauge
-	InhibitionCacheOperations *prometheus.CounterVec
-	InhibitionCacheDuration   *prometheus.HistogramVec
+	// Inhibition cache metrics are NOT here: they are registered (with a
+	// `tier` label) by internal/infrastructure/inhibition.GetCacheMetrics. A
+	// second, label-less copy of the same names here made the default registry
+	// panic on startup for any config with an inhibit rule
+	// (FU-TOPLEVEL-INHIBIT-RULES).
 
 	// References to specialized metrics
 	groups         *GroupMetrics
@@ -1214,57 +1212,6 @@ func NewBusinessMetrics() *BusinessMetrics {
 				Namespace: Namespace,
 				Name:      "inhibition_duration_seconds",
 				Help:      "Duration of inhibition operations.",
-				Buckets:   prometheus.DefBuckets,
-			},
-			[]string{"operation"},
-		),
-		InhibitionCacheHits: promauto.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: Namespace,
-				Subsystem: "inhibition_cache",
-				Name:      "hits_total",
-				Help:      "Total number of inhibition cache hits.",
-			},
-		),
-		InhibitionCacheMisses: promauto.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: Namespace,
-				Subsystem: "inhibition_cache",
-				Name:      "misses_total",
-				Help:      "Total number of inhibition cache misses.",
-			},
-		),
-		InhibitionCacheEvictions: promauto.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: Namespace,
-				Subsystem: "inhibition_cache",
-				Name:      "evictions_total",
-				Help:      "Total number of inhibition cache evictions.",
-			},
-		),
-		InhibitionCacheSize: promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: Namespace,
-				Subsystem: "inhibition_cache",
-				Name:      "size",
-				Help:      "Current size of inhibition cache.",
-			},
-		),
-		InhibitionCacheOperations: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: Namespace,
-				Subsystem: "inhibition_cache",
-				Name:      "operations_total",
-				Help:      "Total number of inhibition cache operations.",
-			},
-			[]string{"operation", "status"},
-		),
-		InhibitionCacheDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: Namespace,
-				Subsystem: "inhibition_cache",
-				Name:      "operation_duration_seconds",
-				Help:      "Duration of inhibition cache operations.",
 				Buckets:   prometheus.DefBuckets,
 			},
 			[]string{"operation"},

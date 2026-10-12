@@ -236,3 +236,22 @@ func TestReloadCoordinator_NoChangeStillShortCircuits(t *testing.T) {
 	require.True(t, result.Success)
 	assert.Same(t, initial, coordinator.GetCurrentConfig())
 }
+
+// FU-TOPLEVEL-INHIBIT-RULES: an edit to only the matchers of a top-level
+// inhibit rule must change the fingerprint (it used to be invisible to it).
+func TestRoutingFingerprint_SeesInhibitMatchersChange(t *testing.T) {
+	base := `
+route:
+  receiver: default
+receivers:
+  - name: default
+    webhook_configs:
+      - url: https://example.com/webhook
+inhibit_rules:
+  - source_matchers: ['alertname="ClusterDown"']
+`
+	before := loadRoutingConfig(t, base+`    target_matchers: ['severity="warning"']`+"\n")
+	after := loadRoutingConfig(t, base+`    target_matchers: ['severity="info"']`+"\n")
+
+	assert.NotEqual(t, RoutingFingerprint(before.Routing), RoutingFingerprint(after.Routing))
+}

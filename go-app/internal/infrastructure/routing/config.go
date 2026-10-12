@@ -81,21 +81,13 @@ type RouteConfig struct {
 	// List of template files to load for message formatting
 	Templates []string `yaml:"templates,omitempty"`
 
-	// Inhibit rules (EXISTING - from TN-126)
-	// Moved here for full Alertmanager compatibility
-	//
-	// Review side finding S2 (wave 7 / FU-INHIBIT-MATCHERS fix round 1):
-	// this is upstream's own top-level `inhibit_rules:` placement, but
-	// grep confirms there is no consumer of this field anywhere - the
-	// only inhibition rules that actually reach
-	// internal/infrastructure/inhibition are AMP's own
-	// `inhibition.inhibit_rules` (internal/config.InhibitionConfig,
-	// wired through ToInhibitionRules). A verbatim upstream config using
-	// this top-level key parses cleanly and silently inhibits nothing.
-	// The InhibitRule type below also lacks SourceMatchers/TargetMatchers,
-	// so those keys are dropped by yaml.Unmarshal without complaint. Not
-	// wired by this fix round - see docs/ALERTMANAGER_COMPATIBILITY.md and
-	// BACKLOG.md for the ledgered follow-up.
+	// InhibitRules mirrors upstream's top-level `inhibit_rules:` so that it
+	// survives into /api/v2/status `config.original` (amtool, karma) and into
+	// RoutingFingerprint. It is NOT the runtime source: the rules that reach
+	// internal/infrastructure/inhibition are read by viper into
+	// internal/config.Config.InhibitRules and merged with
+	// `inhibition.inhibit_rules` by Config.InhibitionRules
+	// (FU-TOPLEVEL-INHIBIT-RULES).
 	InhibitRules []InhibitRule `yaml:"inhibit_rules,omitempty"`
 
 	// TimeIntervals is the primary (Alertmanager >=0.24) section name for
@@ -264,6 +256,7 @@ func (c *RouteConfig) Clone() *RouteConfig {
 		Route:         c.Route.Clone(),
 		Receivers:     make([]*Receiver, len(c.Receivers)),
 		Templates:     append([]string{}, c.Templates...),
+		InhibitRules:  append([]InhibitRule(nil), c.InhibitRules...),
 		ReceiverIndex: make(map[string]*Receiver, len(c.ReceiverIndex)),
 		Version:       c.Version,
 		LoadedAt:      c.LoadedAt,
@@ -354,11 +347,9 @@ func countNestedRoutes(route *grouping.Route) int {
 	return count
 }
 
-// InhibitRule represents an inhibition rule (from TN-126).
-// This is a placeholder for full Alertmanager compatibility.
-// Actual implementation is in TN-126 (Inhibition Rule Parser).
-//
-// TODO(TN-137): Import from TN-126 when integrating inhibition rules
+// InhibitRule is the YAML shape of one upstream inhibition rule, kept for
+// RouteConfig.InhibitRules (see there). Matching is implemented in
+// internal/infrastructure/inhibition, not here.
 type InhibitRule struct {
 	// SourceMatch defines labels that must match for the source alert
 	SourceMatch map[string]string `yaml:"source_match,omitempty"`
@@ -371,6 +362,13 @@ type InhibitRule struct {
 
 	// TargetMatchRE defines regex patterns for the target alert
 	TargetMatchRE map[string]string `yaml:"target_match_re,omitempty"`
+
+	// SourceMatchers/TargetMatchers are upstream's `matchers:` list syntax
+	// (e.g. ['severity="critical"']). Without them a matchers-form rule lost
+	// both sides in config.original and edits to them did not change
+	// RoutingFingerprint.
+	SourceMatchers []string `yaml:"source_matchers,omitempty"`
+	TargetMatchers []string `yaml:"target_matchers,omitempty"`
 
 	// Equal specifies which label names must be equal between source and target
 	Equal []string `yaml:"equal,omitempty"`
