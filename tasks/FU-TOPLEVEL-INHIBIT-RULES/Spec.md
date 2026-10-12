@@ -137,7 +137,11 @@ AMP начинает читать верхнеуровневый `inhibit_rules:
 
 - **Mandatory triggers present:** none (`C R`, 2 сигнала, без `S`/`M`).
 - **Discretionary triggers present:** author doubt — ошибка в этом пути = тихая потеря нотификаций (а не громкий отказ); diff с тестами может приблизиться к ~200 строк.
-- **Decision:** recommended, will run — после `implement`, до `write-tests`.
+- **Decision:** required (после Deviation: `C X R`, 3 сигнала) — после `implement`, до `write-tests`.
+
+## Deviations
+
+- **2026-10-12, implement 1.8:** смоук выявил предсуществующий panic на старте при любом inhibit-правиле (двойная регистрация `alert_history_inhibition_cache_*`: `pkg/metrics.BusinessMetrics.InhibitionCache*` без label'ов и `inhibition.GetCacheMetrics` с `tier`). По решению владельца чинится здесь: мёртвые поля `BusinessMetrics` удалены, источник имён — `GetCacheMetrics`. Без этого задача превращала бы «правила игнорируются» в «конфиг не стартует». Risk Profile → `C X R`, tier Full; `deep-review` — required.
 
 ## Open Questions
 

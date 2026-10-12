@@ -26,6 +26,7 @@ based_on:
 - `internal/config/alertmanager_validation.go` — объединённый список в `configvalidator` (`:98`), комментарий `:18-30`.
 - `internal/application/service_registry.go` — `initializeInhibition` (`:1333`, лог по источникам), hot reload (`:2699`).
 - `internal/infrastructure/routing/config.go` — `InhibitRule.SourceMatchers/TargetMatchers`, комментарии `:84-99`, `:357-361`.
+- `pkg/metrics/metrics.go` — удалены мёртвые `BusinessMetrics.InhibitionCache*` (дубли имён `GetCacheMetrics`, panic на старте; шаг 1.9).
 - `internal/config/inhibition_toplevel_test.go` (новый) — T1–T5.
 - `internal/application/handlers/status_config_test.go` — T6.
 - Доки (корень репо): `docs/ALERTMANAGER_COMPATIBILITY.md`, `helm/amp/README.md`, `config.yaml.example`, `CHANGELOG.md`.
@@ -50,9 +51,14 @@ based_on:
 > **Wave 4** — смоук до deep-review (новые тесты не пишем)
 
 - [x] **1.7** Существующие тесты затронутых пакетов зелёные. <!-- depends: 1.2–1.6 | verify: cd go-app && go test ./internal/config/... ./internal/infrastructure/routing/... ./internal/application/... ./pkg/configvalidator/... -->
-- [ ] **1.8** Ручной смоук на бинаре: конфиг с `route:` + верхнеуровневым правилом (`source_matchers`) — в логе старта `top_level_rules=1`; тот же конфиг с битым matcher'ом — exit 1. Вывод — в Notes. <!-- depends: 1.6 | verify: go run ./cmd/server с AMP_CONFIG_FILE=<tmp> profile=lite -->
+- [x] **1.8** Ручной смоук на бинаре: конфиг с `route:` + верхнеуровневым правилом (`source_matchers`) — в логе старта `top_level_rules=1`; тот же конфиг с битым matcher'ом — exit 1. Вывод — в Notes. <!-- depends: 1.6 | verify: go run ./cmd/server с AMP_CONFIG_FILE=<tmp> profile=lite -->
 
-**Phase verification:** `cd go-app && go build ./... && go vet ./internal/config/... ./internal/application/... ./internal/infrastructure/routing/... && go test ./internal/config/... ./internal/application/...`
+> **Wave 5** — добавлено после смоука 1.8 (решение владельца 2026-10-12: чинить в этой задаче)
+
+- [x] **1.9** Удалить мёртвые `BusinessMetrics.InhibitionCache{Hits,Misses,Evictions,Size,Operations,Duration}` в `pkg/metrics/metrics.go` (0 использований в репозитории, в `grafana/`/`helm/` не упоминаются) — они регистрировали те же имена `alert_history_inhibition_cache_*`, что и `internal/infrastructure/inhibition.GetCacheMetrics`, но без label'ов ⇒ panic default registry при инициализации ингибиции. Источник имён — `GetCacheMetrics` (реально пишется кэшем). <!-- verify: grep -rn "InhibitionCache[A-Z]" --include='*.go' go-app/pkg → пусто; смоук 1.8 без panic -->
+- [x] **1.10** Повторный смоук 1.8. <!-- depends: 1.9 | verify: см. Notes -->
+
+**Phase verification:** `cd go-app && go build ./... && go vet ./internal/config/... ./internal/application/... ./internal/infrastructure/routing/... ./pkg/metrics/... && go test ./internal/config/... ./internal/application/... ./pkg/metrics/...`
 
 ## Phase 2: Deep Review
 
@@ -67,6 +73,7 @@ based_on:
 - [ ] **3.3** T3 битый matcher/regex в верхнеуровневом правиле → `LoadConfig` ошибка, сообщение содержит `inhibit_rules[0]` (без имени) и имя (с именем); `inhibit_rules: []` → без ошибок. <!-- depends: 2.1 | verify: go test -run TestTopLevelInhibitRules_ C -->
 - [ ] **3.4** T4 `configvalidator` видит верхнеуровневые правила: правило, которое валидатор отвергает (E-code из `pkg/configvalidator/validators/inhibition.go`), в верхнеуровневой форме с `route:` → ошибка загрузки. <!-- depends: 2.1 | verify: go test -run TestTopLevelInhibitRules_ C -->
 - [ ] **3.5** T5 reload: файл v1 без правил → v2 только с верхнеуровневым правилом → `ReloadFromFile` не no-change, `GetCurrentConfig().InhibitionRules()` содержит правило (паттерн `reload_coordinator_test.go:336`). Плюс правка только `source_matchers` в верхнеуровневом правиле → тоже не no-change. <!-- depends: 2.1 | verify: go test -run TestTopLevelInhibitRules_Reload C -->
+- [ ] **3.7** T7 регрессия panic'а: в одном процессе `metrics.NewBusinessMetrics()` (или как его зовёт `ServiceRegistry`) + `inhibition.GetCacheMetrics()` на default registry — без panic; проверить, что тест падает на `main`-версии `metrics.go`. Предпочтительно — тест старта `initializeInhibition` с реальными зависимостями, если его можно собрать без Redis. <!-- depends: 2.1 | verify: go test -run Inhibition ./pkg/metrics/ ./internal/application/ -->
 - [ ] **3.6** T6 `AlertmanagerConfigYAML` сохраняет `source_matchers`/`target_matchers` верхнеуровневого правила (`status_config_test.go`). <!-- depends: 2.1 | verify: go test -run TestAlertmanagerConfigYAML ./internal/application/handlers/ -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/config/... ./internal/application/...`
@@ -75,7 +82,7 @@ based_on:
 
 - [ ] **4.1** `docs/ALERTMANAGER_COMPATIBILITY.md`: строки 14 и 73 → 🟢 (обе формы, объединение), строка 23 — убрать «a top-level `inhibit_rules:` is ignored (#9)», Known Gap #9 — пометить закрытым (`FU-TOPLEVEL-INHIBIT-RULES`, 2026-10-12) без перенумерации, миграция ~994 — верхнеуровневая форма работает как есть; reload без правил на старте требует рестарта (Spec Edge Case 4). <!-- verify: grep -n "top-level \`inhibit_rules:\`" docs/ALERTMANAGER_COMPATIBILITY.md — нет утверждений «ignored» -->
 - [ ] **4.2** `helm/amp/README.md:38` — убрать «that key is ignored», пример можно оставить верхнеуровневым; `config.yaml.example:438` — упомянуть, что верхнеуровневый `inhibit_rules:` тоже принимается и сливается. <!-- verify: grep -rn "key is ignored" helm/ config.yaml.example → пусто -->
-- [ ] **4.3** `CHANGELOG.md` `[Unreleased]`: Fixed + migration note — ранее молча игнорируемые верхнеуровневые правила начнут подавлять алерты; неверный тип под `inhibit_rules:` теперь ошибка загрузки; `config.original` отдаёт matchers-форму. <!-- verify: review diff -->
+- [ ] **4.3** `CHANGELOG.md` `[Unreleased]`: Fixed — panic на старте при любом inhibit-правиле (дубли `alert_history_inhibition_cache_*`); Fixed + migration note — ранее молча игнорируемые верхнеуровневые правила начнут подавлять алерты; неверный тип под `inhibit_rules:` теперь ошибка загрузки; `config.original` отдаёт matchers-форму. <!-- verify: review diff -->
 
 **Phase verification:** `git diff --check`
 
@@ -92,7 +99,8 @@ based_on:
   - битый matcher → exit 1, `inhibition config validation failed: top-level inhibition rule "inhibit_rules[0]": …` — ок;
   - валидный конфиг → в логе `rules=1 top_level_rules=1`, затем **panic** `a previously registered descriptor with the same fully-qualified name as Desc{fqName: "alert_history_inhibition_cache_hits_total" …}`.
   - **Предсуществующий баг:** тот же panic на сборке `main` (`f90d853`) с правилом под `inhibition:` — любой конфиг хотя бы с одним inhibit-правилом роняет AMP при старте. Корень: одни и те же имена регистрируются дважды в default registry — `pkg/metrics/metrics.go:1221-1260` (`BusinessMetrics.InhibitionCache*`, `alert_history` + `inhibition_cache`, 0 использований) и `internal/infrastructure/inhibition/cache.go:45` (`GetCacheMetrics`, с label'ами, реально используется). Существует с `d096644` (2025-12-02), в planning не учтён.
-  - Следствие для этой задачи: без фикса panic'а она превращает «правила молча игнорируются» в «verbatim upstream-конфиг не стартует». Отпускать отдельно нельзя. Решение — за владельцем.
+  - Следствие для этой задачи: без фикса panic'а она превращает «правила молча игнорируются» в «verbatim upstream-конфиг не стартует». Отпускать отдельно нельзя. **Решение владельца (2026-10-12): чинить здесь** → шаги 1.9–1.10, T7, CHANGELOG; запись в `BUGS.md` как закрытого — на `finalize`.
+- **1.10:** после 1.9 тот же конфиг: `rules=1 top_level_rules=1`, panic нет; `ClusterDown{cluster=a}` → `HighLatency{cluster=a}` подавлен, `HighLatency{cluster=b}` нет (`/api/v2/inhibitions` — 1 запись; `alert_history_inhibition_check_total{result="inhibited"} 1`, `{result="allowed"} 2`); `config.original` содержит `source_matchers`/`target_matchers`/`equal`; на `/metrics` 33 серии `alert_history_inhibition_cache*`. `inhibitedBy` в `/api/v2/alerts` пуст — известный gap (compat-дока, раздел karma), вне scope.
 
 - Оценка: ~0.5–1d. Нарезка не нужна.
 - Если дифф кода (без тестов и доков) превысит ~200 строк или потребуется трогать `internal/infrastructure/inhibition` — эскалация до Full (requirements § Risk Profile), согласовать с владельцем.
