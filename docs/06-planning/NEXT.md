@@ -16,9 +16,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **FU-TOPLEVEL-INHIBIT-RULES** — P0 из BACKLOG: верхнеуровневый `inhibit_rules:` (размещение upstream) парсится и молча игнорируется — verbatim `alertmanager.yml` не ингибирует ничего. Ветка `bugfix/fu-toplevel-inhibit-rules`, workspace `tasks/FU-TOPLEVEL-INHIBIT-RULES/`. Взят 2026-10-12.
+
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `FU-TOPLEVEL-INHIBIT-RULES` → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `FU-TOPLEVEL-INHIBIT-RULES` (в WIP) → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 
