@@ -23,7 +23,7 @@ import (
 // them (CompileMatchers), and evaluates them in matchRuleFast with the
 // same AND semantics as the legacy maps - both forms may appear on the
 // same rule. Consequently source_matchers/target_matchers alone now DO
-// satisfy E150/E151 here, matching what the runtime loader actually
+// satisfy W150/W151 here, matching what the runtime loader actually
 // wires. The list-syntax fields are still syntax-checked (E153/E154) via
 // the shared pkg/configvalidator/matcher.ParseMatchers port; the W155
 // "not wired at runtime" warning this validator used to emit is gone -
@@ -59,15 +59,21 @@ func (v *InhibitionValidator) Validate(_ context.Context, cfg *config.Alertmanag
 		hasSourceCondition := len(rule.SourceMatch) > 0 || len(rule.SourceMatchRE) > 0 || len(rule.SourceMatchers) > 0
 		hasTargetCondition := len(rule.TargetMatch) > 0 || len(rule.TargetMatchRE) > 0 || len(rule.TargetMatchers) > 0
 
+		// A side without any condition is legal upstream and matches every
+		// alert (kube-prometheus-stack ships `- target_matchers: [alertname =
+		// InfoInhibitor]` with no source), and the runtime evaluates it the
+		// same way. So this is a warning, not an error: as E150/E151 it made a
+		// verbatim upstream config fail to load once top-level inhibit_rules
+		// started reaching this validator (FU-TOPLEVEL-INHIBIT-RULES).
 		if !hasSourceCondition {
-			result.AddError(newError("E150", "inhibit_rules", path,
-				"inhibit rule must specify source_match, source_match_re, or source_matchers",
-				"Define 'source_match', 'source_match_re', or 'source_matchers'"))
+			result.AddWarning(newWarning("W150", "inhibit_rules", path,
+				"inhibit rule has no source condition: every alert can act as its source",
+				"Define 'source_match', 'source_match_re', or 'source_matchers' unless this is intended"))
 		}
 		if !hasTargetCondition {
-			result.AddError(newError("E151", "inhibit_rules", path,
-				"inhibit rule must specify target_match, target_match_re, or target_matchers",
-				"Define 'target_match', 'target_match_re', or 'target_matchers'"))
+			result.AddWarning(newWarning("W151", "inhibit_rules", path,
+				"inhibit rule has no target condition: it can mute any alert",
+				"Define 'target_match', 'target_match_re', or 'target_matchers' unless this is intended"))
 		}
 
 		v.validateSide(rule.SourceMatch, rule.SourceMatchRE, rule.SourceMatchers, path, "source", "E153", result)

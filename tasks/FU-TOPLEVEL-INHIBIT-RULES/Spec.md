@@ -62,7 +62,7 @@ AMP начинает читать верхнеуровневый `inhibit_rules:
 2. Новый метод `(*Config).InhibitionRules() ([]inhibition.InhibitionRule, error)`: компилирует верхнеуровневые правила (`rule.Compile()`, ошибка с префиксом `inhibit_rules[i]` или имени), затем добавляет результат `c.Inhibition.ToInhibitionRules()` (inline + `config_file`, там префикс уже `inline inhibition rule`). Оба источника **объединяются**; дубль правила безвреден. Все 4 потребителя из P1 переходят на этот метод; `ToInhibitionRules` остаётся как есть.
 3. `validateAlertmanagerSubset` передаёт в `configvalidator` объединённый список (`cfg.InhibitRules` + `cfg.Inhibition.Rules`) через существующий `toAlertmanagerInhibitRules`.
 4. `routing.InhibitRule` получает `SourceMatchers`/`TargetMatchers []string` (`yaml:"source_matchers,omitempty"` и т. п.); комментарии «placeholder / silently ignored» на `RouteConfig.InhibitRules` и типе заменяются на правду: поле — только зеркало для `config.original` и fingerprint, в runtime правила идут через `Config.InhibitRules`.
-5. При старте `initializeInhibition` логирует число правил по источникам (`top_level`, `inhibition`), чтобы оператор видел, откуда правила взялись.
+5. При старте `initializeInhibition` логирует `rules` (всего) и `top_level_rules`, чтобы оператор видел, откуда правила взялись (остальное — `inhibition.inhibit_rules` + `config_file`).
 
 Почему так: один тип и один compile-путь для обоих источников, работает без `route:`, слияние повторяет уже принятую модель inline + `config_file`.
 
@@ -129,7 +129,7 @@ AMP начинает читать верхнеуровневый `inhibit_rules:
 
 ## Observability
 
-- **Logs:** INFO на старте `Initializing inhibition subsystem` получает `top_level_rules`/`inhibition_rules`; ошибки compile — с источником.
+- **Logs:** INFO на старте `Initializing inhibition subsystem` получает `top_level_rules` рядом с `rules`; ошибки compile — с источником (`top-level` / `inline`); W150/W151 на правиле без source/target.
 - **Metrics:** не применимо (активные подавления уже видны через `/api/v2/inhibitions`).
 - **Alerts:** не применимо.
 
@@ -142,6 +142,11 @@ AMP начинает читать верхнеуровневый `inhibit_rules:
 ## Deviations
 
 - **2026-10-12, implement 1.8:** смоук выявил предсуществующий panic на старте при любом inhibit-правиле (двойная регистрация `alert_history_inhibition_cache_*`: `pkg/metrics.BusinessMetrics.InhibitionCache*` без label'ов и `inhibition.GetCacheMetrics` с `tier`). По решению владельца чинится здесь: мёртвые поля `BusinessMetrics` удалены, источник имён — `GetCacheMetrics`. Без этого задача превращала бы «правила игнорируются» в «конфиг не стартует». Risk Profile → `C X R`, tier Full; `deep-review` — required.
+
+- **2026-10-12, deep-review round 1 (`review-findings.md`):**
+  - F1 — viper приводил имена label'ов в `*_match`/`*_match_re` к нижнему регистру (и для вложенных правил): правила обоих размещений теперь перечитываются из файла через yaml.v3 (`loadInhibitRulesYAML`), `Config.InhibitRules` — `mapstructure:"-"`. Target Design п.1 уточнён: поле заполняет не viper.
+  - F2 — E150/E151 (правило без source/target) понижены до W150/W151 в `pkg/configvalidator`: upstream такие правила принимает (target-only правило kube-prometheus-stack), иначе verbatim-конфиг после апгрейда не стартовал. Ослабление касается и вложенных правил.
+  - Инвариант «reload отклонён ⇒ живые правила не меняются» не держится на пути `rollbackPostCommit` (F3, предсуществующее) — в BUGS на `finalize`.
 
 ## Open Questions
 

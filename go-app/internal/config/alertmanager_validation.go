@@ -61,8 +61,7 @@ var alertmanagerSubsetKeys = []string{
 // data must be the same bytes the caller is about to hand to
 // infraroute.Parse() / has already used for viper (loadRouteConfig's
 // contract); cfg.InhibitRules and cfg.Inhibition.Rules must already be
-// populated (viper's
-// mapstructure pass happens before this in LoadConfig).
+// populated (loadInhibitRulesYAML runs before this in LoadConfig).
 func validateAlertmanagerSubset(data []byte, cfg *Config) error {
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {

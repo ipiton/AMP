@@ -256,6 +256,7 @@ func (c *RouteConfig) Clone() *RouteConfig {
 		Route:         c.Route.Clone(),
 		Receivers:     make([]*Receiver, len(c.Receivers)),
 		Templates:     append([]string{}, c.Templates...),
+		InhibitRules:  append([]InhibitRule(nil), c.InhibitRules...),
 		ReceiverIndex: make(map[string]*Receiver, len(c.ReceiverIndex)),
 		Version:       c.Version,
 		LoadedAt:      c.LoadedAt,

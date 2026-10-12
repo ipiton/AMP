@@ -18,7 +18,7 @@ updated_at: 2026-10-12
 - Runtime берёт правила только из `cfg.Inhibition.ToInhibitionRules()`: старт `service_registry.go:1333`, hot reload `:2699` (пересобирается **безусловно** на каждом reload), fail-fast `config.go:690` (`LoadConfig`) и `:798` (`LoadConfigFromEnv`).
 - `configvalidator` видит только вложенные правила (`alertmanager_validation.go:98`; `inhibit_rules` нет в `alertmanagerSubsetKeys:50`) и запускается только при `route:` (`loadRouteConfig`, `config.go:722`).
 - `RouteConfig.InhibitRules` **не мёртвое**: `yaml.Marshal(cfg.Routing)` отдаёт его в `/api/v2/status` `config.original` (`handlers/status_config.go:128`, тест `status_config_test.go:148`) и в `RoutingFingerprint` (`routing_fingerprint.go`). Тип без `source_matchers`/`target_matchers` ⇒ amtool/karma их не видят, а правка только matchers не меняет fingerprint. Вложенные правила в `config.original` не попадают вовсе.
-- Парсер `routing.Parse` нестрогий (`KnownFields` нет), viper `Unmarshal` без `ErrorUnused` — новое поле ничего не ломает. Diff (`update_diff.go:189`) идёт через JSON `Config` ⇒ новое поле с json-тегом видно diff'у; секция `inhibit_rules` уже маппится в компонент `inhibition` (`reload_coordinator.go:645`).
+- Парсер `routing.Parse` нестрогий (`KnownFields` нет), viper `Unmarshal` без `ErrorUnused` — новое поле ничего не ломает. Diff (`update_diff.go:189`) идёт через JSON `Config` ⇒ новое поле с json-тегом видно diff'у; запись `inhibit_rules` → `inhibition` в `reload_coordinator.go:645` фактически мертва: diff отдаёт имена Go-полей (`InhibitRules`), поэтому `affected_components` пуст — на применение не влияет, правила пересобираются безусловно (уточнено deep-review F7).
 
 ## Options
 

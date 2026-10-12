@@ -62,11 +62,10 @@ func (c *InhibitionConfig) ToInhibitionRules() ([]inhibition.InhibitionRule, err
 // are merged, as inline rules and config_file already were; a rule present in
 // both just inhibits the same alerts twice over.
 //
-// This is the only path from config to the inhibition engine: startup,
-// hot reload and the fail-fast in LoadConfig all call it
-// (FU-TOPLEVEL-INHIBIT-RULES — before, the top-level key was parsed and
-// silently ignored). A rule that fails to compile fails the whole call, so a
-// config never loads with part of its rules.
+// Startup, hot reload and the fail-fast in LoadConfig all build the engine's
+// rules through it (FU-TOPLEVEL-INHIBIT-RULES — before, the top-level key was
+// parsed and silently ignored). A rule that fails to compile fails the whole
+// call, so LoadConfig never accepts a config with only part of its rules.
 func (c *Config) InhibitionRules() ([]inhibition.InhibitionRule, error) {
 	topLevel, err := compileInhibitionRules(c.InhibitRules, "top-level")
 	if err != nil {

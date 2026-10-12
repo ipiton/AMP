@@ -14,6 +14,7 @@ import (
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // Config represents the application configuration
@@ -49,8 +50,10 @@ type Config struct {
 	// placement. It is merged with Inhibition.Rules by Config.InhibitionRules,
 	// so a verbatim alertmanager.yml inhibits without moving its rules under
 	// `inhibition:` (FU-TOPLEVEL-INHIBIT-RULES; before that the key was parsed
-	// and silently ignored). Not `json:"-"`: the reload diff must see it.
-	InhibitRules []InhibitionRuleConfig `mapstructure:"inhibit_rules" yaml:"inhibit_rules,omitempty"`
+	// and silently ignored). Filled by loadInhibitRulesYAML, not viper
+	// (mapstructure:"-"): viper lowercases label names. Not `json:"-"`: the
+	// reload diff must see it.
+	InhibitRules []InhibitionRuleConfig `mapstructure:"-" yaml:"inhibit_rules,omitempty"`
 
 	// Routing holds the full Alertmanager-compatible route tree and receiver
 	// definitions (top-level `route:` + `receivers:` + `global:` YAML
@@ -685,6 +688,10 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	if err := loadInhibitRulesYAML(configPath, &cfg); err != nil {
+		return nil, err
+	}
+
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -706,6 +713,44 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// loadInhibitRulesYAML re-decodes the inhibition rules from the raw file
+// with gopkg.in/yaml.v3, replacing what viper put into cfg.InhibitRules and
+// cfg.Inhibition.Rules. viper lowercases every map key it holds, including
+// the label names in source_match/target_match(_re) — `clusterName: prod`
+// became `clustername`, and a verbatim upstream rule on a mixed-case label
+// silently matched nothing (FU-TOPLEVEL-INHIBIT-RULES review F1). Label
+// names are case-sensitive, so these maps must come from the YAML as written,
+// the same way loadRouteConfig reads route:/receivers:.
+//
+// A missing file is not an error (LoadConfig already tolerates it).
+func loadInhibitRulesYAML(configPath string, cfg *Config) error {
+	if configPath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read config file for inhibit rules: %w", err)
+	}
+
+	var doc struct {
+		InhibitRules []InhibitionRuleConfig `yaml:"inhibit_rules"`
+		Inhibition   struct {
+			Rules []InhibitionRuleConfig `yaml:"inhibit_rules"`
+		} `yaml:"inhibition"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("failed to parse inhibit rules: %w", err)
+	}
+
+	cfg.InhibitRules = doc.InhibitRules
+	cfg.Inhibition.Rules = doc.Inhibition.Rules
+	return nil
 }
 
 // loadRouteConfig parses the optional `route:` + `receivers:` + `global:`
