@@ -149,25 +149,35 @@ based_on:
 
 ## Phase 4: Testing (гейты AMP, `WORKFLOW.md` § Гейты AMP)
 
-- [ ] **4.1** Затронутые пакеты.
+- [x] **4.1** Затронутые пакеты.
 
   <!-- verify: cd go-app && go vet ./internal/core/... && go test ./internal/core/... -->
-- [ ] **4.2** Быстрый гейт, после него `git status` без новых изменений от `go fmt`.
+- [x] **4.2** Быстрый гейт, после него `git status` без новых изменений от `go fmt`.
 
   <!-- verify: make -C go-app quality-gates-fast && git status --short -->
-- [ ] **4.3** Полный гейт (build, golangci-lint, тесты, `-race`, helm lint/template, RBAC-scope, amtool-smoke).
+- [x] **4.3** Полный гейт (build, golangci-lint, тесты, `-race`, helm lint/template, RBAC-scope, amtool-smoke).
 
   <!-- depends: 4.2 | verify: scripts/release-gate.sh — RESULT: PASS; флейки — по правилу BUGS, не скрывать -->
-- [ ] **4.4** Смоук бинаря, вывод — в `evidence/smoke.md`:
+- [x] **4.4** Смоук бинаря, вывод — в `evidence/smoke.md`:
   - `POST /api/v2/alerts` с `alertname=TestRunnerDown` и `namespace=tmp` → доставлен на webhook-приёмник;
   - конфиг с route на `blackhole` из migration note загружается (W024 в логе) и такой алерт не доставляет.
 
   <!-- depends: 4.3 | verify: evidence/smoke.md -->
-- [ ] **4.5** `git diff --check`; в диффе нет проглоченных ошибок `_, _ :=`.
+- [x] **4.5** `git diff --check`; в диффе нет проглоченных ошибок `_, _ :=`.
 
   <!-- verify: git diff --check main && ! git diff main -- go-app | grep -nE '^\+.*_, _ :=' -->
 
 **Phase verification:** release-gate `RESULT: PASS` + `evidence/smoke.md`.
+
+### Итог фазы 4 (testing, 2026-10-13)
+
+- 4.1: `go vet ./internal/core/...`, `go test ./internal/core/...` — 500 тестов в 8 пакетах, зелёные.
+- 4.2: `quality-gates-fast` зелёный; после него `git status` чистый.
+- 4.3: `scripts/release-gate.sh` — `RESULT: PASS`, все 11 шагов, включая `race` и `amtool-compat` (`evidence/release-gate.txt`). Флейков не было.
+- 4.4: смоук бинаря — `evidence/smoke.md`, скрипт `evidence/smoke-filter.sh`, `TOTAL FAILS: 0`. `TestRunnerDown`/`tmp`/`dev-sandbox`/`environment=test` доставляются. Конфиг из migration note грузится с W024, такие алерты уходят в blackhole (`blackhole_drops_total` = 4, на webhook 0), контрольный алерт доставлен.
+- 4.5: `git diff --check main` чистый, `_, _ :=` в диффе нет.
+- Находка вне scope: дочерние route не наследуют `group_wait`/`group_interval`/`repeat_interval` родителя (`grouping/parser.go` `applyRouteDefaults`) → 5.4.
+- `review-findings.md` не ведётся: deep-review не запускался (Standard, дифф < 200 строк), отложенных находок нет.
 
 ## Phase 5: Finalize
 
@@ -181,6 +191,9 @@ based_on:
 - [ ] **5.2** Follow-up в BUGS: `DIRECT-PUBLISH-RENOTIFIES-ON-RESEND` — direct-publish путь без nflog шлёт уведомление на каждую повторную отправку старше окна Rule 7 (Spec § Impact Analysis).
 
   <!-- verify: grep -n "DIRECT-PUBLISH-RENOTIFIES-ON-RESEND" docs/06-planning/BUGS.md -->
+- [ ] **5.4** Follow-up в BUGS: `ROUTE-TIMINGS-NOT-INHERITED` — `grouping/parser.go` `applyRouteDefaults` проставляет 30s/5m/4h каждому вложенному route, поэтому `TreeBuilder.inheritDuration` не берёт тайминги родителя (upstream наследует). Найдено смоуком (`evidence/smoke.md`).
+
+  <!-- verify: grep -n "ROUTE-TIMINGS-NOT-INHERITED" docs/06-planning/BUGS.md -->
 - [ ] **5.3** Workspace → `tasks/archive/PROD-HARDCODED-FILTER/`; статус артефактов `complete`.
 
   <!-- verify: ls tasks/archive/PROD-HARDCODED-FILTER/ -->
