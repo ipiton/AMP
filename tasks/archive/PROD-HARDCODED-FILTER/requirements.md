@@ -4,7 +4,7 @@ slug: prod-hardcoded-filter
 stream: Pipeline
 type: bug
 priority: critical
-status: active
+status: complete
 created_at: 2026-10-13
 updated_at: 2026-10-13
 ---
@@ -39,13 +39,13 @@ updated_at: 2026-10-13
 
 ## Success Criteria
 
-- [ ] Правила по имени (`test*`), `environment=test|testing` и namespace (`dev-sandbox`, `tmp`) удалены из кода: такие алерты доходят до ресивера — тест на `AlertProcessor` в transparent и enriched.
+- [x] Правила по имени (`test*`), `environment=test|testing` и namespace (`dev-sandbox`, `tmp`) удалены из кода: такие алерты доходят до ресивера — тест на `AlertProcessor` в transparent и enriched.
 - [x] Rule 7, 5, 6 сверены с upstream (`research.md` § 2, решение § 4).
-- [ ] Rule 7: флап firing → resolved → firing внутри окна проходит целиком; повтор того же статуса в окне по-прежнему блокируется.
-- [ ] Каждый дроп виден: `alert_history_filter_blocked_total{reason}` (существующая метрика, имя не меняется), лог дропа — INFO с `fingerprint` и `reason`. `// TODO: Record filter metrics` в `alert_processor.go` убраны.
-- [ ] Ключ `filters:` удалён из `helm/amp/values.yaml` (закрывает BACKLOG `DEAD-VALUES-FILTERS`); `helm lint`/render-тесты чарта зелёные.
-- [ ] `CHANGELOG.md` `[Unreleased]` — Fixed + breaking/migration note с готовым route на blackhole-receiver, возвращающим старый дроп; `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gaps — какие правила фильтра остались (5, 6, 7, LLM 2/3) и что дропнутый алерт виден в `GET /api/v2/alerts`.
-- [ ] Гейты AMP (`WORKFLOW.md` § Гейты AMP): затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`.
+- [x] Rule 7: флап firing → resolved → firing внутри окна проходит целиком; повтор того же статуса в окне по-прежнему блокируется.
+- [x] Каждый дроп виден: `alert_history_filter_blocked_total{reason}` (существующая метрика, имя не меняется), лог дропа — INFO с `fingerprint` и `reason`. `// TODO: Record filter metrics` в `alert_processor.go` убраны.
+- [x] Ключ `filters:` удалён из `helm/amp/values.yaml` (закрывает BACKLOG `DEAD-VALUES-FILTERS`); `helm lint`/render-тесты чарта зелёные.
+- [x] `CHANGELOG.md` `[Unreleased]` — Fixed + breaking/migration note с готовым route на blackhole-receiver, возвращающим старый дроп; `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gaps — какие правила фильтра остались (5, 6, 7, LLM 2/3) и что дропнутый алерт виден в `GET /api/v2/alerts`.
+- [x] Гейты AMP (`WORKFLOW.md` § Гейты AMP): затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`.
 
 ## Non-Goals
 

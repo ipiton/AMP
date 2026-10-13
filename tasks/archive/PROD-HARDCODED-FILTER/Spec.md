@@ -3,7 +3,7 @@ id: PROD-HARDCODED-FILTER
 slug: prod-hardcoded-filter
 stream: Pipeline
 type: bug
-status: draft
+status: complete
 created_at: 2026-10-13
 updated_at: 2026-10-13
 based_on:
@@ -14,7 +14,7 @@ based_on:
 # Specification: захардкоженный фильтр не должен молча выбрасывать алерты
 
 **Version:** 1.0
-**Status:** Draft
+**Status:** Complete
 
 ## Summary
 
@@ -109,12 +109,12 @@ based_on:
 
 ## Invariants
 
-- [ ] Алерт, не попадающий ни под одно оставшееся правило, проходит фильтр — ни одного нового условия блокировки.
-- [ ] Повтор того же fingerprint и того же статуса в окне блокируется, как до изменения (защита direct-publish пути).
-- [ ] Смена статуса никогда не блокируется Rule 7.
-- [ ] Имена метрик `alert_history_filter_blocked_total`, `_filtered_total`, `_duration_seconds` и их label'ы не меняются.
-- [ ] LLM-правила 2/3, правила 5/6 ведут себя как раньше.
-- [ ] Ответ `POST /api/v2/alerts` на дропнутый алерт — по-прежнему 2xx.
+- [x] Алерт, не попадающий ни под одно оставшееся правило, проходит фильтр — ни одного нового условия блокировки.
+- [x] Повтор того же fingerprint и того же статуса в окне блокируется, как до изменения (защита direct-publish пути).
+- [x] Смена статуса никогда не блокируется Rule 7.
+- [x] Имена метрик `alert_history_filter_blocked_total`, `_filtered_total`, `_duration_seconds` и их label'ы не меняются.
+- [x] LLM-правила 2/3, правила 5/6 ведут себя как раньше.
+- [x] Ответ `POST /api/v2/alerts` на дропнутый алерт — по-прежнему 2xx.
 
 ## Edge Cases
 
@@ -198,5 +198,5 @@ based_on:
 
 ## Open Questions
 
-- [ ] `assumed`: HA-пара Prometheus даёт `Updated` в дедуп-сервисе (разные `endsAt`) — только обоснование сохранения Rule 7; на дизайн не влияет. Проверка — вне задачи.
-- [ ] Follow-up (не блокирует): `DIRECT-PUBLISH-RENOTIFIES-ON-RESEND` — direct-publish путь без nflog шлёт уведомление на каждый resend старше окна Rule 7. Завести в BUGS на `finalize`.
+- [x] `assumed` (перенесено как риск в DONE.md; на дизайн не влияет): HA-пара Prometheus даёт `Updated` в дедуп-сервисе (разные `endsAt`) — только обоснование сохранения Rule 7; на дизайн не влияет. Проверка — вне задачи.
+- [x] Follow-up (не блокирует, заведён в BUGS): `DIRECT-PUBLISH-RENOTIFIES-ON-RESEND` — direct-publish путь без nflog шлёт уведомление на каждый resend старше окна Rule 7. Завести в BUGS на `finalize`.

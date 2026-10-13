@@ -3,7 +3,7 @@ id: PROD-HARDCODED-FILTER
 slug: prod-hardcoded-filter
 stream: Pipeline
 type: bug
-status: active
+status: complete
 created_at: 2026-10-13
 updated_at: 2026-10-13
 based_on:
@@ -181,29 +181,29 @@ based_on:
 
 ## Phase 5: Finalize
 
-- [ ] **5.1** Planning на ветке задачи:
+- [x] **5.1** Planning на ветке задачи:
   - BUGS `HARDCODED-FILTER-DROPS-ALERTS` → `Status: closed` со ссылкой на задачу;
   - BACKLOG `PROD-HARDCODED-FILTER` и `DEAD-VALUES-FILTERS` → в «Закрыто»;
   - NEXT — убрать из WIP и из порядка P0;
   - DONE — запись.
 
   <!-- verify: grep -n "PROD-HARDCODED-FILTER" docs/06-planning/NEXT.md — пусто; DONE.md — запись -->
-- [ ] **5.2** Follow-up в BUGS: `DIRECT-PUBLISH-RENOTIFIES-ON-RESEND` — direct-publish путь без nflog шлёт уведомление на каждую повторную отправку старше окна Rule 7 (Spec § Impact Analysis).
+- [x] **5.2** Follow-up в BUGS: `DIRECT-PUBLISH-RENOTIFIES-ON-RESEND` — direct-publish путь без nflog шлёт уведомление на каждую повторную отправку старше окна Rule 7 (Spec § Impact Analysis).
 
   <!-- verify: grep -n "DIRECT-PUBLISH-RENOTIFIES-ON-RESEND" docs/06-planning/BUGS.md -->
-- [ ] **5.4** Follow-up в BUGS: `ROUTE-TIMINGS-NOT-INHERITED` — `grouping/parser.go` `applyRouteDefaults` проставляет 30s/5m/4h каждому вложенному route, поэтому `TreeBuilder.inheritDuration` не берёт тайминги родителя (upstream наследует). Найдено смоуком (`evidence/smoke.md`).
+- [x] **5.4** Follow-up в BUGS: `ROUTE-TIMINGS-NOT-INHERITED` — `grouping/parser.go` `applyRouteDefaults` проставляет 30s/5m/4h каждому вложенному route, поэтому `TreeBuilder.inheritDuration` не берёт тайминги родителя (upstream наследует). Найдено смоуком (`evidence/smoke.md`).
 
   <!-- verify: grep -n "ROUTE-TIMINGS-NOT-INHERITED" docs/06-planning/BUGS.md -->
-- [ ] **5.3** Workspace → `tasks/archive/PROD-HARDCODED-FILTER/`; статус артефактов `complete`.
+- [x] **5.3** Workspace → `tasks/archive/PROD-HARDCODED-FILTER/`; статус артефактов `complete`.
 
   <!-- verify: ls tasks/archive/PROD-HARDCODED-FILTER/ -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required (Spec § Deep Review: skipped, если дифф кода ≤ ~200 строк — шаг 1.6)
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required (Spec § Deep Review: skipped, если дифф кода ≤ ~200 строк — шаг 1.6)
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
