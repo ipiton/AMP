@@ -19,10 +19,12 @@ receiver tables that follow it are kept for API-surface detail.
 Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
 explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** one gap bites on a verbatim upstream config
-and is not reported at startup — a built-in filter drops some alerts (#14). The top-level `inhibit_rules:` the
-audit also found ignored (#9) is applied since `FU-TOPLEVEL-INHIBIT-RULES` (2026-10-12). Grouping (#13) is on by default since `PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15).
-Each is a P0 in `docs/06-planning/BACKLOG.md`.
+**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** the gaps the audit found on a verbatim upstream
+config are closed. The built-in filter no longer drops alerts by name, environment or namespace since
+`PROD-HARDCODED-FILTER` (2026-10-13); the rules it keeps are listed in #14. The top-level `inhibit_rules:` the audit
+found ignored (#9) is applied since `FU-TOPLEVEL-INHIBIT-RULES` (2026-10-12). Grouping (#13) is on by default since
+`PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15), a P0 in
+`docs/06-planning/BACKLOG.md`.
 
 Source of truth:
 - `go-app/internal/business/routing/` (route tree, matcher, evaluator)
@@ -881,13 +883,24 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     - Both profiles group. The standard profile keeps groups, timers and the notification log in Redis, shared
       across replicas, and falls back to in-memory state that replicas do not share when Redis is
       unavailable; the lite profile keeps them in memory (single replica).
-14. **A built-in filter drops some alerts before routing.** `SimpleFilterEngine`
-    (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM, and silently drops:
-    alert names starting with `test` (case-insensitive), alerts labelled `environment=test` or `testing`, alerts
-    from namespaces `dev-sandbox` and `tmp`, resolved alerts older than 24 h, alerts without a name, and a repeat
-    of the same fingerprint and status within one minute. The rules are hard-coded, there is no metric, and the
-    drop is logged at INFO. Upstream drops none of these. The Helm `filters:` key does not configure it. Tracked
-    as `PROD-HARDCODED-FILTER` (P0); bug `HARDCODED-FILTER-DROPS-ALERTS`.
+14. **A built-in filter still drops a few alerts before routing.** `SimpleFilterEngine`
+    (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM. Since
+    `PROD-HARDCODED-FILTER` (2026-10-13) it has no rules on alert content: names starting with `test`,
+    `environment=test`/`testing` and namespaces `dev-sandbox`/`tmp` are delivered (to discard them, route them to a
+    receiver without integrations — see the CHANGELOG migration note). What it still drops:
+    - a repeat of the alert's last status within one minute. On the direct-publish path (no `route:` tree, or
+      `grouping.enabled: false`) this is the only thing that stops an HA Prometheus pair from notifying twice;
+      upstream merges such a repeat into the stored alert instead. A status change always passes, so a flapping
+      alert is not lost;
+    - resolved alerts older than 24 h (upstream stores them but does not notify either);
+    - an alert without a name — unreachable over the HTTP API, which rejects it with `400` (upstream only requires
+      at least one label);
+    - with LLM classification only: `noise` and confidence below `0.3` (`PROD-LLM-ALERT-PATH-ISOLATION`).
+
+    The sender gets `200` and a dropped alert is listed in `GET /api/v2/alerts`, but no receiver is notified. Each
+    drop increments `alert_history_filter_blocked_total{reason}` (`duplicate`, `old_resolved`, `empty_alert_name`,
+    `noise`, `low_confidence`) and logs `Alert blocked by filter` at INFO with the fingerprint. None of it is
+    configurable.
 15. **A config error stops AMP; the Helm defaults do not pass validation yet.** Without a config file
     (`AMP_CONFIG_FILE` unset and no `./config.yaml`) AMP reads its environment and built-in defaults. An
     `AMP_CONFIG_FILE` that does not exist, an unreadable or malformed file, or a config that fails validation exits
@@ -1013,8 +1026,8 @@ Treat AMP as a strong replacement candidate if you rely on:
 - standard health/readiness monitoring and hot configuration reload (`POST /-/reload` **and** `SIGHUP`)
 
 Still validate before a blanket swap:
-- that none of your alerts match the built-in filter (Known Gap #14): names starting with `test`, `environment=test`,
-  namespaces `dev-sandbox`/`tmp`
+- that you do not rely on AMP dropping test-looking alerts: since `PROD-HARDCODED-FILTER` they are delivered
+  (Known Gap #14, CHANGELOG migration note)
 - that every field you depend on inside a `*_configs` block is in the "Mapped (delivered)" column of the
   field-fidelity table, not the "Parsed but NOT delivered" one
 - exact wire-level webhook payload shape if a downstream integration depends on upstream's single alerts-array POST

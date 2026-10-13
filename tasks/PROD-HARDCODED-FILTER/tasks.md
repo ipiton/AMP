@@ -35,13 +35,13 @@ based_on:
 
 > **Wave 1** — независимые шаги, разные файлы
 
-- [ ] **1.1** `filter_engine.go`:
+- [x] **1.1** `filter_engine.go`:
   - удалить из `shouldBlockInternal` Rule 1 (`isTestAlert`) и Rule 4 (`isDisabledNamespace`) вместе с функциями `isTestAlert`, `containsTest`, `isDisabledNamespace`;
   - нумерацию оставшихся правил в комментариях не менять;
   - doc-комментарий `ShouldBlock` перечисляет фактические правила (2, 3, 5, 6, 7) и говорит, что метрику пишет сам движок.
 
   <!-- verify: cd go-app && go build ./internal/core/services/ && ! grep -nE "isTestAlert|containsTest|isDisabledNamespace|test_alert|disabled_namespace" internal/core/services/filter_engine.go -->
-- [ ] **1.2** `filter_engine.go`, Rule 7:
+- [x] **1.2** `filter_engine.go`, Rule 7:
   - `dedupSeen map[string]dedupEntry`, `type dedupEntry struct { status core.AlertStatus; seenAt time.Time }`, ключ — `alert.Fingerprint`;
   - блок только при `entry.status == alert.Status && now.Sub(entry.seenAt) < window`, иначе запись перезаписывается `{alert.Status, now}`;
   - при блоке запись не трогается;
@@ -49,19 +49,19 @@ based_on:
   - doc-комментарий `isDuplicate` и поля структуры — про флап (Spec § Target Design п. 2).
 
   <!-- depends: 1.1 (тот же файл) | verify: cd go-app && go test -race ./internal/core/services/ -run 'Dedup' -count=1 -->
-- [ ] **1.3** `alert_processor.go` (`processTransparent`, `processEnriched`): в INFO `Alert blocked by filter` добавить `"fingerprint", alert.Fingerprint`; удалить обе строки `// TODO: Record filter metrics`. Логику не трогать.
+- [x] **1.3** `alert_processor.go` (`processTransparent`, `processEnriched`): в INFO `Alert blocked by filter` добавить `"fingerprint", alert.Fingerprint`; удалить обе строки `// TODO: Record filter metrics`. Логику не трогать.
 
   <!-- verify: cd go-app && ! grep -n "TODO: Record filter metrics" internal/core/services/alert_processor.go && git diff --stat internal/core/services/alert_processor.go -->
 
 > **Wave 2** — зависит от Wave 1
 
-- [ ] **1.4** Минимальная правка существующих тестов, чтобы пакет был зелёным. Кейсы `filter_engine_test.go`, ожидавшие `test_alert`/`disabled_namespace`, теперь ждут «не блокируется» (`false, ""`); имена и комментарии кейсов — под новое ожидание. Тесты и бенчмарки удалённых хелперов удалить вместе с ними, иначе пакет не компилируется: `TestIsTestAlert` (`:430`), `TestContainsTest` (`:666`), `BenchmarkIsTestAlert` (`:725`), `BenchmarkContainsTest` (`:740`). `TestSimpleFilterEngine_ShouldBlock_TestAlerts` (`:113`) и `_CombinedRules` (`:331`) не удалять — инвертировать ожидания. Новых тестов здесь не писать.
+- [x] **1.4** Минимальная правка существующих тестов, чтобы пакет был зелёным. Кейсы `filter_engine_test.go`, ожидавшие `test_alert`/`disabled_namespace`, теперь ждут «не блокируется» (`false, ""`); имена и комментарии кейсов — под новое ожидание. Тесты и бенчмарки удалённых хелперов удалить вместе с ними, иначе пакет не компилируется: `TestIsTestAlert` (`:430`), `TestContainsTest` (`:666`), `BenchmarkIsTestAlert` (`:725`), `BenchmarkContainsTest` (`:740`). `TestSimpleFilterEngine_ShouldBlock_TestAlerts` (`:113`) и `_CombinedRules` (`:331`) не удалять — инвертировать ожидания. Новых тестов здесь не писать.
 
   <!-- depends: 1.1, 1.2 | verify: cd go-app && go test ./internal/core/services/ -run 'SimpleFilterEngine|FilterEngine' -count=1 -->
-- [ ] **1.5** Затронутое дерево зелёное, `go fmt` не меняет файлы.
+- [x] **1.5** Затронутое дерево зелёное, `go fmt` не меняет файлы.
 
   <!-- depends: 1.1–1.4 | verify: cd go-app && gofmt -l internal/core/services/ && go vet ./internal/core/... && go test ./internal/core/... -count=1 -->
-- [ ] **1.6** Проверка размера диффа кода для решения по deep-review (Spec § Deep Review): больше ~200 строк — остановиться и запустить `deep-review`.
+- [x] **1.6** Проверка размера диффа кода для решения по deep-review (Spec § Deep Review): больше ~200 строк — остановиться и запустить `deep-review`.
 
   <!-- depends: 1.5 | verify: git diff --stat main -- go-app/ | tail -1 -->
 
@@ -71,10 +71,10 @@ based_on:
 
 > **Wave 1** — независимые шаги, разные файлы
 
-- [ ] **2.1** `helm/amp/values.yaml`: удалить секцию `Filter Rules Configuration` (`:798-805`: заголовок-рамку, `filters: {}`, пример).
+- [x] **2.1** `helm/amp/values.yaml`: удалить секцию `Filter Rules Configuration` (`:798-805`: заголовок-рамку, `filters: {}`, пример).
 
   <!-- verify: ! grep -nE "^filters:|Filter Rules Configuration" helm/amp/values.yaml && helm lint helm/amp && helm template amp helm/amp >/dev/null -->
-- [ ] **2.2** `CHANGELOG.md` `[Unreleased]`:
+- [x] **2.2** `CHANGELOG.md` `[Unreleased]`:
   - `### Fixed` — PROD-HARDCODED-FILTER: удалены правила по имени, `environment` и namespace; Rule 7 не теряет повторное срабатывание после resolve; лог дропа с fingerprint.
   - `### Breaking changes / migration notes`:
     - что теперь доставляется;
@@ -83,20 +83,30 @@ based_on:
     - фрагмент `route:` + receiver `blackhole` из Spec § Rollout (с W024) и альтернатива — silence.
 
   <!-- verify: awk '/^## \[Unreleased\]/{f=1} f&&/^## \[[0-9]/{exit} f' CHANGELOG.md | grep -c "PROD-HARDCODED-FILTER" (≥2) -->
-- [ ] **2.3** `docs/ALERTMANAGER_COMPATIBILITY.md`:
+- [x] **2.3** `docs/ALERTMANAGER_COMPATIBILITY.md`:
   - Known Gap #14 переписать под оставшиеся правила (Spec § Target Design п. 5): resolved старше 24 ч, пустое имя (недостижимо с HTTP API), повтор того же статуса за 1 мин, LLM `noise`/`low_confidence` только в enriched;
   - метрика `alert_history_filter_blocked_total{reason}`; дропнутый алерт отвечает 2xx и виден в `GET /api/v2/alerts`;
   - вступление `:23` и чек-лист `:1016-1017` — без `test*`/`tmp`.
 
   <!-- verify: ! grep -nE "dev-sandbox|names starting with .test" docs/ALERTMANAGER_COMPATIBILITY.md -->
-- [ ] **2.4** `README.md:17`: убрать ловушку про встроенный фильтр (`test*`/`tmp`); оставшиеся P0-ловушки и ссылка на Known Gaps — без изменения смысла.
+- [x] **2.4** `README.md:17`: убрать ловушку про встроенный фильтр (`test*`/`tmp`); оставшиеся P0-ловушки и ссылка на Known Gaps — без изменения смысла.
 
   <!-- verify: ! grep -nE "dev-sandbox|environment=test" README.md -->
-- [ ] **2.5** Прочие упоминания: поиск по репо, кроме `docs/06-planning/`, `tasks/archive/` и `CHANGELOG.md`, не находит старых правил как действующих.
+- [x] **2.5** Прочие упоминания: поиск по репо, кроме `docs/06-planning/`, `tasks/archive/` и `CHANGELOG.md`, не находит старых правил как действующих.
 
   <!-- verify: grep -rnE "dev-sandbox|test_alert|disabled_namespace|containsTest|block_test_alerts" --exclude-dir=archive --exclude-dir=06-planning --exclude-dir=tasks --exclude=CHANGELOG.md . | grep -v "^./go-app/.cache" — только тесты фазы 3 (инверсия) -->
 
 **Phase verification:** `git diff --check && helm lint helm/amp`
+
+### Итог фаз 1–2 (implement, 2026-10-13)
+
+- 1.5: `go vet ./internal/core/...`, `go test ./internal/core/...` (487 passed, 8 пакетов), `go test -race ./internal/core/services/` (122 passed) — зелёные; `gofmt -l` пусто.
+- 1.6: дифф кода без тестов — 112 строк (`filter_engine.go` +40/−68, `alert_processor.go` +2/−2) < ~200 ⇒ deep-review остаётся пропущенным (Spec § Deep Review).
+- 2.1: `helm lint helm/amp` — 0 failed, `helm template` — ok.
+- **Отклонения от плана:**
+  - 2.2 — дополнительно `helm/amp/CHANGELOG.md` `### Changed` (удаление ключа `filters:`), по образцу PROD-GROUPING-DEFAULT.
+  - 2.3/2.5 — `verify`-grep не пустой намеренно: Known Gap #14 и инвертированные тест-кейсы называют `dev-sandbox`/`test_alert` как **доставляемые**.
+  - 2.3 — вступление compat-доки переписано целиком: после задачи из гэпов аудита на verbatim-конфиге открытым остаётся только #15 (дефолты чарта).
 
 ## Phase 3: Tests (выполняется в `write-tests`)
 
