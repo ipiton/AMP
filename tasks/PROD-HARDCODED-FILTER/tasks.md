@@ -112,25 +112,25 @@ based_on:
 
 Тест-план — Spec § Test Plan. Тестовые файлы пишутся здесь, после `implement`.
 
-- [ ] **3.1** T1 — `filter_engine_test.go`: `ShouldBlock` → `false` для `TestRunnerDown`, `TEST_X`, `testing`, `environment=test|testing`, namespace `tmp`/`dev-sandbox` (табличный тест).
+- [x] **3.1** T1 — `filter_engine_test.go`: `ShouldBlock` → `false` для `TestRunnerDown`, `TEST_X`, `testing`, `environment=test|testing`, namespace `tmp`/`dev-sandbox` (табличный тест).
 
   <!-- verify: cd go-app && go test ./internal/core/services/ -run 'TestSimpleFilterEngine' -count=1 -v | grep -c PASS -->
-- [ ] **3.2** T3 — `filter_engine_dedup_test.go`: флап firing → resolved → firing в окне — три прохода; следом повтор firing в окне → `true, "duplicate"`. Плюс повтор после смены статуса и возврата: блок считается от последней записи, а не от первой.
+- [x] **3.2** T3 — `filter_engine_dedup_test.go`: флап firing → resolved → firing в окне — три прохода; следом повтор firing в окне → `true, "duplicate"`. Плюс повтор после смены статуса и возврата: блок считается от последней записи, а не от первой.
 
   <!-- verify: cd go-app && go test -race ./internal/core/services/ -run 'Dedup' -count=1 -->
-- [ ] **3.3** T4 — существующие 5 тестов дедупа зелёные без изменения ожиданий; конкурентный `ShouldBlock` одного fingerprint'а с разными статусами под `-race`.
+- [x] **3.3** T4 — существующие 5 тестов дедупа зелёные без изменения ожиданий; конкурентный `ShouldBlock` одного fingerprint'а с разными статусами под `-race`.
 
   <!-- depends: 3.2 | verify: cd go-app && go test -race ./internal/core/services/ -run 'Dedup' -count=3 -->
-- [ ] **3.4** T5 — дроп `duplicate` инкрементирует `alert_history_filter_blocked_total{reason="duplicate"}` (`NewSimpleFilterEngineWithMetrics` + `testutil.ToFloat64`). Если `promauto` в глобальный registry мешает повторному созданию — по образцу существующих тестов `pkg/metrics`.
+- [x] **3.4** T5 — дроп `duplicate` инкрементирует `alert_history_filter_blocked_total{reason="duplicate"}` (`NewSimpleFilterEngineWithMetrics` + `testutil.ToFloat64`). Если `promauto` в глобальный registry мешает повторному созданию — по образцу существующих тестов `pkg/metrics`.
 
   <!-- verify: cd go-app && go test ./internal/core/services/ -run 'Metric' -count=1 -->
-- [ ] **3.5** T2 — `alert_processor_filter_test.go`: `AlertProcessor` с настоящим `SimpleFilterEngine` и `fakePublisher`:
+- [x] **3.5** T2 — `alert_processor_filter_test.go`: `AlertProcessor` с настоящим `SimpleFilterEngine` и `fakePublisher`:
   - алерт `TestRunnerDown` с `namespace=tmp`, `environment=testing` публикуется в transparent (без `LLMClient`) и в enriched (fake `LLMClient`: severity не `noise`, confidence ≥ 0.3);
   - повтор того же алерта в окне не публикуется второй раз (защита direct-publish пути);
   - флап доходит до publisher трижды.
 
   <!-- verify: cd go-app && go test -race ./internal/core/services/ -run 'AlertProcessor.*Filter' -count=1 -->
-- [ ] **3.6** Мутации (Spec § Test Plan), каждая — временная правка, прогон, откат; результат — в `tasks.md` или `evidence/mutations.md`:
+- [x] **3.6** Мутации (Spec § Test Plan), каждая — временная правка, прогон, откат; результат — в `tasks.md` или `evidence/mutations.md`:
   1. вернуть Rule 1 → 3.1/3.5 красные;
   2. ключ `fingerprint|status` → 3.2 красный;
   3. убрать сравнение статуса → 3.2/3.3 красный.
@@ -138,6 +138,14 @@ based_on:
   <!-- depends: 3.1–3.5 | verify: evidence/mutations.md, `git diff --stat` после отката — только тесты и код задачи -->
 
 **Phase verification:** `cd go-app && go vet ./internal/core/... && go test -race ./internal/core/services/ -count=1`
+
+### Итог фазы 3 (write-tests, 2026-10-13)
+
+- 3.1: отдельный табличный тест не добавлялся — T1 покрыт инвертированными в 1.4 кейсами (`_ShouldBlock_TestAlerts`: `test-alert`, `TestAlert`, `TEST_ALERT`, label `alertname`, `environment=test|testing`; `_AdditionalRules`: namespace `dev-sandbox`/`tmp`; `_CombinedRules`) и 3.5 (`TestRunnerDown` + `namespace=tmp` + `environment=testing` через `AlertProcessor`).
+- 3.2–3.4 (`filter_engine_dedup_test.go`): `_FlapWithinWindowPasses`, `_BlockedRepeatDoesNotExtendWindow`, `_ConcurrentStatusChanges`, `_RecordsBlockedMetric` (свои незарегистрированные vec'и вместо `promauto`). Существующие 5 тестов дедупа — без изменений.
+- 3.5: новый `alert_processor_filter_test.go` — 3 теста × {transparent, enriched с fake `LLMClient`}.
+- 3.6: мутации M1–M3 пойманы — `evidence/mutations.md`.
+- Прогон: `go vet ./internal/core/...`; `go test -race ./internal/core/services/ -count=1`; `go test ./internal/core/... -count=1`; `go test -race -run Dedup -count=3` — зелёные.
 
 ## Phase 4: Testing (гейты AMP, `WORKFLOW.md` § Гейты AMP)
 
