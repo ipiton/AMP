@@ -24,50 +24,45 @@ updated_at: 2026-10-13
 
 ## Risk Profile
 
-- **Signals:** `C X R`
-  - `C` — новая секция конфига (фильтры за явным opt-in) и, возможно, переименование/добавление метрики; поведение по умолчанию меняется (breaking для тех, кто полагался на дроп).
-  - `X` — `core/services` (движок), `config` (схема и валидация), `application` (проводка), `helm/amp` (ключ `filters:`), публичные доки.
+- **Signals:** `X R` (пересмотрено после research 2026-10-13: было `C X R`)
+  - `C` снят: по решению владельца правила 1 и 4 удаляются, а не уходят под opt-in-конфиг — новой секции конфига нет, HTTP API и имена метрик не меняются. Breaking по поведению (алерты `test*`/`tmp` доставляются) закрывается migration note, это `R`.
+  - `X` — `core/services` (движок), `helm/amp` (удаление ключа `filters:`), публичные доки.
   - `R` — горячий путь приёма алерта; меняется, какие алерты доставляются; observability (метрика, лог).
-- **Tier:** Full (3 сигнала).
+- **Tier:** Standard (`X R`). `deep-review` по усмотрению; обязателен, если дифф больше ~200 строк.
 - **Notes:** `S`/`M` нет: данные не мигрируют, правило «не дропать» только уменьшает потери. `R` в AMP закрывается записью в `CHANGELOG.md` `[Unreleased]` с migration note (deploy нет, `WORKFLOW.md`).
 
 ## User Stories
 
 1. Как оператор, переносящий `alertmanager.yml` в AMP, я хочу, чтобы любой принятый алерт доходил до ресивера по `route:`, как в upstream, чтобы не терять `TestRunnerDown` и алерты из namespace `tmp`.
-2. Как оператор, которому фильтр нужен, я хочу включить конкретное правило явно в конфиге и видеть каждое срабатывание в метрике с `reason`, чтобы дроп был осознанным и наблюдаемым.
-3. Как оператор, я хочу, чтобы повторная отправка firing-алерта Prometheus'ом (каждые `resend_delay`) не терялась, чтобы `endsAt` продлевался и алерт не резолвился сам по таймауту.
+2. Как оператор, которому дроп тестовых алертов нужен, я хочу сделать его штатным upstream-конфигом (route на blackhole-receiver или silence) по готовому примеру из migration note, а каждое срабатывание оставшихся правил фильтра видеть в метрике с `reason`.
+3. Как оператор, я хочу, чтобы алерт, который снова загорелся вскоре после resolve (флап), доходил до ресивера, а не оставался у ресивера «resolved».
 
 ## Success Criteria
 
-- [ ] При дефолтном конфиге правила по имени (`test*`), `environment=test|testing` и namespace не блокируют ни одного алерта — тест на `AlertProcessor` в transparent и enriched.
-- [ ] Эти правила включаются только явным конфигом; namespace-список и шаблон имени задаются конфигом, а не кодом. Если ни одно правило не включено, фильтр не вызывается или пропускает всё.
-- [ ] Rule 7 (повтор за 1 мин) сверен с upstream по коду Alertmanager (`api/v2`, `provider/mem`): решение (убрать / оставить с merge-семантикой / оставить за opt-in) записано в `research.md`; повторная отправка firing-алерта продлевает `endsAt` в хранилище и в группе, а не теряется.
-- [ ] Rule 5 (`empty_alert_name`) и Rule 6 (`old_resolved`) сверены с upstream-валидацией; решение и обоснование — в `research.md`.
-- [ ] Каждый дроп виден: счётчик с `reason` (`amp_alerts_filtered_total{reason}` из BACKLOG или существующий `alert_history_filter_blocked_total{reason}` — выбор в `Spec.md`), лог — не тише INFO, с fingerprint. `// TODO: Record filter metrics` в `alert_processor.go` убраны.
-- [ ] Ключ `filters:` в values либо реально проводится в конфиг AMP, либо удалён; render-тест чарта.
-- [ ] `CHANGELOG.md` `[Unreleased]` — Fixed + breaking/migration note; строка в `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gaps (или закрытие расхождения); `CONFIGURATION_GUIDE.md` описывает opt-in-фильтры.
+- [ ] Правила по имени (`test*`), `environment=test|testing` и namespace (`dev-sandbox`, `tmp`) удалены из кода: такие алерты доходят до ресивера — тест на `AlertProcessor` в transparent и enriched.
+- [x] Rule 7, 5, 6 сверены с upstream (`research.md` § 2, решение § 4).
+- [ ] Rule 7: флап firing → resolved → firing внутри окна проходит целиком; повтор того же статуса в окне по-прежнему блокируется.
+- [ ] Каждый дроп виден: `alert_history_filter_blocked_total{reason}` (существующая метрика, имя не меняется), лог дропа — INFO с `fingerprint` и `reason`. `// TODO: Record filter metrics` в `alert_processor.go` убраны.
+- [ ] Ключ `filters:` удалён из `helm/amp/values.yaml` (закрывает BACKLOG `DEAD-VALUES-FILTERS`); `helm lint`/render-тесты чарта зелёные.
+- [ ] `CHANGELOG.md` `[Unreleased]` — Fixed + breaking/migration note с готовым route на blackhole-receiver, возвращающим старый дроп; `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gaps — какие правила фильтра остались (5, 6, 7, LLM 2/3) и что дропнутый алерт виден в `GET /api/v2/alerts`.
 - [ ] Гейты AMP (`WORKFLOW.md` § Гейты AMP): затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`.
 
 ## Non-Goals
 
 - LLM-правила Rule 2/3 (`noise`, `low_confidence`) — `PROD-LLM-ALERT-PATH-ISOLATION` (P1): там же LLM-дроп за флагом, асинхронная классификация и настоящий переключатель enrichment mode. Здесь их не трогаем, кроме общей метрики/лога дропа.
 - `EnrichmentModeManager.GetMode`, захардкоженный на `enriched`, — тоже `PROD-LLM-ALERT-PATH-ISOLATION`.
-- Полноценный язык фильтров (regex по любым label'ам, как пример в `values.yaml`) — только минимальный opt-in для существующих правил. Для «не слать» у upstream есть silences/inhibition/`route` с пустым ресивером.
+- Конфигурируемые фильтры (opt-in секция `filters:`, regex по label'ам) — отвергнуто владельцем 2026-10-13: для «не слать» есть upstream-средства (silences, inhibition, `route` на receiver без интеграций).
+- Удаление правил 5 (`empty_alert_name`) и 6 (`old_resolved`): первое недостижимо с API, второе по исходу совпадает с upstream (`research.md` § 3).
 - UI/API управления фильтрами, hot reload фильтров сверх того, что даст общий reload конфига.
 
 ## Constraints
 
-- **Scope:** `go-app/internal/core/services/filter_engine.go`, вызовы в `alert_processor.go`, проводка в `internal/application/service_registry.go`, `internal/config` (новые ключи + валидация), `helm/amp/values.yaml` и шаблон ConfigMap/env, доки. Сверх этого — только по решению в `Spec.md`.
+- **Scope:** `go-app/internal/core/services/filter_engine.go` и его тесты, лог и TODO в `alert_processor.go`, `helm/amp/values.yaml` (удаление `filters:`), CHANGELOG и публичные доки. Сверх этого — только по решению в `Spec.md`.
 - **Security:** не применимо (auth не трогаем). В лог дропа не писать значения label'ов целиком сверх того, что уже логируется (`alertname`, fingerprint).
-- **Compatibility:** поведение по умолчанию меняется: раньше дропалось, теперь доставляется. Кто-то мог полагаться на дроп `test*` → migration note с конфигом, который возвращает старое поведение. Существующие имена метрик `alert_history_filter_*` не ломать без отдельной записи в CHANGELOG.
+- **Compatibility:** поведение меняется: раньше дропалось, теперь доставляется. Кто полагался на дроп `test*`/`tmp`, получает migration note с route, возвращающим старое поведение. Имена метрик `alert_history_filter_*` не меняются; значения `reason` `test_alert` и `disabled_namespace` исчезают.
 
 ## Discovery Notes
 
 - Similar tasks: `tasks/archive/PROD-GROUPING-DEFAULT/` (смена дефолта с migration note, render-тест чарта, e2e с webhook), `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/` (сверка с upstream, конфиг + reload), `DEDUP-STATE-STUB` (`archive/DONE-2026-08.md`, ввёл Rule 7, тесты `filter_engine_dedup_test.go`).
 - Relevant patterns: `pkg/metrics` `FilterMetrics` (`alert_history_filter_blocked_total{reason}`, `filtered_total{result}`, `duration_seconds`) — уже пишется из `ShouldBlock`, расходится с описанием бага («метрики нет»); дефолты конфига через viper в `internal/config/config.go`; `configvalidator` для W/E-кодов.
-- Open unknowns:
-  1. Upstream: что делает Alertmanager с повторной отправкой того же алерта (merge `endsAt` в `provider/mem`) и как AMP хранит алерт до/после фильтра — теряется ли продление `endsAt` при Rule 7.
-  2. Upstream-валидация: принимается ли алерт без `alertname` (upstream требует только непустые label'ы) и старый resolved-алерт.
-  3. Где сохраняется алерт (история/storage) относительно фильтра — дропнутый алерт есть в истории/`GET /api/v2/alerts` или нет.
-  4. Имя метрики: новая `amp_alerts_filtered_total` против существующей `alert_history_filter_blocked_total`.
-  5. Нужна ли форма конфига, совместимая с упомянутым `filters:` в values, или ключ удаляется.
+- Open unknowns: закрыты в `research.md`, кроме одной `assumed`-премисы для spec — на direct-publish пути нет другого дедупа уведомлений, кроме Rule 7.
