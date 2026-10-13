@@ -16,17 +16,18 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **PROD-HARDCODED-FILTER** — P0 из BACKLOG: захардкоженный `SimpleFilterEngine` молча дропает алерты в любом режиме, в том числе без LLM (имя на `test*`, `environment=test`, namespace `dev-sandbox`/`tmp`, повтор за 1 мин). Ветка `bugfix/prod-hardcoded-filter`, workspace `tasks/PROD-HARDCODED-FILTER/`. Взят 2026-10-13.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-HARDCODED-FILTER` → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-HARDCODED-FILTER` (в WIP) → `PROD-DEPS-NET-HTTP2` (Blocked-by: карантин до 2026-10-15) → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
-- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. `~5min`
-  Trigger: owner ready.
+- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` снова красный (GO-2026-6610…6617) — ждёт `PROD-DEPS-NET-HTTP2`. `~5min`
+  Blocked-by: PROD-DEPS-NET-HTTP2.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
