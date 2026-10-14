@@ -107,6 +107,13 @@ spec:
                   key: password
             - name: DATABASE_SSL_MODE
               value: {{ ternary "require" "disable" (eq (default "off" .Values.postgresql.config.ssl) "on") | quote }}
+            {{- if ne (default "off" .Values.postgresql.config.ssl) "on" }}
+            # The bundled PostgreSQL has no TLS, and AMP rejects sslmode=disable
+            # in production unless told otherwise. Set ONLY here, for the
+            # in-cluster database; never exposed as a value (HELM-DEFAULTS-VALIDATE).
+            - name: DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION
+              value: "true"
+            {{- end }}
             {{- else }}
             - name: STORAGE_FILESYSTEM_PATH
               value: {{ printf "%s/alerthistory.db" .Values.liteProfile.persistence.mountPath | quote }}

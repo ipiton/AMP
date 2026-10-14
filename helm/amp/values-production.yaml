@@ -175,7 +175,9 @@ valkey:
 # LLM Configuration (Production)
 # ===============================
 llm:
-  enabled: true
+  # Off until a key is supplied: enabled=true needs apiKey or
+  # externalSecrets.enabled (llm_api_key in the store), or the render fails.
+  enabled: false
   proxyUrl: "https://llm-proxy.example.com"
   apiKey: "" # Set via secret or external secrets
   model: "openai/gpt-4o"

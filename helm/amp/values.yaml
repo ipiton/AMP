@@ -408,7 +408,7 @@ postgresql:
     autovacuumNaptime: "1min"
 
     # Security (TN-98: production hardening)
-    ssl: "off"  # The bundled PostgreSQL has no TLS support yet (no certificate mount); see HELM-DEFAULTS-VALIDATE
+    ssl: "off"  # The bundled PostgreSQL has no TLS support yet (no certificate mount); the chart then sets database.allow_insecure_ssl_in_production for AMP
 
 # ===============================
 # Valkey Cache Configuration (Redis-compatible, Standard Profile Only)
@@ -525,7 +525,10 @@ alerts:
 # LLM Configuration
 # ===============================
 llm:
-  enabled: true
+  # Off by default: there is no key to use. To enable, set enabled=true and
+  # either apiKey or externalSecrets.enabled (llm_api_key in the store);
+  # otherwise the render fails.
+  enabled: false
   proxyUrl: "https://llm-proxy.example.com"
   apiKey: ""  # Set via local override, environment, or secret; never commit real keys
   model: "openai/gpt-4o"

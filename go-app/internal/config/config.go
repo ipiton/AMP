@@ -341,6 +341,11 @@ type DatabaseConfig struct {
 	ConnectTimeout  time.Duration `mapstructure:"connect_timeout"`
 	QueryTimeout    time.Duration `mapstructure:"query_timeout"`
 	URL             string        `mapstructure:"url"`
+
+	// AllowInsecureSSLInProduction lifts the production ban on ssl_mode
+	// "disable" and nothing else. The Helm chart sets it only for its bundled,
+	// in-cluster PostgreSQL, which has no TLS (HELM-DEFAULTS-VALIDATE).
+	AllowInsecureSSLInProduction bool `mapstructure:"allow_insecure_ssl_in_production"`
 }
 
 // RedisConfig holds Redis-related configuration
@@ -889,6 +894,7 @@ func setDefaults() {
 	viper.SetDefault("database.username", "")
 	viper.SetDefault("database.password", "")
 	viper.SetDefault("database.ssl_mode", "require") // Secure by default
+	viper.SetDefault("database.allow_insecure_ssl_in_production", false)
 	viper.SetDefault("database.max_connections", 25)
 	viper.SetDefault("database.min_connections", 5)
 	viper.SetDefault("database.max_conn_lifetime", "1h")
@@ -1471,7 +1477,7 @@ func (c *Config) validateDatabaseCredentials() error {
 	}
 
 	// Validate SSL mode for production
-	if c.App.Environment == "production" && c.Database.SSLMode == "disable" {
+	if c.App.Environment == "production" && c.Database.SSLMode == "disable" && !c.Database.AllowInsecureSSLInProduction {
 		return fmt.Errorf("database SSL mode 'disable' is not allowed in production (use 'require' or 'verify-full')")
 	}
 

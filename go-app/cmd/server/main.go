@@ -92,6 +92,7 @@ func main() {
 		os.Exit(1)
 	}
 	logWebAuthState(logger, cfg, webAuth)
+	logDatabaseTLSState(logger, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -229,6 +230,20 @@ func newWebAuth(cfg *config.Config, logger *slog.Logger, reg prometheus.Register
 		Logger:               logger,
 		Registerer:           reg,
 	})
+}
+
+// logDatabaseTLSState says loudly when database.allow_insecure_ssl_in_production
+// is what let an unencrypted database connection pass production validation.
+// The host is logged so a flag copied onto an external database stands out.
+func logDatabaseTLSState(logger *slog.Logger, cfg *config.Config) {
+	if cfg.Profile == config.ProfileStandard &&
+		cfg.App.Environment == "production" &&
+		cfg.Database.SSLMode == "disable" &&
+		cfg.Database.AllowInsecureSSLInProduction {
+		logger.Warn("Database connection is NOT encrypted in production (database.allow_insecure_ssl_in_production=true): acceptable only for a database inside the cluster",
+			"host", cfg.Database.Host,
+		)
+	}
 }
 
 // logWebAuthState says loudly when the API is open, and flags the legacy

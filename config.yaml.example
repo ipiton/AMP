@@ -59,6 +59,10 @@ database:
   username: postgres
   password: postgres
   ssl_mode: disable
+  # app.environment: production rejects ssl_mode "disable" unless this is
+  # true. Only for a database inside the cluster; AMP logs a warning with the
+  # host. The Helm chart sets it for its bundled PostgreSQL (no TLS) only.
+  allow_insecure_ssl_in_production: false
   max_connections: 25
   min_connections: 5
   max_conn_lifetime: 1h
