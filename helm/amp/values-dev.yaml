@@ -47,7 +47,8 @@ cache:
 # LLM Configuration (Development)
 # ===============================
 llm:
-  enabled: true
+  # Off until a key is supplied: enabled=true needs apiKey, or the render fails.
+  enabled: false
   proxyUrl: "https://llm-proxy.example.com"
   apiKey: ""  # Set via local override or secret; never commit real keys
   model: "openai/gpt-4o"

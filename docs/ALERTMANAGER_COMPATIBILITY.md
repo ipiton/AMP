@@ -23,8 +23,7 @@ explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) 
 config are closed. The built-in filter no longer drops alerts by name, environment or namespace since
 `PROD-HARDCODED-FILTER` (2026-10-13); the rules it keeps are listed in #14. The top-level `inhibit_rules:` the audit
 found ignored (#9) is applied since `FU-TOPLEVEL-INHIBIT-RULES` (2026-10-12). Grouping (#13) is on by default since
-`PROD-GROUPING-DEFAULT`. Separately, the Helm chart's default values do not start (#15), a P0 in
-`docs/06-planning/BACKLOG.md`.
+`PROD-GROUPING-DEFAULT`. The Helm chart's default values start since `HELM-DEFAULTS-VALIDATE` (2026-10-14); see #15.
 
 Source of truth:
 - `go-app/internal/business/routing/` (route tree, matcher, evaluator)
@@ -901,15 +900,16 @@ These are the sharp edges behind the 🟡/🔴 markers above — stated plainly 
     drop increments `alert_history_filter_blocked_total{reason}` (`duplicate`, `old_resolved`, `empty_alert_name`,
     `noise`, `low_confidence`) and logs `Alert blocked by filter` at INFO with the fingerprint. None of it is
     configurable.
-15. **A config error stops AMP; the Helm defaults do not pass validation yet.** Without a config file
+15. **A config error stops AMP.** Without a config file
     (`AMP_CONFIG_FILE` unset and no `./config.yaml`) AMP reads its environment and built-in defaults. An
     `AMP_CONFIG_FILE` that does not exist, an unreadable or malformed file, or a config that fails validation exits
-    with `failed to load configuration` — upstream likewise refuses to start on a bad `--config.file`. The Helm
-    chart's default values do not start: the default `llm.enabled: true` without `llm.apiKey` leaves the pod in
-    `CreateContainerConfigError`, and with LLM off the standard profile with the bundled PostgreSQL (no TLS support)
-    fails validation under the default `environment: production` — `database SSL mode 'disable' is not allowed in
-    production`. Workaround: the `lite` profile or an external PostgreSQL with TLS, see the Quick Start in
-    [`helm/amp/README.md`](../helm/amp/README.md#quick-start). Tracked as `HELM-DEFAULTS-VALIDATE` (P0).
+    with `failed to load configuration` — upstream likewise refuses to start on a bad `--config.file`. Under
+    `environment: production` the config is rejected with `database SSL mode 'disable' is not allowed in
+    production` unless `database.allow_insecure_ssl_in_production: true`; the Helm chart sets that flag only for its
+    bundled PostgreSQL, which has no TLS, and AMP then logs a warning with the database host. Since
+    `HELM-DEFAULTS-VALIDATE` (2026-10-14) the chart's default values start: LLM is off by default, and
+    `llm.enabled: true` without a key fails the render. See the Quick Start in
+    [`helm/amp/README.md`](../helm/amp/README.md#quick-start).
 
 Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
 mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`

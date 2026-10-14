@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/helm-defaults-validate",
+  "commit": "941399b",
+  "reviewed_at": "2026-10-14",
+  "findings": {
+    "blocker": 0,
+    "major": 2,
+    "minor": 6,
+    "nit": 6
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

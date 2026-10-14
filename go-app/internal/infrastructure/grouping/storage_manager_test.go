@@ -355,10 +355,11 @@ func TestStorageManager_SingleTransientPingFailureDoesNotDegrade(t *testing.T) {
 		cfg.DegradeThreshold = 3
 	})
 
-	time.Sleep(150 * time.Millisecond) // ~15 ticks at 10ms
+	// Wait for the probe count, not a fixed sleep: under load the 10ms ticker
+	// fires late, and a fixed window can see too few probes.
+	waitForCondition(t, 5*time.Second, func() bool { return fake.calls.Load() >= 10 })
 	require.Equal(t, "primary", sm.GetCurrentStorage(),
 		"a single transient Ping failure below DegradeThreshold must not flip to fallback")
-	require.GreaterOrEqual(t, fake.calls.Load(), int64(10), "sanity: the probe must have actually run repeatedly")
 }
 
 func TestStorageManager_DegradesAfterConsecutiveFailureThreshold(t *testing.T) {
@@ -388,10 +389,11 @@ func TestStorageManager_FlappingPingNeverAccumulatesEnoughConsecutiveFailures(t 
 		cfg.DegradeThreshold = 3
 	})
 
-	time.Sleep(300 * time.Millisecond) // ~30 ticks of alternating fail/success
+	// Wait for the probe count, not a fixed sleep: under load the 10ms ticker
+	// fires late, and a fixed window can see too few probes.
+	waitForCondition(t, 5*time.Second, func() bool { return fake.calls.Load() >= 15 })
 	require.Equal(t, "primary", sm.GetCurrentStorage(),
 		"alternating fail/success never reaches 3 consecutive failures, so it must never degrade")
-	require.GreaterOrEqual(t, fake.calls.Load(), int64(15), "sanity: the probe must have actually run many times")
 }
 
 // TestStorageManager_RecoveryRequiresMinHoldDurationAfterConsecutiveSuccesses

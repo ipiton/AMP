@@ -12,7 +12,7 @@ Alertmanager++ (AMP) chart packages the current repository runtime with:
 
 ## Quick Start
 
-> **Read before installing (status 2026-10-07).** The chart defaults do not start. With `llm.enabled: true` and no `llm.apiKey` (the default) the pod fails with `CreateContainerConfigError`: the `llm-api-key` Secret key is missing. With LLM off, the `standard` profile with the bundled PostgreSQL still does not start: the bundled PostgreSQL has no TLS support, and `environment: production` (the default) rejects `sslmode=disable`, so AMP exits with `database SSL mode 'disable' is not allowed in production`. The values file below sets `llm.enabled: false` and hits the PostgreSQL check; it starts in the `lite` profile, or with an external PostgreSQL with TLS: with `postgresql.enabled: false` the chart passes no `DATABASE_*` variables, so set `database:` (host, port, database, username, password) in `configFile.content` (requires `configFile.enabled: true`) — `ssl_mode` defaults to `require`, the password must be at least 12 characters under `environment: production`, and it is stored in plain text in the config ConfigMap. Tracked as `HELM-DEFAULTS-VALIDATE` in `docs/06-planning/BACKLOG.md`. The default HPA also starts two replicas. Until these are fixed (P0 in `docs/06-planning/BACKLOG.md`), start from the values file below and pick one of these two routes for the database. No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing (status 2026-10-14).** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart sets `DATABASE_SSL_MODE=disable` plus `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true`: under `environment: production` (the default) AMP accepts the unencrypted in-cluster connection and logs a `Database connection is NOT encrypted in production` warning with the database host. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: with `postgresql.enabled: false` the chart passes no `DATABASE_*` variables, so set `database:` (host, port, database, username, password) in `configFile.content` (requires `configFile.enabled: true`) — `ssl_mode` defaults to `require`, the password must be at least 12 characters under `environment: production`, and it is stored in plain text in the config ConfigMap (values with a Secret-backed password are tracked as `HELM-EXTERNAL-DATABASE` in `docs/06-planning/BACKLOG.md`). The default HPA starts two replicas and the default requests do not fit a small node; the values file below runs one replica. No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
 ```yaml
 # values-small.yaml — one replica, standard profile
@@ -20,8 +20,6 @@ profile: standard
 replicaCount: 1
 autoscaling:
   enabled: false          # default HPA starts 2 replicas
-llm:
-  enabled: false
 postgresql:
   podDisruptionBudget:
     enabled: false        # minAvailable: 1 with one replica blocks node drain
@@ -59,7 +57,7 @@ helm install amp ./helm/amp -f values-small.yaml
 ### Lite Profile
 Single process, no external dependencies:
 ```bash
-helm install amp ./helm/amp --set profile=lite --set llm.enabled=false  # LLM on without llm.apiKey: the pod does not start
+helm install amp ./helm/amp --set profile=lite
 ```
 - SQLite storage (PVC-based), memory cache
 - Grouping works (`group_wait`/`group_interval`/`repeat_interval`), with groups and timers kept in memory — one replica only
@@ -84,7 +82,7 @@ helm install amp ./helm/amp --set profile=lite --set llm.enabled=false  # LLM on
 | `llm.enabled` | Enable LLM classification | `false` |
 | `llm.provider` | LLM provider (openai/anthropic/azure) | `openai` |
 | `llm.apiKey` | API key (use secret in production) | `""` |
-| `llm.model` | Model name | `gpt-4o-mini` |
+| `llm.model` | Model name | `openai/gpt-4o` |
 
 ### Storage
 
