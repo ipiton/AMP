@@ -796,15 +796,6 @@ publishingTargets: []
 #       excludeNoise: false
 
 # ===============================
-# Filter Rules Configuration
-# ===============================
-filters: {}
-# Example:
-# filters:
-#   block_test_alerts: '{"namespace_pattern": ".*test.*"}'
-#   high_confidence_only: '{"llm_confidence_above": 0.8}'
-
-# ===============================
 # Persistence Configuration (Legacy SQLite)
 # ===============================
 persistence:

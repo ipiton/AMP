@@ -728,9 +728,9 @@ func (p *AlertProcessor) processTransparent(ctx context.Context, alert *core.Ale
 	if blocked {
 		p.logger.Info("Alert blocked by filter",
 			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint,
 			"reason", reason,
 		)
-		// TODO: Record filter metrics
 		return nil // Not an error, just filtered out
 	}
 
@@ -793,10 +793,10 @@ func (p *AlertProcessor) processEnriched(ctx context.Context, alert *core.Alert,
 	if blocked {
 		p.logger.Info("Alert blocked by filter",
 			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint,
 			"reason", reason,
 			"severity", classification.Severity,
 		)
-		// TODO: Record filter metrics
 		return nil // Not an error, just filtered out
 	}
 

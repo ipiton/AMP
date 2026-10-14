@@ -16,11 +16,9 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-HARDCODED-FILTER** — P0 из BACKLOG: захардкоженный `SimpleFilterEngine` молча дропает алерты в любом режиме, в том числе без LLM (имя на `test*`, `environment=test`, namespace `dev-sandbox`/`tmp`, повтор за 1 мин). Ветка `bugfix/prod-hardcoded-filter`, workspace `tasks/PROD-HARDCODED-FILTER/`. Взят 2026-10-13.
-
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-HARDCODED-FILTER` (в WIP) → `PROD-DEPS-NET-HTTP2` (Blocked-by: карантин до 2026-10-15) → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-DEPS-NET-HTTP2` (Blocked-by: карантин до 2026-10-15) → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
 
 ### Owner
 

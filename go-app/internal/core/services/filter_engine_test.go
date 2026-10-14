@@ -110,6 +110,8 @@ func TestSimpleFilterEngine_ShouldBlock_NoiseAlerts(t *testing.T) {
 	}
 }
 
+// Test-looking alerts are delivered like any other: there is no rule on alert
+// content since PROD-HARDCODED-FILTER (upstream drops none of these).
 func TestSimpleFilterEngine_ShouldBlock_TestAlerts(t *testing.T) {
 	engine := NewSimpleFilterEngineWithMetrics(nil, nil)
 
@@ -120,40 +122,40 @@ func TestSimpleFilterEngine_ShouldBlock_TestAlerts(t *testing.T) {
 		expectReason string
 	}{
 		{
-			name: "block alert with 'test' in name (lowercase)",
+			name: "allow alert with 'test' in name (lowercase)",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-1",
 				AlertName:   "test-alert",
 				Status:      core.StatusFiring,
 				Labels:      map[string]string{},
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
+			expectBlock:  false,
+			expectReason: "",
 		},
 		{
-			name: "block alert with 'Test' in name (capitalized)",
+			name: "allow alert with 'Test' in name (capitalized)",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-2",
 				AlertName:   "TestAlert",
 				Status:      core.StatusFiring,
 				Labels:      map[string]string{},
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
+			expectBlock:  false,
+			expectReason: "",
 		},
 		{
-			name: "block alert with 'TEST' in name (uppercase)",
+			name: "allow alert with 'TEST' in name (uppercase)",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-3",
 				AlertName:   "TEST_ALERT",
 				Status:      core.StatusFiring,
 				Labels:      map[string]string{},
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
+			expectBlock:  false,
+			expectReason: "",
 		},
 		{
-			name: "block alert with test in alertname label",
+			name: "allow alert with test in alertname label",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-4",
 				AlertName:   "NormalAlert",
@@ -162,11 +164,11 @@ func TestSimpleFilterEngine_ShouldBlock_TestAlerts(t *testing.T) {
 					"alertname": "test_alert",
 				},
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
+			expectBlock:  false,
+			expectReason: "",
 		},
 		{
-			name: "block alert with test environment",
+			name: "allow alert with test environment",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-5",
 				AlertName:   "NormalAlert",
@@ -175,11 +177,11 @@ func TestSimpleFilterEngine_ShouldBlock_TestAlerts(t *testing.T) {
 					"environment": "test",
 				},
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
+			expectBlock:  false,
+			expectReason: "",
 		},
 		{
-			name: "block alert with testing environment",
+			name: "allow alert with testing environment",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-6",
 				AlertName:   "NormalAlert",
@@ -188,8 +190,8 @@ func TestSimpleFilterEngine_ShouldBlock_TestAlerts(t *testing.T) {
 					"environment": "testing",
 				},
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
+			expectBlock:  false,
+			expectReason: "",
 		},
 		{
 			name: "allow normal production alert",
@@ -340,7 +342,7 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 		description    string
 	}{
 		{
-			name: "test alert overrides good classification",
+			name: "test-named alert with good classification allowed",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-1",
 				AlertName:   "test-alert",
@@ -352,9 +354,9 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 				Confidence: 0.99,
 				Reasoning:  "Critical issue",
 			},
-			expectBlock:  true,
-			expectReason: "test_alert",
-			description:  "Test alerts are always blocked, even if critical",
+			expectBlock:  false,
+			expectReason: "",
+			description:  "Test-named alerts are not blocked by name",
 		},
 		{
 			name: "production alert with noise classification blocked",
@@ -427,94 +429,6 @@ func TestSimpleFilterEngine_ShouldBlock_CombinedRules(t *testing.T) {
 	}
 }
 
-func TestIsTestAlert(t *testing.T) {
-	tests := []struct {
-		name        string
-		alert       *core.Alert
-		expectTest  bool
-		description string
-	}{
-		{
-			name: "test in alert name (lowercase)",
-			alert: &core.Alert{
-				AlertName: "test-alert",
-				Labels:    map[string]string{},
-			},
-			expectTest:  true,
-			description: "Should detect 'test' in alert name",
-		},
-		{
-			name: "TEST in alert name (uppercase)",
-			alert: &core.Alert{
-				AlertName: "TEST_ALERT",
-				Labels:    map[string]string{},
-			},
-			expectTest:  true,
-			description: "Should detect 'TEST' in alert name",
-		},
-		{
-			name: "Test in alertname label",
-			alert: &core.Alert{
-				AlertName: "NormalAlert",
-				Labels: map[string]string{
-					"alertname": "TestAlert",
-				},
-			},
-			expectTest:  true,
-			description: "Should detect 'Test' in alertname label",
-		},
-		{
-			name: "test environment",
-			alert: &core.Alert{
-				AlertName: "NormalAlert",
-				Labels: map[string]string{
-					"environment": "test",
-				},
-			},
-			expectTest:  true,
-			description: "Should detect test environment",
-		},
-		{
-			name: "testing environment",
-			alert: &core.Alert{
-				AlertName: "NormalAlert",
-				Labels: map[string]string{
-					"environment": "testing",
-				},
-			},
-			expectTest:  true,
-			description: "Should detect testing environment",
-		},
-		{
-			name: "production alert",
-			alert: &core.Alert{
-				AlertName: "ProductionAlert",
-				Labels: map[string]string{
-					"environment": "production",
-				},
-			},
-			expectTest:  false,
-			description: "Should not detect production as test",
-		},
-		{
-			name: "latest in name (not test)",
-			alert: &core.Alert{
-				AlertName: "LatestVersion",
-				Labels:    map[string]string{},
-			},
-			expectTest:  false,
-			description: "Should not detect 'latest' as test",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isTestAlert(tt.alert)
-			assert.Equal(t, tt.expectTest, result, tt.description)
-		})
-	}
-}
-
 func TestSimpleFilterEngine_ShouldBlock_AdditionalRules(t *testing.T) {
 	engine := NewSimpleFilterEngineWithMetrics(nil, nil)
 
@@ -527,7 +441,7 @@ func TestSimpleFilterEngine_ShouldBlock_AdditionalRules(t *testing.T) {
 		description    string
 	}{
 		{
-			name: "block disabled namespace dev-sandbox",
+			name: "allow namespace dev-sandbox",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-1",
 				AlertName:   "ProductionAlert",
@@ -538,12 +452,12 @@ func TestSimpleFilterEngine_ShouldBlock_AdditionalRules(t *testing.T) {
 				StartsAt: time.Now(),
 			},
 			classification: nil,
-			expectBlock:    true,
-			expectReason:   "disabled_namespace",
-			description:    "dev-sandbox namespace should be blocked",
+			expectBlock:    false,
+			expectReason:   "",
+			description:    "dev-sandbox namespace should be allowed",
 		},
 		{
-			name: "block disabled namespace tmp",
+			name: "allow namespace tmp",
 			alert: &core.Alert{
 				Fingerprint: "test-fp-2",
 				AlertName:   "TempAlert",
@@ -554,9 +468,9 @@ func TestSimpleFilterEngine_ShouldBlock_AdditionalRules(t *testing.T) {
 				StartsAt: time.Now(),
 			},
 			classification: nil,
-			expectBlock:    true,
-			expectReason:   "disabled_namespace",
-			description:    "tmp namespace should be blocked",
+			expectBlock:    false,
+			expectReason:   "",
+			description:    "tmp namespace should be allowed",
 		},
 		{
 			name: "allow kube-system namespace",
@@ -663,35 +577,6 @@ func TestSimpleFilterEngine_ShouldBlock_AdditionalRules(t *testing.T) {
 	}
 }
 
-func TestContainsTest(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		expect bool
-	}{
-		{"lowercase test", "test", true},
-		{"uppercase TEST", "TEST", true},
-		{"mixed Test", "Test", true},
-		{"mixed tEsT", "tEsT", true},
-		{"at start", "test_suffix", true},
-		{"no test", "production", false},
-		{"partial tes", "tes", false},
-		{"partial est", "est", false},
-		{"empty string", "", false},
-		{"similar latest", "latest", false},
-		{"contest", "contest", false},              // contains 'test' but starts with 'con'
-		{"in middle", "prefix_test_suffix", false}, // containsTest only checks start of string
-		{"at end", "prefix_test", false},           // containsTest only checks start of string
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := containsTest(tt.input)
-			assert.Equal(t, tt.expect, result)
-		})
-	}
-}
-
 // Helper functions
 func ptrTime(t time.Time) *time.Time {
 	return &t
@@ -719,37 +604,5 @@ func BenchmarkSimpleFilterEngine_ShouldBlock(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = engine.ShouldBlock(alert, classification)
-	}
-}
-
-func BenchmarkIsTestAlert(b *testing.B) {
-	alert := &core.Alert{
-		AlertName: "ProductionAlert",
-		Labels: map[string]string{
-			"environment": "production",
-			"severity":    "warning",
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = isTestAlert(alert)
-	}
-}
-
-func BenchmarkContainsTest(b *testing.B) {
-	testStrings := []string{
-		"test",
-		"TEST",
-		"production",
-		"TestAlert",
-		"latest",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for _, s := range testStrings {
-			_ = containsTest(s)
-		}
 	}
 }

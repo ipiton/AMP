@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **CI**: `govulncheck` is now a required check (`docs/CI.md`).
 
 ### Fixed
+- **PROD-HARDCODED-FILTER** (2026-10-13): AMP no longer silently drops alerts by name, environment or namespace.
+  - **Before**: a built-in filter (`SimpleFilterEngine`) ran on every alert, with or without LLM. It dropped alert names starting with `test` (case-insensitive), alerts labelled `environment=test` or `testing`, and alerts from namespaces `dev-sandbox` and `tmp`. The sender got `200`, the alert showed up in `GET /api/v2/alerts`, and no receiver was notified. Upstream Alertmanager drops none of these.
+  - **Now**: these rules are gone; such alerts are routed and delivered like any other. To keep dropping them, use upstream's own config (see "Breaking changes / migration notes").
+  - **Also fixed — a flapping alert stayed resolved**: the one-minute repeat suppression keyed on fingerprint and status, so firing → resolved → firing within a minute blocked the second firing, and the receiver was left with "resolved" while the alert fired. It now compares against the alert's last status: every status change passes, and only a repeat of the same status within a minute is suppressed, as before.
+  - **Remaining filter rules** (unchanged): resolved alerts older than 24 h, an empty alert name (unreachable over the HTTP API, which rejects it with `400`), a repeat of the same status within one minute, and — only with LLM classification — `noise` and confidence below `0.3`. Every drop increments `alert_history_filter_blocked_total{reason}` and logs `Alert blocked by filter` at INFO, now with the alert's fingerprint. See `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #14.
 - **FU-TOPLEVEL-INHIBIT-RULES** (2026-10-12): inhibit rules from a verbatim upstream `alertmanager.yml` now inhibit, and any config with an inhibit rule starts again.
   - **Before**: `inhibit_rules:` at the top level — upstream's own placement — was parsed and never applied: the config loaded with no error and no warning, and the rules muted nothing. Only rules nested under AMP's `inhibition: inhibit_rules:` reached the inhibition engine.
   - **Now**: top-level `inhibit_rules:`, `inhibition.inhibit_rules` and `inhibition.config_file` are all applied, merged in that order, at startup and on `/-/reload`, in every upstream form (`source_match`/`_re`, `target_match`/`_re`, `source_matchers`/`target_matchers`, `equal`). A broken top-level rule fails startup and rejects the reload, naming the rule (`top-level inhibition rule "inhibit_rules[0]": …`), and goes through the same config validator as nested rules. `/api/v2/status` `config.original` now shows `source_matchers`/`target_matchers` of top-level rules (amtool/karma used to see a rule with no conditions), and an edit to them alone is detected as a change on reload.
@@ -242,6 +247,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Wave 3 — reliability tails** (`FU-WAVE3-RELIABILITY`, closed 2026-08-19): five independent fixes ledgered from wave-2 review. `NewPublishingQueue`'s nil-`Metrics` fallback now reuses the `v2.Global()` singleton instead of calling `v2.NewRegistry()` on every construction, fixing a duplicate-collector panic when a second queue was built in the same process. `eventKeyCacheImpl` (PagerDuty) gained a `Stop()`/stopChan and `inMemoryIncidentCache`'s (Rootly) existing `Stop()` was exposed on the `IncidentIDCache` interface — both now wired into `PublisherFactory.Shutdown()` alongside the Slack cache worker, closing two per-factory goroutine leaks that drowned full-package `-race` runs. `DefaultHealthMonitor.Start()`'s single-flight gate changed from a `Load()`-then-`Store(true)` pair to one `CompareAndSwap`, fixing a genuine data race (and duplicate-start logic bug) reproduced under `-race` in `TestHealthMonitor_ConcurrentStarts`. `postgres_history_test.go`'s 8 testcontainers-backed tests gained the same `requireDocker`/`testing.Short()` guard already used elsewhere, via the shared `setupTestDB` helper. The compile-time guard on `grouping.timerTTLGracePeriod` was tightened (trailing `- 1`) to reject the exact equality boundary at build time, matching `ValidateReconciliationGrace`'s already-strict runtime check — previously the compile guard alone allowed a zero-width reconciliation adoption window (the finding-2 bug) to pass at equality.
 
 ### Breaking changes / migration notes
+- **Test-looking alerts are delivered** (`PROD-HARDCODED-FILTER`). This affects you if any alert is named `test…` (any case), carries `environment=test` or `environment=testing`, or comes from namespace `dev-sandbox` or `tmp`: AMP used to drop it, now it is notified. Before upgrading:
+  1. To keep dropping such alerts, route them to a receiver without integrations — upstream's way to discard alerts. Put the routes first under your root route, without `continue: true`:
+
+     ```yaml
+     route:
+       receiver: default
+       routes:
+         - receiver: blackhole
+           matchers:
+             - alertname=~"(?i)test.*"
+         - receiver: blackhole
+           matchers:
+             - environment=~"test|testing"
+         - receiver: blackhole
+           matchers:
+             - namespace=~"dev-sandbox|tmp"
+     receivers:
+       - name: default
+         # ...
+       - name: blackhole
+     ```
+
+     AMP accepts the empty receiver with warning `W024`. A long-lived silence with the same matchers works too.
+  2. `alert_history_filter_blocked_total` no longer reports `reason="test_alert"` or `reason="disabled_namespace"`. Dashboards or alerts on those series go quiet.
+  3. Helm: the `filters:` key is removed from `values.yaml`. It never configured anything; a value you set is ignored, as before.
 - **Grouping is on by default** (`PROD-GROUPING-DEFAULT`). This affects you if your config has a `route:` tree and you never set `grouping.enabled` (with the Helm chart: never set `grouping.enabled` in your own values). Before upgrading:
   1. Expect notifications to follow the route tree: the first notification of a group waits `group_wait` (30s when the route sets none); after that the group is flushed every `group_interval` (5m), which sends new or resolved alerts, and an unchanged group is re-notified once `repeat_interval` (4h) has passed. Webhook and Alertmanager-format targets get the alerts of one group in a single call instead of one call per alert, so receivers that assumed one alert per call need a look; Slack, PagerDuty, Rootly, Telegram and email still get one message per alert.
   2. To keep the old behavior, turn the key off and restart; AMP then logs a warning at startup while a `route:` tree is configured.

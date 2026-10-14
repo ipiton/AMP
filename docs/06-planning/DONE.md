@@ -17,6 +17,16 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-13 — (BUG / Pipeline, P0) **PROD-HARDCODED-FILTER** — закрыт баг `HARDCODED-FILTER-DROPS-ALERTS`: AMP больше не выбрасывает молча алерты по захардкоженным правилам, как и upstream.
+  - **Удалено** (решение владельца — без opt-in-конфига): правила `test*` по имени, `environment=test|testing`, namespace `dev-sandbox`/`tmp`. Кому дроп нужен — upstream route на receiver без интеграций (W024); готовый route — в migration note CHANGELOG, проверен на бинаре, включая `(?i)`.
+  - **Rule 7** хранит `fingerprint → {status, seenAt}`: флап firing → resolved → firing в пределах минуты проходит (раньше ресивер оставался с «resolved»), блокируется только повтор того же статуса; заблокированный повтор окно не продлевает. Оставлен, потому что на direct-publish пути он единственная защита от двойной отправки.
+  - **Не тронуты:** Rule 5 (пустое имя, недостижимо с API), Rule 6 (старый resolved, исход как в upstream), LLM-правила 2/3 (`PROD-LLM-ALERT-PATH-ISOLATION`). Лог дропа получил `fingerprint`, TODO про метрики убраны: `alert_history_filter_blocked_total{reason}` уже писался.
+  - **Helm:** ключ `filters:` удалён из `values.yaml` (заодно закрыт `DEAD-VALUES-FILTERS`).
+  - **Тесты:** перевёрнутые кейсы фильтра; дедуп — флап, непродление окна, конкурентная смена статуса под `-race`, метрика; `AlertProcessor` с настоящим фильтром в transparent и enriched. Мутации M1–M3 ловятся.
+  - **Проверка:** Standard tier, deep-review не требовался (дифф кода 112 строк); `quality-gates-fast`; `scripts/release-gate.sh` `RESULT: PASS` с первого прогона @ `d2b02b1`; смоук бинаря (`evidence/smoke.md`): тестовые алерты доставлены, конфиг из migration note грузится с W024 и дропает их в blackhole, контрольный алерт доставлен.
+  - **Доки:** CHANGELOG (Fixed + breaking/migration note), `ALERTMANAGER_COMPATIBILITY.md` Known Gap #14, README, helm CHANGELOG.
+  - **Follow-ups:** BUGS `ROUTE-TIMINGS-NOT-INHERITED` (найден смоуком: вложенный route не наследует тайминги родителя), `DIRECT-PUBLISH-RENOTIFIES-ON-RESEND`. Риск (assumed, на дизайн не влияет): HA-пара Prometheus даёт `Updated` в дедуп-сервисе. Архив: `tasks/archive/PROD-HARDCODED-FILTER/`.
+
 - 2026-10-12 — (BUG / Parity / Inhibition, P0) **FU-TOPLEVEL-INHIBIT-RULES** — верхнеуровневый `inhibit_rules:` (размещение upstream) применяется: verbatim `alertmanager.yml` ингибирует, а не молча игнорирует правила.
   - **Слияние:** `Config.InhibitionRules()` — top-level, затем `inhibition.inhibit_rules`, затем `config_file`; через него идут старт, hot reload и fail-fast `LoadConfig`. Ошибка называет источник (`top-level inhibition rule "inhibit_rules[0]"`); `configvalidator` видит оба списка. `routing.InhibitRule` получил `source_matchers`/`target_matchers` — `config.original` и fingerprint их видят.
   - **Panic на старте** (найден смоуком, чинили здесь по решению владельца): с `a822faf` (PARITY-A2, 2026-04-16) любой конфиг хотя бы с одним inhibit-правилом ронял AMP — `BusinessMetrics.InhibitionCache*` дублировали имена `inhibition.GetCacheMetrics`. Мёртвые дубли удалены.

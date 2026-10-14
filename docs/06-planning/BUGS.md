@@ -60,12 +60,20 @@
 - **Refs:** `~/amp-audit/gate-runbook.log`, 2026-10-07.
 - **Status:** open
 
-### [high][Pipeline][~0.5-1d] HARDCODED-FILTER-DROPS-ALERTS
-- **Title:** жёстко зашитый фильтр молча выбрасывает алерты, в том числе без LLM
-- **Problem:** `SimpleFilterEngine.ShouldBlock` (`go-app/internal/core/services/filter_engine.go`) вызывается в transparent-режиме (`alert_processor.go:724`) и в enriched-режиме, то есть всегда. Правила зашиты в код: имя алерта с префиксом `test` без учёта регистра (`containsTest` проверяет только начало строки, хотя комментарий говорит «contains»), метка `environment=test|testing`, namespace `dev-sandbox` и `tmp` (`isDisabledNamespace`, захардкоженная map), повтор fingerprint+status в окне `DefaultDedupWindow` = 1 мин, resolved старше 24 ч, пустое имя. Заблокированный алерт возвращает `nil` — не ошибка; лог INFO, метрики нет (`// TODO: Record filter metrics`). Ключ `filters:` в `helm/amp/values.yaml` ни одним шаблоном не читается.
-- **Impact:** алерт вроде `TestRunnerDown` или любой алерт из namespace `tmp` не доходит до ресивера, и оператор узнаёт об этом только из INFO-лога. Upstream Alertmanager так не делает — это расхождение не описано в `ALERTMANAGER_COMPATIBILITY.md`.
-- **Fix:** правила по имени, `environment` и namespace — только за явным конфигом, по умолчанию выключены; дедуп за 1 мин сверить с upstream (повторная отправка Prometheus должна продлевать `endsAt`); счётчик `amp_alerts_filtered_total{reason}`; Known Gap в compat-доке. Задача — `PROD-HARDCODED-FILTER` (P0 в BACKLOG).
-- **Refs:** аудит 2026-10-06; `filter_engine.go:85-250`, `alert_processor.go:717-800`.
+### [high][Routing][~0.5d] ROUTE-TIMINGS-NOT-INHERITED
+- **Title:** вложенный route не наследует `group_wait`/`group_interval`/`repeat_interval` родителя
+- **Problem:** `applyRouteDefaults` (`go-app/internal/infrastructure/grouping/parser.go`) рекурсивно вызывает `Route.Defaults()` и проставляет 30s/5m/4h каждому вложенному route без своих таймингов. `TreeBuilder.inheritDuration` (`internal/business/routing/tree_builder.go`) наследует от родителя, только если у route значение не задано, а после парсера оно задано всегда. Воспроизведено на бинаре: корень `group_wait: 3s`, `group_interval: 10s`; дочерний route без таймингов → `"Alert routed to group" ... "group_wait":30000000000`, следующий таймер — `group_interval` 5m. Есть с первого коммита (`d096644`).
+- **Impact:** verbatim `alertmanager.yml` с таймингами у корня и дочерними route без своих таймингов (типичная форма) работает иначе, чем upstream: первая нотификация ждёт 30s вместо заданного, повторы идут по `repeat_interval` 4h вместо, например, 1h. `global.*`-фолбэк из `FU-GLOB-DEFAULT-VALUES` для вложенных route тоже не срабатывает.
+- **Fix:** дефолты ставить только корню (или не ставить вовсе, оставив их `inheritDuration`); тест на дерево корень → ребёнок без таймингов → внук, плюс проверка, что `/api/v2/status` `config.original` не показывает лишних полей. Сверить, не опирается ли кто-то ещё на `Defaults()` у вложенных route.
+- **Refs:** `tasks/archive/PROD-HARDCODED-FILTER/evidence/smoke.md` § Находка.
+- **Status:** open
+
+### [medium][Pipeline][~0.5d] DIRECT-PUBLISH-RENOTIFIES-ON-RESEND
+- **Title:** на direct-publish пути каждая повторная отправка алерта старше минуты уходит ресиверу заново
+- **Problem:** без `route:` или с `grouping.enabled: false` алерт публикуется через `PublishToReceiver` → `coordinator.PublishToTargets`, где нет nflog (он есть только у группового пути, `coordinator.go:619+`). Prometheus переотправляет горящий алерт каждые `resend_delay` (1m) с новым `endsAt`, дедуп-сервис видит `Updated`, и от повторного уведомления защищает только Rule 7 фильтра с окном 1 мин (`DefaultDedupWindow`). Повтор, пришедший позже окна, уходит ресиверу. Существовало до `PROD-HARDCODED-FILTER`, та задача это не меняла.
+- **Impact:** конфиги без дерева route (или с выключенной группировкой) получают уведомление на каждую переотправку вместо одного на `repeat_interval`, как в upstream.
+- **Fix:** nflog (или его аналог по fingerprint + status + `repeat_interval`) для direct-publish пути, либо направить такой путь через группировку с тривиальным ключом. После этого пересмотреть, нужен ли Rule 7.
+- **Refs:** `tasks/archive/PROD-HARDCODED-FILTER/Spec.md` § Impact Analysis, design premises; `research.md` § Option B.
 - **Status:** open
 
 ### [low][Helm][~0.2d] SERVICE-METRICS-PORT-MISROUTED
