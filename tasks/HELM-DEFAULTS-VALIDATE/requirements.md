@@ -40,7 +40,6 @@ updated_at: 2026-10-14
 
 1. Как оператор, я хочу поставить AMP через `helm install` без своих values и получить работающий pod, чтобы попробовать продукт без чтения обходов в README.
 2. Как оператор production-установки с внешним PostgreSQL, я хочу, чтобы проверка `sslmode` в production оставалась строгой, а ослабить её можно было только явно.
-3. Как оператор с внешней БД, я хочу передать пароль через Secret, а не через `configFile.content` в ConfigMap.
 
 ## Success Criteria
 
@@ -48,7 +47,7 @@ updated_at: 2026-10-14
 - [ ] Бинарь AMP на env дефолтного рендера (профиль `standard`, встроенный PostgreSQL, `environment: production`) проходит валидацию конфига. Проверка — тем же способом, что в `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/binary-check.md`.
 - [ ] Без opt-in флага `environment: production` + `sslmode=disable` по-прежнему отклоняется (регрессионный тест в `internal/config`).
 - [ ] Чарт выставляет флаг только при встроенном PostgreSQL; при `postgresql.enabled: false` флаг не рендерится (render-тест).
-- [ ] Внешняя БД настраивается через values с паролем из Secret (существующий или созданный чартом), без пароля в ConfigMap; render-тест.
+- [ ] `llm.enabled: true` без `llm.apiKey` и без `externalSecrets.enabled` падает на рендере с понятной ошибкой, а не `CreateContainerConfigError`; render-тест.
 - [ ] При включённом флаге AMP пишет в лог явное предупреждение о незашифрованном соединении с БД в production.
 - [ ] `helm/amp/README.md` (Quick Start, обходы), `values.yaml` и `CHANGELOG.md` `[Unreleased]` описывают новые дефолты; баг `HELM-DEFAULTS-FAIL-VALIDATION` закрыт.
 - [ ] Гейты AMP (`WORKFLOW.md` § Гейты AMP), включая `scripts/release-gate.sh`, зелёные.
@@ -59,13 +58,14 @@ updated_at: 2026-10-14
 - HA/репликация встроенного PostgreSQL, PDB, бэкапы — это `PROD-POSTGRES-HA-DECISION`.
 - Дефолты под одну ноду (HPA, requests) — `HELM-SINGLE-NODE-DEFAULTS`.
 - Изменение остальной production-валидации (слабые пароли, длина пароля).
-- Проводка `postgresql.existingSecret` в `postgresql-secret.yaml` (TECH-DEBT `HELM-CHART-GAPS`), если она не нужна для пункта 3.
+- Values внешней БД с паролем из Secret (пункт 3 симптома) — отдельный срез `HELM-EXTERNAL-DATABASE`, решение владельца 2026-10-14; до него путь — `configFile.content`.
+- Проводка `postgresql.existingSecret` в `postgresql-secret.yaml` (TECH-DEBT `HELM-CHART-GAPS`).
 
 ## Constraints
 
-- **Scope:** `go-app/internal/config` (флаг + валидация + предупреждение), `helm/amp/` (values, `deployment.yaml`, `secret.yaml`/helpers, render-тесты, README), planning и `CHANGELOG.md`.
+- **Scope:** `go-app/internal/config` и `cmd/server/main.go` (флаг, валидация, предупреждение), `helm/amp/` (values, `deployment.yaml`, `secret.yaml`, render-тесты, README), planning и `CHANGELOG.md`.
 - **Security:** ослабление строго opt-in и видно в логе; для внешней БД production-проверка не меняется; пароли — только из Secret.
-- **Compatibility:** установки с `llm.enabled: true` и заданным ключом не ломаются, если ключ передан явно. Смена дефолта `llm.enabled` — заметка в CHANGELOG (кто полагался на дефолт `true`, должен включить явно). Существующий путь `configFile.content` для внешней БД продолжает работать.
+- **Compatibility:** установки с `llm.enabled: true` и заданным ключом не ломаются, если ключ передан явно. Смена дефолта `llm.enabled` — заметка в CHANGELOG (кто полагался на дефолт `true`, должен включить явно). Путь `configFile.content` для внешней БД не меняется.
 
 ## Discovery Notes
 
@@ -76,6 +76,7 @@ updated_at: 2026-10-14
   - `LLM_API_KEY` — `deployment.yaml:131-139`, ключ в `templates/secret.yaml:46`, ESO-вариант в `templates/externalsecret.yaml:40`;
   - render-тесты чарта — `helm/amp/tests/` (гейт в `scripts/release-gate.sh`).
 - Дефолтный `postgresql.password` (`secure_password_123`, 19 символов) проходит проверки слабого пароля и длины — ломается только `ssl_mode`. Слабый dev-дефолт пароля — отдельный пункт TECH-DEBT `HELM-CHART-GAPS`.
+- Research: `research.md` (level 3, три линзы). Open unknowns ниже закрыты там.
 - Open unknowns (для research):
   - имя и форма флага (ключ YAML `database.*`, env `DATABASE_*`), как он вписывается в загрузку конфига (viper/env-binding);
   - как именно чарт отличает «встроенный PostgreSQL» (условие `postgresql.enabled && profile == standard`) и не может ли пользователь включить флаг для внешней БД случайно;

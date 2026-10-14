@@ -36,6 +36,14 @@
 - **Refs:** `tasks/archive/PROD-CONFIG-FILE-FALLBACK/research.md`, `evidence/binary-check.md` (сценарии d, e), `evidence/chart-default-env.txt`.
 - **Status:** open
 
+### [medium][Helm][~0.25d] ESO-SECRET-OWNERSHIP-CONFLICT
+- **Title:** при `externalSecrets.enabled` Helm и External Secrets Operator претендуют на один Secret
+- **Problem:** `helm/amp/templates/secret.yaml` рендерит `<fullname>-secrets` безусловно, а `templates/externalsecret.yaml` при `externalSecrets.enabled` целится в тот же Secret (`target.name: <fullname>-secrets`, `creationPolicy: Owner`). Ожидаемо: ESO перезаписывает данные, Helm на `upgrade` возвращает свои (в том числе пустые ключи), владелец объекта неоднозначен.
+- **Impact:** не воспроизводилось — найдено чтением шаблонов. Затрагивает только установки с ESO; дефолт и `values-production.yaml` его не включают.
+- **Fix:** не рендерить `secret.yaml` (или его ключи, которые даёт ESO) при `externalSecrets.enabled`; render-тест; проверить на кластере с ESO.
+- **Refs:** `tasks/HELM-DEFAULTS-VALIDATE/research.md` § Findings (линза operational).
+- **Status:** open
+
 ### [low][Test][~0.25d] FLAKE-REFRESH-IN-PROGRESS
 - **Title:** `TestRefreshNow_RefreshInProgress` флейкает под нагрузкой
 - **Problem:** `go-app/internal/business/publishing/refresh_manager_impl_test.go:312` — `Target error should be in err chain: expected: "refresh already in progress"`. В логе перед этим `Manual refresh rate limit exceeded`: второй `RefreshNow` получает ошибку rate limit (50ms), а не «уже идёт» — первый refresh (~200ms) завершился раньше, чем тест сделал второй вызов. Изолированно `-count=20` — 20/20 ok; в шаге `race` того же прогона — ok. Предсуществующий: тест в baseline-падениях апрельских прогонов (`tasks/archive/*/forge-events.jsonl`).
