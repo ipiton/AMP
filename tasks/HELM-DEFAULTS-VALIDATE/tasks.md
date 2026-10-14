@@ -65,6 +65,12 @@ Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (ф�
 
 → **deep-review** (обязателен). `review-verdict.json` с `"gate": "pass"` до фазы 4.
 
+### Fix round 1 (deep-review @ 867e169, `fix_required`)
+
+- [x] **3.4** F1: `docs/MIGRATION_QUICK_START.md:24`, `docs/ALERTMANAGER_COMPATIBILITY.md` (вступление, Known Gap #15) — под новые дефолты; F8: `llm.model` в таблице README. <!-- verify: ! grep -rn 'defaults do not start\|Do not install with chart defaults' docs helm/amp/README.md -->
+- [x] **3.5** F6: migration note в CHANGELOG про `-f values-production.yaml`/`values-dev.yaml`; Spec v1.1 (три values-файла, Test Plan G2–G4, T1 по F4/F5). <!-- verify: grep -n 'values-dev.yaml' CHANGELOG.md tasks/HELM-DEFAULTS-VALIDATE/Spec.md -->
+- [ ] **3.6** Повторный deep-review по дельте fix round 1. <!-- verify: review-verdict.json gate=pass -->
+
 ## Phase 4: Tests (write-tests, после verdict `pass`)
 
 - [ ] **4.1** G1–G3 в `go-app/internal/config/config_database_validation_test.go`: production+disable без флага → прежняя ошибка; с флагом → `nil`; флаг + слабый пароль → ошибка; env `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true` через `LoadConfig` → поле `true`, без env → `false`; невалидное значение env — зафиксировать фактическое поведение (Spec Edge Case 7). <!-- verify: cd go-app && go test ./internal/config/... -run 'InsecureSSL' -count=1 -v -->

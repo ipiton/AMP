@@ -13,8 +13,7 @@ based_on:
 
 # Specification: дефолтные values чарта проходят валидацию AMP
 
-**Version:** 1.0  
-**Status:** Draft
+**Version:** 1.1 · **Status:** Approved (deep-review fix round 1)
 
 ## Summary
 
@@ -71,7 +70,7 @@ Not applicable: HTTP API не меняется.
 
 - **Новый ключ:** `database.allow_insecure_ssl_in_production` (bool, default `false`), env `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION`.
 - **Семантика:** при `true` AMP не отклоняет `database.ssl_mode: disable` в `app.environment: production`; на остальные значения `ssl_mode` и на остальные окружения не влияет.
-- **Chart values:** `llm.enabled` по умолчанию `true` → `false` (`values.yaml`, `values-production.yaml`). Новых ключей values нет.
+- **Chart values:** `llm.enabled` по умолчанию `true` → `false` (`values.yaml`, `values-production.yaml`, `values-dev.yaml` — последний добавлен на `implement`, см. `tasks.md` § Deviations). Новых ключей values нет.
 
 ## Data Model / Migrations
 
@@ -84,11 +83,12 @@ Not applicable.
 - `go-app/cmd/server/main.go` — `logDatabaseTLSState` и её вызов рядом с `:94`; тест G4 рядом с тестами `main` (если их нет — в новом `cmd/server/database_tls_state_test.go`).
 - `helm/amp/templates/deployment.yaml` — env флага в ветке встроенной БД.
 - `helm/amp/templates/secret.yaml` — `fail` в блоке LLM.
-- `helm/amp/values.yaml`, `helm/amp/values-production.yaml` — `llm.enabled: false`, комментарий; комментарий у `postgresql.config.ssl` (`values.yaml:411`) сослаться на флаг вместо `see HELM-DEFAULTS-VALIDATE`.
+- `helm/amp/values.yaml`, `helm/amp/values-production.yaml`, `helm/amp/values-dev.yaml` — `llm.enabled: false`, комментарий; комментарий у `postgresql.config.ssl` (`values.yaml:411`) сослаться на флаг вместо `see HELM-DEFAULTS-VALIDATE`.
 - `helm/amp/tests/render-defaults-validate.sh` — T1–T6.
 - `helm/amp/README.md` — Quick Start: дефолтный install работает; как включить LLM; что встроенный PG в production работает без TLS и почему.
 - `config.yaml.example` — ключ в `database:` с комментарием.
 - `CHANGELOG.md [Unreleased]` — Fixed + migration note про `llm.enabled`.
+- `docs/MIGRATION_QUICK_START.md`, `docs/ALERTMANAGER_COMPATIBILITY.md` (вступление, Known Gap #15) — убрать «defaults do not start» (deep-review F1).
 
 ## Security Design
 
@@ -143,10 +143,10 @@ Not applicable.
 ## Test Plan
 
 - **G1:** `production` + `disable`, флаг `false` → ошибка `SSL mode 'disable' is not allowed in production`.
-- **G2:** `production` + `disable`, флаг `true` → `nil`; флаг `true` + слабый пароль → по-прежнему ошибка.
-- **G3:** env `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true` → `cfg.Database.AllowInsecureSSLInProduction == true` через `LoadConfig`; без env → `false`.
-- **G4:** `logDatabaseTLSState` — `Warn` с `host` только в комбинации из Target Design п. 2; без `Warn` в Edge Cases 2, 3.
-- **T1:** дефолтный рендер — каждый `secretKeyRef` указывает на ключ, который есть в рендеренном Secret того же имени; `LLM_ENABLED: "false"`; env флага есть ровно один раз.
+- **G2:** `production` + `disable`, флаг `true` → `nil`; флаг `true` + каждое из: слабый пароль, пароль короче 12, пустые username/password → по-прежнему ошибка.
+- **G3:** env `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true` → `cfg.Database.AllowInsecureSSLInProduction == true` через `LoadConfig`; без env → `false`; значение `yes` → зафиксировать фактическое поведение (ошибка загрузки или `false`, но не `true`) (Edge Case 7).
+- **G4:** `logDatabaseTLSState` — `Warn` с `host` только в комбинации из Target Design п. 2; без `Warn`: `ssl_mode=require`, `development`, `profile=lite`, флаг `false` + `disable`; пароль не в выводе.
+- **T1:** дефолтный рендер, `values-dev.yaml` и `values-production.yaml` (с placeholders release-gate) — каждый `secretKeyRef` указывает на ключ, который есть в рендеренном Secret того же имени; `LLM_ENABLED: "false"`; env флага есть ровно один раз.
 - **T2:** `postgresql.config.ssl=on` → флага нет.
 - **T3:** `postgresql.enabled=false` → флага нет. **T4:** `profile=lite` → флага нет.
 - **T5:** `llm.enabled=true` без ключа → рендер падает, текст про `llm.apiKey`. **T6:** `llm.enabled=true` + `apiKey` → рендерится, `llm-api-key` в Secret; `llm.enabled=true` + `externalSecrets.enabled=true` без ключа → рендерится.

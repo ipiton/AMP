@@ -82,7 +82,7 @@ helm install amp ./helm/amp --set profile=lite
 | `llm.enabled` | Enable LLM classification | `false` |
 | `llm.provider` | LLM provider (openai/anthropic/azure) | `openai` |
 | `llm.apiKey` | API key (use secret in production) | `""` |
-| `llm.model` | Model name | `gpt-4o-mini` |
+| `llm.model` | Model name | `openai/gpt-4o` |
 
 ### Storage
 
