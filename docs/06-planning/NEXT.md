@@ -16,9 +16,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **HELM-DEFAULTS-VALIDATE** — P0 из BACKLOG: дефолтные values чарта не стартуют (баг `HELM-DEFAULTS-FAIL-VALIDATION`): `llm.enabled: true` без ключа ⇒ `CreateContainerConfigError`, встроенный PostgreSQL без TLS + `environment: production` ⇒ отказ валидации. Решение владельца 2026-10-14: `llm.enabled: false` по умолчанию; opt-in флаг, разрешающий `sslmode=disable` в production, чарт ставит только для встроенного PostgreSQL. Ветка `bugfix/helm-defaults-validate`, workspace `tasks/HELM-DEFAULTS-VALIDATE/`. Взят 2026-10-14.
+
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `HELM-DEFAULTS-VALIDATE` (Waiting-on: решение владельца) → `PROD-DEPS-NET-HTTP2` (Blocked-by: карантин до 2026-10-15) → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-DEPS-NET-HTTP2` (Blocked-by: карантин до 2026-10-15) → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `HELM-DEFAULTS-VALIDATE` в WIP с 2026-10-14.
 
 ### Owner
 
