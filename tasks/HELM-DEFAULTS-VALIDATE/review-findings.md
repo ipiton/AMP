@@ -4,7 +4,7 @@
 **Reviewer perspective:** два независимых read-only агента (Plan), не автор: R1 — security + premises + correctness + git history; R2 — contract + cross-domain + runtime + maintainability + requirements coverage
 **Reviewed at:** 2026-10-14
 **Reviewed tree:** bugfix/helm-defaults-validate @ 867e169
-**Verdict:** fix_required (см. `review-verdict.json`)
+**Verdict:** см. `review-verdict.json` (раунды ниже)
 
 Что ревьюеры подтвердили запуском: `go vet` и `go test ./internal/config/... ./cmd/server/...` зелёные, `TestChartEnvKeysKnownToViper` (`config_load_test.go:139`) резолвит новый env; `helm lint`/`template` для dev и production с placeholders как в `release-gate.sh`; 7/7 `helm/amp/tests/*.sh`; рендер в комбинациях (default, prod, lite, `ssl=on`, `postgresql.enabled=false`, LLM с ключом / без / с ESO / `llm.secret.enabled` / только `authToken`). `database.url` в рантайме не читается (`GetDatabaseURL` — только `example.go`), `Warn` не может напечатать креды. Design Premises 1, 3–7 подтверждены, 2 (hot-reload) — code-read, честно. В истории (`e1d520e`, `ce4ce72` TN-205) нет решения, которое изменение нарушает.
 
@@ -80,6 +80,37 @@
 - **Issue:** поведенческое утверждение; подтверждается бинарной проверкой B1 (R2 #8).
 - **Recommendation:** B1 на `testing`: валидация проходит, `Warn` с `host`, пароля в логе нет.
 - **Disposition:** fix-here (на `testing`, `tasks.md` 5.3)
+- **Follow-up:** n/a
+
+## Round 2 — re-review @ 0c1de16
+
+**Reviewer perspective:** новый независимый агент (Plan), не автор, не участник раунда 1. Проверены утверждения правок по коду (`values*.yaml`, `secret.yaml:45-46`, `deployment.yaml:110-116`, `main.go:243`, `config.go:348/:1480`, top-level `inhibit_rules` — `config.go:56`, `alertmanager_validation.go:99-104`), markdown-якоря.
+
+- F1 — not resolved на 0c1de16 (verify 3.4 смотрел только `docs` и README чарта) → N1, N2; resolved после fix round 2.
+- F6 — resolved. F8 — resolved. F4/F5 — resolved в Spec v1.1, план выполним.
+
+### N1 — корневой README по-прежнему говорит, что дефолты чарта не стартуют
+- **Severity:** major
+- **Location:** `README.md:17`
+- **Issue:** «The Helm chart's default values do not start yet; this is tracked as P0» — первая страница репозитория противоречит CHANGELOG и README чарта (та же проблема, что F1).
+- **Recommendation:** заменить на «start since `HELM-DEFAULTS-VALIDATE`», обновить дату заметки; расширить verify по всему репозиторию.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### N2 — migration note `PROD-CONFIG-FILE-FALLBACK` п. 4 в том же `[Unreleased]` говорит обратное
+- **Severity:** minor
+- **Location:** `CHANGELOG.md:298`
+- **Issue:** «The chart's default values still do not start… until then use `lite`» рядом с записью о фиксе — релиз-ноуты противоречат сами себе.
+- **Recommendation:** сжать до ссылки на `HELM-DEFAULTS-VALIDATE`.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### N3 — путь `database:` в `configFile.content` без `configFile.enabled: true`
+- **Severity:** nit
+- **Location:** `docs/MIGRATION_QUICK_START.md:24`
+- **Issue:** не сказано, что файл надо включить (по умолчанию `false`); в README чарта оговорено. Предсуществующее.
+- **Recommendation:** дописать «(requires `configFile.enabled: true`)».
+- **Disposition:** fix-here
 - **Follow-up:** n/a
 
 ## Anti-Pattern Check
