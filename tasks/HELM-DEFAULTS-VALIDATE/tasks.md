@@ -75,11 +75,13 @@ Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (ф�
 
 ## Phase 4: Tests (write-tests, после verdict `pass`)
 
-- [ ] **4.1** G1–G3 в `go-app/internal/config/config_database_validation_test.go`: production+disable без флага → прежняя ошибка; с флагом → `nil`; флаг + слабый пароль → ошибка; env `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true` через `LoadConfig` → поле `true`, без env → `false`; невалидное значение env — зафиксировать фактическое поведение (Spec Edge Case 7). <!-- verify: cd go-app && go test ./internal/config/... -run 'InsecureSSL' -count=1 -v -->
-- [ ] **4.2** G4 в `go-app/cmd/server/database_tls_state_test.go`: `Warn` с `host` только в целевой комбинации; нет `Warn` при `ssl_mode=require`, при `development`, при `lite`; пароль не в выводе. <!-- verify: cd go-app && go test ./cmd/server/... -run 'DatabaseTLSState' -count=1 -v -->
-- [ ] **4.3** `helm/amp/tests/render-defaults-validate.sh` (по образцу `render-grouping-default.sh`): T1 (все `secretKeyRef` сходятся, `LLM_ENABLED: "false"`, флаг ровно один раз), T2 (`ssl=on` → нет флага), T3 (`postgresql.enabled=false` → нет), T4 (`profile=lite` → нет), T5 (`llm.enabled=true` без ключа → fail с `llm.apiKey`), T6 (`apiKey` задан → `llm-api-key` в Secret; ESO без ключа → рендерится). <!-- verify: bash helm/amp/tests/render-defaults-validate.sh -->
+- [x] **4.1** G1–G3 в `go-app/internal/config/config_database_validation_test.go`: production+disable без флага → прежняя ошибка; с флагом → `nil`; флаг + слабый пароль → ошибка; env `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true` через `LoadConfig` → поле `true`, без env → `false`; невалидное значение env — зафиксировать фактическое поведение (Spec Edge Case 7). <!-- verify: cd go-app && go test ./internal/config/... -run 'InsecureSSL' -count=1 -v -->
+- [x] **4.2** G4 в `go-app/cmd/server/database_tls_state_test.go`: `Warn` с `host` только в целевой комбинации; нет `Warn` при `ssl_mode=require`, при `development`, при `lite`; пароль не в выводе. <!-- verify: cd go-app && go test ./cmd/server/... -run 'DatabaseTLSState' -count=1 -v -->
+- [x] **4.3** `helm/amp/tests/render-defaults-validate.sh` (по образцу `render-grouping-default.sh`): T1 (все `secretKeyRef` сходятся, `LLM_ENABLED: "false"`, флаг ровно один раз), T2 (`ssl=on` → нет флага), T3 (`postgresql.enabled=false` → нет), T4 (`profile=lite` → нет), T5 (`llm.enabled=true` без ключа → fail с `llm.apiKey`), T6 (`apiKey` задан → `llm-api-key` в Secret; ESO без ключа → рендерится). <!-- verify: bash helm/amp/tests/render-defaults-validate.sh -->
 
 **Phase verification:** `cd go-app && go test ./internal/config/... ./cmd/server/... -count=1 && bash ../helm/amp/tests/render-defaults-validate.sh`
+
+Результат (2026-10-14): G1–G4 и T1–T6 зелёные. Edge Case 7: `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=yes` → `failed to unmarshal config`, AMP не стартует (зафиксировано в G3). Мутационная проверка: шаблоны `secret.yaml`/`deployment.yaml`/`values.yaml` из `main` → 5 FAIL в render-тесте (в т. ч. `amp-secrets/llm-api-key has no such key`); без `&& !AllowInsecureSSLInProduction` в валидаторе → G2 FAIL; без `Warn` → G4 FAIL.
 
 ## Phase 5: Testing (гейты AMP)
 
