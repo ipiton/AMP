@@ -88,7 +88,7 @@ Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (ф�
 - [x] **5.1** Затронутые пакеты: `cd go-app && go vet ./internal/config/... ./cmd/server/... && go test ./internal/config/... ./cmd/server/...`. <!-- verify: exit 0 -->
 - [x] **5.2** `make -C go-app quality-gates-fast`, затем `git status` (go fmt мог переписать файлы). <!-- verify: exit 0, git status без неожиданных изменений -->
 - [x] **5.3** B1: `go build ./cmd/server`, запуск под `env -i` на env дефолтного рендера (как `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/binary-check.md` сценарий d, тестовый пароль 19 символов): нет `config validation failed`, есть `Warn` с `host`, пароль в логе 0 раз; контроль — без флага прежняя ошибка. Результат — `evidence/binary-check.md`. <!-- depends: 1.3, 2.1 | verify: evidence/binary-check.md заполнен -->
-- [~] **5.4** `scripts/release-gate.sh` (полный). <!-- verify: все шаги PASS или задокументированный предсуществующий FAIL -->
+- [x] **5.4** `scripts/release-gate.sh` (полный). <!-- verify: все шаги PASS или задокументированный предсуществующий FAIL -->
 - [x] **5.5** `git diff --check`; в диффе нет `_, _ :=`. <!-- verify: git diff main --check && ! git diff main | grep -E '^\+.*_, _ :=' -->
 
 Результат (2026-10-14, `2aaea1b`):
@@ -102,19 +102,25 @@ Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (ф�
   - `inhibition` `TestIntegration_TwoTierAlertCache_Redis` — reaper testcontainers: `unexpected container status "removing"`;
   - `database/postgres` — `startPostgres` не дождался контейнера, таймаут пакета 10m.
   Перезапуск пяти пакетов отдельно — все `ok`.
-  - race `silencing`: `TestMatchesAny_1000Silences_StressTest` (19 ms > 10 ms), на перезапуске `TestMatchesAny_100Silences_Performance` (1.46 ms > 1 ms) — wall-clock пороги под `-race` и нагрузкой; пакет не зависит от `internal/config`, дифф его не трогает. Без `-race` пакет `ok`, `-race -run 'Race|Concurrent'` `ok`, гонок нет. Предсуществующее → новые записи в `BUGS.md` на `finalize` (перф-пороги под `-race`; паника `repository` при медленном Docker; reaper `inhibition`).
+  - race `silencing`: `TestMatchesAny_1000Silences_StressTest` (19 ms > 10 ms), на перезапуске `TestMatchesAny_100Silences_Performance` (1.46 ms > 1 ms) — wall-clock пороги под `-race` и нагрузкой; пакет не зависит от `internal/config`, дифф его не трогает. Без `-race` пакет `ok`, `-race -run 'Race|Concurrent'` `ok`, гонок нет. Предсуществующее → записи в `BUGS.md` на `finalize`.
+  - Повторы на `finalize`: @ `6475291` (load до ~438) — FAIL только `silencing` `_100Silences_Performance` в шаге `test` (3.9 ms); @ `6475291` на почти свободной машине (load 7–15) — FAIL `silencing` (1.31 ms, 12.6 ms) и `grouping` `TestStorageManager_FlappingPing…` (8 проб < 15). Три красных подряд → разбор: пакеты не зависят от диффа, пороги не выдерживаются и без посторонней нагрузки. Флейки исправлены здесь (решение владельца, см. Deviations), `75968a2`.
+  - **Итог: `scripts/release-gate.sh` @ `75968a2` — `RESULT: PASS`, все 11 шагов.**
 
 ## Deviations from Spec
 
 - **values-dev.yaml** (2.3): Spec называл только `values.yaml` и `values-production.yaml`, но в `values-dev.yaml` тоже `llm.enabled: true` без ключа. С новым `fail` его рендер падал бы, и шаг `helm-dev` в release-gate покраснел бы; до задачи такой dev-install всё равно падал с `CreateContainerConfigError`. Выключен по тому же решению владельца.
 - **Поле `AllowInsecureSSLInProduction`** стоит в конце `DatabaseConfig` отдельным блоком: в середине структуры gofmt перевыравнивал все поля.
 
+- **Флейки тестов вне скоупа** (5.4, решение владельца 2026-10-14 «чини тут»): release-gate краснел три прогона подряд, третий — на почти свободной машине. Исправлены здесь же, только тесты:
+  - `internal/core/silencing/matcher_test.go` — `TestMatchesAny_100Silences_Performance`, `TestMatchesAny_1000Silences_StressTest`, `TestMultiMatcher_Performance`: порог по одному замеру wall-clock (1 ms / 10 ms / 500 µs) заменён логом; корректность проверяется как раньше, скорость меряют существующие `BenchmarkMatchesAny_*`, `BenchmarkMultiMatcher_10Matchers`. Тот же паттерн в `internal/infrastructure/inhibition/matcher_test.go:448` не трогали — не падал.
+  - `internal/infrastructure/grouping/storage_manager_test.go` — два теста hysteresis ждут нужного числа проб (`waitForCondition`, 5 s) вместо фиксированного `Sleep`. Инвариант «не деградирует» не ослаблен: возврат из fallback раньше `min_hold_duration` 300 ms невозможен. Мутация `DegradeThreshold 3→1` ловится.
+
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed (`BUGS.md` `HELM-DEFAULTS-FAIL-VALIDATION` закрыт на `finalize`)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed (`BUGS.md` `HELM-DEFAULTS-FAIL-VALIDATION` закрыт на `finalize`)

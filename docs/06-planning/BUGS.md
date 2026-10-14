@@ -28,20 +28,13 @@
 - **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F3.
 - **Status:** open
 
-### [high][Helm][~0.5-1d] HELM-DEFAULTS-FAIL-VALIDATION
-- **Title:** дефолтные values чарта не стартуют
-- **Problem:** `helm install` без своих values не поднимает AMP. (1) `llm.enabled: true` при пустом `llm.apiKey`: Secret не получает ключ `llm-api-key`, Deployment на него ссылается ⇒ pod `CreateContainerConfigError`; LLM по умолчанию смотрит на example-прокси. (2) При `llm.enabled: false` профиль `standard` со встроенным PostgreSQL падает на валидации: `environment: production` (дефолт `values.yaml`/`values-production.yaml`) запрещает `sslmode=disable`, а встроенный PostgreSQL TLS не умеет ⇒ `database SSL mode 'disable' is not allowed in production`, exit 1. (3) При `postgresql.enabled: false` чарт не передаёт `DATABASE_*`: единственный путь — `database:` в `configFile.content`, пароль в ConfigMap открытым текстом.
-- **Impact:** до `PROD-CONFIG-FILE-FALLBACK` это маскировал фолбэк (env игнорировался целиком); теперь дефолтный install — crash loop с явной ошибкой. Обходы описаны в `helm/amp/README.md` § Quick Start: `lite` или внешний PostgreSQL с TLS через `configFile.content`.
-- **Fix:** задача `HELM-DEFAULTS-VALIDATE` (P0 в BACKLOG), ждёт решения владельца.
-- **Refs:** `tasks/archive/PROD-CONFIG-FILE-FALLBACK/research.md`, `evidence/binary-check.md` (сценарии d, e), `evidence/chart-default-env.txt`.
-- **Status:** open
-
 ### [medium][Helm][~0.25d] ESO-SECRET-OWNERSHIP-CONFLICT
 - **Title:** при `externalSecrets.enabled` Helm и External Secrets Operator претендуют на один Secret
 - **Problem:** `helm/amp/templates/secret.yaml` рендерит `<fullname>-secrets` безусловно, а `templates/externalsecret.yaml` при `externalSecrets.enabled` целится в тот же Secret (`target.name: <fullname>-secrets`, `creationPolicy: Owner`). Ожидаемо: ESO перезаписывает данные, Helm на `upgrade` возвращает свои (в том числе пустые ключи), владелец объекта неоднозначен.
 - **Impact:** не воспроизводилось — найдено чтением шаблонов. Затрагивает только установки с ESO; дефолт и `values-production.yaml` его не включают.
 - **Fix:** не рендерить `secret.yaml` (или его ключи, которые даёт ESO) при `externalSecrets.enabled`; render-тест; проверить на кластере с ESO.
-- **Refs:** `tasks/HELM-DEFAULTS-VALIDATE/research.md` § Findings (линза operational).
+- _(2026-10-14, HELM-DEFAULTS-VALIDATE review F2/R3-1)_ путь стал рекомендуемым: `fail` в `secret.yaml` при `llm.enabled=true` без ключа советует `externalSecrets.enabled`. Рядом второй, нерабочий путь: `helm/amp/DEPLOYMENT.md:84` предлагает `llm.externalSecrets.*` (`templates/llm-secret.yaml`), но Deployment всегда читает `<fullname>-secrets/llm-api-key`, а guard принимает только глобальный `externalSecrets.enabled` ⇒ рендер падает (до задачи — `CreateContainerConfigError`). В фиксе оставить один путь ESO для ключа LLM и поправить DEPLOYMENT.md.
+- **Refs:** `tasks/archive/HELM-DEFAULTS-VALIDATE/research.md` § Findings (линза operational), `review-findings.md` F2, R3-1.
 - **Status:** open
 
 ### [low][Test][~0.25d] FLAKE-REFRESH-IN-PROGRESS
@@ -136,6 +129,7 @@
 - **Title:** `TestRunMigrations_ConcurrentReplicas_FreshDB` паникует вместо skip, когда Docker отвечает медленно
 - **Problem:** `requireDocker` (`go-app/internal/database/migrations_concurrent_test.go:34`) вызывает `testcontainers.NewDockerClientWithOpts`, а тот при таймауте `docker info` (2 с) паникует в `MustExtractDockerHost` — до ветки `t.Skip`. Воспроизвелось, когда параллельно шла сборка: `context deadline exceeded`. В одиночку тест проходит.
 - **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет на загруженной машине (2026-10-10).
+- _(2026-10-14, HELM-DEFAULTS-VALIDATE testing)_ тот же механизм в `go-app/internal/infrastructure/repository/postgres_history_test.go:34` (`TestGetTopAlerts_EmptyDatabase`): `docker info: context deadline exceeded` → паника. Фикс — общий хелпер для обоих пакетов.
 - **Fix:** в `requireDocker` перехватывать панику (`recover`) и делать `t.Skip`, либо проверять доступность Docker своим вызовом с бóльшим таймаутом.
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/tasks.md` п. 5.1.
 - **Status:** open
@@ -146,6 +140,14 @@
 - **Impact:** строка уровня ERROR в логе здоровой установки; ложные срабатывания алертов на ERROR-логи.
 - **Fix:** в `lite` без явного адреса Redis не подключаться вовсе; иначе понизить уровень до WARN (ошибку уже несёт следующая строка).
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/evidence/startup-logs.md`.
+- **Status:** open
+
+### [low][Test][~0.25d] TESTCONTAINERS-FLAKY-UNDER-LOAD
+- **Title:** интеграционные тесты на testcontainers падают на загруженной машине
+- **Problem:** 2026-10-14, release-gate при load average ~247: `internal/infrastructure/inhibition/integration_test.go:187` (`TestIntegration_TwoTierAlertCache_Redis`) — `create container: reaper: … unexpected container status "removing"`; `internal/database/postgres/pool_reload_test.go:42` (`startPostgres`) не дождался контейнера и упал по таймауту пакета 10m. Изолированный перезапуск — оба `ok`.
+- **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет случайно; таймаут `postgres` стоит 10 минут прогона.
+- **Fix:** дедлайн на старт контейнера (`context.WithTimeout`) и `t.Skip`/понятная ошибка вместо висящего теста; для reaper — ретрай старта или `TESTCONTAINERS_RYUK_DISABLED` в гейте с явной очисткой.
+- **Refs:** `tasks/archive/HELM-DEFAULTS-VALIDATE/tasks.md` п. 5.4; связано с `MIGRATIONS-TEST-PANICS-ON-SLOW-DOCKER`.
 - **Status:** open
 
 ## Entry Format

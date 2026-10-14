@@ -43,14 +43,14 @@ updated_at: 2026-10-14
 
 ## Success Criteria
 
-- [ ] `helm template` с дефолтными values: нет `secretKeyRef` на ключ, которого нет в рендеренном Secret; `llm.enabled` по умолчанию `false`.
-- [ ] Бинарь AMP на env дефолтного рендера (профиль `standard`, встроенный PostgreSQL, `environment: production`) проходит валидацию конфига. Проверка — тем же способом, что в `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/binary-check.md`.
-- [ ] Без opt-in флага `environment: production` + `sslmode=disable` по-прежнему отклоняется (регрессионный тест в `internal/config`).
-- [ ] Чарт выставляет флаг только при встроенном PostgreSQL; при `postgresql.enabled: false` флаг не рендерится (render-тест).
-- [ ] `llm.enabled: true` без `llm.apiKey` и без `externalSecrets.enabled` падает на рендере с понятной ошибкой, а не `CreateContainerConfigError`; render-тест.
-- [ ] При включённом флаге AMP пишет в лог явное предупреждение о незашифрованном соединении с БД в production.
-- [ ] `helm/amp/README.md` (Quick Start, обходы), `values.yaml` и `CHANGELOG.md` `[Unreleased]` описывают новые дефолты; баг `HELM-DEFAULTS-FAIL-VALIDATION` закрыт.
-- [ ] Гейты AMP (`WORKFLOW.md` § Гейты AMP), включая `scripts/release-gate.sh`, зелёные.
+- [x] `helm template` с дефолтными values: нет `secretKeyRef` на ключ, которого нет в рендеренном Secret; `llm.enabled` по умолчанию `false`.
+- [x] Бинарь AMP на env дефолтного рендера (профиль `standard`, встроенный PostgreSQL, `environment: production`) проходит валидацию конфига. Проверка — тем же способом, что в `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/binary-check.md`.
+- [x] Без opt-in флага `environment: production` + `sslmode=disable` по-прежнему отклоняется (регрессионный тест в `internal/config`).
+- [x] Чарт выставляет флаг только при встроенном PostgreSQL; при `postgresql.enabled: false` флаг не рендерится (render-тест).
+- [x] `llm.enabled: true` без `llm.apiKey` и без `externalSecrets.enabled` падает на рендере с понятной ошибкой, а не `CreateContainerConfigError`; render-тест.
+- [x] При включённом флаге AMP пишет в лог явное предупреждение о незашифрованном соединении с БД в production.
+- [x] `helm/amp/README.md` (Quick Start, обходы), `values.yaml` и `CHANGELOG.md` `[Unreleased]` описывают новые дефолты; баг `HELM-DEFAULTS-FAIL-VALIDATION` закрыт.
+- [x] Гейты AMP (`WORKFLOW.md` § Гейты AMP), включая `scripts/release-gate.sh`, зелёные.
 
 ## Non-Goals
 

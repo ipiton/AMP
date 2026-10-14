@@ -11,11 +11,6 @@
 
 ### P0 — без этого не внедрять
 
-- [ ] **HELM-DEFAULTS-VALIDATE** — баг `HELM-DEFAULTS-FAIL-VALIDATION` (BUGS.md): после `PROD-CONFIG-FILE-FALLBACK` env из чарта доходит до AMP, и стало видно, что дефолтные values не проходят: `llm.enabled: true` без `apiKey` ⇒ `CreateContainerConfigError`; встроенный PostgreSQL без TLS + `environment: production` ⇒ `database SSL mode 'disable' is not allowed in production`.
-  - Сделать: дефолт `llm.enabled` (выключить или не ссылаться на отсутствующий ключ Secret); TLS встроенного PostgreSQL или иной дефолт `environment`/`ssl_mode` для встроенной БД; values внешней БД с паролем из Secret (сейчас только `database:` в `configFile.content`, пароль в ConfigMap); render-тест + запуск бинаря на env дефолтного рендера.
-  - Оценка: ~0.5–1d после решения. _Источник: PROD-CONFIG-FILE-FALLBACK, 2026-10-07._
-  - _(2026-10-14)_ Values внешней БД с паролем из Secret вынесены в `HELM-EXTERNAL-DATABASE` (P1).
-  - _(2026-10-14)_ Решение владельца: `llm.enabled: false` по умолчанию; TLS встроенному PostgreSQL не делаем — явный opt-in флаг, разрешающий `sslmode=disable` при `environment: production`, чарт выставляет только для встроенного PostgreSQL. В WIP.
 - [ ] **PROD-DEPS-NET-HTTP2** — required `govulncheck` красный на `main` с 2026-10-10 (CI run 38047566510 и следующие): GO-2026-6610, -6611, -6612, -6613, -6617 (HTTP/2 и HTTP/1 в `net/http`, в том числе crash HTTP/2-сервера из-за гонки HPACK-энкодера), опубликованы 2026-10-08. Достижимы: `golang.org/x/net` v0.58.0 (фикс v0.60.0) и stdlib `go1.26.8` (фикс `go1.26.9`). Блокирует Owner `MAIN-BRANCH-PROTECTION`.
   - Сделать: `toolchain go1.26.9` в `go-app/go.mod` (CI берёт версию из `go-version-file`), `x/net` → v0.60.0, проверить `Dockerfile`/`Dockerfile.config-reloader` на версию Go; `govulncheck ./...` — 0 достижимых; release-gate.
   - Оценка: ~0.3d. _Источник: start-task PROD-HARDCODED-FILTER, 2026-10-13._
@@ -81,6 +76,7 @@
 
 ### Закрыто
 
+- [x] **HELM-DEFAULTS-VALIDATE** _(закрыт 2026-10-14, `tasks/archive/HELM-DEFAULTS-VALIDATE/`; дефолтные values чарта стартуют: `llm.enabled: false` по умолчанию, `llm.enabled=true` без ключа падает на рендере; opt-in `database.allow_insecure_ssl_in_production` разрешает `sslmode=disable` в production, чарт ставит его только для встроенного PostgreSQL без TLS, AMP пишет `Warn`; внешняя БД с паролем из Secret — `HELM-EXTERNAL-DATABASE` (P1))_
 - [x] **PROD-HARDCODED-FILTER** _(закрыт 2026-10-13, `tasks/archive/PROD-HARDCODED-FILTER/`; правила `test*`/`environment=test|testing`/namespace `dev-sandbox`|`tmp` удалены без opt-in-конфига (решение владельца), замена — upstream route на blackhole-receiver из migration note; Rule 7 пропускает флап, блокирует только повтор того же статуса; release-gate PASS, смоук бинаря PASS)_
 - [x] **DEAD-VALUES-FILTERS** _(закрыт 2026-10-13 вместе с `PROD-HARDCODED-FILTER`: ключ `filters:` удалён из `helm/amp/values.yaml`)_
 - [x] **FU-TOPLEVEL-INHIBIT-RULES** _(закрыт 2026-10-12, `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/`; верхнеуровневый `inhibit_rules:` применяется при старте и reload, сливается с `inhibition.inhibit_rules` и `config_file`; заодно починены panic на старте при любом inhibit-правиле (с PARITY-A2), регистр имён label'ов, E150/E151 → W150/W151; release-gate PASS)_
@@ -199,6 +195,7 @@
   - _(2026-10-01, PROD-INGRESS-HARDENING R12)_ AMP NetworkPolicy открывает только `http`: при включении sidecar'а его порт `reloader` (9091) закрыт для скрейпа — добавить правило для `networkPolicy.metricsScrapers`.
   - **Частично сделано INF-B (2026-08-20)**: values-шейп `configReloader.enabled/image/resources` уже в `helm/amp/values.yaml` (disabled), без темплейтов — по условиям брифа. Остаётся: Go-код sidecar + Dockerfile + template.
 - [ ] **FU-DB-LIVE-POOL-HANDLE** _(открыт 2026-08-20 в INF-A slice 1)_ — дать consumers Postgres-пула handle, который следует за swap, вместо `*pgxpool.Pool`, захваченного в конструкторе (storage adapter, silence/investigation repositories, investigation tools `*sql.DB`). После этого `DatabaseReloadable` перестанет отдавать `W600` и станет реальным hot reload — swap-механизм уже готов и покрыт тестами (`internal/database/postgres/pool_reload_test.go`, включая «held connection» кейс). Оценка: ~0.5d.
+  - _(2026-10-14, HELM-DEFAULTS-VALIDATE review F3)_ заодно: `database.allow_insecure_ssl_in_production` не влияет на пул, но его изменение попадает в `changedFields` и даёт ложный `W600` «restart required»; `Warn` о незашифрованном соединении (`logDatabaseTLSState`, `cmd/server/main.go`) пишется только на старте — при hot reload его повторять, флаг из restart-required полей исключить.
 - [ ] **FU-RELOAD-UNIFY-APPLIERS** _(открыт 2026-08-20, fix-round I4)_ — перевести секции, которые `ServiceRegistry.ReloadConfig` применяет ВНЕ реестра компонентов (routing, templates, receivers, inhibition), в `config.Reloadable`.
 - [ ] **FU-REDIS-LIVE-CLIENT-HANDLE** _(открыт 2026-08-20 в INF-A slice 1)_ — то же для Redis: 6 consumers (`lock.LeaderElector`, `cluster.HeartbeatRegistry`, `RedisSilenceEventBus`, `RedisGroupStorage`, `RedisNotifyLog`, `RedisTimerStorage`) берут `*redis.Client` через `ShareClient()` и не следуют за swap. Без этого `redis.*` — restart-required (`W601`). Внимание: тут не только «неудобно» — на смене addr/db это split claim TTLs + split delivered-state, поэтому отказ обязателен до фикса. Оценка: ~0.5d.
 
