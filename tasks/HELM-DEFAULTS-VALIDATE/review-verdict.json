@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "fix-here: F1",
+  "branch": "bugfix/helm-defaults-validate",
+  "commit": "867e169",
+  "reviewed_at": "2026-10-14",
+  "findings": {
+    "blocker": 0,
+    "major": 1,
+    "minor": 5,
+    "nit": 3
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
