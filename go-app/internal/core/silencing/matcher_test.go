@@ -1084,10 +1084,9 @@ func TestMultiMatcher_Performance(t *testing.T) {
 		t.Error("Expected match, got no match")
 	}
 
-	// Target: <500µs for 5 matchers
-	if duration > 500*time.Microsecond {
-		t.Errorf("Performance target missed: %v > 500µs", duration)
-	}
+	// Target: <500µs for 5 matchers. Logged, not asserted: a single wall-clock
+	// sample fails under load or -race; BenchmarkMultiMatcher_10Matchers measures it.
+	t.Logf("Performance: %v for 5 matchers (target: <500µs)", duration)
 }
 
 func TestMultiMatcher_EmptyMatcherList(t *testing.T) {
@@ -1244,12 +1243,9 @@ func TestMatchesAny_100Silences_Performance(t *testing.T) {
 		t.Errorf("Expected 100 matches, got %d", len(matchedIDs))
 	}
 
-	// Target: <1ms for 100 silences
-	if duration > 1*time.Millisecond {
-		t.Errorf("Performance target missed: %v > 1ms", duration)
-	} else {
-		t.Logf("Performance: %v for 100 silences (target: <1ms) ✅", duration)
-	}
+	// Target: <1ms for 100 silences. Logged, not asserted: a single wall-clock
+	// sample fails under load or -race; BenchmarkMatchesAny_100Silences measures it.
+	t.Logf("Performance: %v for 100 silences (target: <1ms)", duration)
 }
 
 func TestMatchesAny_ContextCancellation(t *testing.T) {
@@ -1623,12 +1619,9 @@ func TestMatchesAny_1000Silences_StressTest(t *testing.T) {
 		t.Errorf("Expected 1000 matches, got %d", len(matchedIDs))
 	}
 
-	// Target: <10ms for 1000 silences
-	if duration > 10*time.Millisecond {
-		t.Errorf("Performance target missed: %v > 10ms", duration)
-	} else {
-		t.Logf("Performance: %v for 1000 silences (target: <10ms) ✅", duration)
-	}
+	// Target: <10ms for 1000 silences. Logged, not asserted: a single wall-clock
+	// sample fails under load or -race; BenchmarkMatchesAny_1000Silences measures it.
+	t.Logf("Performance: %v for 1000 silences (target: <10ms)", duration)
 }
 
 func TestMatcher_AllOperatorsInOneSilence(t *testing.T) {
