@@ -3,7 +3,7 @@
 **Trigger classification:** mandatory (`S`; 4 сигнала `C S X R`)
 **Reviewer perspective:** два независимых read-only агента (Plan), не автор: R1 — security + premises + correctness + git history; R2 — contract + cross-domain + runtime + maintainability + requirements coverage
 **Reviewed at:** 2026-10-14
-**Reviewed tree:** bugfix/helm-defaults-validate @ 867e169
+**Reviewed tree:** bugfix/helm-defaults-validate @ 867e169 (раунд 1), 0c1de16 (раунд 2), 941399b (раунд 3, финальный)
 **Verdict:** см. `review-verdict.json` (раунды ниже)
 
 Что ревьюеры подтвердили запуском: `go vet` и `go test ./internal/config/... ./cmd/server/...` зелёные, `TestChartEnvKeysKnownToViper` (`config_load_test.go:139`) резолвит новый env; `helm lint`/`template` для dev и production с placeholders как в `release-gate.sh`; 7/7 `helm/amp/tests/*.sh`; рендер в комбинациях (default, prod, lite, `ssl=on`, `postgresql.enabled=false`, LLM с ключом / без / с ESO / `llm.secret.enabled` / только `authToken`). `database.url` в рантайме не читается (`GetDatabaseURL` — только `example.go`), `Warn` не может напечатать креды. Design Premises 1, 3–7 подтверждены, 2 (hot-reload) — code-read, честно. В истории (`e1d520e`, `ce4ce72` TN-205) нет решения, которое изменение нарушает.
@@ -111,6 +111,28 @@
 - **Issue:** не сказано, что файл надо включить (по умолчанию `false`); в README чарта оговорено. Предсуществующее.
 - **Recommendation:** дописать «(requires `configFile.enabled: true`)».
 - **Disposition:** fix-here
+- **Follow-up:** n/a
+
+## Round 3 — re-review @ 941399b
+
+**Reviewer perspective:** новый независимый агент (Plan), не участник раундов 1–2. Широкий поиск вне `tasks/`, `docs/06-planning/`, `go-app/.cache` (md/yaml/txt/tpl/sh, `examples/`, `deploy/`, `skills/`, `NOTES.txt`): утверждений о старых дефолтах и обходов не осталось; README чарта, корневой README, CHANGELOG, MIGRATION и COMPATIBILITY согласованы.
+
+- N1, N2, N3 — resolved. F1 — resolved целиком.
+
+### R3-1 — `llm.externalSecrets.*` в DEPLOYMENT.md не проходит новый guard
+- **Severity:** nit
+- **Location:** `helm/amp/DEPLOYMENT.md:84`, `helm/amp/templates/llm-secret.yaml:10`, `helm/amp/templates/secret.yaml:46`
+- **Issue:** DEPLOYMENT.md предлагает `llm.externalSecrets.*`, а guard принимает только глобальный `externalSecrets.enabled`; `llm.enabled=true` + `llm.externalSecrets.enabled=true` без `apiKey` падает на рендере. До изменения тот же путь давал `CreateContainerConfigError`: Deployment всегда читает `<fullname>-secrets/llm-api-key`, `llm-secret.yaml` в цепочку не входит — путь не работал и раньше.
+- **Recommendation:** при работе над ESO оставить один путь ESO для ключа LLM и поправить DEPLOYMENT.md.
+- **Disposition:** defer-bug
+- **Follow-up:** `BUGS.md` `ESO-SECRET-OWNERSHIP-CONFLICT` — дописать на `finalize` (вместе с F2).
+
+### R3-2 — формулировка «did not start after this change» в п. 4 migration note
+- **Severity:** nit
+- **Location:** `CHANGELOG.md:298`
+- **Issue:** можно прочитать двояко.
+- **Recommendation:** по желанию «still did not start at this point».
+- **Disposition:** reject (reason: смысл однозначен по соседней Fixed-записи; правка ради правки после `pass` сдвинула бы проверенное дерево)
 - **Follow-up:** n/a
 
 ## Anti-Pattern Check

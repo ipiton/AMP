@@ -1,8 +1,8 @@
 {
-  "gate": "fix_required",
-  "reason": "fix-here: F1",
+  "gate": "pass",
+  "reason": null,
   "branch": "bugfix/helm-defaults-validate",
-  "commit": "867e169",
+  "commit": "941399b",
   "reviewed_at": "2026-10-14",
   "findings": {
     "blocker": 0,

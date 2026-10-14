@@ -71,7 +71,7 @@ Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (ф�
 - [x] **3.5** F6: migration note в CHANGELOG про `-f values-production.yaml`/`values-dev.yaml`; Spec v1.1 (три values-файла, Test Plan G2–G4, T1 по F4/F5). <!-- verify: grep -n 'values-dev.yaml' CHANGELOG.md tasks/HELM-DEFAULTS-VALIDATE/Spec.md -->
 - [x] **3.6** Повторный deep-review @ 0c1de16 → `fix_required` (N1–N3).
 - [x] **3.7** Fix round 2: N1 — корневой `README.md:17`; N2 — п. 4 migration note `PROD-CONFIG-FILE-FALLBACK` в CHANGELOG; N3 — `configFile.enabled: true` в MIGRATION. <!-- verify: ! grep -rn --include='*.md' --exclude-dir=tasks --exclude-dir=06-planning --exclude-dir=.cache -i 'default values do not start\|default values still do not start\|defaults do not start\|Do not install with chart defaults' . -->
-- [ ] **3.8** Повторный deep-review по дельте fix round 2. <!-- verify: review-verdict.json gate=pass -->
+- [x] **3.8** Повторный deep-review @ 941399b → `pass`. <!-- verify: review-verdict.json gate=pass -->
 
 ## Phase 4: Tests (write-tests, после verdict `pass`)
 
