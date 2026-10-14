@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: дефолтные values чарта проходят валидацию AMP
 
-**Based on:** requirements.md / research.md / Spec.md v1.0  
+**Based on:** requirements.md / research.md / Spec.md v1.0
 **Date:** 2026-10-14
 
 Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (фаза 4) → `testing` (фаза 5) → `finalize`.
@@ -85,11 +85,24 @@ Tier Full: `implement` (фазы 1–3) → `deep-review` → `write-tests` (ф�
 
 ## Phase 5: Testing (гейты AMP)
 
-- [ ] **5.1** Затронутые пакеты: `cd go-app && go vet ./internal/config/... ./cmd/server/... && go test ./internal/config/... ./cmd/server/...`. <!-- verify: exit 0 -->
-- [ ] **5.2** `make -C go-app quality-gates-fast`, затем `git status` (go fmt мог переписать файлы). <!-- verify: exit 0, git status без неожиданных изменений -->
-- [ ] **5.3** B1: `go build ./cmd/server`, запуск под `env -i` на env дефолтного рендера (как `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/binary-check.md` сценарий d, тестовый пароль 19 символов): нет `config validation failed`, есть `Warn` с `host`, пароль в логе 0 раз; контроль — без флага прежняя ошибка. Результат — `evidence/binary-check.md`. <!-- depends: 1.3, 2.1 | verify: evidence/binary-check.md заполнен -->
-- [ ] **5.4** `scripts/release-gate.sh` (полный). <!-- verify: все шаги PASS или задокументированный предсуществующий FAIL -->
-- [ ] **5.5** `git diff --check`; в диффе нет `_, _ :=`. <!-- verify: git diff main --check && ! git diff main | grep -E '^\+.*_, _ :=' -->
+- [x] **5.1** Затронутые пакеты: `cd go-app && go vet ./internal/config/... ./cmd/server/... && go test ./internal/config/... ./cmd/server/...`. <!-- verify: exit 0 -->
+- [x] **5.2** `make -C go-app quality-gates-fast`, затем `git status` (go fmt мог переписать файлы). <!-- verify: exit 0, git status без неожиданных изменений -->
+- [x] **5.3** B1: `go build ./cmd/server`, запуск под `env -i` на env дефолтного рендера (как `tasks/archive/PROD-CONFIG-FILE-FALLBACK/evidence/binary-check.md` сценарий d, тестовый пароль 19 символов): нет `config validation failed`, есть `Warn` с `host`, пароль в логе 0 раз; контроль — без флага прежняя ошибка. Результат — `evidence/binary-check.md`. <!-- depends: 1.3, 2.1 | verify: evidence/binary-check.md заполнен -->
+- [~] **5.4** `scripts/release-gate.sh` (полный). <!-- verify: все шаги PASS или задокументированный предсуществующий FAIL -->
+- [x] **5.5** `git diff --check`; в диффе нет `_, _ :=`. <!-- verify: git diff main --check && ! git diff main | grep -E '^\+.*_, _ :=' -->
+
+Результат (2026-10-14, `2aaea1b`):
+
+- 5.1 — PASS (383 теста). 5.2 — PASS, `go fmt` ничего не переписал.
+- 5.3 — PASS, `evidence/binary-check.md`: env дефолтного рендера проходит валидацию, `Warn` с `host=amp-postgres`, выход только на отсутствии БД; контроль без флага — прежняя ошибка; пароль в логах 0 раз.
+- 5.5 — PASS после удаления trailing whitespace в `tasks.md:17`; `_, _ :=` в коде нет (совпадение только в тексте этого пункта).
+- 5.4 — `RESULT: FAIL` по шагам `test` и `race`, все остальные (build, lint, futureparity, helm-*, amtool-compat) PASS. Падения вне диффа (ветка меняет только `internal/config`, `cmd/server`, чарт), прогон шёл при load average ~247 с параллельным `go test` другой сессии:
+  - `application` `TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica` — известный `GROUPING-ORPHAN-ADOPTION-TEST-FLAKY`; изолированно 10/10;
+  - `database` `TestRunMigrations_ConcurrentReplicas_FreshDB`, `repository` `TestGetTopAlerts_EmptyDatabase` — паника `docker info: context deadline exceeded` (известный `MIGRATIONS-TEST-PANICS-ON-SLOW-DOCKER`, `repository` — тот же механизм);
+  - `inhibition` `TestIntegration_TwoTierAlertCache_Redis` — reaper testcontainers: `unexpected container status "removing"`;
+  - `database/postgres` — `startPostgres` не дождался контейнера, таймаут пакета 10m.
+  Перезапуск пяти пакетов отдельно — все `ok`.
+  - race `silencing`: `TestMatchesAny_1000Silences_StressTest` (19 ms > 10 ms), на перезапуске `TestMatchesAny_100Silences_Performance` (1.46 ms > 1 ms) — wall-clock пороги под `-race` и нагрузкой; пакет не зависит от `internal/config`, дифф его не трогает. Без `-race` пакет `ok`, `-race -run 'Race|Concurrent'` `ok`, гонок нет. Предсуществующее → новые записи в `BUGS.md` на `finalize` (перф-пороги под `-race`; паника `repository` при медленном Docker; reaper `inhibition`).
 
 ## Deviations from Spec
 
