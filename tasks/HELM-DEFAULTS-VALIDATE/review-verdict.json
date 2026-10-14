@@ -6,9 +6,9 @@
   "reviewed_at": "2026-10-14",
   "findings": {
     "blocker": 0,
-    "major": 1,
-    "minor": 5,
-    "nit": 3
+    "major": 2,
+    "minor": 6,
+    "nit": 6
   },
   "open": {
     "blocker": 0,
