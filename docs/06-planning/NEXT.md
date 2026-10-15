@@ -16,9 +16,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **PROD-DEPS-NET-HTTP2** — P0 из BACKLOG: required `govulncheck` красный на `main` с 2026-10-10 (GO-2026-6610…6617, HTTP/2 и HTTP/1 в `net/http`). `toolchain go1.26.9`, `golang.org/x/net` v0.58.0 → v0.60.0 (карантин до 2026-10-15 17:22 UTC), образы `golang:1.26.9-alpine`. Ветка `bugfix/prod-deps-net-http2`, workspace `tasks/PROD-DEPS-NET-HTTP2/`. Взят 2026-10-15.
+
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-DEPS-NET-HTTP2` (Blocked-by: карантин до 2026-10-15) → `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` в WIP с 2026-10-15.
 
 ### Owner
 
