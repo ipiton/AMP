@@ -353,7 +353,7 @@ postgresql:
   # PostgreSQL Configuration (TN-97 + TN-98: optimized for HPA cluster mode)
   # NOTE: currently NOT applied — the bundled PostgreSQL runs with the image
   # defaults (BUGS PG-CONFIG-NOT-APPLIED).
-  # Connection calculation: 10 replicas × 20 conns/pod + 50 reserved = 250 max_connections
+  # Connection calculation: 10 replicas × 25 conns/pod (AMP database.max_connections default) = 250 max_connections
   config:
     # Connection Settings (TN-97: CRITICAL for HPA)
     maxConnections: 250  # Up from 100 default (supports 10 replicas)

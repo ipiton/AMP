@@ -171,3 +171,8 @@ kubectl -n amp scale deploy/amp --replicas=2
 ```
 
 Counts 5/1/0, `goose_db_version` unchanged (11:52:19), `/-/ready` OK, silence `3b7aabdf-…` active. Scenario 3a covers this case.
+
+### 7.7 Re-review follow-ups (R18, R20)
+
+- `<fullname>` lookup: `kubectl -n amp get sts -l app.kubernetes.io/instance=amp,app.kubernetes.io/component=database -o jsonpath='{.items[0].metadata.name}'` → `amp-postgres`, so `<fullname>` = `amp`. The AMP Deployment has no `component` label (only its pod template does), so a lookup by `component=application` on `deploy` finds nothing.
+- Checksum check before restore (macOS `shasum`): `grep " $DUMP$" amp-dumps.sha256 | shasum -a 256 -c -` → `OK`, exit 0; after appending one byte to the dump → `FAILED`, exit 1.

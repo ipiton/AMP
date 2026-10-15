@@ -120,13 +120,26 @@ based_on:
 - R11 (lite рендерит встроенный PG) и R16 (`backupBeforeMigration`) — в BUGS и TECH-DEBT на finalize. Строка README про lite поправлена.
 - Проверки: 8/8 `render-*.sh` PASS; `helm lint` default и production (с плейсхолдерами тестов) — 0 failed; рендеры default, production и lite — ok.
 
+### Implementation notes (2026-10-15, повторное ревью @ 5632eac)
+
+- Повторное ревью подтвердило фиксы R1–R10, R12–R15, R17. Из новых R18–R24 исправлены:
+  - R18: `<fullname>` теперь берётся из StatefulSet `component=database`; у Deployment нет метки `component`;
+  - R19: в NOTES шаги 3–4 выводятся только при встроенном PG, «Expected: 250» заменено, предупреждение `PG-CONFIG-NOT-APPLIED` показывается и без HPA;
+  - R20: `DUMP` и проверка checksum + `pg_restore -f /dev/null` перед любым restore;
+  - R21: удаление мёртвого PVC и пода в 3a, по порядку после scale 0;
+  - R23: Spec D3, комментарий в values (25 conns/pod), ссылки TN-97 в NOTES.
+- R22 отклонён: `enabled: 1`/`"True"` проходят как принятое поведение, CronJob всё равно не работал; кейсы — в 5.1. R24 (`port-forward svc/` в NOTES) — TECH-DEBT `HELM-CHART-GAPS` в finalize.
+- Повторный deep review для R18–R23 не нужен (рекомендация ревьюера). Проверено:
+  - NOTES на 4 вариантах: default, без HPA, без PG, lite;
+  - lookup `<fullname>` и `sha256 -c` (нормальный и подменённый дамп) — evidence §7.7.
+
 ## Phase 4: Deep review
 
 - [ ] **4.1** `/deep-review` (обязателен: `M`, 3 сигнала, большой дифф): guards и тексты, рендер-дифф против инвариантов, удаление PVC и migration notes, runbook против evidence, ADR. <!-- depends: 1.8, 3.5 | verify: jq -r .gate tasks/PROD-POSTGRES-HA-DECISION/review-verdict.json → pass -->
 
 ## Phase 5: Tests
 
-- [ ] **5.1** `helm/amp/tests/render-postgresql.sh` по образцу `render-defaults-validate.sh`: дефолты и production — нет PDB/CronJob/backup PVC Postgres, образ `postgres:16.15`, нет `archive_mode`; `replicas=2`, `replicas=0`, `backup.enabled=true` — render fail с ожидаемым текстом; `postgresql.enabled=false` + `replicas=3`/`backup.enabled=true` — рендер проходит; `profile=lite` — рендер проходит. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-postgresql.sh → все ok; на main (без изменений чарта) — падает (тест не тавтологичен) -->
+- [ ] **5.1** `helm/amp/tests/render-postgresql.sh` по образцу `render-defaults-validate.sh`: дефолты и production — нет PDB/CronJob/backup PVC Postgres, образ `postgres:16.15`, нет `archive_mode`; `replicas=2`, `replicas=0`, `backup.enabled=true` — render fail с ожидаемым текстом; `postgresql.enabled=false` + `replicas=3`/`backup.enabled=true` — рендер проходит; `profile=lite` — рендер проходит; deep review R5/R22: `backup=null`, `backup=false`, пустой `backup:` в values-файле — проходят, `backup=true` (скаляр), `--set-string backup.enabled=true`, main `values.yaml` через `-f` — fail с подсказкой про `--reuse-values`, `backup.enabled=1`/`"True"` — проходят (принятое поведение, R22); NOTES: при встроенном PG нет «HA» и «Expected: 250», при `postgresql.enabled=false` нет шагов 3–4. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-postgresql.sh → все ok; на main (без изменений чарта) — падает (тест не тавтологичен) -->
 
 ## Phase 6: Testing
 

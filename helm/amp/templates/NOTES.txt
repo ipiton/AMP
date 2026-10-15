@@ -25,6 +25,8 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 {{- if .Values.postgresql.enabled }}
 ⚠️  Bundled PostgreSQL: single instance, dev/pilot only — no replication, no backups (ADR-016)
    For production use an external PostgreSQL; backups: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md
+   postgresql.config is not applied (bug PG-CONFIG-NOT-APPLIED): max_connections stays at the
+   server default (20 measured on k3d), below one AMP pod's pool of 25.
 {{- else }}
 ✅ External PostgreSQL (connection from the AMP config, see README → PostgreSQL)
 {{- end }}
@@ -48,10 +50,9 @@ Connection calculation:
   {{ .Values.autoscaling.maxReplicas }} replicas × 25 conns/pod (database.max_connections default) = {{ mul .Values.autoscaling.maxReplicas 25 }} connections
 
 {{- if .Values.postgresql.enabled }}
-⚠️  The bundled PostgreSQL does not apply postgresql.config (bug PG-CONFIG-NOT-APPLIED):
-   max_connections stays at the server default (20 measured on k3d), not
-   postgresql.config.maxConnections. Expect connection errors as replicas grow;
-   use an external PostgreSQL sized for {{ mul .Values.autoscaling.maxReplicas 25 }}+ connections.
+⚠️  The bundled PostgreSQL cannot serve this (max_connections, see above).
+   Expect connection errors as replicas grow; use an external PostgreSQL
+   sized for {{ mul .Values.autoscaling.maxReplicas 25 }}+ connections.
 {{- else }}
    Make sure the external PostgreSQL allows at least {{ mul .Values.autoscaling.maxReplicas 25 }} connections
    (or put PgBouncer in front of it).
@@ -86,7 +87,7 @@ Connection calculation:
 
 {{- end }}
 
-{{- if eq .Values.profile "standard" }}
+{{- if and (eq .Values.profile "standard") .Values.postgresql.enabled }}
 
 3. Check PostgreSQL:
 
@@ -100,7 +101,8 @@ Connection calculation:
    kubectl exec -it $(kubectl get pod -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ .Release.Namespace }} -- \
      psql -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SHOW max_connections;"
 
-   Expected: {{ .Values.postgresql.config.maxConnections }}
+   Expected until PG-CONFIG-NOT-APPLIED is fixed: the server default,
+   not postgresql.config.maxConnections ({{ .Values.postgresql.config.maxConnections }}).
 {{- end }}
 {{- end }}
 {{- end }}
@@ -130,8 +132,7 @@ Connection calculation:
 =============================================================================
 
 📖 Helm Chart: helm/amp/README.md
-📖 HPA Configuration: tasks/TN-97-hpa-configuration/README.md
-📖 Database Connections: tasks/TN-97-hpa-configuration/DATABASE_CONNECTIONS_ANALYSIS.md
+📖 PostgreSQL backup & restore: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md
 📖 API Documentation: docs/API.md
 
 =============================================================================

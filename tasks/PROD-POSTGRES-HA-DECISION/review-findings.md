@@ -7,8 +7,8 @@
 
 Автор свёл находки и сверил ключевые утверждения с кодом: `deployment.yaml:11-13`, `NOTES.txt`, guard `dig`, `git diff --check main...HEAD`.
 **Reviewed at:** 2026-10-15
-**Reviewed tree:** feature/prod-postgres-ha-decision @ ebfd2b8
-**Verdict:** fix_required @ ebfd2b8; фиксы — следующий коммит, повторное ревью — ниже
+**Reviewed tree:** feature/prod-postgres-ha-decision @ ebfd2b8. Повторное ревью фиксов (новый независимый агент) — @ 5632eac: R1–R10, R12–R15, R17 подтверждены, новые R18–R24
+**Verdict:** pass (см. `review-verdict.json`; первый прогон @ ebfd2b8 — fix_required)
 
 Поле `Status` в каждой находке читает скрипт вердикта: `open` | `fixed` | `deferred` | `rejected`. В скобках указан номер находки у ревьюера.
 
@@ -197,6 +197,63 @@
 - **Disposition:** fix-here
 - **Status:** fixed
 - **Follow-up:** n/a
+
+### R18 — Команда поиска `<fullname>` в runbook § 1 ничего не находит (повторное ревью)
+- **Severity:** minor
+- **Location:** `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` § 1
+- **Issue:** `get deploy -l …,component=application` пуст: метка `component` стоит только на pod template, а не на Deployment. `-o name` возвращает `deployment.apps/…`. Определение не учитывало `<release>-<nameOverride>`. Команду внёс fix round, в evidence прогона не было.
+- **Recommendation:** брать имя StatefulSet `component=database` (`<fullname>-postgres`), прогнать на кластере.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
+
+### R19 — `NOTES.txt`: «max_connections не применяется» и рядом «Expected: 250» (повторное ревью)
+- **Severity:** minor
+- **Location:** `helm/amp/templates/NOTES.txt` (шаги 3–4, блок пула)
+- **Issue:** шаг 4 ждёт `maxConnections`. Шаги 3–4 печатаются и при `postgresql.enabled=false`. Предупреждение про config выводится только при HPA.
+- **Recommendation:** гейтовать шаги по `postgresql.enabled`, переписать «Expected», вынести предупреждение из-под HPA.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
+
+### R20 — Restore-секции не задают `$DUMP` и не сверяют checksum (повторное ревью)
+- **Severity:** nit
+- **Location:** `POSTGRESQL_RESTORE_GUIDE.md` § 3
+- **Recommendation:** `DUMP=<path>`, `sha256sum -c` и `pg_restore -f /dev/null` перед restore.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
+
+### R21 — Потеря только PVC: runbook не говорит удалить мёртвый PVC и под (повторное ревью)
+- **Severity:** minor
+- **Location:** `POSTGRESQL_RESTORE_GUIDE.md` § 3a
+- **Issue:** PVC, привязанный к потерянному PV, остаётся. StatefulSet новый не создаст, под зависнет в Pending. В evidence § 7.6 PVC и под удалялись явно.
+- **Recommendation:** шаги удаления PVC и пода после scale 0, как в evidence.
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
+
+### R22 — Guard не ловит `enabled: 1` / `"True"`, которые на main включали CronJob (повторное ревью)
+- **Severity:** nit
+- **Location:** `helm/amp/templates/postgresql-statefulset.yaml:7`
+- **Disposition:** reject (reason: CronJob на этих значениях не работал, вреда нет; поведение фиксируется кейсами в задаче 5.1)
+- **Status:** rejected
+- **Follow-up:** tasks.md 5.1
+
+### R23 — Spec D3, комментарий в values и ссылки TN-97 в NOTES отстали от реализации (повторное ревью)
+- **Severity:** nit
+- **Location:** `Spec.md` D3; `helm/amp/values.yaml` (комментарий `postgresql.config`); `NOTES.txt` Documentation
+- **Disposition:** fix-here
+- **Status:** fixed
+- **Follow-up:** n/a
+
+### R24 — NOTES советует `port-forward svc/<fullname>`, хотя селектор Service захватывает postgres и redis (повторное ревью)
+- **Severity:** nit
+- **Location:** `helm/amp/templates/NOTES.txt` (шаг 5)
+- **Issue:** дефект был до ветки (`SERVICE-METRICS-PORT-MISROUTED`), и NOTES расходится с runbook § 1.
+- **Disposition:** defer-tech-debt
+- **Status:** deferred
+- **Follow-up:** TECH-DEBT `HELM-CHART-GAPS` — дополнить в finalize
 
 ## Premises (Reviewer A)
 

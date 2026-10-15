@@ -14,8 +14,15 @@ The commands in sections 2–4 were run end to end on a k3d cluster with the bun
 |---|---|
 | `<namespace>` | namespace of the Helm release |
 | `<release>` | Helm release name |
-| `<fullname>` | name of the AMP Deployment: `kubectl -n <namespace> get deploy -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application -o name`. It is `<release>` when the release name contains the chart name (`amp`, or `nameOverride`), otherwise `<release>-amp`; `fullnameOverride` replaces it |
+| `<fullname>` | chart fullname, also the name of the AMP Deployment. It is `<release>` when the release name contains `amp` (or `nameOverride`), otherwise `<release>-amp` (or `<release>-<nameOverride>`); `fullnameOverride` replaces it. Look it up below |
 | `<N>` | number of AMP replicas to return to in scenario 3a (`replicaCount`, or `autoscaling.minReplicas` with HPA) |
+
+- Look up `<fullname>` from the bundled PostgreSQL StatefulSet, which is named `<fullname>-postgres`:
+
+  ```sh
+  kubectl -n <namespace> get sts -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=database \
+    -o jsonpath='{.items[0].metadata.name}'      # prints <fullname>-postgres
+  ```
 
 - The commands run `pg_dump`/`pg_restore` **inside** the `postgres` container. They use its `$POSTGRES_USER`/`$POSTGRES_DB` over the local socket, so no password goes on the command line or into shell history.
 - Address the AMP pods by label: `app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application`. Do not use `svc/<fullname>` or `deploy/<fullname>` with `kubectl port-forward`/`logs`: their selector also matches the postgres and redis pods, and kubectl may pick one of those.
@@ -45,16 +52,30 @@ sha256sum "$DUMP" >> amp-dumps.sha256    # macOS: shasum -a 256 "$DUMP" >> amp-d
 
 AMP must not run while `pg_restore` runs. Otherwise it applies migrations to a half-restored schema and keeps ingesting into tables that are being dropped. While AMP is down, `POST /api/v2/alerts` gets no answer. Prometheus re-sends active alerts periodically, so they arrive once AMP is back. A resolve notification sent only during the outage can be lost.
 
+Start every restore by pointing `DUMP` at the file and checking it. Both checks must pass:
+
+```sh
+set -o pipefail
+DUMP=<path to the dump>
+grep " $DUMP\$" amp-dumps.sha256 | sha256sum -c -    # macOS: shasum -a 256 -c -
+kubectl -n <namespace> exec -i <fullname>-postgres-0 -c postgres -- pg_restore -f /dev/null < "$DUMP"
+```
+
 All restores use `--single-transaction --exit-on-error`. If `pg_restore` fails half-way, for example because the dump is damaged, the transaction rolls back and the database stays as it was. Without these flags, `--clean` drops the existing tables and a failed restore leaves them empty.
 
 ### 3a. Roll a live installation back to a dump
 
-Use this also when only the PostgreSQL PVC was lost and the release still exists: the StatefulSet recreates an empty volume, and you restore into it.
+Also for a lost PostgreSQL volume while the release still exists (for example, the node holding a local volume is gone): run the commented commands below too.
 
 ```sh
 kubectl -n <namespace> scale deploy/<fullname> --replicas=0
 kubectl -n <namespace> wait --for=delete pod \
   -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application --timeout=120s
+
+# only if the PostgreSQL volume was lost: drop the dead PVC, let the StatefulSet recreate an empty one
+# kubectl -n <namespace> delete pvc postgres-data-<fullname>-postgres-0 --wait=false
+# kubectl -n <namespace> delete pod <fullname>-postgres-0 --wait=true
+# kubectl -n <namespace> rollout status sts/<fullname>-postgres --timeout=240s
 
 kubectl -n <namespace> exec -i <fullname>-postgres-0 -c postgres -- \
   sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction --exit-on-error' < "$DUMP"
