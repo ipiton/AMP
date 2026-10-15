@@ -1,0 +1,328 @@
+--- /private/tmp/claude-501/-Users-vit-Documents-Projects-AMP/7b59f54f-dddc-4e05-85df-48a300d49905/scratchpad/render-main-default.yaml	2026-10-15 11:03:41.801873132 +0200
++++ /private/tmp/claude-501/-Users-vit-Documents-Projects-AMP/7b59f54f-dddc-4e05-85df-48a300d49905/scratchpad/render-br-default.yaml	2026-10-15 11:08:06.390458218 +0200
+@@ -12,31 +12,6 @@
+   policyTypes:
+
+ ---
+-# Source: amp/templates/postgresql-poddisruptionbudget.yaml
+-apiVersion: policy/v1
+-kind: PodDisruptionBudget
+-metadata:
+-  name: amp-postgres
+-  namespace: amp
+-  labels:
+-    helm.sh/chart: amp-0.1.0
+-    app.kubernetes.io/name: amp
+-    app.kubernetes.io/instance: amp
+-    app.kubernetes.io/version: "0.1.0"
+-    app.kubernetes.io/managed-by: Helm
+-    app.kubernetes.io/component: database
+-  annotations:
+-    description: "Pod Disruption Budget for PostgreSQL - ensures availability during voluntary disruptions"
+-    tn-98: "Operational hardening baseline"
+-spec:
+-  selector:
+-    matchLabels:
+-      app.kubernetes.io/name: amp
+-      app.kubernetes.io/instance: amp
+-      app.kubernetes.io/component: database
+-  minAvailable: 1
+-
+----
+ # Source: amp/templates/serviceaccount.yaml
+ apiVersion: v1
+ kind: ServiceAccount
+@@ -92,7 +67,7 @@
+   # Priority:
+   # 1. Use values.valkey.password.value if provided
+   # 2. Otherwise generate random 32-character password
+-  password: <masked>
++  password: <masked>
+
+ ---
+ # Source: amp/templates/secret.yaml
+@@ -423,16 +398,6 @@
+     min_wal_size = 1GB
+     max_wal_size = 4GB
+     checkpoint_completion_target = 0.9
+-    # -----------------------------------------------------------------------------
+-    # WAL Archiving (TN-98: Point-in-Time Recovery)
+-    # -----------------------------------------------------------------------------
+-    wal_level = replica  # Required for archiving (default in PostgreSQL 16)
+-    archive_mode = on    # Enable WAL archiving
+-    archive_command = 'test ! -f /backup/wal_archive/%f && cp %p /backup/wal_archive/%f'
+-    # Archive command: Copy WAL file to archive directory (idempotent with test -f)
+-    archive_timeout = 300  # Force WAL switch every 5 minutes (for PITR granularity)
+-    max_wal_senders = 5   # Allow up to 5 concurrent WAL senders (for replication)
+-    wal_keep_size = 1GB   # Retain at least 1GB of WAL on disk (for streaming replication)
+
+     # -----------------------------------------------------------------------------
+     # Query Planning (SSD-optimized, TN-97)
+@@ -1598,29 +1563,6 @@
+       storage: 5Gi
+
+ ---
+-# Source: amp/templates/postgresql-backup-pvc.yaml
+-apiVersion: v1
+-kind: PersistentVolumeClaim
+-metadata:
+-  name: amp-postgres-backup
+-  namespace: amp
+-  labels:
+-    helm.sh/chart: amp-0.1.0
+-    app.kubernetes.io/name: amp
+-    app.kubernetes.io/instance: amp
+-    app.kubernetes.io/version: "0.1.0"
+-    app.kubernetes.io/managed-by: Helm
+-    app.kubernetes.io/component: database-backup
+-  annotations:
+-    description: "PostgreSQL WAL archive and base backups storage (TN-98: PITR)"
+-spec:
+-  accessModes:
+-  - ReadWriteOnce
+-  resources:
+-    requests:
+-      storage: "50Gi"
+-
+----
+ # Source: amp/templates/pvc.yaml
+ apiVersion: v1
+ kind: PersistentVolumeClaim
+@@ -2388,9 +2330,7 @@
+     app.kubernetes.io/managed-by: Helm
+     app.kubernetes.io/component: database
+   annotations:
+-    description: "PostgreSQL StatefulSet for AMP (TN-98)"
+-    tn-97: "HPA cluster mode support (max_connections=250)"
+-    tn-98: "Operational hardening baseline"
++    description: "Bundled single-instance PostgreSQL for dev/pilot; no replication, no backups. Production: external PostgreSQL (ADR-016)."
+ spec:
+   serviceName: amp-postgres
+   replicas: 1
+@@ -2409,7 +2349,7 @@
+         app.kubernetes.io/instance: amp
+         app.kubernetes.io/component: database
+       annotations:
+-        checksum/config: aaae96133fd1262739d3ab33ee44f66b0c647b5aa7ca61cd4e38bf4f975c0c93
++        checksum/config: e9e10b6e301cfb6a2213a55c87335264860a2befe9c604e6c2b3114af4f46925
+         checksum/secret: 9afcea5b88ac064e1c814d4e29255bc7dbd70629a47710d9643d7173c16ece45
+         prometheus.io/scrape: "true"
+         prometheus.io/port: "9187"
+@@ -2436,7 +2376,7 @@
+               topologyKey: kubernetes.io/hostname
+       containers:
+       - name: postgres
+-        image: postgres:16
++        image: postgres:16.15
+         imagePullPolicy: IfNotPresent
+         ports:
+         - name: postgres
+@@ -2474,8 +2414,6 @@
+           mountPath: /docker-entrypoint-initdb.d/init.sql
+           subPath: init.sql
+           readOnly: true
+-        - name: backup
+-          mountPath: /backup
+         resources:
+           limits:
+             cpu: 1000m
+@@ -2611,9 +2549,6 @@
+         configMap:
+           name: amp-postgres-exporter-config
+           optional: false
+-      - name: backup
+-        persistentVolumeClaim:
+-          claimName: amp-postgres-backup
+   volumeClaimTemplates:
+   - metadata:
+       name: postgres-data
+@@ -2926,150 +2861,6 @@
+           storage: 5Gi
+
+ ---
+-# Source: amp/templates/postgresql-backup-cronjob.yaml
+-apiVersion: batch/v1
+-kind: CronJob
+-metadata:
+-  name: amp-postgres-backup
+-  namespace: amp
+-  labels:
+-    helm.sh/chart: amp-0.1.0
+-    app.kubernetes.io/name: amp
+-    app.kubernetes.io/instance: amp
+-    app.kubernetes.io/version: "0.1.0"
+-    app.kubernetes.io/managed-by: Helm
+-    app.kubernetes.io/component: database-backup
+-  annotations:
+-    description: "PostgreSQL base backup CronJob for disaster recovery (TN-98)"
+-spec:
+-  schedule: "0 2 * * *"
+-  concurrencyPolicy: Forbid  # Don't run concurrent backups
+-  successfulJobsHistoryLimit: 3
+-  failedJobsHistoryLimit: 3
+-  jobTemplate:
+-    metadata:
+-      labels:
+-        helm.sh/chart: amp-0.1.0
+-        app.kubernetes.io/name: amp
+-        app.kubernetes.io/instance: amp
+-        app.kubernetes.io/version: "0.1.0"
+-        app.kubernetes.io/managed-by: Helm
+-        app.kubernetes.io/component: database-backup
+-    spec:
+-      ttlSecondsAfterFinished: 86400  # Cleanup jobs after 24h
+-      template:
+-        metadata:
+-          labels:
+-            helm.sh/chart: amp-0.1.0
+-            app.kubernetes.io/name: amp
+-            app.kubernetes.io/instance: amp
+-            app.kubernetes.io/version: "0.1.0"
+-            app.kubernetes.io/managed-by: Helm
+-            app.kubernetes.io/component: database-backup
+-        spec:
+-          restartPolicy: OnFailure
+-          serviceAccountName: amp
+-          # No K8s API access needed; the SA's discovery Role is for AMP only.
+-          automountServiceAccountToken: false
+-          securityContext:
+-            fsGroup: 999
+-            runAsNonRoot: true
+-            seccompProfile:
+-              type: RuntimeDefault
+-          containers:
+-          - name: backup
+-            image: postgres:16
+-            imagePullPolicy: IfNotPresent
+-            command:
+-            - /bin/bash
+-            - -c
+-            - |
+-              set -euo pipefail
+-
+-              echo "==================================="
+-              echo "PostgreSQL Base Backup - TN-98"
+-              echo "==================================="
+-              echo "Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+-              echo "Target: amp-postgres:5432"
+-              echo "Database: alert_history"
+-              echo "==================================="
+-
+-              # Create backup directory with timestamp
+-              BACKUP_DIR="/backup/base/$(date -u +"%Y%m%d_%H%M%S")"
+-              mkdir -p "$BACKUP_DIR"
+-
+-              # Create WAL archive directory if not exists
+-              mkdir -p /backup/wal_archive
+-
+-              echo "Backup directory: $BACKUP_DIR"
+-              echo "Starting pg_basebackup..."
+-
+-              # Run pg_basebackup
+-              pg_basebackup \
+-                --host=amp-postgres \
+-                --port=5432 \
+-                --username=alert_history \
+-                --pgdata="$BACKUP_DIR" \
+-                --format=tar \
+-                --gzip \
+-                --wal-method=stream \
+-                --checkpoint=fast \
+-                --progress \
+-                --verbose \
+-                2>&1 | tee "$BACKUP_DIR/backup.log"
+-
+-              echo "Backup completed successfully!"
+-              echo "Backup size: $(du -sh "$BACKUP_DIR" | cut -f1)"
+-
+-              # Cleanup old backups (keep last 30 days)
+-              echo "Cleaning up backups older than 30 days..."
+-              find /backup/base -type d -name "2*" -mtime +30 -exec rm -rf {} \; || true
+-
+-              # Cleanup old WAL archives (keep last 7 days)
+-              echo "Cleaning up WAL archives older than 7 days..."
+-              find /backup/wal_archive -type f -mtime +7 -delete || true
+-
+-              echo "Backup job completed at $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+-              echo "==================================="
+-            env:
+-            - name: PGPASSWORD
+-              valueFrom:
+-                secretKeyRef:
+-                  name: amp-postgresql-secret
+-                  key: password
+-            - name: PGHOST
+-              value: amp-postgres
+-            - name: PGPORT
+-              value: "5432"
+-            - name: PGUSER
+-              value: "alert_history"
+-            - name: PGDATABASE
+-              value: "alert_history"
+-            volumeMounts:
+-            - name: backup
+-              mountPath: /backup
+-            resources:
+-              limits:
+-                cpu: 500m
+-                memory: 512Mi
+-              requests:
+-                cpu: 250m
+-                memory: 256Mi
+-            securityContext:
+-              allowPrivilegeEscalation: false
+-              capabilities:
+-                drop:
+-                - ALL
+-              readOnlyRootFilesystem: false
+-              runAsNonRoot: true
+-              runAsUser: 999
+-              runAsGroup: 999
+-          volumes:
+-          - name: backup
+-            persistentVolumeClaim:
+-              claimName: amp-postgres-backup
+-
+----
+ # Source: amp/templates/rbac.yaml
+ # RBAC for publishing target discovery (PROD-RBAC-SCOPE, ADR-012).
+ #
+@@ -3207,29 +2998,6 @@
+         description: "Table {{ $labels.schemaname }}.{{ $labels.relname }} has not been vacuumed for {{ $value }} seconds."
+
+     # ========================================
+-    # BACKUP ALERTS (TN-98: Disaster Recovery)
+-    # ========================================
+-    - alert: PostgreSQLWALArchivingFailed
+-      expr: rate(pg_stat_archiver_failed_count[5m]) > 0
+-      for: 5m
+-      labels:
+-        severity: critical
+-        component: database-backup
+-      annotations:
+-        summary: "PostgreSQL WAL archiving is failing (instance {{ $labels.instance }})"
+-        description: "WAL archiving has failed {{ $value }} times in the last 5 minutes. PITR capability at risk!"
+-
+-    - alert: PostgreSQLBackupOld
+-      expr: (now() - postgresql_backup_last_success_timestamp_seconds) > 172800
+-      for: 1h
+-      labels:
+-        severity: warning
+-        component: database-backup
+-      annotations:
+-        summary: "PostgreSQL backup is old (instance {{ $labels.instance }})"
+-        description: "Last successful backup was {{ $value }} seconds ago (>48 hours). RTO at risk!"
+-
+-    # ========================================
+     # PERFORMANCE ALERTS
+     # ========================================
+     - alert: PostgreSQLHighCheckpointRate
+@@ -3515,7 +3283,7 @@
+   restartPolicy: Never
+   containers:
+   - name: test
+-    image: postgres:16
++    image: postgres:16.15
+     command:
+     - /bin/sh
+     - -c
