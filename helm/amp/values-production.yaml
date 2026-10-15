@@ -47,22 +47,18 @@ podDisruptionBudget:
 # ===============================
 # PostgreSQL Database (Production)
 # ===============================
-# HONESTY NOTE (was previously wrong in this file): BACKLOG's "PostgreSQL
-# cluster (3 instances)" is NOT what this chart's templates/postgresql-statefulset.yaml
-# implements. It is a single-primary StatefulSet with no streaming replication
-# or failover logic — the old `postgresql.cluster.instances: 3` /
-# `postgresql.cluster.postgresql.parameters` keys below rendered NOTHING (no
-# template reads them) and would have silently shipped one instance while the
-# file claimed three. Setting `replicas: 3` on THIS template would start three
-# independent, uncoordinated Postgres processes each with its own PVC — not a
-# cluster, an active split-brain risk. Real multi-instance HA needs a proper
-# operator (CloudNativePG/Patroni) and is tracked as a gap in
-# docs/06-planning/TECH-DEBT.md (HELM-CHART-GAPS), not implemented here.
-# What IS real and enabled below: one primary, tuned for 20 replicas' worth of
-# connections, WAL archiving + daily base backups for PITR, and its own PDB.
+# The bundled PostgreSQL (templates/postgresql-statefulset.yaml) is a single
+# primary with no replication or failover; there is no "cluster" mode, and
+# `replicas` other than 1 fails the render (it would start independent,
+# uncoordinated databases behind one Service). Multi-instance HA needs an
+# external PostgreSQL or an operator (CloudNativePG/Patroni) — ADR-016.
+# It also takes no backups. Fine for a pilot; for production point AMP at an
+# external PostgreSQL with backups/PITR (README "PostgreSQL") — chart values
+# for that come with HELM-EXTERNAL-DATABASE. Take your own pg_dump backups
+# meanwhile: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md.
 postgresql:
   enabled: true
-  replicas: 1
+  replicas: 1 # must stay 1; anything else fails the render
   # MUST be set before install: --set postgresql.password=..., a CI-injected
   # values file kept out of git, or wire postgresql.existingSecret + External
   # Secrets. Left empty on purpose — unlike secret.yaml's other credentials,
@@ -90,19 +86,13 @@ postgresql:
   persistence:
     enabled: true
     size: 50Gi
-  podDisruptionBudget:
-    enabled: true
-    minAvailable: 1
-  backup:
-    enabled: true
-    schedule: "0 2 * * *"
-    retention: 30
-    walRetention: 7
   monitoring:
     prometheusRules:
       enabled: true
   networkPolicy:
     enabled: true
+  # NOTE: config: below is currently NOT applied by the bundled PostgreSQL
+  # (BUGS PG-CONFIG-NOT-APPLIED) — it runs with the image defaults.
   config:
     # 20 replicas (autoscaling.maxReplicas below) x ~20 conns/pod + headroom.
     maxConnections: 500
