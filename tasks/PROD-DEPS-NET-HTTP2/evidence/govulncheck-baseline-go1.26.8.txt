@@ -1,0 +1,1030 @@
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-6617
+    HTTP/2 server crash due to HPACK encoder race in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6617
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.58.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http2.ConfigureTransports
+      #2: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.ConnectionError.Error
+      #3: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.ErrCode.String
+      #4: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameHeader.String
+      #5: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameType.String
+      #6: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrame
+      #7: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameForHeader
+      #8: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameHeader
+      #9: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteContinuation
+      #10: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteGoAway
+      #11: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteHeaders
+      #12: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WritePing
+      #13: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteRSTStream
+      #14: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettings
+      #15: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettingsAck
+      #16: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteWindowUpdate
+      #17: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.GoAwayError.Error
+      #18: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.Setting.String
+      #19: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.SettingID.String
+      #20: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.SettingsFrame.ForeachSetting
+      #21: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.StreamError.Error
+      #22: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.NewClientConn
+      #23: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.RoundTrip
+      #24: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #25: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.chunkWriter.Write
+      #26: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.connError.Error
+      #27: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.duplicatePseudoHeaderError.Error
+      #28: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.gzipReader.Close
+      #29: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.gzipReader.Read
+      #30: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldNameError.Error
+      #31: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldValueError.Error
+      #32: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.netHTTPClientConn.RoundTrip
+      #33: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.NewClientConn
+      #34: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.RoundTrip
+      #35: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.pseudoHeaderError.Error
+      #36: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.stickyErrWriter.Write
+      #37: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.transportResponseBody.Close
+      #38: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.transportResponseBody.Read
+      #39: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.unencryptedTransport.RoundTrip
+      #40: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.writeData.String
+
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #2: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #3: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #4: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #5: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #6: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #7: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #8: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #9: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #10: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #11: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #12: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #13: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #14: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #15: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #16: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #17: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #18: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #19: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #20: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #21: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #22: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #23: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #24: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #25: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #26: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #27: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #28: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #29: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #30: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #31: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #32: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #33: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #34: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #35: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #36: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #37: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #38: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #39: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #40: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #41: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #42: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #43: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #44: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #45: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #46: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #47: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #48: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #49: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #50: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #51: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #52: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #53: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #54: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #55: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #56: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #57: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #58: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #59: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #60: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #61: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #62: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #63: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #64: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #65: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #66: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #67: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #68: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #69: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #70: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #71: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #72: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #73: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #74: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #75: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #76: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #77: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #78: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #79: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #80: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #81: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #82: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #83: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #84: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #85: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #86: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #87: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #88: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #89: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #90: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #91: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #92: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #93: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #94: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #95: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #96: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #97: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #98: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #99: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #100: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #101: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #102: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #103: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #104: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #105: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #106: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #107: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #108: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #109: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #110: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #111: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #112: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #113: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #114: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #115: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #116: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #117: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #118: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #119: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #120: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #121: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #122: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #123: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #124: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #125: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #126: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #127: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #128: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #129: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #130: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #131: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #132: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #133: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #134: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #135: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #136: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #137: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #138: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #139: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #140: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #141: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #142: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #143: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #144: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #145: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #146: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #147: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #148: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #149: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #150: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #151: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #152: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #153: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #154: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #155: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #156: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #157: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #158: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #159: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #160: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #161: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #162: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #163: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+      #164: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+
+Vulnerability #2: GO-2026-6613
+    HTTP/1 server connection desynchronization after 2xx CONNECT response in
+    net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6613
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #2: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #3: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #4: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #5: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #6: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader, which eventually calls http.Header.Del
+      #7: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #8: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #9: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #10: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #11: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #12: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #13: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #14: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #15: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #16: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #17: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #18: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #19: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #20: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #21: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #22: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #23: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #24: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #25: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #26: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #27: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #28: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #29: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #30: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #31: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #32: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #33: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #34: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #35: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #36: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #37: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #38: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #39: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #40: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #41: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #42: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #43: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #44: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #45: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #46: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #47: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #48: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #49: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #50: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #51: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #52: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #53: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #54: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #55: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+
+Vulnerability #3: GO-2026-6612
+    Double flow control refund on HTTP/2 server streams in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6612
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.58.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http2.ConfigureTransports
+      #2: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.ConnectionError.Error
+      #3: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.ErrCode.String
+      #4: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameHeader.String
+      #5: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameType.String
+      #6: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrame
+      #7: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameForHeader
+      #8: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameHeader
+      #9: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteContinuation
+      #10: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteGoAway
+      #11: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteHeaders
+      #12: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WritePing
+      #13: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteRSTStream
+      #14: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettings
+      #15: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettingsAck
+      #16: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteWindowUpdate
+      #17: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.GoAwayError.Error
+      #18: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.Setting.String
+      #19: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.SettingID.String
+      #20: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.SettingsFrame.ForeachSetting
+      #21: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.StreamError.Error
+      #22: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.NewClientConn
+      #23: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.RoundTrip
+      #24: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #25: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.chunkWriter.Write
+      #26: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.connError.Error
+      #27: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.duplicatePseudoHeaderError.Error
+      #28: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.gzipReader.Close
+      #29: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.gzipReader.Read
+      #30: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldNameError.Error
+      #31: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldValueError.Error
+      #32: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.netHTTPClientConn.RoundTrip
+      #33: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.NewClientConn
+      #34: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.RoundTrip
+      #35: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.pseudoHeaderError.Error
+      #36: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.stickyErrWriter.Write
+      #37: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.transportResponseBody.Close
+      #38: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.transportResponseBody.Read
+      #39: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.unencryptedTransport.RoundTrip
+      #40: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.writeData.String
+
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #2: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #3: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #4: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #5: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #6: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #7: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #8: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #9: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #10: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #11: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #12: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #13: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #14: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #15: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #16: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #17: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #18: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #19: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #20: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #21: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #22: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #23: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #24: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #25: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #26: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #27: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #28: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #29: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #30: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #31: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #32: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #33: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #34: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #35: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #36: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #37: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #38: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #39: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #40: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #41: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #42: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #43: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #44: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #45: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #46: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #47: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #48: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #49: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #50: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #51: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #52: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #53: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #54: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #55: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #56: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #57: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #58: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #59: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #60: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #61: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #62: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #63: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #64: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #65: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #66: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #67: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #68: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #69: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #70: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #71: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #72: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #73: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #74: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #75: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #76: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #77: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #78: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #79: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #80: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #81: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #82: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #83: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #84: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #85: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #86: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #87: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #88: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #89: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #90: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #91: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #92: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #93: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #94: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #95: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #96: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #97: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #98: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #99: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #100: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #101: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #102: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #103: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #104: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #105: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #106: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #107: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #108: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #109: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #110: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #111: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #112: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #113: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #114: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #115: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #116: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #117: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #118: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #119: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #120: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #121: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #122: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #123: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #124: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #125: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #126: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #127: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #128: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #129: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #130: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #131: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #132: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #133: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #134: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #135: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #136: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #137: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #138: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #139: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #140: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #141: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #142: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #143: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #144: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #145: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #146: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #147: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #148: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #149: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #150: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #151: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #152: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #153: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #154: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #155: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #156: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #157: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #158: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #159: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #160: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #161: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #162: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #163: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+      #164: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+
+Vulnerability #4: GO-2026-6611
+    Excessive CPU consumption from repeated initial window changes in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6611
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.58.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http2.ConfigureTransports
+      #2: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.ConnectionError.Error
+      #3: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.ErrCode.String
+      #4: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameHeader.String
+      #5: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameType.String
+      #6: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrame
+      #7: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameForHeader
+      #8: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameHeader
+      #9: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteContinuation
+      #10: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteGoAway
+      #11: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteHeaders
+      #12: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WritePing
+      #13: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteRSTStream
+      #14: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettings
+      #15: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettingsAck
+      #16: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteWindowUpdate
+      #17: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.GoAwayError.Error
+      #18: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.Setting.String
+      #19: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.SettingID.String
+      #20: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.SettingsFrame.ForeachSetting
+      #21: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.StreamError.Error
+      #22: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.NewClientConn
+      #23: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.RoundTrip
+      #24: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #25: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.chunkWriter.Write
+      #26: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.connError.Error
+      #27: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.duplicatePseudoHeaderError.Error
+      #28: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.gzipReader.Close
+      #29: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.gzipReader.Read
+      #30: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldNameError.Error
+      #31: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldValueError.Error
+      #32: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.netHTTPClientConn.RoundTrip
+      #33: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.NewClientConn
+      #34: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.RoundTrip
+      #35: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.pseudoHeaderError.Error
+      #36: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.stickyErrWriter.Write
+      #37: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.transportResponseBody.Close
+      #38: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.transportResponseBody.Read
+      #39: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.unencryptedTransport.RoundTrip
+      #40: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.writeData.String
+
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #2: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #3: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #4: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #5: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #6: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #7: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #8: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #9: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #10: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #11: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #12: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #13: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #14: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #15: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #16: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #17: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #18: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #19: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #20: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #21: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #22: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #23: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #24: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #25: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #26: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #27: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #28: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #29: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #30: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #31: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #32: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #33: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #34: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #35: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #36: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #37: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #38: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #39: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #40: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #41: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #42: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #43: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #44: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #45: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #46: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #47: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #48: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #49: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #50: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #51: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #52: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #53: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #54: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #55: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #56: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #57: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #58: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #59: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #60: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #61: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #62: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #63: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #64: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #65: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #66: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #67: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #68: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #69: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #70: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #71: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #72: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #73: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #74: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #75: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #76: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #77: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #78: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #79: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #80: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #81: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #82: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #83: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #84: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #85: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #86: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #87: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #88: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #89: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #90: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #91: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #92: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #93: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #94: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #95: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #96: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #97: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #98: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #99: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #100: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #101: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #102: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #103: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #104: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #105: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #106: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #107: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #108: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #109: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #110: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #111: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #112: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #113: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #114: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #115: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #116: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #117: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #118: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #119: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #120: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #121: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #122: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #123: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #124: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #125: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #126: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #127: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #128: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #129: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #130: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #131: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #132: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #133: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #134: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #135: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #136: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #137: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #138: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #139: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #140: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #141: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #142: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #143: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #144: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #145: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #146: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #147: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #148: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #149: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #150: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #151: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #152: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #153: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #154: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #155: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #156: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #157: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #158: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #159: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #160: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #161: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #162: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #163: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+      #164: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+
+Vulnerability #5: GO-2026-6610
+    HTTP/2 transport accepts malformed framing-related headers in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6610
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.58.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.NewClientConn
+      #2: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.RoundTrip
+      #3: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.NewClientConn
+      #4: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.RoundTrip
+      #5: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.unencryptedTransport.RoundTrip
+
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #2: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #3: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #4: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #5: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #6: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+
+Vulnerability #6: GO-2026-6609
+    Lack of limit on size of parsed Range headers in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6609
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe, which eventually calls http.fileHandler.ServeHTTP
+
+Vulnerability #7: GO-2026-6608
+    Memory limit bypass when parsing MIME headers in net/textproto,
+    mime/multipart
+  More info: https://pkg.go.dev/vuln/GO-2026-6608
+  Standard library
+    Found in: net/textproto@go1.26.8
+    Fixed in: net/textproto@go1.26.9
+    Example traces found:
+      #1: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe, which eventually calls multipart.Reader.ReadForm
+      #2: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls textproto.Reader.ReadMIMEHeader
+
+Vulnerability #8: GO-2026-6607
+    Reject malformed ECH outer extension references in crypto/tls
+  More info: https://pkg.go.dev/vuln/GO-2026-6607
+  Standard library
+    Found in: crypto/tls@go1.26.8
+    Fixed in: crypto/tls@go1.26.9
+    Example traces found:
+      #1: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls tls.Conn.Handshake
+      #2: internal/infrastructure/publishing/email_client.go:89:37: publishing.SMTPDialer.dialSMTP calls tls.Conn.HandshakeContext
+      #3: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls tls.Conn.Read
+      #4: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls tls.Conn.Write
+      #5: internal/infrastructure/lock/example.go:222:27: lock.ExampleHealthCheck calls redis.NewClient, which eventually calls tls.DialWithDialer
+      #6: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls tls.Dialer.DialContext
+
+Vulnerability #9: GO-2026-6605
+    HTTP/1 client connection desynchronization after CONNECT rejection in
+    net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6605
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #2: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #3: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+
+Vulnerability #10: GO-2026-6603
+    HTTP/2 server memory exhaustion due to Trailer headers in net/http
+  More info: https://pkg.go.dev/vuln/GO-2026-6603
+  Module: golang.org/x/net
+    Found in: golang.org/x/net@v0.58.0
+    Fixed in: golang.org/x/net@v0.60.0
+    Example traces found:
+      #1: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http2.ConfigureTransports
+      #2: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.ConnectionError.Error
+      #3: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.ErrCode.String
+      #4: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameHeader.String
+      #5: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.FrameType.String
+      #6: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrame
+      #7: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameForHeader
+      #8: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.ReadFrameHeader
+      #9: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteContinuation
+      #10: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteGoAway
+      #11: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteHeaders
+      #12: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WritePing
+      #13: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteRSTStream
+      #14: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettings
+      #15: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteSettingsAck
+      #16: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.Framer.WriteWindowUpdate
+      #17: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.GoAwayError.Error
+      #18: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.Setting.String
+      #19: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.SettingID.String
+      #20: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http2.SettingsFrame.ForeachSetting
+      #21: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.StreamError.Error
+      #22: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.NewClientConn
+      #23: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.Transport.RoundTrip
+      #24: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.bufferedWriterTimeoutWriter.Write
+      #25: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.chunkWriter.Write
+      #26: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http2.connError.Error
+      #27: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.duplicatePseudoHeaderError.Error
+      #28: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.gzipReader.Close
+      #29: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.gzipReader.Read
+      #30: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldNameError.Error
+      #31: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.headerFieldValueError.Error
+      #32: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.netHTTPClientConn.RoundTrip
+      #33: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.NewClientConn
+      #34: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.noDialH2RoundTripper.RoundTrip
+      #35: internal/infrastructure/cache/interface.go:131:42: cache.CacheError.Error calls http2.pseudoHeaderError.Error
+      #36: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http2.stickyErrWriter.Write
+      #37: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http2.transportResponseBody.Close
+      #38: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http2.transportResponseBody.Read
+      #39: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip, which eventually calls http2.unencryptedTransport.RoundTrip
+      #40: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http2.writeData.String
+
+  Standard library
+    Found in: net/http@go1.26.8
+    Fixed in: net/http@go1.26.9
+    Example traces found:
+      #1: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #2: pkg/telemetry/tracer.go:15:2: telemetry.init calls otlptracegrpc.init, which eventually calls http.CanonicalHeaderKey
+      #3: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #4: internal/infrastructure/llm/client.go:588:28: llm.HTTPLLMClient.InvestigateAlert calls http.Client.Do
+      #5: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #6: cmd/server/handlers/publishing_stats.go:705:13: handlers.PublishingStatsHandler.GetTrends calls http.Error
+      #7: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #8: pkg/retry/strategy.go:34:2: retry.init calls prometheus.init, which eventually calls http.HandleFunc
+      #9: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #10: internal/infrastructure/k8s/client.go:230:49: k8s.DefaultK8sClient.Health calls discovery.DiscoveryClient.ServerVersion, which eventually calls http.Header.Add
+      #11: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #12: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.Header.Del
+      #13: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #14: cmd/server/handlers/publishing_stats.go:431:28: handlers.PublishingStatsHandler.GetStats calls http.Header.Get
+      #15: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #16: cmd/server/handlers/publishing_stats.go:721:16: handlers.PublishingStatsHandler.GetTrends calls http.Header.Set
+      #17: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #18: internal/infrastructure/k8s/client.go:111:43: k8s.NewK8sClient calls kubernetes.NewForConfig, which eventually calls http.NewRequest
+      #19: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #20: internal/infrastructure/llm/client.go:577:40: llm.HTTPLLMClient.InvestigateAlert calls http.NewRequestWithContext
+      #21: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #22: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.ReadResponse
+      #23: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #24: internal/infrastructure/publishing/http_client_config.go:211:21: publishing.authRoundTripper.RoundTrip calls http.Request.SetBasicAuth
+      #25: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #26: cmd/server/handlers/dashboard_health.go:82:28: handlers.DashboardHealthHandler.GetHealth calls http.Request.UserAgent
+      #27: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #28: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Request.Write
+      #29: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #30: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.Response.Write
+      #31: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #32: internal/application/route_prefix.go:77:14: application.WithRoutePrefix calls http.ServeMux.Handle
+      #33: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #34: internal/application/route_prefix.go:78:18: application.WithRoutePrefix calls http.ServeMux.HandleFunc
+      #35: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #36: cmd/config-reloader/main.go:261:19: config.startMetricsServer calls http.Server.Close
+      #37: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #38: cmd/server/main.go:190:33: server.main calls http.Server.ListenAndServe
+      #39: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #40: internal/application/application.go:265:32: application.Application.Shutdown calls http.Server.Shutdown
+      #41: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #42: internal/infrastructure/publishing/http_client_config.go:126:55: publishing.cloneTransport calls http.Transport.Clone
+      #43: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #44: internal/infrastructure/publishing/webhook_client.go:287:33: publishing.WebhookHTTPClient.Close calls http.Transport.CloseIdleConnections
+      #45: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #46: internal/infrastructure/publishing/http_client_config.go:216:25: publishing.authRoundTripper.RoundTrip calls http.Transport.RoundTrip
+      #47: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #48: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.body.Close
+      #49: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #50: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.body.Read
+      #51: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #52: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.bodyEOFSignal.Close
+      #53: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #54: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.bodyEOFSignal.Read
+      #55: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #56: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.bodyLocked.Read
+      #57: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #58: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which calls http.bufioFlushWriter.Write
+      #59: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #60: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.cancelTimerBody.Close
+      #61: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #62: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.cancelTimerBody.Read
+      #63: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #64: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.checkConnErrorWriter.Write
+      #65: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #66: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.chunkWriter.Write
+      #67: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #68: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.connReader.Read
+      #69: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #70: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.expectContinueReader.Close
+      #71: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #72: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.expectContinueReader.Read
+      #73: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #74: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.gzipReader.Close
+      #75: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #76: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.gzipReader.Read
+      #77: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #78: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2ConnectionError.Error
+      #79: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #80: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2ErrCode.String
+      #81: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #82: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameHeader.String
+      #83: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #84: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameType.String
+      #85: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #86: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2FrameWriteRequest.String
+      #87: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #88: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2GoAwayError.Error
+      #89: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #90: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2Setting.String
+      #91: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #92: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2SettingID.String
+      #93: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #94: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2StreamError.Error
+      #95: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #96: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2bufferedWriterTimeoutWriter.Write
+      #97: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #98: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2chunkWriter.Write
+      #99: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #100: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2connError.Error
+      #101: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #102: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2duplicatePseudoHeaderError.Error
+      #103: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #104: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2gzipReader.Close
+      #105: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #106: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2gzipReader.Read
+      #107: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #108: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldNameError.Error
+      #109: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #110: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2headerFieldValueError.Error
+      #111: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #112: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.http2pseudoHeaderError.Error
+      #113: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #114: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.http2requestBody.Close
+      #115: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #116: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2requestBody.Read
+      #117: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #118: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.http2responseWriter.Write
+      #119: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #120: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.http2responseWriter.WriteHeader
+      #121: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #122: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.http2responseWriter.WriteString
+      #123: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #124: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.http2stickyErrWriter.Write
+      #125: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #126: internal/infrastructure/llm/client.go:592:36: llm.InvestigateAlert calls http.http2transportResponseBody.Close
+      #127: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #128: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.http2transportResponseBody.Read
+      #129: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #130: internal/infrastructure/cache/memory.go:244:25: cache.MemoryCache.SRem calls fmt.Sprint, which eventually calls http.http2writeData.String
+      #131: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #132: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.loggingConn.Read
+      #133: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #134: internal/infrastructure/publishing/validator.go:493:13: publishing.FormatValidationErrors calls fmt.Fprintf, which calls http.loggingConn.Write
+      #135: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #136: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.maxBytesReader.Read
+      #137: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #138: internal/infrastructure/publishing/pagerduty_cache.go:165:15: publishing.eventKeyCacheImpl.Stop calls sync.Once.Do, which eventually calls http.onceCloseListener.Close
+      #139: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #140: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which eventually calls http.persistConn.Read
+      #141: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #142: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.persistConnWriter.ReadFrom
+      #143: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #144: internal/ui/template_engine.go:263:23: ui.TemplateEngine.Render calls bytes.Buffer.WriteTo, which eventually calls http.persistConnWriter.Write
+      #145: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #146: cmd/server/handlers/webhook.go:269:33: handlers.WebhookHandler calls http.readTrackingBody.Close
+      #147: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #148: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readTrackingBody.Read
+      #149: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #150: internal/infrastructure/llm/client.go:594:25: llm.HTTPLLMClient.InvestigateAlert calls io.ReadAll, which calls http.readWriteCloserBody.Read
+      #151: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #152: internal/infrastructure/investigation/tools/kubernetes.go:185:22: tools.KubernetesTool.getLogs calls io.Copy, which eventually calls http.response.ReadFrom
+      #153: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #154: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.response.Write
+      #155: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #156: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.response.WriteHeader
+      #157: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #158: internal/core/http_client_config.go:222:25: core.Fingerprint calls io.WriteString, which calls http.response.WriteString
+      #159: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #160: pkg/telemetry/middleware.go:77:35: telemetry.responseWriter.Write calls http.timeoutWriter.Write
+      #161: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #162: pkg/telemetry/middleware.go:73:31: telemetry.responseWriter.WriteHeader calls http.timeoutWriter.WriteHeader
+      #163: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+      #164: internal/infrastructure/publishing/handlers.go:500:74: publishing.PublishingHandlers.SubmitAlert calls http.transportReadFromServerError.Error
+
+Vulnerability #11: GO-2026-6600
+    Recognize yield as regexp preceder keyword in html/template
+  More info: https://pkg.go.dev/vuln/GO-2026-6600
+  Standard library
+    Found in: html/template@go1.26.8
+    Fixed in: html/template@go1.26.9
+    Example traces found:
+      #1: internal/ui/template_engine.go:307:24: ui.TemplateEngine.RenderString calls template.Template.Execute
+      #2: cmd/server/legacy_dashboard.go:158:37: server.renderTemplate calls template.Template.ExecuteTemplate
+
+Vulnerability #12: GO-2026-6599
+    Reset context tracking on consecutive template expressions in html/template
+  More info: https://pkg.go.dev/vuln/GO-2026-6599
+  Standard library
+    Found in: html/template@go1.26.8
+    Fixed in: html/template@go1.26.9
+    Example traces found:
+      #1: internal/ui/template_engine.go:307:24: ui.TemplateEngine.RenderString calls template.Template.Execute
+      #2: cmd/server/legacy_dashboard.go:158:37: server.renderTemplate calls template.Template.ExecuteTemplate
+
+Your code is affected by 12 vulnerabilities from the Go standard library.
+This scan also found 1 vulnerability in packages you import and 1 vulnerability
+in modules you require, but your code doesn't appear to call these
+vulnerabilities.
+Use '-show verbose' for more details.
+exit status 3
