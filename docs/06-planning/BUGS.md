@@ -6,6 +6,14 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
+### [high][Helm][~1d] PG-CONFIG-NOT-APPLIED
+- **Title:** встроенный PostgreSQL игнорирует конфиг чарта: `max_connections=20`, `pg_hba` и `init.sql` не те, что задуманы
+- **Problem:** `postgresql.conf` и `pg_hba.conf` из ConfigMap монтируются в `/docker-entrypoint-initdb.d/` (`helm/amp/templates/postgresql-statefulset.yaml:91-97`), а entrypoint образа исполняет оттуда только `*.sh`/`*.sql`; `/etc/postgresql` — пустой `emptyDir`, `POSTGRES_INITDB_ARGS="-c config_file=…"` (`:82`) ничего не подключает. Измерено на k3d 2026-10-15: `config_file` дефолтный, `archive_mode=off`, `max_connections=20` (чарт задумывал 250), `shared_buffers=400kB`, `pg_hba` — дефолт образа. `init.sql` падает на строке 56 (`ALTER SYSTEM SET pg_stat_statements.max` без preload) ⇒ первый старт контейнера с ошибкой, после рестарта init пропускается, скрипт применён частично. Образ `postgres:16` без patch-пина.
+- **Impact:** пул AMP 25 соединений на pod (`go-app/internal/config/config.go:897`) × `minReplicas: 2` против 17 доступных соединений ⇒ под нагрузкой ошибки записи ⇒ ingest отвечает 500, алерты не маршрутизируются. Значение 20 измерено на k3d; на других нодах initdb может выбрать иное. Бэкап и PITR из-за этого тоже не работали (см. ADR-016, `PROD-POSTGRES-HA-DECISION`).
+- **Fix:** конфиг — в `args: ["-c", "config_file=…"]` / `-c` параметрами, `pg_hba` через `hba_file`; `init.sql` без `ALTER SYSTEM` для непредзагруженных расширений; пин образа. Поведение существующих установок изменится при рестарте (лимиты памяти против `shared_buffers`, новый `pg_hba`) — migration note и проверка на k3d с уже инициализированным PVC.
+- **Refs:** `tasks/PROD-POSTGRES-HA-DECISION/research.md` § Findings 2, `evidence/k3d-probe-effective-config.txt`.
+- **Status:** open
+
 ### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
 - **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
 - **Problem:** `onGroupWaitExpired` (`go-app/internal/infrastructure/grouping/manager_impl.go:1866-1873`) на любой ошибке `storage.Load` возвращает `nil` без continuation, а `onTimerExpired` после callback'ов удаляет запись таймера (`timer_manager_impl.go`, cleanup после callback'ов). При транзиентной ошибке Redis группа после этого больше не нотифицирует: таймера нет ни локально, ни в storage, reconciliation подобрать нечего. Предсуществующий дефект; раньше его иногда маскировало повторное срабатывание опоздавшей реплики, после `GROUPING-TIMER-LOCK-FIX` она отсеивается по `not_found`.

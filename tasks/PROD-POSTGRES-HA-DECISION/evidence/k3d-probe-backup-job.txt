@@ -1,0 +1,68 @@
+### 2026-10-15T07:54:10Z manual backup job from CronJob (SA amp created by hand)
+NAME           STATUS    COMPLETIONS   DURATION   AGE
+backup-probe   Running   0/1           2m30s      2m30s
+NAME                 READY   STATUS   RESTARTS       AGE
+backup-probe-p8zmr   0/1     Error    4 (108s ago)   2m30s
+===================================
+PostgreSQL Base Backup - TN-98
+===================================
+Timestamp: 2026-10-15 07:53:13 UTC
+Target: amp-postgres:5432
+Database: alert_history
+===================================
+Backup directory: /backup/base/20261015_075313
+Starting pg_basebackup...
+pg_basebackup: error: connection to server at "amp-postgres" (10.43.171.99), port 5432 failed: FATAL:  no pg_hba.conf entry for replication connection from host "10.42.0.13", user "alert_history", no encryption
+> ls -laR /backup
+/backup:
+total 0
+drwxrwsrwx 1 root     postgres  30 Oct 15 07:51 .
+drwxr-xr-x 1 root     root      76 Oct 15 07:45 ..
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 base
+drwxr-sr-x 1 postgres postgres   0 Oct 15 07:51 wal_archive
+
+/backup/base:
+total 0
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 .
+drwxrwsrwx 1 root     postgres  30 Oct 15 07:51 ..
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:51 20261015_075141
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:51 20261015_075143
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:51 20261015_075155
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:52 20261015_075222
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:53 20261015_075313
+
+/backup/base/20261015_075141:
+total 4
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:51 .
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 ..
+-rw-r--r-- 1 postgres postgres 211 Oct 15 07:51 backup.log
+
+/backup/base/20261015_075143:
+total 4
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:51 .
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 ..
+-rw-r--r-- 1 postgres postgres 211 Oct 15 07:51 backup.log
+
+/backup/base/20261015_075155:
+total 4
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:51 .
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 ..
+-rw-r--r-- 1 postgres postgres 211 Oct 15 07:51 backup.log
+
+/backup/base/20261015_075222:
+total 4
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:52 .
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 ..
+-rw-r--r-- 1 postgres postgres 211 Oct 15 07:52 backup.log
+
+/backup/base/20261015_075313:
+total 4
+drwxr-sr-x 1 postgres postgres  20 Oct 15 07:53 .
+drwxr-sr-x 1 postgres postgres 150 Oct 15 07:53 ..
+-rw-r--r-- 1 postgres postgres 211 Oct 15 07:53 backup.log
+
+/backup/wal_archive:
+total 0
+drwxr-sr-x 1 postgres postgres  0 Oct 15 07:51 .
+drwxrwsrwx 1 root     postgres 30 Oct 15 07:51 ..
+pg_basebackup: error: connection to server at "amp-postgres" (10.43.171.99), port 5432 failed: FATAL:  no pg_hba.conf entry for replication connection from host "10.42.0.13", user "alert_history", no encryption

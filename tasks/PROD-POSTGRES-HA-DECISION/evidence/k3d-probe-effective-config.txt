@@ -1,0 +1,54 @@
+### 2026-10-15T07:46:15Z probe on k3d v1.35.5+k3s1, chart rendered from feature/prod-postgres-ha-decision@a4b6d9f, defaults + postgresql.password
+> select version()
+PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+> show config_file
+/var/lib/postgresql/data/pgdata/postgresql.conf
+> show hba_file
+/var/lib/postgresql/data/pgdata/pg_hba.conf
+> show archive_mode
+off
+> show archive_command
+(disabled)
+> show wal_level
+replica
+> show max_connections
+20
+> show shared_buffers
+400kB
+> select count(*) from pg_hba_file_rules
+7
+> ls /etc/postgresql /docker-entrypoint-initdb.d /backup
+/backup:
+total 0
+drwxrwsrwx 1 root postgres  0 Oct 15 07:45 .
+drwxr-xr-x 1 root root     76 Oct 15 07:45 ..
+
+/docker-entrypoint-initdb.d:
+total 20
+drwxr-xr-x 1 root root       68 Oct 15 07:45 .
+drwxr-xr-x 1 root root       76 Oct 15 07:45 ..
+-rw-r--r-- 1 root postgres 4912 Oct 15 07:45 init.sql
+-rw-r--r-- 1 root postgres 1900 Oct 15 07:45 pg_hba.conf
+-rw-r--r-- 1 root postgres 4797 Oct 15 07:45 postgresql.conf
+
+/etc/postgresql:
+total 0
+drwxrwsrwx 1 root postgres  0 Oct 15 07:45 .
+drwxr-xr-x 1 root root     10 Oct 15 07:45 ..
+> grep -v '^#' pg_hba.conf
+local   all             all                                     trust
+host    all             all             127.0.0.1/32            trust
+host    all             all             ::1/128                 trust
+local   replication     all                                     trust
+host    replication     all             127.0.0.1/32            trust
+host    replication     all             ::1/128                 trust
+host all all all scram-sha-256
+> previous container log tail
+ALTER DEFAULT PRIVILEGES
+ALTER DEFAULT PRIVILEGES
+2026-10-15 07:45:36.991 UTC [99] ERROR:  unrecognized configuration parameter "pg_stat_statements.max"
+2026-10-15 07:45:36.991 UTC [99] STATEMENT:  ALTER SYSTEM SET pg_stat_statements.max = 10000;
+psql:/docker-entrypoint-initdb.d/init.sql:56: ERROR:  unrecognized configuration parameter "pg_stat_statements.max"
+37:/usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/init.sql
+45:2026-10-15 07:45:36.991 UTC [99] ERROR:  unrecognized configuration parameter "pg_stat_statements.max"
+47:psql:/docker-entrypoint-initdb.d/init.sql:56: ERROR:  unrecognized configuration parameter "pg_stat_statements.max"
