@@ -65,21 +65,31 @@ based_on:
 
 > **Wave 1**
 
-- [ ] **2.1** Образ AMP: `docker build -t amp:pg-drill .` (текущий builder), `k3d image import amp:pg-drill -c amp-pg-research`; пересоздать namespace `amp` на кластере `amp-pg-research` начисто (остатки probe из research). <!-- verify: docker exec k3d-amp-pg-research-server-0 crictl images | grep amp:pg-drill -->
+- [x] **2.1** Образ AMP: `docker build -t amp:pg-drill .` (текущий builder), `k3d image import amp:pg-drill -c amp-pg-research`; пересоздать namespace `amp` на кластере `amp-pg-research` начисто (остатки probe из research). <!-- verify: docker exec k3d-amp-pg-research-server-0 crictl images | grep amp:pg-drill -->
 
 > **Wave 2** — V2 сначала: upgrade с main
 
-- [ ] **2.2** `helm install` чарта `main` (worktree) с `image.repository=amp image.tag=pg-drill pullPolicy=IfNotPresent`, `postgresql.password` плейсхолдер; дождаться ready; засеять данные: ≥ 3 firing + ≥ 2 resolved алерта, 1 активный silence (матчит отдельный алерт `drill-silenced`). Счётчики `alerts`/`silences`/`alert_investigations` — в evidence. <!-- depends: 2.1 | verify: /-/ready 200; GET /api/v2/silences — 1 active; psql count(*) записан -->
-- [ ] **2.3** V2: `helm upgrade` на чарт ветки (с удалёнными из values ключами): backup PVC/CronJob/PDB удалены, `postgres-data` тот же PVC (uid), один рестарт PG, данные (counts) те же; затем `helm rollback` и обратно `helm upgrade` — counts те же. <!-- depends: 1.8, 2.2 | verify: evidence/upgrade-path.md — kubectl get pvc/cronjob/pdb до/после, uid PVC, restartCount, counts -->
+- [x] **2.2** `helm install` чарта `main` (worktree) с `image.repository=amp image.tag=pg-drill pullPolicy=IfNotPresent`, `postgresql.password` плейсхолдер; дождаться ready; засеять данные: ≥ 3 firing + ≥ 2 resolved алерта, 1 активный silence (матчит отдельный алерт `drill-silenced`). Счётчики `alerts`/`silences`/`alert_investigations` — в evidence. <!-- depends: 2.1 | verify: /-/ready 200; GET /api/v2/silences — 1 active; psql count(*) записан -->
+- [x] **2.3** V2: `helm upgrade` на чарт ветки (с удалёнными из values ключами): backup PVC/CronJob/PDB удалены, `postgres-data` тот же PVC (uid), один рестарт PG, данные (counts) те же; затем `helm rollback` и обратно `helm upgrade` — counts те же. <!-- depends: 1.8, 2.2 | verify: evidence/upgrade-path.md — kubectl get pvc/cronjob/pdb до/после, uid PVC, restartCount, counts -->
 
 > **Wave 3** — V1 restore drill
 
-- [ ] **2.4** Backup: `kubectl exec amp-postgres-0 -c postgres -- pg_dump -Fc …` в файл на хосте (scratchpad), sha256, размер. <!-- depends: 2.3 | verify: pg_restore --list <dump> | grep -c 'TABLE DATA' > 0; sha256 в evidence -->
-- [ ] **2.5** Потеря: `helm uninstall` + `kubectl delete ns amp` (PVC уходят), убедиться, что PV удалены. <!-- depends: 2.4 | verify: kubectl get pvc -A | grep amp — пусто -->
-- [ ] **2.6** Restore: `helm install` ветки с `replicaCount=0`/AMP scale 0 → PG ready → `kubectl cp`/`exec -i` дампа → `pg_restore --clean --if-exists --no-owner -d …` → scale AMP 1. Засечь RTO от начала install до `/-/ready`. <!-- depends: 2.5 | verify: pg_restore exit 0 (или только ожидаемые warnings, записаны) -->
-- [ ] **2.7** Проверки V1: лог AMP — миграции не применялись; `/-/ready` 200; counts = исходным; `GET /api/v2/alerts` — firing на месте; silence active; повторный POST `drill-silenced` → `status.state=suppressed`; новый алерт → 2xx. <!-- depends: 2.6 | verify: evidence/restore-drill.md — команды, выводы, RTO, версия PG, размер дампа; без паролей -->
+- [x] **2.4** Backup: `kubectl exec amp-postgres-0 -c postgres -- pg_dump -Fc …` в файл на хосте (scratchpad), sha256, размер. <!-- depends: 2.3 | verify: pg_restore --list <dump> | grep -c 'TABLE DATA' > 0; sha256 в evidence -->
+- [x] **2.5** Потеря: `helm uninstall` + `kubectl delete ns amp` (PVC уходят), убедиться, что PV удалены. <!-- depends: 2.4 | verify: kubectl get pvc -A | grep amp — пусто -->
+- [x] **2.6** Restore: `helm install` ветки с `replicaCount=0`/AMP scale 0 → PG ready → `kubectl cp`/`exec -i` дампа → `pg_restore --clean --if-exists --no-owner -d …` → scale AMP 1. Засечь RTO от начала install до `/-/ready`. <!-- depends: 2.5 | verify: pg_restore exit 0 (или только ожидаемые warnings, записаны) -->
+- [x] **2.7** Проверки V1: лог AMP — миграции не применялись; `/-/ready` 200; counts = исходным; `GET /api/v2/alerts` — firing на месте; silence active; повторный POST `drill-silenced` → `status.state=suppressed`; новый алерт → 2xx. <!-- depends: 2.6 | verify: evidence/restore-drill.md — команды, выводы, RTO, версия PG, размер дампа; без паролей -->
 
 **Phase verification:** `evidence/restore-drill.md` и `evidence/upgrade-path.md` заполнены, все проверки зелёные. Провал 2.7 — стоп, пересмотр D9 (Spec P8).
+
+### Implementation notes (2026-10-15, Phase 2)
+
+- 2.2: `helm install --wait` чарта `main` уходит в FAILED по двум причинам вне задачи: valkey-сабчарт в `Init:Error` (`exec /scripts/init.sh: no such file or directory`) и `amp-pvc` вечно `Pending` (потребителя нет). Ставил без `--wait`, ждал `rollout status` StatefulSet/Deployment. Засеяно: алертов 5 (3 firing, 2 resolved), 1 активный silence на `drill-silenced`, investigations 0.
+- 2.2: селекторы Service и Deployment `amp` захватывают поды `amp-redis-0` и `amp-postgres-0`: в endpoints три пода, `port-forward svc/amp` и `deploy/amp` уходят в redis. Port-forward делал на под по имени. Находка вне задачи, кандидат в BUGS.
+- 2.3 (V2): rev1 main → rev2 ветка → rollback rev3 → rev4 ветка. Каждый раз: CronJob, PDB и backup PVC удалены, uid `postgres-data` тот же, под PG пересоздан ровно один раз (`postgres:16.15`), строк 5/1/0. Upgrade и rollout PG — 46 с. Для migration notes: upgrade удаляет PVC `<release>-postgres-backup` вместе с содержимым, rollback создаёт его пустым. Данных там нет: base backup ни разу не создавался.
+- 2.4–2.6 (V1): дамп 88 797 байт, в нём 17 TABLE DATA; `pg_restore --clean --if-exists --no-owner` → exit 0, предупреждений нет. RTO 56 с от install до `/-/ready`, из них 31 с — старт пода PG.
+- 2.7: отклонение формулировки. Состояния `status.state=suppressed` в AMP нет: firing-алерт, совпавший с активным silence, отбрасывается на ingest (`handlers/alerts.go:433`) и не сохраняется. Проверено поведением: `drill-silenced` получает 200, но отсутствует в API и в БД, а контрольный `DrillPostRestore` записан. Миграции — no-op: последняя строка `goose_db_version` от исходного install (09:31), restore был в 09:38.
+- Найдено вне задачи: фоновый воркер silence manager не стартует (`limit must be <= 1000, got 10000`); `POST /api/v2/silences/check` → 404.
+- Phase verification: `evidence/upgrade-path.md` и `evidence/restore-drill.md` заполнены, все проверки зелёные.
 
 ## Phase 3: Документация
 
