@@ -6,14 +6,14 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
-### [high][Helm][~1d] PG-CONFIG-NOT-APPLIED
+### [critical][Helm][~1d] PG-CONFIG-NOT-APPLIED
 - **Title:** встроенный PostgreSQL игнорирует конфиг чарта: `max_connections=20`, `pg_hba` и `init.sql` не те, что задуманы
 - **Problem:** `postgresql.conf` и `pg_hba.conf` из ConfigMap монтируются в `/docker-entrypoint-initdb.d/` (`helm/amp/templates/postgresql-statefulset.yaml`, `mountPath: /docker-entrypoint-initdb.d/…`), а entrypoint образа исполняет оттуда только `*.sh`/`*.sql`; `/etc/postgresql` — пустой `emptyDir`, `POSTGRES_INITDB_ARGS="-c config_file=…"` (env в том же StatefulSet) ничего не подключает. Измерено на k3d 2026-10-15: `config_file` дефолтный, `archive_mode=off`, `max_connections=20` (чарт задумывал 250), `shared_buffers=400kB`, `pg_hba` — дефолт образа. `init.sql` падает на строке 56 (`ALTER SYSTEM SET pg_stat_statements.max` без preload) ⇒ первый старт контейнера с ошибкой, после рестарта init пропускается, скрипт применён частично. Образ с 2026-10-15 пинится на `postgres:16.15` (ADR-016).
 - **Impact:** пул AMP 25 соединений на pod (`go-app/internal/config/config.go:897`) × `minReplicas: 2` против 17 доступных соединений ⇒ под нагрузкой ошибки записи ⇒ ingest отвечает 500, алерты не маршрутизируются. Значение 20 измерено на k3d; на других нодах initdb может выбрать иное. Бэкап и PITR из-за этого тоже не работали (см. ADR-016, `PROD-POSTGRES-HA-DECISION`).
 - **Fix:** конфиг — в `args: ["-c", "config_file=…"]` / `-c` параметрами, `pg_hba` через `hba_file`; `init.sql` без `ALTER SYSTEM` для непредзагруженных расширений. Поведение существующих установок изменится при рестарте (лимиты памяти против `shared_buffers`, новый `pg_hba`) — migration note и проверка на k3d с уже инициализированным PVC.
 - **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/research.md` § Findings 2, `evidence/k3d-probe-effective-config.txt`.
 - **Status:** open
-  Waiting-on: решение владельца о приоритете (high как есть или P0 вместе с `HELM-EXTERNAL-DATABASE`), поднято на finalize PROD-POSTGRES-HA-DECISION 2026-10-15.
+  _(2026-10-15, решение владельца)_ critical, чинится как P0 `PG-CONFIG-FIX` в BACKLOG.
 
 ### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
 - **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров

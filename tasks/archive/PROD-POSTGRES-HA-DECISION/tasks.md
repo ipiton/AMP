@@ -162,7 +162,7 @@ based_on:
 ## Phase 7: Finalize
 
 - [x] **7.1** `/finalize`: `DONE.md`; `NEXT.md` (снять из WIP); BACKLOG: P0 → закрытые, из `HELM-SINGLE-NODE-DEFAULTS` убрать пункт про PDB Postgres, идея «ingest без синхронной зависимости от PG»; TECH-DEBT `HELM-CHART-GAPS` — HA-пункт → ADR-016; приоритеты `PG-CONFIG-NOT-APPLIED` / `HELM-EXTERNAL-DATABASE` — по решению владельца; архив workspace. <!-- depends: 6.1, 6.2 | verify: ls tasks/archive/PROD-POSTGRES-HA-DECISION -->
-- [ ] **7.2** Убрать k3d-кластер `amp-pg-research`, вернуть kubectl-контекст владельца. <!-- depends: 7.1 | verify: k3d cluster list — нет amp-pg-research; kubectl config current-context — по указанию владельца -->
+- [x] **7.2** Убрать k3d-кластер `amp-pg-research`, вернуть kubectl-контекст владельца. <!-- depends: 7.1 | verify: k3d cluster list — нет amp-pg-research; kubectl config current-context — по указанию владельца --> _(2026-10-15: кластер удалён; current-context владелец просил не трогать — k3d сам переключил на `k3d-sema-dev`, не `sema-prod`)_
 - [ ] **7.3** `/merge-to-main`; push — по решению владельца. <!-- depends: 7.1 | verify: git log main -1 -->
 
 ## Definition of Done
