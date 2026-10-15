@@ -277,6 +277,11 @@
 - 3b с дефолтным HPA после фикса R1 (V1-bis).
 - Runbook с `--single-transaction --exit-on-error` на полном дампе после фикса R2.
 
+**Outcome (testing, 2026-10-15):** все три подтверждены на k3d `amp-pg-research`, `postgres:16.15`.
+- `--reuse-values` с релиза `main` → `UPGRADE FAILED` с новой подсказкой; `--reset-then-reuse-values` → upgrade ok, данные на месте (`evidence/restore-drill.md` §7.1).
+- 3b с HPA-values пользователя: во время restore 0 подов AMP, после `helm upgrade` HPA и реплики вернулись (§7.4).
+- `--single-transaction --exit-on-error`: на обрезанном дампе restore падает, данные целы; на полном restore ok (§7.3).
+
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.

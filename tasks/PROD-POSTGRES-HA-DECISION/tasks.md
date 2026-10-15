@@ -149,8 +149,15 @@ based_on:
 
 ## Phase 6: Testing
 
-- [ ] **6.1** `scripts/release-gate.sh` полностью (чарт изменён). <!-- depends: 5.1 | verify: все шаги PASS; вывод в evidence/release-gate.txt -->
-- [ ] **6.2** `git diff --check main...HEAD`. <!-- depends: 5.1 | verify: пусто -->
+- [x] **6.1** `scripts/release-gate.sh` полностью (чарт изменён). <!-- depends: 5.1 | verify: все шаги PASS; вывод в evidence/release-gate.txt -->
+- [x] **6.2** `git diff --check main...HEAD`. <!-- depends: 5.1 | verify: пусто -->
+
+### Test status (2026-10-15, testing 6.1–6.2)
+
+- 6.1 `scripts/release-gate.sh` @ `06a8cbe`, вывод — `evidence/release-gate.txt`. Шаги чарта зелёные: helm-deps, helm-dev, helm-production, helm-rbac, helm-tests (включая `render-postgresql.sh`), amtool-compat; build, lint, futureparity, race — PASS.
+- `test` FAIL по одному тесту — `TestShouldInhibit_PrefilterOptimization` (`go-app/internal/infrastructure/inhibition/matcher_test.go:597`): wall-clock порог 500 µs, в прогоне 992 µs. Это существующий флак, к задаче не относится: `git diff main...HEAD -- go-app` пуст. Изолированно 5 прогонов — 3 FAIL, 2 ok. В BUGS не записан — заводится в finalize. Итог gate — FAIL; задача его не меняет.
+- 6.2 `git diff --check main...HEAD` — пусто.
+- Deferred to testing из `review-findings.md` подтверждены прогонами `evidence/restore-drill.md` §7.1, §7.3, §7.4; outcome записан в `review-findings.md`.
 
 ## Phase 7: Finalize
 

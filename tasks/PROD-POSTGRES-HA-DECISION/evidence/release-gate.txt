@@ -1,0 +1,1488 @@
+[release-gate] ==> build
+[release-gate] ==> lint
+0 issues.
+[release-gate] ==> test
+ok  	github.com/ipiton/AMP/cmd/config-reloader	1.407s
+ok  	github.com/ipiton/AMP/cmd/server	2.655s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	2.800s
+?   	github.com/ipiton/AMP/internal/alertmanager/config	[no test files]
+ok  	github.com/ipiton/AMP/internal/application	19.340s
+ok  	github.com/ipiton/AMP/internal/application/handlers	4.143s
+ok  	github.com/ipiton/AMP/internal/buildinfo	4.511s
+ok  	github.com/ipiton/AMP/internal/business/publishing	35.349s
+ok  	github.com/ipiton/AMP/internal/business/routing	5.766s
+ok  	github.com/ipiton/AMP/internal/business/silencing	6.005s
+?   	github.com/ipiton/AMP/internal/business/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/business/templating	6.270s
+ok  	github.com/ipiton/AMP/internal/config	5.865s
+ok  	github.com/ipiton/AMP/internal/core	4.652s
+ok  	github.com/ipiton/AMP/internal/core/alertconv	4.539s
+?   	github.com/ipiton/AMP/internal/core/domain	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/investigation	3.563s
+ok  	github.com/ipiton/AMP/internal/core/investigation/runbook	2.083s
+?   	github.com/ipiton/AMP/internal/core/resilience	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/services	2.555s
+ok  	github.com/ipiton/AMP/internal/core/silencing	2.514s
+ok  	github.com/ipiton/AMP/internal/database	132.821s
+ok  	github.com/ipiton/AMP/internal/database/postgres	138.550s
+ok  	github.com/ipiton/AMP/internal/infrastructure	3.041s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cache	3.248s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cluster	3.036s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	15.018s
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 WARN Failed to add alert to Redis (continuing with L1 only) error="redis unavailable" fingerprint=fp-fallback
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup completed removed_alerts=2 remaining_alerts=1
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup completed removed_alerts=50 remaining_alerts=25
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:57 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup completed removed_alerts=1 remaining_alerts=0
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=10 skipped=0 total_fingerprints=10
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=500 skipped=0 total_fingerprints=500
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=10 skipped=10 total_fingerprints=20
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=100 skipped=0 total_fingerprints=100
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=100 skipped=0 total_fingerprints=100
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=100 skipped=0 total_fingerprints=100
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=100 skipped=0 total_fingerprints=100
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=100 skipped=0 total_fingerprints=100
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=20 skipped=0 total_fingerprints=20
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=10 skipped=10 total_fingerprints=20
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 WARN Failed to add alert to Redis (continuing with L1 only) error="redis unavailable" fingerprint=fp-test
+2026/10/15 14:38:58 WARN Failed to get alert fingerprints from Redis SET error="redis unavailable" set_key=inhibition:active_alerts:set
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=25 skipped=0 total_fingerprints=25
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 WARN Failed to unmarshal alert from Redis error="invalid character 'I' looking for beginning of value" fingerprint=fp-corrupted-0
+2026/10/15 14:38:58 WARN Failed to unmarshal alert from Redis error="invalid character 'I' looking for beginning of value" fingerprint=fp-corrupted-1
+2026/10/15 14:38:58 WARN Failed to unmarshal alert from Redis error="invalid character 'I' looking for beginning of value" fingerprint=fp-corrupted-2
+2026/10/15 14:38:58 WARN Failed to unmarshal alert from Redis error="invalid character 'I' looking for beginning of value" fingerprint=fp-corrupted-3
+2026/10/15 14:38:58 WARN Failed to unmarshal alert from Redis error="invalid character 'I' looking for beginning of value" fingerprint=fp-corrupted-4
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=10 skipped=5 total_fingerprints=15
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:38:58 INFO Retrieved alerts from Redis L2 cache retrieved=100 skipped=0 total_fingerprints=100
+2026/10/15 14:38:58 INFO Cleanup worker stopped
+2026/10/15 14:39:22 INFO Connected to Redis addr=localhost:34433 db=0
+2026/10/15 14:39:37 INFO Connected to Redis addr=localhost:34434 db=0
+2026/10/15 14:39:37 INFO Retrieved alerts from Redis L2 cache retrieved=1 skipped=0 total_fingerprints=1
+2026/10/15 14:39:37 INFO Cleanup worker stopped
+2026/10/15 14:39:37 INFO Cleanup worker stopped
+2026/10/15 14:39:37 INFO Cleanup worker stopped
+2026/10/15 14:39:40 INFO Alert inhibited target=fp-InstanceDown-node1 source=fp-NodeDown-node1 rule=test-rule duration=221.917µs
+2026/10/15 14:39:40 INFO Alert inhibited target=fp-InstanceDown-node1 source=fp-NodeDown-node1 rule=rule1 duration=750ns
+2026/10/15 14:39:40 INFO Alert inhibited target=fp-InstanceDown-node1 source=fp-NodeDown-node1 rule=prefilter-test duration=83.084µs
+--- FAIL: TestShouldInhibit_PrefilterOptimization (0.01s)
+    matcher_test.go:598: Pre-filter optimization not working: took 992.333µs
+    matcher_test.go:601: Pre-filter performance: 992.333µs for 51 alerts (only 1 relevant)
+2026/10/15 14:39:40 INFO Alert inhibited target=fp-InstanceDown-node1 source=fp-NodeDown-node1 rule=no-alertname-filter duration=2µs
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=node-down-inhibits-latency duration=5.916µs
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=0
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=62.25µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=1µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=583ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=541ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=1.333µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=708ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=708ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=666ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=416ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=666ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=542ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=666ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=416ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=416ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=416ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=708ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=541ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=708ns
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=12.375µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=917ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=1.125µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=583ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=542ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=875ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=416ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=542ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=708ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=666ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=541ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=750ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=666ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=709ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=459ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=917ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=708ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=2.458µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=625ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=125ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=4.209µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=125ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=334ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=1µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=375ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=334ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=125ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=334ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=9.792µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=334ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=291ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=375ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=333ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=584ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=334ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=125ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=167ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=166ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=209ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=333ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=333ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=208ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=292ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=375ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=250ns
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=4.5µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=3.875µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=667ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=542ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=1.25µs
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=584ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=542ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=709ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=458ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=r duration=500ns
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=one-sided duration=417ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=equal-absent-both duration=584ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt-exact source=src rule="" duration=584ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=inline-legacy-regex duration=3.583µs
+2026/10/15 14:39:40 INFO Alert inhibited target=fp-InstanceDown-prod source=fp-NodeDown-prod rule=matchers-form duration=750ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt-exact source=src rule=negation-and-anchoring duration=542ns
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src-crit rule=mixed duration=334ns
+2026/10/15 14:39:40 INFO Alert inhibited target=fp-InstanceDown-node1 source=fp-NodeDown-node1 rule=legacy-only duration=458ns
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=1
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=matchers-form-reload duration=292ns
+2026/10/15 14:39:40 INFO Inhibition rules updated rules=0
+2026/10/15 14:39:40 INFO Alert inhibited target=tgt source=src rule=upstream-syntax duration=2.792µs
+2026/10/15 14:39:40 INFO Inhibition state cleanup worker started interval=100ms
+2026/10/15 14:39:40 INFO Cleanup completed expired_states_removed=2 duration_ms=0
+2026/10/15 14:39:40 INFO Cleanup worker stopped (explicit stop)
+2026/10/15 14:39:40 INFO Cleanup worker stopped gracefully
+2026/10/15 14:39:40 INFO Inhibition state cleanup worker started interval=100ms
+2026/10/15 14:39:40 INFO Cleanup worker stopped (explicit stop)
+2026/10/15 14:39:40 INFO Cleanup worker stopped gracefully
+2026/10/15 14:39:40 INFO Inhibition state cleanup worker started interval=100ms
+2026/10/15 14:39:40 INFO Cleanup worker stopped (context cancelled)
+2026/10/15 14:39:40 INFO Cleanup completed expired_states_removed=2 duration_ms=0
+2026/10/15 14:39:40 INFO Inhibition state cleanup worker started interval=100ms
+2026/10/15 14:39:40 INFO Cleanup worker stopped (explicit stop)
+2026/10/15 14:39:40 INFO Cleanup worker stopped gracefully
+FAIL
+FAIL	github.com/ipiton/AMP/internal/infrastructure/inhibition	44.334s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation	1.758s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks	0.642s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/tools	0.780s
+ok  	github.com/ipiton/AMP/internal/infrastructure/k8s	1.932s
+ok  	github.com/ipiton/AMP/internal/infrastructure/llm	0.871s
+ok  	github.com/ipiton/AMP/internal/infrastructure/lock	3.855s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	63.320s
+ok  	github.com/ipiton/AMP/internal/infrastructure/repository	152.102s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing	0.622s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval	0.418s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	0.618s
+ok  	github.com/ipiton/AMP/internal/infrastructure/snapshot	1.311s
+ok  	github.com/ipiton/AMP/internal/infrastructure/storage/memory	0.458s
+?   	github.com/ipiton/AMP/internal/infrastructure/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/infrastructure/webhook	0.434s
+ok  	github.com/ipiton/AMP/internal/notification/template	0.599s
+ok  	github.com/ipiton/AMP/internal/notification/template/defaults	0.869s
+ok  	github.com/ipiton/AMP/internal/notification/url	0.551s
+ok  	github.com/ipiton/AMP/internal/realtime	1.825s
+?   	github.com/ipiton/AMP/internal/storage	[no test files]
+ok  	github.com/ipiton/AMP/internal/ui	0.854s
+?   	github.com/ipiton/AMP/pkg/aiclassifier	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator	0.821s
+ok  	github.com/ipiton/AMP/pkg/configvalidator/matcher	0.653s
+?   	github.com/ipiton/AMP/pkg/configvalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/configvalidator/types	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator/validators	3.230s
+ok  	github.com/ipiton/AMP/pkg/httperror	6.502s
+ok  	github.com/ipiton/AMP/pkg/logger	4.935s
+ok  	github.com/ipiton/AMP/pkg/metrics	4.104s
+ok  	github.com/ipiton/AMP/pkg/metrics/v2	0.796s
+ok  	github.com/ipiton/AMP/pkg/middleware	3.617s
+ok  	github.com/ipiton/AMP/pkg/retry	2.908s
+ok  	github.com/ipiton/AMP/pkg/telemetry	1.228s
+?   	github.com/ipiton/AMP/pkg/templatevalidator	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/formatters	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/fuzzy	2.021s
+?   	github.com/ipiton/AMP/pkg/templatevalidator/models	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/utils	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/validators	3.296s
+FAIL
+[release-gate] ==> futureparity
+ok  	github.com/ipiton/AMP/cmd/server	1.606s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	1.742s
+[release-gate] ==> race
+[release-gate] race-testing 7 package(s): github.com/ipiton/AMP/internal/business/publishing github.com/ipiton/AMP/internal/business/silencing github.com/ipiton/AMP/internal/business/templating github.com/ipiton/AMP/internal/core/silencing github.com/ipiton/AMP/internal/infrastructure/grouping github.com/ipiton/AMP/internal/infrastructure/publishing github.com/ipiton/AMP/internal/infrastructure/silencing
+ok  	github.com/ipiton/AMP/internal/business/publishing	37.402s
+ok  	github.com/ipiton/AMP/internal/business/silencing	5.639s
+ok  	github.com/ipiton/AMP/internal/business/templating	6.805s
+ok  	github.com/ipiton/AMP/internal/core/silencing	3.824s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	15.015s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	297.451s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	6.121s
+[release-gate] ==> helm-deps
+[release-gate] ==> helm-dev
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-production
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-rbac
+[release-gate] ==> helm-tests
+chart renders with the sidecar OFF (default):
+  ok   no sidecar container
+  ok   no config-file ConfigMap
+  ok   no AMP_CONFIG_FILE env
+  ok   no shared PID namespace
+chart renders with the sidecar ON:
+  ok   sidecar container
+  ok   config-file ConfigMap
+  ok   AMP_CONFIG_FILE env for the app
+  ok   sidecar watches the mounted file
+  ok   reload is verified over loopback
+  ok   sidecar filesystem is read-only
+  ok   sidecar runs non-root
+  ok   http method needs no shared PID namespace
+signal method requests a shared PID namespace:
+  ok   shared PID namespace
+  ok   signal method
+http method never grants a shared PID namespace, even if asked:
+  ok   no shared PID namespace for method: http
+production values render the config file but NOT the sidecar:
+  ok   config file rendered in production
+  ok   AMP_CONFIG_FILE set in production
+  ok   sidecar NOT enabled while its image is unpublished
+misconfigurations are refused at render time:
+  ok   sidecar without a config file
+  ok   config file without content
+  ok   signal method without a shared PID namespace
+
+all assertions passed
+T1 shipped values files:
+  ok   default: all 2 secretKeyRef targets exist
+  ok   default: LLM is off
+  ok   dev: all 1 secretKeyRef targets exist
+  ok   dev: LLM is off
+  ok   production: all 3 secretKeyRef targets exist
+  ok   production: LLM is off
+  ok   default: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   default: DATABASE_SSL_MODE is disable
+  ok   production: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   production: DATABASE_SSL_MODE is disable
+T2-T4 flag stays off where it does not belong:
+  ok   ssl-on: no flag when PostgreSQL TLS is on
+  ok   external-db: no flag without the bundled PostgreSQL
+  ok   lite: no flag in the lite profile
+T5 LLM on without a key fails the render:
+  ok   llm-nokey: render fails naming llm.apiKey
+T6 LLM on with a key source renders:
+  ok   llm-key: all 3 secretKeyRef targets exist
+  ok   llm-key: Deployment reads llm-api-key
+  ok   llm-eso: ExternalSecret supplies llm-api-key
+
+all assertions passed
+defaults: preStop, timeout env and a grace period that fits both
+  ok   preStop sleeps preStopDelay (5)
+  ok   timeout env set
+  ok   timeout env carries timeoutSeconds (30s)
+  ok   grace period 40 >= 5 + 30
+  ok   stale 'no preStop' comment gone
+  ok   no budget warning with defaults
+preStopDelay=0 removes the hook
+  ok   no preStop hook
+  ok   no lifecycle block
+custom values flow through
+  ok   preStop sleeps 10
+  ok   timeout env 45s
+  ok   grace period 60
+  ok   no warning when 60 >= 10 + 45
+an old grace period (30) still renders, with a warning
+  ok   render does not fail
+  ok   budget warning printed
+  ok   warning names the required minimum
+production values
+  ok   preStop in production
+  ok   grace period 40 in production
+
+all assertions passed
+default:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+lite:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+production:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+opt-out:
+  ok   GROUPING_ENABLED is "false"
+  ok   GROUPING_ENABLED is set exactly once
+
+all assertions passed
+Chart appVersion: 0.1.0
+default: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+production: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+lite: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+config-reloader image defaults to appVersion:
+  ok   sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0
+  ok   app container unchanged next to the sidecar
+an explicit image.tag still wins:
+  ok   app container on the pinned tag
+  ok   appVersion not used when pinned
+
+all assertions passed
+defaults render no Ingress:
+  ok   no Ingress by default
+an Ingress without auth is refused:
+  ok   defaults + ingress.enabled (guard not tied to the prod file)
+  ok   values-production.yaml without auth
+  ok   values-production.yaml as shipped
+only a real true waives in-process auth:
+  ok   --set-string ingress.externalAuth=false
+  ok   --set-string ingress.externalAuth=no
+  ok   --set-string ingress.externalAuth="false"
+  ok   --set-string ingress.externalAuth=True
+  ok   --set-string ingress.externalAuth=1
+an Ingress with auth renders:
+  ok   prod + webConfig.existingSecret
+  ok   prod + ingress.externalAuth=true
+  ok   --set-string ingress.externalAuth=true
+chart packaging keeps the helm test hook and drops the render tests:
+  ok   helm test hook still rendered
+  ok   helm test hook packaged
+  ok   render tests not packaged
+
+all assertions passed
+defaults render no AMP NetworkPolicy:
+  ok   no AMP policy by default
+an enabled policy with no effective source is refused:
+  ok   values-production.yaml with no sources
+  ok   defaults + networkPolicy.enabled
+  ok   ingressController only, Ingress off
+production policy (placeholder sender):
+  ok   selects the AMP pods by component
+  ok   alert-senders rule
+  ok   peers rendered as given
+  ok   one rule, http port only
+  ok   no Egress policyType
+  ok   no controller rule with no controller peers
+one rule per role; the controller only with an Ingress:
+  ok   controller peers dropped while ingress.enabled=false
+  ok   metrics-scrapers rule
+  ok   sender + scraper rules, http only
+  ok   controller rule with ingress.enabled
+  ok   controller peers rendered
+  ok   controller + sender rules
+extraIngress is rendered as-is:
+  ok   raw rule rendered
+the component label lives in the pod template only:
+  ok   pod template carries the label
+  ok   Deployment selector found
+  ok   Deployment selector unchanged (immutable)
+  ok   Service selector found
+  ok   Service selector unchanged
+podLabels cannot override the component label:
+  ok   podLabels with app.kubernetes.io/component
+  ok   other podLabels still render
+the Redis NetworkPolicy admits the AMP pods:
+  ok   first Redis rule selects component: application
+  ok   ...on the Redis port
+values without the networkPolicy section (--reuse-values from an old release):
+  ok   renders
+  ok   no AMP policy
+
+all assertions passed
+T1 shipped values: no backup, no PDB, pinned image:
+  ok   default: renders
+  ok   production: renders
+  ok   default: bundled PostgreSQL StatefulSet rendered
+  ok   default: Postgres StatefulSet has replicas: 1
+  ok   default: no Postgres PDB
+  ok   default: no backup CronJob
+  ok   default: no backup PVC
+  ok   default: no WAL archiving settings
+  ok   default: no PostgreSQLBackupOld rule
+  ok   default: no PostgreSQLWALArchivingFailed rule
+  ok   default: StatefulSet and test pod use postgres:16.15
+  ok   default: no other postgres:16* image
+  ok   production: bundled PostgreSQL StatefulSet rendered
+  ok   production: Postgres StatefulSet has replicas: 1
+  ok   production: no Postgres PDB
+  ok   production: no backup CronJob
+  ok   production: no backup PVC
+  ok   production: no WAL archiving settings
+  ok   production: no PostgreSQLBackupOld rule
+  ok   production: no PostgreSQLWALArchivingFailed rule
+  ok   production: StatefulSet and test pod use postgres:16.15
+  ok   production: no other postgres:16* image
+T2 replicas other than 1 fail the render:
+  ok   replicas-2: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-0: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-1-string: renders
+T3 an enabled backup fails the render, with the --reuse-values hint:
+  ok   backup-enabled: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-enabled-string: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-scalar-true: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults-override: renders
+T4 leftovers of the removed key render:
+  ok   backup-empty: renders
+  ok   backup-null: renders
+  ok   backup-false: renders
+  ok   backup-enabled-false: renders
+  ok   backup-enabled-one: renders
+  ok   backup-enabled-title-case: renders
+T5 guards do not apply without the bundled PostgreSQL:
+  ok   external-db: renders
+  ok   external-db: no bundled PostgreSQL
+  ok   lite: renders
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-no-hpa: NOTES rendered
+  ok   notes-external: NOTES rendered
+  ok   notes-default: standard profile not advertised as HA
+  ok   notes-default: bundled PostgreSQL not advertised as HA
+  ok   notes-default: bundled PostgreSQL marked dev/pilot
+  ok   notes-default: config-not-applied warning and step 4 note
+  ok   notes-default: no claim that max_connections is 250
+  ok   notes-default: no max_connections OK line
+  ok   notes-no-hpa: standard profile not advertised as HA
+  ok   notes-no-hpa: bundled PostgreSQL not advertised as HA
+  ok   notes-no-hpa: bundled PostgreSQL marked dev/pilot
+  ok   notes-no-hpa: config-not-applied warning and step 4 note
+  ok   notes-no-hpa: no claim that max_connections is 250
+  ok   notes-no-hpa: no max_connections OK line
+  ok   notes-external: external PostgreSQL line
+  ok   notes-external: no bundled PostgreSQL warning
+  ok   notes-external: no bundled PostgreSQL steps
+
+all assertions passed
+default ServiceMonitor:
+  ok   rendered by default
+  ok   selects by component
+  ok   scrapes the http port
+  ok   ...at /metrics
+  ok   default interval
+  ok   default scrape timeout
+  ok   no credentials without web auth
+its selector matches the AMP Service only:
+  ok   selector (3 labels) picks exactly: amp
+  ok   component is what tells the Services apart (7 match without it)
+gated on prometheusEnabled and serviceMonitor.enabled:
+  ok   off with monitoring.prometheusEnabled=false
+  ok   off with serviceMonitor.enabled=false
+  ok   Redis ServiceMonitor unaffected
+web auth needs credentials:
+  ok   webConfig.existingSecret without basicAuth
+  ok   username from the Secret
+  ok   ...default key
+  ok   password from the Secret
+  ok   ...default key
+  ok   custom username key
+  ok   custom password key
+labels and timing:
+  ok   extra labels in metadata
+  ok   interval override
+values without monitoring.serviceMonitor (--reuse-values from an old release):
+  ok   still rendered
+  ok   default interval
+  ok   default scrape timeout
+  ok   ...and the credentials guard still runs
+
+all assertions passed
+[release-gate] ==> amtool-compat
+ Image python:3-alpine Pulling 
+ 05f38c1a7503 Pulling fs layer 0B
+ f0872f0cf9a0 Pulling fs layer 0B
+ fefeaf673ce1 Pulling fs layer 0B
+ 50e4ee401c36 Download complete 0B
+ 11e85743638f Download complete 0B
+ 05f38c1a7503 Download complete 0B
+ f0872f0cf9a0 Download complete 0B
+ f0872f0cf9a0 Extracting 1B
+ f0872f0cf9a0 Extracting 1B
+ f0872f0cf9a0 Extracting 1B
+ f0872f0cf9a0 Extracting 1B
+ fefeaf673ce1 Downloading 1.049MB
+ f0872f0cf9a0 Pull complete 0B
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 2.097MB
+ fefeaf673ce1 Downloading 3.146MB
+ fefeaf673ce1 Downloading 3.146MB
+ fefeaf673ce1 Downloading 4.194MB
+ fefeaf673ce1 Downloading 4.194MB
+ fefeaf673ce1 Downloading 5.243MB
+ fefeaf673ce1 Downloading 5.243MB
+ fefeaf673ce1 Downloading 5.243MB
+ fefeaf673ce1 Downloading 6.291MB
+ fefeaf673ce1 Downloading 6.291MB
+ fefeaf673ce1 Downloading 7.34MB
+ fefeaf673ce1 Downloading 7.34MB
+ fefeaf673ce1 Downloading 8.389MB
+ fefeaf673ce1 Downloading 8.389MB
+ fefeaf673ce1 Downloading 9.437MB
+ fefeaf673ce1 Downloading 9.437MB
+ fefeaf673ce1 Downloading 9.437MB
+ fefeaf673ce1 Downloading 9.437MB
+ fefeaf673ce1 Downloading 10.49MB
+ fefeaf673ce1 Downloading 10.49MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 12.58MB
+ fefeaf673ce1 Downloading 13.63MB
+ fefeaf673ce1 Downloading 13.63MB
+ fefeaf673ce1 Downloading 13.63MB
+ fefeaf673ce1 Downloading 14.68MB
+ fefeaf673ce1 Downloading 14.68MB
+ fefeaf673ce1 Downloading 15.73MB
+ fefeaf673ce1 Downloading 16.78MB
+ fefeaf673ce1 Download complete 0B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Pull complete 0B
+ 05f38c1a7503 Pull complete 0B
+ Image python:3-alpine Pulled 
+ Image amp-smoke-amp Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 518B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.75kB done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.8-alpine
+#3 ...
+
+#4 [auth] library/alpine:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#5 [auth] library/golang:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [internal] load metadata for docker.io/library/alpine:3.24
+#6 ...
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.8-alpine
+#3 DONE 1.1s
+
+#6 [internal] load metadata for docker.io/library/alpine:3.24
+#6 DONE 1.1s
+
+#7 [internal] load .dockerignore
+#7 transferring context: 567B done
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 DONE 0.0s
+
+#9 [builder 1/7] FROM docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c
+#9 resolve docker.io/library/golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c 0.1s done
+#9 DONE 0.1s
+
+#10 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#10 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#10 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.1s done
+#10 DONE 0.1s
+
+#8 [internal] load build context
+#8 transferring context: 71.32kB 0.1s done
+#8 DONE 0.1s
+
+#11 [builder 3/7] WORKDIR /build
+#11 CACHED
+
+#12 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#12 CACHED
+
+#13 [stage-1 3/5] WORKDIR /app
+#13 CACHED
+
+#14 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#14 CACHED
+
+#15 [builder 4/7] COPY go-app/go.mod go-app/go.sum ./
+#15 CACHED
+
+#16 [builder 5/7] RUN go mod download
+#16 CACHED
+
+#17 [builder 7/7] RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w     -X github.com/ipiton/AMP/internal/buildinfo.Version=dev     -X github.com/ipiton/AMP/internal/buildinfo.Revision=unknown     -X github.com/ipiton/AMP/internal/buildinfo.Branch=unknown     -X github.com/ipiton/AMP/internal/buildinfo.BuildUser=docker     -X github.com/ipiton/AMP/internal/buildinfo.BuildDate=unknown"     -o amp ./cmd/server
+#17 CACHED
+
+#18 [builder 6/7] COPY go-app/ ./
+#18 CACHED
+
+#19 [stage-1 4/5] COPY --from=builder /build/amp /app/
+#19 CACHED
+
+#20 [stage-1 5/5] COPY --from=builder /build/migrations /app/migrations
+#20 CACHED
+
+#21 exporting to image
+#21 exporting layers done
+#21 exporting manifest sha256:3c02f591268bc06103861334ed589cf36f0b1f813b2fbf61c6f98cfdfabd1251 0.0s done
+#21 exporting config sha256:d2d17609dbc88c03cae8d9de12a4f21b613c5a5a92cc1683685e407ffc6e969b 0.0s done
+#21 exporting attestation manifest sha256:7f19f946160f942001422d85f09da7383f23dfa185203a67820bfa39510d0903 0.0s done
+#21 exporting manifest list sha256:d051941dff576695938a49501f8d6253c342465fccb51566374e51be215199a0
+#21 exporting manifest list sha256:d051941dff576695938a49501f8d6253c342465fccb51566374e51be215199a0 0.0s done
+#21 naming to docker.io/library/amp-smoke-amp:latest done
+#21 unpacking to docker.io/library/amp-smoke-amp:latest 0.0s done
+#21 DONE 0.1s
+
+#22 resolving provenance for metadata file
+#22 DONE 0.1s
+ Image amp-smoke-amp Built 
+ Network amp-smoke_default Creating 
+ Network amp-smoke_default Created 
+ Container amp-smoke-webhook-1 Creating 
+ Container amp-smoke-webhook-1 Created 
+ Container amp-smoke-amp-1 Creating 
+ Container amp-smoke-amp-1 Created 
+ Container amp-smoke-webhook-1 Starting 
+ Container amp-smoke-webhook-1 Started 
+ Container amp-smoke-webhook-1 Waiting 
+ Container amp-smoke-webhook-1 Healthy 
+ Container amp-smoke-amp-1 Starting 
+ Container amp-smoke-amp-1 Started 
+Unable to find image 'quay.io/prometheus/alertmanager:v0.34.0' locally
+v0.34.0: Pulling from prometheus/alertmanager
+e3c413c9dfa5: Pulling fs layer
+8e40784ad81b: Pulling fs layer
+f1420e14aaeb: Pulling fs layer
+d561ac4e17d5: Pulling fs layer
+4f4fb700ef54: Pulling fs layer
+7c53bb56d9c8: Pulling fs layer
+273d7b3ceff7: Pulling fs layer
+4f4fb700ef54: Already exists
+d561ac4e17d5: Download complete
+f1420e14aaeb: Download complete
+e3c413c9dfa5: Download complete
+7c53bb56d9c8: Download complete
+e3c413c9dfa5: Pull complete
+7c53bb56d9c8: Pull complete
+273d7b3ceff7: Download complete
+273d7b3ceff7: Pull complete
+8e40784ad81b: Download complete
+d561ac4e17d5: Pull complete
+f1420e14aaeb: Pull complete
+8e40784ad81b: Pull complete
+4f4fb700ef54: Pull complete
+Digest: sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+Status: Downloaded newer image for quay.io/prometheus/alertmanager:v0.34.0
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+[release-gate] 
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   52s      go build ./... (go-app)
+lint             PASS   47s      golangci-lint run (go-app)
+test             FAIL   199s     go test ./... -count=1 (go-app)
+futureparity     PASS   24s      build+test, futureparity tag, cmd/server
+race             PASS   349s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   2s       helm repo add (Chart.lock) + dependency build
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-rbac        PASS   0s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   7s       helm/amp/tests/*.sh render tests
+amtool-compat    PASS   43s      real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
