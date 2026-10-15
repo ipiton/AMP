@@ -135,11 +135,17 @@ based_on:
 
 ## Phase 4: Deep review
 
-- [ ] **4.1** `/deep-review` (обязателен: `M`, 3 сигнала, большой дифф): guards и тексты, рендер-дифф против инвариантов, удаление PVC и migration notes, runbook против evidence, ADR. <!-- depends: 1.8, 3.5 | verify: jq -r .gate tasks/PROD-POSTGRES-HA-DECISION/review-verdict.json → pass -->
+- [x] **4.1** `/deep-review` (обязателен: `M`, 3 сигнала, большой дифф): guards и тексты, рендер-дифф против инвариантов, удаление PVC и migration notes, runbook против evidence, ADR. <!-- depends: 1.8, 3.5 | verify: jq -r .gate tasks/PROD-POSTGRES-HA-DECISION/review-verdict.json → pass -->
 
 ## Phase 5: Tests
 
-- [ ] **5.1** `helm/amp/tests/render-postgresql.sh` по образцу `render-defaults-validate.sh`: дефолты и production — нет PDB/CronJob/backup PVC Postgres, образ `postgres:16.15`, нет `archive_mode`; `replicas=2`, `replicas=0`, `backup.enabled=true` — render fail с ожидаемым текстом; `postgresql.enabled=false` + `replicas=3`/`backup.enabled=true` — рендер проходит; `profile=lite` — рендер проходит; deep review R5/R22: `backup=null`, `backup=false`, пустой `backup:` в values-файле — проходят, `backup=true` (скаляр), `--set-string backup.enabled=true`, main `values.yaml` через `-f` — fail с подсказкой про `--reuse-values`, `backup.enabled=1`/`"True"` — проходят (принятое поведение, R22); NOTES: при встроенном PG нет «HA» и «Expected: 250», при `postgresql.enabled=false` нет шагов 3–4. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-postgresql.sh → все ok; на main (без изменений чарта) — падает (тест не тавтологичен) -->
+- [x] **5.1** `helm/amp/tests/render-postgresql.sh` по образцу `render-defaults-validate.sh`: дефолты и production — нет PDB/CronJob/backup PVC Postgres, образ `postgres:16.15`, нет `archive_mode`; `replicas=2`, `replicas=0`, `backup.enabled=true` — render fail с ожидаемым текстом; `postgresql.enabled=false` + `replicas=3`/`backup.enabled=true` — рендер проходит; `profile=lite` — рендер проходит; deep review R5/R22: `backup=null`, `backup=false`, пустой `backup:` в values-файле — проходят, `backup=true` (скаляр), `--set-string backup.enabled=true`, main `values.yaml` через `-f` — fail с подсказкой про `--reuse-values`, `backup.enabled=1`/`"True"` — проходят (принятое поведение, R22); NOTES: при встроенном PG нет «HA» и «Expected: 250», при `postgresql.enabled=false` нет шагов 3–4. <!-- depends: 4.1 | verify: bash helm/amp/tests/render-postgresql.sh → все ok; на main (без изменений чарта) — падает (тест не тавтологичен) -->
+
+### Test status (2026-10-15, 5.1)
+
+- 4.1: deep review — два раунда, `review-verdict.json` gate `pass` @ `85c1d07` (коммит `170e249`).
+- 5.1: `helm/amp/tests/render-postgresql.sh` — 57 проверок, T1–T6: shipped values (default, production), guards replicas и backup (включая old defaults через `-f` и override `enabled=false`), остатки ключа (`null`/`false`/пустой/`enabled=1`/`"True"`, R22), `postgresql.enabled=false`, lite, NOTES через `helm install --dry-run=client`. Ветка: all assertions passed.
+- Не тавтологичен: тот же скрипт на копии чарта `main` (`git archive main helm`) — 38 FAIL (PDB/CronJob/PVC/`archive_mode`/правила алертов/образ `postgres:16` в T1, guards в T2–T3, NOTES в T6).
 
 ## Phase 6: Testing
 
