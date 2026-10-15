@@ -17,11 +17,10 @@ Queue и WIP — источник правды для выбора задачи.
 ## WIP
 
 - [ ] **PROD-DEPS-NET-HTTP2** — P0 из BACKLOG: required `govulncheck` красный на `main` с 2026-10-10 (GO-2026-6610…6617, HTTP/2 и HTTP/1 в `net/http`). `toolchain go1.26.9`, `golang.org/x/net` v0.58.0 → v0.60.0 (карантин до 2026-10-15 17:22 UTC), образы `golang:1.26.9-alpine`. Ветка `bugfix/prod-deps-net-http2`, workspace `tasks/PROD-DEPS-NET-HTTP2/`. Взят 2026-10-15. Ждёт конца карантина `x/net` (2026-10-15 17:23 UTC): research/spec/plan готовы, следующий шаг — `implement`.
-- [ ] **PROD-POSTGRES-HA-DECISION** — P0 из BACKLOG: встроенный PostgreSQL — single primary без failover, PDB `minAvailable: 1` при одной реплике блокирует drain ноды, бэкапы на PVC в том же кластере. Решение (ADR) о поддерживаемом пути для прода, PDB не рендерить при `replicas: 1`, off-cluster бэкапы или явная ответственность оператора, проверенный прогон restore по `POSTGRESQL_RESTORE_GUIDE.md`. Ветка `feature/prod-postgres-ha-decision`, workspace `tasks/PROD-POSTGRES-HA-DECISION/`. Взят 2026-10-15.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` и `PROD-POSTGRES-HA-DECISION` в WIP с 2026-10-15.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` в WIP с 2026-10-15; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15.
 
 ### Owner
 

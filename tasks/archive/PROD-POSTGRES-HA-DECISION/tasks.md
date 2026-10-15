@@ -161,16 +161,16 @@ based_on:
 
 ## Phase 7: Finalize
 
-- [ ] **7.1** `/finalize`: `DONE.md`; `NEXT.md` (снять из WIP); BACKLOG: P0 → закрытые, из `HELM-SINGLE-NODE-DEFAULTS` убрать пункт про PDB Postgres, идея «ingest без синхронной зависимости от PG»; TECH-DEBT `HELM-CHART-GAPS` — HA-пункт → ADR-016; приоритеты `PG-CONFIG-NOT-APPLIED` / `HELM-EXTERNAL-DATABASE` — по решению владельца; архив workspace. <!-- depends: 6.1, 6.2 | verify: ls tasks/archive/PROD-POSTGRES-HA-DECISION -->
+- [x] **7.1** `/finalize`: `DONE.md`; `NEXT.md` (снять из WIP); BACKLOG: P0 → закрытые, из `HELM-SINGLE-NODE-DEFAULTS` убрать пункт про PDB Postgres, идея «ingest без синхронной зависимости от PG»; TECH-DEBT `HELM-CHART-GAPS` — HA-пункт → ADR-016; приоритеты `PG-CONFIG-NOT-APPLIED` / `HELM-EXTERNAL-DATABASE` — по решению владельца; архив workspace. <!-- depends: 6.1, 6.2 | verify: ls tasks/archive/PROD-POSTGRES-HA-DECISION -->
 - [ ] **7.2** Убрать k3d-кластер `amp-pg-research`, вернуть kubectl-контекст владельца. <!-- depends: 7.1 | verify: k3d cluster list — нет amp-pg-research; kubectl config current-context — по указанию владельца -->
 - [ ] **7.3** `/merge-to-main`; push — по решению владельца. <!-- depends: 7.1 | verify: git log main -1 -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated (`render-postgresql.sh`)
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated (ADR-016, README, runbook, оба CHANGELOG, planning в finalize)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated (`render-postgresql.sh`)
+- [x] Phase checks pass (release-gate `test` — флейк вне диффа, BUGS `FLAKE-INHIBITION-PREFILTER-TIMING`)
+- [x] Docs/planning are updated (ADR-016, README, runbook, оба CHANGELOG, planning в finalize)

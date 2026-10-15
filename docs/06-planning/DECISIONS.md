@@ -249,7 +249,7 @@
 - **Дата**: 2026-10-15
 - **Контекст**:
   - аудит 2026-10-06 (`PROD-POSTGRES-HA-DECISION`, P0): чарт обещал HA, PITR и ежедневные base backups встроенного PostgreSQL;
-  - измерения на k3d 2026-10-15 (`tasks/PROD-POSTGRES-HA-DECISION/evidence/`) показали, что ничего из этого не работает:
+  - измерения на k3d 2026-10-15 (`tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/`) показали, что ничего из этого не работает:
     - конфиг из ConfigMap не применяется: `max_connections=20`, `archive_mode=off`, pg_hba из образа (BUGS `PG-CONFIG-NOT-APPLIED`);
     - `pg_basebackup` в CronJob всегда отказывает по pg_hba replication;
     - PDB при одной реплике блокирует drain ноды (`ALLOWED DISRUPTIONS 0`);

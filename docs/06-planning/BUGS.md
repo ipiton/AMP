@@ -8,11 +8,12 @@
 
 ### [high][Helm][~1d] PG-CONFIG-NOT-APPLIED
 - **Title:** встроенный PostgreSQL игнорирует конфиг чарта: `max_connections=20`, `pg_hba` и `init.sql` не те, что задуманы
-- **Problem:** `postgresql.conf` и `pg_hba.conf` из ConfigMap монтируются в `/docker-entrypoint-initdb.d/` (`helm/amp/templates/postgresql-statefulset.yaml`, `mountPath: /docker-entrypoint-initdb.d/…`), а entrypoint образа исполняет оттуда только `*.sh`/`*.sql`; `/etc/postgresql` — пустой `emptyDir`, `POSTGRES_INITDB_ARGS="-c config_file=…"` (env в том же StatefulSet) ничего не подключает. Измерено на k3d 2026-10-15: `config_file` дефолтный, `archive_mode=off`, `max_connections=20` (чарт задумывал 250), `shared_buffers=400kB`, `pg_hba` — дефолт образа. `init.sql` падает на строке 56 (`ALTER SYSTEM SET pg_stat_statements.max` без preload) ⇒ первый старт контейнера с ошибкой, после рестарта init пропускается, скрипт применён частично. Образ `postgres:16` без patch-пина.
+- **Problem:** `postgresql.conf` и `pg_hba.conf` из ConfigMap монтируются в `/docker-entrypoint-initdb.d/` (`helm/amp/templates/postgresql-statefulset.yaml`, `mountPath: /docker-entrypoint-initdb.d/…`), а entrypoint образа исполняет оттуда только `*.sh`/`*.sql`; `/etc/postgresql` — пустой `emptyDir`, `POSTGRES_INITDB_ARGS="-c config_file=…"` (env в том же StatefulSet) ничего не подключает. Измерено на k3d 2026-10-15: `config_file` дефолтный, `archive_mode=off`, `max_connections=20` (чарт задумывал 250), `shared_buffers=400kB`, `pg_hba` — дефолт образа. `init.sql` падает на строке 56 (`ALTER SYSTEM SET pg_stat_statements.max` без preload) ⇒ первый старт контейнера с ошибкой, после рестарта init пропускается, скрипт применён частично. Образ с 2026-10-15 пинится на `postgres:16.15` (ADR-016).
 - **Impact:** пул AMP 25 соединений на pod (`go-app/internal/config/config.go:897`) × `minReplicas: 2` против 17 доступных соединений ⇒ под нагрузкой ошибки записи ⇒ ingest отвечает 500, алерты не маршрутизируются. Значение 20 измерено на k3d; на других нодах initdb может выбрать иное. Бэкап и PITR из-за этого тоже не работали (см. ADR-016, `PROD-POSTGRES-HA-DECISION`).
-- **Fix:** конфиг — в `args: ["-c", "config_file=…"]` / `-c` параметрами, `pg_hba` через `hba_file`; `init.sql` без `ALTER SYSTEM` для непредзагруженных расширений; пин образа. Поведение существующих установок изменится при рестарте (лимиты памяти против `shared_buffers`, новый `pg_hba`) — migration note и проверка на k3d с уже инициализированным PVC.
-- **Refs:** `tasks/PROD-POSTGRES-HA-DECISION/research.md` § Findings 2, `evidence/k3d-probe-effective-config.txt`.
+- **Fix:** конфиг — в `args: ["-c", "config_file=…"]` / `-c` параметрами, `pg_hba` через `hba_file`; `init.sql` без `ALTER SYSTEM` для непредзагруженных расширений. Поведение существующих установок изменится при рестарте (лимиты памяти против `shared_buffers`, новый `pg_hba`) — migration note и проверка на k3d с уже инициализированным PVC.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/research.md` § Findings 2, `evidence/k3d-probe-effective-config.txt`.
 - **Status:** open
+  Waiting-on: решение владельца о приоритете (high как есть или P0 вместе с `HELM-EXTERNAL-DATABASE`), поднято на finalize PROD-POSTGRES-HA-DECISION 2026-10-15.
 
 ### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
 - **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
@@ -156,6 +157,54 @@
 - **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет случайно; таймаут `postgres` стоит 10 минут прогона.
 - **Fix:** дедлайн на старт контейнера (`context.WithTimeout`) и `t.Skip`/понятная ошибка вместо висящего теста; для reaper — ретрай старта или `TESTCONTAINERS_RYUK_DISABLED` в гейте с явной очисткой.
 - **Refs:** `tasks/archive/HELM-DEFAULTS-VALIDATE/tasks.md` п. 5.4; связано с `MIGRATIONS-TEST-PANICS-ON-SLOW-DOCKER`.
+- **Status:** open
+
+### [low][Helm][~0.25d] HELM-LITE-RENDERS-POSTGRES
+- **Title:** профиль `lite` рендерит встроенный PostgreSQL, которым AMP не пользуется
+- **Problem:** шаблоны `helm/amp/templates/postgresql-*.yaml` гейтятся только `postgresql.enabled` (по умолчанию `true`), комментарий в `values.yaml` («Overridden by profile») не соответствует шаблонам: `helm template --set profile=lite` даёт StatefulSet, Service, Secret и PVC Postgres. Дефект существовал до PROD-POSTGRES-HA-DECISION; README предупреждает «set `false` for the lite profile».
+- **Impact:** lite-установка тянет лишний под Postgres и PVC, запрашивает ресурсы ноды впустую.
+- **Fix:** гейт `and .Values.postgresql.enabled (eq .Values.profile "standard")` во всех `postgresql-*.yaml` (и в env БД в `deployment.yaml`) либо `fail` на `lite` + `postgresql.enabled`; render-тест.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/review-findings.md` R11.
+- **Status:** open
+
+### [medium][Helm][~0.25d] VALKEY-SUBCHART-INIT-ERROR
+- **Title:** под сабчарта valkey не стартует: `Init:Error`, `helm install --wait` уходит в FAILED
+- **Problem:** на k3d 2026-10-15 (чарт `main` и ветки, дефолтные values) под `amp-valkey-*` висит в `Init:Error`: `exec /scripts/init.sh: no such file or directory`. AMP по умолчанию ходит в `amp-redis`, поэтому сам AMP работает, но `helm install/upgrade --wait` ждёт valkey и завершается FAILED.
+- **Impact:** любая установка standard-профиля с `--wait` (CI, Argo/Flux с health-check) считается неуспешной; лишний сломанный под в namespace.
+- **Fix:** выяснить, какой ConfigMap со скриптами сабчарт ожидает (версия сабчарта против values), либо выключить сабчарт по умолчанию — пересекается с TECH-DEBT `HELM-CHART-GAPS` (два Redis на standard).
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/upgrade-path.md`.
+- **Status:** open
+
+### [low][Helm][~0.1d] AMP-PVC-PENDING-STANDARD
+- **Title:** `<fullname>-pvc` рендерится во всех профилях, а монтируется только в `lite`
+- **Problem:** `helm/amp/templates/pvc.yaml` без условия; потребитель — том `data` в `deployment.yaml` только при `profile: lite`. На standard с `WaitForFirstConsumer` (local-path) PVC навсегда `Pending` (k3d 2026-10-15).
+- **Impact:** вечно `Pending` PVC в каждой standard-установке; health-check GitOps-инструментов и `--wait` на PVC могут не дождаться; на провайдерах с `Immediate` создаётся и оплачивается неиспользуемый диск.
+- **Fix:** `{{- if eq .Values.profile "lite" }}` вокруг `pvc.yaml`; render-тест. Migration note: существующий PVC удалится при upgrade (данных в нём нет).
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/upgrade-path.md`.
+- **Status:** open
+
+### [medium][Silencing][~0.25d] SILENCE-SYNC-LIMIT-EXCEEDS-FILTER
+- **Title:** фоновый воркер silence manager не стартует: `limit must be <= 1000, got 10000`
+- **Problem:** на каждом старте AMP с PostgreSQL: `initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000`. `go-app/internal/business/silencing/manager_impl.go:479`, `:713` и `sync_worker.go:162` запрашивают `Limit: 10000`, а валидатор фильтра репозитория пропускает не больше 1000 (`go-app/internal/core/errors.go:12`). AMP продолжает работу без GC/stats-воркера.
+- **Impact:** истёкшие silences не собираются фоновым GC, кэш активных silences не прогревается на старте, статистика не считается; молча — только строка в логе.
+- **Fix:** выровнять лимит (пагинация по 1000 или отдельный внутренний путь без пользовательского лимита) и тест на старт менеджера с реальным репозиторием.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/restore-drill.md` § Side findings.
+- **Status:** open
+
+### [low][API][~0.25d] SILENCES-CHECK-404
+- **Title:** `POST /api/v2/silences/check` отвечает 404
+- **Problem:** хендлер есть (`go-app/cmd/server/handlers/silence_advanced.go`, `CheckAlert`), и `docs/ALERTMANAGER_COMPATIBILITY.md` ссылается на эндпоинт, но в собранном сервере на k3d 2026-10-15 запрос даёт 404 — маршрут не зарегистрирован.
+- **Impact:** превью «заглушит ли silence этот алерт» недоступно; документация расходится с поведением. Upstream такого эндпоинта нет, совместимость с Alertmanager не затронута.
+- **Fix:** зарегистрировать маршрут или убрать хендлер и упоминания из доков; тест на роутинг.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/tasks.md` (Implementation notes, Phase 2).
+- **Status:** open
+
+### [low][Test][~0.1d] FLAKE-INHIBITION-PREFILTER-TIMING
+- **Title:** `TestShouldInhibit_PrefilterOptimization` падает по wall-clock порогу
+- **Problem:** `go-app/internal/infrastructure/inhibition/matcher_test.go:597` требует, чтобы `ShouldInhibit` на 51 алерте уложился в 500 µs. 2026-10-15 release-gate: 992 µs → FAIL; изолированно 5 прогонов — 3 FAIL. Тест меряет время, а не то, что пре-фильтр отсёк нерелевантные алерты; в замер попадает логирование.
+- **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет случайно на ветках без изменений в `go-app`.
+- **Fix:** проверять число проверенных кандидатов (счётчик/хук) вместо времени, либо вынести замер в бенчмарк. Тот же приём — у порога в `matcher_test.go:448` (DONE 2026-10-14 HELM-DEFAULTS-VALIDATE, риск).
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/release-gate.txt`.
 - **Status:** open
 
 ## Entry Format
