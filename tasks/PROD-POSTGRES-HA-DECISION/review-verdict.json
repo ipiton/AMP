@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "open fix-here: R1, R2, R3, R4",
+  "branch": "feature/prod-postgres-ha-decision",
+  "commit": "ebfd2b8",
+  "reviewed_at": "2026-10-15",
+  "findings": {
+    "blocker": 0,
+    "major": 4,
+    "minor": 8,
+    "nit": 5
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
