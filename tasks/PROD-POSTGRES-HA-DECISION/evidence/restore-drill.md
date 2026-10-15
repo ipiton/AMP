@@ -63,7 +63,28 @@ Note on "suppressed": the plan expected `status.state=suppressed`. AMP drops fir
 
 **Verdict: V1 passed.** `pg_dump -Fc` → `pg_restore --clean --if-exists --no-owner` into a fresh bundled PostgreSQL brings AMP back with alerts and silences intact and without re-running migrations.
 
+## 5. Scenario A — roll back a live installation to a dump
+
+Same dump, applied over the running installation from section 3 (DB now has 6 alerts: the 5 restored + `DrillPostRestore`).
+
+```sh
+kubectl -n amp scale deploy/amp --replicas=0
+kubectl -n amp wait --for=delete pod -l app.kubernetes.io/instance=amp,app.kubernetes.io/component=application --timeout=120s
+kubectl -n amp exec -i amp-postgres-0 -c postgres -- \
+  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < amp.dump
+kubectl -n amp scale deploy/amp --replicas=1
+kubectl -n amp rollout status deploy/amp --timeout=240s
+```
+
+Result: `pg_restore` exit 0, no warnings; counts 6/1/0 → 5/1/0; `GET /api/v2/alerts` = DrillFiring1..3 (`DrillPostRestore` gone — state is the dump's); silence `6e2099ea-…` active; `goose_db_version` max `tstamp` unchanged (09:31:12); scale 0 → `/-/ready` 200 in 43 s.
+
+AMP pod selector `app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application` returns only the AMP pod (ADR-015 label).
+
+## 6. HPA interaction (default `autoscaling.enabled: true`, `minReplicas: 2`)
+
+`helm upgrade … --set autoscaling.enabled=true`, then `kubectl scale deploy/amp --replicas=0` and wait 75 s: `.spec.replicas` stays 0; `kubectl describe hpa amp` → `ScalingActive False ScalingDisabled scaling is disabled since the replica count of the target is zero`. `kubectl scale deploy/amp --replicas=2` → 2/2 ready, HPA resumes (`cpu: 23%/70%`). The HPA does not fight the scale-down during a restore.
+
 ## Side findings (pre-existing, out of scope)
 
 - The silence manager background worker fails to start on every boot: `initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000` (AMP continues without the GC/stats worker).
-- The `amp` Service/Deployment selectors also match `amp-redis-0`/`amp-postgres-0`: `port-forward svc/amp` / `deploy/amp` land on redis. The runbook must address the AMP pod by name (see upgrade-path.md).
+- The `amp` Service/Deployment selectors also match `amp-redis-0`/`amp-postgres-0` (BUGS `SERVICE-METRICS-PORT-MISROUTED`): `port-forward svc/amp` / `deploy/amp` land on redis. The runbook must address the AMP pod by name (see upgrade-path.md).

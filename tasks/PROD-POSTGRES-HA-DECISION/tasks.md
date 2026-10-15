@@ -84,7 +84,7 @@ based_on:
 ### Implementation notes (2026-10-15, Phase 2)
 
 - 2.2: `helm install --wait` чарта `main` уходит в FAILED по двум причинам вне задачи: valkey-сабчарт в `Init:Error` (`exec /scripts/init.sh: no such file or directory`) и `amp-pvc` вечно `Pending` (потребителя нет). Ставил без `--wait`, ждал `rollout status` StatefulSet/Deployment. Засеяно: алертов 5 (3 firing, 2 resolved), 1 активный silence на `drill-silenced`, investigations 0.
-- 2.2: селекторы Service и Deployment `amp` захватывают поды `amp-redis-0` и `amp-postgres-0`: в endpoints три пода, `port-forward svc/amp` и `deploy/amp` уходят в redis. Port-forward делал на под по имени. Находка вне задачи, кандидат в BUGS.
+- 2.2: селекторы Service и Deployment `amp` захватывают поды `amp-redis-0` и `amp-postgres-0`. Это уже известный `SERVICE-METRICS-PORT-MISROUTED`. По EndpointSlice порт `http` ведёт только на AMP, так что HTTP-трафик в порядке. Но `port-forward svc/amp`/`deploy/amp` и `logs deploy/amp` попадают в redis. Port-forward делал на под по имени; в runbook — так же.
 - 2.3 (V2): rev1 main → rev2 ветка → rollback rev3 → rev4 ветка. Каждый раз: CronJob, PDB и backup PVC удалены, uid `postgres-data` тот же, под PG пересоздан ровно один раз (`postgres:16.15`), строк 5/1/0. Upgrade и rollout PG — 46 с. Для migration notes: upgrade удаляет PVC `<release>-postgres-backup` вместе с содержимым, rollback создаёт его пустым. Данных там нет: base backup ни разу не создавался.
 - 2.4–2.6 (V1): дамп 88 797 байт, в нём 17 TABLE DATA; `pg_restore --clean --if-exists --no-owner` → exit 0, предупреждений нет. RTO 56 с от install до `/-/ready`, из них 31 с — старт пода PG.
 - 2.7: отклонение формулировки. Состояния `status.state=suppressed` в AMP нет: firing-алерт, совпавший с активным silence, отбрасывается на ingest (`handlers/alerts.go:433`) и не сохраняется. Проверено поведением: `drill-silenced` получает 200, но отсутствует в API и в БД, а контрольный `DrillPostRestore` записан. Миграции — no-op: последняя строка `goose_db_version` от исходного install (09:31), restore был в 09:38.
@@ -93,11 +93,17 @@ based_on:
 
 ## Phase 3: Документация
 
-- [ ] **3.1** ADR-016 в `docs/06-planning/DECISIONS.md` по Spec § ADR-016 (формат ADR-015). <!-- verify: grep -n '^## ADR-016' docs/06-planning/DECISIONS.md -->
-- [ ] **3.2** `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` — переписать как runbook (D9), команды — из `evidence/restore-drill.md` с плейсхолдерами `<release>`/`<namespace>`; англ. <!-- depends: 2.7 | verify: grep -c 'alert-history' = 0; каждая команда runbook присутствует в restore-drill.md (ручная сверка) -->
-- [ ] **3.3** `helm/amp/README.md` — `### PostgreSQL` после `### Storage` (D8), ссылки на runbook и ADR-016; англ. <!-- verify: grep -n '^### PostgreSQL' helm/amp/README.md -->
-- [ ] **3.4** `CHANGELOG.md` `[Unreleased]` (Breaking changes / migration notes + Changed) и `helm/amp/CHANGELOG.md` `[Unreleased]` (Removed/Changed) по D10. <!-- verify: grep -n 'PROD-POSTGRES-HA-DECISION' CHANGELOG.md helm/amp/CHANGELOG.md -->
-- [ ] **3.5** Коммит `docs: ADR-016 and verified PostgreSQL restore runbook`. <!-- depends: 3.1–3.4 | verify: git show --stat HEAD -->
+- [x] **3.1** ADR-016 в `docs/06-planning/DECISIONS.md` по Spec § ADR-016 (формат ADR-015). <!-- verify: grep -n '^## ADR-016' docs/06-planning/DECISIONS.md -->
+- [x] **3.2** `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` — переписать как runbook (D9), команды — из `evidence/restore-drill.md` с плейсхолдерами `<release>`/`<namespace>`; англ. <!-- depends: 2.7 | verify: grep -c 'alert-history' = 0; каждая команда runbook присутствует в restore-drill.md (ручная сверка) -->
+- [x] **3.3** `helm/amp/README.md` — `### PostgreSQL` после `### Storage` (D8), ссылки на runbook и ADR-016; англ. <!-- verify: grep -n '^### PostgreSQL' helm/amp/README.md -->
+- [x] **3.4** `CHANGELOG.md` `[Unreleased]` (Breaking changes / migration notes + Changed) и `helm/amp/CHANGELOG.md` `[Unreleased]` (Removed/Changed) по D10. <!-- verify: grep -n 'PROD-POSTGRES-HA-DECISION' CHANGELOG.md helm/amp/CHANGELOG.md -->
+- [x] **3.5** Коммит `docs: ADR-016 and verified PostgreSQL restore runbook`. <!-- depends: 3.1–3.4 | verify: git show --stat HEAD -->
+
+### Implementation notes (2026-10-15, Phase 3)
+
+- Перед runbook дополнительно прогнал на k3d сценарий A, откат живой установки на дамп: scale 0 → `pg_restore --clean` в непустую БД → scale 1. Счётчики 6→5, миграции не применялись. Проверил и HPA: при Deployment в 0 он ставит `ScalingDisabled` и не мешает. Всё записано в `evidence/restore-drill.md` §5–6. В runbook только проверенные команды. Исключение — раздел про внешний PG: там прямо сказано, что прогона не было.
+- 3.3: в таблице `### Storage` исправлен дефолт `postgresql.enabled`: README писал `false`, в values стоит `true`. Иначе новый раздел противоречил бы таблице рядом. Фраза Spec D8 «внешняя БД через env» в README не попала: в чарте нет хука для произвольного env (`extraEnv`), есть только `configFile.content`.
+- 3.1: в ADR-016 разведено, что измерено (конфиг, pg_basebackup, PDB) и что следует из шаблона (реплики без репликации).
 
 ## Phase 4: Deep review
 

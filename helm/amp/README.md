@@ -88,10 +88,25 @@ helm install amp ./helm/amp --set profile=lite
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `postgresql.enabled` | Enable PostgreSQL | `false` |
+| `postgresql.enabled` | Enable bundled PostgreSQL (standard profile) | `true` |
 | `cache.enabled` | Enable Redis/Valkey | `false` |
 | `persistence.enabled` | Enable PVC (Lite) | `true` |
 | `persistence.size` | PVC size | `5Gi` |
+
+### PostgreSQL
+
+The standard profile needs PostgreSQL ≥ 16. AMP writes every incoming alert to it synchronously: if the database is unreachable, `POST /api/v2/alerts` returns `500`, and only senders that retry (Prometheus/Alertmanager do) deliver those alerts later.
+
+| Topology | Use for | Backups / HA |
+|----------|---------|--------------|
+| External PostgreSQL ≥ 16: a managed service with PITR, or CloudNativePG with barman/S3 | production | operator's side |
+| Bundled (`postgresql.enabled: true`) | dev, pilot | none |
+
+The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime, and ingest returns errors until the database is back. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed). The `postgresql.config` block is not applied by the bundled server yet (bug `PG-CONFIG-NOT-APPLIED`).
+
+External PostgreSQL: dedicated `externalDatabase.*` values are planned (`HELM-EXTERNAL-DATABASE`). Until then, set `postgresql.enabled: false` and configure the connection in the `database:` section of the AMP config (`configFile.enabled: true`, `configFile.content`); note that the password then sits in a ConfigMap.
+
+Backup and restore with `pg_dump`/`pg_restore`, for both topologies: [docs/POSTGRESQL_RESTORE_GUIDE.md](docs/POSTGRESQL_RESTORE_GUIDE.md). The decision record is ADR-016 in `docs/06-planning/DECISIONS.md`.
 
 ### HTTP Authentication
 
