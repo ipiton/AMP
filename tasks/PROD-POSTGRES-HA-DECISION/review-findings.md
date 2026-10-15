@@ -8,7 +8,7 @@
 Автор свёл находки и сверил ключевые утверждения с кодом: `deployment.yaml:11-13`, `NOTES.txt`, guard `dig`, `git diff --check main...HEAD`.
 **Reviewed at:** 2026-10-15
 **Reviewed tree:** feature/prod-postgres-ha-decision @ ebfd2b8
-**Verdict:** fix_required (см. `review-verdict.json`)
+**Verdict:** fix_required @ ebfd2b8; фиксы — следующий коммит, повторное ревью — ниже
 
 Поле `Status` в каждой находке читает скрипт вердикта: `open` | `fixed` | `deferred` | `rejected`. В скобках указан номер находки у ревьюера.
 
@@ -24,7 +24,7 @@
   - V1 прошёл только потому, что в drill-values было `autoscaling.enabled=false`. § 6 evidence проверял HPA лишь для 3a.
 - **Recommendation:** в 3b `--set autoscaling.enabled=false --set replicaCount=0`. Возврат к обычным values — финальным `helm upgrade` (уже описан). Перепрогнать 3b с дефолтным HPA (V1-bis) и только потом утверждать «run end to end».
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R2 — Проверка дампа не ловит обрезанный файл, а 3a с таким дампом уничтожает живую БД (A-F2)
@@ -41,7 +41,7 @@
   - Restore: `--single-transaction --exit-on-error`. Перед публикацией проверить, что на полном дампе с этими флагами exit 0 (прогон).
   - Описать, что делать при ненулевом exit.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R3 — `helm upgrade --reuse-values` с релиза на чарте `main` всегда падает на backup-guard (A-F3, B-1)
@@ -57,7 +57,7 @@
   - Поправить формулировку ADR-016.
   - Реальный upgrade в testing.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R4 — `NOTES.txt` обещает HA и «max_connections: 250 (OK)» для встроенного PG (B-3)
@@ -69,7 +69,7 @@
   - Критерий requirements «вводящие в заблуждение HA-обещания убраны» для вывода, который видит каждый оператор, не выполнен.
 - **Recommendation:** при `postgresql.enabled` писать «bundled PostgreSQL: single instance, dev/pilot, no backups (ADR-016)». Блок `max_connections` заменить предупреждением, что `postgresql.config` не применяется (`PG-CONFIG-NOT-APPLIED`).
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R5 — Guard `dig` падает невнятной ошибкой, если `postgresql.backup` равен `null` или не map (A-F4, B-4)
@@ -80,7 +80,7 @@
   - Строка CHANGELOG «Other leftover keys are ignored» в этом случае неверна.
 - **Recommendation:** проверять `kindIs "map"` перед `dig`. Скаляр `true` тоже считать включённым бэкапом. Кейсы — в `render-postgresql.sh` (write-tests).
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R6 — Runbook и ADR: для внешнего PG сказано «works», хотя прогона не было; `--clean` трогает расширения (A-F5)
@@ -91,7 +91,7 @@
   - На managed PG без superuser это ошибки и ненулевой exit.
 - **Recommendation:** «should work, not drilled». Для внешнего PG — restore в свежую пустую БД без `--clean`. Проверку на внешнем PG отложить в backlog вместе с `HELM-EXTERNAL-DATABASE`.
 - **Disposition:** fix-here (формулировка); проверка — defer-backlog
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** BACKLOG `HELM-EXTERNAL-DATABASE` — дополнить в finalize
 
 ### R7 — 3a при смене версии AMP после дампа: `--clean` не удаляет объекты из более новых миграций (A-F6)
@@ -100,7 +100,7 @@
 - **Issue:** таблицы и колонки из миграций новее дампа остаются, а `goose_db_version` откатывается. При старте AMP применит эти миграции повторно поверх существующих объектов. Упадёт ли это, зависит от `IF NOT EXISTS`.
 - **Recommendation:** одна строка в 3a: если AMP обновлялся после дампа, пересоздать БД и восстанавливать в пустую.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R8 — Заголовок 3b обещает и случай потери одного PVC, но команды рассчитаны на снесённый релиз (A-F7)
@@ -109,7 +109,7 @@
 - **Issue:** при потере только PVC релиз жив: `helm install` упадёт («name still in use»). StatefulSet пересоздаст пустой PVC, и AMP накатит на него миграции.
 - **Recommendation:** при потере PVC без потери релиза — шаги 3a. 3b — для потери namespace или кластера.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R9 — README всё ещё упоминает удалённый backup CronJob (B-5)
@@ -118,7 +118,7 @@
 - **Issue:** «The Redis StatefulSet and the PostgreSQL backup CronJob share the ServiceAccount…».
 - **Recommendation:** убрать упоминание CronJob.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R10 — `git diff --check main...HEAD` красный (B-6)
@@ -127,7 +127,7 @@
 - **Issue:** trailing whitespace. Проверка автора смотрела только незакоммиченное.
 - **Recommendation:** обрезать хвостовые пробелы; в finalize проверять `git diff --check main...HEAD`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R11 — Lite-профиль по умолчанию рендерит встроенный PostgreSQL (B-7)
@@ -136,7 +136,7 @@
 - **Issue:** `--set profile=lite` рендерит StatefulSet, Service и PVC Postgres, которыми AMP не пользуется. Дефект существовал до ветки.
 - **Recommendation:** баг в BUGS. В README-строке дописать «set `false` for the lite profile».
 - **Disposition:** defer-bug (README-строка — fix-here)
-- **Status:** open
+- **Status:** deferred
 - **Follow-up:** BUGS — завести в finalize
 
 ### R12 — «PostgreSQL ≥ 16» подано как требование, хотя ничем не подкреплено (B-8)
@@ -145,7 +145,7 @@
 - **Issue:** обоснования нижней границы нет. Тесты приложения идут на `postgres:15-alpine`.
 - **Recommendation:** «supported and tested: PostgreSQL 16».
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R13 — «Senders that retry (Prometheus/Alertmanager do)» неточно для Prometheus (B-9)
@@ -154,7 +154,7 @@
 - **Issue:** Prometheus не ретраит упавший батч, а периодически переотправляет активные алерты. Resolved, отвергнутый один раз, может долго не прийти.
 - **Recommendation:** «Prometheus re-sends active alerts periodically».
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R14 — Spec D2 расходится с кодом: `replicas: 1` захардкожен (B-10)
@@ -163,7 +163,7 @@
 - **Issue:** поведение эквивалентно, guard стоит раньше. Отклонение записано только в Implementation notes 1.3.
 - **Recommendation:** обновить D2 в Spec.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R15 — Номера строк в BUGS `PG-CONFIG-NOT-APPLIED` устарели (B-11)
@@ -171,7 +171,7 @@
 - **Location:** `docs/06-planning/BUGS.md` (`PG-CONFIG-NOT-APPLIED`)
 - **Recommendation:** ссылаться на якоря: `POSTGRES_INITDB_ARGS`, mountPath `docker-entrypoint-initdb.d`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ### R16 — Мёртвое обещание бэкапа `migration.backupBeforeMigration` в values (B-12)
@@ -195,7 +195,7 @@
   - `shasum` есть не везде (на Linux — `sha256sum`), а `>` перезаписывает файл с суммами.
 - **Recommendation:** исправить имена; `sha256sum`/`shasum -a 256` с дозаписью (`>>`).
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed
 - **Follow-up:** n/a
 
 ## Premises (Reviewer A)

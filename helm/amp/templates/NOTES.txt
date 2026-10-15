@@ -20,9 +20,14 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 
 {{- else if eq .Values.profile "standard" }}
 
-⚡ STANDARD PROFILE (HA-Ready, Distributed)
+⚡ STANDARD PROFILE (Distributed)
 ────────────────────────────────────────────────
-✅ PostgreSQL external storage (HA)
+{{- if .Values.postgresql.enabled }}
+⚠️  Bundled PostgreSQL: single instance, dev/pilot only — no replication, no backups (ADR-016)
+   For production use an external PostgreSQL; backups: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md
+{{- else }}
+✅ External PostgreSQL (connection from the AMP config, see README → PostgreSQL)
+{{- end }}
 ✅ Redis L2 + Memory L1 cache
 {{- if .Values.autoscaling.enabled }}
 ✅ HPA autoscaling ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas)
@@ -31,7 +36,7 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 {{- end }}
 
 Resources: 500m CPU, 512Mi RAM (per pod)
-Use Case: Production, HA, high-volume (>1K alerts/day)
+Use Case: high-volume (>1K alerts/day); production with an external PostgreSQL
 
 {{- if .Values.autoscaling.enabled }}
 
@@ -40,24 +45,17 @@ Use Case: Production, HA, high-volume (>1K alerts/day)
 Your HPA is configured for {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas.
 
 Connection calculation:
-  {{ .Values.autoscaling.maxReplicas }} replicas × 20 conns/pod = {{ mul .Values.autoscaling.maxReplicas 20 }} connections
+  {{ .Values.autoscaling.maxReplicas }} replicas × 25 conns/pod (database.max_connections default) = {{ mul .Values.autoscaling.maxReplicas 25 }} connections
 
-{{- if .Values.postgresql.config }}
-{{- if ge (int .Values.postgresql.config.maxConnections) 250 }}
-✅ PostgreSQL max_connections: {{ .Values.postgresql.config.maxConnections }} (OK)
-   Utilization at max scale: {{ div (mul (mul .Values.autoscaling.maxReplicas 20) 100) (int .Values.postgresql.config.maxConnections) }}%
+{{- if .Values.postgresql.enabled }}
+⚠️  The bundled PostgreSQL does not apply postgresql.config (bug PG-CONFIG-NOT-APPLIED):
+   max_connections stays at the server default (20 measured on k3d), not
+   postgresql.config.maxConnections. Expect connection errors as replicas grow;
+   use an external PostgreSQL sized for {{ mul .Values.autoscaling.maxReplicas 25 }}+ connections.
 {{- else }}
-⚠️  PostgreSQL max_connections: {{ .Values.postgresql.config.maxConnections }}
-   WARNING: May exhaust connections at {{ div (int .Values.postgresql.config.maxConnections) 20 }}+ replicas!
-   Recommend: Increase to 250+ or deploy PgBouncer
+   Make sure the external PostgreSQL allows at least {{ mul .Values.autoscaling.maxReplicas 25 }} connections
+   (or put PgBouncer in front of it).
 {{- end }}
-{{- else }}
-⚠️  PostgreSQL using default max_connections (100)
-   WARNING: Will exhaust connections at 6+ replicas!
-   CRITICAL: Update values.yaml postgresql.config.maxConnections to 250+
-{{- end }}
-
-See: tasks/TN-97-hpa-configuration/DATABASE_CONNECTIONS_ANALYSIS.md
 {{- end }}
 {{- end }}
 

@@ -3,10 +3,10 @@
 How to back up and restore AMP's PostgreSQL database with `pg_dump` / `pg_restore`.
 The decision behind it is ADR-016 in `docs/06-planning/DECISIONS.md`. In short:
 
-- **Production:** use an external PostgreSQL ≥ 16 with backups, PITR and HA on the operator's side — a managed service with PITR, or CloudNativePG with barman/S3. Use the provider's backup/PITR tooling first; this runbook is the portable fallback.
-- **Bundled PostgreSQL** (`postgresql.enabled: true`) is for dev/pilot: a single instance, **no automated backups**, no PITR, no PDB. If you run it with data you care about, schedule the backup below yourself and keep the dumps outside the cluster.
+- **Production:** use an external PostgreSQL with backups, PITR and HA on the operator's side: a managed service with PITR, or CloudNativePG with barman/S3. Use the provider's backup/PITR tooling first; this runbook is the portable fallback.
+- **Bundled PostgreSQL** (`postgresql.enabled: true`) is for dev/pilot: a single instance, **no automated backups**, no PITR, no PDB. If its data matters to you, schedule the backup below yourself and keep the dumps outside the cluster.
 
-Every command in sections 2–4 was run end to end on a k3d cluster (chart with bundled `postgres:16.15`): the data and silences came back, and migrations were not re-applied. Recovery from a total loss took 56 s with a small database.
+The commands in sections 2–4 were run end to end on a k3d cluster with the bundled `postgres:16.15` and the chart's default HPA: a rollback of a live installation and a rebuild after deleting the namespace. In both cases the data and silences came back and migrations were not re-applied. The rebuild took under a minute with a small database. The external-PostgreSQL notes in section 3 were not drilled.
 
 ## 1. Placeholders and conventions
 
@@ -14,34 +14,42 @@ Every command in sections 2–4 was run end to end on a k3d cluster (chart with 
 |---|---|
 | `<namespace>` | namespace of the Helm release |
 | `<release>` | Helm release name |
-| `<fullname>` | chart fullname: `<release>` if the release name contains `amp`, otherwise `<release>-amp` (or `fullnameOverride`) |
-| `<N>` | number of AMP replicas to return to (`replicaCount`, or `autoscaling.minReplicas` with HPA) |
+| `<fullname>` | name of the AMP Deployment: `kubectl -n <namespace> get deploy -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application -o name`. It is `<release>` when the release name contains the chart name (`amp`, or `nameOverride`), otherwise `<release>-amp`; `fullnameOverride` replaces it |
+| `<N>` | number of AMP replicas to return to in scenario 3a (`replicaCount`, or `autoscaling.minReplicas` with HPA) |
 
 - The commands run `pg_dump`/`pg_restore` **inside** the `postgres` container. They use its `$POSTGRES_USER`/`$POSTGRES_DB` over the local socket, so no password goes on the command line or into shell history.
 - Address the AMP pods by label: `app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application`. Do not use `svc/<fullname>` or `deploy/<fullname>` with `kubectl port-forward`/`logs`: their selector also matches the postgres and redis pods, and kubectl may pick one of those.
-- Use a `pg_restore` that is at least as new as the `pg_dump` that wrote the file. With the commands below both come from the same image.
+- Run the commands in `bash` or `zsh` with `set -o pipefail`, and stop at the first non-zero exit code.
 
 ## 2. Backup
 
 ```sh
-kubectl -n <namespace> exec <fullname>-postgres-0 -c postgres -- \
-  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > amp-$(date -u +%Y%m%dT%H%M%SZ).dump
-shasum -a 256 amp-*.dump > amp-dumps.sha256
+set -o pipefail
+DUMP=amp-$(date -u +%Y%m%dT%H%M%SZ).dump
 
-# sanity check: the archive is readable and contains table data
-kubectl -n <namespace> exec -i <fullname>-postgres-0 -c postgres -- \
-  pg_restore --list < amp-<timestamp>.dump | grep -c 'TABLE DATA'
+kubectl -n <namespace> exec <fullname>-postgres-0 -c postgres -- \
+  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$DUMP"
+
+# verify: reads the whole archive, fails on a truncated or corrupt file
+kubectl -n <namespace> exec -i <fullname>-postgres-0 -c postgres -- pg_restore -f /dev/null < "$DUMP"
+
+sha256sum "$DUMP" >> amp-dumps.sha256    # macOS: shasum -a 256 "$DUMP" >> amp-dumps.sha256
 ```
 
+- Both commands must exit 0. If the `kubectl exec` stream breaks during a long dump, `pg_dump` fails and the file is incomplete; delete it and dump again. Do not keep a file that failed verification.
 - AMP keeps running during the dump: `pg_dump` takes a consistent snapshot.
 - Copy the dump and its checksum off the cluster: to object storage, or wherever your backups live. A dump on a PVC next to the database is lost together with the node or namespace.
 - Scheduling, retention and encryption at rest are up to you, for example a CronJob in your own platform tooling or a CI job.
 
 ## 3. Restore
 
-AMP must not run while `pg_restore` runs. Otherwise it applies migrations to a half-restored schema and keeps ingesting into tables that are being dropped. While AMP is scaled to 0, `POST /api/v2/alerts` gets no answer: senders that retry (Prometheus/Alertmanager do) resend afterwards, others lose those alerts.
+AMP must not run while `pg_restore` runs. Otherwise it applies migrations to a half-restored schema and keeps ingesting into tables that are being dropped. While AMP is down, `POST /api/v2/alerts` gets no answer. Prometheus re-sends active alerts periodically, so they arrive once AMP is back. A resolve notification sent only during the outage can be lost.
+
+All restores use `--single-transaction --exit-on-error`. If `pg_restore` fails half-way, for example because the dump is damaged, the transaction rolls back and the database stays as it was. Without these flags, `--clean` drops the existing tables and a failed restore leaves them empty.
 
 ### 3a. Roll a live installation back to a dump
+
+Use this also when only the PostgreSQL PVC was lost and the release still exists: the StatefulSet recreates an empty volume, and you restore into it.
 
 ```sh
 kubectl -n <namespace> scale deploy/<fullname> --replicas=0
@@ -49,37 +57,49 @@ kubectl -n <namespace> wait --for=delete pod \
   -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application --timeout=120s
 
 kubectl -n <namespace> exec -i <fullname>-postgres-0 -c postgres -- \
-  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < amp-<timestamp>.dump
+  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction --exit-on-error' < "$DUMP"
 
 kubectl -n <namespace> scale deploy/<fullname> --replicas=<N>
 kubectl -n <namespace> rollout status deploy/<fullname> --timeout=240s
 ```
 
-Everything written after the dump is gone: alerts, silences and investigations return to the dump's state.
+- Everything written after the dump is gone: alerts, silences and investigations return to the dump's state.
+- With HPA enabled (default `autoscaling.enabled: true`), you do not need to touch the HPA. Kubernetes disables scaling while the Deployment is at 0 replicas (`ScalingActive False ScalingDisabled`) and resumes after the scale back to `<N>`.
+- If AMP was upgraded after the dump was taken, `--clean` does not drop tables and columns from the newer migrations, and AMP would re-apply those migrations on top of them. In that case restore into an empty database instead. With AMP at 0 replicas, recreate the database, then run the `pg_restore` above:
 
-With HPA enabled (default `autoscaling.enabled: true`), you do not need to touch the HPA. Kubernetes disables scaling while the Deployment is at 0 replicas (`ScalingActive False ScalingDisabled`) and resumes after the scale back to `<N>`.
+  ```sh
+  kubectl -n <namespace> exec <fullname>-postgres-0 -c postgres -- \
+    sh -c 'dropdb --force -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+  ```
 
-### 3b. Rebuild after losing the database (PVC, namespace or cluster)
+### 3b. Rebuild after losing the namespace or the cluster
 
 ```sh
-# install with AMP at 0 replicas: PostgreSQL comes up with an empty database
-helm install <release> <chart> -n <namespace> --create-namespace -f <your-values.yaml> --set replicaCount=0
+# install with AMP stopped: HPA off, 0 replicas; PostgreSQL comes up with an empty database
+helm install <release> <chart> -n <namespace> --create-namespace -f <your-values.yaml> \
+  --set autoscaling.enabled=false --set replicaCount=0
 kubectl -n <namespace> rollout status sts/<fullname>-postgres --timeout=240s
 
 kubectl -n <namespace> exec -i <fullname>-postgres-0 -c postgres -- \
-  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < amp-<timestamp>.dump
+  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction --exit-on-error' < "$DUMP"
 
-kubectl -n <namespace> scale deploy/<fullname> --replicas=<N>
-kubectl -n <namespace> rollout status deploy/<fullname> --timeout=240s
+# back to your values: replicas and HPA as configured
+helm upgrade <release> <chart> -n <namespace> -f <your-values.yaml>
+kubectl -n <namespace> rollout status deploy/<fullname> --timeout=300s
 ```
 
-Afterwards, run a normal `helm upgrade` with your values (without `--set replicaCount=0`) so the release matches them again.
+Both overrides are needed. With HPA enabled the chart does not render `replicas`, so `--set replicaCount=0` alone still starts AMP.
 
-`pg_restore` should exit 0 with no warnings. With `--clean --if-exists`, objects that do not exist yet are skipped silently. `--no-owner` makes the restored objects belong to the chart's database user.
+`pg_restore` should exit 0 with no output. With `--clean --if-exists`, objects that do not exist yet are skipped silently. `--no-owner` makes the restored objects belong to the chart's database user.
 
-### External PostgreSQL
+If `pg_restore` exits non-zero, the database is unchanged. Do not scale AMP up. Verify the dump (section 2) and try the previous one.
 
-The same `pg_dump -Fc` / `pg_restore --clean --if-exists --no-owner` pair works against an external server from any host with PostgreSQL ≥ 16 client tools. Pass the connection details through `PGHOST`/`PGUSER`/`PGDATABASE` and `PGPASSWORD` or `~/.pgpass`. The scale-to-0 / scale-back steps are the same. The drill covered only the bundled database. For an external server, prefer the provider's PITR, which also covers changes made after the last dump.
+### External PostgreSQL (not drilled)
+
+The same `pg_dump -Fc` / `pg_restore` pair should work against an external server from any host with PostgreSQL client tools at least as new as the server. Pass the connection details through `PGHOST`/`PGUSER`/`PGDATABASE` and `PGPASSWORD` or `~/.pgpass`. The scale-to-0 / scale-back steps are the same.
+
+- Restore into a freshly created empty database and drop `--clean`. AMP's schema uses the extensions `uuid-ossp` and `btree_gin`. Without superuser rights, which managed services usually do not grant, `--clean` fails on `DROP EXTENSION`.
+- Prefer the provider's PITR: it also covers changes made after the last dump.
 
 ## 4. Verify
 
@@ -105,7 +125,7 @@ AMP drops a firing alert that matches an active silence at ingest. Such an alert
 
 ## 5. Limitations
 
-- **No PITR.** RPO equals the interval between dumps; anything written after the last dump is lost.
-- **RTO** is dominated by pod start-up and dump size. The drill measured 56 s from `helm install` to ready, for a dump of under 100 KB.
+- **No PITR.** RPO equals the interval between dumps: anything written after the last dump is lost.
+- **RTO** is dominated by pod start-up and dump size. In the drill: 54–56 s from `helm install` to ready, 29–43 s for an in-place rollback; dumps under 100 KB.
 - **No automation in the chart.** It does not schedule, ship, rotate or encrypt backups. `postgresql.backup.enabled: true` fails the render on purpose (ADR-016).
-- **Downtime.** The bundled database is a single instance: a restart, node drain or restore makes ingest return errors until it is back. Clients must retry.
+- **Downtime.** The bundled database is a single instance: a restart, node drain or restore makes ingest return errors until it is back.

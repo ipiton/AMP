@@ -256,14 +256,14 @@
   - репликации в шаблоне нет: `replicas > 1` даёт несколько независимых баз за одним Service;
   - PostgreSQL стоит в критическом пути ingest: БД недоступна ⇒ `POST /api/v2/alerts` отвечает 500.
 - **Решение**:
-  - прод — внешний PostgreSQL ≥ 16. Бэкапы, PITR и HA — на стороне оператора: managed-сервис с PITR или CloudNativePG + barman/S3. Подключение через values — `HELM-EXTERNAL-DATABASE`; до него — `database:` в `configFile.content` или env;
+  - прод — внешний PostgreSQL; чарт поставляет и проверяет 16-ю версию, нижняя граница не исследовалась. Бэкапы, PITR и HA — на стороне оператора: managed-сервис с PITR или CloudNativePG + barman/S3. Подключение через values — `HELM-EXTERNAL-DATABASE`; до него — `database:` в `configFile.content`;
   - встроенный PostgreSQL — dev/pilot: одна реплика, бэкапов нет, PDB нет. Образ закреплён на `postgres:16.15`;
   - `postgresql.replicas != 1` и `postgresql.backup.enabled: true` в values — `fail` на рендере, с объяснением и ссылкой на runbook;
   - удалены backup CronJob, backup PVC, WAL-блок ConfigMap, PDB Postgres, правила `PostgreSQLWALArchivingFailed` и `PostgreSQLBackupOld`;
-  - восстановление — runbook `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` на `pg_dump -Fc` / `pg_restore`, один для встроенного и внешнего PG. Команды runbook прошли restore-прогон на k3d: данные и silences целы, миграции не перезапускаются, RTO 56 с.
+  - восстановление — runbook `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` на `pg_dump -Fc` / `pg_restore --single-transaction --exit-on-error`. Команды для встроенного PG прошли restore-прогоны на k3d с дефолтным HPA (откат на месте, потеря PVC, потеря namespace, битый дамп): данные и silences целы, миграции не перезапускаются, до ready меньше минуты. Для внешнего PG там же описаны отличия (restore в пустую БД без `--clean`), но прогона не было.
 - **Обоснование**:
   - чарт не должен обещать того, чего не делает. Неработающий бэкап хуже отсутствующего: оператор узнаёт о нём при восстановлении;
-  - явный `backup.enabled: true` в пользовательских values — сигнал, что оператор на бэкап рассчитывает. Поэтому он падает на `helm upgrade`, а не игнорируется молча (как в ADR-015);
+  - `backup.enabled: true` в values — сигнал, что оператор на бэкап рассчитывает. Поэтому он падает на `helm upgrade`, а не игнорируется молча (как в ADR-015). Под guard попадает и `--reuse-values` со старого релиза: старый дефолт чарта переносится в values. Текст ошибки называет обход (`--reset-then-reuse-values` или `--set postgresql.backup.enabled=false`);
   - бэкап на PVC рядом с базой не off-cluster: теряется вместе с нодой или namespace. Логический дамп на машину оператора или в его хранилище закрывает именно этот случай.
 - **Отклонено**:
   - довести встроенный PostgreSQL до HA/PITR. Это меняет поведение существующих баз и по сути означает собственный PG-оператор в чарте (2–3 дня и больше);
@@ -271,9 +271,9 @@
   - CloudNativePG как сабчарт. Новая зависимость и оператор с CRD — решение владельца кластера, не чарта приложения.
 - **Следствие**:
   - breaking для values (migration notes в `CHANGELOG.md`):
-    - ключи `postgresql.backup.*` и `postgresql.podDisruptionBudget.*` удалены, явный `backup.enabled: true` падает;
+    - ключи `postgresql.backup.*` и `postgresql.podDisruptionBudget.*` удалены, `backup.enabled: true` падает (в том числе при `--reuse-values`);
     - `replicas != 1` падает;
-    - при upgrade удаляется PVC `<release>-postgres-backup`: base backup на нём ни разу не создавался;
+    - при upgrade удаляется PVC `<fullname>-postgres-backup`: base backup на нём ни разу не создавался;
     - один рестарт Postgres при upgrade, на это время ingest отвечает 500;
   - `helm rollback` возвращает CronJob, PDB и пустой backup PVC; том `postgres-data` не затрагивается ни в одну сторону;
   - `HELM-EXTERNAL-DATABASE` становится предпосылкой прод-установки;

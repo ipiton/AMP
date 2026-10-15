@@ -3,8 +3,9 @@
 {{- if and (hasKey .Values.postgresql "replicas") (ne (int .Values.postgresql.replicas) 1) }}
 {{- fail "postgresql.replicas must be 1: the bundled PostgreSQL has no replication, so every extra replica is a separate empty database behind the same Service and AMP's writes would be split between them. For high availability use an external PostgreSQL (ADR-016, helm/amp/README.md#postgresql); to run without the bundled one set postgresql.enabled=false." }}
 {{- end }}
-{{- if eq (toString (dig "backup" "enabled" false .Values.postgresql)) "true" }}
-{{- fail "postgresql.backup was removed: the bundled backup CronJob never produced a backup (its replication connection was rejected) and WAL archiving was never on. Backups are the operator's responsibility (ADR-016); see helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md for a pg_dump/pg_restore runbook. Remove postgresql.backup from your values." }}
+{{- $backup := .Values.postgresql.backup }}
+{{- if or (eq (toString $backup) "true") (and (kindIs "map" $backup) (eq (toString (dig "enabled" false $backup)) "true")) }}
+{{- fail "postgresql.backup was removed: the bundled backup CronJob never produced a backup (its replication connection was rejected) and WAL archiving was never on. Backups are the operator's responsibility (ADR-016); see helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md for a pg_dump/pg_restore runbook. Remove postgresql.backup from your values. Upgrading with --reuse-values carries the old chart default (backup.enabled: true): use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false." }}
 {{- end }}
 apiVersion: apps/v1
 kind: StatefulSet

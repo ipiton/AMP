@@ -2,7 +2,7 @@
 +++ /private/tmp/claude-501/-Users-vit-Documents-Projects-AMP/7b59f54f-dddc-4e05-85df-48a300d49905/scratchpad/render-br-default.yaml	2026-10-15 11:08:06.390458218 +0200
 @@ -12,31 +12,6 @@
    policyTypes:
- 
+
  ---
 -# Source: amp/templates/postgresql-poddisruptionbudget.yaml
 -apiVersion: policy/v1
@@ -38,7 +38,7 @@
    # 2. Otherwise generate random 32-character password
 -  password: <masked>
 +  password: <masked>
- 
+
  ---
  # Source: amp/templates/secret.yaml
 @@ -423,16 +398,6 @@
@@ -55,12 +55,12 @@
 -    archive_timeout = 300  # Force WAL switch every 5 minutes (for PITR granularity)
 -    max_wal_senders = 5   # Allow up to 5 concurrent WAL senders (for replication)
 -    wal_keep_size = 1GB   # Retain at least 1GB of WAL on disk (for streaming replication)
- 
+
      # -----------------------------------------------------------------------------
      # Query Planning (SSD-optimized, TN-97)
 @@ -1598,29 +1563,6 @@
        storage: 5Gi
- 
+
  ---
 -# Source: amp/templates/postgresql-backup-pvc.yaml
 -apiVersion: v1
@@ -138,7 +138,7 @@
        name: postgres-data
 @@ -2926,150 +2861,6 @@
            storage: 5Gi
- 
+
  ---
 -# Source: amp/templates/postgresql-backup-cronjob.yaml
 -apiVersion: batch/v1
@@ -289,7 +289,7 @@
  #
 @@ -3207,29 +2998,6 @@
          description: "Table {{ $labels.schemaname }}.{{ $labels.relname }} has not been vacuumed for {{ $value }} seconds."
- 
+
      # ========================================
 -    # BACKUP ALERTS (TN-98: Disaster Recovery)
 -    # ========================================

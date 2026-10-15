@@ -88,3 +88,86 @@ AMP pod selector `app.kubernetes.io/instance=<release>,app.kubernetes.io/compone
 
 - The silence manager background worker fails to start on every boot: `initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000` (AMP continues without the GC/stats worker).
 - The `amp` Service/Deployment selectors also match `amp-redis-0`/`amp-postgres-0` (BUGS `SERVICE-METRICS-PORT-MISROUTED`): `port-forward svc/amp` / `deploy/amp` land on redis. The runbook must address the AMP pod by name (see upgrade-path.md).
+
+## 7. Fix round after deep review (R1–R3), 2026-10-15
+
+Runbook commands after the fix round, re-run on the same k3d cluster (the cluster was restarted in between after a Docker restart). "User values" = drill values with `autoscaling.enabled: true` (chart default HPA, `minReplicas: 2`) and no `replicaCount` override.
+
+### 7.1 Upgrade with `--reuse-values` from a main-chart release (R3)
+
+Install the main chart with user values (2 AMP replicas), seed 5 alerts (3 firing, 2 resolved) and 1 silence (`3b7aabdf-…`) → counts 5/1/0.
+
+| Command | Result |
+|---|---|
+| `helm upgrade amp helm/amp --reuse-values` | `UPGRADE FAILED: execution error at (amp/templates/postgresql-statefulset.yaml:8:4): postgresql.backup was removed: … Upgrading with --reuse-values carries the old chart default (backup.enabled: true): use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false.` — nothing changed in the cluster |
+| `helm upgrade … --reset-then-reuse-values --dry-run=server` | passes |
+| `helm upgrade … --reuse-values --set postgresql.backup.enabled=false --dry-run=server` | passes |
+| `helm upgrade … --reset-then-reuse-values` (real) | rev 2 deployed; CronJob/PDB/backup PVC gone, `postgres:16.15`, HPA min 2, counts 5/1/0 |
+
+### 7.2 Backup and dump verification (R2)
+
+```sh
+set -o pipefail
+kubectl -n amp exec amp-postgres-0 -c postgres -- \
+  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > amp.dump                 # exit 0
+kubectl -n amp exec -i amp-postgres-0 -c postgres -- pg_restore -f /dev/null < amp.dump   # exit 0
+sha256sum amp.dump >> amp-dumps.sha256     # shasum -a 256 on macOS
+```
+
+Dump 88800 bytes, sha256 `232defe9f2ca216d185fd790f93b616d20290956b020ce83289356b69d3a2750`. A truncated copy (`head -c 30000`) fails `pg_restore -f /dev/null` with `could not read from input file: end of file`, exit 1.
+
+### 7.3 Scenario 3a with `--single-transaction --exit-on-error` (R2)
+
+A marker silence row was added after the dump (counts 5/2/0). `kubectl scale deploy/amp --replicas=0`, wait until the AMP pods are gone, then:
+
+| Input | `pg_restore -U … --clean --if-exists --no-owner --single-transaction --exit-on-error` | Counts after |
+|---|---|---|
+| truncated dump | `could not read from input file: end of file`, exit 1 | 5/2/0 — live data untouched (transaction rolled back) |
+| full dump | exit 0, no output | 5/1/0 — dump state, marker gone |
+
+`kubectl scale deploy/amp --replicas=2` → rollout complete; scale 0 → ready in 29 s. HPA `ScalingActive True` afterwards.
+
+### 7.4 Scenario 3b with HPA-enabled user values (R1)
+
+```sh
+helm uninstall amp -n amp --wait; kubectl delete ns amp --wait=true     # no PVC left
+# T0 = 11:55:54Z
+helm install amp helm/amp -n amp --create-namespace -f user-values-hpa.yaml \
+  --set autoscaling.enabled=false --set replicaCount=0                  # Deployment replicas=0, no HPA object
+kubectl -n amp rollout status sts/amp-postgres --timeout=240s            # +38s
+kubectl -n amp exec -i amp-postgres-0 -c postgres -- \
+  sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner --single-transaction --exit-on-error' < amp.dump
+                                                                         # exit 0, +40s; AMP pods: 0
+helm upgrade amp helm/amp -n amp -f user-values-hpa.yaml                 # rev 2: HPA back
+kubectl -n amp rollout status deploy/amp --timeout=300s                  # ready +54s
+```
+
+Checks: Deployment 2/2, HPA active (`cpu 3%/70%`); counts 5/1/0; `goose_db_version` max `20260423000000`, `tstamp` 11:52:19 (original install, before T0); `GET /api/v2/alerts` = DrillFiring1..3 `active`; silence `3b7aabdf-…` `active`; `POST drill-silenced` → 200 and absent from the API; `POST DrillPostRestore2` → 200 and present.
+
+**RTO (install → `/-/ready`) with HPA user values: 54 s.**
+
+### 7.5 Restore into a recreated empty database (R7)
+
+AMP scaled to 0, pods gone. While the database was dropped, `pg_stat_activity` showed only the `psql` session of the check itself; the exporter sidecar held no connection to it.
+
+```sh
+kubectl -n amp exec amp-postgres-0 -c postgres -- sh -c 'dropdb -U "$POSTGRES_USER" "$POSTGRES_DB"'     # exit 0
+kubectl -n amp exec amp-postgres-0 -c postgres -- sh -c 'createdb -U "$POSTGRES_USER" "$POSTGRES_DB" && dropdb --force -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'   # exit 0
+kubectl -n amp exec -i amp-postgres-0 -c postgres -- sh -c 'pg_restore … --clean --if-exists --no-owner --single-transaction --exit-on-error' < amp.dump   # exit 0
+kubectl -n amp scale deploy/amp --replicas=2
+```
+
+Counts 5/1/0. AMP log `Database migrations completed successfully`. `goose_db_version`: 10 rows, max `tstamp` 11:52:19, so no migration was re-applied.
+
+### 7.6 PVC lost, release alive (R8)
+
+```sh
+kubectl -n amp scale deploy/amp --replicas=0      # + wait for the AMP pods to go
+kubectl -n amp delete pvc postgres-data-amp-postgres-0 --wait=false
+kubectl -n amp delete pod amp-postgres-0 --wait=true
+kubectl -n amp rollout status sts/amp-postgres    # new PVC uid 5c291136-… (was 77d7999f-…); `alerts` does not exist
+kubectl -n amp exec -i amp-postgres-0 -c postgres -- sh -c 'pg_restore … --single-transaction --exit-on-error' < amp.dump   # exit 0
+kubectl -n amp scale deploy/amp --replicas=2
+```
+
+Counts 5/1/0, `goose_db_version` unchanged (11:52:19), `/-/ready` OK, silence `3b7aabdf-…` active. Scenario 3a covers this case.

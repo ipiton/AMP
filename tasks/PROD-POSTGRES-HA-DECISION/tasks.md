@@ -105,6 +105,21 @@ based_on:
 - 3.3: в таблице `### Storage` исправлен дефолт `postgresql.enabled`: README писал `false`, в values стоит `true`. Иначе новый раздел противоречил бы таблице рядом. Фраза Spec D8 «внешняя БД через env» в README не попала: в чарте нет хука для произвольного env (`extraEnv`), есть только `configFile.content`.
 - 3.1: в ADR-016 разведено, что измерено (конфиг, pg_basebackup, PDB) и что следует из шаблона (реплики без репликации).
 
+### Implementation notes (2026-10-15, fix round после deep review @ ebfd2b8)
+
+- R5 и R3, guard: `postgresql.backup` читается через `kindIs "map"`. Скаляр `true` ловится отдельно. `null`, `false` и пустой `backup:` проходят. В текст `fail` добавлен обход для `--reuse-values`. Рендер-кейсы: 11 вариантов, включая `-f <main>/values.yaml` (fail) и тот же файл с `--set postgresql.backup.enabled=false` (pass).
+- R4, `NOTES.txt`: убраны HA-обещания. Для встроенного PG выводится предупреждение dev/pilot, для внешнего — ✅. Блок `max_connections` больше не утверждает, что `postgresql.config` применён. В расчёте пул поправлен 20 → 25: это `database.max_connections` по умолчанию, `config.go`.
+- R1, R2, R7, R8: перепрогон на k3d, кластер пришлось поднять после рестарта Docker. Записано в `evidence/restore-drill.md` §7:
+  - `--reuse-values` с релиза main падает с новой подсказкой; `--reset-then-reuse-values` работает на реальном upgrade;
+  - полная проверка дампа ловит обрезанный файл;
+  - 3a с `--single-transaction --exit-on-error`: на обрезанном дампе данные целы, на целом восстановлено;
+  - 3b с HPA-values пользователя: AMP 0 подов во время restore, после `helm upgrade` HPA вернулся;
+  - `dropdb --force` + `createdb` → restore;
+  - потеря только PVC при живом релизе закрывается сценарием 3a.
+- R6, R12, R13, R17: формулировки в runbook, README, ADR и CHANGELOG. R15 — ссылки BUGS на якоря. R14 — Spec D2 под реализацию. R9 — README без CronJob. R10 — trailing whitespace; `git diff --check main` чистый.
+- R11 (lite рендерит встроенный PG) и R16 (`backupBeforeMigration`) — в BUGS и TECH-DEBT на finalize. Строка README про lite поправлена.
+- Проверки: 8/8 `render-*.sh` PASS; `helm lint` default и production (с плейсхолдерами тестов) — 0 failed; рендеры default, production и lite — ok.
+
 ## Phase 4: Deep review
 
 - [ ] **4.1** `/deep-review` (обязателен: `M`, 3 сигнала, большой дифф): guards и тексты, рендер-дифф против инвариантов, удаление PVC и migration notes, runbook против evidence, ADR. <!-- depends: 1.8, 3.5 | verify: jq -r .gate tasks/PROD-POSTGRES-HA-DECISION/review-verdict.json → pass -->

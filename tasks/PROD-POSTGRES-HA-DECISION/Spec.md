@@ -13,7 +13,7 @@ based_on:
 
 # Specification: поддерживаемый путь PostgreSQL для прода
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary
@@ -60,7 +60,7 @@ based_on:
 ### Решения
 
 - **D1. PDB Postgres:** удалить `templates/postgresql-poddisruptionbudget.yaml` и ключ `postgresql.podDisruptionBudget` из `values.yaml`/`values-production.yaml`. Guard не нужен: PDB при одной реплике только вредит, оставшийся ключ в пользовательских values игнорируется (migration note). App-level PDB (`templates/poddisruptionbudget.yaml`) не трогаем.
-- **D2. Реплики:** в `postgresql-statefulset.yaml` — `fail`, если `postgresql.enabled` и `int postgresql.replicas != 1`. Текст: встроенный PostgreSQL без репликации, несколько реплик = несколько независимых баз за одним Service; для HA — внешний PostgreSQL (ADR-016). `replicas: 1` в шаблоне берётся из values (ключ остаётся, `default 1` сохраняем).
+- **D2. Реплики:** в `postgresql-statefulset.yaml` — `fail`, если `postgresql.enabled` и `int postgresql.replicas != 1`. Текст: встроенный PostgreSQL без репликации, несколько реплик = несколько независимых баз за одним Service; для HA — внешний PostgreSQL (ADR-016). Ключ `postgresql.replicas` в values остаётся (документирует ограничение); в шаблоне — литерал `replicas: 1`: guard стоит раньше и другого значения не пропускает, а `default 1` молча превращал бы `0` в `1` (изменено в implement, см. tasks.md 1.3; deep review R14).
 - **D3. Бэкап:** удалить `templates/postgresql-backup-cronjob.yaml`, `templates/postgresql-backup-pvc.yaml`, backup volume/mount в StatefulSet, блок WAL archive в `postgresql-configmap.yaml`, правила `PostgreSQLWALArchivingFailed` и `PostgreSQLBackupOld`; ключ `postgresql.backup` — из обоих values. Guard: `fail`, если `dig "backup" "enabled" false .Values.postgresql` истинно — текст: встроенный backup удалён (никогда не работал, ADR-016), бэкапы — ответственность оператора, runbook `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md`; убрать `postgresql.backup` из values. Guard ловит явное `backup.enabled: true` в пользовательских values при апгрейде (ADR-015: громко на рендере, а не тихо).
 - **D4. Backup PVC при апгрейде:** удаляется Helm'ом (аннотации `keep` нет и добавлять её бессмысленно — политика читается из текущего манифеста релиза). Содержимое по P1/P2 — пустые каталоги. Migration note: если бэкапы на этом PVC делались вручную — скопировать до апгрейда.
 - **D5. Образ:** `postgres:16` → `postgres:16.15` в StatefulSet и `tests/postgresql-test-connection.yaml`. Мажор не меняется.
