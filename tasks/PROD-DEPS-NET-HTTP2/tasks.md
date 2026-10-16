@@ -70,7 +70,17 @@ based_on:
 
 ## Phase 4: Tests
 
-- [ ] **4.1** `/write-tests`: новых тестов не ожидается (Go-код не меняется); подтвердить и записать обоснование. Если ревью потребует — тест на конкретное поведение. <!-- depends: 3.1 | verify: обоснование записано в tasks.md -->
+- [x] **4.1** `/write-tests`: новых тестов не ожидается (Go-код не меняется); подтвердить и записать обоснование. Если ревью потребует — тест на конкретное поведение. <!-- depends: 3.1 | verify: обоснование записано в tasks.md -->
+
+### Write-tests notes (2026-10-16)
+
+- Вердикт `review-verdict.json` — `pass`, ветка `bugfix/prod-deps-net-http2`.
+- Новых тестов нет — обоснование:
+  - `git diff --name-only main...HEAD -- '*.go'` — пусто: поведение AMP не менялось, писать unit-тест не на что (тест «версия в `go.mod` = X» был бы тавтологией).
+  - Регрессионная проверка цели задачи уже есть и required: job `govulncheck` в `.github/workflows/ci.yml` — он и покраснел на `main`; после merge он же подтверждает фикс.
+  - Критерии requirements проверяются не тестами, а командами из Phase 1 (`go.mod`, даты — `evidence/new-module-dates.txt`, `git grep '1\.26\.8'`, `govulncheck` — `evidence/govulncheck-go1.26.9.txt`, сборка образов) и release-gate (5.1).
+  - Отложенная находка ревью F8 (поведение `x/text`/`x/crypto`) закрыта существующими тестами пакетов с прямыми импортами — `evidence/f8-direct-imports-tests.txt`.
+  - Согласованность версии Go в `go.mod` / Dockerfile / `ci.yml` / `docs/CI.md` автоматом не проверяется — сейчас держится правилом «Bump all three together» (`docs/CI.md`). Отдельный guard — вне scope; при повторении рассинхрона — кандидат в BACKLOG `CI-SUPPLY-CHAIN`.
 
 ## Phase 5: Testing
 
