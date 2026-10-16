@@ -109,8 +109,17 @@ spec:
             {{- if not (has ($ext.sslMode | default "require") (list "disable" "require" "verify-ca" "verify-full")) }}
             {{- fail (printf "externalDatabase.sslMode %q is invalid: use one of disable, require, verify-ca, verify-full." $ext.sslMode) }}
             {{- end }}
-            {{- else if and (not .Values.postgresql.enabled) (not (and .Values.configFile.enabled (fromYaml (.Values.configFile.content | default "")).database)) }}
+            {{- else if not .Values.postgresql.enabled }}
+            {{- $cfg := dict }}
+            {{- if .Values.configFile.enabled }}
+            {{- $cfg = fromYaml (.Values.configFile.content | default "") }}
+            {{- if hasKey $cfg "Error" }}
+            {{- fail (printf "configFile.content is not valid YAML: %s" (get $cfg "Error")) }}
+            {{- end }}
+            {{- end }}
+            {{- if not $cfg.database }}
             {{- fail "postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap)." }}
+            {{- end }}
             {{- end }}
             {{- end }}
             {{- if and .Values.postgresql.enabled (eq .Values.profile "standard") }}
