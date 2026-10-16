@@ -20,12 +20,13 @@ updated_at: 2026-10-16
 
 ## Risk Profile
 
-- **Signals:** `C S R`
+- **Signals:** `C S X R`
   - `C` — новый публичный контракт values `externalDatabase.*`; `values-production.yaml` меняет `postgresql.enabled` на `false` (breaking для тех, кто ставит прод из этого файла).
   - `S` — путь пароля БД: только `secretKeyRef`, никакого plain-text в ConfigMap/env; дефолт `sslMode: require`, флаг ослабления TLS в этой ветке не рендерится.
+  - `X` — Go (`internal/database/postgres` `DSN()`: экранирование пароля, решение владельца 2026-10-16) и Helm-чарт.
   - `R` — меняется поведение установки из `values-production.yaml`; закрывается записью в `CHANGELOG.md` `[Unreleased]` с migration note (в AMP нет `deploy`).
 - **Tier:** Full
-- **Notes:** `M` рассмотрен и не ставится: схема/данные не трогаются. Но переключение `values-production.yaml` на внешнюю БД при `helm upgrade` существующего релиза удалит StatefulSet встроенного PG (PVC останется) и переведёт AMP на пустую внешнюю БД — migration note обязан описать перенос через runbook (`pg_dump`/`pg_restore`) до апгрейда. `X` нет: Go-код не меняется, только чарт и доки.
+- **Notes:** `M` рассмотрен и не ставится: схема/данные не трогаются. Но переключение `values-production.yaml` на внешнюю БД при `helm upgrade` существующего релиза удалит StatefulSet встроенного PG (PVC останется) и переведёт AMP на пустую внешнюю БД — migration note обязан описать перенос через runbook (`pg_dump`/`pg_restore`) до апгрейда. `X` добавлен после research (2026-10-16).
 
 ## User Stories
 
@@ -36,7 +37,8 @@ updated_at: 2026-10-16
 ## Success Criteria
 
 - [ ] `values.yaml`: `externalDatabase.{host,port,database,username,sslMode,existingSecret,existingSecretPasswordKey}` с комментариями; `port: 5432`, `sslMode: require`, `existingSecretPasswordKey: password`.
-- [ ] `deployment.yaml`: при `profile: standard` и `postgresql.enabled: false` рендерятся `DATABASE_*` из `externalDatabase`, пароль — `secretKeyRef`; `required` на `externalDatabase.host` и `externalDatabase.existingSecret` с текстом, называющим ключ.
+- [ ] `deployment.yaml`: при `profile: standard`, `postgresql.enabled: false` и заданном `externalDatabase.host` рендерятся `DATABASE_*` из `externalDatabase`, пароль — `secretKeyRef`; `required` на `externalDatabase.existingSecret` с текстом, называющим ключ. Пустой `host` ⇒ рендер как до задачи (путь `configFile.content` не ломается — решение владельца 2026-10-16, Option B).
+- [ ] DSN экранирует пользователя, пароль и имя БД: пароль с `/ # ? % пробел` доходит до pgx без изменений (unit-тест + прогон на k3d).
 - [ ] `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` в ветке внешней БД не рендерится ни при каком `sslMode`.
 - [ ] Поведение встроенного PG и lite-профиля не меняется (существующие render-тесты зелёные).
 - [ ] `values-production.yaml`: `postgresql.enabled: false` + блок `externalDatabase` (без реальных реквизитов — render требует их явно); `helm/amp/tests/values-production-placeholders.yaml` дополнен, тесты на production values зелёные.
@@ -57,9 +59,9 @@ updated_at: 2026-10-16
 
 ## Constraints
 
-- **Scope:** `helm/amp/` (values, values-production, deployment, тесты, docs, NOTES), `README.md`, `CHANGELOG.md`. Go-код не меняется: `DATABASE_*` уже читаются (`go-app/internal/config/config.go:329-348`, дефолт `ssl_mode=require` на `:896`).
+- **Scope:** `helm/amp/` (values, values-production, deployment, тесты, docs, NOTES), `README.md`, `CHANGELOG.md`; Go — только сборка DSN (`internal/database/postgres/config.go`) и её тест. Остальной Go не меняется: `DATABASE_*` уже читаются (`go-app/internal/config/config.go:329-348`, дефолт `ssl_mode=require` на `:896`).
 - **Security:** пароль только через `secretKeyRef`; никакого значения пароля в values/ConfigMap; в production AMP сам отклоняет `sslmode=disable` без флага (`config.go:1480`) — чарт флаг для внешней БД не ставит, поэтому `sslMode: disable` + `environment: production` упадёт на старте пода: это ожидаемо и должно быть написано в комментарии values.
-- **Compatibility:** `values.yaml` — аддитивно (по умолчанию `postgresql.enabled: true`, ничего не меняется). `values-production.yaml` — breaking, migration note обязателен. Стиль guard'ов — fail-loud на рендере (ADR-015, ADR-016).
+- **Compatibility:** `values.yaml` — аддитивно (по умолчанию `postgresql.enabled: true`, ничего не меняется; путь `configFile.content` продолжает работать). `values-production.yaml` — breaking, migration note обязателен. Стиль guard'ов — fail-loud на рендере (ADR-015, ADR-016).
 
 ## Discovery Notes
 

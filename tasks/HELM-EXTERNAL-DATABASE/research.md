@@ -20,8 +20,8 @@ Research level: 2 (light). Generation: single-pass — паттерны изве
   - Go-код уже читает `DATABASE_*` (viper `AutomaticEnv`, env выше config-файла); правка чарта — в одном блоке `deployment.yaml:94-116` плюс `NOTES.txt`.
   - **Предсуществующий баг:** DSN собирается `fmt.Sprintf` без экранирования (`internal/database/postgres/config.go:142-145`). Пароль с `/ # ?` или пробелом не парсится, с `%` молча превращается в другой пароль (замер, `evidence/dsn-password-escaping.txt`). Сгенерированные провайдером пароли такие символы содержат — прод-путь этой задачи упирается в баг.
   - Три render-теста и release-gate завязаны на то, что `values-production.yaml` рендерит встроенный PG; `check_secret_refs` требует, чтобы каждый `secretKeyRef` указывал на отрендеренный Secret.
-- Chose: Option A — строгий выбор БД (`postgresql.enabled: false` в `standard` ⇒ `externalDatabase.host` и `existingSecret` обязательны, без обхода через `configFile`). Экранирование DSN — **решение владельца** (§ 4).
-- Risks: `helm upgrade` прод-релиза с новым `values-production.yaml` удаляет StatefulSet встроенного PG и стартует AMP на пустой внешней БД — migration note и прогон «bundled → external» обязательны; пользователи README-пути `configFile.content` получат fail на рендере (релиза ещё не было, `v0.0.2` от 2025-12 этой схемы не знает).
+- Chose (решение владельца 2026-10-16): Option B — `externalDatabase.host` задан ⇒ `DATABASE_*` из values и Secret; пустой ⇒ поведение как сейчас (реквизиты из `configFile`). Экранирование DSN чиним в этой задаче (D-a).
+- Risks: `helm upgrade` прод-релиза с новым `values-production.yaml` удаляет StatefulSet встроенного PG и стартует AMP на пустой внешней БД — migration note и прогон «bundled → external» обязательны; при B путь `configFile.content` с паролем в ConfigMap остаётся рабочим, а `standard` без БД по-прежнему падает только на старте пода — README должен называть путь `externalDatabase` основным.
 - Next step: -> spec
 
 ## 1) Questions
@@ -48,7 +48,7 @@ Research level: 2 (light). Generation: single-pass — паттерны изве
 - **Constraints:**
   - пароль — только `secretKeyRef` (requirements § Security); флаг insecure-SSL в ветке внешней БД не рендерится;
   - fail-loud на рендере (ADR-015/016), текст ошибки называет ключ и обход;
-  - Go-код по requirements не меняется — нарушается, если владелец берёт фикс DSN (§ 4);
+  - Go-код меняется только в `DSN()` (решение D-a, § 4);
   - `verify-full` без `sslrootcert`: pgx берёт системные корни; CA managed-провайдера (RDS и т. п.) там обычно нет ⇒ `verify-full` к RDS без CA-бандла не заработает. Клиентские TLS-материалы — non-goal, записать в README.
 - **Unknowns:** snakeoil-сертификат и trusted-extensions — подтверждаются прогоном; время прогона на k3d (оценка ~1–1.5 ч вместе со сборкой образа).
 
@@ -80,22 +80,23 @@ Research level: 2 (light). Generation: single-pass — паттерны изве
 
 ## 4) Decision
 
-- **Chosen:** Option A.
-- **Why:**
-  - цель задачи — убрать пароль из ConfigMap; B/C оставляют его рабочим путём, и README будет рекламировать оба;
-  - релиза с `configFile`-путём не было (теги `v0.0.1`/`v0.0.2`, 2025-12), цена breaking минимальна; текст `fail` называет миграцию в `externalDatabase.*`;
-  - стиль ADR-015/016 — ошибка конфигурации видна на рендере, а не по `CrashLoopBackOff`;
-  - откат дешёвый: values-изменение, данные не трогаются.
-- **Открыто — решение владельца: экранирование DSN.**
+- **Chosen:** Option B — решение владельца 2026-10-16 (рекомендация research была A).
+- **Why (владелец):** не ломать существующий путь `configFile.content`; новый путь аддитивен.
+- **Следствия для spec:**
+  - `externalDatabase.host` — переключатель: задан ⇒ env `DATABASE_*` и `required` на `existingSecret`; пуст ⇒ шаблон рендерит то же, что сейчас;
+  - README/NOTES называют `externalDatabase` поддерживаемым путём, `configFile.content` — запасным, с явным предупреждением про пароль в ConfigMap;
+  - `values-production.yaml` всё равно должен не рендериться без внешней БД (story 2): там guard ставится на уровне файла — пустой `externalDatabase.host` при `postgresql.enabled: false` в production values. Как отличить production values от дефолта, решить в spec (в `ingress.yaml:3` записано, что ключа «production» нет; вариант — отдельный value-флаг `externalDatabase.required`, заданный только в `values-production.yaml`).
+- **Экранирование DSN — D-a, решение владельца 2026-10-16: чинить в этой задаче.** Варианты, которые рассматривались:
   - **D-a. Чинить в этой задаче.** `DSN()` через `url.URL{User: url.UserPassword(...)}` (+ `PathEscape` для имени БД), unit-тест на `/ # ? % пробел @ :`; ~15 строк Go + тест. Добавляет сигнал `X` (Go + чарт), tier остаётся Full. Плюс: прод-путь работает с паролем провайдера «как есть», а не после ручного подбора символов.
   - **D-b. Не чинить здесь.** Запись в `BUGS.md` (high, Go), в values/README — «пароль только из `[A-Za-z0-9@:._-]`» до фикса. Плюс: скоуп как в requirements. Минус: первый же пароль из RDS/Cloud SQL/Vault падает с ошибкой про «port», а `%` — с ошибкой аутентификации без подсказки.
-  - Рекомендация: **D-a** — дефект лежит ровно на пути, который эта задача объявляет поддерживаемым, и проверить его можно тем же прогоном на k3d (пароль с `/` и `%`).
+  - Выбрано **D-a**: дефект лежит ровно на пути, который задача объявляет поддерживаемым; проверяется тем же прогоном на k3d (пароль с `/` и `%`).
 
 ## 5) Spec Inputs
 
 - **API/contracts (values):** `externalDatabase.{host: "", port: 5432, database: "alert_history", username: "alert_history", sslMode: "require", existingSecret: "", existingSecretPasswordKey: "password"}` — имена по bitnami. Дефолты `database`/`username` — как у встроенного (`values.yaml:305`) или пустые с `required`: выбрать в spec. `sslMode` — enum-guard на рендере (6 значений из `postgres/config.go`). Env: `DATABASE_HOST`, `DATABASE_PORT` (строкой), `DATABASE_DATABASE`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` (`secretKeyRef`), `DATABASE_SSL_MODE`; `STORAGE_FILESYSTEM_PATH` и insecure-флаг — не рендерить. Lite игнорирует `externalDatabase` (как сейчас игнорирует `postgresql`).
 - **`values-production.yaml`:** `postgresql.enabled: false` + блок `externalDatabase` с пустыми `host`/`existingSecret` (render падает, пока оператор их не задаст — как `webConfig.existingSecret`); убрать устаревший блок про встроенный PG и `password: ""`. `tests/values-production-placeholders.yaml` += `externalDatabase.host`/`existingSecret`; `--set postgresql.password=…` в release-gate и тестах становится лишним — убрать или оставить безвредным (решить в spec).
-- **Render-тест** `helm/amp/tests/render-external-database.sh`: env и `secretKeyRef`; нет insecure-флага при `sslMode: disable`; `required` на host/secret; enum `sslMode`; lite не трогается; встроенный PG не изменился; production рендерит внешнюю БД без StatefulSet `amp-postgres`. Правки: `render-postgresql.sh` T1 (production → «нет StatefulSet»), `render-defaults-validate.sh` T1/T3 и `check_secret_refs` (разрешить ссылку на `externalDatabase.existingSecret`).
+- **Render-тест** `helm/amp/tests/render-external-database.sh`: env и `secretKeyRef`; нет insecure-флага при `sslMode: disable`; `required` на `existingSecret` при заданном `host`; пустой `host` ⇒ рендер как до задачи (нет `DATABASE_*`); enum `sslMode`; lite не трогается; встроенный PG не изменился; production рендерит внешнюю БД без StatefulSet `amp-postgres` и падает без неё. Правки: `render-postgresql.sh` T1 (production → «нет StatefulSet»), `render-defaults-validate.sh` T1 и `check_secret_refs` (разрешить ссылку на `externalDatabase.existingSecret`); T3 `external-db` при B остаётся зелёным.
+- **Go (D-a):** `internal/database/postgres/config.go` `DSN()` — `url.URL{Scheme: "postgres", User: url.UserPassword(user, pass), Host: net.JoinHostPort(host, port), Path: "/" + db, RawQuery: "sslmode=…"}`; `ConnectionString()` (keyword-формат) — проверить, используется ли, и либо экранировать, либо не трогать; `GetDatabaseURL()` в `internal/config/config.go:1488` — тот же дефект, проверить вызовы. Unit-тест: round-trip через `pgxpool.ParseConfig` для `/ # ? % пробел @ :` в пароле, пользователе и имени БД.
 - **Data model/migrations:** схема не меняется. Migration note для `values-production.yaml`: до `helm upgrade` — `pg_dump -Fc` встроенного, создать пустую БД и владельца на внешнем PG, `pg_restore` без `--clean` при AMP в 0 реплик, затем upgrade. PVC встроенного PG после upgrade остаётся (volumeClaimTemplate) — удалить руками после проверки.
 - **Rollout/rollback:** rollback — `helm rollback` на ревизию со встроенным PG; StatefulSet пересоздастся на старом PVC, если его не удалили.
 - **Прогон (k3d):** встроенный PG → данные (алерты, silence) → `pg_dump` → внешний `postgres:16` в docker-сети k3d с `ssl=on`, владелец БД не superuser → `pg_restore` без `--clean` → upgrade на `externalDatabase` (`sslMode: require`, Secret) → `/-/ready`, алерты и silences на месте, миграции не переприменены. При D-a — пароль с `/` и `%`. Команды — в runbook § «External PostgreSQL» вместо «not drilled»; raw-вывод — `evidence/`.
