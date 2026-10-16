@@ -139,7 +139,7 @@ kubectl -n amp wait --for=delete pod -l app.kubernetes.io/instance=amp,app.kuber
 kubectl -n amp exec amp-postgres-0 -c postgres -- sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > amp-move6.dump       # rc 0
 kubectl -n amp exec -i amp-postgres-0 -c postgres -- pg_restore -f /dev/null < amp-move6.dump                                         # rc 0, 88817 bytes
 helm upgrade amp helm/amp -n amp -f hpa-values.yaml -f move-values.yaml --set autoscaling.enabled=false --set replicaCount=0          # rev 2, +13 s
-# spec.replicas = 0, HPA object present
+# spec.replicas = 0; `kubectl get hpa` right after the upgrade (no --wait) still listed amp. Rev 2 renders no HPA, so Helm deletes it; not rechecked. Rev 3 renders it again
 pg_restore -l amp-move6.dump | grep -v -e 'EXTENSION.* pg_stat_statements' -e 'COMMENT - EXTENSION' > amp.list
 pg_restore --no-owner --no-privileges --single-transaction --exit-on-error -L amp.list -d "$PGDATABASE" amp-move6.dump               # rc 0, +22 s
 helm upgrade amp helm/amp -n amp -f hpa-values.yaml -f move-values.yaml                                                               # rev 3

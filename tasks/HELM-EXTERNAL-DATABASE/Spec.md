@@ -142,7 +142,7 @@ externalDatabase:
 4. `sslMode: disable` + `environment: production` → под падает на валидации AMP с её сообщением; ожидаемо, комментарий в values.
 5. `sslMode: verify-full` к managed PG без CA в образе → ошибка TLS при подключении; README: non-goal, используйте `require` или собственный образ с CA.
 6. `host` и `database:` в `configFile.content` одновременно → env побеждает (premise 1); README: «`externalDatabase` перекрывает `database:` в конфиге».
-7. `postgresql.enabled: false`, `host` пуст, `configFile.content` с `database` в flow-style или в кавычках → guard разбирает content через `fromYaml` и принимает; вложенный `database:`, `database: null` или невалидный YAML → `fail` (deep-review R4; первоначально regex, который такие формы не видел).
+7. `postgresql.enabled: false`, `host` пуст, `configFile.content` с `database` в flow-style или в кавычках → guard разбирает content через `fromYaml` и принимает; вложенный `database:`, `database: null`, пустой content → `fail`; невалидный YAML → `fail` с ошибкой разбора (deep-review R4, N3; первоначально regex, который такие формы не видел). Принято: `Database:` с заглавной `fail`, хотя viper ключи регистр не различает; `database: 5`/`[a]` проходят guard (проверяется истинность, не тип) — AMP упадёт на разборе конфига.
 8. БД подаётся post-renderer'ом/kustomize-патчем env → guard D3 падает; обход — `externalDatabase.host` (тот же env). Принимаем.
 9. `helm upgrade --reuse-values` со старого релиза без `externalDatabase` → в values ключа нет; шаблон обращается через `| default dict` (как `networkPolicy`), ветка внешней БД выключена.
 10. Порт строкой (`--set-string externalDatabase.port=5433`) → `quote` даёт `"5433"`, AMP парсит.

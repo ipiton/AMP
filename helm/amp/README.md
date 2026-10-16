@@ -106,10 +106,11 @@ The bundled PostgreSQL (`postgres:16.15`) is a single instance without replicati
 
 #### External PostgreSQL
 
-Create the database and an owner role for AMP (no superuser rights needed: AMP's migrations create only the trusted extensions `uuid-ossp` and `btree_gin`), then a Secret with the role's password in the release namespace. The chart never creates this Secret. Write the password to a file without a trailing newline and create the Secret from that file, so the password stays out of shell history and `--from-file` does not add a `\n` to it:
+Create the database and an owner role for AMP (no superuser rights needed: AMP's migrations create only the trusted extensions `uuid-ossp` and `btree_gin`), then a Secret with the role's password in the release namespace. The chart never creates this Secret. Create it from a file without a trailing newline: `--from-file` keeps a `\n` as part of the password, and `--from-literal` puts the password into shell history:
 
 ```bash
-printf '%s' "$AMP_DB_PASSWORD" > ./amp-db-password    # no trailing newline
+read -rs AMP_DB_PASSWORD                                # prompts; not echoed, not in history
+(umask 077; printf '%s' "$AMP_DB_PASSWORD" > ./amp-db-password)    # no trailing newline
 kubectl -n monitoring create secret generic amp-db --from-file=password=./amp-db-password
 rm ./amp-db-password
 ```
@@ -137,7 +138,7 @@ The chart passes these to AMP as `DATABASE_HOST/PORT/DATABASE/USERNAME/SSL_MODE`
 - Under `environment: production` AMP refuses `sslMode: disable` and passwords shorter than 12 characters. The chart never sets the insecure-SSL override for an external database.
 - `verify-ca`/`verify-full` check the server certificate against the image's system roots only. A provider CA (RDS and the like) is not among them, and the chart mounts no client TLS material: use `require`, or an image with that CA.
 - `externalDatabase` takes precedence over a `database:` section in `configFile.content` (environment variables win over the config file).
-- Fallback without a Secret: leave `externalDatabase.host` empty and put a top-level `database:` section into `configFile.content` (`configFile.enabled: true`). The password then sits in plain text in a ConfigMap. The render check parses `configFile.content` as YAML and looks for a top-level `database` key.
+- Fallback without a Secret: leave `externalDatabase.host` empty and put a top-level `database:` section into `configFile.content` (`configFile.enabled: true`). The password then sits in plain text in a ConfigMap. The render check parses `configFile.content` as YAML and looks for a top-level `database` key, spelled in lower case; invalid YAML fails the render with the parse error.
 - Moving an installation from the bundled to an external database: [docs/POSTGRESQL_RESTORE_GUIDE.md § 3c](docs/POSTGRESQL_RESTORE_GUIDE.md#3c-move-from-the-bundled-to-an-external-postgresql).
 
 Backup and restore with `pg_dump`/`pg_restore`, for both topologies: [docs/POSTGRESQL_RESTORE_GUIDE.md](docs/POSTGRESQL_RESTORE_GUIDE.md). The decision record is ADR-016 in `docs/06-planning/DECISIONS.md`.

@@ -153,7 +153,8 @@ Then point AMP at it: `helm upgrade` with `externalDatabase.database=<new databa
 `helm upgrade` to `postgresql.enabled: false` + `externalDatabase.*` removes the bundled StatefulSet and points AMP at the external database, **which starts empty**. Move the data while AMP is stopped. Prepare the external side first: an empty database owned by AMP's role, and a Secret with that role's password in the release namespace. Create the Secret from a file without a trailing newline: `--from-file` keeps a `\n` as part of the password, and `--from-literal` puts the password into shell history.
 
 ```sh
-printf '%s' "$AMP_DB_PASSWORD" > ./amp-db-password    # no trailing newline
+read -rs AMP_DB_PASSWORD                                # prompts; not echoed, not in history
+(umask 077; printf '%s' "$AMP_DB_PASSWORD" > ./amp-db-password)    # no trailing newline
 kubectl -n <namespace> create secret generic <secret> --from-file=password=./amp-db-password
 rm ./amp-db-password
 ```
@@ -187,7 +188,7 @@ kubectl -n <namespace> rollout status deploy/<fullname> --timeout=300s
 kubectl -n <namespace> get deploy/<fullname> -o jsonpath='{.spec.replicas}'    # must not be 0
 ```
 
-- `rollout status` also succeeds at 0 replicas, hence the last check. With HPA the chart renders no `replicas`, so the upgrade drops the `0` of the previous step and the Deployment comes back with 1 replica, then the HPA scales it. If it still shows `0`, run `kubectl -n <namespace> scale deploy/<fullname> --replicas=<N>`.
+- `rollout status` also succeeds at 0 replicas, hence the last check. With HPA the chart renders no `replicas`, so the upgrade drops the `0` of the previous step and the Deployment comes back with 1 replica (run with `minReplicas: 1`); the HPA then keeps it within `minReplicas`–`maxReplicas`. If it still shows `0`, run `kubectl -n <namespace> scale deploy/<fullname> --replicas=<N>`.
 - Check as in section 4, with the `psql` queries run against the external server. AMP's connections should show `ssl = t` in `pg_stat_ssl`.
 - The upgrade does not delete the bundled database's PVC `postgres-data-<fullname>-postgres-0`. Delete it yourself once the external database is verified. Until then, `helm rollback` to the revision with the bundled PostgreSQL brings it back on that PVC with the data as of the move. Anything AMP wrote to the external database after the move does not come back.
 - If `pg_restore` fails, the external database stays empty. Do not scale AMP up. `helm rollback` returns to the bundled database.
