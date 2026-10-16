@@ -106,10 +106,12 @@ The bundled PostgreSQL (`postgres:16.15`) is a single instance without replicati
 
 #### External PostgreSQL
 
-Create the database and an owner role for AMP (no superuser rights needed: AMP's extensions `uuid-ossp`, `btree_gin` and `pg_trgm` are trusted), then a Secret with the role's password in the release namespace. The chart never creates this Secret:
+Create the database and an owner role for AMP (no superuser rights needed: AMP's migrations create only the trusted extensions `uuid-ossp` and `btree_gin`), then a Secret with the role's password in the release namespace. The chart never creates this Secret. Write the password to a file without a trailing newline and create the Secret from that file, so the password stays out of shell history and `--from-file` does not add a `\n` to it:
 
 ```bash
+printf '%s' "$AMP_DB_PASSWORD" > ./amp-db-password    # no trailing newline
 kubectl -n monitoring create secret generic amp-db --from-file=password=./amp-db-password
+rm ./amp-db-password
 ```
 
 ```yaml
@@ -120,18 +122,22 @@ externalDatabase:
   port: 5432
   database: amp
   username: amp
-  sslMode: require          # disable | allow | prefer | require | verify-ca | verify-full
+  sslMode: require          # disable | require | verify-ca | verify-full
   existingSecret: amp-db
   existingSecretPasswordKey: password
 ```
 
-The chart passes these to AMP as `DATABASE_HOST/PORT/DATABASE/USERNAME/SSL_MODE`, and `DATABASE_PASSWORD` comes from the Secret through `secretKeyRef`. The render fails if `host` is set without `database`, `username` or `existingSecret`, if `sslMode` is not one of the six values, or if `postgresql.enabled` is still `true`.
+The chart passes these to AMP as `DATABASE_HOST/PORT/DATABASE/USERNAME/SSL_MODE`, and `DATABASE_PASSWORD` comes from the Secret through `secretKeyRef`. The render fails if `host` is set without `database`, `username` or `existingSecret`, if `sslMode` is not one of the four values AMP accepts (libpq's `allow` and `prefer` are not), or if `postgresql.enabled` is still `true`.
 
 - A missing Secret or key is not caught at render time (the chart does not read the cluster): the pod stays in `CreateContainerConfigError`.
+- The password reaches AMP as an environment variable, read at pod start. After changing the Secret, run `kubectl -n <namespace> rollout restart deploy/<fullname>`.
+- With `externalSecrets.enabled`, the chart's ExternalSecret maps database keys only for the bundled PostgreSQL. Create your own ExternalSecret whose target Secret is `externalDatabase.existingSecret`.
+- Each AMP pod opens up to 25 connections (`database.max_connections` default). Size `max_connections` on the server for the HPA maximum: `values-production.yaml` allows 20 replicas, up to 500 connections. Small managed tiers often allow about 100.
+- Monitoring the external database (alerts, exporter) is on the operator's side: the chart's PostgreSQL rules and exporter cover only the bundled one.
 - Under `environment: production` AMP refuses `sslMode: disable` and passwords shorter than 12 characters. The chart never sets the insecure-SSL override for an external database.
 - `verify-ca`/`verify-full` check the server certificate against the image's system roots only. A provider CA (RDS and the like) is not among them, and the chart mounts no client TLS material: use `require`, or an image with that CA.
 - `externalDatabase` takes precedence over a `database:` section in `configFile.content` (environment variables win over the config file).
-- Fallback without a Secret: leave `externalDatabase.host` empty and put a top-level `database:` section into `configFile.content` (`configFile.enabled: true`). The password then sits in plain text in a ConfigMap. The render check only finds `database:` at the start of a line; flow-style or quoted keys are not recognized.
+- Fallback without a Secret: leave `externalDatabase.host` empty and put a top-level `database:` section into `configFile.content` (`configFile.enabled: true`). The password then sits in plain text in a ConfigMap. The render check parses `configFile.content` as YAML and looks for a top-level `database` key.
 - Moving an installation from the bundled to an external database: [docs/POSTGRESQL_RESTORE_GUIDE.md § 3c](docs/POSTGRESQL_RESTORE_GUIDE.md#3c-move-from-the-bundled-to-an-external-postgresql).
 
 Backup and restore with `pg_dump`/`pg_restore`, for both topologies: [docs/POSTGRESQL_RESTORE_GUIDE.md](docs/POSTGRESQL_RESTORE_GUIDE.md). The decision record is ADR-016 in `docs/06-planning/DECISIONS.md`.

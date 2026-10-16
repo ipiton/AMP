@@ -46,12 +46,12 @@ based_on:
 
 | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|
-| env `DATABASE_*` перекрывает `database.*` из config-файла | `config.go:671-672,838-839` `AutomaticEnv` + `SetEnvKeyReplacer`; viper ставит env выше config | code-read | `externalDatabase` молча проигрывает старому `database:` в `configFile` — ловится прогоном D9 (там `configFile` из production values) |
+| env `DATABASE_*` перекрывает `database.*` из config-файла | `config.go:671-672,838-839` `AutomaticEnv` + `SetEnvKeyReplacer`; прогон на k3d — `evidence/k3d-external-drill.md` § 4 | measured | `externalDatabase` молча проигрывает старому `database:` в `configFile` — ловится прогоном D9 (там `configFile` из production values) |
 | Других каналов передать БД поду, кроме `DATABASE_*` в `deployment.yaml` и `database:` в config-файле, у чарта нет | grep `extraEnv\|envFrom` по `values.yaml`/`deployment.yaml`: только `envFrom` на `<fullname>-config`, в `configmap.yaml` нет `DATABASE` | call-path-traced | guard D3 ломает установку, которая подаёт БД иначе (post-renderer/kustomize-патч env) — описано в Edge Cases |
 | Пул и миграции строят подключение из одного `DSN()` | `internal/database/postgres/pool.go:174`, `internal/database/migrations.go:185`; `PostgresConfigFrom` `reloadable_database.go:31-38`; grep `ConnectionString()`/`GetDatabaseURL()` вне тестов — только `internal/config/example.go:94` | call-path-traced | фикс D6 не покрывает какой-то путь — Go-тест и прогон с паролем `/` `%` |
 | Пароль с `/ # ? пробел` не парсится, с `%` портится | `evidence/dsn-password-escaping.txt` (pgx v5.9.2) | measured | — |
 | `postgres:16` поднимает TLS со snakeoil-сертификатом; владелец БД без superuser создаёт `uuid-ossp` и `btree_gin` | `evidence/pg16-tls-nonsuperuser.txt` (16.15) | measured | — |
-| Helm `regexMatch "(?m)^database:"` различает ключ верхнего уровня и вложенный | проба `helm template` (Helm v4.3.0): верхний — `true`, вложенный — `false` | measured | guard D3 ошибается на легальной конфигурации |
+| Helm `fromYaml` на `configFile.content` даёт ключ `database` только верхнего уровня, в любом стиле YAML (block, flow, кавычки) | проба `helm template` (Helm v4.3.0): block/flow/quoted — рендер; вложенный, `null`, пустой, `database:` внутри строки, невалидный YAML — `fail` (deep-review R4) | measured | guard D3 ошибается на легальной конфигурации |
 | `values-production.yaml` содержит `configFile.enabled: true` без `database:` | `values-production.yaml:451-` | code-read | production рендерится без БД — T-ext-10 |
 
 ## Target Design
@@ -70,7 +70,7 @@ externalDatabase:
   port: 5432
   database: ""                    # required, если host задан
   username: ""                    # required, если host задан
-  sslMode: require                # disable | allow | prefer | require | verify-ca | verify-full
+  sslMode: require                # disable | require | verify-ca | verify-full (что принимает PostgresConfig.Validate())
   existingSecret: ""              # required, если host задан; чарт этот Secret не создаёт
   existingSecretPasswordKey: password
 ```
@@ -97,7 +97,7 @@ externalDatabase:
 |---|---|
 | `postgresql.enabled` и `externalDatabase.host` одновременно | «выбери одно: `postgresql.enabled=false` для внешней БД» |
 | `host` задан, пуст `existingSecret` / `database` / `username` | соответствующий ключ; для Secret — что чарт его не создаёт и какой ключ нужен |
-| `sslMode` вне шести значений | ключ и список |
+| `sslMode` вне четырёх значений, которые принимает AMP | ключ и список |
 | `postgresql.enabled: false`, `host` пуст, и нет `configFile.enabled` с `database:` верхнего уровня в `configFile.content` | `externalDatabase.host` (рекомендуемый путь) и `database:` в `configFile.content` (пароль в ConfigMap) |
 
 ## Data Model / Migrations
@@ -116,7 +116,7 @@ externalDatabase:
 - **D6** `go-app/internal/database/postgres/config.go` `DSN()` — `url.URL{Scheme: "postgres", User: url.UserPassword(User, Password), Host: net.JoinHostPort(Host, strconv.Itoa(Port)), Path: "/" + Database, RawQuery: "sslmode=" + url.QueryEscape(SSLMode)}.String()`. Для обычных значений строка совпадает с прежней (`TestPostgresConfig_DSN` остаётся зелёным). `ConnectionString()` и `config.GetDatabaseURL()` в рантайме не вызываются — не трогаем, запись в TECH-DEBT (тот же дефект).
 - **D7** тесты: новый `helm/amp/tests/render-external-database.sh` (стиль `render-defaults-validate.sh`: `render`/`render_fails`/`assert_count`); правки `render-postgresql.sh` T1 (production: нет StatefulSet `amp-postgres`, нет `postgres:16.15`), `render-defaults-validate.sh` T1 (production: флага нет, `DATABASE_SSL_MODE=require`) и `check_secret_refs` (ссылка на Secret, которого нет в рендере, допустима только если это `externalDatabase.existingSecret` из args), T3 `external-db` — рендер с `configFile`-путём или ожидание `fail` (выбрать при реализации, смысл теста — «флага нет без встроенного PG»); Go: `TestPostgresConfig_DSN_EscapesCredentials` — round-trip через `pgxpool.ParseConfig` для `/ # ? % пробел @ :` в пароле, `@ :` в пользователе, `/` и пробел в имени БД.
 - **D8** docs: `helm/amp/README.md` (баннер `:15`, § PostgreSQL `:107` — пример `externalDatabase` + `kubectl create secret`, `configFile` как запасной путь с предупреждением), `docs/MIGRATION_QUICK_START.md:24`, комментарий в `values-production.yaml`, `CHANGELOG.md` `[Unreleased]` (Added + Breaking/migration note + Fixed для DSN).
-- **D9** прогон на k3d (см. Rollout) → `POSTGRESQL_RESTORE_GUIDE.md` § «External PostgreSQL» (команды ровно из прогона, без «not drilled»), строка 9; raw-вывод — `evidence/k3d-external-drill.txt`.
+- **D9** прогон на k3d (см. Rollout) → `POSTGRESQL_RESTORE_GUIDE.md` § «External PostgreSQL» (команды ровно из прогона, без «not drilled»), строка 9; raw-вывод — `evidence/k3d-external-drill.md`.
 
 ## Security Design
 
@@ -142,7 +142,7 @@ externalDatabase:
 4. `sslMode: disable` + `environment: production` → под падает на валидации AMP с её сообщением; ожидаемо, комментарий в values.
 5. `sslMode: verify-full` к managed PG без CA в образе → ошибка TLS при подключении; README: non-goal, используйте `require` или собственный образ с CA.
 6. `host` и `database:` в `configFile.content` одновременно → env побеждает (premise 1); README: «`externalDatabase` перекрывает `database:` в конфиге».
-7. `postgresql.enabled: false`, `host` пуст, `configFile.content` с `database:` не на верхнем уровне (flow-style, кавычки `"database":`) → guard ложно падает; обход — `externalDatabase.host`. Записать в README одной фразой.
+7. `postgresql.enabled: false`, `host` пуст, `configFile.content` с `database` в flow-style или в кавычках → guard разбирает content через `fromYaml` и принимает; вложенный `database:`, `database: null` или невалидный YAML → `fail` (deep-review R4; первоначально regex, который такие формы не видел).
 8. БД подаётся post-renderer'ом/kustomize-патчем env → guard D3 падает; обход — `externalDatabase.host` (тот же env). Принимаем.
 9. `helm upgrade --reuse-values` со старого релиза без `externalDatabase` → в values ключа нет; шаблон обращается через `| default dict` (как `networkPolicy`), ветка внешней БД выключена.
 10. Порт строкой (`--set-string externalDatabase.port=5433`) → `quote` даёт `"5433"`, AMP парсит.

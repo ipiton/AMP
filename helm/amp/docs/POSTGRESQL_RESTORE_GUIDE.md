@@ -6,7 +6,7 @@ The decision behind it is ADR-016 in `docs/06-planning/DECISIONS.md`. In short:
 - **Production:** use an external PostgreSQL with backups, PITR and HA on the operator's side: a managed service with PITR, or CloudNativePG with barman/S3. Use the provider's backup/PITR tooling first; this runbook is the portable fallback.
 - **Bundled PostgreSQL** (`postgresql.enabled: true`) is for dev/pilot: a single instance, **no automated backups**, no PITR, no PDB. If its data matters to you, schedule the backup below yourself and keep the dumps outside the cluster.
 
-The commands in sections 2–4 were run end to end on a k3d cluster with the bundled `postgres:16.15` and the chart's default HPA: a rollback of a live installation and a rebuild after deleting the namespace. In both cases the data and silences came back and migrations were not re-applied. The rebuild took under a minute with a small database. "External PostgreSQL" and 3c were run on k3d against an external `postgres:16.15` with TLS (`sslmode=require`) and an owner role without superuser rights. That covered the move from the bundled database, a rollback to it, and a restore both into a fresh database and into one with provider-installed extensions.
+The commands in sections 2–3b and 4 were run end to end on a k3d cluster with the bundled `postgres:16.15` and the chart's default HPA: a rollback of a live installation and a rebuild after deleting the namespace. In both cases the data and silences came back and migrations were not re-applied. The rebuild took under a minute with a small database. "External PostgreSQL" and 3c were run on k3d against an external `postgres:16.15` with TLS (`sslmode=require`) and an owner role without superuser rights. That covered the move from the bundled database (with HPA off and with HPA on), a rollback to it, and a restore both into a fresh database and into one with provider-installed extensions.
 
 ## 1. Placeholders and conventions
 
@@ -144,16 +144,18 @@ pg_restore --no-owner --no-privileges --single-transaction --exit-on-error -L am
 
 Then point AMP at it: `helm upgrade` with `externalDatabase.database=<new database>`, and scale AMP back.
 
-- **No `--clean`.** It has to drop AMP's extensions (`uuid-ossp`, `btree_gin`, `pg_trgm`), and only their owner can. On a managed service they usually belong to the provider's admin role, so `--clean` fails and the single transaction rolls everything back.
+- **No `--clean`.** It has to drop the dump's extensions, and only their owner can. AMP's migrations create `uuid-ossp` and `btree_gin`; dumps of the bundled PostgreSQL also contain `pg_trgm`, created by its init script. On a managed service they usually belong to the provider's admin role, so `--clean` fails and the single transaction rolls everything back.
 - **The `-L` list** skips two kinds of entries. One is `pg_stat_statements`, which only a superuser can create; dumps of the bundled PostgreSQL contain it, and AMP does not need it. The other is comments on extensions, which only the extension's owner may set: without that filter, a restore fails on a database where the provider pre-installed the extensions. Extensions that are missing are created by the restoring role. `uuid-ossp`, `btree_gin` and `pg_trgm` are trusted extensions, so the database owner may create them.
 - **`--no-privileges`** drops the source's `GRANT`s. A dump of the bundled database grants to its role `alert_history`, which does not exist on another server.
 
 ### 3c. Move from the bundled to an external PostgreSQL
 
-`helm upgrade` to `postgresql.enabled: false` + `externalDatabase.*` removes the bundled StatefulSet and points AMP at the external database, **which starts empty**. Move the data while AMP is stopped. Prepare the external side first: an empty database owned by AMP's role, and a Secret with that role's password in the release namespace:
+`helm upgrade` to `postgresql.enabled: false` + `externalDatabase.*` removes the bundled StatefulSet and points AMP at the external database, **which starts empty**. Move the data while AMP is stopped. Prepare the external side first: an empty database owned by AMP's role, and a Secret with that role's password in the release namespace. Create the Secret from a file without a trailing newline: `--from-file` keeps a `\n` as part of the password, and `--from-literal` puts the password into shell history.
 
 ```sh
-kubectl -n <namespace> create secret generic <secret> --from-file=password=<file holding the password>
+printf '%s' "$AMP_DB_PASSWORD" > ./amp-db-password    # no trailing newline
+kubectl -n <namespace> create secret generic <secret> --from-file=password=./amp-db-password
+rm ./amp-db-password
 ```
 
 Then, with your values file switched to the external database (`postgresql.enabled: false`, `externalDatabase.host/database/username/existingSecret`):
@@ -182,12 +184,14 @@ pg_restore --no-owner --no-privileges --single-transaction --exit-on-error -L am
 # back to your values
 helm upgrade <release> <chart> -n <namespace> -f <your-values.yaml>
 kubectl -n <namespace> rollout status deploy/<fullname> --timeout=300s
+kubectl -n <namespace> get deploy/<fullname> -o jsonpath='{.spec.replicas}'    # must not be 0
 ```
 
+- `rollout status` also succeeds at 0 replicas, hence the last check. With HPA the chart renders no `replicas`, so the upgrade drops the `0` of the previous step and the Deployment comes back with 1 replica, then the HPA scales it. If it still shows `0`, run `kubectl -n <namespace> scale deploy/<fullname> --replicas=<N>`.
 - Check as in section 4, with the `psql` queries run against the external server. AMP's connections should show `ssl = t` in `pg_stat_ssl`.
 - The upgrade does not delete the bundled database's PVC `postgres-data-<fullname>-postgres-0`. Delete it yourself once the external database is verified. Until then, `helm rollback` to the revision with the bundled PostgreSQL brings it back on that PVC with the data as of the move. Anything AMP wrote to the external database after the move does not come back.
 - If `pg_restore` fails, the external database stays empty. Do not scale AMP up. `helm rollback` returns to the bundled database.
-- **Helm 4:** chart versions before this change hard-coded the Deployment's `deployment.kubernetes.io/revision` annotation. A `helm rollback` to a revision rendered by such a version fails with `conflict with "k3s" … deployment.kubernetes.io/revision` (the field manager's name depends on the distribution). Run it once with `--force-conflicts`; the Deployment controller resets the annotation itself.
+- **Helm 4:** chart versions before this change hard-coded the Deployment's `deployment.kubernetes.io/revision` annotation. A `helm rollback` to a revision rendered by such a version fails with `conflict with "k3s" … deployment.kubernetes.io/revision` (the field manager's name depends on the distribution). Run it once with `--force-conflicts`; the Deployment controller resets the annotation itself. Only do this if the error names this annotation alone: `--force-conflicts` takes over every conflicting field.
 
 ## 4. Verify
 

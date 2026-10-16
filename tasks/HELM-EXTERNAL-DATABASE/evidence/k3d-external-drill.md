@@ -120,3 +120,38 @@ Release history (rev / status / description):
 9 superseded Upgrade complete
 10 deployed Upgrade complete
 ```
+
+## 9. Third pass — § 3c with HPA and the final runbook text (deep-review R5, R6, R9)
+
+Date: 2026-10-16. Fresh k3d `amp-extdb` (same setup as above), image `amp:extdb-drill` rebuilt from `ef30631` plus the review fixes in the working tree (sslMode enum, `fromYaml` guard, IPv6 in `DSN()`). Fresh `postgres:16.15` container with TLS, role `amp` (`rolsuper=f, rolcreatedb=f, rolcreaterole=f`), empty database `amp6` owned by `amp`. Password `<redacted>`, 23 characters containing `/ % # ? space @ :` and `%41`.
+
+Values (`hpa-values.yaml`): `autoscaling.enabled: true`, `minReplicas: 1`, `maxReplicas: 2`, local image, no prometheus-operator CRDs (as above); nothing else overridden. External DB values: `move-values.yaml` with `database: amp6`.
+
+Source (rev 1, bundled, HPA on): seeded 3 firing, 2 resolved, 1 silence `86e301d7-…` on `alertname=drill-silenced`, then `DrillBeforeMove`. Counts 6 / 1 / 0, goose max `20260423000000`, 10 rows, max `tstamp 14:35:36`.
+
+The § 3c sequence as written in the runbook:
+
+```sh
+printf '%s' "$PASSWORD" > pwfile; kubectl -n amp create secret generic amp-extdb --from-file=password=pwfile; rm pwfile
+# Secret value 23 bytes = the password, no trailing newline
+kubectl -n amp scale deploy/amp --replicas=0
+kubectl -n amp wait --for=delete pod -l app.kubernetes.io/instance=amp,app.kubernetes.io/component=application --timeout=120s   # +9 s
+kubectl -n amp exec amp-postgres-0 -c postgres -- sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > amp-move6.dump       # rc 0
+kubectl -n amp exec -i amp-postgres-0 -c postgres -- pg_restore -f /dev/null < amp-move6.dump                                         # rc 0, 88817 bytes
+helm upgrade amp helm/amp -n amp -f hpa-values.yaml -f move-values.yaml --set autoscaling.enabled=false --set replicaCount=0          # rev 2, +13 s
+# spec.replicas = 0, HPA object present
+pg_restore -l amp-move6.dump | grep -v -e 'EXTENSION.* pg_stat_statements' -e 'COMMENT - EXTENSION' > amp.list
+pg_restore --no-owner --no-privileges --single-transaction --exit-on-error -L amp.list -d "$PGDATABASE" amp-move6.dump               # rc 0, +22 s
+helm upgrade amp helm/amp -n amp -f hpa-values.yaml -f move-values.yaml                                                               # rev 3
+kubectl -n amp rollout status deploy/amp --timeout=300s                                                                               # +45 s total
+```
+
+The two-pattern filter excluded 5 entries: `EXTENSION - pg_stat_statements` and the `COMMENT - EXTENSION` entries of `btree_gin`, `pg_stat_statements`, `pg_trgm`, `uuid-ossp`.
+
+HPA after the last `helm upgrade` (R5): `spec.replicas` = 1, `readyReplicas` = 1, the same 20 s later. HPA conditions `AbleToScale=True ReadyForNewScale`, `ScalingActive=True ValidMetricFound`, `ScalingLimited=False DesiredWithinRange`. The upgrade back to HPA values drops the `replicas: 0` the previous revision rendered, so the Deployment does not stay at 0 and the HPA is not `ScalingDisabled`.
+
+Checks (runbook § 4): `/-/ready` OK; alerts `DrillBeforeMove, DrillFiring1..3` active; silence `86e301d7-…` active, rehydrated (`silences: 1`); `drill-silenced` → 200, 0 rows; `DrillPostMove` → 200, stored; counts 7 / 1 / 0; goose max `20260423000000`, 10 rows, max `tstamp 14:35:36` (no migration re-applied); pod env `DATABASE_HOST=192.168.97.4`, `DATABASE_DATABASE=amp6`, `DATABASE_USERNAME=amp`, `DATABASE_SSL_MODE=require`, `DATABASE_PASSWORD` from `amp-extdb/password`; AMP log `Connecting to PostgreSQL` with host `192.168.97.4`, `ssl_mode: require`; 0 `NOT encrypted` lines; AMP backends `pg_stat_ssl` `t | TLSv1.3 | 6`; PVC `postgres-data-amp-postgres-0` still `Bound`.
+
+Release history: `1 superseded Install`, `2 superseded Upgrade`, `3 deployed Upgrade` — no conflicts.
+
+Cleanup: `k3d cluster delete amp-extdb`, container removed; no `amp-extdb` cluster, container or kubeconfig context left; `kubectl config current-context` = `k3d-sema-dev`.

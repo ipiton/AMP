@@ -60,7 +60,12 @@ podDisruptionBudget:
 # `helm upgrade` of such a release with this file removes the bundled
 # StatefulSet (its PVC stays) and points AMP at the external database, which
 # starts EMPTY. Move the data first: CHANGELOG [Unreleased] and
-# helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md "External PostgreSQL".
+# helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md § 3c. To stay on the bundled
+# database for now, keep your previous `postgresql:` block (it is not the
+# base values.yaml one: password, 50Gi volume, resources, networkPolicy).
+#
+# Connections: 25 per pod (database.max_connections default) × HPA
+# maxReplicas 20 = up to 500. Size max_connections on the server for that.
 postgresql:
   enabled: false
 
