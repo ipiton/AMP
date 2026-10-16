@@ -20,7 +20,7 @@
 - **Issue:** `PostgresConfig.Validate()` принимает только `disable|require|verify-ca|verify-full`. `buildPool` вызывает его до `DSN()` и при старте, и при reload, так что `allow`/`prefer` дают `invalid SSL mode` и CrashLoop. Чарт и документация обещают 6 режимов. Если бы AMP их принимал, `allow`/`prefer` в production молча шли бы без TLS: проверка `config.go:1480` отсекает только `disable`.
 - **Recommendation:** сузить enum чарта, сообщение `fail`, комментарий values, README и CHANGELOG до четырёх значений, которые принимает AMP. Рантайм не трогать.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `1789ff2`, docs `a567e43`
 - **Follow-up:** n/a
 
 ### R2 — Совет «остаться на встроенном PG» в migration note молча ослабляет production-релиз (A-C1)
@@ -35,7 +35,7 @@
   Перепроверено: `helm template … -f values-production.yaml -f placeholders --set postgresql.enabled=true --set externalDatabase.host=` даёт `c2VjdXJlX3Bhc3N3b3JkXzEyMw==` ×3, `storage: "10Gi"`. Release-gate всегда передаёт `--set postgresql.password`, поэтому не ловит.
 - **Recommendation:** переписать совет в CHANGELOG и комментарии `values-production.yaml`: «остаться» = вернуть прежний блок `postgresql:` из `values-production.yaml` предыдущей версии (минимум `password` через `--set`/Secret, `persistence.size: 50Gi`, `resources`, `networkPolicy.enabled: true`), с командой `git show`. Guard на слабый дефолт пароля — отдельно.
 - **Disposition:** fix-here (docs); guard на `secure_password_123` под production — defer-tech-debt
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** TECH-DEBT `HELM-CHART-GAPS` (слабый литерал уже там) — дополнить в finalize
 
 ### R3 — IPv6-хост в скобках (`[::1]`) раньше работал, после `net.JoinHostPort` ломается (B-F2)
@@ -44,7 +44,7 @@
 - **Issue:** `JoinHostPort("[::1]", …)` → `[[::1]]:5432`, pgx: `invalid IP-literal`. Старый `fmt.Sprintf` хост `[::1]` разбирал. Голый `::1` раньше был сломан, теперь работает. Чарт передаёт значение как есть.
 - **Recommendation:** снимать внешние скобки перед `JoinHostPort`; кейс — в Go-тест Phase 7.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `7a274f0`
 - **Follow-up:** n/a
 
 ### R4 — Guard «БД нет нигде» — текстовый regex, ошибается в обе стороны (A-C2)
@@ -53,7 +53,7 @@
 - **Issue:** `database: null` и строка `database:` в начале строки внутри многострочного quoted-значения проходят guard (AMP потом уходит на `localhost:5432`). Flow-style и ключ в кавычках ложно падают (Edge Case 7). `fromYaml` разбирает все эти случаи правильно (проверено пробой ревьюера A).
 - **Recommendation:** `(fromYaml (.Values.configFile.content | default "")).database` — истинно только для настоящего непустого ключа верхнего уровня. Убрать оговорку из README и Edge Case 7.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `1789ff2`, docs `a567e43`
 - **Follow-up:** n/a
 
 ### R5 — § 3c с HPA (дефолт и `values-production`) не прогонялся; последний шаг может оставить AMP на 0 реплик (B-F3)
@@ -62,7 +62,7 @@
 - **Issue:** в прогоне было `autoscaling.enabled: false`. При HPA чарт не рендерит `spec.replicas`; останется ли `0` от `kubectl scale`, зависит от managedFields под SSA. HPA при 0 — `ScalingDisabled`, а `rollout status` при 0 репликах успешен. Шапка гайда («with the chart's default HPA») к 3c не относится.
 - **Recommendation:** в конце 3c, как в 3a, явный `kubectl scale deploy/<fullname> --replicas=<N>` или проверка `.spec.replicas`; поправить шапку. Желательно прогнать 3c с HPA.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R6 — Создание Secret: пароль в shell history (`--from-literal`) и незаметный `\n` (`--from-file`) (A-D1, B-F5)
@@ -71,7 +71,7 @@
 - **Issue:** `--from-literal` противоречит правилу runbook «never on the command line». Для `--from-file` не сказано, что файл не должен кончаться переводом строки. AMP пароль не обрезает, получается ошибка аутентификации, которую трудно распознать.
 - **Recommendation:** везде `--from-file` + «файл без завершающего перевода строки (`printf '%s'`)».
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`, комментарий values.yaml в `1789ff2`
 - **Follow-up:** n/a
 
 ### R7 — Пул на под × HPA против `max_connections` внешней БД нигде не описан (B-F6)
@@ -80,7 +80,7 @@
 - **Issue:** 25 соединений на под × production `maxReplicas: 20` = до 500. У малых managed-тарифов лимит ~100. NOTES это считает, а docs внешней БД — нет.
 - **Recommendation:** одна строка в README и в `values-production.yaml`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R8 — Путь ESO для пароля внешней БД не описан (A-D2)
@@ -89,7 +89,7 @@
 - **Issue:** при `externalSecrets.enabled` ExternalSecret чарта ключи БД маппит только при `postgresql.enabled`. Указать `existingSecret` на `<fullname>-secrets` — `CreateContainerConfigError`.
 - **Recommendation:** строка в README: с ESO заведите свой ExternalSecret, целевой Secret которого — `externalDatabase.existingSecret`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R9 — Финальный фильтр `-L` не прогонялся в сквозном переносе (B-F4)
@@ -98,7 +98,7 @@
 - **Issue:** в сквозном проходе (evidence § 6) был фильтр с одним `-e`. Фильтр с двумя `-e` проверен отдельно на `amp4`/`amp5` (§ 7). На потерю данных фильтр проверен ревьюером: TABLE/TABLE DATA/INDEX не задевает.
 - **Recommendation:** если 3c будут перепрогонять (R5), прогнать с финальным фильтром; иначе одной фразой в evidence указать, где проверен финальный вариант.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R10 — `pg_trgm` назван расширением AMP (B-F7)
@@ -106,7 +106,7 @@
 - **Location:** README § External PostgreSQL; runbook «No `--clean`»
 - **Issue:** миграции создают только `uuid-ossp` и `btree_gin`; `pg_trgm` создаёт init-скрипт встроенного PG и приходит только с его дампом.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R11 — Комментарий MIGRATION в `values-production.yaml` ведёт не в тот раздел runbook (A-D4, B-F8)
@@ -114,7 +114,7 @@
 - **Location:** `helm/amp/values-production.yaml:62-63`
 - **Issue:** ссылка на § «External PostgreSQL», а перенос — § 3c.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R12 — Spec отстаёт от прогона (B-F9)
@@ -122,7 +122,7 @@
 - **Location:** `tasks/HELM-EXTERNAL-DATABASE/Spec.md` — Design Premises, Component Architecture D9
 - **Issue:** premise «env перекрывает config-файл» помечен `code-read`, хотя прогон его измерил (evidence § 4). D9 ссылается на `k3d-external-drill.txt`, файл называется `.md`.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R13 — Ротация пароля и оговорка к `--force-conflicts` (A-D5, B-F10)
@@ -133,7 +133,7 @@
   - `--force-conflicts` забирает все конфликтующие поля — применять, только если в ошибке одна эта аннотация;
   - `helm test` для внешней БД нет.
 - **Disposition:** fix-here (две фразы); `helm test` для внешней БД — defer-backlog
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** BACKLOG — в finalize
 
 ### R14 — В README нет фразы о мониторинге, обещанной Spec § Observability (A-D3)
@@ -141,7 +141,7 @@
 - **Location:** README § External PostgreSQL
 - **Issue:** PrometheusRules и exporter есть только у встроенного PG; для внешней БД алерты на стороне оператора — Spec обещал это одной фразой.
 - **Disposition:** fix-here
-- **Status:** open
+- **Status:** fixed — `a567e43`
 - **Follow-up:** n/a
 
 ### R15 — Нестрогая обработка странных входных значений (A-C3)
