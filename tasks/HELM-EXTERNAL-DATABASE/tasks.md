@@ -89,8 +89,8 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 
 ## Phase 8: Testing
 
-- [ ] **8.1** `GOTOOLCHAIN=go1.26.9 scripts/release-gate.sh` — все шаги PASS (helm-tests подхватывает новый скрипт). <!-- depends: 7.1-7.3 | verify: RESULT: PASS; вывод — evidence/release-gate.txt (без хвостовых пробелов) -->
-- [ ] **8.2** `git diff --check main...HEAD`, нет `_, _ :=` в диффе. <!-- depends: 8.1 | verify: пусто -->
+- [x] **8.1** _(RESULT: PASS, 11 шагов @ 2fc4be8; helm-tests включает render-external-database.sh — evidence/release-gate.txt)_ `GOTOOLCHAIN=go1.26.9 scripts/release-gate.sh` — все шаги PASS (helm-tests подхватывает новый скрипт). <!-- depends: 7.1-7.3 | verify: RESULT: PASS; вывод — evidence/release-gate.txt (без хвостовых пробелов) -->
+- [x] **8.2** _(пусто: `git diff --check main...HEAD`, `_, _ :=` в Go-диффе нет)_ `git diff --check main...HEAD`, нет `_, _ :=` в диффе. <!-- depends: 8.1 | verify: пусто -->
 
 ## Phase 9: Finalize
 

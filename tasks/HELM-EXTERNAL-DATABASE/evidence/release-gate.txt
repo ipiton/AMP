@@ -1,0 +1,561 @@
+# GOTOOLCHAIN=go1.26.9 scripts/release-gate.sh @ 2fc4be8, 2026-10-16T15:31Z, helm v4.3.0+gbec5b06
+[release-gate] ==> build
+[release-gate] ==> lint
+0 issues.
+[release-gate] ==> test
+ok  	github.com/ipiton/AMP/cmd/config-reloader	1.047s
+ok  	github.com/ipiton/AMP/cmd/server	1.090s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	1.084s
+?   	github.com/ipiton/AMP/internal/alertmanager/config	[no test files]
+ok  	github.com/ipiton/AMP/internal/application	17.599s
+ok  	github.com/ipiton/AMP/internal/application/handlers	1.932s
+ok  	github.com/ipiton/AMP/internal/buildinfo	2.432s
+ok  	github.com/ipiton/AMP/internal/business/publishing	33.189s
+ok  	github.com/ipiton/AMP/internal/business/routing	3.205s
+ok  	github.com/ipiton/AMP/internal/business/silencing	4.325s
+?   	github.com/ipiton/AMP/internal/business/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/business/templating	4.324s
+ok  	github.com/ipiton/AMP/internal/config	4.418s
+ok  	github.com/ipiton/AMP/internal/core	3.389s
+ok  	github.com/ipiton/AMP/internal/core/alertconv	3.268s
+?   	github.com/ipiton/AMP/internal/core/domain	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/investigation	2.900s
+ok  	github.com/ipiton/AMP/internal/core/investigation/runbook	1.758s
+?   	github.com/ipiton/AMP/internal/core/resilience	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/services	2.451s
+ok  	github.com/ipiton/AMP/internal/core/silencing	2.510s
+ok  	github.com/ipiton/AMP/internal/database	14.117s
+ok  	github.com/ipiton/AMP/internal/database/postgres	18.121s
+ok  	github.com/ipiton/AMP/internal/infrastructure	2.659s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cache	2.689s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cluster	2.442s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	15.463s
+ok  	github.com/ipiton/AMP/internal/infrastructure/inhibition	12.823s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation	2.463s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks	1.215s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/tools	0.693s
+ok  	github.com/ipiton/AMP/internal/infrastructure/k8s	2.357s
+ok  	github.com/ipiton/AMP/internal/infrastructure/llm	0.736s
+ok  	github.com/ipiton/AMP/internal/infrastructure/lock	3.768s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	31.708s
+ok  	github.com/ipiton/AMP/internal/infrastructure/repository	29.705s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing	0.747s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval	0.543s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	0.901s
+ok  	github.com/ipiton/AMP/internal/infrastructure/snapshot	0.708s
+ok  	github.com/ipiton/AMP/internal/infrastructure/storage/memory	0.806s
+?   	github.com/ipiton/AMP/internal/infrastructure/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/infrastructure/webhook	0.443s
+ok  	github.com/ipiton/AMP/internal/notification/template	0.791s
+ok  	github.com/ipiton/AMP/internal/notification/template/defaults	1.131s
+ok  	github.com/ipiton/AMP/internal/notification/url	1.092s
+ok  	github.com/ipiton/AMP/internal/realtime	2.502s
+?   	github.com/ipiton/AMP/internal/storage	[no test files]
+ok  	github.com/ipiton/AMP/internal/ui	1.644s
+?   	github.com/ipiton/AMP/pkg/aiclassifier	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator	1.610s
+ok  	github.com/ipiton/AMP/pkg/configvalidator/matcher	1.681s
+?   	github.com/ipiton/AMP/pkg/configvalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/configvalidator/types	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator/validators	0.918s
+ok  	github.com/ipiton/AMP/pkg/httperror	1.139s
+ok  	github.com/ipiton/AMP/pkg/logger	1.138s
+ok  	github.com/ipiton/AMP/pkg/metrics	0.439s
+ok  	github.com/ipiton/AMP/pkg/metrics/v2	0.890s
+ok  	github.com/ipiton/AMP/pkg/middleware	3.100s
+ok  	github.com/ipiton/AMP/pkg/retry	1.133s
+ok  	github.com/ipiton/AMP/pkg/telemetry	0.789s
+?   	github.com/ipiton/AMP/pkg/templatevalidator	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/formatters	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/fuzzy	1.393s
+?   	github.com/ipiton/AMP/pkg/templatevalidator/models	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/utils	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/validators	1.092s
+[release-gate] ==> futureparity
+ok  	github.com/ipiton/AMP/cmd/server	1.513s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	1.589s
+[release-gate] ==> race
+[release-gate] race-testing 7 package(s): github.com/ipiton/AMP/internal/business/publishing github.com/ipiton/AMP/internal/business/silencing github.com/ipiton/AMP/internal/business/templating github.com/ipiton/AMP/internal/core/silencing github.com/ipiton/AMP/internal/infrastructure/grouping github.com/ipiton/AMP/internal/infrastructure/publishing github.com/ipiton/AMP/internal/infrastructure/silencing
+ok  	github.com/ipiton/AMP/internal/business/publishing	34.874s
+ok  	github.com/ipiton/AMP/internal/business/silencing	4.661s
+ok  	github.com/ipiton/AMP/internal/business/templating	4.267s
+ok  	github.com/ipiton/AMP/internal/core/silencing	3.295s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	17.289s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	330.220s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	2.397s
+[release-gate] ==> helm-deps
+[release-gate] ==> helm-dev
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-production
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-rbac
+[release-gate] ==> helm-tests
+chart renders with the sidecar OFF (default):
+  ok   no sidecar container
+  ok   no config-file ConfigMap
+  ok   no AMP_CONFIG_FILE env
+  ok   no shared PID namespace
+chart renders with the sidecar ON:
+  ok   sidecar container
+  ok   config-file ConfigMap
+  ok   AMP_CONFIG_FILE env for the app
+  ok   sidecar watches the mounted file
+  ok   reload is verified over loopback
+  ok   sidecar filesystem is read-only
+  ok   sidecar runs non-root
+  ok   http method needs no shared PID namespace
+signal method requests a shared PID namespace:
+  ok   shared PID namespace
+  ok   signal method
+http method never grants a shared PID namespace, even if asked:
+  ok   no shared PID namespace for method: http
+production values render the config file but NOT the sidecar:
+  ok   config file rendered in production
+  ok   AMP_CONFIG_FILE set in production
+  ok   sidecar NOT enabled while its image is unpublished
+misconfigurations are refused at render time:
+  ok   sidecar without a config file
+  ok   config file without content
+  ok   signal method without a shared PID namespace
+
+all assertions passed
+T1 shipped values files:
+  ok   default: all 2 secretKeyRef targets exist
+  ok   dev: all 2 secretKeyRef targets exist
+  ok   production: all 3 secretKeyRef targets exist
+  ok   default: LLM is off
+  ok   dev: LLM is off
+  ok   production: LLM is off
+  ok   default: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   default: DATABASE_SSL_MODE is disable
+  ok   dev: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   dev: DATABASE_SSL_MODE is disable
+  ok   production: no insecure-SSL flag for the external database
+  ok   production: DATABASE_SSL_MODE is require
+  ok   default: no hard-coded Deployment revision annotation
+  ok   dev: no hard-coded Deployment revision annotation
+  ok   production: no hard-coded Deployment revision annotation
+T2-T4 flag stays off where it does not belong:
+  ok   ssl-on: no flag when PostgreSQL TLS is on
+  ok   external-db: all 2 secretKeyRef targets exist
+  ok   external-db: no flag without the bundled PostgreSQL
+  ok   lite: no flag in the lite profile
+T5 LLM on without a key fails the render:
+  ok   llm-nokey: render fails naming llm.apiKey
+T6 LLM on with a key source renders:
+  ok   llm-key: all 3 secretKeyRef targets exist
+  ok   llm-key: Deployment reads llm-api-key
+  ok   llm-eso: ExternalSecret supplies llm-api-key
+
+all assertions passed
+T-ext-1 external database env:
+  ok   ext: renders
+  ok   ext: DATABASE_HOST
+  ok   ext: DATABASE_PORT defaults to 5432
+  ok   ext: DATABASE_DATABASE
+  ok   ext: DATABASE_USERNAME
+  ok   ext: DATABASE_SSL_MODE defaults to require
+  ok   ext: password from the operator's Secret
+  ok   ext: default Secret key is password
+  ok   ext: one DATABASE_PASSWORD
+  ok   ext: no filesystem storage path
+  ok   ext: no bundled PostgreSQL
+  ok   ext: no bundled PostgreSQL Secret
+T-ext-2 overrides:
+  ok   ext-custom: renders
+  ok   ext-custom: port
+  ok   ext-custom: sslMode
+  ok   ext-custom: Secret key
+  ok   ext-port-string: renders
+  ok   ext-port-string: port given as a string
+T-ext-3 sslMode: the four values AMP accepts render, others fail:
+  ok   ssl-disable: renders
+  ok   ssl-disable: DATABASE_SSL_MODE
+  ok   ssl-require: renders
+  ok   ssl-require: DATABASE_SSL_MODE
+  ok   ssl-verify-ca: renders
+  ok   ssl-verify-ca: DATABASE_SSL_MODE
+  ok   ssl-verify-full: renders
+  ok   ssl-verify-full: DATABASE_SSL_MODE
+  ok   ssl-allow: render fails with 'externalDatabase.sslMode "allow" is invalid'
+  ok   ssl-prefer: render fails with 'externalDatabase.sslMode "prefer" is invalid'
+  ok   ssl-bogus: render fails with 'externalDatabase.sslMode "bogus" is invalid'
+T-ext-4 no insecure-SSL flag for an external database, whatever sslMode:
+  ok   ssl-disable: no insecure-SSL flag
+  ok   ssl-require: no insecure-SSL flag
+  ok   ssl-verify-ca: no insecure-SSL flag
+  ok   ssl-verify-full: no insecure-SSL flag
+  ok   ext-pg-ssl-off: renders
+  ok   ext-pg-ssl-off: bundled ssl setting does not leak
+T-ext-5 host without its companions fails:
+  ok   no-secret: render fails with 'externalDatabase.existingSecret'
+  ok   no-database: render fails with 'externalDatabase.database is required'
+  ok   no-username: render fails with 'externalDatabase.username is required'
+T-ext-6 both databases at once fail:
+  ok   both: render fails with 'externalDatabase.host is set while postgresql.enabled=true'
+T-ext-7 no database anywhere fails; the configFile fallback is parsed as YAML:
+  ok   no-db: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-block: renders
+  ok   cfg-flow: renders
+  ok   cfg-quoted: renders
+  ok   cfg-nested: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-null: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-empty: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-no-db: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-invalid: render fails with 'configFile.content is not valid YAML'
+  ok   cfg-disabled: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-and-ext: renders
+  ok   cfg-and-ext: externalDatabase wins over configFile (env)
+T-ext-8 bundled PostgreSQL, lite and --reuse-values without the key:
+  ok   bundled: renders
+  ok   bundled: DATABASE_HOST is the bundled Service
+  ok   bundled: insecure-SSL flag still set for the bundled PostgreSQL
+  ok   reuse-no-key: renders
+  ok   reuse-no-key: bundled branch
+  ok   lite: renders
+  ok   lite: externalDatabase ignored, no guards
+T-ext-9 values-production.yaml renders with an external database:
+  ok   production: renders
+  ok   production: no bundled PostgreSQL
+  ok   production: no postgres image
+  ok   production: DATABASE_HOST from externalDatabase
+  ok   production: sslMode require
+  ok   production: no insecure-SSL flag
+T-ext-10 values-production.yaml does not render without it:
+  ok   production-no-db: render fails with 'postgresql.enabled=false but no database is configured'
+
+all assertions passed
+defaults: preStop, timeout env and a grace period that fits both
+  ok   preStop sleeps preStopDelay (5)
+  ok   timeout env set
+  ok   timeout env carries timeoutSeconds (30s)
+  ok   grace period 40 >= 5 + 30
+  ok   stale 'no preStop' comment gone
+  ok   no budget warning with defaults
+preStopDelay=0 removes the hook
+  ok   no preStop hook
+  ok   no lifecycle block
+custom values flow through
+  ok   preStop sleeps 10
+  ok   timeout env 45s
+  ok   grace period 60
+  ok   no warning when 60 >= 10 + 45
+an old grace period (30) still renders, with a warning
+  ok   render does not fail
+  ok   budget warning printed
+  ok   warning names the required minimum
+production values
+  ok   preStop in production
+  ok   grace period 40 in production
+
+all assertions passed
+default:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+lite:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+production:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+opt-out:
+  ok   GROUPING_ENABLED is "false"
+  ok   GROUPING_ENABLED is set exactly once
+
+all assertions passed
+Chart appVersion: 0.1.0
+default: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+production: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+lite: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+config-reloader image defaults to appVersion:
+  ok   sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0
+  ok   app container unchanged next to the sidecar
+an explicit image.tag still wins:
+  ok   app container on the pinned tag
+  ok   appVersion not used when pinned
+
+all assertions passed
+defaults render no Ingress:
+  ok   no Ingress by default
+an Ingress without auth is refused:
+  ok   defaults + ingress.enabled (guard not tied to the prod file)
+  ok   values-production.yaml without auth
+  ok   values-production.yaml as shipped
+only a real true waives in-process auth:
+  ok   --set-string ingress.externalAuth=false
+  ok   --set-string ingress.externalAuth=no
+  ok   --set-string ingress.externalAuth="false"
+  ok   --set-string ingress.externalAuth=True
+  ok   --set-string ingress.externalAuth=1
+an Ingress with auth renders:
+  ok   prod + webConfig.existingSecret
+  ok   prod + ingress.externalAuth=true
+  ok   --set-string ingress.externalAuth=true
+chart packaging keeps the helm test hook and drops the render tests:
+  ok   helm test hook still rendered
+  ok   helm test hook packaged
+  ok   render tests not packaged
+
+all assertions passed
+defaults render no AMP NetworkPolicy:
+  ok   no AMP policy by default
+an enabled policy with no effective source is refused:
+  ok   values-production.yaml with no sources
+  ok   defaults + networkPolicy.enabled
+  ok   ingressController only, Ingress off
+production policy (placeholder sender):
+  ok   selects the AMP pods by component
+  ok   alert-senders rule
+  ok   peers rendered as given
+  ok   one rule, http port only
+  ok   no Egress policyType
+  ok   no controller rule with no controller peers
+one rule per role; the controller only with an Ingress:
+  ok   controller peers dropped while ingress.enabled=false
+  ok   metrics-scrapers rule
+  ok   sender + scraper rules, http only
+  ok   controller rule with ingress.enabled
+  ok   controller peers rendered
+  ok   controller + sender rules
+extraIngress is rendered as-is:
+  ok   raw rule rendered
+the component label lives in the pod template only:
+  ok   pod template carries the label
+  ok   Deployment selector found
+  ok   Deployment selector unchanged (immutable)
+  ok   Service selector found
+  ok   Service selector unchanged
+podLabels cannot override the component label:
+  ok   podLabels with app.kubernetes.io/component
+  ok   other podLabels still render
+the Redis NetworkPolicy admits the AMP pods:
+  ok   first Redis rule selects component: application
+  ok   ...on the Redis port
+values without the networkPolicy section (--reuse-values from an old release):
+  ok   renders
+  ok   no AMP policy
+
+all assertions passed
+T1 shipped values: no backup, no PDB, pinned image:
+  ok   default: renders
+  ok   production: renders
+  ok   default: bundled PostgreSQL StatefulSet rendered
+  ok   default: Postgres StatefulSet has replicas: 1
+  ok   default: no Postgres PDB
+  ok   default: no backup CronJob
+  ok   default: no backup PVC
+  ok   default: no WAL archiving settings
+  ok   default: no PostgreSQLBackupOld rule
+  ok   default: no PostgreSQLWALArchivingFailed rule
+  ok   default: StatefulSet and test pod use postgres:16.15
+  ok   default: no other postgres:16* image
+  ok   production: no bundled PostgreSQL (external database)
+  ok   production: no backup CronJob
+  ok   production: no postgres image
+T2 replicas other than 1 fail the render:
+  ok   replicas-2: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-0: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-1-string: renders
+T3 an enabled backup fails the render, with the --reuse-values hint:
+  ok   backup-enabled: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-enabled-string: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-scalar-true: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults-override: renders
+T4 leftovers of the removed key render:
+  ok   backup-empty: renders
+  ok   backup-null: renders
+  ok   backup-false: renders
+  ok   backup-enabled-false: renders
+  ok   backup-enabled-one: renders
+  ok   backup-enabled-title-case: renders
+T5 guards do not apply without the bundled PostgreSQL:
+  ok   external-db: renders
+  ok   external-db: no bundled PostgreSQL
+  ok   lite: renders
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-no-hpa: NOTES rendered
+  ok   notes-external: NOTES rendered
+  ok   notes-default: standard profile not advertised as HA
+  ok   notes-default: bundled PostgreSQL not advertised as HA
+  ok   notes-default: bundled PostgreSQL marked dev/pilot
+  ok   notes-default: config-not-applied warning and step 4 note
+  ok   notes-default: no claim that max_connections is 250
+  ok   notes-default: no max_connections OK line
+  ok   notes-no-hpa: standard profile not advertised as HA
+  ok   notes-no-hpa: bundled PostgreSQL not advertised as HA
+  ok   notes-no-hpa: bundled PostgreSQL marked dev/pilot
+  ok   notes-no-hpa: config-not-applied warning and step 4 note
+  ok   notes-no-hpa: no claim that max_connections is 250
+  ok   notes-no-hpa: no max_connections OK line
+  ok   notes-external: external PostgreSQL line
+  ok   notes-external: no bundled PostgreSQL warning
+  ok   notes-external: no bundled PostgreSQL steps
+
+all assertions passed
+default ServiceMonitor:
+  ok   rendered by default
+  ok   selects by component
+  ok   scrapes the http port
+  ok   ...at /metrics
+  ok   default interval
+  ok   default scrape timeout
+  ok   no credentials without web auth
+its selector matches the AMP Service only:
+  ok   selector (3 labels) picks exactly: amp
+  ok   component is what tells the Services apart (7 match without it)
+gated on prometheusEnabled and serviceMonitor.enabled:
+  ok   off with monitoring.prometheusEnabled=false
+  ok   off with serviceMonitor.enabled=false
+  ok   Redis ServiceMonitor unaffected
+web auth needs credentials:
+  ok   webConfig.existingSecret without basicAuth
+  ok   username from the Secret
+  ok   ...default key
+  ok   password from the Secret
+  ok   ...default key
+  ok   custom username key
+  ok   custom password key
+labels and timing:
+  ok   extra labels in metadata
+  ok   interval override
+values without monitoring.serviceMonitor (--reuse-values from an old release):
+  ok   still rendered
+  ok   default interval
+  ok   default scrape timeout
+  ok   ...and the credentials guard still runs
+
+all assertions passed
+[release-gate] ==> amtool-compat
+ Image amp-smoke-amp Building
+#1 [internal] load local bake definitions
+#1 reading from stdin 518B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.75kB 0.0s done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.9-alpine
+#3 DONE 0.1s
+
+#4 [internal] load metadata for docker.io/library/alpine:3.24
+#4 ...
+
+#5 [auth] library/alpine:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#4 [internal] load metadata for docker.io/library/alpine:3.24
+#4 DONE 1.1s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 567B done
+#6 DONE 0.1s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#8 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.1s done
+#8 DONE 0.1s
+
+#9 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#9 resolve docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#9 resolve docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade 0.1s done
+#9 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 89.97kB 0.2s done
+#7 DONE 0.3s
+
+#10 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#10 CACHED
+
+#11 [builder 3/7] WORKDIR /build
+#11 CACHED
+
+#12 [builder 4/7] COPY go-app/go.mod go-app/go.sum ./
+#12 CACHED
+
+#13 [builder 5/7] RUN go mod download
+#13 CACHED
+
+#14 [builder 6/7] COPY go-app/ ./
+#14 DONE 1.8s
+
+#15 [builder 7/7] RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w     -X github.com/ipiton/AMP/internal/buildinfo.Version=dev     -X github.com/ipiton/AMP/internal/buildinfo.Revision=unknown     -X github.com/ipiton/AMP/internal/buildinfo.Branch=unknown     -X github.com/ipiton/AMP/internal/buildinfo.BuildUser=docker     -X github.com/ipiton/AMP/internal/buildinfo.BuildDate=unknown"     -o amp ./cmd/server
+#15 DONE 66.9s
+
+#16 [stage-1 4/5] COPY --from=builder /build/amp /app/
+#16 CACHED
+
+#17 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#17 CACHED
+
+#18 [stage-1 3/5] WORKDIR /app
+#18 CACHED
+
+#19 [stage-1 5/5] COPY --from=builder /build/migrations /app/migrations
+#19 CACHED
+
+#20 exporting to image
+#20 exporting layers done
+#20 exporting manifest sha256:7a8de0d34be4d5fb2200de886e9eb106a35613caf632b4fe5c60718d012cab2f 0.0s done
+#20 exporting config sha256:3dd58b72f8d274f06a64cb8ddaa7431bd825bb4b4662f07a4b66e85fa2d63daf 0.0s done
+#20 exporting attestation manifest sha256:f88468a4d2d14453ebaa859aa904fff1b606bd1f5361aa277c489b4a3fcffbb4
+#20 exporting attestation manifest sha256:f88468a4d2d14453ebaa859aa904fff1b606bd1f5361aa277c489b4a3fcffbb4 0.1s done
+#20 exporting manifest list sha256:db6468dc1e693af047279d126792925935ab9cb821117eba230a250869e8d6ef 0.0s done
+#20 naming to docker.io/library/amp-smoke-amp:latest done
+#20 unpacking to docker.io/library/amp-smoke-amp:latest 0.0s done
+#20 DONE 0.3s
+
+#21 resolving provenance for metadata file
+#21 DONE 0.1s
+ Image amp-smoke-amp Built
+ Network amp-smoke_default Creating
+ Network amp-smoke_default Created
+ Container amp-smoke-webhook-1 Creating
+ Container amp-smoke-webhook-1 Created
+ Container amp-smoke-amp-1 Creating
+ Container amp-smoke-amp-1 Created
+ Container amp-smoke-webhook-1 Starting
+ Container amp-smoke-webhook-1 Started
+ Container amp-smoke-webhook-1 Waiting
+ Container amp-smoke-webhook-1 Healthy
+ Container amp-smoke-amp-1 Starting
+ Container amp-smoke-amp-1 Started
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+[release-gate]
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   21s      go build ./... (go-app)
+lint             PASS   38s      golangci-lint run (go-app)
+test             PASS   68s      go test ./... -count=1 (go-app)
+futureparity     PASS   26s      build+test, futureparity tag, cmd/server
+race             PASS   340s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   2s       helm repo add (Chart.lock) + dependency build
+helm-dev         PASS   1s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   14s      helm/amp/tests/*.sh render tests
+amtool-compat    PASS   100s     real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: PASS
+exit=0
