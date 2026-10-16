@@ -58,15 +58,15 @@ based_on:
 ### Implement notes (2026-10-16)
 
 - 1.1: `date -u` 2026-10-16T10:11Z; proxy `x/net` v0.60.0 Time 2026-10-08T17:22:58Z.
-- 1.3: дельта `go.mod` — `x/net`, `x/crypto`, `x/sys`, `x/term`, `x/text`, `x/sync`; `x/tools`/`x/mod` не сдвинулись (в P2 они были «возможно»). Все ≤ 2026-10-08, `evidence/new-module-dates.txt`. `go 1.26.0` не изменился. `go.sum` только дополнен (без `tidy`, старые хеши остались).
-- 1.6: 0 достижимых; на уровне модулей — один GO-2026-5932 (`x/crypto`, без фикса), как в baseline.
+- 1.3: дельта `go.mod` — `x/net`, `x/crypto`, `x/sys`, `x/term`, `x/text`, `x/sync`; в `go.mod` `x/tools`/`x/mod` не появились, но в build list сдвинулись: `x/tools` v0.48.0 → v0.49.0, `x/mod` → v0.41.0 (их тянет `x/text` v0.42.0; только test-граф `modernc.org/libc`, в бинарники не линкуются), хеши в `go.sum`, даты 2026-08-13 / 2026-08-24 (дописано по review F1). Все ≤ 2026-10-08, `evidence/new-module-dates.txt`. `go 1.26.0` не изменился. `go.sum` только дополнен (без `tidy`, старые хеши остались).
+- 1.6: 0 достижимых; на уровне модулей — один GO-2026-5932 (`x/crypto`, без фикса), как в baseline. **Отклонение от Spec § Invariants (review F2):** «1 в импортируемых пакетах» из baseline — GO-2026-6604 (`os` `Root.Mkdir(All)`, только Windows) — тоже закрыта `go1.26.9`, теперь 0. Verbose-выводы: `evidence/govulncheck-verbose-go1.26.8-branch.txt`, `evidence/govulncheck-verbose-go1.26.9.txt`.
 - 1.7: оба образа собраны, builder `golang:1.26.9-alpine@sha256:3082400e…`, `go version` в нём — go1.26.9.
 - Phase verification: `GOTOOLCHAIN=go1.26.9 make -C go-app quality-gates-fast` — passed, `go fmt` ничего не изменил.
-- Отклонений от Spec нет.
+- Отклонение от Spec — одно, в лучшую сторону (1.6, GO-2026-6604).
 
 ## Phase 3: Deep review
 
-- [ ] **3.1** `/deep-review` (обязателен: `S`) по диффу ветки: версии против Spec P2, инварианты (одна версия Go во всех местах, `go 1.26.0`, нет модулей вне цепочки), вывод `govulncheck`, исключение из карантина для образа записано. <!-- depends: 1.8, 2.1 | verify: jq -r .gate tasks/PROD-DEPS-NET-HTTP2/review-verdict.json → pass -->
+- [x] **3.1** `/deep-review` (обязателен: `S`) по диффу ветки: версии против Spec P2, инварианты (одна версия Go во всех местах, `go 1.26.0`, нет модулей вне цепочки), вывод `govulncheck`, исключение из карантина для образа записано. <!-- depends: 1.8, 2.1 | verify: jq -r .gate tasks/PROD-DEPS-NET-HTTP2/review-verdict.json → pass -->
 
 ## Phase 4: Tests
 

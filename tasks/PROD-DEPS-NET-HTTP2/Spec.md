@@ -13,7 +13,7 @@ based_on:
 
 # Specification: net/http и x/net — GO-2026-6603…6617
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary

@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/prod-deps-net-http2",
+  "commit": "2180c80",
+  "reviewed_at": "2026-10-16",
+  "findings": {
+    "blocker": 0,
+    "major": 0,
+    "minor": 3,
+    "nit": 5
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
