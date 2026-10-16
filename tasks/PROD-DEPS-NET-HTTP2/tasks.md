@@ -5,7 +5,7 @@ stream: Security
 type: bug
 status: active
 created_at: 2026-10-15
-updated_at: 2026-10-15
+updated_at: 2026-10-16
 based_on:
   - requirements.md
   - research.md
@@ -34,26 +34,35 @@ based_on:
 
 > **Wave 1**
 
-- [ ] **1.1** Проверить окно карантина. <!-- verify: date -u ≥ 2026-10-15T17:23Z; curl -s https://proxy.golang.org/golang.org/x/net/@v/v0.60.0.info → Time 2026-10-08T17:22:58Z -->
+- [x] **1.1** Проверить окно карантина. <!-- verify: date -u ≥ 2026-10-15T17:23Z; curl -s https://proxy.golang.org/golang.org/x/net/@v/v0.60.0.info → Time 2026-10-08T17:22:58Z -->
 
 > **Wave 2** — depends on Wave 1
 
-- [ ] **1.2** `cd go-app && go get golang.org/x/net@v0.60.0 toolchain@go1.26.9` (без `-u`, без `go mod tidy`). <!-- depends: 1.1 | verify: grep -E '^toolchain go1.26.9$|golang.org/x/net v0.60.0' go-app/go.mod — обе строки; grep '^go 1.26.0$' go-app/go.mod -->
-- [ ] **1.3** Сверить дельту `go.mod` с Spec P2 и записать даты всех новых версий в `evidence/new-module-dates.txt`. Модуль вне таблицы P2 или моложе 7 дней — стоп, вопрос владельцу (Spec Edge Case 1). <!-- depends: 1.2 | verify: git diff -U0 go-app/go.mod > tasks/PROD-DEPS-NET-HTTP2/evidence/go.mod.diff; git diff go-app/go.mod | grep '^[-+]' | grep -v -E 'golang.org/x/(net|crypto|sys|term|text|sync|tools|mod) |^[-+]toolchain |^(\+\+\+|---)' — пусто; для каждой новой версии go list -m -json <mod>@<ver> → Time ≤ 2026-10-08 -->
-- [ ] **1.4** Заменить `1.26.8` → `1.26.9` в `Dockerfile` (7, 38), `Dockerfile.config-reloader` (12), `.github/workflows/ci.yml` (36), `docs/CI.md` (§ Go Version). <!-- verify: git grep -n '1\.26\.8' -- ':!docs/06-planning' ':!tasks' ':!CHANGELOG.md' — пусто -->
+- [x] **1.2** `cd go-app && go get golang.org/x/net@v0.60.0 toolchain@go1.26.9` (без `-u`, без `go mod tidy`). <!-- depends: 1.1 | verify: grep -E '^toolchain go1.26.9$|golang.org/x/net v0.60.0' go-app/go.mod — обе строки; grep '^go 1.26.0$' go-app/go.mod -->
+- [x] **1.3** Сверить дельту `go.mod` с Spec P2 и записать даты всех новых версий в `evidence/new-module-dates.txt`. Модуль вне таблицы P2 или моложе 7 дней — стоп, вопрос владельцу (Spec Edge Case 1). <!-- depends: 1.2 | verify: git diff -U0 go-app/go.mod > tasks/PROD-DEPS-NET-HTTP2/evidence/go.mod.diff; git diff go-app/go.mod | grep '^[-+]' | grep -v -E 'golang.org/x/(net|crypto|sys|term|text|sync|tools|mod) |^[-+]toolchain |^(\+\+\+|---)' — пусто; для каждой новой версии go list -m -json <mod>@<ver> → Time ≤ 2026-10-08 -->
+- [x] **1.4** Заменить `1.26.8` → `1.26.9` в `Dockerfile` (7, 38), `Dockerfile.config-reloader` (12), `.github/workflows/ci.yml` (36), `docs/CI.md` (§ Go Version). <!-- verify: git grep -n '1\.26\.8' -- ':!docs/06-planning' ':!tasks' ':!CHANGELOG.md' — пусто -->
 
 > **Wave 3** — depends on Wave 2
 
-- [ ] **1.5** Сборка в readonly-режиме на целевом toolchain (ловит недостающие хеши в `go.sum`). <!-- depends: 1.2 | verify: cd go-app && GOTOOLCHAIN=go1.26.9 GOFLAGS=-mod=readonly go build ./... && GOTOOLCHAIN=go1.26.9 go version → go1.26.9 -->
-- [ ] **1.6** `govulncheck` на `go1.26.9` — 0 достижимых; невызываемые — как в baseline (GO-2026-5932). <!-- depends: 1.2 | verify: cd go-app && GOTOOLCHAIN=go1.26.9 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... > ../tasks/PROD-DEPS-NET-HTTP2/evidence/govulncheck-go1.26.9.txt; exit 0, "Your code is affected by 0 vulnerabilities" -->
-- [ ] **1.7** Сборка обоих образов, builder на `go1.26.9`. <!-- depends: 1.4 | verify: docker build -f Dockerfile -t amp:net-http2 . && docker build -f Dockerfile.config-reloader -t amp-config-reloader:net-http2 . — оба OK; docker run --rm golang:1.26.9-alpine go version → go1.26.9 -->
-- [ ] **1.8** Коммит `fix(deps): bump Go to 1.26.9 and x/net to v0.60.0` — `go.mod`, `go.sum`, оба Dockerfile, `ci.yml`, `docs/CI.md` (+ evidence). <!-- depends: 1.3, 1.5, 1.6, 1.7 | verify: git show --stat HEAD — только перечисленные файлы -->
+- [x] **1.5** Сборка в readonly-режиме на целевом toolchain (ловит недостающие хеши в `go.sum`). <!-- depends: 1.2 | verify: cd go-app && GOTOOLCHAIN=go1.26.9 GOFLAGS=-mod=readonly go build ./... && GOTOOLCHAIN=go1.26.9 go version → go1.26.9 -->
+- [x] **1.6** `govulncheck` на `go1.26.9` — 0 достижимых; невызываемые — как в baseline (GO-2026-5932). <!-- depends: 1.2 | verify: cd go-app && GOTOOLCHAIN=go1.26.9 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./... > ../tasks/PROD-DEPS-NET-HTTP2/evidence/govulncheck-go1.26.9.txt; exit 0, "Your code is affected by 0 vulnerabilities" -->
+- [x] **1.7** Сборка обоих образов, builder на `go1.26.9`. <!-- depends: 1.4 | verify: docker build -f Dockerfile -t amp:net-http2 . && docker build -f Dockerfile.config-reloader -t amp-config-reloader:net-http2 . — оба OK; docker run --rm golang:1.26.9-alpine go version → go1.26.9 -->
+- [x] **1.8** Коммит `fix(deps): bump Go to 1.26.9 and x/net to v0.60.0` — `go.mod`, `go.sum`, оба Dockerfile, `ci.yml`, `docs/CI.md` (+ evidence). <!-- depends: 1.3, 1.5, 1.6, 1.7 | verify: git show --stat HEAD — только перечисленные файлы -->
 
 **Phase verification:** `make -C go-app quality-gates-fast` + `git status` чистый после `go fmt`.
 
 ## Phase 2: Docs
 
-- [ ] **2.1** `CHANGELOG.md` `[Unreleased]` → `### Security`: `PROD-DEPS-NET-HTTP2` (дата, 12 ID: GO-2026-6603, -6605, -6607…-6613, -6617 и две `html/template`; `go1.26.8` → `go1.26.9`, `x/net` v0.58.0 → v0.60.0 + транзитивка; образы на `golang:1.26.9-alpine`). Отдельный коммит `docs(changelog): …`. <!-- depends: 1.8 | verify: grep -n "PROD-DEPS-NET-HTTP2" CHANGELOG.md -->
+- [x] **2.1** `CHANGELOG.md` `[Unreleased]` → `### Security`: `PROD-DEPS-NET-HTTP2` (дата, 12 ID: GO-2026-6603, -6605, -6607…-6613, -6617 и две `html/template`; `go1.26.8` → `go1.26.9`, `x/net` v0.58.0 → v0.60.0 + транзитивка; образы на `golang:1.26.9-alpine`). Отдельный коммит `docs(changelog): …`. <!-- depends: 1.8 | verify: grep -n "PROD-DEPS-NET-HTTP2" CHANGELOG.md -->
+
+### Implement notes (2026-10-16)
+
+- 1.1: `date -u` 2026-10-16T10:11Z; proxy `x/net` v0.60.0 Time 2026-10-08T17:22:58Z.
+- 1.3: дельта `go.mod` — `x/net`, `x/crypto`, `x/sys`, `x/term`, `x/text`, `x/sync`; `x/tools`/`x/mod` не сдвинулись (в P2 они были «возможно»). Все ≤ 2026-10-08, `evidence/new-module-dates.txt`. `go 1.26.0` не изменился. `go.sum` только дополнен (без `tidy`, старые хеши остались).
+- 1.6: 0 достижимых; на уровне модулей — один GO-2026-5932 (`x/crypto`, без фикса), как в baseline.
+- 1.7: оба образа собраны, builder `golang:1.26.9-alpine@sha256:3082400e…`, `go version` в нём — go1.26.9.
+- Phase verification: `GOTOOLCHAIN=go1.26.9 make -C go-app quality-gates-fast` — passed, `go fmt` ничего не изменил.
+- Отклонений от Spec нет.
 
 ## Phase 3: Deep review
 
