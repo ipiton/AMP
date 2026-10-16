@@ -7,7 +7,9 @@
 #   - postgresql.replicas other than 1 and postgresql.backup enabled fail the
 #     render, including the old chart default carried by --reuse-values;
 #     null/false/empty leftovers of the removed key do not;
-#   - NOTES no longer advertise HA or an applied max_connections.
+#   - NOTES no longer advertise HA or an applied max_connections;
+#   - values-production.yaml runs no bundled PostgreSQL (external database,
+#     HELM-EXTERNAL-DATABASE).
 #
 #   helm/amp/tests/render-postgresql.sh
 #
@@ -115,23 +117,33 @@ PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
   --set postgresql.password=render-test-placeholder
   --set cache.auth.password=render-test-placeholder)
 
+# An external database: postgresql.enabled=false needs one (render-external-database.sh).
+EXT=(--set postgresql.enabled=false
+  --set externalDatabase.host=db.example.com
+  --set externalDatabase.database=amp
+  --set externalDatabase.username=amp
+  --set externalDatabase.existingSecret=amp-db)
+
 echo "T1 shipped values: no backup, no PDB, pinned image:"
 render default
 render production "${PROD_ARGS[@]}"
-for v in default production; do
-  f="${WORK_DIR}/${v}.yaml"
-  assert_docs "${f}" StatefulSet amp-postgres 1 "${v}: bundled PostgreSQL StatefulSet rendered"
-  got="$(doc_line "${f}" StatefulSet amp-postgres '^  replicas:')"
-  if [ "${got}" = "  replicas: 1" ]; then pass "${v}: Postgres StatefulSet has replicas: 1"; else fail "${v}: Postgres StatefulSet replicas line is '${got}'"; fi
-  assert_docs "${f}" PodDisruptionBudget amp-postgres 0 "${v}: no Postgres PDB"
-  assert_docs "${f}" CronJob amp-postgres-backup 0 "${v}: no backup CronJob"
-  assert_docs "${f}" PersistentVolumeClaim amp-postgres-backup 0 "${v}: no backup PVC"
-  assert_count "${f}" "archive_mode" 0 "${v}: no WAL archiving settings"
-  assert_count "${f}" "PostgreSQLBackupOld" 0 "${v}: no PostgreSQLBackupOld rule"
-  assert_count "${f}" "PostgreSQLWALArchivingFailed" 0 "${v}: no PostgreSQLWALArchivingFailed rule"
-  assert_count "${f}" "image: postgres:16.15" 2 "${v}: StatefulSet and test pod use postgres:16.15"
-  assert_count "${f}" "image: postgres:16" 2 "${v}: no other postgres:16* image"
-done
+v=default
+f="${WORK_DIR}/${v}.yaml"
+assert_docs "${f}" StatefulSet amp-postgres 1 "${v}: bundled PostgreSQL StatefulSet rendered"
+got="$(doc_line "${f}" StatefulSet amp-postgres '^  replicas:')"
+if [ "${got}" = "  replicas: 1" ]; then pass "${v}: Postgres StatefulSet has replicas: 1"; else fail "${v}: Postgres StatefulSet replicas line is '${got}'"; fi
+assert_docs "${f}" PodDisruptionBudget amp-postgres 0 "${v}: no Postgres PDB"
+assert_docs "${f}" CronJob amp-postgres-backup 0 "${v}: no backup CronJob"
+assert_docs "${f}" PersistentVolumeClaim amp-postgres-backup 0 "${v}: no backup PVC"
+assert_count "${f}" "archive_mode" 0 "${v}: no WAL archiving settings"
+assert_count "${f}" "PostgreSQLBackupOld" 0 "${v}: no PostgreSQLBackupOld rule"
+assert_count "${f}" "PostgreSQLWALArchivingFailed" 0 "${v}: no PostgreSQLWALArchivingFailed rule"
+assert_count "${f}" "image: postgres:16.15" 2 "${v}: StatefulSet and test pod use postgres:16.15"
+assert_count "${f}" "image: postgres:16" 2 "${v}: no other postgres:16* image"
+f="${WORK_DIR}/production.yaml"
+assert_docs "${f}" StatefulSet amp-postgres 0 "production: no bundled PostgreSQL (external database)"
+assert_docs "${f}" CronJob amp-postgres-backup 0 "production: no backup CronJob"
+assert_count "${f}" "image: postgres:" 0 "production: no postgres image"
 
 echo "T2 replicas other than 1 fail the render:"
 render_fails replicas-2 "postgresql.replicas must be 1" --set postgresql.replicas=2
@@ -166,14 +178,14 @@ render backup-enabled-one --set postgresql.backup.enabled=1
 render backup-enabled-title-case --set-string postgresql.backup.enabled=True
 
 echo "T5 guards do not apply without the bundled PostgreSQL:"
-render external-db --set postgresql.enabled=false --set postgresql.replicas=3 --set postgresql.backup.enabled=true
+render external-db "${EXT[@]}" --set postgresql.replicas=3 --set postgresql.backup.enabled=true
 assert_docs "${WORK_DIR}/external-db.yaml" StatefulSet amp-postgres 0 "external-db: no bundled PostgreSQL"
 render lite --set profile=lite
 
 echo "T6 NOTES:"
 notes notes-default
 notes notes-no-hpa --set autoscaling.enabled=false
-notes notes-external --set postgresql.enabled=false
+notes notes-external "${EXT[@]}"
 for n in notes-default notes-no-hpa; do
   f="${WORK_DIR}/${n}.notes"
   assert_count "${f}" "HA-Ready" 0 "${n}: standard profile not advertised as HA"
@@ -184,7 +196,7 @@ for n in notes-default notes-no-hpa; do
   assert_count "${f}" "(OK)" 0 "${n}: no max_connections OK line"
 done
 f="${WORK_DIR}/notes-external.notes"
-assert_count "${f}" "External PostgreSQL" 1 "notes-external: external PostgreSQL line"
+assert_count "${f}" "External PostgreSQL: db.example.com:5432/amp (sslmode=require), password from Secret amp-db/password" 1 "notes-external: external PostgreSQL line"
 assert_count "${f}" "dev/pilot only" 0 "notes-external: no bundled PostgreSQL warning"
 assert_count "${f}" "Check PostgreSQL" 0 "notes-external: no bundled PostgreSQL steps"
 
