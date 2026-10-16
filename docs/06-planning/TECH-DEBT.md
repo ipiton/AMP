@@ -141,6 +141,14 @@
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` F11; `go-app/internal/config/reload_coordinator.go`.
 - **Status:** open
 
+### [low][Config][~0.25d] DB-CONN-STRING-UNESCAPED
+- **Title:** `ConnectionString()` и `config.GetDatabaseURL()` собирают строку подключения без экранирования
+- **Problem:** `PostgresConfig.ConnectionString()` (`internal/database/postgres/config.go`, key=value через `fmt.Sprintf`) и `Config.GetDatabaseURL()` (`internal/config/config.go`, URL через `fmt.Sprintf`) подставляют пользователя и пароль как есть — тот же дефект, что был в `DSN()` до HELM-EXTERNAL-DATABASE: пароль с пробелом, `'`, `/ # ? %` ломает разбор или молча меняется. Дополнительно `GetDatabaseURL()` подставляет `sslmode=disable` при пустом значении, тогда как рантайм по умолчанию берёт `require`. В рантайме не вызываются: единственные вызовы — `internal/config/example.go:94` и `pool_test.go:322`.
+- **Impact:** сейчас нет; ловушка для следующего, кто возьмёт эти функции вместо `DSN()`.
+- **Fix:** удалить обе (и пример/тест) либо собрать через `url.URL`, как `DSN()`.
+- **Refs:** `tasks/HELM-EXTERNAL-DATABASE/research.md`, `evidence/dsn-password-escaping.txt`; 2026-10-16.
+- **Status:** open
+
 ## Entry Format
 
 ```markdown

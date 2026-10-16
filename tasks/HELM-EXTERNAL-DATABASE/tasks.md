@@ -32,10 +32,10 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 
 ## Phase 1: Go — экранирование DSN (D6)
 
-- [ ] **1.1** `DSN()` собирать через `url.URL{Scheme: "postgres", User: url.UserPassword(User, Password), Host: net.JoinHostPort(Host, strconv.Itoa(Port)), Path: "/" + Database, RawQuery: "sslmode=" + url.QueryEscape(SSLMode)}`; комментарий — почему (пароль провайдера с `/ # ? %`). `ConnectionString()` не трогать. <!-- verify: cd go-app && GOTOOLCHAIN=go1.26.9 go vet ./internal/database/... && go test ./internal/database/postgres/ -run 'TestPostgresConfig_DSN' -count=1 — существующий тест зелёный (строка для обычных значений не изменилась) -->
-- [ ] **1.2** Проба на тех же паролях, что `evidence/dsn-password-escaping.txt`, но через `PostgresConfig.DSN()` → `pgxpool.ParseConfig`: все `pw_match=true`; вывод — `evidence/dsn-password-escaping-after.txt` (скрипт — в scratchpad, не в репо). <!-- depends: 1.1 | verify: grep -c 'pw_match=true' evidence/dsn-password-escaping-after.txt = 8, grep -c ERR = 0 -->
-- [ ] **1.3** TECH-DEBT: `ConnectionString()` и `config.GetDatabaseURL()` — тот же дефект, в рантайме не вызываются (`internal/config/example.go:94` — единственный вызов). <!-- verify: grep -n 'GetDatabaseURL' docs/06-planning/TECH-DEBT.md -->
-- [ ] **1.4** Коммит `fix(db): escape credentials in the PostgreSQL DSN`. <!-- depends: 1.1-1.3 | verify: git show --stat HEAD — config.go, TECH-DEBT.md, evidence -->
+- [x] **1.1** `DSN()` собирать через `url.URL{Scheme: "postgres", User: url.UserPassword(User, Password), Host: net.JoinHostPort(Host, strconv.Itoa(Port)), Path: "/" + Database, RawQuery: "sslmode=" + url.QueryEscape(SSLMode)}`; комментарий — почему (пароль провайдера с `/ # ? %`). `ConnectionString()` не трогать. <!-- verify: cd go-app && GOTOOLCHAIN=go1.26.9 go vet ./internal/database/... && go test ./internal/database/postgres/ -run 'TestPostgresConfig_DSN' -count=1 — существующий тест зелёный (строка для обычных значений не изменилась) -->
+- [x] **1.2** Проба на тех же паролях, что `evidence/dsn-password-escaping.txt`, но через `PostgresConfig.DSN()` → `pgxpool.ParseConfig`: все `pw_match=true`; вывод — `evidence/dsn-password-escaping-after.txt` (скрипт — в scratchpad, не в репо). <!-- depends: 1.1 | verify: grep -c 'pw_match=true' evidence/dsn-password-escaping-after.txt = 8, grep -c ERR = 0 -->
+- [x] **1.3** TECH-DEBT: `ConnectionString()` и `config.GetDatabaseURL()` — тот же дефект, в рантайме не вызываются (`internal/config/example.go:94` — единственный вызов). <!-- verify: grep -n 'GetDatabaseURL' docs/06-planning/TECH-DEBT.md -->
+- [x] **1.4** Коммит `fix(db): escape credentials in the PostgreSQL DSN`. <!-- depends: 1.1-1.3 | verify: git show --stat HEAD — config.go, TECH-DEBT.md, evidence -->
 
 **Phase verification:** `GOTOOLCHAIN=go1.26.9 make -C go-app quality-gates-fast`, `git status` после `go fmt`.
 

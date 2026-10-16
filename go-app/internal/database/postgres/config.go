@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -138,8 +140,17 @@ func (c *PostgresConfig) ConnectionString() string {
 		c.Host, c.Port, c.User, c.Password, c.Database, c.SSLMode)
 }
 
-// DSN возвращает Data Source Name для pgx
+// DSN возвращает Data Source Name для pgx.
+// Учётные данные и имя БД экранируются: пароль, выданный провайдером
+// (managed PostgreSQL, Vault), может содержать "/", "#", "?" или "%",
+// а без экранирования pgx либо не разбирает URL, либо получает другой пароль.
 func (c *PostgresConfig) DSN() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		c.User, c.Password, c.Host, c.Port, c.Database, c.SSLMode)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(c.User, c.Password),
+		Host:     net.JoinHostPort(c.Host, strconv.Itoa(c.Port)),
+		Path:     "/" + c.Database,
+		RawQuery: "sslmode=" + url.QueryEscape(c.SSLMode),
+	}
+	return u.String()
 }
