@@ -72,10 +72,10 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 
 ## Phase 5: Docs (D8, D9)
 
-- [ ] **5.1** `POSTGRESQL_RESTORE_GUIDE.md`: § «External PostgreSQL» — команды ровно из 4.3–4.5, без «not drilled»; строка 9; новый подраздел «Move from the bundled to an external PostgreSQL» по 4.4/4.6. <!-- depends: 4.7 | verify: grep -c 'not drilled' helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md = 0 -->
-- [ ] **5.2** `helm/amp/README.md` (баннер `:15`, § PostgreSQL `:107` — пример `externalDatabase` + `kubectl create secret generic`, edge cases 3, 5, 6, 7 одной фразой каждый, `configFile` как запасной путь), `docs/MIGRATION_QUICK_START.md:24`. <!-- depends: 3.4 | verify: grep -n 'planned (`HELM-EXTERNAL-DATABASE`)' — пусто; примеры values из README рендерятся (helm template с ними — OK) -->
-- [ ] **5.3** `CHANGELOG.md` `[Unreleased]`: Added (`externalDatabase.*`), Breaking/migration note (`values-production.yaml`, «БД нет нигде» → fail), Fixed (DSN). <!-- depends: 5.1 | verify: grep -n HELM-EXTERNAL-DATABASE CHANGELOG.md -->
-- [ ] **5.4** Коммит `docs: external PostgreSQL values, runbook drill and migration note`. <!-- depends: 5.1-5.3 | verify: git diff --check -->
+- [x] **5.1** `POSTGRESQL_RESTORE_GUIDE.md`: § «External PostgreSQL» — команды ровно из 4.3–4.5, без «not drilled»; строка 9; новый подраздел «Move from the bundled to an external PostgreSQL» по 4.4/4.6. <!-- depends: 4.7 | verify: grep -c 'not drilled' helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md = 0 -->
+- [x] **5.2** `helm/amp/README.md` (баннер `:15`, § PostgreSQL `:107` — пример `externalDatabase` + `kubectl create secret generic`, edge cases 3, 5, 6, 7 одной фразой каждый, `configFile` как запасной путь), `docs/MIGRATION_QUICK_START.md:24`. <!-- depends: 3.4 | verify: grep -n 'planned (`HELM-EXTERNAL-DATABASE`)' — пусто; примеры values из README рендерятся (helm template с ними — OK) -->
+- [x] **5.3** `CHANGELOG.md` `[Unreleased]`: Added (`externalDatabase.*`), Breaking/migration note (`values-production.yaml`, «БД нет нигде» → fail), Fixed (DSN). <!-- depends: 5.1 | verify: grep -n HELM-EXTERNAL-DATABASE CHANGELOG.md -->
+- [x] **5.4** Коммит `docs: external PostgreSQL values, runbook drill and migration note`. <!-- depends: 5.1-5.3 | verify: git diff --check -->
 
 ## Phase 6: Deep review
 

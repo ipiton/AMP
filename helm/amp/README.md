@@ -12,7 +12,7 @@ Alertmanager++ (AMP) chart packages the current repository runtime with:
 
 ## Quick Start
 
-> **Read before installing (status 2026-10-14).** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart sets `DATABASE_SSL_MODE=disable` plus `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true`: under `environment: production` (the default) AMP accepts the unencrypted in-cluster connection and logs a `Database connection is NOT encrypted in production` warning with the database host. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: with `postgresql.enabled: false` the chart passes no `DATABASE_*` variables, so set `database:` (host, port, database, username, password) in `configFile.content` (requires `configFile.enabled: true`) — `ssl_mode` defaults to `require`, the password must be at least 12 characters under `environment: production`, and it is stored in plain text in the config ConfigMap (values with a Secret-backed password are tracked as `HELM-EXTERNAL-DATABASE` in `docs/06-planning/BACKLOG.md`). The default HPA starts two replicas and the default requests do not fit a small node; the values file below runs one replica. No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing (status 2026-10-16).** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart sets `DATABASE_SSL_MODE=disable` plus `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true`: under `environment: production` (the default) AMP accepts the unencrypted in-cluster connection and logs a `Database connection is NOT encrypted in production` warning with the database host. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The default HPA starts two replicas and the default requests do not fit a small node; the values file below runs one replica. No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
 ```yaml
 # values-small.yaml — one replica, standard profile
@@ -104,7 +104,35 @@ The standard profile needs PostgreSQL; the chart ships and tests 16 (`postgres:1
 
 The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime, and ingest returns errors until the database is back. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed). The `postgresql.config` block is not applied by the bundled server yet (bug `PG-CONFIG-NOT-APPLIED`).
 
-External PostgreSQL: dedicated `externalDatabase.*` values are planned (`HELM-EXTERNAL-DATABASE`). Until then, set `postgresql.enabled: false` and configure the connection in the `database:` section of the AMP config (`configFile.enabled: true`, `configFile.content`); note that the password then sits in a ConfigMap.
+#### External PostgreSQL
+
+Create the database and an owner role for AMP (no superuser rights needed: AMP's extensions `uuid-ossp`, `btree_gin` and `pg_trgm` are trusted), then a Secret with the role's password in the release namespace. The chart never creates this Secret:
+
+```bash
+kubectl -n monitoring create secret generic amp-db --from-file=password=./amp-db-password
+```
+
+```yaml
+postgresql:
+  enabled: false
+externalDatabase:
+  host: db.example.com
+  port: 5432
+  database: amp
+  username: amp
+  sslMode: require          # disable | allow | prefer | require | verify-ca | verify-full
+  existingSecret: amp-db
+  existingSecretPasswordKey: password
+```
+
+The chart passes these to AMP as `DATABASE_HOST/PORT/DATABASE/USERNAME/SSL_MODE`, and `DATABASE_PASSWORD` comes from the Secret through `secretKeyRef`. The render fails if `host` is set without `database`, `username` or `existingSecret`, if `sslMode` is not one of the six values, or if `postgresql.enabled` is still `true`.
+
+- A missing Secret or key is not caught at render time (the chart does not read the cluster): the pod stays in `CreateContainerConfigError`.
+- Under `environment: production` AMP refuses `sslMode: disable` and passwords shorter than 12 characters. The chart never sets the insecure-SSL override for an external database.
+- `verify-ca`/`verify-full` check the server certificate against the image's system roots only. A provider CA (RDS and the like) is not among them, and the chart mounts no client TLS material: use `require`, or an image with that CA.
+- `externalDatabase` takes precedence over a `database:` section in `configFile.content` (environment variables win over the config file).
+- Fallback without a Secret: leave `externalDatabase.host` empty and put a top-level `database:` section into `configFile.content` (`configFile.enabled: true`). The password then sits in plain text in a ConfigMap. The render check only finds `database:` at the start of a line; flow-style or quoted keys are not recognized.
+- Moving an installation from the bundled to an external database: [docs/POSTGRESQL_RESTORE_GUIDE.md § 3c](docs/POSTGRESQL_RESTORE_GUIDE.md#3c-move-from-the-bundled-to-an-external-postgresql).
 
 Backup and restore with `pg_dump`/`pg_restore`, for both topologies: [docs/POSTGRESQL_RESTORE_GUIDE.md](docs/POSTGRESQL_RESTORE_GUIDE.md). The decision record is ADR-016 in `docs/06-planning/DECISIONS.md`.
 
