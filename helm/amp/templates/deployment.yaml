@@ -5,8 +5,6 @@ metadata:
   namespace: {{ .Values.namespace | default .Release.Namespace }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
-  annotations:
-    deployment.kubernetes.io/revision: "1"
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
