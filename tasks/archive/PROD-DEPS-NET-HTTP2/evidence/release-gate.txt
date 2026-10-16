@@ -299,7 +299,7 @@ values without monitoring.serviceMonitor (--reuse-values from an old release):
 
 all assertions passed
 [release-gate] ==> amtool-compat
- Image python:3-alpine Pulling 
+ Image python:3-alpine Pulling
  05f38c1a7503 Pulling fs layer 0B
  f0872f0cf9a0 Pulling fs layer 0B
  fefeaf673ce1 Pulling fs layer 0B
@@ -359,8 +359,8 @@ all assertions passed
  05f38c1a7503 Extracting 1B
  fefeaf673ce1 Pull complete 0B
  05f38c1a7503 Pull complete 0B
- Image python:3-alpine Pulled 
- Image amp-smoke-amp Building 
+ Image python:3-alpine Pulled
+ Image amp-smoke-amp Building
 #1 [internal] load local bake definitions
 #1 reading from stdin 518B done
 #1 DONE 0.0s
@@ -449,19 +449,19 @@ all assertions passed
 
 #21 resolving provenance for metadata file
 #21 DONE 0.0s
- Image amp-smoke-amp Built 
- Network amp-smoke_default Creating 
- Network amp-smoke_default Created 
- Container amp-smoke-webhook-1 Creating 
- Container amp-smoke-webhook-1 Created 
- Container amp-smoke-amp-1 Creating 
- Container amp-smoke-amp-1 Created 
- Container amp-smoke-webhook-1 Starting 
- Container amp-smoke-webhook-1 Started 
- Container amp-smoke-webhook-1 Waiting 
- Container amp-smoke-webhook-1 Healthy 
- Container amp-smoke-amp-1 Starting 
- Container amp-smoke-amp-1 Started 
+ Image amp-smoke-amp Built
+ Network amp-smoke_default Creating
+ Network amp-smoke_default Created
+ Container amp-smoke-webhook-1 Creating
+ Container amp-smoke-webhook-1 Created
+ Container amp-smoke-amp-1 Creating
+ Container amp-smoke-amp-1 Created
+ Container amp-smoke-webhook-1 Starting
+ Container amp-smoke-webhook-1 Started
+ Container amp-smoke-webhook-1 Waiting
+ Container amp-smoke-webhook-1 Healthy
+ Container amp-smoke-amp-1 Starting
+ Container amp-smoke-amp-1 Started
 Unable to find image 'quay.io/prometheus/alertmanager:v0.34.0' locally
 v0.34.0: Pulling from prometheus/alertmanager
 4f4fb700ef54: Pulling fs layer
@@ -491,7 +491,7 @@ Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
 Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
 Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
 Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
-[release-gate] 
+[release-gate]
 [release-gate] ==================== SUMMARY ====================
 STEP             STATUS TIME     NOTE
 build            PASS   24s      go build ./... (go-app)
