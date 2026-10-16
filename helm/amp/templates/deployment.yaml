@@ -5,8 +5,6 @@ metadata:
   namespace: {{ .Values.namespace | default .Release.Namespace }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
-  annotations:
-    deployment.kubernetes.io/revision: "1"
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
@@ -91,6 +89,39 @@ spec:
               value: {{ .Chart.AppVersion | quote }}
 
             # Database Configuration
+            {{- /* `| default dict`: `helm upgrade --reuse-values` from a chart without externalDatabase. */}}
+            {{- $ext := .Values.externalDatabase | default dict }}
+            {{- if eq .Values.profile "standard" }}
+            {{- if $ext.host }}
+            {{- if .Values.postgresql.enabled }}
+            {{- fail "externalDatabase.host is set while postgresql.enabled=true: pick one. For an external database set postgresql.enabled=false." }}
+            {{- end }}
+            {{- if not $ext.existingSecret }}
+            {{- fail (printf "externalDatabase.existingSecret is required when externalDatabase.host is set. The chart does not create it: create a Secret holding the password under key %q (externalDatabase.existingSecretPasswordKey)." ($ext.existingSecretPasswordKey | default "password")) }}
+            {{- end }}
+            {{- if not $ext.database }}
+            {{- fail "externalDatabase.database is required when externalDatabase.host is set." }}
+            {{- end }}
+            {{- if not $ext.username }}
+            {{- fail "externalDatabase.username is required when externalDatabase.host is set." }}
+            {{- end }}
+            {{- /* The modes AMP accepts (internal/database/postgres PostgresConfig.Validate); allow/prefer are refused there and may fall back to plaintext. */}}
+            {{- if not (has ($ext.sslMode | default "require") (list "disable" "require" "verify-ca" "verify-full")) }}
+            {{- fail (printf "externalDatabase.sslMode %q is invalid: use one of disable, require, verify-ca, verify-full." $ext.sslMode) }}
+            {{- end }}
+            {{- else if not .Values.postgresql.enabled }}
+            {{- $cfg := dict }}
+            {{- if .Values.configFile.enabled }}
+            {{- $cfg = fromYaml (.Values.configFile.content | default "") }}
+            {{- if hasKey $cfg "Error" }}
+            {{- fail (printf "configFile.content is not valid YAML: %s" (get $cfg "Error")) }}
+            {{- end }}
+            {{- end }}
+            {{- if not $cfg.database }}
+            {{- fail "postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap)." }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if and .Values.postgresql.enabled (eq .Values.profile "standard") }}
             - name: DATABASE_HOST
               value: {{ include "amp.postgresql.fullname" . }}
@@ -114,6 +145,24 @@ spec:
             - name: DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION
               value: "true"
             {{- end }}
+            {{- else if and $ext.host (eq .Values.profile "standard") }}
+            # External PostgreSQL (ADR-016). No insecure-SSL override here, whatever
+            # sslMode is: that override is for the bundled database only.
+            - name: DATABASE_HOST
+              value: {{ $ext.host | quote }}
+            - name: DATABASE_PORT
+              value: {{ $ext.port | default 5432 | quote }}
+            - name: DATABASE_DATABASE
+              value: {{ $ext.database | quote }}
+            - name: DATABASE_USERNAME
+              value: {{ $ext.username | quote }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ext.existingSecret | quote }}
+                  key: {{ $ext.existingSecretPasswordKey | default "password" | quote }}
+            - name: DATABASE_SSL_MODE
+              value: {{ $ext.sslMode | default "require" | quote }}
             {{- else }}
             - name: STORAGE_FILESYSTEM_PATH
               value: {{ printf "%s/alerthistory.db" .Values.liteProfile.persistence.mountPath | quote }}

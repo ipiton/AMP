@@ -45,85 +45,38 @@ podDisruptionBudget:
   minAvailable: 2 # replicaCount 3 (up to 20 via HPA) — never drain below 2 on voluntary disruption
 
 # ===============================
-# PostgreSQL Database (Production)
+# PostgreSQL Database (Production): external
 # ===============================
-# The bundled PostgreSQL (templates/postgresql-statefulset.yaml) is a single
-# primary with no replication or failover; there is no "cluster" mode, and
-# `replicas` other than 1 fails the render (it would start independent,
-# uncoordinated databases behind one Service). Multi-instance HA needs an
-# external PostgreSQL or an operator (CloudNativePG/Patroni) — ADR-016.
-# It also takes no backups. Fine for a pilot; for production point AMP at an
-# external PostgreSQL with backups/PITR (README "PostgreSQL") — chart values
-# for that come with HELM-EXTERNAL-DATABASE. Take your own pg_dump backups
-# meanwhile: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md.
+# Production runs on an external PostgreSQL >= 16 with backups/PITR (ADR-016).
+# The bundled one (templates/postgresql-statefulset.yaml) is a single primary
+# with no replication, failover or backups: dev/pilot only, so it is off here.
+#
+# This file does not render until externalDatabase.host, database, username
+# and existingSecret are set (a Secret you create; the chart never does), the
+# same way it refuses to render without webConfig.existingSecret. See README
+# "PostgreSQL".
+#
+# MIGRATION: before 2026-10 this file installed the bundled PostgreSQL. A
+# `helm upgrade` of such a release with this file removes the bundled
+# StatefulSet (its PVC stays) and points AMP at the external database, which
+# starts EMPTY. Move the data first: CHANGELOG [Unreleased] and
+# helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md § 3c. To stay on the bundled
+# database for now, keep your previous `postgresql:` block (it is not the
+# base values.yaml one: password, 50Gi volume, resources, networkPolicy).
+#
+# Connections: 25 per pod (database.max_connections default) × HPA
+# maxReplicas 20 = up to 500. Size max_connections on the server for that.
 postgresql:
-  enabled: true
-  replicas: 1 # must stay 1; anything else fails the render
-  # MUST be set before install: --set postgresql.password=..., a CI-injected
-  # values file kept out of git, or wire postgresql.existingSecret + External
-  # Secrets. Left empty on purpose — unlike secret.yaml's other credentials,
-  # templates/postgresql-secret.yaml has no `default (randAlphaNum ...)`
-  # fallback, so an empty value here means an empty-password Secret (the
-  # Postgres container itself then refuses to start — loud, at pod-start
-  # time). CORRECTION: this file never carried its own `postgresql.password`
-  # before this audit — the weak literal lives in the base chart's
-  # `values.yaml` (still there, see TECH-DEBT.md HELM-CHART-GAPS) and was
-  # silently INHERITED by any `helm install -f values-production.yaml` that
-  # didn't separately override it, because a values file with -f layers on
-  # top of, not instead of, the chart's own values.yaml. This explicit `""`
-  # is what actually changed: it shadows that inherited weak default instead
-  # of leaving the gap open.
-  password: ""
-  database: "alert_history"
-  username: "alert_history"
-  resources:
-    limits:
-      cpu: 2000m
-      memory: 4Gi
-    requests:
-      cpu: 1000m
-      memory: 2Gi
-  persistence:
-    enabled: true
-    size: 50Gi
-  monitoring:
-    prometheusRules:
-      enabled: true
-  networkPolicy:
-    enabled: true
-  # NOTE: config: below is currently NOT applied by the bundled PostgreSQL
-  # (BUGS PG-CONFIG-NOT-APPLIED) — it runs with the image defaults.
-  config:
-    # 20 replicas (autoscaling.maxReplicas below) x ~20 conns/pod + headroom.
-    maxConnections: 500
-    superuserReservedConnections: 10
-    sharedBuffers: "1GB" # ~25% of the 4Gi memory limit above
-    effectiveCacheSize: "4GB"
-    workMem: "8MB"
-    maintenanceWorkMem: "128MB"
-    walBuffers: "16MB"
-    maxWalSize: "4GB"
-    minWalSize: "1GB"
-    checkpointCompletionTarget: 0.9
-    randomPageCost: 1.1
-    effectiveIoConcurrency: 200
-    sharedPreloadLibraries: "pg_stat_statements"
-    trackActivities: "on"
-    trackCounts: "on"
-    trackIoTiming: "on"
-    loggingCollector: "on"
-    logConnections: "off"
-    logDisconnections: "off"
-    logMinDurationStatement: 1000
-    autovacuum: "on"
-    autovacuumMaxWorkers: 3
-    autovacuumNaptime: "1min"
-    # Left "off" on purpose: the chart has no cert-mounting support for Postgres
-    # yet (templates/postgresql-configmap.yaml's own comment says the same) —
-    # flipping this without a cert path breaks startup. TLS-in-transit for this
-    # link must come from outside Postgres (mesh mTLS/NetworkPolicy) until a
-    # follow-up adds cert mounting.
-    ssl: "off"
+  enabled: false
+
+externalDatabase:
+  host: ""
+  port: 5432
+  database: ""
+  username: ""
+  sslMode: require # "disable" is refused by AMP under environment=production
+  existingSecret: ""
+  existingSecretPasswordKey: password
 
 # ===============================
 # Cache (DragonflyDB, Redis-compatible — external service)
@@ -140,9 +93,8 @@ cache:
   port: 6379
   auth:
     enabled: true
-    # NOT the same rationale as postgresql.password above: templates/secret.yaml
-    # has no random-generation fallback for THIS key (by design — see that
-    # template's comment) and now `required`-guards it, so leaving this empty
+    # templates/secret.yaml has no random-generation fallback for THIS key (by
+    # design — see that template's comment) and now `required`-guards it, so leaving this empty
     # makes `helm template`/`helm install` FAIL OUTRIGHT instead of silently
     # baking in a generated password that can never match your real
     # DragonflyDB credential. This is intentional: install with

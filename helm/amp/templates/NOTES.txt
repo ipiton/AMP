@@ -27,8 +27,12 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
    For production use an external PostgreSQL; backups: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md
    postgresql.config is not applied (bug PG-CONFIG-NOT-APPLIED): max_connections stays at the
    server default (20 measured on k3d), below one AMP pod's pool of 25.
+{{- else if (.Values.externalDatabase | default dict).host }}
+{{- $ext := .Values.externalDatabase }}
+✅ External PostgreSQL: {{ $ext.host }}:{{ $ext.port | default 5432 }}/{{ $ext.database }} (sslmode={{ $ext.sslMode | default "require" }}), password from Secret {{ $ext.existingSecret }}/{{ $ext.existingSecretPasswordKey | default "password" }}
 {{- else }}
-✅ External PostgreSQL (connection from the AMP config, see README → PostgreSQL)
+⚠️  External PostgreSQL from the `database:` section of configFile.content: its password
+   sits in a ConfigMap. Prefer externalDatabase.* with existingSecret (README → PostgreSQL).
 {{- end }}
 ✅ Redis L2 + Memory L1 cache
 {{- if .Values.autoscaling.enabled }}

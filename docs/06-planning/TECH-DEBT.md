@@ -23,7 +23,8 @@
   - _(2026-10-15, PROD-POSTGRES-HA-DECISION)_ HA встроенного PostgreSQL решён ADR-016: встроенный — dev/pilot, single instance, `postgresql.replicas != 1` падает на рендере; прод — внешний PostgreSQL. Реализации HA в чарте не будет.
   - _(2026-10-15, PROD-POSTGRES-HA-DECISION R16)_ `migration.backupBeforeMigration` в `values.yaml` ни один шаблон не читает — мёртвое обещание бэкапа перед миграцией; удалить ключ (или реализовать, если понадобится).
   - _(2026-10-15, PROD-POSTGRES-HA-DECISION R24)_ `NOTES.txt` (шаг 5) советует `kubectl port-forward svc/<fullname>`, но селектор Service захватывает и postgres/redis (BUGS `SERVICE-METRICS-PORT-MISROUTED`) — адресовать под AMP по меткам `component=application`, как runbook `POSTGRESQL_RESTORE_GUIDE.md` § 1.
-  - Найдено ревью fix-round (2026-08-20): базовый `values.yaml` до сих пор хардкодит слабый dev-дефолт для `postgresql.password` (dev/test zero-config install path). Не трогали — задача была про `values-production.yaml`, и требование "без дефолта" сломало бы dev-путь без правки `secret.yaml`'s fallback-логики. `values-production.yaml` явно перекрывает его на `""` (см. её комментарий) — инконсистентность зафиксирована здесь, не исправлена.
+  - Найдено ревью fix-round (2026-08-20): базовый `values.yaml` до сих пор хардкодит слабый dev-дефолт для `postgresql.password` (dev/test zero-config install path). Не трогали — задача была про `values-production.yaml`, и требование "без дефолта" сломало бы dev-путь без правки `secret.yaml`'s fallback-логики. `values-production.yaml` перекрывал его на `""`; с `HELM-EXTERNAL-DATABASE` (2026-10-16) блока `postgresql:` в нём нет (внешняя БД), и релиз, вернувший встроенный PG через `postgresql.enabled: true`, наследует этот литерал, если не задаёт пароль сам (CHANGELOG Breaking). Инконсистентность зафиксирована здесь, не исправлена.
+  - _(2026-10-16, HELM-EXTERNAL-DATABASE R2)_ guard на слабый пароль нет: `postgresql.enabled: true` под `environment: production` с `postgresql.password` = дефолту `values.yaml` (`secure_password_123`) рендерится. AMP в production отсекает только короткие (< 12) и пароли из списка `weakPasswords` (`config.go:1466`), дефолт чарта (19 символов) проходит. Фикс: `fail` в `postgresql-secret.yaml` при `environment: production` и пароле, равном дефолту базового `values.yaml`; render-тест.
   - _(2026-10-01, PROD-INGRESS-HARDENING R17)_ сабчарт valkey рендерит свою NetworkPolicy `amp-valkey` (deny-all по умолчанию) параллельно чартовой `redis-networkpolicy.yaml`; политики postgres/redis хардкодят `namespaceSelector` `name: monitoring` / `name: kube-system` вместо автоматической метки `kubernetes.io/metadata.name`; `ingress.yaml` безусловно добавляет nginx sticky-аннотации (`affinity: cookie` и др.) к любым `ingress.annotations`.
   - _(2026-10-14, HELM-DEFAULTS-VALIDATE review F7)_ `postgresql.config.ssl` не bool-safe: `ssl: on` без кавычек или `--set postgresql.config.ssl=true` → `eq: incompatible types` на рендере; `ssl: "true"` даёт PostgreSQL `ssl = true`, а AMP — `DATABASE_SSL_MODE=disable` и флаг `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` (`templates/deployment.yaml`). Фикс: сравнивать через `toString`, `fail` на всё, кроме `"on"`/`"off"`.
 - **Impact:** операторы, включающие `existingSecret` или выключающие valkey флагом, получают не то, что заявлено в values.
@@ -139,6 +140,14 @@
 - **Impact:** оператор меняет `grouping.enabled` в файле, делает reload и считает, что режим сменился.
 - **Fix:** предупреждение W6xx «restart required» при изменении `grouping.*` на reload.
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` F11; `go-app/internal/config/reload_coordinator.go`.
+- **Status:** open
+
+### [low][Config][~0.25d] DB-CONN-STRING-UNESCAPED
+- **Title:** `ConnectionString()` и `config.GetDatabaseURL()` собирают строку подключения без экранирования
+- **Problem:** `PostgresConfig.ConnectionString()` (`internal/database/postgres/config.go`, key=value через `fmt.Sprintf`) и `Config.GetDatabaseURL()` (`internal/config/config.go`, URL через `fmt.Sprintf`) подставляют пользователя и пароль как есть — тот же дефект, что был в `DSN()` до HELM-EXTERNAL-DATABASE: пароль с пробелом, `'`, `/ # ? %` ломает разбор или молча меняется. Дополнительно `GetDatabaseURL()` подставляет `sslmode=disable` при пустом значении, тогда как рантайм по умолчанию берёт `require`. В рантайме не вызываются: единственные вызовы — `internal/config/example.go:94` и `pool_test.go:322`.
+- **Impact:** сейчас нет; ловушка для следующего, кто возьмёт эти функции вместо `DSN()`.
+- **Fix:** удалить обе (и пример/тест) либо собрать через `url.URL`, как `DSN()`.
+- **Refs:** `tasks/archive/HELM-EXTERNAL-DATABASE/research.md`, `evidence/dsn-password-escaping.txt`; 2026-10-16.
 - **Status:** open
 
 ## Entry Format

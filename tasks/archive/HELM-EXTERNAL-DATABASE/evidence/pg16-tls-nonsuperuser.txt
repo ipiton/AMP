@@ -1,0 +1,10 @@
+# 2026-10-16, local docker, image postgres:16 (resolved to PostgreSQL 16.15, Debian 16.15-1.pgdg13+2, aarch64)
+# docker run postgres:16 -c ssl=on -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+# as postgres: create role amp login password '<pw with / # ? % space @ :>'; create database amp owner amp;
+# as amp (non-superuser), "host=localhost user=amp dbname=amp sslmode=require":
+CREATE EXTENSION   -- uuid-ossp
+CREATE EXTENSION   -- btree_gin
+t                  -- pg_stat_ssl.ssl for own backend
+btree_gin
+plpgsql
+uuid-ossp

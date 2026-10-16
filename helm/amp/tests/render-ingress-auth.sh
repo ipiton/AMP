@@ -74,7 +74,13 @@ fi
 GUARD_MSG="exposes the whole AMP API"
 PASSWORDS=(--set postgresql.password=render-test-placeholder
   --set cache.auth.password=render-test-placeholder)
-PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml" "${PASSWORDS[@]}")
+# values-production.yaml needs an external database before anything renders
+# (HELM-EXTERNAL-DATABASE); supply one so the Ingress guard is the one tested.
+PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml" "${PASSWORDS[@]}"
+  --set externalDatabase.host=db.example.com
+  --set externalDatabase.database=amp
+  --set externalDatabase.username=amp
+  --set externalDatabase.existingSecret=amp-db)
 PLACEHOLDERS=(-f "${CHART_DIR}/tests/values-production-placeholders.yaml")
 # A NetworkPolicy source only: lets prod past its own guards without supplying
 # any auth, so the Ingress guard is the one that answers.

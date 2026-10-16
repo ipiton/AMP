@@ -1,0 +1,64 @@
+# 2026-10-16: Phase 2 chart checks, Helm v4.3.0+gbec5b06. Baselines rendered before the change (default, profile=lite, postgresql.enabled=false + configFile.content with database:); the bundled-PG random password line is ignored in diffs.
+== invariants (random bundled-PG password line ignored)
+default SAME
+lite SAME
+configFile-path SAME
+== external DB env
+            - name: DATABASE_HOST
+              value: "db.example.com"
+            - name: DATABASE_PORT
+              value: "5432"
+            - name: DATABASE_DATABASE
+              value: "amp"
+            - name: DATABASE_USERNAME
+              value: "amp"
+            - name: DATABASE_PASSWORD
+              valueFrom:
+            - name: DATABASE_SSL_MODE
+              value: "require"
+            - name: DATABASE_PASSWORD
+                  name: "amp-db"
+                  key: "password"
+== insecure flag per sslMode
+disable ALLOW_INSECURE=0
+allow ALLOW_INSECURE=0
+prefer ALLOW_INSECURE=0
+require ALLOW_INSECURE=0
+verify-ca ALLOW_INSECURE=0
+verify-full ALLOW_INSECURE=0
+== render errors
+-- EC1 both databases
+Error: execution error at (amp/templates/deployment.yaml:99:16): externalDatabase.host is set while postgresql.enabled=true: pick one. For an external database set postgresql.enabled=false.
+exit=1
+-- EC2 no existingSecret
+Error: execution error at (amp/templates/deployment.yaml:102:16): externalDatabase.existingSecret is required when externalDatabase.host is set. The chart does not create it: create a Secret holding the password under key "password" (externalDatabase.existingSecretPasswordKey).
+exit=1
+-- no database
+Error: execution error at (amp/templates/deployment.yaml:105:16): externalDatabase.database is required when externalDatabase.host is set.
+exit=1
+-- no username
+Error: execution error at (amp/templates/deployment.yaml:108:16): externalDatabase.username is required when externalDatabase.host is set.
+exit=1
+-- bad sslMode
+Error: execution error at (amp/templates/deployment.yaml:111:16): externalDatabase.sslMode "strict" is invalid: use one of disable, allow, prefer, require, verify-ca, verify-full.
+exit=1
+-- no database anywhere
+Error: execution error at (amp/templates/deployment.yaml:114:16): postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap).
+exit=1
+-- configFile without database:
+Error: execution error at (amp/templates/deployment.yaml:114:16): postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap).
+exit=1
+-- configFile.enabled=false with database:
+Error: execution error at (amp/templates/deployment.yaml:114:16): postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap).
+exit=1
+-- nested database: (EC7)
+Error: execution error at (amp/templates/deployment.yaml:114:16): postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap).
+== EC9 externalDatabase=null (reuse-values), bundled PG
+1
+== EC9 externalDatabase=null, pg disabled + configFile db
+SAME
+== EC10 port string
+              value: "5433"
+== lite ignores externalDatabase
+0
+lite: no guards OK

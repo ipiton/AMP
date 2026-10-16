@@ -28,10 +28,13 @@ resources:
     memory: 512Mi
 
 # ===============================
-# Database Configuration (SQLite for development)
+# Database Configuration (bundled PostgreSQL, dev/pilot only — ADR-016)
 # ===============================
+# The standard profile has no SQLite: AMP requires PostgreSQL there. This used
+# to say "SQLite" with the database disabled, which left AMP pointed at
+# localhost:5432 with nothing listening. For SQLite use profile: lite.
 postgresql:
-  enabled: false
+  enabled: true
 
 persistence:
   enabled: true

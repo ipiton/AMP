@@ -2,6 +2,8 @@
 # the render tests. values-production.yaml deliberately renders NOTHING until
 # the operator supplies these (PROD-INGRESS-HARDENING, ADR-015); the gate fills
 # them instead of weakening the guards. Never use this file for a real install.
+# externalDatabase: production uses an external PostgreSQL (ADR-016,
+# HELM-EXTERNAL-DATABASE); the placeholder Secret is referenced, never created.
 #
 #   helm template amp helm/amp -f helm/amp/values-production.yaml \
 #     -f helm/amp/tests/values-production-placeholders.yaml \
@@ -19,3 +21,9 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: release-gate-placeholder
+
+externalDatabase:
+  host: release-gate-placeholder
+  database: release-gate-placeholder
+  username: release-gate-placeholder
+  existingSecret: release-gate-placeholder

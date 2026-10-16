@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -335,6 +336,66 @@ func TestPostgresConfig_DSN(t *testing.T) {
 
 	expected := "postgres://testuser:testpass@testhost:5433/testdb?sslmode=require"
 	assert.Equal(t, expected, config.DSN())
+}
+
+// TestPostgresConfig_DSN_EscapesCredentials: пароль от провайдера с символами
+// URL доходит до pgx без изменений. Без экранирования "/ # ? пробел" ломают
+// разбор, а "%41" молча превращается в "A".
+func TestPostgresConfig_DSN_EscapesCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		user     string
+		password string
+		database string
+	}{
+		{"password with URL delimiters", "amp", "p/a#s?s w@r:d", "amp"},
+		{"password with percent escape", "amp", "pass%41%zz%", "amp"},
+		{"user with @ and :", "amp@tenant:x", "secret", "amp"},
+		{"database with / and space", "amp", "secret", "amp/db name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &PostgresConfig{
+				Host:     "db.example.com",
+				Port:     5432,
+				User:     tt.user,
+				Password: tt.password,
+				Database: tt.database,
+				SSLMode:  "require",
+			}
+			parsed, err := pgxpool.ParseConfig(config.DSN())
+			require.NoError(t, err)
+			assert.Equal(t, tt.user, parsed.ConnConfig.User)
+			assert.Equal(t, tt.password, parsed.ConnConfig.Password)
+			assert.Equal(t, tt.database, parsed.ConnConfig.Database)
+			assert.Equal(t, "db.example.com", parsed.ConnConfig.Host)
+			assert.Equal(t, uint16(5432), parsed.ConnConfig.Port)
+		})
+	}
+}
+
+// TestPostgresConfig_DSN_IPv6Host: IPv6-адрес принимается и голым, и в скобках.
+func TestPostgresConfig_DSN_IPv6Host(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"::1", "::1"},
+		{"[::1]", "::1"},
+		{"fe80::1%eth0", "fe80::1%eth0"},
+		{"[fe80::1%eth0]", "fe80::1%eth0"},
+		{"127.0.0.1", "127.0.0.1"},
+		{"db.example.com", "db.example.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			config := &PostgresConfig{Host: tt.host, Port: 5433, User: "amp", Password: "secret", Database: "amp", SSLMode: "disable"}
+			parsed, err := pgxpool.ParseConfig(config.DSN())
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, parsed.ConnConfig.Host)
+			assert.Equal(t, uint16(5433), parsed.ConnConfig.Port)
+		})
+	}
 }
 
 // BenchmarkPostgresPool_Query бенчмарк для выполнения запросов
