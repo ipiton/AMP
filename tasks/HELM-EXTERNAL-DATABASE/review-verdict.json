@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "14 fix-here finding(s) open",
+  "branch": "feature/helm-external-database",
+  "commit": "6eb1774",
+  "reviewed_at": "2026-10-16",
+  "findings": {
+    "blocker": 0,
+    "major": 2,
+    "minor": 7,
+    "nit": 7
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

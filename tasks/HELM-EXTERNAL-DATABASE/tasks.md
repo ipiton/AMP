@@ -79,7 +79,7 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 
 ## Phase 6: Deep review
 
-- [ ] **6.1** `/deep-review` (обязателен: `S`, 4 сигнала) — независимый агент; линзы: security (путь пароля, TLS-флаг, NOTES), contract (values, breaking), correctness guard'ов и веток, premises, Go-DSN. <!-- depends: 5.4 | verify: jq -r .gate tasks/HELM-EXTERNAL-DATABASE/review-verdict.json → pass -->
+- [ ] **6.1** _(прогон 1 @ 6eb1774: fix_required, 2 major + 7 minor + 7 nit, см. review-findings.md)_ `/deep-review` (обязателен: `S`, 4 сигнала) — независимый агент; линзы: security (путь пароля, TLS-флаг, NOTES), contract (values, breaking), correctness guard'ов и веток, premises, Go-DSN. <!-- depends: 5.4 | verify: jq -r .gate tasks/HELM-EXTERNAL-DATABASE/review-verdict.json → pass -->
 
 ## Phase 7: Tests
 
