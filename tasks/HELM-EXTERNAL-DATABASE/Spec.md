@@ -13,7 +13,7 @@ based_on:
 
 # Specification: внешний PostgreSQL через values чарта
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Draft
 
 ## Summary
