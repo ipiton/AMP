@@ -94,18 +94,18 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 
 ## Phase 9: Finalize
 
-- [ ] **9.1** `/finalize`: DONE, NEXT (WIP снять), BACKLOG P0 → закрытые; follow-ups (TECH-DEBT из 1.3, находки ревью); архив workspace; sync с `main`. <!-- depends: 8.1, 8.2 | verify: ls tasks/archive/HELM-EXTERNAL-DATABASE -->
+- [x] **9.1** _(2026-10-16: DONE, NEXT, BACKLOG → Закрыто; follow-ups BACKLOG `HELM-TEST-EXTERNAL-DB`, TECH-DEBT `HELM-CHART-GAPS` R2; архив; sync с `main` — main без новых коммитов)_ `/finalize`: DONE, NEXT (WIP снять), BACKLOG P0 → закрытые; follow-ups (TECH-DEBT из 1.3, находки ревью); архив workspace; sync с `main`. <!-- depends: 8.1, 8.2 | verify: ls tasks/archive/HELM-EXTERNAL-DATABASE -->
 - [ ] **9.2** `/merge-to-main`; push — по решению владельца. <!-- depends: 9.1 | verify: git log main -1 -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated (README, runbook, MIGRATION_QUICK_START, CHANGELOG, TECH-DEBT)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated (README, runbook, MIGRATION_QUICK_START, CHANGELOG, TECH-DEBT)
 
 ## Implementation Notes
 

@@ -36,17 +36,17 @@ updated_at: 2026-10-16
 
 ## Success Criteria
 
-- [ ] `values.yaml`: `externalDatabase.{host,port,database,username,sslMode,existingSecret,existingSecretPasswordKey}` с комментариями; `port: 5432`, `sslMode: require`, `existingSecretPasswordKey: password`.
-- [ ] `deployment.yaml`: при `profile: standard`, `postgresql.enabled: false` и заданном `externalDatabase.host` рендерятся `DATABASE_*` из `externalDatabase`, пароль — `secretKeyRef`; `required` на `externalDatabase.existingSecret` с текстом, называющим ключ. Пустой `host` ⇒ рендер как до задачи (путь `configFile.content` не ломается — решение владельца 2026-10-16, Option B).
-- [ ] DSN экранирует пользователя, пароль и имя БД: пароль с `/ # ? % пробел` доходит до pgx без изменений (unit-тест + прогон на k3d).
-- [ ] `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` в ветке внешней БД не рендерится ни при каком `sslMode`.
-- [ ] Поведение встроенного PG и lite-профиля не меняется (существующие render-тесты зелёные).
-- [ ] `values-production.yaml`: `postgresql.enabled: false` + блок `externalDatabase` (без реальных реквизитов — render требует их явно); `helm/amp/tests/values-production-placeholders.yaml` дополнен, тесты на production values зелёные.
-- [ ] Новый render-тест в `helm/amp/tests/` (в стиле существующих `render-*.sh`), подключён туда же, где запускаются остальные (release-gate).
-- [ ] Runbook `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` § «External PostgreSQL» прогнан на PG 16 (restore в пустую БД без `--clean`, без superuser), команды в тексте — ровно те, что прошли; пометка «not drilled» снята.
-- [ ] README чарта (`helm/amp/README.md`) и корневой `README.md` (если там есть) — раздел про внешнюю БД вместо «planned»/`configFile.content`; `NOTES.txt` — если упоминает.
-- [ ] `CHANGELOG.md` `[Unreleased]`: Added + Breaking/migration note для `values-production.yaml`.
-- [ ] Гейты: затронутые render-тесты, `helm lint`, `scripts/release-gate.sh`, `git diff --check`.
+- [x] `values.yaml`: `externalDatabase.{host,port,database,username,sslMode,existingSecret,existingSecretPasswordKey}` с комментариями; `port: 5432`, `sslMode: require`, `existingSecretPasswordKey: password`.
+- [x] `deployment.yaml`: при `profile: standard`, `postgresql.enabled: false` и заданном `externalDatabase.host` рендерятся `DATABASE_*` из `externalDatabase`, пароль — `secretKeyRef`; `required` на `externalDatabase.existingSecret` с текстом, называющим ключ. Пустой `host` ⇒ рендер как до задачи (путь `configFile.content` не ломается — решение владельца 2026-10-16, Option B).
+- [x] DSN экранирует пользователя, пароль и имя БД: пароль с `/ # ? % пробел` доходит до pgx без изменений (unit-тест + прогон на k3d).
+- [x] `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` в ветке внешней БД не рендерится ни при каком `sslMode`.
+- [x] Поведение встроенного PG и lite-профиля не меняется (существующие render-тесты зелёные).
+- [x] `values-production.yaml`: `postgresql.enabled: false` + блок `externalDatabase` (без реальных реквизитов — render требует их явно); `helm/amp/tests/values-production-placeholders.yaml` дополнен, тесты на production values зелёные.
+- [x] Новый render-тест в `helm/amp/tests/` (в стиле существующих `render-*.sh`), подключён туда же, где запускаются остальные (release-gate).
+- [x] Runbook `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` § «External PostgreSQL» прогнан на PG 16 (restore в пустую БД без `--clean`, без superuser), команды в тексте — ровно те, что прошли; пометка «not drilled» снята.
+- [x] README чарта (`helm/amp/README.md`) и корневой `README.md` (если там есть) — раздел про внешнюю БД вместо «planned»/`configFile.content`; `NOTES.txt` — если упоминает.
+- [x] `CHANGELOG.md` `[Unreleased]`: Added + Breaking/migration note для `values-production.yaml`.
+- [x] Гейты: затронутые render-тесты, `helm lint`, `scripts/release-gate.sh`, `git diff --check`.
 
 ## Non-Goals
 

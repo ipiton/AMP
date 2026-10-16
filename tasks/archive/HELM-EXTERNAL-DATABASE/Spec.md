@@ -128,11 +128,11 @@ externalDatabase:
 
 ## Invariants
 
-- [ ] Дефолтный рендер (`values.yaml`) не меняется ни в одном объекте (проверка: `helm template` до/после, diff пустой).
-- [ ] Рендер `postgresql.enabled: false` + `configFile.content` с `database:` — тот же, что до задачи (Option B).
-- [ ] lite-профиль не меняется; `externalDatabase.*` в lite ни на что не влияет.
-- [ ] Ни в одной ветке внешней БД нет `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION`.
-- [ ] `DSN()` для значений без спецсимволов возвращает прежнюю строку.
+- [x] Дефолтный рендер (`values.yaml`) не меняется ни в одном объекте (проверка: `helm template` до/после, diff пустой). _Отклонение: diff — ровно удалённая аннотация `deployment.kubernetes.io/revision` (Implementation Notes, Phase 4); прочее совпадает, проверено после фиксов ревью._
+- [x] Рендер `postgresql.enabled: false` + `configFile.content` с `database:` — тот же, что до задачи (Option B). _Кроме той же аннотации._
+- [x] lite-профиль не меняется; `externalDatabase.*` в lite ни на что не влияет. _(T-ext-8; diff с baseline — только аннотация)_
+- [x] Ни в одной ветке внешней БД нет `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION`. _(T-ext-4, T-ext-9)_
+- [x] `DSN()` для значений без спецсимволов возвращает прежнюю строку. _(`TestPostgresConfig_DSN`, не менялся)_
 
 ## Edge Cases
 
@@ -187,4 +187,4 @@ externalDatabase:
 ## Open Questions
 
 - [x] _(закрыт 2026-10-16: `require`, владелец не возражал)_ `sslMode` в `values-production.yaml`: `require` (шифрование без проверки сертификата, работает с любым managed PG) или `verify-full` (без CA провайдера в образе не подключится). Предложение — `require` + комментарий; `verify-full` станет разумным дефолтом, когда появятся клиентские TLS-материалы (non-goal). Решается до `plan-task`, по умолчанию `require`.
-- [ ] premise «env > config-файл» — code-read, подтверждается шагом 5 прогона D9 (в production values есть `configFile`).
+- [x] premise «env > config-файл» — code-read, подтверждается шагом 5 прогона D9 (в production values есть `configFile`). _measured: evidence `k3d-external-drill.md` § 4._
