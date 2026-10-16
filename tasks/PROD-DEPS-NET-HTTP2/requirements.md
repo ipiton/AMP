@@ -15,6 +15,7 @@ updated_at: 2026-10-15
 
 - **Symptom:** required job `govulncheck` красный на `main` с 2026-10-10 (CI run 38047566510 и следующие). Пока он красный, красный любой PR, и включать branch protection (`MAIN-BRANCH-PROTECTION`) бессмысленно.
 - **Root Cause:** advisories GO-2026-6610, -6611, -6612, -6613, -6617 от 2026-10-08 — HTTP/2 и HTTP/1 в `net/http`, в том числе crash HTTP/2-сервера из-за гонки HPACK-энкодера. Достижимы через `golang.org/x/net` v0.58.0 (фикс v0.60.0) и stdlib `go1.26.8` (фикс `go1.26.9`). AMP — HTTP-сервер (`/api/v2/alerts`), так что уязвимый путь — основной ingest.
+  - _(2026-10-16, deep-review F4)_ уточнение: в `x/net/http2` находки — GO-2026-6603, -6610, -6611, -6612, -6617 (6613 — только stdlib), путь — Kubernetes-клиент. Серверы AMP — plaintext `ListenAndServe` без h2c, поэтому серверные HTTP/2-advisories достижимы по символам, но в штатном деплое не эксплуатируются; реальна клиентская сторона (k8s API, вебхуки). Полный список 12 ID — `CHANGELOG.md`.
 - **Why Now:** первая P0 в BACKLOG § Production Readiness; карантин `x/net` v0.60.0 истекает 2026-10-15. Разблокирует Owner `MAIN-BRANCH-PROTECTION`.
 - **How We Measure:** `govulncheck ./...` в `go-app` — 0 достижимых уязвимостей с фиксом; `scripts/release-gate.sh` зелёный; job `govulncheck` на `main` после push зелёный.
 

@@ -4,7 +4,7 @@
 **Reviewer perspective:** независимый read-only агент (Plan), не автор; линзы: supply chain, premises, correctness, maintainability + git history, runtime
 **Reviewed at:** 2026-10-16
 **Reviewed tree:** bugfix/prod-deps-net-http2 @ 2180c80
-**Verdict:** pass (см. `review-verdict.json`); все `fix-here` — правки текста, внесены автором в коммите после ревью, версии и код не менялись
+**Verdict:** pass (см. `review-verdict.json`); все находки закрыты автором после ревью (F1–F6 — текст, F7 — BACKLOG, F8 — прогон тестов); версии и код не менялись
 
 Ревьюер независимо подтвердил: все новые версии ≥ 7 дней (8 модулей + toolchain), хеши `go.sum` побайтно совпадают с sum.golang.org, `go mod verify` — all verified, `go 1.26.0` не изменился, `1.26.8` вне planning/архива/CHANGELOG не осталось, все Go-job'ы CI берут `go-version-file`, `govulncheck` на `go1.26.9` — 0 достижимых, `.go`-файлов в диффе нет.
 
@@ -39,7 +39,7 @@
 - **Location:** `CHANGELOG.md:11`; `requirements.md` Root Cause / Story 2
 - **Issue:** серверы AMP — plaintext `ListenAndServe` без h2c; серверные HTTP/2-advisories достижимы по символам, но в штатном деплое не эксплуатируются. В Root Cause requirements в списке `x/net` стоит 6613 вместо 6603.
 - **Recommendation:** смягчить CHANGELOG; requirements — исторический артефакт.
-- **Disposition:** fix-here для CHANGELOG (одной фразой вместе с F3) — сделано; requirements — reject (reason: исторический артефакт, корректная версия — в CHANGELOG и этом файле).
+- **Disposition:** fix-here — CHANGELOG (вместе с F3) и requirements (уточнение под Root Cause, исходный текст сохранён) — сделано по решению владельца «фиксить все находки».
 - **Follow-up:** n/a
 
 ### F5 — исключение из карантина для образа уже, чем описано
@@ -55,7 +55,7 @@
 - **Location:** `tasks/PROD-DEPS-NET-HTTP2/Spec.md:16` (trailing spaces из `tasks/templates/Spec.md:16`)
 - **Issue:** шаг 5.2 упал бы.
 - **Recommendation:** убрать пробелы; шаблон — отдельно.
-- **Disposition:** fix-here — сделано в Spec.md; шаблон vendored (менять через upstream), не трогаем.
+- **Disposition:** fix-here — сделано в Spec.md. Шаблон `tasks/templates/Spec.md` vendored из upstream Solo Kanban (`AGENTS.md`: «do not edit by hand») — правка там затрётся следующим `solo-kanban-sync.sh`; это вопрос upstream, не этой задачи.
 - **Follow-up:** n/a
 
 ### F7 — устаревшие `1.26.8` в planning
@@ -63,15 +63,15 @@
 - **Location:** `docs/06-planning/BACKLOG.md:54` (`CI-SUPPLY-CHAIN`), `DECISIONS.md:183` (ADR-013), `NEXT.md:29`
 - **Issue:** BACKLOG — живой пункт со старой версией; ADR и NEXT — исторический контекст / правится в finalize.
 - **Recommendation:** в finalize поправить BACKLOG:54 на нейтральное «builder `golang:*-alpine`»; ADR не трогать.
-- **Disposition:** defer-backlog (в `finalize`)
-- **Follow-up:** `tasks.md` 6.1
+- **Disposition:** fix-here — `BACKLOG.md:54` → «builder `golang:*-alpine`» (без версии, чтобы не устаревало); ADR-013 не тронут (исторический контекст), `NEXT.md` правится в finalize.
+- **Follow-up:** n/a
 
 ### F8 — поведение `x/text` / `x/crypto` для прямых импортов
 - **Severity:** nit
 - **Location:** `go-app/go.mod:33-34`; `internal/application/webauth.go` (`bcrypt`), `internal/business/templating/funcs.go`, `internal/notification/template/functions.go` (`x/text/cases`, `language`)
 - **Issue:** minor-бампы; сборка и vet чистые, сдвиг поведения — вопрос прогона.
 - **Recommendation:** покрывается release-gate (`webauth_test.go`, тесты templating).
-- **Disposition:** defer to testing (`tasks.md` 5.1)
+- **Disposition:** fix-here — `go vet` + `go test -count=1` на `go1.26.9` для всех пакетов с прямыми импортами `x/crypto`/`x/text` (`internal/application`, `internal/business/templating`, `internal/notification/template`) — ok, `evidence/f8-direct-imports-tests.txt`. Полный модуль — release-gate (5.1).
 - **Follow-up:** n/a
 
 ## Design Premises (по ревью)
