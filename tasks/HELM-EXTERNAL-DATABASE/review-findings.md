@@ -7,8 +7,8 @@
 
 Кластеры ревьюеры не поднимали. Автор свёл находки, объединил пересечения (A-S1 + B-F1 → R1, A-D1 + B-F5 → R6, A-D4 + B-F8 → R11, A-D5 + B-F10 → R13) и перепроверил ключевые: R1 — `Validate()` `config.go:124-131` и вызов из `buildPool` (`pool.go:159`); R2 — рендер production + `postgresql.enabled=true`.
 **Reviewed at:** 2026-10-16
-**Reviewed tree:** feature/helm-external-database @ 6eb1774
-**Verdict:** fix_required (см. `review-verdict.json`)
+**Reviewed tree:** feature/helm-external-database @ 6eb1774; повторно @ e36a047 (§ Re-review), фиксы до 44aefce
+**Verdict:** pass @ 44aefce (см. `review-verdict.json`); первый проход — fix_required @ 6eb1774
 
 Поле `Status` в каждой находке читает скрипт вердикта: `open` | `fixed` | `deferred` | `rejected`. В скобках указан номер находки у ревьюера.
 
@@ -158,6 +158,51 @@
 - **Issue:** `eq .Values.profile "standard"` проверяется в guard'ах и в каждой ветке env.
 - **Disposition:** reject (reason: ревьюер сам считает приемлемым; вынос в `$dbSource` — абстракция ради трёх условий, ветки рядом в одном блоке)
 - **Status:** rejected
+- **Follow-up:** n/a
+
+## Re-review @ e36a047
+
+Новый независимый агент (read-only) проверил фиксы R1–R14 по `git diff 6eb1774..e36a047` и искал новое в изменённых местах: рендеры (в том числе 17 вариантов `configFile.content`), пробы `DSN()` через pgx v5.9.2 (`[::1]`, `::1`, `[fe80::1%eth0]`, hostname, пароль с `/#?%41 @:`), сверка утверждений docs с кодом. R1, R3–R14 — fixed. R2 — partially: совет содержал ошибку (N1). Новые находки — N1–N5, все исправлены в `9c9bf5d` и `44aefce`.
+
+### N1 — Совет «остаться на встроенном PG» предлагает `postgresql.existingSecret`, который пароль встроенной БД не подаёт
+- **Severity:** major
+- **Location:** `CHANGELOG.md` Breaking (текст фикса R2); `helm/amp/templates/_helpers.tpl:79-81`
+- **Issue:** `amp.postgresql.secretName` всегда `<fullname>-postgresql-secret`, его `password` рендерится из `postgresql.password`; `existingSecret` лишь убирает ключи БД из `secret.yaml`. Рендер production + старый блок `postgresql:` + `postgresql.existingSecret=my-pg`: `my-pg` в выводе нет, `data.password` пустой → после upgrade AMP и postgres с пустым паролем.
+- **Recommendation:** оставить только `--set postgresql.password` / values-файл вне git.
+- **Disposition:** fix-here
+- **Status:** fixed — `44aefce`
+- **Follow-up:** n/a
+
+### N2 — Комментарий `values.yaml` и запись `HELM-CHART-GAPS` утверждают, что `values-production.yaml` перекрывает пароль на `""`
+- **Severity:** minor
+- **Location:** `helm/amp/values.yaml:307-313`; `docs/06-planning/TECH-DEBT.md:26`
+- **Issue:** блока `postgresql:` в `values-production.yaml` больше нет.
+- **Disposition:** fix-here
+- **Status:** fixed — `44aefce`
+- **Follow-up:** дополнение `HELM-CHART-GAPS` (guard на слабый пароль, R2) — в finalize
+
+### N3 — Guard на `fromYaml`: невалидный YAML даёт «no database is configured»; регистр и тип ключа
+- **Severity:** nit
+- **Location:** `helm/amp/templates/deployment.yaml:112`
+- **Issue:** (a) ошибка разбора маскируется сообщением о пустой БД; (b) `Database:` отвергается, хотя viper регистр не различает; (c) `database: 5` проходит.
+- **Recommendation:** (a) отдельный `fail` с ошибкой разбора; (b), (c) принять и записать в Edge Case 7.
+- **Disposition:** fix-here (a); accept (b), (c) — Spec Edge Case 7
+- **Status:** fixed — `9c9bf5d` (a), Spec в `44aefce`
+- **Follow-up:** render-тест на невалидный YAML — Phase 7
+
+### N4 — Рецепт Secret: переменная с паролем, umask, формулировка про `\n` в README
+- **Severity:** nit
+- **Location:** `helm/amp/README.md` § External PostgreSQL; runbook § 3c; `helm/amp/values.yaml` (комментарий `existingSecret`)
+- **Disposition:** fix-here
+- **Status:** fixed — `44aefce` (`read -rs`, `(umask 077; printf …)`, формулировка из runbook)
+- **Follow-up:** n/a
+
+### N5 — Неточности: «HPA object present» в evidence § 9, «volume size cannot shrink», «then the HPA scales it»
+- **Severity:** nit
+- **Location:** `evidence/k3d-external-drill.md` § 9; `CHANGELOG.md` Breaking; runbook § 3c
+- **Issue:** rev 2 HPA не рендерит — наблюдение снято сразу после upgrade без `--wait`; отказ upgrade — из-за неизменяемых `volumeClaimTemplates`; прогон был с `minReplicas: 1`.
+- **Disposition:** fix-here
+- **Status:** fixed — `44aefce`
 - **Follow-up:** n/a
 
 ## Anti-Pattern Check
