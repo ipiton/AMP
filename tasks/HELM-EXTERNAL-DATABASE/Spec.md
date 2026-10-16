@@ -186,5 +186,5 @@ externalDatabase:
 
 ## Open Questions
 
-- [ ] `sslMode` в `values-production.yaml`: `require` (шифрование без проверки сертификата, работает с любым managed PG) или `verify-full` (без CA провайдера в образе не подключится). Предложение — `require` + комментарий; `verify-full` станет разумным дефолтом, когда появятся клиентские TLS-материалы (non-goal). Решается до `plan-task`, по умолчанию `require`.
+- [x] _(закрыт 2026-10-16: `require`, владелец не возражал)_ `sslMode` в `values-production.yaml`: `require` (шифрование без проверки сертификата, работает с любым managed PG) или `verify-full` (без CA провайдера в образе не подключится). Предложение — `require` + комментарий; `verify-full` станет разумным дефолтом, когда появятся клиентские TLS-материалы (non-goal). Решается до `plan-task`, по умолчанию `require`.
 - [ ] premise «env > config-файл» — code-read, подтверждается шагом 5 прогона D9 (в production values есть `configFile`).
