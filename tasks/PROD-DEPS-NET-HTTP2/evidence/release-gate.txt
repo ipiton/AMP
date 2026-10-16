@@ -1,0 +1,509 @@
+[release-gate] ==> build
+[release-gate] ==> lint
+0 issues.
+[release-gate] ==> test
+ok  	github.com/ipiton/AMP/cmd/config-reloader	2.276s
+ok  	github.com/ipiton/AMP/cmd/server	1.122s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	2.699s
+?   	github.com/ipiton/AMP/internal/alertmanager/config	[no test files]
+ok  	github.com/ipiton/AMP/internal/application	19.641s
+ok  	github.com/ipiton/AMP/internal/application/handlers	3.661s
+ok  	github.com/ipiton/AMP/internal/buildinfo	3.816s
+ok  	github.com/ipiton/AMP/internal/business/publishing	42.485s
+ok  	github.com/ipiton/AMP/internal/business/routing	4.375s
+ok  	github.com/ipiton/AMP/internal/business/silencing	5.392s
+?   	github.com/ipiton/AMP/internal/business/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/business/templating	5.837s
+ok  	github.com/ipiton/AMP/internal/config	5.292s
+ok  	github.com/ipiton/AMP/internal/core	4.162s
+ok  	github.com/ipiton/AMP/internal/core/alertconv	4.149s
+?   	github.com/ipiton/AMP/internal/core/domain	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/investigation	3.641s
+ok  	github.com/ipiton/AMP/internal/core/investigation/runbook	5.095s
+?   	github.com/ipiton/AMP/internal/core/resilience	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/services	5.271s
+ok  	github.com/ipiton/AMP/internal/core/silencing	5.117s
+ok  	github.com/ipiton/AMP/internal/database	191.829s
+ok  	github.com/ipiton/AMP/internal/database/postgres	197.030s
+ok  	github.com/ipiton/AMP/internal/infrastructure	2.478s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cache	2.858s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cluster	2.823s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	15.065s
+ok  	github.com/ipiton/AMP/internal/infrastructure/inhibition	63.411s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation	2.044s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks	1.546s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/tools	1.023s
+ok  	github.com/ipiton/AMP/internal/infrastructure/k8s	3.132s
+ok  	github.com/ipiton/AMP/internal/infrastructure/llm	2.279s
+ok  	github.com/ipiton/AMP/internal/infrastructure/lock	6.325s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	54.505s
+ok  	github.com/ipiton/AMP/internal/infrastructure/repository	219.416s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing	1.816s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval	0.472s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	1.464s
+ok  	github.com/ipiton/AMP/internal/infrastructure/snapshot	1.079s
+ok  	github.com/ipiton/AMP/internal/infrastructure/storage/memory	0.556s
+?   	github.com/ipiton/AMP/internal/infrastructure/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/infrastructure/webhook	2.625s
+ok  	github.com/ipiton/AMP/internal/notification/template	3.416s
+ok  	github.com/ipiton/AMP/internal/notification/template/defaults	3.431s
+ok  	github.com/ipiton/AMP/internal/notification/url	4.557s
+ok  	github.com/ipiton/AMP/internal/realtime	5.571s
+?   	github.com/ipiton/AMP/internal/storage	[no test files]
+ok  	github.com/ipiton/AMP/internal/ui	3.202s
+?   	github.com/ipiton/AMP/pkg/aiclassifier	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator	1.859s
+ok  	github.com/ipiton/AMP/pkg/configvalidator/matcher	2.278s
+?   	github.com/ipiton/AMP/pkg/configvalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/configvalidator/types	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator/validators	1.641s
+ok  	github.com/ipiton/AMP/pkg/httperror	2.351s
+ok  	github.com/ipiton/AMP/pkg/logger	4.998s
+ok  	github.com/ipiton/AMP/pkg/metrics	2.778s
+ok  	github.com/ipiton/AMP/pkg/metrics/v2	2.124s
+ok  	github.com/ipiton/AMP/pkg/middleware	2.233s
+ok  	github.com/ipiton/AMP/pkg/retry	1.199s
+ok  	github.com/ipiton/AMP/pkg/telemetry	1.075s
+?   	github.com/ipiton/AMP/pkg/templatevalidator	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/formatters	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/fuzzy	2.220s
+?   	github.com/ipiton/AMP/pkg/templatevalidator/models	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/utils	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/validators	2.946s
+[release-gate] ==> futureparity
+ok  	github.com/ipiton/AMP/cmd/server	2.408s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	1.099s
+[release-gate] ==> race
+[release-gate] race-testing 7 package(s): github.com/ipiton/AMP/internal/business/publishing github.com/ipiton/AMP/internal/business/silencing github.com/ipiton/AMP/internal/business/templating github.com/ipiton/AMP/internal/core/silencing github.com/ipiton/AMP/internal/infrastructure/grouping github.com/ipiton/AMP/internal/infrastructure/publishing github.com/ipiton/AMP/internal/infrastructure/silencing
+ok  	github.com/ipiton/AMP/internal/business/publishing	39.830s
+ok  	github.com/ipiton/AMP/internal/business/silencing	2.681s
+ok  	github.com/ipiton/AMP/internal/business/templating	6.173s
+ok  	github.com/ipiton/AMP/internal/core/silencing	4.248s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	14.441s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	301.871s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	5.305s
+[release-gate] ==> helm-deps
+[release-gate] ==> helm-dev
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-production
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-rbac
+[release-gate] ==> helm-tests
+chart renders with the sidecar OFF (default):
+  ok   no sidecar container
+  ok   no config-file ConfigMap
+  ok   no AMP_CONFIG_FILE env
+  ok   no shared PID namespace
+chart renders with the sidecar ON:
+  ok   sidecar container
+  ok   config-file ConfigMap
+  ok   AMP_CONFIG_FILE env for the app
+  ok   sidecar watches the mounted file
+  ok   reload is verified over loopback
+  ok   sidecar filesystem is read-only
+  ok   sidecar runs non-root
+  ok   http method needs no shared PID namespace
+signal method requests a shared PID namespace:
+  ok   shared PID namespace
+  ok   signal method
+http method never grants a shared PID namespace, even if asked:
+  ok   no shared PID namespace for method: http
+production values render the config file but NOT the sidecar:
+  ok   config file rendered in production
+  ok   AMP_CONFIG_FILE set in production
+  ok   sidecar NOT enabled while its image is unpublished
+misconfigurations are refused at render time:
+  ok   sidecar without a config file
+  ok   config file without content
+  ok   signal method without a shared PID namespace
+
+all assertions passed
+T1 shipped values files:
+  ok   default: all 2 secretKeyRef targets exist
+  ok   default: LLM is off
+  ok   dev: all 1 secretKeyRef targets exist
+  ok   dev: LLM is off
+  ok   production: all 3 secretKeyRef targets exist
+  ok   production: LLM is off
+  ok   default: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   default: DATABASE_SSL_MODE is disable
+  ok   production: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   production: DATABASE_SSL_MODE is disable
+T2-T4 flag stays off where it does not belong:
+  ok   ssl-on: no flag when PostgreSQL TLS is on
+  ok   external-db: no flag without the bundled PostgreSQL
+  ok   lite: no flag in the lite profile
+T5 LLM on without a key fails the render:
+  ok   llm-nokey: render fails naming llm.apiKey
+T6 LLM on with a key source renders:
+  ok   llm-key: all 3 secretKeyRef targets exist
+  ok   llm-key: Deployment reads llm-api-key
+  ok   llm-eso: ExternalSecret supplies llm-api-key
+
+all assertions passed
+defaults: preStop, timeout env and a grace period that fits both
+  ok   preStop sleeps preStopDelay (5)
+  ok   timeout env set
+  ok   timeout env carries timeoutSeconds (30s)
+  ok   grace period 40 >= 5 + 30
+  ok   stale 'no preStop' comment gone
+  ok   no budget warning with defaults
+preStopDelay=0 removes the hook
+  ok   no preStop hook
+  ok   no lifecycle block
+custom values flow through
+  ok   preStop sleeps 10
+  ok   timeout env 45s
+  ok   grace period 60
+  ok   no warning when 60 >= 10 + 45
+an old grace period (30) still renders, with a warning
+  ok   render does not fail
+  ok   budget warning printed
+  ok   warning names the required minimum
+production values
+  ok   preStop in production
+  ok   grace period 40 in production
+
+all assertions passed
+default:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+lite:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+production:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+opt-out:
+  ok   GROUPING_ENABLED is "false"
+  ok   GROUPING_ENABLED is set exactly once
+
+all assertions passed
+Chart appVersion: 0.1.0
+default: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+production: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+lite: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+config-reloader image defaults to appVersion:
+  ok   sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0
+  ok   app container unchanged next to the sidecar
+an explicit image.tag still wins:
+  ok   app container on the pinned tag
+  ok   appVersion not used when pinned
+
+all assertions passed
+defaults render no Ingress:
+  ok   no Ingress by default
+an Ingress without auth is refused:
+  ok   defaults + ingress.enabled (guard not tied to the prod file)
+  ok   values-production.yaml without auth
+  ok   values-production.yaml as shipped
+only a real true waives in-process auth:
+  ok   --set-string ingress.externalAuth=false
+  ok   --set-string ingress.externalAuth=no
+  ok   --set-string ingress.externalAuth="false"
+  ok   --set-string ingress.externalAuth=True
+  ok   --set-string ingress.externalAuth=1
+an Ingress with auth renders:
+  ok   prod + webConfig.existingSecret
+  ok   prod + ingress.externalAuth=true
+  ok   --set-string ingress.externalAuth=true
+chart packaging keeps the helm test hook and drops the render tests:
+  ok   helm test hook still rendered
+  ok   helm test hook packaged
+  ok   render tests not packaged
+
+all assertions passed
+defaults render no AMP NetworkPolicy:
+  ok   no AMP policy by default
+an enabled policy with no effective source is refused:
+  ok   values-production.yaml with no sources
+  ok   defaults + networkPolicy.enabled
+  ok   ingressController only, Ingress off
+production policy (placeholder sender):
+  ok   selects the AMP pods by component
+  ok   alert-senders rule
+  ok   peers rendered as given
+  ok   one rule, http port only
+  ok   no Egress policyType
+  ok   no controller rule with no controller peers
+one rule per role; the controller only with an Ingress:
+  ok   controller peers dropped while ingress.enabled=false
+  ok   metrics-scrapers rule
+  ok   sender + scraper rules, http only
+  ok   controller rule with ingress.enabled
+  ok   controller peers rendered
+  ok   controller + sender rules
+extraIngress is rendered as-is:
+  ok   raw rule rendered
+the component label lives in the pod template only:
+  ok   pod template carries the label
+  ok   Deployment selector found
+  ok   Deployment selector unchanged (immutable)
+  ok   Service selector found
+  ok   Service selector unchanged
+podLabels cannot override the component label:
+  ok   podLabels with app.kubernetes.io/component
+  ok   other podLabels still render
+the Redis NetworkPolicy admits the AMP pods:
+  ok   first Redis rule selects component: application
+  ok   ...on the Redis port
+values without the networkPolicy section (--reuse-values from an old release):
+  ok   renders
+  ok   no AMP policy
+
+all assertions passed
+default ServiceMonitor:
+  ok   rendered by default
+  ok   selects by component
+  ok   scrapes the http port
+  ok   ...at /metrics
+  ok   default interval
+  ok   default scrape timeout
+  ok   no credentials without web auth
+its selector matches the AMP Service only:
+  ok   selector (3 labels) picks exactly: amp
+  ok   component is what tells the Services apart (7 match without it)
+gated on prometheusEnabled and serviceMonitor.enabled:
+  ok   off with monitoring.prometheusEnabled=false
+  ok   off with serviceMonitor.enabled=false
+  ok   Redis ServiceMonitor unaffected
+web auth needs credentials:
+  ok   webConfig.existingSecret without basicAuth
+  ok   username from the Secret
+  ok   ...default key
+  ok   password from the Secret
+  ok   ...default key
+  ok   custom username key
+  ok   custom password key
+labels and timing:
+  ok   extra labels in metadata
+  ok   interval override
+values without monitoring.serviceMonitor (--reuse-values from an old release):
+  ok   still rendered
+  ok   default interval
+  ok   default scrape timeout
+  ok   ...and the credentials guard still runs
+
+all assertions passed
+[release-gate] ==> amtool-compat
+ Image python:3-alpine Pulling 
+ 05f38c1a7503 Pulling fs layer 0B
+ f0872f0cf9a0 Pulling fs layer 0B
+ fefeaf673ce1 Pulling fs layer 0B
+ 50e4ee401c36 Download complete 0B
+ 05f38c1a7503 Download complete 0B
+ f0872f0cf9a0 Download complete 0B
+ f0872f0cf9a0 Extracting 1B
+ f0872f0cf9a0 Pull complete 0B
+ 11e85743638f Download complete 0B
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 1.049MB
+ fefeaf673ce1 Downloading 2.097MB
+ fefeaf673ce1 Downloading 3.146MB
+ fefeaf673ce1 Downloading 3.146MB
+ fefeaf673ce1 Downloading 3.146MB
+ fefeaf673ce1 Downloading 4.194MB
+ fefeaf673ce1 Downloading 4.194MB
+ fefeaf673ce1 Downloading 4.194MB
+ fefeaf673ce1 Downloading 5.243MB
+ fefeaf673ce1 Downloading 5.243MB
+ fefeaf673ce1 Downloading 6.291MB
+ fefeaf673ce1 Downloading 6.291MB
+ fefeaf673ce1 Downloading 7.34MB
+ fefeaf673ce1 Downloading 7.34MB
+ fefeaf673ce1 Downloading 7.34MB
+ fefeaf673ce1 Downloading 8.389MB
+ fefeaf673ce1 Downloading 8.389MB
+ fefeaf673ce1 Downloading 9.437MB
+ fefeaf673ce1 Downloading 9.437MB
+ fefeaf673ce1 Downloading 10.49MB
+ fefeaf673ce1 Downloading 10.49MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 11.53MB
+ fefeaf673ce1 Downloading 12.58MB
+ fefeaf673ce1 Downloading 12.58MB
+ fefeaf673ce1 Downloading 12.58MB
+ fefeaf673ce1 Downloading 13.63MB
+ fefeaf673ce1 Downloading 13.63MB
+ fefeaf673ce1 Downloading 14.68MB
+ fefeaf673ce1 Downloading 14.68MB
+ fefeaf673ce1 Downloading 14.68MB
+ fefeaf673ce1 Downloading 15.73MB
+ fefeaf673ce1 Downloading 15.73MB
+ fefeaf673ce1 Downloading 16.78MB
+ fefeaf673ce1 Download complete 0B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ fefeaf673ce1 Extracting 1B
+ 05f38c1a7503 Extracting 1B
+ fefeaf673ce1 Pull complete 0B
+ 05f38c1a7503 Pull complete 0B
+ Image python:3-alpine Pulled 
+ Image amp-smoke-amp Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 518B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.75kB done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.9-alpine
+#3 DONE 0.0s
+
+#4 [internal] load metadata for docker.io/library/alpine:3.24
+#4 ...
+
+#5 [auth] library/alpine:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#4 [internal] load metadata for docker.io/library/alpine:3.24
+#4 DONE 1.2s
+
+#6 [internal] load .dockerignore
+#6 DONE 0.0s
+
+#6 [internal] load .dockerignore
+#6 transferring context:
+#6 transferring context: 567B done
+#6 DONE 0.3s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#8 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.1s done
+#8 DONE 0.2s
+
+#9 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#9 resolve docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#9 resolve docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade 0.2s done
+#9 DONE 0.3s
+
+#7 [internal] load build context
+#7 transferring context: 71.32kB 0.1s done
+#7 DONE 0.2s
+
+#10 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#10 CACHED
+
+#11 [builder 7/7] RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w     -X github.com/ipiton/AMP/internal/buildinfo.Version=dev     -X github.com/ipiton/AMP/internal/buildinfo.Revision=unknown     -X github.com/ipiton/AMP/internal/buildinfo.Branch=unknown     -X github.com/ipiton/AMP/internal/buildinfo.BuildUser=docker     -X github.com/ipiton/AMP/internal/buildinfo.BuildDate=unknown"     -o amp ./cmd/server
+#11 CACHED
+
+#12 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#12 CACHED
+
+#13 [stage-1 3/5] WORKDIR /app
+#13 CACHED
+
+#14 [builder 4/7] COPY go-app/go.mod go-app/go.sum ./
+#14 CACHED
+
+#15 [builder 5/7] RUN go mod download
+#15 CACHED
+
+#16 [stage-1 4/5] COPY --from=builder /build/amp /app/
+#16 CACHED
+
+#17 [builder 3/7] WORKDIR /build
+#17 CACHED
+
+#18 [builder 6/7] COPY go-app/ ./
+#18 CACHED
+
+#19 [stage-1 5/5] COPY --from=builder /build/migrations /app/migrations
+#19 CACHED
+
+#20 exporting to image
+#20 exporting layers done
+#20 exporting manifest sha256:2618acf4e27ea1b7049c3d94afc3f6f9bd37ed7eb6a2d3534ff73e2be7948b41 0.1s done
+#20 exporting config sha256:100f042b3f97e49b7bc5d8f1420206206ca3389c5340a31cee8543c8e2dce351
+#20 exporting config sha256:100f042b3f97e49b7bc5d8f1420206206ca3389c5340a31cee8543c8e2dce351 0.2s done
+#20 exporting attestation manifest sha256:bdce6ed77d928b14e4075345140e79239d75b23e7f79efc5066dfacc291d52c1 0.0s done
+#20 exporting manifest list sha256:546d4bb49a9692b48b8c99a521f126dd502187f96769e9780098ef176212fa81 0.1s done
+#20 naming to docker.io/library/amp-smoke-amp:latest
+#20 naming to docker.io/library/amp-smoke-amp:latest 0.0s done
+#20 unpacking to docker.io/library/amp-smoke-amp:latest 0.1s done
+#20 DONE 0.5s
+
+#21 resolving provenance for metadata file
+#21 DONE 0.0s
+ Image amp-smoke-amp Built 
+ Network amp-smoke_default Creating 
+ Network amp-smoke_default Created 
+ Container amp-smoke-webhook-1 Creating 
+ Container amp-smoke-webhook-1 Created 
+ Container amp-smoke-amp-1 Creating 
+ Container amp-smoke-amp-1 Created 
+ Container amp-smoke-webhook-1 Starting 
+ Container amp-smoke-webhook-1 Started 
+ Container amp-smoke-webhook-1 Waiting 
+ Container amp-smoke-webhook-1 Healthy 
+ Container amp-smoke-amp-1 Starting 
+ Container amp-smoke-amp-1 Started 
+Unable to find image 'quay.io/prometheus/alertmanager:v0.34.0' locally
+v0.34.0: Pulling from prometheus/alertmanager
+4f4fb700ef54: Pulling fs layer
+e3c413c9dfa5: Pulling fs layer
+7c53bb56d9c8: Pulling fs layer
+273d7b3ceff7: Pulling fs layer
+8e40784ad81b: Pulling fs layer
+f1420e14aaeb: Pulling fs layer
+d561ac4e17d5: Pulling fs layer
+4f4fb700ef54: Already exists
+d561ac4e17d5: Download complete
+f1420e14aaeb: Download complete
+7c53bb56d9c8: Download complete
+e3c413c9dfa5: Download complete
+e3c413c9dfa5: Pull complete
+7c53bb56d9c8: Pull complete
+273d7b3ceff7: Download complete
+273d7b3ceff7: Pull complete
+8e40784ad81b: Download complete
+f1420e14aaeb: Pull complete
+8e40784ad81b: Pull complete
+d561ac4e17d5: Pull complete
+4f4fb700ef54: Pull complete
+Digest: sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+Status: Downloaded newer image for quay.io/prometheus/alertmanager:v0.34.0
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+[release-gate] 
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   24s      go build ./... (go-app)
+lint             PASS   77s      golangci-lint run (go-app)
+test             PASS   265s     go test ./... -count=1 (go-app)
+futureparity     PASS   27s      build+test, futureparity tag, cmd/server
+race             PASS   402s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   4s       helm repo add (Chart.lock) + dependency build
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   7s       helm/amp/tests/*.sh render tests
+amtool-compat    PASS   47s      real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: PASS

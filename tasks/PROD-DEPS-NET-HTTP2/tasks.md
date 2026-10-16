@@ -84,8 +84,14 @@ based_on:
 
 ## Phase 5: Testing
 
-- [ ] **5.1** Гейты AMP: затронутые пакеты — весь модуль (stdlib), поэтому сразу полный `scripts/release-gate.sh` на `GOTOOLCHAIN=go1.26.9`; флейки — перепрогон и запись. <!-- depends: 4.1 | verify: GOTOOLCHAIN=go1.26.9 scripts/release-gate.sh — все шаги PASS; вывод в evidence/release-gate.txt -->
-- [ ] **5.2** `git diff --check main...HEAD`, нет `_, _ :=` в диффе. <!-- depends: 4.1 | verify: git diff --check main...HEAD — пусто -->
+- [x] **5.1** Гейты AMP: затронутые пакеты — весь модуль (stdlib), поэтому сразу полный `scripts/release-gate.sh` на `GOTOOLCHAIN=go1.26.9`; флейки — перепрогон и запись. <!-- depends: 4.1 | verify: GOTOOLCHAIN=go1.26.9 scripts/release-gate.sh — все шаги PASS; вывод в evidence/release-gate.txt -->
+- [x] **5.2** `git diff --check main...HEAD`, нет `_, _ :=` в диффе. <!-- depends: 4.1 | verify: git diff --check main...HEAD — пусто -->
+
+### Testing notes (2026-10-16)
+
+- 5.1: `GOTOOLCHAIN=go1.26.9 scripts/release-gate.sh` — **PASS 11/11** с первого прогона (build, lint, test, futureparity, race, helm-deps, helm-dev, helm-production, helm-rbac, helm-tests, amtool-compat); флейков не было. Вывод — `evidence/release-gate.txt`.
+- 5.2: `git diff --check main...HEAD` — пусто; `_, _ :=` в диффе вне `tasks/` нет.
+- Review F8 подтверждён прогоном: весь модуль, включая `-race`, зелёный на `x/text` v0.42.0 / `x/crypto` v0.57.0.
 
 ## Phase 6: Finalize
 

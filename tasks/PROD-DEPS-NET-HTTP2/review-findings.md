@@ -71,7 +71,7 @@
 - **Location:** `go-app/go.mod:33-34`; `internal/application/webauth.go` (`bcrypt`), `internal/business/templating/funcs.go`, `internal/notification/template/functions.go` (`x/text/cases`, `language`)
 - **Issue:** minor-бампы; сборка и vet чистые, сдвиг поведения — вопрос прогона.
 - **Recommendation:** покрывается release-gate (`webauth_test.go`, тесты templating).
-- **Disposition:** fix-here — `go vet` + `go test -count=1` на `go1.26.9` для всех пакетов с прямыми импортами `x/crypto`/`x/text` (`internal/application`, `internal/business/templating`, `internal/notification/template`) — ok, `evidence/f8-direct-imports-tests.txt`. Полный модуль — release-gate (5.1).
+- **Disposition:** fix-here — `go vet` + `go test -count=1` на `go1.26.9` для всех пакетов с прямыми импортами `x/crypto`/`x/text` (`internal/application`, `internal/business/templating`, `internal/notification/template`) — ok, `evidence/f8-direct-imports-tests.txt`. Полный модуль — release-gate (5.1): PASS 11/11, включая `-race` (`evidence/release-gate.txt`) — F8 опровергнут, сдвига поведения нет.
 - **Follow-up:** n/a
 
 ## Design Premises (по ревью)
