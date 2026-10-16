@@ -9,7 +9,7 @@
 # Builder on the BUILD platform, cross-compiling for TARGETOS/TARGETARCH -- see
 # the main Dockerfile. Version/revision are not baked in: the sidecar has no
 # version endpoint; the release workflow puts them in OCI labels instead.
-FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS builder
 
 WORKDIR /build
 

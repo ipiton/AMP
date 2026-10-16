@@ -1,0 +1,4 @@
+# 2026-10-16, GOTOOLCHAIN=go1.26.9: go vet + go test -count=1 for every package directly importing golang.org/x/crypto or golang.org/x/text (git grep): bcrypt in internal/application (webauth), x/text/cases|language in templating and notification/template
+ok  	github.com/ipiton/AMP/internal/application	17.975s
+ok  	github.com/ipiton/AMP/internal/business/templating	1.848s
+ok  	github.com/ipiton/AMP/internal/notification/template	2.716s

@@ -16,19 +16,18 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-DEPS-NET-HTTP2** — P0 из BACKLOG: required `govulncheck` красный на `main` с 2026-10-10 (GO-2026-6610…6617, HTTP/2 и HTTP/1 в `net/http`). `toolchain go1.26.9`, `golang.org/x/net` v0.58.0 → v0.60.0 (карантин до 2026-10-15 17:22 UTC), образы `golang:1.26.9-alpine`. Ветка `bugfix/prod-deps-net-http2`, workspace `tasks/PROD-DEPS-NET-HTTP2/`. Взят 2026-10-15. Ждёт конца карантина `x/net` (2026-10-15 17:23 UTC): research/spec/plan готовы, следующий шаг — `implement`.
 - [ ] **HELM-EXTERNAL-DATABASE** — P0 из BACKLOG: values `externalDatabase.*` → `DATABASE_*` env, пароль только через `secretKeyRef`, `sslMode: require` по умолчанию; `values-production.yaml` на внешнюю БД (ADR-016); прогон restore-runbook § «External PostgreSQL» на PG 16. Ветка `feature/helm-external-database`, workspace `tasks/HELM-EXTERNAL-DATABASE/`. Взят 2026-10-16.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PG-CONFIG-FIX` (поднят в P0 владельцем 2026-10-15), `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` в WIP с 2026-10-15, `HELM-EXTERNAL-DATABASE` — с 2026-10-16; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PG-CONFIG-FIX` (поднят в P0 владельцем 2026-10-15), `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` в WIP с 2026-10-16; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15.
 
 ### Owner
 
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
-- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` снова красный (GO-2026-6610…6617) — ждёт `PROD-DEPS-NET-HTTP2`. `~5min`
-  Blocked-by: PROD-DEPS-NET-HTTP2.
+- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` был красный (GO-2026-6599…6617); `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16 — локально `govulncheck` на `go1.26.9` чистый, release-gate PASS. Осталось: push `main`, дождаться зелёного CI (включая `govulncheck`), затем включить защиту. `~5min`
+  Waiting-on: push `main` и зелёный CI на нём.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
