@@ -1,0 +1,8 @@
+# 2026-10-16: publication dates (proxy.golang.org .info) of every version added to go-app/go.mod; quarantine = 7 days
+golang.org/x/net v0.60.0 2026-10-08T17:22:58Z
+golang.org/x/crypto v0.57.0 2026-09-08T18:05:01Z
+golang.org/x/sys v0.48.0 2026-08-31T19:43:43Z
+golang.org/x/term v0.46.0 2026-09-08T16:27:41Z
+golang.org/x/text v0.42.0 2026-09-08T16:29:55Z
+golang.org/x/sync v0.23.0 2026-08-31T03:04:41Z
+toolchain go1.26.9 2026-10-02 (go.dev/dl, per research)
