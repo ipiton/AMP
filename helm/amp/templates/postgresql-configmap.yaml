@@ -43,19 +43,6 @@ data:
     max_wal_size = {{ .Values.postgresql.config.maxWalSize | default "4GB" }}
     checkpoint_completion_target = {{ .Values.postgresql.config.checkpointCompletionTarget | default 0.9 }}
 
-    {{- if .Values.postgresql.backup.enabled }}
-    # -----------------------------------------------------------------------------
-    # WAL Archiving (TN-98: Point-in-Time Recovery)
-    # -----------------------------------------------------------------------------
-    wal_level = replica  # Required for archiving (default in PostgreSQL 16)
-    archive_mode = on    # Enable WAL archiving
-    archive_command = 'test ! -f /backup/wal_archive/%f && cp %p /backup/wal_archive/%f'
-    # Archive command: Copy WAL file to archive directory (idempotent with test -f)
-    archive_timeout = 300  # Force WAL switch every 5 minutes (for PITR granularity)
-    max_wal_senders = 5   # Allow up to 5 concurrent WAL senders (for replication)
-    wal_keep_size = 1GB   # Retain at least 1GB of WAL on disk (for streaming replication)
-    {{- end }}
-
     # -----------------------------------------------------------------------------
     # Query Planning (SSD-optimized, TN-97)
     # -----------------------------------------------------------------------------

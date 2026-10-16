@@ -88,10 +88,25 @@ helm install amp ./helm/amp --set profile=lite
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `postgresql.enabled` | Enable PostgreSQL | `false` |
+| `postgresql.enabled` | Enable bundled PostgreSQL; the lite profile does not use it, set `false` there | `true` |
 | `cache.enabled` | Enable Redis/Valkey | `false` |
 | `persistence.enabled` | Enable PVC (Lite) | `true` |
 | `persistence.size` | PVC size | `5Gi` |
+
+### PostgreSQL
+
+The standard profile needs PostgreSQL; the chart ships and tests 16 (`postgres:16.15`). AMP writes every incoming alert to it synchronously: if the database is unreachable, `POST /api/v2/alerts` returns `500`. Prometheus re-sends active alerts periodically, so they arrive once the database is back; a resolve notification sent only during the outage can be lost.
+
+| Topology | Use for | Backups / HA |
+|----------|---------|--------------|
+| External PostgreSQL (16 tested): a managed service with PITR, or CloudNativePG with barman/S3 | production | operator's side |
+| Bundled (`postgresql.enabled: true`) | dev, pilot | none |
+
+The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime, and ingest returns errors until the database is back. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed). The `postgresql.config` block is not applied by the bundled server yet (bug `PG-CONFIG-NOT-APPLIED`).
+
+External PostgreSQL: dedicated `externalDatabase.*` values are planned (`HELM-EXTERNAL-DATABASE`). Until then, set `postgresql.enabled: false` and configure the connection in the `database:` section of the AMP config (`configFile.enabled: true`, `configFile.content`); note that the password then sits in a ConfigMap.
+
+Backup and restore with `pg_dump`/`pg_restore`, for both topologies: [docs/POSTGRESQL_RESTORE_GUIDE.md](docs/POSTGRESQL_RESTORE_GUIDE.md). The decision record is ADR-016 in `docs/06-planning/DECISIONS.md`.
 
 ### HTTP Authentication
 
@@ -137,7 +152,7 @@ The chart grants the AMP ServiceAccount exactly what the app calls: publishing t
 
 - **Keep target Secrets in their own namespace.** RBAC cannot restrict `list` to a label selector, so the Role can read every Secret in the discovery namespace — including the chart's own database and LLM credentials when that is the release namespace. Setting `publishing.discovery.namespace` to a dedicated namespace keeps them out of reach. The Role is then created in that namespace, so whoever runs `helm install` needs permission to create Roles there.
 - **Managing RBAC yourself**: set `serviceAccount.rbac.create=false` and grant the same `list secrets` in the discovery namespace. Without it discovery fails with `403`, AMP logs a `WARN` and starts with no discovered targets (targets from `receivers:` keep working).
-- The Redis StatefulSet and the PostgreSQL backup CronJob share the ServiceAccount but do not mount its token.
+- The Redis StatefulSet shares the ServiceAccount but does not mount its token.
 - Verify: `kubectl auth can-i list secrets -n <discovery-namespace> --as=system:serviceaccount:<release-namespace>:<serviceaccount>` → `yes`; the same for `get`, or for any other namespace → `no`.
 
 ### Network Exposure
@@ -263,6 +278,8 @@ Inhibition rules are applied (`GET /api/v2/inhibitions` shows active ones), both
 ```bash
 helm upgrade amp ./helm/amp --reuse-values
 ```
+
+`--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
 
 ## Uninstalling
 

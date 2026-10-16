@@ -1,4 +1,12 @@
 {{- if .Values.postgresql.enabled }}
+{{- /* ADR-016: the bundled PostgreSQL is a single instance for dev/pilot. */}}
+{{- if and (hasKey .Values.postgresql "replicas") (ne (int .Values.postgresql.replicas) 1) }}
+{{- fail "postgresql.replicas must be 1: the bundled PostgreSQL has no replication, so every extra replica is a separate empty database behind the same Service and AMP's writes would be split between them. For high availability use an external PostgreSQL (ADR-016, helm/amp/README.md#postgresql); to run without the bundled one set postgresql.enabled=false." }}
+{{- end }}
+{{- $backup := .Values.postgresql.backup }}
+{{- if or (eq (toString $backup) "true") (and (kindIs "map" $backup) (eq (toString (dig "enabled" false $backup)) "true")) }}
+{{- fail "postgresql.backup was removed: the bundled backup CronJob never produced a backup (its replication connection was rejected) and WAL archiving was never on. Backups are the operator's responsibility (ADR-016); see helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md for a pg_dump/pg_restore runbook. Remove postgresql.backup from your values. Upgrading with --reuse-values carries the old chart default (backup.enabled: true): use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false." }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -8,12 +16,10 @@ metadata:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: database
   annotations:
-    description: "PostgreSQL StatefulSet for AMP (TN-98)"
-    tn-97: "HPA cluster mode support (max_connections=250)"
-    tn-98: "Operational hardening baseline"
+    description: "Bundled single-instance PostgreSQL for dev/pilot; no replication, no backups. Production: external PostgreSQL (ADR-016)."
 spec:
   serviceName: {{ include "amp.postgresql.fullname" . }}
-  replicas: {{ .Values.postgresql.replicas | default 1 }}
+  replicas: 1
   podManagementPolicy: OrderedReady
   updateStrategy:
     type: RollingUpdate
@@ -59,7 +65,7 @@ spec:
       {{- end }}
       containers:
       - name: postgres
-        image: postgres:16
+        image: postgres:16.15
         imagePullPolicy: IfNotPresent
         ports:
         - name: postgres
@@ -100,10 +106,6 @@ spec:
           mountPath: /docker-entrypoint-initdb.d/init.sql
           subPath: init.sql
           readOnly: true
-        {{- end }}
-        {{- if .Values.postgresql.backup.enabled }}
-        - name: backup
-          mountPath: /backup
         {{- end }}
         resources:
           {{- toYaml .Values.postgresql.resources | nindent 10 }}
@@ -235,11 +237,6 @@ spec:
         configMap:
           name: {{ include "amp.postgresql.fullname" . }}-exporter-config
           optional: false
-      {{- end }}
-      {{- if .Values.postgresql.backup.enabled }}
-      - name: backup
-        persistentVolumeClaim:
-          claimName: {{ include "amp.postgresql.fullname" . }}-backup
       {{- end }}
   volumeClaimTemplates:
   - metadata:

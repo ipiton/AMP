@@ -16,10 +16,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **HELM-EXTERNAL-DATABASE** — P0 из BACKLOG: values `externalDatabase.*` → `DATABASE_*` env, пароль только через `secretKeyRef`, `sslMode: require` по умолчанию; `values-production.yaml` на внешнюю БД (ADR-016); прогон restore-runbook § «External PostgreSQL» на PG 16. Ветка `feature/helm-external-database`, workspace `tasks/HELM-EXTERNAL-DATABASE/`. Взят 2026-10-16.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07) → `PROD-POSTGRES-HA-DECISION`. Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PG-CONFIG-FIX` (поднят в P0 владельцем 2026-10-15), `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` в WIP с 2026-10-16; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15.
 
 ### Owner
 

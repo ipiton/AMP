@@ -110,29 +110,6 @@ spec:
         description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has not been vacuumed for {{ "{{" }} $value {{ "}}" }} seconds."
 
     # ========================================
-    # BACKUP ALERTS (TN-98: Disaster Recovery)
-    # ========================================
-    - alert: PostgreSQLWALArchivingFailed
-      expr: rate(pg_stat_archiver_failed_count[5m]) > 0
-      for: 5m
-      labels:
-        severity: critical
-        component: database-backup
-      annotations:
-        summary: "PostgreSQL WAL archiving is failing (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "WAL archiving has failed {{ "{{" }} $value {{ "}}" }} times in the last 5 minutes. PITR capability at risk!"
-
-    - alert: PostgreSQLBackupOld
-      expr: (now() - postgresql_backup_last_success_timestamp_seconds) > 172800
-      for: 1h
-      labels:
-        severity: warning
-        component: database-backup
-      annotations:
-        summary: "PostgreSQL backup is old (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "Last successful backup was {{ "{{" }} $value {{ "}}" }} seconds ago (>48 hours). RTO at risk!"
-
-    # ========================================
     # PERFORMANCE ALERTS
     # ========================================
     - alert: PostgreSQLHighCheckpointRate

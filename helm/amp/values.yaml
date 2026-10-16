@@ -292,9 +292,15 @@ liteProfile:
 # PostgreSQL Database Configuration (Standard Profile Only)
 # ===============================
 # Automatically disabled for Lite profile
+#
+# Bundled PostgreSQL: dev/pilot only (ADR-016). A single instance with no
+# replication and no backups; AMP's alert ingest depends on it, so losing it
+# means losing alert history and silences. Production: external PostgreSQL
+# with backups/PITR (README "PostgreSQL"). Manual backups and restore:
+# helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md.
 postgresql:
   enabled: true  # Overridden by profile in deployment.yaml
-  replicas: 1  # Single instance for Standard Profile
+  replicas: 1  # Must stay 1: no replication; anything else fails the render
   # Database configuration
   database: "alert_history"
   username: "alert_history"
@@ -320,11 +326,6 @@ postgresql:
     size: 10Gi
     storageClass: ""
 
-  # Pod Disruption Budget (TN-98: HA support)
-  podDisruptionBudget:
-    enabled: true
-    minAvailable: 1  # Keep at least 1 pod available during voluntary disruptions
-
   # PostgreSQL Exporter (TN-98: metrics sidecar)
   exporter:
     enabled: true  # Enable postgres-exporter sidecar
@@ -339,23 +340,6 @@ postgresql:
         cpu: 50m
         memory: 64Mi
 
-  # PostgreSQL Backup & Disaster Recovery (TN-98: PITR capability)
-  backup:
-    enabled: true  # Enable WAL archiving + base backups
-    schedule: "0 2 * * *"  # Daily at 2 AM UTC
-    retention: 30  # Keep base backups for 30 days
-    walRetention: 7  # Keep WAL archives for 7 days (sufficient for PITR)
-    storage:
-      size: 50Gi  # Backup storage size (adjust based on database size)
-      storageClass: ""  # Use default StorageClass
-    resources:
-      limits:
-        cpu: 500m
-        memory: 512Mi
-      requests:
-        cpu: 250m
-        memory: 256Mi
-
   # PostgreSQL Monitoring (TN-98: observability)
   monitoring:
     prometheusRules:
@@ -367,8 +351,9 @@ postgresql:
     enabled: false  # Enable in production for network isolation
 
   # PostgreSQL Configuration (TN-97 + TN-98: optimized for HPA cluster mode)
-  # CRITICAL: These settings prevent connection pool exhaustion at scale
-  # Connection calculation: 10 replicas × 20 conns/pod + 50 reserved = 250 max_connections
+  # NOTE: currently NOT applied — the bundled PostgreSQL runs with the image
+  # defaults (BUGS PG-CONFIG-NOT-APPLIED).
+  # Connection calculation: 10 replicas × 25 conns/pod (AMP database.max_connections default) = 250 max_connections
   config:
     # Connection Settings (TN-97: CRITICAL for HPA)
     maxConnections: 250  # Up from 100 default (supports 10 replicas)

@@ -244,3 +244,37 @@
   - kill-switch — `--set networkPolicy.enabled=false`, удаляет политику без рестарта;
   - на CNI без NetworkPolicy политика ничего не делает (fail-open), проверка — в `helm/amp/README.md` → Network Exposure;
   - дефолты по-прежнему требуют CRD prometheus-operator (ServiceMonitor, PrometheusRule redis), BUGS `MONITORING-CRD-DEFAULT`. Порт Service `metrics:9090` ведёт на экспортёры postgres/redis, BUGS `SERVICE-METRICS-PORT-MISROUTED`.
+
+## ADR-016: Прод-путь PostgreSQL — внешний PostgreSQL; встроенный — dev/pilot single instance без бэкапов
+- **Дата**: 2026-10-15
+- **Контекст**:
+  - аудит 2026-10-06 (`PROD-POSTGRES-HA-DECISION`, P0): чарт обещал HA, PITR и ежедневные base backups встроенного PostgreSQL;
+  - измерения на k3d 2026-10-15 (`tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/`) показали, что ничего из этого не работает:
+    - конфиг из ConfigMap не применяется: `max_connections=20`, `archive_mode=off`, pg_hba из образа (BUGS `PG-CONFIG-NOT-APPLIED`);
+    - `pg_basebackup` в CronJob всегда отказывает по pg_hba replication;
+    - PDB при одной реплике блокирует drain ноды (`ALLOWED DISRUPTIONS 0`);
+  - репликации в шаблоне нет: `replicas > 1` даёт несколько независимых баз за одним Service;
+  - PostgreSQL стоит в критическом пути ingest: БД недоступна ⇒ `POST /api/v2/alerts` отвечает 500.
+- **Решение**:
+  - прод — внешний PostgreSQL; чарт поставляет и проверяет 16-ю версию, нижняя граница не исследовалась. Бэкапы, PITR и HA — на стороне оператора: managed-сервис с PITR или CloudNativePG + barman/S3. Подключение через values — `HELM-EXTERNAL-DATABASE`; до него — `database:` в `configFile.content`;
+  - встроенный PostgreSQL — dev/pilot: одна реплика, бэкапов нет, PDB нет. Образ закреплён на `postgres:16.15`;
+  - `postgresql.replicas != 1` и `postgresql.backup.enabled: true` в values — `fail` на рендере, с объяснением и ссылкой на runbook;
+  - удалены backup CronJob, backup PVC, WAL-блок ConfigMap, PDB Postgres, правила `PostgreSQLWALArchivingFailed` и `PostgreSQLBackupOld`;
+  - восстановление — runbook `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` на `pg_dump -Fc` / `pg_restore --single-transaction --exit-on-error`. Команды для встроенного PG прошли restore-прогоны на k3d с дефолтным HPA (откат на месте, потеря PVC, потеря namespace, битый дамп): данные и silences целы, миграции не перезапускаются, до ready меньше минуты. Для внешнего PG там же описаны отличия (restore в пустую БД без `--clean`), но прогона не было.
+- **Обоснование**:
+  - чарт не должен обещать того, чего не делает. Неработающий бэкап хуже отсутствующего: оператор узнаёт о нём при восстановлении;
+  - `backup.enabled: true` в values — сигнал, что оператор на бэкап рассчитывает. Поэтому он падает на `helm upgrade`, а не игнорируется молча (как в ADR-015). Под guard попадает и `--reuse-values` со старого релиза: старый дефолт чарта переносится в values. Текст ошибки называет обход (`--reset-then-reuse-values` или `--set postgresql.backup.enabled=false`);
+  - бэкап на PVC рядом с базой не off-cluster: теряется вместе с нодой или namespace. Логический дамп на машину оператора или в его хранилище закрывает именно этот случай.
+- **Отклонено**:
+  - довести встроенный PostgreSQL до HA/PITR. Это меняет поведение существующих баз и по сути означает собственный PG-оператор в чарте (2–3 дня и больше);
+  - логический бэкап-CronJob в чарте сейчас. Бэкап рядом с базой ≠ off-cluster; кандидат в отдельный слайс после `HELM-EXTERNAL-DATABASE`;
+  - CloudNativePG как сабчарт. Новая зависимость и оператор с CRD — решение владельца кластера, не чарта приложения.
+- **Следствие**:
+  - breaking для values (migration notes в `CHANGELOG.md`):
+    - ключи `postgresql.backup.*` и `postgresql.podDisruptionBudget.*` удалены, `backup.enabled: true` падает (в том числе при `--reuse-values`);
+    - `replicas != 1` падает;
+    - при upgrade удаляется PVC `<fullname>-postgres-backup`: base backup на нём ни разу не создавался;
+    - один рестарт Postgres при upgrade, на это время ingest отвечает 500;
+  - `helm rollback` возвращает CronJob, PDB и пустой backup PVC; том `postgres-data` не затрагивается ни в одну сторону;
+  - `HELM-EXTERNAL-DATABASE` становится предпосылкой прод-установки;
+  - `PG-CONFIG-NOT-APPLIED` остаётся открытым: блок `postgresql.config` в values по-прежнему не применяется.
