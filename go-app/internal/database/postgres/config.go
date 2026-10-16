@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -144,11 +145,14 @@ func (c *PostgresConfig) ConnectionString() string {
 // Учётные данные и имя БД экранируются: пароль, выданный провайдером
 // (managed PostgreSQL, Vault), может содержать "/", "#", "?" или "%",
 // а без экранирования pgx либо не разбирает URL, либо получает другой пароль.
+// IPv6-адрес принимается и голым ("::1"), и в скобках ("[::1]"):
+// JoinHostPort добавляет скобки сам.
 func (c *PostgresConfig) DSN() string {
+	host := strings.TrimSuffix(strings.TrimPrefix(c.Host, "["), "]")
 	u := url.URL{
 		Scheme:   "postgres",
 		User:     url.UserPassword(c.User, c.Password),
-		Host:     net.JoinHostPort(c.Host, strconv.Itoa(c.Port)),
+		Host:     net.JoinHostPort(host, strconv.Itoa(c.Port)),
 		Path:     "/" + c.Database,
 		RawQuery: "sslmode=" + url.QueryEscape(c.SSLMode),
 	}
