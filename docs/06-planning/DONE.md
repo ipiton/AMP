@@ -17,6 +17,13 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-16 — (BUG / Security / Deps, P0) **PROD-DEPS-NET-HTTP2** — required `govulncheck` снова зелёный локально: закрыты 12 достижимых уязвимостей Go stdlib (`net/http`, `net/textproto`, `crypto/tls`, `html/template`; пять из них ещё и в `x/net/http2` через Kubernetes-клиент), красивших `main` с 2026-10-10.
+  - **Версии:** `toolchain go1.26.8` → `go1.26.9` (`go 1.26.0` не тронут), `golang.org/x/net` v0.58.0 → v0.60.0 точечным `go get` без `-u`/`tidy`; транзитивка `x/crypto` v0.57.0, `x/sys` v0.48.0, `x/term` v0.46.0, `x/text` v0.42.0, `x/sync` v0.23.0 (+ `x/tools`/`x/mod` только в build list). Все ≥ 7 дней, хеши сверены с sum.golang.org. Builder обоих образов — `golang:1.26.9-alpine` (исключение из карантина для перепушенного index — решение владельца; манифесты amd64/arm64 и так старше 7 дней). Go-код не менялся.
+  - **Проверка:** Full tier (`S`); `govulncheck@v1.8.0` на `go1.26.9` — 0 достижимых (было 12), импортируемая GO-2026-6604 тоже закрыта, на уровне модулей — только GO-2026-5932 (без фикса); deep-review (независимый агент) — `pass`, 3 minor + 5 nit, все закрыты; `scripts/release-gate.sh` `RESULT: PASS` 11/11 с первого прогона @ `df16838`.
+  - **Доки:** CHANGELOG (Security), `docs/CI.md` § Go Version, `ci.yml`; `BACKLOG` `CI-SUPPLY-CHAIN` — версия builder'а без номера.
+  - **Owner:** `MAIN-BRANCH-PROTECTION` разблокирован — ждёт push `main` и зелёного CI (`Waiting-on`). Подтверждение фикса — зелёный `govulncheck` в CI после push.
+  - **Follow-ups:** нет. Пробел (не заведён): согласованность версии Go в `go.mod`/Dockerfile/`ci.yml`/`docs/CI.md` держится правилом, а не проверкой — кандидат в `CI-SUPPLY-CHAIN` при повторении. Архив: `tasks/archive/PROD-DEPS-NET-HTTP2/`.
+
 - 2026-10-14 — (BUG / Helm, P0) **HELM-DEFAULTS-VALIDATE** — закрыт баг `HELM-DEFAULTS-FAIL-VALIDATION`: `helm install` с дефолтными values поднимает AMP (раньше — `CreateContainerConfigError` или отказ валидации).
   - **LLM:** `llm.enabled: false` по умолчанию в `values.yaml`, `values-production.yaml`, `values-dev.yaml` (решение владельца). `llm.enabled=true` без `llm.apiKey` и без `externalSecrets.enabled` падает на рендере (`fail` в `secret.yaml`) с понятной ошибкой.
   - **БД:** opt-in `database.allow_insecure_ssl_in_production` снимает только запрет `ssl_mode: disable` в production; остальные проверки кредов не ослаблены. Чарт выставляет `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` только для встроенного PostgreSQL без TLS (не для внешней БД, `lite`, `ssl=on`); AMP при этом пишет `Warn` с `host`, без пароля.

@@ -11,10 +11,6 @@
 
 ### P0 — без этого не внедрять
 
-- [ ] **PROD-DEPS-NET-HTTP2** — required `govulncheck` красный на `main` с 2026-10-10 (CI run 38047566510 и следующие): GO-2026-6610, -6611, -6612, -6613, -6617 (HTTP/2 и HTTP/1 в `net/http`, в том числе crash HTTP/2-сервера из-за гонки HPACK-энкодера), опубликованы 2026-10-08. Достижимы: `golang.org/x/net` v0.58.0 (фикс v0.60.0) и stdlib `go1.26.8` (фикс `go1.26.9`). Блокирует Owner `MAIN-BRANCH-PROTECTION`.
-  - Сделать: `toolchain go1.26.9` в `go-app/go.mod` (CI берёт версию из `go-version-file`), `x/net` → v0.60.0, проверить `Dockerfile`/`Dockerfile.config-reloader` на версию Go; `govulncheck ./...` — 0 достижимых; release-gate.
-  - Оценка: ~0.3d. _Источник: start-task PROD-HARDCODED-FILTER, 2026-10-13._
-  Blocked-by: карантин 7 дней — `x/net` v0.60.0 опубликован 2026-10-08, брать не раньше 2026-10-15 (`go1.26.9` от 2026-10-02 уже можно).
 - [ ] **PROD-RELEASE-V010** — релиза нет: теги только `v0.0.1`/`v0.0.2` (2025-12), 500+ коммитов после; `docs/RELEASE_NOTES_v0.1.0-draft.md` — «TBD»; `CHANGELOG.md` — только `[Unreleased]`. Версии не согласованы: `Chart.yaml` `version 0.1.0` / `appVersion 0.0.1` vs `tag: "1.0.0"` в values-production.
   - Сделать: выровнять версии (Chart `appVersion` = тег образа, values ссылаются на `.Chart.AppVersion` по умолчанию), закрыть `CHANGELOG`, финализировать release notes, тег `v0.1.0`. Зависит от PROD-CI-IMAGES.
   - _(2026-09-28, после PROD-CI-IMAGES)_ push тега `v*` запускает `release.yml`. После первого тега: пакеты `amp` и `amp-config-reloader` в GitHub Packages → Public (GHCR создаёт их private); проверить `docker pull ghcr.io/ipiton/amp:<tag>` и `…/amp-config-reloader:<tag>` без логина, на amd64 и arm64. Тег образа — без `v` (`0.1.0`), `image.tag` в `values-production.yaml` сейчас `1.0.0` — выровнять. После этого можно включать `configReloader.enabled` (отдельное решение, `CONFIG-RELOADER-SIDECAR`). Лучше после `PROD-DEPS-VULN`, чтобы первый образ не нёс известных уязвимостей. _(2026-09-29: `PROD-DEPS-VULN` закрыт. Сканер образа всё равно покажет GO-2026-5932 в `x/crypto` — фикса нет, пакет `openpgp` не используется; упомянуть в release notes.)_
@@ -76,6 +72,7 @@
 
 ### Закрыто
 
+- [x] **PROD-DEPS-NET-HTTP2** _(закрыт 2026-10-16, `tasks/archive/PROD-DEPS-NET-HTTP2/`; `toolchain go1.26.9`, `x/net` v0.58.0 → v0.60.0 + транзитивка `x/{crypto,sys,term,text,sync}` (все ≥ 7 дней), builder `golang:1.26.9-alpine`; 12 достижимых (stdlib, пять из них ещё и в `x/net/http2`) → 0, заодно GO-2026-6604; release-gate PASS 11/11)_
 - [x] **HELM-DEFAULTS-VALIDATE** _(закрыт 2026-10-14, `tasks/archive/HELM-DEFAULTS-VALIDATE/`; дефолтные values чарта стартуют: `llm.enabled: false` по умолчанию, `llm.enabled=true` без ключа падает на рендере; opt-in `database.allow_insecure_ssl_in_production` разрешает `sslmode=disable` в production, чарт ставит его только для встроенного PostgreSQL без TLS, AMP пишет `Warn`; внешняя БД с паролем из Secret — `HELM-EXTERNAL-DATABASE` (P1))_
 - [x] **PROD-HARDCODED-FILTER** _(закрыт 2026-10-13, `tasks/archive/PROD-HARDCODED-FILTER/`; правила `test*`/`environment=test|testing`/namespace `dev-sandbox`|`tmp` удалены без opt-in-конфига (решение владельца), замена — upstream route на blackhole-receiver из migration note; Rule 7 пропускает флап, блокирует только повтор того же статуса; release-gate PASS, смоук бинаря PASS)_
 - [x] **DEAD-VALUES-FILTERS** _(закрыт 2026-10-13 вместе с `PROD-HARDCODED-FILTER`: ключ `filters:` удалён из `helm/amp/values.yaml`)_

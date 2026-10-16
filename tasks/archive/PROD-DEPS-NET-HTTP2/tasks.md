@@ -95,15 +95,15 @@ based_on:
 
 ## Phase 6: Finalize
 
-- [ ] **6.1** `/finalize`: `DONE.md`, `NEXT.md` (WIP снять; у `MAIN-BRANCH-PROTECTION` снять `Blocked-by: PROD-DEPS-NET-HTTP2` и оставить условие «зелёный CI на `main` после push»), BACKLOG P0 → закрытые, архив workspace. <!-- depends: 5.1, 5.2 | verify: ls tasks/archive/PROD-DEPS-NET-HTTP2; grep -c PROD-DEPS-NET-HTTP2 docs/06-planning/NEXT.md → 0 в WIP -->
+- [x] **6.1** `/finalize`: `DONE.md`, `NEXT.md` (WIP снять; у `MAIN-BRANCH-PROTECTION` снять `Blocked-by: PROD-DEPS-NET-HTTP2` и оставить условие «зелёный CI на `main` после push»), BACKLOG P0 → закрытые, архив workspace. <!-- depends: 5.1, 5.2 | verify: ls tasks/archive/PROD-DEPS-NET-HTTP2; grep -c PROD-DEPS-NET-HTTP2 docs/06-planning/NEXT.md → 0 в WIP -->
 - [ ] **6.2** `/merge-to-main`; push — по решению владельца. Подтверждение результата — зелёный `govulncheck` на `main` в CI. <!-- depends: 6.1 | verify: git log main -1 -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated (обоснование отсутствия — 4.1)
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated (`CHANGELOG.md`, `docs/CI.md`, planning в finalize)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated (обоснование отсутствия — 4.1)
+- [x] Phase checks pass
+- [x] Docs/planning are updated (`CHANGELOG.md`, `docs/CI.md`, planning в finalize)
