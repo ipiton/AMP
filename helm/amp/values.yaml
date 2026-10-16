@@ -396,6 +396,32 @@ postgresql:
     ssl: "off"  # The bundled PostgreSQL has no TLS support yet (no certificate mount); the chart then sets database.allow_insecure_ssl_in_production for AMP
 
 # ===============================
+# External PostgreSQL (Standard Profile Only)
+# ===============================
+# The supported production database (ADR-016): PostgreSQL >= 16 run outside
+# this chart. Set postgresql.enabled=false and fill in host, database, username
+# and existingSecret. The chart passes these to AMP as DATABASE_* env vars,
+# which take precedence over a `database:` section in configFile.content.
+# Ignored by the lite profile.
+externalDatabase:
+  host: ""  # Empty = not used. Set it to switch AMP to this database
+  port: 5432
+  database: ""  # Required when host is set
+  username: ""  # Required when host is set
+  # disable | allow | prefer | require | verify-ca | verify-full.
+  # With environment=production AMP refuses to start on "disable"; the chart
+  # does not set the insecure-SSL override for an external database.
+  # verify-ca/verify-full check the server certificate against the image's
+  # system roots only: a provider CA (RDS etc.) is not in there, and the chart
+  # mounts no client TLS material.
+  sslMode: require
+  # Required when host is set. The chart does NOT create this Secret:
+  #   kubectl create secret generic amp-db --from-literal=password='...'
+  # With environment=production AMP requires a password of 12+ characters.
+  existingSecret: ""
+  existingSecretPasswordKey: password
+
+# ===============================
 # Valkey Cache Configuration (Redis-compatible, Standard Profile Only)
 # ===============================
 # Automatically disabled for Lite profile (uses memory-only cache)
