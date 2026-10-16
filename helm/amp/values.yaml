@@ -408,16 +408,20 @@ externalDatabase:
   port: 5432
   database: ""  # Required when host is set
   username: ""  # Required when host is set
-  # disable | allow | prefer | require | verify-ca | verify-full.
-  # With environment=production AMP refuses to start on "disable"; the chart
-  # does not set the insecure-SSL override for an external database.
-  # verify-ca/verify-full check the server certificate against the image's
-  # system roots only: a provider CA (RDS etc.) is not in there, and the chart
-  # mounts no client TLS material.
+  # disable | require | verify-ca | verify-full: the modes AMP accepts (allow
+  # and prefer fail the render). With environment=production AMP refuses to
+  # start on "disable"; the chart does not set the insecure-SSL override for an
+  # external database. verify-ca/verify-full check the server certificate
+  # against the image's system roots only: a provider CA (RDS etc.) is not in
+  # there, and the chart mounts no client TLS material.
   sslMode: require
-  # Required when host is set. The chart does NOT create this Secret:
-  #   kubectl create secret generic amp-db --from-literal=password='...'
+  # Required when host is set. The chart does NOT create this Secret. From a
+  # file with no trailing newline (AMP does not trim the password):
+  #   printf '%s' "$PASSWORD" > amp-db-password
+  #   kubectl create secret generic amp-db --from-file=password=amp-db-password
   # With environment=production AMP requires a password of 12+ characters.
+  # The password is read at pod start: after changing the Secret, run
+  # kubectl rollout restart deploy/<fullname>.
   existingSecret: ""
   existingSecretPasswordKey: password
 

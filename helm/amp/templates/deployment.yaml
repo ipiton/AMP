@@ -105,10 +105,11 @@ spec:
             {{- if not $ext.username }}
             {{- fail "externalDatabase.username is required when externalDatabase.host is set." }}
             {{- end }}
-            {{- if not (has ($ext.sslMode | default "require") (list "disable" "allow" "prefer" "require" "verify-ca" "verify-full")) }}
-            {{- fail (printf "externalDatabase.sslMode %q is invalid: use one of disable, allow, prefer, require, verify-ca, verify-full." $ext.sslMode) }}
+            {{- /* The modes AMP accepts (internal/database/postgres PostgresConfig.Validate); allow/prefer are refused there and may fall back to plaintext. */}}
+            {{- if not (has ($ext.sslMode | default "require") (list "disable" "require" "verify-ca" "verify-full")) }}
+            {{- fail (printf "externalDatabase.sslMode %q is invalid: use one of disable, require, verify-ca, verify-full." $ext.sslMode) }}
             {{- end }}
-            {{- else if and (not .Values.postgresql.enabled) (not (and .Values.configFile.enabled (regexMatch "(?m)^database:" (.Values.configFile.content | default "")))) }}
+            {{- else if and (not .Values.postgresql.enabled) (not (and .Values.configFile.enabled (fromYaml (.Values.configFile.content | default "")).database)) }}
             {{- fail "postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or a top-level `database:` section in configFile.content (its password then sits in a ConfigMap)." }}
             {{- end }}
             {{- end }}
