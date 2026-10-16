@@ -26,9 +26,10 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 - `helm/amp/templates/deployment.yaml` — guard'ы и ветка внешней БД (D2, D3).
 - `helm/amp/templates/NOTES.txt` — строка о внешней БД / `configFile`-пути (D5).
 - `helm/amp/values-production.yaml` — `postgresql.enabled: false`, `externalDatabase` (D4).
+- `helm/amp/values-dev.yaml` — `postgresql.enabled: true` (отклонение, см. Implementation Notes).
 - `helm/amp/tests/values-production-placeholders.yaml` — заглушки `externalDatabase.*` (D4).
 - `helm/amp/README.md`, `docs/MIGRATION_QUICK_START.md`, `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md`, `CHANGELOG.md`, `docs/06-planning/TECH-DEBT.md` (D8, D9, D6 follow-up).
-- Тесты (Phase 6, после вердикта): `helm/amp/tests/render-external-database.sh` (новый), `helm/amp/tests/render-postgresql.sh`, `helm/amp/tests/render-defaults-validate.sh`, `go-app/internal/database/postgres/pool_test.go`.
+- Тесты (Phase 7, после вердикта): `helm/amp/tests/render-external-database.sh` (новый), `helm/amp/tests/render-postgresql.sh`, `helm/amp/tests/render-defaults-validate.sh`, `helm/amp/tests/render-ingress-auth.sh`, `go-app/internal/database/postgres/pool_test.go`.
 
 ## Phase 1: Go — экранирование DSN (D6)
 
@@ -105,3 +106,9 @@ Spec Open Question «`sslMode` в `values-production.yaml`» закрыт деф
 - [ ] Tests for changed behavior are added or updated
 - [ ] Phase checks pass
 - [ ] Docs/planning are updated (README, runbook, MIGRATION_QUICK_START, CHANGELOG, TECH-DEBT)
+
+## Implementation Notes
+
+- **Отклонение от Spec (2026-10-16, Phase 3): `helm/amp/values-dev.yaml`.** Research/Spec его не учли: там `profile: standard` (по умолчанию) + `postgresql.enabled: false` без БД, с комментарием «SQLite for development». Guard «БД нет нигде» его ловит, и `helm-dev`/`render-defaults-validate.sh` T1 падают. В standard-профиле SQLite нет (`config.go` `validateProfile`: `storage.backend=postgres`; дефолт `database.host=localhost`), так что под из dev-values и до задачи не мог подключиться к БД — guard поймал реальный дефект. Фикс: `postgresql.enabled: true` (встроенный PG — dev/pilot по ADR-016), комментарий исправлен. Не `profile: lite`: тогда `helm-rbac[dev]` в release-gate ждёт 1 Role, а lite даёт 0 — пришлось бы править гейт. В CHANGELOG — строка в Fixed.
+- Комментарий в ветке внешней БД `deployment.yaml` не содержит имени insecure-флага: иначе `grep -c ALLOW_INSECURE` в проверках считал бы комментарий.
+- **Не учтено в Spec D7:** `helm/amp/tests/render-ingress-auth.sh` `prod-external` (`:106`) рендерит production без `values-production-placeholders.yaml` и теперь падает на guard'е «БД нет нигде». Phase 7: добавить ему `externalDatabase.*` (или `-f` placeholders). Прочие render-тесты зелёные; падают ровно `render-postgresql.sh` T1, `render-defaults-validate.sh` T1/T3 и этот кейс (прогон 2026-10-16).
