@@ -36,3 +36,8 @@ new (C args, same volume): "Database directory appears to contain a database; Sk
    config_file/hba_file from chart, max_connections=250, preload ok, marker row present, pg_stat_statements queryable, hba rules=11, v_* views: 0
 rollback (old layout again, same volume): starts, max_connections=20, marker present;
    SELECT FROM pg_stat_statements -> ERROR: pg_stat_statements must be loaded via shared_preload_libraries (same as before the fix)
+
+## E. fresh volume, chart conf with shared_preload_libraries = '' but pg_stat_statements.* lines kept (Spec Edge Case 7)
+args -c config_file=… -c hba_file=… -c logging_collector=off
+status: Up; log: "database system is ready to accept connections" (in container stdout); no FATAL, no WARNING about pg_stat_statements.*
+SHOW shared_preload_libraries -> ''
