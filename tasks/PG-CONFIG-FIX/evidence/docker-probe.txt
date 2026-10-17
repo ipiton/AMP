@@ -1,0 +1,38 @@
+# docker-probe: postgres:16.15 (digest sha256:ca0bd484cb98…), --user 999:999, 2026-10-17
+# Inputs: helm template t helm/amp --show-only templates/postgresql-configmap.yaml (main @ 3a0f723), default values.
+
+## A. config_file arg + init.sql minus ALTER SYSTEM (fresh volume)
+running bootstrap script ... ok
+/usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/init.sql
+psql:/docker-entrypoint-initdb.d/init.sql:94: ERROR:  column "tablename" does not exist
+LINE 4:   tablename AS table,
+
+## B/C. fresh volume, init.sql fixed (ALTER SYSTEM removed, v_index_usage -> relname/indexrelname), pg_stat_statements.* appended to postgresql.conf
+B: args -c config_file=/etc/postgresql/postgresql.conf
+   config_file=/etc/postgresql/postgresql.conf
+   hba_file=/var/lib/postgresql/data/pgdata/pg_hba.conf   <- NOT the chart file
+   max_connections=250 shared_buffers=32768 (x8kB = 256MB) shared_preload_libraries=pg_stat_statements
+   logging_collector=on; pg_hba_file_rules: 7 rules (image default)
+C: args -c config_file=… -c hba_file=/etc/postgresql/pg_hba.conf
+   hba_file=/etc/postgresql/pg_hba.conf; pg_hba_file_rules: 11 rules, 0 errors
+   password_encryption=scram-sha-256; rolsuper=t rolreplication=t rolpassword=SCRAM-SHA-256$…
+   container stdout after start: only "redirecting log output to logging collector process" / "Future log output will appear in directory pg_log"
+Network auth from another container (192.168.215.0/24, chart pg_hba C):
+   pass ok,  db alert_history -> ok alert_history     (md5 rule + SCRAM-stored password => SCRAM exchange)
+   pass bad, db alert_history -> FATAL: password authentication failed
+   pass ok,  db postgres      -> FATAL: pg_hba.conf rejects connection … database "postgres"
+   replication=database as alert_history -> IDENTIFY_SYSTEM succeeds (host replication all 192.168.0.0/16 md5)
+
+## D. upgrade path: volume initialised by the OLD chart layout, then started with C args
+old first start:
+selecting default max_connections ... 20
+selecting default shared_buffers ... 400kB
+selecting default time zone ... Etc/UTC
+2026-10-17 13:20:06.353 UTC [91] ERROR:  unrecognized configuration parameter "pg_stat_statements.max"
+old after restart: config_file=$PGDATA/postgresql.conf hba_file=$PGDATA/pg_hba.conf max_connections=20 shared_buffers=50(x8kB=400kB)
+   shared_preload_libraries='' logging_collector=off; extensions plpgsql,pg_stat_statements,pg_trgm,btree_gin; v_* views: 0
+   postgresql.auto.conf: empty; $PGDATA/postgresql.conf:829 config_file = '/etc/postgresql/postgresql.conf' (written by initdb -c, ignored by the server)
+new (C args, same volume): "Database directory appears to contain a database; Skipping initialization"
+   config_file/hba_file from chart, max_connections=250, preload ok, marker row present, pg_stat_statements queryable, hba rules=11, v_* views: 0
+rollback (old layout again, same volume): starts, max_connections=20, marker present;
+   SELECT FROM pg_stat_statements -> ERROR: pg_stat_statements must be loaded via shared_preload_libraries (same as before the fix)
