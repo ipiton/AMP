@@ -51,9 +51,9 @@ based_on:
 | P2. Без `-c hba_file` сервер берёт `$PGDATA/pg_hba.conf` | docker-probe B vs C | measured | `pg_hba` чарта не действует |
 | P3. Откат на старую раскладку на том же томе стартует, данные на месте; в PVC фикс ничего не пишет | docker-probe D (rollback) | measured | `helm rollback` не восстанавливает сервис |
 | P4. Пароли хранятся как SCRAM ⇒ `scram-sha-256` в `pg_hba` не ломает вход существующих установок | docker-probe C (`rolpassword=SCRAM-SHA-256$…`, `password_encryption=scram-sha-256`); все установки инициализированы `postgres:16*` (пин с ADR-016, раньше `postgres:16`) | measured + code-read | AMP на старом PVC с MD5-хешем получает `password authentication failed` |
-| P5. Views из `init.sql`, правило `replication`, `127.0.0.1 md5` никому не нужны | grep по `helm/`, `go-app/`, `grafana/` — нет потребителей views; backup CronJob удалён (ADR-016); exporter ходит на `localhost` (`trust` раньше) | call-path-traced | что-то читает `v_*` или реплицируется |
+| P5. Views из `init.sql`, правило `replication`, `127.0.0.1 md5` никому не нужны | grep по `helm/`, `go-app/`, `grafana/` — нет потребителей views; backup CronJob удалён (ADR-016); exporter ходит на `localhost` (`trust` раньше) | code-read (grep; перепроверено deep-review по `go-app/`, `grafana/`, `docs/`, `deploy/`, `examples/`, `scripts/`) | что-то читает `v_*` или реплицируется |
 | P6. `/dev/shm` в pod'е 64M, параллельные hash join'ы падают уже на дефолтах (и на `per_gather=2` образа); `emptyDir {medium: Memory, sizeLimit: 256Mi}` снимает | `evidence/k3d-shm-probe.txt` | measured | — |
-| P7. `shared_buffers=256MB` + shm ≤256Mi + backend'ы укладываются в `limits.memory: 2Gi` | `values.yaml:317-323`; shm считается в memory cgroup контейнера | code-read | OOMKill под нагрузкой — проверка K1 |
+| P7. `shared_buffers=256MB` + shm ≤256Mi + backend'ы укладываются в `limits.memory: 2Gi` | `values.yaml:317-323`; shm считается в memory cgroup контейнера; K1.4 — 13 backend'ов + 4 параллельных запроса, без OOM | assumed для 250 backend'ов (measured ≤ ~20) | OOMKill при насыщении пулов — README/CHANGELOG, `HELM-SINGLE-NODE-DEFAULTS` |
 | P8. Pod CIDR k3d `10.42/16`, вход по паролю из pod-сети проходит | k3d-shm-probe (последний блок; с текущим `md5`, с новым `all scram-sha-256` — в K1) | measured (частично) | — |
 | P9. Кластеры с pod CIDR вне RFC1918 существуют у пользователей чарта | не проверено; EKS custom networking (`100.64/10`), dual-stack | assumed | ничего: выбранный `pg_hba` не фильтрует по адресу (см. Open Questions) |
 
@@ -128,8 +128,8 @@ based_on:
 ## Observability
 
 - **Logs:** PG пишет в stderr контейнера (`kubectl logs <release>-postgres-0 -c postgres`) и после старта.
-- **Metrics:** exporter без изменений; `pg_stat_statements_*` начинают появляться (алерт `postgresql-prometheus-rules.yaml:73` получает данные — раньше молчал).
-- **Alerts:** без изменений.
+- **Metrics:** exporter починен в implement (Deviations): `pg_up 1`, кастомные запросы работают. Метрики `pg_stat_statements_mean_exec_time_seconds` у exporter v0.15.0 нет (коллектор `stat_statements` выключен по умолчанию).
+- **Alerts:** группа `postgresql.rules` не парсилась (`now()` в `PostgreSQLVacuumOld`) — починено (deep-review R2); часть правил ссылается на несуществующие имена метрик — BUGS (R3).
 
 ## Test Plan
 
@@ -161,6 +161,8 @@ based_on:
 
 - 2026-10-17 (implement): `postgresql.config: null` не рендерится ни на `main`, ни на ветке (`evidence/render-invariants.txt`) — D1 «аварийный выход», Edge Case 1, Rollback «аварийно без отката чарта» и T7.7 недействительны. Откат — только `helm rollback`. Invariant «lite рендерит то же» неверен: lite тоже рендерит встроенный PG. Подробности — `tasks.md` § Implementation Notes.
 - 2026-10-17 (implement, K1): `postgres-exporter` не подключался (env-порядок `$(POSTGRES_*)`), после подключения `/metrics` отдавал 500 (несуществующие столбцы в `queries.yaml`, дубли серий от auto-discovery). Починен в этой задаче — критерий requirements «exporter подключается». Затронут `templates/postgresql-exporter-configmap.yaml`, которого нет в § Component Architecture. Тест — T7.9.
+- 2026-10-17 (deep-review R6): D3 — loopback `127.0.0.1/32`, `::1/128` `trust` → `scram-sha-256`; `trust` только на socket. `kubectl port-forward` приходит на loopback, роль — суперпользователь. Exporter передаёт пароль (`DATA_SOURCE_PASS`), probes — `pg_isready` (без аутентификации) и `psql` через socket.
+- 2026-10-17 (deep-review R2): `postgresql-prometheus-rules.yaml` — `now()` → `time()` + пропуск `last_autovacuum = 0`; без этого группа правил не загружалась.
 
 ## Open Questions
 

@@ -149,6 +149,28 @@ helm upgrade amp helm/amp -n k2 --reset-then-reuse-values --dry-run=client      
 helm upgrade amp helm/amp -n k2 --reuse-values --set postgresql.config.loggingCollector=off --dry-run=client → logging_collector = off
 ```
 
+## Re-check after deep-review fixes (R2, R6)
+
+`helm upgrade amp helm/amp -n k2 -f drill-values.yaml` from rev 3 (`main`) → rev 4 (branch + loopback `scram-sha-256`, `time()` in `PostgreSQLVacuumOld`) — the upgrade path once more.
+
+```
+socket (kubectl exec psql, no -h):            socket ok
+psql -w -h 127.0.0.1 -U alert_history -d postgres: fe_sendauth: no password supplied
+psql -w -h ::1       -U alert_history -d postgres: fe_sendauth: no password supplied
+PGPASSWORD=… psql -h 127.0.0.1 … alert_history:   2
+exporter: scrape rc=0, pg_up 1, query errors 0
+amp-postgres-0: postgres ready restarts=0, postgres-exporter ready restarts=0   (probes: pg_isready -h 127.0.0.1 needs no auth)
+/-/ready 200; POST /api/v2/alerts PgFixk2r6{1..3} 200; silence 62376771-… 200; helm test Succeeded; alerts 9
+```
+
+Rules (`helm template … -s templates/postgresql-prometheus-rules.yaml | yq .spec`, promtool 3.15.0):
+
+```
+before: FAILED: … rule 9, "PostgreSQLVacuumOld": could not parse expression: 1:2: parse error: unknown function with name "now"
+after:  SUCCESS: 11 rules found
+promtool test rules: last_autovacuum 0 for 150m → no alert; last_autovacuum 1 (t=1s), eval 26h → alert, description "… has not been vacuumed for 93599 seconds."
+```
+
 ## Not done here
 
-Cleanup of the cluster (step 4.6) — waits for the owner's confirmation. Left behind: releases `amp` in `k1` (scaled to 0) and `k2` (rev 3), pods `drill-curl` in both, database `shmprobe` in the `k1` volume, research pods `pgshm`/`pgshm2` and ConfigMap `pgconf` in `default`.
+Cleanup of the cluster (step 4.6) — waits for the owner's confirmation. Left behind: releases `amp` in `k1` (scaled to 0) and `k2` (rev 4), pods `drill-curl` in both, database `shmprobe` in the `k1` volume, research pods `pgshm`/`pgshm2` and ConfigMap `pgconf` in `default`.
