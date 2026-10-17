@@ -79,7 +79,7 @@ based_on:
 
 ## Phase 5: Deep review
 
-- [ ] **5.1** `/deep-review` (обязателен: `S`) — независимый агент; линзы: security (`pg_hba`, `trust` только loopback/socket, пароль не в ConfigMap/args), correctness (`args` vs entrypoint, upgrade на старом PVC, rollback), contract/migration (дефолт `loggingCollector`, CHANGELOG), premises P1–P9. <!-- depends: 4.7 | verify: jq -r .gate tasks/PG-CONFIG-FIX/review-verdict.json → pass -->
+- [x] **5.1** _(готово: два ревьюера @ `3271a45` → fix_required, 12 находок; фиксы `42e8828`; повторное ревью → R13–R16, текстовые закрыты, R13 → BUGS; gate pass)_ `/deep-review` (обязателен: `S`) — независимый агент; линзы: security (`pg_hba`, `trust` только loopback/socket, пароль не в ConfigMap/args), correctness (`args` vs entrypoint, upgrade на старом PVC, rollback), contract/migration (дефолт `loggingCollector`, CHANGELOG), premises P1–P9. <!-- depends: 4.7 | verify: jq -r .gate tasks/PG-CONFIG-FIX/review-verdict.json → pass -->
 
 ## Phase 6: Tests
 
