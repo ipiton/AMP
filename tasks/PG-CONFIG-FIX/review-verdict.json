@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "7 fix-here finding(s) open",
+  "branch": "bugfix/pg-config-fix",
+  "commit": "3271a45",
+  "reviewed_at": "2026-10-17",
+  "findings": {
+    "blocker": 0,
+    "major": 3,
+    "minor": 5,
+    "nit": 4
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
