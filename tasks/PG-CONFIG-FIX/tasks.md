@@ -27,6 +27,7 @@ based_on:
 - `helm/amp/templates/NOTES.txt` — `:25-28`, шаг 4 `:101-110`, строка бюджета (D6).
 - `helm/amp/README.md` — `:105` (D6).
 - `CHANGELOG.md` — `[Unreleased]` Fixed + migration note (D8).
+- `helm/amp/CHANGELOG.md` — `[Unreleased]` Fixed (чартовый changelog; Spec его не называл).
 - `tasks/PG-CONFIG-FIX/evidence/` — `render-invariants.txt`, `k3d-acceptance.md`.
 - Тесты (Phase 6, после вердикта): `helm/amp/tests/render-postgresql.sh` — T6 переписать, T7.1–T7.8 (D7).
 - Не трогаются: `values-production.yaml` (`postgresql.enabled: false`), `values-dev.yaml` (только `enabled: true` — берёт дефолты), `templates/tests/postgresql-test-connection.yaml`.
@@ -48,16 +49,16 @@ based_on:
 - [x] **2.3** `logging_collector`: шаблон `default "off"`, `values.yaml` `loggingCollector: "off"` + комментарий «`on` пишет в `$PGDATA/pg_log` на PVC без ротации-удаления, логи пропадают из `kubectl logs`». <!-- verify: helm template amp helm/amp | grep -c 'logging_collector = off' = 1 -->
 - [x] **2.4** Комментарии бюджета: `configmap :31` и `values.yaml :357/:360` — «25 per AMP pod × replicas + exporter»; значение `250` не меняется. <!-- verify: grep -n 'supports 10 replicas\|10 × 20' helm/amp/values.yaml helm/amp/templates/postgresql-configmap.yaml — пусто -->
 - [x] **2.5** _(готово: ext — diff пуст; lite и dev рендерят встроенный PG, их diff байт-в-байт = diff default; вне `amp-postgres`/`amp-postgres-config`/Secret документы идентичны)_ Инварианты: lite, `postgresql.enabled=false` + external — байт-в-байт как до задачи; diff default/dev — только ожидаемые места (D1–D5). Вывод — `evidence/render-invariants.txt`. <!-- depends: 1.1-2.4 | verify: diff $SCRATCH/before-lite.yaml и before-ext.yaml — пусто; diff before-default.yaml — только StatefulSet amp-postgres и ConfigMap amp-postgres-config -->
-- [ ] **2.6** Коммит `fix(helm): apply the chart PostgreSQL config to the bundled server`. <!-- depends: 2.5 | verify: git show --stat HEAD — statefulset, configmap, values.yaml, evidence -->
+- [x] **2.6** Коммит `fix(helm): apply the chart PostgreSQL config to the bundled server`. <!-- depends: 2.5 | verify: git show --stat HEAD — statefulset, configmap, values.yaml, evidence -->
 
 **Phase verification:** `helm lint helm/amp`; `bash helm/amp/tests/render-postgresql.sh` — T1–T5 зелёные, T6 падает (ожидаемо до Phase 3/6).
 
 ## Phase 3: Docs (D6, D8)
 
-- [ ] **3.1** `NOTES.txt`: убрать предупреждение `:25-28`; шаг 4 — «Expected: {{ maxConnections }}»; при `autoscaling.enabled` и `maxReplicas × 25 ≥ maxConnections` — строка про бюджет соединений. <!-- verify: helm install --dry-run=client amp helm/amp | grep -c PG-CONFIG-NOT-APPLIED = 0, grep -c 'Expected: 250' = 1; с --set autoscaling.maxReplicas=10 — строка бюджета есть, с дефолтом — по факту формулы -->
-- [ ] **3.2** `values.yaml`: убрать NOTE `:355-356`. `README.md:105`: убрать последнее предложение; абзац — бюджет соединений (25 × реплики против `maxConnections`), `pg_hba` пускает из сети только `<database>`/`<username>` по SCRAM, периметр — `postgresql.networkPolicy.enabled`, `/dev/shm` 256Mi входит в `resources.limits.memory`. <!-- verify: grep -rn PG-CONFIG-NOT-APPLIED helm/ — только tests/render-postgresql.sh (T6 до Phase 6) -->
-- [ ] **3.3** `CHANGELOG.md` `[Unreleased]`: `### Fixed` (`PG-CONFIG-NOT-APPLIED`, падение `init.sql`, `/dev/shm`) + migration note по Spec § Rollout / Rollback: рестарт PG при upgrade; что меняется (`max_connections` 20→250, `shared_buffers` 400kB→256MB, preload, WAL 1/4GB, shm 256Mi, `pg_hba`); `reject` для других ролей/БД; `--reuse-values` и `loggingCollector`; rollback + ручное удаление pod'а при зависшем `OrderedReady`. <!-- verify: grep -n 'PG-CONFIG-NOT-APPLIED\|reuse-values\|helm rollback' CHANGELOG.md -->
-- [ ] **3.4** Коммит `docs: bundled PostgreSQL config, pg_hba and migration note`. <!-- depends: 3.1-3.3 | verify: git diff --check HEAD~1 -->
+- [x] **3.1** _(готово: существующий блок «CRITICAL: Database Connection Pool» переписан под условие `maxReplicas × 25 ≥ maxConnections` — на дефолтах (10 × 25 = 250) предупреждение остаётся, при `maxReplicas=8` его нет)_ `NOTES.txt`: убрать предупреждение `:25-28`; шаг 4 — «Expected: {{ maxConnections }}»; при `autoscaling.enabled` и `maxReplicas × 25 ≥ maxConnections` — строка про бюджет соединений. <!-- verify: helm install --dry-run=client amp helm/amp | grep -c PG-CONFIG-NOT-APPLIED = 0, grep -c 'Expected: 250' = 1; с --set autoscaling.maxReplicas=10 — строка бюджета есть, с дефолтом — по факту формулы -->
+- [x] **3.2** `values.yaml`: убрать NOTE `:355-356`. `README.md:105`: убрать последнее предложение; абзац — бюджет соединений (25 × реплики против `maxConnections`), `pg_hba` пускает из сети только `<database>`/`<username>` по SCRAM, периметр — `postgresql.networkPolicy.enabled`, `/dev/shm` 256Mi входит в `resources.limits.memory`. <!-- verify: grep -rn PG-CONFIG-NOT-APPLIED helm/ — только tests/render-postgresql.sh (T6 до Phase 6) -->
+- [x] **3.3** `CHANGELOG.md` `[Unreleased]`: `### Fixed` (`PG-CONFIG-NOT-APPLIED`, падение `init.sql`, `/dev/shm`) + migration note по Spec § Rollout / Rollback: рестарт PG при upgrade; что меняется (`max_connections` 20→250, `shared_buffers` 400kB→256MB, preload, WAL 1/4GB, shm 256Mi, `pg_hba`); `reject` для других ролей/БД; `--reuse-values` и `loggingCollector`; rollback + ручное удаление pod'а при зависшем `OrderedReady`. <!-- verify: grep -n 'PG-CONFIG-NOT-APPLIED\|reuse-values\|helm rollback' CHANGELOG.md -->
+- [x] **3.4** Коммит `docs: bundled PostgreSQL config, pg_hba and migration note`. <!-- depends: 3.1-3.3 | verify: git diff --check HEAD~1 -->
 
 **Phase verification:** `helm lint helm/amp`; `git diff --check`.
 
