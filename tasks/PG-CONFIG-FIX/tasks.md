@@ -1,0 +1,110 @@
+---
+id: PG-CONFIG-FIX
+slug: pg-config-fix
+stream: Helm
+type: bug
+status: active
+created_at: 2026-10-17
+updated_at: 2026-10-17
+based_on:
+  - requirements.md
+  - research.md
+  - Spec.md
+---
+
+# Implementation Plan: встроенный PostgreSQL применяет конфиг чарта
+
+**Based on:** requirements.md / research.md / Spec.md v1.0
+**Date:** 2026-10-17
+
+`$SCRATCH` = `/private/tmp/claude-501/-Users-vit-Documents-Projects-AMP/15317cf1-cc49-4001-8dd7-d88e02f11f28/scratchpad`. Номера строк — на `7d5d248`.
+
+## Touched Files
+
+- `helm/amp/templates/postgresql-statefulset.yaml` — `args`, mount ConfigMap в `/etc/postgresql`, `init.sql` по `subPath`, `/dev/shm`; убрать `POSTGRES_INITDB_ARGS` (`:87`), `postgres-config` (`:93-94`, volume `~:227`), mount'ы `*.conf` в `initdb.d` (`:97-104`) (D1, D5).
+- `helm/amp/templates/postgresql-configmap.yaml` — `pg_stat_statements.*` после `:81`; `logging_collector` default `"off"` (`:65`); `pg_hba` (`:128-140`); удалить `ALTER SYSTEM` (`:205-207`) и секцию 5 views (`:210-~245`); комментарий бюджета (`:31`) (D2–D5).
+- `helm/amp/values.yaml` — NOTE `:355-356` убрать; формула `:357`/`:360`; `loggingCollector: "off"` + комментарий (`:386`) (D4, D5, D6).
+- `helm/amp/templates/NOTES.txt` — `:25-28`, шаг 4 `:101-110`, строка бюджета (D6).
+- `helm/amp/README.md` — `:105` (D6).
+- `CHANGELOG.md` — `[Unreleased]` Fixed + migration note (D8).
+- `tasks/PG-CONFIG-FIX/evidence/` — `render-invariants.txt`, `k3d-acceptance.md`.
+- Тесты (Phase 6, после вердикта): `helm/amp/tests/render-postgresql.sh` — T6 переписать, T7.1–T7.8 (D7).
+- Не трогаются: `values-production.yaml` (`postgresql.enabled: false`), `values-dev.yaml` (только `enabled: true` — берёт дефолты), `templates/tests/postgresql-test-connection.yaml`.
+
+## Phase 1: Chart — запуск сервера с конфигом (D1, D5)
+
+> Перед правками: `helm template amp helm/amp > $SCRATCH/before-default.yaml`; то же для `--set profile=lite` (`before-lite.yaml`), `--set postgresql.enabled=false` + `externalDatabase.*` (`before-ext.yaml`), `-f values-dev.yaml` (`before-dev.yaml`) — база для инвариантов.
+
+- [ ] **1.1** StatefulSet, контейнер `postgres`: под `{{- if .Values.postgresql.config }}` — `args: ["-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]`; mount `custom-config` → `/etc/postgresql` (каталог, `readOnly: true`); `init.sql` по `subPath` в `/docker-entrypoint-initdb.d/init.sql` остаётся. Удалить env `POSTGRES_INITDB_ARGS`, mount и volume `postgres-config`, два `subPath`-mount'а `*.conf`. `command` не задавать. <!-- verify: helm template amp helm/amp | yq 'select(.kind=="StatefulSet") | .spec.template.spec.containers[0] | [.args, .volumeMounts]' — args из 4 элементов, mount /etc/postgresql без subPath, нет INITDB; helm template ... --set postgresql.config=null — рендер OK, нет args и mount'ов конфига -->
+- [ ] **1.2** Volume `dshm: emptyDir {medium: Memory, sizeLimit: 256Mi}` → `mountPath: /dev/shm` в контейнере `postgres`, вне условия `config`. <!-- depends: 1.1 | verify: helm template amp helm/amp | grep -c 'medium: Memory' = 1; то же с --set postgresql.config=null = 1 -->
+- [ ] **1.3** `helm lint` default/dev; `checksum/config` (`:36`) по-прежнему считается от ConfigMap. <!-- depends: 1.2 | verify: helm lint helm/amp && helm lint helm/amp -f helm/amp/values-dev.yaml -->
+
+**Phase verification:** `helm template` default и `config=null` проходят; `diff` с `before-lite.yaml` и `before-ext.yaml` пуст.
+
+## Phase 2: Chart — содержимое конфига (D2, D3, D4)
+
+- [ ] **2.1** `init.sql`: удалить секцию 4 (`ALTER SYSTEM`, `:204-207`) и секцию 5 (три `CREATE OR REPLACE VIEW`, `:210-248`); секцию 6 `VACUUM ANALYZE` (`:249`) перенумеровать в 4. `postgresql.conf`: после `shared_preload_libraries` — `pg_stat_statements.max = 10000`, `pg_stat_statements.track = all`, `pg_stat_statements.track_utility = on`. <!-- verify: helm template amp helm/amp | grep -cE 'ALTER SYSTEM|CREATE OR REPLACE VIEW' = 0; grep -c 'pg_stat_statements.max = 10000' = 1 -->
+- [ ] **2.2** `pg_hba.conf`: оставить `local all all trust`, `host all all 127.0.0.1/32 trust`, `host all all ::1/128 trust`; одно `host <database> <username> all scram-sha-256`; `host all all all reject`. Удалить три RFC1918 `md5`, `127.0.0.1/32 md5`, три `replication`. Комментарий: сужение по сети — `postgresql.networkPolicy.enabled`. <!-- verify: helm template ... ConfigMap amp-postgres-config, блок pg_hba.conf: grep -c replication = 0, grep -c md5 = 0, scram-sha-256 = 1, reject = 1 -->
+- [ ] **2.3** `logging_collector`: шаблон `default "off"`, `values.yaml` `loggingCollector: "off"` + комментарий «`on` пишет в `$PGDATA/pg_log` на PVC без ротации-удаления, логи пропадают из `kubectl logs`». <!-- verify: helm template amp helm/amp | grep -c 'logging_collector = off' = 1 -->
+- [ ] **2.4** Комментарии бюджета: `configmap :31` и `values.yaml :357/:360` — «25 per AMP pod × replicas + exporter»; значение `250` не меняется. <!-- verify: grep -n 'supports 10 replicas\|10 × 20' helm/amp/values.yaml helm/amp/templates/postgresql-configmap.yaml — пусто -->
+- [ ] **2.5** Инварианты: lite, `postgresql.enabled=false` + external — байт-в-байт как до задачи; diff default/dev — только ожидаемые места (D1–D5). Вывод — `evidence/render-invariants.txt`. <!-- depends: 1.1-2.4 | verify: diff $SCRATCH/before-lite.yaml и before-ext.yaml — пусто; diff before-default.yaml — только StatefulSet amp-postgres и ConfigMap amp-postgres-config -->
+- [ ] **2.6** Коммит `fix(helm): apply the chart PostgreSQL config to the bundled server`. <!-- depends: 2.5 | verify: git show --stat HEAD — statefulset, configmap, values.yaml, evidence -->
+
+**Phase verification:** `helm lint helm/amp`; `bash helm/amp/tests/render-postgresql.sh` — T1–T5 зелёные, T6 падает (ожидаемо до Phase 3/6).
+
+## Phase 3: Docs (D6, D8)
+
+- [ ] **3.1** `NOTES.txt`: убрать предупреждение `:25-28`; шаг 4 — «Expected: {{ maxConnections }}»; при `autoscaling.enabled` и `maxReplicas × 25 ≥ maxConnections` — строка про бюджет соединений. <!-- verify: helm install --dry-run=client amp helm/amp | grep -c PG-CONFIG-NOT-APPLIED = 0, grep -c 'Expected: 250' = 1; с --set autoscaling.maxReplicas=10 — строка бюджета есть, с дефолтом — по факту формулы -->
+- [ ] **3.2** `values.yaml`: убрать NOTE `:355-356`. `README.md:105`: убрать последнее предложение; абзац — бюджет соединений (25 × реплики против `maxConnections`), `pg_hba` пускает из сети только `<database>`/`<username>` по SCRAM, периметр — `postgresql.networkPolicy.enabled`, `/dev/shm` 256Mi входит в `resources.limits.memory`. <!-- verify: grep -rn PG-CONFIG-NOT-APPLIED helm/ — только tests/render-postgresql.sh (T6 до Phase 6) -->
+- [ ] **3.3** `CHANGELOG.md` `[Unreleased]`: `### Fixed` (`PG-CONFIG-NOT-APPLIED`, падение `init.sql`, `/dev/shm`) + migration note по Spec § Rollout / Rollback: рестарт PG при upgrade; что меняется (`max_connections` 20→250, `shared_buffers` 400kB→256MB, preload, WAL 1/4GB, shm 256Mi, `pg_hba`); `reject` для других ролей/БД; `--reuse-values` и `loggingCollector`; rollback + ручное удаление pod'а при зависшем `OrderedReady`; аварийно `--set postgresql.config=null`. <!-- verify: grep -n 'PG-CONFIG-NOT-APPLIED\|reuse-values\|config=null' CHANGELOG.md -->
+- [ ] **3.4** Коммит `docs: bundled PostgreSQL config, pg_hba and migration note`. <!-- depends: 3.1-3.3 | verify: git diff --check HEAD~1 -->
+
+**Phase verification:** `helm lint helm/amp`; `git diff --check`.
+
+## Phase 4: Приёмка на k3d (K1–K3)
+
+> Кластер `pg-config-fix` уже есть (research). Все команды — с `--context k3d-pg-config-fix`. До начала: убрать pod'ы `pgshm`, `pgshm2` и ConfigMap `pgconf` в `default` — **с подтверждения владельца** (хук `destructive-command-guard`). Образ AMP — `amp:pg-config-fix` с HEAD ветки, `k3d image import`. Raw-вывод — `evidence/k3d-acceptance.md`, пароли `<redacted>`.
+
+- [ ] **4.1** Подготовка: тестовые pod'ы research убраны, образ импортирован. <!-- depends: 3.4 | verify: kubectl --context k3d-pg-config-fix get pods -A | grep pgshm — пусто; docker exec k3d-pg-config-fix-server-0 crictl images | grep pg-config-fix -->
+- [ ] **4.2** K1 свежая установка (дефолты, `profile: standard`, 2 реплики): `SHOW config_file, hba_file, max_connections, shared_buffers, shared_preload_libraries, logging_collector`; `pg_hba_file_rules` = 5 правил чарта; `RESTARTS 0`; `df -h /dev/shm` 256M; AMP `/-/ready`; `POST /api/v2/alerts` → 200; exporter `pg_up 1`; `kubectl logs` PG после «ready to accept connections»; `helm test`. <!-- depends: 4.1 | verify: все пункты записаны в evidence, значения = values -->
+- [ ] **4.3** K1 нагрузка: 4 параллельных hash join (сценарий `evidence/k3d-shm-probe.txt`) + ingest — нет `could not resize shared memory`, нет OOMKill (`kubectl get pod -o jsonpath` lastState). <!-- depends: 4.2 | verify: 4 × 3000000; restartCount 0 -->
+- [ ] **4.4** K2 upgrade: `helm uninstall` + удалить PVC K1 (подтверждение владельца) → `helm install` чартом с `main` (`git worktree` в `$SCRATCH`) → алерт + silence, счётчики → `helm upgrade` на ветку → проверки 4.2 + счётчики совпадают; AMP не получает `pg_hba.conf rejects`. <!-- depends: 4.3 | verify: SHOW config_file — /etc/postgresql/postgresql.conf на старом PVC; счётчики = до upgrade -->
+- [ ] **4.5** K3 rollback: `helm rollback` на ревизию с `main` → PG стартует на дефолтах образа, данные на месте; если pod не пересоздан — удалить вручную (подтверждение) и записать это в evidence. <!-- depends: 4.4 | verify: SHOW max_connections = 20; счётчики = 4.4 -->
+- [ ] **4.6** Убрать: кластер `pg-config-fix` (подтверждение владельца), вернуть kubectl-контекст `k3d-sema-dev` (сейчас текущий — `k3d-pg-config-fix`, переключён в research). <!-- depends: 4.5 | verify: k3d cluster list — нет pg-config-fix; kubectl config current-context = k3d-sema-dev -->
+- [ ] **4.7** Коммит `docs: k3d acceptance PG-CONFIG-FIX`. <!-- depends: 4.6 | verify: git show --stat HEAD — evidence/k3d-acceptance.md -->
+
+**Phase verification:** все K1–K3 зелёные в `evidence/k3d-acceptance.md`; при провале — фикс в Phase 1–3, отклонение в Implementation Notes.
+
+## Phase 5: Deep review
+
+- [ ] **5.1** `/deep-review` (обязателен: `S`) — независимый агент; линзы: security (`pg_hba`, `trust` только loopback/socket, пароль не в ConfigMap/args), correctness (`args` vs entrypoint, `config=null`, upgrade на старом PVC), contract/migration (дефолт `loggingCollector`, CHANGELOG), premises P1–P9. <!-- depends: 4.7 | verify: jq -r .gate tasks/PG-CONFIG-FIX/review-verdict.json → pass -->
+
+## Phase 6: Tests
+
+- [ ] **6.1** `render-postgresql.sh` T6: 0 × `PG-CONFIG-NOT-APPLIED`; notes-default — `Expected: 250` 1 раз. <!-- depends: 5.1 | verify: bash helm/amp/tests/render-postgresql.sh; мутация: вернуть NOTES.txt из main → T6 FAIL -->
+- [ ] **6.2** T7.1–T7.8 по Spec § Test Plan (args; нет INITDB и mount'ов `*.conf` в `initdb.d`, есть `init.sql`; один `/etc/postgresql` из ConfigMap; нет `ALTER SYSTEM`/`VIEW`, есть `pg_stat_statements.max`; `pg_hba` без `replication`/`md5`, `scram-sha-256` и `reject`; `logging_collector = off`; `config=null`; `/dev/shm` Memory). <!-- depends: 5.1 | verify: bash helm/amp/tests/render-postgresql.sh — все ok; мутация: templates/postgresql-*.yaml из main → T7 FAIL по каждому пункту -->
+- [ ] **6.3** Коммит `test(helm): cover the bundled PostgreSQL config wiring`. <!-- depends: 6.1, 6.2 | verify: git show --stat HEAD -->
+
+## Phase 7: Testing
+
+- [ ] **7.1** `scripts/release-gate.sh` — RESULT: PASS (helm-tests берёт `tests/*.sh`). <!-- depends: 6.3 | verify: вывод — evidence/release-gate.txt -->
+- [ ] **7.2** `git diff --check main...HEAD`; `git status` чист. <!-- depends: 7.1 | verify: пусто -->
+
+## Phase 8: Finalize
+
+- [ ] **8.1** `/finalize`: BUGS `PG-CONFIG-NOT-APPLIED` закрыт; BACKLOG `PG-CONFIG-FIX` → закрытые; DONE, NEXT (WIP снять); follow-ups: бюджет `max_connections` при `maxReplicas: 10` → `HELM-SINGLE-NODE-DEFAULTS`; preStop `su - postgres` под uid 999 не работает → BUGS/BACKLOG P2; `alert_history` суперпользователь → TECH-DEBT `HELM-CHART-GAPS`; находки ревью; архив workspace; sync с `main`. <!-- depends: 7.1, 7.2 | verify: ls tasks/archive/PG-CONFIG-FIX -->
+- [ ] **8.2** `/merge-to-main`; push — по решению владельца. <!-- depends: 8.1 | verify: git log main -1 -->
+
+## Definition of Done
+
+- [ ] All steps are complete or explicitly marked blocked/skipped
+- [ ] Success criteria from `requirements.md` are covered
+- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
+- [ ] Deep review verdict is `pass`
+- [ ] Tests for changed behavior are added or updated
+- [ ] Phase checks pass
+- [ ] Docs/planning are updated (NOTES, values, README, CHANGELOG, BUGS, BACKLOG)
+
+## Implementation Notes
+
+- Phase 4 идёт до deep-review: ревьюер получает измеренный upgrade-путь, а не только рендер. Если ревью потребует правок механизма (D1/D3) — повторить 4.2/4.4.
