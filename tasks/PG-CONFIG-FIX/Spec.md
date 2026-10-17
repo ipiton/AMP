@@ -157,6 +157,10 @@ based_on:
 - **Discretionary triggers present:** none (дифф ожидается < 200 строк).
 - **Decision:** required.
 
+## Deviations
+
+- 2026-10-17 (implement): `postgresql.config: null` не рендерится ни на `main`, ни на ветке (`evidence/render-invariants.txt`) — D1 «аварийный выход», Edge Case 1, Rollback «аварийно без отката чарта» и T7.7 недействительны. Откат — только `helm rollback`. Invariant «lite рендерит то же» неверен: lite тоже рендерит встроенный PG. Подробности — `tasks.md` § Implementation Notes.
+
 ## Open Questions
 
 - [ ] P9 (`assumed`): реальные пользователи с pod CIDR вне RFC1918 — не влияет на дизайн (правило `all`), остаётся как обоснование отказа от CIDR-списка.

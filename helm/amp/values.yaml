@@ -352,12 +352,10 @@ postgresql:
     enabled: false  # Enable in production for network isolation
 
   # PostgreSQL Configuration (TN-97 + TN-98: optimized for HPA cluster mode)
-  # NOTE: currently NOT applied — the bundled PostgreSQL runs with the image
-  # defaults (BUGS PG-CONFIG-NOT-APPLIED).
-  # Connection calculation: 10 replicas × 25 conns/pod (AMP database.max_connections default) = 250 max_connections
+  # Connection budget: 25 per AMP pod (database.max_connections default) × replicas + exporter
   config:
     # Connection Settings (TN-97: CRITICAL for HPA)
-    maxConnections: 250  # Up from 100 default (supports 10 replicas)
+    maxConnections: 250  # Up from 100 default; see the budget above
     superuserReservedConnections: 10
 
     # Memory Settings (tuned for max_connections=250)
@@ -383,7 +381,7 @@ postgresql:
     trackIoTiming: "on"
 
     # Logging (adjust for debugging connection issues)
-    loggingCollector: "on"
+    loggingCollector: "off"  # "on" writes logs to $PGDATA/pg_log on the PVC (never deleted) instead of kubectl logs
     logConnections: "off"  # Enable for debugging (performance hit)
     logDisconnections: "off"
     logMinDurationStatement: 1000  # Log queries > 1s

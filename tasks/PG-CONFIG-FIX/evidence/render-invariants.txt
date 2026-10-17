@@ -1,0 +1,117 @@
+# render-invariants: helm template, base 7d5d248 (before) vs working tree after Phase 1-2 (after), 2026-10-17
+# Variants: default | --set profile=lite | -f values-dev.yaml | --set postgresql.enabled=false + externalDatabase.{host,database,username,existingSecret}
+# Secret password lines masked (random per render).
+
+ext: diff empty -> 0 lines
+lite, dev: diff byte-identical to the default diff (lite also renders the bundled PostgreSQL)
+default/lite/dev: all documents except StatefulSet amp-postgres, ConfigMap amp-postgres-config, Secret identical
+
+## default diff (</> = before/after)
+<     # Formula: (replicas × conns_per_pod) + reserved = (10 × 20) + 50 = 250
+>     # Budget: 25 per AMP pod (database.max_connections default) × replicas + exporter
+<     logging_collector = on
+>     logging_collector = off
+>     pg_stat_statements.max = 10000
+>     pg_stat_statements.track = all
+>     pg_stat_statements.track_utility = on
+<     # Allow connections from Kubernetes pods (Standard Profile)
+<     # TN-98: Restricted to cluster CIDR for security
+>     # Pod network (AMP): own database and user only, from any address, SCRAM password.
+>     # Network-level restriction: postgresql.networkPolicy.enabled.
+<     # AMP application pods (Standard Profile)
+<     host    alert_history  alert_history  10.0.0.0/8       md5
+<     host    alert_history  alert_history  172.16.0.0/12    md5
+<     host    alert_history  alert_history  192.168.0.0/16   md5
+<     # =============================================================================
+<     # Postgres Exporter sidecar (localhost only)
+<     # =============================================================================
+<     host    all             alert_history  127.0.0.1/32            md5
+<     # =============================================================================
+<     # Replication connections (for future HA setup)
+<     # =============================================================================
+<     host    replication     all             10.0.0.0/8              md5
+<     host    replication     all             172.16.0.0/12           md5
+<     host    replication     all             192.168.0.0/16          md5
+>     host    alert_history  alert_history  all                     scram-sha-256
+<     -- 4. CONFIGURE pg_stat_statements (TN-97: Query monitoring)
+<     -- -------------------------------------------------------------------------
+<     -- Set pg_stat_statements parameters (if not in postgresql.conf)
+<     ALTER SYSTEM SET pg_stat_statements.max = 10000;
+<     ALTER SYSTEM SET pg_stat_statements.track = 'all';
+<     ALTER SYSTEM SET pg_stat_statements.track_utility = 'on';
+<
+<     -- -------------------------------------------------------------------------
+<     -- 5. CREATE MONITORING VIEWS (TN-98: Observability)
+<     -- -------------------------------------------------------------------------
+<     -- View for database size monitoring
+<     CREATE OR REPLACE VIEW v_database_size AS
+<     SELECT
+<       datname AS database,
+<       pg_size_pretty(pg_database_size(datname)) AS size_pretty,
+<       pg_database_size(datname) AS size_bytes
+<     FROM pg_database
+<     WHERE datname = 'alert_history';
+<
+<     -- View for table sizes
+<     CREATE OR REPLACE VIEW v_table_sizes AS
+<     SELECT
+<       schemaname AS schema,
+<       tablename AS table,
+<       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size,
+<       pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) AS table_size,
+<       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) AS indexes_size,
+<       pg_total_relation_size(schemaname||'.'||tablename) AS total_size_bytes
+<     FROM pg_tables
+<     WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+<     ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+<
+<     -- View for index usage statistics
+<     CREATE OR REPLACE VIEW v_index_usage AS
+<     SELECT
+<       schemaname AS schema,
+<       tablename AS table,
+<       indexname AS index,
+<       idx_scan AS scans,
+<       idx_tup_read AS tuples_read,
+<       idx_tup_fetch AS tuples_fetched,
+<       pg_size_pretty(pg_relation_size(indexrelid)) AS size
+<     FROM pg_stat_user_indexes
+<     WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+<     ORDER BY idx_scan;
+<
+<     -- -------------------------------------------------------------------------
+<     -- 6. VACUUM ANALYZE (Initial statistics)
+>     -- 4. VACUUM ANALYZE (Initial statistics)
+<         checksum/config: 18f38236e6f5fb6522dbb4c8b0ed788b5399a48ab6f4d2b004d59e979cb9bbe6
+>         checksum/config: 39c28deabea85e38e9dd341b78b4f38b44bd2d37ffed368da6f9acc7cbbc0a65
+>         # Server arguments, not initdb ones: they apply on every start, also on an
+>         # already initialized PVC. The entrypoint passes them to the init-time server too.
+>         args:
+>         - "-c"
+>         - "config_file=/etc/postgresql/postgresql.conf"
+>         - "-c"
+>         - "hba_file=/etc/postgresql/pg_hba.conf"
+<         - name: POSTGRES_INITDB_ARGS
+<           value: "-c config_file=/etc/postgresql/postgresql.conf"
+<         - name: postgres-config
+<           mountPath: /etc/postgresql
+<           readOnly: true
+>         # The default 64M /dev/shm fails parallel hash joins ("could not resize shared memory segment").
+>         - name: dshm
+>           mountPath: /dev/shm
+<           mountPath: /docker-entrypoint-initdb.d/postgresql.conf
+<           subPath: postgresql.conf
+<           readOnly: true
+<         - name: custom-config
+<           mountPath: /docker-entrypoint-initdb.d/pg_hba.conf
+<           subPath: pg_hba.conf
+>           mountPath: /etc/postgresql
+<       - name: postgres-config
+<         emptyDir: {}
+>       - name: dshm
+>         emptyDir:
+>           medium: Memory
+>           sizeLimit: 256Mi
+
+## postgresql.config=null
+main (7d5d248 parent chart) and branch both fail: nil pointer evaluating interface {}.maxConnections (postgresql-configmap.yaml:25)

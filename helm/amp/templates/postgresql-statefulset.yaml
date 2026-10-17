@@ -67,6 +67,15 @@ spec:
       - name: postgres
         image: postgres:16.15
         imagePullPolicy: IfNotPresent
+        {{- if .Values.postgresql.config }}
+        # Server arguments, not initdb ones: they apply on every start, also on an
+        # already initialized PVC. The entrypoint passes them to the init-time server too.
+        args:
+        - "-c"
+        - "config_file=/etc/postgresql/postgresql.conf"
+        - "-c"
+        - "hba_file=/etc/postgresql/pg_hba.conf"
+        {{- end }}
         ports:
         - name: postgres
           containerPort: 5432
@@ -83,24 +92,15 @@ spec:
               key: password
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
-        {{- if .Values.postgresql.config }}
-        - name: POSTGRES_INITDB_ARGS
-          value: "-c config_file=/etc/postgresql/postgresql.conf"
-        {{- end }}
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
-        - name: postgres-config
-          mountPath: /etc/postgresql
-          readOnly: true
+        # The default 64M /dev/shm fails parallel hash joins ("could not resize shared memory segment").
+        - name: dshm
+          mountPath: /dev/shm
         {{- if .Values.postgresql.config }}
         - name: custom-config
-          mountPath: /docker-entrypoint-initdb.d/postgresql.conf
-          subPath: postgresql.conf
-          readOnly: true
-        - name: custom-config
-          mountPath: /docker-entrypoint-initdb.d/pg_hba.conf
-          subPath: pg_hba.conf
+          mountPath: /etc/postgresql
           readOnly: true
         - name: custom-config
           mountPath: /docker-entrypoint-initdb.d/init.sql
@@ -224,8 +224,10 @@ spec:
       {{- end }}
       terminationGracePeriodSeconds: 120
       volumes:
-      - name: postgres-config
-        emptyDir: {}
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi
       {{- if .Values.postgresql.config }}
       - name: custom-config
         configMap:

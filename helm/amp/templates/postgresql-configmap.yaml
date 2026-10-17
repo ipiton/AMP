@@ -24,7 +24,7 @@ data:
     port = 5432
     max_connections = {{ .Values.postgresql.config.maxConnections | default 250 }}
     # TN-97: Increased from 100 to 250 for HPA cluster mode
-    # Formula: (replicas × conns_per_pod) + reserved = (10 × 20) + 50 = 250
+    # Budget: 25 per AMP pod (database.max_connections default) × replicas + exporter
     superuser_reserved_connections = {{ .Values.postgresql.config.superuserReservedConnections | default 10 }}
 
     # -----------------------------------------------------------------------------
@@ -62,7 +62,7 @@ data:
     # Logging (TN-98: Production monitoring)
     # -----------------------------------------------------------------------------
     log_destination = 'stderr'
-    logging_collector = {{ .Values.postgresql.config.loggingCollector | default "on" }}
+    logging_collector = {{ .Values.postgresql.config.loggingCollector | default "off" }}
     log_directory = 'pg_log'
     log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
     log_rotation_age = 1d
@@ -79,6 +79,9 @@ data:
     # Performance Monitoring (TN-97: pg_stat_statements)
     # -----------------------------------------------------------------------------
     shared_preload_libraries = '{{ .Values.postgresql.config.sharedPreloadLibraries | default "pg_stat_statements" }}'
+    pg_stat_statements.max = 10000
+    pg_stat_statements.track = all
+    pg_stat_statements.track_utility = on
     track_activities = {{ .Values.postgresql.config.trackActivities | default "on" }}
     track_counts = {{ .Values.postgresql.config.trackCounts | default "on" }}
     track_io_timing = {{ .Values.postgresql.config.trackIoTiming | default "on" }}
@@ -121,23 +124,10 @@ data:
     # IPv6 local connections:
     host    all             all             ::1/128                 trust
     # =============================================================================
-    # Allow connections from Kubernetes pods (Standard Profile)
-    # TN-98: Restricted to cluster CIDR for security
+    # Pod network (AMP): own database and user only, from any address, SCRAM password.
+    # Network-level restriction: postgresql.networkPolicy.enabled.
     # =============================================================================
-    # AMP application pods (Standard Profile)
-    host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  10.0.0.0/8       md5
-    host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  172.16.0.0/12    md5
-    host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  192.168.0.0/16   md5
-    # =============================================================================
-    # Postgres Exporter sidecar (localhost only)
-    # =============================================================================
-    host    all             {{ .Values.postgresql.username }}  127.0.0.1/32            md5
-    # =============================================================================
-    # Replication connections (for future HA setup)
-    # =============================================================================
-    host    replication     all             10.0.0.0/8              md5
-    host    replication     all             172.16.0.0/12           md5
-    host    replication     all             192.168.0.0/16          md5
+    host    {{ .Values.postgresql.database }}  {{ .Values.postgresql.username }}  all                     scram-sha-256
     # =============================================================================
     # Reject all other connections
     # =============================================================================
@@ -199,54 +189,7 @@ data:
     -- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_alerts_labels_gin ON alerts USING gin(labels jsonb_path_ops);
 
     -- -------------------------------------------------------------------------
-    -- 4. CONFIGURE pg_stat_statements (TN-97: Query monitoring)
-    -- -------------------------------------------------------------------------
-    -- Set pg_stat_statements parameters (if not in postgresql.conf)
-    ALTER SYSTEM SET pg_stat_statements.max = 10000;
-    ALTER SYSTEM SET pg_stat_statements.track = 'all';
-    ALTER SYSTEM SET pg_stat_statements.track_utility = 'on';
-
-    -- -------------------------------------------------------------------------
-    -- 5. CREATE MONITORING VIEWS (TN-98: Observability)
-    -- -------------------------------------------------------------------------
-    -- View for database size monitoring
-    CREATE OR REPLACE VIEW v_database_size AS
-    SELECT
-      datname AS database,
-      pg_size_pretty(pg_database_size(datname)) AS size_pretty,
-      pg_database_size(datname) AS size_bytes
-    FROM pg_database
-    WHERE datname = '{{ .Values.postgresql.database }}';
-
-    -- View for table sizes
-    CREATE OR REPLACE VIEW v_table_sizes AS
-    SELECT
-      schemaname AS schema,
-      tablename AS table,
-      pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS total_size,
-      pg_size_pretty(pg_relation_size(schemaname||'.'||tablename)) AS table_size,
-      pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename)) AS indexes_size,
-      pg_total_relation_size(schemaname||'.'||tablename) AS total_size_bytes
-    FROM pg_tables
-    WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
-
-    -- View for index usage statistics
-    CREATE OR REPLACE VIEW v_index_usage AS
-    SELECT
-      schemaname AS schema,
-      tablename AS table,
-      indexname AS index,
-      idx_scan AS scans,
-      idx_tup_read AS tuples_read,
-      idx_tup_fetch AS tuples_fetched,
-      pg_size_pretty(pg_relation_size(indexrelid)) AS size
-    FROM pg_stat_user_indexes
-    WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY idx_scan;
-
-    -- -------------------------------------------------------------------------
-    -- 6. VACUUM ANALYZE (Initial statistics)
+    -- 4. VACUUM ANALYZE (Initial statistics)
     -- -------------------------------------------------------------------------
     -- Run VACUUM ANALYZE on initial setup (after tables are created)
     -- VACUUM ANALYZE;
