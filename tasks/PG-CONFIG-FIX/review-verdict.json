@@ -1,14 +1,14 @@
 {
-  "gate": "fix_required",
-  "reason": "7 fix-here finding(s) open",
+  "gate": "pass",
+  "reason": null,
   "branch": "bugfix/pg-config-fix",
-  "commit": "3271a45",
+  "commit": "8f42cd4",
   "reviewed_at": "2026-10-17",
   "findings": {
     "blocker": 0,
     "major": 3,
-    "minor": 5,
-    "nit": 4
+    "minor": 7,
+    "nit": 6
   },
   "open": {
     "blocker": 0,
