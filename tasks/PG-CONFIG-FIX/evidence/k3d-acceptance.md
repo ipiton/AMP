@@ -171,6 +171,19 @@ after:  SUCCESS: 11 rules found
 promtool test rules: last_autovacuum 0 for 150m → no alert; last_autovacuum 1 (t=1s), eval 26h → alert, description "… has not been vacuumed for 93599 seconds."
 ```
 
+## write-tests: `helm test` checks the running server (deep review R7)
+
+`templates/tests/postgresql-test-connection.yaml` gained Test 5: `SHOW config_file` / `SHOW hba_file` over the Service must equal `/etc/postgresql/postgresql.conf` / `/etc/postgresql/pg_hba.conf`. `helm upgrade amp helm/amp --reuse-values` in `k2` (rev 5; only the test hook changed, `amp-postgres-0` not restarted), then `helm test amp --logs`:
+
+```
+✅ pg_stat_statements extension verified
+✅ Chart config applied
+🎉 All tests passed!
+Phase: Succeeded
+```
+
+Rev 5 is `failed` in `helm history`: `--wait` timed out on `amp-valkey` (`Init:Error`, `exec /scripts/init.sh: no such file or directory`, BUGS:172, since the `main` install) and the unused PVC `amp-pvc` (`WaitForFirstConsumer`). Same state as rev 4, which ran without `--wait`; not related to PostgreSQL.
+
 ## Not done here
 
-Cleanup of the cluster (step 4.6) — waits for the owner's confirmation. Left behind: releases `amp` in `k1` (scaled to 0) and `k2` (rev 4), pods `drill-curl` in both, database `shmprobe` in the `k1` volume, research pods `pgshm`/`pgshm2` and ConfigMap `pgconf` in `default`.
+Cleanup of the cluster (step 4.6) — waits for the owner's confirmation. Left behind: releases `amp` in `k1` (scaled to 0) and `k2` (rev 5), pods `drill-curl` in both, database `shmprobe` in the `k1` volume, research pods `pgshm`/`pgshm2` and ConfigMap `pgconf` in `default`.

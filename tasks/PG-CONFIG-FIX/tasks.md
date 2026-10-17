@@ -31,7 +31,7 @@ based_on:
 - `helm/amp/CHANGELOG.md` — `[Unreleased]` Fixed (чартовый changelog; Spec его не называл).
 - `tasks/PG-CONFIG-FIX/evidence/` — `render-invariants.txt`, `k3d-acceptance.md`.
 - Тесты (Phase 6, после вердикта): `helm/amp/tests/render-postgresql.sh` — T6 переписать, T7.1–T7.8 (D7).
-- Не трогаются: `values-production.yaml` (`postgresql.enabled: false`), `values-dev.yaml` (только `enabled: true` — берёт дефолты), `templates/tests/postgresql-test-connection.yaml`.
+- Не трогаются: `values-production.yaml` (`postgresql.enabled: false`), `values-dev.yaml` (только `enabled: true` — берёт дефолты), `templates/tests/postgresql-test-connection.yaml` (отклонение: в Phase 6 получил Test 5 `SHOW config_file`/`hba_file` — deep review R7(1)).
 
 ## Phase 1: Chart — запуск сервера с конфигом (D1, D5)
 
@@ -83,9 +83,9 @@ based_on:
 
 ## Phase 6: Tests
 
-- [ ] **6.1** `render-postgresql.sh` T6: 0 × `PG-CONFIG-NOT-APPLIED`; notes-default — `Expected: 250` 1 раз. <!-- depends: 5.1 | verify: bash helm/amp/tests/render-postgresql.sh; мутация: вернуть NOTES.txt из main → T6 FAIL -->
-- [ ] **6.2** T7.1–T7.8 по Spec § Test Plan (args; нет INITDB и mount'ов `*.conf` в `initdb.d`, есть `init.sql`; один `/etc/postgresql` из ConfigMap; нет `ALTER SYSTEM`/`VIEW`, есть `pg_stat_statements.max`; `pg_hba` без `replication`/`md5`, `scram-sha-256` и `reject`; `logging_collector = off`; `/dev/shm` Memory; T7.7 снят — см. Implementation Notes) + T7.9 exporter: `DATA_SOURCE_URI`/`USER`/`PASS`, нет `DATA_SOURCE_NAME` и `$(POSTGRES_`, `PG_EXPORTER_AUTO_DISCOVER_DATABASES` `"false"`, в exporter ConfigMap 0 × `tablename`/`indexname as`. <!-- depends: 5.1 | verify: bash helm/amp/tests/render-postgresql.sh — все ok; мутация: templates/postgresql-*.yaml из main → T7 FAIL по каждому пункту -->
-- [ ] **6.3** Коммит `test(helm): cover the bundled PostgreSQL config wiring`. <!-- depends: 6.1, 6.2 | verify: git show --stat HEAD -->
+- [x] **6.1** _(готово: + бюджет-предупреждение: notes-default есть, `maxReplicas=8` нет)_ `render-postgresql.sh` T6: 0 × `PG-CONFIG-NOT-APPLIED`; notes-default — `Expected: 250` 1 раз. <!-- depends: 5.1 | verify: bash helm/amp/tests/render-postgresql.sh; мутация: вернуть NOTES.txt из main → T6 FAIL -->
+- [x] **6.2** _(готово: T7.5 — точный набор 5 правил pg_hba, `trust` только socket (R6); + T7.10 rules: нет `now()`, есть `> 0` (R2); + T7.11 `helm test` проверяет `config_file`/`hba_file` (R7(1)), на k3d `k2` rev 5 — Succeeded. Мутации: каждый из NOTES, statefulset, configmap, exporter-configmap, prometheus-rules, test-connection, values.yaml из `main` → FAIL)_ T7.1–T7.8 по Spec § Test Plan (args; нет INITDB и mount'ов `*.conf` в `initdb.d`, есть `init.sql`; один `/etc/postgresql` из ConfigMap; нет `ALTER SYSTEM`/`VIEW`, есть `pg_stat_statements.max`; `pg_hba` без `replication`/`md5`, `scram-sha-256` и `reject`; `logging_collector = off`; `/dev/shm` Memory; T7.7 снят — см. Implementation Notes) + T7.9 exporter: `DATA_SOURCE_URI`/`USER`/`PASS`, нет `DATA_SOURCE_NAME` и `$(POSTGRES_`, `PG_EXPORTER_AUTO_DISCOVER_DATABASES` `"false"`, в exporter ConfigMap 0 × `tablename`/`indexname as`. <!-- depends: 5.1 | verify: bash helm/amp/tests/render-postgresql.sh — все ok; мутация: templates/postgresql-*.yaml из main → T7 FAIL по каждому пункту -->
+- [x] **6.3** Коммит `test(helm): cover the bundled PostgreSQL config wiring`. <!-- depends: 6.1, 6.2 | verify: git show --stat HEAD -->
 
 ## Phase 7: Testing
 
