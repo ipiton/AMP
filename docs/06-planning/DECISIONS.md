@@ -277,4 +277,4 @@
     - один рестарт Postgres при upgrade, на это время ingest отвечает 500;
   - `helm rollback` возвращает CronJob, PDB и пустой backup PVC; том `postgres-data` не затрагивается ни в одну сторону;
   - `HELM-EXTERNAL-DATABASE` становится предпосылкой прод-установки;
-  - `PG-CONFIG-NOT-APPLIED` остаётся открытым: блок `postgresql.config` в values по-прежнему не применяется.
+  - `PG-CONFIG-NOT-APPLIED` остаётся открытым: блок `postgresql.config` в values по-прежнему не применяется. _(Закрыт 2026-10-18 задачей `PG-CONFIG-FIX`.)_

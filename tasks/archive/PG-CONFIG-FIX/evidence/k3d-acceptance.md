@@ -184,6 +184,6 @@ Phase: Succeeded
 
 Rev 5 is `failed` in `helm history`: `--wait` timed out on `amp-valkey` (`Init:Error`, `exec /scripts/init.sh: no such file or directory`, BUGS:172, since the `main` install) and the unused PVC `amp-pvc` (`WaitForFirstConsumer`). Same state as rev 4, which ran without `--wait`; not related to PostgreSQL.
 
-## Not done here
+## Cleanup
 
-Cleanup of the cluster (step 4.6) — waits for the owner's confirmation. Left behind: releases `amp` in `k1` (scaled to 0) and `k2` (rev 5), pods `drill-curl` in both, database `shmprobe` in the `k1` volume, research pods `pgshm`/`pgshm2` and ConfigMap `pgconf` in `default`.
+2026-10-18, with the owner's confirmation: cluster `pg-config-fix` deleted (with releases `k1`/`k2`, research pods and the `shmprobe` database), kubectl context back to `k3d-sema-dev`.

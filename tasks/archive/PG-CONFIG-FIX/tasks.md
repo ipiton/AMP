@@ -72,7 +72,7 @@ based_on:
 - [x] **4.3** _(готово: 4 × 3000000, restarts 0; `memory.peak` 1880 MiB — page cache, `anon` 27 MiB)_ K1 нагрузка: 4 параллельных hash join (сценарий `evidence/k3d-shm-probe.txt`) + ingest — нет `could not resize shared memory`, нет OOMKill (`kubectl get pod -o jsonpath` lastState). <!-- depends: 4.2 | verify: 4 × 3000000; restartCount 0 -->
 - [x] **4.4** _(готово: без uninstall/удаления PVC — отдельный namespace `k2`; `main` воспроизвёл баг (`init.sql:56`, restarts 1); после upgrade — конфиг чарта, данные на месте, AMP переподключился без рестарта)_ K2 upgrade: `helm uninstall` + удалить PVC K1 (подтверждение владельца) → `helm install` чартом с `main` (`git worktree` в `$SCRATCH`) → алерт + silence, счётчики → `helm upgrade` на ветку → проверки 4.2 + счётчики совпадают; AMP не получает `pg_hba.conf rejects`. <!-- depends: 4.3 | verify: SHOW config_file — /etc/postgresql/postgresql.conf на старом PVC; счётчики = до upgrade -->
 - [x] **4.5** _(готово: pod пересоздан StatefulSet'ом сам, `max_connections=20`, 6 алертов / 2 silence; edge case 2 `--reuse-values` подтверждён dry-run'ом)_ K3 rollback: `helm rollback` на ревизию с `main` → PG стартует на дефолтах образа, данные на месте; если pod не пересоздан — удалить вручную (подтверждение) и записать это в evidence. <!-- depends: 4.4 | verify: SHOW max_connections = 20; счётчики = 4.4 -->
-- [ ] **4.6** _(blocked: ждёт подтверждения владельца на удаление кластера)_ Убрать: кластер `pg-config-fix` (подтверждение владельца), вернуть kubectl-контекст `k3d-sema-dev` (сейчас текущий — `k3d-pg-config-fix`, переключён в research). <!-- depends: 4.5 | verify: k3d cluster list — нет pg-config-fix; kubectl config current-context = k3d-sema-dev -->
+- [x] **4.6** _(готово 2026-10-18 с подтверждения владельца: кластер `pg-config-fix` удалён, контекст `k3d-sema-dev`, worktrees `main` в scratchpad и docker-тома `revA-*` удалены)_ Убрать: кластер `pg-config-fix` (подтверждение владельца), вернуть kubectl-контекст `k3d-sema-dev` (сейчас текущий — `k3d-pg-config-fix`, переключён в research). <!-- depends: 4.5 | verify: k3d cluster list — нет pg-config-fix; kubectl config current-context = k3d-sema-dev -->
 - [x] **4.7** Коммит `docs: k3d acceptance PG-CONFIG-FIX`. <!-- depends: 4.6 | verify: git show --stat HEAD — evidence/k3d-acceptance.md -->
 
 **Phase verification:** все K1–K3 зелёные в `evidence/k3d-acceptance.md`; при провале — фикс в Phase 1–3, отклонение в Implementation Notes.
@@ -94,18 +94,18 @@ based_on:
 
 ## Phase 8: Finalize
 
-- [ ] **8.1** `/finalize`: BUGS `PG-CONFIG-NOT-APPLIED` закрыт; follow-ups из Phase 4 (Implementation Notes); BACKLOG `PG-CONFIG-FIX` → закрытые; DONE, NEXT (WIP снять); follow-ups: бюджет `max_connections` при `maxReplicas: 10` → `HELM-SINGLE-NODE-DEFAULTS`; preStop `su - postgres` под uid 999 не работает → BUGS/BACKLOG P2; `alert_history` суперпользователь → TECH-DEBT `HELM-CHART-GAPS`; находки ревью; архив workspace; sync с `main`. <!-- depends: 7.1, 7.2 | verify: ls tasks/archive/PG-CONFIG-FIX -->
+- [x] **8.1** _(готово: follow-ups — BUGS `PG-ALERT-RULES-METRICS`, `AMP-NO-DB-WAIT`, `PG-PRESTOP-SU-FAILS`; BACKLOG `PG-MONITORING-CHECKS`, `HELM-SINGLE-NODE-DEFAULTS`; TECH-DEBT `HELM-CHART-GAPS`)_ `/finalize`: BUGS `PG-CONFIG-NOT-APPLIED` закрыт; follow-ups из Phase 4 (Implementation Notes); BACKLOG `PG-CONFIG-FIX` → закрытые; DONE, NEXT (WIP снять); follow-ups: бюджет `max_connections` при `maxReplicas: 10` → `HELM-SINGLE-NODE-DEFAULTS`; preStop `su - postgres` под uid 999 не работает → BUGS/BACKLOG P2; `alert_history` суперпользователь → TECH-DEBT `HELM-CHART-GAPS`; находки ревью; архив workspace; sync с `main`. <!-- depends: 7.1, 7.2 | verify: ls tasks/archive/PG-CONFIG-FIX -->
 - [ ] **8.2** `/merge-to-main`; push — по решению владельца. <!-- depends: 8.1 | verify: git log main -1 -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated (NOTES, values, README, CHANGELOG, BUGS, BACKLOG)
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated (NOTES, values, README, CHANGELOG, BUGS, BACKLOG)
 
 ## Implementation Notes
 
