@@ -42,13 +42,13 @@ data:
       query: |
         SELECT
           schemaname as schema,
-          tablename as table,
-          pg_total_relation_size(schemaname||'.'||tablename) as size_bytes,
+          relname as table,
+          pg_total_relation_size(relid) as size_bytes,
           n_live_tup as live_tuples,
           n_dead_tup as dead_tuples
         FROM pg_stat_user_tables
         WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-        ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+        ORDER BY pg_total_relation_size(relid) DESC
         LIMIT 20
       metrics:
         - schema:
@@ -74,8 +74,8 @@ data:
       query: |
         SELECT
           schemaname as schema,
-          tablename as table,
-          indexname as index,
+          relname as table,
+          indexrelname as index,
           idx_scan as scans,
           idx_tup_read as tuples_read,
           idx_tup_fetch as tuples_fetched,
@@ -114,7 +114,7 @@ data:
       query: |
         SELECT
           schemaname as schema,
-          tablename as table,
+          relname as table,
           EXTRACT(EPOCH FROM (NOW() - last_vacuum)) as seconds_since_last_vacuum,
           EXTRACT(EPOCH FROM (NOW() - last_autovacuum)) as seconds_since_last_autovacuum,
           EXTRACT(EPOCH FROM (NOW() - last_analyze)) as seconds_since_last_analyze,

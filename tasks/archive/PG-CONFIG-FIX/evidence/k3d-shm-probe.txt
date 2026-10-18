@@ -1,0 +1,31 @@
+# k3d-shm-probe: k3d cluster pg-config-fix (k3s, containerd), 2026-10-17
+# Pod: postgres:16.15, runAsUser 999, args -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf,
+#      ConfigMap = rendered chart conf + pg_stat_statements.* lines (scratch copy from docker-probe C), limits 1 CPU / 2Gi.
+# Data: t1, t2 = 3,000,000 rows each (id int, md5 text), ANALYZE; query: SELECT count(*) FROM t1 JOIN t2 USING(id)
+#       with parallel_setup_cost=0, parallel_tuple_cost=0 (forces a parallel plan).
+
+## Pod without a /dev/shm volume (chart today)
+df -h /dev/shm:  shm  64M  0  64M  0% /dev/shm
+settings: work_mem=4MB hash_mem_multiplier=2 max_parallel_workers=8 max_parallel_workers_per_gather=4 (chart conf)
+
+single query, work_mem=256MB (session):
+  ERROR:  could not resize shared memory segment "/PostgreSQL.417334840" to 16777216 bytes: No space left on device
+single query, work_mem=4MB:
+  Workers Launched: 3; Parallel Hash Join; Batches: 32  Memory Usage: 5760kB -> ok
+
+4 concurrent queries, chart defaults (per_gather=4):
+  2 x ERROR:  could not resize shared memory segment "/PostgreSQL.…" to 8388608 bytes: No space left on device (CONTEXT: parallel worker)
+  2 x 3000000
+4 concurrent, session max_parallel_workers_per_gather=2 (image default = what runs today):
+  2 x ERROR:  could not resize shared memory segment … to 8388608 bytes: No space left on device
+  2 x 3000000
+4 concurrent, max_parallel_workers_per_gather=0:
+  4 x 3000000
+
+## Same pod + volume dshm: emptyDir {medium: Memory, sizeLimit: 256Mi} at /dev/shm
+df -h /dev/shm:  tmpfs  256M  0  256M  0% /dev/shm
+4 concurrent, chart defaults (per_gather=4):
+  4 x 3000000
+
+## Network auth from another pod (pod CIDR 10.42.0.0/16), chart pg_hba as on main (md5 rules for RFC1918)
+psql -h 10.42.0.10 -U alert_history -d alert_history -> ok alert_history from 10.42.0.11/32

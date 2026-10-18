@@ -7,9 +7,11 @@
 #   - postgresql.replicas other than 1 and postgresql.backup enabled fail the
 #     render, including the old chart default carried by --reuse-values;
 #     null/false/empty leftovers of the removed key do not;
-#   - NOTES no longer advertise HA or an applied max_connections;
+#   - NOTES no longer advertise HA;
 #   - values-production.yaml runs no bundled PostgreSQL (external database,
-#     HELM-EXTERNAL-DATABASE).
+#     HELM-EXTERNAL-DATABASE);
+#   - the server runs with the chart postgresql.conf and pg_hba.conf, passed as
+#     server arguments, and the exporter connects (PG-CONFIG-FIX).
 #
 #   helm/amp/tests/render-postgresql.sh
 #
@@ -186,19 +188,91 @@ echo "T6 NOTES:"
 notes notes-default
 notes notes-no-hpa --set autoscaling.enabled=false
 notes notes-external "${EXT[@]}"
+notes notes-max-8 --set autoscaling.maxReplicas=8
 for n in notes-default notes-no-hpa; do
   f="${WORK_DIR}/${n}.notes"
   assert_count "${f}" "HA-Ready" 0 "${n}: standard profile not advertised as HA"
   assert_count "${f}" "external storage (HA)" 0 "${n}: bundled PostgreSQL not advertised as HA"
   assert_count "${f}" "dev/pilot only" 1 "${n}: bundled PostgreSQL marked dev/pilot"
-  assert_count "${f}" "PG-CONFIG-NOT-APPLIED" 2 "${n}: config-not-applied warning and step 4 note"
-  assert_count "${f}" "Expected: 250" 0 "${n}: no claim that max_connections is 250"
+  assert_count "${f}" "PG-CONFIG-NOT-APPLIED" 0 "${n}: no config-not-applied warning"
+  assert_count "${f}" "Expected: 250" 1 "${n}: step 4 expects max_connections 250"
   assert_count "${f}" "(OK)" 0 "${n}: no max_connections OK line"
 done
+# 10 replicas x 25 = 250 exhaust max_connections; 8 x 25 do not.
+assert_count "${WORK_DIR}/notes-default.notes" "allows max_connections=250" 1 "notes-default: connection budget warning"
+assert_count "${WORK_DIR}/notes-max-8.notes" "allows max_connections=" 0 "notes-max-8: no connection budget warning"
 f="${WORK_DIR}/notes-external.notes"
 assert_count "${f}" "External PostgreSQL: db.example.com:5432/amp (sslmode=require), password from Secret amp-db/password" 1 "notes-external: external PostgreSQL line"
 assert_count "${f}" "dev/pilot only" 0 "notes-external: no bundled PostgreSQL warning"
 assert_count "${f}" "Check PostgreSQL" 0 "notes-external: no bundled PostgreSQL steps"
+
+echo "T7 the server runs with the chart config (PG-CONFIG-FIX):"
+f="${WORK_DIR}/default.yaml"
+sts="${WORK_DIR}/default-sts.yaml"
+cm="${WORK_DIR}/default-cm.yaml"
+doc_line "${f}" StatefulSet amp-postgres '' >"${sts}"
+doc_line "${f}" ConfigMap amp-postgres-config '' >"${cm}"
+# T7.1: server arguments, so an initialized PVC picks them up too.
+assert_count "${sts}" '- "config_file=/etc/postgresql/postgresql.conf"' 1 "args: config_file"
+assert_count "${sts}" '- "hba_file=/etc/postgresql/pg_hba.conf"' 1 "args: hba_file"
+# T7.2: no initdb-time config; init.sql stays.
+assert_count "${sts}" "POSTGRES_INITDB_ARGS" 0 "no POSTGRES_INITDB_ARGS"
+assert_count "${sts}" "mountPath: /docker-entrypoint-initdb.d/postgresql.conf" 0 "no postgresql.conf in initdb.d"
+assert_count "${sts}" "mountPath: /docker-entrypoint-initdb.d/pg_hba.conf" 0 "no pg_hba.conf in initdb.d"
+assert_count "${sts}" "mountPath: /docker-entrypoint-initdb.d/init.sql" 1 "init.sql in initdb.d"
+# T7.3: /etc/postgresql is the ConfigMap, not an emptyDir.
+assert_count "${sts}" "mountPath: /etc/postgresql" 1 "one /etc/postgresql mount"
+got="$(grep -B1 -x -e " *mountPath: /etc/postgresql" "${sts}" | head -1 | awk '{ print $NF }')"
+if [ "${got}" = "custom-config" ]; then pass "/etc/postgresql is volume custom-config"; else fail "/etc/postgresql is volume '${got}', want custom-config"; fi
+got="$(grep -A3 -F -e "- name: custom-config" "${sts}" | grep -c -F -e "name: amp-postgres-config" || true)"
+if [ "${got}" -eq 1 ]; then pass "custom-config volume is ConfigMap amp-postgres-config"; else fail "custom-config volume is not ConfigMap amp-postgres-config"; fi
+assert_count "${sts}" "name: postgres-config" 0 "no postgres-config emptyDir"
+# T7.4: no init-time server settings or views.
+assert_count "${cm}" "ALTER SYSTEM" 0 "no ALTER SYSTEM in init.sql"
+assert_count "${cm}" "CREATE OR REPLACE VIEW" 0 "no views in init.sql"
+# A whole line: init.sql on main had "ALTER SYSTEM SET pg_stat_statements.max = 10000;".
+got="$(grep -c -x -e " *pg_stat_statements\.max = 10000" "${cm}" || true)"
+if [ "${got}" -eq 1 ]; then pass "pg_stat_statements settings in postgresql.conf"; else fail "pg_stat_statements.max = 10000 lines in postgresql.conf: ${got}, want 1"; fi
+# T7.5: the full pg_hba.conf rule set; trust only on the Unix socket (deep review R6).
+cat >"${WORK_DIR}/hba-want.txt" <<'EOF'
+local all all trust
+host all all 127.0.0.1/32 scram-sha-256
+host all all ::1/128 scram-sha-256
+host alert_history alert_history all scram-sha-256
+host all all all reject
+EOF
+doc_line "${f}" ConfigMap amp-postgres-config '^    (local|host)[[:space:]]' |
+  awk '{ $1 = $1; print }' >"${WORK_DIR}/hba-got.txt"
+if diff -u "${WORK_DIR}/hba-want.txt" "${WORK_DIR}/hba-got.txt" >"${WORK_DIR}/hba.diff"; then
+  pass "pg_hba.conf: socket trust, SCRAM on loopback and for the app, reject the rest"
+else
+  fail "pg_hba.conf rules differ: $(cat "${WORK_DIR}/hba.diff")"
+fi
+# T7.6: logs stay in kubectl logs.
+assert_count "${cm}" "logging_collector = off" 1 "logging_collector off"
+# T7.8: /dev/shm is a memory volume.
+assert_count "${sts}" "mountPath: /dev/shm" 1 "/dev/shm mounted"
+assert_count "${sts}" "medium: Memory" 1 "/dev/shm is a memory emptyDir"
+# T7.9: the exporter connects and its queries match the catalog.
+assert_count "${sts}" "name: DATA_SOURCE_URI" 1 "exporter: DATA_SOURCE_URI"
+assert_count "${sts}" "name: DATA_SOURCE_USER" 1 "exporter: DATA_SOURCE_USER"
+assert_count "${sts}" "name: DATA_SOURCE_PASS" 1 "exporter: DATA_SOURCE_PASS"
+assert_count "${sts}" "DATA_SOURCE_NAME" 0 "exporter: no DATA_SOURCE_NAME"
+assert_count "${sts}" '$(POSTGRES_' 0 "exporter: no \$(POSTGRES_*) references"
+got="$(grep -A1 -F -e "- name: PG_EXPORTER_AUTO_DISCOVER_DATABASES" "${sts}" | grep -c -F -e 'value: "false"' || true)"
+if [ "${got}" -eq 1 ]; then pass "exporter: database auto-discovery off"; else fail "exporter: database auto-discovery not off"; fi
+exp="${WORK_DIR}/default-exporter-cm.yaml"
+doc_line "${f}" ConfigMap amp-postgres-exporter-config '' >"${exp}"
+assert_count "${exp}" "tablename" 0 "exporter queries: no tablename column"
+assert_count "${exp}" "indexname as" 0 "exporter queries: no indexname column"
+# T7.10: the rule group parses (deep review R2).
+rules="${WORK_DIR}/default-rules.yaml"
+doc_line "${f}" PrometheusRule amp-postgres '' >"${rules}"
+assert_count "${rules}" "now()" 0 "rules: no now() (not PromQL)"
+assert_count "${rules}" "and pg_stat_user_tables_last_autovacuum > 0" 1 "rules: never-autovacuumed tables skipped"
+# T7.11: helm test checks the running server, not only the render (deep review R7).
+assert_count "${f}" '"config_file /etc/postgresql/postgresql.conf"' 1 "helm test: checks config_file"
+assert_count "${f}" '"hba_file /etc/postgresql/pg_hba.conf"' 1 "helm test: checks hba_file"
 
 if [ "${failures}" -ne 0 ]; then
   printf '\n%d assertion(s) failed\n' "${failures}" >&2

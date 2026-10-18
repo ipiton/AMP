@@ -6,15 +6,6 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
-### [critical][Helm][~1d] PG-CONFIG-NOT-APPLIED
-- **Title:** встроенный PostgreSQL игнорирует конфиг чарта: `max_connections=20`, `pg_hba` и `init.sql` не те, что задуманы
-- **Problem:** `postgresql.conf` и `pg_hba.conf` из ConfigMap монтируются в `/docker-entrypoint-initdb.d/` (`helm/amp/templates/postgresql-statefulset.yaml`, `mountPath: /docker-entrypoint-initdb.d/…`), а entrypoint образа исполняет оттуда только `*.sh`/`*.sql`; `/etc/postgresql` — пустой `emptyDir`, `POSTGRES_INITDB_ARGS="-c config_file=…"` (env в том же StatefulSet) ничего не подключает. Измерено на k3d 2026-10-15: `config_file` дефолтный, `archive_mode=off`, `max_connections=20` (чарт задумывал 250), `shared_buffers=400kB`, `pg_hba` — дефолт образа. `init.sql` падает на строке 56 (`ALTER SYSTEM SET pg_stat_statements.max` без preload) ⇒ первый старт контейнера с ошибкой, после рестарта init пропускается, скрипт применён частично. Образ с 2026-10-15 пинится на `postgres:16.15` (ADR-016).
-- **Impact:** пул AMP 25 соединений на pod (`go-app/internal/config/config.go:897`) × `minReplicas: 2` против 17 доступных соединений ⇒ под нагрузкой ошибки записи ⇒ ingest отвечает 500, алерты не маршрутизируются. Значение 20 измерено на k3d; на других нодах initdb может выбрать иное. Бэкап и PITR из-за этого тоже не работали (см. ADR-016, `PROD-POSTGRES-HA-DECISION`).
-- **Fix:** конфиг — в `args: ["-c", "config_file=…"]` / `-c` параметрами, `pg_hba` через `hba_file`; `init.sql` без `ALTER SYSTEM` для непредзагруженных расширений. Поведение существующих установок изменится при рестарте (лимиты памяти против `shared_buffers`, новый `pg_hba`) — migration note и проверка на k3d с уже инициализированным PVC.
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/research.md` § Findings 2, `evidence/k3d-probe-effective-config.txt`.
-- **Status:** open
-  _(2026-10-15, решение владельца)_ critical, чинится как P0 `PG-CONFIG-FIX` в BACKLOG.
-
 ### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
 - **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
 - **Problem:** `onGroupWaitExpired` (`go-app/internal/infrastructure/grouping/manager_impl.go:1866-1873`) на любой ошибке `storage.Load` возвращает `nil` без continuation, а `onTimerExpired` после callback'ов удаляет запись таймера (`timer_manager_impl.go`, cleanup после callback'ов). При транзиентной ошибке Redis группа после этого больше не нотифицирует: таймера нет ни локально, ни в storage, reconciliation подобрать нечего. Предсуществующий дефект; раньше его иногда маскировало повторное срабатывание опоздавшей реплики, после `GROUPING-TIMER-LOCK-FIX` она отсеивается по `not_found`.
@@ -205,6 +196,30 @@
 - **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет случайно на ветках без изменений в `go-app`.
 - **Fix:** проверять число проверенных кандидатов (счётчик/хук) вместо времени, либо вынести замер в бенчмарк. Тот же приём — у порога в `matcher_test.go:448` (DONE 2026-10-14 HELM-DEFAULTS-VALIDATE, риск).
 - **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/release-gate.txt`.
+- **Status:** open
+
+### [medium][Helm][~0.5d] PG-ALERT-RULES-METRICS
+- **Title:** часть правил `postgresql.rules` ссылается на метрики, которых exporter не отдаёт, а `PostgreSQLVacuumOld` шумит
+- **Problem:** с PG-CONFIG-FIX группа правил парсится и exporter подключён, но сверка со scrape `postgres-exporter:v0.15.0` (k3d 2026-10-17) показала: connection-saturation (2 правила) без `on(instance)` между `pg_stat_activity_count` и `pg_settings_max_connections`; replication-lag ссылается на `pg_replication_lag` (есть `pg_replication_lag_seconds`); wraparound — на `pg_database_age_seconds` (нет); slow-query — на `pg_stat_statements_mean_exec_time_seconds` (коллектор `stat_statements` выключен по умолчанию); bgwriter (2) — на имена без `_total`. Эти правила молчат. `PostgreSQLVacuumOld` срабатывает на таблицах, куда почти не пишут: autovacuum их не трогает, пока не накопится порог изменений, и warning висит бесконечно.
+- **Impact:** операторы считают, что насыщение соединений, wraparound и медленные запросы под алертами, а их нет; плюс постоянный шум VacuumOld на тихих таблицах.
+- **Fix:** сверить каждое правило с `/metrics` exporter'а (или включить нужные коллекторы), для VacuumOld учитывать `n_dead_tup`/`n_mod_since_analyze` или убрать; `promtool test rules` на каждое правило — вместе с BACKLOG `PG-MONITORING-CHECKS`.
+- **Refs:** `tasks/archive/PG-CONFIG-FIX/review-findings.md` R3, R13; `evidence/k3d-acceptance.md` K1.3.
+- **Status:** open
+
+### [low][App][~0.25d] AMP-NO-DB-WAIT
+- **Title:** AMP выходит с кодом 1, пока PostgreSQL стартует
+- **Problem:** на свежей установке AMP стартует раньше встроенного PG, получает `dial tcp …:5432: connect: connection refused` и завершается; kubelet перезапускает — 3–8 рестартов на install (k3d 2026-10-17, то же на `main`).
+- **Impact:** шум `CrashLoopBackOff` и рестарты в метриках на каждой установке/рестарте БД; с `--wait` дольше выход в Ready.
+- **Fix:** ретрай подключения к БД на старте с backoff до таймаута (или initContainer `pg_isready` для встроенного PG); тест на старт без БД.
+- **Refs:** `tasks/archive/PG-CONFIG-FIX/evidence/k3d-acceptance.md` (Known, outside the task).
+- **Status:** open
+
+### [low][Helm][~0.1d] PG-PRESTOP-SU-FAILS
+- **Title:** preStop встроенного PostgreSQL не работает: `su - postgres` под `runAsUser: 999`
+- **Problem:** `templates/postgresql-statefulset.yaml` preStop — `su - postgres -c "pg_ctl stop -D $PGDATA -m fast -w -t 60" || true`; контейнер уже работает под uid 999 без root, `su` падает, `|| true` глушит ошибку. Остановку делает SIGTERM от kubelet (smart shutdown), а не задуманный fast.
+- **Impact:** остановка ждёт закрытия клиентских сессий AMP вместо `-m fast`; при долгих сессиях упирается в `terminationGracePeriodSeconds` и SIGKILL (recovery на старте).
+- **Fix:** `pg_ctl stop -D "$PGDATA" -m fast -w -t 60` без `su`; проверка на k3d (лог `fast shutdown request`).
+- **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
 - **Status:** open
 
 ## Entry Format

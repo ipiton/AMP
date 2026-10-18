@@ -1,0 +1,21 @@
+# scripts/release-gate.sh @ 26ba9b1 (bugfix/pg-config-fix), 2026-10-18
+
+helm-tests: helm/amp/tests/*.sh (10 scripts), incl. render-postgresql.sh T6/T7: all assertions passed
+
+==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   62s      go build ./... (go-app)
+lint             PASS   55s      golangci-lint run (go-app)
+test             PASS   138s     go test ./... -count=1 (go-app)
+futureparity     PASS   18s      build+test, futureparity tag, cmd/server
+race             PASS   325s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   2s       helm repo add (Chart.lock) + dependency build
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   7s       helm/amp/tests/*.sh render tests
+amtool-compat    PASS   159s     real amtool CLI vs deploy/smoke stack
+==================================================
+RESULT: PASS
+
+git diff --check main...HEAD: clean; no '_, _ :=' in the diff; git status clean

@@ -16,11 +16,10 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PG-CONFIG-FIX** — P0 из BACKLOG, баг `PG-CONFIG-NOT-APPLIED`: встроенный PostgreSQL получает `postgresql.conf`/`pg_hba.conf` чарта через `-c config_file=…`/`hba_file` вместо `initdb.d`; `init.sql` без `ALTER SYSTEM` для непредзагруженных расширений; migration note и проверка на k3d с уже инициализированным PVC. Ветка `bugfix/pg-config-fix`, workspace `tasks/PG-CONFIG-FIX/`. Взят 2026-10-17.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` в WIP с 2026-10-17; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15.
 
 ### Owner
 

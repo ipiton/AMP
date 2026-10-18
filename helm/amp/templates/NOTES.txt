@@ -25,8 +25,6 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 {{- if .Values.postgresql.enabled }}
 ⚠️  Bundled PostgreSQL: single instance, dev/pilot only — no replication, no backups (ADR-016)
    For production use an external PostgreSQL; backups: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md
-   postgresql.config is not applied (bug PG-CONFIG-NOT-APPLIED): max_connections stays at the
-   server default (20 measured on k3d), below one AMP pod's pool of 25.
 {{- else if (.Values.externalDatabase | default dict).host }}
 {{- $ext := .Values.externalDatabase }}
 ✅ External PostgreSQL: {{ $ext.host }}:{{ $ext.port | default 5432 }}/{{ $ext.database }} (sslmode={{ $ext.sslMode | default "require" }}), password from Secret {{ $ext.existingSecret }}/{{ $ext.existingSecretPasswordKey | default "password" }}
@@ -54,9 +52,12 @@ Connection calculation:
   {{ .Values.autoscaling.maxReplicas }} replicas × 25 conns/pod (database.max_connections default) = {{ mul .Values.autoscaling.maxReplicas 25 }} connections
 
 {{- if .Values.postgresql.enabled }}
-⚠️  The bundled PostgreSQL cannot serve this (max_connections, see above).
-   Expect connection errors as replicas grow; use an external PostgreSQL
-   sized for {{ mul .Values.autoscaling.maxReplicas 25 }}+ connections.
+{{- $maxConn := int64 ((.Values.postgresql.config | default dict).maxConnections | default 250) }}
+{{- if ge (mul .Values.autoscaling.maxReplicas 25) $maxConn }}
+⚠️  The bundled PostgreSQL allows max_connections={{ $maxConn }}: at maxReplicas the AMP pools
+   alone take it all, leaving nothing for the exporter. Lower autoscaling.maxReplicas, raise
+   postgresql.config.maxConnections (with memory), or use an external PostgreSQL.
+{{- end }}
 {{- else }}
    Make sure the external PostgreSQL allows at least {{ mul .Values.autoscaling.maxReplicas 25 }} connections
    (or put PgBouncer in front of it).
@@ -105,8 +106,7 @@ Connection calculation:
    kubectl exec -it $(kubectl get pod -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ .Release.Namespace }} -- \
      psql -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SHOW max_connections;"
 
-   Expected until PG-CONFIG-NOT-APPLIED is fixed: the server default,
-   not postgresql.config.maxConnections ({{ .Values.postgresql.config.maxConnections }}).
+   Expected: {{ .Values.postgresql.config.maxConnections }}
 {{- end }}
 {{- end }}
 {{- end }}

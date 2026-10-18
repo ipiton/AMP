@@ -100,7 +100,7 @@ spec:
         description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} dead tuples. Consider manual VACUUM."
 
     - alert: PostgreSQLVacuumOld
-      expr: (now() - pg_stat_user_tables_last_autovacuum) > 86400
+      expr: (time() - pg_stat_user_tables_last_autovacuum) > 86400 and pg_stat_user_tables_last_autovacuum > 0
       for: 1h
       labels:
         severity: warning

@@ -36,6 +36,16 @@ spec:
       # Test 4: Extensions
       psql -h {{ include "amp.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SELECT * FROM pg_extension WHERE extname='pg_stat_statements';"
       echo "✅ pg_stat_statements extension verified"
+      {{- if .Values.postgresql.config }}
+
+      # Test 5: the server runs with the chart config, not the image defaults
+      for s in "config_file /etc/postgresql/postgresql.conf" "hba_file /etc/postgresql/pg_hba.conf"; do
+        set -- $s
+        got=$(psql -h {{ include "amp.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -tAc "SHOW $1;")
+        if [ "$got" != "$2" ]; then echo "❌ $1 is '$got', want '$2'"; exit 1; fi
+      done
+      echo "✅ Chart config applied"
+      {{- end }}
 
       # Cleanup
       psql -h {{ include "amp.postgresql.fullname" . }} -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "DROP TABLE IF EXISTS helm_test;"

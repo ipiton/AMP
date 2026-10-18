@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/pg-config-fix",
+  "commit": "8f42cd4",
+  "reviewed_at": "2026-10-17",
+  "findings": {
+    "blocker": 0,
+    "major": 3,
+    "minor": 7,
+    "nit": 6
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
