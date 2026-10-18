@@ -89,8 +89,8 @@ based_on:
 
 ## Phase 7: Testing
 
-- [ ] **7.1** `scripts/release-gate.sh` — RESULT: PASS (helm-tests берёт `tests/*.sh`). <!-- depends: 6.3 | verify: вывод — evidence/release-gate.txt -->
-- [ ] **7.2** `git diff --check main...HEAD`; `git status` чист. <!-- depends: 7.1 | verify: пусто -->
+- [x] **7.1** `scripts/release-gate.sh` — RESULT: PASS (helm-tests берёт `tests/*.sh`). <!-- depends: 6.3 | verify: вывод — evidence/release-gate.txt -->
+- [x] **7.2** `git diff --check main...HEAD`; `git status` чист. <!-- depends: 7.1 | verify: пусто -->
 
 ## Phase 8: Finalize
 
