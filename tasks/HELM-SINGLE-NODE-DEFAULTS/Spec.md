@@ -81,7 +81,7 @@ based_on:
 | Helm 4 SSA может конфликтовать на `.spec.replicas` с HPA-контроллером | k3d, `evidence/hpa-upgrade-off.txt` A | measured | Рекомендация `--force-conflicts` была бы лишней |
 | Пул AMP — 25 соединений на под, чарт его не переопределяет | `go-app/internal/config/config.go:898`; `git grep max_connections helm/` — только PG-конфиг и NOTES | call-path-traced | Бюджет `maxConnections` неверен |
 | Прод не использует встроенный PG и встроенный кеш | `values-production.yaml`: `postgresql.enabled: false`, `valkey.replicas: 0` + внешний Dragonfly | code-read | Migration notes коснулись бы прода |
-| Valkey 9.x пишет RDB с другой сигнатурой (`VALKEY`/v80), а не `REDIS0012+` | не проверено | assumed | Init-скрипт мог бы трогать данные Valkey 9. Защита: скрипт смотрит только на `REDIS` + версия ≥ 12, а v ≥ 12 под сигнатурой `REDIS` пишет только Redis ≥ 7.4. Риск — в Open Questions |
+| Valkey 9.x пишет RDB с другой сигнатурой (`VALKEY`/v80), а не `REDIS0012+` | `valkey/valkey:9.0-alpine` (9.0.6) пишет `VALKEY080` в `dump.rdb` и в base AOF; init их не трогает (deep-review, Reviewer A) | measured | Перепроверить при переходе на 9.x всё равно: правило зависит от формата |
 
 ## Target Design
 
@@ -129,12 +129,12 @@ based_on:
 
 Таблиц нет. Данные кеша (PVC `redis-data-*`):
 
-- **Migration:** да, неявная. Init переносит RDB/AOF Redis ≥ 7.4 в `/data/redis-pre-valkey-<ts>/`, Valkey стартует пустым.
+- **Migration:** да, неявная. Init переносит в `/data/redis-pre-valkey-<ts>/` `dump.rdb` v12+ и `appendonlydir` с base v12+ — по отдельности (deep-review R6): после отката на Redis 7.4 рядом лежат `dump.rdb` v12 и AOF v11, и AOF Valkey читает сам.
 - **Потери:** nflog, группы, таймеры. Следствия: один повтор уведомлений по firing-группам; resolved по алертам, погасшим во время апгрейда, могут не уйти; короткое окно без inhibition-источников. Silences и алерты не теряются, они в PG.
 - **Rollback / forward-fix:**
   - откат на старый чарт: Redis 7.4 читает данные, которые записал Valkey (v11);
-  - вернуть исходные данные Redis: остановить под, перенести файлы из `redis-pre-valkey-*` обратно в `/data` и запустить старый чарт;
-  - каталог-бэкап не удаляется автоматически. Его объём не больше `maxmemory` (384mb по умолчанию); удаление — ручное (CHANGELOG).
+  - вернуть исходные данные Redis: остановить под, удалить то, что записал Valkey (`appendonlydir`, `dump.rdb`), перенести файлы из `redis-pre-valkey-*` в `/data` и откатить чарт (deep-review R3; прогон — `evidence/init-fixtures-review.txt`);
+  - каталог-бэкап не удаляется автоматически. Объём — RDB дважды (dump и base) плюс хвост AOF; удаление — ручное (CHANGELOG).
 
 ## Component Architecture
 
@@ -165,7 +165,7 @@ based_on:
 
 ## Invariants
 
-- [ ] `values-production.yaml` рендерится как раньше: HPA 3–20, внешний PG, `valkey.replicas: 0`. Разница рендера — только удалённые объекты сабчарта и `amp-pvc`.
+- [ ] `values-production.yaml` рендерится как раньше: HPA 3–20, внешний PG, `valkey.replicas: 0`. Разница рендера — удалённые объекты сабчарта и `amp-pvc`, `keep` у HPA и шаблон StatefulSet `-redis` (образ, requests, init) при `replicas: 0`.
 - [ ] `profile: lite` рендерится как раньше: `amp-pvc` есть, HPA нет.
 - [ ] `cache.host` и Service `<fullname>-redis` не меняются: AMP и пользовательские values с внешним кешем работают без правок.
 - [ ] `helm upgrade` без пользовательских values не уходит в crashloop на данных Redis 7.4.
@@ -222,9 +222,10 @@ based_on:
     - ветка: все поды Ready, `POST /api/v2/alerts` → 200, exporter `redis_up 1`, `pg_up 1`.
   - **A2 — upgrade с `main`.** Установка `main` (HPA on, данные Redis 7.4 после потока алертов) → upgrade веткой.
     - init перенёс файлы (лог + `ls`), Valkey Ready, ingest 200;
-    - HPA-сирота есть → `kubectl delete hpa` → 1 реплика.
-  - **A3 — rollback.** `helm rollback` → Redis 7.4 стартует на данных Valkey.
-  - **A4 — `values-small.yaml`.** Установка, всё Ready.
+    - лог AMP: подключился ли к кешу (`Redis cache initialized` или fallback — BUGS `AMP-CACHE-NOAUTH`);
+    - NOTES предупреждает о HPA-сироте → удаление HPA → 1 реплика.
+  - **A3 — rollback.** `helm rollback` → Redis 7.4 стартует на данных Valkey; процедура восстановления исходных данных из CHANGELOG (6) — на кластере.
+  - **A4 — `values-small.yaml`.** Установка, всё Ready; память PG с открытым пулом AMP (deep-review R10).
 
 ## Observability
 
@@ -240,5 +241,5 @@ based_on:
 
 ## Open Questions
 
-- [ ] (assumed) Valkey 9.x не пишет `REDIS0012+`. Не блокирует: чарт пинит 8.1, где сигнатура `REDIS0011` проверена. При переходе на 9.x перепроверить init-условие (комментарий в шаблоне).
-- [ ] Сколько уведомлений реально повторится при upgrade, проверяется на A2 (число отправок на тестовый webhook до и после). Если повтор шире одного раунда по firing-группам, вернуться к spec.
+- [x] ~~(assumed) Valkey 9.x не пишет `REDIS0012+`.~~ Измерено на ревью: 9.0.6 пишет `VALKEY080`. Не блокирует: чарт пинит 8.1, где сигнатура `REDIS0011` проверена. При переходе на 9.x перепроверить init-условие (комментарий в шаблоне).
+- [ ] Сколько уведомлений реально повторится при upgrade, проверяется на A2 (число отправок на тестовый webhook до и после). Если повтор шире одного раунда по firing-группам, вернуться к spec. Оговорка ревью: на дефолтах AMP кеш не использует (`AMP-CACHE-NOAUTH`), повтор определяется рестартом AMP, а не переносом данных.

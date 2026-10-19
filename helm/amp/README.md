@@ -35,6 +35,8 @@ helm install amp ./helm/amp -f my-values.yaml
 helm install amp ./helm/amp -f ./helm/amp/values-small.yaml -f my-values.yaml
 ```
 
+`values-small.yaml` is for new installs: it shrinks the StatefulSet volumes, which Kubernetes does not allow on an existing release.
+
 ### Sizing
 
 Requests are set from a measurement on one node under light load (`tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/idle-top.txt`: the whole stack used about 50m CPU / 90Mi); limits leave room for bursts.
@@ -48,7 +50,7 @@ Requests are set from a measurement on one node under light load (`tasks/archive
 | redis-exporter | 10m / 32Mi | 100m / 128Mi |
 | **Total** | **270m / 512Mi** | |
 
-Volumes: PostgreSQL 10Gi, Valkey 5Gi. `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60`, and the volumes to 5Gi / 1Gi. For HA use `values-production.yaml` (HPA 3–20, external PostgreSQL) or set `autoscaling.enabled: true` — with the bundled PostgreSQL, raise its connection budget first ([PostgreSQL](#postgresql)).
+Volumes: PostgreSQL 10Gi, Valkey 5Gi. `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60`, and the volumes to 5Gi / 1Gi. For HA use `values-production.yaml` (HPA 3–20, external PostgreSQL) or set `autoscaling.enabled: true`. The HPA targets are percentages of `resources.requests`, so raise the requests too (with 100m the HPA scales out at ~70m CPU per pod); with the bundled PostgreSQL, raise its connection budget first ([PostgreSQL](#postgresql)).
 
 ## Deployment Profiles
 
@@ -60,7 +62,7 @@ helm install amp ./helm/amp
 - PostgreSQL storage (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
 - Valkey cache (`<fullname>-redis`, image `valkey/valkey`), one instance. Valkey, not Redis: Redis 7.4 and later is RSALv2/SSPL (`docs/06-planning/DECISIONS.md` ADR-017). An external Redis-compatible cache: `cache.host` (and `valkey.replicas: 0`), as in `values-production.yaml`
 - One replica, HPA off by default; `autoscaling.enabled: true` for 2–10 replicas
-- Group timers and notification dedup live in Valkey, so replicas share them
+- Group timers and notification dedup are meant to live in Valkey, so that replicas share them. With the defaults AMP cannot authenticate to the chart's Valkey and keeps them in memory per pod (bug `AMP-CACHE-NOAUTH`); check the AMP log for `Redis cache unavailable, falling back to in-memory cache`
 
 ### Lite Profile
 Single process, no external dependencies:
@@ -113,7 +115,7 @@ The standard profile needs PostgreSQL; the chart ships and tests 16 (`postgres:1
 
 The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime, and ingest returns errors until the database is back. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed).
 
-The server runs with `postgresql.config` (rendered into `postgresql.conf`) and the chart's `pg_hba.conf`, passed as server arguments, so they also apply to an existing data volume. Each AMP pod opens up to 25 connections (`database.max_connections`), so `autoscaling.maxReplicas` × 25 must stay below `postgresql.config.maxConnections`. The default 100 (10 of them reserved for the superuser) covers the default replica, a rolling-update surge pod and the exporter, with room for a third pod; NOTES warns when `autoscaling.maxReplicas` × 25 reaches it. Before enabling autoscaling, raise it to at least `maxReplicas` × 25 + 10, together with `sharedBuffers` and `postgresql.resources` (the default limit is 1Gi with `shared_buffers=128MB`). From the network, `pg_hba.conf` admits only `postgresql.username` to `postgresql.database` with a SCRAM password and rejects everything else, including replication; loopback inside the pod (and `kubectl port-forward`) needs the password too, only `kubectl exec … psql` over the Unix socket does not; to restrict which pods may connect, enable `postgresql.networkPolicy.enabled`. `/dev/shm` is a 256Mi memory volume and counts against `postgresql.resources.limits.memory`.
+The server runs with `postgresql.config` (rendered into `postgresql.conf`) and the chart's `pg_hba.conf`, passed as server arguments, so they also apply to an existing data volume. Each AMP pod opens up to 25 connections (`database.max_connections`), so `postgresql.config.maxConnections` must be at least `autoscaling.maxReplicas` × 25 + 5 (the exporter and a few `psql` sessions). AMP connects as `postgresql.username`, the bootstrap superuser, so `superuserReservedConnections` holds nothing back from it. The default 100 covers 3 AMP pods (the default replica, a rolling-update surge pod and one more) and the exporter; NOTES warns when the budget is short. Before enabling autoscaling, raise it to at least `maxReplicas` × 25 + 5, together with `sharedBuffers` and `postgresql.resources` (the default limit is 1Gi with `shared_buffers=128MB`). From the network, `pg_hba.conf` admits only `postgresql.username` to `postgresql.database` with a SCRAM password and rejects everything else, including replication; loopback inside the pod (and `kubectl port-forward`) needs the password too, only `kubectl exec … psql` over the Unix socket does not; to restrict which pods may connect, enable `postgresql.networkPolicy.enabled`. `/dev/shm` is a 256Mi memory volume and counts against `postgresql.resources.limits.memory`.
 
 #### External PostgreSQL
 

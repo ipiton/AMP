@@ -8,6 +8,9 @@
 #
 # Not for HA: keep autoscaling off with this file (the connection budget
 # below covers 2 AMP pods during a rolling update).
+#
+# New installs only: StatefulSet volume sizes cannot change, so on an existing
+# release drop postgresql.persistence.size and valkey.storage.requestedSize.
 
 autoscaling:
   enabled: false
@@ -32,11 +35,17 @@ postgresql:
   persistence:
     size: 5Gi
   config:
-    # 2 AMP pods (rolling update) × 25 + exporter + 10 reserved for superuser
+    # 2 AMP pods (rolling update) × 25 + exporter, with spare for psql sessions
+    # (the AMP user is the superuser, so superuser_reserved_connections does
+    # not reserve anything from it)
     maxConnections: 60
-    # Within the 512Mi limit: shared_buffers + 60 backends × work_mem headroom
+    # Sized for the 512Mi limit at light load; not measured with all 60
+    # backends busy (work_mem is per operation, /dev/shm counts too)
     sharedBuffers: "64MB"
     effectiveCacheSize: "256MB"
+    # The defaults (1GB/4GB) would take most of the 5Gi volume
+    minWalSize: "256MB"
+    maxWalSize: "1GB"
 
 valkey:
   resources:

@@ -1,0 +1,10 @@
+# AMP cache wiring on k3d-single-node (release amp, ns m, chart from main), 2026-10-19
+# deployment.yaml: REDIS_PASSWORD only if cache.auth.enabled (default false); redis StatefulSet always sets requirepass
+{"time":"2026-10-19T08:24:30.855752008Z","level":"ERROR","msg":"Failed to connect to Redis","error":"NOAUTH Authentication required.","addr":"amp-redis:6379"}
+{"time":"2026-10-19T08:24:30.855782049Z","level":"WARN","msg":"Redis cache unavailable, falling back to in-memory cache","error":"failed to connect to Redis: NOAUTH Authentication required.","addr":"amp-redis:6379"}
+{"time":"2026-10-19T08:24:30.855802716Z","level":"INFO","msg":"Initializing silence manager (GC/stats worker)..."}
+{"time":"2026-10-19T08:24:30.855972299Z","level":"INFO","msg":"Silence manager created","gc_interval":300000000000,"gc_retention":86400000000000,"sync_interval":60000000000}
+{"time":"2026-10-19T08:24:30.855981299Z","level":"WARN","msg":"No Redis cache backend, silence GC leader election disabled (GC worker runs on every replica, as before task 6.4)"}
+{"time":"2026-10-19T08:24:30.855992091Z","level":"INFO","msg":"Starting silence manager","gc_interval":300000000000,"gc_retention":86400000000000,"sync_interval":60000000000}
+{"time":"2026-10-19T08:24:30.856009216Z","level":"ERROR","msg":"Initial cache sync failed","error":"invalid filter parameters: limit must be <= 1000, got 10000"}
+{"time":"2026-10-19T08:24:30.856016258Z","level":"WARN","msg":"Silence manager initialization failed, continuing without background GC/stats worker","error":"silence manager start failed: initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000"}

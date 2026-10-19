@@ -23,8 +23,9 @@ data:
     listen_addresses = '*'
     port = 5432
     max_connections = {{ .Values.postgresql.config.maxConnections | default 100 }}
-    # Budget: 25 per AMP pod (database.max_connections default) × replicas + exporter
-    # + superuser_reserved_connections; raise it with autoscaling.maxReplicas
+    # Budget: 25 per AMP pod (database.max_connections default) × replicas + exporter;
+    # the AMP user is the superuser, so the reserved slots are not held back from it.
+    # Raise it with autoscaling.maxReplicas
     superuser_reserved_connections = {{ .Values.postgresql.config.superuserReservedConnections | default 10 }}
 
     # -----------------------------------------------------------------------------

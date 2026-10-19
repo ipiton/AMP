@@ -66,7 +66,7 @@ based_on:
 
 ## Phase 3: deep-review
 
-- [ ] **3.1** `/deep-review` (обязателен, сигнал `M`) → `tasks/HELM-SINGLE-NODE-DEFAULTS/review-verdict.json` с `"gate": "pass"`; находки — фиксами и повторным ревью. <!-- depends: Phase 1, Phase 2 | verify: jq -r .gate review-verdict.json → pass -->
+- [x] **3.1** `/deep-review` (обязателен, сигнал `M`) → `tasks/HELM-SINGLE-NODE-DEFAULTS/review-verdict.json` с `"gate": "pass"`; находки — фиксами и повторным ревью. <!-- depends: Phase 1, Phase 2 | verify: jq -r .gate review-verdict.json → pass -->
 
 ## Phase 4: тесты (после verdict `pass`)
 
@@ -74,19 +74,21 @@ based_on:
 - [ ] **4.2** `render-postgresql.sh` T6: ожидания 250 → 100; кейс «HPA on, maxReplicas 10 → предупреждение», «maxReplicas 3 → нет» (3 × 25 < 100). <!-- depends: 3.1 | verify: bash helm/amp/tests/render-postgresql.sh -->
 - [ ] **4.3** Тест init-скрипта: вынести тело проверки так, чтобы его можно было прогнать в `busybox:1.36` на фикстурах (RDB v12, v11, пусто, повторный запуск) — либо обоснованно ограничиться k3d A2 + ручным прогоном 1.8, записав это в evidence. <!-- depends: 3.1 | verify: прогон фикстур или evidence -->
 
+- [ ] **4.4** Из ревью: тест init на фикстуре «после отката» (dump v12 + base v11 → переносится только `dump.rdb`); `valkey.image.tag` пустой → render fails; NOTES — предупреждение о бюджете при `maxReplicas × 25 + 5 > maxConnections`, строка кеша для `cache.enabled=false` и `valkey.replicas: 0`; `redis-prometheusrule` берёт `maxmemory` из values. Убрать из `tests/*.sh` блок `helm dependency build` (зависимостей нет). <!-- depends: 3.1 | verify: bash helm/amp/tests/render-single-node.sh -->
+
 **Phase verification:** все `helm/amp/tests/*.sh` PASS.
 
 ## Phase 5: testing и приёмка
 
 - [ ] **5.1** Гейты AMP: `make -C go-app quality-gates-fast` (Go не меняется — контрольный), `scripts/release-gate.sh` → `RESULT: PASS`, вывод в `evidence/release-gate.txt`; `git diff --check`. <!-- depends: Phase 4 | verify: grep 'RESULT: PASS' evidence/release-gate.txt -->
 - [ ] **5.2** k3d **A1**: кластер с `--kubelet-arg=kube-reserved=cpu=7` (allocatable ≈ 1 vCPU); чарт `main` → поды `Pending`; ветка → все Ready, `POST /api/v2/alerts` → 200, `redis_up 1`, `pg_up 1`. <!-- verify: evidence/k3d-acceptance.md § A1 -->
-- [ ] **5.3** k3d **A2**: `main` (HPA on) + поток алертов на тестовый webhook → upgrade веткой: лог init с переносом, `ls /data/redis-pre-valkey-*`, Valkey Ready, ingest 200; HPA-сирота → `kubectl delete hpa` → 1 реплика; подсчёт повторных уведомлений (Open Question Spec). <!-- verify: evidence/k3d-acceptance.md § A2 -->
-- [ ] **5.4** k3d **A3**: `helm rollback` → Redis 7.4 стартует на данных Valkey. **A4**: установка `-f values-small.yaml`, всё Ready. <!-- verify: evidence/k3d-acceptance.md § A3, A4 -->
+- [ ] **5.3** k3d **A2**: `main` (HPA on) + поток алертов на тестовый webhook → upgrade веткой: лог init с переносом, `ls /data/redis-pre-valkey-*`, Valkey Ready, ingest 200; HPA-сирота → `kubectl delete hpa` → 1 реплика; подсчёт повторных уведомлений (Open Question Spec); лог AMP — кеш подключён или fallback; предупреждение NOTES о HPA-сироте. <!-- verify: evidence/k3d-acceptance.md § A2 -->
+- [ ] **5.4** k3d **A3**: `helm rollback` → Redis 7.4 стартует на данных Valkey. **A3** также: процедура восстановления исходных данных (CHANGELOG 6) на кластере. **A4**: установка `-f values-small.yaml`, всё Ready; `kubectl top` PG при открытом пуле AMP (25 соединений) — в evidence, иначе TECH-DEBT. <!-- verify: evidence/k3d-acceptance.md § A3, A4 -->
 - [ ] **5.5** Удалить k3d-кластеры задачи (`single-node` и приёмочный) — с подтверждения владельца. <!-- verify: k3d cluster list -->
 
 ## Phase 6: finalize
 
-- [ ] **6.1** `/finalize`: DONE.md, NEXT.md (WIP → пусто; Queue пополнить — сейчас 1 задача), BUGS (закрыть `VALKEY-SUBCHART-INIT-ERROR`, `AMP-PVC-PENDING-STANDARD`), TECH-DEBT `HELM-CHART-GAPS` (снять «два Redis»), BACKLOG (закрыть P1 `HELM-SINGLE-NODE-DEFAULTS`), архив workspace. <!-- depends: Phase 5 | verify: git status чистый, workspace в tasks/archive/ -->
+- [ ] **6.1** `/finalize`: DONE.md, NEXT.md (WIP → пусто; Queue пополнить — сейчас 1 задача), BUGS (закрыть `VALKEY-SUBCHART-INIT-ERROR`, `AMP-PVC-PENDING-STANDARD`), TECH-DEBT `HELM-CHART-GAPS` (снять «два Redis»), новые BUGS `AMP-CACHE-NOAUTH`, `AMP-CACHE-NO-RECONNECT`, `SILENCE-SYNC-LIMIT`, `HELM-VCT-CHART-LABELS`, TECH-DEBT (Go-тест `redis:7-alpine`, «2-10 replicas» в `config.go`), BACKLOG `values-dev.yaml` под новые дефолты, BACKLOG (закрыть P1 `HELM-SINGLE-NODE-DEFAULTS`), архив workspace. <!-- depends: Phase 5 | verify: git status чистый, workspace в tasks/archive/ -->
 
 ## Definition of Done
 

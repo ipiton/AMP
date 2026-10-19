@@ -1,0 +1,97 @@
+# deep-review fix (R?): config-init judges dump.rdb and appendonlydir separately
+# script: helm template t helm/amp -s templates/redis-statefulset.yaml, migration part only; busybox:1.36, uid 999
+# fixtures (from reviewer A): r74 = Redis 7.4.11 (dump+base REDIS0012); rb = rollback state (dump REDIS0012, base REDIS0011 by Valkey);
+#   v81 = Valkey 8.1.10 (REDIS0011); v90 = Valkey 9.0.6 (VALKEY080); aofonly/rdbonly = r74 parts; empty
+
+== r74 (run 1)
+Redis >= 7.4 data (RDB v12+: dump.rdb appendonlydir) moved to /data/redis-pre-valkey-1792402620
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+./BACKUP/appendonlydir/appendonly.aof.2.base.rdb
+./BACKUP/appendonlydir/appendonly.aof.2.incr.aof
+./BACKUP/appendonlydir/appendonly.aof.manifes
+./BACKUP/dump.rdb
+== rb (run 1)
+Redis >= 7.4 data (RDB v12+: dump.rdb) moved to /data/redis-pre-valkey-1792402620
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+./appendonlydir/appendonly.aof.2.base.rdb
+./appendonlydir/appendonly.aof.2.incr.aof
+./appendonlydir/appendonly.aof.manifes
+./BACKUP/dump.rdb
+== v81 (run 1)
+No Redis >= 7.4 data on the volume
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+./appendonlydir/appendonly.aof.2.base.rdb
+./appendonlydir/appendonly.aof.2.incr.aof
+./appendonlydir/appendonly.aof.manifes
+./dump.rdb
+== v90 (run 1)
+No Redis >= 7.4 data on the volume
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+./appendonlydir/appendonly.aof.2.base.rdb
+./appendonlydir/appendonly.aof.2.incr.aof
+./appendonlydir/appendonly.aof.manifes
+./dump.rdb
+== empty (run 1)
+No Redis >= 7.4 data on the volume
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+== aofonly (run 1)
+Redis >= 7.4 data (RDB v12+: appendonlydir) moved to /data/redis-pre-valkey-1792402624
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+./BACKUP/appendonlydir/appendonly.aof.2.base.rdb
+./BACKUP/appendonlydir/appendonly.aof.2.incr.aof
+./BACKUP/appendonlydir/appendonly.aof.manifes
+== rdbonly (run 1)
+Redis >= 7.4 data (RDB v12+: dump.rdb) moved to /data/redis-pre-valkey-1792402625
+rc=0
+-- run 2
+No Redis >= 7.4 data on the volume
+./BACKUP/dump.rdb
+
+# start after the move / rollback compatibility
+== valkey/valkey:8.1.10-alpine on case-rb
+7:M 19 Oct 2026 09:38:40.922 * Valkey version=8.1.10, bits=64, commit=00000000, modified=1, pid=7, just started
+7:M 19 Oct 2026 09:38:40.926 * Reading RDB base file on AOF loading...
+7:M 19 Oct 2026 09:38:40.926 * Loading RDB produced by Valkey version 8.1.10
+7:M 19 Oct 2026 09:38:40.926 * Done loading RDB, keys loaded: 1, keys expired: 0.
+7:M 19 Oct 2026 09:38:40.926 * DB loaded from base file appendonly.aof.2.base.rdb: 0.000 seconds
+7:M 19 Oct 2026 09:38:40.926 * DB loaded from incr file appendonly.aof.2.incr.aof: 0.000 seconds
+v
+v2
+2
+== redis:7-alpine on rbk-v81
+1:C 19 Oct 2026 09:38:45.088 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=1, just started
+1:M 19 Oct 2026 09:38:45.092 * Reading RDB base file on AOF loading...
+1:M 19 Oct 2026 09:38:45.092 * Done loading RDB, keys loaded: 1, keys expired: 0.
+1:M 19 Oct 2026 09:38:45.092 * DB loaded from base file appendonly.aof.2.base.rdb: 0.002 seconds
+1:M 19 Oct 2026 09:38:45.092 * DB loaded from incr file appendonly.aof.2.incr.aof: 0.000 seconds
+1:M 19 Oct 2026 09:38:45.095 * DB loaded from append only file: 0.006 seconds
+v
+v2
+2
+
+== restore procedure on case-r74 (after init moved Redis 7.4 data)
+1
+-- valkey wrote:
+appendonlydir
+redis-pre-valkey-1792402620
+redis.conf
+appendonlydir
+dump.rdb
+redis.conf
+1:C 19 Oct 2026 09:39:03.264 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=1, just started
+1:M 19 Oct 2026 09:39:03.267 * DB loaded from append only file: 0.001 seconds
+v
+
+2

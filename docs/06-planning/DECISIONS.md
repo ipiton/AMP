@@ -284,11 +284,11 @@
 - **Контекст**:
   - собственный StatefulSet чарта (`<fullname>-redis`) запускал `redis:7-alpine`; на 2026-10-19 этот тег резолвится в Redis 7.4.11, который с 7.4 распространяется под RSALv2/SSPLv1, а не BSD. AMP — AGPL-3.0, и такая лицензия кеша владельцу не подходит (решение владельца 2026-10-19, `HELM-SINGLE-NODE-DEFAULTS`);
   - рядом в каждом `standard`-рендере жил сабчарт `valkey` (groundhog2k 2.1.3, `condition: cache.enabled`): AMP в него не ходил (`cache.host` → `<fullname>-redis`), под падал в `Init:Error` (BUGS `VALKEY-SUBCHART-INIT-ERROR`), а ресурсы и PVC 5Gi занимал;
-  - замеры (`tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/`): `valkey/valkey:8.1.10-alpine` поднимается с конфигом чарта без правок (`redis-server`/`redis-cli` в образе — симлинки на `valkey-*`), `redis_exporter` v1.55.0 с ним работает; Valkey 8.1 и 9.0 не читают данные Redis 7.4 (`Can't handle RDB format version 12`); Redis 7.4 читает данные Valkey 8.1 (RDB v11).
+  - замеры (`tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/`): `valkey/valkey:8.1.10-alpine` поднимается с конфигом чарта без правок (`redis-server`/`redis-cli` в образе — симлинки на `valkey-*`), `redis_exporter` v1.55.0 с ним работает; Valkey 8.1 и 9.0 не читают данные Redis 7.4 (`Can't handle RDB format version 12`); Redis 7.4 читает данные Valkey 8.1 (RDB v11); Valkey 9.0 пишет сигнатуру `VALKEY080`, правило переноса её не трогает.
 - **Решение**:
   - кеш AMP в чарте — один инстанс, собственный StatefulSet чарта на `valkey/valkey` (BSD-3), тег закреплён до патча (`8.1.10-alpine`);
   - сабчарт `valkey` и `Chart.lock` удалены, у чарта нет зависимостей;
-  - init-контейнер `config-init` при образе `*valkey*` переносит RDB/AOF с сигнатурой `REDIS` и версией ≥ 12 в `/data/redis-pre-valkey-<ts>/`, Valkey стартует пустым; при образе без `valkey` в имени перенос не выполняется;
+  - init-контейнер `config-init` при образе `*valkey*` переносит в `/data/redis-pre-valkey-<ts>/` `dump.rdb` и `appendonlydir` — каждый отдельно, если его RDB имеет сигнатуру `REDIS` и версию ≥ 12; Valkey стартует без них; при образе без `valkey` в имени перенос не выполняется;
   - образы Redis ≥ 7.4 не используются в чарте и в стендах репозитория (`deploy/e2e-ha`). Внешний Redis-совместимый кеш (`cache.host`, как Dragonfly в `values-production.yaml`) — выбор и ответственность оператора.
 - **Обоснование**:
   - один кеш вместо двух: меньше ресурсов на одной ноде, нет внешнего helm-репозитория в сборке, нет сломанного пода;
@@ -299,7 +299,8 @@
   - оставить сабчарт groundhog2k и убрать свой StatefulSet: сабчарт сломан, без exporter/правил/дашборда, меняет `cache.host`, тянет внешний репозиторий;
   - перенос ключей из Redis 7.4 в Valkey: DUMP/RESTORE несут ту же версию RDB, остаётся поштучный SCAN с временным Redis-сайдкаром — несоразмерно кешу, где долговечны только nflog, группы и таймеры с TTL ≤ `repeat_interval`.
 - **Следствие**:
-  - breaking при `helm upgrade` с дефолтами (migration notes в `CHANGELOG.md`): данные кеша сбрасываются ⇒ один повтор уведомлений по firing-группам, возможна потеря resolved по алертам, погасшим во время апгрейда; silences и алерты в PostgreSQL не затронуты;
+  - breaking при `helm upgrade` с дефолтами (migration notes в `CHANGELOG.md`): данные кеша сбрасываются ⇒ один повтор уведомлений по firing-группам, возможна потеря resolved по алертам, погасшим во время апгрейда; silences и алерты в PostgreSQL не затронуты. На дефолтах чарта AMP в этот кеш не авторизуется и держит состояние в памяти (BUGS `AMP-CACHE-NOAUTH`, существовало до задачи) — пока баг не закрыт, общий nflog между репликами не работает;
   - каталог `/data/redis-pre-valkey-*` чарт не удаляет, это ручной шаг;
-  - при переходе на Valkey 9.x перепроверить правило переноса (сигнатура и версия RDB);
+  - при переходе на Valkey 9.x перепроверить правило переноса (9.0.6 пишет `VALKEY080` — замер на ревью);
+  - гейт по имени репозитория образа: зеркало Valkey под другим именем пропускает перенос и падает на данных v12 — оператор задаёт `repository` и `tag` вместе (комментарий в `values.yaml`);
   - Go-тесты (`go-app/internal/infrastructure/inhibition/integration_test.go`) ещё поднимают `redis:7-alpine` через testcontainers — локально и в CI, не в поставке; перевод — отдельной задачей.

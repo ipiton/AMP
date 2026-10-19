@@ -12,7 +12,7 @@ NAME   READY   UP-TO-DATE   AVAILABLE   AGE
 amp    2/2     2            2           15m
 
 $ helm history amp
-REVISION	UPDATED                 	STATUS    	CHART    	APP VERSION	DESCRIPTION     
+REVISION	UPDATED                 	STATUS    	CHART    	APP VERSION	DESCRIPTION
 1       	Mon Oct 19 10:16:39 2026	superseded	amp-0.1.0	0.1.0      	Install complete
 2       	Mon Oct 19 10:30:58 2026	superseded	amp-0.1.0	0.1.0      	Upgrade complete
 3       	Mon Oct 19 10:31:01 2026	deployed  	amp-0.1.0	0.1.0      	Upgrade complete

@@ -215,8 +215,11 @@ webConfig:
 # Horizontal Pod Autoscaler
 # ===============================
 # Off by default: the defaults target one node (replicaCount: 1).
-# values-production.yaml turns it on. With the bundled PostgreSQL, raise
-# postgresql.config.maxConnections for maxReplicas first (NOTES warns).
+# values-production.yaml turns it on. The targets are percentages of
+# resources.requests: with the default 100m/128Mi the HPA scales out at ~70m
+# CPU per pod, so raise the requests along with it. With the bundled
+# PostgreSQL, raise postgresql.config.maxConnections for maxReplicas first
+# (NOTES warns).
 autoscaling:
   enabled: false
   minReplicas: 2
@@ -361,11 +364,12 @@ postgresql:
     enabled: false  # Enable in production for network isolation
 
   # PostgreSQL Configuration
-  # Connection budget: 25 per AMP pod (database.max_connections default).
-  # 100 - superuserReservedConnections (10) = 90 for clients: the one default
-  # pod plus a rolling-update surge pod (50), the exporter, and room for a
-  # third pod. With autoscaling, raise maxConnections to at least
-  # maxReplicas × 25 + 10 (and memory with it); NOTES warns when it is short.
+  # Connection budget: 25 per AMP pod (database.max_connections default) plus
+  # the exporter. AMP connects as postgresql.username, which is the bootstrap
+  # superuser, so superuserReservedConnections reserves nothing from it: the
+  # whole maxConnections is the budget. 100 covers 3 AMP pods (the default pod,
+  # a rolling-update surge pod and one more). With autoscaling, raise it to at
+  # least maxReplicas × 25 + 5 (and memory with it); NOTES warns when it is short.
   config:
     maxConnections: 100
     superuserReservedConnections: 10
@@ -466,8 +470,8 @@ cache:
 # Valkey StatefulSet Configuration (<fullname>-redis)
 # ===============================
 # The chart's one in-cluster cache, Standard Profile only. Valkey (BSD-3), not
-# Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). Connection pool: 50 conns/pod;
-# Valkey maxclients 10,000 (default).
+# Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). AMP pool: 10 conns/pod
+# (redis.pool_size); Valkey maxclients 10,000 (default).
 valkey:
   enabled: true  # Managed by profile in deployment
 
@@ -475,9 +479,10 @@ valkey:
   replicas: 1  # Expandable to 3 for Sentinel HA in future
 
   # Container image. Valkey 8.1 cannot load data written by Redis >= 7.4
-  # (RDB v12): with a valkey image, the init container moves such files to
-  # /data/redis-pre-valkey-<ts>/ and Valkey starts empty (CHANGELOG migration
-  # notes).
+  # (RDB v12): when repository contains "valkey", the init container moves
+  # such files to /data/redis-pre-valkey-<ts>/ and Valkey starts without them
+  # (CHANGELOG migration notes). A Valkey mirror under another name skips the
+  # move; set repository and tag together.
   image:
     repository: valkey/valkey
     tag: "8.1.10-alpine"
