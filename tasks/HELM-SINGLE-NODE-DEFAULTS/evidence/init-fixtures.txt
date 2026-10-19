@@ -1,0 +1,21 @@
+# config-init data move (tasks.md 1.8), 2026-10-19
+# Script = rendered helm/amp/templates/redis-statefulset.yaml initContainers[0].command[2]
+# (branch feature/helm-single-node-defaults, working tree), run in busybox:1.36 as uid 999.
+# Fixtures: v12 = Redis 7.4.11 dump.rdb + appendonlydir (REDIS0012), v11 = Valkey 8.1.10 (REDIS0011)
+# (from evidence/valkey-rdb-compat.txt runs).
+
+render, valkey/valkey image:            redis-pre-valkey occurrences = 1
+render, --set valkey.image.repository=redis: occurrences = 0
+
+== v12
+Redis >= 7.4 data (RDB v12+: /data/dump.rdb /data/appendonlydir/appendonly.aof.2.base.rdb) moved to /data/redis-pre-valkey-1792401341; Valkey starts empty
+/data after: redis-pre-valkey-1792401341 redis.conf
+== v11
+No Redis >= 7.4 data on the volume
+/data after: appendonlydir dump.rdb redis.conf
+== empty
+No Redis >= 7.4 data on the volume
+/data after: redis.conf
+== v12, second run (same volume)
+No Redis >= 7.4 data on the volume
+/data after: redis-pre-valkey-1792401341 redis.conf
