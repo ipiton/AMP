@@ -1,0 +1,39 @@
+# HPA on -> off upgrade (k3d single-node, k3s v1.35.5, helm v4.3.0, chart main@dbaf049), 2026-10-19
+
+$ helm upgrade ... --set autoscaling.enabled=true   # rev 2
+$ helm upgrade ...                                 # rev 3, autoscaling.enabled=false
+
+$ kubectl get hpa
+NAME   REFERENCE        TARGETS                                   MINPODS   MAXPODS   REPLICAS   AGE
+amp    Deployment/amp   cpu: 4%/70%, memory: 4%/80% + 3 more...   2         10        2          68s
+
+$ kubectl get deploy amp   (rev 3 renders spec.replicas: 1)
+NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+amp    2/2     2            2           15m
+
+$ helm history amp
+REVISION	UPDATED                 	STATUS    	CHART    	APP VERSION	DESCRIPTION     
+1       	Mon Oct 19 10:16:39 2026	superseded	amp-0.1.0	0.1.0      	Install complete
+2       	Mon Oct 19 10:30:58 2026	superseded	amp-0.1.0	0.1.0      	Upgrade complete
+3       	Mon Oct 19 10:31:01 2026	deployed  	amp-0.1.0	0.1.0      	Upgrade complete
+
+# Follow-up runs, same cluster/release. "nokeep" = chart copy with
+# `helm.sh/resource-policy: keep` removed from templates/hpa.yaml.
+
+A) rev6 nokeep chart, autoscaling on (adopts the orphan HPA) -> rev7 nokeep chart, autoscaling off:
+   Error: UPGRADE FAILED: conflict occurred while applying object m/amp apps/v1, Kind=Deployment:
+   Apply failed with 1 conflict: conflict with "k3s" with subresource "scale" using apps/v1: .spec.replicas
+   (Helm 4 server-side apply: .spec.replicas is owned by the HPA controller via the scale subresource)
+
+B) same as A, plus --force-conflicts:
+   upgrade OK; `kubectl get hpa` -> No resources found; deploy/amp 1/1
+   => without `keep` in the PREVIOUS release manifest Helm deletes the HPA.
+
+C) main chart (with keep), autoscaling on, HPA scaled to 2 -> nokeep chart, autoscaling off
+   (both with and without --force-conflicts; no conflict this time):
+   upgrade OK, but the HPA stays: amp  Deployment/amp  min 2  max 10  (orphan)
+   => `keep` is read from the previous release's manifest: existing releases keep an
+      orphan HPA once, whatever the new chart says; it scales the Deployment back to 2.
+
+Conclusion: the SSA conflict in A is timing-dependent (whether the HPA controller has
+already written .spec.replicas); the orphan HPA in C is deterministic.

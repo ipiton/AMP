@@ -23,10 +23,11 @@ updated_at: 2026-10-19
 
 ## Risk Profile
 
-- **Signals:** `R`
-  - `R` — меняются дефолты, которые получит каждый `helm upgrade` без своих values: HPA выключается (Deployment переходит на `replicaCount: 1`), requests и параметры встроенного PG меняются (рестарт PG, новый бюджет соединений). Нужна запись в CHANGELOG с migration note.
-- **Tier:** Standard
-- **Notes:** `C` не ставлю: ключи values не удаляются и не переименовываются, меняются только значения по умолчанию. Если research покажет, что лишний Redis надо убрать удалением ключа (`cache` vs `valkey`), это меняет контракт values: добавить `C` и пересмотреть tier.
+- **Signals:** `R M`
+  - `R` — меняются дефолты, которые получит каждый `helm upgrade` без своих values: HPA выключается (Deployment переходит на `replicaCount: 1`), requests и параметры встроенного PG меняются (рестарт PG, новый бюджет соединений), образ кеша меняется на Valkey. Нужна запись в CHANGELOG с migration note.
+  - `M` — (research 2026-10-19) Valkey не читает данные Redis 7.4 (RDB v12): данные кеша на существующем PVC при upgrade отбрасываются, nflog теряется — один повтор уведомлений по firing-группам (`research.md` § Q5).
+- **Tier:** Full (было Standard; пересмотрено после research — сигнал `M`).
+- **Notes:** `C` не ставлю: ключи values не удаляются и не переименовываются. Если spec решит удалить ключи, которые читал только сабчарт `valkey`, добавить `C`.
 
 ## User Stories
 
@@ -56,6 +57,7 @@ updated_at: 2026-10-19
 
 - **Scope:** `helm/amp/` (values, при необходимости шаблоны и NOTES), тесты чарта, CHANGELOG, README чарта.
 - **Security:** не применимо. Auth-guard ADR-015 и NetworkPolicy не трогаются.
+- **License:** кеш — только Valkey; образы Redis ≥ 7.4 (RSALv2/SSPL) не используются (требование владельца 2026-10-19).
 - **Compatibility:** `helm upgrade` с дефолтами меняет число реплик и ресурсы. Нужна migration note: как вернуть HA-поведение (`autoscaling.enabled: true` или `-f values-production.yaml`). Изменение параметров PG перезапускает PG.
 
 ## Discovery Notes

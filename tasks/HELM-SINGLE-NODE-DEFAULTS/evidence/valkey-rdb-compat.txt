@@ -1,0 +1,24 @@
+# Redis 7.4 data -> Valkey, docker, 2026-10-19
+# redis.conf = rendered chart templates/redis-config.yaml (main@dbaf049) + requirepass, dir /data
+# redis:7-alpine resolves to: Redis server v=7.4.11 (RSALv2/SSPLv1 since 7.4)
+
+1) redis:7-alpine: SET k v; BGREWRITEAOF; SAVE
+   -> /data/appendonlydir/appendonly.aof.2.base.rdb, /data/dump.rdb (RDB format v12)
+
+2) valkey/valkey:8.1-alpine (Valkey 8.1.10) on the same /data:
+   * Reading RDB base file on AOF loading...
+   # Can't handle RDB format version 12
+   # Error reading the RDB base file appendonly.aof.2.base.rdb, AOF loading aborted
+   -> process exits
+
+3) valkey/valkey:9.0-alpine (image created 2026-09-21) on the same /data:
+   # Can't handle RDB format version 12
+   # Error reading the RDB base file appendonly.aof.2.base.rdb, AOF loading aborted
+   -> process exits
+
+4) valkey/valkey:8.1-alpine on an empty /data with the same config: starts,
+   "Ready to accept connections"; redis-cli/redis-server are symlinks to valkey-*;
+   INFO server: server_name:valkey, valkey_version:8.1.10, redis_version:7.2.4
+
+Conclusion: switching the image on an existing amp-redis PVC written by Redis 7.4
+crash-loops the pod; the data has to be dropped (or moved aside) on migration.
