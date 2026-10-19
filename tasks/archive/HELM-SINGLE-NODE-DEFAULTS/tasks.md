@@ -3,7 +3,7 @@ id: HELM-SINGLE-NODE-DEFAULTS
 slug: helm-single-node-defaults
 stream: operations
 type: feature
-status: active
+status: done
 created_at: 2026-10-19
 updated_at: 2026-10-19
 based_on:
@@ -116,11 +116,11 @@ based_on:
   - A4 — `values-small` Ready; замер памяти PG → `workMem: 2MB` (deep-review R10).
 - Новое для finalize: TECH-DEBT — liveness-проба PG при насыщении CPU-лимита (A4); BUG — флейк `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` (5.1).
 
-- [ ] **5.5** Удалить k3d-кластеры задачи (`single-node` и приёмочный) — с подтверждения владельца. <!-- verify: k3d cluster list -->
+- [ ] **5.5** (ждёт подтверждения владельца 2026-10-19: хук блокирует удаление релизов и кластеров; локальная уборка, на продукт не влияет) Удалить k3d-кластеры задачи (`single-node` и приёмочный) — с подтверждения владельца. <!-- verify: k3d cluster list -->
 
 ## Phase 6: finalize
 
-- [ ] **6.1** `/finalize`: DONE.md, NEXT.md (WIP → пусто; Queue пополнить — сейчас 1 задача), BUGS (закрыть `VALKEY-SUBCHART-INIT-ERROR`, `AMP-PVC-PENDING-STANDARD`), TECH-DEBT `HELM-CHART-GAPS` (снять «два Redis»), новые BUGS `AMP-CACHE-NOAUTH`, `AMP-CACHE-NO-RECONNECT`, `SILENCE-SYNC-LIMIT`, `HELM-VCT-CHART-LABELS`, TECH-DEBT (Go-тест `redis:7-alpine`, «2-10 replicas» в `config.go`), BACKLOG `values-dev.yaml` под новые дефолты, BACKLOG (закрыть P1 `HELM-SINGLE-NODE-DEFAULTS`), архив workspace. <!-- depends: Phase 5 | verify: git status чистый, workspace в tasks/archive/ -->
+- [x] **6.1** `/finalize`: DONE.md, NEXT.md (WIP → пусто; Queue пополнить — сейчас 1 задача), BUGS (закрыть `VALKEY-SUBCHART-INIT-ERROR`, `AMP-PVC-PENDING-STANDARD`), TECH-DEBT `HELM-CHART-GAPS` (снять «два Redis»), новые BUGS `AMP-CACHE-NOAUTH`, `AMP-CACHE-NO-RECONNECT`, `SILENCE-SYNC-LIMIT`, `HELM-VCT-CHART-LABELS`, TECH-DEBT (Go-тест `redis:7-alpine`, «2-10 replicas» в `config.go`), BACKLOG `values-dev.yaml` под новые дефолты, BACKLOG (закрыть P1 `HELM-SINGLE-NODE-DEFAULTS`), архив workspace. <!-- depends: Phase 5 | verify: git status чистый, workspace в tasks/archive/ -->
 
 ## Definition of Done
 
