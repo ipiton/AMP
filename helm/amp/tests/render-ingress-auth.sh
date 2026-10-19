@@ -66,11 +66,6 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ ! -d "${CHART_DIR}/charts" ]; then
-  echo "Fetching chart dependencies..."
-  helm dependency build "${CHART_DIR}" >/dev/null
-fi
-
 GUARD_MSG="exposes the whole AMP API"
 PASSWORDS=(--set postgresql.password=render-test-placeholder
   --set cache.auth.password=render-test-placeholder)

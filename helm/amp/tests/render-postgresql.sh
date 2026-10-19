@@ -106,11 +106,6 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ ! -d "${CHART_DIR}/charts" ]; then
-  echo "Fetching chart dependencies..."
-  helm dependency build "${CHART_DIR}" >/dev/null
-fi
-
 # values-production.yaml ships no passwords, auth or NetworkPolicy sources
 # (guards fail the render until they are supplied) -- placeholders, as
 # scripts/release-gate.sh does.
@@ -186,21 +181,26 @@ render lite --set profile=lite
 
 echo "T6 NOTES:"
 notes notes-default
-notes notes-no-hpa --set autoscaling.enabled=false
+notes notes-hpa --set autoscaling.enabled=true
 notes notes-external "${EXT[@]}"
-notes notes-max-8 --set autoscaling.maxReplicas=8
-for n in notes-default notes-no-hpa; do
+notes notes-max-3 --set autoscaling.enabled=true --set autoscaling.maxReplicas=3
+notes notes-max-4 --set autoscaling.enabled=true --set autoscaling.maxReplicas=4 --set postgresql.config.maxConnections=102
+for n in notes-default notes-hpa; do
   f="${WORK_DIR}/${n}.notes"
   assert_count "${f}" "HA-Ready" 0 "${n}: standard profile not advertised as HA"
   assert_count "${f}" "external storage (HA)" 0 "${n}: bundled PostgreSQL not advertised as HA"
   assert_count "${f}" "dev/pilot only" 1 "${n}: bundled PostgreSQL marked dev/pilot"
   assert_count "${f}" "PG-CONFIG-NOT-APPLIED" 0 "${n}: no config-not-applied warning"
-  assert_count "${f}" "Expected: 250" 1 "${n}: step 4 expects max_connections 250"
+  assert_count "${f}" "Expected: 100" 1 "${n}: step 4 expects max_connections 100"
   assert_count "${f}" "(OK)" 0 "${n}: no max_connections OK line"
 done
-# 10 replicas x 25 = 250 exhaust max_connections; 8 x 25 do not.
-assert_count "${WORK_DIR}/notes-default.notes" "allows max_connections=250" 1 "notes-default: connection budget warning"
-assert_count "${WORK_DIR}/notes-max-8.notes" "allows max_connections=" 0 "notes-max-8: no connection budget warning"
+# The budget is maxReplicas x 25 + 5 (exporter, psql) against max_connections
+# 100: HPA off and 3 replicas (80) fit, 10 (255) do not; 4 (105) do not fit
+# 102, where maxReplicas x 25 alone (100) would.
+assert_count "${WORK_DIR}/notes-default.notes" "allows max_connections=" 0 "notes-default: HPA off, no connection budget warning"
+assert_count "${WORK_DIR}/notes-hpa.notes" "allows max_connections=100" 1 "notes-hpa: connection budget warning at 10 replicas"
+assert_count "${WORK_DIR}/notes-max-3.notes" "allows max_connections=" 0 "notes-max-3: no connection budget warning"
+assert_count "${WORK_DIR}/notes-max-4.notes" "allows max_connections=102" 1 "notes-max-4: warning counts the exporter (105 > 102)"
 f="${WORK_DIR}/notes-external.notes"
 assert_count "${f}" "External PostgreSQL: db.example.com:5432/amp (sslmode=require), password from Secret amp-db/password" 1 "notes-external: external PostgreSQL line"
 assert_count "${f}" "dev/pilot only" 0 "notes-external: no bundled PostgreSQL warning"

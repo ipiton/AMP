@@ -70,13 +70,31 @@ based_on:
 
 ## Phase 4: тесты (после verdict `pass`)
 
-- [ ] **4.1** `helm/amp/tests/render-single-node.sh`: дефолты — нет HPA, `replicas: 1`, сумма requests = 270m/512Mi, нет `t-valkey`/`amp-pvc`, образ `valkey/valkey`, init с переносом; `autoscaling.enabled=true` — HPA без `keep`; `profile=lite` — `amp-pvc` есть; `valkey.image.repository=redis` — init без переноса; `values-small.yaml` рендерится; `values-production.yaml` — HPA 3–20. Мутации: вернуть `keep` / `enabled: true` / убрать условие init — тест краснеет. <!-- depends: 3.1 | verify: bash helm/amp/tests/render-single-node.sh -->
-- [ ] **4.2** `render-postgresql.sh` T6: ожидания 250 → 100; кейс «HPA on, maxReplicas 10 → предупреждение», «maxReplicas 3 → нет» (3 × 25 < 100). <!-- depends: 3.1 | verify: bash helm/amp/tests/render-postgresql.sh -->
-- [ ] **4.3** Тест init-скрипта: вынести тело проверки так, чтобы его можно было прогнать в `busybox:1.36` на фикстурах (RDB v12, v11, пусто, повторный запуск) — либо обоснованно ограничиться k3d A2 + ручным прогоном 1.8, записав это в evidence. <!-- depends: 3.1 | verify: прогон фикстур или evidence -->
+- [x] **4.1** `helm/amp/tests/render-single-node.sh`: дефолты — нет HPA, `replicas: 1`, сумма requests = 270m/512Mi, нет `t-valkey`/`amp-pvc`, образ `valkey/valkey`, init с переносом; `autoscaling.enabled=true` — HPA без `keep`; `profile=lite` — `amp-pvc` есть; `valkey.image.repository=redis` — init без переноса; `values-small.yaml` рендерится; `values-production.yaml` — HPA 3–20. Мутации: вернуть `keep` / `enabled: true` / убрать условие init — тест краснеет. <!-- depends: 3.1 | verify: bash helm/amp/tests/render-single-node.sh -->
+- [x] **4.2** `render-postgresql.sh` T6: ожидания 250 → 100; кейс «HPA on, maxReplicas 10 → предупреждение», «maxReplicas 3 → нет» (3 × 25 < 100). <!-- depends: 3.1 | verify: bash helm/amp/tests/render-postgresql.sh -->
+- [x] **4.3** Тест init-скрипта: вынести тело проверки так, чтобы его можно было прогнать в `busybox:1.36` на фикстурах (RDB v12, v11, пусто, повторный запуск) — либо обоснованно ограничиться k3d A2 + ручным прогоном 1.8, записав это в evidence. <!-- depends: 3.1 | verify: прогон фикстур или evidence -->
 
-- [ ] **4.4** Из ревью: тест init на фикстуре «после отката» (dump v12 + base v11 → переносится только `dump.rdb`); `valkey.image.tag` пустой → render fails; NOTES — предупреждение о бюджете при `maxReplicas × 25 + 5 > maxConnections`, строка кеша для `cache.enabled=false` и `valkey.replicas: 0`; `redis-prometheusrule` берёт `maxmemory` из values. Убрать из `tests/*.sh` блок `helm dependency build` (зависимостей нет). <!-- depends: 3.1 | verify: bash helm/amp/tests/render-single-node.sh -->
+- [x] **4.4** Из ревью: тест init на фикстуре «после отката» (dump v12 + base v11 → переносится только `dump.rdb`); `valkey.image.tag` пустой → render fails; NOTES — предупреждение о бюджете при `maxReplicas × 25 + 5 > maxConnections`, строка кеша для `cache.enabled=false` и `valkey.replicas: 0`; `redis-prometheusrule` берёт `maxmemory` из values. Убрать из `tests/*.sh` блок `helm dependency build` (зависимостей нет). <!-- depends: 3.1 | verify: bash helm/amp/tests/render-single-node.sh -->
 
 **Phase verification:** все `helm/amp/tests/*.sh` PASS.
+
+Статус (write-tests, 2026-10-19), `evidence/write-tests.txt`:
+- 11/11 `helm/amp/tests/*.sh` PASS.
+- `render-single-node.sh`:
+  - T1–T6 — рендер и NOTES.
+  - T7 (4.3) — data move из отрендеренного `config-init` на 7 фикстурах (заголовки RDB, `sh` с `/data` → temp dir) + повторный запуск. Реальные файлы Redis 7.4 / Valkey 8.1 / 9.0 в busybox — `evidence/init-fixtures-review.txt`; в тест не вынесены, чтобы гейт не зависел от Docker.
+- `render-postgresql.sh` T6: 250 → 100, HPA on → предупреждение, `maxReplicas` 3 → нет, 4 при `maxConnections` 102 → есть (формула `+ 5`).
+- Блок `helm dependency build` убран из всех 10 старых тестов.
+- Мутации (копия чарта на мутацию) убиты 8/8:
+  - `keep` на HPA;
+  - `autoscaling.enabled: true`;
+  - `amp-pvc` без условия;
+  - гейт `contains "valkey"` → `true`;
+  - перенос `appendonlydir` вместе с v12 `dump.rdb`;
+  - фолбэк тега `7-alpine`;
+  - старая формула бюджета;
+  - `384MB` в правиле.
+- Не покрыто тестом: предупреждение NOTES о HPA-сироте (`lookup` пуст при `--dry-run=client`). Проверено `--dry-run=server` на k3d (deep-review R1), на A2 — повторно.
 
 ## Phase 5: testing и приёмка
 

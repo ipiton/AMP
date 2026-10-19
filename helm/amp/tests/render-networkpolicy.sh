@@ -101,11 +101,6 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ ! -d "${CHART_DIR}/charts" ]; then
-  echo "Fetching chart dependencies..."
-  helm dependency build "${CHART_DIR}" >/dev/null
-fi
-
 LABEL="app.kubernetes.io/component: application"
 NO_SOURCES="with no sources would block every alert sender"
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"

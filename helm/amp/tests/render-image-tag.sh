@@ -50,11 +50,6 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ ! -d "${CHART_DIR}/charts" ]; then
-  echo "Fetching chart dependencies..."
-  helm dependency build "${CHART_DIR}" >/dev/null
-fi
-
 APP_VERSION="$(sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "${CHART_DIR}/Chart.yaml")"
 if [ -z "${APP_VERSION}" ]; then
   echo "FAIL: no appVersion in ${CHART_DIR}/Chart.yaml" >&2
