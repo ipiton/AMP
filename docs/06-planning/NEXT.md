@@ -16,6 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **HELM-SINGLE-NODE-DEFAULTS** — дефолты чарта под одну ноду (HPA выкл., requests, PDB, пример `values-small.yaml`, бюджет соединений PG); P1 из BACKLOG § Production Readiness. Взят 2026-10-19, ветка `feature/helm-single-node-defaults`, workspace `tasks/HELM-SINGLE-NODE-DEFAULTS/`.
 
 ## Queue
 
@@ -34,8 +35,6 @@ Queue и WIP — источник правды для выбора задачи.
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `PROD-LLM-ALERT-PATH-ISOLATION`: пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
 ### 2. Operations
-
-- [ ] **HELM-SINGLE-NODE-DEFAULTS** — дефолты чарта под одну ноду (HPA выкл., requests, PDB, пример `values-small.yaml`); первая P1 из BACKLOG, нужна для внедрения на однонодовый k3s. ~0.5–1d.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
