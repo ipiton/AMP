@@ -180,6 +180,7 @@ assert_count "${f}" "maxmemory 192mb" 1 "small: Valkey maxmemory 192mb"
 assert_count "${f}" "of maxmemory (192mb)" 2 "small: alert descriptions show maxmemory from values"
 assert_count "${f}" "max_connections = 60" 1 "small: max_connections 60"
 assert_count "${f}" "max_wal_size = 1GB" 1 "small: max_wal_size 1GB"
+assert_count "${f}" "work_mem = 2MB" 1 "small: work_mem 2MB (memory measured at 56 sorting sessions)"
 
 echo "T6 NOTES:"
 notes notes-default

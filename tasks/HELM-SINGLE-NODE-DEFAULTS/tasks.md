@@ -98,10 +98,24 @@ based_on:
 
 ## Phase 5: testing и приёмка
 
-- [ ] **5.1** Гейты AMP: `make -C go-app quality-gates-fast` (Go не меняется — контрольный), `scripts/release-gate.sh` → `RESULT: PASS`, вывод в `evidence/release-gate.txt`; `git diff --check`. <!-- depends: Phase 4 | verify: grep 'RESULT: PASS' evidence/release-gate.txt -->
-- [ ] **5.2** k3d **A1**: кластер с `--kubelet-arg=kube-reserved=cpu=7` (allocatable ≈ 1 vCPU); чарт `main` → поды `Pending`; ветка → все Ready, `POST /api/v2/alerts` → 200, `redis_up 1`, `pg_up 1`. <!-- verify: evidence/k3d-acceptance.md § A1 -->
-- [ ] **5.3** k3d **A2**: `main` (HPA on) + поток алертов на тестовый webhook → upgrade веткой: лог init с переносом, `ls /data/redis-pre-valkey-*`, Valkey Ready, ingest 200; HPA-сирота → `kubectl delete hpa` → 1 реплика; подсчёт повторных уведомлений (Open Question Spec); лог AMP — кеш подключён или fallback; предупреждение NOTES о HPA-сироте. <!-- verify: evidence/k3d-acceptance.md § A2 -->
-- [ ] **5.4** k3d **A3**: `helm rollback` → Redis 7.4 стартует на данных Valkey. **A3** также: процедура восстановления исходных данных (CHANGELOG 6) на кластере. **A4**: установка `-f values-small.yaml`, всё Ready; `kubectl top` PG при открытом пуле AMP (25 соединений) — в evidence, иначе TECH-DEBT. <!-- verify: evidence/k3d-acceptance.md § A3, A4 -->
+- [x] **5.1** Гейты AMP: `make -C go-app quality-gates-fast` (Go не меняется — контрольный), `scripts/release-gate.sh` → `RESULT: PASS`, вывод в `evidence/release-gate.txt`; `git diff --check`. <!-- depends: Phase 4 | verify: grep 'RESULT: PASS' evidence/release-gate.txt -->
+- [x] **5.2** k3d **A1**: кластер с `--kubelet-arg=kube-reserved=cpu=7` (allocatable ≈ 1 vCPU); чарт `main` → поды `Pending`; ветка → все Ready, `POST /api/v2/alerts` → 200, `redis_up 1`, `pg_up 1`. <!-- verify: evidence/k3d-acceptance.md § A1 -->
+- [x] **5.3** k3d **A2**: `main` (HPA on) + поток алертов на тестовый webhook → upgrade веткой: лог init с переносом, `ls /data/redis-pre-valkey-*`, Valkey Ready, ingest 200; HPA-сирота → `kubectl delete hpa` → 1 реплика; подсчёт повторных уведомлений (Open Question Spec); лог AMP — кеш подключён или fallback; предупреждение NOTES о HPA-сироте. <!-- verify: evidence/k3d-acceptance.md § A2 -->
+- [x] **5.4** k3d **A3**: `helm rollback` → Redis 7.4 стартует на данных Valkey. **A3** также: процедура восстановления исходных данных (CHANGELOG 6) на кластере. **A4**: установка `-f values-small.yaml`, всё Ready; `kubectl top` PG при открытом пуле AMP (25 соединений) — в evidence, иначе TECH-DEBT. <!-- verify: evidence/k3d-acceptance.md § A3, A4 -->
+Статус (testing, 2026-10-19):
+- 5.1:
+  - `quality-gates-fast` PASS.
+  - release-gate, первый прогон: PASS по всем 12 шагам.
+  - Повтор после правок testing (`evidence/release-gate.txt`): всё PASS, кроме `race`. Флейк `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` — читает таймер `group_wait` до записи continuation, тот же класс, что `GROUPING-ORPHAN-ADOPTION-TEST-FLAKY`. Go-код задача не трогала. Перезапуск шага `race`: 7/7 ok; тест отдельно с `-race -count=30`: 30/30. → новый BUG на finalize.
+- 5.2 A1: `main` → `Insufficient cpu`; ветка → Ready, ingest 200, `redis_up 1`, `pg_up 1`.
+- 5.3 A2: перенос данных, NOTES о сироте, ingest 200, объекты сабчарта удалены. Не сделано:
+  - удаление HPA — хук требует подтверждения владельца;
+  - подсчёт повторов — см. Spec Open Questions.
+- 5.4:
+  - A3 — откат и восстановление исходных данных на кластере;
+  - A4 — `values-small` Ready; замер памяти PG → `workMem: 2MB` (deep-review R10).
+- Новое для finalize: TECH-DEBT — liveness-проба PG при насыщении CPU-лимита (A4); BUG — флейк `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` (5.1).
+
 - [ ] **5.5** Удалить k3d-кластеры задачи (`single-node` и приёмочный) — с подтверждения владельца. <!-- verify: k3d cluster list -->
 
 ## Phase 6: finalize

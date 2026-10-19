@@ -39,10 +39,12 @@ postgresql:
     # (the AMP user is the superuser, so superuser_reserved_connections does
     # not reserve anything from it)
     maxConnections: 60
-    # Sized for the 512Mi limit at light load; not measured with all 60
-    # backends busy (work_mem is per operation, /dev/shm counts too)
+    # With 56 sessions sorting at once, anonymous memory reached 469Mi of the
+    # 512Mi limit at work_mem 4MB; 2MB keeps headroom (HELM-SINGLE-NODE-DEFAULTS
+    # evidence/k3d-acceptance.md § A4)
     sharedBuffers: "64MB"
     effectiveCacheSize: "256MB"
+    workMem: "2MB"
     # The defaults (1GB/4GB) would take most of the 5Gi volume
     minWalSize: "256MB"
     maxWalSize: "1GB"

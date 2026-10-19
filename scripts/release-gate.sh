@@ -325,7 +325,7 @@ run_step "test" "go test ./... -count=1 (go-app)" step_test
 run_step "futureparity" "build+test, futureparity tag, cmd/server" step_futureparity
 run_step "race" "go test -race, publishing/grouping/silencing/templating" step_race
 
-run_step "helm-deps" "helm repo add (Chart.lock) + dependency build" step_helm_deps
+run_step "helm-deps" "chart dependencies (Chart.lock, no stale charts/)" step_helm_deps
 run_step "helm-dev" "lint + template, values-dev.yaml" step_helm_values values-dev.yaml
 run_step "helm-production" "lint + template, values-production.yaml" step_helm_values values-production.yaml
 run_step "helm-small" "lint + template, values-small.yaml" step_helm_values values-small.yaml

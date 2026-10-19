@@ -1,0 +1,1716 @@
+[release-gate] ==> build
+[release-gate] ==> lint
+0 issues.
+[release-gate] ==> test
+ok      github.com/ipiton/AMP/cmd/config-reloader       0.996s
+ok      github.com/ipiton/AMP/cmd/server        0.950s
+ok      github.com/ipiton/AMP/cmd/server/handlers       1.387s
+?       github.com/ipiton/AMP/internal/alertmanager/config      [no test files]
+ok      github.com/ipiton/AMP/internal/application      17.909s
+ok      github.com/ipiton/AMP/internal/application/handlers     2.097s
+ok      github.com/ipiton/AMP/internal/buildinfo        2.470s
+ok      github.com/ipiton/AMP/internal/business/publishing      32.798s
+ok      github.com/ipiton/AMP/internal/business/routing 3.303s
+ok      github.com/ipiton/AMP/internal/business/silencing       4.779s
+?       github.com/ipiton/AMP/internal/business/template        [no test files]
+ok      github.com/ipiton/AMP/internal/business/templating      4.559s
+ok      github.com/ipiton/AMP/internal/config   4.728s
+ok      github.com/ipiton/AMP/internal/core     3.668s
+ok      github.com/ipiton/AMP/internal/core/alertconv   3.219s
+?       github.com/ipiton/AMP/internal/core/domain      [no test files]
+ok      github.com/ipiton/AMP/internal/core/investigation       2.814s
+ok      github.com/ipiton/AMP/internal/core/investigation/runbook       1.621s
+?       github.com/ipiton/AMP/internal/core/resilience  [no test files]
+ok      github.com/ipiton/AMP/internal/core/services    2.172s
+ok      github.com/ipiton/AMP/internal/core/silencing   2.112s
+ok      github.com/ipiton/AMP/internal/database 9.915s
+ok      github.com/ipiton/AMP/internal/database/postgres        16.166s
+ok      github.com/ipiton/AMP/internal/infrastructure   2.307s
+ok      github.com/ipiton/AMP/internal/infrastructure/cache     2.456s
+ok      github.com/ipiton/AMP/internal/infrastructure/cluster   2.210s
+ok      github.com/ipiton/AMP/internal/infrastructure/grouping  13.142s
+ok      github.com/ipiton/AMP/internal/infrastructure/inhibition        9.587s
+ok      github.com/ipiton/AMP/internal/infrastructure/investigation     1.219s
+ok      github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks    0.396s
+ok      github.com/ipiton/AMP/internal/infrastructure/investigation/tools       0.701s
+ok      github.com/ipiton/AMP/internal/infrastructure/k8s       2.270s
+ok      github.com/ipiton/AMP/internal/infrastructure/llm       0.498s
+ok      github.com/ipiton/AMP/internal/infrastructure/lock      3.869s
+ok      github.com/ipiton/AMP/internal/infrastructure/publishing        29.368s
+ok      github.com/ipiton/AMP/internal/infrastructure/repository        30.047s
+ok      github.com/ipiton/AMP/internal/infrastructure/routing   0.768s
+ok      github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval      0.799s
+ok      github.com/ipiton/AMP/internal/infrastructure/silencing 0.814s
+ok      github.com/ipiton/AMP/internal/infrastructure/snapshot  1.236s
+ok      github.com/ipiton/AMP/internal/infrastructure/storage/memory    0.847s
+?       github.com/ipiton/AMP/internal/infrastructure/template  [no test files]
+ok      github.com/ipiton/AMP/internal/infrastructure/webhook   0.440s
+ok      github.com/ipiton/AMP/internal/notification/template    0.783s
+ok      github.com/ipiton/AMP/internal/notification/template/defaults   0.834s
+ok      github.com/ipiton/AMP/internal/notification/url 1.035s
+ok      github.com/ipiton/AMP/internal/realtime 1.996s
+?       github.com/ipiton/AMP/internal/storage  [no test files]
+ok      github.com/ipiton/AMP/internal/ui       1.221s
+?       github.com/ipiton/AMP/pkg/aiclassifier  [no test files]
+ok      github.com/ipiton/AMP/pkg/configvalidator       0.657s
+ok      github.com/ipiton/AMP/pkg/configvalidator/matcher       0.861s
+?       github.com/ipiton/AMP/pkg/configvalidator/parser        [no test files]
+?       github.com/ipiton/AMP/pkg/configvalidator/types [no test files]
+ok      github.com/ipiton/AMP/pkg/configvalidator/validators    1.027s
+ok      github.com/ipiton/AMP/pkg/httperror     1.162s
+ok      github.com/ipiton/AMP/pkg/logger        1.316s
+ok      github.com/ipiton/AMP/pkg/metrics       0.420s
+ok      github.com/ipiton/AMP/pkg/metrics/v2    0.918s
+ok      github.com/ipiton/AMP/pkg/middleware    3.125s
+ok      github.com/ipiton/AMP/pkg/retry 1.188s
+ok      github.com/ipiton/AMP/pkg/telemetry     1.275s
+?       github.com/ipiton/AMP/pkg/templatevalidator     [no test files]
+?       github.com/ipiton/AMP/pkg/templatevalidator/formatters  [no test files]
+ok      github.com/ipiton/AMP/pkg/templatevalidator/fuzzy       0.498s
+?       github.com/ipiton/AMP/pkg/templatevalidator/models      [no test files]
+?       github.com/ipiton/AMP/pkg/templatevalidator/parser      [no test files]
+?       github.com/ipiton/AMP/pkg/templatevalidator/utils       [no test files]
+ok      github.com/ipiton/AMP/pkg/templatevalidator/validators  0.811s
+[release-gate] ==> futureparity
+ok      github.com/ipiton/AMP/cmd/server        1.690s
+ok      github.com/ipiton/AMP/cmd/server/handlers       0.637s
+[release-gate] ==> race
+[release-gate] race-testing 7 package(s): github.com/ipiton/AMP/internal/business/publishing github.com/ipiton/AMP/internal/business/silencing github.com/ipiton/AMP/internal/business/templating github.com/ipiton/AMP/internal/core/silencing github.com/ipiton/AMP/internal/infrastructure/grouping github.com/ipiton/AMP/internal/infrastructure/publishing github.com/ipiton/AMP/internal/infrastructure/silencing
+ok      github.com/ipiton/AMP/internal/business/publishing      32.799s
+ok      github.com/ipiton/AMP/internal/business/silencing       2.509s
+ok      github.com/ipiton/AMP/internal/business/templating      4.898s
+ok      github.com/ipiton/AMP/internal/core/silencing   3.579s
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53573 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53575 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53577 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53579 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53581 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53583 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53585 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53587 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53589 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53591 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53593 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53595 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53597 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53599 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:40 INFO Restoring groups from storage...
+2026/10/19 13:24:40 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:40 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:40 INFO created new alert group group_key="receiver=default/alertname=HighCPU" alert=HighCPU fingerprint=fp-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:40 INFO target notification partially delivered; only the remaining alerts will be re-sent next fire group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a delivered_alerts=2 alert_count=3
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=3 target_count=1
+2026/10/19 13:24:40 INFO target notification narrowed to the alerts it has not yet accepted (per-alert retry) group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a remaining=1 alert_count=3
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=3 target_count=1
+2026/10/19 13:24:40 INFO target notification partially delivered; only the remaining alerts will be re-sent next fire group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a delivered_alerts=2 alert_count=3
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=3 target_count=1
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53601 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53601 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53604 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:40 INFO Restoring groups from storage...
+2026/10/19 13:24:40 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:40 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:40 INFO created new alert group group_key="receiver=default/alertname=HighCPU" alert=HighCPU fingerprint=fp-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:40 INFO target notification partially delivered; only the remaining alerts will be re-sent next fire group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a delivered_alerts=4 alert_count=5
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=5 target_count=1
+2026/10/19 13:24:40 INFO target notification narrowed to the alerts it has not yet accepted (per-alert retry) group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a remaining=1 alert_count=5
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53606 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:40 INFO Restoring groups from storage...
+2026/10/19 13:24:40 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:40 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:40 INFO created new alert group group_key="receiver=default/alertname=HighCPU" alert=HighCPU fingerprint=fp-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53608 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:40 INFO Restoring groups from storage...
+2026/10/19 13:24:40 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:40 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:40 INFO created new alert group group_key="receiver=default/alertname=HighCPU" alert=HighCPU fingerprint=fp-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53610 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:40 INFO Restoring groups from storage...
+2026/10/19 13:24:40 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:40 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:40 INFO created new alert group group_key="receiver=default/alertname=HighCPU" alert=HighCPU fingerprint=fp-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:40 INFO target notification partially delivered; only the remaining alerts will be re-sent next fire group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a delivered_alerts=2 alert_count=3
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=3 target_count=1
+2026/10/19 13:24:40 INFO target notification narrowed to the alerts it has not yet accepted (per-alert retry) group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a remaining=2 alert_count=3
+2026/10/19 13:24:40 INFO target notification partially delivered; only the remaining alerts will be re-sent next fire group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a delivered_alerts=1 alert_count=3
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=3 target_count=1
+2026/10/19 13:24:40 INFO target notification narrowed to the alerts it has not yet accepted (per-alert retry) group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a remaining=2 alert_count=3
+2026/10/19 13:24:40 INFO target notification partially delivered; only the remaining alerts will be re-sent next fire group_key="receiver=default/alertname=HighCPU" receiver=default target=target-a delivered_alerts=1 alert_count=3
+2026/10/19 13:24:40 ERROR failed to publish group notification to any target group_key="receiver=default/alertname=HighCPU" receiver=default alert_count=3 target_count=1
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:40 INFO Connected to Redis addr=127.0.0.1:53612 db=0
+2026/10/19 13:24:40 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:40 INFO Closing Redis cache connection
+2026/10/19 13:24:40 INFO Redis cache connection closed
+2026/10/19 13:24:41 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:41 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:41 INFO Shutting down timer manager
+2026/10/19 13:24:41 INFO Timer manager shutdown completed cancelled_timers=0 duration=27292
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO group_wait timer expired, sending first notification group_key="receiver=default/alertname=NilMetaAlert" alert_count=1
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO repeat_interval timer expired, sending reminder notification group_key="receiver=default/alertname=NilMetaAlert" alert_count=1
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU-1 fingerprint=fp_HighCPU-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU-1 fingerprint=fp_HighCPU-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO deleted empty alert group group_key="alertname=HighCPU"
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=DiskFull" alert=DiskFull fingerprint=fp_DiskFull timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=2 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Firing" alert=Firing fingerprint=fp_Firing timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Resolved" alert=Resolved fingerprint=fp_Resolved timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=2 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x00" alert="Alert\x00" fingerprint="fp_Alert\x00" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x01" alert="Alert\x01" fingerprint="fp_Alert\x01" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x02" alert="Alert\x02" fingerprint="fp_Alert\x02" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x03" alert="Alert\x03" fingerprint="fp_Alert\x03" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x04" alert="Alert\x04" fingerprint="fp_Alert\x04" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=5 duration_ms=0
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=5 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=HighCPU" alert=HighCPU fingerprint=fp_HighCPU timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Expired" alert=Expired fingerprint=fp_Expired timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:42 INFO cleaned up expired groups deleted_count=1 max_age=1h0m0s duration=15.25µs
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Stale" alert=Stale fingerprint=fp_Stale timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:42 INFO cleaned up expired groups deleted_count=1 max_age=1h0m0s duration=14µs
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Fresh" alert=Fresh fingerprint=fp_Fresh timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:42 INFO cleaned up expired groups deleted_count=0 max_age=1h0m0s duration=10.667µs
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Test" alert=Test-1 fingerprint=fp_Test-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Test" alert=Test-1 fingerprint=fp_Test-1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Test" alert=Firing fingerprint=fp_Firing timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x00" alert="Alert\x00" fingerprint="fp_Alert\x00" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x01" alert="Alert\x01" fingerprint="fp_Alert\x01" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="group_\x02" alert="Alert\x02" fingerprint="fp_Alert\x02" timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=3 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=Test" alert=Test fingerprint=fp_Test timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO deleted empty alert group group_key="alertname=Test"
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings="&{GroupWait:20ms GroupInterval:1h0m0s RepeatInterval:1h0m0s}" time_interval_names=<nil>
+2026/10/19 13:24:42 INFO group_wait timer expired, sending first notification group_key="receiver=default/alertname=TestAlert" alert_count=1
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A1 fingerprint=fp_A1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO group_wait timer expired, sending first notification group_key="alertname=TestAlert" alert_count=1
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=TestAlert" alert=B fingerprint=fp_B timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="alertname=TestAlert" alert=C fingerprint=fp_C timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO repeat_interval timer expired, sending reminder notification group_key="alertname=TestAlert" alert_count=1
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO repeat_interval timer expired, sending reminder notification group_key=nonexistent-group alert_count=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO registered timer expiration callbacks
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=Chain" alert=Chain fingerprint=fp_Chain timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO group_wait timer expired, sending first notification group_key="receiver=default/alertname=TestAlert" alert_count=2
+2026/10/19 13:24:42 INFO group_wait timer expired, sending first notification group_key="receiver=default/alertname=Chain" alert_count=1
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53642 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=DegradedAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 WARN group notification not delivered (publisher confirmed no delivery); dedup log deliberately NOT updated group_key="receiver=default/alertname=DegradedAlert" receiver=default alert_count=1 reason="group notification not delivered: publisher confirmed no delivery (metrics-only/degraded mode): publishing disabled"
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53644 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53644 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=FailoverAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=FailoverAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 WARN group notification not delivered (publisher confirmed no delivery); dedup log deliberately NOT updated group_key="receiver=default/alertname=FailoverAlert" receiver=default alert_count=1 reason="group notification not delivered: publisher confirmed no delivery (metrics-only/degraded mode): publishing disabled"
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53647 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Shutting down timer manager
+2026/10/19 13:24:42 INFO Timer manager shutdown completed cancelled_timers=0 duration=10458
+2026/10/19 13:24:42 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=7s
+2026/10/19 13:24:42 INFO Shutting down timer manager
+2026/10/19 13:24:42 INFO Timer manager shutdown completed cancelled_timers=0 duration=9125
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A1 fingerprint=fp_A1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 WARN inhibition check failed at send time, keeping alert group_key="receiver=default/alertname=TestAlert" fingerprint=fp_A error="inhibition backend down"
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A1 fingerprint=fp_A1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A1 fingerprint=fp_A1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 ERROR failed to publish group notification group_key="receiver=default/alertname=TestAlert" receiver=default alert_count=1 error="simulated failure: metrics-only mode or partial target failure"
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 WARN group notification partially delivered; targets that failed will be retried on the next scheduled fire group_key="receiver=default/alertname=TestAlert" receiver=default alert_count=1 target_count=2
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=ResolvingAlert" alert=R1 fingerprint=fp_R1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 WARN group notification partially delivered; targets that failed will be retried on the next scheduled fire group_key="receiver=default/alertname=ResolvingAlert" receiver=default alert_count=1 target_count=2
+2026/10/19 13:24:42 INFO deleted empty alert group group_key="receiver=default/alertname=ResolvingAlert"
+2026/10/19 13:24:42 INFO pruned resolved alerts after group flush (upstream aggrGroup.flush semantics) group_key="receiver=default/alertname=ResolvingAlert" pruned=1
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=HighCPU/cluster=prod" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/no-group-by" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=team.dba/alertname=ExoticReceiverAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53651 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53651 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53654 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:42 INFO Restoring groups from storage...
+2026/10/19 13:24:42 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:42 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:42 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:42 ERROR nflog publish-claim check failed, proceeding fail-open (duplicate-across-replicas risk accepted) group_key="receiver=default/alertname=TestAlert" receiver=default error="nflog claim setnx receiver=default/alertname=TestAlert: dial tcp 127.0.0.1:53654: connect: connection refused"
+2026/10/19 13:24:42 ERROR nflog duplicate check failed for target, proceeding fail-open (duplicate-across-replicas risk accepted) group_key="receiver=default/alertname=TestAlert" receiver=default target=mock error="nflog get receiver=default/alertname=TestAlert/mock: dial tcp 127.0.0.1:53654: connect: connection refused"
+2026/10/19 13:24:42 ERROR failed to record nflog sent entry for target (duplicate risk for this target on next fire) group_key="receiver=default/alertname=TestAlert" receiver=default target=mock error="nflog set receiver=default/alertname=TestAlert/mock: dial tcp 127.0.0.1:53654: connect: connection refused"
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53696 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53698 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53698 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53701 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53703 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53705 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53707 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53709 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53711 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53713 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53715 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53717 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53717 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53720 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53722 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53724 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53730 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53736 db=0
+2026/10/19 13:24:42 INFO Initialized Redis notification log (nflog)
+2026/10/19 13:24:42 INFO Closing Redis cache connection
+2026/10/19 13:24:42 INFO Redis cache connection closed
+2026/10/19 13:24:42 INFO Connected to Redis addr=127.0.0.1:53744 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53752 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53754 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53756 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53758 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53760 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53762 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53764 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53766 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53768 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53770 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53772 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53774 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53776 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53778 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53780 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53782 db=0
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Restoring groups from storage...
+2026/10/19 13:24:43 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:43 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=ResolvingAlert" alert=R1 fingerprint=fp_R1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 INFO deleted empty alert group group_key="receiver=default/alertname=ResolvingAlert"
+2026/10/19 13:24:43 INFO pruned resolved alerts after group flush (upstream aggrGroup.flush semantics) group_key="receiver=default/alertname=ResolvingAlert" pruned=1
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=ResolvingAlert" alert=R1 fingerprint=fp_R1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Restoring groups from storage...
+2026/10/19 13:24:43 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:43 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=MixedAlert" alert=M1 fingerprint=fp_M1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 INFO pruned resolved alerts after group flush (upstream aggrGroup.flush semantics) group_key="receiver=default/alertname=MixedAlert" pruned=1
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Restoring groups from storage...
+2026/10/19 13:24:43 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:43 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=SuppressedAlert" alert=S1 fingerprint=fp_S1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:43 INFO registered timer expiration callbacks
+2026/10/19 13:24:43 INFO Restoring groups from storage...
+2026/10/19 13:24:43 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:43 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=TerminalAlert" alert=T1 fingerprint=fp_T1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 INFO repeat_interval timer expired, sending reminder notification group_key="receiver=default/alertname=TerminalAlert" alert_count=1
+2026/10/19 13:24:43 INFO deleted empty alert group group_key="receiver=default/alertname=TerminalAlert"
+2026/10/19 13:24:43 INFO Cancelled timer group_key="receiver=default/alertname=TerminalAlert" timer_type=group_wait latency=6209
+2026/10/19 13:24:43 INFO pruned resolved alerts after group flush (upstream aggrGroup.flush semantics) group_key="receiver=default/alertname=TerminalAlert" pruned=1
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Restoring groups from storage...
+2026/10/19 13:24:43 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:43 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=TransientProbe" alert=P1 fingerprint=fp_P1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 WARN could not confirm group still exists after publishing; assuming it does and continuing the timer chain group_key="receiver=default/alertname=TransientProbe" error="redis: i/o timeout"
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:43 INFO registered timer expiration callbacks
+2026/10/19 13:24:43 INFO Restoring groups from storage...
+2026/10/19 13:24:43 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:43 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:43 INFO created new alert group group_key="receiver=default/alertname=ChainSurvives" alert=C1 fingerprint=fp_C1 timings=<nil> time_interval_names=<nil>
+2026/10/19 13:24:43 WARN could not confirm group still exists after publishing; assuming it does and continuing the timer chain group_key="receiver=default/alertname=ChainSurvives" error="redis: i/o timeout"
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53784 db=0
+2026/10/19 13:24:43 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:43 INFO Stopped storage manager
+2026/10/19 13:24:43 INFO Closing Redis cache connection
+2026/10/19 13:24:43 INFO Redis cache connection closed
+2026/10/19 13:24:43 INFO Connected to Redis addr=127.0.0.1:53786 db=0
+2026/10/19 13:24:43 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:43 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:43 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:43 ERROR Failed to get group for timer expiration group_key="receiver=default/alertname=ChainSurvives" error="redis: i/o timeout"
+2026/10/19 13:24:43 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53786: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:44 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:44 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:44 INFO Stopped storage manager
+2026/10/19 13:24:44 INFO Closing Redis cache connection
+2026/10/19 13:24:44 INFO Redis cache connection closed
+2026/10/19 13:24:44 INFO Connected to Redis addr=127.0.0.1:53829 db=0
+2026/10/19 13:24:44 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:44 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:44 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:44 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53829: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:45 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:45 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:45 INFO Stopped storage manager
+2026/10/19 13:24:45 INFO Closing Redis cache connection
+2026/10/19 13:24:45 INFO Redis cache connection closed
+2026/10/19 13:24:45 INFO Connected to Redis addr=127.0.0.1:53878 db=0
+2026/10/19 13:24:45 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:45 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:45 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:45 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: redis: client is closed" backend=memory consecutive_failures=1
+2026/10/19 13:24:45 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53878: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:46 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:46 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:46 INFO Stopped storage manager
+2026/10/19 13:24:46 INFO Closing Redis cache connection
+2026/10/19 13:24:46 INFO Redis cache connection closed
+2026/10/19 13:24:46 INFO Connected to Redis addr=127.0.0.1:53888 db=0
+2026/10/19 13:24:46 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:46 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:46 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:46 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53888: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:47 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:47 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:47 INFO Stopped storage manager
+2026/10/19 13:24:47 INFO Closing Redis cache connection
+2026/10/19 13:24:47 INFO Redis cache connection closed
+2026/10/19 13:24:47 INFO Connected to Redis addr=127.0.0.1:53898 db=0
+2026/10/19 13:24:47 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=1h0m0s degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:47 ERROR Failed to store group group_key=per-call-fallback error="dial tcp 127.0.0.1:53898: connect: connection refused"
+2026/10/19 13:24:47 WARN Primary storage Store failed with a connectivity error, falling back to memory group_key=per-call-fallback error="storage error during store: redis transaction for per-call-fallback: dial tcp 127.0.0.1:53898: connect: connection refused"
+2026/10/19 13:24:47 INFO Stopped storage manager
+2026/10/19 13:24:47 INFO Closing Redis cache connection
+2026/10/19 13:24:47 INFO Redis cache connection closed
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=10ms degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:47 INFO Stopped storage manager
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=10ms degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:47 WARN Primary storage unhealthy for consecutive probes, switching to fallback error=down backend=memory consecutive_failures=3
+2026/10/19 13:24:47 INFO Stopped storage manager
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:47 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=10ms degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:48 INFO Stopped storage manager
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=10ms degrade_threshold=1 recover_threshold=2 min_hold_duration=300ms
+2026/10/19 13:24:48 WARN Primary storage unhealthy for consecutive probes, switching to fallback error=down backend=memory consecutive_failures=1
+2026/10/19 13:24:48 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:48 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=30
+2026/10/19 13:24:48 INFO Stopped storage manager
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=1h0m0s degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:48 INFO Stopped storage manager
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=1h0m0s degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:48 WARN Primary storage Store failed with a connectivity error, falling back to memory group_key=g1 error="redis transaction for g1: dial tcp 127.0.0.1:6379: connect: connection refused"
+2026/10/19 13:24:48 INFO Stopped storage manager
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=1h0m0s degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:48 INFO Stopped storage manager
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=1h0m0s degrade_threshold=3 recover_threshold=3 min_hold_duration=30s
+2026/10/19 13:24:48 WARN Primary storage Store failed with a connectivity error, falling back to memory group_key=g1 error="redis call: context deadline exceeded"
+2026/10/19 13:24:48 INFO Stopped storage manager
+2026/10/19 13:24:48 INFO Connected to Redis addr=127.0.0.1:53907 db=0
+2026/10/19 13:24:48 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:48 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:48 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:48 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53907: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:49 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:49 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:49 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53907: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:50 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:50 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:50 INFO Stopped storage manager
+2026/10/19 13:24:50 INFO Closing Redis cache connection
+2026/10/19 13:24:50 INFO Redis cache connection closed
+2026/10/19 13:24:50 INFO Connected to Redis addr=127.0.0.1:53933 db=0
+2026/10/19 13:24:50 INFO Initialized Redis group storage index_key=group:index
+2026/10/19 13:24:50 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:50 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=20ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:50 WARN Primary storage unhealthy for consecutive probes, switching to fallback error="redis ping failed: dial tcp 127.0.0.1:53933: connect: connection refused" backend=memory consecutive_failures=1
+2026/10/19 13:24:51 INFO Loaded all groups from memory count=1 duration_ms=0
+2026/10/19 13:24:51 INFO Primary storage recovered and reconciled, switching back from fallback backend=redis consecutive_successes=1
+2026/10/19 13:24:51 INFO Stopped storage manager
+2026/10/19 13:24:51 INFO Closing Redis cache connection
+2026/10/19 13:24:51 INFO Redis cache connection closed
+2026/10/19 13:24:51 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:51 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:51 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=10ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:51 WARN Primary storage unhealthy for consecutive probes, switching to fallback error=down backend=memory consecutive_failures=1
+2026/10/19 13:24:51 WARN Primary storage recovered but write-through reconciliation failed, staying on fallback error="load fallback groups for write-through: simulated fallback LoadAll failure"
+2026/10/19 13:24:51 INFO Stopped storage manager
+2026/10/19 13:24:51 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:51 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:51 INFO Initialized storage manager with automatic fallback/recovery initial_storage=redis health_check_interval=10ms degrade_threshold=1 recover_threshold=1 min_hold_duration=1ms
+2026/10/19 13:24:51 WARN Primary storage unhealthy for consecutive probes, switching to fallback error=down backend=memory consecutive_failures=1
+2026/10/19 13:24:52 INFO Stopped storage manager
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 ERROR mute_time_intervals: interval name undefined in current config at fire time, treating as not matched group_key=gk interval=gone
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 ERROR active_time_intervals: interval name undefined in current config at fire time, treating as not matched group_key=gk interval=gone
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names="&{Mute:[maintenance] Active:[]}"
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names="&{Mute:[maintenance] Active:[]}"
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names="&{Mute:[biz-hours] Active:[]}"
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names="&{Mute:[] Active:[biz-hours]}"
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names="&{Mute:[] Active:[biz-hours]}"
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names="&{Mute:[maintenance] Active:[biz-hours]}"
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Restoring groups from storage...
+2026/10/19 13:24:52 INFO Loaded all groups from memory count=0 duration_ms=0
+2026/10/19 13:24:52 INFO Restored groups from storage groups_count=0 fingerprints_count=0 duration_ms=0
+2026/10/19 13:24:52 INFO created new alert group group_key="receiver=default/alertname=TestAlert" alert=A fingerprint=fp_A timings=<nil> time_interval_names=<nil>
+--- FAIL: TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer (0.03s)
+    timer_continuation_regression_test.go:198:
+                Error Trace:    /Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_continuation_regression_test.go:198
+                Error:          Not equal:
+                                expected: "group_interval"
+                                actual  : "group_wait"
+
+                                Diff:
+                                --- Expected
+                                +++ Actual
+                                @@ -1,2 +1,2 @@
+                                -(grouping.TimerType) (len=14) "group_interval"
+                                +(grouping.TimerType) (len=10) "group_wait"
+
+                Test:           TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=13292
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 ERROR Timer expired but no group manager is configured, skipping callback dispatch group_key=test-group timer_type=group_wait
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=40916
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=1 duration=17125
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=15625
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=13250
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=9084
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=1 duration=22458
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Cancelled timer group_key=test-group timer_type=group_wait latency=4958
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=13042
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=6875
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Cancelled timer group_key=test-group timer_type=group_wait latency=4333
+2026/10/19 13:24:52 INFO Reset timer group_key=test-group timer_type=group_interval reset_count=1 latency=36958
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=1 duration=11041
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=7416
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=1 duration=15625
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=7584
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=3 duration=18125
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=3 duration=17583
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=18250
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 INFO Shutting down timer manager
+2026/10/19 13:24:52 INFO Timer manager shutdown completed cancelled_timers=0 duration=18375
+2026/10/19 13:24:52 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:52 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:52 ERROR Timer callback panicked group_key=test-group timer_type=group_wait callback_index=0 panic="simulated callback panic (task 2.4 fix round 1, Finding 3)" stack="goroutine 6560 [running]:\nruntime/debug.Stack()\n\t/opt/homebrew/Cellar/go/1.27.1/libexec/src/runtime/debug/stack.go:26 +0x6c\ngithub.com/ipiton/AMP/internal/infrastructure/grouping.(*DefaultTimerManager).invokeCallbackSafely.func1()\n\t/Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_manager_impl.go:1180 +0x60\npanic({0x102536418?, 0x10241e710?})\n\t/opt/homebrew/Cellar/go/1.27.1/libexec/src/runtime/panic.go:859 +0x120\ngithub.com/ipiton/AMP/internal/infrastructure/grouping.TestDefaultTimerManager_OnTimerExpired_CallbackPanicIsRecovered.func2({0xc000489818?, 0x100fa6328?}, {0xdf84753c4?, 0xc0006fe780?}, {0x102679380?, 0x1025eaee8?}, 0xc0005678f0?)\n\t/Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_manager_impl_test.go:496 +0x48\ngithub.com/ipiton/AMP/internal/infrastructure/grouping.(*DefaultTimerManager).invokeCallbackSafely(0xc0003823c0, {0x1025ed790, 0xc0005678f0}, 0xc000a029a0, 0x0, {0x101c0a948, 0xa}, {0x101c0a86c, 0xa}, 0xc000174840)\n\t/Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_manager_impl.go:1184 +0xf8\ngithub.com/ipiton/AMP/internal/infrastructure/grouping.(*DefaultTimerManager).onTimerExpired(0xc0003823c0, 0xc00069c120, {0x101c0a948, 0xa}, {0x101c0a86c, 0xa})\n\t/Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_manager_impl.go:1094 +0xc30\ngithub.com/ipiton/AMP/internal/infrastructure/grouping.(*DefaultTimerManager).handleTimerExpiration(0xc0003823c0, 0xc00069c120, 0x0?)\n\t/Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_manager_impl.go:769 +0x2d4\ncreated by github.com/ipiton/AMP/internal/infrastructure/grouping.(*DefaultTimerManager).StartTimer in goroutine 6559\n\t/Users/vit/Documents/Projects/AMP/amp/go-app/internal/infrastructure/grouping/timer_manager_impl.go:499 +0xc40\n"
+2026/10/19 13:24:53 INFO Shutting down timer manager
+2026/10/19 13:24:53 INFO Timer manager shutdown completed cancelled_timers=0 duration=14083
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:53 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:53 INFO Starting timer restoration from storage
+2026/10/19 13:24:53 INFO Restoring timer group_key=active-group timer_type=group_wait remaining=29.99991675s
+2026/10/19 13:24:53 WARN Found missed timer group_key=expired-group timer_type=group_wait should_have_expired_at=2026-10-19T13:24:23.225+02:00 delay=30.000082917s
+2026/10/19 13:24:53 INFO Timer restoration completed restored=1 missed=1 total=2 duration=71208
+2026/10/19 13:24:53 INFO Shutting down timer manager
+2026/10/19 13:24:53 ERROR Failed to get group for timer expiration group_key=expired-group error="context canceled"
+2026/10/19 13:24:53 INFO Timer manager shutdown completed cancelled_timers=1 duration=85708
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:53 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:53 INFO Shutting down timer manager
+2026/10/19 13:24:53 INFO Timer manager shutdown completed cancelled_timers=2 duration=18833
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:53 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:53 INFO Shutting down timer manager
+2026/10/19 13:24:53 INFO Timer manager shutdown completed cancelled_timers=2 duration=21291
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:53 INFO Timer manager initialized instance_id=Vitalys-MacBook-Pro:35511 max_concurrent_timers=10000 reconciliation_interval=0s reconciliation_grace=0s callback_timeout=1m0s
+2026/10/19 13:24:53 INFO Cancelled timer group_key=h timer_type=group_wait latency=20958
+2026/10/19 13:24:53 INFO Cancelled timer group_key=f timer_type=group_wait latency=11709
+2026/10/19 13:24:53 INFO Cancelled timer group_key=j timer_type=group_wait latency=5917
+2026/10/19 13:24:53 INFO Cancelled timer group_key=d timer_type=group_wait latency=6083
+2026/10/19 13:24:53 INFO Cancelled timer group_key=e timer_type=group_wait latency=5750
+2026/10/19 13:24:53 INFO Cancelled timer group_key=g timer_type=group_wait latency=13333
+2026/10/19 13:24:53 INFO Cancelled timer group_key=i timer_type=group_wait latency=4583
+2026/10/19 13:24:53 INFO Cancelled timer group_key=c timer_type=group_wait latency=7125
+2026/10/19 13:24:53 INFO Cancelled timer group_key=b timer_type=group_wait latency=5208
+2026/10/19 13:24:53 INFO Cancelled timer group_key=a timer_type=group_wait latency=5542
+2026/10/19 13:24:53 INFO Shutting down timer manager
+2026/10/19 13:24:53 INFO Timer manager shutdown completed cancelled_timers=0 duration=9708
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+2026/10/19 13:24:53 INFO Initialized in-memory group storage (volatile, no persistence)
+FAIL
+FAIL    github.com/ipiton/AMP/internal/infrastructure/grouping  13.715s
+ok      github.com/ipiton/AMP/internal/infrastructure/publishing        239.708s
+ok      github.com/ipiton/AMP/internal/infrastructure/silencing 4.468s
+FAIL
+[release-gate] ==> helm-deps
+[release-gate] no chart dependencies
+[release-gate] ==> helm-dev
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-production
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-small
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-rbac
+[release-gate] ==> helm-tests
+chart renders with the sidecar OFF (default):
+  ok   no sidecar container
+  ok   no config-file ConfigMap
+  ok   no AMP_CONFIG_FILE env
+  ok   no shared PID namespace
+chart renders with the sidecar ON:
+  ok   sidecar container
+  ok   config-file ConfigMap
+  ok   AMP_CONFIG_FILE env for the app
+  ok   sidecar watches the mounted file
+  ok   reload is verified over loopback
+  ok   sidecar filesystem is read-only
+  ok   sidecar runs non-root
+  ok   http method needs no shared PID namespace
+signal method requests a shared PID namespace:
+  ok   shared PID namespace
+  ok   signal method
+http method never grants a shared PID namespace, even if asked:
+  ok   no shared PID namespace for method: http
+production values render the config file but NOT the sidecar:
+  ok   config file rendered in production
+  ok   AMP_CONFIG_FILE set in production
+  ok   sidecar NOT enabled while its image is unpublished
+misconfigurations are refused at render time:
+  ok   sidecar without a config file
+  ok   config file without content
+  ok   signal method without a shared PID namespace
+
+all assertions passed
+T1 shipped values files:
+  ok   default: all 2 secretKeyRef targets exist
+  ok   dev: all 2 secretKeyRef targets exist
+  ok   production: all 3 secretKeyRef targets exist
+  ok   default: LLM is off
+  ok   dev: LLM is off
+  ok   production: LLM is off
+  ok   default: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   default: DATABASE_SSL_MODE is disable
+  ok   dev: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   dev: DATABASE_SSL_MODE is disable
+  ok   production: no insecure-SSL flag for the external database
+  ok   production: DATABASE_SSL_MODE is require
+  ok   default: no hard-coded Deployment revision annotation
+  ok   dev: no hard-coded Deployment revision annotation
+  ok   production: no hard-coded Deployment revision annotation
+T2-T4 flag stays off where it does not belong:
+  ok   ssl-on: no flag when PostgreSQL TLS is on
+  ok   external-db: all 2 secretKeyRef targets exist
+  ok   external-db: no flag without the bundled PostgreSQL
+  ok   lite: no flag in the lite profile
+T5 LLM on without a key fails the render:
+  ok   llm-nokey: render fails naming llm.apiKey
+T6 LLM on with a key source renders:
+  ok   llm-key: all 3 secretKeyRef targets exist
+  ok   llm-key: Deployment reads llm-api-key
+  ok   llm-eso: ExternalSecret supplies llm-api-key
+
+all assertions passed
+T-ext-1 external database env:
+  ok   ext: renders
+  ok   ext: DATABASE_HOST
+  ok   ext: DATABASE_PORT defaults to 5432
+  ok   ext: DATABASE_DATABASE
+  ok   ext: DATABASE_USERNAME
+  ok   ext: DATABASE_SSL_MODE defaults to require
+  ok   ext: password from the operator's Secret
+  ok   ext: default Secret key is password
+  ok   ext: one DATABASE_PASSWORD
+  ok   ext: no filesystem storage path
+  ok   ext: no bundled PostgreSQL
+  ok   ext: no bundled PostgreSQL Secret
+T-ext-2 overrides:
+  ok   ext-custom: renders
+  ok   ext-custom: port
+  ok   ext-custom: sslMode
+  ok   ext-custom: Secret key
+  ok   ext-port-string: renders
+  ok   ext-port-string: port given as a string
+T-ext-3 sslMode: the four values AMP accepts render, others fail:
+  ok   ssl-disable: renders
+  ok   ssl-disable: DATABASE_SSL_MODE
+  ok   ssl-require: renders
+  ok   ssl-require: DATABASE_SSL_MODE
+  ok   ssl-verify-ca: renders
+  ok   ssl-verify-ca: DATABASE_SSL_MODE
+  ok   ssl-verify-full: renders
+  ok   ssl-verify-full: DATABASE_SSL_MODE
+  ok   ssl-allow: render fails with 'externalDatabase.sslMode "allow" is invalid'
+  ok   ssl-prefer: render fails with 'externalDatabase.sslMode "prefer" is invalid'
+  ok   ssl-bogus: render fails with 'externalDatabase.sslMode "bogus" is invalid'
+T-ext-4 no insecure-SSL flag for an external database, whatever sslMode:
+  ok   ssl-disable: no insecure-SSL flag
+  ok   ssl-require: no insecure-SSL flag
+  ok   ssl-verify-ca: no insecure-SSL flag
+  ok   ssl-verify-full: no insecure-SSL flag
+  ok   ext-pg-ssl-off: renders
+  ok   ext-pg-ssl-off: bundled ssl setting does not leak
+T-ext-5 host without its companions fails:
+  ok   no-secret: render fails with 'externalDatabase.existingSecret'
+  ok   no-database: render fails with 'externalDatabase.database is required'
+  ok   no-username: render fails with 'externalDatabase.username is required'
+T-ext-6 both databases at once fail:
+  ok   both: render fails with 'externalDatabase.host is set while postgresql.enabled=true'
+T-ext-7 no database anywhere fails; the configFile fallback is parsed as YAML:
+  ok   no-db: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-block: renders
+  ok   cfg-flow: renders
+  ok   cfg-quoted: renders
+  ok   cfg-nested: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-null: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-empty: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-no-db: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-invalid: render fails with 'configFile.content is not valid YAML'
+  ok   cfg-disabled: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-and-ext: renders
+  ok   cfg-and-ext: externalDatabase wins over configFile (env)
+T-ext-8 bundled PostgreSQL, lite and --reuse-values without the key:
+  ok   bundled: renders
+  ok   bundled: DATABASE_HOST is the bundled Service
+  ok   bundled: insecure-SSL flag still set for the bundled PostgreSQL
+  ok   reuse-no-key: renders
+  ok   reuse-no-key: bundled branch
+  ok   lite: renders
+  ok   lite: externalDatabase ignored, no guards
+T-ext-9 values-production.yaml renders with an external database:
+  ok   production: renders
+  ok   production: no bundled PostgreSQL
+  ok   production: no postgres image
+  ok   production: DATABASE_HOST from externalDatabase
+  ok   production: sslMode require
+  ok   production: no insecure-SSL flag
+T-ext-10 values-production.yaml does not render without it:
+  ok   production-no-db: render fails with 'postgresql.enabled=false but no database is configured'
+
+all assertions passed
+defaults: preStop, timeout env and a grace period that fits both
+  ok   preStop sleeps preStopDelay (5)
+  ok   timeout env set
+  ok   timeout env carries timeoutSeconds (30s)
+  ok   grace period 40 >= 5 + 30
+  ok   stale 'no preStop' comment gone
+  ok   no budget warning with defaults
+preStopDelay=0 removes the hook
+  ok   no preStop hook
+  ok   no lifecycle block
+custom values flow through
+  ok   preStop sleeps 10
+  ok   timeout env 45s
+  ok   grace period 60
+  ok   no warning when 60 >= 10 + 45
+an old grace period (30) still renders, with a warning
+  ok   render does not fail
+  ok   budget warning printed
+  ok   warning names the required minimum
+production values
+  ok   preStop in production
+  ok   grace period 40 in production
+
+all assertions passed
+default:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+lite:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+production:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+opt-out:
+  ok   GROUPING_ENABLED is "false"
+  ok   GROUPING_ENABLED is set exactly once
+
+all assertions passed
+Chart appVersion: 0.1.0
+default: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+production: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+lite: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+config-reloader image defaults to appVersion:
+  ok   sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0
+  ok   app container unchanged next to the sidecar
+an explicit image.tag still wins:
+  ok   app container on the pinned tag
+  ok   appVersion not used when pinned
+
+all assertions passed
+defaults render no Ingress:
+  ok   no Ingress by default
+an Ingress without auth is refused:
+  ok   defaults + ingress.enabled (guard not tied to the prod file)
+  ok   values-production.yaml without auth
+  ok   values-production.yaml as shipped
+only a real true waives in-process auth:
+  ok   --set-string ingress.externalAuth=false
+  ok   --set-string ingress.externalAuth=no
+  ok   --set-string ingress.externalAuth="false"
+  ok   --set-string ingress.externalAuth=True
+  ok   --set-string ingress.externalAuth=1
+an Ingress with auth renders:
+  ok   prod + webConfig.existingSecret
+  ok   prod + ingress.externalAuth=true
+  ok   --set-string ingress.externalAuth=true
+chart packaging keeps the helm test hook and drops the render tests:
+  ok   helm test hook still rendered
+  ok   helm test hook packaged
+  ok   render tests not packaged
+
+all assertions passed
+defaults render no AMP NetworkPolicy:
+  ok   no AMP policy by default
+an enabled policy with no effective source is refused:
+  ok   values-production.yaml with no sources
+  ok   defaults + networkPolicy.enabled
+  ok   ingressController only, Ingress off
+production policy (placeholder sender):
+  ok   selects the AMP pods by component
+  ok   alert-senders rule
+  ok   peers rendered as given
+  ok   one rule, http port only
+  ok   no Egress policyType
+  ok   no controller rule with no controller peers
+one rule per role; the controller only with an Ingress:
+  ok   controller peers dropped while ingress.enabled=false
+  ok   metrics-scrapers rule
+  ok   sender + scraper rules, http only
+  ok   controller rule with ingress.enabled
+  ok   controller peers rendered
+  ok   controller + sender rules
+extraIngress is rendered as-is:
+  ok   raw rule rendered
+the component label lives in the pod template only:
+  ok   pod template carries the label
+  ok   Deployment selector found
+  ok   Deployment selector unchanged (immutable)
+  ok   Service selector found
+  ok   Service selector unchanged
+podLabels cannot override the component label:
+  ok   podLabels with app.kubernetes.io/component
+  ok   other podLabels still render
+the Redis NetworkPolicy admits the AMP pods:
+  ok   first Redis rule selects component: application
+  ok   ...on the Redis port
+values without the networkPolicy section (--reuse-values from an old release):
+  ok   renders
+  ok   no AMP policy
+
+all assertions passed
+T1 shipped values: no backup, no PDB, pinned image:
+  ok   default: renders
+  ok   production: renders
+  ok   default: bundled PostgreSQL StatefulSet rendered
+  ok   default: Postgres StatefulSet has replicas: 1
+  ok   default: no Postgres PDB
+  ok   default: no backup CronJob
+  ok   default: no backup PVC
+  ok   default: no WAL archiving settings
+  ok   default: no PostgreSQLBackupOld rule
+  ok   default: no PostgreSQLWALArchivingFailed rule
+  ok   default: StatefulSet and test pod use postgres:16.15
+  ok   default: no other postgres:16* image
+  ok   production: no bundled PostgreSQL (external database)
+  ok   production: no backup CronJob
+  ok   production: no postgres image
+T2 replicas other than 1 fail the render:
+  ok   replicas-2: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-0: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-1-string: renders
+T3 an enabled backup fails the render, with the --reuse-values hint:
+  ok   backup-enabled: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-enabled-string: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-scalar-true: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults-override: renders
+T4 leftovers of the removed key render:
+  ok   backup-empty: renders
+  ok   backup-null: renders
+  ok   backup-false: renders
+  ok   backup-enabled-false: renders
+  ok   backup-enabled-one: renders
+  ok   backup-enabled-title-case: renders
+T5 guards do not apply without the bundled PostgreSQL:
+  ok   external-db: renders
+  ok   external-db: no bundled PostgreSQL
+  ok   lite: renders
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-hpa: NOTES rendered
+  ok   notes-external: NOTES rendered
+  ok   notes-max-3: NOTES rendered
+  ok   notes-max-4: NOTES rendered
+  ok   notes-default: standard profile not advertised as HA
+  ok   notes-default: bundled PostgreSQL not advertised as HA
+  ok   notes-default: bundled PostgreSQL marked dev/pilot
+  ok   notes-default: no config-not-applied warning
+  ok   notes-default: step 4 expects max_connections 100
+  ok   notes-default: no max_connections OK line
+  ok   notes-hpa: standard profile not advertised as HA
+  ok   notes-hpa: bundled PostgreSQL not advertised as HA
+  ok   notes-hpa: bundled PostgreSQL marked dev/pilot
+  ok   notes-hpa: no config-not-applied warning
+  ok   notes-hpa: step 4 expects max_connections 100
+  ok   notes-hpa: no max_connections OK line
+  ok   notes-default: HPA off, no connection budget warning
+  ok   notes-hpa: connection budget warning at 10 replicas
+  ok   notes-max-3: no connection budget warning
+  ok   notes-max-4: warning counts the exporter (105 > 102)
+  ok   notes-external: external PostgreSQL line
+  ok   notes-external: no bundled PostgreSQL warning
+  ok   notes-external: no bundled PostgreSQL steps
+T7 the server runs with the chart config (PG-CONFIG-FIX):
+  ok   args: config_file
+  ok   args: hba_file
+  ok   no POSTGRES_INITDB_ARGS
+  ok   no postgresql.conf in initdb.d
+  ok   no pg_hba.conf in initdb.d
+  ok   init.sql in initdb.d
+  ok   one /etc/postgresql mount
+  ok   /etc/postgresql is volume custom-config
+  ok   custom-config volume is ConfigMap amp-postgres-config
+  ok   no postgres-config emptyDir
+  ok   no ALTER SYSTEM in init.sql
+  ok   no views in init.sql
+  ok   pg_stat_statements settings in postgresql.conf
+  ok   pg_hba.conf: socket trust, SCRAM on loopback and for the app, reject the rest
+  ok   logging_collector off
+  ok   /dev/shm mounted
+  ok   /dev/shm is a memory emptyDir
+  ok   exporter: DATA_SOURCE_URI
+  ok   exporter: DATA_SOURCE_USER
+  ok   exporter: DATA_SOURCE_PASS
+  ok   exporter: no DATA_SOURCE_NAME
+  ok   exporter: no $(POSTGRES_*) references
+  ok   exporter: database auto-discovery off
+  ok   exporter queries: no tablename column
+  ok   exporter queries: no indexname column
+  ok   rules: no now() (not PromQL)
+  ok   rules: never-autovacuumed tables skipped
+  ok   helm test: checks config_file
+  ok   helm test: checks hba_file
+
+all assertions passed
+default ServiceMonitor:
+  ok   rendered by default
+  ok   selects by component
+  ok   scrapes the http port
+  ok   ...at /metrics
+  ok   default interval
+  ok   default scrape timeout
+  ok   no credentials without web auth
+its selector matches the AMP Service only:
+  ok   selector (3 labels) picks exactly: amp
+  ok   component is what tells the Services apart (7 match without it)
+gated on prometheusEnabled and serviceMonitor.enabled:
+  ok   off with monitoring.prometheusEnabled=false
+  ok   off with serviceMonitor.enabled=false
+  ok   Redis ServiceMonitor unaffected
+web auth needs credentials:
+  ok   webConfig.existingSecret without basicAuth
+  ok   username from the Secret
+  ok   ...default key
+  ok   password from the Secret
+  ok   ...default key
+  ok   custom username key
+  ok   custom password key
+labels and timing:
+  ok   extra labels in metadata
+  ok   interval override
+values without monitoring.serviceMonitor (--reuse-values from an old release):
+  ok   still rendered
+  ok   default interval
+  ok   default scrape timeout
+  ok   ...and the credentials guard still runs
+
+all assertions passed
+T1 defaults fit one node:
+  ok   default: renders
+  ok   default: no HPA
+  ok   default: Deployment has replicas: 1
+  ok   default: requests total 270m/512Mi
+  ok   default: no valkey subchart objects
+  ok   default: no amp-pvc under profile: standard
+  ok   default: cache image valkey/valkey:8.1.10-alpine
+  ok   default: no redis image
+  ok   default: config-init moves Redis >= 7.4 data
+T2 autoscaling on: HPA without keep:
+  ok   hpa: renders
+  ok   hpa: HPA rendered
+  ok   hpa: no helm.sh/resource-policy on the HPA
+T3 lite and production:
+  ok   lite: renders
+  ok   lite: amp-pvc rendered
+  ok   lite: no HPA
+  ok   production: renders
+  ok   production: HPA rendered
+  ok   production: HPA 3-20
+  ok   production: no valkey subchart objects
+  ok   production: no amp-pvc
+T4 cache image:
+  ok   empty-tag: render fails with 'valkey.image.tag is required'
+  ok   own-redis: renders
+  ok   own-redis: image redis:7.4-alpine
+  ok   own-redis: no data move
+T5 values-small.yaml:
+  ok   small: renders
+  ok   small: no HPA
+  ok   small: Valkey maxmemory 192mb
+  ok   small: alert descriptions show maxmemory from values
+  ok   small: max_connections 60
+  ok   small: max_wal_size 1GB
+  ok   small: work_mem 2MB (memory measured at 56 sorting sessions)
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-cache-off: NOTES rendered
+  ok   notes-external-cache: NOTES rendered
+  ok   notes-lite: NOTES rendered
+  ok   notes-default: Valkey cache line
+  ok   notes-default: HPA off line
+  ok   notes-default: AMP resources from values
+  ok   notes-cache-off: cache off line
+  ok   notes-cache-off: no Valkey line
+  ok   notes-external-cache: external cache line
+  ok   notes-lite: resources from values
+T7 config-init data move on fixtures (sh, not busybox):
+  ok   config-init script extracted
+  ok   redis-7.4: moved both
+  ok   redis-7.4: second run moves nothing
+  ok   after-rollback: moved dump
+  ok   after-rollback: second run moves nothing
+  ok   aof-only: moved aof
+  ok   aof-only: second run moves nothing
+  ok   rdb-only: moved dump
+  ok   rdb-only: second run moves nothing
+  ok   valkey-8.1: moved none
+  ok   valkey-8.1: second run moves nothing
+  ok   valkey-9.0: moved none
+  ok   valkey-9.0: second run moves nothing
+  ok   empty: moved none
+  ok   empty: second run moves nothing
+
+all assertions passed
+[release-gate] ==> amtool-compat
+ Image amp-smoke-amp Building
+#1 [internal] load local bake definitions
+#1 reading from stdin 518B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.75kB done
+#2 DONE 0.1s
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.9-alpine
+#3 ...
+
+#4 [auth] library/golang:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#5 [auth] library/alpine:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [internal] load metadata for docker.io/library/alpine:3.24
+#6 ...
+
+#3 [internal] load metadata for docker.io/library/golang:1.26.9-alpine
+#3 DONE 1.3s
+
+#6 [internal] load metadata for docker.io/library/alpine:3.24
+#6 DONE 1.3s
+
+#7 [internal] load .dockerignore
+#7 transferring context: 567B done
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 DONE 0.0s
+
+#9 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#9 resolve docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade 0.1s done
+#9 DONE 0.1s
+
+#10 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#10 resolve docker.io/library/alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.1s done
+#10 DONE 0.1s
+
+#8 [internal] load build context
+#8 transferring context: 71.32kB 0.1s done
+#8 DONE 0.1s
+
+#11 [stage-1 4/5] COPY --from=builder /build/amp /app/
+#11 CACHED
+
+#12 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#12 CACHED
+
+#13 [stage-1 3/5] WORKDIR /app
+#13 CACHED
+
+#14 [builder 3/7] WORKDIR /build
+#14 CACHED
+
+#15 [builder 5/7] RUN go mod download
+#15 CACHED
+
+#16 [builder 6/7] COPY go-app/ ./
+#16 CACHED
+
+#17 [builder 4/7] COPY go-app/go.mod go-app/go.sum ./
+#17 CACHED
+
+#18 [builder 7/7] RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w     -X github.com/ipiton/AMP/internal/buildinfo.Version=dev     -X github.com/ipiton/AMP/internal/buildinfo.Revision=unknown     -X github.com/ipiton/AMP/internal/buildinfo.Branch=unknown     -X github.com/ipiton/AMP/internal/buildinfo.BuildUser=docker     -X github.com/ipiton/AMP/internal/buildinfo.BuildDate=unknown"     -o amp ./cmd/server
+#18 CACHED
+
+#19 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#19 CACHED
+
+#20 [stage-1 5/5] COPY --from=builder /build/migrations /app/migrations
+#20 CACHED
+
+#21 exporting to image
+#21 exporting layers done
+#21 exporting manifest sha256:676be51ffc5170ae2b714215dac9aa4890aa7b9b2691185af0cbd41eba0bc678 done
+#21 exporting config sha256:270d353303f9f3c925ccfdaef4fadef062dee9894c35e2ca3a1803bf3ebee256 done
+#21 exporting attestation manifest sha256:ee637cc73ca12d845ce71e12e796827cec5548fda8a449143d0164accc165727 0.0s done
+#21 exporting manifest list sha256:869715198f03ae76e79bdd4af5e2be527fdcc284bb43c0cfe2e235ff7e6e0f08 0.0s done
+#21 naming to docker.io/library/amp-smoke-amp:latest
+#21 naming to docker.io/library/amp-smoke-amp:latest done
+#21 unpacking to docker.io/library/amp-smoke-amp:latest 0.0s done
+#21 DONE 0.2s
+
+#22 resolving provenance for metadata file
+#22 DONE 0.0s
+ Image amp-smoke-amp Built
+ Network amp-smoke_default Creating
+ Network amp-smoke_default Creating
+ Network amp-smoke_default Created
+ Network amp-smoke_default Created
+ Container amp-smoke-webhook-1 Creating
+ Container amp-smoke-webhook-1 Created
+ Container amp-smoke-amp-1 Creating
+ Container amp-smoke-amp-1 Created
+ Container amp-smoke-webhook-1 Starting
+ Container amp-smoke-webhook-1 Started
+ Container amp-smoke-webhook-1 Waiting
+ Container amp-smoke-webhook-1 Healthy
+ Container amp-smoke-amp-1 Starting
+ Container amp-smoke-amp-1 Started
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+[release-gate]
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   10s      go build ./... (go-app)
+lint             PASS   17s      golangci-lint run (go-app)
+test             PASS   61s      go test ./... -count=1 (go-app)
+futureparity     PASS   15s      build+test, futureparity tag, cmd/server
+race             FAIL   245s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   0s       chart dependencies (Chart.lock, no stale charts/)
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-small       PASS   1s       lint + template, values-small.yaml
+helm-rbac        PASS   0s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   7s       helm/amp/tests/*.sh render tests
+amtool-compat    PASS   21s      real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+
+# 2026-10-19 rerun of step race only (same command as step_race), after the FAIL above:
+# TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer read the group_wait timer before the
+# group_interval continuation was written -- the race of BUGS GROUPING-ORPHAN-ADOPTION-TEST-FLAKY in another test;
+# Go code unchanged by this task; the test alone with -race -count=30: 30/30 ok. First gate run of this task: all PASS.
+ok  	github.com/ipiton/AMP/internal/business/publishing	34.469s
+ok  	github.com/ipiton/AMP/internal/business/silencing	2.904s
+ok  	github.com/ipiton/AMP/internal/business/templating	4.566s
+ok  	github.com/ipiton/AMP/internal/core/silencing	1.541s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	16.277s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	252.015s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	2.360s

@@ -50,7 +50,7 @@ Requests are set from a measurement on one node under light load (`tasks/archive
 | redis-exporter | 10m / 32Mi | 100m / 128Mi |
 | **Total** | **270m / 512Mi** | |
 
-Volumes: PostgreSQL 10Gi, Valkey 5Gi. `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60`, and the volumes to 5Gi / 1Gi. For HA use `values-production.yaml` (HPA 3–20, external PostgreSQL) or set `autoscaling.enabled: true`. The HPA targets are percentages of `resources.requests`, so raise the requests too (with 100m the HPA scales out at ~70m CPU per pod); with the bundled PostgreSQL, raise its connection budget first ([PostgreSQL](#postgresql)).
+Volumes: PostgreSQL 10Gi, Valkey 5Gi. `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60` and `work_mem=2MB`, and the volumes to 5Gi / 1Gi. For HA use `values-production.yaml` (HPA 3–20, external PostgreSQL) or set `autoscaling.enabled: true`. The HPA targets are percentages of `resources.requests`, so raise the requests too (with 100m the HPA scales out at ~70m CPU per pod); with the bundled PostgreSQL, raise its connection budget first ([PostgreSQL](#postgresql)).
 
 ## Deployment Profiles
 

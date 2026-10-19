@@ -352,6 +352,23 @@
 - **Follow-up:** n/a
 - **Resolution:** `e610dc5`
 
+## Testing outcomes (2026-10-19, `evidence/k3d-acceptance.md`)
+
+- **R1** подтверждено:
+  - после upgrade с `main` (A2) HPA-сирота держит Deployment на 2 репликах при `replicas: 1` в рендере;
+  - `helm get notes` печатает предупреждение с `kubectl -n a2 delete hpa amp`.
+- **R2** подтверждено на A1 (свежая установка ветки) и A2: `NOAUTH Authentication required` → in-memory.
+- **R3**: процедура восстановления на кластере вернула ключ Redis 7.4 (`a2key`); ключа, записанного Valkey, нет.
+- **R7**: в A1/A2 AMP стартует раньше PostgreSQL и перезапускается до его готовности (существующее поведение); кеш на дефолтах не используется (R2), поэтому гонка с Valkey здесь не наблюдаема.
+- **R10** закрыт замером, правка в `values-small.yaml`:
+  - Нагрузка: все свободные соединения, каждая сессия сортирует сверх `work_mem`.
+  - `values-small`, `work_mem` 4MB: anon 469Mi из лимита 512Mi.
+  - `work_mem` 2MB: 274Mi.
+  - Дефолты (1Gi, 100 соединений, 4MB): anon 657Mi, пик 828Mi — запас есть, без изменений.
+  - Попутно: при 52 тяжёлых сортировках на CPU-лимите 500m liveness-проба PG не уложилась в таймаут и kubelet перезапустил PostgreSQL (crash recovery, AMP переподключился) → TECH-DEBT на finalize.
+- **R11** подтверждено (A3): после `helm rollback` вернулись `amp-valkey` (`Init:Error`), `amp-pvc` (`Pending`) и HPA; Redis 7.4 загрузил данные Valkey.
+- **R17**: `redis_up 1` с Valkey 8.1.10 (A1).
+
 ## Premises (сводка Reviewer A)
 
 | Посылка | Вердикт |
