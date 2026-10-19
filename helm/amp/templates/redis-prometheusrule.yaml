@@ -43,7 +43,7 @@ spec:
         component: redis
       annotations:
         summary: "Redis memory usage critical (>90%)"
-        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of maxmemory (384MB limit)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of maxmemory ({{ .Values.valkey.settings.maxmemory }})"
         runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-oom"
 
     # CRITICAL ALERT 3: Too Many Connections
@@ -99,7 +99,7 @@ spec:
         component: redis
       annotations:
         summary: "Redis memory usage high (>75%)"
-        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of maxmemory (384MB limit)"
+        description: "Redis instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of maxmemory ({{ .Values.valkey.settings.maxmemory }})"
         runbook_url: "https://docs.alertmanager-plus-plus.io/runbooks/redis-memory"
 
     # WARNING ALERT 7: High Connection Usage

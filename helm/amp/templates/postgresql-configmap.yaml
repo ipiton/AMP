@@ -10,28 +10,29 @@ metadata:
 data:
   postgresql.conf: |
     # =============================================================================
-    # PostgreSQL Production Configuration - HPA Cluster Mode (TN-97 + TN-98)
+    # Bundled PostgreSQL (dev/pilot, ADR-016) for the AMP standard profile
     # =============================================================================
-    # Optimized for: AMP standard profile with HPA (2-10 replicas)
-    # TN-97: Connection pool sizing for cluster mode
+    # Defaults are sized for one node (1 AMP replica, HPA off); values.yaml
+    # postgresql.config/resources carry the budget.
     # TN-98: Production hardening and performance tuning
     # =============================================================================
 
     # -----------------------------------------------------------------------------
-    # Connection Settings (TN-97: CRITICAL for HPA cluster mode)
+    # Connection Settings
     # -----------------------------------------------------------------------------
     listen_addresses = '*'
     port = 5432
-    max_connections = {{ .Values.postgresql.config.maxConnections | default 250 }}
-    # TN-97: Increased from 100 to 250 for HPA cluster mode
-    # Budget: 25 per AMP pod (database.max_connections default) × replicas + exporter
+    max_connections = {{ .Values.postgresql.config.maxConnections | default 100 }}
+    # Budget: 25 per AMP pod (database.max_connections default) × replicas + exporter;
+    # the AMP user is the superuser, so the reserved slots are not held back from it.
+    # Raise it with autoscaling.maxReplicas
     superuser_reserved_connections = {{ .Values.postgresql.config.superuserReservedConnections | default 10 }}
 
     # -----------------------------------------------------------------------------
-    # Memory Settings (tuned for max_connections=250)
+    # Memory Settings (keep within postgresql.resources.limits.memory)
     # -----------------------------------------------------------------------------
-    shared_buffers = {{ .Values.postgresql.config.sharedBuffers | default "256MB" }}
-    effective_cache_size = {{ .Values.postgresql.config.effectiveCacheSize | default "1GB" }}
+    shared_buffers = {{ .Values.postgresql.config.sharedBuffers | default "128MB" }}
+    effective_cache_size = {{ .Values.postgresql.config.effectiveCacheSize | default "512MB" }}
     work_mem = {{ .Values.postgresql.config.workMem | default "4MB" }}
     maintenance_work_mem = {{ .Values.postgresql.config.maintenanceWorkMem | default "64MB" }}
 

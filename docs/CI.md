@@ -37,7 +37,7 @@ Runs on the same pull request cancel each other; runs on `main` do not.
 ./scripts/release-gate.sh
 ```
 
-It prints a PASS/FAIL table per step. It needs Go, `golangci-lint`, `helm`, and Docker (for `amtool-compat`). The Helm dependency step adds the chart repositories listed in `helm/amp/Chart.lock` to a throwaway Helm repository config, so it works on a clean checkout and leaves your `~/.config/helm` untouched.
+It prints a PASS/FAIL table per step. It needs Go, `golangci-lint`, `helm`, and Docker (for `amtool-compat`). The Helm dependency step adds the chart repositories listed in `helm/amp/Chart.lock` to a throwaway Helm repository config, so it works on a clean checkout and leaves your `~/.config/helm` untouched. The chart has no dependencies now: the step fails if `Chart.yaml` declares some without a `Chart.lock`, or if a stale `helm/amp/charts/` is left over (Helm would render it).
 
 The other jobs:
 

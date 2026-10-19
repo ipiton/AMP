@@ -11,7 +11,8 @@ namespace: ""
 # ===============================
 # Profile determines the deployment architecture:
 # - "lite": Single-node, embedded storage (SQLite), memory-only cache, zero external dependencies
-# - "standard": HA-ready, PostgreSQL + Valkey/Redis, distributed cache, 2-10 replicas
+# - "standard": PostgreSQL + Valkey, distributed cache. Defaults fit one node
+#   (1 replica, HPA off); HA is opt-in: autoscaling.enabled or values-production.yaml
 profile: "standard"  # Options: "lite" | "standard"
 
 # ===============================
@@ -61,13 +62,16 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 65534
 
+# Requests are sized for one node: idle/light load measured at ~15m CPU / ~20Mi
+# (tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/idle-top.txt). Limits keep
+# the burst headroom.
 resources:
   limits:
     cpu: 1000m
     memory: 1Gi
   requests:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 100m
+    memory: 128Mi
 
 # ===============================
 # Pod Disruption Budget (app Deployment)
@@ -210,8 +214,14 @@ webConfig:
 # ===============================
 # Horizontal Pod Autoscaler
 # ===============================
+# Off by default: the defaults target one node (replicaCount: 1).
+# values-production.yaml turns it on. The targets are percentages of
+# resources.requests: with the default 100m/128Mi the HPA scales out at ~70m
+# CPU per pod, so raise the requests along with it. With the bundled
+# PostgreSQL, raise postgresql.config.maxConnections for maxReplicas first
+# (NOTES warns).
 autoscaling:
-  enabled: true
+  enabled: false
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
@@ -313,14 +323,16 @@ postgresql:
   # than changed here — a no-default/required key would break the
   # zero-config dev/test install path this default exists for.
   password: "secure_password_123"
-  # Resource limits (TN-98: increased for production)
+  # Sized for config below (max_connections=100, shared_buffers=128MB) on one
+  # node; idle/light load measured at ~40m CPU / ~55Mi. Raise together with
+  # config.maxConnections/sharedBuffers.
   resources:
     limits:
       cpu: 1000m
-      memory: 2Gi  # Increased from 1Gi for max_connections=250
+      memory: 1Gi
     requests:
-      cpu: 500m
-      memory: 1Gi  # Increased from 512Mi
+      cpu: 100m
+      memory: 256Mi
   # Storage configuration
   persistence:
     enabled: true
@@ -338,8 +350,8 @@ postgresql:
         cpu: 100m
         memory: 128Mi
       requests:
-        cpu: 50m
-        memory: 64Mi
+        cpu: 10m
+        memory: 32Mi
 
   # PostgreSQL Monitoring (TN-98: observability)
   monitoring:
@@ -351,16 +363,20 @@ postgresql:
   networkPolicy:
     enabled: false  # Enable in production for network isolation
 
-  # PostgreSQL Configuration (TN-97 + TN-98: optimized for HPA cluster mode)
-  # Connection budget: 25 per AMP pod (database.max_connections default) × replicas + exporter
+  # PostgreSQL Configuration
+  # Connection budget: 25 per AMP pod (database.max_connections default) plus
+  # the exporter. AMP connects as postgresql.username, which is the bootstrap
+  # superuser, so superuserReservedConnections reserves nothing from it: the
+  # whole maxConnections is the budget. 100 covers 3 AMP pods (the default pod,
+  # a rolling-update surge pod and one more). With autoscaling, raise it to at
+  # least maxReplicas × 25 + 5 (and memory with it); NOTES warns when it is short.
   config:
-    # Connection Settings (TN-97: CRITICAL for HPA)
-    maxConnections: 250  # Up from 100 default; see the budget above
+    maxConnections: 100
     superuserReservedConnections: 10
 
-    # Memory Settings (tuned for max_connections=250)
-    sharedBuffers: "256MB"  # 25% of maxConnections
-    effectiveCacheSize: "1GB"  # 50% of total memory
+    # Memory Settings (sized for resources.limits.memory: 1Gi)
+    sharedBuffers: "128MB"
+    effectiveCacheSize: "512MB"
     workMem: "4MB"  # Per-operation memory
     maintenanceWorkMem: "64MB"  # For VACUUM, indexes
 
@@ -449,48 +465,44 @@ cache:
   auth:
     enabled: false
     password: ""
-  # Valkey resource limits
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-    requests:
-      cpu: 250m
-      memory: 256Mi
 
 # ===============================
-# Valkey/Redis StatefulSet Configuration (TN-99)
+# Valkey StatefulSet Configuration (<fullname>-redis)
 # ===============================
-# Valkey is a Redis-compatible cache used by Standard Profile only
-# Connection pool: 50 conns/pod × 10 replicas = 500 connections
-# Valkey maxclients: 10,000 (default) → 5% utilization at max scale ✅
+# The chart's one in-cluster cache, Standard Profile only. Valkey (BSD-3), not
+# Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). AMP pool: 10 conns/pod
+# (redis.pool_size); Valkey maxclients 10,000 (default).
 valkey:
   enabled: true  # Managed by profile in deployment
 
   # Deployment configuration
   replicas: 1  # Expandable to 3 for Sentinel HA in future
 
-  # Container image (Redis or Valkey)
+  # Container image. Valkey 8.1 cannot load data written by Redis >= 7.4
+  # (RDB v12): when repository contains "valkey", the init container moves
+  # such files to /data/redis-pre-valkey-<ts>/ and Valkey starts without them
+  # (CHANGELOG migration notes). A Valkey mirror under another name skips the
+  # move; set repository and tag together.
   image:
-    repository: redis  # Options: "redis" or "valkey/valkey"
-    tag: "7-alpine"
+    repository: valkey/valkey
+    tag: "8.1.10-alpine"
     pullPolicy: IfNotPresent
 
-  # Resource limits (TN-99: production-sized)
+  # Idle/light load measured at ~10m CPU / ~5Mi; the limit bounds maxmemory below.
   resources:
     limits:
       cpu: 500m
       memory: 512Mi
     requests:
-      cpu: 250m
-      memory: 256Mi
+      cpu: 50m
+      memory: 64Mi
 
   # Persistence (TN-99: enabled for durability)
   storage:
     className: ""
     requestedSize: 5Gi
 
-  # Redis/Valkey settings (production-tuned for Standard Profile + HPA)
+  # Valkey settings
   settings:
     maxmemory: 384mb  # 75% of 512Mi limit (leaves headroom for overhead)
     maxmemoryPolicy: allkeys-lru  # Evict least recently used keys
@@ -510,8 +522,8 @@ valkey:
         cpu: 100m
         memory: 128Mi
       requests:
-        cpu: 50m
-        memory: 64Mi
+        cpu: 10m
+        memory: 32Mi
 
   # Password authentication (Secret management)
   password:

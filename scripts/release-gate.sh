@@ -129,10 +129,26 @@ step_race() {
 # helm steps below would otherwise bury under "missing in charts/".
 # The repos go into a throwaway repository config, not the caller's own
 # ~/.config/helm: a local gate run must not edit the developer's repo list.
+# The chart has had no dependencies since HELM-SINGLE-NODE-DEFAULTS (valkey
+# subchart removed). Helm still renders whatever sits in charts/, and that
+# directory is gitignored, so a checkout that once ran `helm dependency build`
+# would bring the old subchart back: fail on it.
 step_helm_deps() {
   if ! command -v helm >/dev/null 2>&1; then
     log "helm not found on PATH"
     return 1
+  fi
+  if [[ ! -f "$HELM_CHART_DIR/Chart.lock" ]]; then
+    if grep -q '^dependencies:' "$HELM_CHART_DIR/Chart.yaml"; then
+      log "Chart.yaml declares dependencies but there is no Chart.lock"
+      return 1
+    fi
+    if [[ -n "$(ls -A "$HELM_CHART_DIR/charts" 2>/dev/null)" ]]; then
+      log "stale $HELM_CHART_DIR/charts/ without dependencies; delete it"
+      return 1
+    fi
+    log "no chart dependencies"
+    return 0
   fi
   local repo_dir rc
   repo_dir=$(mktemp -d) || return 1
@@ -309,9 +325,10 @@ run_step "test" "go test ./... -count=1 (go-app)" step_test
 run_step "futureparity" "build+test, futureparity tag, cmd/server" step_futureparity
 run_step "race" "go test -race, publishing/grouping/silencing/templating" step_race
 
-run_step "helm-deps" "helm repo add (Chart.lock) + dependency build" step_helm_deps
+run_step "helm-deps" "chart dependencies (Chart.lock, no stale charts/)" step_helm_deps
 run_step "helm-dev" "lint + template, values-dev.yaml" step_helm_values values-dev.yaml
 run_step "helm-production" "lint + template, values-production.yaml" step_helm_values values-production.yaml
+run_step "helm-small" "lint + template, values-small.yaml" step_helm_values values-small.yaml
 run_step "helm-rbac" "RBAC scope: namespaced list-secrets only" step_helm_rbac
 run_step "helm-tests" "helm/amp/tests/*.sh render tests" step_helm_tests
 

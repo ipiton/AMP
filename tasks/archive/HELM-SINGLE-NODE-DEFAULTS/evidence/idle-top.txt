@@ -1,0 +1,84 @@
+# Idle/light-load usage, k3d single-node (8 vCPU host), chart main@dbaf049 + valkey/valkey:8.1-alpine, autoscaling off
+# load: loadgen pod, 10 x POST /api/v2/alerts every 15s (all 200); 10 samples x 30s, kubectl top --containers
+# summary: amp 8m avg/14m max, 15Mi avg/21Mi max; postgres 24m/39m, 54/55Mi; pg-exporter 1/2m, 3/6Mi; valkey 9/12m, 5/5Mi; redis-exporter 5/8m, 11/13Mi
+# amp-valkey (subchart) Init:Error throughout, not measured
+
+08:25:13
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 14m          10Mi
+amp-postgres-0         postgres            21m          54Mi
+amp-postgres-0         postgres-exporter   1m           6Mi
+amp-redis-0            redis               8m           4Mi
+amp-redis-0            redis-exporter      8m           9Mi
+08:25:44
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 6m           10Mi
+amp-postgres-0         postgres            25m          55Mi
+amp-postgres-0         postgres-exporter   1m           2Mi
+amp-redis-0            redis               8m           4Mi
+amp-redis-0            redis-exporter      6m           12Mi
+loadgen                loadgen             5m           1Mi
+08:26:14
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 7m           16Mi
+amp-postgres-0         postgres            20m          55Mi
+amp-postgres-0         postgres-exporter   1m           3Mi
+amp-redis-0            redis               9m           5Mi
+amp-redis-0            redis-exporter      7m           9Mi
+loadgen                loadgen             4m           0Mi
+08:26:44
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 7m           17Mi
+amp-postgres-0         postgres            24m          55Mi
+amp-postgres-0         postgres-exporter   2m           3Mi
+amp-redis-0            redis               8m           5Mi
+amp-redis-0            redis-exporter      4m           12Mi
+loadgen                loadgen             8m           0Mi
+08:27:14
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 8m           21Mi
+amp-postgres-0         postgres            27m          54Mi
+amp-postgres-0         postgres-exporter   1m           5Mi
+amp-redis-0            redis               12m          5Mi
+amp-redis-0            redis-exporter      4m           12Mi
+loadgen                loadgen             6m           1Mi
+08:27:45
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 5m           14Mi
+amp-postgres-0         postgres            20m          54Mi
+amp-postgres-0         postgres-exporter   1m           3Mi
+amp-redis-0            redis               11m          5Mi
+amp-redis-0            redis-exporter      5m           9Mi
+loadgen                loadgen             6m           0Mi
+08:28:15
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 7m           14Mi
+amp-postgres-0         postgres            24m          54Mi
+amp-postgres-0         postgres-exporter   1m           2Mi
+amp-redis-0            redis               9m           5Mi
+amp-redis-0            redis-exporter      4m           11Mi
+loadgen                loadgen             0m           0Mi
+08:28:45
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 9m           20Mi
+amp-postgres-0         postgres            19m          54Mi
+amp-postgres-0         postgres-exporter   1m           2Mi
+amp-redis-0            redis               9m           5Mi
+amp-redis-0            redis-exporter      4m           13Mi
+loadgen                loadgen             6m           1Mi
+08:29:16
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 7m           16Mi
+amp-postgres-0         postgres            17m          54Mi
+amp-postgres-0         postgres-exporter   1m           3Mi
+amp-redis-0            redis               9m           5Mi
+amp-redis-0            redis-exporter      6m           10Mi
+loadgen                loadgen             4m           1Mi
+08:29:46
+POD                    NAME                CPU(cores)   MEMORY(bytes)
+amp-664cb5f6cd-6qlth   amp                 11m          14Mi
+amp-postgres-0         postgres            39m          54Mi
+amp-postgres-0         postgres-exporter   2m           3Mi
+amp-redis-0            redis               9m           4Mi
+amp-redis-0            redis-exporter      4m           9Mi
+loadgen                loadgen             5m           1Mi

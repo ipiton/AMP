@@ -72,6 +72,45 @@ spec:
         - -c
         - |
           set -e
+          {{- if contains "valkey" .Values.valkey.image.repository }}
+          # Valkey 8.1 loads RDB up to v11. v12+ under the REDIS signature is
+          # written only by Redis >= 7.4 (the chart's image before ADR-017) and
+          # makes Valkey exit ("Can't handle RDB format version 12"). Move such
+          # data aside instead of crash-looping: Valkey starts without it, the
+          # old files stay on the volume for a rollback. dump.rdb and
+          # appendonlydir are judged separately: with appendonly yes Valkey
+          # reads only the AOF, so a v12 dump.rdb next to a v11 AOF base (left
+          # by a rollback to Redis 7.4) does not cost the AOF.
+          # Valkey 9.0 writes VALKEY080 and is not matched here.
+          rdb_v12() {
+            magic=$(head -c 9 "$1")
+            case "$magic" in
+              REDIS[0-9][0-9][0-9][0-9]) [ "${magic#REDIS}" -ge 12 ] ;;
+              *) return 1 ;;
+            esac
+          }
+          moved=""
+          backup="/data/redis-pre-valkey-$(date +%s)"
+          if [ -f /data/dump.rdb ] && rdb_v12 /data/dump.rdb; then
+            mkdir -p "$backup"
+            mv /data/dump.rdb "$backup/"
+            moved="$moved dump.rdb"
+          fi
+          for f in /data/appendonlydir/*.base.rdb; do
+            [ -f "$f" ] || continue
+            if rdb_v12 "$f"; then
+              mkdir -p "$backup"
+              mv /data/appendonlydir "$backup/"
+              moved="$moved appendonlydir"
+              break
+            fi
+          done
+          if [ -n "$moved" ]; then
+            echo "Redis >= 7.4 data (RDB v12+:$moved) moved to $backup"
+          else
+            echo "No Redis >= 7.4 data on the volume"
+          fi
+          {{- end }}
           echo "Copying redis.conf from ConfigMap..."
           cp /tmp/redis/redis.conf /data/redis.conf
 
@@ -101,7 +140,7 @@ spec:
       containers:
       # Redis Container
       - name: redis
-        image: {{ .Values.valkey.image.repository }}:{{ .Values.valkey.image.tag | default "7-alpine" }}
+        image: {{ .Values.valkey.image.repository }}:{{ required "valkey.image.tag is required" .Values.valkey.image.tag }}
         imagePullPolicy: {{ .Values.valkey.image.pullPolicy | default "IfNotPresent" }}
 
         # Command

@@ -57,11 +57,6 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ ! -d "${CHART_DIR}/charts" ]; then
-  echo "Fetching chart dependencies..."
-  helm dependency build "${CHART_DIR}" >/dev/null
-fi
-
 cat >"${WORK_DIR}/on.yaml" <<'YAML'
 configFile:
   enabled: true

@@ -1,0 +1,89 @@
+# write-tests 2026-10-19: helm/amp/tests/*.sh
+render-config-reloader.sh rc=0
+render-defaults-validate.sh rc=0
+render-external-database.sh rc=0
+render-graceful-shutdown.sh rc=0
+render-grouping-default.sh rc=0
+render-image-tag.sh rc=0
+render-ingress-auth.sh rc=0
+render-networkpolicy.sh rc=0
+render-postgresql.sh rc=0
+render-servicemonitor.sh rc=0
+render-single-node.sh rc=0
+
+# render-single-node.sh
+T1 defaults fit one node:
+  ok   default: renders
+  ok   default: no HPA
+  ok   default: Deployment has replicas: 1
+  ok   default: requests total 270m/512Mi
+  ok   default: no valkey subchart objects
+  ok   default: no amp-pvc under profile: standard
+  ok   default: cache image valkey/valkey:8.1.10-alpine
+  ok   default: no redis image
+  ok   default: config-init moves Redis >= 7.4 data
+T2 autoscaling on: HPA without keep:
+  ok   hpa: renders
+  ok   hpa: HPA rendered
+  ok   hpa: no helm.sh/resource-policy on the HPA
+T3 lite and production:
+  ok   lite: renders
+  ok   lite: amp-pvc rendered
+  ok   lite: no HPA
+  ok   production: renders
+  ok   production: HPA rendered
+  ok   production: HPA 3-20
+  ok   production: no valkey subchart objects
+  ok   production: no amp-pvc
+T4 cache image:
+  ok   empty-tag: render fails with 'valkey.image.tag is required'
+  ok   own-redis: renders
+  ok   own-redis: image redis:7.4-alpine
+  ok   own-redis: no data move
+T5 values-small.yaml:
+  ok   small: renders
+  ok   small: no HPA
+  ok   small: Valkey maxmemory 192mb
+  ok   small: alert descriptions show maxmemory from values
+  ok   small: max_connections 60
+  ok   small: max_wal_size 1GB
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-cache-off: NOTES rendered
+  ok   notes-external-cache: NOTES rendered
+  ok   notes-lite: NOTES rendered
+  ok   notes-default: Valkey cache line
+  ok   notes-default: HPA off line
+  ok   notes-default: AMP resources from values
+  ok   notes-cache-off: cache off line
+  ok   notes-cache-off: no Valkey line
+  ok   notes-external-cache: external cache line
+  ok   notes-lite: resources from values
+T7 config-init data move on fixtures (sh, not busybox):
+  ok   config-init script extracted
+  ok   redis-7.4: moved both
+  ok   redis-7.4: second run moves nothing
+  ok   after-rollback: moved dump
+  ok   after-rollback: second run moves nothing
+  ok   aof-only: moved aof
+  ok   aof-only: second run moves nothing
+  ok   rdb-only: moved dump
+  ok   rdb-only: second run moves nothing
+  ok   valkey-8.1: moved none
+  ok   valkey-8.1: second run moves nothing
+  ok   valkey-9.0: moved none
+  ok   valkey-9.0: second run moves nothing
+  ok   empty: moved none
+  ok   empty: second run moves nothing
+
+all assertions passed
+
+# mutation check (chart copy per mutation)
+keep-back: killed ->  FAIL hpa: HPA carries ' helm.sh/resource-policy: keep';
+hpa-on: killed ->  FAIL default: no HPA (want 0 x HorizontalPodAutoscaler/amp, got 1); FAIL default: Deployment replicas line is '';
+pvc-always: killed ->  FAIL default: no amp-pvc under profile: standard (want 0 x PersistentVolumeClaim/amp-pvc, got 1); FAIL production: no amp-pvc (want 0 x PersistentVolumeClaim/amp-pvc, got 1);
+gate-always: killed ->  FAIL own-redis: no data move (want 0 x 'redis-pre-valkey-', got 1);
+move-all: killed ->  FAIL after-rollback: moved both, want dump;
+tag-fallback: killed ->  FAIL empty-tag: render succeeded, want failure;
+budget-old: killed ->  FAIL notes-max-4: warning counts the exporter (105 > 102) (want 1 x 'allows max_connections=102', got 0);
+rule-384: killed ->  FAIL small: alert descriptions show maxmemory from values (want 2 x 'of maxmemory (192mb)', got 1);

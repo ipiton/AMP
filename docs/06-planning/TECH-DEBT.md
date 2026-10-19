@@ -18,14 +18,14 @@
 ### [medium][Helm][~2d] HELM-CHART-GAPS
 - **Title:** расхождения шаблонов чарта с values
 - **Problem:** найдено при аудите `values-production.yaml` (INF-B, 2026-08-20), не исправлено (слишком большой темплейт-скоуп для values-аудита):
-  - `valkey.enabled`/`cache.enabled` НЕ гейтят деплой `templates/redis-statefulset.yaml` — единственный гейт — `profile: standard`. Рабочий воркараунд — `valkey.replicas: 0` (заведён в values-production.yaml), но сами флаги мёртвые. _(Уточнено аудитом 2026-10-06, `helm template`: `valkey.replicas: 0` обнуляет именно `amp-redis` — тот Redis, в который ходит AMP по умолчанию (`REDIS_ADDR=amp-redis:6379`), — а Deployment сабчарта `amp-valkey` продолжает деплоиться. Обход работает только с внешним Redis (`cache.host`, как Dragonfly в values-production). `cache.enabled: false` ставит `REDIS_ADDR=localhost:6379`. Без внешнего Redis штатно убрать лишний инстанс нельзя — два Redis на каждый `standard`-деплой. Связано с `HELM-SINGLE-NODE-DEFAULTS` в BACKLOG.)_
+  - `valkey.enabled`/`cache.enabled` НЕ гейтят деплой `templates/redis-statefulset.yaml` — единственный гейт — `profile: standard`. Рабочий воркараунд — `valkey.replicas: 0` (заведён в values-production.yaml), но сами флаги мёртвые. `cache.enabled: false` ставит `REDIS_ADDR=localhost:6379`. _(2026-10-19, HELM-SINGLE-NODE-DEFAULTS: сабчарт `valkey` удалён, кеш один — `<fullname>-redis` на `valkey/valkey`; «два Redis на standard» больше нет. `valkey.replicas: 0` без `cache.host` теперь оставляет AMP без кеша.)_
   - `postgresql.existingSecret` читается `templates/secret.yaml` (другой Secret, `<fullname>-secrets`), но НЕ читается `templates/postgresql-secret.yaml`/хелпером `amp.postgresql.secretName` — реальный DB-пароль (`DATABASE_PASSWORD`, `POSTGRES_PASSWORD` в StatefulSet) всегда берётся из `postgresql.password`, existingSecret туда не долетает.
   - _(2026-10-15, PROD-POSTGRES-HA-DECISION)_ HA встроенного PostgreSQL решён ADR-016: встроенный — dev/pilot, single instance, `postgresql.replicas != 1` падает на рендере; прод — внешний PostgreSQL. Реализации HA в чарте не будет.
   - _(2026-10-15, PROD-POSTGRES-HA-DECISION R16)_ `migration.backupBeforeMigration` в `values.yaml` ни один шаблон не читает — мёртвое обещание бэкапа перед миграцией; удалить ключ (или реализовать, если понадобится).
   - _(2026-10-15, PROD-POSTGRES-HA-DECISION R24)_ `NOTES.txt` (шаг 5) советует `kubectl port-forward svc/<fullname>`, но селектор Service захватывает и postgres/redis (BUGS `SERVICE-METRICS-PORT-MISROUTED`) — адресовать под AMP по меткам `component=application`, как runbook `POSTGRESQL_RESTORE_GUIDE.md` § 1.
   - Найдено ревью fix-round (2026-08-20): базовый `values.yaml` до сих пор хардкодит слабый dev-дефолт для `postgresql.password` (dev/test zero-config install path). Не трогали — задача была про `values-production.yaml`, и требование "без дефолта" сломало бы dev-путь без правки `secret.yaml`'s fallback-логики. `values-production.yaml` перекрывал его на `""`; с `HELM-EXTERNAL-DATABASE` (2026-10-16) блока `postgresql:` в нём нет (внешняя БД), и релиз, вернувший встроенный PG через `postgresql.enabled: true`, наследует этот литерал, если не задаёт пароль сам (CHANGELOG Breaking). Инконсистентность зафиксирована здесь, не исправлена.
   - _(2026-10-16, HELM-EXTERNAL-DATABASE R2)_ guard на слабый пароль нет: `postgresql.enabled: true` под `environment: production` с `postgresql.password` = дефолту `values.yaml` (`secure_password_123`) рендерится. AMP в production отсекает только короткие (< 12) и пароли из списка `weakPasswords` (`config.go:1466`), дефолт чарта (19 символов) проходит. Фикс: `fail` в `postgresql-secret.yaml` при `environment: production` и пароле, равном дефолту базового `values.yaml`; render-тест.
-  - _(2026-10-01, PROD-INGRESS-HARDENING R17)_ сабчарт valkey рендерит свою NetworkPolicy `amp-valkey` (deny-all по умолчанию) параллельно чартовой `redis-networkpolicy.yaml`; политики postgres/redis хардкодят `namespaceSelector` `name: monitoring` / `name: kube-system` вместо автоматической метки `kubernetes.io/metadata.name`; `ingress.yaml` безусловно добавляет nginx sticky-аннотации (`affinity: cookie` и др.) к любым `ingress.annotations`.
+  - _(2026-10-01, PROD-INGRESS-HARDENING R17; NetworkPolicy сабчарта ушла вместе с ним 2026-10-19)_ политики postgres/redis хардкодят `namespaceSelector` `name: monitoring` / `name: kube-system` вместо автоматической метки `kubernetes.io/metadata.name`; `ingress.yaml` безусловно добавляет nginx sticky-аннотации (`affinity: cookie` и др.) к любым `ingress.annotations`.
   - _(2026-10-14, HELM-DEFAULTS-VALIDATE review F7)_ `postgresql.config.ssl` не bool-safe: `ssl: on` без кавычек или `--set postgresql.config.ssl=true` → `eq: incompatible types` на рендере; `ssl: "true"` даёт PostgreSQL `ssl = true`, а AMP — `DATABASE_SSL_MODE=disable` и флаг `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` (`templates/deployment.yaml`). Фикс: сравнивать через `toString`, `fail` на всё, кроме `"on"`/`"off"`.
   - _(2026-10-18, PG-CONFIG-FIX R10)_ `checksum/config` pod'а PostgreSQL считается только от `postgresql-configmap.yaml`; ConfigMap exporter'а (`postgresql-exporter-configmap.yaml`) в него не входит — правка `queries.yaml` без смены конфига PG не рестартует sidecar (на k3d понадобился `kubectl rollout restart`).
   - _(2026-10-18, PG-CONFIG-FIX R12)_ AMP и exporter ходят во встроенный PG ролью `postgresql.username`, а она суперпользователь (её создаёт entrypoint образа) ⇒ `superuser_reserved_connections` ничего не резервирует: при насыщении пулов не войдут ни exporter, ни `kubectl exec psql`. Нужна отдельная непривилегированная роль для AMP и роль `pg_monitor` для exporter'а.
@@ -77,7 +77,29 @@
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` F8, G7.
 - **Status:** open
 
+### [medium][Helm][~0.5d] PG-LIVENESS-UNDER-CPU-SATURATION
+- **Title:** liveness-проба встроенного PostgreSQL перезапускает его при насыщении CPU-лимита
+- **Problem:** k3d 2026-10-19, `values-small.yaml` (PG limit 500m): 52 сессии с тяжёлыми сортировками упёрли PG в CPU-лимит, проба (`pg_isready`, таймаут чарта) не уложилась, kubelet перезапустил контейнер — crash recovery, AMP переподключился. Не OOM (`oom_kill=0`). Проба меряет «успел ли ответить под троттлингом», а не «жив ли процесс».
+- **Impact:** пик нагрузки на маленькой ноде превращается в рестарт БД и окно ошибок ingest (BACKLOG `INGEST-WITHOUT-SYNC-PG`).
+- **Fix:** liveness мягче readiness (больший `timeoutSeconds`/`failureThreshold`) или только readiness + startupProbe; замер тем же сценарием (`evidence/k3d-acceptance.md` § A4).
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/k3d-acceptance.md` § A4.
+- **Status:** open
+
 ## Low
+
+### [low][Test][~0.25d] GO-TESTS-REDIS-IMAGE
+- **Title:** Go-интеграционные тесты поднимают `redis:7-alpine` (Redis 7.4, RSALv2/SSPL)
+- **Problem:** `go-app/internal/infrastructure/inhibition/integration_test.go:24` через testcontainers; чарт и e2e-ha с 2026-10-19 на `valkey/valkey:8.1.10-alpine` (ADR-017). В поставку не попадает, но тесты проверяют не тот кеш, что ставит чарт.
+- **Fix:** образ `valkey/valkey:8.1.10-alpine` в тесте; прогон пакета.
+- **Refs:** ADR-017; `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/tasks.md` (вне scope).
+- **Status:** open
+
+### [low][Config][~0.1d] CONFIG-STANDARD-REPLICAS-TEXT
+- **Title:** `config.go` описывает standard-профиль как «2-10 replicas»
+- **Problem:** `go-app/internal/config/config.go:236,1575`; с 2026-10-19 чарт по умолчанию ставит одну реплику без HPA, HA — `values-production.yaml`.
+- **Fix:** поправить текст (standard = PostgreSQL + Valkey, число реплик задаёт чарт).
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/tasks.md` (вне scope).
+- **Status:** open
 
 ### [low][Config][~0.25d] INHIBIT-CONFIG-LOUDNESS
 - **Title:** мелкие шероховатости загрузки inhibit-правил

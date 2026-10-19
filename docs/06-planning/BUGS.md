@@ -158,28 +158,12 @@
 - **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/review-findings.md` R11.
 - **Status:** open
 
-### [medium][Helm][~0.25d] VALKEY-SUBCHART-INIT-ERROR
-- **Title:** под сабчарта valkey не стартует: `Init:Error`, `helm install --wait` уходит в FAILED
-- **Problem:** на k3d 2026-10-15 (чарт `main` и ветки, дефолтные values) под `amp-valkey-*` висит в `Init:Error`: `exec /scripts/init.sh: no such file or directory`. AMP по умолчанию ходит в `amp-redis`, поэтому сам AMP работает, но `helm install/upgrade --wait` ждёт valkey и завершается FAILED.
-- **Impact:** любая установка standard-профиля с `--wait` (CI, Argo/Flux с health-check) считается неуспешной; лишний сломанный под в namespace.
-- **Fix:** выяснить, какой ConfigMap со скриптами сабчарт ожидает (версия сабчарта против values), либо выключить сабчарт по умолчанию — пересекается с TECH-DEBT `HELM-CHART-GAPS` (два Redis на standard).
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/upgrade-path.md`.
-- **Status:** open
-
-### [low][Helm][~0.1d] AMP-PVC-PENDING-STANDARD
-- **Title:** `<fullname>-pvc` рендерится во всех профилях, а монтируется только в `lite`
-- **Problem:** `helm/amp/templates/pvc.yaml` без условия; потребитель — том `data` в `deployment.yaml` только при `profile: lite`. На standard с `WaitForFirstConsumer` (local-path) PVC навсегда `Pending` (k3d 2026-10-15).
-- **Impact:** вечно `Pending` PVC в каждой standard-установке; health-check GitOps-инструментов и `--wait` на PVC могут не дождаться; на провайдерах с `Immediate` создаётся и оплачивается неиспользуемый диск.
-- **Fix:** `{{- if eq .Values.profile "lite" }}` вокруг `pvc.yaml`; render-тест. Migration note: существующий PVC удалится при upgrade (данных в нём нет).
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/upgrade-path.md`.
-- **Status:** open
-
 ### [medium][Silencing][~0.25d] SILENCE-SYNC-LIMIT-EXCEEDS-FILTER
 - **Title:** фоновый воркер silence manager не стартует: `limit must be <= 1000, got 10000`
 - **Problem:** на каждом старте AMP с PostgreSQL: `initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000`. `go-app/internal/business/silencing/manager_impl.go:479`, `:713` и `sync_worker.go:162` запрашивают `Limit: 10000`, а валидатор фильтра репозитория пропускает не больше 1000 (`go-app/internal/core/errors.go:12`). AMP продолжает работу без GC/stats-воркера.
 - **Impact:** истёкшие silences не собираются фоновым GC, кэш активных silences не прогревается на старте, статистика не считается; молча — только строка в логе.
 - **Fix:** выровнять лимит (пагинация по 1000 или отдельный внутренний путь без пользовательского лимита) и тест на старт менеджера с реальным репозиторием.
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/restore-drill.md` § Side findings.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/restore-drill.md` § Side findings; повторно 2026-10-19 — `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/cache-noauth.txt` (R26).
 - **Status:** open
 
 ### [low][API][~0.25d] SILENCES-CHECK-404
@@ -220,6 +204,38 @@
 - **Impact:** остановка ждёт закрытия клиентских сессий AMP вместо `-m fast`; при долгих сессиях упирается в `terminationGracePeriodSeconds` и SIGKILL (recovery на старте).
 - **Fix:** `pg_ctl stop -D "$PGDATA" -m fast -w -t 60` без `su`; проверка на k3d (лог `fast shutdown request`).
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
+- **Status:** open
+
+### [high][Helm][~0.25d] AMP-CACHE-NOAUTH
+- **Title:** на дефолтах чарта AMP не авторизуется в своём Valkey и работает на in-memory кеше
+- **Problem:** `templates/redis-statefulset.yaml` всегда запускает кеш с `requirepass` из сгенерированного `<fullname>-redis-secret`, а `templates/deployment.yaml:175` передаёт AMP `REDIS_PASSWORD` только при `cache.auth.enabled` (по умолчанию `false`). Лог AMP: `NOAUTH Authentication required` → `Redis cache unavailable, falling back to in-memory cache` (k3d 2026-10-19, свежая установка и upgrade с `main`). Было до `HELM-SINGLE-NODE-DEFAULTS`.
+- **Impact:** таймеры групп, nflog и кеш инхибиции живут в памяти пода: рестарт AMP даёт повтор уведомлений, реплики (HPA, `values-production.yaml` со своим кешем) не делят дедуп; `redis_up 1` и зелёный под кеша это скрывают.
+- **Fix:** когда `cache.host` указывает на StatefulSet чарта — `REDIS_PASSWORD` из `<fullname>-redis-secret` без `cache.auth.enabled`; для внешнего кеша — `cache.auth.existingSecret`. Render-тест и проверка лога на k3d (нет `falling back`). Снять оговорки в README чарта, CHANGELOG и ADR-017.
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/cache-noauth.txt`, `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/k3d-acceptance.md` A1/A2, `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R2.
+- **Status:** open
+
+### [medium][Cache][~0.5d] AMP-CACHE-NO-RECONNECT
+- **Title:** AMP не переподключается к кешу, недоступному на старте
+- **Problem:** `go-app/internal/application/service_registry.go:1204-1212`: если Redis/Valkey не ответил при инициализации, AMP переходит на in-memory кеш до конца жизни процесса. `helm upgrade` рестартует AMP и под кеша одновременно, порядок не гарантирован.
+- **Impact:** после upgrade или рестарта кеша AMP молча работает без общего состояния; лечится только `kubectl rollout restart` (migration note в `CHANGELOG.md`). Гонка на k3d не воспроизводилась — на дефолтах её маскирует `AMP-CACHE-NOAUTH`.
+- **Fix:** ленивое подключение с ретраем (backoff) и переход с in-memory на кеш при восстановлении, либо readiness AMP не готов, пока кеш недоступен; метрика/лог текущего бэкенда кеша.
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R7.
+- **Status:** open
+
+### [medium][Helm][~0.25d] HELM-VCT-CHART-LABELS
+- **Title:** метки `volumeClaimTemplates` содержат версию чарта — первый бамп версии сломает `helm upgrade`
+- **Problem:** `templates/redis-statefulset.yaml` (и проверить `postgresql-statefulset.yaml`) кладёт в `volumeClaimTemplates.metadata.labels` полный `amp.labels`, включая `helm.sh/chart` и `app.kubernetes.io/version`. Поле StatefulSet неизменяемое: смена `version`/`appVersion` в `Chart.yaml` даёт `StatefulSet.apps is invalid: spec: Forbidden`. Сейчас не проявляется — версия не менялась с первого релиза чарта. По спецификации k8s, на кластере не прогонялось.
+- **Impact:** первый релиз с бампом версии (`PROD-RELEASE-V010`) не обновит существующие установки без удаления StatefulSet (`--cascade=orphan`).
+- **Fix:** в VCT только selector labels + `component`; migration note (одноразовое `kubectl delete sts --cascade=orphan` перед upgrade, т. к. сама смена меток тоже меняет VCT); render-тест «в VCT нет `helm.sh/chart`». Сделать до `PROD-RELEASE-V010`.
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R14.
+- **Status:** open
+
+### [low][Test][~0.1d] FLAKE-TIMER-CONTINUATION-GROUP-INTERVAL
+- **Title:** `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` флейкает в шаге `race`
+- **Problem:** `go-app/internal/infrastructure/grouping/timer_continuation_regression_test.go:198` — ожидался таймер `group_interval`, прочитан `group_wait`: тест читает storage раньше, чем срабатывание записало continuation. Release-gate 2026-10-19 (ветка `feature/helm-single-node-defaults`, Go-код не менялся), шаг `race`; перезапуск шага — 7/7 ok, тест отдельно `-race -count=30` — 30/30.
+- **Impact:** шаг `race` release-gate краснеет случайно.
+- **Fix:** ждать опросом, пока тип записи станет `group_interval` (как предложено в `GROUPING-ORPHAN-ADOPTION-TEST-FLAKY` — тот же класс, чинить вместе).
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/release-gate.txt` (FAIL и перезапуск в конце файла).
 - **Status:** open
 
 ## Entry Format

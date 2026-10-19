@@ -17,7 +17,7 @@
 ## Stream: Operations & Hot Reload
 > AMP уже имеет ReloadCoordinator (TN-152) с 6-фазным pipeline.
 - [~] **PHASE-4.5: Per-Component Reloadable + K8s Sidecar** — интерфейсы `config.Reloadable` (logger, metrics, LLM — живые; database/redis — честный restart-required W600/W601) сделаны в PROD-INFRA (2026-08-20); sidecar `cmd/config-reloader` + шаблон + публикация образа — сделаны. Остаётся: первый релиз образа, `CONFIG-RELOADER-AUTH`, включение в production values (`CONFIG-RELOADER-SIDECAR` в BACKLOG); живые хэндлы Postgres/Redis — `FU-DB-LIVE-POOL-HANDLE`, `FU-REDIS-LIVE-CLIENT-HANDLE`.
-- [~] **PHASE-4.6: Production Helm & Release Process** — `values-production.yaml` переаудирован, шаблон release notes и релизный процесс (`WORKFLOW.md`) есть (PROD-INFRA, PROD-RELEASE-V010-PREP). Остаётся: выпуск `v0.1.0` (`PROD-RELEASE-V010`, ждёт решения владельца), дефолты под одну ноду (`HELM-SINGLE-NODE-DEFAULTS`), HA Postgres (`PROD-POSTGRES-HA-DECISION`).
+- [~] **PHASE-4.6: Production Helm & Release Process** — `values-production.yaml` переаудирован, шаблон release notes и релизный процесс (`WORKFLOW.md`) есть (PROD-INFRA, PROD-RELEASE-V010-PREP). Остаётся: выпуск `v0.1.0` (`PROD-RELEASE-V010`, ждёт решения владельца), HA Postgres (`PROD-POSTGRES-HA-DECISION`). Дефолты под одну ноду закрыты 2026-10-19 (`HELM-SINGLE-NODE-DEFAULTS`).
 
 ## Stream: Alertmanager Full Parity
 > Задачи для полноценной замены Alertmanager без deprecated методов. Эпик `AMP-PARITY` (7 фаз, 29 срезов) закрыт 2026-08-18; хвосты — в BACKLOG § «Follow-ups from Phase 1-7» и в P0/P1 «Production Readiness».

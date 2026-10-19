@@ -37,11 +37,6 @@ if ! command -v helm >/dev/null 2>&1; then
   exit 0
 fi
 
-if [ ! -d "${CHART_DIR}/charts" ]; then
-  echo "Fetching chart dependencies..."
-  helm dependency build "${CHART_DIR}" >/dev/null
-fi
-
 # values-production.yaml ships no passwords, auth or NetworkPolicy sources
 # (guards fail the render until they are supplied) -- placeholders, as
 # scripts/release-gate.sh does.
