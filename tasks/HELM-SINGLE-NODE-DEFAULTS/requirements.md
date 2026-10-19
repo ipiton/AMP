@@ -55,7 +55,7 @@ updated_at: 2026-10-19
 
 ## Constraints
 
-- **Scope:** `helm/amp/` (values, при необходимости шаблоны и NOTES), тесты чарта, CHANGELOG, README чарта.
+- **Scope:** `helm/amp/` (values, шаблоны, NOTES, `Chart.yaml`), тесты чарта, `scripts/release-gate.sh` (шаг `helm-deps`), `deploy/e2e-ha/docker-compose.yml` (образ Valkey), CHANGELOG, README чарта, ADR-017. Втянуты (spec 2026-10-19): BUGS `VALKEY-SUBCHART-INIT-ERROR` (сабчарт удаляется) и `AMP-PVC-PENDING-STANDARD`.
 - **Security:** не применимо. Auth-guard ADR-015 и NetworkPolicy не трогаются.
 - **License:** кеш — только Valkey; образы Redis ≥ 7.4 (RSALv2/SSPL) не используются (требование владельца 2026-10-19).
 - **Compatibility:** `helm upgrade` с дефолтами меняет число реплик и ресурсы. Нужна migration note: как вернуть HA-поведение (`autoscaling.enabled: true` или `-f values-production.yaml`). Изменение параметров PG перезапускает PG.
