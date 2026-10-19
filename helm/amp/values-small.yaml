@@ -1,0 +1,53 @@
+# Small single node: about 1 vCPU / 1Gi free for AMP (k3s on a small VM, a
+# home lab). Layered on the chart defaults, which already target one node
+# (1 replica, HPA off, ~270m CPU / 512Mi requests); this file only tightens
+# limits, memory settings and volume sizes. Bundled PostgreSQL and Valkey are
+# dev/pilot components (ADR-016): no replication, no backups.
+#
+#   helm install amp ./helm/amp -f ./helm/amp/values-small.yaml
+#
+# Not for HA: keep autoscaling off with this file (the connection budget
+# below covers 2 AMP pods during a rolling update).
+
+autoscaling:
+  enabled: false
+
+# AMP: idle/light load measured at ~15m CPU / ~20Mi.
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+postgresql:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 192Mi
+  persistence:
+    size: 5Gi
+  config:
+    # 2 AMP pods (rolling update) × 25 + exporter + 10 reserved for superuser
+    maxConnections: 60
+    # Within the 512Mi limit: shared_buffers + 60 backends × work_mem headroom
+    sharedBuffers: "64MB"
+    effectiveCacheSize: "256MB"
+
+valkey:
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  storage:
+    requestedSize: 1Gi
+  settings:
+    # 75% of the 256Mi limit; allkeys-lru evicts beyond it
+    maxmemory: 192mb

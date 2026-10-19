@@ -1,6 +1,5 @@
 # Production-oriented values overrides for AMP with optional LLM settings
 # Usage:
-#   helm dependency build ./helm/amp   # fetches the valkey subchart (Chart.yaml dependency) once
 #   helm install amp ./helm/amp -f values-production.yaml
 #
 # Every key below was audited against the app's actual viper defaults

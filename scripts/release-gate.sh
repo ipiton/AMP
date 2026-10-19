@@ -129,10 +129,17 @@ step_race() {
 # helm steps below would otherwise bury under "missing in charts/".
 # The repos go into a throwaway repository config, not the caller's own
 # ~/.config/helm: a local gate run must not edit the developer's repo list.
+# The chart has had no dependencies since HELM-SINGLE-NODE-DEFAULTS (valkey
+# subchart removed); without Chart.lock the step passes, and it guards again
+# if a dependency comes back.
 step_helm_deps() {
   if ! command -v helm >/dev/null 2>&1; then
     log "helm not found on PATH"
     return 1
+  fi
+  if [[ ! -f "$HELM_CHART_DIR/Chart.lock" ]]; then
+    log "no chart dependencies (no Chart.lock)"
+    return 0
   fi
   local repo_dir rc
   repo_dir=$(mktemp -d) || return 1

@@ -32,15 +32,16 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 ⚠️  External PostgreSQL from the `database:` section of configFile.content: its password
    sits in a ConfigMap. Prefer externalDatabase.* with existingSecret (README → PostgreSQL).
 {{- end }}
-✅ Redis L2 + Memory L1 cache
+✅ Valkey L2 + Memory L1 cache
 {{- if .Values.autoscaling.enabled }}
 ✅ HPA autoscaling ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas)
 {{- else }}
-⚠️  HPA disabled (fixed {{ .Values.replicaCount }} replica(s))
+ℹ️  HPA off: fixed {{ .Values.replicaCount }} replica(s) (autoscaling.enabled or values-production.yaml for HA)
 {{- end }}
 
-Resources: 500m CPU, 512Mi RAM (per pod)
-Use Case: high-volume (>1K alerts/day); production with an external PostgreSQL
+{{- $res := .Values.resources | default dict }}
+Resources (per AMP pod): requests {{ dig "requests" "cpu" "-" $res }} CPU / {{ dig "requests" "memory" "-" $res }}, limits {{ dig "limits" "cpu" "-" $res }} CPU / {{ dig "limits" "memory" "-" $res }}
+Use Case: one node by default; high volume / HA with autoscaling and an external PostgreSQL
 
 {{- if .Values.autoscaling.enabled }}
 
@@ -52,7 +53,7 @@ Connection calculation:
   {{ .Values.autoscaling.maxReplicas }} replicas × 25 conns/pod (database.max_connections default) = {{ mul .Values.autoscaling.maxReplicas 25 }} connections
 
 {{- if .Values.postgresql.enabled }}
-{{- $maxConn := int64 ((.Values.postgresql.config | default dict).maxConnections | default 250) }}
+{{- $maxConn := int64 ((.Values.postgresql.config | default dict).maxConnections | default 100) }}
 {{- if ge (mul .Values.autoscaling.maxReplicas 25) $maxConn }}
 ⚠️  The bundled PostgreSQL allows max_connections={{ $maxConn }}: at maxReplicas the AMP pools
    alone take it all, leaving nothing for the exporter. Lower autoscaling.maxReplicas, raise

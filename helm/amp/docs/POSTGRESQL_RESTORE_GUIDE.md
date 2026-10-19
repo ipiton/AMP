@@ -85,7 +85,7 @@ kubectl -n <namespace> rollout status deploy/<fullname> --timeout=240s
 ```
 
 - Everything written after the dump is gone: alerts, silences and investigations return to the dump's state.
-- With HPA enabled (default `autoscaling.enabled: true`), you do not need to touch the HPA. Kubernetes disables scaling while the Deployment is at 0 replicas (`ScalingActive False ScalingDisabled`) and resumes after the scale back to `<N>`.
+- With HPA enabled (`autoscaling.enabled: true`; off by default since HELM-SINGLE-NODE-DEFAULTS), you do not need to touch the HPA. Kubernetes disables scaling while the Deployment is at 0 replicas (`ScalingActive False ScalingDisabled`) and resumes after the scale back to `<N>`.
 - If AMP was upgraded after the dump was taken, `--clean` does not drop tables and columns from the newer migrations, and AMP would re-apply those migrations on top of them. In that case restore into an empty database instead. With AMP at 0 replicas, recreate the database, then run the `pg_restore` above:
 
   ```sh

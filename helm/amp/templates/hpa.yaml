@@ -9,7 +9,6 @@ metadata:
   annotations:
     description: "Horizontal Pod Autoscaler for Alertmanager++ OSS Core - Standard Profile"
     managed-by: {{ .Release.Service }}
-    helm.sh/resource-policy: keep
     profile: {{ .Values.profile | quote }}
 spec:
   scaleTargetRef:

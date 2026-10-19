@@ -72,6 +72,33 @@ spec:
         - -c
         - |
           set -e
+          {{- if contains "valkey" .Values.valkey.image.repository }}
+          # Valkey 8.1 loads RDB up to v11. v12+ under the REDIS signature is
+          # written only by Redis >= 7.4 (the chart's image before ADR-017) and
+          # makes Valkey exit ("Can't handle RDB format version 12"). Move such
+          # data aside instead of crash-looping: Valkey starts with an empty
+          # dataset, the old files stay on the volume for a rollback.
+          # Recheck this rule before moving the image to Valkey 9.x.
+          incompatible=""
+          for f in /data/dump.rdb /data/appendonlydir/*.base.rdb; do
+            [ -f "$f" ] || continue
+            magic=$(head -c 9 "$f")
+            case "$magic" in
+              REDIS[0-9][0-9][0-9][0-9])
+                if [ "${magic#REDIS}" -ge 12 ]; then incompatible="$incompatible $f"; fi
+                ;;
+            esac
+          done
+          if [ -n "$incompatible" ]; then
+            backup="/data/redis-pre-valkey-$(date +%s)"
+            mkdir "$backup"
+            if [ -e /data/dump.rdb ]; then mv /data/dump.rdb "$backup/"; fi
+            if [ -d /data/appendonlydir ]; then mv /data/appendonlydir "$backup/"; fi
+            echo "Redis >= 7.4 data (RDB v12+:$incompatible) moved to $backup; Valkey starts empty"
+          else
+            echo "No Redis >= 7.4 data on the volume"
+          fi
+          {{- end }}
           echo "Copying redis.conf from ConfigMap..."
           cp /tmp/redis/redis.conf /data/redis.conf
 
