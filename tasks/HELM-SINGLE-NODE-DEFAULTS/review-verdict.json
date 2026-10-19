@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/helm-single-node-defaults",
+  "commit": "e610dc5",
+  "reviewed_at": "2026-10-19",
+  "findings": {
+    "blocker": 0,
+    "major": 3,
+    "minor": 16,
+    "nit": 8
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
