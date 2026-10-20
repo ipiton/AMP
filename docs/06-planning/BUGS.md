@@ -96,9 +96,9 @@
 ### [low][Helm][~0.25d] HELM-NAMESPACE-OVERRIDE-SPLIT
 - **Title:** `namespace` разносит объекты AMP и redis по разным namespace
 - **Problem:** шаблоны приложения ставят `namespace: {{ .Values.namespace | default .Release.Namespace }}`, а `redis-*.yaml` — `.Release.Namespace`. При `namespace` ≠ namespace релиза Redis, его Service и NetworkPolicy оказываются в другом namespace, чем AMP: политика redis выбирает AMP pod'ы через `podSelector` без `namespaceSelector` и их не видит, а `cache.host` указывает на Service не там.
-- **Impact:** редкая конфигурация (`namespace` задан явно), но тихо: AMP теряет Redis при `valkey.networkPolicy.enabled`.
+- **Impact:** редкая конфигурация (`namespace` задан явно), но тихо: AMP теряет Redis при `valkey.networkPolicy.enabled`. С 2026-10-20 (`AMP-CACHE-NOAUTH`) AMP на дефолтах читает `REDIS_PASSWORD` из `<fullname>-redis-secret`, который лежит в namespace релиза, — при `namespace` ≠ релиза под AMP не стартует (`CreateContainerConfigError`, по коду на ревью, на кластере не прогонялось) вместо тихой деградации; `amp.cache.hostIsValkey` тоже сравнивает с `.Release.Namespace`.
 - **Fix:** один источник namespace для всех шаблонов (хелпер `amp.namespace`).
-- **Refs:** deep-review PROD-INGRESS-HARDENING R16, `tasks/archive/PROD-INGRESS-HARDENING/review-findings.md`; 2026-10-01.
+- **Refs:** deep-review PROD-INGRESS-HARDENING R16, `tasks/archive/PROD-INGRESS-HARDENING/review-findings.md`; 2026-10-01; deep-review AMP-CACHE-NOAUTH A2 (`tasks/archive/AMP-CACHE-NOAUTH/review-findings.md`), 2026-10-20.
 - **Status:** open
 
 ### [low][Grouping][~0.5d] GROUPING-RESOLVED-ONLY-FOR-UNKNOWN-GROUP
@@ -206,20 +206,12 @@
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
 - **Status:** open
 
-### [high][Helm][~0.25d] AMP-CACHE-NOAUTH
-- **Title:** на дефолтах чарта AMP не авторизуется в своём Valkey и работает на in-memory кеше
-- **Problem:** `templates/redis-statefulset.yaml` всегда запускает кеш с `requirepass` из сгенерированного `<fullname>-redis-secret`, а `templates/deployment.yaml:175` передаёт AMP `REDIS_PASSWORD` только при `cache.auth.enabled` (по умолчанию `false`). Лог AMP: `NOAUTH Authentication required` → `Redis cache unavailable, falling back to in-memory cache` (k3d 2026-10-19, свежая установка и upgrade с `main`). Было до `HELM-SINGLE-NODE-DEFAULTS`.
-- **Impact:** таймеры групп, nflog и кеш инхибиции живут в памяти пода: рестарт AMP даёт повтор уведомлений, реплики (HPA, `values-production.yaml` со своим кешем) не делят дедуп; `redis_up 1` и зелёный под кеша это скрывают.
-- **Fix:** когда `cache.host` указывает на StatefulSet чарта — `REDIS_PASSWORD` из `<fullname>-redis-secret` без `cache.auth.enabled`; для внешнего кеша — `cache.auth.existingSecret`. Render-тест и проверка лога на k3d (нет `falling back`). Снять оговорки в README чарта, CHANGELOG и ADR-017.
-- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/cache-noauth.txt`, `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/k3d-acceptance.md` A1/A2, `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R2.
-- **Status:** open
-
 ### [medium][Cache][~0.5d] AMP-CACHE-NO-RECONNECT
 - **Title:** AMP не переподключается к кешу, недоступному на старте
 - **Problem:** `go-app/internal/application/service_registry.go:1204-1212`: если Redis/Valkey не ответил при инициализации, AMP переходит на in-memory кеш до конца жизни процесса. `helm upgrade` рестартует AMP и под кеша одновременно, порядок не гарантирован.
-- **Impact:** после upgrade или рестарта кеша AMP молча работает без общего состояния; лечится только `kubectl rollout restart` (migration note в `CHANGELOG.md`). Гонка на k3d не воспроизводилась — на дефолтах её маскирует `AMP-CACHE-NOAUTH`.
+- **Impact:** после upgrade или рестарта кеша AMP молча работает без общего состояния; лечится только `kubectl rollout restart` (migration note в `CHANGELOG.md`). Воспроизведено на k3d 2026-10-20 (`AMP-CACHE-NOAUTH` A2): первый `helm upgrade` с `main` рестартует Valkey (новые `items` volume) и AMP; AMP стартовал на 3 с раньше, `dial tcp …:6379: i/o timeout` → in-memory, под Ready. С `AMP-CACHE-NOAUTH` AMP на дефолтах ходит в кеш, поэтому гонка теперь бьёт по каждому upgrade, который рестартует оба пода; NOTES на upgrade подсказывают `rollout restart`.
 - **Fix:** ленивое подключение с ретраем (backoff) и переход с in-memory на кеш при восстановлении, либо readiness AMP не готов, пока кеш недоступен; метрика/лог текущего бэкенда кеша.
-- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R7.
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R7; `tasks/archive/AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2, `review-findings.md` A4.
 - **Status:** open
 
 ### [medium][Helm][~0.25d] HELM-VCT-CHART-LABELS

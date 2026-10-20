@@ -60,6 +60,9 @@
 - [ ] **PROD-AUTH-BEARER** — bearer-токены для HTTP API в дополнение к basic. Отложено на `/spec` PROD-AUTH: upstream их не принимает, клиенты экосистемы работают на basic. Брать, если появится машинный клиент без удобного basic. Оценка ~0.5d.
   - _Источник: PROD-AUTH research (2026-09-25)._
 
+- [ ] **VALKEY-PROBE-ARGV-PASSWORD** — пробы и `redis-cli` в `templates/redis-statefulset.yaml` (liveness/readiness/startup) передают пароль как `-a $REDIS_PASSWORD`: он виден в `ps` внутри пода и в `/proc/<pid>/cmdline`, `redis-cli` пишет предупреждение в каждую пробу. Было до `AMP-CACHE-NOAUTH`. Сделать: `REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping` (в кавычках проба не срезает `\n` и честно падает на таком пароле, а не прячет его — сейчас Valkey Ready, а AMP и exporter не подключаются, `AMP-CACHE-NOAUTH` B3), render-тест «нет `-a $`». Оценка ~0.1d.
+  - _Источник: AMP-CACHE-NOAUTH deep-review A6 (2026-10-20)._
+
 - [ ] **PG-MONITORING-CHECKS** — мониторинг встроенного PostgreSQL проверяется только рендером: `render-postgresql.sh` ловит `now()` и столбцы `tablename`/`indexname`, но не выполняет ни PromQL, ни SQL. Сделать: в `helm/amp/tests/` — `promtool check rules` + `promtool test rules` по отрендеренному `PrometheusRule` (skip без `promtool`), запросы `postgresql-exporter-configmap.yaml` против `postgres:16.15` в docker (или exporter v0.15.0 + `/metrics` без ошибок); решить, входит ли в `release-gate.sh`. Оценка ~0.5d.
   - _Источник: PG-CONFIG-FIX deep-review R7(2) (2026-10-17). Парный баг — `PG-ALERT-RULES-METRICS`._
 

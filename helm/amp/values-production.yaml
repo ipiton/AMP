@@ -100,6 +100,9 @@ cache:
     # `--set cache.auth.password=<real value>` (or wire it through CI/secret
     # manager) — this file does not, and must not, carry a real or
     # placeholder-looking value here.
+    # Preferred instead: a Secret you create, so the password never passes
+    # through values — set `enabled: false` and
+    # `existingSecret: <name>` (+ `existingSecretPasswordKey`, default `password`).
     password: ""
 
 # Chart gap, documented rather than silently worked around: templates/redis-statefulset.yaml

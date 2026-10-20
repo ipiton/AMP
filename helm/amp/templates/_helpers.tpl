@@ -110,25 +110,46 @@ Return the proper Database URL (groundhog2k/postgres)
 {{- end }}
 
 {{/*
-Return the proper Valkey/Redis URL
+Secret holding the password of the chart's Valkey (<fullname>-redis): the
+operator's valkey.password.existingSecret, or the one templates/redis-secret.yaml
+creates. Valkey, its exporter and AMP all read it, so the three never disagree.
 */}}
-{{- define "amp.cacheUrl" -}}
-{{- if .Values.cache.enabled }}
-{{- if .Values.cache.auth.enabled }}
-{{- printf "redis://:%s@%s:%g/0" .Values.cache.auth.password (tpl .Values.cache.host .) .Values.cache.port }}
-{{- else }}
-{{- printf "redis://%s:%g/0" (tpl .Values.cache.host .) .Values.cache.port }}
-{{- end }}
-{{- else }}
-{{- printf "redis://localhost:6379/0" }}
-{{- end }}
+{{- define "amp.valkey.secretName" -}}
+{{- .Values.valkey.password.existingSecret | default (printf "%s-redis-secret" (include "amp.fullname" .)) }}
 {{- end }}
 
 {{/*
-Return the proper Redis URL (legacy compatibility)
+"true" when cache.host names the chart's Valkey Service: <fullname>-redis, or
+a longer DNS name of it in the release namespace (<fullname>-redis.<ns>,
+...svc.cluster.local). The same name in another namespace is someone else's.
 */}}
-{{- define "amp.redisUrl" -}}
-{{- include "amp.cacheUrl" . }}
+{{- define "amp.cache.hostIsValkey" -}}
+{{- $svc := printf "%s-redis" (include "amp.fullname" .) }}
+{{- $nsSvc := printf "%s.%s" $svc .Release.Namespace }}
+{{- $host := tpl .Values.cache.host . }}
+{{- if or (eq $host $svc) (eq $host $nsSvc) (hasPrefix (printf "%s." $nsSvc) $host) }}true{{ end }}
+{{- end }}
+
+{{/*
+"true" when AMP talks to the chart's own Valkey: it runs (valkey.replicas > 0,
+its only gate besides the profile) AND cache.host points at it. AMP then reads
+Valkey's password; otherwise the cache is external and cache.auth.* applies,
+also when the chart's Valkey still runs next to it unused.
+*/}}
+{{- define "amp.cache.bundled" -}}
+{{- if and (gt (int .Values.valkey.replicas) 0) (include "amp.cache.hostIsValkey" .) }}true{{ end }}
+{{- end }}
+
+{{/*
+Key of the password in amp.valkey.secretName: valkey.password.secretKey for an
+existingSecret; the chart's own Secret always stores it under "password".
+*/}}
+{{- define "amp.valkey.secretKey" -}}
+{{- if .Values.valkey.password.existingSecret }}
+{{- .Values.valkey.password.secretKey | default "password" }}
+{{- else -}}
+password
+{{- end }}
 {{- end }}
 
 {{/*

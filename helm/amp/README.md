@@ -60,9 +60,9 @@ PostgreSQL + Valkey; grouping state is shared across replicas:
 helm install amp ./helm/amp
 ```
 - PostgreSQL storage (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
-- Valkey cache (`<fullname>-redis`, image `valkey/valkey`), one instance. Valkey, not Redis: Redis 7.4 and later is RSALv2/SSPL (`docs/06-planning/DECISIONS.md` ADR-017). An external Redis-compatible cache: `cache.host` (and `valkey.replicas: 0`), as in `values-production.yaml`
+- Valkey cache (`<fullname>-redis`, image `valkey/valkey`), one instance. Valkey, not Redis: Redis 7.4 and later is RSALv2/SSPL (`docs/06-planning/DECISIONS.md` ADR-017). An external Redis-compatible cache: `cache.host` and `valkey.replicas: 0`, as in `values-production.yaml` (see [Cache](#cache))
 - One replica, HPA off by default; `autoscaling.enabled: true` for 2–10 replicas
-- Group timers and notification dedup are meant to live in Valkey, so that replicas share them. With the defaults AMP cannot authenticate to the chart's Valkey and keeps them in memory per pod (bug `AMP-CACHE-NOAUTH`); check the AMP log for `Redis cache unavailable, falling back to in-memory cache`
+- Group timers and notification dedup live in Valkey, so that replicas share them. AMP logs `Redis cache initialized` when it is connected; `Redis cache unavailable, falling back to in-memory cache` means it keeps them in memory per pod (see [Cache](#cache))
 
 ### Lite Profile
 Single process, no external dependencies:
@@ -101,8 +101,20 @@ helm install amp ./helm/amp --set profile=lite
 | `postgresql.enabled` | Enable bundled PostgreSQL; the lite profile does not use it, set `false` there | `true` |
 | `cache.enabled` | Point AMP at the Valkey cache (`cache.host`); `false` leaves AMP on in-memory state | `true` |
 | `valkey.image.repository` / `.tag` | Cache image | `valkey/valkey` / `8.1.10-alpine` |
+| `valkey.password.existingSecret` / `.secretKey` | Secret with the chart's Valkey password (otherwise `<fullname>-redis-secret`) | `""` / `password` |
+| `valkey.password.value` | Password for `<fullname>-redis-secret`; empty: generated on first install and kept by upgrades | `""` |
+| `cache.auth.existingSecret` / `.existingSecretPasswordKey` | Secret with the password of an external `cache.host` | `""` / `password` |
+| `cache.auth.enabled` / `.password` | Password of an external cache from values (stored in `<fullname>-secrets`) | `false` / `""` |
 | `persistence.enabled` | Enable PVC (Lite) | `true` |
 | `persistence.size` | PVC size | `5Gi` |
+
+### Cache
+
+The chart's Valkey (`valkey.replicas` > 0, the default) always requires a password. While `cache.host` points at it (`<fullname>-redis`, the default, or a longer DNS name of it in the release namespace), AMP, Valkey and its exporter read it from the same Secret: `valkey.password.existingSecret` (key `valkey.password.secretKey`), or `<fullname>-redis-secret`, which the chart creates. With neither `existingSecret` nor `valkey.password.value` the password is generated on the first install and later upgrades keep it (`lookup`). `lookup` is empty in renders without cluster access (`helm template`, client-side `--dry-run`, Argo CD; Flux and `--dry-run=server` do look it up): there set `valkey.password.value` or `existingSecret`, or every sync generates a new password. An `existingSecret` password must not end with a newline: Valkey trims it, AMP and the exporter do not (create it with `printf '%s'`, as below). Valkey and AMP read the password at pod start: to change it, update the Secret, then `kubectl rollout restart statefulset/<fullname>-redis deploy/<fullname>`. `cache.auth.*` does not apply to the chart's Valkey; NOTES warns when it is set.
+
+An external Redis-compatible cache (`values-production.yaml`): `cache.host`, `valkey.replicas: 0` (otherwise the chart's Valkey keeps running unused; NOTES says so), and its password from a Secret you create (`cache.auth.existingSecret`, key `cache.auth.existingSecretPasswordKey`) or from `cache.auth.enabled` + `cache.auth.password`; not both. Without either AMP connects without a password. `valkey.replicas: 0` with `cache.host` left at the chart's Valkey (short or full DNS name in the release namespace) fails the render. AMP reads the password at start: after changing the Secret, run `kubectl rollout restart deploy/<fullname>`.
+
+AMP does not reconnect to a cache that was unreachable when it started (bug `AMP-CACHE-NO-RECONNECT`): if the log shows `falling back to in-memory cache` after an upgrade, restart AMP once the cache pod is ready.
 
 ### PostgreSQL
 

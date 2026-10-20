@@ -1,0 +1,194 @@
+# helm/amp/tests/render-cache-auth.sh against the main chart (git archive main = ddc02ae), v4.3.0+gbec5b06
+# expected: T1/T2/T3/T6/T7/T7b(own) fail = the bug; T4/T5/T7a env/T7b external/T8 pass = unchanged invariants
+T1 defaults: AMP, Valkey and the exporter read the chart's Secret:
+  ok   defaults: renders
+  FAIL defaults: AMP REDIS_PASSWORD from the Valkey Secret (want Deployment REDIS_PASSWORD -> 'amp-redis-secret/password', got '')
+  ok   defaults: Valkey and exporter from the same Secret
+  ok   defaults: chart creates the Valkey Secret
+  ok   defaults: Valkey config-init mounts the same Secret
+  ok   defaults: no cache.auth password in amp-secrets
+T2 valkey.password.existingSecret with a custom key:
+  ok   valkey-existing: renders
+  FAIL valkey-existing: AMP from the operator's Secret (want Deployment REDIS_PASSWORD -> 'vk/pw', got '')
+  FAIL valkey-existing: Valkey and exporter from it (want StatefulSet REDIS_PASSWORD -> 'vk/pw vk/pw', got 'amp-redis-secret/password amp-redis-secret/password')
+  ok   valkey-existing: no chart Valkey Secret
+  FAIL valkey-existing: config-init mounts it (want 1 x 'secretName: vk', got 0)
+  FAIL valkey-existing: mounted item is the custom key (want 1 x '- key: pw', got 0)
+  FAIL valkey-existing: chart Secret not referenced (want 0 x 'amp-redis-secret', got 3)
+  ok   valkey-existing-default-key: renders
+  FAIL valkey-existing-default-key: key defaults to password (want Deployment REDIS_PASSWORD -> 'vk/password', got '')
+T3 external cache with cache.auth.existingSecret:
+  ok   ext-existing: renders
+  FAIL ext-existing: AMP from the operator's Secret (want Deployment REDIS_PASSWORD -> 'cache-sec/password', got '')
+  ok   ext-existing: no redis-password in amp-secrets
+  ok   ext-existing-key: renders
+  FAIL ext-existing-key: custom key (want Deployment REDIS_PASSWORD -> 'cache-sec/pw', got '')
+  ok   ext-existing-eso: renders
+  ok   ext-existing-eso: ExternalSecret does not fetch it
+T4 values-production.yaml (external cache, cache.auth.password) as before:
+  ok   production: renders
+  ok   production: AMP from amp-secrets/redis-password
+  ok   production: amp-secrets carries redis-password
+T5 no cache, no password:
+  ok   lite: renders
+  ok   lite: no REDIS_PASSWORD
+  ok   cache-off: renders
+  ok   cache-off: only Valkey and exporter, not AMP
+  ok   cache-off: AMP gets no REDIS_PASSWORD
+T6 contradictory values fail the render:
+  FAIL no-cache: render succeeded, want failure
+  FAIL both: render succeeded, want failure
+T7 chart's Valkey: cache.auth.* is ignored, with a warning:
+  FAIL own-auth-enabled: render failed: Error: execution error at (amp/templates/secret.yaml:39:24): cache.auth.password must be set when cache.auth.enabled is true — no safe random-generation fallback exists for a cache credential the chart doesn't own (see the comment above); set it via --set, CI secret injection, or a secret manager before install.
+
+Use --debug flag to render out invalid YAML
+  FAIL own-auth-enabled: renders without cache.auth.password, Valkey Secret (want Deployment REDIS_PASSWORD -> 'amp-redis-secret/password', got '')
+  ok   own-auth-enabled: no redis-password
+  FAIL own-notes-enabled: no NOTES: Error: INSTALLATION FAILED: execution error at (amp/templates/secret.yaml:39:24): cache.auth.password must be set when cache.auth.enabled is true — no safe random-generation fallback exists for a cache credential the chart doesn't own (see the comment above); set it via --set, CI secret injection, or a secret manager before install.
+  FAIL own-notes-enabled: NOTES warn that cache.auth.* is ignored (want 1 x 'cache.auth.* is ignored for the chart's Valkey', got 0)
+  ok   own-notes-password: NOTES rendered
+  FAIL own-notes-password: NOTES warn that cache.auth.* is ignored (want 1 x 'cache.auth.* is ignored for the chart's Valkey', got 0)
+  ok   own-notes-existingSecret: NOTES rendered
+  FAIL own-notes-existingSecret: NOTES warn that cache.auth.* is ignored (want 1 x 'cache.auth.* is ignored for the chart's Valkey', got 0)
+  ok   own-notes-defaults: NOTES rendered
+  FAIL own-notes-defaults: NOTES name the Secret (want 1 x 'password from Secret amp-redis-secret/password', got 0)
+  ok   own-notes-defaults: no warning
+  ok   own-notes-defaults: no upgrade hint on install
+T7a external cache.host while the chart's Valkey still runs:
+  ok   ext-replicas: renders
+  ok   ext-replicas: AMP from cache.auth.password, not Valkey's
+  ok   ext-replicas: amp-secrets carries redis-password
+  ok   ext-noauth: renders
+  ok   ext-noauth: no password for an external cache without auth
+  ok   ext-replicas: NOTES rendered
+  FAIL ext-replicas: NOTES say the chart's Valkey is unused (want 1 x 'still runs but AMP does not use it', got 0)
+  FAIL ext-replicas: NOTES name the external host (want 1 x 'External cache L2 (cache.example.com)', got 0)
+T7b cache.host DNS names: own namespace is the chart's Valkey, another is external (-n prod):
+  ok   host-amp-redis: renders
+  FAIL host-amp-redis: chart's Valkey (want Deployment REDIS_PASSWORD -> 'amp-redis-secret/password', got 'amp-secrets/redis-password')
+  FAIL host-amp-redis-replicas-0: render succeeded, want failure
+  ok   host-amp-redis.prod: renders
+  FAIL host-amp-redis.prod: chart's Valkey (want Deployment REDIS_PASSWORD -> 'amp-redis-secret/password', got 'amp-secrets/redis-password')
+  FAIL host-amp-redis.prod-replicas-0: render succeeded, want failure
+  ok   host-amp-redis.prod.svc: renders
+  FAIL host-amp-redis.prod.svc: chart's Valkey (want Deployment REDIS_PASSWORD -> 'amp-redis-secret/password', got 'amp-secrets/redis-password')
+  FAIL host-amp-redis.prod.svc-replicas-0: render succeeded, want failure
+  ok   host-amp-redis.prod.svc.cluster.local: renders
+  FAIL host-amp-redis.prod.svc.cluster.local: chart's Valkey (want Deployment REDIS_PASSWORD -> 'amp-redis-secret/password', got 'amp-secrets/redis-password')
+  FAIL host-amp-redis.prod.svc.cluster.local-replicas-0: render succeeded, want failure
+  ok   host-amp-redis.otherns.svc.cluster.local: renders
+  ok   host-amp-redis.otherns.svc.cluster.local: external
+  ok   host-amp-redis.otherns.svc.cluster.local-replicas-0: renders
+  ok   host-amp-redisx: renders
+  ok   host-amp-redisx: external
+  ok   host-amp-redisx-replicas-0: renders
+  ok   host-amp-redis.prodx.svc: renders
+  ok   host-amp-redis.prodx.svc: external
+  ok   host-amp-redis.prodx.svc-replicas-0: renders
+T8 no password in a URL or in plain text outside a Secret:
+  ok   plain: renders
+  ok   plain-ext: renders
+  ok   defaults: no redis://:<password> URL
+  ok   plain: no redis://:<password> URL
+  ok   plain-ext: no redis://:<password> URL
+  ok   production: no redis://:<password> URL
+  ok   plain: valkey.password.value only base64-encoded
+  ok   plain-ext: cache.auth.password only base64-encoded
+
+28 assertion(s) failed
+
+# same test against bugfix/amp-cache-noauth
+T1 defaults: AMP, Valkey and the exporter read the chart's Secret:
+  ok   defaults: renders
+  ok   defaults: AMP REDIS_PASSWORD from the Valkey Secret
+  ok   defaults: Valkey and exporter from the same Secret
+  ok   defaults: chart creates the Valkey Secret
+  ok   defaults: Valkey config-init mounts the same Secret
+  ok   defaults: no cache.auth password in amp-secrets
+T2 valkey.password.existingSecret with a custom key:
+  ok   valkey-existing: renders
+  ok   valkey-existing: AMP from the operator's Secret
+  ok   valkey-existing: Valkey and exporter from it
+  ok   valkey-existing: no chart Valkey Secret
+  ok   valkey-existing: config-init mounts it
+  ok   valkey-existing: mounted item is the custom key
+  ok   valkey-existing: chart Secret not referenced
+  ok   valkey-existing-default-key: renders
+  ok   valkey-existing-default-key: key defaults to password
+T3 external cache with cache.auth.existingSecret:
+  ok   ext-existing: renders
+  ok   ext-existing: AMP from the operator's Secret
+  ok   ext-existing: no redis-password in amp-secrets
+  ok   ext-existing-key: renders
+  ok   ext-existing-key: custom key
+  ok   ext-existing-eso: renders
+  ok   ext-existing-eso: ExternalSecret does not fetch it
+T4 values-production.yaml (external cache, cache.auth.password) as before:
+  ok   production: renders
+  ok   production: AMP from amp-secrets/redis-password
+  ok   production: amp-secrets carries redis-password
+T5 no cache, no password:
+  ok   lite: renders
+  ok   lite: no REDIS_PASSWORD
+  ok   cache-off: renders
+  ok   cache-off: only Valkey and exporter, not AMP
+  ok   cache-off: AMP gets no REDIS_PASSWORD
+T6 contradictory values fail the render:
+  ok   no-cache: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   both: render fails with 'cache.auth.existingSecret is set while cache.auth.enabled=true'
+T7 chart's Valkey: cache.auth.* is ignored, with a warning:
+  ok   own-auth-enabled: renders
+  ok   own-auth-enabled: renders without cache.auth.password, Valkey Secret
+  ok   own-auth-enabled: no redis-password
+  ok   own-notes-enabled: NOTES rendered
+  ok   own-notes-enabled: NOTES warn that cache.auth.* is ignored
+  ok   own-notes-password: NOTES rendered
+  ok   own-notes-password: NOTES warn that cache.auth.* is ignored
+  ok   own-notes-existingSecret: NOTES rendered
+  ok   own-notes-existingSecret: NOTES warn that cache.auth.* is ignored
+  ok   own-notes-defaults: NOTES rendered
+  ok   own-notes-defaults: NOTES name the Secret
+  ok   own-notes-defaults: no warning
+  ok   own-notes-defaults: no upgrade hint on install
+T7a external cache.host while the chart's Valkey still runs:
+  ok   ext-replicas: renders
+  ok   ext-replicas: AMP from cache.auth.password, not Valkey's
+  ok   ext-replicas: amp-secrets carries redis-password
+  ok   ext-noauth: renders
+  ok   ext-noauth: no password for an external cache without auth
+  ok   ext-replicas: NOTES rendered
+  ok   ext-replicas: NOTES say the chart's Valkey is unused
+  ok   ext-replicas: NOTES name the external host
+T7b cache.host DNS names: own namespace is the chart's Valkey, another is external (-n prod):
+  ok   host-amp-redis: renders
+  ok   host-amp-redis: chart's Valkey
+  ok   host-amp-redis-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.prod: renders
+  ok   host-amp-redis.prod: chart's Valkey
+  ok   host-amp-redis.prod-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.prod.svc: renders
+  ok   host-amp-redis.prod.svc: chart's Valkey
+  ok   host-amp-redis.prod.svc-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.prod.svc.cluster.local: renders
+  ok   host-amp-redis.prod.svc.cluster.local: chart's Valkey
+  ok   host-amp-redis.prod.svc.cluster.local-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.otherns.svc.cluster.local: renders
+  ok   host-amp-redis.otherns.svc.cluster.local: external
+  ok   host-amp-redis.otherns.svc.cluster.local-replicas-0: renders
+  ok   host-amp-redisx: renders
+  ok   host-amp-redisx: external
+  ok   host-amp-redisx-replicas-0: renders
+  ok   host-amp-redis.prodx.svc: renders
+  ok   host-amp-redis.prodx.svc: external
+  ok   host-amp-redis.prodx.svc-replicas-0: renders
+T8 no password in a URL or in plain text outside a Secret:
+  ok   plain: renders
+  ok   plain-ext: renders
+  ok   defaults: no redis://:<password> URL
+  ok   plain: no redis://:<password> URL
+  ok   plain-ext: no redis://:<password> URL
+  ok   production: no redis://:<password> URL
+  ok   plain: valkey.password.value only base64-encoded
+  ok   plain-ext: cache.auth.password only base64-encoded
+
+all assertions passed

@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/amp-cache-noauth",
+  "commit": "bf5761b",
+  "reviewed_at": "2026-10-20",
+  "findings": {
+    "blocker": 0,
+    "major": 1,
+    "minor": 7,
+    "nit": 9
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

@@ -461,10 +461,21 @@ cache:
   # Valkey connection details
   host: "{{ include \"amp.fullname\" . }}-redis"  # Service name of Redis/Valkey
   port: 6379
-  # Valkey authentication (if needed)
+  # Password of an EXTERNAL cache (cache.host pointing at it; set
+  # valkey.replicas: 0 too, or the chart's Valkey runs unused). While cache.host
+  # is the chart's Valkey (the default, or a longer DNS name of it in the release
+  # namespace) AMP reads Valkey's password (valkey.password below) and these
+  # keys are ignored.
   auth:
+    # Password from this value, stored in <fullname>-secrets (redis-password).
     enabled: false
     password: ""
+    # Or from a Secret the chart does not create (preferred; not together
+    # with enabled: true). From a file with no trailing newline:
+    #   (umask 077; printf '%s' "$PASSWORD" > cache-password)
+    #   kubectl create secret generic amp-cache --from-file=password=cache-password
+    existingSecret: ""
+    existingSecretPasswordKey: password
 
 # ===============================
 # Valkey StatefulSet Configuration (<fullname>-redis)
@@ -525,14 +536,22 @@ valkey:
         cpu: 10m
         memory: 32Mi
 
-  # Password authentication (Secret management)
+  # Password authentication (Secret management). Valkey, its exporter and AMP
+  # read the same Secret; cache.auth.* does not apply to this Valkey.
   password:
     # Use existing Secret (recommended for production)
-    existingSecret: ""  # If empty, creates new Secret
-    secretKey: password
+    existingSecret: ""  # If empty, creates <fullname>-redis-secret
+    secretKey: password  # Key of the password in existingSecret
     # Password value (only used if existingSecret is empty)
     # In production: Set via Helm values or External Secrets Operator (TN-100)
-    value: ""  # If empty, generates random 32-char password
+    # If empty: generated on first install, kept by later upgrades (lookup).
+    # Renders without cluster access (helm template, client-side --dry-run,
+    # Argo CD) cannot look the Secret up and generate a new one each time:
+    # set value or existingSecret there. An existingSecret password must not
+    # end with a newline: Valkey trims it, AMP and the exporter do not:
+    #   (umask 077; printf '%s' "$PASSWORD" > valkey-password)
+    #   kubectl create secret generic amp-valkey --from-file=password=valkey-password
+    value: ""
 
   # NetworkPolicy (pod isolation)
   networkPolicy:
