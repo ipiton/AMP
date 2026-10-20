@@ -174,6 +174,39 @@ func TestTemplateFormatter_SlackInlineExpression(t *testing.T) {
 	assert.Equal(t, "#ops-critical", payload["channel"], "a literal field passes through unrendered")
 }
 
+// TestTemplateFormatter_SlackTemplatedColorFollowsStatus pins the rendering
+// half of SLACK-COLOR-TEMPLATE-REJECTED: upstream's own default for `color` is
+// an inline expression, and its output lands in the attachment verbatim —
+// danger while firing, good once resolved.
+func TestTemplateFormatter_SlackTemplatedColorFollowsStatus(t *testing.T) {
+	target := templateTarget("slack", core.FormatSlack, "team-x", map[string]string{
+		core.TemplateFieldColor: `{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}`,
+	})
+	formatter := newTestTemplateFormatter(t, target, testRegistry(t), testTemplateMetrics(t))
+
+	resolved := templateTestAlert()
+	endsAt := resolved.Alert.StartsAt.Add(time.Minute)
+	resolved.Alert.Status = core.StatusResolved
+	resolved.Alert.EndsAt = &endsAt
+
+	for name, tc := range map[string]struct {
+		alert *core.EnrichedAlert
+		want  string
+	}{
+		"firing":   {templateTestAlert(), "danger"},
+		"resolved": {resolved, "good"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload, err := formatter.FormatAlert(alertnameGroup("team-x"), tc.alert, core.FormatSlack)
+			require.NoError(t, err)
+
+			attachment, ok := firstAttachment(payload)
+			require.True(t, ok, "payload must carry an attachment: %v", payload)
+			assert.Equal(t, tc.want, attachment["color"])
+		})
+	}
+}
+
 func TestTemplateFormatter_PagerDutyFields(t *testing.T) {
 	target := templateTarget("pagerduty", core.FormatPagerDuty, "oncall", map[string]string{
 		core.TemplateFieldDescription:                  `{{ template "pagerduty.default.description" .}}`,

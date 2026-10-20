@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ipiton/AMP/internal/business/templating"
+	"github.com/ipiton/AMP/internal/core"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
@@ -167,6 +169,67 @@ func TestTemplatesDelivery_PerIntegrationFieldReachesTheWire(t *testing.T) {
 
 	assert.Equal(t, "CRITICAL: cpu is high", attachment["title"])
 	assert.Equal(t, "danger", attachment["color"])
+}
+
+// TestTemplatesDelivery_TemplatedColorFromYAMLReachesTheWire is
+// SLACK-COLOR-TEMPLATE-REJECTED end to end. The RouteConfig comes out of the
+// real parser rather than being built in Go — every other Slack test here
+// builds it programmatically, which is how a parser that rejected a templated
+// `color` (upstream's own default for that field) went unnoticed while the
+// rendering side already worked.
+//
+// The parser runs directly rather than through appconfig.LoadConfig because
+// configvalidator hard-errors on the httptest endpoint's plaintext Slack
+// api_url (see newConfigOnlyStack).
+func TestTemplatesDelivery_TemplatedColorFromYAMLReachesTheWire(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "development")
+	slack := newRecordingEndpoint(t)
+
+	routing, err := infraroute.NewRouteConfigParser().Parse([]byte(`
+route:
+  receiver: team-x
+receivers:
+  - name: team-x
+    slack_configs:
+      - api_url: ` + slack.server.URL + `/services/T/B/C
+        channel: '#ops'
+        send_resolved: true
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+`))
+	require.NoError(t, err, "a templated color must load")
+
+	stack := newStackFromRouting(t, routing, "team-x", alertnameGroupingConfig(),
+		withTemplatingFromConfig(t, appconfig.PublishingTemplateConfig{}, nil))
+
+	stack.ingest(t, "fp-1")
+	firing := slack.waitForRequest(t, 3*time.Second)
+	assert.Equal(t, "danger", slackAttachmentColor(t, firing), "firing renders the then-branch")
+
+	endsAt := time.Now().UTC()
+	_, err = stack.groupManager.AddAlertToGroup(context.Background(), &core.Alert{
+		Fingerprint: "fp-1",
+		AlertName:   "HighCPU",
+		Status:      core.StatusResolved,
+		Labels:      map[string]string{"alertname": "HighCPU", "severity": "critical", "cluster": "prod"},
+		Annotations: map[string]string{"summary": "cpu is high"},
+		StartsAt:    time.Now().UTC().Add(-time.Minute),
+		EndsAt:      &endsAt,
+	}, stack.groupKey)
+	require.NoError(t, err)
+
+	requests := slack.waitForRequests(t, 2, 3*time.Second)
+	assert.Equal(t, "good", slackAttachmentColor(t, requests[len(requests)-1]), "resolved renders the else-branch")
+}
+
+// slackAttachmentColor returns attachments[0].color of a recorded Slack request.
+func slackAttachmentColor(t *testing.T, request recordedRequest) any {
+	t.Helper()
+	attachments, ok := request.body["attachments"].([]any)
+	require.True(t, ok, "slack payload must carry attachments: %#v", request.body)
+	require.NotEmpty(t, attachments)
+	attachment, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	return attachment["color"]
 }
 
 // TestTemplatesDelivery_ExternalURLReachesTheWire pins item 3: the configured
