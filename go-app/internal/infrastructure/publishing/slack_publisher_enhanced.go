@@ -116,13 +116,20 @@ func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert 
 		return fmt.Errorf("failed to post message: %w", err)
 	}
 
-	// Cache message timestamp for threading
-	entry := &MessageEntry{
-		MessageTS: resp.TS,
-		ThreadTS:  resp.TS, // First message is thread root
-		CreatedAt: time.Now(),
+	// Cache message timestamp for threading. An Incoming Webhook answers a
+	// bare `ok` with no ts (SLACK-WEBHOOK-PLAIN-OK-RESPONSE): there is no
+	// thread to reply into, and an entry with an empty ts would turn the next
+	// send of this alert into a short un-threaded "Still firing" line instead
+	// of the full message. Without an entry every send is a full message, as
+	// upstream does.
+	if resp.TS != "" {
+		entry := &MessageEntry{
+			MessageTS: resp.TS,
+			ThreadTS:  resp.TS, // First message is thread root
+			CreatedAt: time.Now(),
+		}
+		p.cache.Store(fingerprint, entry)
 	}
-	p.cache.Store(fingerprint, entry)
 
 	// Record metrics
 	if p.GetMetrics() != nil {

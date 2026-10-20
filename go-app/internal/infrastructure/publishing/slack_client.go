@@ -260,19 +260,8 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 		}
 
 		// Check status code
-		if httpResp.StatusCode == http.StatusOK {
-			// Success - parse response
-			var slackResp SlackResponse
-			if err := json.Unmarshal(respBody, &slackResp); err != nil {
-				return nil, fmt.Errorf("failed to parse response: %w", err)
-			}
-
-			if !slackResp.OK {
-				// Slack returned ok=false (error in response body)
-				return nil, httperror.NewHTTPError(httpResp.StatusCode, slackResp.Error, ProviderSlack)
-			}
-
-			return &slackResp, nil
+		if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+			return parseSlackSuccess(httpResp, respBody)
 		}
 
 		// Error - parse Slack API error
@@ -318,6 +307,43 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 	}
 
 	return nil, fmt.Errorf("max retries (%d) exceeded: %w", maxRetries, lastErr)
+}
+
+// parseSlackSuccess interprets the body of a 2xx Slack response.
+//
+// The two Slack endpoints a slack_config can point at answer differently
+// (SLACK-WEBHOOK-PLAIN-OK-RESPONSE): an Incoming Webhook
+// (hooks.slack.com/services/...) answers `ok` as text/plain, while the Web API
+// (chat.postMessage) answers JSON {"ok":...,"ts":...} and reports failures as
+// 200 + ok=false. Requiring JSON made every successful webhook delivery an
+// error, so the group path never recorded an nflog entry and re-sent the group
+// on every group_interval. Mirrors upstream notify/slack: JSON only when the
+// body is JSON, otherwise `ok` is success and any other text is a permanent
+// error carrying that text. An empty body is also accepted — the 2xx status is
+// the delivery signal.
+//
+// A webhook success carries no ts, so the returned SlackResponse has TS == "".
+func parseSlackSuccess(httpResp *http.Response, respBody []byte) (*SlackResponse, error) {
+	trimmed := bytes.TrimSpace(respBody)
+
+	isJSON := strings.HasPrefix(httpResp.Header.Get("Content-Type"), "application/json") ||
+		bytes.HasPrefix(trimmed, []byte("{"))
+	if isJSON {
+		var slackResp SlackResponse
+		if err := json.Unmarshal(respBody, &slackResp); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		if !slackResp.OK {
+			// Slack returned ok=false (error in response body)
+			return nil, httperror.NewHTTPError(httpResp.StatusCode, slackResp.Error, ProviderSlack)
+		}
+		return &slackResp, nil
+	}
+
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("ok")) {
+		return &SlackResponse{OK: true}, nil
+	}
+	return nil, httperror.NewHTTPError(httpResp.StatusCode, string(trimmed), ProviderSlack)
 }
 
 // maskWebhookURL masks sensitive webhook token for logging
