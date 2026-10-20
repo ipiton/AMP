@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ipiton/AMP/internal/business/templating"
-	"github.com/ipiton/AMP/internal/core"
 	appconfig "github.com/ipiton/AMP/internal/config"
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	infraroute "github.com/ipiton/AMP/internal/infrastructure/routing"
 )
