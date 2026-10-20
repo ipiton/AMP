@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
 	"github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval"
 	"gopkg.in/yaml.v3"
@@ -57,6 +58,7 @@ func NewRouteConfigParser() *RouteConfigParser {
 	_ = v.RegisterValidation("emoji", validateEmoji)
 	_ = v.RegisterValidation("slack_color", validateSlackColor)
 	_ = v.RegisterValidation("telegram_chat_id", validateTelegramChatID)
+	_ = v.RegisterValidation("template_expr", validateTemplateExpression)
 
 	return &RouteConfigParser{
 		validator: v,
@@ -765,6 +767,22 @@ func validateEmoji(fl validator.FieldLevel) bool {
 
 	// Format: :emoji:
 	return len(value) >= 3 && value[0] == ':' && value[len(value)-1] == ':'
+}
+
+// validateTemplateExpression accepts a value that is a template expression.
+//
+// It is only ever OR-ed in front of a literal check on a templated
+// presentation field (`template_expr|slack_color`): the shape of a template's
+// output is unknown until it renders against an alert, so a value like
+// `{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}` (upstream's own
+// slack color default) can never pass the literal check. Upstream does not
+// check these fields at load either; the rendered value is sent as is.
+//
+// core.IsTemplateExpression is the same test the template formatter uses to
+// decide whether to render a field, so a value this lets through is exactly a
+// value that gets rendered, and every literal is still checked here.
+func validateTemplateExpression(fl validator.FieldLevel) bool {
+	return core.IsTemplateExpression(fl.Field().String())
 }
 
 func validateSlackColor(fl validator.FieldLevel) bool {
