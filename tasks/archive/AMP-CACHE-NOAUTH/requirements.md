@@ -35,14 +35,14 @@ updated_at: 2026-10-20
 
 ## Success Criteria
 
-- [ ] Встроенный кеш (standard-профиль, Valkey чарта): контейнер AMP получает `REDIS_PASSWORD` из того же Secret и ключа, что и Valkey, — включая случай `valkey.password.existingSecret` + `valkey.password.secretKey`, — без `cache.auth.enabled`.
-- [ ] Valkey чарта сам работает с `valkey.password.existingSecret` + `valkey.password.secretKey` (сейчас ссылается на несозданный `<fullname>-redis-secret`, `evidence/valkey-existing-secret-render.txt`).
-- [ ] Пароль встроенного кеша не меняется между `helm upgrade` (сейчас `randAlphaNum` на каждом рендере — после фикса AMP разошёлся бы с Valkey; найдено на spec).
-- [ ] Внешний кеш: пароль можно передать через `cache.auth.existingSecret` (+ ключ); текущий путь `cache.auth.enabled` + `cache.auth.password` (и `externalSecrets`) продолжает работать.
-- [ ] Render-тест в `helm/amp/tests/` покрывает: дефолты, `valkey.password.existingSecret`, внешний кеш с `existingSecret`, внешний кеш с `cache.auth.password`, lite-профиль (нет `REDIS_PASSWORD`).
-- [ ] k3d: `helm install` с дефолтами — в логе AMP нет `falling back to in-memory cache`; в Valkey появляются ключи AMP после отправки алерта. Evidence в `tasks/AMP-CACHE-NOAUTH/evidence/`.
-- [ ] Сняты оговорки про `AMP-CACHE-NOAUTH` в `helm/amp/README.md`, `CHANGELOG.md`, ADR-017 (`DECISIONS.md`); запись в `CHANGELOG.md` `[Unreleased]`; баг закрыт в `BUGS.md`.
-- [ ] Гейты AMP (`WORKFLOW.md` § Гейты AMP), включая `scripts/release-gate.sh`, зелёные.
+- [x] Встроенный кеш (standard-профиль, Valkey чарта): контейнер AMP получает `REDIS_PASSWORD` из того же Secret и ключа, что и Valkey, — включая случай `valkey.password.existingSecret` + `valkey.password.secretKey`, — без `cache.auth.enabled`.
+- [x] Valkey чарта сам работает с `valkey.password.existingSecret` + `valkey.password.secretKey` (сейчас ссылается на несозданный `<fullname>-redis-secret`, `evidence/valkey-existing-secret-render.txt`).
+- [x] Пароль встроенного кеша не меняется между `helm upgrade` (сейчас `randAlphaNum` на каждом рендере — после фикса AMP разошёлся бы с Valkey; найдено на spec).
+- [x] Внешний кеш: пароль можно передать через `cache.auth.existingSecret` (+ ключ); текущий путь `cache.auth.enabled` + `cache.auth.password` (и `externalSecrets`) продолжает работать.
+- [x] Render-тест в `helm/amp/tests/` покрывает: дефолты, `valkey.password.existingSecret`, внешний кеш с `existingSecret`, внешний кеш с `cache.auth.password`, lite-профиль (нет `REDIS_PASSWORD`).
+- [x] k3d: `helm install` с дефолтами — в логе AMP нет `falling back to in-memory cache`; в Valkey появляются ключи AMP после отправки алерта. _(Свежая установка — без `falling back`; на первом upgrade с `main` — гонка `AMP-CACHE-NO-RECONNECT`, non-goal, `evidence/k3d-acceptance.md` § A2.)_ Evidence в `tasks/AMP-CACHE-NOAUTH/evidence/`.
+- [x] Сняты оговорки про `AMP-CACHE-NOAUTH` в `helm/amp/README.md`, `CHANGELOG.md`, ADR-017 (`DECISIONS.md`); запись в `CHANGELOG.md` `[Unreleased]`; баг закрыт в `BUGS.md`.
+- [x] Гейты AMP (`WORKFLOW.md` § Гейты AMP), включая `scripts/release-gate.sh`, зелёные.
 
 ## Non-Goals
 

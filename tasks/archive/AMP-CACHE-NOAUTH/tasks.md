@@ -75,21 +75,21 @@ based_on:
 - [x] **5.1** Гейты AMP: `make -C go-app quality-gates-fast` (Go не меняется — контрольный), `scripts/release-gate.sh` → `RESULT: PASS`, вывод в `evidence/release-gate.txt`; `git diff --check`. <!-- depends: Phase 4 | verify: grep 'RESULT: PASS' tasks/AMP-CACHE-NOAUTH/evidence/release-gate.txt --> Сделано: `quality-gates-fast` PASS, `git status` чистый после `go fmt`; release-gate 12/12 PASS (`RESULT: PASS`); `git diff --check main...HEAD` — один хвостовой пробел в `Spec.md` (жёсткий перенос) заменён на `\`.
 - [x] **5.2** k3d **A1**: `helm install` веткой с дефолтами → все Ready; лог AMP: `Redis cache initialized`, нет `falling back`; `POST /api/v2/alerts` → 200, затем `redis-cli -a <пароль из Secret> --scan` в поде Valkey показывает ключи AMP. <!-- depends: 5.1 | verify: evidence/k3d-acceptance.md § A1 --> Сделано: `Redis cache initialized`, POST 200, ключ `amp:cluster:peer:*`, 7 соединений AMP, `redis_up 1`.
 - [x] **5.3** k3d **A2**: `helm install` чартом `main` → `helm upgrade` веткой → второй `helm upgrade` без изменений → `kubectl rollout restart deploy/t-amp`: хеш пароля в Secret одинаков после обоих upgrade, AMP подключён после каждого шага; если после первого upgrade `falling back` (гонка, `AMP-CACHE-NO-RECONNECT`) — зафиксировать, `rollout restart`, продолжить. NOTES первого `helm upgrade` содержат подсказку про `Redis cache initialized` (T7c из 4.1). <!-- depends: 5.2 | verify: evidence/k3d-acceptance.md § A2 --> Сделано: хеш пароля одинаков на install `main` + 2 upgrade + restart; гонка `AMP-CACHE-NO-RECONNECT` после первого upgrade воспроизвелась, `rollout restart` по подсказке NOTES вылечил; дальше подключён после каждого шага. B3 (`\n` в `existingSecret`) — подтверждён, § B3.
-- [ ] **5.4** Удалить k3d-кластер задачи — с подтверждения владельца. <!-- depends: 5.3 | verify: k3d cluster list -->
+- [ ] **5.4** _(skipped: подтверждения владельца нет — кластер `cache-noauth` с релизами `a1`/`a2`/`b3` оставлен; удалить `k3d cluster delete cache-noauth` после подтверждения)_ Удалить k3d-кластер задачи — с подтверждения владельца. <!-- depends: 5.3 | verify: k3d cluster list -->
 
 ## Phase 6: finalize
 
-- [ ] **6.1** `/finalize`: ADR-017 «Следствие» — снять оговорку про баг (перенесено из 2.3 по deep-review B7: не объявлять закрытым до приёмки); `DONE.md`; `NEXT.md` (WIP → пусто, Queue пополнить — сейчас 2 задачи); `BUGS.md` — закрыть `AMP-CACHE-NOAUTH`, в `AMP-CACHE-NO-RECONNECT` снять «маскирует `AMP-CACHE-NOAUTH`» и добавить результат A2; новые записи по deep-review: BUGS `HELM-NAMESPACE-SPLIT` (A2), TECH-DEBT `HELM-CHART-GAPS` — GitOps без `lookup` (A3) и нет рестарта подов при смене пароля Valkey (B5), BACKLOG — пароль в argv проб (A6); архив workspace. <!-- depends: Phase 5 | verify: ls tasks/archive/AMP-CACHE-NOAUTH -->
+- [x] **6.1** `/finalize`: ADR-017 «Следствие» — снять оговорку про баг (перенесено из 2.3 по deep-review B7: не объявлять закрытым до приёмки); `DONE.md`; `NEXT.md` (WIP → пусто, Queue пополнить — сейчас 2 задачи); `BUGS.md` — закрыть `AMP-CACHE-NOAUTH`, в `AMP-CACHE-NO-RECONNECT` снять «маскирует `AMP-CACHE-NOAUTH`» и добавить результат A2; новые записи по deep-review: BUGS `HELM-NAMESPACE-SPLIT` (A2; оказался существующим `HELM-NAMESPACE-OVERRIDE-SPLIT` — дополнен, новой записи нет), TECH-DEBT `HELM-CHART-GAPS` — GitOps без `lookup` (A3) и нет рестарта подов при смене пароля Valkey (B5), BACKLOG — пароль в argv проб (A6, `VALKEY-PROBE-ARGV-PASSWORD`); архив workspace. <!-- depends: Phase 5 | verify: ls tasks/archive/AMP-CACHE-NOAUTH -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
 
 ## Deviations from Spec (implement, 2026-10-20)
 

@@ -99,11 +99,11 @@ Go не меняется: лог `Redis cache initialized`/`falling back` и deg
 
 ## Invariants
 
-- [ ] `values-production.yaml` + `--set cache.auth.password=…` рендерит то же, что сейчас: `REDIS_PASSWORD` из `<fullname>-secrets`/`redis-password` (release-gate и все render-тесты на этом стоят).
-- [ ] Lite-профиль: ни `REDIS_PASSWORD`, ни объектов Valkey (как сейчас).
-- [ ] `cache.enabled: false`: `REDIS_PASSWORD` нет (как сейчас).
-- [ ] Повторный рендер с существующим `<fullname>-redis-secret` не меняет пароль.
-- [ ] Обход «`cache.auth.enabled` + `cache.auth.password` = `valkey.password.value`» продолжает работать (AMP получает тот же пароль из Secret Valkey).
+- [x] `values-production.yaml` + `--set cache.auth.password=…` рендерит то же, что сейчас: `REDIS_PASSWORD` из `<fullname>-secrets`/`redis-password` (release-gate и все render-тесты на этом стоят). — T4, `checksum/secret` совпадает с `main`.
+- [x] Lite-профиль: ни `REDIS_PASSWORD`, ни объектов Valkey (как сейчас). — T5; рендер lite идентичен `main`.
+- [x] `cache.enabled: false`: `REDIS_PASSWORD` нет (как сейчас). — T5.
+- [x] Повторный рендер с существующим `<fullname>-redis-secret` не меняет пароль. — k3d A2: хеш одинаков на install + 2 upgrade + restart.
+- [x] Обход «`cache.auth.enabled` + `cache.auth.password` = `valkey.password.value`» продолжает работать (AMP получает тот же пароль из Secret Valkey). — T7: AMP читает Secret Valkey, `cache.auth.*` игнорируется с предупреждением в NOTES.
 
 ## Edge Cases
 
@@ -146,5 +146,5 @@ Go не меняется: лог `Redis cache initialized`/`falling back` и deg
 
 ## Open Questions
 
-- [ ] Поведение `lookup` в GitOps-рендерах (`assumed`) — не проверяем, закрываем документацией (Edge Case 11).
-- [ ] Проявится ли `AMP-CACHE-NO-RECONNECT` в A2 — фиксируем в evidence, чиним отдельной задачей.
+- [x] Поведение `lookup` в GitOps-рендерах (`assumed`) — не проверяем, закрываем документацией (Edge Case 11); риск перенесён в TECH-DEBT `HELM-CHART-GAPS` (A3).
+- [x] Проявится ли `AMP-CACHE-NO-RECONNECT` в A2 — фиксируем в evidence, чиним отдельной задачей. — Проявился после первого upgrade (`evidence/k3d-acceptance.md` § A2), BUGS дополнен, задача в Queue.
