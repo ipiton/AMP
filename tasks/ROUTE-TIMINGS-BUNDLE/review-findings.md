@@ -3,8 +3,8 @@
 **Trigger classification:** discretionary-running (дифф с тестами >200 строк, `X R`, путь таймеров HA, запрошено владельцем)
 **Reviewer perspective:** независимый агент-ревьюер (не автор реализации)
 **Reviewed at:** 2026-10-20
-**Reviewed tree:** bugfix/route-timings @ 91265a3
-**Verdict:** fix_required (см. `review-verdict.json`)
+**Reviewed tree:** bugfix/route-timings @ 91265a3 (первый проход), 0eb8a38 (re-review)
+**Verdict:** pass после re-review (см. `review-verdict.json`)
 
 Линзы: correctness, premises, `X` (дерево ↔ grouping manager ↔ timer manager ↔ memory/Redis, hot reload, restore/reconciliation), `R` (поведение существующих конфигов, rollback, наблюдаемость), maintainability. Сверка с upstream `alertmanager@v0.32.0` (`dispatch/route.go:68-99`, `config/config.go:914-919`).
 
@@ -82,6 +82,30 @@
 - `go build ./...` — ок. `go test ./internal/infrastructure/routing/... ./internal/config/... ./pkg/configvalidator/... ./internal/application/handlers/... ./internal/core/services/...` — зелёные. Тесты `business/routing` и `infrastructure/grouping` не компилируются (ожидаемо, шаг `write-tests`).
 - `internal/application` `TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica` (`GROUPING-ORPHAN-ADOPTION-TEST-FLAKY`): 2/20 падений на 91265a3 против 1/20 на 8cd9237 без нагрузки — статистически неразличимо; учащение флейка оценить в `testing` (критерий успеха из requirements).
 - Удаление AMP-only `group_interval >= group_wait` соответствует upstream; `inheritDuration` совпадает с `dispatch.newRoute`; `/api/v2/status` `config.original` теперь сериализует только заданное.
+
+## Re-review (0eb8a38)
+
+Тот же независимый ревьюер. Предмет — только fix round: `git diff 91265a3..0eb8a38`. `go build ./...` проходит, `go test ./internal/infrastructure/routing/... ./internal/config/... ./pkg/configvalidator/...` зелёные.
+
+| Finding | Статус | Комментарий |
+|---|---|---|
+| F1 | закрыт | `validateRouteTree` (`go-app/internal/infrastructure/routing/parser.go:538-554`) обходит дерево от корня и отвергает `!= nil && == 0` для `group_interval`/`repeat_interval`; `validateSemantics` (`parser.go:391-400`) делает то же для `global.*`. Оба пути фатальны: `Parse` → `loadRouteConfig` → `LoadConfig` на старте, и тот же `LoadConfig` в `reload_coordinator.go:365` на hot reload; `ValidateConfig` тоже идёт через `validateSemantics`. `group_wait: 0s` проходит, `nil` наследуется. Отрицательные значения по-прежнему ловит configvalidator E026 до парсера, `validateDurations` остаётся backstop. Тесты — в 3.1. |
+| F2 | defer-tech-debt (без изменений) | → `TECH-DEBT.md` на finalize |
+| F3 | defer-bug (без изменений) | → `BUGS.md` на finalize |
+| F4 | закрыт | Rollback в `Spec.md` исправлен; строка premise и D3a добавлены. |
+| F5 | закрыт | Doc `Route.Defaults()` (`go-app/internal/infrastructure/grouping/config.go:149-153`) описывает поведение верно. |
+| F6 | reject (без изменений) | |
+| F7 | закрыт | Шаги 2.4/2.5 в `tasks.md`. CHANGELOG откладывается до finalize — это явно записано в 2.5. |
+
+### N1 — Путь поля в ошибке нулевого interval для вложенного route без receiver
+- **Severity:** nit
+- **Location:** `go-app/internal/infrastructure/routing/parser.go:542`
+- **Issue:** `route[receiver=%s].group_interval`: вложенный route, который наследует receiver, даёт `route[receiver=]...`, и по сообщению не понять, какой это route. Остальные ошибки в `validateRouteTree` используют тот же стиль, так что расхождения нет.
+- **Recommendation:** при желании позже перейти на индексный путь (`routes[i]`) во всём `validateRouteTree`.
+- **Disposition:** reject (reason: следует существующему стилю функции; смена формата выходит за scope)
+- **Follow-up:** n/a
+
+Новых blocker/major нет. Gate: pass.
 
 ## Anti-Pattern Check
 
