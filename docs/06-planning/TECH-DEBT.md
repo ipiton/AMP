@@ -138,6 +138,14 @@
 - **Refs:** deep-review PROD-INGRESS-HARDENING R14; 2026-10-01.
 - **Status:** open
 
+### [low][Gate][~0.1d] RELEASE-GATE-SMOKE-SHARED-PROJECT
+- **Title:** два одновременных `scripts/release-gate.sh` ломают друг другу `amtool-compat`
+- **Problem:** `step_amtool_compat` поднимает `deploy/smoke` под фиксированным compose-проектом `amp-smoke` и портом `18080`, а в начале шага делает `docker compose down -v`. Второй прогон (другая сессия/worktree) снимает или подменяет стек первого: health-check проходит по чужому контейнеру, затем `amtool` — `connection refused`.
+- **Impact:** ложный FAIL гейта при параллельной работе нескольких сессий; под той же нагрузкой на Docker testcontainers-reaper ловит `unexpected container status "removing"` в шаге `test`.
+- **Fix:** уникальный `COMPOSE_PROJECT_NAME` (например, с PID) и свободный порт на прогон, либо lock-файл на шаг.
+- **Refs:** SLACK-WEBHOOK-PLAIN-OK-RESPONSE, `tasks/archive/SLACK-WEBHOOK-PLAIN-OK-RESPONSE/evidence/release-gate-run1.md`; 2026-10-20.
+- **Status:** open
+
 ### [low][Grouping][~0.5d] GROUP-HASTIMER-REDIS-GET-PER-ALERT
 - **Title:** `HasTimer` делает Redis GET на каждый алерт у реплики без локального handle
 - **Problem:** `ensureGroupTimer` спрашивает `HasTimer`; у реплики, не владеющей таймером группы, это поход в Redis — в HA (N−1)/N алертов. При ошибке GET пишутся Warn и Error на каждый алерт, без rate-limit.

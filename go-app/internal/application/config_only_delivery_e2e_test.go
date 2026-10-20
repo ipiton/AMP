@@ -473,6 +473,50 @@ func TestConfigOnlyDelivery_SlackWireShape(t *testing.T) {
 	assert.True(t, hasAttachments || hasBlocks, "Slack payload must carry blocks or attachments: %v", got.body)
 }
 
+// TestConfigOnlyDelivery_SlackWebhookOKConfirmsDelivery is
+// SLACK-WEBHOOK-PLAIN-OK-RESPONSE on the group path: recordingEndpoint answers
+// like a real Incoming Webhook (200, body `ok`). The Slack client used to fail
+// to parse that as JSON, so the delivery was never confirmed, no nflog entry
+// was recorded, and the group went out again on every group_interval instead
+// of waiting for repeat_interval.
+func TestConfigOnlyDelivery_SlackWebhookOKConfirmsDelivery(t *testing.T) {
+	slack := newRecordingEndpoint(t)
+
+	routing := &infraroute.RouteConfig{
+		Receivers: []*infraroute.Receiver{{
+			Name: "team-x",
+			SlackConfigs: []*infraroute.SlackConfig{{
+				APIURL:  slack.server.URL + "/services/T/B/C",
+				Channel: "#ops",
+			}},
+		}},
+	}
+
+	groupInterval := 150 * time.Millisecond
+	groupingConfig := &grouping.GroupingConfig{
+		Route: &grouping.Route{
+			Receiver:       "team-x",
+			GroupBy:        []string{"alertname"},
+			GroupWait:      &grouping.Duration{Duration: 40 * time.Millisecond},
+			GroupInterval:  &grouping.Duration{Duration: groupInterval},
+			RepeatInterval: &grouping.Duration{Duration: time.Hour},
+		},
+	}
+
+	stack := newStackFromRouting(t, routing, "team-x", groupingConfig)
+	stack.ingest(t, "fp-1")
+
+	slack.waitForRequest(t, 5*time.Second)
+
+	// Several group_interval ticks: an unconfirmed delivery re-sends on each.
+	// Longer than the Slack client's own rate limit (1 msg/s per webhook), which
+	// would otherwise hold the re-send back past a shorter window and let the
+	// buggy client pass.
+	time.Sleep(1500 * time.Millisecond)
+	assert.Len(t, slack.all(), 1,
+		"a webhook `ok` is a confirmed delivery: the group must wait for repeat_interval, not re-send every group_interval")
+}
+
 // TestConfigOnlyDelivery_SendResolvedFalseNotRenotifiedOnPartialResolve: one
 // alert of a group resolves, the target does not take resolved alerts. The
 // alerts still firing were already notified, so the target must hear nothing
