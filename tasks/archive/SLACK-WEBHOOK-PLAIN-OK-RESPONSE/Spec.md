@@ -68,10 +68,10 @@ Slack-клиент перестаёт требовать JSON на 2xx: Incoming
 
 ## Invariants
 
-- [ ] JSON `{"ok":true,"ts":"..."}` → `TS` возвращается, threading для Web API не меняется.
-- [ ] JSON `{"ok":false,"error":"x"}` на 200 → ошибка с `x`.
-- [ ] 4xx не ретраятся, 429/5xx ретраятся (`maxRetries=3`).
-- [ ] `slack_client_mask_test.go` зелёный.
+- [x] JSON `{"ok":true,"ts":"..."}` → `TS` возвращается, threading для Web API не меняется.
+- [x] JSON `{"ok":false,"error":"x"}` на 200 → ошибка с `x`.
+- [x] 4xx не ретраятся, 429/5xx ретраятся (`maxRetries=3`).
+- [x] `slack_client_mask_test.go` зелёный.
 
 ## Edge Cases
 
