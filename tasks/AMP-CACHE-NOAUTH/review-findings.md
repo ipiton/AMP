@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (`S`; 3 сигнала `C S R`)
 **Reviewer perspective:** два независимых агента (general-purpose), каждый без доступа к выводу другого: A — security / secret handling + contract compatibility + premises; B — correctness + premises + runtime/rollout + maintainability. Раунд исправлений проверяет третий независимый агент (R2 ниже).
 **Reviewed at:** 2026-10-20
-**Reviewed tree:** `bugfix/amp-cache-noauth` @ `697d100` (раунд 1); исправления @ `834ecbe`
-**Verdict:** см. `review-verdict.json`
+**Reviewed tree:** `bugfix/amp-cache-noauth` @ `697d100` (раунд 1); исправления @ `834ecbe`, проверены раундом 2; C1 @ `bf5761b` (2 строки, проверено рендером по сценарию ревьюера)
+**Verdict:** pass @ `bf5761b` (`review-verdict.json`: 1 major, 7 minor, 9 nit; все fix-here закрыты, кроме C3 — тесты в write-tests)
 
 Сходимость: A1 и B1 найдены обоими агентами независимо (наблюдение, не подтверждение).
 

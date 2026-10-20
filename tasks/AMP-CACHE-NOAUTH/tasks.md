@@ -61,7 +61,7 @@ based_on:
 
 ## Phase 3: deep-review
 
-- [ ] **3.1** `/deep-review` по диффу ветки → `review-findings.md`, `review-verdict.json`; находки исправить до `"gate": "pass"`. <!-- depends: Phase 1, Phase 2 | verify: jq -r .gate tasks/AMP-CACHE-NOAUTH/review-verdict.json → pass -->
+- [x] **3.1** `/deep-review` по диффу ветки → `review-findings.md`, `review-verdict.json`; находки исправить до `"gate": "pass"`. <!-- depends: Phase 1, Phase 2 | verify: jq -r .gate tasks/AMP-CACHE-NOAUTH/review-verdict.json → pass -->
 
 ## Phase 4: тесты (после verdict `pass`)
 
