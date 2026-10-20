@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `extraVolumes` / `extraVolumeMounts` (HELM-EXTRA-VOLUMES, default `[]`): extra pod volumes and mounts for the `amp` container, e.g. a Secret with receiver credentials referenced from `configFile.content` via `*_file` fields. Not mounted into the config-reloader sidecar. Rendering fails on a volume name or `mountPath` the chart already uses; empty values render unchanged. Test: `tests/render-extra-volumes.sh`.
 - `cache.auth.existingSecret` / `cache.auth.existingSecretPasswordKey` (AMP-CACHE-NOAUTH): password of an external cache from a Secret the chart does not create. Rendering fails together with `cache.auth.enabled: true`, and with `valkey.replicas: 0` while `cache.host` still points at the chart's Valkey (`<fullname>-redis` or a longer DNS name of it in the release namespace).
 - `templates/networkpolicy.yaml` + `networkPolicy.*` (PROD-INGRESS-HARDENING, ADR-015): ingress-only NetworkPolicy for the AMP pods, `http` port only, sources `ingressController` (with `ingress.enabled`) / `alertSenders` / `metricsScrapers` / `extraIngress`. Enabled with no source, rendering fails. Enabled in `values-production.yaml` with no sources.
 - `ingress.externalAuth` (default `false`): `ingress.enabled` now fails to render unless `webConfig.existingSecret` is set or this declares auth at the ingress/proxy (only `true` or the string `"true"` counts).

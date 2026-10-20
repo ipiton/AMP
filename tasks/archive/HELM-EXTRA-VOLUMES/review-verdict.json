@@ -1,0 +1,18 @@
+{
+  "gate": "pass",
+  "reason": "Round 2 (fix round): F1 blocker resolved in 1674cdb and verified via config.LoadConfig with every *_file twin (and E113/E115/E122 kept for neither value nor file); routing.Parse still enforces url/https_production on file-sourced URLs. F2-F6, F9-F11 resolved. No open blocker or major; round-2 findings are minor/nit with dispositions (R2-F1, R2-F6 defer-bug; R2-F2..F5, R2-F7 fix-here before/within testing).",
+  "branch": "feature/helm-extra-volumes",
+  "commit": "1674cdb",
+  "reviewed_at": "2026-10-20",
+  "round": 2,
+  "findings": {
+    "blocker": 0,
+    "major": 0,
+    "minor": 3,
+    "nit": 4
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

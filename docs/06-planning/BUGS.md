@@ -22,6 +22,14 @@
 - **Refs:** `tasks/archive/ROUTE-TIMINGS-BUNDLE/review-findings.md` § F3.
 - **Status:** open
 
+### [high][Routing][~1d] ROUTE-CONTINUE-NO-FANOUT
+- **Title:** `continue: true` не даёт доставку во второй receiver — алерт уходит только в первый совпавший route
+- **Problem:** путь публикации берёт одно решение: `AlertProcessor.evaluateRoute` (`go-app/internal/core/services/alert_processor.go:271`) → `routeTreeEvaluator.Evaluate` (`internal/application/route_evaluator.go:100`) → `businessrouting.RouteEvaluator.Evaluate` — первый матч; `services.RoutingDecision` хранит один `Receiver`. Мультиматч по `continue` есть в `RouteMatcher.FindMatchingRoutes` и `RouteEvaluator.EvaluateWithAlternatives` (`internal/business/routing/evaluator.go:277`), но у `EvaluateWithAlternatives` нет ни одного не-тестового вызова.
+- **Impact:** конфиг «critical → дежурный канал **и** общий канал» через `continue` молча теряет вторую доставку; `docs/ALERTMANAGER_COMPATIBILITY.md:41` заявляет `continue` как 🟢 Supported. Для параллельного запуска рядом с Alertmanager в sema-prod — расхождение по составу получателей.
+- **Fix:** решение маршрутизации — список (primary + alternatives); группировка и публикация по каждому receiver'у отдельно (ключ группы уже содержит receiver), dedup/nflog — на пару (группа, receiver). Тест через `LoadConfig` + `ProcessAlert`: два sibling-route с `continue: true` → обе группы и обе публикации. Поправить строку в `ALERTMANAGER_COMPATIBILITY.md`.
+- **Refs:** k3d HELM-EXTRA-VOLUMES 2026-10-20 (`tasks/archive/HELM-EXTRA-VOLUMES/evidence/k3d-extra-volumes.md` §3): `severity=critical` → только `telegram-panic` (`matched_route=route.routes[0]`), sibling `slack` пуст.
+- **Status:** open
+
 ### [low][Test][~0.1d] FLAKE-GROUP-INTERVAL-CHAIN-RESOLVE
 - **Title:** `TestGroupIntervalChain_ResolveGoesOutAndTheGroupIsGone` флейкает
 - **Problem:** `go-app/internal/infrastructure/grouping/group_interval_chain_test.go:176` — `no further fires for the removed group`: после удаления полностью разрешённой группы счётчик сработавших таймеров ещё растёт. Замер 2026-10-20, `-count=300`: 4 падения на `main` @ `28007e8` и 4 на `bugfix/route-timings` — предсуществующий.
@@ -44,6 +52,22 @@
 - **Impact:** в Slack дублируется информация, которую оператор уже вывел в `text`; расхождение с обещанием «нетронутый upstream-конфиг даёт upstream-вывод». Плюс `title_link` относителен (`/#/alerts?...`), если не задан `server.externalUrl`, — это настройка, не баг.
 - **Fix:** при наличии операторских шаблонов не переносить `fields` фиксированного форматтера (переносить только явно заданные); тест на payload без `fields`.
 - **Refs:** проверка 2026-10-20 на конфиге sema (`errors-slack`).
+- **Status:** open
+
+### [low][Test][~0.1d] REFRESH-WORKER-WARMUP-STOP-FLAKY
+- **Title:** `TestBackgroundWorker_CancellationDuringWarmup` падает под нагрузкой
+- **Problem:** тест (`go-app/internal/business/publishing/refresh_worker_test.go:116`) ждёт `Start()` через `time.Sleep(2ms)` и вызывает `Stop`, рассчитывая успеть до конца `WarmupPeriod: 10ms` (`refresh_test_utils.go:295`). Под нагрузкой шага `test` release-gate между `Start` и `Stop` проходит больше 10 мс, первый refresh срабатывает: `expected: 0, actual: 1`.
+- **Impact:** required-шаг `test` гейта краснеет без регрессии; изолированно `-count=30` зелёный.
+- **Fix:** в тесте warmup с запасом (секунды) либо синхронизация через канал/фейковые часы вместо sleep.
+- **Refs:** release-gate 2026-10-20 на `feature/helm-extra-volumes` @ `0c3156d` (пакет веткой не менялся).
+- **Status:** open
+
+### [low][Config][~0.25d] PAGERDUTY-SERVICE-KEY-ONLY-REJECTED
+- **Title:** PagerDuty только с `service_key` / `service_key_file` не загружается, хотя валидатор его пропускает
+- **Problem:** `routing.PagerDutyConfig.RoutingKey` помечен `validate:"required"` (`go-app/internal/infrastructure/routing/receiver.go:324`), поэтому `routing.Parse` отвергает конфиг без `routing_key` (`Field validation for 'RoutingKey' failed on the 'required' tag`), и фолбэк на `ServiceKey` в `config_targets.go` недостижим. Валидатор (E122) после HELM-EXTRA-VOLUMES принимает `service_key`/`service_key_file`, как и upstream.
+- **Impact:** конфиг с устаревшим `service_key` (upstream-совместимый) не стартует с непонятной ошибкой struct-валидации; W116 на `service_key_file` не выдаётся.
+- **Fix:** `required` → «`routing_key` или `service_key`» (кастомная проверка после `resolveFileSecrets`); тест через `LoadConfig` с `service_key` и с `service_key_file`.
+- **Refs:** `tasks/archive/HELM-EXTRA-VOLUMES/review-findings.md` R2-F1; предсуществующее с FU7-B.
 - **Status:** open
 
 ### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN

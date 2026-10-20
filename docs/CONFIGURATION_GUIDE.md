@@ -461,6 +461,58 @@ app:
   alertmanager_config_path: /etc/alertmanager/alertmanager.yaml
 ```
 
+### Receiver Credentials From Files
+
+A ConfigMap is not a place for credentials. These receiver secrets have a `*_file` twin that names a file instead: `telegram_configs[].bot_token_file`, `slack_configs[].api_url_file`, `global.slack_api_url_file`, `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file` / `service_key_file`, `global.smtp_auth_password_file` (details: `docs/ALERTMANAGER_COMPATIBILITY.md` → "`*_file` secret variants").
+
+- Use **absolute** paths. These fields are read as given, relative to the process working directory, not to the config file (as in upstream Alertmanager). Only `http_config` paths (`ca_file`, `password_file`, ...) are resolved against the config file's directory.
+- Setting both the inline field and its `_file` twin is a load error. So is a file AMP cannot read; the error names the path, never the content.
+- Trailing newlines are trimmed, so files written by `echo` work. Create the Secret from files, not `--from-literal`: a literal stays in the shell history.
+- AMP reads the files at startup and on every `/-/reload` or SIGHUP, not per notification. After rotating a file, reload.
+- PagerDuty needs `routing_key` or `routing_key_file`: a receiver with only `service_key` / `service_key_file` does not load yet.
+
+With the Helm chart, put the credentials into a Secret and mount it with `extraVolumes` / `extraVolumeMounts`; `configFile.content` then holds paths only:
+
+```bash
+# one file per credential; a trailing newline is trimmed
+kubectl create secret generic amp-receiver-secrets \
+  --from-file=telegram-bot-token=./telegram-bot-token \
+  --from-file=slack-webhook-url=./slack-webhook-url
+```
+
+```yaml
+# values
+extraVolumes:
+  - name: receiver-secrets
+    secret:
+      secretName: amp-receiver-secrets
+      defaultMode: 0440
+extraVolumeMounts:
+  - name: receiver-secrets
+    mountPath: /etc/amp/secrets
+    readOnly: true
+configFile:
+  enabled: true
+  content: |
+    route:
+      receiver: slack
+      routes:
+        # critical alerts go to Telegram, everything else to Slack
+        - receiver: telegram-panic
+          matchers: ['severity="critical"']
+    receivers:
+      - name: slack
+        slack_configs:
+          - api_url_file: /etc/amp/secrets/slack-webhook-url
+            channel: '#alerts'
+      - name: telegram-panic
+        telegram_configs:
+          - bot_token_file: /etc/amp/secrets/telegram-bot-token
+            chat_id: -1001234567890
+```
+
+`/api/v2/status` shows the `*_file` paths and keeps the resolved values redacted. The chart's config-reloader watches the config file only, so a Secret change needs a `POST /-/reload` (authenticated when `webConfig` is enabled; once kubelet has synced the volume, about a minute) or `kubectl rollout restart deploy/<fullname>`. See `helm/amp/README.md` → "Receiver Credentials From A Secret".
+
 ### When to Modify
 
 - Adding new receivers (Slack, PagerDuty)

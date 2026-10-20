@@ -288,6 +288,17 @@ is a load error naming the PATH (never any content — the read failed, so
 there is none to leak). File content is trimmed of trailing newline/
 whitespace, matching upstream.
 
+Paths are used as given, so a relative path resolves against the process
+working directory, not the config file's directory (upstream does the same:
+its `resolveFilepaths` rebases only `http_config` and `templates`). Use
+absolute paths, e.g. the `mountPath` of a Secret mounted through the Helm
+chart's `extraVolumes`/`extraVolumeMounts`. The config validator that runs
+before parsing (`pkg/configvalidator`) counts a set `*_file` as satisfying
+the required-field checks (E113 webhook URL, E115 Slack URL, E122 PagerDuty
+key) without reading the file; until 2026-10-20 (HELM-EXTRA-VOLUMES) it
+rejected a Slack, webhook or PagerDuty receiver configured through `*_file`
+alone.
+
 **Rotation caveat (honesty note):** upstream re-reads some `*_file` secrets
 lazily, per notification, so rotating the file's content on disk updates
 live delivery without a reload. AMP reads at config load and on every

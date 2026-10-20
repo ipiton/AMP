@@ -1,0 +1,26 @@
+# Render invariance: empty extraVolumes/extraVolumeMounts vs main
+
+Date: 2026-10-20. main @ 28007e8, branch @ 0c3156d (re-rendered at the final chart state, review R2-F7; chart templates and values unchanged since 1b868dc). Helm v4.3.0+gbec5b06.
+Every render adds `--set valkey.password.value=fixed` (otherwise the Valkey Secret gets a random password and differs on every render).
+
+```
+helm template amp <chart> --set valkey.password.value=fixed
+helm template amp <chart> --set valkey.password.value=fixed --set profile=lite
+helm template amp <chart> --set valkey.password.value=fixed --set configFile.enabled=true --set-string 'configFile.content=route: {receiver: d}' --set webConfig.existingSecret=wc --set monitoring.serviceMonitor.basicAuth.secretName=sm
+helm template amp <chart> --set valkey.password.value=fixed --set configFile.enabled=true --set-string 'configFile.content=route: {receiver: d}' --set configReloader.enabled=true
+helm template amp <chart> --set valkey.password.value=fixed -f "$C/values-production.yaml" -f "$C/tests/values-production-placeholders.yaml" --set postgresql.password=x --set cache.auth.password=x
+helm template amp <chart> --set valkey.password.value=fixed -f "$C/values-dev.yaml"
+helm template amp <chart> --set valkey.password.value=fixed -f "$C/values-small.yaml"
+helm template amp <chart> --set valkey.password.value=fixed --set extraVolumes=null --set extraVolumeMounts=null   # --reuse-values from an older chart; compared with main default
+```
+
+| render | main sha256 | branch sha256 | result |
+|---|---|---|---|
+| cfg-web | 93e02b5b183d74f9 | 93e02b5b183d74f9 | identical |
+| default | a30eae0487edc68d | a30eae0487edc68d | identical |
+| dev | 1183ae6fed3db20e | 1183ae6fed3db20e | identical |
+| lite | cc379765a491d230 | cc379765a491d230 | identical |
+| null-keys | a30eae0487edc68d | a30eae0487edc68d | identical |
+| production | 8950c84822cf147d | 8950c84822cf147d | identical |
+| reloader | 457603933bbf41cf | 457603933bbf41cf | identical |
+| small | 0c9b94ba0d157dd3 | 0c9b94ba0d157dd3 | identical |

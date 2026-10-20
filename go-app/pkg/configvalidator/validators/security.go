@@ -111,17 +111,18 @@ func (v *SecurityValidator) checkTLS(httpConfig *config.HTTPConfig, field string
 }
 
 // checkHardcodedSecret flags W300 when a secret-shaped field is set
-// directly in the configuration (this config model has no *_file
-// alternative to point to instead, so the suggestion is to move the
-// value out of the tracked config, e.g. via environment substitution or a
-// secret manager, per the org's "never hardcode secrets" policy).
+// directly in the configuration. Some of these fields (global SMTP auth
+// password, PagerDuty service_key) have a *_file twin (FU7-B) to point to
+// instead; the rest can move out of the tracked config via environment
+// substitution or a secret manager, per the org's "never hardcode secrets"
+// policy.
 func (v *SecurityValidator) checkHardcodedSecret(value, field string, result *types.Result) {
 	if value == "" {
 		return
 	}
 	result.AddWarning(newWarning("W300", "security", field,
 		"secret value is set directly in the configuration",
-		"Inject this value via environment substitution or a secret manager instead of committing it in plain text"))
+		"Read this value from a file via its *_file field where one exists, or inject it via environment substitution or a secret manager, instead of committing it in plain text"))
 }
 
 // checkInsecureHTTP flags W111 for plaintext webhook URLs. Unlike the
