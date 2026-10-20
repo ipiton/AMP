@@ -22,18 +22,20 @@ type AlertmanagerConfig struct {
 
 // GlobalConfig contains global configuration options
 type GlobalConfig struct {
-	ResolveTimeout   time.Duration `yaml:"resolve_timeout,omitempty" json:"resolve_timeout,omitempty"`
-	HTTPConfig       *HTTPConfig   `yaml:"http_config,omitempty" json:"http_config,omitempty"`
-	SMTPFrom         string        `yaml:"smtp_from,omitempty" json:"smtp_from,omitempty"`
-	SMTPSmarthost    string        `yaml:"smtp_smarthost,omitempty" json:"smtp_smarthost,omitempty"`
-	SMTPAuthUsername string        `yaml:"smtp_auth_username,omitempty" json:"smtp_auth_username,omitempty"`
-	SMTPAuthPassword string        `yaml:"smtp_auth_password,omitempty" json:"smtp_auth_password,omitempty"`
-	SMTPRequireTLS   bool          `yaml:"smtp_require_tls,omitempty" json:"smtp_require_tls,omitempty"`
-	SlackAPIURL      string        `yaml:"slack_api_url,omitempty" json:"slack_api_url,omitempty"`
-	PagerdutyURL     string        `yaml:"pagerduty_url,omitempty" json:"pagerduty_url,omitempty"`
-	OpsGenieAPIURL   string        `yaml:"opsgenie_api_url,omitempty" json:"opsgenie_api_url,omitempty"`
-	WeChatAPIURL     string        `yaml:"wechat_api_url,omitempty" json:"wechat_api_url,omitempty"`
-	VictorOpsAPIURL  string        `yaml:"victorops_api_url,omitempty" json:"victorops_api_url,omitempty"`
+	ResolveTimeout       time.Duration `yaml:"resolve_timeout,omitempty" json:"resolve_timeout,omitempty"`
+	HTTPConfig           *HTTPConfig   `yaml:"http_config,omitempty" json:"http_config,omitempty"`
+	SMTPFrom             string        `yaml:"smtp_from,omitempty" json:"smtp_from,omitempty"`
+	SMTPSmarthost        string        `yaml:"smtp_smarthost,omitempty" json:"smtp_smarthost,omitempty"`
+	SMTPAuthUsername     string        `yaml:"smtp_auth_username,omitempty" json:"smtp_auth_username,omitempty"`
+	SMTPAuthPassword     string        `yaml:"smtp_auth_password,omitempty" json:"smtp_auth_password,omitempty"`
+	SMTPAuthPasswordFile string        `yaml:"smtp_auth_password_file,omitempty" json:"smtp_auth_password_file,omitempty"` // *_file twin (FU7-B)
+	SMTPRequireTLS       bool          `yaml:"smtp_require_tls,omitempty" json:"smtp_require_tls,omitempty"`
+	SlackAPIURL          string        `yaml:"slack_api_url,omitempty" json:"slack_api_url,omitempty"`
+	SlackAPIURLFile      string        `yaml:"slack_api_url_file,omitempty" json:"slack_api_url_file,omitempty"` // *_file twin (FU7-B)
+	PagerdutyURL         string        `yaml:"pagerduty_url,omitempty" json:"pagerduty_url,omitempty"`
+	OpsGenieAPIURL       string        `yaml:"opsgenie_api_url,omitempty" json:"opsgenie_api_url,omitempty"`
+	WeChatAPIURL         string        `yaml:"wechat_api_url,omitempty" json:"wechat_api_url,omitempty"`
+	VictorOpsAPIURL      string        `yaml:"victorops_api_url,omitempty" json:"victorops_api_url,omitempty"`
 }
 
 // HTTPConfig contains HTTP client configuration
@@ -136,18 +138,26 @@ type EmailConfig struct {
 
 // PagerdutyConfig defines PagerDuty notification configuration
 type PagerdutyConfig struct {
-	ServiceKey  string            `yaml:"service_key,omitempty" json:"service_key,omitempty"`
-	RoutingKey  string            `yaml:"routing_key,omitempty" json:"routing_key,omitempty"`
-	URL         string            `yaml:"url,omitempty" json:"url,omitempty"`
-	Client      string            `yaml:"client,omitempty" json:"client,omitempty"`
-	ClientURL   string            `yaml:"client_url,omitempty" json:"client_url,omitempty"`
-	Description string            `yaml:"description,omitempty" json:"description,omitempty"`
-	Details     map[string]string `yaml:"details,omitempty" json:"details,omitempty"`
+	ServiceKey     string            `yaml:"service_key,omitempty" json:"service_key,omitempty"`
+	RoutingKey     string            `yaml:"routing_key,omitempty" json:"routing_key,omitempty"`
+	ServiceKeyFile string            `yaml:"service_key_file,omitempty" json:"service_key_file,omitempty"` // *_file twin (FU7-B)
+	RoutingKeyFile string            `yaml:"routing_key_file,omitempty" json:"routing_key_file,omitempty"` // *_file twin (FU7-B)
+	URL            string            `yaml:"url,omitempty" json:"url,omitempty"`
+	Client         string            `yaml:"client,omitempty" json:"client,omitempty"`
+	ClientURL      string            `yaml:"client_url,omitempty" json:"client_url,omitempty"`
+	Description    string            `yaml:"description,omitempty" json:"description,omitempty"`
+	Details        map[string]string `yaml:"details,omitempty" json:"details,omitempty"`
 }
 
 // SlackConfig defines Slack notification configuration
+//
+// *_file twins (FU7-B) here and in the other integrations: a path to a file
+// holding the secret, read by infrastructure/routing.Parse. They are modelled
+// so the validator counts a file as "set" and the strict parser accepts the
+// key; this package never reads the file.
 type SlackConfig struct {
 	APIURL      string        `yaml:"api_url,omitempty" json:"api_url,omitempty"`
+	APIURLFile  string        `yaml:"api_url_file,omitempty" json:"api_url_file,omitempty"` // *_file twin (FU7-B)
 	Channel     string        `yaml:"channel,omitempty" json:"channel,omitempty"`
 	Username    string        `yaml:"username,omitempty" json:"username,omitempty"`
 	Color       string        `yaml:"color,omitempty" json:"color,omitempty"`
@@ -186,6 +196,7 @@ type SlackAction struct {
 // WebhookConfig defines webhook notification configuration
 type WebhookConfig struct {
 	URL        string      `yaml:"url,omitempty" json:"url,omitempty"`
+	URLFile    string      `yaml:"url_file,omitempty" json:"url_file,omitempty"` // *_file twin (FU7-B)
 	HTTPConfig *HTTPConfig `yaml:"http_config,omitempty" json:"http_config,omitempty"`
 }
 
@@ -233,6 +244,7 @@ type WeChatConfig struct {
 // validation and would just be dead weight in this package.
 type TelegramConfig struct {
 	BotToken             string `yaml:"bot_token,omitempty" json:"bot_token,omitempty"`
+	BotTokenFile         string `yaml:"bot_token_file,omitempty" json:"bot_token_file,omitempty"` // *_file twin (FU7-B)
 	ChatID               string `yaml:"chat_id,omitempty" json:"chat_id,omitempty"`
 	MessageThreadID      int    `yaml:"message_thread_id,omitempty" json:"message_thread_id,omitempty"`
 	ParseMode            string `yaml:"parse_mode,omitempty" json:"parse_mode,omitempty"`

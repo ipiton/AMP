@@ -146,14 +146,15 @@ func (v *ReceiverValidator) validateEmailConfigs(r *config.Receiver, path string
 	}
 }
 
-// validatePagerdutyConfigs checks E122 (routing/service key required),
-// W116 (deprecated service_key), E123 (invalid url), E124 (https required).
+// validatePagerdutyConfigs checks E122 (routing/service key required; a
+// *_file twin counts), W116 (deprecated service_key), E123 (invalid url),
+// E124 (https required).
 func (v *ReceiverValidator) validatePagerdutyConfigs(r *config.Receiver, path string, result *types.Result) {
 	for i, c := range r.PagerdutyConfigs {
 		field := fmt.Sprintf("%s.pagerduty_configs[%d]", path, i)
-		if c.RoutingKey == "" && c.ServiceKey == "" {
+		if c.RoutingKey == "" && c.ServiceKey == "" && c.RoutingKeyFile == "" && c.ServiceKeyFile == "" {
 			result.AddError(newError("E122", "receivers", field,
-				"PagerDuty routing_key (or deprecated service_key) is required",
+				"PagerDuty routing_key (or deprecated service_key, or their *_file variants) is required",
 				"Provide 'routing_key' (Events API v2)"))
 		}
 		if c.ServiceKey != "" {
@@ -175,18 +176,27 @@ func (v *ReceiverValidator) validatePagerdutyConfigs(r *config.Receiver, path st
 	}
 }
 
-// validateSlackConfigs checks E115 (api_url required, with global fallback),
-// E116 (invalid url), E117 (https required).
+// validateSlackConfigs checks E115 (api_url required, with global fallback;
+// a *_file twin counts), E116 (invalid url), E117 (https required).
+//
+// A URL that comes from a file is not checked for format or HTTPS: its
+// content is only read by infrastructure/routing.Parse.
 func (v *ReceiverValidator) validateSlackConfigs(r *config.Receiver, path string, global *config.GlobalConfig, result *types.Result) {
 	for i, c := range r.SlackConfigs {
 		field := fmt.Sprintf("%s.slack_configs[%d]", path, i)
 		effective := c.APIURL
+		if effective == "" && c.APIURLFile != "" {
+			continue
+		}
 		if effective == "" {
 			effective = global.SlackAPIURL
 		}
+		if effective == "" && global.SlackAPIURLFile != "" {
+			continue
+		}
 		if effective == "" {
 			result.AddError(newError("E115", "receivers", field+".api_url",
-				"Slack API URL is required (set here or in global.slack_api_url)",
+				"Slack API URL is required (set here or in global.slack_api_url, or their *_file variants)",
 				"Provide the Slack incoming-webhook URL"))
 			continue
 		}
@@ -204,7 +214,9 @@ func (v *ReceiverValidator) validateSlackConfigs(r *config.Receiver, path string
 	}
 }
 
-// validateWebhookConfigs checks E113 (url required), E114 (invalid url).
+// validateWebhookConfigs checks E113 (url or url_file required), E114
+// (invalid url; not checked for url_file, whose content only
+// infrastructure/routing.Parse reads).
 // Unlike the named integrations, generic webhooks have no documented
 // HTTPS-required error code (README: HTTPS is a "best practice", not a
 // hard requirement, since operators may target internal http endpoints);
@@ -212,9 +224,12 @@ func (v *ReceiverValidator) validateSlackConfigs(r *config.Receiver, path string
 func (v *ReceiverValidator) validateWebhookConfigs(r *config.Receiver, path string, result *types.Result) {
 	for i, c := range r.WebhookConfigs {
 		field := fmt.Sprintf("%s.webhook_configs[%d]", path, i)
+		if c.URL == "" && c.URLFile != "" {
+			continue
+		}
 		if c.URL == "" {
 			result.AddError(newError("E113", "receivers", field+".url",
-				"webhook URL is required",
+				"webhook URL is required (url or url_file)",
 				"Provide a valid webhook URL (e.g. 'https://example.com/webhook')"))
 			continue
 		}

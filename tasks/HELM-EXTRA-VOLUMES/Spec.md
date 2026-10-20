@@ -13,7 +13,7 @@ based_on:
 
 # Specification: extraVolumes / extraVolumeMounts в чарте helm/amp
 
-**Version:** 1.0  
+**Version:** 1.1 (Scope Change: валидатор `*_file`, review F1)  
 **Status:** Approved (автор; задача из Queue с готовой формулировкой владельца)
 
 ## Summary
@@ -44,6 +44,7 @@ based_on:
 | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|
 | `bot_token_file`/`api_url_file`/`slack_api_url_file` читаются как есть, без rebase от каталога конфига | `go-app/internal/infrastructure/routing/file_secrets.go:207` (`os.ReadFile(file)`); `resolveHTTPConfigFilepaths` трогает только `http_config` (`http_config_filepaths.go`) | call-path-traced | относительный путь в примере не найдётся; мы требуем абсолютный — работает в обоих случаях |
+| До `routing.Parse` конфиг проходит `pkg/configvalidator` (`validateAlertmanagerSubset`, `internal/config/config.go:793`) на типах `internal/alertmanager/config`; сейчас он не знает `*_file` и требует inline-значение (E113/E115/E122) | `alertmanager_validation.go:65`, `validators/receiver.go`; k3d `evidence/k3d-extra-volumes.md` §1 | call-path-traced + measured | (premise добавлена по review F2) Slack/webhook/PagerDuty через `*_file` не загружаются — исправляется в Validator Fix |
 | upstream ведёт себя так же | `alertmanager@v0.32.0/config/config.go:157` | code-read | только формулировка в доках |
 | Вложенный mount в каталог ConfigMap-volume (`/etc/amp/secrets` внутри `/etc/amp`) работает | уже используется `webConfig` (`/etc/amp/web`); проверка k3d | code-read → measured в testing | Secret не виден; пример сменить на `/etc/amp-secrets` |
 | Файл Secret читаем `runAsUser: 65534` при `fsGroup: 65534` и `defaultMode: 0440`/`0400` | k3d в testing | assumed → measured | AMP не стартует с «failed to read secret file»; в доке — `defaultMode` по умолчанию |
@@ -57,6 +58,14 @@ based_on:
 В `deployment.yaml`: `$extraVolumes := .Values.extraVolumes | default list`, `$extraVolumeMounts := …` (`default` — для `--reuse-values` со старого чарта). Условия блоков `volumeMounts:` и `volumes:` дополняются этими списками; элементы дописываются в конец через `toYaml | nindent`.
 
 **Guard:** перед рендером `volumeMounts` контейнера `amp` собрать активные имена (`data` при lite, `config-file` при configFile, `web-config` при webConfig) и пути (их mountPath + путь config-файла `<configFile.mountPath>/<fileName>`), сравнить с каждым `extraVolumes[].name` / `extraVolumeMounts[].mountPath` (через `clean`, чтобы `/etc/amp/` == `/etc/amp`). Совпадение → `fail` с указанием конфликтующего ключа чарта. Вложенные пути (`/etc/amp/secrets`) допустимы.
+
+## Validator Fix (Scope Change)
+
+- `internal/alertmanager/config/config.go`: поля-двойники `global.slack_api_url_file`, `global.smtp_auth_password_file`, `slack_configs[].api_url_file`, `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file`/`service_key_file`, `telegram_configs[].bot_token_file` — полный список FU7-B (`routing/file_secrets.go`). Нужны и для strict-парсера пакета (`KnownFields`).
+- `pkg/configvalidator/validators/receiver.go`: E113/E115/E122 считают `*_file` заданным; порядок Slack — inline, file, `global.slack_api_url`, `global.slack_api_url_file`. Значение из файла валидатор не читает и не проверяет формат/HTTPS (E114/E116/E117) — содержимое читает `routing.Parse`.
+- Взаимоисключение inline + file и нечитаемый файл остаются за `routing.Parse` (ошибка загрузки с путём, как раньше).
+- `ERROR_CODES.md` (E113/E115/E122), `docs/ALERTMANAGER_COMPATIBILITY.md` § `*_file`.
+- Тесты: валидатор (каждый `*_file`, «ни значения, ни файла», strict-парсер), `config.LoadConfig` с реальными файлами.
 
 ## Component Architecture
 
