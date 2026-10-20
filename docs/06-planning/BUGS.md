@@ -6,14 +6,6 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
-### [high][Publishing][~0.25d] SLACK-WEBHOOK-PLAIN-OK-RESPONSE
-- **Title:** успешная доставка в Slack Incoming Webhook считается ошибкой, группа переотправляется на каждом `group_interval`
-- **Problem:** `HTTPSlackWebhookClient` (`go-app/internal/infrastructure/publishing/slack_client.go:263-267`) на HTTP 200 разбирает тело как JSON `SlackResponse{ok,...}` — так отвечает API `chat.postMessage`. Incoming Webhook (`hooks.slack.com/services/...`, путь `slack_api_url`/`api_url`) отвечает телом `ok` в `text/plain`, поэтому `json.Unmarshal` падает: `failed to parse response: invalid character 'o'` → `Non-retryable error` → `Group publishing delivery not confirmed ... no dedup entry will be recorded`. Тесты (`queue_target_publisher_test.go:388`) мокают Slack JSON-ответом и этого не ловят.
-- **Impact:** сообщение в канал фактически доставлено, но nflog его не записывает: каждая горящая группа уходит повторно на каждом `group_interval` (5m) вместо `repeat_interval`, метрики доставки показывают ошибки. Блокирует параллельный запуск рядом с Alertmanager в sema-prod (`errors-slack`, канал `#sema`). Воспроизведено 2026-10-20 на бинаре `main` с конфигом sema и мок-приёмником, отвечающим как Slack: повтор в 11:54:09 после первой отправки в 11:49:09.
-- **Fix:** на 2xx принимать тело `ok` (и пустое) как успех; JSON разбирать, только если он есть; не-2xx с текстовым телом (`invalid_payload`, `no_service`, …) — ошибка с этим текстом. Тест на `text/plain` `ok` и на текстовую ошибку; мок в существующих тестах привести к реальному ответу вебхука.
-- **Refs:** `slack_client.go:263`; upstream `notify/slack` проверяет статус, а тело вебхука не разбирает как JSON.
-- **Status:** open
-
 ### [high][Config][~0.25d] SLACK-COLOR-TEMPLATE-REJECTED
 - **Title:** шаблонный `slack_configs[].color` не проходит валидацию, конфиг не загружается
 - **Problem:** `validateSlackColor` (`go-app/internal/infrastructure/routing/parser.go:770`, тег `slack_color` на `SlackConfig.Color`, `receiver.go:503`) пропускает только `good`/`warning`/`danger`/`#RRGGBB`. С TEMPLATES-EPIC slice 2 `color` — шаблонное поле, а в upstream оно шаблон по умолчанию (`{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}`). Конфиг с таким значением: `RouteConfig.Receivers[2].SlackConfigs[0].Color ... failed on the 'slack_color' tag`, AMP не стартует.

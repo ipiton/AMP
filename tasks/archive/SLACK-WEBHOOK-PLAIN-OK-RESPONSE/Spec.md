@@ -3,7 +3,7 @@ id: SLACK-WEBHOOK-PLAIN-OK-RESPONSE
 slug: slack-webhook-plain-ok
 stream: operations
 type: bug
-status: approved
+status: done
 created_at: 2026-10-20
 updated_at: 2026-10-20
 based_on:
