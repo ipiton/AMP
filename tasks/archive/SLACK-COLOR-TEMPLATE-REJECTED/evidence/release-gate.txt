@@ -1,0 +1,30 @@
+commit: 0969423  date: 2026-10-20T10:46:26Z
+
+# scripts/release-gate.sh — summary
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   55s      go build ./... (go-app)
+lint             PASS   75s      golangci-lint run (go-app)
+test             PASS   336s     go test ./... -count=1 (go-app)
+futureparity     PASS   63s      build+test, futureparity tag, cmd/server
+race             PASS   413s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   0s       chart dependencies (Chart.lock, no stale charts/)
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-small       PASS   0s       lint + template, values-small.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   46s      helm/amp/tests/*.sh render tests
+amtool-compat    FAIL   987s     real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+
+# amtool-compat FAIL — инфраструктура, не код:
+747:Error response from daemon: No such container: 5cef528e52a005ed41c040859ce290e0dff77ad6c68263df365dbc42de34dc1f
+748:[release-gate] docker compose up failed for the amtool-compat smoke stack
+# Параллельно шёл release-gate другого worktree (route-timings) — общий compose-проект amp-smoke и порт 18080.
+# Повтор только шага amtool-compat (step_amtool_compat из release-gate.sh) после завершения чужого гейта, 2026-10-20 13:46, тот же commit:
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+amtool-compat exit=0

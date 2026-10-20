@@ -6,12 +6,12 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
-### [high][Config][~0.25d] SLACK-COLOR-TEMPLATE-REJECTED
-- **Title:** шаблонный `slack_configs[].color` не проходит валидацию, конфиг не загружается
-- **Problem:** `validateSlackColor` (`go-app/internal/infrastructure/routing/parser.go:770`, тег `slack_color` на `SlackConfig.Color`, `receiver.go:503`) пропускает только `good`/`warning`/`danger`/`#RRGGBB`. С TEMPLATES-EPIC slice 2 `color` — шаблонное поле, а в upstream оно шаблон по умолчанию (`{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}`). Конфиг с таким значением: `RouteConfig.Receivers[2].SlackConfigs[0].Color ... failed on the 'slack_color' tag`, AMP не стартует.
-- **Impact:** verbatim `alertmanager.yml` с шаблонным `color` (sema-prod `errors-slack`, типовой upstream-пример) не загружается — противоречит заявлению в `ALERTMANAGER_COMPATIBILITY.md`, что `color` рендерится шаблоном.
-- **Fix:** значение с `{{` не валидировать как цвет (проверять отрендеренный результат либо оставить Slack судить); тест на шаблонный `color` при загрузке и на его рендер в attachment.
-- **Refs:** `parser.go:770`; проверка 2026-10-20 на конфиге sema (`~/Sema/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml`).
+### [medium][Config][~0.5d] TEMPLATED-FIELDS-NOT-RENDERED
+- **Title:** `email_configs[].to` и `slack_configs[].actions[]` upstream шаблонизирует, AMP не рендерит и при загрузке валидирует как литерал
+- **Problem:** `EmailConfig.To` — `validate:"required,email"` (`go-app/internal/infrastructure/routing/receiver.go`), в target уходит как есть (`config_targets.go:645`, заголовок `to`). Upstream рендерит `to` шаблоном и принимает список адресов через запятую — у AMP не грузится ни `to: '{{ .CommonLabels.owner }}@example.com'`, ни `to: 'a@example.com, b@example.com'`. `SlackAction` (`text`/`url`/`style`, теги `required`/`url`/`oneof`) — upstream шаблонизирует все поля action, AMP actions не отправляет вовсе (`slackTarget`: «not expressible»), но шаблонный `url` валит загрузку.
+- **Impact:** upstream-конфиг с несколькими получателями письма или шаблонным `to` не загружается; с шаблонной Slack-кнопкой — тоже, хотя кнопка всё равно потерялась бы.
+- **Fix:** `to` — разрешить список адресов (`net/mail.ParseAddressList`) и шаблон (`template_expr|…`, как в SLACK-COLOR-TEMPLATE-REJECTED), рендерить `to` в `emailTemplateFields` и брать отрендеренный адрес в email publisher. `actions` — `template_expr|…` на полях, пока actions не отправляются; рендер — вместе с поддержкой actions. Просто ослабить валидацию `to` без рендера нельзя: письмо уйдёт на литерал `{{ … }}`.
+- **Refs:** найдено при SLACK-COLOR-TEMPLATE-REJECTED (2026-10-20), аудит валидаторов шаблонных полей.
 - **Status:** open
 
 ### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-CREATE-RACE

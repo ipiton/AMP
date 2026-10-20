@@ -351,9 +351,11 @@ type PagerDutyConfig struct {
 	URL string `yaml:"url,omitempty" validate:"omitempty,url,https_production"`
 
 	// Severity specifies the incident severity
-	// Values: critical, error, warning, info
+	// Values: critical, error, warning, info, or a template expression
+	// (rendered at send time, checked only as a literal; see
+	// validateTemplateExpression)
 	// Default: error
-	Severity string `yaml:"severity,omitempty" validate:"omitempty,oneof=critical error warning info"`
+	Severity string `yaml:"severity,omitempty" validate:"omitempty,template_expr|oneof=critical error warning info"`
 
 	// Class, Component, Group provide incident categorization
 	Class     string `yaml:"class,omitempty"`
@@ -466,25 +468,27 @@ type SlackConfig struct {
 	APIURLFile string `yaml:"api_url_file,omitempty"`
 
 	// Channel specifies the target channel or user
-	// Format: #channel or @username
-	Channel string `yaml:"channel,omitempty" validate:"omitempty,slack_channel"`
+	// Format: #channel or @username, or a template expression. Like icon_*,
+	// title_link and color, a template value is not checked at load: its
+	// shape is only known once rendered (validateTemplateExpression).
+	Channel string `yaml:"channel,omitempty" validate:"omitempty,template_expr|slack_channel"`
 
 	// Username overrides the bot display name
 	Username string `yaml:"username,omitempty"`
 
 	// IconEmoji overrides the bot icon (e.g., :alert:)
 	// Mutually exclusive with IconURL
-	IconEmoji string `yaml:"icon_emoji,omitempty" validate:"omitempty,emoji"`
+	IconEmoji string `yaml:"icon_emoji,omitempty" validate:"omitempty,template_expr|emoji"`
 
 	// IconURL overrides the bot icon with a URL
 	// Mutually exclusive with IconEmoji
-	IconURL string `yaml:"icon_url,omitempty" validate:"omitempty,url"`
+	IconURL string `yaml:"icon_url,omitempty" validate:"omitempty,template_expr|url"`
 
 	// Title is the message title
 	Title string `yaml:"title,omitempty"`
 
 	// TitleLink adds a URL to the title
-	TitleLink string `yaml:"title_link,omitempty" validate:"omitempty,url"`
+	TitleLink string `yaml:"title_link,omitempty" validate:"omitempty,template_expr|url"`
 
 	// Pretext appears above the main message block
 	Pretext string `yaml:"pretext,omitempty"`
@@ -499,8 +503,10 @@ type SlackConfig struct {
 	Actions []*SlackAction `yaml:"actions,omitempty"`
 
 	// Color determines the message color bar
-	// Values: good (green), warning (yellow), danger (red), #hex
-	Color string `yaml:"color,omitempty" validate:"omitempty,slack_color"`
+	// Values: good (green), warning (yellow), danger (red), #hex, or a
+	// template expression — upstream's default is one:
+	// `{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}`
+	Color string `yaml:"color,omitempty" validate:"omitempty,template_expr|slack_color"`
 
 	// SendResolved determines if resolved notifications are sent
 	SendResolved *bool `yaml:"send_resolved,omitempty"`
