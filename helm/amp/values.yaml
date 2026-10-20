@@ -463,8 +463,9 @@ cache:
   port: 6379
   # Password of an EXTERNAL cache (cache.host pointing at it; set
   # valkey.replicas: 0 too, or the chart's Valkey runs unused). While cache.host
-  # is the chart's Valkey (the default, or a longer DNS name of it) AMP reads
-  # Valkey's password (valkey.password below) and these keys are ignored.
+  # is the chart's Valkey (the default, or a longer DNS name of it in the release
+  # namespace) AMP reads Valkey's password (valkey.password below) and these
+  # keys are ignored.
   auth:
     # Password from this value, stored in <fullname>-secrets (redis-password).
     enabled: false

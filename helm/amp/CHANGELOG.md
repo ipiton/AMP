@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- `cache.auth.existingSecret` / `cache.auth.existingSecretPasswordKey` (AMP-CACHE-NOAUTH): password of an external cache from a Secret the chart does not create. Rendering fails together with `cache.auth.enabled: true`, and with `valkey.replicas: 0` while `cache.host` still points at the chart's Valkey (`<fullname>-redis` or a longer DNS name of it).
+- `cache.auth.existingSecret` / `cache.auth.existingSecretPasswordKey` (AMP-CACHE-NOAUTH): password of an external cache from a Secret the chart does not create. Rendering fails together with `cache.auth.enabled: true`, and with `valkey.replicas: 0` while `cache.host` still points at the chart's Valkey (`<fullname>-redis` or a longer DNS name of it in the release namespace).
 - `templates/networkpolicy.yaml` + `networkPolicy.*` (PROD-INGRESS-HARDENING, ADR-015): ingress-only NetworkPolicy for the AMP pods, `http` port only, sources `ingressController` (with `ingress.enabled`) / `alertSenders` / `metricsScrapers` / `extraIngress`. Enabled with no source, rendering fails. Enabled in `values-production.yaml` with no sources.
 - `ingress.externalAuth` (default `false`): `ingress.enabled` now fails to render unless `webConfig.existingSecret` is set or this declares auth at the ingress/proxy (only `true` or the string `"true"` counts).
 - `monitoring.serviceMonitor.{enabled,interval,scrapeTimeout,labels,basicAuth.*}`; rendering fails with `webConfig.existingSecret` and no `basicAuth.secretName`.

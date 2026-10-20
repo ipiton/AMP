@@ -120,12 +120,14 @@ creates. Valkey, its exporter and AMP all read it, so the three never disagree.
 
 {{/*
 "true" when cache.host names the chart's Valkey Service: <fullname>-redis, or
-any longer DNS name of it (<fullname>-redis.<ns>, ...svc.cluster.local).
+a longer DNS name of it in the release namespace (<fullname>-redis.<ns>,
+...svc.cluster.local). The same name in another namespace is someone else's.
 */}}
 {{- define "amp.cache.hostIsValkey" -}}
 {{- $svc := printf "%s-redis" (include "amp.fullname" .) }}
+{{- $nsSvc := printf "%s.%s" $svc .Release.Namespace }}
 {{- $host := tpl .Values.cache.host . }}
-{{- if or (eq $host $svc) (hasPrefix (printf "%s." $svc) $host) }}true{{ end }}
+{{- if or (eq $host $svc) (eq $host $nsSvc) (hasPrefix (printf "%s." $nsSvc) $host) }}true{{ end }}
 {{- end }}
 
 {{/*
