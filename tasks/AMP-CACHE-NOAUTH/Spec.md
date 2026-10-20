@@ -13,7 +13,7 @@ based_on:
 
 # Specification: AMP авторизуется в кеше чарта на дефолтах
 
-**Version:** 1.0  
+**Version:** 1.0\
 **Status:** Draft
 
 ## Summary

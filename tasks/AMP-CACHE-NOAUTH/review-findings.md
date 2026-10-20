@@ -154,3 +154,11 @@
 - **Recommendation:** написать до finalize, включая случай C1.
 - **Disposition:** fix-here in write-tests (шаг 4.1 по порядку конвейера: тесты — после verdict `pass`)
 - **Follow-up:** `tasks.md` 4.1
+
+## Testing outcomes (deferred to testing, 2026-10-20)
+
+Evidence: `evidence/k3d-acceptance.md`.
+
+- **A4 / B4 — гонка старта AMP/Valkey:** подтверждено. Первый `helm upgrade` с `main` на ветку рестартует Valkey (новые `items` у volume) и AMP одновременно; AMP стартовал на 3 с раньше Valkey, получил `i/o timeout` и остался в fallback, будучи Ready. Подсказка NOTES (`rollout restart`) выведена и исправляет ситуацию; повторный upgrade и рестарт — `Redis cache initialized`. Не дефект этой задачи — `AMP-CACHE-NO-RECONNECT`; в finalize дописать туда воспроизведение (A2).
+- **B3 — `\n` в конце пароля `valkey.password.existingSecret`:** подтверждено ровно как задокументировано: Valkey и пробы срезают перевод строки (под Ready), AMP получает `WRONGPASS` → fallback, exporter `redis_up 0`. С `printf '%s'` — AMP и exporter подключаются. Документации (`values.yaml`, README) достаточно; поведение не меняем.
+- **A3 / B5** — не проверялись на k3d (GitOps без `lookup`, смена пароля Valkey): отложены в TECH-DEBT, проверка не требовалась.
