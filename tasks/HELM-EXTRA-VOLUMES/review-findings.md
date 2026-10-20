@@ -1,5 +1,125 @@
 # Deep Review Findings: extraVolumes / extraVolumeMounts в чарте helm/amp
 
+## Round 2 (fix round) — 2026-10-20
+
+**Trigger classification:** mandatory (`S` — путь доставки секретов receiver'ов; после Scope Change ещё `X`: чарт + Go-валидатор)
+**Reviewer perspective:** independent general-purpose agent (не автор реализации и не ревьюер раунда 1)
+**Reviewed at:** 2026-10-20
+**Reviewed tree:** feature/helm-extra-volumes @ 1674cdb (`git diff f62a517..HEAD` + полный `git diff main...HEAD`)
+**Verdict:** pass (см. `review-verdict.json`): открытых blocker нет, major нет; minor/nit ниже с disposition.
+
+### Что проверено (раунд 2)
+
+- **Валидатор, эмпирически.** Временный `_test.go` в scratchpad, подложенный через `go test -overlay` в `internal/config` (дерево не менялось), гоняет `config.LoadConfig` на конфигах с реальными temp-файлами (`ENVIRONMENT` не задан, т.е. production-ветка `https_production`):
+  - загружаются: `slack_configs[].api_url_file`; `global.slack_api_url_file` + slack без `api_url`; `webhook_configs[].url_file`; `pagerduty_configs[].routing_key_file`; `telegram_configs[].bot_token_file`; `global.smtp_auth_password_file` с email-receiver;
+  - «ни значения, ни файла» → прежние `[E115]` (slack), `[E113]` (webhook), `[E122]` (pagerduty);
+  - URL из файла с `http://` (slack, webhook, `global.slack_api_url_file`) → отказ `routing.Parse` на теге `https_production`; мусор вместо URL → тег `url`. Значение файла в тексте ошибки **не появляется** (`fieldErr.Error()` не печатает значение; проверено поиском маркера в сообщении);
+  - inline + file (receiver и global) → «not both» от `routing.Parse`; отсутствующий файл → «failed to read secret file "<path>"», в том числе когда `global.slack_api_url` валиден (fallback не маскирует сломанный `api_url_file` — как в routing);
+  - `api_url_file` + невалидный inline `global.slack_api_url` → `global.go` по-прежнему ругается (E2xx), т.е. пропуск в `validateSlackConfigs` не выключает проверку global;
+  - `pagerduty_configs[].service_key_file` **без** `routing_key` → отказ загрузки (см. R2-F1); тот же отказ и для inline `service_key` без `routing_key` — предсуществующее.
+  - Strict-парсер пакета (`configvalidator.New(...).ValidateBytes`, `KnownFields(true)`) на YAML со всеми семью `*_file` ключами: `valid=true`, 0 ошибок, 0 warnings.
+- **Паритет со списком FU7-B** (`routing/file_secrets.go`): `global.slack_api_url_file`, `global.smtp_auth_password_file`, `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file`/`service_key_file`, `slack_configs[].api_url_file`, `telegram_configs[].bot_token_file` — все семь полей добавлены в `internal/alertmanager/config`, лишних нет.
+- **Порядок Slack.** Валидатор: inline → file → global inline → global file. Routing: `resolveFileSecrets` (inline XOR file, на receiver и на global) → `resolveGlobalFallbacks` (`if cfg.APIURL == ""`). При взаимоисключении inline/file оба порядка дают одно и то же эффективное значение; конфиги, где они могли бы разойтись (inline+file), отвергает routing. Расхождений нет.
+- **HTTPS для URL из файла.** Пропуск E116/E117/E114 в валидаторе не оставляет дыры: файл резолвится в inline-поле до `p.validator.Struct`, а теги `url,https_production` стоят на `SlackConfig.APIURL`, `WebhookConfig.URL` (`required,url,https_production`), `GlobalConfig.SlackAPIURL`. Единственное послабление — `ENVIRONMENT=development` отключает `https_production` для URL из файла, тогда как inline Slack-URL валидатор режет E117 всегда (R2-F3, nit).
+- **Прочие валидаторы.** `security.go`: W300 на inline `smtp_auth_password`/`service_key` — для `*_file` предупреждения нет (правильно); W111/S111 по `c.URL` для `url_file` не срабатывают (это warnings, приемлемо). `global.go`/`structural.go` о `*_file` знать не обязаны.
+- **Другие потребители `internal/alertmanager/config`:** только `pkg/configvalidator/*` и `internal/config/alertmanager_validation.go` (non-strict unmarshal). Новые поля аддитивны, json-теги согласованы — `json_parser` (`DisallowUnknownFields`) их тоже принимает. gofmt-выравнивание — механический churn в двух struct'ах, `gofmt -l` чист, `go vet` чист.
+- **Регресс:** `go test ./pkg/configvalidator/... ./internal/alertmanager/... ./internal/config/...` — 412 passed.
+- **Чарт:** I1 перепроверен на 1674cdb против `git archive main helm/amp` (default, lite, configFile+webConfig, configFile+configReloader, `extraVolumes=null`/`extraVolumeMounts=null`) — хеши совпадают. Guard на `/etc/amp/web/web-config.yml` и `/etc/amp/web/` падает с понятной ошибкой, `/etc/amp/web/sub` проходит; Secret-mount попадает только в контейнер `amp`.
+
+### Статус находок раунда 1
+
+| ID | Severity | Disposition | Статус | Проверка |
+|---|---|---|---|---|
+| F1 | blocker | fix-here | **resolved** | `1674cdb`; `LoadConfig` с каждым `*_file` проходит, без значения — E113/E115/E122 (см. выше). Остаток по PagerDuty `service_key*` — предсуществующий routing-баг, R2-F1 |
+| F2 | minor | fix-here | resolved | премиса про `validateAlertmanagerSubset` добавлена в Spec § Design Premises (call-path-traced + measured, k3d §1). `research.md` не дополнен — некритично, Spec — источник истины |
+| F3 | minor | fix-here | resolved | `$chartPaths` включает `webConfig.mountPath/secretKey`; README/values упоминают web config file; рендер с `/etc/amp/web/web-config.yml` падает |
+| F4 | minor | fix-here | resolved | README и values.yaml: условная формулировка про default `podSecurityContext` и `fsGroup`; k3d §2 подтвердил 0400→0440 `root:nobody`, чтение под 65534 |
+| F5 | minor | fix-here | resolved | оба примера на `--from-file`, CONFIGURATION_GUIDE объясняет про shell history |
+| F6 | minor | fix-here | resolved | `evidence/render-invariance.txt` есть; снят на f62a517+wt, шаблон потом менялся (R2-F7) — ревьюер перепроверил на 1674cdb, совпадает |
+| F7 | nit | reject | closed (reject) | без изменений |
+| F8 | nit | reject | closed (reject) | без изменений |
+| F9 | nit | fix-here | resolved | переменные и guard один раз в начале `spec:` рядом с проверками `configReloader`; второе объявление `$extraVolumes` удалено; рендер не изменился |
+| F10 | nit | fix-here | resolved | README и CONFIGURATION_GUIDE: «`POST /-/reload` (authenticated when `webConfig` is enabled)» |
+| F11 | nit | fix-here | resolved | «These receiver secrets have a `*_file` twin» |
+| F12 | nit | defer-tech-debt | open → finalize | подтверждено снова: на отсутствующий файл suggestion «Set either api_url or api_url_file, not both». Запись в `TECH-DEBT.md` в finalize |
+
+### Findings (раунд 2)
+
+#### R2-F1 — PagerDuty только с `service_key` / `service_key_file` проходит валидатор, но не загружается
+- **Severity:** minor
+- **Location:** `go-app/internal/infrastructure/routing/receiver.go:324` (`RoutingKey ... validate:"required"`); затронутые обещания — `go-app/pkg/configvalidator/ERROR_CODES.md` (E122), `docs/CONFIGURATION_GUIDE.md` § Receiver Credentials From Files (список двойников), `docs/ALERTMANAGER_COMPATIBILITY.md` (`service_key` — «live routing-key fallback»)
+- **Issue:** `resolveFileSecrets` резолвит `service_key_file` в `ServiceKey`, но struct-валидация `routing.Parse` требует непустой `RoutingKey`, так что конфиг без `routing_key` падает: `Field validation for 'RoutingKey' failed on the 'required' tag` — и для inline `service_key`, и для `service_key_file`. Фолбэк в `config_targets.go` недостижим. Предсуществующее (FU7-B / fu2-d), не регресс этой задачи: до фикса такой конфиг отвергал ещё и валидатор (E122), теперь — только routing. Новая формулировка E122 («or their `routing_key_file` / `service_key_file` variants») обещает больше, чем работает. Попутно: W116 (deprecated `service_key`) не выдаётся для `service_key_file`.
+- **Recommendation:** баг в `BUGS.md` (routing: `RoutingKey` required → «routing_key или service_key», тест через `LoadConfig`). Здесь при желании — пол-строки в ERROR_CODES/CONFIGURATION_GUIDE, что `service_key*` без `routing_key*` пока не загружается. Чинить routing в этой задаче не нужно (Non-Goal; основной сценарий — `routing_key_file`).
+- **Disposition:** defer-bug
+- **Follow-up:** новая запись в `docs/06-planning/BUGS.md` (в finalize)
+
+#### R2-F2 — План и требования не обновлены под Scope Change
+- **Severity:** minor
+- **Location:** `tasks/HELM-EXTRA-VOLUMES/tasks.md` (Touched Files, Phase 1–3), `tasks/HELM-EXTRA-VOLUMES/requirements.md` § Risk Profile → Notes
+- **Issue:** в `tasks.md` нет шагов на Validator Fix (Go-файлы, ERROR_CODES, ALERTMANAGER_COMPATIBILITY), а 3.2 перечисляет только helm-тесты — тесты валидатора и `LoadConfig`, обещанные Spec § Validator Fix и новым критерием успеха, в плане отсутствуют, write-tests легко их пропустит. 3.3 (k3d) не требует пересборки образа: `evidence/k3d-extra-volumes.md` снят на образе из f62a517 (Go = main), §1 фиксирует падение Slack — нужно повторить на образе с 1674cdb+. В requirements Notes осталось «Go-код не меняется».
+- **Recommendation:** добавить в `tasks.md` фазу Validator Fix (отмеченную как сделанную, со ссылкой на 1674cdb) и в Phase 3 — шаг тестов Go. Минимум покрытия:
+  1. `validators/receiver_test.go`: по одному кейсу на `api_url_file`, `global.slack_api_url_file`, `url_file`, `routing_key_file`, `service_key_file` → нет E113/E115/E122; «ни значения, ни файла» → E113/E115/E122; `api_url_file` + невалидный inline URL не даёт E116/E117 только когда inline пуст (inline+file — валидатор проверяет inline).
+  2. Strict-парсер (`ValidateBytes`) принимает все семь ключей (и JSON-вариант).
+  3. `internal/config` через `LoadConfig` с реальными temp-файлами: Slack/webhook/PagerDuty/global-Slack загружаются; `http://` в файле → отказ (`https_production`), содержимое файла не попадает в текст ошибки; отсутствующий файл → ошибка с путём.
+  4. k3d 3.3: Slack `api_url_file` из Secret на образе с фиксом.
+  Notes в requirements поправить.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+#### R2-F3 — «A URL from a file is not checked for format or HTTPS» читается как отсутствие проверки вообще
+- **Severity:** nit
+- **Location:** `go-app/pkg/configvalidator/ERROR_CODES.md` (E113, E115), комментарии `validators/receiver.go` (`validateSlackConfigs`, `validateWebhookConfigs`)
+- **Issue:** формально верно для валидатора, но оператор поймёт, что `http://` в файле пройдёт. На деле `routing.Parse` режет его тегами `url,https_production`, кроме `ENVIRONMENT=development` — и в этом режиме возникает асимметрия: inline `http://` Slack-URL валидатор отвергает E117 всегда, а тот же URL из файла проходит.
+- **Recommendation:** дописать «...by the validator; the loader still rejects a non-HTTPS URL (unless `ENVIRONMENT=development`)». Асимметрию в dev оставить.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+#### R2-F4 — W300 в `security.go` всё ещё говорит, что у модели нет `*_file`
+- **Severity:** nit
+- **Location:** `go-app/pkg/configvalidator/validators/security.go` (doc-комментарий `checkHardcodedSecret`, suggestion W300)
+- **Issue:** комментарий «this config model has no *_file alternative to point to instead» устарел после 1674cdb; для `smtp_auth_password` и `service_key` подсказка W300 могла бы назвать `smtp_auth_password_file` / `routing_key_file` — это и есть цель задачи.
+- **Recommendation:** поправить комментарий; по желанию — suggestion с упоминанием `*_file` для полей, у которых двойник есть.
+- **Disposition:** fix-here (опционально, на усмотрение автора)
+- **Follow-up:** n/a
+
+#### R2-F5 — `git diff --check main...HEAD` не зелёный
+- **Severity:** nit
+- **Location:** `tasks/HELM-EXTRA-VOLUMES/Spec.md:16`, `tasks/HELM-EXTRA-VOLUMES/tasks.md:17`
+- **Issue:** trailing whitespace (markdown hard break из шаблона). `CLAUDE.md` § Quality Gates требует `git diff --check` перед finalize.
+- **Recommendation:** заменить двойной пробел на `<br>`/пустую строку или убрать.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+#### R2-F6 — Ошибки E114/E116/E123 печатают inline URL, а Slack/webhook URL — это секрет
+- **Severity:** minor
+- **Location:** `go-app/pkg/configvalidator/validators/receiver.go` (`invalid Slack API URL: %s`, `invalid webhook URL: %s`, `invalid PagerDuty URL: %s`); ошибка уходит в лог `failed to load configuration` (видно в k3d §1)
+- **Issue:** при опечатке в inline `api_url` полный webhook URL с токеном попадает в лог пода. Предсуществующее и только для inline-значений; путь `*_file` его как раз обходит (валидатор файл не читает, routing значение не печатает). Вне scope задачи.
+- **Recommendation:** в сообщении — маскировка query/пути, как в `internal/infrastructure/routing/utils.go`, или только поле без значения; тест на отсутствие токена в ошибке.
+- **Disposition:** defer-bug
+- **Follow-up:** новая запись в `docs/06-planning/BUGS.md` (в finalize)
+
+#### R2-F7 — `evidence/render-invariance.txt` снят до переноса guard'а
+- **Severity:** nit
+- **Location:** `tasks/HELM-EXTRA-VOLUMES/evidence/render-invariance.txt`
+- **Issue:** заголовок — «branch @ f62a517 + working tree»; 1b868dc перенёс guard и переменные. Ревьюер перепроверил на 1674cdb — хеши с main совпадают, но evidence должен описывать финальное дерево.
+- **Recommendation:** перегенерировать в testing на финальном коммите (и добавить production + placeholders, как в файле).
+- **Disposition:** fix-here (в testing)
+- **Follow-up:** n/a
+
+### Defer to testing (k3d), обновлено
+
+- Slack `api_url_file` из Secret на образе, собранном с 1674cdb или позже (k3d §1 повторить, ожидаем `Running` и `<secret>` в `/api/v2/status`).
+- Ротация Secret + `POST /-/reload` — как в раунде 1.
+
+### Anti-Pattern Check (раунд 2)
+
+- [x] Self-audit was not treated as a substitute for independent review.
+
+---
+
+## Round 1 — 2026-10-20
+
+
 **Trigger classification:** mandatory (`S` — путь доставки секретов receiver'ов)
 **Reviewer perspective:** independent general-purpose agent (не автор реализации)
 **Reviewed at:** 2026-10-20

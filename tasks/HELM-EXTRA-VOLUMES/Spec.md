@@ -13,7 +13,7 @@ based_on:
 
 # Specification: extraVolumes / extraVolumeMounts в чарте helm/amp
 
-**Version:** 1.1 (Scope Change: валидатор `*_file`, review F1)  
+**Version:** 1.1 (Scope Change: валидатор `*_file`, review F1)
 **Status:** Approved (автор; задача из Queue с готовой формулировкой владельца)
 
 ## Summary

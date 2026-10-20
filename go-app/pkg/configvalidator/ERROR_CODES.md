@@ -178,7 +178,7 @@ maps.
 
 #### E113: Webhook URL Required
 **Severity**: Error
-**Solution**: Provide valid webhook URL (e.g., 'http://example.com/webhook'), or `url_file` with a path to a file holding it. A URL from a file is not checked for format (E114).
+**Solution**: Provide valid webhook URL (e.g., 'http://example.com/webhook'), or `url_file` with a path to a file holding it. The validator does not check a URL from a file for format (E114); the loader still requires a valid `https://` URL once the file is read (plain `http://` only with `ENVIRONMENT=development`).
 
 #### E114: Invalid Webhook URL
 **Severity**: Error
@@ -188,7 +188,7 @@ maps.
 
 #### E115: Slack API URL Required
 **Severity**: Error
-**Solution**: Provide Slack webhook URL: `api_url`, `api_url_file`, `global.slack_api_url` or `global.slack_api_url_file`. A URL from a file is not checked for format or HTTPS (E116, E117).
+**Solution**: Provide Slack webhook URL: `api_url`, `api_url_file`, `global.slack_api_url` or `global.slack_api_url_file`. The validator does not check a URL from a file for format or HTTPS (E116, E117); the loader still requires a valid `https://` URL once the file is read (plain `http://` only with `ENVIRONMENT=development`).
 
 #### E116: Invalid Slack API URL
 **Severity**: Error

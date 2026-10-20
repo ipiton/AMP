@@ -496,9 +496,9 @@ configFile:
     route:
       receiver: slack
       routes:
+        # critical alerts go to Telegram, everything else to Slack
         - receiver: telegram-panic
           matchers: ['severity="critical"']
-          continue: true
     receivers:
       - name: slack
         slack_configs:

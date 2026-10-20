@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: extraVolumes / extraVolumeMounts
 
-**Based on:** requirements.md / research.md / Spec.md  
+**Based on:** requirements.md / research.md / Spec.md
 **Date:** 2026-10-20
 
 ## Touched Files
@@ -23,7 +23,11 @@ based_on:
 - `helm/amp/templates/deployment.yaml` — guard + рендер
 - `helm/amp/tests/render-extra-volumes.sh` — render-тест (write-tests)
 - `helm/amp/README.md`, `docs/CONFIGURATION_GUIDE.md` — пример Telegram + Slack
-- `helm/amp/CHANGELOG.md`?, `CHANGELOG.md` — [Unreleased] Added (finalize)
+- `go-app/internal/alertmanager/config/config.go` — поля `*_file` (Scope Change)
+- `go-app/pkg/configvalidator/validators/receiver.go`, `ERROR_CODES.md`, `validators/security.go` (подсказка W300) — E113/E115/E122 учитывают `*_file`
+- `go-app/pkg/configvalidator/validators/*_test.go`, `go-app/internal/config/*_test.go` — тесты (write-tests)
+- `docs/ALERTMANAGER_COMPATIBILITY.md` — пути `*_file` и валидатор
+- `CHANGELOG.md` — [Unreleased] Added (finalize)
 
 ## Phase 1: Chart
 
@@ -39,11 +43,19 @@ based_on:
 
 **Phase verification:** чтение, `git diff --check`
 
+## Phase 2b: Validator `*_file` (Scope Change 2026-10-20, review F1)
+
+- [x] **2b.1** `internal/alertmanager/config`: поля `*_file` у global (slack_api_url_file, smtp_auth_password_file), slack, webhook, pagerduty, telegram <!-- verify: go build ./... -->
+- [x] **2b.2** `validators/receiver.go`: E113/E115/E122 считают `*_file` заданным значением; `ERROR_CODES.md` <!-- verify: go test ./pkg/configvalidator/... -->
+- [x] **2b.3** Подсказка W300 в `validators/security.go` упоминает `*_file` (review R2-F4)
+
 ## Phase 3: Review → Tests → Testing (после deep-review pass)
 
-- [ ] **3.1** deep-review (независимый агент) → `review-verdict.json` pass
+- [x] **3.1** deep-review (независимый агент, 2 раунда) → `review-verdict.json` pass
 - [ ] **3.2** `helm/amp/tests/render-extra-volumes.sh`: T1 пусто = без изменений, T2 Secret смонтирован в `amp`, не в reloader, `configFile.content` ссылается на путь, T3 конфликты падают
-- [ ] **3.3** k3d: AMP стартует с `bot_token_file`/`api_url_file` из Secret (+ `defaultMode: 0400`) → `evidence/k3d-extra-volumes.md`
+- [ ] **3.2b** Go-тесты: валидатор принимает каждый `*_file` и даёт E113/E115/E122 без значения и файла; строгий парсер принимает ключи; `config.LoadConfig` с реальными файлами и ошибка без обоих
+- [x] **3.3** k3d на образе `1674cdb`: Telegram `bot_token_file` и Slack `api_url_file` из Secret (+ `defaultMode: 0400`) → `evidence/k3d-extra-volumes.md` §2–§3
+- [ ] **3.3b** Перерендер `evidence/render-invariance.txt` на финальном коммите (R2-F7)
 - [ ] **3.4** `scripts/release-gate.sh` → `evidence/release-gate.txt`, `git diff --check`
 
 ## Definition of Done

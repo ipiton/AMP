@@ -37,3 +37,15 @@ The same values without the Slack receiver (`route.receiver: telegram-panic`), `
 - `id` → `uid=65534(nobody) gid=65534(nobody)`. Files: `-r--r----- root nobody` — kubelet turned `defaultMode: 0400` into 0440 with the `fsGroup` group; `cat` as 65534 works.
 - `GET /api/v2/status` → `config.original`: `bot_token: <secret>`, `bot_token_file: /etc/amp/secrets/telegram-bot-token`; `grep -c FAKE-drill-token` on the response = 0.
 - `POST /api/v2/alerts` with `alertname=ExtraVolumesDrill, severity=critical` → 200; after `group_wait` the Telegram publisher calls api.telegram.org and gets `telegram API error 401: Unauthorized` — the token from the file (trailing newline trimmed) reached the API. `grep -c FAKE-drill-token` over the whole pod log = 0.
+
+## 3. Slack `api_url_file` after the validator fix (`1674cdb`)
+
+Image `amp:extra-volumes` rebuilt from `1674cdb` (validator counts `*_file`), `k3d image import`, `helm upgrade` + `rollout restart`. Values as in §1: both receivers, `defaultMode: 0400`, routes `telegram-panic` (`severity="critical"`, `continue: true`) then `slack`. Pod `amp-5dff9f7879-l6bmt`.
+
+- Pod `Running 1/1`, `config parsed successfully routes=3 receivers=2`, targets `cfg:slack/slack0` and `cfg:telegram-panic/telegram0`. The E115 failure from §1 is gone.
+- `uid=65534`; `ls -lL /etc/amp/secrets` → both files `-r--r----- root nobody` (same `fsGroup` effect as §2).
+- `GET /api/v2/status` → `api_url: <secret>`, `api_url_file: /etc/amp/secrets/slack-webhook-url`, `bot_token: <secret>`, `bot_token_file: /etc/amp/secrets/telegram-bot-token`.
+- `POST /api/v2/alerts` `alertname=DrillSlackFile, severity=warning` → 200 → group `receiver=slack/{global}` → after `group_wait` `cfg:slack/slack0` posts to hooks.slack.com and gets `slack API error 404: no_team` — the fake webhook URL from the file reached Slack.
+- `grep -c -E 'drillsecretvalue|FAKE-drill-token'` over the whole pod log = 0.
+
+Side finding, out of scope: a `severity=critical` alert went only to `telegram-panic` (`Routing decision computed … matched_route=route.routes[0]`), the `slack` sibling after `continue: true` got nothing. The publish path calls `RouteEvaluator.Evaluate` (first match only); `EvaluateWithAlternatives` has no production caller. Filed as a bug; the docs example no longer relies on `continue`.
