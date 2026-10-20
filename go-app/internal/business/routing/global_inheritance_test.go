@@ -87,7 +87,7 @@ func TestInheritDuration_RouteOwnValueWinsOverGlobal(t *testing.T) {
 		Global: &infraroute.GlobalConfig{GroupWait: routingDuration(99 * time.Second)},
 	}}
 
-	got := b.inheritDuration(nil, 10*time.Second, "group_wait")
+	got := b.inheritDuration(nil, &grouping.Duration{Duration: 10 * time.Second}, "group_wait")
 
 	if got != 10*time.Second {
 		t.Fatalf("inheritDuration() = %v, want 10s (route's own value must win)", got)
@@ -100,7 +100,7 @@ func TestInheritDuration_ParentValueWinsOverGlobal(t *testing.T) {
 	}}
 	parent := &RouteNode{GroupWait: 20 * time.Second}
 
-	got := b.inheritDuration(parent, 0, "group_wait")
+	got := b.inheritDuration(parent, nil, "group_wait")
 
 	if got != 20*time.Second {
 		t.Fatalf("inheritDuration() = %v, want 20s (parent must win over global)", got)
@@ -112,7 +112,7 @@ func TestInheritDuration_FallsBackToGlobalWhenNoRouteOrParentValue(t *testing.T)
 		Global: &infraroute.GlobalConfig{GroupWait: routingDuration(90 * time.Second)},
 	}}
 
-	got := b.inheritDuration(nil, 0, "group_wait")
+	got := b.inheritDuration(nil, nil, "group_wait")
 
 	if got != 90*time.Second {
 		t.Fatalf("inheritDuration() = %v, want 90s from global.group_wait", got)
@@ -122,13 +122,13 @@ func TestInheritDuration_FallsBackToGlobalWhenNoRouteOrParentValue(t *testing.T)
 func TestInheritDuration_FallsBackToHardcodedDefaultWhenGlobalAlsoUnset(t *testing.T) {
 	b := &TreeBuilder{config: &infraroute.RouteConfig{}} // no Global at all
 
-	if got := b.inheritDuration(nil, 0, "group_wait"); got != 30*time.Second {
+	if got := b.inheritDuration(nil, nil, "group_wait"); got != 30*time.Second {
 		t.Fatalf("inheritDuration(group_wait) = %v, want 30s hardcoded default", got)
 	}
-	if got := b.inheritDuration(nil, 0, "group_interval"); got != 5*time.Minute {
+	if got := b.inheritDuration(nil, nil, "group_interval"); got != 5*time.Minute {
 		t.Fatalf("inheritDuration(group_interval) = %v, want 5m hardcoded default", got)
 	}
-	if got := b.inheritDuration(nil, 0, "repeat_interval"); got != 4*time.Hour {
+	if got := b.inheritDuration(nil, nil, "repeat_interval"); got != 4*time.Hour {
 		t.Fatalf("inheritDuration(repeat_interval) = %v, want 4h hardcoded default", got)
 	}
 }
@@ -141,22 +141,22 @@ func TestInheritDuration_GroupIntervalAndRepeatIntervalAlsoFallBackToGlobal(t *t
 		},
 	}}
 
-	if got := b.inheritDuration(nil, 0, "group_interval"); got != 2*time.Minute {
+	if got := b.inheritDuration(nil, nil, "group_interval"); got != 2*time.Minute {
 		t.Fatalf("inheritDuration(group_interval) = %v, want 2m from global", got)
 	}
-	if got := b.inheritDuration(nil, 0, "repeat_interval"); got != 6*time.Hour {
+	if got := b.inheritDuration(nil, nil, "repeat_interval"); got != 6*time.Hour {
 		t.Fatalf("inheritDuration(repeat_interval) = %v, want 6h from global", got)
 	}
 }
 
 func TestInheritDuration_NilConfigOrNilGlobalIsSafe(t *testing.T) {
 	var b TreeBuilder // config is nil
-	if got := b.inheritDuration(nil, 0, "group_wait"); got != 30*time.Second {
+	if got := b.inheritDuration(nil, nil, "group_wait"); got != 30*time.Second {
 		t.Fatalf("inheritDuration() with nil config = %v, want the 30s hardcoded default, not a panic", got)
 	}
 
 	b2 := &TreeBuilder{config: &infraroute.RouteConfig{}} // Global is nil
-	if got := b2.inheritDuration(nil, 0, "group_wait"); got != 30*time.Second {
+	if got := b2.inheritDuration(nil, nil, "group_wait"); got != 30*time.Second {
 		t.Fatalf("inheritDuration() with nil Global = %v, want the 30s hardcoded default, not a panic", got)
 	}
 }

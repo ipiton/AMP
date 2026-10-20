@@ -289,10 +289,21 @@ func TestGroupTimer_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "zero_duration",
+			name: "zero_duration_group_wait",
 			timer: &GroupTimer{
 				GroupKey:  "test-group",
 				TimerType: GroupWaitTimer,
+				Duration:  0,
+				StartedAt: now,
+				ExpiresAt: now,
+			},
+			wantErr: false, // group_wait: 0s — notify immediately
+		},
+		{
+			name: "zero_duration_group_interval",
+			timer: &GroupTimer{
+				GroupKey:  "test-group",
+				TimerType: GroupIntervalTimer,
 				Duration:  0,
 				StartedAt: now,
 				ExpiresAt: now,

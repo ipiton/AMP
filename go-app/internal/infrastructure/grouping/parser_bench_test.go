@@ -127,29 +127,6 @@ func BenchmarkParser_ParseString(b *testing.B) {
 	}
 }
 
-// BenchmarkApplyRouteDefaults benchmarks default application
-func BenchmarkApplyRouteDefaults(b *testing.B) {
-	route := &Route{
-		Receiver: "test",
-		GroupBy:  []string{"alertname"},
-		Routes: []*Route{
-			{
-				Receiver: "nested1",
-				GroupBy:  []string{"cluster"},
-			},
-			{
-				Receiver: "nested2",
-				GroupBy:  []string{"namespace"},
-			},
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		applyRouteDefaults(route)
-	}
-}
-
 // BenchmarkCalculateRouteDepth benchmarks depth calculation
 func BenchmarkCalculateRouteDepth(b *testing.B) {
 	// Create a route with depth 5
@@ -193,7 +170,6 @@ func BenchmarkValidateSemantics(b *testing.B) {
 			},
 		},
 	}
-	applyRouteDefaults(config.Route)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

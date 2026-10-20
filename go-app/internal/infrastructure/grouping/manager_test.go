@@ -909,6 +909,36 @@ func TestAddAlertToGroup_PerRouteTimingsOverrideRootDefaults(t *testing.T) {
 	assert.Equal(t, 20*time.Millisecond, group.Metadata.Timings.GroupWait)
 }
 
+// TestAddAlertToGroup_ZeroGroupWaitNotifiesImmediately: a route's explicit
+// group_wait: 0s (ROUTE-EXPLICIT-ZERO-GROUP-WAIT) reaches grouping as a
+// GroupTimings.GroupWait of 0 and must notify at once — not fall back to the
+// root's 1-hour group_wait as a "0 = unset" reading would. The notification
+// must carry the alert: the zero timer is armed only after the group and its
+// first alert are stored, so its callback cannot load an empty group.
+func TestAddAlertToGroup_ZeroGroupWaitNotifiesImmediately(t *testing.T) {
+	pub := &mockPublisher{}
+	manager := createTestManagerWithLongRootTimings(t, pub)
+	ctx := context.Background()
+
+	groupKey := GroupKey("receiver=panic/alertname=PostgresDown")
+	alert := createTestAlert("A", core.StatusFiring, map[string]string{"alertname": "PostgresDown"})
+
+	_, err := manager.AddAlertToGroup(ctx, alert, groupKey,
+		WithGroupTimings(0, time.Hour, time.Hour))
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool { return len(pub.calls()) == 1 }, time.Second, 5*time.Millisecond,
+		"group_wait: 0s must notify immediately, not after the 1-hour root group_wait")
+	calls := pub.calls()
+	require.Len(t, calls[0], 1)
+	assert.Equal(t, alert.Fingerprint, calls[0][0].Fingerprint)
+
+	group, err := manager.GetGroup(ctx, groupKey)
+	require.NoError(t, err)
+	require.NotNil(t, group.Metadata.Timings)
+	assert.Equal(t, time.Duration(0), group.Metadata.Timings.GroupWait)
+}
+
 // TestPublishGroupAlerts_OneCallCarriesAllAlerts verifies that
 // publishGroupAlerts makes exactly ONE PublishGroup call for the whole
 // group, carrying every alert in it (task 2.4: one grouped notification

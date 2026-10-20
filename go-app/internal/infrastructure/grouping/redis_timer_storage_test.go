@@ -75,6 +75,39 @@ func TestRedisTimerStorage_SaveTimer(t *testing.T) {
 	assert.Equal(t, timer.Duration, loaded.Duration)
 }
 
+// TestRedisTimerStorage_SaveTimer_ZeroGroupWait: a group_wait: 0s timer
+// (ROUTE-EXPLICIT-ZERO-GROUP-WAIT) is already due when saved; it must still
+// be stored with a positive TTL (the grace minimum) so a replica's restore or
+// reconciliation can pick it up. A zero group_interval timer stays invalid.
+func TestRedisTimerStorage_SaveTimer_ZeroGroupWait(t *testing.T) {
+	storage, mr, cleanup := setupTestRedisStorage(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	now := time.Now()
+
+	timer := &GroupTimer{
+		GroupKey:  "zero-group",
+		TimerType: GroupWaitTimer,
+		Duration:  0,
+		StartedAt: now,
+		ExpiresAt: now,
+		State:     TimerStateActive,
+		Metadata:  &TimerMetadata{Version: 1, CreatedBy: "test-instance"},
+	}
+	require.NoError(t, storage.SaveTimer(ctx, timer))
+
+	loaded, err := storage.LoadTimer(ctx, "zero-group")
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), loaded.Duration)
+	assert.Positive(t, mr.TTL(storage.timerKey("zero-group")), "an already-due timer must not be stored without expiry or dropped")
+
+	interval := *timer
+	interval.GroupKey = "zero-interval"
+	interval.TimerType = GroupIntervalTimer
+	assert.Error(t, storage.SaveTimer(ctx, &interval))
+}
+
 // TestRedisTimerStorage_SaveTimer_NilTimer tests error handling for nil timer
 func TestRedisTimerStorage_SaveTimer_NilTimer(t *testing.T) {
 	storage, _, cleanup := setupTestRedisStorage(t)

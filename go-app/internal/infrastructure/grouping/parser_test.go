@@ -55,10 +55,12 @@ route:
 			check: func(t *testing.T, config *GroupingConfig) {
 				assert.Equal(t, "team-Y", config.Route.Receiver)
 				assert.Equal(t, []string{"severity"}, config.Route.GroupBy)
-				// Check defaults are applied
-				assert.Equal(t, 30*time.Second, config.Route.GroupWait.Duration)
-				assert.Equal(t, 5*time.Minute, config.Route.GroupInterval.Duration)
-				assert.Equal(t, 4*time.Hour, config.Route.RepeatInterval.Duration)
+				// Unset timings stay nil in the parsed config (as upstream);
+				// the effective values fall back to 30s/5m/4h.
+				assert.Nil(t, config.Route.GroupWait)
+				assert.Equal(t, 30*time.Second, config.Route.GetEffectiveGroupWait())
+				assert.Equal(t, 5*time.Minute, config.Route.GetEffectiveGroupInterval())
+				assert.Equal(t, 4*time.Hour, config.Route.GetEffectiveRepeatInterval())
 			},
 		},
 		{
@@ -346,9 +348,6 @@ func TestParser_validateSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Apply defaults first
-			applyRouteDefaults(tt.config.Route)
-
 			err := parser.validateSemantics(tt.config)
 
 			if tt.wantErr {
@@ -360,32 +359,42 @@ func TestParser_validateSemantics(t *testing.T) {
 	}
 }
 
-// TestApplyRouteDefaults tests default application
-func TestApplyRouteDefaults(t *testing.T) {
-	route := &Route{
-		Receiver: "test",
-		GroupBy:  []string{"alertname"},
-		Routes: []*Route{
-			{
-				Receiver: "nested",
-				GroupBy:  []string{"cluster"},
-			},
-		},
-	}
+// TestParser_Parse_LeavesUnsetTimingsNil: Parse must not fill route timings
+// (ROUTE-TIMINGS-NOT-INHERITED) — an unset field stays nil so a nested route
+// inherits its parent's, and an explicit 0s group_wait stays an explicit 0
+// (ROUTE-EXPLICIT-ZERO-GROUP-WAIT).
+func TestParser_Parse_LeavesUnsetTimingsNil(t *testing.T) {
+	parser := NewParser()
 
-	applyRouteDefaults(route)
+	config, err := parser.Parse([]byte(`
+route:
+  receiver: root
+  group_by: [alertname]
+  group_wait: 3s
+  routes:
+    - receiver: child
+      routes:
+        - receiver: grandchild
+    - receiver: zero
+      group_wait: 0s
+`))
+	require.NoError(t, err)
 
-	// Check root route defaults
-	assert.NotNil(t, route.GroupWait)
-	assert.Equal(t, 30*time.Second, route.GroupWait.Duration)
-	assert.NotNil(t, route.GroupInterval)
-	assert.Equal(t, 5*time.Minute, route.GroupInterval.Duration)
-	assert.NotNil(t, route.RepeatInterval)
-	assert.Equal(t, 4*time.Hour, route.RepeatInterval.Duration)
+	root := config.Route
+	require.NotNil(t, root.GroupWait)
+	assert.Equal(t, 3*time.Second, root.GroupWait.Duration)
+	assert.Nil(t, root.GroupInterval, "unset root timing must not be defaulted by the parser")
+	assert.Nil(t, root.RepeatInterval)
 
-	// Check nested route defaults
-	assert.NotNil(t, route.Routes[0].GroupWait)
-	assert.Equal(t, 30*time.Second, route.Routes[0].GroupWait.Duration)
+	child := root.Routes[0]
+	assert.Nil(t, child.GroupWait)
+	assert.Nil(t, child.GroupInterval)
+	assert.Nil(t, child.RepeatInterval)
+	assert.Nil(t, child.Routes[0].GroupWait)
+
+	zero := root.Routes[1]
+	require.NotNil(t, zero.GroupWait, "explicit 0s must stay distinguishable from unset")
+	assert.Equal(t, time.Duration(0), zero.GroupWait.Duration)
 }
 
 // TestCalculateRouteDepth tests depth calculation
@@ -497,7 +506,6 @@ func TestParser_MaxDepthValidation(t *testing.T) {
 	}
 
 	config := &GroupingConfig{Route: route}
-	applyRouteDefaults(config.Route)
 
 	err := parser.validateSemantics(config)
 	assert.Error(t, err)
