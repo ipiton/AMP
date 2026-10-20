@@ -34,6 +34,12 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### 2. Operations
 
+> Предпосылки запуска рядом с Alertmanager в sema-prod (параллельные нотификации), переоценка 2026-10-20.
+
+- [ ] **SLACK-WEBHOOK-PLAIN-OK-RESPONSE** — ответ `ok` Incoming Webhook считается ошибкой, Slack-группы переотправляются каждые `group_interval`. BUGS high, ~0.25d.
+- [ ] **SLACK-COLOR-TEMPLATE-REJECTED** — шаблонный `slack_configs[].color` валит загрузку конфига sema. BUGS high, ~0.25d.
+- [ ] **HELM-EXTRA-VOLUMES** — Secret с кредами receiver'ов вместо открытого текста в ConfigMap. BACKLOG, ~0.5d.
+
 - [ ] **HELM-VCT-CHART-LABELS** — метки VCT с версией чарта: первый бамп версии сломает `helm upgrade`; сделать до `PROD-RELEASE-V010`. BUGS, ~0.25d. Пополнено 2026-10-19.
 - [ ] **AMP-CACHE-NO-RECONNECT** — AMP, не заставший кеш на старте, остаётся на in-memory до рестарта; после `AMP-CACHE-NOAUTH` воспроизводится на первом `helm upgrade` (k3d 2026-10-20). BUGS, medium, ~0.5d. Пополнено 2026-10-20.
 

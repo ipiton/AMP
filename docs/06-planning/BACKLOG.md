@@ -395,7 +395,10 @@
   - [ ] **RUNBOOKS-ONESHOT-PATH** — runbooks в one-shot пути 5A (`InvestigateAlert`, `llm.agent_mode=false`): второй интерфейс (`infrastructure/investigation/queue.go` `LLMClient`) и свой промпт в `llm/client.go`. ~0.5d
   - [ ] **RUNBOOKS-HOT-RELOAD** — перечитывать каталог по SIGHUP/`/-/reload` (`config.Reloadable` + атомарная подмена `*runbook.Set` в `AgentLoop`); сейчас только при старте. ~0.5d
   - [ ] **RUNBOOKS-REGEX-MATCH** — regex/glob/negative matching в `match` (сейчас только точное равенство). Решить синтаксис (как у Alertmanager matchers?). ~0.5d
-  - [ ] **HELM-EXTRA-VOLUMES** — `extraVolumes`/`extraVolumeMounts` в `helm/amp/templates/deployment.yaml`, чтобы монтировать ConfigMap с runbooks без патча Deployment. Связано с `HELM-CHART-GAPS` (TECH-DEBT.md). ~0.5d
+  - [ ] **HELM-EXTRA-VOLUMES** — `extraVolumes`/`extraVolumeMounts` в `helm/amp/templates/deployment.yaml` (контейнер `amp`). Связано с `HELM-CHART-GAPS` (TECH-DEBT.md). ~0.5d
+    - Зачем: (1) креды receiver'ов — `configFile.content` рендерится в ConfigMap, поэтому `bot_token`/Slack webhook без этого лежат там открытым текстом; с монтированием Secret — `bot_token_file`/`api_url_file`/`slack_api_url_file` (FU-FILE-SECRETS), относительные пути резолвятся от каталога конфига; (2) ConfigMap с runbooks без патча Deployment.
+    - Критерий: render-тест — Secret из `extraVolumes` смонтирован в `amp`, путь из `configFile.content` указывает на него; пример в `CONFIGURATION_GUIDE.md`/`helm/amp/README.md` для Telegram + Slack через `*_file`.
+    - _(2026-10-20, переоценка готовности к запуску рядом с Alertmanager в sema-prod)_ поднят в Queue: без него креды Telegram/Slack sema попадают в ConfigMap.
   - [ ] **RUNBOOKS-IN-INVESTIGATION-RECORD** — сохранять `RunbooksUsed` в БД/отдавать в API investigation (сейчас только лог очереди). ~0.5d
   - [ ] **RUNBOOKS-METRICS** — Prometheus-счётчики: загружено/пропущено при старте, матчей на расследование (в срезе выбран лог, Spec §5.8). ~0.25d
 

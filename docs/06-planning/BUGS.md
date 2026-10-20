@@ -6,6 +6,46 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
+### [high][Publishing][~0.25d] SLACK-WEBHOOK-PLAIN-OK-RESPONSE
+- **Title:** успешная доставка в Slack Incoming Webhook считается ошибкой, группа переотправляется на каждом `group_interval`
+- **Problem:** `HTTPSlackWebhookClient` (`go-app/internal/infrastructure/publishing/slack_client.go:263-267`) на HTTP 200 разбирает тело как JSON `SlackResponse{ok,...}` — так отвечает API `chat.postMessage`. Incoming Webhook (`hooks.slack.com/services/...`, путь `slack_api_url`/`api_url`) отвечает телом `ok` в `text/plain`, поэтому `json.Unmarshal` падает: `failed to parse response: invalid character 'o'` → `Non-retryable error` → `Group publishing delivery not confirmed ... no dedup entry will be recorded`. Тесты (`queue_target_publisher_test.go:388`) мокают Slack JSON-ответом и этого не ловят.
+- **Impact:** сообщение в канал фактически доставлено, но nflog его не записывает: каждая горящая группа уходит повторно на каждом `group_interval` (5m) вместо `repeat_interval`, метрики доставки показывают ошибки. Блокирует параллельный запуск рядом с Alertmanager в sema-prod (`errors-slack`, канал `#sema`). Воспроизведено 2026-10-20 на бинаре `main` с конфигом sema и мок-приёмником, отвечающим как Slack: повтор в 11:54:09 после первой отправки в 11:49:09.
+- **Fix:** на 2xx принимать тело `ok` (и пустое) как успех; JSON разбирать, только если он есть; не-2xx с текстовым телом (`invalid_payload`, `no_service`, …) — ошибка с этим текстом. Тест на `text/plain` `ok` и на текстовую ошибку; мок в существующих тестах привести к реальному ответу вебхука.
+- **Refs:** `slack_client.go:263`; upstream `notify/slack` проверяет статус, а тело вебхука не разбирает как JSON.
+- **Status:** open
+
+### [high][Config][~0.25d] SLACK-COLOR-TEMPLATE-REJECTED
+- **Title:** шаблонный `slack_configs[].color` не проходит валидацию, конфиг не загружается
+- **Problem:** `validateSlackColor` (`go-app/internal/infrastructure/routing/parser.go:770`, тег `slack_color` на `SlackConfig.Color`, `receiver.go:503`) пропускает только `good`/`warning`/`danger`/`#RRGGBB`. С TEMPLATES-EPIC slice 2 `color` — шаблонное поле, а в upstream оно шаблон по умолчанию (`{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}`). Конфиг с таким значением: `RouteConfig.Receivers[2].SlackConfigs[0].Color ... failed on the 'slack_color' tag`, AMP не стартует.
+- **Impact:** verbatim `alertmanager.yml` с шаблонным `color` (sema-prod `errors-slack`, типовой upstream-пример) не загружается — противоречит заявлению в `ALERTMANAGER_COMPATIBILITY.md`, что `color` рендерится шаблоном.
+- **Fix:** значение с `{{` не валидировать как цвет (проверять отрендеренный результат либо оставить Slack судить); тест на шаблонный `color` при загрузке и на его рендер в attachment.
+- **Refs:** `parser.go:770`; проверка 2026-10-20 на конфиге sema (`~/Sema/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml`).
+- **Status:** open
+
+### [medium][Routing][~0.25d] ROUTE-EXPLICIT-ZERO-GROUP-WAIT
+- **Title:** явный `group_wait: 0s` у route трактуется как «не задан» и наследуется от родителя
+- **Problem:** `TreeBuilder.inheritDuration` (`go-app/internal/business/routing/tree_builder.go:514`) берёт значение route только при `routeValue > 0`, иначе — родителя; `validateDurations` (`internal/business/routing/tree.go:498`) вдобавок считает `group_wait <= 0` ошибкой. В upstream `0s` — валидное «отправить сразу».
+- **Impact:** route `signal="panic"` с `group_wait: 0s` под корнем с `group_wait: 10s` (sema-prod) нотифицирует через 10s, а не сразу. Родственно `ROUTE-TIMINGS-NOT-INHERITED` (тот же механизм наследования), но отдельный случай: там лишние дефолты, здесь потерянный явный ноль.
+- **Fix:** различать «не задан» и «задан 0» (указатель/флаг из парсера), разрешить `group_wait: 0`; тест на route с `0s` под корнем с ненулевым `group_wait`. Удобно чинить вместе с `ROUTE-TIMINGS-NOT-INHERITED`.
+- **Refs:** проверка 2026-10-20 на конфиге sema: PostgresDown (`group_wait: 0s`) ушёл через 10s вместе с алертом корневого route.
+- **Status:** open
+
+### [medium][Test][~0.25d] FUZZ-RANDOM-ALERTS-RACE-TIMEOUT
+- **Title:** `TestFuzz_RandomAlerts` под `-race` съедает больше половины 10-минутного таймаута пакета
+- **Problem:** `go-app/internal/infrastructure/publishing/formatter_fuzz_test.go` в одиночном прогоне `go test -race -run 'TestFuzz_RandomAlerts$'` идёт 5m21s (2026-10-20, M-series). В шаге `race` release-gate под нагрузкой пакет `internal/infrastructure/publishing` упал `panic: test timed out after 10m0s` с этим тестом в `running tests`.
+- **Impact:** required-шаг `race` гейта краснеет по таймауту без реальной регрессии; на shared runner'ах CI вероятнее.
+- **Fix:** уменьшить число итераций под `-race` (`testing.Short()`/build tag `race` или env), либо перенести в отдельный fuzz-таргет `go test -fuzz` вне гейта; цель — секунды, не минуты.
+- **Refs:** release-gate 2026-10-20 на `main` @ `7958ef8` (шаг `race`).
+- **Status:** open
+
+### [low][Publishing][~0.25d] SLACK-EXTRA-FIELDS-NOT-UPSTREAM
+- **Title:** Slack-сообщение с операторскими `title`/`text` несёт лишний блок `fields` (Status/Started/Namespace)
+- **Problem:** `template_formatter.go:328` берёт colour/fields фиксированного форматтера (`formatter.go:552-566`) как базу, поверх которой накладываются отрендеренные поля оператора. Upstream без `fields:` в конфиге поля не шлёт.
+- **Impact:** в Slack дублируется информация, которую оператор уже вывел в `text`; расхождение с обещанием «нетронутый upstream-конфиг даёт upstream-вывод». Плюс `title_link` относителен (`/#/alerts?...`), если не задан `server.externalUrl`, — это настройка, не баг.
+- **Fix:** при наличии операторских шаблонов не переносить `fields` фиксированного форматтера (переносить только явно заданные); тест на payload без `fields`.
+- **Refs:** проверка 2026-10-20 на конфиге sema (`errors-slack`).
+- **Status:** open
+
 ### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
 - **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
 - **Problem:** `onGroupWaitExpired` (`go-app/internal/infrastructure/grouping/manager_impl.go:1866-1873`) на любой ошибке `storage.Load` возвращает `nil` без continuation, а `onTimerExpired` после callback'ов удаляет запись таймера (`timer_manager_impl.go`, cleanup после callback'ов). При транзиентной ошибке Redis группа после этого больше не нотифицирует: таймера нет ни локально, ни в storage, reconciliation подобрать нечего. Предсуществующий дефект; раньше его иногда маскировало повторное срабатывание опоздавшей реплики, после `GROUPING-TIMER-LOCK-FIX` она отсеивается по `not_found`.
