@@ -17,7 +17,6 @@ Queue и WIP — источник правды для выбора задачи.
 ## WIP
 
 - [ ] **HELM-EXTRA-VOLUMES** — `extraVolumes`/`extraVolumeMounts` в чарте: Secret с кредами receiver'ов вместо открытого текста в ConfigMap; BACKLOG. Взят 2026-10-20, ветка `feature/helm-extra-volumes`, workspace `tasks/HELM-EXTRA-VOLUMES/`.
-- [ ] **ROUTE-TIMINGS-BUNDLE** — наследование таймингов route как в upstream: дефолты только корню, «не задан» ≠ «задан 0», `group_wait: 0s` — немедленная отправка. Члены: `ROUTE-TIMINGS-NOT-INHERITED` (high), `ROUTE-EXPLICIT-ZERO-GROUP-WAIT` (medium); BUGS. Взят 2026-10-20, ветка `bugfix/route-timings`, workspace `tasks/ROUTE-TIMINGS-BUNDLE/`.
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.

@@ -190,16 +190,43 @@ func TestDefaultTimerManager_StartTimer_InvalidType(t *testing.T) {
 	assert.IsType(t, &InvalidTimerTypeError{}, err)
 }
 
-// TestDefaultTimerManager_StartTimer_ZeroDuration tests validation
+// TestDefaultTimerManager_StartTimer_ZeroDuration: a zero group_wait timer
+// is upstream's group_wait: 0s and fires at once through the normal
+// expiration path (ROUTE-EXPLICIT-ZERO-GROUP-WAIT); zero group_interval/
+// repeat_interval and any negative duration are rejected.
 func TestDefaultTimerManager_StartTimer_ZeroDuration(t *testing.T) {
 	manager, _, _ := setupTestTimerManager(t)
 	defer func() { _ = manager.Shutdown(context.Background()) }()
 
 	ctx := context.Background()
 
+	fired := make(chan TimerType, 1)
+	manager.OnTimerExpired(func(_ context.Context, _ GroupKey, timerType TimerType, _ *AlertGroup) error {
+		fired <- timerType
+		return nil
+	})
+
 	_, err := manager.StartTimer(ctx, "test-group", GroupWaitTimer, 0)
-	assert.Error(t, err)
-	assert.IsType(t, &InvalidDurationError{}, err)
+	require.NoError(t, err)
+	select {
+	case got := <-fired:
+		assert.Equal(t, GroupWaitTimer, got)
+	case <-time.After(time.Second):
+		t.Fatal("zero group_wait timer did not fire immediately")
+	}
+
+	for _, tt := range []struct {
+		timerType TimerType
+		duration  time.Duration
+	}{
+		{GroupIntervalTimer, 0},
+		{RepeatIntervalTimer, 0},
+		{GroupWaitTimer, -time.Second},
+	} {
+		_, err := manager.StartTimer(ctx, "test-group", tt.timerType, tt.duration)
+		assert.Error(t, err, "%s %v", tt.timerType, tt.duration)
+		assert.IsType(t, &InvalidDurationError{}, err)
+	}
 }
 
 // TestDefaultTimerManager_StartTimer_EmptyGroupKey tests validation

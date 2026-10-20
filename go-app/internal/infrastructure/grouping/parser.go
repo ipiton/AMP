@@ -72,8 +72,9 @@ func (p *DefaultParser) Parse(data []byte) (*GroupingConfig, error) {
 		return nil, NewConfigError("route configuration is required", "", nil)
 	}
 
-	// Apply defaults recursively
-	applyRouteDefaults(config.Route)
+	// Route timings are left nil when unset (no Route.Defaults() here):
+	// a nested route without its own timings inherits them from its parent,
+	// and DefaultGroupManager falls back to 30s/5m/4h for a nil root value.
 
 	// Structural validation using validator tags
 	if err := p.validator.Struct(&config); err != nil {
@@ -228,21 +229,6 @@ func (p *DefaultParser) validateRouteSemantics(route *Route, errors *ValidationE
 			"max_depth",
 			fmt.Sprintf("route nesting depth (%d) exceeds maximum allowed (%d)", depth, maxRouteDepth),
 		)
-	}
-}
-
-// applyRouteDefaults recursively applies default values to a route and its nested routes.
-func applyRouteDefaults(route *Route) {
-	if route == nil {
-		return
-	}
-
-	// Apply defaults to this route
-	route.Defaults()
-
-	// Recursively apply to nested routes
-	for _, nestedRoute := range route.Routes {
-		applyRouteDefaults(nestedRoute)
 	}
 }
 

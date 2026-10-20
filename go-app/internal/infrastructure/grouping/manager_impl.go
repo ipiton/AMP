@@ -244,6 +244,7 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 
 	// Load or create group (TN-125: storage-backed)
 	group, err := m.storage.Load(ctx, groupKey)
+	isNewGroup := false
 	if err != nil {
 		// Check if group not found
 		var notFoundErr *GroupNotFoundError
@@ -254,6 +255,7 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 
 		// Create new group
 		group = m.createNewGroupUnsafe(groupKey)
+		isNewGroup = true
 
 		// task 2.4: apply per-route timing overrides (RoutingDecision), if
 		// the caller supplied any — see WithGroupTimings and
@@ -275,15 +277,6 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 		// Metric: new group created
 		if m.metrics != nil {
 			m.metrics.IncActiveGroups()
-		}
-
-		// Start group_wait timer for new group (TN-124), honoring this
-		// group's own timing override if one was supplied (task 2.4).
-		if startErr := m.startGroupWaitTimer(ctx, groupKey, group.Metadata.Timings); startErr != nil {
-			// Log error but don't fail the operation (timer is optional)
-			m.logger.Warn("failed to start group_wait timer for new group",
-				"group_key", groupKey,
-				"error", startErr)
 		}
 	} else {
 		m.ensureGroupTimer(ctx, groupKey, group)
@@ -310,6 +303,20 @@ func (m *DefaultGroupManager) AddAlertToGroup(
 			"error", storeErr)
 		// Don't fail the operation - group is in memory
 		// TODO: Consider retry logic or fallback strategy
+	}
+
+	// Start group_wait timer for a new group (TN-124), honoring this
+	// group's own timing override if one was supplied (task 2.4). Started
+	// only after the group and its first alert are stored: with
+	// group_wait: 0s the timer fires at once, and its callback loads the
+	// group from storage.
+	if isNewGroup {
+		if startErr := m.startGroupWaitTimer(ctx, groupKey, group.Metadata.Timings); startErr != nil {
+			// Log error but don't fail the operation (timer is optional)
+			m.logger.Warn("failed to start group_wait timer for new group",
+				"group_key", groupKey,
+				"error", startErr)
+		}
 	}
 
 	// Update stats
@@ -885,12 +892,14 @@ func (m *DefaultGroupManager) startGroupWaitTimer(ctx context.Context, groupKey 
 	}
 
 	// Get group_wait duration: per-group override (task 2.4) takes
-	// precedence over the root Route.* default (default: 30s).
+	// precedence over the root Route.* default (default: 30s). The override
+	// is taken as is, 0 included — group_wait: 0s means "notify immediately"
+	// (see GroupTimings).
 	duration := 30 * time.Second
 	if m.config != nil && m.config.Route != nil && m.config.Route.GroupWait != nil {
 		duration = m.config.Route.GroupWait.Duration
 	}
-	if timings != nil && timings.GroupWait > 0 {
+	if timings != nil {
 		duration = timings.GroupWait
 	}
 

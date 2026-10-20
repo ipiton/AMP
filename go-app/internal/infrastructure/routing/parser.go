@@ -302,10 +302,11 @@ func (p *RouteConfigParser) applyDefaults(config *RouteConfig) {
 		config.Global.Defaults()
 	}
 
-	// Apply route defaults (via TN-121)
-	if config.Route != nil {
-		applyRouteDefaultsRecursive(config.Route)
-	}
+	// Route timings (group_wait/group_interval/repeat_interval) are NOT
+	// defaulted here: an unset field must stay nil so business/routing's
+	// TreeBuilder can inherit it from the parent route (or global.*, then
+	// 30s/5m/4h at the root), exactly as upstream resolves them in
+	// dispatch.NewRoute rather than in the parsed config.
 
 	// Apply receiver defaults
 	for _, receiver := range config.Receivers {
@@ -386,6 +387,17 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 	}
 	validateTimeIntervalNames(config.TimeIntervals, "time_intervals")
 	validateTimeIntervalNames(config.MuteTimeIntervalsSection, "mute_time_intervals")
+
+	// global.group_interval/repeat_interval (AMP-only) cascade into the root
+	// route, so a zero there is rejected for the same reason as on a route.
+	if config.Global != nil {
+		if d := config.Global.GroupInterval; d != nil && *d == 0 {
+			errors.Add("global.group_interval", "group_interval cannot be zero", "Use a positive duration (e.g. '5m') or omit the field")
+		}
+		if d := config.Global.RepeatInterval; d != nil && *d == 0 {
+			errors.Add("global.repeat_interval", "repeat_interval cannot be zero", "Use a positive duration (e.g. '4h') or omit the field")
+		}
+	}
 
 	// Validate route tree
 	if err := p.validateRouteTree(config.Route, receiverIndex, timeIntervalNames, &errors); err != nil {
@@ -521,6 +533,24 @@ func (p *RouteConfigParser) validateRouteTree(
 				"Define it in the 'time_intervals' section",
 			)
 		}
+	}
+
+	// Explicit zero group_interval/repeat_interval: rejected at load, as
+	// upstream's Route.UnmarshalYAML does ("cannot be zero"). Unset (nil)
+	// inherits; group_wait: 0s is valid ("notify immediately").
+	if route.GroupInterval != nil && route.GroupInterval.Duration == 0 {
+		errors.Add(
+			fmt.Sprintf("route[receiver=%s].group_interval", route.Receiver),
+			"group_interval cannot be zero",
+			"Use a positive duration (e.g. '5m') or omit the field to inherit",
+		)
+	}
+	if route.RepeatInterval != nil && route.RepeatInterval.Duration == 0 {
+		errors.Add(
+			fmt.Sprintf("route[receiver=%s].repeat_interval", route.Receiver),
+			"repeat_interval cannot be zero",
+			"Use a positive duration (e.g. '4h') or omit the field to inherit",
+		)
 	}
 
 	// Recursively validate child routes
@@ -850,19 +880,4 @@ func calculateRouteDepth(route *grouping.Route) int {
 	}
 
 	return maxDepth + 1
-}
-
-// applyRouteDefaultsRecursive applies defaults to route tree recursively.
-func applyRouteDefaultsRecursive(route *grouping.Route) {
-	if route == nil {
-		return
-	}
-
-	// Apply defaults to current route
-	route.Defaults()
-
-	// Recursively apply to children
-	for _, child := range route.Routes {
-		applyRouteDefaultsRecursive(child)
-	}
 }

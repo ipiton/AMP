@@ -14,12 +14,20 @@
 - **Refs:** `parser.go:770`; проверка 2026-10-20 на конфиге sema (`~/Sema/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml`).
 - **Status:** open
 
-### [medium][Routing][~0.25d] ROUTE-EXPLICIT-ZERO-GROUP-WAIT
-- **Title:** явный `group_wait: 0s` у route трактуется как «не задан» и наследуется от родителя
-- **Problem:** `TreeBuilder.inheritDuration` (`go-app/internal/business/routing/tree_builder.go:514`) берёт значение route только при `routeValue > 0`, иначе — родителя; `validateDurations` (`internal/business/routing/tree.go:498`) вдобавок считает `group_wait <= 0` ошибкой. В upstream `0s` — валидное «отправить сразу».
-- **Impact:** route `signal="panic"` с `group_wait: 0s` под корнем с `group_wait: 10s` (sema-prod) нотифицирует через 10s, а не сразу. Родственно `ROUTE-TIMINGS-NOT-INHERITED` (тот же механизм наследования), но отдельный случай: там лишние дефолты, здесь потерянный явный ноль.
-- **Fix:** различать «не задан» и «задан 0» (указатель/флаг из парсера), разрешить `group_wait: 0`; тест на route с `0s` под корнем с ненулевым `group_wait`. Удобно чинить вместе с `ROUTE-TIMINGS-NOT-INHERITED`.
-- **Refs:** проверка 2026-10-20 на конфиге sema: PostgresDown (`group_wait: 0s`) ушёл через 10s вместе с алертом корневого route.
+### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-CREATE-RACE
+- **Title:** два конкурентных алерта одной новой группы создают две группы и два таймера `group_wait`
+- **Problem:** `DefaultGroupManager.AddAlertToGroup` (`go-app/internal/infrastructure/grouping/manager_impl.go:246`) делает `storage.Load` → `createNewGroupUnsafe` → `storage.Store` без сериализации по ключу группы, хотя `createNewGroupUnsafe` документирован «Caller must hold write lock». Оба вызова получают `not found`, каждый создаёт группу, последний `Store` затирает первый (алерт пропадает из storage до следующего resend), оба стартуют `group_wait`.
+- **Impact:** с `group_wait > 0` маскируется (второй таймер заменяет первый); с `group_wait: 0s` (разрешён с ROUTE-TIMINGS-BUNDLE) возможны две отдельные нотификации вместо одной и потеря алерта в первой. Предсуществующее, найдено deep-review ROUTE-TIMINGS-BUNDLE (F3).
+- **Fix:** per-group-key сериализация создания (keyed mutex / singleflight) или условная запись в storage; тест на конкурентный `AddAlertToGroup` новой группы с `group_wait: 0`.
+- **Refs:** `tasks/archive/ROUTE-TIMINGS-BUNDLE/review-findings.md` § F3.
+- **Status:** open
+
+### [low][Test][~0.1d] FLAKE-GROUP-INTERVAL-CHAIN-RESOLVE
+- **Title:** `TestGroupIntervalChain_ResolveGoesOutAndTheGroupIsGone` флейкает
+- **Problem:** `go-app/internal/infrastructure/grouping/group_interval_chain_test.go:176` — `no further fires for the removed group`: после удаления полностью разрешённой группы счётчик сработавших таймеров ещё растёт. Замер 2026-10-20, `-count=300`: 4 падения на `main` @ `28007e8` и 4 на `bugfix/route-timings` — предсуществующий.
+- **Impact:** шаг `test` гейта может краснеть случайно.
+- **Fix:** разобрать, доходит ли до fire таймер, взведённый до удаления группы (тогда это продуктовая гонка), или тест снимает `expiredTimers` раньше, чем завершилась уже начатая обработка; во втором случае — ждать стабилизации счётчика.
+- **Refs:** замер в сессии ROUTE-TIMINGS-BUNDLE.
 - **Status:** open
 
 ### [medium][Test][~0.25d] FUZZ-RANDOM-ALERTS-RACE-TIMEOUT
@@ -91,14 +99,6 @@
 - **Impact:** шаг `helm-tests` required-гейта `gate` краснеет случайно на длинных выводах `helm template`.
 - **Fix:** `grep -q -F -e "${expected}" <<<"${output}"` (here-string вместо пайпа) во всех `tests/*.sh`.
 - **Refs:** `~/amp-audit/gate-runbook.log`, 2026-10-07.
-- **Status:** open
-
-### [high][Routing][~0.5d] ROUTE-TIMINGS-NOT-INHERITED
-- **Title:** вложенный route не наследует `group_wait`/`group_interval`/`repeat_interval` родителя
-- **Problem:** `applyRouteDefaults` (`go-app/internal/infrastructure/grouping/parser.go`) рекурсивно вызывает `Route.Defaults()` и проставляет 30s/5m/4h каждому вложенному route без своих таймингов. `TreeBuilder.inheritDuration` (`internal/business/routing/tree_builder.go`) наследует от родителя, только если у route значение не задано, а после парсера оно задано всегда. Воспроизведено на бинаре: корень `group_wait: 3s`, `group_interval: 10s`; дочерний route без таймингов → `"Alert routed to group" ... "group_wait":30000000000`, следующий таймер — `group_interval` 5m. Есть с первого коммита (`d096644`).
-- **Impact:** verbatim `alertmanager.yml` с таймингами у корня и дочерними route без своих таймингов (типичная форма) работает иначе, чем upstream: первая нотификация ждёт 30s вместо заданного, повторы идут по `repeat_interval` 4h вместо, например, 1h. `global.*`-фолбэк из `FU-GLOB-DEFAULT-VALUES` для вложенных route тоже не срабатывает.
-- **Fix:** дефолты ставить только корню (или не ставить вовсе, оставив их `inheritDuration`); тест на дерево корень → ребёнок без таймингов → внук, плюс проверка, что `/api/v2/status` `config.original` не показывает лишних полей. Сверить, не опирается ли кто-то ещё на `Defaults()` у вложенных route.
-- **Refs:** `tasks/archive/PROD-HARDCODED-FILTER/evidence/smoke.md` § Находка.
 - **Status:** open
 
 ### [medium][Pipeline][~0.5d] DIRECT-PUBLISH-RENOTIFIES-ON-RESEND

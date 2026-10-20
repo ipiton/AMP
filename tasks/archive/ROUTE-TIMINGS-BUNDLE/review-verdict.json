@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/route-timings",
+  "commit": "0eb8a38",
+  "reviewed_at": "2026-10-20",
+  "findings": { "blocker": 0, "major": 1, "minor": 2, "nit": 5 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

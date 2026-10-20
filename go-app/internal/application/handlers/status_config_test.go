@@ -267,3 +267,40 @@ inhibit_rules:
 	assert.Equal(t, []string{`severity=~"warning|info"`}, reparsed.InhibitRules[0].TargetMatchers)
 	assert.Equal(t, []string{"cluster"}, reparsed.InhibitRules[0].Equal)
 }
+
+// ROUTE-TIMINGS-BUNDLE: the parser no longer fills route timing defaults, so
+// config.original shows only the timings the operator wrote (like upstream).
+func TestAlertmanagerConfigYAML_OmitsUnsetRouteTimings(t *testing.T) {
+	parsed, err := infraroute.NewRouteConfigParser().Parse([]byte(`
+route:
+  receiver: root
+  group_wait: 3s
+  routes:
+    - matchers: ['team="db"']
+      receiver: root
+      routes:
+        - matchers: ['sub="x"']
+          receiver: root
+receivers:
+  - name: root
+`))
+	require.NoError(t, err)
+
+	var doc struct {
+		Route map[string]any `yaml:"route"`
+	}
+	out := AlertmanagerConfigYAML(&appconfig.Config{Routing: parsed})
+	require.NoError(t, yaml.Unmarshal([]byte(out), &doc), out)
+
+	assert.Equal(t, "3s", doc.Route["group_wait"])
+	assert.NotContains(t, doc.Route, "group_interval", "root group_interval is not in the config")
+	assert.NotContains(t, doc.Route, "repeat_interval", "root repeat_interval is not in the config")
+
+	child := doc.Route["routes"].([]any)[0].(map[string]any)
+	grand := child["routes"].([]any)[0].(map[string]any)
+	for name, route := range map[string]map[string]any{"child": child, "grandchild": grand} {
+		for _, field := range []string{"group_wait", "group_interval", "repeat_interval"} {
+			assert.NotContains(t, route, field, "%s must not show an unset %s", name, field)
+		}
+	}
+}

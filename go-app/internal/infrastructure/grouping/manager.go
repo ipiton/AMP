@@ -165,6 +165,12 @@ type GroupMetadata struct {
 
 // GroupTimings holds per-group group_wait/group_interval/repeat_interval
 // overrides (task 2.4). See GroupMetadata.Timings for when it's set and why.
+//
+// The values are the matched route's fully resolved timings (RoutingDecision,
+// after parent/global inheritance), so GroupWait is authoritative whenever
+// GroupTimings is non-nil: 0 means "notify immediately" (upstream
+// group_wait: 0s). GroupInterval/RepeatInterval cannot be 0 in a loaded
+// config, so a 0 there still means "no override, use the root route's".
 type GroupTimings struct {
 	GroupWait      time.Duration `json:"group_wait,omitempty"`
 	GroupInterval  time.Duration `json:"group_interval,omitempty"`
