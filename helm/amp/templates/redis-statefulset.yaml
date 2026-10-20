@@ -159,8 +159,8 @@ spec:
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "amp.fullname" . }}-redis-secret
-              key: password
+              name: {{ include "amp.valkey.secretName" . }}
+              key: {{ include "amp.valkey.secretKey" . }}
 
         # Resource Limits
         resources:
@@ -236,8 +236,8 @@ spec:
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ include "amp.fullname" . }}-redis-secret
-              key: password
+              name: {{ include "amp.valkey.secretName" . }}
+              key: {{ include "amp.valkey.secretKey" . }}
 
         # Ports
         ports:
@@ -286,7 +286,11 @@ spec:
           name: {{ include "amp.fullname" . }}-redis-config
       - name: redis-secret
         secret:
-          secretName: {{ include "amp.fullname" . }}-redis-secret
+          secretName: {{ include "amp.valkey.secretName" . }}
+          # config-init reads /tmp/secret/password whatever the key is called.
+          items:
+          - key: {{ include "amp.valkey.secretKey" . }}
+            path: password
 
       # Node Selector (optional, values.yaml controlled)
       {{- with .Values.nodeSelector }}

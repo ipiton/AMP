@@ -110,25 +110,24 @@ Return the proper Database URL (groundhog2k/postgres)
 {{- end }}
 
 {{/*
-Return the proper Valkey/Redis URL
+Secret holding the password of the chart's Valkey (<fullname>-redis): the
+operator's valkey.password.existingSecret, or the one templates/redis-secret.yaml
+creates. Valkey, its exporter and AMP all read it, so the three never disagree.
 */}}
-{{- define "amp.cacheUrl" -}}
-{{- if .Values.cache.enabled }}
-{{- if .Values.cache.auth.enabled }}
-{{- printf "redis://:%s@%s:%g/0" .Values.cache.auth.password (tpl .Values.cache.host .) .Values.cache.port }}
-{{- else }}
-{{- printf "redis://%s:%g/0" (tpl .Values.cache.host .) .Values.cache.port }}
-{{- end }}
-{{- else }}
-{{- printf "redis://localhost:6379/0" }}
-{{- end }}
+{{- define "amp.valkey.secretName" -}}
+{{- .Values.valkey.password.existingSecret | default (printf "%s-redis-secret" (include "amp.fullname" .)) }}
 {{- end }}
 
 {{/*
-Return the proper Redis URL (legacy compatibility)
+Key of the password in amp.valkey.secretName: valkey.password.secretKey for an
+existingSecret; the chart's own Secret always stores it under "password".
 */}}
-{{- define "amp.redisUrl" -}}
-{{- include "amp.cacheUrl" . }}
+{{- define "amp.valkey.secretKey" -}}
+{{- if .Values.valkey.password.existingSecret }}
+{{- .Values.valkey.password.secretKey | default "password" }}
+{{- else -}}
+password
+{{- end }}
 {{- end }}
 
 {{/*

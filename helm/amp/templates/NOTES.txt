@@ -36,9 +36,17 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 {{- if not .Values.cache.enabled }}
 ℹ️  Cache off: AMP keeps grouping state in memory (cache.enabled)
 {{- else if gt (int .Values.valkey.replicas) 0 }}
-✅ Valkey L2 + Memory L1 cache
+✅ Valkey L2 + Memory L1 cache, password from Secret {{ include "amp.valkey.secretName" . }}/{{ include "amp.valkey.secretKey" . }}
+{{- if or .Values.cache.auth.enabled .Values.cache.auth.existingSecret }}
+⚠️  cache.auth.* is ignored for the chart's Valkey: AMP reads Valkey's own password
+   (valkey.password.*). cache.auth.* applies to an external cache (valkey.replicas: 0).
+{{- end }}
+{{- else if .Values.cache.auth.existingSecret }}
+✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache, password from Secret {{ .Values.cache.auth.existingSecret }}/{{ .Values.cache.auth.existingSecretPasswordKey | default "password" }}
+{{- else if .Values.cache.auth.enabled }}
+✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache, password from cache.auth.password
 {{- else }}
-✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache
+✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache, no password
 {{- end }}
 {{- if .Values.autoscaling.enabled }}
 ✅ HPA autoscaling ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas)

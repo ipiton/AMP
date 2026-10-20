@@ -172,12 +172,33 @@ spec:
             {{- if and .Values.cache.enabled (eq .Values.profile "standard") }}
             - name: REDIS_ADDR
               value: {{ printf "%s:%v" (tpl .Values.cache.host .) .Values.cache.port | quote }}
-            {{- if .Values.cache.auth.enabled }}
+            {{- /* The chart's Valkey runs iff valkey.replicas > 0 (its only gate besides the profile); it always requires its own password. */}}
+            {{- if gt (int .Values.valkey.replicas) 0 }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "amp.valkey.secretName" . }}
+                  key: {{ include "amp.valkey.secretKey" . }}
+            {{- else }}
+            {{- if eq (tpl .Values.cache.host .) (printf "%s-redis" (include "amp.fullname" .)) }}
+            {{- fail "valkey.replicas is 0 while cache.host still points at the chart's Valkey: nothing serves the cache. Set cache.host (and cache.auth.*) for an external cache, or cache.enabled=false." }}
+            {{- end }}
+            {{- if and .Values.cache.auth.existingSecret .Values.cache.auth.enabled }}
+            {{- fail "cache.auth.existingSecret is set while cache.auth.enabled=true: pick one. For a Secret you create set cache.auth.enabled=false." }}
+            {{- end }}
+            {{- if .Values.cache.auth.existingSecret }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cache.auth.existingSecret | quote }}
+                  key: {{ .Values.cache.auth.existingSecretPasswordKey | default "password" | quote }}
+            {{- else if .Values.cache.auth.enabled }}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "amp.fullname" . }}-secrets
                   key: redis-password
+            {{- end }}
             {{- end }}
             {{- else }}
             - name: REDIS_ADDR
