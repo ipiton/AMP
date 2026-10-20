@@ -1,6 +1,6 @@
 # Render invariance: empty extraVolumes/extraVolumeMounts vs main
 
-Date: 2026-10-20. main @ 28007e8, branch @ f62a517 + working tree. Helm v4.3.0+gbec5b06.
+Date: 2026-10-20. main @ 28007e8, branch @ 0c3156d (re-rendered at the final chart state, review R2-F7; chart templates and values unchanged since 1b868dc). Helm v4.3.0+gbec5b06.
 Every render adds `--set valkey.password.value=fixed` (otherwise the Valkey Secret gets a random password and differs on every render).
 
 ```

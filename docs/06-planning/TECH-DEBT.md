@@ -52,6 +52,7 @@
 - **Problem:** сообщения валидаторов (E114/E116, проверка `external_url`) эхом печатают значение: Slack webhook URL (это credential), userinfo в `external_url`. С PROD-CONFIG-FILE-FALLBACK невалидный конфиг — ERROR `failed to load configuration` и exit 1, т. е. строка повторяется на каждом рестарте crash loop. Не регресс: раньше то же уходило в WARN. Ошибки YAML и mapstructure значений не печатают.
 - **Impact:** секреты ресиверов попадают в логи пода и в агрегатор логов.
 - **Fix:** редактировать userinfo, query и path URL в сообщениях валидаторов (показывать схему и хост).
+- _(HELM-EXTRA-VOLUMES R2-F6, 2026-10-20)_ подтверждено на `pkg/configvalidator/validators/receiver.go`: `invalid Slack API URL: %s`, `invalid webhook URL: %s`, `invalid PagerDuty URL: %s` (E116/E114/E123) печатают inline-значение, в k3d — в строке `failed to load configuration`. Путь `*_file` эти проверки обходит (валидатор файл не читает).
 - **Refs:** `go-app/internal/config`, `cmd/server/main.go`; review-findings F6.
 - **Status:** open
 
@@ -120,6 +121,14 @@
 - **Impact:** гейдж годится только для тренда; на доставку не влияет. _(PROD-GROUPING-DEFAULT G7: ещё один путь — удаление группы из callback'а даёт двойной `DecActiveTimers`, гейдж уходит в минус.)_
 - **Fix:** считать гейдж от `len(tm.timers)` (GaugeFunc) вместо `Inc`/`Dec` по путям.
 - **Refs:** `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` N3, F2.
+- **Status:** open
+
+### [low][Config][~0.1d] FILE-SECRET-READ-ERROR-HINT
+- **Title:** на нечитаемый `*_file` подсказка говорит про взаимоисключение
+- **Problem:** `resolveFileSecret` (`go-app/internal/infrastructure/routing/file_secrets.go`) для обеих ошибок — «задано и значение, и файл» и `failed to read secret file "<path>"` — даёт suggestion «Set either X or X_file, not both».
+- **Impact:** при неверном `mountPath`/имени ключа Secret подсказка уводит диагностику в сторону.
+- **Fix:** отдельная подсказка для ошибки чтения (проверить путь, mount, права); тест на текст.
+- **Refs:** `tasks/archive/HELM-EXTRA-VOLUMES/review-findings.md` F12.
 - **Status:** open
 
 ### [low][Config][~0.1d] CONFIG-PATH-RESOLUTION-DUP

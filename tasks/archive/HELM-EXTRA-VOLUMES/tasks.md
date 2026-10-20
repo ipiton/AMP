@@ -55,8 +55,8 @@ based_on:
 - [x] **3.2** `helm/amp/tests/render-extra-volumes.sh`: T1 пусто = без изменений, T2 Secret смонтирован в `amp`, не в reloader, `configFile.content` ссылается на путь, T3 конфликты падают
 - [x] **3.2b** Go-тесты: валидатор принимает каждый `*_file` и даёт E113/E115/E122 без значения и файла; строгий парсер принимает ключи; `config.LoadConfig` с реальными файлами и ошибка без обоих
 - [x] **3.3** k3d на образе `1674cdb`: Telegram `bot_token_file` и Slack `api_url_file` из Secret (+ `defaultMode: 0400`) → `evidence/k3d-extra-volumes.md` §2–§3
-- [ ] **3.3b** Перерендер `evidence/render-invariance.txt` на финальном коммите (R2-F7)
-- [ ] **3.4** `scripts/release-gate.sh` → `evidence/release-gate.txt`, `git diff --check`
+- [x] **3.3b** Перерендер `evidence/render-invariance.txt` на финальном коммите (R2-F7)
+- [x] **3.4** `scripts/release-gate.sh` → `evidence/release-gate.txt`, `git diff --check`
 
 ## Definition of Done
 

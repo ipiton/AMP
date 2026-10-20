@@ -469,6 +469,7 @@ A ConfigMap is not a place for credentials. These receiver secrets have a `*_fil
 - Setting both the inline field and its `_file` twin is a load error. So is a file AMP cannot read; the error names the path, never the content.
 - Trailing newlines are trimmed, so files written by `echo` work. Create the Secret from files, not `--from-literal`: a literal stays in the shell history.
 - AMP reads the files at startup and on every `/-/reload` or SIGHUP, not per notification. After rotating a file, reload.
+- PagerDuty needs `routing_key` or `routing_key_file`: a receiver with only `service_key` / `service_key_file` does not load yet.
 
 With the Helm chart, put the credentials into a Secret and mount it with `extraVolumes` / `extraVolumeMounts`; `configFile.content` then holds paths only:
 
