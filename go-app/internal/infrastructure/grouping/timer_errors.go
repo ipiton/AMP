@@ -22,7 +22,7 @@ type InvalidDurationError struct {
 }
 
 func (e *InvalidDurationError) Error() string {
-	return fmt.Sprintf("invalid timer duration: %v (must be positive)", e.Duration)
+	return fmt.Sprintf("invalid timer duration: %v (must be positive; 0 is allowed only for group_wait)", e.Duration)
 }
 
 // TimerNotFoundError is returned when a requested timer does not exist.

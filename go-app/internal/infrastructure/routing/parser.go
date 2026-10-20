@@ -302,10 +302,11 @@ func (p *RouteConfigParser) applyDefaults(config *RouteConfig) {
 		config.Global.Defaults()
 	}
 
-	// Apply route defaults (via TN-121)
-	if config.Route != nil {
-		applyRouteDefaultsRecursive(config.Route)
-	}
+	// Route timings (group_wait/group_interval/repeat_interval) are NOT
+	// defaulted here: an unset field must stay nil so business/routing's
+	// TreeBuilder can inherit it from the parent route (or global.*, then
+	// 30s/5m/4h at the root), exactly as upstream resolves them in
+	// dispatch.NewRoute rather than in the parsed config.
 
 	// Apply receiver defaults
 	for _, receiver := range config.Receivers {
@@ -850,19 +851,4 @@ func calculateRouteDepth(route *grouping.Route) int {
 	}
 
 	return maxDepth + 1
-}
-
-// applyRouteDefaultsRecursive applies defaults to route tree recursively.
-func applyRouteDefaultsRecursive(route *grouping.Route) {
-	if route == nil {
-		return
-	}
-
-	// Apply defaults to current route
-	route.Defaults()
-
-	// Recursively apply to children
-	for _, child := range route.Routes {
-		applyRouteDefaultsRecursive(child)
-	}
 }

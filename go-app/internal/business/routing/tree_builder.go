@@ -205,13 +205,12 @@ func (b *TreeBuilder) buildNode(
 	node.Continue = route.Continue
 
 	// 5. Apply parameter inheritance
-	// grouping.Route stores durations as *grouping.Duration (nil = unset);
-	// durationOrZero unwraps to time.Duration so inheritDuration's existing
-	// "> 0 means explicitly set" check keeps working unchanged.
+	// grouping.Route stores durations as *grouping.Duration: nil = unset
+	// (inherit), non-nil = set, including an explicit 0s group_wait.
 	node.GroupBy = b.inheritGroupBy(parent, route)
-	node.GroupWait = b.inheritDuration(parent, durationOrZero(route.GroupWait), "group_wait")
-	node.GroupInterval = b.inheritDuration(parent, durationOrZero(route.GroupInterval), "group_interval")
-	node.RepeatInterval = b.inheritDuration(parent, durationOrZero(route.RepeatInterval), "repeat_interval")
+	node.GroupWait = b.inheritDuration(parent, route.GroupWait, "group_wait")
+	node.GroupInterval = b.inheritDuration(parent, route.GroupInterval, "group_interval")
+	node.RepeatInterval = b.inheritDuration(parent, route.RepeatInterval, "repeat_interval")
 
 	// 5b. mute_time_intervals/active_time_intervals (task 3.2) are
 	// deliberately NOT inherited from parent — set verbatim from this
@@ -440,18 +439,6 @@ func parseMatcherExpr(expr string) (Matcher, bool) {
 	return m, true
 }
 
-// durationOrZero unwraps a *grouping.Duration into a time.Duration,
-// treating nil (field absent from config) as the zero value. This keeps
-// inheritDuration's "> 0 means explicitly set" check meaningful for the
-// canonical grouping.Route, which represents unset durations as nil
-// pointers rather than zero time.Duration.
-func durationOrZero(d *grouping.Duration) time.Duration {
-	if d == nil {
-		return 0
-	}
-	return d.Duration
-}
-
 // inheritGroupBy applies inheritance logic for group_by parameter.
 //
 // Priority:
@@ -498,61 +485,61 @@ func (b *TreeBuilder) inheritGroupBy(parent *RouteNode, route *grouping.Route) [
 }
 
 // inheritDuration applies inheritance logic for duration parameters.
+//
+// Priority, mirroring upstream dispatch.newRoute (opts start as the parent's
+// resolved opts, or DefaultRouteOpts at the root, then a field the route sets
+// overrides them):
+//  1. Route's own value, if set (non-nil) — 0s included: group_wait: 0s
+//     means "notify immediately" (ROUTE-EXPLICIT-ZERO-GROUP-WAIT).
+//  2. Parent's resolved value. Every non-root node has one, so a nested
+//     route without its own timings takes its nearest ancestor's
+//     (ROUTE-TIMINGS-NOT-INHERITED) — never the hardcoded defaults.
+//  3. global.<field> (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
+//     — restored on infraroute.GlobalConfig; see that type's doc comment
+//     for why this is an AMP-only convenience, not an upstream field).
+//     Reached only at the root; nested routes see it through the root.
+//  4. Default value (based on field name) — upstream's DefaultRouteOpts.
+//
+// Zero group_interval/repeat_interval are not rejected here but by
+// RouteTree.validateDurations, as upstream rejects them at config load.
 func (b *TreeBuilder) inheritDuration(
 	parent *RouteNode,
-	routeValue time.Duration,
+	routeValue *grouping.Duration,
 	fieldName string,
 ) time.Duration {
-	// Priority:
-	// 1. Route's own value (if > 0)
-	// 2. Parent's value (if exists and > 0)
-	// 3. global.<field> (alertmanager-parity wave-5, FU-GLOB-DEFAULT-VALUES
-	//    — restored on infraroute.GlobalConfig; see that type's doc comment
-	//    for why this is an AMP-only convenience, not an upstream field)
-	// 4. Default value (based on field name)
-
-	if routeValue > 0 {
-		return routeValue
+	if routeValue != nil {
+		return routeValue.Duration
 	}
 
-	// Get parent value based on field name
 	if parent != nil {
 		switch fieldName {
 		case "group_wait":
-			if parent.GroupWait > 0 {
-				return parent.GroupWait
-			}
+			return parent.GroupWait
 		case "group_interval":
-			if parent.GroupInterval > 0 {
-				return parent.GroupInterval
-			}
+			return parent.GroupInterval
 		case "repeat_interval":
-			if parent.RepeatInterval > 0 {
-				return parent.RepeatInterval
-			}
+			return parent.RepeatInterval
 		}
 	}
 
-	if global := b.globalDuration(fieldName); global > 0 {
+	if global, ok := b.globalDuration(fieldName); ok {
 		return global
 	}
 
-	// Return default value
 	return b.getDefaultDuration(fieldName)
 }
 
 // globalDuration reads the global.<fieldName> fallback (see inheritDuration's
-// priority list above), returning 0 when config/Global is nil or the field
-// itself is unset — both mean "nothing to fall back to here", identical to
-// how routeValue/parent's 0 is treated by the caller.
+// priority list above). ok is false when config/Global is nil or the field
+// itself is unset — "nothing to fall back to here"; a set field is returned
+// as is, 0s included.
 //
 // b.config.Global's duration fields are *infraroute.Duration (a defined
-// time.Duration type, not the grouping.Duration struct durationOrZero
-// unwraps above) — hence the explicit conversion instead of reusing that
-// helper.
-func (b *TreeBuilder) globalDuration(fieldName string) time.Duration {
+// time.Duration type, not the grouping.Duration struct used on routes) —
+// hence the explicit conversion.
+func (b *TreeBuilder) globalDuration(fieldName string) (time.Duration, bool) {
 	if b.config == nil || b.config.Global == nil {
-		return 0
+		return 0, false
 	}
 
 	var d *infraroute.Duration
@@ -565,9 +552,9 @@ func (b *TreeBuilder) globalDuration(fieldName string) time.Duration {
 		d = b.config.Global.RepeatInterval
 	}
 	if d == nil {
-		return 0
+		return 0, false
 	}
-	return time.Duration(*d)
+	return time.Duration(*d), true
 }
 
 // getDefaultDuration returns the default duration for a field.

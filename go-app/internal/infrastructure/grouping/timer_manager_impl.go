@@ -422,8 +422,8 @@ func (tm *DefaultTimerManager) StartTimer(
 	if err := timerType.Validate(); err != nil {
 		return nil, err
 	}
-	if duration <= 0 {
-		return nil, &InvalidDurationError{Duration: duration}
+	if err := timerType.ValidateDuration(duration); err != nil {
+		return nil, err
 	}
 	if groupKey == "" {
 		return nil, fmt.Errorf("group key cannot be empty")

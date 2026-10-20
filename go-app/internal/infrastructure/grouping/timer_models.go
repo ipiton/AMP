@@ -68,6 +68,19 @@ func (t TimerType) Validate() error {
 	}
 }
 
+// ValidateDuration checks d for a timer of type t. A group_wait timer may be
+// 0 — upstream's group_wait: 0s, "notify immediately" — and then fires on the
+// next scheduler tick through the normal expiration path. group_interval and
+// repeat_interval timers must be positive: they are re-armed from their own
+// callbacks, so a 0 there would spin, and config load already rejects a 0
+// for either (RouteTree.validateDurations).
+func (t TimerType) ValidateDuration(d time.Duration) error {
+	if d < 0 || (d == 0 && t != GroupWaitTimer) {
+		return &InvalidDurationError{Duration: d}
+	}
+	return nil
+}
+
 // IsValid returns true if the timer type is valid.
 // Convenience method for boolean checks without error handling.
 func (t TimerType) IsValid() bool {
@@ -251,7 +264,7 @@ func (t *GroupTimer) String() string {
 // Returns error if any field is invalid:
 //   - GroupKey cannot be empty
 //   - TimerType must be valid
-//   - Duration must be positive
+//   - Duration must be valid for TimerType (TimerType.ValidateDuration)
 //   - StartedAt and ExpiresAt must be consistent
 func (t *GroupTimer) Validate() error {
 	if t.GroupKey == "" {
@@ -262,8 +275,8 @@ func (t *GroupTimer) Validate() error {
 		return err
 	}
 
-	if t.Duration <= 0 {
-		return &InvalidDurationError{Duration: t.Duration}
+	if err := t.TimerType.ValidateDuration(t.Duration); err != nil {
+		return err
 	}
 
 	if t.StartedAt.IsZero() {

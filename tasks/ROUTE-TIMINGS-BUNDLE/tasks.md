@@ -32,16 +32,16 @@ based_on:
 
 ## Phase 1: ROUTE-TIMINGS-NOT-INHERITED
 
-- [ ] **1.1** Прод-парсер и grouping-парсер не дефолтят тайминги route (D1) <!-- verify: grep -n 'applyRouteDefaults' go-app/internal/infrastructure/{routing,grouping}/parser.go → пусто -->
-- [ ] **1.2** `inheritDuration` различает `nil`/значение, корень берёт `global.*` (D2) <!-- verify: cd go-app && go build ./... -->
+- [x] **1.1** Прод-парсер и grouping-парсер не дефолтят тайминги route (D1) <!-- verify: grep -n 'applyRouteDefaults' go-app/internal/infrastructure/{routing,grouping}/parser.go → пусто -->
+- [x] **1.2** `inheritDuration` различает `nil`/значение, корень берёт `global.*` (D2) <!-- verify: cd go-app && go build ./... -->
 
 **Phase verification:** `cd go-app && go vet ./internal/business/routing/... ./internal/infrastructure/routing/... ./internal/infrastructure/grouping/...`
 
 ## Phase 2: ROUTE-EXPLICIT-ZERO-GROUP-WAIT
 
-- [ ] **2.1** `validateDurations`: `group_wait < 0`, interval/repeat `<= 0`, без `group_interval >= group_wait` (D3) <!-- verify: go build ./... -->
-- [ ] **2.2** `StartTimer`/`GroupTimer.Validate` принимают `0` для `GroupWaitTimer` (D4) <!-- verify: go build ./... -->
-- [ ] **2.3** `startGroupWaitTimer` берёт `timings.GroupWait` как есть; старт таймера новой группы после `Store` (D4) <!-- verify: go build ./... -->
+- [x] **2.1** `validateDurations`: `group_wait < 0`, interval/repeat `<= 0`, без `group_interval >= group_wait` (D3) <!-- verify: go build ./... -->
+- [x] **2.2** `StartTimer`/`GroupTimer.Validate` принимают `0` для `GroupWaitTimer` (D4) <!-- verify: go build ./... -->
+- [x] **2.3** `startGroupWaitTimer` берёт `timings.GroupWait` как есть; старт таймера новой группы после `Store` (D4) <!-- verify: go build ./... -->
 
 **Phase verification:** `cd go-app && go test ./internal/business/routing/... ./internal/infrastructure/routing/... ./internal/infrastructure/grouping/...` (существующие тесты; падения из-за изменённой семантики разбираются в фазе 3)
 

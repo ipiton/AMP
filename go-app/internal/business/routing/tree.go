@@ -487,24 +487,31 @@ func (t *RouteTree) checkDuplicateMatchers() []TreeValidationError {
 	return errors
 }
 
-// validateDurations checks that all duration values are positive.
+// validateDurations checks resolved route timings the way upstream
+// Alertmanager does at config load: group_wait may be 0 ("notify
+// immediately") but not negative; group_interval and repeat_interval must be
+// positive (upstream: "group_interval cannot be zero", "repeat_interval
+// cannot be zero").
+//
+// There is deliberately no group_interval >= group_wait check: upstream has
+// none, and with timings inherited from the parent route it would reject
+// valid upstream configs (e.g. a child that lowers only group_interval under
+// a root with a longer group_wait).
 //
 // Complexity: O(N) where N is nodes
 func (t *RouteTree) validateDurations() []TreeValidationError {
 	var errors []TreeValidationError
 
 	_ = t.Walk(func(node *RouteNode) bool {
-		// Check GroupWait
-		if node.GroupWait <= 0 {
+		if node.GroupWait < 0 {
 			errors = append(errors, TreeValidationError{
 				Type:    ErrInvalidDuration,
 				Path:    node.Path,
-				Message: fmt.Sprintf("group_wait must be positive, got %v", node.GroupWait),
+				Message: fmt.Sprintf("group_wait must not be negative, got %v", node.GroupWait),
 				Field:   "group_wait",
 			})
 		}
 
-		// Check GroupInterval
 		if node.GroupInterval <= 0 {
 			errors = append(errors, TreeValidationError{
 				Type:    ErrInvalidDuration,
@@ -514,27 +521,12 @@ func (t *RouteTree) validateDurations() []TreeValidationError {
 			})
 		}
 
-		// Check RepeatInterval
 		if node.RepeatInterval <= 0 {
 			errors = append(errors, TreeValidationError{
 				Type:    ErrInvalidDuration,
 				Path:    node.Path,
 				Message: fmt.Sprintf("repeat_interval must be positive, got %v", node.RepeatInterval),
 				Field:   "repeat_interval",
-			})
-		}
-
-		// Semantic check: GroupInterval should be >= GroupWait
-		if node.GroupInterval < node.GroupWait {
-			errors = append(errors, TreeValidationError{
-				Type: ErrInvalidDuration,
-				Path: node.Path,
-				Message: fmt.Sprintf(
-					"group_interval (%v) should be >= group_wait (%v)",
-					node.GroupInterval,
-					node.GroupWait,
-				),
-				Field: "group_interval",
 			})
 		}
 
