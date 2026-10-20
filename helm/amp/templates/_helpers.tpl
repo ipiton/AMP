@@ -119,6 +119,26 @@ creates. Valkey, its exporter and AMP all read it, so the three never disagree.
 {{- end }}
 
 {{/*
+"true" when cache.host names the chart's Valkey Service: <fullname>-redis, or
+any longer DNS name of it (<fullname>-redis.<ns>, ...svc.cluster.local).
+*/}}
+{{- define "amp.cache.hostIsValkey" -}}
+{{- $svc := printf "%s-redis" (include "amp.fullname" .) }}
+{{- $host := tpl .Values.cache.host . }}
+{{- if or (eq $host $svc) (hasPrefix (printf "%s." $svc) $host) }}true{{ end }}
+{{- end }}
+
+{{/*
+"true" when AMP talks to the chart's own Valkey: it runs (valkey.replicas > 0,
+its only gate besides the profile) AND cache.host points at it. AMP then reads
+Valkey's password; otherwise the cache is external and cache.auth.* applies,
+also when the chart's Valkey still runs next to it unused.
+*/}}
+{{- define "amp.cache.bundled" -}}
+{{- if and (gt (int .Values.valkey.replicas) 0) (include "amp.cache.hostIsValkey" .) }}true{{ end }}
+{{- end }}
+
+{{/*
 Key of the password in amp.valkey.secretName: valkey.password.secretKey for an
 existingSecret; the chart's own Secret always stores it under "password".
 */}}

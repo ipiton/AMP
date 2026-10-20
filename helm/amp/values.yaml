@@ -461,8 +461,9 @@ cache:
   # Valkey connection details
   host: "{{ include \"amp.fullname\" . }}-redis"  # Service name of Redis/Valkey
   port: 6379
-  # Password of an EXTERNAL cache (valkey.replicas: 0, cache.host pointing at
-  # it). With the chart's own Valkey (valkey.replicas > 0) AMP always reads
+  # Password of an EXTERNAL cache (cache.host pointing at it; set
+  # valkey.replicas: 0 too, or the chart's Valkey runs unused). While cache.host
+  # is the chart's Valkey (the default, or a longer DNS name of it) AMP reads
   # Valkey's password (valkey.password below) and these keys are ignored.
   auth:
     # Password from this value, stored in <fullname>-secrets (redis-password).
@@ -543,8 +544,12 @@ valkey:
     # Password value (only used if existingSecret is empty)
     # In production: Set via Helm values or External Secrets Operator (TN-100)
     # If empty: generated on first install, kept by later upgrades (lookup).
-    # GitOps renders (Argo CD) cannot look the Secret up and would generate a
-    # new one on every sync: set value or existingSecret there.
+    # Renders without cluster access (helm template, client-side --dry-run,
+    # Argo CD) cannot look the Secret up and generate a new one each time:
+    # set value or existingSecret there. An existingSecret password must not
+    # end with a newline: Valkey trims it, AMP and the exporter do not:
+    #   (umask 077; printf '%s' "$PASSWORD" > valkey-password)
+    #   kubectl create secret generic amp-valkey --from-file=password=valkey-password
     value: ""
 
   # NetworkPolicy (pod isolation)

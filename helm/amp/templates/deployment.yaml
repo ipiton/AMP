@@ -172,15 +172,15 @@ spec:
             {{- if and .Values.cache.enabled (eq .Values.profile "standard") }}
             - name: REDIS_ADDR
               value: {{ printf "%s:%v" (tpl .Values.cache.host .) .Values.cache.port | quote }}
-            {{- /* The chart's Valkey runs iff valkey.replicas > 0 (its only gate besides the profile); it always requires its own password. */}}
-            {{- if gt (int .Values.valkey.replicas) 0 }}
+            {{- /* The chart's Valkey always requires its own password (amp.cache.bundled). */}}
+            {{- if include "amp.cache.bundled" . }}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "amp.valkey.secretName" . }}
                   key: {{ include "amp.valkey.secretKey" . }}
             {{- else }}
-            {{- if eq (tpl .Values.cache.host .) (printf "%s-redis" (include "amp.fullname" .)) }}
+            {{- if include "amp.cache.hostIsValkey" . }}
             {{- fail "valkey.replicas is 0 while cache.host still points at the chart's Valkey: nothing serves the cache. Set cache.host (and cache.auth.*) for an external cache, or cache.enabled=false." }}
             {{- end }}
             {{- if and .Values.cache.auth.existingSecret .Values.cache.auth.enabled }}

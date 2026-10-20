@@ -55,7 +55,7 @@ based_on:
 
 - [x] **2.1** `helm/amp/README.md`: снять оговорку `AMP-CACHE-NOAUTH` (`:65`); раздел о кеше — свой Valkey (пароль, `existingSecret`/`secretKey`, GitOps), внешний (`valkey.replicas: 0` + `cache.auth.existingSecret`). <!-- depends: Phase 1 | verify: grep -c 'AMP-CACHE-NOAUTH' helm/amp/README.md → 0 -->
 - [x] **2.2** `CHANGELOG.md` `[Unreleased]` + `helm/amp/CHANGELOG.md`: Fixed (AMP авторизуется в Valkey, пароль стабилен, `valkey.password.existingSecret` работает), Added (`cache.auth.existingSecret*`), migration notes: два новых fail, `cache.auth.*` при своём кеше игнорируется, рестарт Valkey на upgrade, проверка лога AMP и `rollout restart` (`AMP-CACHE-NO-RECONNECT`); в пункте Valkey (`CHANGELOG.md:274`) снять ссылку на баг. <!-- depends: Phase 1 | verify: grep -n 'AMP-CACHE-NOAUTH' CHANGELOG.md — только новая запись -->
-- [x] **2.3** ADR-017 «Следствие» (`DECISIONS.md:302`): снять «на дефолтах не авторизуется…», ссылка на `AMP-CACHE-NOAUTH` как закрытый. <!-- depends: Phase 1 | verify: diff ограничен строкой «Следствие» -->
+- [x] **2.3** ~~ADR-017~~ (откат по deep-review B7, перенесено в 6.1) ADR-017 «Следствие» (`DECISIONS.md:302`): снять «на дефолтах не авторизуется…», ссылка на `AMP-CACHE-NOAUTH` как закрытый. <!-- depends: Phase 1 | verify: diff ограничен строкой «Следствие» -->
 
 **Phase verification:** `git diff --check`; ни README, ни ADR не обещают того, чего нет в шаблонах (сверка с Phase 1).
 
@@ -65,7 +65,7 @@ based_on:
 
 ## Phase 4: тесты (после verdict `pass`)
 
-- [ ] **4.1** `helm/amp/tests/render-cache-auth.sh` по образцу `render-external-database.sh` (`assert_count`/`assert_docs`/env-хелперы): T1 дефолты — AMP, valkey, exporter читают `t-amp-redis-secret`/`password`; T2 `valkey.password.existingSecret`+`secretKey` — Secret чарта не рендерится, все три и `items` на `s`/`k`; T3 внешний + `cache.auth.existingSecret` (+ свой ключ); T4 `values-production.yaml` + `cache.auth.password` — `t-amp-secrets`/`redis-password` (Invariant); T5 lite и `cache.enabled=false` — без `REDIS_PASSWORD`; T6 два fail с текстом; T7 `replicas > 0` + `cache.auth.enabled` без пароля рендерится, `redis-password` нет, NOTES предупреждает; T8 в выводе нет `redis://:` и значения пароля вне Secret. <!-- depends: 3.1 | verify: bash helm/amp/tests/render-cache-auth.sh → exit 0 -->
+- [ ] **4.1** `helm/amp/tests/render-cache-auth.sh` по образцу `render-external-database.sh` (`assert_count`/`assert_docs`/env-хелперы): T1 дефолты — AMP, valkey, exporter читают `t-amp-redis-secret`/`password`; T2 `valkey.password.existingSecret`+`secretKey` — Secret чарта не рендерится, все три и `items` на `s`/`k`; T3 внешний + `cache.auth.existingSecret` (+ свой ключ); T4 `values-production.yaml` + `cache.auth.password` — `t-amp-secrets`/`redis-password` (Invariant); T5 lite и `cache.enabled=false` — без `REDIS_PASSWORD`; T6 два fail с текстом; T7 `replicas > 0` + `cache.auth.enabled` без пароля рендерится, `redis-password` нет, NOTES предупреждает (и при одном `cache.auth.password`); T7a внешний `cache.host` при `replicas` по умолчанию + `cache.auth.enabled/password` → `t-amp-secrets`/`redis-password`, как на `main` (A1/B1), NOTES — «Valkey runs unused»; T7b `cache.host=t-amp-redis.<ns>.svc.cluster.local` → Secret Valkey, при `replicas: 0` — fail (B2); T7c NOTES на upgrade — строка про `Redis cache initialized` (B4); T8 в выводе нет `redis://:` и значения пароля вне Secret. <!-- depends: 3.1 | verify: bash helm/amp/tests/render-cache-auth.sh → exit 0 -->
 - [ ] **4.2** Проверка, что тест ловит баг: прогон T1/T2 против чарта `main` (`git worktree add` во временный каталог) падает. <!-- depends: 4.1 | verify: вывод FAIL на main записан в evidence/render-cache-auth-main.txt -->
 
 **Phase verification:** `for t in helm/amp/tests/*.sh; do bash "$t" || echo FAIL "$t"; done` — без FAIL.
@@ -79,7 +79,7 @@ based_on:
 
 ## Phase 6: finalize
 
-- [ ] **6.1** `/finalize`: `DONE.md`; `NEXT.md` (WIP → пусто, Queue пополнить — сейчас 2 задачи); `BUGS.md` — закрыть `AMP-CACHE-NOAUTH`, в `AMP-CACHE-NO-RECONNECT` снять «маскирует `AMP-CACHE-NOAUTH`» и добавить результат A2; архив workspace. <!-- depends: Phase 5 | verify: ls tasks/archive/AMP-CACHE-NOAUTH -->
+- [ ] **6.1** `/finalize`: ADR-017 «Следствие» — снять оговорку про баг (перенесено из 2.3 по deep-review B7: не объявлять закрытым до приёмки); `DONE.md`; `NEXT.md` (WIP → пусто, Queue пополнить — сейчас 2 задачи); `BUGS.md` — закрыть `AMP-CACHE-NOAUTH`, в `AMP-CACHE-NO-RECONNECT` снять «маскирует `AMP-CACHE-NOAUTH`» и добавить результат A2; новые записи по deep-review: BUGS `HELM-NAMESPACE-SPLIT` (A2), TECH-DEBT `HELM-CHART-GAPS` — GitOps без `lookup` (A3) и нет рестарта подов при смене пароля Valkey (B5), BACKLOG — пароль в argv проб (A6); архив workspace. <!-- depends: Phase 5 | verify: ls tasks/archive/AMP-CACHE-NOAUTH -->
 
 ## Definition of Done
 
@@ -97,3 +97,6 @@ based_on:
 - **`secret.yaml`:** пояснение к новому условию — шаблонный комментарий (`{{- /* */}}`), YAML-комментарий оставлен прежним: так рендер `<fullname>-secrets` и `checksum/secret` у `values-production.yaml` и lite не меняются, AMP в проде не рестартует из-за этой задачи. Проверено сравнением с базовым рендером `main` (prod: checksum совпадает; lite: рендер идентичен).
 - **README чарта:** вместо точечной правки — раздел `### Cache` (свой Valkey, внешний кеш, ротация пароля через `rollout restart`, `AMP-CACHE-NO-RECONNECT`) и четыре строки в таблице Storage.
 - **Рендер на дефолтах** (сверка с базовым рендером `main`, `valkey.password.value=fixed`): изменились только `REDIS_PASSWORD` у AMP, `items` у volume Valkey и комментарии в `<fullname>-redis-secret`; `checksum/secret` AMP совпадает. Под AMP рестартует на upgrade из-за нового env, Valkey — из-за `items`.
+- **Выбор «свой кеш» (deep-review A1/B1, обе независимые находки):** не только `valkey.replicas > 0`, но и `cache.host` указывает на Valkey чарта (`amp.cache.hostIsValkey`: `<fullname>-redis` или префикс `<fullname>-redis.`); helper `amp.cache.bundled` используют `deployment.yaml`, `secret.yaml`, `externalsecret.yaml`, NOTES. Внешний `cache.host` при `replicas` по умолчанию снова получает пароль `cache.auth.*` (рендер совпадает с `main`) — требование совместимости из `requirements.md`. Сравнение по host research отклонял из-за FQDN; префикс снимает это возражение, точный признак работы пода по-прежнему `replicas`.
+- **NOTES:** подсказка «Valkey работает вхолостую» при внешнем `cache.host` и `replicas > 0`; на upgrade своего кеша — как проверить подключение и `rollout restart` (B4); предупреждение про `cache.auth.*` и при одном `cache.auth.password` (B8).
+- **ADR-017** правится в finalize, не в implement (B7).

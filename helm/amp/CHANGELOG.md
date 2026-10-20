@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- `cache.auth.existingSecret` / `cache.auth.existingSecretPasswordKey` (AMP-CACHE-NOAUTH): password of an external cache from a Secret the chart does not create. Rendering fails together with `cache.auth.enabled: true`, and with `valkey.replicas: 0` while `cache.host` still points at the chart's Valkey.
+- `cache.auth.existingSecret` / `cache.auth.existingSecretPasswordKey` (AMP-CACHE-NOAUTH): password of an external cache from a Secret the chart does not create. Rendering fails together with `cache.auth.enabled: true`, and with `valkey.replicas: 0` while `cache.host` still points at the chart's Valkey (`<fullname>-redis` or a longer DNS name of it).
 - `templates/networkpolicy.yaml` + `networkPolicy.*` (PROD-INGRESS-HARDENING, ADR-015): ingress-only NetworkPolicy for the AMP pods, `http` port only, sources `ingressController` (with `ingress.enabled`) / `alertSenders` / `metricsScrapers` / `extraIngress`. Enabled with no source, rendering fails. Enabled in `values-production.yaml` with no sources.
 - `ingress.externalAuth` (default `false`): `ingress.enabled` now fails to render unless `webConfig.existingSecret` is set or this declares auth at the ingress/proxy (only `true` or the string `"true"` counts).
 - `monitoring.serviceMonitor.{enabled,interval,scrapeTimeout,labels,basicAuth.*}`; rendering fails with `webConfig.existingSecret` and no `basicAuth.secretName`.
@@ -15,7 +15,7 @@
 - `webConfig.existingSecret`/`secretKey`/`mountPath` (PROD-AUTH): mounts an upstream-format web config Secret and sets `SERVER_WEB_CONFIG_FILE`, enabling HTTP basic auth. Rendering fails if combined with `configReloader.enabled` (the sidecar has no credentials yet).
 
 ### Fixed
-- AMP never authenticated to the chart's Valkey on the defaults (AMP-CACHE-NOAUTH): `templates/deployment.yaml` set `REDIS_PASSWORD` only with `cache.auth.enabled`. With `valkey.replicas` > 0 AMP now reads Valkey's Secret (`amp.valkey.secretName`/`amp.valkey.secretKey`); `cache.auth.*` and `redis-password` in `<fullname>-secrets`/ExternalSecret apply only to an external cache. NOTES names the password source and warns about `cache.auth.*` set for the chart's Valkey.
+- AMP never authenticated to the chart's Valkey on the defaults (AMP-CACHE-NOAUTH): `templates/deployment.yaml` set `REDIS_PASSWORD` only with `cache.auth.enabled`. When `cache.host` points at the chart's Valkey and it runs (`amp.cache.bundled`: `valkey.replicas` > 0), AMP reads Valkey's Secret (`amp.valkey.secretName`/`amp.valkey.secretKey`); otherwise `cache.auth.*` and `redis-password` in `<fullname>-secrets`/ExternalSecret apply, as before. NOTES names the password source, warns about `cache.auth.*` set for the chart's Valkey and about an unused Valkey pod next to an external `cache.host`, and on upgrade says how to check the cache connection.
 - `templates/redis-secret.yaml` keeps the password of the existing Secret (`lookup`) instead of a new `randAlphaNum` on every render (AMP-CACHE-NOAUTH).
 - `templates/redis-statefulset.yaml` honours `valkey.password.existingSecret`/`secretKey` (env of Valkey and exporter, volume `items`); it referenced `<fullname>-redis-secret` even when the chart did not create it (AMP-CACHE-NOAUTH).
 - Removed unused `amp.cacheUrl`/`amp.redisUrl` from `_helpers.tpl` (password in a URL in plain text).
