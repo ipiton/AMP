@@ -1,0 +1,26 @@
+profile: lite
+storage: {backend: filesystem, filesystem_path: /private/tmp/claude-501/-Users-vit-Documents-Projects-AMP-amp--claude-worktrees-route-timings-6a3e18/a35ad4f4-a74c-400e-80b1-8afabd3c6711/scratchpad/run-branch/amp.db, path: ""}
+server: {port: 18093, host: 127.0.0.1}
+log: {level: info, format: json, output: stdout}
+publishing: {enabled: true}
+grouping: {enabled: true}
+route:
+  receiver: root
+  group_by: [alertname]
+  group_wait: 3s
+  group_interval: 10s
+  repeat_interval: 1h
+  routes:
+    - matchers: ['route="inherit"']
+      receiver: inherit
+      routes:
+        - matchers: ['sub="grand"']
+          receiver: grand
+    - matchers: ['route="zero"']
+      receiver: zero
+      group_wait: 0s
+receivers:
+  - {name: root, webhook_configs: [{url: "http://127.0.0.1:18094/root"}]}
+  - {name: inherit, webhook_configs: [{url: "http://127.0.0.1:18094/inherit"}]}
+  - {name: grand, webhook_configs: [{url: "http://127.0.0.1:18094/grand"}]}
+  - {name: zero, webhook_configs: [{url: "http://127.0.0.1:18094/zero"}]}
