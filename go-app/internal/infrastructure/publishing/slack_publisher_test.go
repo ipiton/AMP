@@ -577,3 +577,30 @@ func TestClassifySlackError(t *testing.T) {
 		})
 	}
 }
+
+// TestPublish_WebhookOKWithoutTS_NoThreadEntry is SLACK-WEBHOOK-PLAIN-OK-RESPONSE:
+// an Incoming Webhook success carries no ts. Caching an entry with an empty ts
+// would turn the next send of the same alert into a short, un-threaded "Still
+// firing" reply; with no entry the alert goes out as a full message again.
+func TestPublish_WebhookOKWithoutTS_NoThreadEntry(t *testing.T) {
+	client := new(mockSlackWebhookClient)
+	formatter := new(mockSlackAlertFormatter)
+	cache := NewMessageCache()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	publisher := NewEnhancedSlackPublisher(client, cache, nil, formatter, logger)
+
+	ctx := context.Background()
+	alert := createSlackTestAlert("fp-webhook", "test-alert", core.StatusFiring)
+	target := createSlackTestTarget()
+
+	formatter.On("FormatAlert", ctx, alert, core.FormatSlack).Return(map[string]any{"text": "Test alert"}, nil)
+	client.On("PostMessage", ctx, mock.AnythingOfType("*publishing.SlackMessage")).Return(&SlackResponse{OK: true}, nil)
+
+	require.NoError(t, publisher.Publish(ctx, alert, target))
+	_, found := cache.Get("fp-webhook")
+	assert.False(t, found, "a response without ts must not leave a threading entry")
+
+	require.NoError(t, publisher.Publish(ctx, alert, target))
+	client.AssertNumberOfCalls(t, "PostMessage", 2)
+	client.AssertNotCalled(t, "ReplyInThread", mock.Anything, mock.Anything, mock.Anything)
+}

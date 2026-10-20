@@ -384,8 +384,10 @@ func TestCreatePublisherForJob_SlackActuallyPostsToWebhook(t *testing.T) {
 		gotPath = r.URL.Path
 		mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"ts":"1234567890.000001"}`))
+		// What a real Incoming Webhook answers (SLACK-WEBHOOK-PLAIN-OK-RESPONSE):
+		// a bare `ok`, not the Web API's JSON.
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(`ok`))
 	}))
 	defer srv.Close()
 
