@@ -147,7 +147,10 @@ func (d Duration) String() string {
 }
 
 // Defaults applies default values to route parameters if they are not set.
-// This method should be called after parsing configuration.
+//
+// The parsers do NOT call it: an unset timing must stay nil so a nested route
+// inherits its parent's (business/routing.TreeBuilder.inheritDuration). Call
+// it only on a standalone route that has no parent to inherit from.
 //
 // Default values:
 //   - group_wait: 30s

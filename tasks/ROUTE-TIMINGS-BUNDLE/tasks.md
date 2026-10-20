@@ -43,11 +43,14 @@ based_on:
 - [x] **2.2** `StartTimer`/`GroupTimer.Validate` принимают `0` для `GroupWaitTimer` (D4) <!-- verify: go build ./... -->
 - [x] **2.3** `startGroupWaitTimer` берёт `timings.GroupWait` как есть; старт таймера новой группы после `Store` (D4) <!-- verify: go build ./... -->
 
+- [x] **2.4** Прод-парсер отвергает явные `group_interval`/`repeat_interval: 0s` у route и в `global.*` (D3a, deep-review F1) <!-- verify: go test ./internal/infrastructure/routing/... -->
+- [x] **2.5** Docs: `ALERTMANAGER_COMPATIBILITY.md` (строка per-route timings, п. 7); `CHANGELOG.md` `[Unreleased]` — на finalize (deep-review F7) <!-- verify: git diff main -- docs/ALERTMANAGER_COMPATIBILITY.md CHANGELOG.md -->
+
 **Phase verification:** `cd go-app && go test ./internal/business/routing/... ./internal/infrastructure/routing/... ./internal/infrastructure/grouping/...` (существующие тесты; падения из-за изменённой семантики разбираются в фазе 3)
 
 ## Phase 3: Tests (после deep-review `pass`)
 
-- [ ] **3.1** Дерево через прод-парсер: корень → ребёнок без таймингов → внук; промежуточный со своими; `group_wait: 0s` под `10s`; `global.*` для корня и вложенных; `group_interval: 0s`/`repeat_interval: 0s` → ошибка `Build`; `group_interval < group_wait` грузится <!-- verify: go test ./internal/business/routing/... -->
+- [ ] **3.1** Дерево через прод-парсер: корень → ребёнок без таймингов → внук; промежуточный со своими; `group_wait: 0s` под `10s`; `global.*` для корня и вложенных; `group_interval: 0s`/`repeat_interval: 0s` → ошибка парсера и `Build`; `group_interval < group_wait` грузится <!-- verify: go test ./internal/business/routing/... -->
 - [ ] **3.2** Парсер: вложенные route без таймингов остаются `nil` после `Parse` <!-- verify: go test ./internal/infrastructure/routing/... ./internal/infrastructure/grouping/... -->
 - [ ] **3.3** Grouping: `startGroupWaitTimer` с `GroupWait: 0` срабатывает сразу, алерт виден callback'у; `StartTimer(0)` для interval/repeat — ошибка; memory/Redis `SaveTimer` нулевого group_wait <!-- verify: go test ./internal/infrastructure/grouping/... -->
 - [ ] **3.4** `/api/v2/status` `config.original` без таймингов у route, где их нет <!-- verify: go test ./internal/application/handlers/... -->

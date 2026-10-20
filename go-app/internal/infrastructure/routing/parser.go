@@ -388,6 +388,17 @@ func (p *RouteConfigParser) validateSemantics(config *RouteConfig) error {
 	validateTimeIntervalNames(config.TimeIntervals, "time_intervals")
 	validateTimeIntervalNames(config.MuteTimeIntervalsSection, "mute_time_intervals")
 
+	// global.group_interval/repeat_interval (AMP-only) cascade into the root
+	// route, so a zero there is rejected for the same reason as on a route.
+	if config.Global != nil {
+		if d := config.Global.GroupInterval; d != nil && *d == 0 {
+			errors.Add("global.group_interval", "group_interval cannot be zero", "Use a positive duration (e.g. '5m') or omit the field")
+		}
+		if d := config.Global.RepeatInterval; d != nil && *d == 0 {
+			errors.Add("global.repeat_interval", "repeat_interval cannot be zero", "Use a positive duration (e.g. '4h') or omit the field")
+		}
+	}
+
 	// Validate route tree
 	if err := p.validateRouteTree(config.Route, receiverIndex, timeIntervalNames, &errors); err != nil {
 		return err
@@ -522,6 +533,24 @@ func (p *RouteConfigParser) validateRouteTree(
 				"Define it in the 'time_intervals' section",
 			)
 		}
+	}
+
+	// Explicit zero group_interval/repeat_interval: rejected at load, as
+	// upstream's Route.UnmarshalYAML does ("cannot be zero"). Unset (nil)
+	// inherits; group_wait: 0s is valid ("notify immediately").
+	if route.GroupInterval != nil && route.GroupInterval.Duration == 0 {
+		errors.Add(
+			fmt.Sprintf("route[receiver=%s].group_interval", route.Receiver),
+			"group_interval cannot be zero",
+			"Use a positive duration (e.g. '5m') or omit the field to inherit",
+		)
+	}
+	if route.RepeatInterval != nil && route.RepeatInterval.Duration == 0 {
+		errors.Add(
+			fmt.Sprintf("route[receiver=%s].repeat_interval", route.Receiver),
+			"repeat_interval cannot be zero",
+			"Use a positive duration (e.g. '4h') or omit the field to inherit",
+		)
 	}
 
 	// Recursively validate child routes

@@ -132,7 +132,10 @@ func (v *RouteValidator) validateReceiverRef(route *config.Route, path string, r
 }
 
 // validateDurations checks E026: timing fields must not be negative. Zero
-// is treated as "unset, inherit default" (see isNonNegativeDuration).
+// is not flagged here (see isNonNegativeDuration): this config model cannot
+// tell an explicit 0s from an omitted field. The runtime route parser
+// (internal/infrastructure/routing) rejects an explicit zero
+// group_interval/repeat_interval, as upstream does.
 func (v *RouteValidator) validateDurations(route *config.Route, path string, result *types.Result) {
 	fields := []struct {
 		name  string

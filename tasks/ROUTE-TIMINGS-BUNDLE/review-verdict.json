@@ -1,0 +1,9 @@
+{
+  "gate": "fix_required",
+  "reason": "F1 (major, fix-here): explicit group_interval/repeat_interval: 0s passes config load and only fails non-fatal tree Build at startup, leaving AMP without route-tree evaluation; reject it in the production parser like upstream. Also fix-here nits F4, F5, F7.",
+  "branch": "bugfix/route-timings",
+  "commit": "91265a3",
+  "reviewed_at": "2026-10-20",
+  "findings": { "blocker": 0, "major": 1, "minor": 2, "nit": 4 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

@@ -47,7 +47,7 @@ based_on:
 | Тайминги прочитанного конфига вне дерева читают только `DefaultGroupManager` (корень, `nil` уже обработан) и `/api/v2/status` | `grep` `Route.GroupWait\|GetEffective*` по `go-app` | call-path-traced | паника на `nil` или иной дефолт в стороннем потребителе |
 | Единственный продюсер `GroupTimings` — `alert_processor.go:487` из `RoutingDecision` (значения разрешены деревом) | `grep 'WithGroupTimings('` | call-path-traced | частичный `GroupTimings` с `GroupWait == 0` «не задан» начнёт слать сразу |
 | Сохранённые до фикса группы имеют `GroupWait > 0` | `inheritDuration` до фикса всегда возвращал `> 0` | code-read | старая группа с `0` при re-arm сработает сразу — для «уже просроченной» группы это и так ожидаемо |
-| Дерево строится и валидируется одинаково при старте и hot reload | `service_registry.go:1391`, `tree_manager.go:145-156` | code-read | расхождение старт/reload |
+| Дерево строится и валидируется одинаково при старте и hot reload | `service_registry.go:1391`, `tree_manager.go:145-156` | code-read | Построение одинаковое, обработка ошибки — нет: на старте ошибка `Build` нефатальна (degraded). Поэтому ноль отвергается в парсере (D3a), ошибка которого фатальна и на старте, и на reload |
 | `time.NewTimer(0)` и Redis-индекс по `ExpiresAt` корректно обрабатывают нулевую длительность | `timer_manager_impl.go:480`, `redis_timer_storage.go:245-260` | code-read | нулевой таймер не сработает либо не сохранится |
 
 ## Target Design
@@ -55,6 +55,8 @@ based_on:
 **D1. Парсеры не дефолтят тайминги route.** `infrastructure/routing/parser.go` `applyDefaults` больше не вызывает `applyRouteDefaultsRecursive` (функция удаляется). `grouping/parser.go` `applyRouteDefaults` — удаляется аналогично (единообразие; потребитель уже обрабатывает `nil`). `Route.Defaults()` остаётся как API, не вызывается парсерами. Распарсенный конфиг — ровно то, что написано, как в upstream.
 
 **D2. Дерево различает «не задан» и `0`.** `inheritDuration(parent, *grouping.Duration, field)`: `route != nil` → `route.Duration`; `parent != nil` → разрешённое значение родителя (как есть); `global.<field> != nil` → оно; иначе 30s/5m/4h. `durationOrZero` удаляется. Корень наследует от `global.*`, потомки — через корень.
+
+**D3a. Ноль отвергается при загрузке (deep-review F1).** Прод-парсер `infrastructure/routing/parser.go` `validateRouteTree` отвергает явные `group_interval: 0s`/`repeat_interval: 0s` (`*grouping.Duration` не nil и равен 0) — как upstream `Route.UnmarshalYAML`; то же для `global.group_interval`/`global.repeat_interval`. Без этого ошибку давал бы только `Build` дерева, а на старте он нефатален (`service_registry.go` — degraded без route-tree).
 
 **D3. Валидация дерева как в upstream.** `validateDurations`: `group_wait < 0` — ошибка; `group_interval <= 0`, `repeat_interval <= 0` — ошибка (аналог upstream `cannot be zero`); AMP-only проверка `group_interval >= group_wait` удаляется (upstream её не делает, а правильное наследование сделало бы её достижимой для валидных upstream-конфигов).
 
@@ -70,7 +72,7 @@ based_on:
 ## Data Model / Migrations
 
 - **Migration:** нет. `GroupTimer.Duration == 0` теперь допустим для `group_wait`; старые записи остаются валидными.
-- **Rollback / forward-fix:** откат коммита. Нулевой `group_wait`-таймер в Redis при откате на старый бинарь не пройдёт `Validate` при `RestoreTimers` — таймер «уже просрочен», группа подхватится `ensureGroupTimer` на следующем алерте; окно — секунды.
+- **Rollback / forward-fix:** откат коммита. Нулевой `group_wait`-таймер, сохранённый в Redis, старый бинарь при `RestoreTimers` (без `Validate`, она есть только в `SaveTimer`) увидит просроченным и выстрелит как missed — группа отправится сразу, это и было намерение.
 
 ## Impact Analysis
 
