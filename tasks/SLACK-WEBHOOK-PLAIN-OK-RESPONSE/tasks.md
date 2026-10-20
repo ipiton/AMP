@@ -13,7 +13,7 @@ based_on:
 
 # Implementation Plan: ответ `ok` Slack Incoming Webhook считается ошибкой
 
-**Based on:** requirements.md / Spec.md  
+**Based on:** requirements.md / Spec.md
 **Date:** 2026-10-20
 
 ## Touched Files

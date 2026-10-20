@@ -12,7 +12,7 @@ based_on:
 
 # Specification: ответ `ok` Slack Incoming Webhook считается ошибкой
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Approved
 
 ## Summary
