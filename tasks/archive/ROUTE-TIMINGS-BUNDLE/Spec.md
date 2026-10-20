@@ -13,7 +13,7 @@ based_on:
 
 # Specification: наследование таймингов route как в upstream
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Approved
 
 ## Summary

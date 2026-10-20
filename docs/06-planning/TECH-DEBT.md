@@ -89,6 +89,14 @@
 
 ## Low
 
+### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-TIMER-REARM-WINDOW
+- **Title:** ложный re-arm `group_wait` в окне между `Store` новой группы и стартом её таймера
+- **Problem:** с ROUTE-TIMINGS-BUNDLE таймер новой группы стартует после `storage.Store` (`go-app/internal/infrastructure/grouping/manager_impl.go:313`), чтобы нулевой `group_wait` не читал группу раньше записи. Второй алерт той же группы (или другая реплика в HA), пришедший в это окно, видит группу без таймера, и `ensureGroupTimer` (`manager_impl.go:940`) взводит `group_wait` сам: Warn «alert group has no timer scheduled, re-arming group_wait» и метрика `timer_rearm`. Корректность не страдает (исходный `StartTimer` заменяет таймер, в HA лишний fire отсекают lock/`fireStillDue`), но при `group_wait: 0s` возможен лишний немедленный flush.
+- **Impact:** на всплесках алертов — ложные предупреждения и шум в метрике, которая должна сигналить о реальной потере таймера.
+- **Fix:** взводить таймер под той же per-key сериализацией, что и создание группы (BUGS `GROUPING-NEW-GROUP-CREATE-RACE`), либо не считать поводом для re-arm отсутствие таймера у группы младше `CreatedAt + ε`.
+- **Refs:** `tasks/archive/ROUTE-TIMINGS-BUNDLE/review-findings.md` § F2.
+- **Status:** open
+
 ### [low][Test][~0.25d] GO-TESTS-REDIS-IMAGE
 - **Title:** Go-интеграционные тесты поднимают `redis:7-alpine` (Redis 7.4, RSALv2/SSPL)
 - **Problem:** `go-app/internal/infrastructure/inhibition/integration_test.go:24` через testcontainers; чарт и e2e-ha с 2026-10-19 на `valkey/valkey:8.1.10-alpine` (ADR-017). В поставку не попадает, но тесты проверяют не тот кеш, что ставит чарт.
