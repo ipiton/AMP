@@ -190,9 +190,10 @@ Liveness/readiness probes use `/-/healthy` and `/-/ready`, which stay reachable 
 `configFile.content` is rendered into a ConfigMap, so a `bot_token` or Slack webhook URL written there is stored in plain text. Put the credentials into a Secret you create, mount it with `extraVolumes` / `extraVolumeMounts`, and point the receivers at the files through their `*_file` fields:
 
 ```bash
+# one file per credential; a trailing newline is trimmed
 kubectl create secret generic amp-receiver-secrets \
-  --from-literal=telegram-bot-token='123456:ABC...' \
-  --from-literal=slack-webhook-url='https://hooks.slack.com/services/T000/B000/XXX'
+  --from-file=telegram-bot-token=./telegram-bot-token \
+  --from-file=slack-webhook-url=./slack-webhook-url
 ```
 
 ```yaml
@@ -227,9 +228,9 @@ configFile:
 | `extraVolumeMounts` | Extra mounts for the `amp` container; the config-reloader sidecar does not get them | `[]` |
 
 - Use absolute paths in `*_file` fields: AMP reads `bot_token_file`, `api_url_file`, `slack_api_url_file`, `url_file` and `routing_key_file` as given, relative to the process working directory, not to the config file. Setting both `bot_token` and `bot_token_file` is a load error, and so is a file AMP cannot read.
-- A directory below the chart's own mounts (`/etc/amp/secrets`) is fine. A volume name or `mountPath` the chart already uses fails the render: `config-file` / `configFile.mountPath` and the config file itself, `web-config` / `webConfig.mountPath`, `data` / `liteProfile.persistence.mountPath`.
-- The container runs as UID 65534 with `fsGroup: 65534`, so the files stay readable with a strict `defaultMode` such as `0440`.
-- AMP reads the files at startup and on every `/-/reload`. After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` or `kubectl rollout restart deploy/<fullname>`; `configReloader` watches the config file only and does not notice. Mounts with `subPath` are never updated.
+- A directory below the chart's own mounts (`/etc/amp/secrets`) is fine. A volume name or `mountPath` the chart already uses fails the render: `config-file` / `configFile.mountPath` and the config file itself, `web-config` / `webConfig.mountPath` and the web config file, `data` / `liteProfile.persistence.mountPath`.
+- With the chart's default `podSecurityContext` (`runAsUser: 65534`, `fsGroup: 65534`) the files stay readable with a strict `defaultMode` such as `0440`: kubelet gives them the `fsGroup` group. If you override `podSecurityContext` without `fsGroup`, keep the default mode (`0644`).
+- AMP reads the files at startup and on every `/-/reload`. After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` (authenticated when `webConfig` is enabled) or `kubectl rollout restart deploy/<fullname>`; `configReloader` watches the config file only and does not notice. Mounts with `subPath` are never updated.
 - The same keys mount a ConfigMap with runbooks or any other file AMP should read.
 
 ### Graceful Shutdown

@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "F1 (blocker, fix-here): pkg/configvalidator rejects slack api_url_file / global.slack_api_url_file (E115), webhook url_file (E113), pagerduty routing_key_file (E122) before routing.Parse runs, so the documented Slack-from-Secret example fails LoadConfig; only telegram bot_token_file works.",
+  "branch": "feature/helm-extra-volumes",
+  "commit": "f62a517",
+  "reviewed_at": "2026-10-20",
+  "findings": {
+    "blocker": 1,
+    "major": 0,
+    "minor": 5,
+    "nit": 6
+  },
+  "open": {
+    "blocker": 1,
+    "major_without_disposition": 0
+  }
+}

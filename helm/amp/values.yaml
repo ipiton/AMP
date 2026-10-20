@@ -919,9 +919,10 @@ configFile:
 # - A name or mountPath already used by the chart fails the render: volumes
 #   data (lite profile), config-file (configFile.enabled), web-config
 #   (webConfig.existingSecret) and their mountPath values, plus the config
-#   file path itself. A directory below them, e.g. /etc/amp/secrets, is fine.
-# - The container runs as 65534 with fsGroup 65534, so Secret files stay
-#   readable with a strict defaultMode such as 0440.
+#   file and web config file paths. A directory below them, e.g. /etc/amp/secrets, is fine.
+# - With the default podSecurityContext (runAsUser/fsGroup 65534) Secret files
+#   stay readable with a strict defaultMode such as 0440. Without fsGroup keep
+#   the default mode.
 extraVolumes: []
 # extraVolumes:
 #   - name: receiver-secrets
