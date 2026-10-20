@@ -27,15 +27,15 @@ based_on:
 
 ## Phase 1: Chart
 
-- [ ] **1.1** values.yaml: `extraVolumes: []`, `extraVolumeMounts: []` с комментарием и примером <!-- verify: helm lint helm/amp -->
-- [ ] **1.2** deployment.yaml: рендер в `amp` и в `volumes`, условия блоков <!-- verify: helm template с примером -->
-- [ ] **1.3** deployment.yaml: guard на конфликт имён/mountPath <!-- verify: helm template с конфликтом падает -->
-- [ ] **1.4** Байт-в-байт сравнение рендера с main для пустых значений (default, lite, configFile+webConfig, production) <!-- verify: evidence/render-invariance.txt -->
+- [x] **1.1** values.yaml: `extraVolumes: []`, `extraVolumeMounts: []` с комментарием и примером <!-- verify: helm lint helm/amp -->
+- [x] **1.2** deployment.yaml: рендер в `amp` и в `volumes`, условия блоков <!-- verify: helm template с примером -->
+- [x] **1.3** deployment.yaml: guard на конфликт имён/mountPath <!-- verify: helm template с конфликтом падает -->
+- [x] **1.4** Байт-в-байт сравнение рендера с main для пустых значений (default, lite, configFile+webConfig, production) <!-- verify: evidence/render-invariance.txt -->
 
 ## Phase 2: Docs
 
-- [ ] **2.1** README: раздел Receiver Credentials From A Secret + параметры
-- [ ] **2.2** CONFIGURATION_GUIDE: пример Telegram + Slack через `*_file` в Kubernetes
+- [x] **2.1** README: раздел Receiver Credentials From A Secret + параметры
+- [x] **2.2** CONFIGURATION_GUIDE: пример Telegram + Slack через `*_file` в Kubernetes
 
 **Phase verification:** чтение, `git diff --check`
 

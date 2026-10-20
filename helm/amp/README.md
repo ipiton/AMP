@@ -185,6 +185,53 @@ helm upgrade --install amp ./helm/amp --set webConfig.existingSecret=amp-web-con
 
 Liveness/readiness probes use `/-/healthy` and `/-/ready`, which stay reachable without credentials. Password edits in the Secret apply without a pod restart once kubelet syncs the volume. `configReloader.enabled` cannot be combined with `webConfig` yet (rendering fails). See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication".
 
+### Receiver Credentials From A Secret
+
+`configFile.content` is rendered into a ConfigMap, so a `bot_token` or Slack webhook URL written there is stored in plain text. Put the credentials into a Secret you create, mount it with `extraVolumes` / `extraVolumeMounts`, and point the receivers at the files through their `*_file` fields:
+
+```bash
+kubectl create secret generic amp-receiver-secrets \
+  --from-literal=telegram-bot-token='123456:ABC...' \
+  --from-literal=slack-webhook-url='https://hooks.slack.com/services/T000/B000/XXX'
+```
+
+```yaml
+extraVolumes:
+  - name: receiver-secrets
+    secret:
+      secretName: amp-receiver-secrets
+      defaultMode: 0440
+extraVolumeMounts:
+  - name: receiver-secrets
+    mountPath: /etc/amp/secrets
+    readOnly: true
+configFile:
+  enabled: true
+  content: |
+    route:
+      receiver: slack
+    receivers:
+      - name: slack
+        slack_configs:
+          - api_url_file: /etc/amp/secrets/slack-webhook-url
+            channel: '#alerts'
+      - name: telegram-panic
+        telegram_configs:
+          - bot_token_file: /etc/amp/secrets/telegram-bot-token
+            chat_id: -1001234567890
+```
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `extraVolumes` | Extra pod volumes (any volume type: Secret, ConfigMap, projected, CSI) | `[]` |
+| `extraVolumeMounts` | Extra mounts for the `amp` container; the config-reloader sidecar does not get them | `[]` |
+
+- Use absolute paths in `*_file` fields: AMP reads `bot_token_file`, `api_url_file`, `slack_api_url_file`, `url_file` and `routing_key_file` as given, relative to the process working directory, not to the config file. Setting both `bot_token` and `bot_token_file` is a load error, and so is a file AMP cannot read.
+- A directory below the chart's own mounts (`/etc/amp/secrets`) is fine. A volume name or `mountPath` the chart already uses fails the render: `config-file` / `configFile.mountPath` and the config file itself, `web-config` / `webConfig.mountPath`, `data` / `liteProfile.persistence.mountPath`.
+- The container runs as UID 65534 with `fsGroup: 65534`, so the files stay readable with a strict `defaultMode` such as `0440`.
+- AMP reads the files at startup and on every `/-/reload`. After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` or `kubectl rollout restart deploy/<fullname>`; `configReloader` watches the config file only and does not notice. Mounts with `subPath` are never updated.
+- The same keys mount a ConfigMap with runbooks or any other file AMP should read.
+
 ### Graceful Shutdown
 
 On termination the pod first runs a preStop `sleep` while Kubernetes removes it from Service endpoints, then AMP gets `SIGTERM`: readiness turns `503`, in-flight requests drain, services stop (the lite profile writes its final snapshot). Details: `docs/CONFIGURATION_GUIDE.md` → "Graceful Shutdown".

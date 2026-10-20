@@ -304,7 +304,37 @@ spec:
                 command: ["sleep", {{ .Values.gracefulShutdown.preStopDelay | int | toString | quote }}]
           {{- end }}
 
-          {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret }}
+          {{- /* `| default list`: `helm upgrade --reuse-values` from a chart without these keys. */}}
+          {{- $extraVolumes := .Values.extraVolumes | default list }}
+          {{- $extraVolumeMounts := .Values.extraVolumeMounts | default list }}
+          {{- /* The API server rejects a duplicate volume name or mountPath only at apply time; catch the chart's own here. */}}
+          {{- $chartVolumes := dict }}
+          {{- $chartPaths := dict }}
+          {{- if eq .Values.profile "lite" }}
+          {{- $_ := set $chartVolumes "data" "the lite profile's data volume" }}
+          {{- $_ := set $chartPaths (clean .Values.liteProfile.persistence.mountPath) "liteProfile.persistence.mountPath" }}
+          {{- end }}
+          {{- if .Values.configFile.enabled }}
+          {{- $_ := set $chartVolumes "config-file" "configFile.enabled" }}
+          {{- $_ := set $chartPaths (clean .Values.configFile.mountPath) "configFile.mountPath" }}
+          {{- $_ := set $chartPaths (clean (printf "%s/%s" .Values.configFile.mountPath .Values.configFile.fileName)) "the config file (configFile.mountPath/fileName)" }}
+          {{- end }}
+          {{- if .Values.webConfig.existingSecret }}
+          {{- $_ := set $chartVolumes "web-config" "webConfig.existingSecret" }}
+          {{- $_ := set $chartPaths (clean .Values.webConfig.mountPath) "webConfig.mountPath" }}
+          {{- end }}
+          {{- range $extraVolumes }}
+          {{- if hasKey $chartVolumes (toString .name) }}
+          {{- fail (printf "extraVolumes: volume name %q is already used by the chart (%s). Pick another name." (toString .name) (get $chartVolumes (toString .name))) }}
+          {{- end }}
+          {{- end }}
+          {{- range $extraVolumeMounts }}
+          {{- $path := clean (toString .mountPath) }}
+          {{- if hasKey $chartPaths $path }}
+          {{- fail (printf "extraVolumeMounts: mountPath %q is already used by %s. Use another path; a directory below the chart's mounts, such as /etc/amp/secrets, is fine." (toString .mountPath) (get $chartPaths $path)) }}
+          {{- end }}
+          {{- end }}
+          {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret $extraVolumeMounts }}
           volumeMounts:
             {{- if eq .Values.profile "lite" }}
             - name: data
@@ -319,6 +349,9 @@ spec:
             - name: web-config
               mountPath: {{ .Values.webConfig.mountPath }}
               readOnly: true
+            {{- end }}
+            {{- with $extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
 
@@ -374,7 +407,8 @@ spec:
               readOnly: true
 {{- end }}
 
-      {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret }}
+      {{- $extraVolumes := .Values.extraVolumes | default list }}
+      {{- if or (eq .Values.profile "lite") .Values.configFile.enabled .Values.webConfig.existingSecret $extraVolumes }}
       volumes:
         {{- if eq .Values.profile "lite" }}
         - name: data
@@ -393,6 +427,9 @@ spec:
             items:
               - key: {{ .Values.webConfig.secretKey }}
                 path: {{ .Values.webConfig.secretKey }}
+        {{- end }}
+        {{- with $extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
 

@@ -904,6 +904,47 @@ configFile:
   #         - api_url: https://hooks.slack.com/services/XXX
   #           channel: '#alerts'
 
+# Extra volumes for the pod and mounts for the `amp` container only (not the
+# config-reloader sidecar). Main use: receiver credentials from a Secret you
+# create, so configFile.content (a ConfigMap) holds file paths instead of
+# tokens. Also: a ConfigMap with runbooks.
+#
+# - `*_file` paths in configFile.content must be ABSOLUTE: AMP reads
+#   bot_token_file, api_url_file, slack_api_url_file, url_file, routing_key_file
+#   as given, relative to the process working directory, not the config file.
+# - AMP reads the files at startup and on every /-/reload. After changing the
+#   Secret, wait for kubelet to sync the volume (about a minute), then reload
+#   or `kubectl rollout restart`. config-reloader does not notice, it watches
+#   the config file only. Volumes mounted with subPath are never updated.
+# - A name or mountPath already used by the chart fails the render: volumes
+#   data (lite profile), config-file (configFile.enabled), web-config
+#   (webConfig.existingSecret) and their mountPath values, plus the config
+#   file path itself. A directory below them, e.g. /etc/amp/secrets, is fine.
+# - The container runs as 65534 with fsGroup 65534, so Secret files stay
+#   readable with a strict defaultMode such as 0440.
+extraVolumes: []
+# extraVolumes:
+#   - name: receiver-secrets
+#     secret:
+#       secretName: amp-receiver-secrets   # keys: telegram-bot-token, slack-webhook-url
+#       defaultMode: 0440
+extraVolumeMounts: []
+# extraVolumeMounts:
+#   - name: receiver-secrets
+#     mountPath: /etc/amp/secrets
+#     readOnly: true
+#
+# and in configFile.content:
+#   receivers:
+#     - name: telegram-panic
+#       telegram_configs:
+#         - bot_token_file: /etc/amp/secrets/telegram-bot-token
+#           chat_id: -1001234567890
+#     - name: slack
+#       slack_configs:
+#         - api_url_file: /etc/amp/secrets/slack-webhook-url
+#           channel: '#alerts'
+
 # config-reloader sidecar: watches the mounted config file and asks AMP to
 # reload when its CONTENT changes (SHA256, not mtime — kubelet re-syncs a
 # ConfigMap volume periodically without changing the bytes).
