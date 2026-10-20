@@ -4,7 +4,7 @@ slug: slack-color-template
 stream: Config
 type: bug
 priority: high
-status: active
+status: done
 created_at: 2026-10-20
 updated_at: 2026-10-20
 ---
@@ -32,11 +32,11 @@ updated_at: 2026-10-20
 
 ## Success Criteria
 
-- [ ] Конфиг с `color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'` (upstream-дефолт) и с вариантом sema (`warning`/`good`) загружается парсером.
-- [ ] Остальные шаблонные поля с жёсткими проверками (Slack `channel`, `icon_emoji`, `icon_url`, `title_link`; PagerDuty `severity`) принимают шаблон.
-- [ ] Шаблонный `color` рендерится в attachment как `danger` для firing и `good` для resolved.
-- [ ] Статичные невалидные значения (`color: red`, `channel: ops`, `icon_emoji: fire`, `icon_url: not a url`, `severity: bogus`) по-прежнему отклоняются.
-- [ ] Гейты AMP зелёные (или красные шаги явно разобраны).
+- [x] Конфиг с `color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'` (upstream-дефолт) и с вариантом sema (`warning`/`good`) загружается парсером.
+- [x] Остальные шаблонные поля с жёсткими проверками (Slack `channel`, `icon_emoji`, `icon_url`, `title_link`; PagerDuty `severity`) принимают шаблон.
+- [x] Шаблонный `color` рендерится в attachment как `danger` для firing и `good` для resolved.
+- [x] Статичные невалидные значения (`color: red`, `channel: ops`, `icon_emoji: fire`, `icon_url: not a url`, `severity: bogus`) по-прежнему отклоняются.
+- [x] Гейты AMP зелёные (или красные шаги явно разобраны).
 
 ## Non-Goals
 

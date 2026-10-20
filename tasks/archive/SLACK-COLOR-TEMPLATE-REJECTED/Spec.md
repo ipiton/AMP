@@ -3,7 +3,7 @@ id: SLACK-COLOR-TEMPLATE-REJECTED
 slug: slack-color-template
 stream: Config
 type: bug
-status: draft
+status: done
 created_at: 2026-10-20
 updated_at: 2026-10-20
 based_on:
@@ -13,7 +13,7 @@ based_on:
 # Specification: шаблонные presentation-поля не валидируются как литералы
 
 **Version:** 1.0\
-**Status:** Draft
+**Status:** Implemented
 
 ## Summary
 
@@ -42,7 +42,7 @@ based_on:
    | `SlackConfig.Color` | `omitempty,slack_color` | `omitempty,template_expr\|slack_color` |
    | `PagerDutyConfig.Severity` | `omitempty,oneof=critical error warning info` | `omitempty,template_expr\|oneof=critical error warning info` |
 
-   Комментарии полей дополняются строкой «templated upstream; a template value is checked only after render (i.e. not at all — Slack/PagerDuty judge it)».
+   Комментарии `Channel`, `Color`, `Severity` говорят, что значение может быть шаблоном и что шаблон при загрузке не проверяется (ссылка на `validateTemplateExpression`).
 3. **Синтаксис шаблона при загрузке не проверяется** (как upstream). Сломанный шаблон → при отправке warn-лог + метрика fallback + значение фиксированного форматтера (существующее поведение `templateRenderer.renderField`).
 4. **Отрендеренное значение не валидируется**: `overlaySlack`/`overlayPagerDuty` передают его как есть (upstream так же).
 
