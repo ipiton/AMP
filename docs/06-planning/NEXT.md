@@ -16,6 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **SLACK-COLOR-TEMPLATE-REJECTED** — шаблонные presentation-поля (`slack_configs[].color` и др.) не валидируются как литералы при загрузке конфига; BUGS, high. Взят 2026-10-20, ветка `bugfix/slack-color-template`, workspace `tasks/SLACK-COLOR-TEMPLATE-REJECTED/`.
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20.
@@ -37,7 +38,6 @@ Queue и WIP — источник правды для выбора задачи.
 > Предпосылки запуска рядом с Alertmanager в sema-prod (параллельные нотификации), переоценка 2026-10-20.
 
 - [ ] **SLACK-WEBHOOK-PLAIN-OK-RESPONSE** — ответ `ok` Incoming Webhook считается ошибкой, Slack-группы переотправляются каждые `group_interval`. BUGS high, ~0.25d.
-- [ ] **SLACK-COLOR-TEMPLATE-REJECTED** — шаблонный `slack_configs[].color` валит загрузку конфига sema. BUGS high, ~0.25d.
 - [ ] **HELM-EXTRA-VOLUMES** — Secret с кредами receiver'ов вместо открытого текста в ConfigMap. BACKLOG, ~0.5d.
 
 - [ ] **HELM-VCT-CHART-LABELS** — метки VCT с версией чарта: первый бамп версии сломает `helm upgrade`; сделать до `PROD-RELEASE-V010`. BUGS, ~0.25d. Пополнено 2026-10-19.
