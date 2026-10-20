@@ -16,6 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **AMP-CACHE-NOAUTH** — AMP авторизуется в Valkey чарта на дефолтах (`REDIS_PASSWORD` из `<fullname>-redis-secret`), внешний кеш — через `existingSecret`; BUGS, high. Взят 2026-10-20, ветка `bugfix/amp-cache-noauth`, workspace `tasks/AMP-CACHE-NOAUTH/`.
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19.
@@ -34,7 +35,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### 2. Operations
 
-- [ ] **AMP-CACHE-NOAUTH** — на дефолтах чарта AMP не авторизуется в своём Valkey и держит таймеры/nflog в памяти пода; без фикса реплики не делят дедуп. BUGS, high, ~0.25d. Пополнено 2026-10-19.
 - [ ] **HELM-VCT-CHART-LABELS** — метки VCT с версией чарта: первый бамп версии сломает `helm upgrade`; сделать до `PROD-RELEASE-V010`. BUGS, ~0.25d. Пополнено 2026-10-19.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
