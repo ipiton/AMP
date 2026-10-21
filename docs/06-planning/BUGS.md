@@ -286,6 +286,21 @@
 - **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/release-gate.txt` (FAIL и перезапуск в конце файла).
 - **Status:** open
 
+### [medium][API][~0.5d] API-ALERTS-RECEIVER-INHIBITED-STATUS
+- **Title:** `GET /api/v2/alerts` отдаёт `receivers: ["default"]` и `state: active` с пустым `inhibitedBy` для подавленного алерта
+- **Problem:** два места.
+  - **Receiver.** `toAPIAlert` (`go-app/internal/infrastructure/storage/memory/alert_store.go:460-473`) берёт receiver из метки `receiver` алерта, а при её отсутствии ставит `"default"`. Route tree не используется, хотя `/api/v2/alerts/groups` уже резолвит receiver через `alertGroupingResolver` (`internal/application/handlers/alerts.go:347`).
+  - **Inhibition.** `alertconv.ToGettableAlert` (`internal/core/alertconv/alertconv.go:212`) всегда возвращает `InhibitedBy: []string{}`, а `state` считает только по silences. Результат inhibition (`alert_processor.go:587-595`) до API не доходит; ограничение описано в комментарии `handlers/alerts.go:173-177`. Поэтому `?inhibited=false` ничего не отфильтрует.
+  - **Воспроизведение** на живом конфиге sema-prod (Secret `sema-monitoring/alertmanager-kube-prometheus-stack-alertmanager`, секреты заменены заглушками, Telegram/Slack — на `https://127.0.0.1`), бинарь `main` @ `9d41dc0`, `profile: lite`, `storage.backend: filesystem`:
+    1. Запустить с `AMP_CONFIG_FILE=<копия конфига>`. Конфиг грузится: `routes=4 receivers=3`, `Inhibition subsystem initialized rules=3`.
+    2. `POST /api/v2/alerts` с пятью алертами: `DiskFull` `severity=critical signal=panic`, `DiskFull` `severity=warning signal=error`, `HighLatency` `severity=warning signal=error` (у всех трёх `namespace=sema-prod service=api`), `Watchdog`, `Unmatched` без `signal`.
+    3. Лог — правильно: `DiskFull/critical` → `panic-telegram` (`route.routes[1]`), `HighLatency` → `errors-slack` (`route.routes[2]`), `Watchdog` → `drop-unmatched`, `Unmatched` → `panic-telegram` (корень); `Alert inhibited by rule` — `DiskFull/warning` подавлен `DiskFull/critical` (правило `severity = critical` → `severity =~ warning|info`, `equal: [namespace, alertname]`).
+    4. `GET /api/v2/alerts` — неправильно: у всех пяти `receivers: [{"name":"default"}]` (такого receiver'а в конфиге нет), у `DiskFull/warning` — `state: active`, `inhibitedBy: []`. Upstream вернул бы реальный receiver каждого алерта и `state: suppressed`, `inhibitedBy: [<fingerprint DiskFull/critical>]`.
+- **Impact:** на доставку не влияет. Влияет на клиентов API: karma, Grafana Alertmanager datasource, `amtool alert query`. Подавленные алерты они показывают как горящие, фильтр по receiver'у (`?receiver=`) ничего не находит. При параллельном запуске рядом с Alertmanager в sema-prod картина в UI будет расходиться с Alertmanager. `/api/v2/alerts/groups` в этом прогоне не проверялся.
+- **Fix:** receiver — через тот же резолвер, что и для groups (route tree, при `continue` — все совпавшие receiver'ы, см. `ROUTE-CONTINUE-NO-FANOUT`). Inhibition — хранить у алерта fingerprint'ы источников подавления (или спрашивать inhibition-кеш при выдаче) и заполнять `inhibitedBy`/`state: suppressed` в `ToGettableAlert`; то же для групп. Тест через `LoadConfig` + `POST`/`GET /api/v2/alerts`: route tree без метки `receiver` и пара source/target по inhibit-правилу.
+- **Refs:** проверка 2026-10-21 на живом конфиге sema-prod (временный прогон, конфиг и логи не сохранены в репо: в конфиге креды).
+- **Status:** open
+
 ## Entry Format
 
 ```markdown
