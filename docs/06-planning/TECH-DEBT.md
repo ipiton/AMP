@@ -9,6 +9,59 @@
 <!-- Мелкие записи одной подсистемы (одних и тех же файлов) — в одного claimable-родителя.
      В Queue `NEXT.md` идёт только slug бандла. См. docs/solo-kanban/artifact-contract.md § Bundles. -->
 
+<!-- Code review 2026-10-21: участники — записи BUGS.md / TECH-DEBT.md. Пути verify — от корня репозитория. -->
+
+### PUBLISH-QUICK-FIX-BUNDLE
+- [critical][Publishing][~2d] PUBLISH-QUICK-FIX-BUNDLE
+- **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/publishing/... ./internal/business/publishing/...`
+- **Members (ordered):**
+  - [ ] PROVIDER-RESOLVE-STATELESS-PD
+  - [ ] PUBLISH-PER-TARGET-STATE
+  - [ ] PROVIDER-RESOLVE-ROOTLY
+  - [ ] CIRCUIT-BREAKER-HALF-OPEN
+  - [ ] QUEUE-GRACEFUL-STOP
+  - [ ] PUBLISH-SECRETS-IN-LOGS
+
+### CONFIG-RELOAD-BUNDLE
+- [high][Config][~1.25d] CONFIG-RELOAD-BUNDLE
+- **Combined verify:** `cd go-app && go test -race ./internal/config/... ./internal/application/... ./cmd/server/...`
+- **Members (ordered):**
+  - [ ] RELOAD-SERIALIZE
+  - [ ] CONFIG-VALIDATION-FAIL-CLOSED
+  - [ ] CONFIG-ENV-KEYS-UNBOUND
+
+### INVESTIGATION-SAFETY-BUNDLE
+- [high][Investigation][~2.25d] INVESTIGATION-SAFETY-BUNDLE
+- **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/investigation/... ./internal/infrastructure/llm/... ./internal/core/resilience/...`
+- **Members (ordered):**
+  - [ ] LLM-RETRY-CLASSIFY
+  - [ ] INVESTIGATION-ASYNC-DEDUP
+  - [ ] INVESTIGATION-PROMPT-ISOLATION
+
+### API-COMPAT-BUNDLE
+- [medium][API][~1.25d] API-COMPAT-BUNDLE
+- **Combined verify:** `cd go-app && go test -race ./internal/application/handlers/... ./cmd/server/...`
+- **Members (ordered):**
+  - [ ] API-V2-ERROR-SHAPE
+  - [ ] INGEST-PARSE-VALIDATE
+  - [ ] SERVER-HARDENING
+
+### INHIBITION-LIFECYCLE-BUNDLE
+- [medium][Inhibition][~1.5d] INHIBITION-LIFECYCLE-BUNDLE
+- **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/inhibition/... ./internal/core/services/...`
+- **Members (ordered):**
+  - [ ] INHIBIT-STATE-LIFECYCLE
+  - [ ] INHIBIT-MATCH-PERF
+
+### REDIS-STORAGE-BUNDLE
+- [low][Grouping][~1.1d] REDIS-STORAGE-BUNDLE
+- **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/grouping/... ./internal/infrastructure/lock/... ./internal/infrastructure/cluster/...`
+- **Members (ordered):**
+  - [ ] REDIS-HELPERS
+  - [ ] REDIS-GROUP-INDEX-GHOSTS
+  - [ ] LOCK-ACQUIRE-SLEEP
+  - [ ] CLUSTER-HEARTBEAT-STATE
+
 ## Critical
 
 ## High
@@ -88,6 +141,112 @@
 - **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/k3d-acceptance.md` § A4.
 - **Status:** open
 
+<!-- Code review 2026-10-21 (`docs/06-planning/CODE-REVIEW-2026-10-21.md`). Пути — от `go-app/`. Удаление мёртвого кода и консолидация — только `refactor:`-PR без изменения поведения. -->
+
+### [medium][Pipeline][~2d] LABELMATCH-PKG
+- **Title:** семантика и грамматика label-matcher'ов реализованы 3–5 раз
+- **Problem:** match/anchoring `^(?:…)$`/absent label — в `core/silencing/matcher_impl.go:242`, `infrastructure/inhibition/matchers_list.go:111` и `matcher_impl.go:309-365`, `business/routing/matcher.go:240-283`, `application/handlers/matchers.go`, `pkg/configvalidator/matcher`; грамматика выражений — в `business/routing/tree_builder.go:237,336,411`, `pkg/configvalidator/matcher/matcher.go:116,168,256`, `application/handlers/matchers.go:28`. Комментарии «third copy», «FIFTH copy». `isValidLabelName` ×6, `RegexCache` ×2; LRU в `business/routing/matcher_cache.go:128-140` берёт write-lock на каждом hit.
+- **Impact:** расхождение семантики чинилось 3–5 раз; `API-FILTER-MATCHER-GRAMMAR` — следствие.
+- **Fix:** `pkg/labelmatch` (`Parse`, `Matcher.Matches`, `ValidLabelName`) + общий conformance-тест по кейсам upstream; потребителей переводить по одному PR; regex компилировать при build дерева, LRU убрать. Делать после `DEAD-PKGS-NO-IMPORTERS`/`DEAD-APPLICATION-MIDDLEWARE` (меньше копий).
+- **Refs:** CODE-REVIEW-2026-10-21 D-1, D-2, L-11, R-2. Смежно `FU-MATCHER-LABEL-CHARSET`.
+- **Status:** open
+
+### [medium][Observability][~1d] METRICS-V2-ONLY
+- **Title:** три системы метрик, часть `/metrics` — вечные нули
+- **Problem:** `pkg/metrics/metrics.go` (v1), `pkg/metrics/v2/registry.go:82-121`, `internal/database/postgres/{metrics,prometheus}.go`. Сеттеры v2 Database/Cache не вызываются ⇒ нули; v1 и v2 регистрируют одинаковые `alert_history_database_*` ⇒ panic при создании v1 рядом с v2.
+- **Impact:** дашборды по БД/кешу врут; скрытый panic для следующего, кто подключит v1.
+- **Fix:** Business/Filter/Webhook перенести в v2, мёртвые группы удалить, пул — `GaugeFunc` от `pgxpool.Stat()`. После `DEAD-PKGS-NO-IMPORTERS`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-26, D-10, R-5.
+- **Status:** open
+
+### [medium][Config][~1.5d] CONFIG-SCHEMA-PARITY
+- **Title:** схема Alertmanager-конфига описана трижды, inhibit-правило — пятью типами
+- **Problem:** `internal/alertmanager/config/config.go`, `internal/infrastructure/routing/{config,receiver,global}.go`, `internal/config/config.go:193`; валидатор проверяет не ту модель, что исполняет рантайм.
+- **Impact:** уже дало `PAGERDUTY-SERVICE-KEY-ONLY-REJECTED`, E024 telegram, `W300-DELIVERABLE-SECRETS`.
+- **Fix:** минимум — reflection-тест паритета yaml-тегов; цель — валидатор по `routing.RouteConfig`, остальные модели удалить. После `DURATION-UPSTREAM-UNITS` и `DEAD-CONFIG-SUBSYSTEMS`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-21, D-5, R-4.
+- **Status:** open
+
+### [medium][Inhibition][~1d] INHIBIT-MATCH-PERF
+- **Title:** `ShouldInhibit` — O(R·F) с копией всего L1 на каждый вызов
+- **Problem:** `inhibition/matcher_impl.go:73-169` копирует все firing-источники на каждый вызов; `grouping/manager_impl.go:1166-1201` вызывает его для каждого алерта группы; совпадения логируются на INFO.
+- **Impact:** стоимость отправки группы растёт как размер группы × число источников; шум в логах.
+- **Fix:** индекс источников по правилу, обновляемый в `AddFiringAlert`; один снапшот на `filterInhibited`; логи → DEBUG. Бенчмарк до/после. После `INHIBIT-SOURCE-CACHE-EVICTION`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-6.
+- **Status:** open
+
+### [medium][Observability][~0.5d] HTTP-METRICS-ACCESS-LOG
+- **Title:** у HTTP-сервера нет access-лога, request-id и метрик
+- **Problem:** `cmd/server/main.go:136-155` собирает mux без middleware; готовые `pkg/logger.LoggingMiddleware` и HTTP-метрики не подключены.
+- **Impact:** латентность и 5xx на ingest не видны.
+- **Fix:** обёртка `instrument(handler, name)` на `promhttp.InstrumentHandlerDuration`/`Counter` со статической меткой handler + access-лог с request-id (sketch — CODE-REVIEW § 5).
+- **Refs:** CODE-REVIEW-2026-10-21 M-14.
+- **Status:** open
+
+### [medium][Grouping][~2.5d] NOTIFY-PIPELINE-EXTRACT
+- **Title:** пакет grouping содержит DSL конфига, keygen, два storage, таймеры, nflog и весь notify chain
+- **Problem:** `internal/infrastructure/grouping/manager_impl.go` — 2175 строк, `publishGroupAlerts` — 438 строк; ~44% строк — комментарии с историей fix-round'ов.
+- **Impact:** любая правка notify chain требует держать в голове весь файл; тестировать стадии по отдельности нельзя.
+- **Fix:** вынести notify chain в стадии (`filterInhibited`, `filterSilenced`, dedup/nflog, send) с интерфейсом стадии, как в upstream `notify.Stage`; историю из комментариев — в git/ADR. Нарезать на слайсы ≤1d. После семантических багов grouping/inhibition и `LABELMATCH-PKG`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-24, R-6, R-9.
+- **Status:** open
+
+### [medium][App][~2d] SERVICE-REGISTRY-SPLIT
+- **Title:** `ServiceRegistry` — god-object wiring всех подсистем
+- **Problem:** `internal/application/service_registry.go` — 2763 строки: инициализация, reload, shutdown и health всех подсистем в одном типе.
+- **Impact:** reload и порядок инициализации трудно рассуждать и тестировать (`RELOAD-SERIALIZE` — следствие).
+- **Fix:** по файлу/типу на подсистему с явными `Init/Reload/Close`; registry — только композиция. После `RELOAD-SERIALIZE` и `DEAD-APPLICATION-MIDDLEWARE`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-24, R-7.
+- **Status:** open
+
+### [medium][Gate][~1d] LAYER-GATE-DEPGUARD
+- **Title:** business-слой импортирует infrastructure; линтер этого не ловит
+- **Problem:** `business/routing/tree_builder.go:180` → `infrastructure/grouping.Route`; `business/silencing` → `infrastructure/silencing`. В `.golangci` нет `depguard`, `bodyclose`, `gosec`, `noctx`.
+- **Impact:** инверсия слоёв растёт незаметно; часть находок ревью (G112, тела ответов, запросы без ctx) поймал бы линтер.
+- **Fix:** перенести `Route`/`Duration` и интерфейс репозитория в core/business; `depguard` с правилами слоёв + `bodyclose`/`gosec`/`noctx` в гейт. После удаления мёртвого кода (меньше ложных срабатываний).
+- **Refs:** CODE-REVIEW-2026-10-21 M-25, R-8. Смежно `AMP-CORE-IMPORTS-INFRASTRUCTURE-NO-LAYER-GATE`.
+- **Status:** open
+
+### [medium][Deps][~0.5d] DEPS-CLIENT-GO-BUMP
+- **Title:** `k8s.io/client-go v0.29.0` вне поддержки, go.mod не tidy
+- **Problem:** `go.mod:38-40`.
+- **Impact:** нет security-фиксов client-go; дрейф графа зависимостей.
+- **Fix:** поднять client-go отдельным PR (карантин 7 дней — проверить дату версии), `go mod tidy -diff` в гейт.
+- **Refs:** CODE-REVIEW-2026-10-21 M-29. Смежно `GO-MOD-TIDY-CHECK`.
+- **Status:** open
+
+### [medium][App][~0.5d] DEAD-PKGS-NO-IMPORTERS
+- **Title:** пакеты без единого импортёра
+- **Problem:** `pkg/templatevalidator` (+ подпакеты, 4.6k), `pkg/aiclassifier` (549), `pkg/telemetry` (322), `pkg/middleware`, `internal/business/template`, `internal/storage` (placeholder) — не входят в `go list -deps ./cmd/...`.
+- **Impact:** ложная поверхность для ревью и поиска, лишние зависимости в go.mod.
+- **Fix:** удалить, `go mod tidy`. Проверка: `go build ./... && go list -deps ./cmd/... | grep -E 'templatevalidator|aiclassifier|pkg/telemetry|pkg/middleware'` пусто. Можно начинать сразу.
+- **Refs:** CODE-REVIEW-2026-10-21 § 4.4. Закрывает `DEAD-PKG-TELEMETRY`.
+- **Status:** open
+
+### [medium][Publishing][~0.5d] DEAD-TEMPLATE-STACK
+- **Title:** второй, неподключённый стек шаблонов
+- **Problem:** `internal/infrastructure/template`, `internal/notification/template` (живой только `defaults/email.go` в fallback-пути), миграция таблиц `templates`, прямая зависимость sprig (~4.5k строк).
+- **Impact:** две системы шаблонов, одна мёртвая; fallback через неё — источник `EMAIL-RENDER-ESCAPING`.
+- **Fix:** удалить после `EMAIL-RENDER-ESCAPING` (тот убирает fallback-путь).
+- **Refs:** CODE-REVIEW-2026-10-21 § 4.4.
+- **Status:** open
+
+### [medium][Publishing][~0.5d] DEAD-PUBLISHING-SURFACE
+- **Title:** ~7k строк неподключённого кода publishing
+- **Problem:** enhanced webhook stack, DLQ (`queue_dlq.go`), `middleware.go`, `middleware_cache.go`, `tracing.go`, `lru_cache.go`, `validator.go`, `metrics.go`, второй `refresh.go`, `trends_detector.go`, `timeseries_storage.go`, `stats_collector_parallel.go`; `refresh_test_utils.go` импортирует `testing` в prod.
+- **Impact:** непонятно, какой путь живой; `testing` в бинаре.
+- **Fix:** удалить по `go list -deps` и `deadcode`; отдельный `refactor:`-PR.
+- **Refs:** CODE-REVIEW-2026-10-21 § 4.4. Смежно `FU-UNWIRED-PUBLISH-SURFACES`.
+- **Status:** open
+
+### [medium][Config][~0.5d] DEAD-CONFIG-SUBSYSTEMS
+- **Title:** мёртвые подсистемы конфига и ключи, которые парсятся, но не читаются
+- **Problem:** `internal/config/{update_service,update_storage,service,sanitizer,example}.go`, `LoadConfigFromEnv`, ветки lock/backup/audit в `atomicApply`, `pkg/configvalidator/{parser,result,options}`. Ключи без читателей (`config.go:271-530`): `server.*_timeout` (таймауты захардкожены в `main.go:149-155`), `webhook.signature/rate_limiting/cors/max_*`, `app.max_workers`, `metrics.port/path`, `cache.*`, `lock.*`, `retry.*`, `telemetry.*`, `http_client.*`.
+- **Impact:** ложное ощущение настройки; хуже всего `webhook.signature.enabled`.
+- **Fix:** код удалить; ключи — подключить или удалить с WARN «not enforced» (breaking для указавших их — CHANGELOG с migration note).
+- **Refs:** CODE-REVIEW-2026-10-21 M-23, § 4.4. Смежно `DEAD-WEBHOOK-SECURITY-CONFIG`.
+- **Status:** open
+
 ## Low
 
 ### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-TIMER-REARM-WINDOW
@@ -118,9 +277,10 @@
   - Индексы ошибок валидатора для вложенных правил сдвигаются, если есть верхнеуровневые: правило `inhibition.inhibit_rules[j]` репортится как `inhibit_rules[len(top)+j]` (`go-app/internal/config/alertmanager_validation.go:101-105`) (F6).
   - Ключи секции в другом регистре (`Inhibition:`, `Inhibit_Rules:`, `Source_Match:`) yaml.v3 не узнаёт, и правила под ними пропадают молча (`config.go`, `loadInhibitRulesYAML`). Upstream такие ключи отвергает как неизвестные; в CHANGELOG — migration note (R2 N2).
   - `reload_coordinator.go:645-646` маппит `inhibit_rules`/`inhibition` в компонент, а diff отдаёт имена Go-полей (`InhibitRules`/`Inhibition`) ⇒ `affected_components` для ингибиции всегда пуст. На применение не влияет: правила пересобираются на каждом reload (F7).
+  - Карт «секция → компонент» две: `reload_coordinator.go:641-655` и `update_diff.go:295-322`; `affected_components` пуст и для правок маршрутов (CODE-REVIEW-2026-10-21 L-24, D-14).
 - **Impact:** вводящие в заблуждение путь в ошибке, `affected_components` и молча пропущенная секция.
-- **Fix:** валидировать списки раздельно (или перенумеровывать в `formatConfigValidatorErrors`); ошибка на ключ, совпадающий с известным без учёта регистра; маппинг компонентов по mapstructure/yaml-имени.
-- **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F6, F7, N2.
+- **Fix:** валидировать списки раздельно (или перенумеровывать в `formatConfigValidatorErrors`); ошибка на ключ, совпадающий с известным без учёта регистра; одна функция маппинга компонентов по mapstructure/yaml-имени.
+- **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F6, F7, N2; CODE-REVIEW-2026-10-21 L-24.
 - **Status:** open
 
 ### [low][Grouping][~0.25d] TIMER-ACTIVE-GAUGE-DRIFT
@@ -201,6 +361,80 @@
 - **Impact:** сейчас нет; ловушка для следующего, кто возьмёт эти функции вместо `DSN()`.
 - **Fix:** удалить обе (и пример/тест) либо собрать через `url.URL`, как `DSN()`.
 - **Refs:** `tasks/archive/HELM-EXTERNAL-DATABASE/research.md`, `evidence/dsn-password-escaping.txt`; 2026-10-16.
+- **Status:** open
+
+<!-- Code review 2026-10-21 -->
+
+### [low][Silencing][~0.5d] DEAD-SILENCING-CACHE
+- **Title:** второй кеш silences и прочие мёртвые хвосты
+- **Problem:** `business/silencing` cache + sync worker + `IsAlertSilenced` (~1.5k, в бинаре) дублируют живой `memory.SilenceStore`. Плюс: мёртвые `internal/database/postgres/{retry,prometheus,example,errors}.go`, `CircuitBreakerHealthChecker`, `LoadFromEnv`, `PeriodicHealthChecker` (с гонкой); `lock/example.go`, `LockManager`, `grouping/parser.go`, `ValidateConfig`/`SanitizeConfig`, `fingerprintIndex`; `core.Cache`; `k8s.GetSecret`; `httperror.RetryStrategy`.
+- **Impact:** дрейф состояний двух кешей (`SILENCE-SYNC-LIMIT-EXCEEDS-FILTER`); ложная поверхность.
+- **Fix:** удалить; `lock/example.go` → `_test.go` (example-тест). `RunMigrationsDown` — в `MIGRATIONS-EMBED`.
+- **Refs:** CODE-REVIEW-2026-10-21 D-11, § 4.4. Смежно `DB-CONN-STRING-UNESCAPED`.
+- **Status:** open
+
+### [low][Storage][~0.25d] DB-ORPHAN-TABLES
+- **Title:** таблицы БД без читателей и писателей
+- **Problem:** `filter_rules` (с seed), `alert_classifications`, `alert_publishing_history`, `system_metrics`, `migration_history` (`migrations/20250911094416_initial_schema.sql`), `config_versions`/`audit_log`/`backups`/`locks`. Живая только `alerts` (и таблицы silences/investigations).
+- **Impact:** схема вводит в заблуждение (`HISTORY-API` строился на допущении, что история уже пишется).
+- **Fix:** drop-миграция отдельным PR (Standard: схема БД); решение по `alert_classifications`/`alert_publishing_history` — вместе с `HISTORY-API`.
+- **Refs:** CODE-REVIEW-2026-10-21 § 4.4, § 10.
+- **Status:** open
+
+### [low][Cache][~0.5d] REDIS-HELPERS
+- **Title:** механические дубли вокруг Redis
+- **Problem:** CAS-release Lua ×4 (`lock/distributed.go:139,180`, `grouping/redis_timer_storage.go:540`, `grouping/redis_notify_log.go:605`); ленивая чистка ZSET-индекса только в timer storage (`redis_timer_storage.go:452`); `redis_notify_log.go:283-330` — 4 последовательных round trip на таргет без атомарности.
+- **Impact:** исправление в одной копии не доезжает до других (`REDIS-GROUP-INDEX-GHOSTS`).
+- **Fix:** `var casDelete = redis.NewScript(...)`, общий helper «ZSET-индекс с ленивой чисткой», `TxPipelined` в nflog.
+- **Refs:** CODE-REVIEW-2026-10-21 D-12, L-13, § 4.2.
+- **Status:** open
+
+### [low][Publishing][~0.5d] PUBLISH-CLIENT-PLUMBING
+- **Title:** обвязка клиентов publishing повторена пять раз
+- **Problem:** get-or-create с double-checked locking для 5 client maps (`publisher.go:342-361`); вложенные `select` с `time.After(100ms)` в воркере (`queue.go:815-850`) — high-задание ждёт до 100ms, таймер на итерацию; три `CircuitBreaker` (publishing, `core/resilience`, `llm`).
+- **Impact:** копии расходятся (ключи кеша — `PUBLISH-PER-TARGET-STATE`).
+- **Fix:** generic `cachedClient[T]` (после `PUBLISH-PER-TARGET-STATE`); неблокирующие проверки по приоритету + один блокирующий select; один breaker. После `PUBLISH-SINGLE-RETRY-LAYER`.
+- **Refs:** CODE-REVIEW-2026-10-21 D-9, D-15, L-16, § 4.2.
+- **Status:** open
+
+### [low][Publishing][~0.5d] TEMPLATE-EXEC-CACHE
+- **Title:** шаблон парсится заново на каждое поле каждого алерта
+- **Problem:** `business/templating/template.go:380-420`: `Clone`+`Parse` на каждый вызов.
+- **Impact:** CPU и аллокации на отправке растут с числом полей × алертов.
+- **Fix:** LRU `expression → *Template`, сброс на reload; бенчмарк.
+- **Refs:** CODE-REVIEW-2026-10-21 L-10.
+- **Status:** open
+
+### [low][Storage][~0.25d] MIGRATIONS-EMBED
+- **Title:** миграции ищутся в FS по CWD; `RunMigrationsDown` откатывает не то
+- **Problem:** `internal/database/migrations.go:108-140,190-215`: поиск каталога по CWD/`runtime.Caller`; `RunMigrationsDown(steps)` передаёт steps как целевую версию (`steps=1` откатит всё; вызовов нет).
+- **Impact:** бинарь зависит от раскладки FS; ловушка для первого вызова Down.
+- **Fix:** `//go:embed *.sql` в `goose.NewProvider`; Down удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 L-29.
+- **Status:** open
+
+### [low][Helm][~0.1d] HELM-AMP-SECCOMP
+- **Title:** у пода AMP нет `seccompProfile`, токен SA монтируется без RBAC
+- **Problem:** `helm/amp/values.yaml:51`, `templates/serviceaccount.yaml:13`: нет `seccompProfile: RuntimeDefault`; `automountServiceAccountToken: true` даже без RBAC.
+- **Impact:** не проходит restricted PSS; лишний токен в поде.
+- **Fix:** seccomp `RuntimeDefault`; automount только при `rbac.create && publishing.enabled` (или investigation k8s tool).
+- **Refs:** CODE-REVIEW-2026-10-21 L-28. Digest-пины — `CI-SUPPLY-CHAIN`.
+- **Status:** open
+
+### [low][Config][~0.5d] RELOADER-WATCH-DEPENDENT-FILES
+- **Title:** sidecar config-reloader не видит изменений зависимых файлов
+- **Problem:** `cmd/config-reloader/hash.go:17` хеширует только основной конфиг: смена шаблонов, `*_file`-секретов, web config не триггерит reload.
+- **Impact:** ротация секрета через Secret-файл требует ручного reload или рестарта.
+- **Fix:** повторяемый `--watch-file`, хеш по набору; в чарте — пути из values.
+- **Refs:** CODE-REVIEW-2026-10-21 L-23.
+- **Status:** open
+
+### [low][Test][~1d] TESTS-INTEGRATION-TAG
+- **Title:** интеграционные тесты без build-тега, ожидания через `time.Sleep`
+- **Problem:** тесты с Redis/Postgres/testcontainers идут в общем `go test ./...` и пропускаются по окружению; ожидания асинхронных событий через `time.Sleep`.
+- **Impact:** flaky-тесты (часть записей `BUGS.md`) и медленный локальный прогон.
+- **Fix:** build-тег `integration`, отдельная цель в гейте; `time.Sleep` → `require.Eventually`.
+- **Refs:** CODE-REVIEW-2026-10-21 § 8.
 - **Status:** open
 
 ## Entry Format

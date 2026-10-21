@@ -301,6 +301,347 @@
 - **Refs:** проверка 2026-10-21 на живом конфиге sema-prod (временный прогон, конфиг и логи не сохранены в репо: в конфиге креды).
 - **Status:** open
 
+<!-- Code review 2026-10-21 (`docs/06-planning/CODE-REVIEW-2026-10-21.md`, `main` @ `68d749f`). В Refs — ID находки из документа; там же — порядок этапов и зависимости. Пути — от `go-app/`. -->
+
+### [critical][Inhibition][~1d] INHIBIT-SOURCE-CACHE-EVICTION
+- **Title:** источник inhibition выпадает из кеша через 5 минут горения и не возвращается на дубликатах
+- **Problem:** три дефекта `TwoTierAlertCache`.
+  - `cleanup` (`internal/infrastructure/inhibition/cache.go:426-445`) вытесняет из L1 по `StartsAt + ttl` (5m): любой источник старше 5 минут удаляется каждую минуту.
+  - Точный дубликат (`ProcessActionIgnored` — resend без изменения `EndsAt`, типично для webhook-источников без `endsAt`) делает `return nil` до шага `AddFiringAlert` (`internal/core/services/alert_processor.go:537-541`) ⇒ источник не возвращается в кеш, Redis-ключ (TTL 5m) тоже истекает.
+  - `GetFiringAlerts` (`cache.go:233-262`) идёт в Redis только при пустом L1 ⇒ в HA источники с другой реплики невидимы, пока локальный L1 не пуст.
+- **Impact:** долгоживущий источник перестаёт подавлять цели: для не-Prometheus источников навсегда, для Prometheus — «дырами» до минуты. Утечка и на ingest, и в `filterInhibited` на отправке — базовая функция Alertmanager работает неверно.
+- **Fix:** вытеснять только по `EndsAt` (с `resolve_timeout`); обновлять кеш на каждом ingest, включая ignored-дубликаты; убрать shortcut «L1 не пуст ⇒ без Redis» или брать источники из активного набора `memory.AlertStore`. Тест: источник горит 10 минут с resend каждые 30s (с новым `endsAt` и без) ⇒ цель подавлена всё время; вариант с двумя репликами.
+- **Refs:** CODE-REVIEW-2026-10-21 C-1.
+- **Status:** open
+
+### [critical][Publishing][~0.25d] PROVIDER-RESOLVE-STATELESS-PD
+- **Title:** resolve в PagerDuty теряется после рестарта, на другой реплике и через 24h
+- **Problem:** trigger шлёт `DedupKey: alert.Fingerprint`, а `resolveEvent` (`internal/infrastructure/publishing/pagerduty_publisher_enhanced.go:127-138`) берёт ключ только из in-memory `EventKeyCache(24h)` (`publisher.go:383-388`) и при промахе возвращает `ErrEventNotTracked`. Кеш общий на фабрику: ключ может удалить и второй PD-таргет.
+- **Impact:** после каждого rollout/рестарта, в HA и для инцидентов старше 24h инциденты PD не закрываются автоматически. В upstream dedup-ключ детерминирован.
+- **Fix:** в resolve — `DedupKey: alert.Fingerprint`, кеш для PD убрать. Тест: resolve без предварительного trigger в том же процессе ⇒ запрос `event_action=resolve` с тем же `dedup_key`.
+- **Refs:** CODE-REVIEW-2026-10-21 C-2.
+- **Status:** open
+
+### [high][Publishing][~0.5d] PROVIDER-RESOLVE-ROOTLY
+- **Title:** resolve в Rootly молча пропадает без локального состояния
+- **Problem:** `resolveIncident` (`internal/infrastructure/publishing/rootly_publisher_enhanced.go:196-202`) ищет ID инцидента в in-memory `IncidentIDCache(24h)`; при промахе возвращает `nil` — доставка считается успешной.
+- **Impact:** как у `PROVIDER-RESOLVE-STATELESS-PD`, но без ошибки и метрики: инцидент Rootly остаётся открытым, а AMP считает resolve доставленным.
+- **Fix:** детерминированный внешний ключ (lookup по label/title) или персистентное хранение ID в Redis рядом с nflog; при промахе — ошибка, а не `nil`. Делать после `PUBLISH-PER-TARGET-STATE` (ключ кеша).
+- **Refs:** CODE-REVIEW-2026-10-21 C-2.
+- **Status:** open
+
+### [high][API][~0.5d] SILENCED-ALERTS-INGEST
+- **Title:** firing-алерт под активным silence отбрасывается до ingest
+- **Problem:** `handleAlertsPost` (`internal/application/handlers/alerts.go:431-436`) фильтрует `silences.HasActiveMatch` до `ProcessAlert`/`IngestBatch`. Контрактный тест `cmd/server/main_phase0_contract_test.go:1453` закрепляет это (0 алертов после POST заглушенного).
+- **Impact:** алерт не виден в `GET /api/v2/alerts` со `status.state=suppressed` (karma, `amtool alert query -s`); не становится источником inhibition (в upstream становится); нет записи в истории.
+- **Fix:** убрать фильтр из хендлера — подавление уже делает notify chain (`filterSilenced`, `grouping/manager_impl.go:1215`); переписать контрактный тест на «алерт есть, `suppressed`». Breaking для клиентов API — запись в CHANGELOG. Смежно `API-ALERTS-RECEIVER-INHIBITED-STATUS`.
+- **Refs:** CODE-REVIEW-2026-10-21 H-1, D-4.
+- **Status:** open
+
+### [high][Config][~0.25d] DURATION-UPSTREAM-UNITS
+- **Title:** длительности `d`/`w`/`y` в конфиге не парсятся
+- **Problem:** `routing.Duration` (`internal/infrastructure/routing/global.go:486`) и `grouping.Duration` (`internal/infrastructure/grouping/config.go:125`) используют `time.ParseDuration`; upstream — `model.Duration`.
+- **Impact:** немодифицированный upstream-конфиг с `repeat_interval: 1d` не загружается.
+- **Fix:** один тип `Duration` на `model.ParseDuration` из `github.com/prometheus/common` (уже прямая зависимость); тест на `1d`, `1w`, `90s`, `0s`.
+- **Refs:** CODE-REVIEW-2026-10-21 H-2, D-6.
+- **Status:** open
+
+### [high][Security][~0.25d] EMAIL-RENDER-ESCAPING
+- **Title:** email fallback рендерит HTML без экранирования; Subject без санитизации CR/LF
+- **Problem:**
+  - `email_publisher_enhanced.go` (`internal/infrastructure/publishing/`, импорт `text/template`, `extractEmailConfig` `:159-163`, `renderTemplate` `:315-325`) рендерит HTML из `internal/notification/template/defaults/email.go:236-258` через `text/template`: `{{ .Annotations.description }}` вставляется как есть, `href="{{ .CommonAnnotations.runbook_url }}"` пропускает `javascript:`. Путь активен при `publishing.templates.enabled=false`, у email-target без шаблонных полей и при ошибке `RenderEmailContent`.
+  - `email_client.go:282`: `Subject` в ASCII пишется без `sanitizeHeaderValue` (её применяют только к extra headers, `:304`). `hypothesis`: доходят ли CR/LF в лейблах через `/api/v2/alerts` — не проверено.
+- **Impact:** тот, кто может прислать алерт, внедряет HTML/ссылки в письмо дежурному; возможна header injection через `alertname`.
+- **Fix:** убрать fallback-путь, всегда рендерить через `business/templating` (`html/template`, `email.default.html`); минимум — `html/template` для HTML-части. `mime2047Subject(sanitizeHeaderValue(msg.Subject))`. Тесты: аннотация с `<script>`/`javascript:`, `alertname` с `\r\n`.
+- **Refs:** CODE-REVIEW-2026-10-21 H-3, L-1.
+- **Status:** open
+
+### [high][Publishing][~0.5d] PUBLISH-PER-TARGET-STATE
+- **Title:** кеши корреляции и SMTP-клиенты общие между таргетами
+- **Problem:** `rootlyCache`, `pagerDutyCache`, `slackCache` создаются на фабрику (`internal/infrastructure/publishing/publisher.go:383-388`) и ключуются только fingerprint (`slack_publisher_enhanced.go:56,131`, `rootly_publisher_enhanced.go:71,117`). SMTP-клиент кешируется по `host:port` (`publisher.go:856-869`), хотя в `SMTPDialer` зашиты user/password/TLS/From (`email_client.go:126-161`).
+- **Impact:** второй Slack-таргет отвечает в тред чужого канала; второй Rootly-аккаунт обновляет чужой инцидент; после reload с новым SMTP-паролем или `require_tls` работает старый клиент до рестарта; два таргета на одном SMTP-хосте шлют с кредами первого.
+- **Fix:** ключ кеша `target.Name|fingerprint`; ключ SMTP-клиента `host|port|user|sha256(pass)|tls`. Тест на два таргета одного типа и reload SMTP-пароля.
+- **Refs:** CODE-REVIEW-2026-10-21 H-4.
+- **Status:** open
+
+### [high][Config][~0.5d] RELOAD-SERIALIZE
+- **Title:** reload конфига не сериализован и привязан к контексту HTTP-клиента
+- **Problem:**
+  - `ServiceRegistry.ReloadConfig` (`internal/application/service_registry.go:2654`) без мьютекса; SIGHUP (`cmd/server/main.go:298`), `POST /-/reload` (`handlers/status_api.go:105`) и sidecar запускают конвейер параллельно. Внутри — глобальный viper, `r.config = newConfig` без синхронизации; распределённый lock в `atomicApply` недостижим (`lockManager == nil`, `service_registry.go:337`); `rc.reloadVersion` читается без `mu` (`reload_coordinator.go:168,252`).
+  - HTTP-reload и `RollbackAll` (`internal/config/update_reloader.go:262`) работают на `r.Context()`: обрыв клиента посреди Phase 5 оставляет незавершённый откат (W610). SIGHUP-путь уже использует свой контекст.
+  - `external_url` захватывается при сборке роутера (`internal/application/handlers/alerts.go:57`) и reload его не обновляет.
+- **Impact:** два reload применяются вперемешку, откат возвращает не тот снимок; `hypothesis`: `concurrent map writes` в viper. Обрыв клиента ⇒ split state.
+- **Fix:** `reloadMu sync.Mutex` в `ReloadConfig`, для HTTP — `TryLock` ⇒ `409`; `context.WithoutCancel` + свой таймаут в `ReloadHandler` и `RollbackAll`; `external_url` читать из `registry.Config()` на запрос. Тест: два параллельных reload под `-race`, reload с отменённым клиентским ctx.
+- **Refs:** CODE-REVIEW-2026-10-21 H-5, M-19, L-5.
+- **Status:** open
+
+### [high][Config][~0.5d] CONFIG-VALIDATION-FAIL-CLOSED
+- **Title:** валидация конфига расходится между стартом и reload и пропускает ошибки
+- **Problem:**
+  - `DefaultConfigValidator` (`internal/config/update_validator.go:589-596`) работает только на reload, `Config.Validate` — только на старте (`config.go:1147`), правила разные. Lite + `app.environment=production` (дефолт чарта) без `DATABASE_PASSWORD`: старт проходит, каждый reload падает «database password should not be empty in production».
+  - `validateAlertmanagerSubset` (`internal/config/alertmanager_validation.go:66-71,93-95`): ошибка `yaml.Unmarshal` ⇒ `return nil`, вся проверка configvalidator пропускается.
+  - `parseMatchers` в tree builder (`internal/business/routing/tree_builder.go:274-278`) молча выбрасывает битый matcher («best-effort») ⇒ маршрут шире, особенно для `!=`/`!~`. `hypothesis`: конкретный вход, проходящий configvalidator и ломающий builder, не найден.
+- **Impact:** на lite-prod hot reload не работает никогда (sidecar в бесконечном backoff); битый конфиг может отправлять алерты не тому ресиверу без единой ошибки.
+- **Fix:** один валидатор на оба пути, проверки БД гейтить `RequiresPostgres()`; ошибка unmarshal — ошибка валидации; builder вызывает `matcher.Parse` и возвращает ошибку. Breaking: битые `matchers:` перестают загружаться — CHANGELOG.
+- **Refs:** CODE-REVIEW-2026-10-21 H-6, M-20, D-7.
+- **Status:** open
+
+### [high][LLM][~0.25d] LLM-RETRY-CLASSIFY
+- **Title:** ответы LLM 429/5xx не ретраятся, `max_retries: 0` превращается в 3
+- **Problem:** `llm.HTTPError` (`internal/infrastructure/llm/errors.go:26`) не `httperror.HTTPAPIError`, поэтому `IsRetryable` (`pkg/httperror/error.go:445`) возвращает false — ретраятся только таймауты (худший случай 30s × 4 внутри `POST /api/v2/alerts`). `WithRetryFunc` (`internal/core/resilience/resilience.go:55-57`) подменяет `MaxRetries==0` на 3. Тело ответа LLM целиком уходит в ERROR-лог и в БД через `SaveError` (`llm/client.go:310-317,440,584`).
+- **Impact:** максимальная латентность ingest при минимальной надёжности классификации; ретраи нельзя выключить; PII из промпта в логах.
+- **Fix:** `errors.As(err, &he) && (he.StatusCode==429 || he.StatusCode>=500)`; различать «не задано» и `0`; `truncate(body, 512)`. Тест на httptest 503→200. Бюджет времени — в `PROD-LLM-ALERT-PATH-ISOLATION`.
+- **Refs:** CODE-REVIEW-2026-10-21 H-7, L-8.
+- **Status:** open
+
+### [high][Investigation][~1d] INVESTIGATION-ASYNC-DEDUP
+- **Title:** расследования без дедупа, синхронный INSERT в ingest-пути, вывод tools без лимитов
+- **Problem:**
+  - `Submit` (`internal/infrastructure/investigation/queue.go:122-160`) делает `repo.Create` на горутине запроса, без таймаута, хотя вызов из `alert_processor.go:787-788` подписан fire-and-forget.
+  - Дедупа нет, а смена `EndsAt` на каждом resend считается апдейтом (`deduplication.go:352-357`) ⇒ новое расследование на каждый resend.
+  - Вывод tools не ограничен: `kubernetes.go:185` (`io.Copy`, `tail_lines` от LLM), `loki.go:82,114`, `prometheus.go:107`, `agent_loop.go:204`.
+- **Impact:** неограниченная стоимость LLM (~1 расследование/мин на горящий алерт); медленная БД задерживает ingest; OOM воркера и раздувание контекста.
+- **Fix:** `Submit` — только неблокирующая отправка в канал, `Create` в воркере; дедуп по `fingerprint+StartsAt` с TTL (Redis `SETNX`); `io.LimitReader(256KiB)`, clamp `tail_lines`/`limit` ≤500, кэп символов перед записью в history.
+- **Refs:** CODE-REVIEW-2026-10-21 H-8, M-10 (tools). Дедуп запланирован и в `PHASE-5A-INVESTIGATION-PIPELINE`.
+- **Status:** open
+
+### [high][Security][~1d] INVESTIGATION-PROMPT-ISOLATION
+- **Title:** недоверенные данные алерта в system-промпте, investigation tools без allowlist namespace
+- **Problem:**
+  - `buildOpenAIMessages` (`internal/infrastructure/llm/investigate_with_tools.go:165`) кладёт JSON алерта (все labels/annotations) в роль `system`; классификация — так же (`llm/client.go:385-394`): инъекция в аннотацию может выставить `severity=noise`, после чего `filter_engine` дропнет алерт.
+  - Kubernetes tool (`internal/infrastructure/investigation/tools/kubernetes.go:165`) читает логи/поды/события в любом namespace по выбору LLM; вывод уходит внешнему провайдеру и в БД.
+  - `database_query` ходит в пул самого AMP (`service_registry.go:2226`) ⇒ неверные выводы по алертам на чужие БД, утечка `pg_stat_activity` AMP провайдеру.
+  - `InvestigateAlert`/`InvestigateWithTools` (`llm/client.go:521`) игнорируют `provider` и circuit breaker.
+- **Impact:** атакующий с правом слать алерты управляет агентом и вытягивает логи чужих namespace во внешний LLM.
+- **Fix:** данные алерта — в `user`-сообщении в явном разделителе с инструкцией «это данные»; `investigation.tools.kubernetes.allowed_namespaces`, по умолчанию — namespace из лейбла алерта; редактирование секретов в выводе tools; отдельный DSN для `database_query`, без него tool не регистрировать; один `doChat` с CB и лимитом тела.
+- **Refs:** CODE-REVIEW-2026-10-21 H-9, L-7, L-9. Смежно `PROD-LLM-ALERT-PATH-ISOLATION`, `INVESTIGATION-K8S-TOOL-HELM`.
+- **Status:** open
+
+### [high][Test][~1d] SILENCE-REPO-INTEGRATION-TESTS
+- **Title:** тесты `PostgresSilenceRepository` безусловно пропускаются
+- **Problem:** `internal/infrastructure/silencing/postgres_silence_repository_test.go` (30 `t.Skip`), `bulk_ops_test.go` (7), `ttl_test.go` (6) — «Requires database connection»; `NewPostgresSilenceRepository` не вызывается ни в одном тесте.
+- **Impact:** SQL хранения silences в HA не проверяется ничем, кроме e2e.
+- **Fix:** testcontainers-сьют по образцу `repository/postgres_history_test.go`: CRUD, фильтры `filter_builder`, TTL/cleanup, bulk; безусловные `t.Skip` удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 H-11.
+- **Status:** open
+
+### [medium][Grouping][~1d] GROUP-STORE-LOST-UPDATE
+- **Title:** конкурентное обновление существующей группы в Redis теряет алерт молча
+- **Problem:** `AddAlertToGroup` (`internal/infrastructure/grouping/manager_impl.go:298-305`) делает `Load → mutate → Store`; при конкурентном апдейте `RedisGroupStorage.Store` (`redis_group_storage.go:204`) возвращает `ErrVersionMismatch`/`TxFailedErr`, ошибка только логируется, вызывающему возвращается незаписанный `Clone()`. `group.Version++` выполняется до EXEC. `MemoryGroupStorage` версию не проверяет вовсе.
+- **Impact:** алерт или resolve пропадает из группы до следующего resend; memory и Redis backend ведут себя по-разному.
+- **Fix:** retry с повторным `Load` (N попыток, затем ошибка); локальная сериализация по ключу через `groupPublishLocks` (`publish_lock.go:72`) — заодно закрывает `GROUPING-NEW-GROUP-CREATE-RACE`; `Version++` на копии после EXEC; общий contract-тест для двух storage.
+- **Refs:** CODE-REVIEW-2026-10-21 M-1, D-13. Смежно `REDIS-GROUP-STORAGE-UNLOCKED-WRITES` (TECH-DEBT), `GROUPING-NEW-GROUP-CREATE-RACE`.
+- **Status:** open
+
+### [medium][Silencing][~0.25d] SILENCE-VALIDATION-PARITY
+- **Title:** валидация silence расходится с upstream: отклоняет пустые значения, принимает match-all
+- **Problem:** три копии валидации (`internal/application/handlers/silence_convert.go:79`, `internal/infrastructure/storage/memory/silence_store.go:457`, `internal/core/silencing/validator.go:76`) требуют непустое значение каждого matcher'а. Upstream требует, чтобы хотя бы один matcher не матчил пустую строку.
+- **Impact:** отклоняются валидные `env=""`, `env!=""`; принимается `alertname=~".*"`, который глушит всё.
+- **Fix:** один валидатор в `core/silencing` по правилу upstream, обе точки входа вызывают его; парсинг StartsAt/EndsAt и regex-проверка — там же. Breaking (match-all отклоняется) — CHANGELOG.
+- **Refs:** CODE-REVIEW-2026-10-21 M-2, D-3.
+- **Status:** open
+
+### [medium][Storage][~1d] STORE-RETENTION-GC
+- **Title:** alert store и silence store растут неограниченно
+- **Problem:**
+  - `AlertStore.all` (`internal/infrastructure/storage/memory/alert_store.go:113-193`) никогда не чистится: resolved остаются навсегда, каждый новый `startsAt` — новый ключ.
+  - `SilenceStore` не удаляет истёкшие silences (`silence_store.go`); `HasActiveMatch`/`ActiveMatchingSilenceIDs` (`:287-303,365-385`) проходят все silences, аллоцируя matcher'ы на каждый; глобальный `RegexCache` (`core/silencing/matcher_cache.go`) сбрасывается целиком на 1000 записях под write-lock.
+- **Impact:** память, время `List`/`Stats`/`filterSilenced` и размер снапшота растут с аптаймом.
+- **Fix:** периодический GC resolved с `EndsAt < now - retention`; retention GC silences (upstream 120h); компиляция matcher'ов при сохранении в `StoredSilenceState`; gauges размеров store. Soak-тест с ротацией алертов.
+- **Refs:** CODE-REVIEW-2026-10-21 M-3, M-4. Смежно `ALERT-STORE-DEDUP-KEY-STARTSAT`.
+- **Status:** open
+
+### [medium][Inhibition][~0.5d] INHIBIT-STATE-LIFECYCLE
+- **Title:** состояния inhibition не истекают, cleanup worker не запущен
+- **Problem:** `inhibition/state_manager.go:120-260`: state удаляется только при resolve источника, полным сканом `GetActiveInhibitions` (`alert_processor.go:830-850`); resolve цели или исчезновение источника без resolve оставляют state навсегда; `ExpiresAt` всегда nil; `StartCleanupWorker` не вызывается; `RecordInhibition` на каждом resend — Redis SET с TTL 24h и O(n) `countActiveStates` (`alert_processor.go:600`).
+- **Impact:** неограниченный рост `sync.Map` и Redis-ключей; лишняя O(n) работа в ingest-пути.
+- **Fix:** удалять state на resolve цели; `ExpiresAt = source.EndsAt`; обратный индекс `source → targets`; gauge через `GaugeFunc`; запустить cleanup worker или удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 M-5.
+- **Status:** open
+
+### [medium][Publishing][~0.5d] QUEUE-GRACEFUL-STOP
+- **Title:** остановка очереди публикации теряет задания и может паниковать
+- **Problem:** `PublishingQueue.Stop` (`internal/infrastructure/publishing/queue.go:570-600`) закрывает три канала; воркер (`:815-850`) выходит, получив `nil` из закрытого high-канала, бросая medium/low без сигнала completion. `submitJob` (`:764`) после `Stop` и повторный `Stop` — panic. Воркер без `recover` (`:802`); источник паники — непроверенные type assertions (`rootly_publisher_enhanced.go:89-91`).
+- **Impact:** graceful stop теряет задания; поздний `Submit` или паника паблишера роняет процесс.
+- **Fix:** atomic `closing` + отказ в `submitJob`, drain всех каналов, `close` под `sync.Once`; `recover` в `processJob` с переводом паники в ошибку задания. Тест: `Stop` с заданиями во всех приоритетах; `Submit` после `Stop`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-7, L-19.
+- **Status:** open
+
+### [medium][Publishing][~1.5d] PUBLISH-SINGLE-RETRY-LAYER
+- **Title:** вложенные ретраи в publishing блокируют воркер и открывают breaker здоровым таргетам
+- **Problem:** клиенты (`slack_client.go:217-311`, `telegram_client.go:319-418`, `pagerduty_client.go:379-472`, `rootly_client.go:303-364`, `webhook_client.go:142-267`) делают 3–4 попытки, очередь (`queue.go:1401`, `retryPublish`) — ещё `maxRetries+1`: до 16 HTTP на задание. `time.Sleep` без ctx (`slack:247`, `telegram:345`, `pagerduty:427,460`) — `Abandon` не прерывает backoff; `defer Body.Close()` внутри цикла (`slack:254`, `telegram:352`); `Retry-After` не ограничен (`slack:288`, `webhook:241-244`).
+- **Impact:** медленный или rate-limited таргет превышает `DeliveryConfirmationTimeout` (45s), abandon считается отказом для breaker'а ⇒ здоровый таргет может открыть breaker. `hypothesis`: группа из 45+ алертов в Slack не укладывается в 45s.
+- **Fix:** клиенты делают одну попытку и возвращают классифицированную ошибку (`retryable`, `Retry-After`); ретраит только очередь через `pkg/retry` с ctx-aware backoff; cap `Retry-After` 30s.
+- **Refs:** CODE-REVIEW-2026-10-21 M-8, D-8.
+- **Status:** open
+
+### [medium][Publishing][~0.25d] CIRCUIT-BREAKER-HALF-OPEN
+- **Title:** circuit breaker publishing не переходит в half-open — после timeout пропускает весь поток
+- **Problem:** `CanAttempt` (`internal/infrastructure/publishing/circuit_breaker.go:69-84`) по истечении timeout возвращает true всем вызывающим, но состояние в HalfOpen не переводит; `State()` показывает `open`.
+- **Impact:** вместо одной пробы на таргет идёт весь поток заданий; состояние в метриках неверно.
+- **Fix:** под write-lock переход Open→HalfOpen с одним пробным слотом (`probeInFlight`); тест на конкурентные `CanAttempt` после timeout.
+- **Refs:** CODE-REVIEW-2026-10-21 M-11.
+- **Status:** open
+
+### [medium][Security][~0.5d] PUBLISH-SECRETS-IN-LOGS
+- **Title:** токены из URL таргетов и тела ответов попадают в логи; ответы читаются без лимита
+- **Problem:**
+  - `"HTTP request failed: %w"` с `*url.Error` и полным URL (`internal/infrastructure/publishing/publisher.go:118-120,176-178`): токены Teams/Discord/Google Chat/Telegram-fallback уходят в лог `Failed to publish after retries`. Тело ответа целиком копируется в текст ошибки (`publisher.go:125-130`). Сырой `target.URL` на DEBUG (`business/publishing/discovery_impl.go:479-483`) и INFO (`publisher.go:801-803`).
+  - `io.ReadAll` без лимита: `publisher.go:125,182`, `slack_client.go:257`, `telegram_client.go:296,355`, `pagerduty_client.go:529`, `rootly_client.go:380`, `webhook_client.go:198`, `llm/client.go:282`.
+  - Ошибка `weak database password detected: '%s'` (`internal/config/config.go:1468`) печатает пароль (из словаря слабых).
+- **Impact:** секреты в логах и агрегаторе; гигантский ответ таргета раздувает память воркера.
+- **Fix:** маскировать URL (маскер из `webhook_auth.go:153` перенести в общий хелпер); тело в ошибках ≤512 байт; общий `readLimited(r, 64<<10)`; убрать значение из ошибки пароля. Тест по образцу `discovery_log_redaction_test.go`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-9, M-10, L-2, D-9. Смежно `CONFIG-VALIDATION-ERROR-REDACTION`.
+- **Status:** open
+
+### [medium][Publishing][~0.5d] PUBLISH-HEALTH-PROBES
+- **Title:** email-таргет всегда unhealthy; метрики refresh не скрейпятся
+- **Problem:** health monitor шлёт HTTP GET на каждый таргет (`internal/business/publishing/health_checker.go:107-120`); для `smtp://host:port` (`config_targets.go:669`) — всегда `unsupported protocol scheme`. `hypothesis`: GET на Slack webhook / PD `/v2/enqueue` тоже не 2xx. Метрики refresh регистрируются во временном `prometheus.NewRegistry()` (`internal/application/publishing_runtime.go:210`, `refresh_manager_impl.go:121`).
+- **Impact:** ложные unhealthy-статусы в API/дашборде; refresh не наблюдаем.
+- **Fix:** email — пропускать или TCP-probe; API-типы — TCP-only probe; refresh-метрики — `v2.Global().Publishing`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-12, M-13.
+- **Status:** open
+
+### [medium][API][~0.5d] API-V2-ERROR-SHAPE
+- **Title:** ошибки API v2 в форме `{"error":…}` вместо JSON-строки; 405 без `Allow`; любая ошибка чтения тела — 413
+- **Problem:** `writeJSON(..., map[string]string{"error": ...})` в `internal/application/handlers/alerts.go:76,309,425`, `silences.go:95,122,135,144`, `status.go:51`; upstream swagger описывает 400/500 как `type: string`. Проверка метода inline (`alerts.go:68`, `silences.go:46,73`, `status_api.go:101`, `investigation.go:19`, `inhibitions.go:29`) отдаёт 405 без `Allow`, в отличие от `method_guard.go`. В `handleAlertsPost`/`handleSilencePost` любая ошибка `io.ReadAll` (обрыв клиента) ⇒ 413.
+- **Impact:** `hypothesis`: клиенты, сгенерированные по swagger (amtool), на 400 получают ошибку декодирования вместо причины.
+- **Fix:** `writeV2Error(w, code, msg)` с `json.Marshal(msg)`; `allowMethods(...)` по образцу `getOnly`; `errors.As(err, *http.MaxBytesError)` ⇒ 413, остальное 400. Строка в `ALERTMANAGER_COMPATIBILITY.md`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-15, L-6.
+- **Status:** open
+
+### [medium][API][~0.25d] API-FILTER-MATCHER-GRAMMAR
+- **Title:** `?filter=` в API принимает другую грамматику matcher'ов, чем конфиг и upstream
+- **Problem:** `internal/application/handlers/matchers.go:28` требует кавычки (`"(.*)"`), не допускает пробелов и не снимает экранирование; парсер маршрутов (`business/routing/tree_builder.go:237,411`) и `pkg/configvalidator/matcher` принимают обе формы.
+- **Impact:** `?filter=alertname=Foo` ⇒ 400, тот же matcher в `route.matchers` работает; upstream принимает обе формы.
+- **Fix:** использовать общий парсер (`matcher.Parse`, затем `pkg/labelmatch` из `LABELMATCH-PKG`), регекс в handlers удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 M-16, D-2.
+- **Status:** open
+
+### [medium][API][~0.5d] INGEST-PARSE-VALIDATE
+- **Title:** валидация входящих алертов зависит от `severity`, 400 без причины
+- **Problem:** `parseAlertsForProcessing` (`internal/application/handlers/alerts.go:482-503`) сначала разбирает Prometheus-парсером, его валидатор требует `severity ∈ {critical,warning,info,debug}` (`webhook/validator.go:186-196,554`); при ошибке молча fallback на legacy-парсер, который проверяет только `alertname`, не валидирует имена меток и `generatorURL`, теряет `activeAt`/`value`. Наружу — общее «invalid alert payload».
+- **Impact:** итоговая валидация зависит от значения `severity`; диагностика 400 бесполезна. Upstream валидирует имена/значения меток и `startsAt<=endsAt`, `alertname` не требует.
+- **Fix:** выбор парсера по формату (детектор), один валидатор по смыслу upstream `PostableAlert.Validate`, ограничение по severity из ingest убрать, возвращать первую содержательную ошибку.
+- **Refs:** CODE-REVIEW-2026-10-21 M-17.
+- **Status:** open
+
+### [medium][UI][~0.25d] UI-ROUTE-PREFIX-LINKS
+- **Title:** legacy-дашборд под `route_prefix` без CSS и с битой навигацией
+- **Problem:** абсолютные `href="/static/..."`, `href="/dashboard/..."` в `cmd/server/templates/legacy/shared.html:9,16-22`, `dashboard-overview.html:49-52`; `WithRoutePrefix` отдаёт 404 на всё вне префикса. `route_prefix_integration_test.go:117` проверяет только статус страницы.
+- **Impact:** при `--web.route-prefix` или `external_url` с путём дашборд неработоспособен.
+- **Fix:** `RoutePrefix` в `legacyDashboardPageData`, `href="{{.RoutePrefix}}/static/..."` (или относительные ссылки); проверка ссылок в тесте.
+- **Refs:** CODE-REVIEW-2026-10-21 M-18.
+- **Status:** open
+
+### [medium][Config][~0.25d] CONFIG-ENV-KEYS-UNBOUND
+- **Title:** env молча игнорируется для ключей без default/`BindEnv`
+- **Problem:** `AutomaticEnv` (`internal/config/config.go:671-672`, признано комментарием у `:978-982`) резолвит только ключи, известные viper. Без default и `BindEnv`: `database.url`, `telemetry.insecure`, `telemetry.ca_cert_file`, `llm.agent_mode`, `inhibition.config_file`, `publishing.templates.render_timeout`, `publishing.templates.max_output_bytes` (сверено по списку из 162 ключей).
+- **Impact:** оператор задаёт `LLM_AGENT_MODE=true` — режим не меняется, без ошибки.
+- **Fix:** bind всех mapstructure-путей (reflection или `viper.ExperimentalBindStruct()`), тест, сверяющий набор ключей структуры и bound-ключей. Корень общий с `CONFIG-GLOBAL-VIPER-STATE` — делать вместе.
+- **Refs:** CODE-REVIEW-2026-10-21 M-22.
+- **Status:** open
+
+### [medium][Lite][~0.25d] SQLITE-LITE-HARDENING
+- **Title:** в lite-профиле `foreign_keys` включён на одном соединении, нет `busy_timeout`
+- **Problem:** `PRAGMA foreign_keys = ON` и `journal_mode = WAL` выполняются через `db.ExecContext` на пуле (`internal/infrastructure/sqlite_adapter.go:57-85`) — действуют на одно соединение; `MaxOpenConns` берётся из настроек Postgres (`service_registry.go:1148-1154`); `busy_timeout` не задан.
+- **Impact:** `ON DELETE CASCADE` срабатывает недетерминированно; `SQLITE_BUSY` при конкурентной записи.
+- **Fix:** pragma в DSN (`_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)`, modernc поддерживает); `SetMaxOpenConns(1)` для писателя.
+- **Refs:** CODE-REVIEW-2026-10-21 M-27.
+- **Status:** open
+
+### [medium][Gate][~0.25d] QUALITY-GATES-ALIGN
+- **Title:** `make quality-gates` даёт ложно-зелёный результат
+- **Problem:** `go-app/Makefile:21,80-87`: цель гоняет только `./cmd/server/... ./internal/ui` без lint и `-race`; `go fmt` переписывает файлы вместо проверки. Настоящий гейт — `scripts/release-gate.sh`.
+- **Impact:** глобальные правила агентов предписывают `make quality-gates` — гейт проходит при красном release-gate.
+- **Fix:** `quality-gates: ; ../scripts/release-gate.sh`; fmt-проверка через `gofmt -l` с ненулевым кодом выхода; `quality-gates-fast` оставить как есть.
+- **Refs:** CODE-REVIEW-2026-10-21 M-28. Поглощает остаток `QUALITY-GATES-DIRTIES-TREE` (BACKLOG); смежно `PARITY-GATE-DOES-NOT-GATE`.
+- **Status:** open
+
+### [low][Security][~0.25d] SERVER-HARDENING
+- **Title:** HTTP-сервер без `ReadHeaderTimeout`, ранний SIGHUP убивает процесс, bcrypt под глобальным мьютексом
+- **Problem:**
+  - `cmd/server/main.go:149-155`: нет `ReadHeaderTimeout`/`MaxHeaderBytes` (gosec G112).
+  - `signal.Notify(SIGHUP)` (`:166-180`) после `registry.Initialize` — SIGHUP во время долгого старта завершает процесс действием по умолчанию.
+  - Ошибка bind в `ListenAndServe` (`:194-197`) ⇒ `os.Exit(1)` без `registry.Shutdown`.
+  - `internal/application/webauth.go:155-156`: все bcrypt-сравнения под одним `bcryptMu`, неверные пароли кешируются ⇒ поток неверных Basic-auth выстраивает в очередь проверки легитимных клиентов.
+- **Impact:** slowloris в пределах 30s; падение при раннем reload; DoS auth без кредов.
+- **Fix:** `ReadHeaderTimeout: 10s`; Notify до `Initialize`; `net.Listen` до `Initialize`; семафор `GOMAXPROCS` вместо мьютекса и отдельный лимит на отказы.
+- **Refs:** CODE-REVIEW-2026-10-21 L-3, L-4.
+- **Status:** open
+
+### [low][Grouping][~0.25d] REDIS-GROUP-INDEX-GHOSTS
+- **Title:** ZSET-индекс групп в Redis копит удалённые по TTL группы
+- **Problem:** `redis_group_storage.go:222,385,419-590`: после истечения ключа группы (TTL 24h) член `group:index` остаётся; timer storage такие члены лениво чистит (`redis_timer_storage.go:452`), group storage — нет.
+- **Impact:** `Size()` (ZCARD) завышен, `LoadAll` считает призраков ошибками на каждом restore, индекс растёт.
+- **Fix:** `ZRem` на not-found в `LoadAll`/`ListKeys`; общий helper с timer storage (`REDIS-HELPERS`).
+- **Refs:** CODE-REVIEW-2026-10-21 L-12, D-12.
+- **Status:** open
+
+### [low][Grouping][~0.1d] LOCK-ACQUIRE-SLEEP
+- **Title:** `Acquire` распределённого lock делает 4 попытки со `time.Sleep` без ctx
+- **Problem:** `lock/distributed.go:86-125`: `Acquire()` = `AcquireWithRetry(ctx, 0)` ⇒ 3 ретрая по умолчанию; `time.Sleep` игнорирует ctx; `defer cancel()` внутри цикла; таймаут попытки = TTL, а не `AcquireTimeout`; успех логируется на INFO.
+- **Impact:** follower делает 4 SETNX на poll, `Stop` задерживается.
+- **Fix:** одна попытка SETNX на `Acquire`, ctx-aware sleep, `cancel()` на итерацию, лог на DEBUG.
+- **Refs:** CODE-REVIEW-2026-10-21 L-14.
+- **Status:** open
+
+### [low][Cluster][~0.25d] CLUSTER-HEARTBEAT-STATE
+- **Title:** heartbeat считает себя зарегистрированным после неудачных refresh; `Peers` сканирует весь keyspace
+- **Problem:** `cluster/heartbeat.go:174`: `registered` остаётся true, даже когда ключ уже истёк; `Peers` (`:244`) делает SCAN по всему keyspace (группы, таймеры, nflog) на каждый status.
+- **Impact:** неверный статус кластера в `/api/v2/status`; нагрузка на Redis растёт с числом групп.
+- **Fix:** `registered=false` на неудаче refresh; peers в ZSET со score=expiry (`ZADD` + `ZRANGEBYSCORE now +inf`).
+- **Refs:** CODE-REVIEW-2026-10-21 L-15.
+- **Status:** open
+
+### [low][Publishing][~0.5d] PUBLISH-RELOAD-CLIENT-LIFECYCLE
+- **Title:** reload копит HTTP-клиенты и breaker'ы; первые таргеты после reload до 5s отбрасываются
+- **Problem:** client maps фабрики (`publisher.go:342-361`) и `circuitBreakers` (`queue.go:1171-1206`) никогда не чистятся — каждый reload с новым ключом/URL добавляет клиента со своим `Transport`. Reload не вызывает `CheckModeTransition` (`service_registry_reload.go:184`; тикер 5s в `mode_manager.go:281`).
+- **Impact:** рост idle-соединений и памяти с числом reload; если reload добавляет первые таргеты, прямой путь теряет алерты до 5s (групповой ретраит).
+- **Fix:** GC по живому набору таргетов в `applyConfigTargets`; `CheckModeTransition()` после него.
+- **Refs:** CODE-REVIEW-2026-10-21 L-17, L-18. Смежно `FU-HTTP-FILE-ROTATION`.
+- **Status:** open
+
+### [low][Publishing][~0.25d] PUBLISH-TRANSPORT-CONSISTENCY
+- **Title:** приоритет источников ключа PD и поведение прокси зависят от пути
+- **Problem:** `publisher.go:592-606` — `Authorization` перекрывает `routing_key`, `pagerduty_publisher_enhanced.go:215-231` — побеждает `routing_key`; Bearer-strip повторяется (`publisher.go:525,729`). Свои `http.Transport` без `Proxy` в `slack_client.go:89`, `telegram_client.go:200`, `pagerduty_client.go:172`, `rootly_client.go:104`, тогда как базовый путь через `DefaultTransport` учитывает `HTTPS_PROXY`.
+- **Impact:** один и тот же таргет может уйти с разным ключом и через разный сетевой путь в зависимости от типа.
+- **Fix:** одна `credentialFromHeaders(target, keys...)`; явная политика прокси (upstream env-прокси по умолчанию не использует), одинаковая для всех клиентов.
+- **Refs:** CODE-REVIEW-2026-10-21 L-20, L-21, D-15.
+- **Status:** open
+
+### [low][Config][~0.25d] FILE-SECRET-PATH-BASE
+- **Title:** `*_file`-секреты читаются относительно CWD и без лимита размера
+- **Problem:** `internal/infrastructure/routing/file_secrets.go:207`; при этом `http_config/*_file` перебазируются на каталог конфига (`http_config_filepaths.go:62`). `hypothesis`: делает ли upstream rebase для этих полей — не проверено.
+- **Impact:** относительный `api_url_file` работает иначе, чем `ca_file`; путь `/dev/zero` ⇒ OOM на reload (конфиг доверенный, не path traversal).
+- **Fix:** `rebasePath` до чтения (параметр `baseDir` у `Parse`), `io.LimitReader(64KiB)`.
+- **Refs:** CODE-REVIEW-2026-10-21 L-22. Смежно `FILE-SECRET-READ-ERROR-HINT`.
+- **Status:** open
+
+### [low][Security][~0.1d] W300-DELIVERABLE-SECRETS
+- **Title:** предупреждение W300 «secret hardcoded» не проверяет секреты доставляемых интеграций
+- **Problem:** `pkg/configvalidator/validators/security.go:73-84` проверяет OpsGenie/VictorOps/WeChat (AMP их не доставляет) и пропускает PD `routing_key`, Slack `api_url`, Telegram `bot_token`, `http_config.basic_auth.password`, `bearer_token`.
+- **Impact:** предупреждение молчит ровно там, где секрет реально используется.
+- **Fix:** добавить перечисленные поля; тест на каждое.
+- **Refs:** CODE-REVIEW-2026-10-21 L-25.
+- **Status:** open
+
+### [low][Cache][~0.1d] REDIS-FLUSH-ALL
+- **Title:** `RedisCache.Flush` стирает все DB инстанса
+- **Problem:** `internal/infrastructure/cache/redis.go:367-378` вызывает `FlushAll`, а не `FlushDB`; метод в интерфейсе `Cache`, prod-вызовов нет. `NewRedisCache` игнорирует ctx (`:59`).
+- **Impact:** сейчас нет; на shared Redis первый же вызов сотрёт чужие данные.
+- **Fix:** `FlushDB` или убрать метод из интерфейса; прокинуть ctx (вместе с `AMP-CACHE-NO-RECONNECT`).
+- **Refs:** CODE-REVIEW-2026-10-21 L-26.
+- **Status:** open
+
+### [low][K8s][~0.25d] K8S-CLIENT-HEALTH-TIMEOUT
+- **Title:** k8s-клиент: таймаут health не применяется, список Secret'ов молча обрезается, гонка в `Close`
+- **Problem:** `internal/infrastructure/k8s/client.go`: `Health` (`:225-240`) создаёт `healthCtx`, но `Discovery().ServerVersion()` его не принимает; `ListSecrets` (`:150-158`) режет на 1000 элементов с WARN; `Close` обнуляет `clientset` под `mu`, читатели берут без блокировки.
+- **Impact:** зависший API-сервер вешает health; discovery теряет таргеты после 1000 Secret'ов; nil-разыменование при shutdown.
+- **Fix:** `RESTClient().Get().AbsPath("/version").Do(healthCtx)`; пагинация через `Continue`; удалить `Close` или синхронизировать читателей.
+- **Refs:** CODE-REVIEW-2026-10-21 L-27.
+- **Status:** open
+
 ## Entry Format
 
 ```markdown

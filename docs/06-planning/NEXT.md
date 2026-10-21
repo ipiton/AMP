@@ -37,6 +37,13 @@ Queue и WIP — источник правды для выбора задачи.
 - [ ] **HELM-VCT-CHART-LABELS** — метки VCT с версией чарта: первый бамп версии сломает `helm upgrade`; сделать до `PROD-RELEASE-V010`. BUGS, ~0.25d. Пополнено 2026-10-19.
 - [ ] **AMP-CACHE-NO-RECONNECT** — AMP, не заставший кеш на старте, остаётся на in-memory до рестарта; после `AMP-CACHE-NOAUTH` воспроизводится на первом `helm upgrade` (k3d 2026-10-20). BUGS, medium, ~0.5d. Пополнено 2026-10-20.
 
+### 3. Code review 2026-10-21 — конвейер
+> Голова `REVIEW-PIPELINE-2026-10-21.md`; следующие позиции переносятся оттуда по мере освобождения WIP. Пополнено 2026-10-21.
+
+- [ ] **INHIBIT-SOURCE-CACHE-EVICTION** — источник inhibition выпадает из кеша через 5 минут горения и не возвращается на дубликатах: цели перестают подавляться. BUGS, critical, Full, ~1d.
+- [ ] **PUBLISH-QUICK-FIX-BUNDLE** — resolve в PagerDuty/Rootly без локального состояния, общие между таргетами кеши и SMTP-клиенты, half-open breaker, graceful stop очереди, секреты в логах. TECH-DEBT § Bundles (участники — BUGS), critical, Full, ~2d.
+- [ ] **EMAIL-RENDER-ESCAPING** — email fallback рендерит HTML через `text/template`, Subject без санитизации CR/LF. BUGS, high, Full, ~0.25d.
+
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
 ## Ссылки
