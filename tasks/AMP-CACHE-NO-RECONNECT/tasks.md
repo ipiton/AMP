@@ -39,9 +39,11 @@ based_on:
 
 ## Phase 3: Тесты (write-tests, после verdict `pass`)
 
-- [ ] **3.1** `initializeCache`: miniredis стартует на зарезервированном адресе позже → `*RedisCache`, нет degraded reason; недоступный адрес + малое окно → `MemoryCache` + degraded; lite и `startup_wait: 0` → одна попытка (время < паузы); ctx отменён → быстрый fallback. <!-- verify: cd go-app && go test ./internal/application/ -run InitializeCache -count=1 -race -->
-- [ ] **3.2** Config: дефолт `60s`, env `REDIS_STARTUP_WAIT`, отрицательное отвергается. <!-- verify: cd go-app && go test ./internal/config/ -run StartupWait -count=1 -->
-- [ ] **3.3** `render-cache-startup-wait.sh`: env есть при `cache.enabled=false` и lite, нет на дефолтах standard. <!-- verify: bash helm/amp/tests/render-cache-startup-wait.sh -->
+- [x] **3.1** `initializeCache`: miniredis стартует на зарезервированном адресе позже → `*RedisCache`, нет degraded reason; недоступный адрес + малое окно → `MemoryCache` + degraded; lite и `startup_wait: 0` → одна попытка (время < паузы); ctx отменён → быстрый fallback. <!-- verify: cd go-app && go test ./internal/application/ -run InitializeCache -count=1 -race -->
+- [x] **3.2** Config: дефолт `60s`, env `REDIS_STARTUP_WAIT`, отрицательное отвергается. <!-- verify: cd go-app && go test ./internal/config/ -run StartupWait -count=1 -->
+- [x] **3.3** `render-cache-startup-wait.sh`: env есть при `cache.enabled=false` и lite, нет на дефолтах standard. <!-- verify: bash helm/amp/tests/render-cache-startup-wait.sh -->
+
+**Результат write-tests:** `service_registry_cache_test.go` — 5 тестов (поздний miniredis на зарезервированном адресе → `*RedisCache` без degraded; окно 300ms → fallback не раньше 250ms; lite и `0s` — одна попытка < 1s; доступный кеш — `attempts=1`; отменённый ctx → fallback < 2s), `-race -count=10` зелёные. `TestLoadConfig_RedisStartupWait` — дефолт `1m0s`, env `0s`, `-1s` отвергается. `render-cache-startup-wait.sh` — 5 проверок, на чарте `main` 2 FAIL (нет `REDIS_STARTUP_WAIT` в lite и при `cache.enabled=false`). Go-тесты на коде `main` не собираются (нет полей backoff), поэтому «красный на main» для них показан только сценарием: на `main` первая неудачная попытка сразу даёт fallback.
 
 ## Phase 4: Testing
 
