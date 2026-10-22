@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (Full tier по правилу конвейера ревью: семантика Alertmanager; сигналы `X R`; novel pattern — фоновый синк L2→L1 с tombstone)
 **Reviewer perspective:** независимый агент-ревьюер (не автор кода); линзы correctness/гонки синка, premises (сверка с upstream `alertmanager@v0.32.0`), X, R, совместимость Redis, HA-задержка, maintainability
 **Reviewed at:** 2026-10-22
-**Reviewed tree:** bugfix/inhibit-source-cache-eviction @ 616aeef
-**Verdict:** fix_required (see `review-verdict.json`)
+**Reviewed tree:** bugfix/inhibit-source-cache-eviction @ 616aeef (раунд 1), @ f326a0d (раунд 2)
+**Verdict:** раунд 1 — fix_required; раунд 2 — pass (see `review-verdict.json`)
 
 ## Проверено (без находок)
 
@@ -80,6 +80,50 @@
 - **Recommendation:** label `reason="expired|capacity"` у `evictions_total` (или отдельный счётчик); чистить tombstones старше `syncInterval·2` и при ошибке синка; опционально отменять контекст синка по `stopCh`.
 - **Disposition:** defer-tech-debt
 - **Follow-up:** TECH-DEBT (finalize), можно одной записью с F1/F4
+
+## Раунд 2 (f326a0d)
+
+**Reviewed at:** 2026-10-22. Дифф `1e38775..f326a0d`: `cache.go` (`redisConfirmedAt` вместо `inRedis`, флаг `fromSync`, повторный tombstone после `Delete`/`SRem`, синк без вытеснения при полном L1, агрегированные WARN), Spec v1.1, `tasks.md`, `CACHE_README.md`, `ALERTMANAGER_COMPATIBILITY.md`. `go build ./...` — OK. Поведение проверено временными тестами на копии `cache.go` (`go test -race`, вне коммита, удалены): F2, F3 (оба порядка: слияние прохода до и после повторного tombstone), повторный firing одного fingerprint (локально и с другой реплики), ёмкость при 3005 алертах в Redis — data race нет.
+
+### Статусы находок раунда 1
+
+| ID | Severity | Статус | Комментарий |
+|---|---|---|---|
+| F1 | major | **closed** (fix-here часть); корень — defer-tech-debt | Синк больше не вытесняет активные записи: при полном L1 после разовой очистки истёкших удалённые записи пропускаются (`cache.go:607-616`). Проба: 3005 алертов в Redis, L1Max 1000 — все 5 локальных источников остаются, один WARN `skipped_alerts=2005` за проход вместо 2000. Вытеснения на `AddFiringAlert` — DEBUG + счётчик `capacityEvictions`, один WARN за проход очистки (`:483`, `:538-547`). Лимит описан в `ALERTMANAGER_COMPATIBILITY.md`. Остаётся WARN раз в 5s на реплику, пока алертов больше 1000, — это сигнал оператору, а не флуд; корень (кешировать только источники) — TECH-DEBT в finalize. |
+| F2 | minor | **closed** | `redisConfirmedAt = now()` после успешного SAdd (`:360`), удаление «пропавших» только при `redisConfirmedAt.Before(passStart)`. Так как `passStart` берётся до SMEMBERS, подтверждённая до него запись видна в SMEMBERS — ложного удаления нет. Проба на сценарии раунда 1: `X visible = true`. |
+| F3 | minor | **closed** | Повторный tombstone и удаление записи из L1 после `Delete`/`SRem` (`:409-420`). Проба: проход, начатый между первым tombstone и `Delete`, — запись возвращается и снимается повторной простановкой; проход, слившийся после неё, — пропускает по tombstone; следующий проход запись не возвращает. |
+| F4 | minor | open, defer-tech-debt | Без изменений — в finalize. |
+| F5 | minor | **closed** (premise); pub/sub — defer-backlog | Premise переклассифицирована в `assumed`, риск `group_wait` < 5s — в Rollout, Open Questions и `ALERTMANAGER_COMPATIBILITY.md`. |
+| F6 | nit | open, defer-backlog | Без изменений. |
+| F7 | nit | open, defer-tech-debt | Частично: WARN по ёмкости агрегирован; label/счётчик у `evictions_total`, чистка tombstones при ошибке синка, контекст синка от `stopCh` — в finalize. |
+
+### F8 — Параллельные resolve и повторный firing одного fingerprint на одной реплике: L1 и Redis расходятся
+- **Severity:** minor
+- **Location:** `go-app/internal/infrastructure/inhibition/cache.go:372-420` (`RemoveAlert`), `:415` (условие `fromSync`)
+- **Issue:** `RemoveAlert` (`Delete` в Redis в процессе) и `AddFiringAlert` того же fingerprint идут параллельно: add пишет L1 (`fromSync = false`), Set+SAdd, затем `Delete`/`SRem` от remove стирают только что записанный ключ и член SET. Повторный tombstone верно пропускается (запись локальная), но в L1 источник есть, а в Redis нет, и `redisConfirmedAt` уже выставлен → следующий проход удаляет его как «пропавший». Проба: `refire local: X visible = true` → после синка `false`. Источник пропадает до следующего resend (до `resend_delay` ~1m у Prometheus; для webhook — до повтора). Реалистичный источник — HA-пара Prometheus, рассинхронизированная по оценке (одна шлёт resolved, другая firing). Дефект не внесён раундом 2: в раунде 1 тот же исход давал `inRedis`; в первом раунде я его пропустил. На других репликах исход согласован (там победил remove), расходится только L1 этой реплики.
+- **Recommendation:** в `RemoveAlert` после `Delete`/`SRem`, если в L1 лежит локальная запись с `writtenAt` позже первого tombstone, — повторно записать её в Redis (или сбросить ей `redisConfirmedAt`, чтобы синк её не трогал, а при следующем add она снова попала в Redis). Тест — вместе с 3.3.
+- **Disposition:** defer-bug
+- **Follow-up:** BUGS.md (finalize): «inhibition cache: параллельные resolve/firing одного fingerprint — локальная запись снимается синком»
+
+### F9 — `fromSync`: повторный firing на другой реплике, загруженный синком между первым удалением и повторным tombstone, снимается до 5s
+- **Severity:** nit
+- **Location:** `go-app/internal/infrastructure/inhibition/cache.go:415`
+- **Issue:** если реплика B заново зажгла fingerprint после `Delete` на A, а проход A успел загрузить её запись (`fromSync`) до повторного tombstone, A удалит запись и поставит tombstone; следующий проход (после tombstone) вернёт её из Redis. Если же Set на B прошёл до `Delete` на A, ключ стёрт — согласованный исход «победил resolve», как у любого last-writer-wins. Нужны resolve на A и firing на B одного алерта в пределах одного RTT Redis и попадание прохода в это окно; самоисправляется за ≤5s. Согласен с автором: патология.
+- **Recommendation:** нет; при желании — сравнивать `EndsAt`/`StartsAt` записи с моментом первого tombstone, но сложность не оправдана.
+- **Disposition:** reject (reason: принятый риск — патологическое окно в один RTT Redis, самоисправление ≤5s)
+- **Follow-up:** n/a
+
+### F10 — Spec v1.1 местами описывает `inRedis`
+- **Severity:** nit
+- **Location:** `tasks/INHIBIT-SOURCE-CACHE-EVICTION/Spec.md:57` (Target Design §3 «подтверждённые в Redis (`inRedis`)», «tombstone … до конца прохода»), `:63` (Component Architecture `cacheEntry{alert, writtenAt, inRedis}`)
+- **Issue:** код и §5 уже на `redisConfirmedAt`/`fromSync`; §3 и Component Architecture остались от v1.0 — Spec противоречит сам себе.
+- **Recommendation:** заменить на `redisConfirmedAt`/`fromSync`, сослаться на §5.
+- **Disposition:** fix-here (не блокирует gate; можно попутно в write-tests/finalize)
+- **Follow-up:** n/a
+
+### Вердикт раунда 2
+
+Открытых blocker нет; единственный major (F1) закрыт в части fix-here, корень отложен с disposition. Новые находки — minor (defer-bug) и nit. **Gate: pass.**
 
 ## Anti-Pattern Check
 
