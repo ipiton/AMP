@@ -1173,6 +1173,8 @@ func (c *Config) Validate() error {
 	// Validation only if Redis addr is provided.
 	// Note: Redis is not recommended for Lite profile,
 	// but it is allowed for testing/development.
+
+	// startup_wait applies whether or not redis.addr is set.
 	if c.Redis.StartupWait < 0 {
 		return fmt.Errorf("redis.startup_wait cannot be negative")
 	}

@@ -46,7 +46,7 @@ based_on:
 | HTTP-сервер (и пробы) поднимается только после `Initialize`, поэтому ожидание в `initializeCache` не валит liveness | `cmd/server/main.go:120` → `:190` | code-read | liveness убивает под во время ожидания |
 | `startupProbe` чарта даёт ≥ 60s до проверки liveness | `deployment.yaml:314-323`: 10s + 30 × 10s | code-read | под рестартует в ожидании (тогда хоть и рестарт, но не хуже `main`) |
 | Все потребители Redis берут клиент из `r.cache` после `initializeCache`; ни один не создаёт свой клиент раньше | grep `r.cache.(*infrastructurecache.RedisCache)` / `NewRedisCache` по `go-app` (`:782`, `:841`, `:905`, `:1879`, `:1981`, `service_registry_reload.go:226`; `NewRedisCache` в prod-коде вызывается только в `initializeCache`) | call-path-traced | часть подсистем осталась бы на старом решении |
-| Разрыв старта AMP/Valkey на upgrade — секунды, а не минуты | k3d 2026-10-20: 3 s (`AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2) | measured | окна 60s не хватит — fallback как сейчас (не хуже `main`) |
+| На single-node k3d (локальные образы, local-path PV) разрыв старта AMP/Valkey на upgrade — секунды; в многоузловом кластере (reattach RWO PV, pull образа, загрузка большого AOF) может быть больше 60s — тогда итог как на `main` | k3d 2026-10-20: под AMP старше пода Valkey на ~6 s, `dial tcp …: i/o timeout` (`AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2.1); фактические попытки и `waited` — в `evidence/k3d-acceptance.md` этой задачи | measured (только single-node k3d) | окна 60s не хватит — fallback как сейчас (не хуже `main`) |
 | При `cache.enabled=false` и в lite чарт передаёт `REDIS_ADDR=localhost:6379`, где никто не слушает | `deployment.yaml:235-236` | code-read | без `REDIS_STARTUP_WAIT=0s` такой старт ждал бы 60s |
 | Пустая env-переменная не перекрывает дефолт viper (`AutomaticEnv` без `AllowEmptyEnv`) — поэтому выключатель через `REDIS_ADDR=""` не годится, нужен отдельный ключ | `config.go:671,838` | code-read | — (выбран ключ, не пустой адрес) |
 
@@ -94,9 +94,9 @@ based_on:
 ## Edge Cases
 
 1. Неверный пароль (`WRONGPASS`) → ретраи до конца окна, затем fallback (ожидание 60s лишнее, но ошибка видна в каждом Warn; отличать auth-ошибки — не в этой задаче).
-2. `ctx` отменён во время сна → немедленный fallback (процесс и так завершается).
+2. `ctx` отменён во время сна → немедленный fallback. В проде недостижимо (`main` отменяет ctx только в `defer`, SIGTERM до `signal.Notify` завершает процесс действием по умолчанию) — контракт для тестов и встраивания (deep-review F6).
 3. `startup_wait` меньше первой паузы (например `500ms`) → одна попытка.
-4. Каждая попытка длится до `dial_timeout` + 5s PING → фактическое ожидание может превысить окно на одну попытку (≤ ~10s).
+4. Dial идёт внутри `Ping(pingCtx)` с таймаутом 5s (`cache/redis.go:94`), поэтому попытка длится ≤ ~5s и фактическое ожидание может превысить окно на одну попытку (≤ ~5s). При `i/o timeout` каждая попытка занимает ~5s → за окно ~8–10 попыток.
 5. Кеш поднялся, но упал до старта подсистем → как на `main`: их собственные проверки (grouping `StorageManager` failback, nflog degraded).
 
 ## Impact Analysis
