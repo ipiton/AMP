@@ -4,7 +4,7 @@ slug: helm-vct-chart-labels
 stream: Helm
 type: bug
 priority: medium
-status: active
+status: done
 created_at: 2026-10-22
 updated_at: 2026-10-22
 ---
@@ -30,10 +30,10 @@ updated_at: 2026-10-22
 
 ## Success Criteria
 
-- [ ] В `volumeClaimTemplates` StatefulSet кеша нет меток, зависящих от версии чарта/приложения: только selector labels + `app.kubernetes.io/component: redis-storage`.
-- [ ] Рендер с разными `version`/`appVersion` в `Chart.yaml` даёт одинаковый `volumeClaimTemplates` (render-тест в `helm/amp/tests/`).
-- [ ] Migration note в `CHANGELOG.md` и `helm/amp/CHANGELOG.md`: разовое orphan-удаление `<fullname>-redis` перед upgrade, что при этом происходит с подом и PVC.
-- [ ] k3d: install чарта `main` → orphan-удаление → upgrade веткой → upgrade с бампом версии — оба upgrade проходят, PVC тот же (UID), данные Valkey на месте.
+- [x] В `volumeClaimTemplates` StatefulSet кеша нет меток, зависящих от версии чарта/приложения: только selector labels + `app.kubernetes.io/component: redis-storage`.
+- [x] Рендер с разными `version`/`appVersion` в `Chart.yaml` даёт одинаковый `volumeClaimTemplates` (render-тест в `helm/amp/tests/`).
+- [x] Migration note в `CHANGELOG.md` и `helm/amp/CHANGELOG.md`: разовое orphan-удаление `<fullname>-redis` перед upgrade, что при этом происходит с подом и PVC.
+- [x] k3d: install чарта `main` → orphan-удаление → upgrade веткой → upgrade с бампом версии — оба upgrade проходят, PVC тот же (UID), данные Valkey на месте. *(Итог: до upgrade веткой включительно — полностью; upgrade с бампом принят API, состояние после rollout не снято — кластер удалён.)*
 
 ## Non-Goals
 

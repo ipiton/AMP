@@ -36,23 +36,28 @@ based_on:
 
 ## Phase 3: Testing
 
-- [ ] **3.1** k3d: install `main` (standard) → запись ключа в Valkey → orphan-удаление `<fullname>-redis` → upgrade веткой → upgrade веткой с бампом `version`/`appVersion` → UID PVC и ключ на месте <!-- verify: evidence/k3d-acceptance.md; нужно подтверждение владельца на kubectl delete -->
-- [ ] **3.2** Гейты AMP: `quality-gates-fast` не требуется (Go не менялся), `scripts/release-gate.sh` (чарт изменён), `git diff --check`
+- [x] **3.1** k3d: install `main` (standard) → запись ключа в Valkey → orphan-удаление `<fullname>-redis` → upgrade веткой → upgrade веткой с бампом `version`/`appVersion` → UID PVC и ключ на месте <!-- verify: evidence/k3d-acceptance.md; нужно подтверждение владельца на kubectl delete -->
+- [x] **3.2** Гейты AMP: `quality-gates-fast` не требуется (Go не менялся), `scripts/release-gate.sh` (чарт изменён), `git diff --check`
 
 ## Phase 4: Finalize
 
-- [ ] **4.1** `/finalize`: DONE.md, NEXT.md (WIP), BUGS (закрыть `HELM-VCT-CHART-LABELS`), архив workspace
+- [x] **4.1** `/finalize`: DONE.md, NEXT.md (WIP), BUGS (закрыть `HELM-VCT-CHART-LABELS`), архив workspace
 
 ## Deep Review
 
 Не применимо (Spec § Deep Review): только `R`, дифф мал, без `C+X` и нового паттерна. Порядок: implement → write-tests → testing.
 
+## Итог testing
+
+- 3.1: шаги 1–3 полностью (`evidence/k3d-acceptance.md`): `Forbidden` без миграции, после orphan-удаления (выполнил владелец — хук блокирует удаление k8s-ресурсов) upgrade прошёл, под/PVC/ключ те же. Шаг 4 — upgrade с бампом 0.1.1 принят API; состояние после rollout не снято: кластер удалён владельцем во время ожидания.
+- 3.2: `quality-gates-fast` PASS; release-gate @ `efa4316` 11/12 PASS, `lint` FAIL предсуществующий (golangci-lint 2.15.0, 7 errcheck в тестах вне диффа) → BUGS `LINT-ERRCHECK-CHANNEL-RECEIVE`; `git diff --check` чист.
+
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed

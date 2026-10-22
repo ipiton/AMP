@@ -17,6 +17,14 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-22 — (BUG / Helm, medium) **HELM-VCT-CHART-LABELS** — бамп версии чарта больше не ломает `helm upgrade` StatefulSet кеша: на k3d upgrade с `version`/`appVersion` 0.1.1 принят API, на чарте `main` — `spec: Forbidden`.
+  - **Чарт:** `volumeClaimTemplates` `redis-data` в `redis-statefulset.yaml` — только `app.kubernetes.io/name`/`instance` + `component: redis-storage` вместо `amp.labels` (`helm.sh/chart`, `app.kubernetes.io/version`). У Postgres меток в VCT не было; других неизменяемых полей с `amp.labels` в чарте нет.
+  - **Миграция (Breaking в CHANGELOG, README § Upgrading):** существующая standard-установка один раз удаляет StatefulSet кеша с `--cascade=orphan` перед upgrade — сама смена меток тоже `Forbidden`.
+  - **Тесты:** новый `helm/amp/tests/render-vct-labels.sh` (нет версионных меток; VCT одинаков при бампе версии) — на `main` 3 FAIL; в release-gate через глоб `tests/*.sh`.
+  - **k3d** (`evidence/k3d-acceptance.md`): install `main` → upgrade веткой `Forbidden` → orphan-удаление (владелец) → upgrade прошёл, под усыновлён (тот же UID, 0 рестартов), PVC и ключ Valkey те же → upgrade с бампом 0.1.1 принят. Состояние после rollout шага с бампом не снято — кластер удалён во время ожидания.
+  - **Проверка:** Standard tier (`R`), deep-review не применим (дифф мал, без `C+X`). `quality-gates-fast` PASS; release-gate @ `efa4316` 11/12 PASS, `lint` FAIL предсуществующий — golangci-lint 2.15.0, 7 errcheck в тестах вне диффа.
+  - **Follow-ups:** BUGS `LINT-ERRCHECK-CHANNEL-RECEIVE`. Архив: `tasks/archive/HELM-VCT-CHART-LABELS/`.
+
 - 2026-10-20 — (BUG / Publishing, high) **SLACK-WEBHOOK-PLAIN-OK-RESPONSE** — успешная отправка в Slack Incoming Webhook (ответ `ok`, `text/plain`) — подтверждённая доставка: nflog пишется, группа ждёт `repeat_interval`, а не уходит повторно на каждом `group_interval`.
   - **Клиент** (`slack_client.go`, `parseSlackSuccess`): на любом 2xx JSON разбирается, только если тело — JSON (`Content-Type: application/json` или тело с `{`), `ok:false` — ошибка как раньше; иначе `ok` или пустое тело — успех, другой текст — неретраимая ошибка с этим текстом (как upstream `checkTextResponseError`; пустое тело — мягче upstream, по постановке). Не-2xx не менялись: текст тела (`invalid_payload`, `no_service`) уже попадал в ошибку, ретраи только 429/5xx. 201/204 раньше были ошибкой.
   - **Publisher:** ответ без `ts` не оставляет threading-записи в кеше — иначе повтор того же алерта шёл бы коротким «Still firing» без треда вместо полного сообщения.

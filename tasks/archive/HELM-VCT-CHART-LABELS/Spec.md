@@ -3,7 +3,7 @@ id: HELM-VCT-CHART-LABELS
 slug: helm-vct-chart-labels
 stream: Helm
 type: bug
-status: approved
+status: done
 created_at: 2026-10-22
 updated_at: 2026-10-22
 based_on:
@@ -42,7 +42,7 @@ based_on:
 | Смена меток в `spec.volumeClaimTemplates` существующего StatefulSet отвергается API (`Forbidden`) | k3d 1.35, `evidence/vct-probe.md` | measured | фикс не нужен / миграция не нужна |
 | Кроме VCT кеша, в чарте нет неизменяемых полей с `amp.labels` (selector'ы — `amp.selectorLabels`, Job/CronJob нет) | grep `selector:` и `kind: Job` по `helm/amp/templates` | call-path-traced | бамп сломает другой объект |
 | Метки PVC никто не селектит (NetworkPolicy, скрипты, доки) | grep `redis-storage`/`redis-data` по `helm/`, `docs/`, `scripts/` | call-path-traced | потребитель потеряет PVC — не применимо: метки существующих PVC не меняются |
-| После orphan-удаления новый StatefulSet усыновляет под (selector не меняется) и переиспользует PVC по имени | документация k8s, не прогонялось | assumed | upgrade пересоздаст под с пустым томом → потеря кеша; проверяется в `testing` (Rollout) |
+| После orphan-удаления новый StatefulSet усыновляет под (selector не меняется) и переиспользует PVC по имени | k3d, `evidence/k3d-acceptance.md` шаг 3: тот же UID пода и PVC, ключ на месте | measured | upgrade пересоздаст под с пустым томом → потеря кеша |
 
 ## Target Design
 
@@ -60,9 +60,9 @@ based_on:
 
 ## Invariants
 
-- [ ] Selector StatefulSet и метки пода не меняются (иначе под не усыновится).
-- [ ] Имя VCT `redis-data` и размер/класс хранилища не меняются (имя PVC = имя VCT + под).
-- [ ] VCT не зависит от `Chart.yaml` `version`/`appVersion`.
+- [x] Selector StatefulSet и метки пода не меняются (иначе под не усыновится).
+- [x] Имя VCT `redis-data` и размер/класс хранилища не меняются (имя PVC = имя VCT + под).
+- [x] VCT не зависит от `Chart.yaml` `version`/`appVersion`.
 
 ## Edge Cases
 
@@ -96,4 +96,4 @@ based_on:
 
 ## Open Questions
 
-- [ ] Усыновление пода и PVC после orphan-удаления (assumed) — проверить на k3d в `testing`; нужно подтверждение владельца на `kubectl delete` (хук `destructive-command-guard`).
+- [x] Усыновление пода и PVC после orphan-удаления — подтверждено на k3d (`evidence/k3d-acceptance.md` шаг 3). Было: (assumed) — проверить на k3d в `testing`; нужно подтверждение владельца на `kubectl delete` (хук `destructive-command-guard`).
