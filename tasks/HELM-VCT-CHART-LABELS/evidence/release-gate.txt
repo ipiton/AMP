@@ -1,0 +1,45 @@
+# release-gate @ efa4316, 2026-10-22, golangci-lint 2.15.0 (бинарь обновлён 2026-10-21 21:54)
+# lint FAIL предсуществующий: ветка не меняет go-app (git diff main -- go-app пуст)
+[release-gate] ==> build
+[release-gate] ==> lint
+internal/infrastructure/publishing/delivery_confirmation_test.go:559:8: Error return value is not checked (errcheck)
+		case <-handle.Done():
+		     ^
+internal/infrastructure/publishing/delivery_confirmation_test.go:602:7: Error return value is not checked (errcheck)
+	case <-handle.Done():
+	     ^
+internal/infrastructure/publishing/delivery_confirmation_test.go:645:7: Error return value is not checked (errcheck)
+	case <-handle.Done():
+	     ^
+internal/infrastructure/silencing/redis_event_bus_test.go:202:2: Error return value is not checked (errcheck)
+	<-done
+	^
+internal/infrastructure/silencing/redis_event_bus_test.go:246:2: Error return value is not checked (errcheck)
+	<-done
+	^
+internal/infrastructure/silencing/redis_event_bus_test.go:268:2: Error return value is not checked (errcheck)
+	<-done1
+	^
+internal/infrastructure/silencing/redis_event_bus_test.go:282:2: Error return value is not checked (errcheck)
+	<-done2
+	^
+7 issues:
+* errcheck: 7
+[release-gate] ==> test
+...
+STEP             STATUS TIME     NOTE
+build            PASS   49s      go build ./... (go-app)
+lint             FAIL   92s      golangci-lint run (go-app)
+test             PASS   164s     go test ./... -count=1 (go-app)
+futureparity     PASS   23s      build+test, futureparity tag, cmd/server
+race             PASS   391s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   0s       chart dependencies (Chart.lock, no stale charts/)
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-small       PASS   0s       lint + template, values-small.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   44s      helm/amp/tests/*.sh render tests
+amtool-compat    PASS   343s     real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+exit=1
