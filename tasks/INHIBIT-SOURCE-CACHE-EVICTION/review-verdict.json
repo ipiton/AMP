@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "F1 (major, fix-here): sync evicts active L1 entries when full (contradicts Spec §4), WARN flood ~400/s at 3000 alerts; also minor fix-here F2 (add/sync race drops a fresh source), F3 (tombstone stamped before Redis delete)",
+  "branch": "bugfix/inhibit-source-cache-eviction",
+  "commit": "616aeef",
+  "reviewed_at": "2026-10-22",
+  "findings": {
+    "blocker": 0,
+    "major": 1,
+    "minor": 4,
+    "nit": 2
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
