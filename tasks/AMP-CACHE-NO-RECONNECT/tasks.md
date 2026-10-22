@@ -27,13 +27,13 @@ based_on:
 
 ## Phase 1: Код
 
-- [ ] **1.1** `RedisConfig.StartupWait` + `viper.SetDefault("redis.startup_wait", "60s")` + `Validate`: `< 0` → ошибка. <!-- verify: cd go-app && go build ./... && go vet ./internal/config/ -->
-- [ ] **1.2** `initializeCache`: окно (standard → `StartupWait`, иначе 0), цикл с backoff 1s→×2→5s, ctx-aware сон, логи по Spec; поля `cacheRetryInitialBackoff`/`cacheRetryMaxBackoff` с дефолтами в конструкторе. <!-- depends: 1.1 | verify: cd go-app && go vet ./internal/application/ && go test ./internal/application/ -run 'Cache|Cluster|Grouping' -count=1 -->
+- [x] **1.1** `RedisConfig.StartupWait` + `viper.SetDefault("redis.startup_wait", "60s")` + `Validate`: `< 0` → ошибка. <!-- verify: cd go-app && go build ./... && go vet ./internal/config/ -->
+- [x] **1.2** `initializeCache`: окно (standard → `StartupWait`, иначе 0), цикл с backoff 1s→×2→5s, ctx-aware сон, логи по Spec; поля `cacheRetryInitialBackoff`/`cacheRetryMaxBackoff` с дефолтами в конструкторе. <!-- depends: 1.1 | verify: cd go-app && go vet ./internal/application/ && go test ./internal/application/ -run 'Cache|Cluster|Grouping' -count=1 -->
 
 ## Phase 2: Чарт и доки
 
-- [ ] **2.1** `deployment.yaml`: `REDIS_STARTUP_WAIT: "0s"` в ветке без кеша; NOTES на upgrade. <!-- verify: helm lint helm/amp && for t in helm/amp/tests/render-*.sh; do bash $t >/dev/null || echo FAIL $t; done -->
-- [ ] **2.2** Docs: CHANGELOG (Fixed), `helm/amp/CHANGELOG.md`, CONFIGURATION_GUIDE + `config.yaml.example` (ключ), README чарта § Cache. <!-- verify: grep -rn startup_wait CHANGELOG.md docs/CONFIGURATION_GUIDE.md config.yaml.example -->
+- [x] **2.1** `deployment.yaml`: `REDIS_STARTUP_WAIT: "0s"` в ветке без кеша; NOTES на upgrade. <!-- verify: helm lint helm/amp && for t in helm/amp/tests/render-*.sh; do bash $t >/dev/null || echo FAIL $t; done -->
+- [x] **2.2** Docs: CHANGELOG (Fixed), `helm/amp/CHANGELOG.md`, CONFIGURATION_GUIDE + `config.yaml.example` (ключ), README чарта § Cache. <!-- verify: grep -rn startup_wait CHANGELOG.md docs/CONFIGURATION_GUIDE.md config.yaml.example -->
 
 **Phase verification:** `make -C go-app quality-gates-fast`, `git diff --check`.
 
@@ -47,6 +47,12 @@ based_on:
 
 - [ ] **4.1** Гейты WORKFLOW.md § Гейты AMP (затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`). <!-- verify: evidence/release-gate.txt -->
 - [ ] **4.2** k3d: install `main` → upgrade веткой, рестартующий AMP и Valkey (или удаление пода Valkey + `rollout restart` AMP одновременно) → в логе AMP `Redis cache initialized` (с `attempts > 1`, если гонка случилась) без ручного рестарта. <!-- verify: evidence/k3d-acceptance.md -->
+
+## Implementation Notes
+
+- Окно проверяется перед паузой: повтор делается, только если до дедлайна остаётся больше текущей паузы. Сама попытка (`dialRedis`: dial до `dial_timeout` + PING до 5s) не ограничена дедлайном, поэтому фактическое ожидание может превысить `startup_wait` на одну попытку (≤ ~10s) — укладывается в `startupProbe`.
+- Тесты `internal/application` на ветке и `main` — 19.5s / 20.6s: существующие тесты не стали ждать окно (их конфиги — lite или литералы с `StartupWait: 0`).
+- Рендер чарта: дефолты standard — без изменений (кроме случайных паролей); `profile=lite` и `cache.enabled=false` — только `REDIS_STARTUP_WAIT: "0s"`.
 
 ## Definition of Done
 

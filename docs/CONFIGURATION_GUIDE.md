@@ -114,6 +114,9 @@ redis:
   password: ${REDIS_PASSWORD}  # From environment
   db: 0
   pool_size: 10
+  # Standard profile: retry an unreachable cache this long at startup, then fall
+  # back to the in-memory cache until restart. 0s = one attempt (env REDIS_STARTUP_WAIT).
+  startup_wait: 60s
 
 # ============================================================================
 # LLM Configuration (Optional)
