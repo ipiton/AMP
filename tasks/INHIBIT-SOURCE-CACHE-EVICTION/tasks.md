@@ -27,18 +27,18 @@ based_on:
 
 ## Phase 1: Кеш источников
 
-- [ ] **1.1** `cacheEntry{alert, writtenAt, inRedis}`, `stampExpiry` (копия алерта, `EndsAt` или `now+resolveTimeout()`), `GetFiringAlerts` только из L1 с проверкой `EndsAt.After(now)`; `cleanup` только по `EndsAt`; опции `ResolveTimeout`, `SyncInterval`, удалить `TTL` <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.2** Redis: TTL ключа до `EndsAt`, не писать истёкшее; `RemoveAlert` ставит tombstone <!-- depends: 1.1 | verify: cd go-app && go build ./... -->
-- [ ] **1.3** `syncFromRedis` + воркер (первый проход при старте, тикер `SyncInterval`, очистка тем же воркером); лог чтения Redis → DEBUG <!-- depends: 1.2 | verify: cd go-app && go build ./... && go vet ./internal/infrastructure/inhibition/ (vet компилирует тесты — красный до Phase 3 ожидаем, см. Notes) -->
-- [ ] **1.4** Ёмкость: сначала истёкшие, затем самый ранний `EndsAt` <!-- depends: 1.1 | verify: cd go-app && go build ./... -->
+- [x] **1.1** `cacheEntry{alert, writtenAt, inRedis}`, `stampExpiry` (копия алерта, `EndsAt` или `now+resolveTimeout()`), `GetFiringAlerts` только из L1 с проверкой `EndsAt.After(now)`; `cleanup` только по `EndsAt`; опции `ResolveTimeout`, `SyncInterval`, удалить `TTL` <!-- verify: cd go-app && go build ./... -->
+- [x] **1.2** Redis: TTL ключа до `EndsAt`, не писать истёкшее; `RemoveAlert` ставит tombstone <!-- depends: 1.1 | verify: cd go-app && go build ./... -->
+- [x] **1.3** `syncFromRedis` + воркер (первый проход при старте, тикер `SyncInterval`, очистка тем же воркером); лог чтения Redis → DEBUG <!-- depends: 1.2 | verify: cd go-app && go build ./... && go vet ./internal/infrastructure/inhibition/ (vet компилирует тесты — красный до Phase 3 ожидаем, см. Notes) -->
+- [x] **1.4** Ёмкость: сначала истёкшие, затем самый ранний `EndsAt` <!-- depends: 1.1 | verify: cd go-app && go build ./... -->
 
 **Phase verification:** `cd go-app && go build ./...`
 
 ## Phase 2: Ingest и wiring
 
-- [ ] **2.1** `AlertProcessor.ProcessAlert`: ignored firing-дубликат → `AddFiringAlert(alert)` перед `return` <!-- verify: cd go-app && go build ./... && go test ./internal/core/services/... -->
-- [ ] **2.2** `initializeInhibition`: `NewTwoTierAlertCacheWithOptions` с `ResolveTimeout: resolveTimeoutFromConfig(r.config)` (читается на каждый вызов) <!-- verify: cd go-app && go build ./... && go test ./internal/application/... -->
-- [ ] **2.3** Доки: `CACHE_README.md`, `ALERTMANAGER_COMPATIBILITY.md` (Inhibition: время жизни источника, HA-синк ≤5s), `CHANGELOG.md` [Unreleased] Fixed <!-- verify: git diff --check -->
+- [x] **2.1** `AlertProcessor.ProcessAlert`: ignored firing-дубликат → `AddFiringAlert(alert)` перед `return` <!-- verify: cd go-app && go build ./... && go test ./internal/core/services/... -->
+- [x] **2.2** `initializeInhibition`: `NewTwoTierAlertCacheWithOptions` с `ResolveTimeout: resolveTimeoutFromConfig(r.config)` (читается на каждый вызов) <!-- verify: cd go-app && go build ./... && go test ./internal/application/... -->
+- [x] **2.3** Доки: `CACHE_README.md`, `ALERTMANAGER_COMPATIBILITY.md` (Inhibition: время жизни источника, HA-синк ≤5s), `CHANGELOG.md` [Unreleased] Fixed <!-- verify: git diff --check -->
 
 **Phase verification:** `cd go-app && go build ./... && go test ./internal/core/services/... ./internal/application/...`
 
@@ -57,6 +57,8 @@ based_on:
 - [ ] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` (один прогон; `lint` красный из-за предсуществующего `LINT-ERRCHECK-CHANNEL-RECEIVE`) <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
+
+- Implement 2026-10-22: все шаги Phase 1–2 выполнены; `go build ./...` OK, `go test ./internal/core/services/... ./internal/application/...` — 603 passed; `go vet ./...` красный только на `inhibition/cache_test.go` (тип `l1Cache`) — ожидаемо до Phase 3. Отклонений от Spec нет; дополнительно: `getFromRedis` возвращает ошибку вместо пустого списка (иначе синк принял бы недоступный Redis за пустой и снял чужие источники), транзиентная ошибка GET больше не удаляет член SET; лог «Inhibition cache full» на WARN при вытеснении активного алерта.
 
 - Пакетные тесты `inhibition` обращаются к `l1Cache` как к `map[string]*core.Alert` и к удаляемому Redis-пути — до Phase 3 они не компилируются; поэтому verify Phase 1 — `go build`, а не `go test`/`go vet` пакета.
 

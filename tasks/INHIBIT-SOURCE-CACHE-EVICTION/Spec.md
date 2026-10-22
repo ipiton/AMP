@@ -91,6 +91,7 @@ based_on:
 7. Запись старой версии в Redis без `EndsAt` ⇒ при синке получает окно `now + resolve_timeout`; ключ сам истечёт по старому TTL ≤5m, после чего синк удалит её из L1.
 8. Рестарт пода ⇒ первый синк сразу при старте восстанавливает источники из Redis (раньше это делал L2-путь при пустом L1).
 9. Lite / без Redis (`r.cache == nil`) ⇒ только L1; синк не запускается.
+10. Локальный resolve, у которого не прошёл `Delete` в Redis ⇒ tombstone защищает только от прохода, начатого до удаления; следующий проход вернёт запись из Redis до истечения её ключа (`EndsAt`). Так же было и раньше (L2-путь при пустом L1) — принимается, ошибка Redis логируется WARN.
 
 ## Impact Analysis
 
@@ -108,7 +109,7 @@ based_on:
 ## Observability
 
 - **Logs:** синк — DEBUG на успешный проход, WARN на ошибку Redis; лог «Retrieved alerts from Redis L2 cache» понижается до DEBUG (иначе INFO каждые 5s).
-- **Metrics:** существующие `alert_history_inhibition_cache_*`; `operations_total{operation="sync"}` и `operation_duration_seconds{operation="sync"}` — через те же векторы.
+- **Metrics:** существующие `alert_history_inhibition_cache_*`; `operations_total{operation="sync"}` и `operation_duration_seconds{operation="sync"}` — через те же векторы. `hits/misses_total{tier="l2"}` теперь считают проходы синка (hit — Redis прочитан, miss — ошибка Redis), а не обращения `GetFiringAlerts` к Redis; `evictions_total` больше не растёт от вытеснения по возрасту.
 - **Alerts:** не применимо.
 
 ## Deep Review
