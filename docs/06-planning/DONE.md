@@ -17,6 +17,15 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-22 — (BUG / Cache, medium) **AMP-CACHE-NO-RECONNECT** — AMP в standard-профиле ждёт кеш на старте, а не остаётся на in-memory после одной попытки: на k3d при Valkey, поднятом через 20s после рестарта AMP, `main` уходит на in-memory навсегда, ветка подключается на 6-й попытке через 38s без ручного рестарта.
+  - **Код:** `initializeCache` повторяет `NewRedisCache` с backoff 1s → ×2 → ≤5s в пределах нового `redis.startup_wait` (дефолт `60s`, env `REDIS_STARTUP_WAIT`, `< 0` отвергается); Warn на каждую попытку (`attempt`, `retry_in`), `attempts`/`waited` в итоговых логах; после окна — прежний fallback и прежняя degraded reason. Lite и `0s` — одна попытка. Поздний переход in-memory → Redis не делался (7 подсистем получают клиент один раз) — follow-up.
+  - **Чарт:** `REDIS_STARTUP_WAIT=0s` там, где кеша нет (`cache.enabled=false`, lite), рендер с дефолтами не изменился; NOTES на upgrade — про окно.
+  - **Доки:** CHANGELOG (Fixed + две migration note `AMP-CACHE-NOAUTH`), `helm/amp/CHANGELOG.md`, README чарта § Cache, CONFIGURATION_GUIDE, `config.yaml.example`, ADR-017 «Следствие».
+  - **Тесты:** `service_registry_cache_test.go` (поздний miniredis → Redis без degraded; окно → fallback; lite/`0s`; ctx), `TestLoadConfig_RedisStartupWait`, `render-cache-startup-wait.sh` (на чарте `main` 2 FAIL).
+  - **k3d** (`evidence/k3d-acceptance.md`): A0 `main` — гонка → in-memory; A1 ветка — `attempts=6`, 38.3s, 5 ERROR-строк; A2 Valkey 90s → fallback `attempts=8 waited=60.285s`, `rollout restart` лечит; A3 `cache.enabled=false` — одна попытка. Гонка воспроизведена через `scale` Valkey в 0 + `rollout restart` AMP; измерено только на single-node k3d.
+  - **Проверка:** Full tier (`C X R`), deep-review независимым агентом → `pass` @ `eb86457` (0 blocker/major, F3/F5 исправлены); release-gate @ `41cb924` 11/12 PASS, `lint` FAIL предсуществующий (`LINT-ERRCHECK-CHANNEL-RECEIVE`).
+  - **Follow-ups:** TECH-DEBT `CACHE-RUNTIME-FAILFORWARD` (вариант C), `CACHE-STARTUP-RETRY-ERROR-LOGS` (F2), `REDIS-RELOAD-STARTUP-WAIT-DRIFT` (F4); BACKLOG P2 `CACHE-STARTUP-FAIL-FAST-AUTH` (F1); в BUGS `REDIS-FLUSH-ALL` уточнён (ctx не прокинут). Архив: `tasks/archive/AMP-CACHE-NO-RECONNECT/`.
+
 - 2026-10-22 — (BUG / Helm, medium) **HELM-VCT-CHART-LABELS** — бамп версии чарта больше не ломает `helm upgrade` StatefulSet кеша: на k3d upgrade с `version`/`appVersion` 0.1.1 принят API, на чарте `main` — `spec: Forbidden`.
   - **Чарт:** `volumeClaimTemplates` `redis-data` в `redis-statefulset.yaml` — только `app.kubernetes.io/name`/`instance` + `component: redis-storage` вместо `amp.labels` (`helm.sh/chart`, `app.kubernetes.io/version`). У Postgres меток в VCT не было; других неизменяемых полей с `amp.labels` в чарте нет.
   - **Миграция (Breaking в CHANGELOG, README § Upgrading):** существующая standard-установка один раз удаляет StatefulSet кеша с `--cascade=orphan` перед upgrade — сама смена меток тоже `Forbidden`.

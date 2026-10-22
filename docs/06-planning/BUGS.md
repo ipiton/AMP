@@ -270,14 +270,6 @@
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
 - **Status:** open
 
-### [medium][Cache][~0.5d] AMP-CACHE-NO-RECONNECT
-- **Title:** AMP не переподключается к кешу, недоступному на старте
-- **Problem:** `go-app/internal/application/service_registry.go:1204-1212`: если Redis/Valkey не ответил при инициализации, AMP переходит на in-memory кеш до конца жизни процесса. `helm upgrade` рестартует AMP и под кеша одновременно, порядок не гарантирован.
-- **Impact:** после upgrade или рестарта кеша AMP молча работает без общего состояния; лечится только `kubectl rollout restart` (migration note в `CHANGELOG.md`). Воспроизведено на k3d 2026-10-20 (`AMP-CACHE-NOAUTH` A2): первый `helm upgrade` с `main` рестартует Valkey (новые `items` volume) и AMP; AMP стартовал на 3 с раньше, `dial tcp …:6379: i/o timeout` → in-memory, под Ready. С `AMP-CACHE-NOAUTH` AMP на дефолтах ходит в кеш, поэтому гонка теперь бьёт по каждому upgrade, который рестартует оба пода; NOTES на upgrade подсказывают `rollout restart`.
-- **Fix:** ленивое подключение с ретраем (backoff) и переход с in-memory на кеш при восстановлении, либо readiness AMP не готов, пока кеш недоступен; метрика/лог текущего бэкенда кеша.
-- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R7; `tasks/archive/AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2, `review-findings.md` A4.
-- **Status:** open
-
 ### [low][Test][~0.1d] FLAKE-TIMER-CONTINUATION-GROUP-INTERVAL
 - **Title:** `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` флейкает в шаге `race`
 - **Problem:** `go-app/internal/infrastructure/grouping/timer_continuation_regression_test.go:198` — ожидался таймер `group_interval`, прочитан `group_wait`: тест читает storage раньше, чем срабатывание записало continuation. Release-gate 2026-10-19 (ветка `feature/helm-single-node-defaults`, Go-код не менялся), шаг `race`; перезапуск шага — 7/7 ok, тест отдельно `-race -count=30` — 30/30.
@@ -630,7 +622,7 @@
 - **Title:** `RedisCache.Flush` стирает все DB инстанса
 - **Problem:** `internal/infrastructure/cache/redis.go:367-378` вызывает `FlushAll`, а не `FlushDB`; метод в интерфейсе `Cache`, prod-вызовов нет. `NewRedisCache` игнорирует ctx (`:59`).
 - **Impact:** сейчас нет; на shared Redis первый же вызов сотрёт чужие данные.
-- **Fix:** `FlushDB` или убрать метод из интерфейса; прокинуть ctx (вместе с `AMP-CACHE-NO-RECONNECT`).
+- **Fix:** `FlushDB` или убрать метод из интерфейса; прокинуть ctx в `NewRedisCache`/`dialRedis` (`AMP-CACHE-NO-RECONNECT` закрыт без этого: ожидание на старте прерывается своим ctx между попытками).
 - **Refs:** CODE-REVIEW-2026-10-21 L-26.
 - **Status:** open
 

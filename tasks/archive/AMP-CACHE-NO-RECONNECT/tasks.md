@@ -3,7 +3,7 @@ id: AMP-CACHE-NO-RECONNECT
 slug: amp-cache-no-reconnect
 stream: Cache
 type: bug
-status: active
+status: done
 created_at: 2026-10-22
 updated_at: 2026-10-22
 based_on:
