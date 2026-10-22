@@ -54,9 +54,11 @@ based_on:
 
 ## Phase 4: Testing
 
-- [ ] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` (один прогон; `lint` красный из-за предсуществующего `LINT-ERRCHECK-CHANNEL-RECEIVE`) <!-- verify: evidence/release-gate.txt -->
+- [x] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` (один прогон; `lint` красный из-за предсуществующего `LINT-ERRCHECK-CHANNEL-RECEIVE`) <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
+
+- Testing 2026-10-22 @ `2a67715`: `go vet ./...` OK; `go test -race` по `inhibition`, `core/services`, `application` — 860 passed; `make -C go-app quality-gates-fast` — passed; `git diff --check` чисто, `_, _ :=` в диффе нет; `scripts/release-gate.sh` (один прогон) — всё PASS, кроме `lint`: 7 errcheck в `publishing`/`silencing` тестах вне диффа (`LINT-ERRCHECK-CHANNEL-RECEIVE`), `evidence/release-gate.txt`.
 
 - Write-tests 2026-10-22: `cache_test.go` — тип L1 и восстановление через явный `syncFromRedis()` (Redis-путь `GetFiringAlerts` удалён), mock Redis возвращает `cache.ErrNotFound` вместо произвольной ошибки; новые тесты на фейковых часах (`newManualCache` останавливает воркер и подменяет `c.now`): 10 минут с resend каждые 30s на две реплики с endsAt и без, `ResolveTimeout`, синк при непустом L1, F2 (add во время прохода), F3 (повторный tombstone), re-add во время remove, ошибка Redis, F1 (синк не вытесняет локальные), порядок вытеснения. Регресс `SourceLongLived_OlderThanFiveMinutes` на реальных часах — на `main` падает (`inhibited = false`), проверено во временном worktree. Мутации (откат F1/F2/F3, порядок вытеснения, продление окна) ловятся. `integration_test.go` — явный синк для c2/c3. `alert_processor_test.go` — ignored-дубликат firing → `AddFiringAlert`, resolved → нет.
 
