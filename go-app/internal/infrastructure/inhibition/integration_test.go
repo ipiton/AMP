@@ -228,7 +228,8 @@ func TestIntegration_TwoTierAlertCache_Redis(t *testing.T) {
 	c2 := NewTwoTierAlertCache(redisClient, nil)
 	defer c2.Stop()
 
-	// Initial get should hit Redis and populate L1
+	// Sync pass populates L1 from Redis
+	c2.syncFromRedis()
 	alerts2, err := c2.GetFiringAlerts(ctx)
 	if err != nil {
 		t.Fatalf("GetFiringAlerts (c2) failed: %v", err)
@@ -250,6 +251,7 @@ func TestIntegration_TwoTierAlertCache_Redis(t *testing.T) {
 	c3 := NewTwoTierAlertCache(redisClient, nil)
 	defer c3.Stop()
 
+	c3.syncFromRedis()
 	alerts3, err := c3.GetFiringAlerts(ctx)
 	if err != nil {
 		t.Fatalf("GetFiringAlerts (c3) failed: %v", err)

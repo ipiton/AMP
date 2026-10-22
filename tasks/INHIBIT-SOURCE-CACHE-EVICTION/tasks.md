@@ -44,11 +44,11 @@ based_on:
 
 ## Phase 3: Тесты (после deep-review `pass`)
 
-- [ ] **3.1** Переписать `cache_test.go`/`integration_test.go` под новую модель (Redis-путь `GetFiringAlerts` удалён, тип L1 изменён) <!-- verify: cd go-app && go test ./internal/infrastructure/inhibition/... -->
-- [ ] **3.2** Источник горит 10 минут на фейковых часах, resend каждые 30s с новым `endsAt` и без — `ShouldInhibit` true на каждом шаге; на коде `main` — false после 5 минут <!-- verify: go test -run SourceLongLived ./internal/infrastructure/inhibition/... -->
-- [ ] **3.3** Два экземпляра кеша на общем `MemoryCache`/miniredis: источник на A виден B после синка при непустом L1 B; resolve на A снимает на B; tombstone-гонка <!-- verify: go test -run Sync ./internal/infrastructure/inhibition/... -->
-- [ ] **3.4** `AlertProcessor`: ignored-дубликат вызывает `AddFiringAlert` <!-- verify: go test -run Ignored ./internal/core/services/... -->
-- [ ] **3.5** Ёмкость: вытесняется ближайший к resolve, истёкшие первыми <!-- verify: go test -run Capacity ./internal/infrastructure/inhibition/... -->
+- [x] **3.1** Переписать `cache_test.go`/`integration_test.go` под новую модель (Redis-путь `GetFiringAlerts` удалён, тип L1 изменён) <!-- verify: cd go-app && go test ./internal/infrastructure/inhibition/... -->
+- [x] **3.2** Источник горит 10 минут на фейковых часах, resend каждые 30s с новым `endsAt` и без — `ShouldInhibit` true на каждом шаге; на коде `main` — false после 5 минут <!-- verify: go test -run SourceLongLived ./internal/infrastructure/inhibition/... -->
+- [x] **3.3** Два экземпляра кеша на общем `MemoryCache`/miniredis: источник на A виден B после синка при непустом L1 B; resolve на A снимает на B; tombstone-гонка <!-- verify: go test -run Sync ./internal/infrastructure/inhibition/... -->
+- [x] **3.4** `AlertProcessor`: ignored-дубликат вызывает `AddFiringAlert` <!-- verify: go test -run Ignored ./internal/core/services/... -->
+- [x] **3.5** Ёмкость: вытесняется ближайший к resolve, истёкшие первыми <!-- verify: go test -run Capacity ./internal/infrastructure/inhibition/... -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/inhibition/... ./internal/core/services/...`
 
@@ -57,6 +57,8 @@ based_on:
 - [ ] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` (один прогон; `lint` красный из-за предсуществующего `LINT-ERRCHECK-CHANNEL-RECEIVE`) <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
+
+- Write-tests 2026-10-22: `cache_test.go` — тип L1 и восстановление через явный `syncFromRedis()` (Redis-путь `GetFiringAlerts` удалён), mock Redis возвращает `cache.ErrNotFound` вместо произвольной ошибки; новые тесты на фейковых часах (`newManualCache` останавливает воркер и подменяет `c.now`): 10 минут с resend каждые 30s на две реплики с endsAt и без, `ResolveTimeout`, синк при непустом L1, F2 (add во время прохода), F3 (повторный tombstone), re-add во время remove, ошибка Redis, F1 (синк не вытесняет локальные), порядок вытеснения. Регресс `SourceLongLived_OlderThanFiveMinutes` на реальных часах — на `main` падает (`inhibited = false`), проверено во временном worktree. Мутации (откат F1/F2/F3, порядок вытеснения, продление окна) ловятся. `integration_test.go` — явный синк для c2/c3. `alert_processor_test.go` — ignored-дубликат firing → `AddFiringAlert`, resolved → нет.
 
 - Deep-review @ `616aeef` → `fix_required` (`review-findings.md`). Fix-here: F1 — синк не вытесняет активные записи при полном L1, пропущенные — одним WARN за проход; WARN вытеснения на `AddFiringAlert` сведён в один за проход очистки (`capacityEvictions`); F2 — `inRedis` заменён на `redisConfirmedAt`, удаление «пропавших» — только подтверждённых до начала прохода; F3 — повторный tombstone и удаление записи из L1 после `Delete`/`SRem` (флаг `fromSync`, чтобы не тронуть более новый локальный add); F5 — premise переклассифицирована в `assumed`. Отложено в finalize: F1-корень, F4, F7 → TECH-DEBT; F5 (pub/sub), F6 → BACKLOG. Проверка: `go build ./...`; временная проба на копии `cache.go` (`go test -race -count=3`: долгоживущий источник, resolve на другой реплике, ёмкость при синке, гонка F3) — зелёная, удалена; тесты — в Phase 3 после `pass`.
 

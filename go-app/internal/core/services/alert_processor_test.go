@@ -11,6 +11,7 @@ import (
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/infrastructure/grouping"
+	"github.com/ipiton/AMP/internal/infrastructure/inhibition"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -594,5 +595,69 @@ func TestAlertProcessor_ProcessAlert_GroupingEnabled_NoTimeIntervals_CapturesEmp
 	if group.Metadata.TimeIntervalNames != nil {
 		assert.Empty(t, group.Metadata.TimeIntervalNames.Mute)
 		assert.Empty(t, group.Metadata.TimeIntervalNames.Active)
+	}
+}
+
+// fakeDeduplication returns a fixed action for every alert.
+type fakeDeduplication struct {
+	action ProcessAction
+}
+
+func (f *fakeDeduplication) ProcessAlert(ctx context.Context, alert *core.Alert) (*ProcessResult, error) {
+	return &ProcessResult{Action: f.action, Alert: alert}, nil
+}
+
+func (f *fakeDeduplication) GetDuplicateStats(ctx context.Context) (*DuplicateStats, error) {
+	return &DuplicateStats{}, nil
+}
+
+func (f *fakeDeduplication) ResetStats(ctx context.Context) error { return nil }
+
+// fakeInhibitionCache records AddFiringAlert calls.
+type fakeInhibitionCache struct {
+	added []string
+}
+
+var _ inhibition.ActiveAlertCache = (*fakeInhibitionCache)(nil)
+
+func (f *fakeInhibitionCache) GetFiringAlerts(ctx context.Context) ([]*core.Alert, error) {
+	return nil, nil
+}
+
+func (f *fakeInhibitionCache) AddFiringAlert(ctx context.Context, alert *core.Alert) error {
+	f.added = append(f.added, alert.Fingerprint)
+	return nil
+}
+
+func (f *fakeInhibitionCache) RemoveAlert(ctx context.Context, fingerprint string) error { return nil }
+
+// An unchanged firing re-send is ignored by dedup but still refreshes the
+// inhibition cache: for an alert without endsAt that re-send is what keeps it
+// a source (INHIBIT-SOURCE-CACHE-EVICTION).
+func TestAlertProcessor_ProcessAlert_IgnoredDuplicate_RefreshesInhibitionCache(t *testing.T) {
+	for _, tc := range []struct {
+		status    core.AlertStatus
+		wantAdded []string
+	}{
+		{status: core.StatusFiring, wantAdded: []string{"fp-1"}},
+		{status: core.StatusResolved, wantAdded: nil},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			publisher := &fakePublisher{}
+			inhibitionCache := &fakeInhibitionCache{}
+			cfg := newTestProcessorConfig(t, nil, publisher)
+			cfg.Deduplication = &fakeDeduplication{action: ProcessActionIgnored}
+			cfg.InhibitionCache = inhibitionCache
+			processor, err := NewAlertProcessor(cfg)
+			require.NoError(t, err)
+
+			alert := testAlert()
+			alert.Status = tc.status
+			require.NoError(t, processor.ProcessAlert(context.Background(), alert))
+
+			assert.Equal(t, tc.wantAdded, inhibitionCache.added)
+			assert.Zero(t, publisher.publishToAllCalls+publisher.publishWithClassificationCalls,
+				"an ignored duplicate is not published")
+		})
 	}
 }

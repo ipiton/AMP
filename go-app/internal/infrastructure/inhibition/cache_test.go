@@ -3,11 +3,16 @@ package inhibition
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
+	infracache "github.com/ipiton/AMP/internal/infrastructure/cache"
 )
 
 // --- Mock Redis Cache ---
@@ -27,11 +32,11 @@ func (m *mockRedisCache) Get(ctx context.Context, key string, dest interface{}) 
 	defer m.mu.RUnlock()
 
 	if m.data == nil {
-		return fmt.Errorf("not found")
+		return infracache.ErrNotFound
 	}
 	val, exists := m.data[key]
 	if !exists {
-		return fmt.Errorf("not found")
+		return infracache.ErrNotFound
 	}
 	// Simplified deserialization
 	if strPtr, ok := dest.(*string); ok {
@@ -1368,7 +1373,7 @@ func TestTwoTierAlertCache_RedisRecovery_BasicRestore(t *testing.T) {
 
 	// Simulate pod restart: clear L1 cache
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Verify L1 empty (direct check, don't call GetFiringAlerts yet)
@@ -1379,13 +1384,14 @@ func TestTwoTierAlertCache_RedisRecovery_BasicRestore(t *testing.T) {
 		t.Errorf("Expected 0 alerts in L1 after restart, got %d", l1Size)
 	}
 
-	// Recovery: GetFiringAlerts should restore from Redis
+	// Recovery: background sync pass restores L1 from Redis
+	cache.syncFromRedis()
 	alerts, err := cache.GetFiringAlerts(ctx)
 	if err != nil {
 		t.Fatalf("GetFiringAlerts() error = %v", err)
 	}
 
-	// After L1 miss, should fetch from L2 and populate L1
+	// After sync, L1 holds everything from L2
 	if len(alerts) != 10 {
 		t.Errorf("Expected 10 alerts recovered from Redis, got %d", len(alerts))
 	}
@@ -1419,10 +1425,11 @@ func TestTwoTierAlertCache_RedisRecovery_LargeDataset(t *testing.T) {
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Recovery
+	cache.syncFromRedis()
 	alerts, _ := cache.GetFiringAlerts(ctx)
 	if len(alerts) != alertCount {
 		t.Errorf("Expected %d alerts recovered, got %d", alertCount, len(alerts))
@@ -1452,10 +1459,11 @@ func TestTwoTierAlertCache_RedisRecovery_PartialData(t *testing.T) {
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Recovery should only restore 10 valid alerts
+	cache.syncFromRedis()
 	alerts, _ := cache.GetFiringAlerts(ctx)
 	if len(alerts) != 10 {
 		t.Errorf("Expected 10 valid alerts recovered, got %d", len(alerts))
@@ -1482,18 +1490,18 @@ func TestTwoTierAlertCache_RedisRecovery_ConcurrentRestarts(t *testing.T) {
 		_ = cache.AddFiringAlert(ctx, alert)
 	}
 
-	// Simulate multiple concurrent "restarts"
+	// Simulate a restart: L1 is empty
+	cache.l1Mutex.Lock()
+	cache.l1Cache = make(map[string]*cacheEntry)
+	cache.l1Mutex.Unlock()
+
+	// Concurrent sync passes must not corrupt L1
 	const restarts = 5
 	done := make(chan int, restarts)
 
 	for r := 0; r < restarts; r++ {
 		go func(id int) {
-			// Clear L1
-			cache.l1Mutex.Lock()
-			cache.l1Cache = make(map[string]*core.Alert)
-			cache.l1Mutex.Unlock()
-
-			// Recovery
+			cache.syncFromRedis()
 			alerts, _ := cache.GetFiringAlerts(ctx)
 			done <- len(alerts)
 		}(r)
@@ -1538,10 +1546,11 @@ func TestTwoTierAlertCache_RedisRecovery_ExpiredAlerts(t *testing.T) {
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Recovery - expired alerts should be in Redis (cleanup happens in background)
+	cache.syncFromRedis()
 	alerts, _ := cache.GetFiringAlerts(ctx)
 
 	// Should recover all 20 (cleanup worker runs separately)
@@ -1574,10 +1583,11 @@ func TestTwoTierAlertCache_RedisRecovery_ResolvedAlerts(t *testing.T) {
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Recovery - only firing alerts should be returned
+	cache.syncFromRedis()
 	alerts, _ := cache.GetFiringAlerts(ctx)
 	if len(alerts) != 10 {
 		t.Errorf("Expected 10 firing alerts recovered, got %d", len(alerts))
@@ -1612,10 +1622,11 @@ func TestTwoTierAlertCache_RedisRecovery_RedisFails(t *testing.T) {
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Recovery should fail gracefully (return empty)
+	cache.syncFromRedis()
 	alerts, err = cache.GetFiringAlerts(ctx)
 	if err != nil {
 		t.Errorf("GetFiringAlerts should not error on Redis failure, got: %v", err)
@@ -1658,9 +1669,10 @@ func TestTwoTierAlertCache_RedisRecovery_SETConsistency(t *testing.T) {
 
 	// Clear L1 and verify recovery
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
+	cache.syncFromRedis()
 	alerts, _ := cache.GetFiringAlerts(ctx)
 	if len(alerts) != 25 {
 		t.Errorf("Expected 25 alerts recovered, got %d", len(alerts))
@@ -1690,10 +1702,11 @@ func TestTwoTierAlertCache_RedisRecovery_CorruptedData(t *testing.T) {
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	cache.l1Mutex.Unlock()
 
 	// Recovery should skip corrupted data and return valid alerts
+	cache.syncFromRedis()
 	alerts, err := cache.GetFiringAlerts(ctx)
 	if err != nil {
 		t.Fatalf("GetFiringAlerts() error = %v", err)
@@ -1716,6 +1729,7 @@ func TestTwoTierAlertCache_RedisRecovery_EmptyCache(t *testing.T) {
 	// No alerts added - simulate fresh start
 
 	// Recovery from empty cache
+	cache.syncFromRedis()
 	alerts, err := cache.GetFiringAlerts(ctx)
 	if err != nil {
 		t.Fatalf("GetFiringAlerts() error = %v", err)
@@ -1741,7 +1755,7 @@ func TestTwoTierAlertCache_RedisRecovery_L1PopulatedAfterRecovery(t *testing.T) 
 
 	// Clear L1
 	cache.l1Mutex.Lock()
-	cache.l1Cache = make(map[string]*core.Alert)
+	cache.l1Cache = make(map[string]*cacheEntry)
 	l1SizeBefore := len(cache.l1Cache)
 	cache.l1Mutex.Unlock()
 
@@ -1750,6 +1764,7 @@ func TestTwoTierAlertCache_RedisRecovery_L1PopulatedAfterRecovery(t *testing.T) 
 	}
 
 	// Recovery
+	cache.syncFromRedis()
 	alerts, _ := cache.GetFiringAlerts(ctx)
 	if len(alerts) != 100 {
 		t.Errorf("Expected 100 alerts recovered, got %d", len(alerts))
@@ -1774,4 +1789,369 @@ func TestTwoTierAlertCache_RedisRecovery_L1PopulatedAfterRecovery(t *testing.T) 
 	}
 
 	t.Logf("L1 cache hit took %v (should be <1ms)", duration)
+}
+
+// --- Source lifetime, replica sync, capacity (INHIBIT-SOURCE-CACHE-EVICTION) ---
+
+// fakeClock drives cacheEntry expiry without sleeping.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{t: time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)}
+}
+
+func (f *fakeClock) Now() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.t
+}
+
+func (f *fakeClock) Advance(d time.Duration) {
+	f.mu.Lock()
+	f.t = f.t.Add(d)
+	f.mu.Unlock()
+}
+
+// newManualCache returns a cache whose background worker is already stopped:
+// the test runs cleanup/syncFromRedis by hand on the fake clock.
+func newManualCache(t *testing.T, redis infracache.Cache, clock *fakeClock, opts *AlertCacheOptions) *TwoTierAlertCache {
+	t.Helper()
+	c := NewTwoTierAlertCacheWithOptions(redis, nil, opts)
+	c.Stop()
+	c.now = clock.Now
+	return c
+}
+
+// hookCache runs a callback once inside a Redis call, to interleave a local
+// write or removal with a running sync pass.
+type hookCache struct {
+	infracache.Cache
+	afterSMembers func()
+	beforeDelete  func(key string)
+}
+
+func (h *hookCache) SMembers(ctx context.Context, key string) ([]string, error) {
+	members, err := h.Cache.SMembers(ctx, key)
+	if f := h.afterSMembers; f != nil {
+		h.afterSMembers = nil
+		f()
+	}
+	return members, err
+}
+
+func (h *hookCache) Delete(ctx context.Context, key string) error {
+	if f := h.beforeDelete; f != nil {
+		h.beforeDelete = nil
+		f(key)
+	}
+	return h.Cache.Delete(ctx, key)
+}
+
+func nodeDownRule() InhibitionRule {
+	rule := InhibitionRule{
+		Name:        "node-down",
+		SourceMatch: map[string]string{"alertname": "NodeDown"},
+		TargetMatch: map[string]string{"alertname": "InstanceDown"},
+		Equal:       []string{"node"},
+	}
+	rule.compiledSourceRE = make(map[string]*regexp.Regexp)
+	rule.compiledTargetRE = make(map[string]*regexp.Regexp)
+	return rule
+}
+
+func nodeAlert(name string, startsAt time.Time, endsAt *time.Time) *core.Alert {
+	return &core.Alert{
+		AlertName:   name,
+		Fingerprint: "fp-" + name + "-node1",
+		Status:      core.StatusFiring,
+		StartsAt:    startsAt,
+		EndsAt:      endsAt,
+		Labels:      map[string]string{"alertname": name, "node": "node1"},
+	}
+}
+
+func assertInhibited(t *testing.T, c ActiveAlertCache, want bool, step string) {
+	t.Helper()
+	target := nodeAlert("InstanceDown", time.Now(), nil)
+	result, err := NewMatcher(c, []InhibitionRule{nodeDownRule()}, nil).ShouldInhibit(context.Background(), target)
+	if err != nil {
+		t.Fatalf("%s: ShouldInhibit() error = %v", step, err)
+	}
+	if result.Matched != want {
+		t.Fatalf("%s: inhibited = %v, want %v", step, result.Matched, want)
+	}
+}
+
+// Regression: a source without endsAt that started more than 5 minutes ago
+// kept being evicted by cleanup (age by StartsAt), so its targets leaked.
+// Uses the real clock: fails on the pre-fix cache.
+func TestTwoTierAlertCache_SourceLongLived_OlderThanFiveMinutes(t *testing.T) {
+	c := NewTwoTierAlertCacheWithOptions(nil, nil, &AlertCacheOptions{CleanupInterval: 10 * time.Millisecond})
+	defer c.Stop()
+
+	source := nodeAlert("NodeDown", time.Now().Add(-10*time.Minute), nil)
+	if err := c.AddFiringAlert(context.Background(), source); err != nil {
+		t.Fatalf("AddFiringAlert() error = %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond) // several cleanup passes
+	assertInhibited(t, c, true, "after cleanup")
+	if source.EndsAt != nil {
+		t.Error("AddFiringAlert must not mutate the caller's alert")
+	}
+}
+
+// A source firing for 10 minutes, re-sent every 30s to either of two replicas,
+// inhibits on both replicas at every step, with and without endsAt.
+func TestTwoTierAlertCache_SourceLongLived_TenMinutesTwoReplicas(t *testing.T) {
+	for _, withEndsAt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("endsAt=%v", withEndsAt), func(t *testing.T) {
+			clock := newFakeClock()
+			redis := infracache.NewMemoryCache(nil)
+			a := newManualCache(t, redis, clock, nil)
+			b := newManualCache(t, redis, clock, nil)
+			startsAt := clock.Now()
+
+			send := func(replica *TwoTierAlertCache) {
+				var endsAt *time.Time
+				if withEndsAt {
+					e := clock.Now().Add(2 * time.Minute) // Prometheus: 4 × resend interval
+					endsAt = &e
+				}
+				if err := replica.AddFiringAlert(context.Background(), nodeAlert("NodeDown", startsAt, endsAt)); err != nil {
+					t.Fatalf("AddFiringAlert() error = %v", err)
+				}
+			}
+
+			send(a)
+			for step := 1; step <= 20; step++ {
+				clock.Advance(30 * time.Second)
+				if step%2 == 0 {
+					send(a)
+				} else {
+					send(b)
+				}
+				for _, replica := range []*TwoTierAlertCache{a, b} {
+					replica.syncFromRedis()
+					replica.cleanup()
+				}
+				assertInhibited(t, a, true, fmt.Sprintf("replica A, %v", time.Duration(step)*30*time.Second))
+				assertInhibited(t, b, true, fmt.Sprintf("replica B, %v", time.Duration(step)*30*time.Second))
+			}
+
+			// Re-sends stop: the source ends with its last EndsAt.
+			clock.Advance(alertconv.DefaultResolveTimeout + time.Second)
+			assertInhibited(t, a, false, "after the last EndsAt")
+			assertInhibited(t, b, false, "after the last EndsAt")
+		})
+	}
+}
+
+func TestTwoTierAlertCache_ResolveTimeoutOption(t *testing.T) {
+	clock := newFakeClock()
+	c := newManualCache(t, nil, clock, &AlertCacheOptions{
+		ResolveTimeout: func() time.Duration { return time.Minute },
+	})
+
+	_ = c.AddFiringAlert(context.Background(), nodeAlert("NodeDown", clock.Now(), nil))
+	clock.Advance(59 * time.Second)
+	assertInhibited(t, c, true, "before resolve_timeout")
+	clock.Advance(2 * time.Second)
+	assertInhibited(t, c, false, "after resolve_timeout")
+}
+
+func TestTwoTierAlertCache_Sync_SourceVisibleOnOtherReplica(t *testing.T) {
+	clock := newFakeClock()
+	redis := infracache.NewMemoryCache(nil)
+	a := newManualCache(t, redis, clock, nil)
+	b := newManualCache(t, redis, clock, nil)
+	ctx := context.Background()
+
+	// B's L1 is not empty: the old L2 fallback only ran on an empty L1.
+	_ = b.AddFiringAlert(ctx, createCacheTestAlert("Other", "fp-other"))
+	_ = a.AddFiringAlert(ctx, nodeAlert("NodeDown", clock.Now(), nil))
+	assertInhibited(t, b, false, "before sync")
+
+	clock.Advance(time.Second)
+	b.syncFromRedis()
+	assertInhibited(t, b, true, "after sync")
+
+	// Resolve on A clears the source on B with the next sync.
+	_ = a.RemoveAlert(ctx, "fp-NodeDown-node1")
+	clock.Advance(time.Second)
+	b.syncFromRedis()
+	assertInhibited(t, b, false, "after resolve on A")
+
+	alerts, _ := b.GetFiringAlerts(ctx)
+	if len(alerts) != 1 || alerts[0].Fingerprint != "fp-other" {
+		t.Errorf("B must keep its own alert, got %v", alerts)
+	}
+}
+
+// F2: a sync pass whose SMEMBERS ran before this replica's SAdd must not drop
+// the freshly added source as "gone from Redis".
+func TestTwoTierAlertCache_Sync_KeepsSourceAddedDuringPass(t *testing.T) {
+	clock := newFakeClock()
+	redis := &hookCache{Cache: infracache.NewMemoryCache(nil)}
+	c := newManualCache(t, redis, clock, nil)
+
+	redis.afterSMembers = func() {
+		_ = c.AddFiringAlert(context.Background(), nodeAlert("NodeDown", clock.Now(), nil))
+	}
+	c.syncFromRedis()
+	assertInhibited(t, c, true, "after the racing pass")
+
+	clock.Advance(time.Second)
+	c.syncFromRedis()
+	assertInhibited(t, c, true, "after the next pass")
+}
+
+// A local remove during a pass that already read the alert from Redis wins.
+func TestTwoTierAlertCache_Sync_RemoveDuringPassWins(t *testing.T) {
+	clock := newFakeClock()
+	redis := &hookCache{Cache: infracache.NewMemoryCache(nil)}
+	a := newManualCache(t, redis, clock, nil)
+	b := newManualCache(t, redis, clock, nil)
+
+	_ = a.AddFiringAlert(context.Background(), nodeAlert("NodeDown", clock.Now(), nil))
+	redis.afterSMembers = func() {
+		_ = b.RemoveAlert(context.Background(), "fp-NodeDown-node1")
+	}
+	b.syncFromRedis()
+	assertInhibited(t, b, false, "after the racing pass")
+}
+
+// F3: a sync pass that starts after RemoveAlert's first tombstone but reads
+// Redis before its Delete puts the alert back; the re-stamp after Delete must
+// remove it again.
+func TestTwoTierAlertCache_Sync_TombstoneRestampedAfterDelete(t *testing.T) {
+	clock := newFakeClock()
+	redis := &hookCache{Cache: infracache.NewMemoryCache(nil)}
+	a := newManualCache(t, redis, clock, nil)
+	b := newManualCache(t, redis, clock, nil)
+	ctx := context.Background()
+
+	_ = a.AddFiringAlert(ctx, nodeAlert("NodeDown", clock.Now(), nil))
+	b.syncFromRedis()
+	assertInhibited(t, b, true, "after initial sync")
+
+	redis.beforeDelete = func(string) {
+		clock.Advance(time.Second)
+		b.syncFromRedis() // reads the alert still in Redis, clears the first tombstone
+	}
+	_ = b.RemoveAlert(ctx, "fp-NodeDown-node1")
+	assertInhibited(t, b, false, "right after RemoveAlert")
+
+	clock.Advance(time.Second)
+	b.syncFromRedis()
+	assertInhibited(t, b, false, "after the next pass")
+}
+
+// A local re-add between RemoveAlert's Delete and its re-stamp is newer and
+// survives.
+func TestTwoTierAlertCache_Sync_ReaddDuringRemoveSurvives(t *testing.T) {
+	clock := newFakeClock()
+	redis := &hookCache{Cache: infracache.NewMemoryCache(nil)}
+	c := newManualCache(t, redis, clock, nil)
+	ctx := context.Background()
+
+	_ = c.AddFiringAlert(ctx, nodeAlert("NodeDown", clock.Now(), nil))
+	redis.beforeDelete = func(string) {
+		clock.Advance(time.Second)
+		_ = c.AddFiringAlert(ctx, nodeAlert("NodeDown", clock.Now(), nil))
+	}
+	_ = c.RemoveAlert(ctx, "fp-NodeDown-node1")
+	assertInhibited(t, c, true, "after remove with a racing re-add")
+}
+
+func TestTwoTierAlertCache_Sync_RedisErrorKeepsLocalState(t *testing.T) {
+	clock := newFakeClock()
+	redis := &mockRedisCache{}
+	c := newManualCache(t, redis, clock, nil)
+
+	_ = c.AddFiringAlert(context.Background(), nodeAlert("NodeDown", clock.Now(), nil))
+	redis.mu.Lock()
+	redis.fail = true
+	redis.mu.Unlock()
+
+	clock.Advance(time.Second)
+	c.syncFromRedis()
+	assertInhibited(t, c, true, "after a failed sync")
+}
+
+// F1: a full L1 never evicts this replica's active entries to load remote ones;
+// expired entries make room first.
+func TestTwoTierAlertCache_Capacity_SyncDoesNotEvictLocal(t *testing.T) {
+	clock := newFakeClock()
+	redis := infracache.NewMemoryCache(nil)
+	a := newManualCache(t, redis, clock, nil)
+	b := newManualCache(t, redis, clock, &AlertCacheOptions{L1Max: 2})
+	ctx := context.Background()
+
+	soon := clock.Now().Add(time.Minute)
+	later := clock.Now().Add(time.Hour)
+	withEnds := func(fp string, endsAt time.Time) *core.Alert {
+		alert := createCacheTestAlert("Alert", fp)
+		alert.EndsAt = &endsAt
+		return alert
+	}
+	_ = b.AddFiringAlert(ctx, withEnds("b1", soon))
+	_ = b.AddFiringAlert(ctx, withEnds("b2", later))
+	_ = a.AddFiringAlert(ctx, withEnds("a1", later))
+
+	clock.Advance(time.Second)
+	b.syncFromRedis()
+	if got := firingFingerprints(t, b); got != "b1,b2" {
+		t.Fatalf("full L1: got %s, want b1,b2 (remote a1 skipped)", got)
+	}
+
+	clock.Advance(2 * time.Minute) // b1 expired
+	b.syncFromRedis()
+	if got := firingFingerprints(t, b); got != "a1,b2" {
+		t.Fatalf("after b1 expired: got %s, want a1,b2", got)
+	}
+}
+
+func TestTwoTierAlertCache_Capacity_EvictsExpiredThenClosestToResolve(t *testing.T) {
+	clock := newFakeClock()
+	c := newManualCache(t, nil, clock, &AlertCacheOptions{L1Max: 3})
+	ctx := context.Background()
+
+	add := func(fp string, endsIn time.Duration) {
+		alert := createCacheTestAlert("Alert", fp)
+		endsAt := clock.Now().Add(endsIn)
+		alert.EndsAt = &endsAt
+		_ = c.AddFiringAlert(ctx, alert)
+	}
+	add("x", 10*time.Minute)
+	add("y", time.Minute)
+	add("z", 30*time.Minute)
+
+	add("w", time.Hour)
+	if got := firingFingerprints(t, c); got != "w,x,z" {
+		t.Fatalf("got %s, want w,x,z (y closest to resolve)", got)
+	}
+
+	clock.Advance(15 * time.Minute) // x expired
+	add("v", time.Minute)
+	if got := firingFingerprints(t, c); got != "v,w,z" {
+		t.Fatalf("got %s, want v,w,z (expired x first)", got)
+	}
+}
+
+func firingFingerprints(t *testing.T, c *TwoTierAlertCache) string {
+	t.Helper()
+	alerts, err := c.GetFiringAlerts(context.Background())
+	if err != nil {
+		t.Fatalf("GetFiringAlerts() error = %v", err)
+	}
+	fps := make([]string, 0, len(alerts))
+	for _, a := range alerts {
+		fps = append(fps, a.Fingerprint)
+	}
+	sort.Strings(fps)
+	return strings.Join(fps, ",")
 }
