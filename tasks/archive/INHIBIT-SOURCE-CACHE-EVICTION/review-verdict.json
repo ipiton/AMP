@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/inhibit-source-cache-eviction",
+  "commit": "f326a0d",
+  "reviewed_at": "2026-10-22",
+  "findings": {
+    "blocker": 0,
+    "major": 1,
+    "minor": 5,
+    "nit": 4
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

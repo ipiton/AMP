@@ -533,8 +533,20 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 				"fingerprint", alert.Fingerprint,
 				"processing_time", dedupResult.ProcessingTime)
 
-			// If alert was ignored (exact duplicate), skip further processing
+			// If alert was ignored (exact duplicate), skip further processing.
+			// A firing duplicate still refreshes the inhibition cache: for an
+			// alert without endsAt the re-send is what keeps it a source
+			// (resolve_timeout window), as in upstream where every received
+			// alert updates the inhibitor's source cache.
 			if dedupResult.Action == ProcessActionIgnored {
+				if p.inhibitionCache != nil && alert.Status == core.StatusFiring {
+					if err := p.inhibitionCache.AddFiringAlert(ctx, alert); err != nil {
+						p.logger.Warn("Failed to refresh alert in inhibition cache",
+							"error", err,
+							"alert", alert.AlertName,
+							"fingerprint", alert.Fingerprint)
+					}
+				}
 				p.logger.Info("Alert ignored as duplicate, skipping processing",
 					"alert", alert.AlertName,
 					"fingerprint", alert.Fingerprint)

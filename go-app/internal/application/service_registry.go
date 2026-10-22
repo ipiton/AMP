@@ -1408,7 +1408,11 @@ func (r *ServiceRegistry) initializeInhibition(ctx context.Context) error {
 		"top_level_rules", len(r.config.InhibitRules),
 	)
 
-	alertCache := inhibitionpkg.NewTwoTierAlertCache(r.cache, r.logger)
+	// resolve_timeout is read on every add (not captured here), like
+	// newAlertStore, so /-/reload applies to the next ingest.
+	alertCache := inhibitionpkg.NewTwoTierAlertCacheWithOptions(r.cache, r.logger, &inhibitionpkg.AlertCacheOptions{
+		ResolveTimeout: func() time.Duration { return resolveTimeoutFromConfig(r.config) },
+	})
 	stateManager := inhibitionpkg.NewDefaultStateManager(r.cache, r.logger, r.metrics)
 	matcher := inhibitionpkg.NewMatcher(alertCache, rules, r.logger)
 

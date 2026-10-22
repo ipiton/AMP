@@ -1,0 +1,28 @@
+commit: 2a67715  date: 2026-10-22T12:44:05Z
+
+# scripts/release-gate.sh — summary
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   9s       go build ./... (go-app)
+lint             FAIL   19s      golangci-lint run (go-app)
+test             PASS   52s      go test ./... -count=1 (go-app)
+futureparity     PASS   14s      build+test, futureparity tag, cmd/server
+race             PASS   240s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   0s       chart dependencies (Chart.lock, no stale charts/)
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-small       PASS   1s       lint + template, values-small.yaml
+helm-rbac        PASS   0s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   11s      helm/amp/tests/*.sh render tests
+amtool-compat    PASS   56s      real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+
+# lint FAIL — предсуществующий LINT-ERRCHECK-CHANNEL-RECEIVE (golangci-lint 2.15.0), все находки вне диффа задачи:
+internal/infrastructure/publishing/delivery_confirmation_test.go:559:8: Error return value is not checked (errcheck)
+internal/infrastructure/publishing/delivery_confirmation_test.go:602:7: Error return value is not checked (errcheck)
+internal/infrastructure/publishing/delivery_confirmation_test.go:645:7: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:202:2: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:246:2: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:268:2: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:282:2: Error return value is not checked (errcheck)

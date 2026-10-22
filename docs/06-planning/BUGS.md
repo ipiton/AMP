@@ -295,15 +295,12 @@
 
 <!-- Code review 2026-10-21 (`docs/06-planning/CODE-REVIEW-2026-10-21.md`, `main` @ `68d749f`). В Refs — ID находки из документа; там же — порядок этапов и зависимости. Пути — от `go-app/`. -->
 
-### [critical][Inhibition][~1d] INHIBIT-SOURCE-CACHE-EVICTION
-- **Title:** источник inhibition выпадает из кеша через 5 минут горения и не возвращается на дубликатах
-- **Problem:** три дефекта `TwoTierAlertCache`.
-  - `cleanup` (`internal/infrastructure/inhibition/cache.go:426-445`) вытесняет из L1 по `StartsAt + ttl` (5m): любой источник старше 5 минут удаляется каждую минуту.
-  - Точный дубликат (`ProcessActionIgnored` — resend без изменения `EndsAt`, типично для webhook-источников без `endsAt`) делает `return nil` до шага `AddFiringAlert` (`internal/core/services/alert_processor.go:537-541`) ⇒ источник не возвращается в кеш, Redis-ключ (TTL 5m) тоже истекает.
-  - `GetFiringAlerts` (`cache.go:233-262`) идёт в Redis только при пустом L1 ⇒ в HA источники с другой реплики невидимы, пока локальный L1 не пуст.
-- **Impact:** долгоживущий источник перестаёт подавлять цели: для не-Prometheus источников навсегда, для Prometheus — «дырами» до минуты. Утечка и на ingest, и в `filterInhibited` на отправке — базовая функция Alertmanager работает неверно.
-- **Fix:** вытеснять только по `EndsAt` (с `resolve_timeout`); обновлять кеш на каждом ingest, включая ignored-дубликаты; убрать shortcut «L1 не пуст ⇒ без Redis» или брать источники из активного набора `memory.AlertStore`. Тест: источник горит 10 минут с resend каждые 30s (с новым `endsAt` и без) ⇒ цель подавлена всё время; вариант с двумя репликами.
-- **Refs:** CODE-REVIEW-2026-10-21 C-1.
+### [low][Inhibition][~0.25d] INHIBIT-CACHE-RESOLVE-REFIRE-RACE
+- **Title:** параллельные resolve и повторный firing одного fingerprint на одной реплике — источник снимается синком
+- **Problem:** `RemoveAlert` (`internal/infrastructure/inhibition/cache.go`) делает `Delete`/`SRem` в Redis после удаления из L1. Если параллельно идёт `AddFiringAlert` того же fingerprint, его Set+SAdd могут попасть до `Delete`/`SRem` remove: в L1 лежит локальная запись с выставленным `redisConfirmedAt`, а в Redis её уже нет ⇒ следующий проход синка удаляет её как «пропавшую». Повторный tombstone верно пропускает локальную запись, но расхождение L1 и Redis остаётся.
+- **Impact:** источник перестаёт подавлять на этой реплике до следующего resend (~1m у Prometheus, для webhook — до повтора). Реалистичный случай — HA-пара Prometheus с рассинхроном оценки (одна шлёт resolved, другая firing). Другие реплики согласованы (там победил resolve).
+- **Fix:** в `RemoveAlert` после `Delete`/`SRem`, если в L1 локальная запись (`!fromSync`) с `writtenAt` позже первого tombstone, — повторно записать её в Redis (или сбросить ей `redisConfirmedAt`). Тест на `hookCache` из `cache_test.go`: add внутри `Delete` remove ⇒ после синка источник виден.
+- **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F8.
 - **Status:** open
 
 ### [critical][Publishing][~0.25d] PROVIDER-RESOLVE-STATELESS-PD

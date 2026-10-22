@@ -183,6 +183,22 @@
 - **Refs:** CODE-REVIEW-2026-10-21 M-6.
 - **Status:** open
 
+### [medium][Inhibition][~1d] INHIBIT-CACHE-SOURCES-ONLY
+- **Title:** кеш inhibition хранит все firing-алерты, а не источники; ёмкость `l1Max` и нагрузка синка растут с кластером
+- **Problem:** `alert_processor.go` кладёт в `TwoTierAlertCache` каждый firing-алерт, а upstream (`inhibit/inhibit.go`, `scache`) — только совпавшие с `SourceMatchers` хотя бы одного правила. С фоновым синком L2 → L1 каждая реплика держит весь кластер: лимит `l1Max` = 1000 достигается в R раз раньше (сверх него удалённые записи не грузятся — WARN раз за проход, локальные вытесняются по ближайшему `EndsAt`). Синк каждые 5s делает N последовательных GET на реплику (MGET/pipeline в `cache.Cache` нет), таймаут прохода = интервалу: при N ≳ 10k проход не укладывается и чужие источники не видны вовсе; одна ошибка GET обнуляет проход.
+- **Impact:** на больших инсталляциях (>1000 firing-алертов) часть источников не подавляет на части реплик; R·N/5 GET/s на Redis.
+- **Fix:** кешировать только алерты, совпадающие с source-стороной правил (пересчёт при reload правил) — это же индекс из `INHIBIT-MATCH-PERF`, делать вместе; MGET/pipeline или Redis hash вместо SET + N GET; метрика длительности прохода против интервала; ёмкость — настраиваемая или по числу источников.
+- **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F1 (корень), F4. Смежно `INHIBIT-MATCH-PERF`, `INHIBIT-CACHE-OBSERVABILITY`.
+- **Status:** open
+
+### [low][Inhibition][~0.25d] INHIBIT-CACHE-OBSERVABILITY
+- **Title:** наблюдаемость синка кеша inhibition и мелочи состояния
+- **Problem:** `alert_history_inhibition_cache_evictions_total` смешивает штатное истечение по `EndsAt` и потерю активного источника по ёмкости — второе видно только по WARN. Ошибка синка видна лишь как `cache_misses_total{tier="l2"}`. `tombstones` чистятся только успешным проходом: при долгой недоступности Redis растут на каждый resolve. Контекст синка не связан со `stopCh` — `Stop` может ждать до `SyncInterval` зависший проход.
+- **Impact:** потерю источников по ёмкости не отличить от нормы на дашборде; память под tombstones во время аутеджа Redis; медленный shutdown.
+- **Fix:** label `reason="expired|capacity"` (или отдельный счётчик); чистить tombstones старше `2·SyncInterval` и при ошибке синка; отменять контекст синка по `stopCh`.
+- **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F7.
+- **Status:** open
+
 ### [medium][Observability][~0.5d] HTTP-METRICS-ACCESS-LOG
 - **Title:** у HTTP-сервера нет access-лога, request-id и метрик
 - **Problem:** `cmd/server/main.go:136-155` собирает mux без middleware; готовые `pkg/logger.LoggingMiddleware` и HTTP-метрики не подключены.
