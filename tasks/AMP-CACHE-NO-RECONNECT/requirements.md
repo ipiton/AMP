@@ -34,13 +34,13 @@ updated_at: 2026-10-22
 
 ## Success Criteria
 
-- [ ] Standard-профиль: если кеш недоступен на старте, AMP повторяет подключение с backoff в пределах `redis.startup_wait` (дефолт 60s) и при успехе работает на Redis как при обычном старте (`Redis cache initialized`, без degraded reason).
-- [ ] По истечении окна поведение как сейчас: in-memory fallback + degraded reason; в логе видно число попыток и время ожидания.
-- [ ] Lite-профиль и `redis.startup_wait: 0` — одна попытка, как сейчас (старт не замедляется).
-- [ ] Чарт: при `cache.enabled=false` (и в lite) AMP получает `REDIS_STARTUP_WAIT=0s`; рендер с дефолтами не меняется, кроме этого env там, где кеш выключен.
-- [ ] Отрицательное `redis.startup_wait` отвергается при загрузке конфига.
-- [ ] NOTES на upgrade и docs отражают новое поведение; CHANGELOG `[Unreleased]` Fixed.
-- [ ] k3d: upgrade, рестартующий AMP и Valkey, — AMP на Valkey без ручного рестарта (evidence).
+- [x] Standard-профиль: если кеш недоступен на старте, AMP повторяет подключение с backoff в пределах `redis.startup_wait` (дефолт 60s) и при успехе работает на Redis как при обычном старте (`Redis cache initialized`, без degraded reason).
+- [x] По истечении окна поведение как сейчас: in-memory fallback + degraded reason; в логе видно число попыток и время ожидания.
+- [x] Lite-профиль и `redis.startup_wait: 0` — одна попытка, как сейчас (старт не замедляется).
+- [x] Чарт: при `cache.enabled=false` (и в lite) AMP получает `REDIS_STARTUP_WAIT=0s`; рендер с дефолтами не меняется, кроме этого env там, где кеш выключен.
+- [x] Отрицательное `redis.startup_wait` отвергается при загрузке конфига.
+- [x] NOTES на upgrade и docs отражают новое поведение; CHANGELOG `[Unreleased]` Fixed.
+- [x] k3d: upgrade, рестартующий AMP и Valkey, — AMP на Valkey без ручного рестарта (evidence).
 
 ## Non-Goals
 

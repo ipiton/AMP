@@ -47,8 +47,10 @@ based_on:
 
 ## Phase 4: Testing
 
-- [ ] **4.1** Гейты WORKFLOW.md § Гейты AMP (затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`). <!-- verify: evidence/release-gate.txt -->
-- [ ] **4.2** k3d: install `main` → upgrade веткой, рестартующий AMP и Valkey (или удаление пода Valkey + `rollout restart` AMP одновременно) → в логе AMP `Redis cache initialized` (с `attempts > 1`, если гонка случилась) без ручного рестарта. <!-- verify: evidence/k3d-acceptance.md -->
+- [x] **4.1** Гейты WORKFLOW.md § Гейты AMP (затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`). <!-- verify: evidence/release-gate.txt -->
+- [x] **4.2** k3d: install `main` → upgrade веткой, рестартующий AMP и Valkey (или удаление пода Valkey + `rollout restart` AMP одновременно) → в логе AMP `Redis cache initialized` (с `attempts > 1`, если гонка случилась) без ручного рестарта. <!-- verify: evidence/k3d-acceptance.md -->
+
+**Результат testing:** затронутые пакеты (`application`, `config`, `infrastructure/cache`) зелёные, `quality-gates-fast` PASS, `git diff --check` чист, проглоченных ошибок нет. Release-gate @ `41cb924`: 11/12 PASS, `lint` FAIL — 7 errcheck в `delivery_confirmation_test.go` и `redis_event_bus_test.go` вне диффа (предсуществующий `LINT-ERRCHECK-CHANNEL-RECEIVE`), `evidence/release-gate.txt`. k3d (`evidence/k3d-acceptance.md`): на `main` гонка → in-memory навсегда; на ветке — `attempts=6`, 38.3s, 5 ERROR-строк, без ручного рестарта; Valkey дольше окна → fallback `attempts=8 waited=60.285s`; `cache.enabled=false` → одна попытка.
 
 ## Implementation Notes
 

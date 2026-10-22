@@ -3,7 +3,7 @@ id: AMP-CACHE-NO-RECONNECT
 slug: amp-cache-no-reconnect
 stream: Cache
 type: bug
-status: draft
+status: implemented
 created_at: 2026-10-22
 updated_at: 2026-10-22
 based_on:
@@ -14,7 +14,7 @@ based_on:
 # Specification: AMP не переподключается к кешу, недоступному на старте
 
 **Version:** 1.0
-**Status:** Draft
+**Status:** Implemented
 
 ## Summary
 
@@ -46,7 +46,7 @@ based_on:
 | HTTP-сервер (и пробы) поднимается только после `Initialize`, поэтому ожидание в `initializeCache` не валит liveness | `cmd/server/main.go:120` → `:190` | code-read | liveness убивает под во время ожидания |
 | `startupProbe` чарта даёт ≥ 60s до проверки liveness | `deployment.yaml:314-323`: 10s + 30 × 10s | code-read | под рестартует в ожидании (тогда хоть и рестарт, но не хуже `main`) |
 | Все потребители Redis берут клиент из `r.cache` после `initializeCache`; ни один не создаёт свой клиент раньше | grep `r.cache.(*infrastructurecache.RedisCache)` / `NewRedisCache` по `go-app` (`:782`, `:841`, `:905`, `:1879`, `:1981`, `service_registry_reload.go:226`; `NewRedisCache` в prod-коде вызывается только в `initializeCache`) | call-path-traced | часть подсистем осталась бы на старом решении |
-| На single-node k3d (локальные образы, local-path PV) разрыв старта AMP/Valkey на upgrade — секунды; в многоузловом кластере (reattach RWO PV, pull образа, загрузка большого AOF) может быть больше 60s — тогда итог как на `main` | k3d 2026-10-20: под AMP старше пода Valkey на ~6 s, `dial tcp …: i/o timeout` (`AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2.1); фактические попытки и `waited` — в `evidence/k3d-acceptance.md` этой задачи | measured (только single-node k3d) | окна 60s не хватит — fallback как сейчас (не хуже `main`) |
+| На single-node k3d (локальные образы, local-path PV) разрыв старта AMP/Valkey на upgrade — секунды; в многоузловом кластере (reattach RWO PV, pull образа, загрузка большого AOF) может быть больше 60s — тогда итог как на `main` | k3d 2026-10-20: под AMP старше пода Valkey на ~6 s, `dial tcp …: i/o timeout` (`AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2.1); 2026-10-22 на single-node k3d: Valkey вернулся через 20s → AMP подключился на 6-й попытке через 38.3s (`evidence/k3d-acceptance.md` § A1) | measured (только single-node k3d) | окна 60s не хватит — fallback как сейчас (не хуже `main`) |
 | При `cache.enabled=false` и в lite чарт передаёт `REDIS_ADDR=localhost:6379`, где никто не слушает | `deployment.yaml:235-236` | code-read | без `REDIS_STARTUP_WAIT=0s` такой старт ждал бы 60s |
 | Пустая env-переменная не перекрывает дефолт viper (`AutomaticEnv` без `AllowEmptyEnv`) — поэтому выключатель через `REDIS_ADDR=""` не годится, нужен отдельный ключ | `config.go:671,838` | code-read | — (выбран ключ, не пустой адрес) |
 
@@ -126,4 +126,4 @@ based_on:
 
 ## Open Questions
 
-- [ ] Дефолт окна 60s — компромисс между гонкой upgrade (секунды) и задержкой старта без кеша; проверяется на k3d (testing).
+- [x] Дефолт окна 60s — компромисс между гонкой upgrade (секунды) и задержкой старта без кеша. k3d: гонка с 20s простоя Valkey укладывается (38.3s), окно исчерпывается за 60.3s (`evidence/k3d-acceptance.md` § A1, A2); на многоузловом кластере не измерено.
