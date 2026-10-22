@@ -24,8 +24,8 @@ based_on:
 
 ## Phase 1: Implement
 
-- [ ] **1.1** VCT `redis-data`: `amp.labels` → `amp.selectorLabels` + `component: redis-storage` <!-- verify: helm template t helm/amp | yq 'select(.kind=="StatefulSet" and .metadata.name=="t-amp-redis") | .spec.volumeClaimTemplates[0].metadata.labels' — нет helm.sh/chart и version; helm lint helm/amp -->
-- [ ] **1.2** Migration note: корневой `CHANGELOG.md` (Fixed + Breaking changes / migration notes), `helm/amp/CHANGELOG.md` (Fixed), README § Upgrading <!-- depends: 1.1 | verify: git diff --check; ручная вычитка -->
+- [x] **1.1** VCT `redis-data`: `amp.labels` → `amp.selectorLabels` + `component: redis-storage` <!-- verify: helm template t helm/amp | yq 'select(.kind=="StatefulSet" and .metadata.name=="t-amp-redis") | .spec.volumeClaimTemplates[0].metadata.labels' — нет helm.sh/chart и version; helm lint helm/amp -->
+- [x] **1.2** Migration note: корневой `CHANGELOG.md` (Fixed + Breaking changes / migration notes), `helm/amp/CHANGELOG.md` (Fixed), README § Upgrading <!-- depends: 1.1 | verify: git diff --check; ручная вычитка -->
 
 **Phase verification:** `helm lint helm/amp`, `helm/amp/tests/render-*.sh` зелёные.
 

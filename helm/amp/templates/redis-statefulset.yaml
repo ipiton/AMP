@@ -321,11 +321,14 @@ spec:
 
   # Volume Claim Templates
   # Creates PersistentVolumeClaim for each replica (persistent storage)
+  # Labels must not depend on the chart version: volumeClaimTemplates is
+  # immutable, so `helm.sh/chart`/`app.kubernetes.io/version` (amp.labels)
+  # would fail every upgrade that bumps Chart.yaml (HELM-VCT-CHART-LABELS).
   volumeClaimTemplates:
   - metadata:
       name: redis-data
       labels:
-        {{- include "amp.labels" . | nindent 8 }}
+        {{- include "amp.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: redis-storage
     spec:
       accessModes:

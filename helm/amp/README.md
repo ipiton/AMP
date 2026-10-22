@@ -389,6 +389,13 @@ helm upgrade amp ./helm/amp --reuse-values
 
 `--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
 
+Upgrading a `profile: standard` release installed by a chart from before `HELM-VCT-CHART-LABELS` fails with `StatefulSet.apps "<fullname>-redis" is invalid: spec: Forbidden`: the labels of its volume claim template changed, and that field cannot be updated. Delete the StatefulSet object once, keeping its pod and volume, then upgrade:
+
+```bash
+kubectl -n <namespace> delete statefulset <fullname>-redis --cascade=orphan
+helm upgrade amp ./helm/amp --reset-then-reuse-values
+```
+
 ## Uninstalling
 
 ```bash
