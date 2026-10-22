@@ -31,8 +31,8 @@ based_on:
 
 ## Phase 2: Tests (write-tests)
 
-- [ ] **2.1** `helm/amp/tests/render-vct-labels.sh`: в VCT нет `helm.sh/chart`/`app.kubernetes.io/version`; рендер копии чарта с другим `version`/`appVersion` даёт идентичный VCT; на `main` тест красный <!-- verify: bash helm/amp/tests/render-vct-labels.sh -->
-- [ ] **2.2** Подключить тест туда, где release-gate гоняет render-тесты (если список явный) <!-- verify: grep render-vct-labels scripts/release-gate.sh -->
+- [x] **2.1** `helm/amp/tests/render-vct-labels.sh`: в VCT нет `helm.sh/chart`/`app.kubernetes.io/version`; рендер копии чарта с другим `version`/`appVersion` даёт идентичный VCT; на `main` тест красный <!-- verify: bash helm/amp/tests/render-vct-labels.sh -->
+- [x] **2.2** Подключить тест туда, где release-gate гоняет render-тесты (если список явный) <!-- verify: release-gate шаг `helm-tests` берёт `helm/amp/tests/*.sh` глобом — подключено без правок -->
 
 ## Phase 3: Testing
 
