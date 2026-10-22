@@ -58,6 +58,8 @@ based_on:
 
 ## Notes
 
+- Deep-review @ `616aeef` → `fix_required` (`review-findings.md`). Fix-here: F1 — синк не вытесняет активные записи при полном L1, пропущенные — одним WARN за проход; WARN вытеснения на `AddFiringAlert` сведён в один за проход очистки (`capacityEvictions`); F2 — `inRedis` заменён на `redisConfirmedAt`, удаление «пропавших» — только подтверждённых до начала прохода; F3 — повторный tombstone и удаление записи из L1 после `Delete`/`SRem` (флаг `fromSync`, чтобы не тронуть более новый локальный add); F5 — premise переклассифицирована в `assumed`. Отложено в finalize: F1-корень, F4, F7 → TECH-DEBT; F5 (pub/sub), F6 → BACKLOG. Проверка: `go build ./...`; временная проба на копии `cache.go` (`go test -race -count=3`: долгоживущий источник, resolve на другой реплике, ёмкость при синке, гонка F3) — зелёная, удалена; тесты — в Phase 3 после `pass`.
+
 - Implement 2026-10-22: все шаги Phase 1–2 выполнены; `go build ./...` OK, `go test ./internal/core/services/... ./internal/application/...` — 603 passed; `go vet ./...` красный только на `inhibition/cache_test.go` (тип `l1Cache`) — ожидаемо до Phase 3. Отклонений от Spec нет; дополнительно: `getFromRedis` возвращает ошибку вместо пустого списка (иначе синк принял бы недоступный Redis за пустой и снял чужие источники), транзиентная ошибка GET больше не удаляет член SET; лог «Inhibition cache full» на WARN при вытеснении активного алерта.
 
 - Пакетные тесты `inhibition` обращаются к `l1Cache` как к `map[string]*core.Alert` и к удаляемому Redis-пути — до Phase 3 они не компилируются; поэтому verify Phase 1 — `go build`, а не `go test`/`go vet` пакета.

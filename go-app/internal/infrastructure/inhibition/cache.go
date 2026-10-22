@@ -124,6 +124,9 @@ type TwoTierAlertCache struct {
 	tombstones map[string]time.Time
 	l1Mutex    sync.RWMutex
 	l1Max      int // Max entries in L1
+	// capacityEvictions counts active alerts evicted to make room since the
+	// last cleanup, which reports them in one WARN.
+	capacityEvictions int
 
 	// L2: Redis cache
 	redisCache cache.Cache
@@ -151,11 +154,16 @@ type cacheEntry struct {
 	// writtenAt orders local writes against a running sync pass: a write made
 	// after the pass started wins over what the pass read from Redis.
 	writtenAt time.Time
-	// inRedis marks an entry known to be in the shared Redis SET. Only such
-	// entries are dropped by a sync pass that no longer finds them there (the
-	// alert was resolved or expired on another replica); an entry whose Redis
-	// write failed lives until its own EndsAt.
-	inRedis bool
+	// redisConfirmedAt is when the entry was known to be in the shared Redis
+	// SET (zero: never — its Redis write failed). A sync pass drops an entry it
+	// no longer finds in Redis (resolved or expired on another replica) only if
+	// it was confirmed there before the pass started: a pass whose SMEMBERS ran
+	// before this replica's SAdd must not drop a fresh source. An unconfirmed
+	// entry lives until its own EndsAt.
+	redisConfirmedAt time.Time
+	// fromSync marks an entry loaded from Redis by a sync pass rather than
+	// written by AddFiringAlert on this replica.
+	fromSync bool
 }
 
 // AlertCacheOptions contains optional configuration for TwoTierAlertCache.
@@ -349,7 +357,7 @@ func (c *TwoTierAlertCache) AddFiringAlert(ctx context.Context, alert *core.Aler
 
 	c.l1Mutex.Lock()
 	if c.l1Cache[alert.Fingerprint] == entry {
-		entry.inRedis = true
+		entry.redisConfirmedAt = c.now()
 	}
 	c.l1Mutex.Unlock()
 
@@ -397,6 +405,19 @@ func (c *TwoTierAlertCache) RemoveAlert(ctx context.Context, fingerprint string)
 				"set_key", setKey)
 			// Non-critical - alert data removed
 		}
+
+		// Re-stamp the tombstone now that Redis no longer holds the alert: a
+		// sync pass that read Redis before the Delete may still be merging, or
+		// may already have put the alert back into L1 (and cleared the first
+		// tombstone). Skipped when a newer AddFiringAlert on this replica
+		// re-added the alert in the meantime.
+		c.l1Mutex.Lock()
+		if entry, ok := c.l1Cache[fingerprint]; !ok || entry.fromSync {
+			delete(c.l1Cache, fingerprint)
+			c.tombstones[fingerprint] = c.now()
+			c.metrics.CacheSize.Set(float64(len(c.l1Cache)))
+		}
+		c.l1Mutex.Unlock()
 	}
 
 	return nil
@@ -459,7 +480,8 @@ func (c *TwoTierAlertCache) evictLocked(now time.Time) {
 	if victim != "" {
 		delete(c.l1Cache, victim)
 		c.metrics.Evictions.Inc()
-		c.logger.Warn("Inhibition cache full, evicted an active alert",
+		c.capacityEvictions++
+		c.logger.Debug("Inhibition cache full, evicted an active alert",
 			"fingerprint", victim,
 			"l1_max", c.l1Max)
 	}
@@ -513,8 +535,16 @@ func (c *TwoTierAlertCache) cleanup() {
 	c.l1Mutex.Lock()
 	removed := c.removeExpiredLocked(c.now())
 	remaining := len(c.l1Cache)
+	capacityEvictions := c.capacityEvictions
+	c.capacityEvictions = 0
 	c.metrics.CacheSize.Set(float64(remaining))
 	c.l1Mutex.Unlock()
+
+	if capacityEvictions > 0 {
+		c.logger.Warn("Inhibition cache full, evicted active alerts: they no longer inhibit until re-sent",
+			"evicted_alerts", capacityEvictions,
+			"l1_max", c.l1Max)
+	}
 
 	if removed > 0 {
 		c.logger.Info("Cleanup completed",
@@ -553,6 +583,8 @@ func (c *TwoTierAlertCache) syncFromRedis() {
 	defer c.l1Mutex.Unlock()
 
 	seen := make(map[string]struct{}, len(remote))
+	expiredSwept := false
+	skipped := 0
 	for _, alert := range remote {
 		fp := alert.Fingerprint
 		seen[fp] = struct{}{}
@@ -566,17 +598,29 @@ func (c *TwoTierAlertCache) syncFromRedis() {
 		}
 		stamped := c.withExpiry(alert, passStart)
 		if exists && !stamped.EndsAt.After(*local.alert.EndsAt) {
-			local.inRedis = true
+			if local.redisConfirmedAt.IsZero() {
+				local.redisConfirmedAt = passStart
+			}
 			continue
 		}
+		// A full L1 never evicts an active entry for a remote one: entries
+		// this replica ingested keep priority, the rest is reported below.
 		if !exists && len(c.l1Cache) >= c.l1Max {
-			c.evictLocked(passStart)
+			if !expiredSwept {
+				c.removeExpiredLocked(passStart)
+				expiredSwept = true
+			}
+			if len(c.l1Cache) >= c.l1Max {
+				skipped++
+				continue
+			}
 		}
-		c.l1Cache[fp] = &cacheEntry{alert: stamped, writtenAt: passStart, inRedis: true}
+		c.l1Cache[fp] = &cacheEntry{alert: stamped, writtenAt: passStart, redisConfirmedAt: passStart, fromSync: true}
 	}
 
 	for fp, entry := range c.l1Cache {
-		if _, ok := seen[fp]; !ok && entry.inRedis && entry.writtenAt.Before(passStart) {
+		_, ok := seen[fp]
+		if !ok && !entry.redisConfirmedAt.IsZero() && entry.redisConfirmedAt.Before(passStart) {
 			delete(c.l1Cache, fp)
 		}
 	}
@@ -587,6 +631,11 @@ func (c *TwoTierAlertCache) syncFromRedis() {
 	}
 	c.metrics.CacheSize.Set(float64(len(c.l1Cache)))
 
+	if skipped > 0 {
+		c.logger.Warn("Inhibition cache full, alerts from other replicas not loaded: they do not inhibit on this replica",
+			"skipped_alerts", skipped,
+			"l1_max", c.l1Max)
+	}
 	c.logger.Debug("Synced inhibition cache from Redis",
 		"remote_alerts", len(remote),
 		"l1_alerts", len(c.l1Cache))

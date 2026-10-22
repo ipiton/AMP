@@ -185,7 +185,7 @@ histogram_quantile(0.99,
 
 - **Type**: map of `cacheEntry` (copy of the alert with `EndsAt` set, local write time, whether it is known to be in Redis)
 - **Thread-safety**: `sync.RWMutex` for concurrent access
-- **Eviction**: expired first, then the alert closest to its `EndsAt` (logged at WARN)
+- **Eviction**: on a local add to a full L1 — expired first, then the alert closest to its `EndsAt` (one WARN per cleanup pass with the count); a sync pass never evicts active entries for remote ones — it skips them (one WARN per pass)
 - **Capacity**: Configurable (default: 1000 alerts)
 - **Cleanup**: Background worker removes expired alerts every 1 minute
 
@@ -204,8 +204,9 @@ histogram_quantile(0.99,
 // 1. Every CleanupInterval (1m): drop alerts that are no longer active (EndsAt <= now)
 // 2. With Redis, at start and every SyncInterval (5s): merge Redis into L1.
 //    Local writes/removals made after a pass started win over what it read
-//    (write time + tombstones); entries absent from Redis are dropped only
-//    if they were known to be there (their own Redis write did not fail).
+//    (write time + tombstones, re-stamped after the Redis delete); entries
+//    absent from Redis are dropped only if their SET membership was confirmed
+//    before the pass started.
 // Gracefully stops on cache.Stop()
 ```
 

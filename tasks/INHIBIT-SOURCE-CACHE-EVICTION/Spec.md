@@ -13,7 +13,7 @@ based_on:
 
 # Specification: источник inhibition выпадает из кеша через 5 минут горения
 
-**Version:** 1.0  
+**Version:** 1.1 (фиксы deep-review F1–F3, F5)\
 **Status:** Approved (Full tier, deep-review после implement)
 
 ## Summary
@@ -48,14 +48,15 @@ based_on:
 | В ingest-пути `core.Alert.EndsAt` у алерта без `endsAt` — `nil` (окно `resolve_timeout` ставит только `memory.AlertStore`) | `handlers/alerts.go:523-563`, `webhook/prometheus_parser.go:288-292`, `memory/alert_store.go:92-100` | code-read | двойная простановка окна |
 | `r.cache` в standard — Redis или `MemoryCache` (оба реализуют SET-операции); общий для реплик только Redis | `service_registry.go:1218-1280`, `cache/memory.go:186-230` | code-read | синк без Redis — лишняя работа в своём процессе, но корректна |
 | Чтение Redis (SMEMBERS + N×GET) на каждый `ShouldInhibit` недопустимо: вызов на каждый ingest и на каждый алерт группы | `grouping/manager_impl.go:1166-1201`, `cache/interface.go` (нет MGET) | code-read | можно было бы читать Redis напрямую (вариант A) |
-| Задержка видимости чужого источника ≤ 5s приемлема: notify-chain проверяет inhibition на отправке, после `group_wait` (дефолт 30s) | `grouping/manager_impl.go:1166`; дефолт `group_wait` 30s | code-read | при `group_wait: 0` цель на другой реплике может уйти в первые ≤5s после источника — риск, Open Questions |
+| Задержка видимости чужого источника ≤ 5s приемлема: notify-chain проверяет inhibition на отправке, после `group_wait` (дефолт 30s); цель, пришедшая на другую реплику в первые ≤5s, не подавляется на ingest, но подавляется на flush группы | `grouping/manager_impl.go:1166`; дефолт `group_wait` 30s; суждение, не измерение (deep-review F5) | assumed | при `group_wait` < ~5s цель на другой реплике может уйти неподавленной до синка — риск в Open Questions и Rollout |
 
 ## Target Design
 
 1. **Время жизни.** `AddFiringAlert` кладёт в L1 копию алерта: `EndsAt` сохраняется, если задан, иначе `now + resolveTimeout()` (провайдер из опций, по умолчанию `alertconv.DefaultResolveTimeout`; в реестре — `resolveTimeoutFromConfig(r.config)`, как у `memory.AlertStore`). `GetFiringAlerts` возвращает записи `firing` с `EndsAt.After(now)`. `cleanup` удаляет записи с `EndsAt` не позже `now`; правило `StartsAt + ttl` удаляется. Redis-ключ пишется с TTL до `EndsAt` (запись с уже прошедшим `EndsAt` в Redis не пишется).
 2. **Дубликаты.** В `ProcessAlert` при `ProcessActionIgnored` для firing-алерта вызывается `AddFiringAlert(incoming)` перед ранним `return` — окно продлевается, Redis-ключ обновляется. Resolved-дубликат ничего не делает (источник уже снят первым resolve).
 3. **HA-видимость.** `GetFiringAlerts` больше не ходит в Redis. Фоновый воркер раз в `SyncInterval` (дефолт 5s; первый проход сразу при старте) читает Redis-набор и сливает в L1: добавляет/обновляет записи, удаляет из L1 записи, подтверждённые в Redis (`inRedis`), которых там больше нет (resolve или истечение на другой реплике). Локальная запись или удаление, сделанные после начала прохода, побеждают прочитанное (метка `writtenAt` у записи, tombstone удалённого fingerprint до конца прохода). Записи, которые не удалось записать в Redis, синк не удаляет — они живут до своего `EndsAt`.
-4. **Ёмкость.** При заполнении L1 сначала выбрасываются истёкшие, затем запись с самым ранним `EndsAt` (ближайшая к resolve), а не самая старая по `StartsAt`. Синк не добавляет записи сверх ёмкости.
+4. **Ёмкость.** При заполнении L1 локальным `AddFiringAlert` сначала выбрасываются истёкшие, затем запись с самым ранним `EndsAt` (ближайшая к resolve), а не самая старая по `StartsAt`; такие вытеснения сводятся в один WARN за проход очистки. Синк активные записи не вытесняет: после удаления истёкших лишние удалённые записи пропускаются, один WARN за проход с их числом (deep-review F1). Корень — кеш хранит все firing-алерты, а не только источники — follow-up.
+5. **Порядок с локальными изменениями (deep-review F2, F3).** Запись удаляется синком как «пропавшая из Redis», только если её членство в SET подтверждено до начала прохода (`redisConfirmedAt`). `RemoveAlert` ставит tombstone до удаления из Redis и повторно — после `Delete`/`SRem`, заодно убирая запись, которую успел вернуть параллельный проход (если её не переписал более новый локальный `AddFiringAlert`).
 
 ## Component Architecture
 
@@ -86,7 +87,7 @@ based_on:
 2. Prometheus-источник с `endsAt = now+4m`, resend раз в минуту ⇒ dedup видит новый `EndsAt` (updated), окно сдвигается.
 3. Источник перестал присылаться ⇒ неактивен с `EndsAt` (как upstream), удалится очисткой.
 4. Resolve на реплике B ⇒ B удаляет ключ и SET-член; A снимает источник на следующем синке (≤5s), до этого — подавляет, как раньше бы подавлял до resolve.
-5. Синк прочитал Redis, локально пришёл resolve во время прохода ⇒ tombstone не даёт вернуть запись.
+5. Синк прочитал Redis, локально пришёл resolve во время прохода ⇒ tombstone не даёт вернуть запись; если проход успел вернуть её до завершения `Delete`, повторная простановка tombstone после `Delete` её убирает.
 6. Redis недоступен ⇒ синк логирует WARN и оставляет L1; локальные источники работают; чужие не видны (как при пустом Redis).
 7. Запись старой версии в Redis без `EndsAt` ⇒ при синке получает окно `now + resolve_timeout`; ключ сам истечёт по старому TTL ≤5m, после чего синк удалит её из L1.
 8. Рестарт пода ⇒ первый синк сразу при старте восстанавливает источники из Redis (раньше это делал L2-путь при пустом L1).
@@ -102,7 +103,7 @@ based_on:
 
 ## Rollout / Rollback
 
-- **Rollout:** обычный релиз; CHANGELOG `[Unreleased]` Fixed.
+- **Rollout:** обычный релиз; CHANGELOG `[Unreleased]` Fixed. Риск (assumed premise): в HA при `group_wait` < ~5s цель на другой реплике может уйти до синка — описано в `ALERTMANAGER_COMPATIBILITY.md`; лечится вариантом C (pub/sub), follow-up в BACKLOG.
 - **Rollback:** откат образа; данные в Redis совместимы в обе стороны.
 - **Feature flag:** не применимо.
 
@@ -120,5 +121,5 @@ based_on:
 
 ## Open Questions
 
-- [ ] Задержка видимости ≤5s в HA при `group_wait: 0` (assumed приемлемой) — если нужно строже, вариант C (pub/sub) из research.
+- [ ] Задержка видимости ≤5s в HA (premise `assumed`): при `group_wait` < ~5s цель на другой реплике может уйти неподавленной; если нужно строже — вариант C (pub/sub) из research, BACKLOG в finalize.
 - [ ] Ёмкость `l1Max` 1000 считает все firing-алерты — follow-up в finalize.
