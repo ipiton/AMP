@@ -234,6 +234,9 @@ spec:
             {{- else }}
             - name: REDIS_ADDR
               value: "localhost:6379"
+            # No cache here: skip the standard profile's startup wait for one.
+            - name: REDIS_STARTUP_WAIT
+              value: "0s"
             {{- end }}
 
             # LLM Configuration

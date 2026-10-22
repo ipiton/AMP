@@ -114,7 +114,7 @@ The chart's Valkey (`valkey.replicas` > 0, the default) always requires a passwo
 
 An external Redis-compatible cache (`values-production.yaml`): `cache.host`, `valkey.replicas: 0` (otherwise the chart's Valkey keeps running unused; NOTES says so), and its password from a Secret you create (`cache.auth.existingSecret`, key `cache.auth.existingSecretPasswordKey`) or from `cache.auth.enabled` + `cache.auth.password`; not both. Without either AMP connects without a password. `valkey.replicas: 0` with `cache.host` left at the chart's Valkey (short or full DNS name in the release namespace) fails the render. AMP reads the password at start: after changing the Secret, run `kubectl rollout restart deploy/<fullname>`.
 
-AMP does not reconnect to a cache that was unreachable when it started (bug `AMP-CACHE-NO-RECONNECT`): if the log shows `falling back to in-memory cache` after an upgrade, restart AMP once the cache pod is ready.
+At startup AMP waits for an unreachable cache for `redis.startup_wait` (60s; env `REDIS_STARTUP_WAIT`), retrying with backoff, so the Valkey restart on `helm upgrade` is covered. It does not switch to the cache after that window: if the log shows `falling back to in-memory cache`, restart AMP once the cache pod is ready. With `cache.enabled: false` the chart sets the window to `0s`.
 
 ### PostgreSQL
 

@@ -42,8 +42,9 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
    (valkey.password.*). cache.auth.* applies to an external cache.host.
 {{- end }}
 {{- if .Release.IsUpgrade }}
-ℹ️  After the upgrade the AMP log should say "Redis cache initialized". On "falling back to
-   in-memory cache" (AMP started before Valkey was ready):
+ℹ️  After the upgrade the AMP log should say "Redis cache initialized" — AMP waits up to
+   redis.startup_wait (60s) for Valkey to come back. On "falling back to in-memory cache"
+   (Valkey was not ready within that window):
    kubectl -n {{ .Release.Namespace }} rollout restart deploy/{{ include "amp.fullname" . }}
 {{- end }}
 {{- else }}

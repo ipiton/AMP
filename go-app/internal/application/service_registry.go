@@ -89,6 +89,12 @@ type ServiceRegistry struct {
 	cache          infrastructurecache.Cache
 	metrics        *metrics.BusinessMetrics
 
+	// cacheRetryInitialBackoff / cacheRetryMaxBackoff pace initializeCache's
+	// startup retries (AMP-CACHE-NO-RECONNECT). Zero = the defaults below;
+	// tests set milliseconds.
+	cacheRetryInitialBackoff time.Duration
+	cacheRetryMaxBackoff     time.Duration
+
 	// Memory Stores (for Alertmanager compatibility mode)
 	alertStore   *memory.AlertStore
 	silenceStore *memory.SilenceStore
@@ -1193,7 +1199,22 @@ func (r *ServiceRegistry) initializeStorage(ctx context.Context) error {
 	return nil
 }
 
+// Startup retry pacing for initializeCache: the first pause and its cap.
+const (
+	defaultCacheRetryInitialBackoff = time.Second
+	defaultCacheRetryMaxBackoff     = 5 * time.Second
+)
+
 // initializeCache initializes the cache backend.
+//
+// The standard profile keeps retrying an unreachable cache for
+// redis.startup_wait (AMP-CACHE-NO-RECONNECT): a helm upgrade restarts AMP and
+// Valkey together, and an AMP that loses that race would otherwise stay on
+// the in-memory cache until its next restart — every Redis consumer (group and
+// timer storage, nflog, silence sync, leader election, cluster heartbeat) is
+// wired once, from the type r.cache has right after this call. Once the
+// window is spent the fallback is exactly the pre-retry one. The lite profile
+// makes a single attempt.
 func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
 	r.logger.Info("Initializing cache backend...")
 
@@ -1201,21 +1222,59 @@ func (r *ServiceRegistry) initializeCache(ctx context.Context) error {
 	// client config from the same YAML.
 	cacheConfig := appconfig.CacheConfigFrom(r.config.Redis)
 
-	redisCache, err := infrastructurecache.NewRedisCache(cacheConfig, r.logger)
-	if err != nil {
+	var wait time.Duration
+	if r.config.Profile == appconfig.ProfileStandard {
+		wait = r.config.Redis.StartupWait
+	}
+
+	backoff := r.cacheRetryInitialBackoff
+	if backoff <= 0 {
+		backoff = defaultCacheRetryInitialBackoff
+	}
+	maxBackoff := r.cacheRetryMaxBackoff
+	if maxBackoff <= 0 {
+		maxBackoff = defaultCacheRetryMaxBackoff
+	}
+
+	started := time.Now()
+	deadline := started.Add(wait)
+	for attempt := 1; ; attempt++ {
+		redisCache, err := infrastructurecache.NewRedisCache(cacheConfig, r.logger)
+		if err == nil {
+			r.cache = redisCache
+			r.logger.Info("Redis cache initialized",
+				"addr", cacheConfig.Addr,
+				"db", cacheConfig.DB,
+				"attempts", attempt,
+			)
+			return nil
+		}
+
+		if time.Until(deadline) > backoff {
+			r.logger.Warn("Redis cache not reachable yet, retrying",
+				"error", err,
+				"addr", cacheConfig.Addr,
+				"attempt", attempt,
+				"retry_in", backoff,
+			)
+			select {
+			case <-time.After(backoff):
+				backoff = min(backoff*2, maxBackoff)
+				continue
+			case <-ctx.Done():
+			}
+		}
+
 		r.logger.Warn("Redis cache unavailable, falling back to in-memory cache",
 			"error", err,
 			"addr", cacheConfig.Addr,
+			"attempts", attempt,
+			"waited", time.Since(started).Round(time.Millisecond),
 		)
 		r.addDegradedReason("cache backend unavailable: %v", err)
 		r.cache = infrastructurecache.NewMemoryCache(r.logger)
 		return nil
 	}
-
-	r.cache = redisCache
-	r.logger.Info("Redis cache initialized", "addr", cacheConfig.Addr, "db", cacheConfig.DB)
-	_ = ctx
-	return nil
 }
 
 // initializeCoreServices initializes core business logic services.

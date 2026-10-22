@@ -1,0 +1,28 @@
+# release-gate @ 41cb924 — 2026-10-22
+
+```text
+internal/infrastructure/publishing/delivery_confirmation_test.go:559:8: Error return value is not checked (errcheck)
+internal/infrastructure/publishing/delivery_confirmation_test.go:602:7: Error return value is not checked (errcheck)
+internal/infrastructure/publishing/delivery_confirmation_test.go:645:7: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:202:2: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:246:2: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:268:2: Error return value is not checked (errcheck)
+internal/infrastructure/silencing/redis_event_bus_test.go:282:2: Error return value is not checked (errcheck)
+7 issues:
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   14s      go build ./... (go-app)
+lint             FAIL   40s      golangci-lint run (go-app)
+test             PASS   91s      go test ./... -count=1 (go-app)
+futureparity     PASS   21s      build+test, futureparity tag, cmd/server
+race             PASS   308s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   0s       chart dependencies (Chart.lock, no stale charts/)
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-small       PASS   0s       lint + template, values-small.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   13s      helm/amp/tests/*.sh render tests
+amtool-compat    PASS   107s     real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+```

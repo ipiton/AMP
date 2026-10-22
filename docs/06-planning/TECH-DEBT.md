@@ -68,6 +68,14 @@
 
 ## Medium
 
+### [medium][Cache][~2d] CACHE-RUNTIME-FAILFORWARD
+- **Title:** AMP, ушедший на in-memory кеш на старте, не переходит на Redis, когда тот поднялся
+- **Problem:** тип `r.cache` после `initializeCache` определяет проводку group/timer storage, nflog, silence event bus, leader election, cluster heartbeat и `RedisReloadable` (`ShareClient()` один раз). `AMP-CACHE-NO-RECONNECT` закрыл гонку старта окном `redis.startup_wait` (60s), но кеш, недоступный дольше окна (reattach RWO PV на другом узле, долгий pull, загрузка большого AOF), по-прежнему оставляет AMP на in-memory до `rollout restart`. `grouping.StorageManager` умеет failback/failforward только для group storage и только если стартовал на Redis.
+- **Impact:** реплики без общего состояния: повторные уведомления, silence-синк и leader election выключены, пока под не перезапустят руками.
+- **Fix:** фоновый probe после fallback и failforward всех потребителей (без слияния состояния, как `StorageManager`), либо явный сигнал «restart required» (readiness/метрика), который оператор или контроллер может автоматизировать.
+- **Refs:** `tasks/archive/AMP-CACHE-NO-RECONNECT/research.md` (вариант C), `evidence/k3d-acceptance.md` § A2.
+- **Status:** open
+
 ### [medium][Helm][~2d] HELM-CHART-GAPS
 - **Title:** расхождения шаблонов чарта с values
 - **Problem:** найдено при аудите `values-production.yaml` (INF-B, 2026-08-20), не исправлено (слишком большой темплейт-скоуп для values-аудита):
@@ -248,6 +256,22 @@
 - **Status:** open
 
 ## Low
+
+### [low][Cache][~0.25d] CACHE-STARTUP-RETRY-ERROR-LOGS
+- **Title:** каждая неудачная попытка подключения к кешу на старте пишет ERROR
+- **Problem:** `dialRedis` (`go-app/internal/infrastructure/cache/redis.go:99`) логирует `Failed to connect to Redis` на уровне ERROR. С ожиданием на старте (`AMP-CACHE-NO-RECONNECT`) штатная гонка upgrade даёт по ERROR-строке на попытку: k3d — 5 при успешном подключении через 38s, 8 при исчерпанном окне. Тот же `dialRedis` вызывает `Reload`.
+- **Impact:** алерты по ERROR-логам срабатывают на штатный upgrade, хотя итог — подключение; раньше ERROR был один и означал реальный fallback.
+- **Fix:** понизить лог в `dialRedis` до Debug (Warn цикла и ошибка `Reload` уже несут причину) или передавать уровень от вызывающего.
+- **Refs:** `tasks/archive/AMP-CACHE-NO-RECONNECT/review-findings.md` F2, `evidence/k3d-acceptance.md`.
+- **Status:** open
+
+### [low][Config][~0.1d] REDIS-RELOAD-STARTUP-WAIT-DRIFT
+- **Title:** смена только `redis.startup_wait` на reload даёт W601 с неверной причиной
+- **Problem:** `RedisReloadable.drift` (`go-app/internal/config/reloadable_redis.go:127-131`) сравнивает все поля `RedisConfig`, включая параметр старта `startup_wait`, который в клиент не попадает (`CacheConfigFrom` его не переносит). В standard W601 объясняет это «split claim TTLs … two keyspaces»; при нерасшаренном клиенте будет лишний re-dial и swap идентичного клиента.
+- **Impact:** вводящее в заблуждение предупреждение; функционально безопасно.
+- **Fix:** исключить `startup_wait` из drift или дать ему причину «applies on next start».
+- **Refs:** `tasks/archive/AMP-CACHE-NO-RECONNECT/review-findings.md` F4.
+- **Status:** open
 
 ### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-TIMER-REARM-WINDOW
 - **Title:** ложный re-arm `group_wait` в окне между `Store` новой группы и стартом её таймера

@@ -85,6 +85,9 @@ redis:
   max_retries: 3
   min_retry_backoff: 8ms
   max_retry_backoff: 512ms
+  # Standard profile: how long to retry an unreachable cache at startup before
+  # falling back to the in-memory cache for the process's life. 0s = one attempt.
+  startup_wait: 60s
 
 # ============================================================================
 # LLM Configuration (Classification)

@@ -361,6 +361,11 @@ type RedisConfig struct {
 	MaxRetries      int           `mapstructure:"max_retries"`
 	MinRetryBackoff time.Duration `mapstructure:"min_retry_backoff"`
 	MaxRetryBackoff time.Duration `mapstructure:"max_retry_backoff"`
+	// StartupWait is how long the standard profile keeps retrying an
+	// unreachable cache at startup before falling back to the in-memory cache
+	// for the rest of the process's life (AMP-CACHE-NO-RECONNECT). 0 = a single
+	// attempt. The lite profile never waits.
+	StartupWait time.Duration `mapstructure:"startup_wait"`
 }
 
 // LLMConfig holds LLM-related configuration
@@ -914,6 +919,7 @@ func setDefaults() {
 	viper.SetDefault("redis.max_retries", 3)
 	viper.SetDefault("redis.min_retry_backoff", "100ms")
 	viper.SetDefault("redis.max_retry_backoff", "500ms")
+	viper.SetDefault("redis.startup_wait", "60s")
 
 	// LLM defaults
 	viper.SetDefault("llm.enabled", false)
@@ -1167,6 +1173,11 @@ func (c *Config) Validate() error {
 	// Validation only if Redis addr is provided.
 	// Note: Redis is not recommended for Lite profile,
 	// but it is allowed for testing/development.
+
+	// startup_wait applies whether or not redis.addr is set.
+	if c.Redis.StartupWait < 0 {
+		return fmt.Errorf("redis.startup_wait cannot be negative")
+	}
 
 	// log.level is deliberately NOT required here (re-review I6). An unset level
 	// means "info" — pkg/logger.ParseLevel's own default, and what

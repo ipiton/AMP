@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/amp-cache-no-reconnect",
+  "commit": "eb86457",
+  "reviewed_at": "2026-10-22",
+  "findings": {
+    "blocker": 0,
+    "major": 0,
+    "minor": 4,
+    "nit": 4
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

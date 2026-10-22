@@ -166,3 +166,27 @@ func TestChartEnvKeysKnownToViper(t *testing.T) {
 	}
 	assert.Greater(t, seen, 40, "expected the chart's full env set")
 }
+
+// AMP-CACHE-NO-RECONNECT: redis.startup_wait defaults to 60s, the chart's
+// REDIS_STARTUP_WAIT overrides it, and a negative window fails the load.
+func TestLoadConfig_RedisStartupWait(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent.yaml")
+
+	resetViper()
+	unsetEnvKeys("REDIS_STARTUP_WAIT")
+	cfg, err := LoadConfig(missing)
+	require.NoError(t, err)
+	assert.Equal(t, "1m0s", cfg.Redis.StartupWait.String())
+
+	resetViper()
+	t.Setenv("REDIS_STARTUP_WAIT", "0s")
+	cfg, err = LoadConfig(missing)
+	require.NoError(t, err)
+	assert.Zero(t, cfg.Redis.StartupWait)
+
+	resetViper()
+	t.Setenv("REDIS_STARTUP_WAIT", "-1s")
+	_, err = LoadConfig(missing)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "redis.startup_wait cannot be negative")
+}
