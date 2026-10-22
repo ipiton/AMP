@@ -8,7 +8,7 @@
 - Tier — по Risk Profile (`docs/solo-kanban/workflow.md` § Step Matrix): security и семантика Alertmanager — Full; refactor без изменения поведения — Standard; механика — Lightweight. Финальный tier подтверждает `start-task`.
 - `fix:` и `refactor:` не смешивать в одном PR (CODE-REVIEW § 11, принципы).
 - Закрытая задача: `[x]` здесь, запись удаляется из источника, строка в `DONE.md`.
-- В Queue `NEXT.md` (§ 3) на 2026-10-21: №1–3.
+- В Queue `NEXT.md` (§ 2) на 2026-10-22: №2–4; №1 в WIP.
 
 Обозначения источника: **B** — `BUGS.md`, **TD** — `TECH-DEBT.md`, **TD/Bundle** — `TECH-DEBT.md` § Bundles, **BL** — `BACKLOG.md`.
 

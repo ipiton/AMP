@@ -16,6 +16,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **INHIBIT-SOURCE-CACHE-EVICTION** — источник inhibition выпадает из L1-кеша через 5 минут горения, не возвращается на дубликатах, в HA источники другой реплики невидимы. BUGS, critical, ~1d. Ветка `bugfix/inhibit-source-cache-eviction`, workspace `tasks/INHIBIT-SOURCE-CACHE-EVICTION/`. Взята 2026-10-22.
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -32,15 +34,12 @@ Queue и WIP — источник правды для выбора задачи.
 
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `PROD-LLM-ALERT-PATH-ISOLATION`: пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
-### 2. Operations
-
-
-### 3. Code review 2026-10-21 — конвейер
+### 2. Code review 2026-10-21 — конвейер
 > Голова `REVIEW-PIPELINE-2026-10-21.md`; следующие позиции переносятся оттуда по мере освобождения WIP. Пополнено 2026-10-21.
 
-- [ ] **INHIBIT-SOURCE-CACHE-EVICTION** — источник inhibition выпадает из кеша через 5 минут горения и не возвращается на дубликатах: цели перестают подавляться. BUGS, critical, Full, ~1d.
 - [ ] **PUBLISH-QUICK-FIX-BUNDLE** — resolve в PagerDuty/Rootly без локального состояния, общие между таргетами кеши и SMTP-клиенты, half-open breaker, graceful stop очереди, секреты в логах. TECH-DEBT § Bundles (участники — BUGS), critical, Full, ~2d.
 - [ ] **EMAIL-RENDER-ESCAPING** — email fallback рендерит HTML через `text/template`, Subject без санитизации CR/LF. BUGS, high, Full, ~0.25d.
+- [ ] **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence отбрасывается до ingest: не виден как `suppressed`, не становится источником inhibition. BUGS, high, Full, ~0.5d, breaking для API.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
