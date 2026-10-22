@@ -22,7 +22,7 @@ updated_at: 2026-10-22
 - `go-app/internal/infrastructure/cache/redis.go:59-100` — `NewRedisCache` → `dialRedis`, PING 5s, ctx = `Background`.
 - `go-app/cmd/server/main.go:120,190` — `Initialize` до `ListenAndServe`.
 - `helm/amp/templates/deployment.yaml:202-237` (env кеша), `:314-323` (`startupProbe` 10s + 30×10s), `NOTES.txt:44-48`.
-- `tasks/archive/AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2 — разрыв 3 s.
+- `tasks/archive/AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2.1 — под AMP старше пода Valkey на ~6 s, `i/o timeout` (single-node k3d).
 
 ## Findings
 
