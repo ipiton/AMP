@@ -6,6 +6,14 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
+### [medium][Gate][~0.25d] LINT-ERRCHECK-CHANNEL-RECEIVE
+- **Title:** release-gate `lint` красный на `main`: golangci-lint 2.15.0 ловит errcheck на приёме из канала в тестах
+- **Problem:** локальный golangci-lint обновился до 2.15.0 (go1.27.1, бинарь от 2026-10-21 21:54) и даёт 7 `errcheck` «Error return value is not checked» на голом приёме из канала, где элемент — `error`: `go-app/internal/infrastructure/publishing/delivery_confirmation_test.go:559,602,645` (`case <-handle.Done():`), `go-app/internal/infrastructure/silencing/redis_event_bus_test.go:202,246,268,282` (`<-done`). Код не менялся с 2026-08-19; release-gate 2026-10-20 на прежней версии линтера был зелёным. Версия линтера нигде не закреплена (`go-app/Makefile:158` ставит `@latest`, release-gate берёт бинарь из `PATH`).
+- **Impact:** release-gate каждой задачи — `RESULT: FAIL` на шаге `lint` независимо от диффа; настоящая регрессия lint на этом фоне не видна.
+- **Fix:** в тестах принять значение (`_ = <-done` / `case err := <-handle.Done(): _ = err` или проверить его); закрепить версию golangci-lint для гейта и CI (`.golangci` / скрипт установки), чтобы обновление линтера было отдельным изменением.
+- **Refs:** найдено при HELM-VCT-CHART-LABELS (2026-10-22), `tasks/archive/HELM-VCT-CHART-LABELS/evidence/release-gate.txt`. Смежно `QUALITY-GATES-ALIGN`.
+- **Status:** open
+
 ### [medium][Config][~0.5d] TEMPLATED-FIELDS-NOT-RENDERED
 - **Title:** `email_configs[].to` и `slack_configs[].actions[]` upstream шаблонизирует, AMP не рендерит и при загрузке валидирует как литерал
 - **Problem:** `EmailConfig.To` — `validate:"required,email"` (`go-app/internal/infrastructure/routing/receiver.go`), в target уходит как есть (`config_targets.go:645`, заголовок `to`). Upstream рендерит `to` шаблоном и принимает список адресов через запятую — у AMP не грузится ни `to: '{{ .CommonLabels.owner }}@example.com'`, ни `to: 'a@example.com, b@example.com'`. `SlackAction` (`text`/`url`/`style`, теги `required`/`url`/`oneof`) — upstream шаблонизирует все поля action, AMP actions не отправляет вовсе (`slackTarget`: «not expressible»), но шаблонный `url` валит загрузку.
@@ -268,14 +276,6 @@
 - **Impact:** после upgrade или рестарта кеша AMP молча работает без общего состояния; лечится только `kubectl rollout restart` (migration note в `CHANGELOG.md`). Воспроизведено на k3d 2026-10-20 (`AMP-CACHE-NOAUTH` A2): первый `helm upgrade` с `main` рестартует Valkey (новые `items` volume) и AMP; AMP стартовал на 3 с раньше, `dial tcp …:6379: i/o timeout` → in-memory, под Ready. С `AMP-CACHE-NOAUTH` AMP на дефолтах ходит в кеш, поэтому гонка теперь бьёт по каждому upgrade, который рестартует оба пода; NOTES на upgrade подсказывают `rollout restart`.
 - **Fix:** ленивое подключение с ретраем (backoff) и переход с in-memory на кеш при восстановлении, либо readiness AMP не готов, пока кеш недоступен; метрика/лог текущего бэкенда кеша.
 - **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R7; `tasks/archive/AMP-CACHE-NOAUTH/evidence/k3d-acceptance.md` § A2, `review-findings.md` A4.
-- **Status:** open
-
-### [medium][Helm][~0.25d] HELM-VCT-CHART-LABELS
-- **Title:** метки `volumeClaimTemplates` содержат версию чарта — первый бамп версии сломает `helm upgrade`
-- **Problem:** `templates/redis-statefulset.yaml` (и проверить `postgresql-statefulset.yaml`) кладёт в `volumeClaimTemplates.metadata.labels` полный `amp.labels`, включая `helm.sh/chart` и `app.kubernetes.io/version`. Поле StatefulSet неизменяемое: смена `version`/`appVersion` в `Chart.yaml` даёт `StatefulSet.apps is invalid: spec: Forbidden`. Сейчас не проявляется — версия не менялась с первого релиза чарта. По спецификации k8s, на кластере не прогонялось.
-- **Impact:** первый релиз с бампом версии (`PROD-RELEASE-V010`) не обновит существующие установки без удаления StatefulSet (`--cascade=orphan`).
-- **Fix:** в VCT только selector labels + `component`; migration note (одноразовое `kubectl delete sts --cascade=orphan` перед upgrade, т. к. сама смена меток тоже меняет VCT); render-тест «в VCT нет `helm.sh/chart`». Сделать до `PROD-RELEASE-V010`.
-- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/review-findings.md` R14.
 - **Status:** open
 
 ### [low][Test][~0.1d] FLAKE-TIMER-CONTINUATION-GROUP-INTERVAL

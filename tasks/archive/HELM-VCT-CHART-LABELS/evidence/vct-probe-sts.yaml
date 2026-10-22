@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: t}
+spec:
+  replicas: 0
+  serviceName: t
+  selector: {matchLabels: {app: t}}
+  template:
+    metadata: {labels: {app: t}}
+    spec: {containers: [{name: c, image: busybox}]}
+  volumeClaimTemplates:
+  - metadata:
+      name: d
+      labels: {app: t, helm.sh/chart: amp-0.1.0, app.kubernetes.io/version: "0.1.0"}
+    spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 1Gi}}}
