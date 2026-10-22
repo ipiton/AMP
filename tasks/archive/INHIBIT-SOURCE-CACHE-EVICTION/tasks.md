@@ -58,6 +58,8 @@ based_on:
 
 ## Notes
 
+- Finalize 2026-10-22: F10 исправлен (`8515495`); premise «HA-задержка ≤5s» (`assumed`) перенесена как риск в `ALERTMANAGER_COMPATIBILITY.md` и BACKLOG `INHIBIT-CACHE-PUBSUB-HA`. Follow-ups: BUGS `INHIBIT-CACHE-RESOLVE-REFIRE-RACE` (F8), TECH-DEBT `INHIBIT-CACHE-SOURCES-ONLY` (F1-корень, F4), `INHIBIT-CACHE-OBSERVABILITY` (F7), BACKLOG `INHIBIT-CACHE-PUBSUB-HA` (F5), `INHIBIT-CACHE-ENDSAT-MERGE` (F6).
+
 - Testing 2026-10-22 @ `2a67715`: `go vet ./...` OK; `go test -race` по `inhibition`, `core/services`, `application` — 860 passed; `make -C go-app quality-gates-fast` — passed; `git diff --check` чисто, `_, _ :=` в диффе нет; `scripts/release-gate.sh` (один прогон) — всё PASS, кроме `lint`: 7 errcheck в `publishing`/`silencing` тестах вне диффа (`LINT-ERRCHECK-CHANNEL-RECEIVE`), `evidence/release-gate.txt`.
 
 - Write-tests 2026-10-22: `cache_test.go` — тип L1 и восстановление через явный `syncFromRedis()` (Redis-путь `GetFiringAlerts` удалён), mock Redis возвращает `cache.ErrNotFound` вместо произвольной ошибки; новые тесты на фейковых часах (`newManualCache` останавливает воркер и подменяет `c.now`): 10 минут с resend каждые 30s на две реплики с endsAt и без, `ResolveTimeout`, синк при непустом L1, F2 (add во время прохода), F3 (повторный tombstone), re-add во время remove, ошибка Redis, F1 (синк не вытесняет локальные), порядок вытеснения. Регресс `SourceLongLived_OlderThanFiveMinutes` на реальных часах — на `main` падает (`inhibited = false`), проверено во временном worktree. Мутации (откат F1/F2/F3, порядок вытеснения, продление окна) ловятся. `integration_test.go` — явный синк для c2/c3. `alert_processor_test.go` — ignored-дубликат firing → `AddFiringAlert`, resolved → нет.
@@ -70,10 +72,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
