@@ -304,3 +304,40 @@
   - при переходе на Valkey 9.x перепроверить правило переноса (9.0.6 пишет `VALKEY080` — замер на ревью);
   - гейт по имени репозитория образа: зеркало Valkey под другим именем пропускает перенос и падает на данных v12 — оператор задаёт `repository` и `tag` вместе (комментарий в `values.yaml`);
   - Go-тесты (`go-app/internal/infrastructure/inhibition/integration_test.go`) ещё поднимают `redis:7-alpine` через testcontainers — локально и в CI, не в поставке; перевод — отдельной задачей.
+
+## ADR-018: Ядро Alertmanager — своя реализация, пакеты upstream или upstream рядом с AMP
+- **Дата**: 2026-10-23
+- **Статус**: proposed — решение за владельцем (продуктовый выбор, см. «Вопрос владельцу»).
+- **Контекст**:
+  - явного решения «писать ядро самим или брать upstream» не было (в этом реестре и `docs/TECHNICAL_DECISIONS.md` его нет); ADR-001 фиксирует только язык, ADR-002 — объём заявлений;
+  - замер 2026-10-23 (`wc -l` без тестов, `go-app/`): prod 128k строк, тесты 125k. Из них паритет с upstream — ~66k prod и ~73k тестов: routing 7.5k, grouping/notify chain/nflog/таймеры 12.6k, silences 6.3k, inhibition 3.4k, интеграции и publishing ~19k, шаблоны 7.4k, конфиг 3.6k+, API/ingest 4.7k, HA через Redis/lock 2.4k. Аналогичное ядро upstream v0.32 — ~20k строк, 18 интеграций против 5 у AMP (+ Rootly);
+  - AMP-уникальное, ради чего проект существует: LLM-классификация ~2.7k, investigation ~2.5k, история в PostgreSQL ~2.7k, filter/dedup ~1k — ~8–9k строк; UI/dashboard ~8.8k, K8s-Secret таргеты ~8.7k, метрики/auth/reloader ~5k, Helm-чарт;
+  - цена своего ядра: в `CODE-REVIEW-2026-10-21.md` 7 из 13 critical/high — расхождения с upstream (C-1, C-2, H-1, H-2, H-3, H-4, H-10); в открытых `BUGS.md`/`TECH-DEBT.md` ~44 записи (~24d) — паритет и ~23 (~11d) — следствие своего Redis/PG-состояния, вместе ~63% открытого бэклога (классификация по одной строке на запись, грубая). Пример: задачи 2026-10-22..23 `INHIBIT-SOURCE-CACHE-EVICTION`, `PUBLISH-QUICK-FIX-BUNDLE`, `SILENCED-ALERTS-INGEST` — поведение, которое upstream имеет из коробки; у последней deep-review нашёл два major именно в стыке «своя дедупликация × silence»;
+  - AMP-фичи слабо связаны с доставкой: `EnrichmentModeManager.GetMode` всегда `enriched` (`core/services/enrichment_types.go`), классификация влияет на `ShouldBlock` (noise, `confidence<0.3`) и на direct publish; при группировке (по умолчанию) в уведомление не попадает (`ALERTMANAGER_COMPATIBILITY.md` Known Gap #13). Investigation — fire-and-forget;
+  - публичных релизов не было (README: «No release has been tagged yet», «pilot-ready … not production-ready»); в `CHANGELOG.md` [Unreleased] уже 11 breaking-записей — база инсталляций пилотная;
+  - лицензии: upstream Apache-2.0, AMP AGPL-3.0 — включение Apache-кода с NOTICE допустимо (прецедент: `business/templating` и шаблоны v0.34.0 с `templates/NOTICE`).
+- **Варианты** (оценки — допущение: один разработчик с агентами, накладные Solo Kanban; приёмка — существующие контрактные тесты и amtool-гейт):
+
+  | | В1. Своё ядро (как сейчас) | В2. Пакеты upstream как библиотеки | В3. Upstream Alertmanager + AMP за `webhook_configs` |
+  |---|---|---|---|
+  | Паритетное ядро (~45k: routing, dispatch, notify chain, nflog, silences, inhibition, API v2) | остаётся, дорабатывается | выбрасывается, остаётся wiring (`dispatch`, `notify`, `silence`, `inhibit`, `nflog`, `provider/mem`, `api/v2`) | выбрасывается |
+  | Интеграции (~19k) | остаются, 13 из 18 upstream не хватает | выбрасываются; Rootly → свой `notify.Notifier` | остаются только если AMP сам шлёт обогащённые уведомления |
+  | LLM, investigation, PG-история, UI | остаются | остаются: `AlertStoreCallback.PreStore` — фильтр/noise, `PostStore` — история и investigation; классификация — в annotations, тогда доходит и до сгруппированных уведомлений | остаются; вход — webhook v4 после маршрутизации (нужен дедуп повторов на `repeat_interval`) |
+  | Своё HA-состояние (Redis/Valkey, lock, PG-silences; ADR-016/017) | остаётся | выбрасывается при переходе на memberlist + snapshot (чарт: StatefulSet, headless Service, gossip), либо адаптеры Redis/PG (+5–8d) | выбрасывается (HA — upstream-чарт AM) |
+  | K8s-Secret таргеты | остаются | адаптер в `config.Receiver` или удаление | удаляются |
+  | HTTP API | своё, расхождения закрываются задачами | upstream побайтно; теряются AMP-расширения (`?group_by=`, `global.group_by`), `/api/v2/inhibitions` можно оставить своим | AMP перестаёт быть endpoint'ом AM, Prometheus переключается на AM |
+  | Влияние AI на доставку | полное | полное (PreStore, annotations, своя стадия через ручной `MultiStage`) | только как прокси перед AM или через создание silences в AM |
+  | Стоимость перехода | 0; остаток конвейера ревью ~38d (до production-ready ~9.5d) | ~21–29d (PoC 4–5d первым), с сохранением Redis/PG ~26–37d | ~13–20d |
+  | Постоянная плата | новые находки паритета (ревью 2026-10-21: 60 новых) | ~0.5–1d на минор upstream (Go API v0.x ломается между минорами: `NewDispatcher`, `mem.NewAlerts`, `NewInhibitor`, `PipelineBuilder` менялись в 0.28–0.32); 2–3 минора в год | обновление образа AM |
+
+  Полный форк — разновидность В2 без выигрыша в цене перехода: AMP-код живёт в дереве upstream (`cmd/alertmanager`, `notify`), каждый rebase конфликтует; дороже библиотечного варианта в сопровождении. Не рассматривается отдельно.
+- **Рекомендация (автора ADR)**:
+  - не продолжать В1 по умолчанию: основная доля бэклога и находок — паритет, который upstream уже решил;
+  - если AMP — «Alertmanager с AI» (замена): В2, начиная с PoC 4–5d с критерием выхода «upstream `dispatch` + `notify` + `api/v2` в бинаре AMP проходят `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт»; HA — memberlist (адаптеры Redis/PG только при явной потребности);
+  - если AMP — «AI-слой рядом с Alertmanager»: В3, самый дешёвый и без постоянной платы, ценой позиции «замены»;
+  - до решения конвейер `REVIEW-PIPELINE-2026-10-21.md` продолжать только по security/critical-позициям; паритетные high/medium (например `ROUTE-CONTINUE-NO-FANOUT`, `DURATION-UPSTREAM-UNITS`) при В2/В3 становятся ненужными.
+- **Вопрос владельцу**: AMP — замена Alertmanager (В2) или слой рядом с ним (В3)? Остаться на В1 — тоже допустимый ответ, но тогда явно, с принятием постоянной платы за паритет.
+- **Следствие** (после решения):
+  - В2/В3 — эпик со срезами в `BACKLOG.md`, пересмотр Queue и `REVIEW-PIPELINE-2026-10-21.md`, ревизия ADR-002, -009, -016, -017;
+  - В1 — статус `accepted`, без изменений плана.
+- **Источники замеров**: `wc -l` по `go-app/` и `~/go/pkg/mod/github.com/prometheus/alertmanager@v0.32.0` (2026-10-23), `docs/06-planning/CODE-REVIEW-2026-10-21.md`, `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`, `docs/ALERTMANAGER_COMPATIBILITY.md`, `core/services/alert_processor.go`.
