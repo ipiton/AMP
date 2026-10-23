@@ -116,7 +116,7 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read tools response: %w", err)
 	}

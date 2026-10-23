@@ -11,17 +11,6 @@
 
 <!-- Code review 2026-10-21: участники — записи BUGS.md / TECH-DEBT.md. Пути verify — от корня репозитория. -->
 
-### PUBLISH-QUICK-FIX-BUNDLE
-- [critical][Publishing][~2d] PUBLISH-QUICK-FIX-BUNDLE
-- **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/publishing/... ./internal/business/publishing/...`
-- **Members (ordered):**
-  - [ ] PROVIDER-RESOLVE-STATELESS-PD
-  - [ ] PUBLISH-PER-TARGET-STATE
-  - [ ] PROVIDER-RESOLVE-ROOTLY
-  - [ ] CIRCUIT-BREAKER-HALF-OPEN
-  - [ ] QUEUE-GRACEFUL-STOP
-  - [ ] PUBLISH-SECRETS-IN-LOGS
-
 ### CONFIG-RELOAD-BUNDLE
 - [high][Config][~1.25d] CONFIG-RELOAD-BUNDLE
 - **Combined verify:** `cd go-app && go test -race ./internal/config/... ./internal/application/... ./cmd/server/...`
@@ -429,11 +418,19 @@
 - **Refs:** CODE-REVIEW-2026-10-21 D-12, L-13, § 4.2.
 - **Status:** open
 
+### [low][Publishing][~0.25d] BREAKER-PROBE-ACCOUNTING
+- **Title:** half-open breaker: тайм-аут пробы и чужие результаты
+- **Problem:** слот пробы освобождается по `Timeout` breaker'а (30s), а задание может идти дольше (ретраи, до 45s ожидания подтверждения) — вторая проба стартует, пока первая ещё идёт. Результат попытки, начатой до открытия breaker'а, засчитывается как результат пробы. Промах Rootly resolve (`not_tracked`, `nil`) засчитывается как успех и может закрыть breaker без обращения к API.
+- **Impact:** в редких случаях две пробы вместо одной или преждевременное закрытие breaker'а; не хуже поведения до `CIRCUIT-BREAKER-HALF-OPEN`.
+- **Fix:** токен пробы (поколение) из `CanAttempt`, результат принимается только с ним; тайм-аут пробы — от длительности задания; терминальные «нечего доставлять» не записывать в breaker.
+- **Refs:** `tasks/archive/PUBLISH-QUICK-FIX-BUNDLE/review-findings.md` F4, F10.
+- **Status:** open
+
 ### [low][Publishing][~0.5d] PUBLISH-CLIENT-PLUMBING
 - **Title:** обвязка клиентов publishing повторена пять раз
 - **Problem:** get-or-create с double-checked locking для 5 client maps (`publisher.go:342-361`); вложенные `select` с `time.After(100ms)` в воркере (`queue.go:815-850`) — high-задание ждёт до 100ms, таймер на итерацию; три `CircuitBreaker` (publishing, `core/resilience`, `llm`).
 - **Impact:** копии расходятся (ключи кеша — `PUBLISH-PER-TARGET-STATE`).
-- **Fix:** generic `cachedClient[T]` (после `PUBLISH-PER-TARGET-STATE`); неблокирующие проверки по приоритету + один блокирующий select; один breaker. После `PUBLISH-SINGLE-RETRY-LAYER`.
+- **Fix:** generic `cachedClient[T]` (ключи — `correlationKey`/`smtpClientKey` из `PUBLISH-PER-TARGET-STATE`, закрыт 2026-10-23); неблокирующие проверки по приоритету + один блокирующий select; один breaker. После `PUBLISH-SINGLE-RETRY-LAYER`.
 - **Refs:** CODE-REVIEW-2026-10-21 D-9, D-15, L-16, § 4.2.
 - **Status:** open
 

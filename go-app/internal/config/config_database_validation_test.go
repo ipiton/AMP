@@ -54,6 +54,9 @@ func TestValidateDatabaseCredentials_InsecureSSLFlagKeepsCredentialChecks(t *tes
 			err := cfg.validateDatabaseCredentials()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
+			if tc.password != "" {
+				assert.NotContains(t, err.Error(), tc.password, "the error is logged; it must not echo the password")
+			}
 		})
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -526,7 +525,7 @@ func (c *pagerDutyEventsClientImpl) calculateBackoff(attempt int) time.Duration 
 // parseError parses error response from PagerDuty API
 func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *httperror.HTTPAPIError {
 	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimited(resp.Body)
 	if err != nil {
 		return httperror.NewHTTPErrorWithDetails(resp.StatusCode, "failed to read error response", ProviderPagerDuty, []string{err.Error()})
 	}
@@ -540,7 +539,7 @@ func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *httperror.H
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse JSON, return raw body
-		return httperror.NewHTTPError(resp.StatusCode, string(body), ProviderPagerDuty)
+		return httperror.NewHTTPError(resp.StatusCode, errorBody(body), ProviderPagerDuty)
 	}
 
 	return httperror.NewHTTPErrorWithDetails(resp.StatusCode, errorResp.Message, ProviderPagerDuty, errorResp.Errors)

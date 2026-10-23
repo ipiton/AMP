@@ -8,9 +8,10 @@ import (
 // IncidentIDCache defines interface for incident ID tracking
 type IncidentIDCache interface {
 	Set(fingerprint, incidentID string)
-	Get(fingerprint string) (incidentID string, exists bool)
+	// Get reports a missing entry as exists=false with a nil error; err is
+	// reserved for a store that could not answer, which is worth retrying.
+	Get(fingerprint string) (incidentID string, exists bool, err error)
 	Delete(fingerprint string)
-	Size() int
 
 	// Stop stops the background cleanup goroutine started by
 	// NewIncidentIDCache. Safe to call once. Callers that own an
@@ -61,10 +62,10 @@ func (c *inMemoryIncidentCache) Set(fingerprint, incidentID string) {
 }
 
 // Get retrieves incident ID for fingerprint
-func (c *inMemoryIncidentCache) Get(fingerprint string) (string, bool) {
+func (c *inMemoryIncidentCache) Get(fingerprint string) (string, bool, error) {
 	value, exists := c.data.Load(fingerprint)
 	if !exists {
-		return "", false
+		return "", false, nil
 	}
 
 	entry := value.(cacheEntry)
@@ -72,10 +73,10 @@ func (c *inMemoryIncidentCache) Get(fingerprint string) (string, bool) {
 	// Check if expired
 	if time.Now().After(entry.expiresAt) {
 		c.data.Delete(fingerprint)
-		return "", false
+		return "", false, nil
 	}
 
-	return entry.incidentID, true
+	return entry.incidentID, true, nil
 }
 
 // Delete removes incident ID for fingerprint

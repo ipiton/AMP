@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -474,9 +475,19 @@ type PublishingQueue struct {
 	cancel           context.CancelFunc
 	circuitBreakers  map[string]*CircuitBreaker
 	mu               sync.RWMutex
-	totalSubmitted   atomic.Int64
-	totalCompleted   atomic.Int64
-	totalFailed      atomic.Int64
+
+	// closeMu/closed make sending into the job channels and closing them
+	// mutually exclusive (QUEUE-GRACEFUL-STOP): submitJob sends under RLock
+	// after checking closed, Stop closes under Lock. The send never blocks
+	// (select with default), so Stop never waits on a submitter. Without it a
+	// Submit racing or following Stop panicked on a closed channel.
+	closeMu  sync.RWMutex
+	closed   bool
+	stopOnce sync.Once
+
+	totalSubmitted atomic.Int64
+	totalCompleted atomic.Int64
+	totalFailed    atomic.Int64
 }
 
 // PublishingQueueConfig holds configuration for publishing queue
@@ -566,14 +577,21 @@ func (q *PublishingQueue) Start() {
 	}
 }
 
-// Stop gracefully stops the publishing queue
+// Stop gracefully stops the publishing queue: no new jobs are accepted, and
+// workers drain every job already queued, in all three priorities, before
+// exiting. Safe to call more than once — later calls only wait.
 func (q *PublishingQueue) Stop(timeout time.Duration) error {
 	q.logger.Info("Stopping publishing queue", "timeout", timeout)
 
 	// Close all priority job channels to signal workers
-	close(q.highPriorityJobs)
-	close(q.mediumPriorityJobs)
-	close(q.lowPriorityJobs)
+	q.stopOnce.Do(func() {
+		q.closeMu.Lock()
+		q.closed = true
+		close(q.highPriorityJobs)
+		close(q.mediumPriorityJobs)
+		close(q.lowPriorityJobs)
+		q.closeMu.Unlock()
+	})
 
 	// Wait for workers with timeout
 	done := make(chan struct{})
@@ -761,6 +779,18 @@ func (q *PublishingQueue) submitJob(job *PublishingJob, priority Priority, logFi
 		q.jobTrackingStore.Add(job)
 	}
 
+	q.closeMu.RLock()
+	defer q.closeMu.RUnlock()
+	if q.closed {
+		if q.metrics != nil {
+			q.metrics.RecordQueueSubmission(priority.String(), false)
+		}
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Remove(job.ID)
+		}
+		return fmt.Errorf("publishing queue is shutting down")
+	}
+
 	select {
 	case targetQueue <- job:
 		q.totalSubmitted.Add(1)
@@ -807,16 +837,24 @@ func (q *PublishingQueue) worker(id int) {
 		q.logger.Debug("Worker started", "worker_id", id)
 	}
 
-	for {
+	// Local copies of the job channels: a channel closed by Stop is set to
+	// nil here, so its case never fires again, and the worker keeps draining
+	// the others (QUEUE-GRACEFUL-STOP). It used to return on the first closed
+	// channel it saw — the high one — dropping every queued medium/low job
+	// without a completion signal.
+	high, medium, low := q.highPriorityJobs, q.mediumPriorityJobs, q.lowPriorityJobs
+
+	for high != nil || medium != nil || low != nil {
 		var job *PublishingJob
 		var priority Priority
+		var ok bool
 
 		// Priority-based select (HIGH > MEDIUM > LOW)
 		select {
-		case job = <-q.highPriorityJobs:
-			if job == nil {
-				// High priority channel closed
-				return
+		case job, ok = <-high:
+			if !ok {
+				high = nil
+				continue
 			}
 			priority = PriorityHigh
 		case <-q.ctx.Done():
@@ -824,10 +862,10 @@ func (q *PublishingQueue) worker(id int) {
 		default:
 			// Check medium, then low
 			select {
-			case job = <-q.mediumPriorityJobs:
-				if job == nil {
-					// Medium priority channel closed
-					return
+			case job, ok = <-medium:
+				if !ok {
+					medium = nil
+					continue
 				}
 				priority = PriorityMedium
 			case <-q.ctx.Done():
@@ -835,10 +873,10 @@ func (q *PublishingQueue) worker(id int) {
 			default:
 				// Check low
 				select {
-				case job = <-q.lowPriorityJobs:
-					if job == nil {
-						// Low priority channel closed
-						return
+				case job, ok = <-low:
+					if !ok {
+						low = nil
+						continue
 					}
 					priority = PriorityLow
 				case <-q.ctx.Done():
@@ -987,6 +1025,41 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	deliveryOutcome := fmt.Errorf("%w: job did not reach a publish attempt (target %q)", ErrDeliveryNotAttempted, job.Target.Name)
 	defer func() { job.completion.signal(deliveryOutcome) }()
 
+	// A panicking publisher fails this job instead of the process
+	// (QUEUE-GRACEFUL-STOP, L-19): workers had no recover, so one bad payload —
+	// an unchecked type assertion in a publisher — took AMP down. Registered
+	// after the completion defer, so it runs first and the waiter receives
+	// the panic as the job's outcome.
+	var cb *CircuitBreaker
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			return
+		}
+		panicErr := fmt.Errorf("publisher panic for target %q: %v", job.Target.Name, recovered)
+		deliveryOutcome = panicErr
+		job.State = JobStateFailed
+		failedAt := time.Now()
+		job.CompletedAt = &failedAt
+		job.LastError = panicErr
+		q.totalFailed.Add(1)
+		if cb != nil {
+			cb.RecordFailure()
+		}
+		if q.metrics != nil {
+			q.metrics.RecordJobFailure(job.Target.Name)
+		}
+		if q.jobTrackingStore != nil {
+			q.jobTrackingStore.Add(job)
+		}
+		q.logger.Error("Publisher panicked, job failed",
+			"job_id", job.ID,
+			"target", job.Target.Name,
+			"panic", recovered,
+			"stack", string(debug.Stack()),
+		)
+	}()
+
 	// Update job state to Processing
 	job.State = JobStateProcessing
 	now := time.Now()
@@ -998,7 +1071,7 @@ func (q *PublishingQueue) processJob(job *PublishingJob) {
 	}
 
 	// Check circuit breaker
-	cb := q.getCircuitBreaker(job.Target.Name)
+	cb = q.getCircuitBreaker(job.Target.Name)
 	if !cb.CanAttempt() {
 		q.logger.Warn("Circuit breaker open, skipping publish",
 			"target", job.Target.Name,

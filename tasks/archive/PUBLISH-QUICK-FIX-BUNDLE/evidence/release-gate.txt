@@ -1,0 +1,1009 @@
+[release-gate] ==> build
+[release-gate] ==> lint
+internal/infrastructure/publishing/delivery_confirmation_test.go:559:8: Error return value is not checked (errcheck)
+		case <-handle.Done():
+		     ^
+internal/infrastructure/publishing/delivery_confirmation_test.go:602:7: Error return value is not checked (errcheck)
+	case <-handle.Done():
+	     ^
+internal/infrastructure/publishing/delivery_confirmation_test.go:645:7: Error return value is not checked (errcheck)
+	case <-handle.Done():
+	     ^
+internal/infrastructure/silencing/redis_event_bus_test.go:202:2: Error return value is not checked (errcheck)
+	<-done
+	^
+internal/infrastructure/silencing/redis_event_bus_test.go:246:2: Error return value is not checked (errcheck)
+	<-done
+	^
+internal/infrastructure/silencing/redis_event_bus_test.go:268:2: Error return value is not checked (errcheck)
+	<-done1
+	^
+internal/infrastructure/silencing/redis_event_bus_test.go:282:2: Error return value is not checked (errcheck)
+	<-done2
+	^
+7 issues:
+* errcheck: 7
+[release-gate] ==> test
+ok  	github.com/ipiton/AMP/cmd/config-reloader	0.860s
+ok  	github.com/ipiton/AMP/cmd/server	1.942s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	1.146s
+?   	github.com/ipiton/AMP/internal/alertmanager/config	[no test files]
+ok  	github.com/ipiton/AMP/internal/application	22.223s
+ok  	github.com/ipiton/AMP/internal/application/handlers	2.778s
+ok  	github.com/ipiton/AMP/internal/buildinfo	2.775s
+ok  	github.com/ipiton/AMP/internal/business/publishing	32.961s
+ok  	github.com/ipiton/AMP/internal/business/routing	2.901s
+ok  	github.com/ipiton/AMP/internal/business/silencing	4.096s
+?   	github.com/ipiton/AMP/internal/business/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/business/templating	3.980s
+ok  	github.com/ipiton/AMP/internal/config	4.499s
+ok  	github.com/ipiton/AMP/internal/core	4.037s
+ok  	github.com/ipiton/AMP/internal/core/alertconv	3.934s
+?   	github.com/ipiton/AMP/internal/core/domain	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/investigation	3.648s
+ok  	github.com/ipiton/AMP/internal/core/investigation/runbook	2.510s
+?   	github.com/ipiton/AMP/internal/core/resilience	[no test files]
+ok  	github.com/ipiton/AMP/internal/core/services	3.546s
+ok  	github.com/ipiton/AMP/internal/core/silencing	3.180s
+ok  	github.com/ipiton/AMP/internal/database	61.482s
+ok  	github.com/ipiton/AMP/internal/database/postgres	67.056s
+ok  	github.com/ipiton/AMP/internal/infrastructure	2.621s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cache	2.246s
+ok  	github.com/ipiton/AMP/internal/infrastructure/cluster	2.392s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	12.345s
+ok  	github.com/ipiton/AMP/internal/infrastructure/inhibition	36.453s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation	1.754s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/runbooks	0.482s
+ok  	github.com/ipiton/AMP/internal/infrastructure/investigation/tools	0.747s
+ok  	github.com/ipiton/AMP/internal/infrastructure/k8s	1.903s
+ok  	github.com/ipiton/AMP/internal/infrastructure/llm	1.103s
+ok  	github.com/ipiton/AMP/internal/infrastructure/lock	4.168s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	40.657s
+ok  	github.com/ipiton/AMP/internal/infrastructure/repository	48.253s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing	1.019s
+ok  	github.com/ipiton/AMP/internal/infrastructure/routing/timeinterval	0.443s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	0.513s
+ok  	github.com/ipiton/AMP/internal/infrastructure/snapshot	1.224s
+ok  	github.com/ipiton/AMP/internal/infrastructure/storage/memory	0.824s
+?   	github.com/ipiton/AMP/internal/infrastructure/template	[no test files]
+ok  	github.com/ipiton/AMP/internal/infrastructure/webhook	1.139s
+ok  	github.com/ipiton/AMP/internal/notification/template	1.166s
+ok  	github.com/ipiton/AMP/internal/notification/template/defaults	1.410s
+ok  	github.com/ipiton/AMP/internal/notification/url	0.986s
+ok  	github.com/ipiton/AMP/internal/realtime	1.862s
+?   	github.com/ipiton/AMP/internal/storage	[no test files]
+ok  	github.com/ipiton/AMP/internal/ui	0.644s
+?   	github.com/ipiton/AMP/pkg/aiclassifier	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator	0.570s
+ok  	github.com/ipiton/AMP/pkg/configvalidator/matcher	0.893s
+?   	github.com/ipiton/AMP/pkg/configvalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/configvalidator/types	[no test files]
+ok  	github.com/ipiton/AMP/pkg/configvalidator/validators	0.629s
+ok  	github.com/ipiton/AMP/pkg/httperror	0.484s
+ok  	github.com/ipiton/AMP/pkg/logger	0.765s
+ok  	github.com/ipiton/AMP/pkg/metrics	1.220s
+ok  	github.com/ipiton/AMP/pkg/metrics/v2	1.688s
+ok  	github.com/ipiton/AMP/pkg/middleware	3.714s
+ok  	github.com/ipiton/AMP/pkg/retry	1.096s
+ok  	github.com/ipiton/AMP/pkg/telemetry	0.877s
+?   	github.com/ipiton/AMP/pkg/templatevalidator	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/formatters	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/fuzzy	0.424s
+?   	github.com/ipiton/AMP/pkg/templatevalidator/models	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/parser	[no test files]
+?   	github.com/ipiton/AMP/pkg/templatevalidator/utils	[no test files]
+ok  	github.com/ipiton/AMP/pkg/templatevalidator/validators	1.270s
+[release-gate] ==> futureparity
+ok  	github.com/ipiton/AMP/cmd/server	2.191s
+ok  	github.com/ipiton/AMP/cmd/server/handlers	0.784s
+[release-gate] ==> race
+[release-gate] race-testing 7 package(s): github.com/ipiton/AMP/internal/business/publishing github.com/ipiton/AMP/internal/business/silencing github.com/ipiton/AMP/internal/business/templating github.com/ipiton/AMP/internal/core/silencing github.com/ipiton/AMP/internal/infrastructure/grouping github.com/ipiton/AMP/internal/infrastructure/publishing github.com/ipiton/AMP/internal/infrastructure/silencing
+ok  	github.com/ipiton/AMP/internal/business/publishing	35.212s
+ok  	github.com/ipiton/AMP/internal/business/silencing	2.534s
+ok  	github.com/ipiton/AMP/internal/business/templating	6.548s
+ok  	github.com/ipiton/AMP/internal/core/silencing	2.649s
+ok  	github.com/ipiton/AMP/internal/infrastructure/grouping	16.776s
+ok  	github.com/ipiton/AMP/internal/infrastructure/publishing	420.112s
+ok  	github.com/ipiton/AMP/internal/infrastructure/silencing	2.023s
+[release-gate] ==> helm-deps
+[release-gate] no chart dependencies
+[release-gate] ==> helm-dev
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-production
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-small
+==> Linting /Users/vit/Documents/Projects/AMP/amp/helm/amp
+[INFO] Chart.yaml: icon is recommended
+
+1 chart(s) linted, 0 chart(s) failed
+[release-gate] ==> helm-rbac
+[release-gate] ==> helm-tests
+T1 defaults: AMP, Valkey and the exporter read the chart's Secret:
+  ok   defaults: renders
+  ok   defaults: AMP REDIS_PASSWORD from the Valkey Secret
+  ok   defaults: Valkey and exporter from the same Secret
+  ok   defaults: chart creates the Valkey Secret
+  ok   defaults: Valkey config-init mounts the same Secret
+  ok   defaults: no cache.auth password in amp-secrets
+T2 valkey.password.existingSecret with a custom key:
+  ok   valkey-existing: renders
+  ok   valkey-existing: AMP from the operator's Secret
+  ok   valkey-existing: Valkey and exporter from it
+  ok   valkey-existing: no chart Valkey Secret
+  ok   valkey-existing: config-init mounts it
+  ok   valkey-existing: mounted item is the custom key
+  ok   valkey-existing: chart Secret not referenced
+  ok   valkey-existing-default-key: renders
+  ok   valkey-existing-default-key: key defaults to password
+T3 external cache with cache.auth.existingSecret:
+  ok   ext-existing: renders
+  ok   ext-existing: AMP from the operator's Secret
+  ok   ext-existing: no redis-password in amp-secrets
+  ok   ext-existing-key: renders
+  ok   ext-existing-key: custom key
+  ok   ext-existing-eso: renders
+  ok   ext-existing-eso: ExternalSecret does not fetch it
+T4 values-production.yaml (external cache, cache.auth.password) as before:
+  ok   production: renders
+  ok   production: AMP from amp-secrets/redis-password
+  ok   production: amp-secrets carries redis-password
+T5 no cache, no password:
+  ok   lite: renders
+  ok   lite: no REDIS_PASSWORD
+  ok   cache-off: renders
+  ok   cache-off: only Valkey and exporter, not AMP
+  ok   cache-off: AMP gets no REDIS_PASSWORD
+T6 contradictory values fail the render:
+  ok   no-cache: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   both: render fails with 'cache.auth.existingSecret is set while cache.auth.enabled=true'
+T7 chart's Valkey: cache.auth.* is ignored, with a warning:
+  ok   own-auth-enabled: renders
+  ok   own-auth-enabled: renders without cache.auth.password, Valkey Secret
+  ok   own-auth-enabled: no redis-password
+  ok   own-notes-enabled: NOTES rendered
+  ok   own-notes-enabled: NOTES warn that cache.auth.* is ignored
+  ok   own-notes-password: NOTES rendered
+  ok   own-notes-password: NOTES warn that cache.auth.* is ignored
+  ok   own-notes-existingSecret: NOTES rendered
+  ok   own-notes-existingSecret: NOTES warn that cache.auth.* is ignored
+  ok   own-notes-defaults: NOTES rendered
+  ok   own-notes-defaults: NOTES name the Secret
+  ok   own-notes-defaults: no warning
+  ok   own-notes-defaults: no upgrade hint on install
+T7a external cache.host while the chart's Valkey still runs:
+  ok   ext-replicas: renders
+  ok   ext-replicas: AMP from cache.auth.password, not Valkey's
+  ok   ext-replicas: amp-secrets carries redis-password
+  ok   ext-noauth: renders
+  ok   ext-noauth: no password for an external cache without auth
+  ok   ext-replicas: NOTES rendered
+  ok   ext-replicas: NOTES say the chart's Valkey is unused
+  ok   ext-replicas: NOTES name the external host
+T7b cache.host DNS names: own namespace is the chart's Valkey, another is external (-n prod):
+  ok   host-amp-redis: renders
+  ok   host-amp-redis: chart's Valkey
+  ok   host-amp-redis-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.prod: renders
+  ok   host-amp-redis.prod: chart's Valkey
+  ok   host-amp-redis.prod-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.prod.svc: renders
+  ok   host-amp-redis.prod.svc: chart's Valkey
+  ok   host-amp-redis.prod.svc-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.prod.svc.cluster.local: renders
+  ok   host-amp-redis.prod.svc.cluster.local: chart's Valkey
+  ok   host-amp-redis.prod.svc.cluster.local-replicas-0: render fails with 'valkey.replicas is 0 while cache.host still points at the chart's Valkey'
+  ok   host-amp-redis.otherns.svc.cluster.local: renders
+  ok   host-amp-redis.otherns.svc.cluster.local: external
+  ok   host-amp-redis.otherns.svc.cluster.local-replicas-0: renders
+  ok   host-amp-redisx: renders
+  ok   host-amp-redisx: external
+  ok   host-amp-redisx-replicas-0: renders
+  ok   host-amp-redis.prodx.svc: renders
+  ok   host-amp-redis.prodx.svc: external
+  ok   host-amp-redis.prodx.svc-replicas-0: renders
+T8 no password in a URL or in plain text outside a Secret:
+  ok   plain: renders
+  ok   plain-ext: renders
+  ok   defaults: no redis://:<password> URL
+  ok   plain: no redis://:<password> URL
+  ok   plain-ext: no redis://:<password> URL
+  ok   production: no redis://:<password> URL
+  ok   plain: valkey.password.value only base64-encoded
+  ok   plain-ext: cache.auth.password only base64-encoded
+
+all assertions passed
+== standard defaults: cache on, AMP waits for it ==
+  ok   REDIS_ADDR is the chart's Valkey
+  ok   no REDIS_STARTUP_WAIT (app default 60s)
+== standard, cache.enabled=false ==
+  ok   REDIS_ADDR falls back to localhost
+  ok   REDIS_STARTUP_WAIT=0s
+== lite profile ==
+  ok   REDIS_STARTUP_WAIT=0s
+all assertions passed
+chart renders with the sidecar OFF (default):
+  ok   no sidecar container
+  ok   no config-file ConfigMap
+  ok   no AMP_CONFIG_FILE env
+  ok   no shared PID namespace
+chart renders with the sidecar ON:
+  ok   sidecar container
+  ok   config-file ConfigMap
+  ok   AMP_CONFIG_FILE env for the app
+  ok   sidecar watches the mounted file
+  ok   reload is verified over loopback
+  ok   sidecar filesystem is read-only
+  ok   sidecar runs non-root
+  ok   http method needs no shared PID namespace
+signal method requests a shared PID namespace:
+  ok   shared PID namespace
+  ok   signal method
+http method never grants a shared PID namespace, even if asked:
+  ok   no shared PID namespace for method: http
+production values render the config file but NOT the sidecar:
+  ok   config file rendered in production
+  ok   AMP_CONFIG_FILE set in production
+  ok   sidecar NOT enabled while its image is unpublished
+misconfigurations are refused at render time:
+  ok   sidecar without a config file
+  ok   config file without content
+  ok   signal method without a shared PID namespace
+
+all assertions passed
+T1 shipped values files:
+  ok   default: all 2 secretKeyRef targets exist
+  ok   dev: all 2 secretKeyRef targets exist
+  ok   production: all 3 secretKeyRef targets exist
+  ok   default: LLM is off
+  ok   dev: LLM is off
+  ok   production: LLM is off
+  ok   default: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   default: DATABASE_SSL_MODE is disable
+  ok   dev: insecure-SSL flag set once for the bundled PostgreSQL
+  ok   dev: DATABASE_SSL_MODE is disable
+  ok   production: no insecure-SSL flag for the external database
+  ok   production: DATABASE_SSL_MODE is require
+  ok   default: no hard-coded Deployment revision annotation
+  ok   dev: no hard-coded Deployment revision annotation
+  ok   production: no hard-coded Deployment revision annotation
+T2-T4 flag stays off where it does not belong:
+  ok   ssl-on: no flag when PostgreSQL TLS is on
+  ok   external-db: all 2 secretKeyRef targets exist
+  ok   external-db: no flag without the bundled PostgreSQL
+  ok   lite: no flag in the lite profile
+T5 LLM on without a key fails the render:
+  ok   llm-nokey: render fails naming llm.apiKey
+T6 LLM on with a key source renders:
+  ok   llm-key: all 3 secretKeyRef targets exist
+  ok   llm-key: Deployment reads llm-api-key
+  ok   llm-eso: ExternalSecret supplies llm-api-key
+
+all assertions passed
+T-ext-1 external database env:
+  ok   ext: renders
+  ok   ext: DATABASE_HOST
+  ok   ext: DATABASE_PORT defaults to 5432
+  ok   ext: DATABASE_DATABASE
+  ok   ext: DATABASE_USERNAME
+  ok   ext: DATABASE_SSL_MODE defaults to require
+  ok   ext: password from the operator's Secret
+  ok   ext: default Secret key is password
+  ok   ext: one DATABASE_PASSWORD
+  ok   ext: no filesystem storage path
+  ok   ext: no bundled PostgreSQL
+  ok   ext: no bundled PostgreSQL Secret
+T-ext-2 overrides:
+  ok   ext-custom: renders
+  ok   ext-custom: port
+  ok   ext-custom: sslMode
+  ok   ext-custom: Secret key
+  ok   ext-port-string: renders
+  ok   ext-port-string: port given as a string
+T-ext-3 sslMode: the four values AMP accepts render, others fail:
+  ok   ssl-disable: renders
+  ok   ssl-disable: DATABASE_SSL_MODE
+  ok   ssl-require: renders
+  ok   ssl-require: DATABASE_SSL_MODE
+  ok   ssl-verify-ca: renders
+  ok   ssl-verify-ca: DATABASE_SSL_MODE
+  ok   ssl-verify-full: renders
+  ok   ssl-verify-full: DATABASE_SSL_MODE
+  ok   ssl-allow: render fails with 'externalDatabase.sslMode "allow" is invalid'
+  ok   ssl-prefer: render fails with 'externalDatabase.sslMode "prefer" is invalid'
+  ok   ssl-bogus: render fails with 'externalDatabase.sslMode "bogus" is invalid'
+T-ext-4 no insecure-SSL flag for an external database, whatever sslMode:
+  ok   ssl-disable: no insecure-SSL flag
+  ok   ssl-require: no insecure-SSL flag
+  ok   ssl-verify-ca: no insecure-SSL flag
+  ok   ssl-verify-full: no insecure-SSL flag
+  ok   ext-pg-ssl-off: renders
+  ok   ext-pg-ssl-off: bundled ssl setting does not leak
+T-ext-5 host without its companions fails:
+  ok   no-secret: render fails with 'externalDatabase.existingSecret'
+  ok   no-database: render fails with 'externalDatabase.database is required'
+  ok   no-username: render fails with 'externalDatabase.username is required'
+T-ext-6 both databases at once fail:
+  ok   both: render fails with 'externalDatabase.host is set while postgresql.enabled=true'
+T-ext-7 no database anywhere fails; the configFile fallback is parsed as YAML:
+  ok   no-db: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-block: renders
+  ok   cfg-flow: renders
+  ok   cfg-quoted: renders
+  ok   cfg-nested: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-null: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-empty: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-no-db: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-invalid: render fails with 'configFile.content is not valid YAML'
+  ok   cfg-disabled: render fails with 'postgresql.enabled=false but no database is configured'
+  ok   cfg-and-ext: renders
+  ok   cfg-and-ext: externalDatabase wins over configFile (env)
+T-ext-8 bundled PostgreSQL, lite and --reuse-values without the key:
+  ok   bundled: renders
+  ok   bundled: DATABASE_HOST is the bundled Service
+  ok   bundled: insecure-SSL flag still set for the bundled PostgreSQL
+  ok   reuse-no-key: renders
+  ok   reuse-no-key: bundled branch
+  ok   lite: renders
+  ok   lite: externalDatabase ignored, no guards
+T-ext-9 values-production.yaml renders with an external database:
+  ok   production: renders
+  ok   production: no bundled PostgreSQL
+  ok   production: no postgres image
+  ok   production: DATABASE_HOST from externalDatabase
+  ok   production: sslMode require
+  ok   production: no insecure-SSL flag
+T-ext-10 values-production.yaml does not render without it:
+  ok   production-no-db: render fails with 'postgresql.enabled=false but no database is configured'
+
+all assertions passed
+empty values render exactly what no values render
+  ok   standard: [] == default
+  ok   standard: null == default
+  ok   lite: [] == default
+  ok   lite: null == default
+  ok   standard default: no volumes block
+a Secret mounted for receiver credentials
+  ok   volume rendered
+  ok   volume points at the Secret
+  ok   defaultMode kept
+  ok   chart volumes kept next to it
+  ok   mounted in the amp container
+  ok   config-file mount kept
+  ok   sidecar rendered
+  ok   not mounted in the config-reloader sidecar
+  ok   configFile.content references the mounted path
+mounts alone (volume from elsewhere, e.g. a CSI driver) render
+  ok   standard profile gets a volumes block for extraVolumes
+  ok   standard profile gets a volumeMounts block for extraVolumeMounts
+names and paths the chart already uses fail the render
+  ok   volume name config-file
+  ok   volume name data in lite
+  ok   mountPath /etc/amp
+  ok   mountPath /etc/amp/ (trailing slash)
+  ok   mountPath of config.yaml itself
+  ok   mountPath /data in lite
+  ok   mountPath of the web config dir
+  ok   mountPath of the web config file
+a directory below the chart's mounts is fine
+  ok   /etc/amp/secrets accepted
+  ok   /etc/amp accepted when configFile is off
+all extraVolumes assertions passed
+defaults: preStop, timeout env and a grace period that fits both
+  ok   preStop sleeps preStopDelay (5)
+  ok   timeout env set
+  ok   timeout env carries timeoutSeconds (30s)
+  ok   grace period 40 >= 5 + 30
+  ok   stale 'no preStop' comment gone
+  ok   no budget warning with defaults
+preStopDelay=0 removes the hook
+  ok   no preStop hook
+  ok   no lifecycle block
+custom values flow through
+  ok   preStop sleeps 10
+  ok   timeout env 45s
+  ok   grace period 60
+  ok   no warning when 60 >= 10 + 45
+an old grace period (30) still renders, with a warning
+  ok   render does not fail
+  ok   budget warning printed
+  ok   warning names the required minimum
+production values
+  ok   preStop in production
+  ok   grace period 40 in production
+
+all assertions passed
+default:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+lite:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+production:
+  ok   GROUPING_ENABLED is "true"
+  ok   GROUPING_ENABLED is set exactly once
+opt-out:
+  ok   GROUPING_ENABLED is "false"
+  ok   GROUPING_ENABLED is set exactly once
+
+all assertions passed
+Chart appVersion: 0.1.0
+default: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+production: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+lite: app image defaults to appVersion
+  ok   one app container on ghcr.io/ipiton/amp:0.1.0
+  ok   tag is never empty
+config-reloader image defaults to appVersion:
+  ok   sidecar on ghcr.io/ipiton/amp-config-reloader:0.1.0
+  ok   app container unchanged next to the sidecar
+an explicit image.tag still wins:
+  ok   app container on the pinned tag
+  ok   appVersion not used when pinned
+
+all assertions passed
+defaults render no Ingress:
+  ok   no Ingress by default
+an Ingress without auth is refused:
+  ok   defaults + ingress.enabled (guard not tied to the prod file)
+  ok   values-production.yaml without auth
+  ok   values-production.yaml as shipped
+only a real true waives in-process auth:
+  ok   --set-string ingress.externalAuth=false
+  ok   --set-string ingress.externalAuth=no
+  ok   --set-string ingress.externalAuth="false"
+  ok   --set-string ingress.externalAuth=True
+  ok   --set-string ingress.externalAuth=1
+an Ingress with auth renders:
+  ok   prod + webConfig.existingSecret
+  ok   prod + ingress.externalAuth=true
+  ok   --set-string ingress.externalAuth=true
+chart packaging keeps the helm test hook and drops the render tests:
+  ok   helm test hook still rendered
+  ok   helm test hook packaged
+  ok   render tests not packaged
+
+all assertions passed
+defaults render no AMP NetworkPolicy:
+  ok   no AMP policy by default
+an enabled policy with no effective source is refused:
+  ok   values-production.yaml with no sources
+  ok   defaults + networkPolicy.enabled
+  ok   ingressController only, Ingress off
+production policy (placeholder sender):
+  ok   selects the AMP pods by component
+  ok   alert-senders rule
+  ok   peers rendered as given
+  ok   one rule, http port only
+  ok   no Egress policyType
+  ok   no controller rule with no controller peers
+one rule per role; the controller only with an Ingress:
+  ok   controller peers dropped while ingress.enabled=false
+  ok   metrics-scrapers rule
+  ok   sender + scraper rules, http only
+  ok   controller rule with ingress.enabled
+  ok   controller peers rendered
+  ok   controller + sender rules
+extraIngress is rendered as-is:
+  ok   raw rule rendered
+the component label lives in the pod template only:
+  ok   pod template carries the label
+  ok   Deployment selector found
+  ok   Deployment selector unchanged (immutable)
+  ok   Service selector found
+  ok   Service selector unchanged
+podLabels cannot override the component label:
+  ok   podLabels with app.kubernetes.io/component
+  ok   other podLabels still render
+the Redis NetworkPolicy admits the AMP pods:
+  ok   first Redis rule selects component: application
+  ok   ...on the Redis port
+values without the networkPolicy section (--reuse-values from an old release):
+  ok   renders
+  ok   no AMP policy
+
+all assertions passed
+T1 shipped values: no backup, no PDB, pinned image:
+  ok   default: renders
+  ok   production: renders
+  ok   default: bundled PostgreSQL StatefulSet rendered
+  ok   default: Postgres StatefulSet has replicas: 1
+  ok   default: no Postgres PDB
+  ok   default: no backup CronJob
+  ok   default: no backup PVC
+  ok   default: no WAL archiving settings
+  ok   default: no PostgreSQLBackupOld rule
+  ok   default: no PostgreSQLWALArchivingFailed rule
+  ok   default: StatefulSet and test pod use postgres:16.15
+  ok   default: no other postgres:16* image
+  ok   production: no bundled PostgreSQL (external database)
+  ok   production: no backup CronJob
+  ok   production: no postgres image
+T2 replicas other than 1 fail the render:
+  ok   replicas-2: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-0: render fails with 'postgresql.replicas must be 1'
+  ok   replicas-1-string: renders
+T3 an enabled backup fails the render, with the --reuse-values hint:
+  ok   backup-enabled: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-enabled-string: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-scalar-true: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults: render fails with 'use --reset-then-reuse-values, or add --set postgresql.backup.enabled=false'
+  ok   backup-old-defaults-override: renders
+T4 leftovers of the removed key render:
+  ok   backup-empty: renders
+  ok   backup-null: renders
+  ok   backup-false: renders
+  ok   backup-enabled-false: renders
+  ok   backup-enabled-one: renders
+  ok   backup-enabled-title-case: renders
+T5 guards do not apply without the bundled PostgreSQL:
+  ok   external-db: renders
+  ok   external-db: no bundled PostgreSQL
+  ok   lite: renders
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-hpa: NOTES rendered
+  ok   notes-external: NOTES rendered
+  ok   notes-max-3: NOTES rendered
+  ok   notes-max-4: NOTES rendered
+  ok   notes-default: standard profile not advertised as HA
+  ok   notes-default: bundled PostgreSQL not advertised as HA
+  ok   notes-default: bundled PostgreSQL marked dev/pilot
+  ok   notes-default: no config-not-applied warning
+  ok   notes-default: step 4 expects max_connections 100
+  ok   notes-default: no max_connections OK line
+  ok   notes-hpa: standard profile not advertised as HA
+  ok   notes-hpa: bundled PostgreSQL not advertised as HA
+  ok   notes-hpa: bundled PostgreSQL marked dev/pilot
+  ok   notes-hpa: no config-not-applied warning
+  ok   notes-hpa: step 4 expects max_connections 100
+  ok   notes-hpa: no max_connections OK line
+  ok   notes-default: HPA off, no connection budget warning
+  ok   notes-hpa: connection budget warning at 10 replicas
+  ok   notes-max-3: no connection budget warning
+  ok   notes-max-4: warning counts the exporter (105 > 102)
+  ok   notes-external: external PostgreSQL line
+  ok   notes-external: no bundled PostgreSQL warning
+  ok   notes-external: no bundled PostgreSQL steps
+T7 the server runs with the chart config (PG-CONFIG-FIX):
+  ok   args: config_file
+  ok   args: hba_file
+  ok   no POSTGRES_INITDB_ARGS
+  ok   no postgresql.conf in initdb.d
+  ok   no pg_hba.conf in initdb.d
+  ok   init.sql in initdb.d
+  ok   one /etc/postgresql mount
+  ok   /etc/postgresql is volume custom-config
+  ok   custom-config volume is ConfigMap amp-postgres-config
+  ok   no postgres-config emptyDir
+  ok   no ALTER SYSTEM in init.sql
+  ok   no views in init.sql
+  ok   pg_stat_statements settings in postgresql.conf
+  ok   pg_hba.conf: socket trust, SCRAM on loopback and for the app, reject the rest
+  ok   logging_collector off
+  ok   /dev/shm mounted
+  ok   /dev/shm is a memory emptyDir
+  ok   exporter: DATA_SOURCE_URI
+  ok   exporter: DATA_SOURCE_USER
+  ok   exporter: DATA_SOURCE_PASS
+  ok   exporter: no DATA_SOURCE_NAME
+  ok   exporter: no $(POSTGRES_*) references
+  ok   exporter: database auto-discovery off
+  ok   exporter queries: no tablename column
+  ok   exporter queries: no indexname column
+  ok   rules: no now() (not PromQL)
+  ok   rules: never-autovacuumed tables skipped
+  ok   helm test: checks config_file
+  ok   helm test: checks hba_file
+
+all assertions passed
+default ServiceMonitor:
+  ok   rendered by default
+  ok   selects by component
+  ok   scrapes the http port
+  ok   ...at /metrics
+  ok   default interval
+  ok   default scrape timeout
+  ok   no credentials without web auth
+its selector matches the AMP Service only:
+  ok   selector (3 labels) picks exactly: amp
+  ok   component is what tells the Services apart (7 match without it)
+gated on prometheusEnabled and serviceMonitor.enabled:
+  ok   off with monitoring.prometheusEnabled=false
+  ok   off with serviceMonitor.enabled=false
+  ok   Redis ServiceMonitor unaffected
+web auth needs credentials:
+  ok   webConfig.existingSecret without basicAuth
+  ok   username from the Secret
+  ok   ...default key
+  ok   password from the Secret
+  ok   ...default key
+  ok   custom username key
+  ok   custom password key
+labels and timing:
+  ok   extra labels in metadata
+  ok   interval override
+values without monitoring.serviceMonitor (--reuse-values from an old release):
+  ok   still rendered
+  ok   default interval
+  ok   default scrape timeout
+  ok   ...and the credentials guard still runs
+
+all assertions passed
+T1 defaults fit one node:
+  ok   default: renders
+  ok   default: no HPA
+  ok   default: Deployment has replicas: 1
+  ok   default: requests total 270m/512Mi
+  ok   default: no valkey subchart objects
+  ok   default: no amp-pvc under profile: standard
+  ok   default: cache image valkey/valkey:8.1.10-alpine
+  ok   default: no redis image
+  ok   default: config-init moves Redis >= 7.4 data
+T2 autoscaling on: HPA without keep:
+  ok   hpa: renders
+  ok   hpa: HPA rendered
+  ok   hpa: no helm.sh/resource-policy on the HPA
+T3 lite and production:
+  ok   lite: renders
+  ok   lite: amp-pvc rendered
+  ok   lite: no HPA
+  ok   production: renders
+  ok   production: HPA rendered
+  ok   production: HPA 3-20
+  ok   production: no valkey subchart objects
+  ok   production: no amp-pvc
+T4 cache image:
+  ok   empty-tag: render fails with 'valkey.image.tag is required'
+  ok   own-redis: renders
+  ok   own-redis: image redis:7.4-alpine
+  ok   own-redis: no data move
+T5 values-small.yaml:
+  ok   small: renders
+  ok   small: no HPA
+  ok   small: Valkey maxmemory 192mb
+  ok   small: alert descriptions show maxmemory from values
+  ok   small: max_connections 60
+  ok   small: max_wal_size 1GB
+  ok   small: work_mem 2MB (memory measured at 56 sorting sessions)
+T6 NOTES:
+  ok   notes-default: NOTES rendered
+  ok   notes-cache-off: NOTES rendered
+  ok   notes-external-cache: NOTES rendered
+  ok   notes-lite: NOTES rendered
+  ok   notes-default: Valkey cache line
+  ok   notes-default: HPA off line
+  ok   notes-default: AMP resources from values
+  ok   notes-cache-off: cache off line
+  ok   notes-cache-off: no Valkey line
+  ok   notes-external-cache: external cache line
+  ok   notes-lite: resources from values
+T7 config-init data move on fixtures (sh, not busybox):
+  ok   config-init script extracted
+  ok   redis-7.4: moved both
+  ok   redis-7.4: second run moves nothing
+  ok   after-rollback: moved dump
+  ok   after-rollback: second run moves nothing
+  ok   aof-only: moved aof
+  ok   aof-only: second run moves nothing
+  ok   rdb-only: moved dump
+  ok   rdb-only: second run moves nothing
+  ok   valkey-8.1: moved none
+  ok   valkey-8.1: second run moves nothing
+  ok   valkey-9.0: moved none
+  ok   valkey-9.0: second run moves nothing
+  ok   empty: moved none
+  ok   empty: second run moves nothing
+
+all assertions passed
+== volumeClaimTemplates labels ==
+  ok   VCT redis-data rendered
+  ok   selector label name
+  ok   selector label instance
+  ok   component label
+  ok   no chart label
+  ok   no version label
+== same volumeClaimTemplates after a version bump ==
+  ok   bumped chart renders the new version
+  ok   volumeClaimTemplates identical across versions
+all assertions passed
+[release-gate] ==> amtool-compat
+ Image python:3-alpine Pulling 
+ f38be3a0b339 Pulling fs layer 0B
+ 5b7cc468e007 Pulling fs layer 0B
+ 55ff4564d4b6 Pulling fs layer 0B
+ 1acf5a3d9950 Download complete 0B
+ f38be3a0b339 Download complete 0B
+ bbfda0755eed Download complete 0B
+ 5b7cc468e007 Download complete 0B
+ 5b7cc468e007 Extracting 1B
+ 5b7cc468e007 Extracting 1B
+ 55ff4564d4b6 Downloading 1.049MB
+ 5b7cc468e007 Extracting 1B
+ 55ff4564d4b6 Downloading 1.049MB
+ 5b7cc468e007 Extracting 1B
+ 55ff4564d4b6 Downloading 1.049MB
+ 5b7cc468e007 Pull complete 0B
+ 55ff4564d4b6 Downloading 1.049MB
+ 55ff4564d4b6 Downloading 2.097MB
+ 55ff4564d4b6 Downloading 2.097MB
+ 55ff4564d4b6 Downloading 3.146MB
+ 55ff4564d4b6 Downloading 3.146MB
+ 55ff4564d4b6 Downloading 3.146MB
+ 55ff4564d4b6 Downloading 4.194MB
+ 55ff4564d4b6 Downloading 4.194MB
+ 55ff4564d4b6 Downloading 5.243MB
+ 55ff4564d4b6 Downloading 5.243MB
+ 55ff4564d4b6 Downloading 6.291MB
+ 55ff4564d4b6 Downloading 6.291MB
+ 55ff4564d4b6 Downloading 6.291MB
+ 55ff4564d4b6 Downloading 6.291MB
+ 55ff4564d4b6 Downloading 7.34MB
+ 55ff4564d4b6 Downloading 7.34MB
+ 55ff4564d4b6 Downloading 7.34MB
+ 55ff4564d4b6 Downloading 8.389MB
+ 55ff4564d4b6 Downloading 8.389MB
+ 55ff4564d4b6 Downloading 9.437MB
+ 55ff4564d4b6 Downloading 9.437MB
+ 55ff4564d4b6 Downloading 9.437MB
+ 55ff4564d4b6 Downloading 10.49MB
+ 55ff4564d4b6 Downloading 10.49MB
+ 55ff4564d4b6 Downloading 11.53MB
+ 55ff4564d4b6 Downloading 11.53MB
+ 55ff4564d4b6 Downloading 12.58MB
+ 55ff4564d4b6 Downloading 12.58MB
+ 55ff4564d4b6 Downloading 12.58MB
+ 55ff4564d4b6 Downloading 13.63MB
+ 55ff4564d4b6 Downloading 13.63MB
+ 55ff4564d4b6 Downloading 13.63MB
+ 55ff4564d4b6 Downloading 13.63MB
+ 55ff4564d4b6 Downloading 13.63MB
+ 55ff4564d4b6 Downloading 14.68MB
+ 55ff4564d4b6 Download complete 0B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ 55ff4564d4b6 Extracting 1B
+ f38be3a0b339 Extracting 1B
+ 55ff4564d4b6 Pull complete 0B
+ f38be3a0b339 Pull complete 0B
+ Image python:3-alpine Pulled 
+ Image amp-smoke-amp Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 518B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 1.75kB 0.0s done
+#2 DONE 0.2s
+
+#3 [internal] load metadata for docker.io/library/alpine:3.24
+#3 ...
+
+#4 [auth] library/alpine:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#5 [auth] library/golang:pull token for registry-1.docker.io
+#5 DONE 0.0s
+
+#6 [internal] load metadata for docker.io/library/golang:1.26.9-alpine
+#6 DONE 1.8s
+
+#3 [internal] load metadata for docker.io/library/alpine:3.24
+#3 DONE 1.9s
+
+#7 [internal] load .dockerignore
+#7 transferring context: 567B done
+#7 DONE 0.1s
+
+#8 [internal] load build context
+#8 DONE 0.0s
+
+#9 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#9 resolve docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#9 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#10 resolve docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade 0.2s done
+#10 DONE 0.2s
+
+#9 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#9 resolve docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a 0.2s done
+#9 DONE 0.5s
+
+#8 [internal] load build context
+#8 ...
+
+#9 [stage-1 1/5] FROM docker.io/library/alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#9 extracting sha256:d3531b7a4f217bdc3426c57bcff84c170f086f456a39689d4a615c6d026c4be0 0.5s done
+#9 DONE 1.1s
+
+#8 [internal] load build context
+#8 transferring context: 8.78MB 0.4s done
+#8 DONE 1.1s
+
+#11 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#11 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#10 extracting sha256:a9986cd6f37dbddae7862a6d4be71683472e7c2ea708e87db14f8a6393c00f00 0.3s done
+#10 sha256:348001e198c43bff043472eaf391b2d76f1f1c3939a6af3021a11d86617e0e17 126B / 126B 0.2s done
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 15.73MB / 64.25MB 5.0s
+#10 sha256:5258cfc7b8cfd861ec79320847f08e8174a42164ecef7bd82fcad140be0d237b 249.81kB / 249.81kB 1.5s done
+#10 extracting sha256:5258cfc7b8cfd861ec79320847f08e8174a42164ecef7bd82fcad140be0d237b 0.1s done
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 19.92MB / 64.25MB 5.7s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 24.12MB / 64.25MB 7.1s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 28.31MB / 64.25MB 8.3s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 32.51MB / 64.25MB 9.6s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 36.70MB / 64.25MB 11.4s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 40.89MB / 64.25MB 12.5s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 45.09MB / 64.25MB 14.0s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 49.28MB / 64.25MB 15.3s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 53.48MB / 64.25MB 16.4s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 57.67MB / 64.25MB 17.7s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 61.87MB / 64.25MB 18.8s
+#10 sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 64.25MB / 64.25MB 19.7s done
+#10 extracting sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f
+#10 ...
+
+#11 [stage-1 2/5] RUN apk add --no-cache ca-certificates tzdata &&     adduser -D -u 10001 appuser
+#11 20.43 (1/2) Installing ca-certificates (20261020-r0)
+#11 20.88 (2/2) Installing tzdata (2026e-r0)
+#11 21.38 Executing busybox-1.37.0-r31.trigger
+#11 21.41 Executing ca-certificates-20261020-r0.trigger
+#11 21.48 OK: 9185 KiB in 18 packages
+#11 DONE 24.2s
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#10 extracting sha256:d035f39de3c6ef146b1aeb1e916d3e2a8e98c2ce563984191d3492463253e95f 4.3s done
+#10 extracting sha256:348001e198c43bff043472eaf391b2d76f1f1c3939a6af3021a11d86617e0e17 0.1s done
+#10 DONE 25.5s
+
+#12 [stage-1 3/5] WORKDIR /app
+#12 ...
+
+#10 [builder 1/7] FROM docker.io/library/golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade
+#10 extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 0.0s done
+#10 DONE 25.5s
+
+#13 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#13 ...
+
+#12 [stage-1 3/5] WORKDIR /app
+#12 DONE 1.5s
+
+#13 [builder 2/7] RUN apk add --no-cache git make ca-certificates
+#13 3.415 ( 1/13) Installing brotli-libs (1.2.1-r0)
+#13 3.623 ( 2/13) Installing c-ares (1.34.9-r0)
+#13 3.709 ( 3/13) Installing libunistring (1.4.2-r0)
+#13 4.083 ( 4/13) Installing libidn2 (2.3.8-r0)
+#13 4.162 ( 5/13) Installing nghttp2-libs (1.70.0-r0)
+#13 4.227 ( 6/13) Installing libpsl (0.21.5-r3)
+#13 4.283 ( 7/13) Installing zstd-libs (1.5.7-r2)
+#13 4.469 ( 8/13) Installing libcurl (8.22.0-r0)
+#13 4.682 ( 9/13) Installing libexpat (2.9.0-r0)
+#13 4.747 (10/13) Installing pcre2 (10.49-r0)
+#13 4.965 (11/13) Installing git (2.54.0-r0)
+#13 6.676 (12/13) Installing git-init-template (2.54.0-r0)
+#13 6.723 (13/13) Installing make (4.4.1-r4)
+#13 6.845 Executing busybox-1.37.0-r31.trigger
+#13 6.881 OK: 21.8 MiB in 30 packages
+#13 DONE 7.1s
+
+#14 [builder 3/7] WORKDIR /build
+#14 DONE 0.3s
+
+#15 [builder 4/7] COPY go-app/go.mod go-app/go.sum ./
+#15 DONE 0.2s
+
+#16 [builder 5/7] RUN go mod download
+#16 DONE 58.4s
+
+#17 [builder 6/7] COPY go-app/ ./
+#17 DONE 1.8s
+
+#18 [builder 7/7] RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w     -X github.com/ipiton/AMP/internal/buildinfo.Version=dev     -X github.com/ipiton/AMP/internal/buildinfo.Revision=unknown     -X github.com/ipiton/AMP/internal/buildinfo.Branch=unknown     -X github.com/ipiton/AMP/internal/buildinfo.BuildUser=docker     -X github.com/ipiton/AMP/internal/buildinfo.BuildDate=unknown"     -o amp ./cmd/server
+#18 DONE 137.6s
+
+#19 [stage-1 4/5] COPY --from=builder /build/amp /app/
+#19 DONE 0.7s
+
+#20 [stage-1 5/5] COPY --from=builder /build/migrations /app/migrations
+#20 DONE 0.6s
+
+#21 exporting to image
+#21 exporting layers
+#21 exporting layers 5.3s done
+#21 exporting manifest sha256:715d721f98ecdc525b9aae1741ed57d2fdebb49e67066184948ffc9c00d86207
+#21 exporting manifest sha256:715d721f98ecdc525b9aae1741ed57d2fdebb49e67066184948ffc9c00d86207 0.2s done
+#21 exporting config sha256:9e2f5742a27bcda6389f58394a049216f37d1c99b9be49e4182d43588d3fe632
+#21 exporting config sha256:9e2f5742a27bcda6389f58394a049216f37d1c99b9be49e4182d43588d3fe632 0.0s done
+#21 exporting attestation manifest sha256:ec976426741e2436edeb63fd09b1ed225462cff5707372a21e5f3f39cce7bb7b
+#21 exporting attestation manifest sha256:ec976426741e2436edeb63fd09b1ed225462cff5707372a21e5f3f39cce7bb7b 0.0s done
+#21 exporting manifest list sha256:5f60ab889bb45138627ee2d6d5294ebdc919a3bfa78c5d83b199cc1aa2e0b2ce
+#21 exporting manifest list sha256:5f60ab889bb45138627ee2d6d5294ebdc919a3bfa78c5d83b199cc1aa2e0b2ce 0.2s done
+#21 naming to docker.io/library/amp-smoke-amp:latest
+#21 naming to docker.io/library/amp-smoke-amp:latest 0.0s done
+#21 unpacking to docker.io/library/amp-smoke-amp:latest
+#21 unpacking to docker.io/library/amp-smoke-amp:latest 2.0s done
+#21 DONE 8.5s
+
+#22 resolving provenance for metadata file
+#22 DONE 0.1s
+ Image amp-smoke-amp Built 
+ Network amp-smoke_default Creating 
+ Network amp-smoke_default Creating 
+ Network amp-smoke_default Created 
+ Network amp-smoke_default Created 
+ Container amp-smoke-webhook-1 Creating 
+ Container amp-smoke-webhook-1 Created 
+ Container amp-smoke-amp-1 Creating 
+ Container amp-smoke-amp-1 Created 
+ Container amp-smoke-webhook-1 Starting 
+ Container amp-smoke-webhook-1 Started 
+ Container amp-smoke-webhook-1 Waiting 
+ Container amp-smoke-webhook-1 Healthy 
+ Container amp-smoke-amp-1 Starting 
+ Container amp-smoke-amp-1 Started 
+Unable to find image 'quay.io/prometheus/alertmanager:v0.34.0' locally
+v0.34.0: Pulling from prometheus/alertmanager
+4f4fb700ef54: Pulling fs layer
+273d7b3ceff7: Pulling fs layer
+e3c413c9dfa5: Pulling fs layer
+7c53bb56d9c8: Pulling fs layer
+f1420e14aaeb: Pulling fs layer
+8e40784ad81b: Pulling fs layer
+d561ac4e17d5: Pulling fs layer
+4f4fb700ef54: Already exists
+d561ac4e17d5: Download complete
+7c53bb56d9c8: Download complete
+f1420e14aaeb: Download complete
+e3c413c9dfa5: Download complete
+e3c413c9dfa5: Pull complete
+7c53bb56d9c8: Pull complete
+273d7b3ceff7: Download complete
+273d7b3ceff7: Pull complete
+8e40784ad81b: Download complete
+8e40784ad81b: Pull complete
+f1420e14aaeb: Pull complete
+d561ac4e17d5: Pull complete
+4f4fb700ef54: Pull complete
+Digest: sha256:690c7b525f4367aa91f73e2f91c632206d32e97c6384bdbf2fb7a861b420340d
+Status: Downloaded newer image for quay.io/prometheus/alertmanager:v0.34.0
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+Warning: amtool version (0.34.0) and alertmanager version (dev) are different.
+[release-gate] 
+[release-gate] ==================== SUMMARY ====================
+STEP             STATUS TIME     NOTE
+build            PASS   14s      go build ./... (go-app)
+lint             FAIL   54s      golangci-lint run (go-app)
+test             PASS   87s      go test ./... -count=1 (go-app)
+futureparity     PASS   24s      build+test, futureparity tag, cmd/server
+race             PASS   433s     go test -race, publishing/grouping/silencing/templating
+helm-deps        PASS   0s       chart dependencies (Chart.lock, no stale charts/)
+helm-dev         PASS   0s       lint + template, values-dev.yaml
+helm-production  PASS   0s       lint + template, values-production.yaml
+helm-small       PASS   0s       lint + template, values-small.yaml
+helm-rbac        PASS   1s       RBAC scope: namespaced list-secrets only
+helm-tests       PASS   25s      helm/amp/tests/*.sh render tests
+amtool-compat    PASS   302s     real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: FAIL
+exit=1

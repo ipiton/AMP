@@ -16,7 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PUBLISH-QUICK-FIX-BUNDLE** — resolve в PagerDuty/Rootly без локального состояния, общие между таргетами кеши и SMTP-клиенты, half-open breaker, graceful stop очереди, секреты в логах. TECH-DEBT § Bundles, critical, ~2d. Ветка `bugfix/publish-quick-fix-bundle`, workspace `tasks/PUBLISH-QUICK-FIX-BUNDLE/`. Взята 2026-10-23.
 
 ## Queue
 

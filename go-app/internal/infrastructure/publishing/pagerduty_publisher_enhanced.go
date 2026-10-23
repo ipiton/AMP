@@ -15,13 +15,11 @@ import (
 type EnhancedPagerDutyPublisher struct {
 	*BaseEnhancedPublisher                       // Embedded base publisher for common functionality
 	client                 PagerDutyEventsClient // PagerDuty-specific events client
-	cache                  EventKeyCache         // For tracking event keys (incident lifecycle)
 }
 
 // NewEnhancedPagerDutyPublisher creates a new enhanced PagerDuty publisher
 func NewEnhancedPagerDutyPublisher(
 	client PagerDutyEventsClient,
-	cache EventKeyCache,
 	metrics *v2.PublishingMetrics,
 	formatter AlertFormatter,
 	logger *slog.Logger,
@@ -33,7 +31,6 @@ func NewEnhancedPagerDutyPublisher(
 			logger.With("component", "pagerduty_publisher"),
 		),
 		client: client,
-		cache:  cache,
 	}
 }
 
@@ -103,9 +100,6 @@ func (p *EnhancedPagerDutyPublisher) triggerEvent(ctx context.Context, enrichedA
 		return fmt.Errorf("failed to trigger event: %w", err)
 	}
 
-	// Cache dedup key for future updates
-	p.cache.Set(alert.Fingerprint, resp.DedupKey)
-
 	// Record metrics
 	severity := getSeverity(enrichedAlert)
 	if p.GetMetrics() != nil {
@@ -123,19 +117,16 @@ func (p *EnhancedPagerDutyPublisher) triggerEvent(ctx context.Context, enrichedA
 	return nil
 }
 
-// resolveEvent resolves an event in PagerDuty
+// resolveEvent resolves an event in PagerDuty.
+//
+// The dedup key is the alert fingerprint — the same key triggerEvent sends —
+// so resolve needs no state from the trigger (PROVIDER-RESOLVE-STATELESS-PD).
+// It used to be looked up in an in-memory cache, which lost every key on
+// restart, on another replica and after 24h, leaving the incident open.
+// Upstream does the same: notify/pagerduty sends key.Hash() on both actions.
 func (p *EnhancedPagerDutyPublisher) resolveEvent(ctx context.Context, enrichedAlert *core.EnrichedAlert, routingKey string) error {
 	alert := enrichedAlert.Alert
-
-	// Lookup dedup key from cache
-	dedupKey, found := p.cache.Get(alert.Fingerprint)
-	if !found {
-		p.GetLogger().Warn("Cannot resolve event: not tracked in cache",
-			"fingerprint", alert.Fingerprint,
-			"alert_name", alert.AlertName,
-		)
-		return ErrEventNotTracked
-	}
+	dedupKey := alert.Fingerprint
 
 	// Build resolve request
 	req := &ResolveEventRequest{
@@ -149,9 +140,6 @@ func (p *EnhancedPagerDutyPublisher) resolveEvent(ctx context.Context, enrichedA
 	if err != nil {
 		return fmt.Errorf("failed to resolve event: %w", err)
 	}
-
-	// Remove from cache (event lifecycle complete)
-	p.cache.Delete(alert.Fingerprint)
 
 	// Record metrics
 	if p.GetMetrics() != nil {

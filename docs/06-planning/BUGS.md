@@ -30,6 +30,14 @@
 - **Refs:** `tasks/archive/ROUTE-TIMINGS-BUNDLE/review-findings.md` § F3.
 - **Status:** open
 
+### [medium][Security][~0.25d] HEALTH-CHECK-URL-LEAK
+- **Title:** health checker пишет URL таргета с токеном в статус и DEBUG-лог
+- **Problem:** при транспортной ошибке `business/publishing/health_checker.go:108-123` кладёт текст `*url.Error` с полным URL в `ErrorMessage` статуса и в DEBUG-лог; `sanitizeErrorMessage` путь не чистит. Для Teams/Discord/Google Chat/Slack/Telegram токен — часть пути. Health monitor включён по умолчанию.
+- **Impact:** токен таргета в логах и в API статуса таргетов — остаток `PUBLISH-SECRETS-IN-LOGS` (оговорено в CHANGELOG).
+- **Fix:** маскировать `*url.Error` через `core.RedactURL` перед записью (как `redactURLError` в publishing). Тест: недоступный таргет с токеном в пути ⇒ ни статус, ни лог токена не содержат.
+- **Refs:** `tasks/archive/PUBLISH-QUICK-FIX-BUNDLE/review-findings.md` F2.
+- **Status:** open
+
 ### [high][Routing][~1d] ROUTE-CONTINUE-NO-FANOUT
 - **Title:** `continue: true` не даёт доставку во второй receiver — алерт уходит только в первый совпавший route
 - **Problem:** путь публикации берёт одно решение: `AlertProcessor.evaluateRoute` (`go-app/internal/core/services/alert_processor.go:271`) → `routeTreeEvaluator.Evaluate` (`internal/application/route_evaluator.go:100`) → `businessrouting.RouteEvaluator.Evaluate` — первый матч; `services.RoutingDecision` хранит один `Receiver`. Мультиматч по `continue` есть в `RouteMatcher.FindMatchingRoutes` и `RouteEvaluator.EvaluateWithAlternatives` (`internal/business/routing/evaluator.go:277`), но у `EvaluateWithAlternatives` нет ни одного не-тестового вызова.
@@ -303,22 +311,6 @@
 - **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F8.
 - **Status:** open
 
-### [critical][Publishing][~0.25d] PROVIDER-RESOLVE-STATELESS-PD
-- **Title:** resolve в PagerDuty теряется после рестарта, на другой реплике и через 24h
-- **Problem:** trigger шлёт `DedupKey: alert.Fingerprint`, а `resolveEvent` (`internal/infrastructure/publishing/pagerduty_publisher_enhanced.go:127-138`) берёт ключ только из in-memory `EventKeyCache(24h)` (`publisher.go:383-388`) и при промахе возвращает `ErrEventNotTracked`. Кеш общий на фабрику: ключ может удалить и второй PD-таргет.
-- **Impact:** после каждого rollout/рестарта, в HA и для инцидентов старше 24h инциденты PD не закрываются автоматически. В upstream dedup-ключ детерминирован.
-- **Fix:** в resolve — `DedupKey: alert.Fingerprint`, кеш для PD убрать. Тест: resolve без предварительного trigger в том же процессе ⇒ запрос `event_action=resolve` с тем же `dedup_key`.
-- **Refs:** CODE-REVIEW-2026-10-21 C-2.
-- **Status:** open
-
-### [high][Publishing][~0.5d] PROVIDER-RESOLVE-ROOTLY
-- **Title:** resolve в Rootly молча пропадает без локального состояния
-- **Problem:** `resolveIncident` (`internal/infrastructure/publishing/rootly_publisher_enhanced.go:196-202`) ищет ID инцидента в in-memory `IncidentIDCache(24h)`; при промахе возвращает `nil` — доставка считается успешной.
-- **Impact:** как у `PROVIDER-RESOLVE-STATELESS-PD`, но без ошибки и метрики: инцидент Rootly остаётся открытым, а AMP считает resolve доставленным.
-- **Fix:** детерминированный внешний ключ (lookup по label/title) или персистентное хранение ID в Redis рядом с nflog; при промахе — ошибка, а не `nil`. Делать после `PUBLISH-PER-TARGET-STATE` (ключ кеша).
-- **Refs:** CODE-REVIEW-2026-10-21 C-2.
-- **Status:** open
-
 ### [high][API][~0.5d] SILENCED-ALERTS-INGEST
 - **Title:** firing-алерт под активным silence отбрасывается до ingest
 - **Problem:** `handleAlertsPost` (`internal/application/handlers/alerts.go:431-436`) фильтрует `silences.HasActiveMatch` до `ProcessAlert`/`IngestBatch`. Контрактный тест `cmd/server/main_phase0_contract_test.go:1453` закрепляет это (0 алертов после POST заглушенного).
@@ -343,14 +335,6 @@
 - **Impact:** тот, кто может прислать алерт, внедряет HTML/ссылки в письмо дежурному; возможна header injection через `alertname`.
 - **Fix:** убрать fallback-путь, всегда рендерить через `business/templating` (`html/template`, `email.default.html`); минимум — `html/template` для HTML-части. `mime2047Subject(sanitizeHeaderValue(msg.Subject))`. Тесты: аннотация с `<script>`/`javascript:`, `alertname` с `\r\n`.
 - **Refs:** CODE-REVIEW-2026-10-21 H-3, L-1.
-- **Status:** open
-
-### [high][Publishing][~0.5d] PUBLISH-PER-TARGET-STATE
-- **Title:** кеши корреляции и SMTP-клиенты общие между таргетами
-- **Problem:** `rootlyCache`, `pagerDutyCache`, `slackCache` создаются на фабрику (`internal/infrastructure/publishing/publisher.go:383-388`) и ключуются только fingerprint (`slack_publisher_enhanced.go:56,131`, `rootly_publisher_enhanced.go:71,117`). SMTP-клиент кешируется по `host:port` (`publisher.go:856-869`), хотя в `SMTPDialer` зашиты user/password/TLS/From (`email_client.go:126-161`).
-- **Impact:** второй Slack-таргет отвечает в тред чужого канала; второй Rootly-аккаунт обновляет чужой инцидент; после reload с новым SMTP-паролем или `require_tls` работает старый клиент до рестарта; два таргета на одном SMTP-хосте шлют с кредами первого.
-- **Fix:** ключ кеша `target.Name|fingerprint`; ключ SMTP-клиента `host|port|user|sha256(pass)|tls`. Тест на два таргета одного типа и reload SMTP-пароля.
-- **Refs:** CODE-REVIEW-2026-10-21 H-4.
 - **Status:** open
 
 ### [high][Config][~0.5d] RELOAD-SERIALIZE
@@ -448,39 +432,12 @@
 - **Refs:** CODE-REVIEW-2026-10-21 M-5.
 - **Status:** open
 
-### [medium][Publishing][~0.5d] QUEUE-GRACEFUL-STOP
-- **Title:** остановка очереди публикации теряет задания и может паниковать
-- **Problem:** `PublishingQueue.Stop` (`internal/infrastructure/publishing/queue.go:570-600`) закрывает три канала; воркер (`:815-850`) выходит, получив `nil` из закрытого high-канала, бросая medium/low без сигнала completion. `submitJob` (`:764`) после `Stop` и повторный `Stop` — panic. Воркер без `recover` (`:802`); источник паники — непроверенные type assertions (`rootly_publisher_enhanced.go:89-91`).
-- **Impact:** graceful stop теряет задания; поздний `Submit` или паника паблишера роняет процесс.
-- **Fix:** atomic `closing` + отказ в `submitJob`, drain всех каналов, `close` под `sync.Once`; `recover` в `processJob` с переводом паники в ошибку задания. Тест: `Stop` с заданиями во всех приоритетах; `Submit` после `Stop`.
-- **Refs:** CODE-REVIEW-2026-10-21 M-7, L-19.
-- **Status:** open
-
 ### [medium][Publishing][~1.5d] PUBLISH-SINGLE-RETRY-LAYER
 - **Title:** вложенные ретраи в publishing блокируют воркер и открывают breaker здоровым таргетам
 - **Problem:** клиенты (`slack_client.go:217-311`, `telegram_client.go:319-418`, `pagerduty_client.go:379-472`, `rootly_client.go:303-364`, `webhook_client.go:142-267`) делают 3–4 попытки, очередь (`queue.go:1401`, `retryPublish`) — ещё `maxRetries+1`: до 16 HTTP на задание. `time.Sleep` без ctx (`slack:247`, `telegram:345`, `pagerduty:427,460`) — `Abandon` не прерывает backoff; `defer Body.Close()` внутри цикла (`slack:254`, `telegram:352`); `Retry-After` не ограничен (`slack:288`, `webhook:241-244`).
 - **Impact:** медленный или rate-limited таргет превышает `DeliveryConfirmationTimeout` (45s), abandon считается отказом для breaker'а ⇒ здоровый таргет может открыть breaker. `hypothesis`: группа из 45+ алертов в Slack не укладывается в 45s.
 - **Fix:** клиенты делают одну попытку и возвращают классифицированную ошибку (`retryable`, `Retry-After`); ретраит только очередь через `pkg/retry` с ctx-aware backoff; cap `Retry-After` 30s.
 - **Refs:** CODE-REVIEW-2026-10-21 M-8, D-8.
-- **Status:** open
-
-### [medium][Publishing][~0.25d] CIRCUIT-BREAKER-HALF-OPEN
-- **Title:** circuit breaker publishing не переходит в half-open — после timeout пропускает весь поток
-- **Problem:** `CanAttempt` (`internal/infrastructure/publishing/circuit_breaker.go:69-84`) по истечении timeout возвращает true всем вызывающим, но состояние в HalfOpen не переводит; `State()` показывает `open`.
-- **Impact:** вместо одной пробы на таргет идёт весь поток заданий; состояние в метриках неверно.
-- **Fix:** под write-lock переход Open→HalfOpen с одним пробным слотом (`probeInFlight`); тест на конкурентные `CanAttempt` после timeout.
-- **Refs:** CODE-REVIEW-2026-10-21 M-11.
-- **Status:** open
-
-### [medium][Security][~0.5d] PUBLISH-SECRETS-IN-LOGS
-- **Title:** токены из URL таргетов и тела ответов попадают в логи; ответы читаются без лимита
-- **Problem:**
-  - `"HTTP request failed: %w"` с `*url.Error` и полным URL (`internal/infrastructure/publishing/publisher.go:118-120,176-178`): токены Teams/Discord/Google Chat/Telegram-fallback уходят в лог `Failed to publish after retries`. Тело ответа целиком копируется в текст ошибки (`publisher.go:125-130`). Сырой `target.URL` на DEBUG (`business/publishing/discovery_impl.go:479-483`) и INFO (`publisher.go:801-803`).
-  - `io.ReadAll` без лимита: `publisher.go:125,182`, `slack_client.go:257`, `telegram_client.go:296,355`, `pagerduty_client.go:529`, `rootly_client.go:380`, `webhook_client.go:198`, `llm/client.go:282`.
-  - Ошибка `weak database password detected: '%s'` (`internal/config/config.go:1468`) печатает пароль (из словаря слабых).
-- **Impact:** секреты в логах и агрегаторе; гигантский ответ таргета раздувает память воркера.
-- **Fix:** маскировать URL (маскер из `webhook_auth.go:153` перенести в общий хелпер); тело в ошибках ≤512 байт; общий `readLimited(r, 64<<10)`; убрать значение из ошибки пароля. Тест по образцу `discovery_log_redaction_test.go`.
-- **Refs:** CODE-REVIEW-2026-10-21 M-9, M-10, L-2, D-9. Смежно `CONFIG-VALIDATION-ERROR-REDACTION`.
 - **Status:** open
 
 ### [medium][Publishing][~0.5d] PUBLISH-HEALTH-PROBES

@@ -479,7 +479,7 @@ func (m *DefaultTargetDiscoveryManager) parseAndValidateSecrets(secrets []corev1
 		m.logger.Debug("Parsed valid target",
 			"target_name", target.Name,
 			"type", target.Type,
-			"url", target.URL,
+			"url", core.RedactURL(target.URL),
 			"enabled", target.Enabled,
 		)
 	}

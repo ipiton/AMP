@@ -19,9 +19,6 @@ var (
 	// ErrInvalidDedupKey is returned when dedup_key is invalid or empty
 	ErrInvalidDedupKey = errors.New("pagerduty: invalid or empty dedup_key")
 
-	// ErrEventNotTracked is returned when attempting to acknowledge/resolve an event not in cache
-	ErrEventNotTracked = errors.New("pagerduty: event not tracked in cache (no dedup_key found)")
-
 	// ErrRateLimitExceeded is returned when PagerDuty rate limit is exceeded
 	ErrRateLimitExceeded = errors.New("pagerduty: rate limit exceeded (120 req/min)")
 

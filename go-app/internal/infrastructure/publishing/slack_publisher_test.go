@@ -142,7 +142,7 @@ func TestPublish_NewFiringAlert(t *testing.T) {
 	target := createSlackTestTarget()
 
 	// Mock cache miss (no existing message)
-	cache.On("Get", "fp123").Return(nil, false)
+	cache.On("Get", correlationKey(target, "fp123")).Return(nil, false)
 
 	// Mock formatter success
 	formattedPayload := map[string]any{
@@ -167,7 +167,7 @@ func TestPublish_NewFiringAlert(t *testing.T) {
 	client.On("PostMessage", ctx, mock.AnythingOfType("*publishing.SlackMessage")).Return(slackResp, nil)
 
 	// Mock cache store
-	cache.On("Store", "fp123", mock.MatchedBy(func(entry *MessageEntry) bool {
+	cache.On("Store", correlationKey(target, "fp123"), mock.MatchedBy(func(entry *MessageEntry) bool {
 		return entry.MessageTS == "1234567890.123456" && entry.ThreadTS == "1234567890.123456"
 	})).Return()
 
@@ -195,7 +195,7 @@ func TestPublish_ResolvedAlert_CacheHit(t *testing.T) {
 		ThreadTS:  "1234567890.123456",
 		CreatedAt: time.Now(),
 	}
-	cache.On("Get", "fp123").Return(cacheEntry, true)
+	cache.On("Get", correlationKey(target, "fp123")).Return(cacheEntry, true)
 
 	// Mock client thread reply success
 	slackResp := &SlackResponse{
@@ -223,7 +223,7 @@ func TestPublish_ResolvedAlert_CacheMiss(t *testing.T) {
 	target := createSlackTestTarget()
 
 	// Mock cache miss
-	cache.On("Get", "fp123").Return(nil, false)
+	cache.On("Get", correlationKey(target, "fp123")).Return(nil, false)
 
 	// Mock formatter success
 	formattedPayload := map[string]any{
@@ -239,7 +239,7 @@ func TestPublish_ResolvedAlert_CacheMiss(t *testing.T) {
 	client.On("PostMessage", ctx, mock.AnythingOfType("*publishing.SlackMessage")).Return(slackResp, nil)
 
 	// Mock cache store
-	cache.On("Store", "fp123", mock.AnythingOfType("*publishing.MessageEntry")).Return()
+	cache.On("Store", correlationKey(target, "fp123"), mock.AnythingOfType("*publishing.MessageEntry")).Return()
 
 	// Execute
 	err := publisher.Publish(ctx, alert, target)
@@ -265,7 +265,7 @@ func TestPublish_StillFiring_CacheHit(t *testing.T) {
 		ThreadTS:  "1234567890.123456",
 		CreatedAt: time.Now().Add(-10 * time.Minute), // Old firing alert
 	}
-	cache.On("Get", "fp123").Return(cacheEntry, true)
+	cache.On("Get", correlationKey(target, "fp123")).Return(cacheEntry, true)
 
 	// Mock client thread reply success
 	slackResp := &SlackResponse{
@@ -292,7 +292,7 @@ func TestPublish_FormatterError(t *testing.T) {
 	target := createSlackTestTarget()
 
 	// Mock cache miss
-	cache.On("Get", "fp123").Return(nil, false)
+	cache.On("Get", correlationKey(target, "fp123")).Return(nil, false)
 
 	// Mock formatter error
 	formatter.On("FormatAlert", ctx, alert, core.FormatSlack).Return(nil, errors.New("formatter error"))
@@ -316,7 +316,7 @@ func TestPublish_ClientError(t *testing.T) {
 	target := createSlackTestTarget()
 
 	// Mock cache miss
-	cache.On("Get", "fp123").Return(nil, false)
+	cache.On("Get", correlationKey(target, "fp123")).Return(nil, false)
 
 	// Mock formatter success
 	formattedPayload := map[string]any{"text": "Test"}
@@ -350,7 +350,7 @@ func TestPublish_ThreadReplyError(t *testing.T) {
 		ThreadTS:  "1234567890.123456",
 		CreatedAt: time.Now(),
 	}
-	cache.On("Get", "fp123").Return(cacheEntry, true)
+	cache.On("Get", correlationKey(target, "fp123")).Return(cacheEntry, true)
 
 	// Mock client error
 	client.On("ReplyInThread", ctx, "1234567890.123456", mock.AnythingOfType("*publishing.SlackMessage")).Return(nil, errors.New("thread reply error"))
@@ -374,7 +374,7 @@ func TestPublish_UnknownStatus(t *testing.T) {
 	target := createSlackTestTarget()
 
 	// Mock cache miss (Publish will check cache regardless of status)
-	cache.On("Get", "fp123").Return(nil, false)
+	cache.On("Get", correlationKey(target, "fp123")).Return(nil, false)
 
 	// Execute
 	err := publisher.Publish(ctx, alert, target)

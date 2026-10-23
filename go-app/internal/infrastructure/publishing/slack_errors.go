@@ -121,7 +121,7 @@ func parseSlackError(resp *http.Response, body []byte) *httperror.HTTPAPIError {
 		apiErr.Message = slackResp.Error
 	} else {
 		// Fallback: use raw body as error message
-		apiErr.Message = string(body)
+		apiErr.Message = errorBody(body)
 	}
 
 	// Extract Retry-After header (for 429 responses)

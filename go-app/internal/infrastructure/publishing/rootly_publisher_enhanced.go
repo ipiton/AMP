@@ -49,11 +49,12 @@ func (p *EnhancedRootlyPublisher) Publish(
 	}
 
 	// Route based on alert status
+	cacheKey := correlationKey(target, enrichedAlert.Alert.Fingerprint)
 	switch enrichedAlert.Alert.Status {
 	case core.StatusFiring:
-		return p.createOrUpdateIncident(ctx, enrichedAlert, payload)
+		return p.createOrUpdateIncident(ctx, enrichedAlert, payload, cacheKey)
 	case core.StatusResolved:
-		return p.resolveIncident(ctx, enrichedAlert)
+		return p.resolveIncident(ctx, enrichedAlert, cacheKey)
 	default:
 		return fmt.Errorf("unknown alert status: %s", enrichedAlert.Alert.Status)
 	}
@@ -64,19 +65,23 @@ func (p *EnhancedRootlyPublisher) createOrUpdateIncident(
 	ctx context.Context,
 	enrichedAlert *core.EnrichedAlert,
 	payload map[string]interface{},
+	cacheKey string,
 ) error {
-	fingerprint := enrichedAlert.Alert.Fingerprint
-
-	// Check if incident exists in cache
-	incidentID, exists := p.cache.Get(fingerprint)
+	// Check if incident exists in cache. A store error fails the delivery
+	// rather than counting as "no incident": creating one here would overwrite
+	// the stored ID and leave the open incident unresolvable.
+	incidentID, exists, err := p.cache.Get(cacheKey)
+	if err != nil {
+		return err
+	}
 
 	if exists {
 		// Update existing incident
-		return p.updateIncident(ctx, incidentID, enrichedAlert, payload)
+		return p.updateIncident(ctx, incidentID, enrichedAlert, payload, cacheKey)
 	}
 
 	// Create new incident
-	return p.createIncident(ctx, enrichedAlert, payload)
+	return p.createIncident(ctx, enrichedAlert, payload, cacheKey)
 }
 
 // createIncident creates a new Rootly incident
@@ -84,6 +89,7 @@ func (p *EnhancedRootlyPublisher) createIncident(
 	ctx context.Context,
 	enrichedAlert *core.EnrichedAlert,
 	payload map[string]interface{},
+	cacheKey string,
 ) error {
 	// Build CreateIncidentRequest from payload
 	req := &CreateIncidentRequest{
@@ -114,7 +120,7 @@ func (p *EnhancedRootlyPublisher) createIncident(
 
 	// Store incident ID in cache
 	incidentID := resp.GetID()
-	p.cache.Set(enrichedAlert.Alert.Fingerprint, incidentID)
+	p.cache.Set(cacheKey, incidentID)
 
 	// Update metrics
 	if p.GetMetrics() != nil {
@@ -138,6 +144,7 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 	incidentID string,
 	enrichedAlert *core.EnrichedAlert,
 	payload map[string]interface{},
+	cacheKey string,
 ) error {
 	// Build UpdateIncidentRequest (only fields that changed)
 	req := &UpdateIncidentRequest{}
@@ -163,8 +170,8 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 			)
 
 			// Delete from cache and recreate
-			p.cache.Delete(enrichedAlert.Alert.Fingerprint)
-			return p.createIncident(ctx, enrichedAlert, payload)
+			p.cache.Delete(cacheKey)
+			return p.createIncident(ctx, enrichedAlert, payload, cacheKey)
 		}
 
 		if p.metrics != nil {
@@ -172,6 +179,11 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 		}
 		return fmt.Errorf("update incident failed: %w", err)
 	}
+
+	// Re-store the ID: a persistent IncidentIDCache (see
+	// newCacheIncidentIDCache) expires entries, and every firing update must
+	// push that expiry out so a long-running incident is still resolvable.
+	p.cache.Set(cacheKey, incidentID)
 
 	// Update metrics
 	if p.GetMetrics() != nil {
@@ -191,14 +203,29 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 func (p *EnhancedRootlyPublisher) resolveIncident(
 	ctx context.Context,
 	enrichedAlert *core.EnrichedAlert,
+	cacheKey string,
 ) error {
 	// Lookup incident ID from cache
-	incidentID, exists := p.cache.Get(enrichedAlert.Alert.Fingerprint)
+	incidentID, exists, err := p.cache.Get(cacheKey)
+	if err != nil {
+		// The store did not answer; the ID may well be there. Fail so the
+		// resolve is retried on the next flush.
+		return err
+	}
 	if !exists {
-		// Not tracked, skip resolution (not an error)
-		p.GetLogger().Debug("Incident ID not found in cache, skipping resolution",
+		// Rootly assigns the incident ID, so without it there is nothing to
+		// resolve, and retrying will not change that. Returning an error would
+		// keep the resolved alert in its group, resend it on every flush and
+		// count each attempt against the target's breaker. Surface the miss
+		// (WARN + not_tracked metric) and treat the target as done
+		// (PROVIDER-RESOLVE-ROOTLY).
+		p.GetLogger().Warn("Cannot resolve Rootly incident: incident ID not tracked",
 			"fingerprint", enrichedAlert.Alert.Fingerprint,
+			"alert_name", enrichedAlert.Alert.AlertName,
 		)
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderRootly, "incidents", "not_tracked")
+		}
 		return nil
 	}
 
@@ -216,7 +243,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 	}
 
 	// Call Rootly API
-	_, err := p.client.ResolveIncident(ctx, incidentID, req)
+	_, err = p.client.ResolveIncident(ctx, incidentID, req)
 	if err != nil {
 		// If 404 Not Found or 409 Conflict, handle gracefully
 		httpErr := AsPublishingError(err)
@@ -227,7 +254,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 			)
 
 			// Delete from cache
-			p.cache.Delete(enrichedAlert.Alert.Fingerprint)
+			p.cache.Delete(cacheKey)
 			return nil // Not an error
 		}
 
@@ -238,7 +265,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 	}
 
 	// Delete from cache
-	p.cache.Delete(enrichedAlert.Alert.Fingerprint)
+	p.cache.Delete(cacheKey)
 
 	// Update metrics
 	if p.GetMetrics() != nil {

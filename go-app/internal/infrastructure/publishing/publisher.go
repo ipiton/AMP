@@ -3,9 +3,10 @@ package publishing
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/infrastructure/cache"
 	v2 "github.com/ipiton/AMP/pkg/metrics/v2"
 )
 
@@ -105,7 +107,7 @@ func (p *HTTPPublisher) publish(ctx context.Context, enrichedAlert *core.Enriche
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", target.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 
 	// Set headers
@@ -117,16 +119,16 @@ func (p *HTTPPublisher) publish(ctx context.Context, enrichedAlert *core.Enriche
 	// Execute request
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+		return fmt.Errorf("HTTP request failed: %w", redactURLError(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body for error details
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimited(resp.Body)
 
 	// Check status code
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, errorBody(body))
 	}
 
 	p.logger.Debug("Alert published successfully",
@@ -165,7 +167,7 @@ func (p *HTTPPublisher) publishBatch(ctx context.Context, alerts []*core.Alert, 
 
 	req, err := http.NewRequestWithContext(ctx, "POST", target.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -175,14 +177,14 @@ func (p *HTTPPublisher) publishBatch(ctx context.Context, alerts []*core.Alert, 
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("HTTP request failed: %w", err)
+		return fmt.Errorf("HTTP request failed: %w", redactURLError(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimited(resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, errorBody(body))
 	}
 
 	p.logger.Debug("Alert group published successfully",
@@ -339,15 +341,14 @@ type PublisherFactory struct {
 	// folded in here, to keep this change to the minimum needed.
 	clientMu sync.RWMutex
 
-	rootlyCache        IncidentIDCache                  // Shared Rootly incident cache
+	rootlyCache        IncidentIDCache                  // Shared Rootly incident cache (clientMu; see SetRootlyIncidentStore)
 	rootlyClientMap    map[string]RootlyIncidentsClient // Cache of Rootly clients by API key (clientMu)
-	pagerDutyCache     EventKeyCache                    // Shared PagerDuty event key cache
 	pagerDutyClientMap map[string]PagerDutyEventsClient // Cache of PagerDuty clients by routing key (clientMu)
 	slackCache         MessageIDCache                   // Shared Slack message cache (for threading)
 	slackClientMap     map[string]SlackWebhookClient    // Cache of Slack clients by webhook URL (clientMu)
 	slackCleanupWorker func()                           // Slack cache cleanup worker cancel function
 	emailClientMu      sync.RWMutex                     // Guards emailClientMap for concurrent access
-	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtp_host:port
+	emailClientMap     map[string]SMTPClient            // Cache of SMTP clients by smtpClientKey
 	telegramClientMap  map[string]TelegramClient        // Cache of Telegram clients by "api_url|bot_token" (clientMu)
 
 	// httpClientMap caches the per-target *http.Client built from a target's
@@ -382,7 +383,6 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics 
 		externalURL:        externalURL,
 		rootlyCache:        NewIncidentIDCache(24 * time.Hour), // 24h TTL for Rootly incident tracking
 		rootlyClientMap:    make(map[string]RootlyIncidentsClient),
-		pagerDutyCache:     NewEventKeyCache(24 * time.Hour), // 24h TTL for PagerDuty event tracking
 		pagerDutyClientMap: make(map[string]PagerDutyEventsClient),
 		slackCache:         slackCache, // Slack message cache for threading
 		slackClientMap:     make(map[string]SlackWebhookClient),
@@ -392,6 +392,22 @@ func NewPublisherFactory(formatter AlertFormatter, logger *slog.Logger, metrics 
 		httpClientMap:      make(map[string]*http.Client),
 		metrics:            metrics, // Unified v2 metrics
 	}
+}
+
+// SetRootlyIncidentStore moves Rootly incident IDs into store — the
+// process-wide cache, Redis when configured — so resolve survives a restart
+// and works on every replica (PROVIDER-RESOLVE-ROOTLY). Without this call the
+// factory keeps its in-memory cache. Call once, before the queue starts.
+func (f *PublisherFactory) SetRootlyIncidentStore(store cache.Cache) {
+	if store == nil {
+		return
+	}
+	f.clientMu.Lock()
+	defer f.clientMu.Unlock()
+	if f.rootlyCache != nil {
+		f.rootlyCache.Stop()
+	}
+	f.rootlyCache = newCacheIncidentIDCache(store, f.logger)
 }
 
 // CreatePublisher creates a publisher for the given target type
@@ -576,10 +592,14 @@ func (f *PublisherFactory) createEnhancedRootlyPublisher(target *core.Publishing
 		f.clientMu.Unlock()
 	}
 
+	f.clientMu.RLock()
+	incidentCache := f.rootlyCache
+	f.clientMu.RUnlock()
+
 	// Create EnhancedRootlyPublisher with shared cache and unified metrics
 	return NewEnhancedRootlyPublisher(
 		client,
-		f.rootlyCache,
+		incidentCache,
 		f.metrics,
 		f.formatterFor(target),
 		f.logger,
@@ -665,10 +685,9 @@ func (f *PublisherFactory) createEnhancedPagerDutyPublisher(target *core.Publish
 		f.clientMu.Unlock()
 	}
 
-	// Create EnhancedPagerDutyPublisher with shared cache and unified metrics
+	// Create EnhancedPagerDutyPublisher with unified metrics
 	return NewEnhancedPagerDutyPublisher(
 		client,
-		f.pagerDutyCache,
 		f.metrics,
 		f.formatterFor(target),
 		f.logger,
@@ -800,7 +819,7 @@ func (f *PublisherFactory) createEnhancedTelegramPublisher(target *core.Publishi
 func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.PublishingTarget) (AlertPublisher, error) {
 	f.logger.Info("Creating enhanced webhook publisher",
 		"target", target.Name,
-		"url", target.URL)
+		"url", core.RedactURL(target.URL))
 
 	// Per-target http_config (FU-HTTP-CONFIG): proxy / TLS / basic-auth / bearer
 	// layered on top of the webhook client's own tuning. nil for every target
@@ -842,7 +861,7 @@ func (f *PublisherFactory) createEnhancedWebhookPublisher(target *core.Publishin
 }
 
 // createEnhancedEmailPublisher создаёт EnhancedEmailPublisher с конфигурацией из target.Headers.
-// SMTP-клиент кешируется по ключу "host:port" для переиспользования.
+// SMTP-клиент кешируется по всей конфигурации SMTP (см. smtpClientKey).
 func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingTarget) (AlertPublisher, error) {
 	// Извлечь SMTP конфиг из target.Headers
 	smtpCfg := extractSMTPConfig(target)
@@ -852,8 +871,7 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 			slog.String("target", target.Name))
 	}
 
-	// Ключ кеша — smtp_host:port (одинаковый SMTP сервер переиспользуется)
-	cacheKey := strings.Join([]string{smtpCfg.Host, strconv.Itoa(smtpCfg.Port)}, ":")
+	cacheKey := smtpClientKey(smtpCfg)
 
 	f.emailClientMu.RLock()
 	client, ok := f.emailClientMap[cacheKey]
@@ -878,8 +896,8 @@ func (f *PublisherFactory) createEnhancedEmailPublisher(target *core.PublishingT
 }
 
 // Shutdown stops all background workers owned by this factory: the Slack
-// message cache cleanup worker plus the Rootly and PagerDuty cache cleanup
-// goroutines started in NewPublisherFactory. Without this, each of those
+// message cache cleanup worker plus the Rootly cache cleanup goroutine
+// started in NewPublisherFactory. Without this, each of those
 // goroutines runs forever (see their respective cleanupWorker/cleanup loops),
 // which leaks one goroutine per factory instance for the life of the
 // process and drowns full-package -race runs in stacks from unrelated tests
@@ -896,10 +914,33 @@ func (f *PublisherFactory) Shutdown() {
 		f.rootlyCache.Stop()
 		f.logger.Info("Stopped Rootly cache cleanup worker")
 	}
+}
 
-	// Stop PagerDuty event key cache cleanup worker
-	if f.pagerDutyCache != nil {
-		f.pagerDutyCache.Stop()
-		f.logger.Info("Stopped PagerDuty cache cleanup worker")
-	}
+// correlationKey is the key under which a publisher keeps per-alert state for
+// one target: the Slack thread, the Rootly incident ID (PUBLISH-PER-TARGET-STATE).
+//
+// The caches are shared by the whole factory, so keying on the fingerprint
+// alone let a second target of the same type read the first one's entry — a
+// second Slack target replied into another channel's thread, a second Rootly
+// account updated another account's incident.
+func correlationKey(target *core.PublishingTarget, fingerprint string) string {
+	return target.Name + "|" + fingerprint
+}
+
+// smtpClientKey — ключ кеша SMTP-клиентов (PUBLISH-PER-TARGET-STATE).
+//
+// SMTPDialer запекает весь SMTPConfig: креды, TLS и From. При ключе
+// "host:port" второй таргет на том же хосте слал с кредами первого, а после
+// reload с новым паролем или smtp_tls работал старый клиент до рестарта.
+// Пароль входит в ключ только хешем: ключ не должен хранить секрет.
+func smtpClientKey(cfg SMTPConfig) string {
+	passwordHash := sha256.Sum256([]byte(cfg.Password))
+	return strings.Join([]string{
+		cfg.Host,
+		strconv.Itoa(cfg.Port),
+		cfg.Username,
+		hex.EncodeToString(passwordHash[:]),
+		strconv.FormatBool(cfg.RequireTLS),
+		cfg.From,
+	}, "|")
 }

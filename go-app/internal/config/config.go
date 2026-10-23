@@ -1477,7 +1477,9 @@ func (c *Config) validateDatabaseCredentials() error {
 		weakPasswords := []string{"password", "admin", "root", "dev", "test", "123456", "postgres"}
 		for _, weak := range weakPasswords {
 			if c.Database.Password == weak {
-				return fmt.Errorf("weak database password detected: '%s' is not allowed in production", weak)
+				// The value is not echoed: the error is logged, and the password
+				// is the operator's real one (PUBLISH-SECRETS-IN-LOGS, L-2).
+				return fmt.Errorf("weak database password detected: a common default password is not allowed in production")
 			}
 		}
 

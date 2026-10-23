@@ -263,7 +263,7 @@ func (c *HTTPTelegramClient) SendMessage(ctx context.Context, message *TelegramM
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("sendMessage"), bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -281,7 +281,7 @@ func (c *HTTPTelegramClient) SendMessage(ctx context.Context, message *TelegramM
 func (c *HTTPTelegramClient) Health(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("getMe"), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 
 	httpResp, err := c.httpClient.Do(req)
@@ -293,7 +293,7 @@ func (c *HTTPTelegramClient) Health(ctx context.Context) error {
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
-	respBody, err := io.ReadAll(httpResp.Body)
+	respBody, err := readLimited(httpResp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read health check response: %w", err)
 	}
@@ -352,7 +352,7 @@ func (c *HTTPTelegramClient) doRequestWithRetry(ctx context.Context, req *http.R
 		defer func() { _ = httpResp.Body.Close() }()
 
 		// Read response body
-		respBody, err := io.ReadAll(httpResp.Body)
+		respBody, err := readLimited(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}

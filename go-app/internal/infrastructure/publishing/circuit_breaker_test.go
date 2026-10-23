@@ -89,10 +89,12 @@ func TestCircuitBreaker_RecoverAfterHalfOpen(t *testing.T) {
 	// Wait for timeout
 	time.Sleep(60 * time.Millisecond)
 
-	// Record successes in half-open
-	cb.RecordSuccess() // Transition to half-open
-	cb.RecordSuccess() // Still half-open
-	cb.RecordSuccess() // Should close now (threshold = 2)
+	// Each half-open probe is admitted by CanAttempt and reported back.
+	assert.True(t, cb.CanAttempt()) // Open -> HalfOpen, first probe
+	cb.RecordSuccess()
+	assert.Equal(t, StateHalfOpen, cb.State())
+	assert.True(t, cb.CanAttempt()) // second probe
+	cb.RecordSuccess()              // threshold = 2 -> Closed
 
 	assert.Equal(t, StateClosed, cb.State())
 	assert.Equal(t, 0, cb.GetFailureCount())
