@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/email-render-escaping",
+  "commit": "cbe4330",
+  "reviewed_at": "2026-10-23",
+  "findings": { "blocker": 0, "major": 1, "minor": 2, "nit": 1 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}
