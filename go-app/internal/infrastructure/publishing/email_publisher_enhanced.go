@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	htmltemplate "html/template"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -298,7 +299,7 @@ func renderEmailContent(data *emailTemplateData, subjectTmpl, htmlTmpl, textTmpl
 		return "", "", "", fmt.Errorf("subject template: %w", err)
 	}
 
-	html, err = renderTemplate("html", htmlTmpl, data)
+	html, err = renderHTMLTemplate("html", htmlTmpl, data)
 	if err != nil {
 		return "", "", "", fmt.Errorf("html template: %w", err)
 	}
@@ -311,9 +312,29 @@ func renderEmailContent(data *emailTemplateData, subjectTmpl, htmlTmpl, textTmpl
 	return subject, html, text, nil
 }
 
+// renderHTMLTemplate рендерит HTML-часть письма через html/template:
+// значения алерта (аннотации, лейблы, runbook_url) приходят из
+// /api/v2/alerts, и text/template вставлял их в письмо как разметку и ссылки
+// (EMAIL-RENDER-ESCAPING). Subject и text — не HTML, они остаются на
+// renderTemplate.
+func renderHTMLTemplate(name, tmplStr string, data *emailTemplateData) (string, error) {
+	t, err := htmltemplate.New(name).Option("missingkey=zero").Funcs(emailTemplateFuncs).Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("parse template %q: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute template %q: %w", name, err)
+	}
+	return buf.String(), nil
+}
+
 // renderTemplate рендерит один шаблон с заданными данными.
 func renderTemplate(name, tmplStr string, data *emailTemplateData) (string, error) {
-	t, err := template.New(name).Funcs(emailTemplateFuncs).Parse(tmplStr)
+	// missingkey=zero: an alert without `instance`/`severity`/`description`
+	// must render `default "N/A"` instead of failing — a fallback render
+	// error aborts the whole email, overlay included.
+	t, err := template.New(name).Option("missingkey=zero").Funcs(emailTemplateFuncs).Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", name, err)
 	}

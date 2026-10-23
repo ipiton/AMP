@@ -279,7 +279,9 @@ func buildMIMEMessage(msg *EmailMessage, resolvedFrom string, to []string) ([]by
 	buf.WriteString("From: " + resolvedFrom + "\r\n")
 	// to уже отфильтрован вызывающим кодом (SendEmail) — повторная фильтрация не нужна
 	buf.WriteString("To: " + strings.Join(to, ", ") + "\r\n")
-	buf.WriteString("Subject: " + mime2047Subject(msg.Subject) + "\r\n")
+	// Тема рендерится из данных алерта: CR/LF в alertname иначе разрывают
+	// заголовок и добавляют свои (EMAIL-RENDER-ESCAPING).
+	buf.WriteString("Subject: " + mime2047Subject(sanitizeHeaderValue(msg.Subject)) + "\r\n")
 	buf.WriteString("MIME-Version: 1.0\r\n")
 	// Content-Type с boundary пишется здесь вместе с остальными заголовками.
 	// Зарезервированные заголовки из msg.Headers (Content-Type, MIME-Version) пропускаются ниже.

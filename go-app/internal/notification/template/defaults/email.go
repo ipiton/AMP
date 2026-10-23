@@ -282,7 +282,7 @@ const DefaultEmailText = `{{ if eq .Status "resolved" }}[RESOLVED]{{ else }}[ALE
 ALERTS ({{ len .Alerts }} total)
 ================================================================================
 Alert: {{ .Labels.alertname }}
-Severity: {{ .Labels.severity | upper }}
+Severity: {{ .Labels.severity | default "unknown" | upper }}
 Instance: {{ .Labels.instance | default "N/A" }}
 Description: {{ .Annotations.description | default "No description" }}
 {{ if .Annotations.summary }}Summary: {{ .Annotations.summary }}{{ end }}
