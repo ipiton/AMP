@@ -1,8 +1,8 @@
 {
-  "gate": "fix_required",
-  "reason": "F6 (major, fix-here): Rule 7 isDuplicate called in the silence branch deletes the silenceSkipped mark and blocks the first re-send after the silence ends, so F1 is still reproducible in direct mode for alerts without endsAt",
+  "gate": "pass",
+  "reason": null,
   "branch": "bugfix/silenced-alerts-ingest",
-  "commit": "bc9a0be",
+  "commit": "d179b42",
   "reviewed_at": "2026-10-23",
   "findings": { "blocker": 0, "major": 2, "minor": 2, "nit": 2 },
   "open": { "blocker": 0, "major_without_disposition": 0 }

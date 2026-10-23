@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (сигналы `C X R`, Full tier: `C` + 3 сигнала)
 **Reviewer perspective:** independent agent (не автор кода); линзы correctness (путь публикации заглушенного/незаглушенного/resolved алерта в прямом режиме и в группировке, dedup, кеш inhibition), premises, contract (`C`: `GET /api/v2/alerts`, `/api/v2/alerts/groups`, v1), cross-boundary (`X`: хендлер → `AlertProcessor` → `GroupManager`/notify chain, сборка в `service_registry`), `R` (горячий путь `HasActiveMatch`, логи/метрики), maintainability
 **Reviewed at:** 2026-10-23
-**Reviewed tree:** раунд 1 — bugfix/silenced-alerts-ingest @ 336aeb5 (diff `622e33d..336aeb5`); раунд 2 — @ bc9a0be (diff `b19ea92..bc9a0be`)
-**Verdict:** раунд 1 — fix_required; раунд 2 — fix_required (see `review-verdict.json`)
+**Reviewed tree:** раунд 1 — bugfix/silenced-alerts-ingest @ 336aeb5 (diff `622e33d..336aeb5`); раунд 2 — @ bc9a0be (diff `b19ea92..bc9a0be`); раунд 3 — @ d179b42 (diff `dcbaac2..d179b42`)
+**Verdict:** раунд 1 — fix_required; раунд 2 — fix_required; раунд 3 — pass (see `review-verdict.json`)
 
 ## Проверено (без находок)
 
@@ -37,8 +37,8 @@
 - **Location:** `go-app/internal/core/services/alert_processor.go:661-671`; ср. `processTransparent` (`:766-775`) и `processEnriched` (`:812-830`)
 - **Issue:** обычный путь применяет `filterEngine.ShouldBlock` до `routeAlertToGroup`: заблокированный алерт в группу не попадает (`empty_alert_name`; в enriched-режиме — `noise`/`low_confidence` по классификации LLM). Заглушенный идёт в группу без фильтров и без классификации. После снятия silence последующие resend-ы такого алерта фильтр отрежет, но алерт уже лежит в группе — notify chain уведомит о нём. Раньше (фильтр в хендлере) такой алерт в группу не попадал вообще. Для `noise`-классификации это AMP-специфичная функция без upstream-аналога, так что расхождение небольшое, но не задокументированное.
 - **Recommendation:** в ветке silence перед `routeAlertToGroup` вызывать `filterEngine.ShouldBlock(alert, nil)` (правила без классификации; Rule 7 на групповом пути безвреден) — или явно задокументировать в Spec (Edge Cases) и в `docs/ALERTMANAGER_COMPATIBILITY.md` (Known Gap про классификацию в группах), что LLM-фильтр к заглушенному алерту не применяется. Тест Phase 2: заглушенный алерт с пустым `alertname` не попадает в группу (если выбран фикс).
-- **Disposition:** fix-here (не блокирует; допустим `defer-tech-debt` с записью)
-- **Follow-up:** n/a
+- **Disposition:** defer-tech-debt (раунд 1 — fix-here; фикс раунда 2 породил F6 и снят в раунде 3)
+- **Follow-up:** `SILENCED-GROUP-UNFILTERED` в `docs/06-planning/TECH-DEBT.md` на `finalize`
 
 ### F3 — Breaking-запись CHANGELOG описывает не все видимые изменения
 - **Severity:** minor
@@ -104,6 +104,46 @@
 ### Итог раунда 2
 
 F3 и F4 закрыты, F5 отложен. F1 остаётся открытым из-за F6 (major, fix-here): механизм `silenceSkipped` корректен, но Rule 7, вызванный в ветке silence, стирает пометку и съедает первый resend после снятия silence. Gate — `fix_required`.
+
+## Раунд 3 (2026-10-23, @ d179b42)
+
+Дифф `dcbaac2..d179b42`: из ветки silence убран вызов `filterEngine.ShouldBlock` (и связанный с ним `silenceSkipped.Delete`); комментарий и Spec (Design 2/2a) объясняют причину и ссылаются на TECH-DEBT `SILENCED-GROUP-UNFILTERED`. Прочий код ветки и механизм `silenceSkipped` не менялись.
+
+### Временный тест (удалён, дерево чистое)
+
+`ProcessAlert` с настоящим `DeduplicationService` (`newMockAlertStorage`), переключаемым `SilenceChecker`, алерт без `endsAt`; под `-race`:
+
+| Сценарий | Фильтр | Публикаций |
+|---|---|---|
+| A: 2 resend-а под silence → снятие → 3 resend-а | `fakeFilterEngine` (без состояния) | 1 |
+| B: resend под silence → снятие → 3 resend-а сразу (в окне Rule 7) | `SimpleFilterEngine`, окно 1 мин | 1 |
+| C: 2 resend-а под silence в окне → пауза > окна → снятие → 2 resend-а | `SimpleFilterEngine`, окно 50 мс | 1 |
+| D: resend под silence → пауза → снятие → resend → пауза → resend | `SimpleFilterEngine`, окно 50 мс | 1 |
+| E: firing под silence → resolved под silence → снятие → resolved resend | `SimpleFilterEngine`, 1 мин | 1 (resolved; как до задачи, см. «Проверено») |
+| F: группировка, `AddAlertToGroup` падает на 2 resend-ах под silence → снятие, группировка исправна → 2 resend-а | `SimpleFilterEngine`, 1 мин | 0 публикаций, 3 вызова `AddAlertToGroup` (повтор под пометкой ушёл в группу, следующий — `ignored`) |
+| G: группировка исправна: 2 resend-а под silence → снятие → resend | `SimpleFilterEngine`, 1 мин | 0 публикаций, 1 вызов `AddAlertToGroup` |
+
+Сценарии B и C, падавшие в раунде 2 (0 публикаций), теперь дают ровно одну; повторных публикаций нет ни в одном сценарии.
+
+### Побочные эффекты
+
+- Rule 7 больше не видит resend-ы под silence ни в каком виде — как в раунде 1, где фильтра в ветке не было. Первый resend после снятия silence проходит Rule 7 как новый; дубль от HA-пары по-прежнему отсекается Rule 7 на обычном пути.
+- Без фильтра в ветке silence единственный оставшийся эффект — F2 (группа держит заглушенный алерт без label-фильтра): в группу может попасть алерт с пустым `alertname` и уведомить после снятия silence. Узкий случай, отложен как `SILENCED-GROUP-UNFILTERED`.
+- Прочие наблюдения раунда 2 (повторная inhibition-проверка и метрика на каждый помеченный resend; удаление пометки до mode-хендлера при ошибке публикации; ограничения «на реплику» и «запись без resolve») не изменились — не регрессии, задокументированы.
+
+Сборка и тесты: `go build ./...`, `go vet ./internal/core/services/`, `go test -race ./internal/core/services/ ./internal/application/...` — 606 passed; `go test -tags futureparity ./cmd/server/` — 202 passed.
+
+### Статус находок
+
+- **F1 — resolved** (механизм `silenceSkipped`, проверен сценариями A–G).
+- **F2 — defer-tech-debt** (`SILENCED-GROUP-UNFILTERED`, запись в `TECH-DEBT.md` на `finalize`).
+- **F3, F4 — resolved** (раунд 2).
+- **F5 — defer-backlog** (запись в `BACKLOG.md` на `finalize`).
+- **F6 — resolved**: `ShouldBlock` из ветки silence удалён, пометка `silenceSkipped` фильтром больше не стирается.
+
+### Итог раунда 3
+
+Открытых blocker нет, оба major (F1, F6) закрыты, отложенные находки имеют disposition и follow-up. Gate — `pass`. Тесты Phase 2 должны включать сценарии B и C с настоящим `SimpleFilterEngine` (см. «Что должны покрыть тесты Phase 2»).
 
 ## Anti-Pattern Check
 
