@@ -16,6 +16,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **PUBLISH-QUICK-FIX-BUNDLE** — resolve в PagerDuty/Rootly без локального состояния, общие между таргетами кеши и SMTP-клиенты, half-open breaker, graceful stop очереди, секреты в логах. TECH-DEBT § Bundles, critical, ~2d. Ветка `bugfix/publish-quick-fix-bundle`, workspace `tasks/PUBLISH-QUICK-FIX-BUNDLE/`. Взята 2026-10-23.
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -35,9 +37,9 @@ Queue и WIP — источник правды для выбора задачи.
 ### 2. Code review 2026-10-21 — конвейер
 > Голова `REVIEW-PIPELINE-2026-10-21.md`; следующие позиции переносятся оттуда по мере освобождения WIP. Пополнено 2026-10-21.
 
-- [ ] **PUBLISH-QUICK-FIX-BUNDLE** — resolve в PagerDuty/Rootly без локального состояния, общие между таргетами кеши и SMTP-клиенты, half-open breaker, graceful stop очереди, секреты в логах. TECH-DEBT § Bundles (участники — BUGS), critical, Full, ~2d.
 - [ ] **EMAIL-RENDER-ESCAPING** — email fallback рендерит HTML через `text/template`, Subject без санитизации CR/LF. BUGS, high, Full, ~0.25d.
 - [ ] **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence отбрасывается до ingest: не виден как `suppressed`, не становится источником inhibition. BUGS, high, Full, ~0.5d, breaking для API.
+- [ ] **ROUTE-CONTINUE-NO-FANOUT** — `continue: true` не даёт доставку во второй receiver: путь публикации берёт только первый совпавший route. BUGS, high, Full, ~1d.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
