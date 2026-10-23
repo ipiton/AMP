@@ -62,10 +62,11 @@ based_on:
 
 ## Phase 4: Testing
 
-- [ ] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` <!-- verify: evidence/release-gate.txt -->
+- [x] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
 - 2026-10-23, implement: `IncidentIDCache.Size()` убран из интерфейса — у реализации поверх общего кеша нет дешёвого подсчёта, в проде `Size()` не вызывался (только тесты, Phase 3). `pagerduty_cache.go` удалён; `pagerduty_cache_test.go` и тесты с `cache.Size()` не компилируются до Phase 3 — ожидаемо.
 - 2026-10-23, deep-review fix (F1, F3, F5, F7): `IncidentIDCache.Get` → `(id, found, err)`; `ErrIncidentNotTracked` удалён; `parseError` PD/Rootly цитируют тело через `errorBody`; ошибка `NewRequestWithContext` в `HTTPPublisher` маскируется. F2/F4/F6 — follow-ups на finalize.
 - 2026-10-23, deep-review round 2 fix (F8, F9): `WebhookHTTPClient` маскирует `*url.Error` (создание запроса и транспорт) и цитирует тело через `errorBody`; Slack/Telegram fallback-сообщение ошибки — через `errorBody`. F10 — в TECH-DEBT вместе с F4.
 - Отклонение от Spec не требовалось; хелперы тела/URL — `publishing/http_body.go` (`readLimited`, `errorBody`, `redactURLError`).
+- 2026-10-23, testing @ `71f86a3`: vet затронутых пакетов OK; `go test -race` publishing OK; `quality-gates-fast` passed; release-gate 11/12 PASS, `lint` FAIL предсуществующий (`LINT-ERRCHECK-CHANNEL-RECEIVE`: `delivery_confirmation_test.go`, `silencing/redis_event_bus_test.go` — задачей не трогались). `evidence/release-gate.txt`.
