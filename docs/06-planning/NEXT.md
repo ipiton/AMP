@@ -23,6 +23,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### Owner
 
+- [ ] **ADR-018-CORE-DECISION** — выбрать путь ядра Alertmanager: своё ядро (В1), пакеты upstream как библиотеки (В2) или upstream AM + AMP рядом (В3); сравнение, что переживает каждый вариант и цена перехода — `DECISIONS.md` ADR-018. От ответа зависит, продолжать ли паритетные позиции `REVIEW-PIPELINE-2026-10-21.md`. `~30min`
+  Trigger: owner ready.
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` был красный (GO-2026-6599…6617); `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16 — локально `govulncheck` на `go1.26.9` чистый, release-gate PASS. Осталось: push `main`, дождаться зелёного CI (включая `govulncheck`), затем включить защиту. `~5min`
