@@ -23,9 +23,9 @@ based_on:
 
 ## Phase 1: Implement
 
-- [ ] **1.1** HTML-часть через `html/template` <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.2** `sanitizeHeaderValue` для Subject <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.3** CHANGELOG [Unreleased] Security <!-- verify: git diff --check -->
+- [x] **1.1** HTML-часть через `html/template` <!-- verify: cd go-app && go build ./... -->
+- [x] **1.2** `sanitizeHeaderValue` для Subject <!-- verify: cd go-app && go build ./... -->
+- [x] **1.3** CHANGELOG [Unreleased] Security <!-- verify: git diff --check -->
 
 ## Phase 2: Тесты (после deep-review `pass`)
 
