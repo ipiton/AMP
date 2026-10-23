@@ -539,7 +539,7 @@ func (c *pagerDutyEventsClientImpl) parseError(resp *http.Response) *httperror.H
 
 	if err := json.Unmarshal(body, &errorResp); err != nil {
 		// Failed to parse JSON, return raw body
-		return httperror.NewHTTPError(resp.StatusCode, string(body), ProviderPagerDuty)
+		return httperror.NewHTTPError(resp.StatusCode, errorBody(body), ProviderPagerDuty)
 	}
 
 	return httperror.NewHTTPErrorWithDetails(resp.StatusCode, errorResp.Message, ProviderPagerDuty, errorResp.Errors)

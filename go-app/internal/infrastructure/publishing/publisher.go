@@ -107,7 +107,7 @@ func (p *HTTPPublisher) publish(ctx context.Context, enrichedAlert *core.Enriche
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, "POST", target.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 
 	// Set headers
@@ -167,7 +167,7 @@ func (p *HTTPPublisher) publishBatch(ctx context.Context, alerts []*core.Alert, 
 
 	req, err := http.NewRequestWithContext(ctx, "POST", target.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 
 	req.Header.Set("Content-Type", "application/json")

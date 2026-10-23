@@ -67,8 +67,13 @@ func (p *EnhancedRootlyPublisher) createOrUpdateIncident(
 	payload map[string]interface{},
 	cacheKey string,
 ) error {
-	// Check if incident exists in cache
-	incidentID, exists := p.cache.Get(cacheKey)
+	// Check if incident exists in cache. A store error fails the delivery
+	// rather than counting as "no incident": creating one here would overwrite
+	// the stored ID and leave the open incident unresolvable.
+	incidentID, exists, err := p.cache.Get(cacheKey)
+	if err != nil {
+		return err
+	}
 
 	if exists {
 		// Update existing incident
@@ -201,11 +206,18 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 	cacheKey string,
 ) error {
 	// Lookup incident ID from cache
-	incidentID, exists := p.cache.Get(cacheKey)
+	incidentID, exists, err := p.cache.Get(cacheKey)
+	if err != nil {
+		// The store did not answer; the ID may well be there. Fail so the
+		// resolve is retried on the next flush.
+		return err
+	}
 	if !exists {
 		// Rootly assigns the incident ID, so without it there is nothing to
-		// resolve. Reporting that as success (the pre-fix `return nil`) left the
-		// incident open while AMP counted the resolve as delivered
+		// resolve, and retrying will not change that. Returning an error would
+		// keep the resolved alert in its group, resend it on every flush and
+		// count each attempt against the target's breaker. Surface the miss
+		// (WARN + not_tracked metric) and treat the target as done
 		// (PROVIDER-RESOLVE-ROOTLY).
 		p.GetLogger().Warn("Cannot resolve Rootly incident: incident ID not tracked",
 			"fingerprint", enrichedAlert.Alert.Fingerprint,
@@ -214,7 +226,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 		if p.metrics != nil {
 			p.metrics.RecordAPIError(v2.ProviderRootly, "incidents", "not_tracked")
 		}
-		return ErrIncidentNotTracked
+		return nil
 	}
 
 	// Build ResolveIncidentRequest
@@ -231,7 +243,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 	}
 
 	// Call Rootly API
-	_, err := p.client.ResolveIncident(ctx, incidentID, req)
+	_, err = p.client.ResolveIncident(ctx, incidentID, req)
 	if err != nil {
 		// If 404 Not Found or 409 Conflict, handle gracefully
 		httpErr := AsPublishingError(err)

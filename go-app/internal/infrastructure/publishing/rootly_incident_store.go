@@ -2,16 +2,12 @@ package publishing
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/ipiton/AMP/internal/infrastructure/cache"
 )
-
-// ErrIncidentNotTracked is returned when a resolved alert reaches Rootly but
-// the ID of the incident it opened is unknown, so there is nothing to resolve.
-var ErrIncidentNotTracked = errors.New("rootly: incident ID not tracked, cannot resolve")
 
 const (
 	// rootlyIncidentKeyPrefix namespaces the incident IDs in the shared cache.
@@ -34,9 +30,10 @@ const (
 // and on any replica (PROVIDER-RESOLVE-ROOTLY). Rootly assigns the ID on
 // create, so unlike PagerDuty's dedup key it cannot be derived from the alert.
 //
-// Cache errors are logged and degrade to "not tracked": on firing that means a
-// new incident (a duplicate beats a lost alert), on resolve it surfaces as
-// ErrIncidentNotTracked.
+// A failed Get is returned as an error, not as a miss: a miss on firing opens a
+// new incident and overwrites the stored ID, orphaning the open one, and a
+// miss on resolve is terminal. An unreachable store must instead fail the
+// delivery so it is retried. Set/Delete errors are only logged.
 type cacheIncidentIDCache struct {
 	store  cache.Cache
 	logger *slog.Logger
@@ -54,17 +51,17 @@ func (c *cacheIncidentIDCache) Set(key, incidentID string) {
 	}
 }
 
-func (c *cacheIncidentIDCache) Get(key string) (string, bool) {
+func (c *cacheIncidentIDCache) Get(key string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), rootlyIncidentStoreTimeout)
 	defer cancel()
 	var incidentID string
 	if err := c.store.Get(ctx, rootlyIncidentKeyPrefix+key, &incidentID); err != nil {
-		if !cache.IsNotFound(err) {
-			c.logger.Warn("Failed to read Rootly incident ID", "error", err)
+		if cache.IsNotFound(err) {
+			return "", false, nil
 		}
-		return "", false
+		return "", false, fmt.Errorf("read rootly incident ID: %w", err)
 	}
-	return incidentID, incidentID != ""
+	return incidentID, incidentID != "", nil
 }
 
 func (c *cacheIncidentIDCache) Delete(key string) {

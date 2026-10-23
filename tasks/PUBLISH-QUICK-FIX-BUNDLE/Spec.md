@@ -57,7 +57,7 @@ based_on:
 
 1. **PD.** `resolveEvent` шлёт `DedupKey: alert.Fingerprint`, без чтения кеша. Поле `cache` и параметр `NewEnhancedPagerDutyPublisher` удаляются, `pagerduty_cache.go`, его тест и `ErrEventNotTracked` — тоже; фабрика не создаёт и не останавливает `pagerDutyCache`.
 2. **Изоляция по таргету.** Ключ кеша Slack и Rootly — `target.Name + "|" + fingerprint` (хелпер `correlationKey(target, fingerprint)` в одном месте). Ключ SMTP-клиента — `host|port|user|sha256(password)|tls|from`.
-3. **Rootly.** Новая реализация `IncidentIDCache` поверх `cache.Cache` (`rootly_incident_store.go`): ключ `publishing:rootly:incident:<correlationKey>`, значение — ID, TTL 7d, `Set` на create и после успешного update (продление). Ошибка хранилища на `Get` — WARN и «нет записи»; на `Set`/`Delete` — WARN. Фабрика получает хранилище через `SetRootlyIncidentStore(cache.Cache)` из `publishing_runtime.go`; без вызова остаётся in-memory кеш. `resolveIncident` при промахе возвращает `ErrIncidentNotTracked` и пишет `RecordAPIError(rootly, "incidents", "not_tracked")`.
+3. **Rootly.** Новая реализация `IncidentIDCache` поверх `cache.Cache` (`rootly_incident_store.go`): ключ `publishing:rootly:incident:<correlationKey>`, значение — ID, TTL 7d, `Set` на create и после успешного update (продление). Ошибка хранилища на `Get` возвращается ошибкой (`Get` → `(id, found, err)`), доставка падает и повторяется на следующем flush; на `Set`/`Delete` — WARN. Фабрика получает хранилище через `SetRootlyIncidentStore(cache.Cache)` из `publishing_runtime.go`; без вызова остаётся in-memory кеш. `resolveIncident` при промахе пишет WARN и `RecordAPIError(rootly, "incidents", "not_tracked")` и возвращает `nil`: исход терминальный, ошибка держала бы алерт в группе и считалась бы breaker'ом на каждом flush (deep-review F1).
 4. **Breaker.** `CanAttempt` под write-lock: `Closed` — true; `Open` — если `Timeout` истёк, переход в `HalfOpen`, занять слот пробы, true; `HalfOpen` — true, только если слот свободен или проба висит дольше `Timeout` (тогда слот перезанимается). `RecordSuccess` в `HalfOpen` освобождает слот, считает успех, на `SuccessThreshold` — `Closed`. `RecordFailure` в `HalfOpen` — `Open`, слот свободен. Ветка `RecordSuccess` в состоянии `Open` (переход по успеху без пробы) удаляется: в `Open` попасть в attempt нельзя.
 5. **Очередь.** Поля `closeMu sync.RWMutex`, `closed bool`, `stopOnce sync.Once`. `submitJob`: под `RLock` проверить `closed` ⇒ ошибка «shutting down», иначе существующий `select` (send не блокирует). `Stop`: под `stopOnce`+`Lock` выставить `closed` и закрыть каналы; ожидание воркеров — на каждом вызове (повторный `Stop` безопасен). Воркер читает `job, ok := <-ch`; закрытый канал обнуляется локально, выход — когда закрыты все три (или `ctx.Done`). `processJob`: `defer recover()` — паника ⇒ ошибка задания (`job.State=Failed`, `totalFailed`, `cb.RecordFailure`, лог со стеком), outcome — эта ошибка.
 6. **Секреты.** `core.RedactURL(raw)`: разбирает URL, возвращает `scheme://host` + `/***`, если были путь, query или userinfo; неразбираемая строка ⇒ `***`. `maskURL` делегирует ему. `HTTPPublisher.publish/publishBatch`: `*url.Error` — заменить `URL` на редактированный (цепочка сохраняется); тело ответа читается через `readLimited(resp.Body, 64<<10)` и в ошибку идёт ≤512 байт. Остальные клиенты publishing — `readLimited`; LLM — `io.LimitReader(…, 1<<20)`. `createEnhancedWebhookPublisher` и `discovery_impl.go` логируют `RedactURL`. `config.go`: ошибка без значения пароля.
@@ -82,7 +82,7 @@ based_on:
 - `internal/core/redact.go` — `RedactURL`.
 - `publishing/publisher.go` — фабрика: без PD-кеша, ключ SMTP, `SetRootlyIncidentStore`, `readLimited`, маскировка ошибок `HTTPPublisher`.
 - `publishing/pagerduty_publisher_enhanced.go`, удаление `pagerduty_cache.go`, `ErrEventNotTracked`.
-- `publishing/rootly_publisher_enhanced.go`, `rootly_incident_store.go` (новый), `rootly_errors` — `ErrIncidentNotTracked`.
+- `publishing/rootly_publisher_enhanced.go`, `rootly_incident_store.go` (новый), `rootly_cache.go` — сигнатура `Get`.
 - `publishing/slack_publisher_enhanced.go` — ключ кеша.
 - `publishing/circuit_breaker.go`, `publishing/queue.go`.
 - `publishing/{slack,telegram,pagerduty,rootly,webhook}_client.go` — `readLimited`.
@@ -107,8 +107,8 @@ based_on:
 ## Edge Cases
 
 1. PD resolve для алерта, trigger которого ушёл с другой реплики ⇒ `resolve` с тем же ключом.
-2. Rootly: Redis недоступен на firing ⇒ создаётся инцидент (лучше дубль, чем потерянный алерт), WARN.
-3. Rootly: resolve при промахе ⇒ `ErrIncidentNotTracked`, задание падает (permanent, без ретраев), считается breaker'ом.
+2. Rootly: Redis недоступен на firing/resolve ⇒ ошибка доставки, повтор на следующем flush; новый инцидент не создаётся (иначе ID открытого затёрся бы — deep-review F5).
+3. Rootly: resolve при промахе ⇒ WARN + `not_tracked`, `nil`; breaker и DLQ не затрагиваются.
 4. Две конкурентные `CanAttempt` после `Timeout` ⇒ true ровно у одной.
 5. Проба abandoned без записи результата ⇒ через `Timeout` слот перезанимается.
 6. `Stop` с заданиями во всех трёх каналах ⇒ все обработаны до выхода воркеров (в пределах тайм-аута `Stop`).
@@ -118,9 +118,9 @@ based_on:
 ## Impact Analysis
 
 - **Affected modules:** publishing (infra), discovery (business), application wiring, config validation, llm client.
-- **Breaking changes:** нет для конфига/API. Поведение: Rootly resolve без записи теперь ошибка (раньше — тихий успех); CHANGELOG `Fixed`.
+- **Breaking changes:** нет для конфига/API. Поведение: Rootly resolve без записи — WARN + метрика (раньше — тихий успех); недоступное хранилище — ошибка доставки; CHANGELOG `Fixed`.
 - **New dependencies:** none.
-- **Risks:** `ErrIncidentNotTracked` поднимает счётчик breaker'а — серия промахов (апгрейд с открытыми инцидентами) может на `Timeout` открыть breaker Rootly-таргета. Окно — одна волна resolve после апгрейда; принимается, отражено в CHANGELOG.
+- **Risks:** промах на resolve оставляет инцидент открытым (видно по WARN и `not_tracked`): после апгрейда, рестарта lite-профиля (`MemoryCache`), вытеснения ключей Valkey, перестановки `rootly_configs`. Недоступный Redis блокирует доставку в Rootly до восстановления (повторы на flush, считаются breaker'ом) — принимается: это честнее сиротских инцидентов.
 
 ## Rollout / Rollback
 

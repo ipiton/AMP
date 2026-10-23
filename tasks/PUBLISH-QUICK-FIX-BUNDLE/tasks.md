@@ -34,7 +34,7 @@ based_on:
 - [x] **1.1** PD: resolve по `alert.Fingerprint`; удалить кеш из паблишера, фабрики, `pagerduty_cache.go`, `ErrEventNotTracked` <!-- verify: cd go-app && go build ./... -->
 - [x] **1.2** `correlationKey(target, fingerprint)`; Slack и Rootly ключуют им кеш <!-- verify: cd go-app && go build ./... -->
 - [x] **1.3** Ключ SMTP-клиента из всех полей `SMTPConfig` (пароль — sha256) <!-- verify: cd go-app && go build ./... -->
-- [x] **1.4** Rootly: `rootly_incident_store.go` поверх `cache.Cache`, `SetRootlyIncidentStore`, wiring в `publishing_runtime.go`; продление на update; `ErrIncidentNotTracked` на промахе resolve <!-- depends: 1.2 | verify: cd go-app && go build ./... -->
+- [x] **1.4** Rootly: `rootly_incident_store.go` поверх `cache.Cache`, `SetRootlyIncidentStore`, wiring в `publishing_runtime.go`; продление на update; промах resolve — WARN + `not_tracked`, ошибка хранилища — ошибка доставки <!-- depends: 1.2 | verify: cd go-app && go build ./... -->
 
 **Phase verification:** `cd go-app && go build ./...`
 
@@ -53,7 +53,7 @@ based_on:
 - [ ] **3.1** Починить компиляцию тестов после удаления PD-кеша <!-- verify: cd go-app && go vet ./internal/infrastructure/publishing/... -->
 - [ ] **3.2** PD: resolve без trigger ⇒ `event_action=resolve`, `dedup_key=fingerprint` <!-- verify: go test -run PagerDuty ./internal/infrastructure/publishing/ -->
 - [ ] **3.3** Два Slack/Rootly-таргета с одним fingerprint не делят записи; SMTP: другой пароль/второй таргет ⇒ другой клиент <!-- verify: go test -run 'PerTarget|SMTPClientKey' ./internal/infrastructure/publishing/ -->
-- [ ] **3.4** Rootly: ID из общего хранилища виден новому экземпляру паблишера; промах resolve ⇒ `ErrIncidentNotTracked` <!-- verify: go test -run Rootly ./internal/infrastructure/publishing/ -->
+- [ ] **3.4** Rootly: ID из общего хранилища виден новому экземпляру паблишера; промах resolve ⇒ `nil` + `not_tracked`, breaker не тронут; ошибка `Get` ⇒ ошибка, инцидент не создаётся <!-- verify: go test -run Rootly ./internal/infrastructure/publishing/ -->
 - [ ] **3.5** Breaker: конкурентные `CanAttempt` после `Timeout` ⇒ одна проба; переходы; тайм-аут пробы <!-- verify: go test -race -run CircuitBreaker ./internal/infrastructure/publishing/ -->
 - [ ] **3.6** Очередь: `Stop` с заданиями во всех приоритетах; `Submit` после `Stop`; двойной `Stop`; паника паблишера <!-- verify: go test -race -run 'Queue.*Stop|Panic' ./internal/infrastructure/publishing/ -->
 - [ ] **3.7** `RedactURL`; ошибка `HTTPPublisher` без токена и с телом ≤512; лог фабрики/discovery без токена; ошибка пароля без значения <!-- verify: go test -run 'Redact|Secret' ./internal/core/ ./internal/infrastructure/publishing/ ./internal/business/publishing/ ./internal/config/ -->
@@ -66,4 +66,5 @@ based_on:
 
 ## Notes
 - 2026-10-23, implement: `IncidentIDCache.Size()` убран из интерфейса — у реализации поверх общего кеша нет дешёвого подсчёта, в проде `Size()` не вызывался (только тесты, Phase 3). `pagerduty_cache.go` удалён; `pagerduty_cache_test.go` и тесты с `cache.Size()` не компилируются до Phase 3 — ожидаемо.
+- 2026-10-23, deep-review fix (F1, F3, F5, F7): `IncidentIDCache.Get` → `(id, found, err)`; `ErrIncidentNotTracked` удалён; `parseError` PD/Rootly цитируют тело через `errorBody`; ошибка `NewRequestWithContext` в `HTTPPublisher` маскируется. F2/F4/F6 — follow-ups на finalize.
 - Отклонение от Spec не требовалось; хелперы тела/URL — `publishing/http_body.go` (`readLimited`, `errorBody`, `redactURLError`).
