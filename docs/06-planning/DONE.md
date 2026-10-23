@@ -17,6 +17,11 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-23 — (Security / Deps) **PROD-DEPS-GO-127** — Go toolchain `go1.26.9` → `go1.27.3`: закрыта GO-2026-6809 (`crypto/x509`, недоверие скомпрометированным промежуточным сертификатам), из-за которой `govulncheck` на `main` был красным с 2026-10-23.
+  - **Версии:** `toolchain go1.27.3` в `go-app/go.mod` (`go 1.26.0` не тронут — язык и `GODEBUG`-дефолты прежние), builder обоих образов — `golang:1.27.3-alpine` (Alpine 3.24, тот же digest, что у `1.27.3-alpine3.24`; рантайм `alpine:3.24`), комментарий в `ci.yml`, `docs/CI.md`. Go-код не менялся.
+  - **Карантин:** go1.27.3 вышел 2026-10-19 (4 дня), образ — 2026-10-22: исключение из 7-дневного карантина — решение владельца (фикс в ветке 1.27 есть только в 1.27.3). Тулчейн скачан через `proxy.golang.org` с проверкой по `sum.golang.org`.
+  - **Проверка:** `govulncheck@v1.8.0` на `go1.27.3` — 0 достижимых, на уровне модулей только GO-2026-5932 (без фикса); `scripts/release-gate.sh` `RESULT: PASS` 12/12 с первого прогона, включая `amtool-compat`.
+
 - 2026-10-23 — (Owner / Architecture) **ADR-018-CORE-DECISION** — путь ядра Alertmanager выбран: AMP — AI-слой перед upstream AM (прокси на ingest, annotations `amp_*`, fail-open), своё паритетное ядро удаляется. Запись — `DECISIONS.md` § ADR-018; оценка перехода ~12–18d, PoC 4–5d — по срезам в `ADR-018-V3-PROXY-SLICING`. Конвейер ревью 2026-10-21 в Queue приостановлен; нарезка эпика — `ADR-018-V3-PROXY-SLICING`.
 
 - 2026-10-23 — (BUG / API, high) **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence принимается, как в upstream: виден в `GET /api/v2/alerts` (и v1, `/alerts/groups`) со `state=suppressed` и `silencedBy`, становится источником inhibition, пишется в историю; уведомление по-прежнему не уходит. Breaking для API-клиентов.
