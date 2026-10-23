@@ -23,7 +23,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### Owner
 
-- [ ] **ADR-018-CORE-DECISION** — выбрать путь ядра Alertmanager: своё ядро (В1), пакеты upstream как библиотеки (В2) или upstream AM + AMP рядом (В3); сравнение, что переживает каждый вариант и цена перехода — `DECISIONS.md` ADR-018. От ответа зависит, продолжать ли паритетные позиции `REVIEW-PIPELINE-2026-10-21.md`. `~30min`
+- [ ] **ADR-018-CORE-DECISION** — выбрать путь ядра Alertmanager: своё ядро (В1), пакеты upstream как библиотеки (В2) или upstream AM + AMP рядом (В3); сравнение, что переживает каждый вариант и цена перехода — внешний документ `../docs/ADR-018 — ядро Alertmanager.md` (вне репозитория). После решения — запись в `DECISIONS.md`. От ответа зависит, продолжать ли паритетные позиции `REVIEW-PIPELINE-2026-10-21.md`. `~30min`
   Trigger: owner ready.
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
