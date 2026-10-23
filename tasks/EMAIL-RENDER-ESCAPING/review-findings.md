@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (сигнал `S`; сигналы `S R` — Full tier)
 **Reviewer perspective:** independent agent (не автор кода); линзы security (HTML/URL-инъекция в письмо, header injection), correctness (дефолтный и пользовательские шаблоны под `html/template`, RFC 2047), premises (трасса ingest → Subject), maintainability
 **Reviewed at:** 2026-10-23
-**Reviewed tree:** bugfix/email-render-escaping @ cbe4330 (diff `3d5e675..cbe4330`)
-**Verdict:** pass (see `review-verdict.json`)
+**Reviewed tree:** раунд 1 — bugfix/email-render-escaping @ cbe4330 (diff `3d5e675..cbe4330`); раунд 2 — @ 71279d1 (diff `fc2c1c2..71279d1`)
+**Verdict:** раунд 1 — pass; раунд 2 — pass (see `review-verdict.json`)
 
 ## Проверено (без находок)
 
@@ -29,8 +29,8 @@
 - **Location:** `go-app/internal/notification/template/defaults/email.go:237-239,285-287`; `go-app/internal/infrastructure/publishing/email_publisher_enhanced.go:75-82,320-343`
 - **Issue:** `renderTemplate` и `renderHTMLTemplate` парсят шаблон без `Option("missingkey=...")`. Для `map[string]string` отсутствующий ключ даёт invalid value, и пайп в функцию со `string`-параметром падает: `executing "html" at <lower>: invalid value; expected string` (нет `severity`), `at <"N/A">` (нет `instance`), то же для `description`. Воспроизведено и на `text/template` (до фикса), и на `html/template` (после) — **не регрессия этого диффа**, но тот же путь, который он меняет. Ошибка fallback возвращается из `Publish` (`:75-82`) до блока overlay (`:93-109`), поэтому письма нет вовсе — даже если у таргета есть рабочие upstream-шаблоны. Алерт без `instance` — обычное дело (агрегатные правила). Плюс к этому: Success Criterion «дефолтный HTML-шаблон рендерится без ошибок» и тест 2.1 по текущей фикстуре (`email_publisher_test.go:55-56`, все лейблы заданы) подтвердят свойство, которое верно только при полном наборе лейблов.
 - **Recommendation:** отдельный баг: `Option("missingkey=zero")` в обоих рендерах (как в `business/templating` — `ExecuteHTMLString`/`ExecuteTextString`), тест на алерт только с `alertname`. Отдельно решить, должна ли ошибка fallback блокировать успешный overlay (сейчас fallback — обязательная предпосылка). Фикс — две строки, его можно взять и сюда, если автор сочтёт уместным; при отложении — в тесте 2.1 явно задать полный набор лейблов и не формулировать его как «дефолтные шаблоны рендерятся» без оговорки.
-- **Disposition:** defer-bug
-- **Follow-up:** новая запись в `docs/06-planning/BUGS.md` (high, Publishing) на `finalize`
+- **Disposition:** fix-here (раунд 1 — defer-bug; взят в задачу автором, resolved в 71279d1, см. Раунд 2)
+- **Follow-up:** n/a
 
 ### F2 — Premise 3 и research ссылаются не на ingest, а на валидацию фильтров запроса
 - **Severity:** minor
@@ -55,6 +55,44 @@
 - **Recommendation:** добавить в запись полфразы про `ZgotmplZ` для значений в небезопасном контексте.
 - **Disposition:** fix-here
 - **Follow-up:** n/a
+
+## Раунд 2 (2026-10-23, @ 71279d1)
+
+Дифф `fc2c1c2..71279d1`: `Option("missingkey=zero")` в `renderTemplate` и `renderHTMLTemplate`, запись Fixed и дополнение Security в `CHANGELOG.md`, правки премис и критериев в `Spec.md`/`requirements.md`/`research.md`/`tasks.md`. Проверено временным тестом в пакете (удалён, дерево чистое) и полным прогоном пакета.
+
+### Статус находок раунда 1
+
+- **F1 — resolved.** Алерт только с `alertname`, собранный реальным `buildEmailTemplateData`, рендерит дефолтные subject/html/text без ошибки и для `firing`, и для `resolved`: subject `[ALERT] OnlyName (1 alert)` / `[RESOLVED] OnlyName (1 alert)`; в HTML `unknown`, `N/A`, `No description` — `default` срабатывает, потому что для `map[string]string` `missingkey=zero` даёт `""`, а не invalid value; `<no value>` нигде нет. Алерт с `Labels == nil` и без аннотаций тоже рендерится (`buildEmailTemplateData` создаёт пустые map). Ошибка fallback больше не обрывает Publish на таком алерте, overlay доходит до своей очереди.
+- **F2 — resolved.** Premise 3 и research ссылаются на трассу `handleAlertsPost` → `parseAlertsForProcessing` → `convertIngestInputToAlert`; ошибочная ссылка на `core/interfaces.go:258` снята с пояснением. Premise 2 теперь `verified (тест 2.1)` — тест ещё не написан, но привязка к конкретному шагу честная.
+- **F3 — defer-tech-debt**, без изменений; уходит в `TECH-DEBT.md` на `finalize`.
+- **F4 — resolved.** В Security-записи есть замена небезопасного значения на `#ZgotmplZ`. Упоминание вырезания HTML-комментариев не добавлено — невидимо, не требуется.
+
+### Проверка побочных эффектов `missingkey=zero`
+
+Одинаково для `text/template` и `html/template`:
+
+- `eq .Status "resolved"` — `Status` поле структуры, опция не влияет; ветки `<style>`/`<h1>`/subject переключаются верно.
+- `range $k, $v := .Labels`, `range .Alerts` — без изменений; внутри `range .Alerts` отсутствующий ключ тоже даёт `""` и `default`.
+- Отсутствующий ключ в пользовательском шаблоне: `{{ if .Labels.x }}` → else-ветка, `{{ eq .Labels.x "" }}` → true, `{{ with .Annotations.x }}` → else, `{{ index .Labels "x" }}` → `""`, `{{ len .Labels.x }}` → `0`, `| upper` / `| default "D"` работают. Раньше `text/template` печатал `<no value>`, а пайп в функцию падал; теперь пустая строка — улучшение, не регрессия.
+- Несуществующее **поле структуры** (`{{ .NoSuchField }}`) по-прежнему ошибка исполнения — опция действует только на map, опечатки в шаблоне не маскируются.
+- `href="{{ .Annotations.runbook_url }}"` при отсутствии ключа → `href=""`; в дефолтном шаблоне блок и так под `{{ if }}`.
+- Overlay (`business/templating`) уже использовал `missingkey=zero` — fallback и overlay теперь ведут себя одинаково.
+
+Сборка и тесты: `go build ./...`, `go vet ./internal/infrastructure/publishing/`, `go test -count=1 ./internal/infrastructure/publishing/` — 1037 passed.
+
+### Новые находки
+
+#### F5 — При отсутствии `severity` text-часть пишет пустое `Severity:`, HTML — `class="severity-"`
+- **Severity:** nit
+- **Location:** `go-app/internal/notification/template/defaults/email.go:237,285`
+- **Issue:** теперь, когда алерт без `severity` рендерится, видно несогласованность шаблонов: HTML-ячейка показывает `unknown` (`| default "unknown"`), а text — `Severity: ` (только `| upper`, без `default`); CSS-класс — `severity-`. Косметика, на доставку не влияет; запись Fixed в CHANGELOG («`default "N/A"` now applies») верна для `instance`/`description`.
+- **Recommendation:** `{{ .Labels.severity | default "unknown" | upper }}` в text и `| default "unknown" | lower` в классе — одна строка каждая; можно добавить в тест 2.1.
+- **Disposition:** fix-here (не блокирует)
+- **Follow-up:** n/a
+
+### Итог раунда 2
+
+Открытых blocker/major нет: F1 закрыт по существу, побочных эффектов `missingkey=zero` не найдено. Открыты F3 (defer-tech-debt) и F5 (nit, fix-here, не блокирует). Gate — `pass`.
 
 ## Anti-Pattern Check
 
