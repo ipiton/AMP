@@ -63,7 +63,7 @@ func AlertsHandler(registry RegistryProvider) http.HandlerFunc {
 		case http.MethodGet:
 			handleAlertsGet(alertStore, silenceStore, w, r)
 		case http.MethodPost:
-			handleAlertsPost(registry.AlertProcessor(), alertStore, silenceStore, externalURL, w, r)
+			handleAlertsPost(registry.AlertProcessor(), alertStore, externalURL, w, r)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -401,7 +401,7 @@ func filterAlertGroups(groups []core.APIGettableAlertGroup, stateFilter alertSta
 	return out
 }
 
-func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, silences *memory.SilenceStore, externalURL string, w http.ResponseWriter, r *http.Request) {
+func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertStore, externalURL string, w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }()
 
 	if processor == nil {
@@ -428,17 +428,12 @@ func handleAlertsPost(processor *services.AlertProcessor, store *memory.AlertSto
 		return
 	}
 
-	filteredAlerts := make([]*core.Alert, 0, len(alerts))
-	for _, alert := range alerts {
-		if alert.Status != core.StatusResolved && silences != nil && silences.HasActiveMatch(alert.Labels, now) {
-			continue
-		}
-		filteredAlerts = append(filteredAlerts, alert)
-	}
-
-	successfulInputs := make([]core.AlertIngestInput, 0, len(filteredAlerts))
+	// Silenced alerts are ingested like any other (SILENCED-ALERTS-INGEST):
+	// GET reports them as "suppressed" and they act as inhibition sources;
+	// ProcessAlert keeps them out of publishing.
+	successfulInputs := make([]core.AlertIngestInput, 0, len(alerts))
 	failedCount := 0
-	for _, alert := range filteredAlerts {
+	for _, alert := range alerts {
 		if err := processor.ProcessAlert(r.Context(), alert); err != nil {
 			failedCount++
 			continue

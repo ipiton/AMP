@@ -2412,6 +2412,11 @@ func (r *ServiceRegistry) initializeAlertProcessor(ctx context.Context) error {
 		Logger:                 r.logger,
 		Metrics:                nil, // TODO: MetricsManager
 	}
+	// SILENCED-ALERTS-INGEST: same store the group notify chain reads (see
+	// silenceChecker above); a nil *SilenceStore must stay a nil interface.
+	if r.silenceStore != nil {
+		config.SilenceChecker = r.silenceStore
+	}
 
 	processor, err := services.NewAlertProcessor(config)
 	if err != nil {

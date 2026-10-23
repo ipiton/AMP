@@ -82,6 +82,7 @@ type AlertProcessor struct {
 	inhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
 	businessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
 	routeEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
+	silenceChecker     grouping.GroupSilenceChecker      // SILENCED-ALERTS-INGEST: optional, nil = no silence check
 	logger             *slog.Logger
 	metrics            *metrics.MetricsManager
 
@@ -157,6 +158,12 @@ type AlertProcessorConfig struct {
 	BusinessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
 	RouteEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
 
+	// SilenceChecker keeps silenced firing alerts out of direct publish
+	// (SILENCED-ALERTS-INGEST). Optional: nil disables the check. Silenced
+	// alerts are still ingested, stored and act as inhibition sources, as in
+	// upstream, where a silence only applies at notification time.
+	SilenceChecker grouping.GroupSilenceChecker
+
 	// GroupingEnabled is config.Grouping.Enabled AND a `route:` tree being
 	// configured (task 2.3; see ServiceRegistry). When true,
 	// alerts with a computed RoutingDecision AND a non-nil GroupManager flow
@@ -228,6 +235,7 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 		inhibitionState:    config.InhibitionState,    // TN-130 Phase 6
 		businessMetrics:    config.BusinessMetrics,    // TN-130 Phase 6
 		routeEvaluator:     config.RouteEvaluator,     // task 1.4
+		silenceChecker:     config.SilenceChecker,     // SILENCED-ALERTS-INGEST
 		groupingEnabled:    config.GroupingEnabled,    // task 2.3
 		groupManager:       config.GroupManager,       // task 2.3
 		groupKeyGenerator:  config.GroupKeyGenerator,  // task 2.3
@@ -643,6 +651,24 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 	// lastRoutingDecision atomic slot): each mode handler below decides
 	// per-alert whether to publish directly or route into a group.
 	decision := p.evaluateRoute(alert)
+
+	// SILENCED-ALERTS-INGEST: a silenced firing alert is ingested (stored,
+	// inhibition source — steps above) but never published directly. With
+	// grouping it still enters its group, whose notify chain applies the
+	// silence at send time, so the group notifies once the silence ends.
+	// Checked before the mode handlers: no LLM call or investigation for an
+	// alert nobody will be notified about.
+	if p.silenceChecker != nil && alert.Status == core.StatusFiring && p.silenceChecker.HasActiveMatch(alert.Labels, time.Now()) {
+		p.logger.Info("Alert silenced, skipping publish",
+			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint)
+		if p.shouldGroup(decision) {
+			// No fail-open here: a grouping failure must not turn into a
+			// direct publish of a silenced alert.
+			p.routeAlertToGroup(ctx, alert, decision)
+		}
+		return nil
+	}
 
 	// Get current enrichment mode
 	mode, err := p.enrichmentManager.GetMode(ctx)

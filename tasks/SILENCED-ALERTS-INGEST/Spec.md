@@ -27,7 +27,7 @@ based_on:
 2. `ProcessAlert`, после `decision := p.evaluateRoute(alert)`: если `alert.Status == core.StatusFiring` и `silenceChecker.HasActiveMatch(alert.Labels, time.Now())` — Info-лог; при `shouldGroup(decision)` — `routeAlertToGroup` (результат не ведёт в прямую публикацию); `return nil`.
 3. `service_registry.go`: `SilenceChecker` = `r.silenceStore` при не-nil.
 4. `handleAlertsPost`: убрать silence-фильтр, параметр `silences` больше не нужен.
-5. `CHANGELOG.md` [Unreleased]: Changed (breaking) — заглушенные алерты принимаются и видны как `suppressed`; Fixed — webhook-входы в прямом режиме публиковали заглушенные алерты.
+5. `CHANGELOG.md` [Unreleased]: Fixed + Breaking changes / migration notes — заглушенные алерты принимаются и видны как `suppressed` (v2 и v1).
 
 ## Acceptance
 

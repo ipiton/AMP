@@ -27,7 +27,7 @@ updated_at: 2026-10-23
 ## Findings
 
 - Запись BUGS говорит «подавление уже делает notify chain» — верно только при группировке (`GroupingEnabled = grouping.enabled && route-дерево`). В прямом режиме (нет `route:`, fail-open группировки, `shouldGroup=false`) `AlertProcessor` публикует через `PublishToReceiver*` без проверки silence. Просто убрать фильтр ⇒ заглушенные алерты начнут уходить в прямом режиме.
-- Webhook-эндпоинты silence не фильтруют вовсе: в прямом режиме заглушенные алерты с них уже публикуются — тот же корень.
+- Другие вызовы `ProcessAlert` (`cmd/server/handlers/webhook.go`, `prometheus_alerts.go`, `infrastructure/webhook/handler.go`) в проде не подключены (`router.go`: единственный вход — `AlertsHandler`, `POST /api/v1/alerts` проксирует в него). Проверка в процессоре закрывает и их, если их подключат.
 - В enriched-режиме `processEnriched` до группировки вызывает LLM и `investigationQueue.Submit`. Если пустить заглушенный алерт по обычному пути, LLM будет вызываться для каждого его resend — раньше этого не было (хендлер отбрасывал).
 - `ProcessAlert` до выбора режима: dedup (запись в БД/историю) → кеш inhibition (`AddFiringAlert`) → inhibition-проверка. Проверка silence после них сохраняет и историю, и роль источника inhibition.
 - `GET` считает состояние в `alertconv.ToGettableAlert` по текущим silences: `suppressed` + `silencedBy`; фильтр `silenced` по умолчанию `true` — алерт виден.

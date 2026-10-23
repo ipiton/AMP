@@ -19,16 +19,16 @@ based_on:
 - `go-app/internal/core/services/alert_processor.go`
 - `go-app/internal/application/service_registry.go`
 - `go-app/internal/application/handlers/alerts.go`
-- `go-app/internal/application/handlers/alerts_test.go`, `go-app/cmd/server/main_phase0_contract_test.go` — существующие тесты под новое поведение (Phase 1, иначе гейт красный)
+- `go-app/internal/application/handlers/alerts_test.go`, `go-app/cmd/server/main_phase0_contract_test.go` (`TestPhase0SilenceAffectsAlertIngest`, `TestPhase0E2ESmoke_IngestSilenceAndHistoryRecent`, тег `futureparity`) — существующие тесты под новое поведение (Phase 1, иначе гейт красный)
 - `go-app/internal/core/services/alert_processor_silence_test.go` — Phase 2
 - `CHANGELOG.md`
 
 ## Phase 1: Implement
 
-- [ ] **1.1** `SilenceChecker` в `AlertProcessorConfig`, проверка в `ProcessAlert` <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.2** Сборка в `service_registry.go` <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.3** Убрать фильтр из `handleAlertsPost`; переписать `TestPhase0SilenceAffectsAlertIngest` и `TestAlertsHandler_SilencedAlertIsSuppressed` <!-- verify: go test ./cmd/server/ ./internal/application/handlers/ -->
-- [ ] **1.4** CHANGELOG [Unreleased] Changed (breaking) + Fixed <!-- verify: git diff --check -->
+- [x] **1.1** `SilenceChecker` в `AlertProcessorConfig`, проверка в `ProcessAlert` <!-- verify: cd go-app && go build ./... -->
+- [x] **1.2** Сборка в `service_registry.go` <!-- verify: cd go-app && go build ./... -->
+- [x] **1.3** Убрать фильтр из `handleAlertsPost`; переписать `TestPhase0SilenceAffectsAlertIngest` и `TestAlertsHandler_SilencedAlertIsSuppressed` <!-- verify: go test ./cmd/server/ ./internal/application/handlers/ -->
+- [x] **1.4** CHANGELOG [Unreleased] Fixed + Breaking changes <!-- verify: git diff --check -->
 
 ## Phase 2: Tests (после deep-review `pass`)
 
