@@ -100,7 +100,7 @@ func parseTelegramError(resp *http.Response, body []byte) *httperror.HTTPAPIErro
 		}
 	} else {
 		// Fallback: use raw body as error message
-		apiErr.Message = string(body)
+		apiErr.Message = errorBody(body)
 	}
 
 	// Fallback to Retry-After header if not present in the response body

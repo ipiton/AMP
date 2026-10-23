@@ -56,7 +56,7 @@ based_on:
 - [ ] **3.4** Rootly: ID из общего хранилища виден новому экземпляру паблишера; промах resolve ⇒ `nil` + `not_tracked`, breaker не тронут; ошибка `Get` ⇒ ошибка, инцидент не создаётся <!-- verify: go test -run Rootly ./internal/infrastructure/publishing/ -->
 - [ ] **3.5** Breaker: конкурентные `CanAttempt` после `Timeout` ⇒ одна проба; переходы; тайм-аут пробы <!-- verify: go test -race -run CircuitBreaker ./internal/infrastructure/publishing/ -->
 - [ ] **3.6** Очередь: `Stop` с заданиями во всех приоритетах; `Submit` после `Stop`; двойной `Stop`; паника паблишера <!-- verify: go test -race -run 'Queue.*Stop|Panic' ./internal/infrastructure/publishing/ -->
-- [ ] **3.7** `RedactURL`; ошибка `HTTPPublisher` без токена и с телом ≤512; лог фабрики/discovery без токена; ошибка пароля без значения <!-- verify: go test -run 'Redact|Secret' ./internal/core/ ./internal/infrastructure/publishing/ ./internal/business/publishing/ ./internal/config/ -->
+- [ ] **3.7** `RedactURL`; ошибка `HTTPPublisher` и `WebhookHTTPClient` без токена и с телом ≤512; лог фабрики/discovery без токена; ошибка пароля без значения <!-- verify: go test -run 'Redact|Secret' ./internal/core/ ./internal/infrastructure/publishing/ ./internal/business/publishing/ ./internal/config/ -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/publishing/... ./internal/business/publishing/...`
 
@@ -67,4 +67,5 @@ based_on:
 ## Notes
 - 2026-10-23, implement: `IncidentIDCache.Size()` убран из интерфейса — у реализации поверх общего кеша нет дешёвого подсчёта, в проде `Size()` не вызывался (только тесты, Phase 3). `pagerduty_cache.go` удалён; `pagerduty_cache_test.go` и тесты с `cache.Size()` не компилируются до Phase 3 — ожидаемо.
 - 2026-10-23, deep-review fix (F1, F3, F5, F7): `IncidentIDCache.Get` → `(id, found, err)`; `ErrIncidentNotTracked` удалён; `parseError` PD/Rootly цитируют тело через `errorBody`; ошибка `NewRequestWithContext` в `HTTPPublisher` маскируется. F2/F4/F6 — follow-ups на finalize.
+- 2026-10-23, deep-review round 2 fix (F8, F9): `WebhookHTTPClient` маскирует `*url.Error` (создание запроса и транспорт) и цитирует тело через `errorBody`; Slack/Telegram fallback-сообщение ошибки — через `errorBody`. F10 — в TECH-DEBT вместе с F4.
 - Отклонение от Spec не требовалось; хелперы тела/URL — `publishing/http_body.go` (`readLimited`, `errorBody`, `redactURLError`).

@@ -98,6 +98,7 @@ func (c *WebhookHTTPClient) Post(ctx context.Context, url string, payload map[st
 	// Create HTTP request
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	if err != nil {
+		err = redactURLError(err)
 		return nil, httperror.NewHTTPErrorWithCause(http.StatusBadRequest,
 			fmt.Sprintf("failed to create request: %v", err), ProviderWebhook, err)
 	}
@@ -174,6 +175,8 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 
 		// Handle network errors
 		if err != nil {
+			// *url.Error embeds the full URL; Teams/Discord/Google Chat keep the token in its path.
+			err = redactURLError(err)
 			// Network errors don't have an HTTP status code (StatusCode 0)
 			lastErr = httperror.NewHTTPErrorWithCause(0,
 				fmt.Sprintf("HTTP request failed: %v", err), ProviderWebhook, err)
@@ -225,7 +228,7 @@ func (c *WebhookHTTPClient) doRequestWithRetry(ctx context.Context, req *http.Re
 		category := classifyHTTPError(resp.StatusCode)
 
 		lastErr = NewPublishingError(resp.StatusCode,
-			fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body)),
+			fmt.Sprintf("HTTP %d: %s", resp.StatusCode, errorBody(body)),
 			ProviderWebhook)
 		_ = errorType // Used for logging only
 
