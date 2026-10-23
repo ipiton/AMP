@@ -669,23 +669,17 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 	// SILENCED-ALERTS-INGEST: a silenced firing alert is ingested (stored,
 	// inhibition source — steps above) but never published directly. With
 	// grouping it still enters its group, whose notify chain applies the
-	// silence at send time, so the group notifies once the silence ends;
-	// the label filter applies first, as on the normal path (the LLM one
-	// does not: no classification for a silenced alert). Checked before the
-	// mode handlers: no LLM call or investigation for an alert nobody will
-	// be notified about.
+	// silence at send time, so the group notifies once the silence ends.
+	// Checked before the mode handlers: no LLM call or investigation for an
+	// alert nobody will be notified about. FilterEngine is not consulted
+	// here: its duplicate rule is stateful, and recording a silenced re-send
+	// would block the first publish after the silence ends (deep-review F6);
+	// the group therefore holds the alert unfiltered (TECH-DEBT
+	// SILENCED-GROUP-UNFILTERED).
 	if p.silenceChecker != nil && alert.Status == core.StatusFiring && p.silenceChecker.HasActiveMatch(alert.Labels, time.Now()) {
 		p.logger.Info("Alert silenced, skipping publish",
 			"alert", alert.AlertName,
 			"fingerprint", alert.Fingerprint)
-		if blocked, reason := p.filterEngine.ShouldBlock(alert, nil); blocked {
-			p.logger.Info("Silenced alert blocked by filter",
-				"alert", alert.AlertName,
-				"fingerprint", alert.Fingerprint,
-				"reason", reason)
-			p.silenceSkipped.Delete(alert.Fingerprint)
-			return nil
-		}
 		if p.shouldGroup(decision) {
 			// No fail-open here: a grouping failure must not turn into a
 			// direct publish of a silenced alert.

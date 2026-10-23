@@ -24,8 +24,8 @@ based_on:
 ## Design
 
 1. `AlertProcessorConfig.SilenceChecker grouping.GroupSilenceChecker` → поле `silenceChecker`.
-2. `ProcessAlert`, после `decision := p.evaluateRoute(alert)`: если `alert.Status == core.StatusFiring` и `silenceChecker.HasActiveMatch(alert.Labels, time.Now())` — Info-лог; `filterEngine.ShouldBlock(alert, nil)` ⇒ `return nil` (deep-review F2); при `shouldGroup(decision)` — `routeAlertToGroup` (результат не ведёт в прямую публикацию, неудача — Warn, F4); `return nil`.
-2a. Deep-review F1: fingerprint заглушенного алерта, не попавшего в группу, — в `silenceSkipped` (`sync.Map`). Dedup-`ignored` для такого fingerprint не обрывает `ProcessAlert`; после проверки silence незаглушенный/resolved алерт из набора удаляется (как и успешно сгруппированный или отфильтрованный). Иначе алерт без `endsAt` после снятия silence не публиковался бы до resolve.
+2. `ProcessAlert`, после `decision := p.evaluateRoute(alert)`: если `alert.Status == core.StatusFiring` и `silenceChecker.HasActiveMatch(alert.Labels, time.Now())` — Info-лог; `filterEngine` не вызывается — Rule 7 (`isDuplicate`) с состоянием заблокировал бы первую публикацию после снятия silence (deep-review F6), F2 отложен в TECH-DEBT `SILENCED-GROUP-UNFILTERED`; при `shouldGroup(decision)` — `routeAlertToGroup` (результат не ведёт в прямую публикацию, неудача — Warn, F4); `return nil`.
+2a. Deep-review F1: fingerprint заглушенного алерта, не попавшего в группу, — в `silenceSkipped` (`sync.Map`). Dedup-`ignored` для такого fingerprint не обрывает `ProcessAlert`; после проверки silence незаглушенный/resolved алерт из набора удаляется (как и успешно сгруппированный). Иначе алерт без `endsAt` после снятия silence не публиковался бы до resolve.
 3. `service_registry.go`: `SilenceChecker` = `r.silenceStore` при не-nil.
 4. `handleAlertsPost`: убрать silence-фильтр, параметр `silences` больше не нужен.
 5. `CHANGELOG.md` [Unreleased]: Fixed + Breaking changes / migration notes — заглушенные алерты принимаются и видны как `suppressed` (v2 и v1).
