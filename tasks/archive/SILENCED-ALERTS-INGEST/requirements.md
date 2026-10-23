@@ -37,11 +37,11 @@ updated_at: 2026-10-23
 
 ## Success Criteria
 
-- [ ] Firing-алерт под активным silence после `POST /api/v2/alerts` есть в `GET /api/v2/alerts` со `status.state=suppressed` и `silencedBy`.
-- [ ] Такой алерт не публикуется в прямом режиме (без route-дерева / группировки).
-- [ ] В режиме группировки алерт попадает в группу (notify chain подавляет его по silence), LLM-классификация и investigation для него не запускаются.
-- [ ] Заглушенный firing-алерт попадает в кеш источников inhibition.
-- [ ] Resolved-алерт обрабатывается как раньше.
+- [x] Firing-алерт под активным silence после `POST /api/v2/alerts` есть в `GET /api/v2/alerts` со `status.state=suppressed` и `silencedBy`.
+- [x] Такой алерт не публикуется в прямом режиме (без route-дерева / группировки).
+- [x] В режиме группировки алерт попадает в группу (notify chain подавляет его по silence), LLM-классификация и investigation для него не запускаются.
+- [x] Заглушенный firing-алерт попадает в кеш источников inhibition.
+- [x] Resolved-алерт обрабатывается как раньше.
 
 ## Non-Goals
 

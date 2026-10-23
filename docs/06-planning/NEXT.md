@@ -16,7 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence отбрасывается до ingest: не виден как `suppressed`, не становится источником inhibition. BUGS, high, ~0.5d, breaking для API. Ветка `bugfix/silenced-alerts-ingest`, workspace `tasks/SILENCED-ALERTS-INGEST/`. Взята 2026-10-23.
 
 ## Queue
 

@@ -2,7 +2,7 @@
 id: SILENCED-ALERTS-INGEST
 slug: silenced-alerts-ingest
 type: bug
-status: draft
+status: approved
 created_at: 2026-10-23
 updated_at: 2026-10-23
 based_on:

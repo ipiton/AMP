@@ -418,6 +418,14 @@
 - **Refs:** CODE-REVIEW-2026-10-21 D-12, L-13, § 4.2.
 - **Status:** open
 
+### [low][API][~0.25d] SILENCED-GROUP-UNFILTERED
+- **Title:** заглушенный алерт попадает в группу без `FilterEngine`
+- **Problem:** ветка silence в `AlertProcessor.ProcessAlert` не вызывает `filterEngine.ShouldBlock`: Rule 7 (`isDuplicate`) имеет состояние, и запись заглушенного resend'а блокировала бы первую публикацию после снятия silence (deep-review F6). Поэтому в режиме группировки заглушенный алерт с пустым `alertname` и т. п. попадает в группу и уведомит после снятия silence, хотя обычным путём был бы отфильтрован; LLM-фильтр к нему не применяется.
+- **Impact:** редкие уведомления, которые обычный путь отфильтровал бы; только при группировке.
+- **Fix:** отделить stateless-правила `SimpleFilterEngine` (1–6) от Rule 7 и вызывать в ветке silence только их; тест с настоящим `SimpleFilterEngine`.
+- **Refs:** `tasks/archive/SILENCED-ALERTS-INGEST/review-findings.md` F2, F6.
+- **Status:** open
+
 ### [low][Publishing][~0.25d] EMAIL-SUBJECT-RFC2047
 - **Title:** самописный RFC 2047 кодер Subject рвёт UTF-8 и не фолдит строку
 - **Problem:** `mime2047Subject`/`encodeRFC2047Words`/`encodeQP` (`go-app/internal/infrastructure/publishing/email_client.go`) режут по 63 символам без учёта границ рун — длинная кириллическая тема даёт encoded words с невалидным UTF-8; байты `< 32` в Q-кодировке не кодируются; слова склеиваются пробелом без CRLF-фолдинга, строка `Subject:` может превысить 998 октетов. Проблемы до `EMAIL-RENDER-ESCAPING`, инъекция CR/LF закрыта.
