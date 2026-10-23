@@ -121,7 +121,7 @@ func (c *HTTPSlackWebhookClient) PostMessage(ctx context.Context, message *Slack
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.webhookURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", redactURLError(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
