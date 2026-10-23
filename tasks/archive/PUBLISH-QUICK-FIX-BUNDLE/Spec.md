@@ -3,7 +3,7 @@ id: PUBLISH-QUICK-FIX-BUNDLE
 slug: publish-quick-fix-bundle
 stream: Publishing
 type: bug
-status: draft
+status: approved
 created_at: 2026-10-23
 updated_at: 2026-10-23
 based_on:
