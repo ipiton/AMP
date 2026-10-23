@@ -35,10 +35,10 @@ updated_at: 2026-10-23
 
 ## Success Criteria
 
-- [ ] HTML-часть fallback-рендера экранирует значения: `<script>` в аннотации — `&lt;script&gt;`, `javascript:` в `runbook_url` — не попадает в `href`.
-- [ ] Subject и text-часть остаются plain text (без HTML-экранирования).
-- [ ] `Subject` в MIME-сообщении без CR/LF для ASCII и не-ASCII темы; в сообщении нет заголовка, внедрённого через `alertname`.
-- [ ] Дефолтный HTML-шаблон (`defaults.DefaultEmailHTML`) рендерится через `html/template` без ошибок; алерт без `instance`/`severity`/`description` рендерится (`default`), а не роняет письмо.
+- [x] HTML-часть fallback-рендера экранирует значения: `<script>` в аннотации — `&lt;script&gt;`, `javascript:` в `runbook_url` — не попадает в `href`.
+- [x] Subject и text-часть остаются plain text (без HTML-экранирования).
+- [x] `Subject` в MIME-сообщении без CR/LF для ASCII и не-ASCII темы; в сообщении нет заголовка, внедрённого через `alertname`.
+- [x] Дефолтный HTML-шаблон (`defaults.DefaultEmailHTML`) рендерится через `html/template` без ошибок; алерт без `instance`/`severity`/`description` рендерится (`default`), а не роняет письмо.
 
 ## Non-Goals
 

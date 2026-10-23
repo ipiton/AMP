@@ -327,16 +327,6 @@
 - **Refs:** CODE-REVIEW-2026-10-21 H-2, D-6.
 - **Status:** open
 
-### [high][Security][~0.25d] EMAIL-RENDER-ESCAPING
-- **Title:** email fallback рендерит HTML без экранирования; Subject без санитизации CR/LF
-- **Problem:**
-  - `email_publisher_enhanced.go` (`internal/infrastructure/publishing/`, импорт `text/template`, `extractEmailConfig` `:159-163`, `renderTemplate` `:315-325`) рендерит HTML из `internal/notification/template/defaults/email.go:236-258` через `text/template`: `{{ .Annotations.description }}` вставляется как есть, `href="{{ .CommonAnnotations.runbook_url }}"` пропускает `javascript:`. Путь активен при `publishing.templates.enabled=false`, у email-target без шаблонных полей и при ошибке `RenderEmailContent`.
-  - `email_client.go:282`: `Subject` в ASCII пишется без `sanitizeHeaderValue` (её применяют только к extra headers, `:304`). `hypothesis`: доходят ли CR/LF в лейблах через `/api/v2/alerts` — не проверено.
-- **Impact:** тот, кто может прислать алерт, внедряет HTML/ссылки в письмо дежурному; возможна header injection через `alertname`.
-- **Fix:** убрать fallback-путь, всегда рендерить через `business/templating` (`html/template`, `email.default.html`); минимум — `html/template` для HTML-части. `mime2047Subject(sanitizeHeaderValue(msg.Subject))`. Тесты: аннотация с `<script>`/`javascript:`, `alertname` с `\r\n`.
-- **Refs:** CODE-REVIEW-2026-10-21 H-3, L-1.
-- **Status:** open
-
 ### [high][Config][~0.5d] RELOAD-SERIALIZE
 - **Title:** reload конфига не сериализован и привязан к контексту HTTP-клиента
 - **Problem:**

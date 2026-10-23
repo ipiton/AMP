@@ -16,7 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **EMAIL-RENDER-ESCAPING** — email fallback рендерит HTML через `text/template`, Subject без санитизации CR/LF. BUGS, high, ~0.25d. Ветка `bugfix/email-render-escaping`, workspace `tasks/EMAIL-RENDER-ESCAPING/`. Взята 2026-10-23.
 
 ## Queue
 

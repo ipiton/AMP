@@ -239,8 +239,8 @@
 ### [medium][Publishing][~0.5d] DEAD-TEMPLATE-STACK
 - **Title:** второй, неподключённый стек шаблонов
 - **Problem:** `internal/infrastructure/template`, `internal/notification/template` (живой только `defaults/email.go` в fallback-пути), миграция таблиц `templates`, прямая зависимость sprig (~4.5k строк).
-- **Impact:** две системы шаблонов, одна мёртвая; fallback через неё — источник `EMAIL-RENDER-ESCAPING`.
-- **Fix:** удалить после `EMAIL-RENDER-ESCAPING` (тот убирает fallback-путь).
+- **Impact:** две системы шаблонов, одна мёртвая; fallback через неё был источником `EMAIL-RENDER-ESCAPING`.
+- **Fix:** `EMAIL-RENDER-ESCAPING` (2026-10-23) fallback-путь не убрал, а перевёл HTML-часть на `html/template` — `defaults/email.go` по-прежнему живой. Сначала перевести fallback на `business/templating` (`email.default.html`), затем удалить стек.
 - **Refs:** CODE-REVIEW-2026-10-21 § 4.4.
 - **Status:** open
 
@@ -416,6 +416,14 @@
 - **Impact:** исправление в одной копии не доезжает до других (`REDIS-GROUP-INDEX-GHOSTS`).
 - **Fix:** `var casDelete = redis.NewScript(...)`, общий helper «ZSET-индекс с ленивой чисткой», `TxPipelined` в nflog.
 - **Refs:** CODE-REVIEW-2026-10-21 D-12, L-13, § 4.2.
+- **Status:** open
+
+### [low][Publishing][~0.25d] EMAIL-SUBJECT-RFC2047
+- **Title:** самописный RFC 2047 кодер Subject рвёт UTF-8 и не фолдит строку
+- **Problem:** `mime2047Subject`/`encodeRFC2047Words`/`encodeQP` (`go-app/internal/infrastructure/publishing/email_client.go`) режут по 63 символам без учёта границ рун — длинная кириллическая тема даёт encoded words с невалидным UTF-8; байты `< 32` в Q-кодировке не кодируются; слова склеиваются пробелом без CRLF-фолдинга, строка `Subject:` может превысить 998 октетов. Проблемы до `EMAIL-RENDER-ESCAPING`, инъекция CR/LF закрыта.
+- **Impact:** строгие MUA показывают `�` в длинных не-ASCII темах; часть MTA отклоняет письмо с очень длинным `alertname`.
+- **Fix:** `mime.QEncoding.Encode("UTF-8", s)` + фолдинг слов через `"\r\n "`; управляющие символы в ASCII-теме убирать или кодировать. Тест: длинная кириллическая тема декодируется `mime.WordDecoder` в валидный UTF-8.
+- **Refs:** `tasks/archive/EMAIL-RENDER-ESCAPING/review-findings.md` F3.
 - **Status:** open
 
 ### [low][Publishing][~0.25d] BREAKER-PROBE-ACCOUNTING
