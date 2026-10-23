@@ -17,22 +17,23 @@ based_on:
 | Premise | Как проверено | Класс | Если неверна |
 |---|---|---|---|
 | `html/template.FuncMap` совместим с `emailTemplateFuncs` | `go/src/html/template/template.go:332` (`type FuncMap = template.FuncMap`) | verified | не компилируется — видно сразу |
-| `DefaultEmailHTML` валиден для `html/template` | чтение шаблона: одно действие в `<style>` выводит константы; тест рендера | verified (тест) | дефолтное письмо перестанет рендериться — ловит тест |
-| CR/LF в значениях лейблов доходят до шаблона Subject | `core/interfaces.go:258` проверяет только длину | call-path-traced | фикс всё равно нужен для overlay-пути |
+| `DefaultEmailHTML` валиден для `html/template` | чтение шаблона: одно действие в `<style>` выводит константы; тест рендера | verified (тест 2.1) | дефолтное письмо перестанет рендериться — ловит тест |
+| CR/LF в значениях лейблов доходят до шаблона Subject | `handleAlertsPost` → `parseAlertsForProcessing` → `convertIngestInputToAlert`: значения лейблов не валидируются, `alertname` только `TrimSpace` (deep-review) | call-path-traced | фикс всё равно нужен для overlay-пути |
 | Overlay HTML уже экранирован | `template_formatter.go:494-504` (`htmlFields`, `ExecuteHTMLString`) | call-path-traced | вне scope, отдельный баг |
 
 ## Design
 
 1. `renderEmailContent`: HTML рендерится новым `renderHTMLTemplate` (`html/template`, `emailTemplateFuncs`); subject и text — существующий `renderTemplate` (`text/template`).
-2. `buildMIMEMessage`: `Subject: mime2047Subject(sanitizeHeaderValue(msg.Subject))`.
-3. `CHANGELOG.md` [Unreleased] Security.
+2. Оба рендера — `Option("missingkey=zero")`: алерт без `instance`/`severity`/`description` рендерит `default`, а не падает (deep-review F1; ошибка fallback-рендера отменяла всё письмо, overlay тоже).
+3. `buildMIMEMessage`: `Subject: mime2047Subject(sanitizeHeaderValue(msg.Subject))`.
+4. `CHANGELOG.md` [Unreleased] Security + Fixed.
 
 ## Acceptance
 
 - [ ] Аннотация `<script>alert(1)</script>` ⇒ в HTML `&lt;script&gt;`, в text — как есть.
 - [ ] `runbook_url: javascript:alert(1)` ⇒ `href` не содержит `javascript:`.
 - [ ] `alertname: "A\r\nBcc: x@evil"` ⇒ строка `Subject:` одна, заголовка `Bcc:` нет; то же для не-ASCII темы.
-- [ ] Дефолтные шаблоны рендерятся без ошибок.
+- [ ] Дефолтные шаблоны рендерятся без ошибок, в том числе для алерта только с `alertname`.
 
 ## Edge Cases
 

@@ -29,7 +29,7 @@ based_on:
 
 ## Phase 2: Тесты (после deep-review `pass`)
 
-- [ ] **2.1** HTML: `<script>`, `javascript:`; text не экранирован; дефолтные шаблоны рендерятся <!-- verify: go test -run Email ./internal/infrastructure/publishing/ -->
+- [ ] **2.1** HTML: `<script>`, `javascript:`; text не экранирован; дефолтные шаблоны рендерятся, в том числе алерт только с `alertname` <!-- verify: go test -run Email ./internal/infrastructure/publishing/ -->
 - [ ] **2.2** MIME: CR/LF в Subject (ASCII и не-ASCII) <!-- verify: go test -run 'BuildMIME|Email' ./internal/infrastructure/publishing/ -->
 
 ## Phase 3: Testing
@@ -37,3 +37,4 @@ based_on:
 - [ ] **3.1** Гейты `WORKFLOW.md` § Гейты AMP <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
+- 2026-10-23, deep-review `pass` @ `cbe4330`; F1 (major, был defer-bug) взят сюда — две строки в той же функции, без него письмо по алерту без `instance` не уходит вовсе; F2/F4 — доки. F3 — TECH-DEBT на finalize.

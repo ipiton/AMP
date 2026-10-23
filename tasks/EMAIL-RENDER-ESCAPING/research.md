@@ -28,7 +28,7 @@ updated_at: 2026-10-23
 - Fallback-рендер выполняется всегда, overlay `RenderEmailContent` (уже `html/template`) только заменяет непустые поля. При `publishing.templates.enabled=false`, у таргета без шаблонных полей или при ошибке overlay уходит fallback.
 - `html/template.FuncMap` — алиас `text/template.FuncMap`: `emailTemplateFuncs` (`upper`, `lower`, `default`) подходит без изменений.
 - `DefaultEmailHTML` содержит одно действие в `<style>` (`{{ if eq .Status "resolved" }}#28a745{{ else }}…`) — выводит только константы шаблона, для `html/template` безопасно; `href="{{ .CommonAnnotations.runbook_url }}"` — `html/template` заменяет небезопасную схему на `#ZgotmplZ`.
-- Ingest проверяет только длину значения лейбла (`ErrLabelValueTooLong`), CR/LF доходят до шаблона Subject — гипотеза из BUGS подтверждается чтением кода.
+- Ingest не валидирует значения лейблов (`parseAlertsForProcessing` → `convertIngestInputToAlert`, `alertname` только `TrimSpace`), CR/LF доходят до шаблона Subject — гипотеза из BUGS подтверждается чтением кода (уточнено на deep-review: `core/interfaces.go:258` — валидация фильтров запросов, не ingest).
 - `mime2047Subject` кодирует только не-ASCII темы; ASCII-тема пишется как есть.
 
 ## Decision

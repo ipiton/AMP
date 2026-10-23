@@ -318,7 +318,7 @@ func renderEmailContent(data *emailTemplateData, subjectTmpl, htmlTmpl, textTmpl
 // (EMAIL-RENDER-ESCAPING). Subject и text — не HTML, они остаются на
 // renderTemplate.
 func renderHTMLTemplate(name, tmplStr string, data *emailTemplateData) (string, error) {
-	t, err := htmltemplate.New(name).Funcs(emailTemplateFuncs).Parse(tmplStr)
+	t, err := htmltemplate.New(name).Option("missingkey=zero").Funcs(emailTemplateFuncs).Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", name, err)
 	}
@@ -331,7 +331,10 @@ func renderHTMLTemplate(name, tmplStr string, data *emailTemplateData) (string, 
 
 // renderTemplate рендерит один шаблон с заданными данными.
 func renderTemplate(name, tmplStr string, data *emailTemplateData) (string, error) {
-	t, err := template.New(name).Funcs(emailTemplateFuncs).Parse(tmplStr)
+	// missingkey=zero: an alert without `instance`/`severity`/`description`
+	// must render `default "N/A"` instead of failing — a fallback render
+	// error aborts the whole email, overlay included.
+	t, err := template.New(name).Option("missingkey=zero").Funcs(emailTemplateFuncs).Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", name, err)
 	}
