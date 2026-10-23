@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": "Round 3: F8 (webhook client URL redaction and body cap) and F9 (Slack/Telegram body cap) resolved in bb21bbb; F1, F3, F5, F7 resolved in ee44f0d. Re-sweep of publishing for secrets found no open blocker/major. Remaining: F11 nit (fix-here, non-blocking: Slack/Telegram NewRequestWithContext errors unmasked), deferred F2 (bug), F4/F10 (tech debt), F6/F12 (backlog) to be filed at finalize.",
+  "branch": "bugfix/publish-quick-fix-bundle",
+  "commit": "bb21bbb",
+  "reviewed_at": "2026-10-23",
+  "findings": { "blocker": 0, "major": 2, "minor": 5, "nit": 5 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}
