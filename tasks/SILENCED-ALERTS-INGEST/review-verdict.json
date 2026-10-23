@@ -1,0 +1,9 @@
+{
+  "gate": "fix_required",
+  "reason": "F1 (major, fix-here): direct-mode silenced alert without endsAt is never published after the silence ends (dedup 'ignored' short-circuit); F2-F4 fix-here",
+  "branch": "bugfix/silenced-alerts-ingest",
+  "commit": "336aeb5",
+  "reviewed_at": "2026-10-23",
+  "findings": { "blocker": 0, "major": 1, "minor": 2, "nit": 2 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}
