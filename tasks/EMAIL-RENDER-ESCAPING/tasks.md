@@ -29,8 +29,8 @@ based_on:
 
 ## Phase 2: Тесты (после deep-review `pass`)
 
-- [ ] **2.1** HTML: `<script>`, `javascript:`; text не экранирован; дефолтные шаблоны рендерятся, в том числе алерт только с `alertname` <!-- verify: go test -run Email ./internal/infrastructure/publishing/ -->
-- [ ] **2.2** MIME: CR/LF в Subject (ASCII и не-ASCII) <!-- verify: go test -run 'BuildMIME|Email' ./internal/infrastructure/publishing/ -->
+- [x] **2.1** HTML: `<script>`, `javascript:`; text не экранирован; дефолтные шаблоны рендерятся, в том числе алерт только с `alertname` <!-- verify: go test -run Email ./internal/infrastructure/publishing/ -->
+- [x] **2.2** MIME: CR/LF в Subject (ASCII и не-ASCII) <!-- verify: go test -run 'BuildMIME|Email' ./internal/infrastructure/publishing/ -->
 
 ## Phase 3: Testing
 
