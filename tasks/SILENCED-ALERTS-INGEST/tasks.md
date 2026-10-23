@@ -32,7 +32,7 @@ based_on:
 
 ## Phase 2: Tests (после deep-review `pass`)
 
-- [ ] **2.1** Процессор: прямой режим (firing заглушен/нет, resolved), группировка (в группу, без публикации и LLM), кеш inhibition <!-- verify: go test -run Silence ./internal/core/services/ -->
+- [x] **2.1** Процессор: прямой режим (firing заглушен/нет, resolved), группировка (в группу, без публикации и LLM), кеш inhibition <!-- verify: go test -race -run Silence ./internal/core/services/ — с настоящими DeduplicationService и SimpleFilterEngine (сценарии B/C deep-review) -->
 
 ## Phase 3: Gates
 
