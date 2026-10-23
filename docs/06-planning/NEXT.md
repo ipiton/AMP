@@ -30,7 +30,15 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### ADR-018 — AMP перед Alertmanager
 
-- [ ] **ADR-018-V3-PROXY-SLICING** — нарезать эпик перехода на прокси перед upstream AM (`DECISIONS.md` § ADR-018) в `BACKLOG.md`: шесть срезов с оценками из `../docs/ADR-018 — ядро Alertmanager.md` § В3-прокси, первый — PoC (форвардер, annotations `amp_*`, fail-open, e2e Prometheus → AMP → AM). Заодно пересмотреть `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`: паритетные позиции закрыть ссылкой на ADR-018, оставить security/critical по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` влить в PoC. Lightweight, docs-only, ~0.5d.
+- [ ] **ADR-018-V3-PROXY-SLICING** — нарезать эпик перехода на прокси перед upstream AM (`DECISIONS.md` § ADR-018) в `BACKLOG.md`. Срезы и оценки (~12–18d; удаление кода оценено по объёму, без пробного удаления):
+  1. PoC — форвардер во все пиры AM (ретраи, TLS/basic auth), классификация → annotations `amp_*` с бюджетом < `group_wait`, fail-open по LLM/PG/кешу; e2e на k3d Prometheus → AMP → AM → webhook-приёмник видит annotations в сгруппированном уведомлении. 4–5d, первым;
+  2. дроп шума за флагом (default off), метрика и лог дропов (`filter_engine.go`). 0.5–1d;
+  3. удаление паритетного ядра (routing, dispatch, notify chain, nflog, таймеры, silences, inhibition, publishing/интеграции, шаблоны, K8s-Secret таргеты, Redis HA/lock), разбор wiring `service_registry.go` и конфига. 3–5d;
+  4. API и UI: убрать AM API кроме приёма алертов, UI читает состояние из AM API v2. 1.5–2.5d;
+  5. чарт: адрес AM обязателен, Valkey опционален, реплики AMP без состояния кроме PG. 1.5–2.5d;
+  6. доки и миграция: README, `ALERTMANAGER_COMPATIBILITY.md` → гайд интеграции, CHANGELOG breaking, ревизия ADR-002/006/009/016/017. 1.5–2d.
+
+  Заодно пересмотреть `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`: паритетные позиции закрыть ссылкой на ADR-018, оставить security/critical по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` влить в PoC. Lightweight, docs-only, ~0.5d.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.

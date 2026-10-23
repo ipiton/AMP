@@ -308,7 +308,7 @@
 ## ADR-018: AMP — AI-слой перед upstream Alertmanager (прокси на ingest), не замена
 - **Дата**: 2026-10-23
 - **Контекст**:
-  - явного решения «писать ядро Alertmanager самим или брать upstream» не было; сравнение вариантов, замеры и оценки — внешний документ `../docs/ADR-018 — ядро Alertmanager.md` (вне репозитория);
+  - явного решения «писать ядро Alertmanager самим или брать upstream» не было: ADR-001 фиксирует только язык, ADR-002 — объём заявлений;
   - из 128k prod-строк `go-app/` ~66k повторяют upstream (routing, dispatch, notify chain, nflog, silences, inhibition, интеграции, шаблоны, HA на Redis); то же ядро upstream v0.32 — ~20k строк. AMP-уникальное (LLM-классификация, investigation, история в PG, filter/dedup) — ~8–9k;
   - паритет — основная цена проекта: 7 из 13 critical/high ревью 2026-10-21 и ~63% открытого бэклога `BUGS.md`/`TECH-DEBT.md` — расхождения с upstream или следствие своего Redis/PG-состояния;
   - при группировке (по умолчанию) классификация в уведомление не попадает (`ALERTMANAGER_COMPATIBILITY.md` Known Gap #13): AI сейчас слабо влияет на доставку;
