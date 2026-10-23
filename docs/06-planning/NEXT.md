@@ -16,6 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence отбрасывается до ingest: не виден как `suppressed`, не становится источником inhibition. BUGS, high, ~0.5d, breaking для API. Ветка `bugfix/silenced-alerts-ingest`, workspace `tasks/SILENCED-ALERTS-INGEST/`. Взята 2026-10-23.
 
 ## Queue
 
@@ -36,9 +37,9 @@ Queue и WIP — источник правды для выбора задачи.
 ### 2. Code review 2026-10-21 — конвейер
 > Голова `REVIEW-PIPELINE-2026-10-21.md`; следующие позиции переносятся оттуда по мере освобождения WIP. Пополнено 2026-10-21.
 
-- [ ] **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence отбрасывается до ingest: не виден как `suppressed`, не становится источником inhibition. BUGS, high, Full, ~0.5d, breaking для API.
 - [ ] **ROUTE-CONTINUE-NO-FANOUT** — `continue: true` не даёт доставку во второй receiver: путь публикации берёт только первый совпавший route. BUGS, high, Full, ~1d.
 - [ ] **DURATION-UPSTREAM-UNITS** — длительности `d`/`w`/`y` в конфиге не парсятся: немодифицированный upstream-конфиг с `repeat_interval: 1d` не загружается. BUGS, high, Standard, ~0.25d.
+- [ ] **CONFIG-RELOAD-BUNDLE** — `RELOAD-SERIALIZE`, `CONFIG-VALIDATION-FAIL-CLOSED`, `CONFIG-ENV-KEYS-UNBOUND`: reload не сериализован и привязан к контексту HTTP-клиента, валидация конфига расходится между стартом и reload, env молча игнорируется для ключей без default/`BindEnv`. TD/Bundle, high, Standard, ~1.25d, breaking: битые matchers.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
