@@ -50,13 +50,13 @@ based_on:
 
 ## Phase 3: Тесты (после deep-review `pass`)
 
-- [ ] **3.1** Починить компиляцию тестов после удаления PD-кеша <!-- verify: cd go-app && go vet ./internal/infrastructure/publishing/... -->
-- [ ] **3.2** PD: resolve без trigger ⇒ `event_action=resolve`, `dedup_key=fingerprint` <!-- verify: go test -run PagerDuty ./internal/infrastructure/publishing/ -->
-- [ ] **3.3** Два Slack/Rootly-таргета с одним fingerprint не делят записи; SMTP: другой пароль/второй таргет ⇒ другой клиент <!-- verify: go test -run 'PerTarget|SMTPClientKey' ./internal/infrastructure/publishing/ -->
-- [ ] **3.4** Rootly: ID из общего хранилища виден новому экземпляру паблишера; промах resolve ⇒ `nil` + `not_tracked`, breaker не тронут; ошибка `Get` ⇒ ошибка, инцидент не создаётся <!-- verify: go test -run Rootly ./internal/infrastructure/publishing/ -->
-- [ ] **3.5** Breaker: конкурентные `CanAttempt` после `Timeout` ⇒ одна проба; переходы; тайм-аут пробы <!-- verify: go test -race -run CircuitBreaker ./internal/infrastructure/publishing/ -->
-- [ ] **3.6** Очередь: `Stop` с заданиями во всех приоритетах; `Submit` после `Stop`; двойной `Stop`; паника паблишера <!-- verify: go test -race -run 'Queue.*Stop|Panic' ./internal/infrastructure/publishing/ -->
-- [ ] **3.7** `RedactURL`; ошибка `HTTPPublisher` и `WebhookHTTPClient` без токена и с телом ≤512; лог фабрики/discovery без токена; ошибка пароля без значения <!-- verify: go test -run 'Redact|Secret' ./internal/core/ ./internal/infrastructure/publishing/ ./internal/business/publishing/ ./internal/config/ -->
+- [x] **3.1** Починить компиляцию тестов после удаления PD-кеша <!-- verify: cd go-app && go vet ./internal/infrastructure/publishing/... -->
+- [x] **3.2** PD: resolve без trigger ⇒ `event_action=resolve`, `dedup_key=fingerprint` <!-- verify: go test -run PagerDuty ./internal/infrastructure/publishing/ -->
+- [x] **3.3** Два Slack/Rootly-таргета с одним fingerprint не делят записи; SMTP: другой пароль/второй таргет ⇒ другой клиент <!-- verify: go test -run 'PerTarget|SMTPClientKey' ./internal/infrastructure/publishing/ -->
+- [x] **3.4** Rootly: ID из общего хранилища виден новому экземпляру паблишера; промах resolve ⇒ `nil` + `not_tracked`, breaker не тронут; ошибка `Get` ⇒ ошибка, инцидент не создаётся <!-- verify: go test -run Rootly ./internal/infrastructure/publishing/ -->
+- [x] **3.5** Breaker: конкурентные `CanAttempt` после `Timeout` ⇒ одна проба; переходы; тайм-аут пробы <!-- verify: go test -race -run CircuitBreaker ./internal/infrastructure/publishing/ -->
+- [x] **3.6** Очередь: `Stop` с заданиями во всех приоритетах; `Submit` после `Stop`; двойной `Stop`; паника паблишера <!-- verify: go test -race -run 'Queue.*Stop|Panic' ./internal/infrastructure/publishing/ -->
+- [x] **3.7** `RedactURL`; ошибка `HTTPPublisher` и `WebhookHTTPClient` без токена и с телом ≤512; лог фабрики/discovery без токена; ошибка пароля без значения <!-- verify: go test -run 'Redact|Secret' ./internal/core/ ./internal/infrastructure/publishing/ ./internal/business/publishing/ ./internal/config/ -->
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/publishing/... ./internal/business/publishing/...`
 

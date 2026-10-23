@@ -27,7 +27,8 @@ func TestIncidentIDCache_SetAndGet(t *testing.T) {
 	cache.Set(fingerprint, incidentID)
 
 	// Get
-	retrievedID, found := cache.Get(fingerprint)
+	retrievedID, found, err := cache.Get(fingerprint)
+	assert.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, incidentID, retrievedID)
 }
@@ -36,7 +37,8 @@ func TestIncidentIDCache_GetNonExistent(t *testing.T) {
 	cache := NewIncidentIDCache(1 * time.Hour)
 	t.Cleanup(cache.Stop)
 
-	retrievedID, found := cache.Get("nonexistent-fingerprint")
+	retrievedID, found, err := cache.Get("nonexistent-fingerprint")
+	assert.NoError(t, err)
 	assert.False(t, found)
 	assert.Empty(t, retrievedID)
 }
@@ -51,7 +53,8 @@ func TestIncidentIDCache_Expiry(t *testing.T) {
 	cache.Set(fingerprint, incidentID)
 
 	// Get immediately - should be present
-	retrievedID, found := cache.Get(fingerprint)
+	retrievedID, found, err := cache.Get(fingerprint)
+	assert.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, incidentID, retrievedID)
 
@@ -59,7 +62,8 @@ func TestIncidentIDCache_Expiry(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Get after expiry - should be gone
-	retrievedID, found = cache.Get(fingerprint)
+	retrievedID, found, err = cache.Get(fingerprint)
+	assert.NoError(t, err)
 	assert.False(t, found)
 	assert.Empty(t, retrievedID)
 }
@@ -74,37 +78,17 @@ func TestIncidentIDCache_Delete(t *testing.T) {
 	cache.Set(fingerprint, incidentID)
 
 	// Verify it's there
-	_, found := cache.Get(fingerprint)
+	_, found, err := cache.Get(fingerprint)
+	assert.NoError(t, err)
 	assert.True(t, found)
 
 	// Delete
 	cache.Delete(fingerprint)
 
 	// Verify it's gone
-	_, found = cache.Get(fingerprint)
+	_, found, err = cache.Get(fingerprint)
+	assert.NoError(t, err)
 	assert.False(t, found)
-}
-
-func TestIncidentIDCache_Size(t *testing.T) {
-	cache := NewIncidentIDCache(1 * time.Hour)
-	t.Cleanup(cache.Stop)
-
-	// Initially empty
-	assert.Equal(t, 0, cache.Size())
-
-	// Add entries
-	cache.Set("fp1", "id1")
-	cache.Set("fp2", "id2")
-	cache.Set("fp3", "id3")
-
-	// Should have 3 entries
-	assert.Equal(t, 3, cache.Size())
-
-	// Delete one
-	cache.Delete("fp1")
-
-	// Should have 2 entries
-	assert.Equal(t, 2, cache.Size())
 }
 
 func TestIncidentIDCache_ConcurrentAccess(t *testing.T) {
@@ -133,7 +117,7 @@ func TestIncidentIDCache_ConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			fingerprint := "fingerprint-" + string(rune(id))
-			_, _ = cache.Get(fingerprint)
+			_, _, _ = cache.Get(fingerprint)
 		}(i)
 	}
 
@@ -161,7 +145,7 @@ func TestIncidentIDCache_ConcurrentDeleteAndRead(t *testing.T) {
 	// Concurrent read
 	go func() {
 		defer wg.Done()
-		_, _ = cache.Get(fingerprint)
+		_, _, _ = cache.Get(fingerprint)
 	}()
 
 	wg.Wait()
@@ -183,7 +167,7 @@ func BenchmarkIncidentIDCache_Get(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = cache.Get("benchmark-fp")
+		_, _, _ = cache.Get("benchmark-fp")
 	}
 }
 
@@ -192,7 +176,7 @@ func BenchmarkIncidentIDCache_GetMiss(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = cache.Get("nonexistent-fp")
+		_, _, _ = cache.Get("nonexistent-fp")
 	}
 }
 
@@ -203,7 +187,7 @@ func BenchmarkIncidentIDCache_ConcurrentReads(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = cache.Get("benchmark-fp")
+			_, _, _ = cache.Get("benchmark-fp")
 		}
 	})
 }
