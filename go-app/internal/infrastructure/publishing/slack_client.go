@@ -254,7 +254,7 @@ func (c *HTTPSlackWebhookClient) doRequestWithRetry(ctx context.Context, req *ht
 		defer func() { _ = httpResp.Body.Close() }()
 
 		// Read response body
-		respBody, err := io.ReadAll(httpResp.Body)
+		respBody, err := readLimited(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}

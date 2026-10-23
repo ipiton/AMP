@@ -293,7 +293,7 @@ func (c *HTTPTelegramClient) Health(ctx context.Context) error {
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
-	respBody, err := io.ReadAll(httpResp.Body)
+	respBody, err := readLimited(httpResp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read health check response: %w", err)
 	}
@@ -352,7 +352,7 @@ func (c *HTTPTelegramClient) doRequestWithRetry(ctx context.Context, req *http.R
 		defer func() { _ = httpResp.Body.Close() }()
 
 		// Read response body
-		respBody, err := io.ReadAll(httpResp.Body)
+		respBody, err := readLimited(httpResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response body: %w", err)
 		}

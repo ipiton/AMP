@@ -49,11 +49,12 @@ func (p *EnhancedRootlyPublisher) Publish(
 	}
 
 	// Route based on alert status
+	cacheKey := correlationKey(target, enrichedAlert.Alert.Fingerprint)
 	switch enrichedAlert.Alert.Status {
 	case core.StatusFiring:
-		return p.createOrUpdateIncident(ctx, enrichedAlert, payload)
+		return p.createOrUpdateIncident(ctx, enrichedAlert, payload, cacheKey)
 	case core.StatusResolved:
-		return p.resolveIncident(ctx, enrichedAlert)
+		return p.resolveIncident(ctx, enrichedAlert, cacheKey)
 	default:
 		return fmt.Errorf("unknown alert status: %s", enrichedAlert.Alert.Status)
 	}
@@ -64,19 +65,18 @@ func (p *EnhancedRootlyPublisher) createOrUpdateIncident(
 	ctx context.Context,
 	enrichedAlert *core.EnrichedAlert,
 	payload map[string]interface{},
+	cacheKey string,
 ) error {
-	fingerprint := enrichedAlert.Alert.Fingerprint
-
 	// Check if incident exists in cache
-	incidentID, exists := p.cache.Get(fingerprint)
+	incidentID, exists := p.cache.Get(cacheKey)
 
 	if exists {
 		// Update existing incident
-		return p.updateIncident(ctx, incidentID, enrichedAlert, payload)
+		return p.updateIncident(ctx, incidentID, enrichedAlert, payload, cacheKey)
 	}
 
 	// Create new incident
-	return p.createIncident(ctx, enrichedAlert, payload)
+	return p.createIncident(ctx, enrichedAlert, payload, cacheKey)
 }
 
 // createIncident creates a new Rootly incident
@@ -84,6 +84,7 @@ func (p *EnhancedRootlyPublisher) createIncident(
 	ctx context.Context,
 	enrichedAlert *core.EnrichedAlert,
 	payload map[string]interface{},
+	cacheKey string,
 ) error {
 	// Build CreateIncidentRequest from payload
 	req := &CreateIncidentRequest{
@@ -114,7 +115,7 @@ func (p *EnhancedRootlyPublisher) createIncident(
 
 	// Store incident ID in cache
 	incidentID := resp.GetID()
-	p.cache.Set(enrichedAlert.Alert.Fingerprint, incidentID)
+	p.cache.Set(cacheKey, incidentID)
 
 	// Update metrics
 	if p.GetMetrics() != nil {
@@ -138,6 +139,7 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 	incidentID string,
 	enrichedAlert *core.EnrichedAlert,
 	payload map[string]interface{},
+	cacheKey string,
 ) error {
 	// Build UpdateIncidentRequest (only fields that changed)
 	req := &UpdateIncidentRequest{}
@@ -163,8 +165,8 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 			)
 
 			// Delete from cache and recreate
-			p.cache.Delete(enrichedAlert.Alert.Fingerprint)
-			return p.createIncident(ctx, enrichedAlert, payload)
+			p.cache.Delete(cacheKey)
+			return p.createIncident(ctx, enrichedAlert, payload, cacheKey)
 		}
 
 		if p.metrics != nil {
@@ -172,6 +174,11 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 		}
 		return fmt.Errorf("update incident failed: %w", err)
 	}
+
+	// Re-store the ID: a persistent IncidentIDCache (see
+	// newCacheIncidentIDCache) expires entries, and every firing update must
+	// push that expiry out so a long-running incident is still resolvable.
+	p.cache.Set(cacheKey, incidentID)
 
 	// Update metrics
 	if p.GetMetrics() != nil {
@@ -191,15 +198,23 @@ func (p *EnhancedRootlyPublisher) updateIncident(
 func (p *EnhancedRootlyPublisher) resolveIncident(
 	ctx context.Context,
 	enrichedAlert *core.EnrichedAlert,
+	cacheKey string,
 ) error {
 	// Lookup incident ID from cache
-	incidentID, exists := p.cache.Get(enrichedAlert.Alert.Fingerprint)
+	incidentID, exists := p.cache.Get(cacheKey)
 	if !exists {
-		// Not tracked, skip resolution (not an error)
-		p.GetLogger().Debug("Incident ID not found in cache, skipping resolution",
+		// Rootly assigns the incident ID, so without it there is nothing to
+		// resolve. Reporting that as success (the pre-fix `return nil`) left the
+		// incident open while AMP counted the resolve as delivered
+		// (PROVIDER-RESOLVE-ROOTLY).
+		p.GetLogger().Warn("Cannot resolve Rootly incident: incident ID not tracked",
 			"fingerprint", enrichedAlert.Alert.Fingerprint,
+			"alert_name", enrichedAlert.Alert.AlertName,
 		)
-		return nil
+		if p.metrics != nil {
+			p.metrics.RecordAPIError(v2.ProviderRootly, "incidents", "not_tracked")
+		}
+		return ErrIncidentNotTracked
 	}
 
 	// Build ResolveIncidentRequest
@@ -227,7 +242,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 			)
 
 			// Delete from cache
-			p.cache.Delete(enrichedAlert.Alert.Fingerprint)
+			p.cache.Delete(cacheKey)
 			return nil // Not an error
 		}
 
@@ -238,7 +253,7 @@ func (p *EnhancedRootlyPublisher) resolveIncident(
 	}
 
 	// Delete from cache
-	p.cache.Delete(enrichedAlert.Alert.Fingerprint)
+	p.cache.Delete(cacheKey)
 
 	// Update metrics
 	if p.GetMetrics() != nil {

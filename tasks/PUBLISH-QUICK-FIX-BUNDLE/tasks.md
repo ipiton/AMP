@@ -31,20 +31,20 @@ based_on:
 
 ## Phase 1: Resolve и изоляция состояния
 
-- [ ] **1.1** PD: resolve по `alert.Fingerprint`; удалить кеш из паблишера, фабрики, `pagerduty_cache.go`, `ErrEventNotTracked` <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.2** `correlationKey(target, fingerprint)`; Slack и Rootly ключуют им кеш <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.3** Ключ SMTP-клиента из всех полей `SMTPConfig` (пароль — sha256) <!-- verify: cd go-app && go build ./... -->
-- [ ] **1.4** Rootly: `rootly_incident_store.go` поверх `cache.Cache`, `SetRootlyIncidentStore`, wiring в `publishing_runtime.go`; продление на update; `ErrIncidentNotTracked` на промахе resolve <!-- depends: 1.2 | verify: cd go-app && go build ./... -->
+- [x] **1.1** PD: resolve по `alert.Fingerprint`; удалить кеш из паблишера, фабрики, `pagerduty_cache.go`, `ErrEventNotTracked` <!-- verify: cd go-app && go build ./... -->
+- [x] **1.2** `correlationKey(target, fingerprint)`; Slack и Rootly ключуют им кеш <!-- verify: cd go-app && go build ./... -->
+- [x] **1.3** Ключ SMTP-клиента из всех полей `SMTPConfig` (пароль — sha256) <!-- verify: cd go-app && go build ./... -->
+- [x] **1.4** Rootly: `rootly_incident_store.go` поверх `cache.Cache`, `SetRootlyIncidentStore`, wiring в `publishing_runtime.go`; продление на update; `ErrIncidentNotTracked` на промахе resolve <!-- depends: 1.2 | verify: cd go-app && go build ./... -->
 
 **Phase verification:** `cd go-app && go build ./...`
 
 ## Phase 2: Breaker, очередь, секреты
 
-- [ ] **2.1** Breaker: half-open с одной пробой и тайм-аутом пробы <!-- verify: cd go-app && go build ./... -->
-- [ ] **2.2** Очередь: `closeMu`/`closed`/`stopOnce`, дренаж всех каналов, `recover` в `processJob` <!-- verify: cd go-app && go build ./... -->
-- [ ] **2.3** `core.RedactURL`; `maskURL` делегирует; маскировка `*url.Error` и тела в `HTTPPublisher`; лог URL в фабрике и discovery <!-- verify: cd go-app && go build ./... -->
-- [ ] **2.4** `readLimited` во всех клиентах publishing, `io.LimitReader` в llm; пароль из ошибки `config.go` <!-- verify: cd go-app && go build ./... && go vet ./internal/config/ ./internal/infrastructure/llm/ -->
-- [ ] **2.5** `CHANGELOG.md` [Unreleased] Fixed; доки PD/Rootly — по grep <!-- verify: git diff --check -->
+- [x] **2.1** Breaker: half-open с одной пробой и тайм-аутом пробы <!-- verify: cd go-app && go build ./... -->
+- [x] **2.2** Очередь: `closeMu`/`closed`/`stopOnce`, дренаж всех каналов, `recover` в `processJob` <!-- verify: cd go-app && go build ./... -->
+- [x] **2.3** `core.RedactURL`; `maskURL` делегирует; маскировка `*url.Error` и тела в `HTTPPublisher`; лог URL в фабрике и discovery <!-- verify: cd go-app && go build ./... -->
+- [x] **2.4** `readLimited` во всех клиентах publishing, `io.LimitReader` в llm; пароль из ошибки `config.go` <!-- verify: cd go-app && go build ./... && go vet ./internal/config/ ./internal/infrastructure/llm/ -->
+- [x] **2.5** `CHANGELOG.md` [Unreleased] Fixed; доки PD/Rootly — по grep <!-- verify: git diff --check -->
 
 **Phase verification:** `cd go-app && go build ./... && go vet ./internal/infrastructure/publishing/...` (vet компилирует тесты: красный до Phase 3 ожидаем из-за сигнатуры PD-паблишера)
 
@@ -65,3 +65,5 @@ based_on:
 - [ ] **4.1** Гейты `WORKFLOW.md` § Гейты AMP: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh` <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
+- 2026-10-23, implement: `IncidentIDCache.Size()` убран из интерфейса — у реализации поверх общего кеша нет дешёвого подсчёта, в проде `Size()` не вызывался (только тесты, Phase 3). `pagerduty_cache.go` удалён; `pagerduty_cache_test.go` и тесты с `cache.Size()` не компилируются до Phase 3 — ожидаемо.
+- Отклонение от Spec не требовалось; хелперы тела/URL — `publishing/http_body.go` (`readLimited`, `errorBody`, `redactURLError`).

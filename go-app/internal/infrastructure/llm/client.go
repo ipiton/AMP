@@ -18,6 +18,13 @@ import (
 	"github.com/ipiton/AMP/internal/core/resilience"
 )
 
+// maxResponseBodyBytes caps how much of an LLM response is read
+// (PUBLISH-SECRETS-IN-LOGS, M-10): unbounded reads let one misbehaving
+// endpoint grow memory without limit. A completion, tool calls included, is
+// tens of KiB; 1 MiB leaves a wide margin before a truncated JSON would fail
+// to decode.
+const maxResponseBodyBytes = 1 << 20
+
 // ClassificationRequest represents the request payload to LLM API.
 type ClassificationRequest struct {
 	Alert  LLMAlertRequest `json:"alert"`
@@ -300,7 +307,7 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -402,7 +409,7 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read OpenAI response body: %w", err)
 	}
@@ -591,7 +598,7 @@ Return ONLY valid JSON with these keys:
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read investigation response: %w", err)
 	}

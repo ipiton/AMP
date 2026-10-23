@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+
+	"github.com/ipiton/AMP/internal/core"
 )
 
 // AuthStrategy defines authentication strategy interface (Strategy pattern)
@@ -149,34 +151,9 @@ func (s *CustomAuthStrategy) Name() string {
 
 // ==================== HELPER FUNCTIONS ====================
 
-// maskURL masks sensitive parts of URL for logging
+// maskURL masks sensitive parts of URL for logging: scheme and host only.
+// Delegates to core.RedactURL (PUBLISH-SECRETS-IN-LOGS) — the old version left
+// any URL of 30 characters or fewer unmasked, query string included.
 func maskURL(urlStr string) string {
-	// Simple masking: show only scheme and host
-	// Example: https://api.example.com/webhook?key=secret → https://api.example.com/***
-	if len(urlStr) > 30 {
-		// Find the position after "://"
-		schemeEnd := 0
-		for i := 0; i < len(urlStr)-3; i++ {
-			if urlStr[i:i+3] == "://" {
-				schemeEnd = i + 3
-				break
-			}
-		}
-
-		// Find the first "/" after scheme
-		pathStart := schemeEnd
-		for i := schemeEnd; i < len(urlStr); i++ {
-			if urlStr[i] == '/' || urlStr[i] == '?' {
-				pathStart = i
-				break
-			}
-		}
-
-		// Return scheme + host + masked path
-		if pathStart > schemeEnd {
-			return urlStr[:pathStart] + "/***"
-		}
-	}
-
-	return urlStr
+	return core.RedactURL(urlStr)
 }

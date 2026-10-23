@@ -114,6 +114,11 @@ func (r *ServiceRegistry) initializePublishingRuntime(ctx context.Context, confi
 		externalURL,
 	)
 
+	// PROVIDER-RESOLVE-ROOTLY: Rootly incident IDs live in the shared cache
+	// (Redis when configured), not in this process, so a resolve after a
+	// restart or on another replica still finds the incident.
+	r.publisherFactory.SetRootlyIncidentStore(r.cache)
+
 	// TEMPLATES-EPIC slice 2: hand the notification template library to the
 	// publisher factory, which wraps each target's formatter so the receiver's
 	// own `title`/`text`/`description`/`message`/`subject` templates render onto

@@ -46,6 +46,14 @@ type CircuitBreaker struct {
 	lastFailureTime time.Time
 	targetName      string
 	mu              sync.RWMutex
+
+	// probeInFlight marks the single half-open probe slot as taken;
+	// probeStartedAt bounds it. A probe whose outcome is never recorded (an
+	// abandoned job that says nothing about the target, see
+	// PublishingQueue.processJob) frees the slot after config.Timeout instead
+	// of pinning the breaker in half-open forever.
+	probeInFlight  bool
+	probeStartedAt time.Time
 }
 
 // NewCircuitBreaker creates a new circuit breaker
@@ -65,26 +73,43 @@ func NewCircuitBreakerWithName(config CircuitBreakerConfig, targetName string) *
 	}
 }
 
-// CanAttempt checks if a request can be attempted
+// CanAttempt checks if a request can be attempted.
+//
+// Open lets nothing through until config.Timeout has passed since the last
+// failure; then it moves to half-open and admits exactly ONE probe
+// (CIRCUIT-BREAKER-HALF-OPEN). Before, it only returned true without changing
+// state, so every caller after the timeout went through — the whole backlog
+// hit a target that had just been failing — while State() still said "open".
+// A write lock, because admitting the probe is a state change.
 func (cb *CircuitBreaker) CanAttempt() bool {
-	cb.mu.RLock()
-	defer cb.mu.RUnlock()
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
 
 	switch cb.state {
 	case StateClosed:
 		return true
 	case StateOpen:
-		// Check if timeout elapsed to transition to half-open
-		if time.Since(cb.lastFailureTime) > cb.config.Timeout {
-			// Transition will happen on next attempt
-			return true
+		if time.Since(cb.lastFailureTime) <= cb.config.Timeout {
+			return false
 		}
-		return false
+		cb.state = StateHalfOpen
+		cb.successCount = 0
+		return cb.takeProbe()
 	case StateHalfOpen:
-		return true
+		if cb.probeInFlight && time.Since(cb.probeStartedAt) <= cb.config.Timeout {
+			return false
+		}
+		return cb.takeProbe()
 	default:
 		return false
 	}
+}
+
+// takeProbe occupies the half-open probe slot. Caller holds cb.mu.
+func (cb *CircuitBreaker) takeProbe() bool {
+	cb.probeInFlight = true
+	cb.probeStartedAt = time.Now()
+	return true
 }
 
 // RecordSuccess records a successful attempt
@@ -97,6 +122,7 @@ func (cb *CircuitBreaker) RecordSuccess() {
 		// Reset failure count on success
 		cb.failureCount = 0
 	case StateHalfOpen:
+		cb.probeInFlight = false
 		cb.successCount++
 		if cb.successCount >= cb.config.SuccessThreshold {
 			// Transition to closed
@@ -104,14 +130,9 @@ func (cb *CircuitBreaker) RecordSuccess() {
 			cb.failureCount = 0
 			cb.successCount = 0
 		}
-	case StateOpen:
-		// Transition to half-open on first success after timeout
-		if time.Since(cb.lastFailureTime) > cb.config.Timeout {
-			cb.state = StateHalfOpen
-			cb.successCount = 1
-			cb.failureCount = 0
-		}
 	}
+	// StateOpen: a success reported by an attempt admitted before the breaker
+	// opened says nothing about recovery; only a half-open probe closes it.
 }
 
 // RecordFailure records a failed attempt
@@ -132,6 +153,7 @@ func (cb *CircuitBreaker) RecordFailure() {
 		// Go back to open on any failure in half-open
 		cb.state = StateOpen
 		cb.successCount = 0
+		cb.probeInFlight = false
 	}
 }
 
@@ -150,6 +172,7 @@ func (cb *CircuitBreaker) Reset() {
 	cb.state = StateClosed
 	cb.failureCount = 0
 	cb.successCount = 0
+	cb.probeInFlight = false
 }
 
 // GetFailureCount returns current failure count

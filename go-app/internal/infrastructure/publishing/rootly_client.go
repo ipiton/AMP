@@ -377,7 +377,7 @@ func (c *defaultRootlyIncidentsClient) setHeaders(req *http.Request) {
 
 // parseError parses Rootly API error response
 func (c *defaultRootlyIncidentsClient) parseError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := readLimited(resp.Body)
 
 	var errorResp struct {
 		Errors []struct {

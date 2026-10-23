@@ -10,7 +10,6 @@ type IncidentIDCache interface {
 	Set(fingerprint, incidentID string)
 	Get(fingerprint string) (incidentID string, exists bool)
 	Delete(fingerprint string)
-	Size() int
 
 	// Stop stops the background cleanup goroutine started by
 	// NewIncidentIDCache. Safe to call once. Callers that own an

@@ -49,11 +49,12 @@ func NewEnhancedSlackPublisher(
 func (p *EnhancedSlackPublisher) Publish(ctx context.Context, enrichedAlert *core.EnrichedAlert, target *core.PublishingTarget) error {
 	alert := enrichedAlert.Alert
 	fingerprint := alert.Fingerprint
+	cacheKey := correlationKey(target, fingerprint)
 
 	p.LogPublishStart(ctx, v2.ProviderSlack, enrichedAlert)
 
 	// Check cache for existing message
-	entry, found := p.cache.Get(fingerprint)
+	entry, found := p.cache.Get(cacheKey)
 
 	// Determine action based on alert status and cache
 	switch alert.Status {
@@ -65,7 +66,7 @@ func (p *EnhancedSlackPublisher) Publish(ctx context.Context, enrichedAlert *cor
 		}
 		// New firing alert - post new message
 		p.RecordCacheMiss(v2.ProviderSlack)
-		return p.postMessage(ctx, enrichedAlert, fingerprint)
+		return p.postMessage(ctx, enrichedAlert, fingerprint, cacheKey)
 
 	case core.StatusResolved:
 		if found {
@@ -77,7 +78,7 @@ func (p *EnhancedSlackPublisher) Publish(ctx context.Context, enrichedAlert *cor
 		p.GetLogger().WarnContext(ctx, "Resolved alert without firing message (cache miss), posting new message",
 			slog.String("fingerprint", fingerprint))
 		p.RecordCacheMiss(v2.ProviderSlack)
-		return p.postMessage(ctx, enrichedAlert, fingerprint)
+		return p.postMessage(ctx, enrichedAlert, fingerprint, cacheKey)
 
 	default:
 		return fmt.Errorf("unknown alert status: %s", alert.Status)
@@ -91,7 +92,8 @@ func (p *EnhancedSlackPublisher) Name() string {
 
 // postMessage posts a new message to Slack channel
 // Formats alert using TN-051 formatter, posts to Slack, caches message timestamp
-func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert *core.EnrichedAlert, fingerprint string) error {
+// under cacheKey (see correlationKey)
+func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert *core.EnrichedAlert, fingerprint string, cacheKey string) error {
 	startTime := time.Now()
 
 	// Format alert using TN-051 formatter
@@ -128,7 +130,7 @@ func (p *EnhancedSlackPublisher) postMessage(ctx context.Context, enrichedAlert 
 			ThreadTS:  resp.TS, // First message is thread root
 			CreatedAt: time.Now(),
 		}
-		p.cache.Store(fingerprint, entry)
+		p.cache.Store(cacheKey, entry)
 	}
 
 	// Record metrics
