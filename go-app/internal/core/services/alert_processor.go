@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -82,6 +83,7 @@ type AlertProcessor struct {
 	inhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: State tracking
 	businessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: Business metrics for inhibition
 	routeEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
+	silenceChecker     grouping.GroupSilenceChecker      // SILENCED-ALERTS-INGEST: optional, nil = no silence check
 	logger             *slog.Logger
 	metrics            *metrics.MetricsManager
 
@@ -101,6 +103,13 @@ type AlertProcessor struct {
 	// broken route tree EVERY alert hits it, and one Warn per alert would drown
 	// the log that explains why.
 	routingUnavailableWarner *rateLimitedWarner
+
+	// silenceSkipped holds fingerprints of firing alerts whose publish was
+	// skipped because of a silence and that are not held by a group
+	// (SILENCED-ALERTS-INGEST). Dedup ignores an unchanged re-send (e.g. no
+	// endsAt), which would otherwise never reach publishing once the silence
+	// ends. Per process: a re-send landing on another replica is not covered.
+	silenceSkipped sync.Map
 
 	// Grouping subsystem wiring (task 2.3, alertmanager-parity). groupingEnabled
 	// is config.Grouping.Enabled AND a `route:` tree being configured (see
@@ -156,6 +165,12 @@ type AlertProcessorConfig struct {
 	InhibitionState    inhibition.InhibitionStateManager // TN-130 Phase 6: optional, for state tracking
 	BusinessMetrics    *metrics.BusinessMetrics          // TN-130 Phase 6: required if using inhibition
 	RouteEvaluator     RouteEvaluator                    // task 1.4: optional, nil in lite/legacy mode (no route: section)
+
+	// SilenceChecker keeps silenced firing alerts out of direct publish
+	// (SILENCED-ALERTS-INGEST). Optional: nil disables the check. Silenced
+	// alerts are still ingested, stored and act as inhibition sources, as in
+	// upstream, where a silence only applies at notification time.
+	SilenceChecker grouping.GroupSilenceChecker
 
 	// GroupingEnabled is config.Grouping.Enabled AND a `route:` tree being
 	// configured (task 2.3; see ServiceRegistry). When true,
@@ -228,6 +243,7 @@ func NewAlertProcessor(config AlertProcessorConfig) (*AlertProcessor, error) {
 		inhibitionState:    config.InhibitionState,    // TN-130 Phase 6
 		businessMetrics:    config.BusinessMetrics,    // TN-130 Phase 6
 		routeEvaluator:     config.RouteEvaluator,     // task 1.4
+		silenceChecker:     config.SilenceChecker,     // SILENCED-ALERTS-INGEST
 		groupingEnabled:    config.GroupingEnabled,    // task 2.3
 		groupManager:       config.GroupManager,       // task 2.3
 		groupKeyGenerator:  config.GroupKeyGenerator,  // task 2.3
@@ -538,7 +554,11 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 			// alert without endsAt the re-send is what keeps it a source
 			// (resolve_timeout window), as in upstream where every received
 			// alert updates the inhibitor's source cache.
-			if dedupResult.Action == ProcessActionIgnored {
+			// Exception: a duplicate of an alert whose publish a silence
+			// skipped goes on, so it is published once the silence ends
+			// (SILENCED-ALERTS-INGEST); Step 0.5 refreshes the cache for it.
+			_, silenceSkipped := p.silenceSkipped.Load(alert.Fingerprint)
+			if dedupResult.Action == ProcessActionIgnored && !silenceSkipped {
 				if p.inhibitionCache != nil && alert.Status == core.StatusFiring {
 					if err := p.inhibitionCache.AddFiringAlert(ctx, alert); err != nil {
 						p.logger.Warn("Failed to refresh alert in inhibition cache",
@@ -554,7 +574,9 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 			}
 
 			// Use deduplicated alert for further processing (may be updated)
-			alert = dedupResult.Alert
+			if dedupResult.Action != ProcessActionIgnored {
+				alert = dedupResult.Alert
+			}
 		}
 	}
 
@@ -643,6 +665,37 @@ func (p *AlertProcessor) ProcessAlert(ctx context.Context, alert *core.Alert) er
 	// lastRoutingDecision atomic slot): each mode handler below decides
 	// per-alert whether to publish directly or route into a group.
 	decision := p.evaluateRoute(alert)
+
+	// SILENCED-ALERTS-INGEST: a silenced firing alert is ingested (stored,
+	// inhibition source — steps above) but never published directly. With
+	// grouping it still enters its group, whose notify chain applies the
+	// silence at send time, so the group notifies once the silence ends.
+	// Checked before the mode handlers: no LLM call or investigation for an
+	// alert nobody will be notified about. FilterEngine is not consulted
+	// here: its duplicate rule is stateful, and recording a silenced re-send
+	// would block the first publish after the silence ends (deep-review F6);
+	// the group therefore holds the alert unfiltered (TECH-DEBT
+	// SILENCED-GROUP-UNFILTERED).
+	if p.silenceChecker != nil && alert.Status == core.StatusFiring && p.silenceChecker.HasActiveMatch(alert.Labels, time.Now()) {
+		p.logger.Info("Alert silenced, skipping publish",
+			"alert", alert.AlertName,
+			"fingerprint", alert.Fingerprint)
+		if p.shouldGroup(decision) {
+			// No fail-open here: a grouping failure must not turn into a
+			// direct publish of a silenced alert.
+			if p.routeAlertToGroup(ctx, alert, decision) {
+				p.silenceSkipped.Delete(alert.Fingerprint)
+				return nil
+			}
+			p.logger.Warn("Silenced alert not grouped, not publishing it directly",
+				"alert", alert.AlertName,
+				"fingerprint", alert.Fingerprint)
+		}
+		p.silenceSkipped.Store(alert.Fingerprint, struct{}{})
+		return nil
+	}
+	// Not silenced (or resolved): from here the alert takes the normal path.
+	p.silenceSkipped.Delete(alert.Fingerprint)
 
 	// Get current enrichment mode
 	mode, err := p.enrichmentManager.GetMode(ctx)

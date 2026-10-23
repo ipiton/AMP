@@ -8,7 +8,7 @@
 - Tier — по Risk Profile (`docs/solo-kanban/workflow.md` § Step Matrix): security и семантика Alertmanager — Full; refactor без изменения поведения — Standard; механика — Lightweight. Финальный tier подтверждает `start-task`.
 - `fix:` и `refactor:` не смешивать в одном PR (CODE-REVIEW § 11, принципы).
 - Закрытая задача: `[x]` здесь, запись удаляется из источника, строка в `DONE.md`.
-- В Queue `NEXT.md` (§ 2) на 2026-10-23: №5–7; №1 закрыт 2026-10-22, №2–3 закрыты 2026-10-23, №4 в WIP.
+- В Queue `NEXT.md` (§ 2) на 2026-10-23: №5–7; №1 закрыт 2026-10-22, №2–4 закрыты 2026-10-23.
 
 Обозначения источника: **B** — `BUGS.md`, **TD** — `TECH-DEBT.md`, **TD/Bundle** — `TECH-DEBT.md` § Bundles, **BL** — `BACKLOG.md`.
 
@@ -24,7 +24,7 @@
 | № | | Задача | Источник | Tier | Оценка | После | Находки |
 |---|---|---|---|---|---|---|---|
 | 3 | [x] | `EMAIL-RENDER-ESCAPING` | B | Full | 0.25d | — | H-3, L-1 |
-| 4 | [ ] | `SILENCED-ALERTS-INGEST` | B | Full | 0.5d | — | H-1 (breaking) |
+| 4 | [x] | `SILENCED-ALERTS-INGEST` | B | Full | 0.5d | — | H-1 (breaking) |
 | 5 | [ ] | `ROUTE-CONTINUE-NO-FANOUT` | B (существовал) | Full | 1d | — | H-10 |
 | 6 | [ ] | `DURATION-UPSTREAM-UNITS` | B | Standard | 0.25d | — | H-2 |
 | 7 | [ ] | `CONFIG-RELOAD-BUNDLE` | TD/Bundle | Standard | 1.25d | — | H-5, H-6, M-19, M-20, M-22, L-5 (breaking: битые matchers) |

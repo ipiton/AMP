@@ -38,6 +38,14 @@
 - **Refs:** `tasks/archive/PUBLISH-QUICK-FIX-BUNDLE/review-findings.md` F2.
 - **Status:** open
 
+### [medium][Inhibition][~0.25d] INHIBITED-RESEND-NEVER-NOTIFIED
+- **Title:** подавленный inhibition алерт без `endsAt` не уведомит и после ухода источника
+- **Problem:** `AlertProcessor.ProcessAlert` (`internal/core/services/alert_processor.go`): inhibited firing-алерт уже записан dedup'ом (`created`) и выходит `return nil` до `evaluateRoute` — ни публикации, ни группы. Когда источник гаснет, неизменный resend (нет `endsAt`: Prometheus-API-формат, legacy, `amtool alert add` без `--end`) dedup считает `ignored`, и `ProcessAlert` выходит до inhibition/группы. Тот же класс, что F1 `SILENCED-ALERTS-INGEST` (там закрыт `silenceSkipped`). `hypothesis`: трасса по коду, не воспроизведено тестом.
+- **Impact:** цель inhibition молчит до resolve или изменения алерта; в режиме группировки — тоже (алерт не попадает в группу). Отправители с меняющимся `endsAt` (Prometheus в Alertmanager-формате) не затронуты.
+- **Fix:** как в upstream — inhibited алерт всё равно попадает в группу (notify chain уже делает Inhibit), а в прямом режиме — помечать fingerprint по образцу `silenceSkipped`. Тест: inhibited без `endsAt` → источник resolved → resend → одна публикация.
+- **Refs:** `tasks/archive/SILENCED-ALERTS-INGEST/review-findings.md` F1.
+- **Status:** open
+
 ### [high][Routing][~1d] ROUTE-CONTINUE-NO-FANOUT
 - **Title:** `continue: true` не даёт доставку во второй receiver — алерт уходит только в первый совпавший route
 - **Problem:** путь публикации берёт одно решение: `AlertProcessor.evaluateRoute` (`go-app/internal/core/services/alert_processor.go:271`) → `routeTreeEvaluator.Evaluate` (`internal/application/route_evaluator.go:100`) → `businessrouting.RouteEvaluator.Evaluate` — первый матч; `services.RoutingDecision` хранит один `Receiver`. Мультиматч по `continue` есть в `RouteMatcher.FindMatchingRoutes` и `RouteEvaluator.EvaluateWithAlternatives` (`internal/business/routing/evaluator.go:277`), но у `EvaluateWithAlternatives` нет ни одного не-тестового вызова.
@@ -309,14 +317,6 @@
 - **Impact:** источник перестаёт подавлять на этой реплике до следующего resend (~1m у Prometheus, для webhook — до повтора). Реалистичный случай — HA-пара Prometheus с рассинхроном оценки (одна шлёт resolved, другая firing). Другие реплики согласованы (там победил resolve).
 - **Fix:** в `RemoveAlert` после `Delete`/`SRem`, если в L1 локальная запись (`!fromSync`) с `writtenAt` позже первого tombstone, — повторно записать её в Redis (или сбросить ей `redisConfirmedAt`). Тест на `hookCache` из `cache_test.go`: add внутри `Delete` remove ⇒ после синка источник виден.
 - **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F8.
-- **Status:** open
-
-### [high][API][~0.5d] SILENCED-ALERTS-INGEST
-- **Title:** firing-алерт под активным silence отбрасывается до ingest
-- **Problem:** `handleAlertsPost` (`internal/application/handlers/alerts.go:431-436`) фильтрует `silences.HasActiveMatch` до `ProcessAlert`/`IngestBatch`. Контрактный тест `cmd/server/main_phase0_contract_test.go:1453` закрепляет это (0 алертов после POST заглушенного).
-- **Impact:** алерт не виден в `GET /api/v2/alerts` со `status.state=suppressed` (karma, `amtool alert query -s`); не становится источником inhibition (в upstream становится); нет записи в истории.
-- **Fix:** убрать фильтр из хендлера — подавление уже делает notify chain (`filterSilenced`, `grouping/manager_impl.go:1215`); переписать контрактный тест на «алерт есть, `suppressed`». Breaking для клиентов API — запись в CHANGELOG. Смежно `API-ALERTS-RECEIVER-INHIBITED-STATUS`.
-- **Refs:** CODE-REVIEW-2026-10-21 H-1, D-4.
 - **Status:** open
 
 ### [high][Config][~0.25d] DURATION-UPSTREAM-UNITS

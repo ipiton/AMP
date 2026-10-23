@@ -1446,12 +1446,21 @@ func TestPhase0SilenceAffectsAlertIngest(t *testing.T) {
 		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
 	}
 
+	// SILENCED-ALERTS-INGEST: a silenced alert is ingested and reported as
+	// suppressed (upstream applies silences at notification time only).
 	var alerts []map[string]any
 	if err := json.Unmarshal(alertsRec.Body.Bytes(), &alerts); err != nil {
 		t.Fatalf("failed to decode alerts response: %v", err)
 	}
-	if len(alerts) != 0 {
-		t.Fatalf("expected silenced alert to be suppressed, got %d alerts", len(alerts))
+	if len(alerts) != 1 {
+		t.Fatalf("expected the silenced alert to be stored, got %d alerts", len(alerts))
+	}
+	status, _ := alerts[0]["status"].(map[string]any)
+	if state := status["state"]; state != "suppressed" {
+		t.Fatalf("expected silenced alert state suppressed, got %v", state)
+	}
+	if silencedBy, _ := status["silencedBy"].([]any); len(silencedBy) != 1 {
+		t.Fatalf("expected silencedBy with one silence, got %v", status["silencedBy"])
 	}
 
 	unsilencedPayload := `[
@@ -1479,8 +1488,8 @@ func TestPhase0SilenceAffectsAlertIngest(t *testing.T) {
 	if err := json.Unmarshal(alertsAfterRec.Body.Bytes(), &alertsAfter); err != nil {
 		t.Fatalf("failed to decode alerts response: %v", err)
 	}
-	if len(alertsAfter) != 1 {
-		t.Fatalf("expected only unsilenced alert to be stored, got %d", len(alertsAfter))
+	if len(alertsAfter) != 2 {
+		t.Fatalf("expected silenced and unsilenced alerts to be stored, got %d", len(alertsAfter))
 	}
 }
 
@@ -1914,13 +1923,27 @@ func TestPhase0E2ESmoke_IngestSilenceAndHistoryRecent(t *testing.T) {
 		t.Fatalf("POST /api/v2/alerts control expected 200, got %d", controlAlertRec.Code)
 	}
 
-	// ADR-002: /history/recent was removed; the active runtime drops silenced
-	// firing alerts at ingest, so only the control alert is listed.
-	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	// ADR-002: /history/recent was removed. SILENCED-ALERTS-INGEST: both
+	// alerts are ingested; silenced=false leaves only the control alert.
+	allReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil)
+	allRec := httptest.NewRecorder()
+	mux.ServeHTTP(allRec, allReq)
+	if allRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v2/alerts expected 200, got %d", allRec.Code)
+	}
+	var all []map[string]any
+	if err := json.Unmarshal(allRec.Body.Bytes(), &all); err != nil {
+		t.Fatalf("failed to decode alerts response: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected muted and control alerts to be ingested, got %d", len(all))
+	}
+
+	alertsReq := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?silenced=false", nil)
 	alertsRec := httptest.NewRecorder()
 	mux.ServeHTTP(alertsRec, alertsReq)
 	if alertsRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/alerts expected 200, got %d", alertsRec.Code)
+		t.Fatalf("GET /api/v2/alerts?silenced=false expected 200, got %d", alertsRec.Code)
 	}
 
 	var alerts []map[string]any
@@ -1928,7 +1951,7 @@ func TestPhase0E2ESmoke_IngestSilenceAndHistoryRecent(t *testing.T) {
 		t.Fatalf("failed to decode alerts response: %v", err)
 	}
 	if len(alerts) != 1 {
-		t.Fatalf("expected only the non-muted alert to be ingested, got %d", len(alerts))
+		t.Fatalf("expected only the non-muted alert with silenced=false, got %d", len(alerts))
 	}
 
 	labels, ok := alerts[0]["labels"].(map[string]any)

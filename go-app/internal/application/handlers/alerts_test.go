@@ -310,14 +310,24 @@ func TestAlertsHandler_EmptyFilter_ReturnsAll(t *testing.T) {
 
 func TestAlertsHandler_SilencedAlertIsSuppressed(t *testing.T) {
 	publisher := &fakePublisher{}
+	silenceStore := memory.NewSilenceStore()
+	processor, err := services.NewAlertProcessor(services.AlertProcessorConfig{
+		FilterEngine:   &fakeFilterEngine{},
+		Publisher:      publisher,
+		SilenceChecker: silenceStore,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("NewAlertProcessor() error = %v", err)
+	}
 	registry := &fakeRegistry{
 		alertStore:   memory.NewAlertStore(),
-		silenceStore: memory.NewSilenceStore(),
-		processor:    newTestProcessor(t, publisher),
+		silenceStore: silenceStore,
+		processor:    processor,
 	}
 
 	now := time.Now().UTC()
-	_, err := registry.silenceStore.CreateOrUpdate(&core.SilenceInput{
+	silenceID, err := registry.silenceStore.CreateOrUpdate(&core.SilenceInput{
 		Matchers: []core.SilenceMatcherInput{
 			{Name: "alertname", Value: "MutedAlert"},
 		},
@@ -347,10 +357,33 @@ func TestAlertsHandler_SilencedAlertIsSuppressed(t *testing.T) {
 		t.Fatalf("POST status = %d, want 200", rec.Code)
 	}
 	if len(publisher.published) != 0 {
-		t.Fatalf("expected silenced alert to be skipped, got %d published", len(publisher.published))
+		t.Fatalf("expected silenced alert not to be published, got %d published", len(publisher.published))
 	}
-	if total, _, _ := registry.alertStore.Stats(); total != 0 {
-		t.Fatalf("expected no stored alerts, got %d", total)
+
+	// SILENCED-ALERTS-INGEST: the alert is stored and reported as suppressed.
+	getRec := httptest.NewRecorder()
+	handler(getRec, httptest.NewRequest(http.MethodGet, "/api/v2/alerts", nil))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", getRec.Code)
+	}
+	var got []struct {
+		Labels map[string]string `json:"labels"`
+		Status struct {
+			State      string   `json:"state"`
+			SilencedBy []string `json:"silencedBy"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected the silenced alert to be stored, got %d alerts", len(got))
+	}
+	if got[0].Status.State != "suppressed" {
+		t.Fatalf("state = %q, want suppressed", got[0].Status.State)
+	}
+	if len(got[0].Status.SilencedBy) != 1 || got[0].Status.SilencedBy[0] != silenceID {
+		t.Fatalf("silencedBy = %v, want [%s]", got[0].Status.SilencedBy, silenceID)
 	}
 }
 
