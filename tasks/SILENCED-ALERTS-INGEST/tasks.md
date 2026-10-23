@@ -36,6 +36,8 @@ based_on:
 
 ## Phase 3: Gates
 
-- [ ] **3.1** Гейты `WORKFLOW.md` § Гейты AMP <!-- verify: evidence/release-gate.txt -->
+- [x] **3.1** Гейты `WORKFLOW.md` § Гейты AMP <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
+- 2026-10-23, deep-review: раунд 1 `fix_required` @ `336aeb5` (F1 major — алерт без `endsAt` после снятия silence не публиковался: dedup `ignored`), раунд 2 `fix_required` @ `bc9a0be` (F6 major — правка F2 вызывала фильтр с состоянием Rule 7 и снова ломала F1), раунд 3 `pass` @ `d179b42`. F2 → TECH-DEBT `SILENCED-GROUP-UNFILTERED`, F5 → BACKLOG `SILENCE-SKIP-METRIC`.
+- 2026-10-23, testing: `go vet`, `go test -race` services/application, `-tags futureparity ./cmd/server/` зелёные; новые тесты краснеют при откате фикса F1; `make -C go-app quality-gates-fast` зелёный; `scripts/release-gate.sh` — 11/12 PASS, `lint` FAIL только в `delivery_confirmation_test.go` и `silencing/redis_event_bus_test.go` (предсуществующий `LINT-ERRCHECK-CHANNEL-RECEIVE`). `git diff --check` чистый. Флейк: один раз упал `internal/infrastructure/inhibition` в полном прогоне `go test ./...`, пакет диффом не затронут, три повтора зелёные.
