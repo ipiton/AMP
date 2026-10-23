@@ -17,6 +17,8 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-23 — (Owner / Architecture) **ADR-018-CORE-DECISION** — путь ядра Alertmanager выбран: AMP — AI-слой перед upstream AM (прокси на ingest, annotations `amp_*`, fail-open), своё паритетное ядро удаляется. Запись — `DECISIONS.md` § ADR-018; сравнение вариантов и оценка В3-прокси (~12–18d, PoC 4–5d) — `../docs/ADR-018 — ядро Alertmanager.md`. Конвейер ревью 2026-10-21 в Queue приостановлен; нарезка эпика — `ADR-018-V3-PROXY-SLICING`.
+
 - 2026-10-23 — (BUG / API, high) **SILENCED-ALERTS-INGEST** — firing-алерт под активным silence принимается, как в upstream: виден в `GET /api/v2/alerts` (и v1, `/alerts/groups`) со `state=suppressed` и `silencedBy`, становится источником inhibition, пишется в историю; уведомление по-прежнему не уходит. Breaking для API-клиентов.
   - **Код:** `handleAlertsPost` — silence-фильтр удалён. `AlertProcessor` — `SilenceChecker` (`r.silenceStore`): заглушенный firing после dedup/inhibition не публикуется, при группировке уходит в группу (notify chain режет по silence), без LLM/investigation и без fail-open; `silenceSkipped` — dedup-`ignored` не обрывает путь алерту, публикацию которого пропустил silence (иначе алерт без `endsAt` не уведомлял бы до resolve).
   - **Доки:** CHANGELOG [Unreleased] Fixed + Breaking changes (`?silenced=false`, рост хранилища, ограничение «на реплику»).

@@ -23,12 +23,14 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### Owner
 
-- [ ] **ADR-018-CORE-DECISION** — выбрать путь ядра Alertmanager: своё ядро (В1), пакеты upstream как библиотеки (В2) или upstream AM + AMP рядом (В3); сравнение, что переживает каждый вариант и цена перехода — внешний документ `../docs/ADR-018 — ядро Alertmanager.md` (вне репозитория). После решения — запись в `DECISIONS.md`. От ответа зависит, продолжать ли паритетные позиции `REVIEW-PIPELINE-2026-10-21.md`. `~30min`
-  Trigger: owner ready.
 - [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
   Trigger: owner ready.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` был красный (GO-2026-6599…6617); `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16 — локально `govulncheck` на `go1.26.9` чистый, release-gate PASS. Осталось: push `main`, дождаться зелёного CI (включая `govulncheck`), затем включить защиту. `~5min`
   Waiting-on: push `main` и зелёный CI на нём.
+
+### ADR-018 — AMP перед Alertmanager
+
+- [ ] **ADR-018-V3-PROXY-SLICING** — нарезать эпик перехода на прокси перед upstream AM (`DECISIONS.md` § ADR-018) в `BACKLOG.md`: шесть срезов с оценками из `../docs/ADR-018 — ядро Alertmanager.md` § В3-прокси, первый — PoC (форвардер, annotations `amp_*`, fail-open, e2e Prometheus → AMP → AM). Заодно пересмотреть `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`: паритетные позиции закрыть ссылкой на ADR-018, оставить security/critical по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` влить в PoC. Lightweight, docs-only, ~0.5d.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
@@ -36,11 +38,7 @@ Queue и WIP — источник правды для выбора задачи.
 - [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `PROD-LLM-ALERT-PATH-ISOLATION`: пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
 ### 2. Code review 2026-10-21 — конвейер
-> Голова `REVIEW-PIPELINE-2026-10-21.md`; следующие позиции переносятся оттуда по мере освобождения WIP. Пополнено 2026-10-21.
-
-- [ ] **ROUTE-CONTINUE-NO-FANOUT** — `continue: true` не даёт доставку во второй receiver: путь публикации берёт только первый совпавший route. BUGS, high, Full, ~1d.
-- [ ] **DURATION-UPSTREAM-UNITS** — длительности `d`/`w`/`y` в конфиге не парсятся: немодифицированный upstream-конфиг с `repeat_interval: 1d` не загружается. BUGS, high, Standard, ~0.25d.
-- [ ] **CONFIG-RELOAD-BUNDLE** — `RELOAD-SERIALIZE`, `CONFIG-VALIDATION-FAIL-CLOSED`, `CONFIG-ENV-KEYS-UNBOUND`: reload не сериализован и привязан к контексту HTTP-клиента, валидация конфига расходится между стартом и reload, env молча игнорируется для ключей без default/`BindEnv`. TD/Bundle, high, Standard, ~1.25d, breaking: битые matchers.
+> Приостановлен 2026-10-23 по ADR-018: паритетные позиции (`ROUTE-CONTINUE-NO-FANOUT`, `DURATION-UPSTREAM-UNITS`, `CONFIG-RELOAD-BUNDLE` и следующие) относятся к удаляемому ядру и не берутся. Записи остаются в `BUGS.md`/`TECH-DEBT.md`/`REVIEW-PIPELINE-2026-10-21.md` до `ADR-018-V3-PROXY-SLICING`; security/critical по переживающему переход коду возвращаются в Queue оттуда.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
