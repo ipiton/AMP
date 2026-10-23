@@ -1,9 +1,9 @@
 {
   "gate": "fix_required",
-  "reason": "F1 (major, fix-here): direct-mode silenced alert without endsAt is never published after the silence ends (dedup 'ignored' short-circuit); F2-F4 fix-here",
+  "reason": "F6 (major, fix-here): Rule 7 isDuplicate called in the silence branch deletes the silenceSkipped mark and blocks the first re-send after the silence ends, so F1 is still reproducible in direct mode for alerts without endsAt",
   "branch": "bugfix/silenced-alerts-ingest",
-  "commit": "336aeb5",
+  "commit": "bc9a0be",
   "reviewed_at": "2026-10-23",
-  "findings": { "blocker": 0, "major": 1, "minor": 2, "nit": 2 },
+  "findings": { "blocker": 0, "major": 2, "minor": 2, "nit": 2 },
   "open": { "blocker": 0, "major_without_disposition": 0 }
 }

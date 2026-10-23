@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (сигналы `C X R`, Full tier: `C` + 3 сигнала)
 **Reviewer perspective:** independent agent (не автор кода); линзы correctness (путь публикации заглушенного/незаглушенного/resolved алерта в прямом режиме и в группировке, dedup, кеш inhibition), premises, contract (`C`: `GET /api/v2/alerts`, `/api/v2/alerts/groups`, v1), cross-boundary (`X`: хендлер → `AlertProcessor` → `GroupManager`/notify chain, сборка в `service_registry`), `R` (горячий путь `HasActiveMatch`, логи/метрики), maintainability
 **Reviewed at:** 2026-10-23
-**Reviewed tree:** bugfix/silenced-alerts-ingest @ 336aeb5 (diff `622e33d..336aeb5`)
-**Verdict:** fix_required (see `review-verdict.json`)
+**Reviewed tree:** раунд 1 — bugfix/silenced-alerts-ingest @ 336aeb5 (diff `622e33d..336aeb5`); раунд 2 — @ bc9a0be (diff `b19ea92..bc9a0be`)
+**Verdict:** раунд 1 — fix_required; раунд 2 — fix_required (see `review-verdict.json`)
 
 ## Проверено (без находок)
 
@@ -70,6 +70,40 @@
 - Группировка: заглушенный firing — ровно один `AddAlertToGroup`, 0 публикаций и 0 вызовов LLM; ошибка группировки — 0 публикаций (без fail-open).
 - F1: алерт без `endsAt` → silence → истечение → resend → публикация (после фикса).
 - `SilenceChecker == nil` — поведение прежнее.
+
+## Раунд 2 (2026-10-23, @ bc9a0be)
+
+Дифф `b19ea92..bc9a0be`: `silenceSkipped` (`sync.Map`) и исключение для dedup-`ignored` в `ProcessAlert`, `ShouldBlock(alert, nil)` и Warn в ветке silence, CHANGELOG (Fixed, Breaking), Spec (Design 2/2a, Edge Cases 2/4, Risks). Проверено временным тестом в `internal/core/services` с настоящим `DeduplicationService` (удалён, дерево чистое); `go build ./...`, `go vet`, `go test -race ./internal/core/services/ ./internal/application/...` — 606 passed; `go test -tags futureparity ./cmd/server/` — 202 passed.
+
+### Статус находок раунда 1
+
+- **F1 — не закрыт (механизм верен, но сломан правкой F2, см. F6).** С фильтром без состояния (`fakeFilterEngine`) сценарий «без `endsAt` → silence → два resend под silence → снятие → три resend» даёт ровно одну публикацию: исключение для `ignored` срабатывает, после публикации запись удаляется, повторных публикаций нет. Логика набора проверена:
+  - `Load` выполняется после `deduplication.ProcessAlert`, который проставляет `Fingerprint`; при `ignored` используется входной алерт (тот же fingerprint), а не сохранённый — для дальнейшего пути безразлично.
+  - Inhibition: помеченный `ignored`-повтор проходит Step 0.5 (кеш источников обновляется, как и в обычной `ignored`-ветке) и inhibition-проверку; если алерт подавлен — `return` до проверки silence, запись остаётся, и после снятия inhibition resend будет опубликован. Побочный эффект: для помеченных fingerprint-ов `RecordInhibition` и метрика `inhibited` пишутся на каждый resend, а не только на изменение — на корректность не влияет.
+  - Гонки: операции `sync.Map` атомарны; два одновременных помеченных resend-а после снятия silence оба пройдут до публикации, второй отрежет Rule 7 `isDuplicate` (под мьютексом) — двойной публикации нет. `-race` чист.
+  - Удаление записи стоит до mode-хендлеров: если публикация упала (`resolveReceiver`/publisher вернули ошибку), запись уже удалена и неизменный resend снова станет `ignored`. Это тот же класс, что у любого алерта без `endsAt` при ошибке публикации (dedup уже записал), не регрессия.
+  - Утечка: запись живёт до resolve/публикации/группировки; алерт, который перестали слать без resolve, оставляет одну запись навсегда; набор не реплицируется. Оба ограничения задокументированы в Spec (Edge Case 2) и CHANGELOG — приемлемо.
+- **F2 — resolved по существу, но реализация порождает F6.** `ShouldBlock(alert, nil)` отсекает `empty_alert_name` до группы; отказ от LLM-фильтра задокументирован комментарием.
+- **F3 — resolved.** Breaking-запись называет `/api/v2/alerts/groups` и счётчики дашборда; Spec Risks дополнен.
+- **F4 — resolved.** Добавлен Warn «Silenced alert not grouped, not publishing it directly». Error внутри `routeAlertToGroup` по-прежнему говорит «falling back to direct publish (fail-open)», но следующая строка лога это опровергает — достаточно.
+- **F5 — defer-backlog**, без изменений.
+
+### Новые находки
+
+#### F6 — Rule 7 (`isDuplicate`) в ветке silence стирает пометку `silenceSkipped` и блокирует первый resend после снятия silence — F1 в прямом режиме не исправлен
+- **Severity:** major
+- **Location:** `go-app/internal/core/services/alert_processor.go` (ветка silence: `ShouldBlock(alert, nil)` → `silenceSkipped.Delete`; удаление записи перед mode-хендлерами); `go-app/internal/core/services/filter_engine.go:141-172` (`isDuplicate`)
+- **Issue:** `SimpleFilterEngine.ShouldBlock` не чистая функция: Rule 7 записывает `fingerprint → (status, seenAt)` и блокирует повтор того же статуса в окне `DefaultDedupWindow` = 1 мин. В ветке silence это даёт две поломки (обе воспроизведены временным тестом с настоящими `DeduplicationService` и `SimpleFilterEngine`, ожидалась одна публикация):
+  1. **Два resend-а под silence в пределах окна** (отправитель шлёт чаще раза в минуту): второй блокируется как `duplicate`, ветка «blocked by filter» удаляет запись из `silenceSkipped`. После снятия silence неизменный resend — `ignored` без пометки ⇒ **0 публикаций** до resolve (окно 50 мс, тот же сценарий).
+  2. **Снятие silence в пределах окна от последнего resend-а под silence:** обычный путь удаляет запись до mode-хендлера, затем `processTransparent`/`processEnriched` вызывает `ShouldBlock` и Rule 7 видит `firing`, записанный веткой silence, ⇒ `duplicate`, публикации нет; следующий resend — `ignored` без пометки ⇒ **0 публикаций** (окно 1 мин, resend сразу после снятия).
+  Для отправителей с меняющимся `endsAt` (Prometheus) последствие мягче — публикация откладывается до resend-а вне окна, но с `endsAt`-less алертом F1 воспроизводится как в раунде 1. В режиме группировки сценарий 1 бьёт по алерту, которому не удалась группировка (единственный случай, когда он помечен).
+- **Recommendation:** не трогать состояние Rule 7 в ветке silence. Например: применять фильтр только перед `routeAlertToGroup` (в прямом режиме он не нужен — алерт не публикуется, а после снятия silence фильтр отработает на обычном пути) и не считать причину `duplicate` блокировкой в этой ветке; либо вынести в `FilterEngine` проверку без побочных эффектов (правила 5/6) и вызывать её. В любом варианте запись `silenceSkipped` не должна удаляться из-за `duplicate`. Тесты Phase 2 — с настоящим `SimpleFilterEngine`, а не `fakeFilterEngine`: оба сценария выше плюс «resend после окна».
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### Итог раунда 2
+
+F3 и F4 закрыты, F5 отложен. F1 остаётся открытым из-за F6 (major, fix-here): механизм `silenceSkipped` корректен, но Rule 7, вызванный в ветке silence, стирает пометку и съедает первый resend после снятия silence. Gate — `fix_required`.
 
 ## Anti-Pattern Check
 
