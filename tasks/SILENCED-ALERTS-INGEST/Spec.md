@@ -24,7 +24,8 @@ based_on:
 ## Design
 
 1. `AlertProcessorConfig.SilenceChecker grouping.GroupSilenceChecker` → поле `silenceChecker`.
-2. `ProcessAlert`, после `decision := p.evaluateRoute(alert)`: если `alert.Status == core.StatusFiring` и `silenceChecker.HasActiveMatch(alert.Labels, time.Now())` — Info-лог; при `shouldGroup(decision)` — `routeAlertToGroup` (результат не ведёт в прямую публикацию); `return nil`.
+2. `ProcessAlert`, после `decision := p.evaluateRoute(alert)`: если `alert.Status == core.StatusFiring` и `silenceChecker.HasActiveMatch(alert.Labels, time.Now())` — Info-лог; `filterEngine.ShouldBlock(alert, nil)` ⇒ `return nil` (deep-review F2); при `shouldGroup(decision)` — `routeAlertToGroup` (результат не ведёт в прямую публикацию, неудача — Warn, F4); `return nil`.
+2a. Deep-review F1: fingerprint заглушенного алерта, не попавшего в группу, — в `silenceSkipped` (`sync.Map`). Dedup-`ignored` для такого fingerprint не обрывает `ProcessAlert`; после проверки silence незаглушенный/resolved алерт из набора удаляется (как и успешно сгруппированный или отфильтрованный). Иначе алерт без `endsAt` после снятия silence не публиковался бы до resolve.
 3. `service_registry.go`: `SilenceChecker` = `r.silenceStore` при не-nil.
 4. `handleAlertsPost`: убрать silence-фильтр, параметр `silences` больше не нужен.
 5. `CHANGELOG.md` [Unreleased]: Fixed + Breaking changes / migration notes — заглушенные алерты принимаются и видны как `suppressed` (v2 и v1).
@@ -39,16 +40,16 @@ based_on:
 ## Edge Cases
 
 1. Silence создан после ingest — как раньше: состояние считает `GET`, уведомление режет notify chain (прямой режим уже опубликовал).
-2. Silence истёк — следующий resend Prometheus публикуется обычным путём; в режиме группировки алерт уже в группе.
+2. Silence истёк — следующий resend публикуется, даже если dedup считает его дубликатом (`silenceSkipped`); в режиме группировки алерт уже в группе. Ограничение: набор в памяти процесса — resend на другой реплике (прямой режим, несколько реплик) не публикуется до изменения алерта или resolve; алерт, который перестали слать без resolve, остаётся в наборе (одна запись на fingerprint).
 3. `SilenceChecker == nil` (тесты, конструкторы без silence) — проверки нет.
-4. Ошибка группировки для заглушенного алерта — лог внутри `routeAlertToGroup`, прямой публикации нет.
+4. Ошибка группировки для заглушенного алерта — Error в `routeAlertToGroup` и Warn «not publishing it directly»; прямой публикации нет, fingerprint в `silenceSkipped` — resend после снятия silence пройдёт обычный путь.
 
 ## Impact Analysis
 
 - **Affected modules:** `application/handlers`, `core/services`, `application` (registry).
 - **Breaking changes:** API — `GET /api/v2/alerts` теперь содержит заглушенные алерты (как upstream); клиенты фильтруют `silenced=false`.
 - **New dependencies:** none.
-- **Risks:** рост объёма хранилища на заглушенные алерты (как в upstream); заглушенные алерты теперь пишутся в историю.
+- **Risks:** рост объёма хранилища на заглушенные алерты (как в upstream); заглушенные алерты теперь пишутся в историю, видны в `/api/v2/alerts/groups` и в счётчиках legacy-дашборда (deep-review F3).
 
 ## Rollout / Rollback
 
