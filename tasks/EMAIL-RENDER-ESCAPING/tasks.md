@@ -34,7 +34,8 @@ based_on:
 
 ## Phase 3: Testing
 
-- [ ] **3.1** Гейты `WORKFLOW.md` § Гейты AMP <!-- verify: evidence/release-gate.txt -->
+- [x] **3.1** Гейты `WORKFLOW.md` § Гейты AMP <!-- verify: evidence/release-gate.txt -->
 
 ## Notes
 - 2026-10-23, deep-review `pass` @ `cbe4330`; F1 (major, был defer-bug) взят сюда — две строки в той же функции, без него письмо по алерту без `instance` не уходит вовсе; F2/F4 — доки. F3 — TECH-DEBT на finalize.
+- 2026-10-23, testing: `go vet` + `go test` publishing/notification зелёные, `make -C go-app quality-gates-fast` зелёный, `scripts/release-gate.sh` — 11/12 PASS; `lint` FAIL только в `delivery_confirmation_test.go` и `silencing/redis_event_bus_test.go` (предсуществующий `LINT-ERRCHECK-CHANNEL-RECEIVE`, файлы не тронуты). `git diff --check` чистый.
