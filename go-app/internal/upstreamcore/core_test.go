@@ -186,6 +186,19 @@ func TestCoreEndToEnd(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond)
 }
 
+// AMP accepted JSON without a Content-Type; upstream answers 415. The
+// futureparity harness evens this out for the suites, so it is pinned here
+// (baseline header in cmd/server/testdata/upstreamcore-divergences.tsv).
+func TestCorePostWithoutContentTypeIs415(t *testing.T) {
+	tc := newTestCore(t, "http://127.0.0.1:9/")
+	req, err := http.NewRequest(http.MethodPost, tc.srv.URL+"/api/v2/alerts", bytes.NewReader([]byte("[]")))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusUnsupportedMediaType, resp.StatusCode)
+}
+
 func TestCoreReloadInvalidConfigKeepsActive(t *testing.T) {
 	tc := newTestCore(t, "http://hook.example/")
 

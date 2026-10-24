@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/upstream-core-poc-gate",
+  "commit": "e565c4f",
+  "reviewed_at": "2026-10-24",
+  "findings": { "blocker": 0, "major": 2, "minor": 5, "nit": 5 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

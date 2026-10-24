@@ -172,7 +172,7 @@ check_amtool() {
   # The harness sets Content-Type for the suites; check the divergence
   # itself here, so a bump that changes it shows up (baseline header).
   local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '[]' "$url/api/v2/alerts")"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type:' -d '[]' "$url/api/v2/alerts")"
   if [[ "$code" != "415" ]]; then
     log "POST /api/v2/alerts without Content-Type answered $code, the baseline header says 415"
     return 1
