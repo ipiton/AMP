@@ -16,7 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **UPSTREAM-CORE-POC-WIRING** — срез 1a эпика ADR-019 (`UPSTREAM-CORE-POC` нарезан на `start-task` 2026-10-24): upstream Alertmanager v0.34.1 как зависимость, ядро `dispatch`/`notify`/`provider/mem`/`silence`/`inhibit`/`nflog`/`api/v2` собрано в отдельном пакете и бинаре по `alertmanager.yml`, своё ядро не тронуто; инвентаризация зависимостей, `govulncheck`, замер размера бинаря. Standard, ~2d.
 
 ## Queue
 
