@@ -64,4 +64,4 @@ TestPhase0SilencePostUpdateSemantics	b	fails	changing startsAt of an active sile
 TestPhase0SilencesFilterMatcherSemantics	b	fails	silence filter does not match a != matcher
 TestPhase0Contracts_CoreAPI/status_contract	c	fails	version.Version unset: amp-upstream is built without -ldflags
 TestUpstreamParity_StatusRequiredShape	c	fails	version.Version unset: amp-upstream is built without -ldflags
-TestPhase0RouteInventory/debug_removed	d	fails	upstream serves /debug/* (pprof, expvar); AMP removed it on purpose (owner decision)
+TestPhase0RouteInventory/debug_removed	b	fails	upstream serves /debug/* (pprof, expvar); owner kept it as upstream (DECISIONS.md ADR-019, 2026-10-24)

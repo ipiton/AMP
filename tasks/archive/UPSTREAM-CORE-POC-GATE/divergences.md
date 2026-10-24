@@ -49,7 +49,7 @@
 
 ## d — решение владельца (1)
 
-- **`/debug/*`** открыт: upstream `httpserver.Register` проксирует `/debug/` в `http.DefaultServeMux` — это pprof и `expvar` (`/debug/vars`: `cmdline`, `memstats`), AMP его намеренно убрал (`TestPhase0RouteInventory/debug_removed`). Варианты: (1) как upstream — pprof и expvar доступны всем, кто достаёт до порта; (2) вырезать в нашем wiring (не вызывать `/debug` маршрут — свой `Register` из трёх строк вместо `httpserver.Register`); (3) за флагом. Ответ нужен к срезу 5.
+- **`/debug/*`** открыт: upstream `httpserver.Register` проксирует `/debug/` в `http.DefaultServeMux` — это pprof и `expvar` (`/debug/vars`: `cmdline`, `memstats`), AMP его намеренно убрал (`TestPhase0RouteInventory/debug_removed`). Варианты: (1) как upstream — pprof и expvar доступны всем, кто достаёт до порта; (2) вырезать в нашем wiring (не вызывать `/debug` маршрут — свой `Register` из трёх строк вместо `httpserver.Register`); (3) за флагом. **Решено владельцем 2026-10-24: (1), как upstream** (`DECISIONS.md` § ADR-019); в baseline запись переведена в класс b.
 
 ## Verdict (ADR-019)
 
