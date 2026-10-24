@@ -33,7 +33,7 @@ Queue и WIP — источник правды для выбора задачи.
 - [ ] **ADR-019-V2-SLICING** — нарезать эпик перехода на пакеты upstream (`DECISIONS.md` § ADR-019) в `BACKLOG.md`. Срезы и оценки (~20–28d; удаление кода оценено по объёму, без пробного удаления):
   1. PoC — upstream `dispatch`, `notify`, `provider/mem`, `silence`, `inhibit`, `nflog`, `api/v2` собраны в бинаре AMP по `alertmanager.yml`; выход — проходят `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт, иначе стоп и пересмотр. 4–5d, первым;
   2. AI-хуки — `PreStore` (дешёвый фильтр, дроп шума за флагом default off), `PostStore` (история в PG, investigation, асинхронная классификация), своя notify-стадия с бюджетом ожидания классификации для шаблонов группы. 2–3d;
-  3. интеграции — Rootly как свой `notify.Notifier`; K8s-Secret таргеты — адаптер в `config.Receiver` или удаление. 2–3d;
+  3. то, чего нет в upstream: все 18 интеграций (Slack, PagerDuty, email, Telegram, Opsgenie, webhook и др.) берутся из upstream `notify/*` как есть; свои — только Rootly (в upstream нет; сначала проверить, принимает ли Rootly webhook Alertmanager — тогда свой `notify.Notifier` не нужен) и K8s-Secret таргеты (адаптер в `config.Receiver` или удаление). 2–3d;
   4. HA — `cluster.Peer` (memberlist), снапшоты silences/nflog на PVC; чарт: StatefulSet, headless Service, порт gossip; удаление Redis lock/heartbeat/group/timer storage. 3–5d;
   5. удаление своего ядра — routing, dispatcher, notify chain, nflog, таймеры, silences, inhibition, свои интеграции и шаблоны; конфиг через upstream `config.Load`; разбор `service_registry.go`. 5–6d;
   6. API и UI — `api/v2` upstream побайтно, AMP-маршруты (история, investigation, `/api/v2/inhibitions`) отдельно, UI на состоянии upstream. 2–3d;

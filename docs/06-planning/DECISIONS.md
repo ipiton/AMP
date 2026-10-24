@@ -348,7 +348,7 @@
   - один конфиг — `alertmanager.yml` upstream; один API — `api/v2` upstream побайтно, AMP-маршруты (история, investigation, `/api/v2/inhibitions`) — отдельно;
   - HA — memberlist upstream (`cluster.Peer`) со снапшотами silences/nflog; своё HA-состояние на Redis (lock, heartbeat, группы, таймеры, nflog) удаляется;
   - AI встраивается в конвейер upstream: `AlertStoreCallback.PreStore` — только дешёвый фильтр без LLM (синхронен в пути `Put`), дроп шума — за флагом default off; `PostStore` — история в PG и асинхронный запуск классификации и investigation; своя notify-стадия перед интеграциями ждёт классификацию с бюджетом и отдаёт её шаблонам группы;
-  - собственные routing, dispatcher, notify chain, nflog, таймеры, silences, inhibition, интеграции и шаблоны удаляются.
+  - собственные routing, dispatcher, notify chain, nflog, таймеры, silences, inhibition, интеграции и шаблоны удаляются. Интеграции — все 18 из upstream `notify/*` (у AMP было 5); своё — только то, чего в upstream нет: Rootly и K8s-Secret таргеты.
 - **Обоснование**:
   - паритет становится свойством кода, а не задачей: его поддерживает upstream;
   - пользователь получает один продукт: один бинарь, один конфиг, один API для amtool/Grafana/UI;
