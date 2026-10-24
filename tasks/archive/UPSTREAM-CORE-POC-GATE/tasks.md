@@ -3,7 +3,7 @@ id: UPSTREAM-CORE-POC-GATE
 slug: upstream-core-poc-gate
 stream: Architecture / ADR-019
 type: feature
-status: active
+status: done
 created_at: 2026-10-24
 updated_at: 2026-10-24
 based_on:
@@ -48,14 +48,14 @@ based_on:
 
 ## Phase 5: Testing (после deep-review)
 
-- [ ] **5.1** Гейты: `quality-gates-fast`, `release-gate.sh`, `git diff --check`, `govulncheck`
+- [x] **5.1** Гейты: `quality-gates-fast`, `release-gate.sh`, `git diff --check`, `govulncheck`
 
 ## Acceptance
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`, or deep review was not required
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated if behavior, contracts, or process changed
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`, or deep review was not required
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated if behavior, contracts, or process changed
