@@ -1,0 +1,11 @@
+# Unmodified alertmanager.yml for the amtool check against cmd/amp-upstream
+# (scripts/upstream-core-gate.sh). The webhook target is unreachable on
+# purpose: the check exercises the API amtool talks to, not delivery
+# (internal/upstreamcore/core_test.go covers delivery).
+route:
+  receiver: default
+  group_by: [alertname]
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://127.0.0.1:9/
