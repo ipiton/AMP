@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: ядро upstream Alertmanager в бинаре AMP
 
-**Based on:** requirements.md / research.md / Spec.md  
+**Based on:** requirements.md / research.md / Spec.md
 **Date:** 2026-10-24
 
 ## Touched Files

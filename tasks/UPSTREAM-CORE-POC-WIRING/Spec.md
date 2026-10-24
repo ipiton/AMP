@@ -13,7 +13,7 @@ based_on:
 
 # Specification: ядро upstream Alertmanager в бинаре AMP
 
-**Version:** 1.0  
+**Version:** 1.0
 **Status:** Approved (self, PoC)
 
 ## Summary
