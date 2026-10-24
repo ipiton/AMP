@@ -359,7 +359,7 @@
   - AMP после AM через `webhook_configs`: AI не влияет на доставку, история неполная;
   - полный форк upstream: AMP-код в дереве upstream, каждый rebase конфликтует, дороже библиотечного варианта.
 - **Следствие**:
-  - эпик ~20–28d, семь срезов; первым — PoC 4–5d с критерием выхода: upstream-ядро в бинаре AMP проходит `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт, иначе — стоп и пересмотр. Нарезка в `BACKLOG.md` — задача `ADR-019-V2-SLICING`;
+  - эпик ~20–28d, семь срезов; первым — PoC 4–5d с критерием выхода: upstream-ядро в бинаре AMP проходит `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт, иначе — стоп и пересмотр. Нарезка — `BACKLOG.md` § «ADR-019 — AMP на пакетах upstream Alertmanager» (`ADR-019-V2-SLICING`, 2026-10-24);
   - постоянная плата: Go API upstream не библиотечный контракт и ломается между минорами (`NewDispatcher`, `mem.NewAlerts`, `NewInhibitor`, `PipelineBuilder` менялись в 0.28–0.32) — ~0.5–1d на минор, 2–3 в год;
   - breaking для пилотных инсталляций: silences переносятся из PostgreSQL в снапшот upstream, Redis-состояние сбрасывается, теряются AMP-расширения API (`?group_by=`, `global.group_by`), если не держать их отдельными маршрутами;
   - чарт: StatefulSet, headless Service и порт gossip; Valkey остаётся только как кеш классификации;
