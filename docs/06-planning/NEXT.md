@@ -30,24 +30,17 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
-- [ ] **ADR-019-V2-SLICING** — нарезать эпик перехода на пакеты upstream (`DECISIONS.md` § ADR-019) в `BACKLOG.md`. Срезы и оценки (~20–28d; удаление кода оценено по объёму, без пробного удаления):
-  1. PoC — upstream `dispatch`, `notify`, `provider/mem`, `silence`, `inhibit`, `nflog`, `api/v2` собраны в бинаре AMP по `alertmanager.yml`; выход — проходят `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт, иначе стоп и пересмотр. 4–5d, первым;
-  2. AI-хуки — `PreStore` (дешёвый фильтр, дроп шума за флагом default off), `PostStore` (история в PG, investigation, асинхронная классификация), своя notify-стадия с бюджетом ожидания классификации для шаблонов группы. 2–3d;
-  3. то, чего нет в upstream: все 18 интеграций (Slack, PagerDuty, email, Telegram, Opsgenie, webhook и др.) берутся из upstream `notify/*` как есть; свои — только Rootly (в upstream нет; сначала проверить, принимает ли Rootly webhook Alertmanager — тогда свой `notify.Notifier` не нужен) и K8s-Secret таргеты (адаптер в `config.Receiver` или удаление). 2–3d;
-  4. HA — `cluster.Peer` (memberlist), снапшоты silences/nflog на PVC; чарт: StatefulSet, headless Service, порт gossip; удаление Redis lock/heartbeat/group/timer storage. 3–5d;
-  5. удаление своего ядра — routing, dispatcher, notify chain, nflog, таймеры, silences, inhibition, свои интеграции и шаблоны; конфиг через upstream `config.Load`; разбор `service_registry.go`. 5–6d;
-  6. API и UI — `api/v2` upstream побайтно, AMP-маршруты (история, investigation, `/api/v2/inhibitions`) отдельно, UI на состоянии upstream. 2–3d;
-  7. доки и миграция — README, `ALERTMANAGER_COMPATIBILITY.md`, CHANGELOG breaking (перенос silences из PG в снапшот upstream, сброс Redis-состояния), ревизия ADR-002/006/009/016/017. 2–3d.
-
-  Заодно пересмотреть `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`: позиции на совместимость закрыть ссылкой на ADR-019, оставить security/critical по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` влить в срез 2. Lightweight, docs-only, ~0.5d.
+- [ ] **UPSTREAM-CORE-POC** — срез 1 эпика ADR-019 (`BACKLOG.md` § «ADR-019 — AMP на пакетах upstream Alertmanager»): upstream `dispatch`, `notify`, `provider/mem`, `silence`, `inhibit`, `nflog`, `api/v2` в бинаре AMP по `alertmanager.yml`. Выход — `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт на upstream-ядре; иначе стоп и пересмотр ADR-019. Standard, 4–5d — нарезать на `start-task`. Следом — срезы 2–4 (после PoC, независимы).
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после среза AI-хуков ADR-019 (он закрывает `PROD-LLM-ALERT-PATH-ISOLATION`): пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
+- [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `UPSTREAM-AI-HOOKS` (срез 2 ADR-019, закрывает `PROD-LLM-ALERT-PATH-ISOLATION`): пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
 ### 2. Code review 2026-10-21 — конвейер
-> Приостановлен 2026-10-23 по ADR-018, в силе по ADR-019 (2026-10-24): паритетные позиции (`ROUTE-CONTINUE-NO-FANOUT`, `DURATION-UPSTREAM-UNITS`, `CONFIG-RELOAD-BUNDLE` и следующие) относятся к удаляемому ядру и не берутся. Записи остаются в `BUGS.md`/`TECH-DEBT.md`/`REVIEW-PIPELINE-2026-10-21.md` до `ADR-019-V2-SLICING`; security/critical по переживающему переход коду возвращаются в Queue оттуда.
+> Пересмотрен 2026-10-24 (`ADR-019-V2-SLICING`): позиции по удаляемому ядру сняты (`[-]` в `REVIEW-PIPELINE-2026-10-21.md`, записи — в секциях «Снимается переходом на upstream (ADR-019)» `BUGS.md`/`TECH-DEBT.md`). Голова живой части — №8. Остальные живые позиции берутся из `REVIEW-PIPELINE-2026-10-21.md` по порядку.
+
+- [ ] **INVESTIGATION-SAFETY-BUNDLE** — `TECH-DEBT.md` § Bundles: `LLM-RETRY-CLASSIFY`, `INVESTIGATION-ASYNC-DEDUP`, `INVESTIGATION-PROMPT-ISOLATION`. Full, ~2.25d — нарезать на `start-task`. Код investigation переживает переход на upstream; с `UPSTREAM-AI-HOOKS` пересекается только точкой постановки investigation (`PostStore`).
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 

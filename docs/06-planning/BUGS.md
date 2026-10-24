@@ -14,70 +14,6 @@
 - **Refs:** найдено при HELM-VCT-CHART-LABELS (2026-10-22), `tasks/archive/HELM-VCT-CHART-LABELS/evidence/release-gate.txt`. Смежно `QUALITY-GATES-ALIGN`.
 - **Status:** open
 
-### [medium][Config][~0.5d] TEMPLATED-FIELDS-NOT-RENDERED
-- **Title:** `email_configs[].to` и `slack_configs[].actions[]` upstream шаблонизирует, AMP не рендерит и при загрузке валидирует как литерал
-- **Problem:** `EmailConfig.To` — `validate:"required,email"` (`go-app/internal/infrastructure/routing/receiver.go`), в target уходит как есть (`config_targets.go:645`, заголовок `to`). Upstream рендерит `to` шаблоном и принимает список адресов через запятую — у AMP не грузится ни `to: '{{ .CommonLabels.owner }}@example.com'`, ни `to: 'a@example.com, b@example.com'`. `SlackAction` (`text`/`url`/`style`, теги `required`/`url`/`oneof`) — upstream шаблонизирует все поля action, AMP actions не отправляет вовсе (`slackTarget`: «not expressible»), но шаблонный `url` валит загрузку.
-- **Impact:** upstream-конфиг с несколькими получателями письма или шаблонным `to` не загружается; с шаблонной Slack-кнопкой — тоже, хотя кнопка всё равно потерялась бы.
-- **Fix:** `to` — разрешить список адресов (`net/mail.ParseAddressList`) и шаблон (`template_expr|…`, как в SLACK-COLOR-TEMPLATE-REJECTED), рендерить `to` в `emailTemplateFields` и брать отрендеренный адрес в email publisher. `actions` — `template_expr|…` на полях, пока actions не отправляются; рендер — вместе с поддержкой actions. Просто ослабить валидацию `to` без рендера нельзя: письмо уйдёт на литерал `{{ … }}`.
-- **Refs:** найдено при SLACK-COLOR-TEMPLATE-REJECTED (2026-10-20), аудит валидаторов шаблонных полей.
-- **Status:** open
-
-### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-CREATE-RACE
-- **Title:** два конкурентных алерта одной новой группы создают две группы и два таймера `group_wait`
-- **Problem:** `DefaultGroupManager.AddAlertToGroup` (`go-app/internal/infrastructure/grouping/manager_impl.go:246`) делает `storage.Load` → `createNewGroupUnsafe` → `storage.Store` без сериализации по ключу группы, хотя `createNewGroupUnsafe` документирован «Caller must hold write lock». Оба вызова получают `not found`, каждый создаёт группу, последний `Store` затирает первый (алерт пропадает из storage до следующего resend), оба стартуют `group_wait`.
-- **Impact:** с `group_wait > 0` маскируется (второй таймер заменяет первый); с `group_wait: 0s` (разрешён с ROUTE-TIMINGS-BUNDLE) возможны две отдельные нотификации вместо одной и потеря алерта в первой. Предсуществующее, найдено deep-review ROUTE-TIMINGS-BUNDLE (F3).
-- **Fix:** per-group-key сериализация создания (keyed mutex / singleflight) или условная запись в storage; тест на конкурентный `AddAlertToGroup` новой группы с `group_wait: 0`.
-- **Refs:** `tasks/archive/ROUTE-TIMINGS-BUNDLE/review-findings.md` § F3.
-- **Status:** open
-
-### [medium][Security][~0.25d] HEALTH-CHECK-URL-LEAK
-- **Title:** health checker пишет URL таргета с токеном в статус и DEBUG-лог
-- **Problem:** при транспортной ошибке `business/publishing/health_checker.go:108-123` кладёт текст `*url.Error` с полным URL в `ErrorMessage` статуса и в DEBUG-лог; `sanitizeErrorMessage` путь не чистит. Для Teams/Discord/Google Chat/Slack/Telegram токен — часть пути. Health monitor включён по умолчанию.
-- **Impact:** токен таргета в логах и в API статуса таргетов — остаток `PUBLISH-SECRETS-IN-LOGS` (оговорено в CHANGELOG).
-- **Fix:** маскировать `*url.Error` через `core.RedactURL` перед записью (как `redactURLError` в publishing). Тест: недоступный таргет с токеном в пути ⇒ ни статус, ни лог токена не содержат.
-- **Refs:** `tasks/archive/PUBLISH-QUICK-FIX-BUNDLE/review-findings.md` F2.
-- **Status:** open
-
-### [medium][Inhibition][~0.25d] INHIBITED-RESEND-NEVER-NOTIFIED
-- **Title:** подавленный inhibition алерт без `endsAt` не уведомит и после ухода источника
-- **Problem:** `AlertProcessor.ProcessAlert` (`internal/core/services/alert_processor.go`): inhibited firing-алерт уже записан dedup'ом (`created`) и выходит `return nil` до `evaluateRoute` — ни публикации, ни группы. Когда источник гаснет, неизменный resend (нет `endsAt`: Prometheus-API-формат, legacy, `amtool alert add` без `--end`) dedup считает `ignored`, и `ProcessAlert` выходит до inhibition/группы. Тот же класс, что F1 `SILENCED-ALERTS-INGEST` (там закрыт `silenceSkipped`). `hypothesis`: трасса по коду, не воспроизведено тестом.
-- **Impact:** цель inhibition молчит до resolve или изменения алерта; в режиме группировки — тоже (алерт не попадает в группу). Отправители с меняющимся `endsAt` (Prometheus в Alertmanager-формате) не затронуты.
-- **Fix:** как в upstream — inhibited алерт всё равно попадает в группу (notify chain уже делает Inhibit), а в прямом режиме — помечать fingerprint по образцу `silenceSkipped`. Тест: inhibited без `endsAt` → источник resolved → resend → одна публикация.
-- **Refs:** `tasks/archive/SILENCED-ALERTS-INGEST/review-findings.md` F1.
-- **Status:** open
-
-### [high][Routing][~1d] ROUTE-CONTINUE-NO-FANOUT
-- **Title:** `continue: true` не даёт доставку во второй receiver — алерт уходит только в первый совпавший route
-- **Problem:** путь публикации берёт одно решение: `AlertProcessor.evaluateRoute` (`go-app/internal/core/services/alert_processor.go:271`) → `routeTreeEvaluator.Evaluate` (`internal/application/route_evaluator.go:100`) → `businessrouting.RouteEvaluator.Evaluate` — первый матч; `services.RoutingDecision` хранит один `Receiver`. Мультиматч по `continue` есть в `RouteMatcher.FindMatchingRoutes` и `RouteEvaluator.EvaluateWithAlternatives` (`internal/business/routing/evaluator.go:277`), но у `EvaluateWithAlternatives` нет ни одного не-тестового вызова.
-- **Impact:** конфиг «critical → дежурный канал **и** общий канал» через `continue` молча теряет вторую доставку; `docs/ALERTMANAGER_COMPATIBILITY.md:41` заявляет `continue` как 🟢 Supported. Для параллельного запуска рядом с Alertmanager в sema-prod — расхождение по составу получателей.
-- **Fix:** решение маршрутизации — список (primary + alternatives); группировка и публикация по каждому receiver'у отдельно (ключ группы уже содержит receiver), dedup/nflog — на пару (группа, receiver). Тест через `LoadConfig` + `ProcessAlert`: два sibling-route с `continue: true` → обе группы и обе публикации. Поправить строку в `ALERTMANAGER_COMPATIBILITY.md`.
-- **Refs:** k3d HELM-EXTRA-VOLUMES 2026-10-20 (`tasks/archive/HELM-EXTRA-VOLUMES/evidence/k3d-extra-volumes.md` §3): `severity=critical` → только `telegram-panic` (`matched_route=route.routes[0]`), sibling `slack` пуст.
-- **Status:** open
-
-### [low][Test][~0.1d] FLAKE-GROUP-INTERVAL-CHAIN-RESOLVE
-- **Title:** `TestGroupIntervalChain_ResolveGoesOutAndTheGroupIsGone` флейкает
-- **Problem:** `go-app/internal/infrastructure/grouping/group_interval_chain_test.go:176` — `no further fires for the removed group`: после удаления полностью разрешённой группы счётчик сработавших таймеров ещё растёт. Замер 2026-10-20, `-count=300`: 4 падения на `main` @ `28007e8` и 4 на `bugfix/route-timings` — предсуществующий.
-- **Impact:** шаг `test` гейта может краснеть случайно.
-- **Fix:** разобрать, доходит ли до fire таймер, взведённый до удаления группы (тогда это продуктовая гонка), или тест снимает `expiredTimers` раньше, чем завершилась уже начатая обработка; во втором случае — ждать стабилизации счётчика.
-- **Refs:** замер в сессии ROUTE-TIMINGS-BUNDLE.
-- **Status:** open
-
-### [medium][Test][~0.25d] FUZZ-RANDOM-ALERTS-RACE-TIMEOUT
-- **Title:** `TestFuzz_RandomAlerts` под `-race` съедает больше половины 10-минутного таймаута пакета
-- **Problem:** `go-app/internal/infrastructure/publishing/formatter_fuzz_test.go` в одиночном прогоне `go test -race -run 'TestFuzz_RandomAlerts$'` идёт 5m21s (2026-10-20, M-series). В шаге `race` release-gate под нагрузкой пакет `internal/infrastructure/publishing` упал `panic: test timed out after 10m0s` с этим тестом в `running tests`.
-- **Impact:** required-шаг `race` гейта краснеет по таймауту без реальной регрессии; на shared runner'ах CI вероятнее.
-- **Fix:** уменьшить число итераций под `-race` (`testing.Short()`/build tag `race` или env), либо перенести в отдельный fuzz-таргет `go test -fuzz` вне гейта; цель — секунды, не минуты.
-- **Refs:** release-gate 2026-10-20 на `main` @ `7958ef8` (шаг `race`).
-- **Status:** open
-
-### [low][Publishing][~0.25d] SLACK-EXTRA-FIELDS-NOT-UPSTREAM
-- **Title:** Slack-сообщение с операторскими `title`/`text` несёт лишний блок `fields` (Status/Started/Namespace)
-- **Problem:** `template_formatter.go:328` берёт colour/fields фиксированного форматтера (`formatter.go:552-566`) как базу, поверх которой накладываются отрендеренные поля оператора. Upstream без `fields:` в конфиге поля не шлёт.
-- **Impact:** в Slack дублируется информация, которую оператор уже вывел в `text`; расхождение с обещанием «нетронутый upstream-конфиг даёт upstream-вывод». Плюс `title_link` относителен (`/#/alerts?...`), если не задан `server.externalUrl`, — это настройка, не баг.
-- **Fix:** при наличии операторских шаблонов не переносить `fields` фиксированного форматтера (переносить только явно заданные); тест на payload без `fields`.
-- **Refs:** проверка 2026-10-20 на конфиге sema (`errors-slack`).
-- **Status:** open
-
 ### [low][Test][~0.1d] REFRESH-WORKER-WARMUP-STOP-FLAKY
 - **Title:** `TestBackgroundWorker_CancellationDuringWarmup` падает под нагрузкой
 - **Problem:** тест (`go-app/internal/business/publishing/refresh_worker_test.go:116`) ждёт `Start()` через `time.Sleep(2ms)` и вызывает `Stop`, рассчитывая успеть до конца `WarmupPeriod: 10ms` (`refresh_test_utils.go:295`). Под нагрузкой шага `test` release-gate между `Start` и `Stop` проходит больше 10 мс, первый refresh срабатывает: `expected: 0, actual: 1`.
@@ -86,35 +22,9 @@
 - **Refs:** release-gate 2026-10-20 на `feature/helm-extra-volumes` @ `0c3156d` (пакет веткой не менялся).
 - **Status:** open
 
-### [low][Config][~0.25d] PAGERDUTY-SERVICE-KEY-ONLY-REJECTED
-- **Title:** PagerDuty только с `service_key` / `service_key_file` не загружается, хотя валидатор его пропускает
-- **Problem:** `routing.PagerDutyConfig.RoutingKey` помечен `validate:"required"` (`go-app/internal/infrastructure/routing/receiver.go:324`), поэтому `routing.Parse` отвергает конфиг без `routing_key` (`Field validation for 'RoutingKey' failed on the 'required' tag`), и фолбэк на `ServiceKey` в `config_targets.go` недостижим. Валидатор (E122) после HELM-EXTRA-VOLUMES принимает `service_key`/`service_key_file`, как и upstream.
-- **Impact:** конфиг с устаревшим `service_key` (upstream-совместимый) не стартует с непонятной ошибкой struct-валидации; W116 на `service_key_file` не выдаётся.
-- **Fix:** `required` → «`routing_key` или `service_key`» (кастомная проверка после `resolveFileSecrets`); тест через `LoadConfig` с `service_key` и с `service_key_file`.
-- **Refs:** `tasks/archive/HELM-EXTRA-VOLUMES/review-findings.md` R2-F1; предсуществующее с FU7-B.
-- **Status:** open
-
-### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
-- **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
-- **Problem:** `onGroupWaitExpired` (`go-app/internal/infrastructure/grouping/manager_impl.go:1866-1873`) на любой ошибке `storage.Load` возвращает `nil` без continuation, а `onTimerExpired` после callback'ов удаляет запись таймера (`timer_manager_impl.go`, cleanup после callback'ов). При транзиентной ошибке Redis группа после этого больше не нотифицирует: таймера нет ни локально, ни в storage, reconciliation подобрать нечего. Предсуществующий дефект; раньше его иногда маскировало повторное срабатывание опоздавшей реплики, после `GROUPING-TIMER-LOCK-FIX` она отсеивается по `not_found`.
-- **Impact:** в HA (Redis) группа может замолчать до следующего нового алерта в ней. _(Уточнено PROD-GROUPING-DEFAULT, 2026-10-10: «до следующего алерта» теперь гарантировано — `AddAlertToGroup` через `ensureGroupTimer` перевзводит таймер группе без таймера; раньше новый алерт в такой группе ждал `repeat_interval`.)_
-- **Fix:** в callback различать not-found группы и транзиентную ошибку; при транзиентной возвращать ошибку и не удалять запись таймера, чтобы reconciliation повторил. Тест с `loadFailingGroupStorage`.
-- **Refs:** `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` F7.
-- **Status:** open
-
-- [ ] **ALERT-STORE-DEDUP-KEY-STARTSAT** — повторный `POST /api/v2/alerts` без `startsAt` создаёт в memory store **новую копию** алерта, а не обновляет существующую: ключ дедупликации стора — `fingerprint|startsAt` (`go-app/internal/infrastructure/storage/memory/alert_store.go`, `dedupKey`), а пустой `startsAt` на каждом POST превращается в `now`. В итоге `GET /api/v2/alerts` отдаёт один и тот же алерт N раз с разными `startsAt`. Upstream сливает по fingerprint и сохраняет самый ранний `startsAt`. Воспроизведено вживую на `main` и на ветке `PARITY-RESOLVE-TIMEOUT-ENDSAT` (2026-09-24, lite, два POST `{"labels":{"alertname":"X"}}`). Prometheus и `amtool` шлют `startsAt` сами, поэтому затронуты в основном curl и самописные клиенты. Из-за этого для них не работает и продление окна `resolve_timeout`. Не регресс. Найдено на `/testing` PARITY-RESOLVE-TIMEOUT-ENDSAT. Чинить отдельной задачей: для отсутствующего `startsAt` брать `startsAt` уже горящего алерта с тем же fingerprint. Смотреть осторожно: dedup в БД (`deduplication.go`) и resolved-путь стора завязаны на тот же ключ.
-
 - [ ] **INVESTIGATION-ALERT-TIME-NOT-SET** — `investigation.WithAlertTime` (`go-app/internal/core/investigation/context.go`) нигде в рабочем коде не вызывается: `queue.processJobWithAgent` передаёт в `AgentLoop.Run` голый `q.ctx`. Tools (`prometheus_query_range`, `loki_query_range`) через `AlertTimeFromCtx` падают на фолбэк `time.Now()` и якорят окно ±15 мин на момент расследования, а не срабатывания алерта. Для ретраев (backoff до 60s × `max_retries`) и очереди под нагрузкой окно уезжает от события. Фикс: `ctx = investigation.WithAlertTime(ctx, job.Alert.StartsAt)` перед `Run` (и в 5A-пути, если tools появятся там) + тест, что tool видит `StartsAt`. README пакета уже помечает это как known gap. Не регресс. Найдено на `/research` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
 
 - [ ] **AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT** — `AgentLoop.Run` (`go-app/internal/core/investigation/agent_loop.go`, ветка `default` в `switch resp.Kind`) возвращает `(nil, err)`, а `InvestigationQueue.processJobWithAgent` (`go-app/internal/infrastructure/investigation/queue.go`) на ошибке сразу читает `agentRun.TerminationKind` ⇒ nil-pointer panic в воркере. Сейчас недостижимо из прод-клиента (`parseOpenAIAgentResponse` отдаёт только два известных kind), но любой новый `AgentLLMClient` или мок с иным kind роняет воркер. Фикс: возвращать `&AgentRunResult{TerminationKind: "error", ...}` и/или nil-guard в queue + тест. Не регресс. Найдено на `/implement` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
-
-### [medium][Inhibition][~0.25d] INHIBIT-RELOAD-ROLLBACK-KEEPS-RULES
-- **Title:** откат reload после коммита оставляет новые inhibit-правила
-- **Problem:** `ServiceRegistry.ReloadConfig` применяет правила матчеру (`UpdateRules`, `go-app/internal/application/service_registry.go:2702-2717`) до `reloadRoutingTree`; если тот падает, `rollbackPostCommit` восстанавливает config, routing, шаблоны и targets, но не правила матчера.
-- **Impact:** отклонённый `/-/reload` (ошибка дерева маршрутов) оставляет в работе inhibit-правила из отвергнутого конфига — до следующего успешного reload или рестарта. Было и до `FU-TOPLEVEL-INHIBIT-RULES`.
-- **Fix:** применять ингибицию после `reloadRoutingTree` либо в откате звать `UpdateRules(previousConfig.InhibitionRules())`; тест с падающим `reloadRoutingTree`.
-- **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F3.
-- **Status:** open
 
 ### [medium][Helm][~0.25d] ESO-SECRET-OWNERSHIP-CONFLICT
 - **Title:** при `externalSecrets.enabled` Helm и External Secrets Operator претендуют на один Secret
@@ -133,28 +43,12 @@
 - **Refs:** `tasks/archive/PROD-CONFIG-FILE-FALLBACK/tasks.md` § Testing notes.
 - **Status:** open
 
-### [medium][Test][~0.25d] GROUPING-ORPHAN-ADOPTION-TEST-FLAKY
-- **Title:** `TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica` флейкает
-- **Problem:** `go-app/internal/application/service_registry_grouping_test.go:585` — `continuation timer type = "group_wait", want "group_interval"`. Замер 2026-10-07 под нагрузкой (параллельно с release-gate), `-count=80`: 6 падений на `main` @ `fa682d4`, 7 на ветке с runbook engine — предсуществующий, не от слияния. Без нагрузки на `main` 0/40. Гипотеза: тест ждёт `stats.ReconciledTimers >= 1` и сразу читает storage, а счётчик растёт раньше, чем `onGroupWaitExpired` записывает continuation `group_interval`, — тест читает ещё старую запись `group_wait`.
-- **Impact:** шаг `test` required-гейта `gate` краснеет случайно; после `GROUPING-TIMER-LOCK-FIX` (2026-10-10) — последний известный флейк в grouping.
-- **Fix:** в тесте ждать опросом, пока тип записи станет `group_interval` (с тем же дедлайном), а не читать один раз; если запись `group_wait` держится дольше дедлайна — это уже продуктовый дефект.
-- **Refs:** release-gate 2026-10-07 на `feature/phase-6b-runbook-engine`, `~/amp-audit/gate-runbook.log`.
-- **Status:** open
-
 ### [low][Test][~0.1d] HELM-TEST-SIGPIPE-PIPEFAIL
 - **Title:** render-тесты чарта случайно падают на `printf: Broken pipe`
 - **Problem:** `helm/amp/tests/render-networkpolicy.sh` (`assert_render_fails`, стр. 59) под `set -euo pipefail` делает `printf '%s' "${output}" | grep -q -F -e "${expected}"`. `grep -q` выходит на первом совпадении, `printf` получает SIGPIPE, и `pipefail` превращает успешное совпадение в провал: `FAIL ingressController only, Ingress off (wrong error: …)`, хотя текст ошибки ожидаемый. Поймано release-gate 2026-10-07; три повторных прогона скрипта — зелёные.
 - **Impact:** шаг `helm-tests` required-гейта `gate` краснеет случайно на длинных выводах `helm template`.
 - **Fix:** `grep -q -F -e "${expected}" <<<"${output}"` (here-string вместо пайпа) во всех `tests/*.sh`.
 - **Refs:** `~/amp-audit/gate-runbook.log`, 2026-10-07.
-- **Status:** open
-
-### [medium][Pipeline][~0.5d] DIRECT-PUBLISH-RENOTIFIES-ON-RESEND
-- **Title:** на direct-publish пути каждая повторная отправка алерта старше минуты уходит ресиверу заново
-- **Problem:** без `route:` или с `grouping.enabled: false` алерт публикуется через `PublishToReceiver` → `coordinator.PublishToTargets`, где нет nflog (он есть только у группового пути, `coordinator.go:619+`). Prometheus переотправляет горящий алерт каждые `resend_delay` (1m) с новым `endsAt`, дедуп-сервис видит `Updated`, и от повторного уведомления защищает только Rule 7 фильтра с окном 1 мин (`DefaultDedupWindow`). Повтор, пришедший позже окна, уходит ресиверу. Существовало до `PROD-HARDCODED-FILTER`, та задача это не меняла.
-- **Impact:** конфиги без дерева route (или с выключенной группировкой) получают уведомление на каждую переотправку вместо одного на `repeat_interval`, как в upstream.
-- **Fix:** nflog (или его аналог по fingerprint + status + `repeat_interval`) для direct-publish пути, либо направить такой путь через группировку с тривиальным ключом. После этого пересмотреть, нужен ли Rule 7.
-- **Refs:** `tasks/archive/PROD-HARDCODED-FILTER/Spec.md` § Impact Analysis, design premises; `research.md` § Option B.
 - **Status:** open
 
 ### [low][Helm][~0.2d] SERVICE-METRICS-PORT-MISROUTED
@@ -179,30 +73,6 @@
 - **Impact:** редкая конфигурация (`namespace` задан явно), но тихо: AMP теряет Redis при `valkey.networkPolicy.enabled`. С 2026-10-20 (`AMP-CACHE-NOAUTH`) AMP на дефолтах читает `REDIS_PASSWORD` из `<fullname>-redis-secret`, который лежит в namespace релиза, — при `namespace` ≠ релиза под AMP не стартует (`CreateContainerConfigError`, по коду на ревью, на кластере не прогонялось) вместо тихой деградации; `amp.cache.hostIsValkey` тоже сравнивает с `.Release.Namespace`.
 - **Fix:** один источник namespace для всех шаблонов (хелпер `amp.namespace`).
 - **Refs:** deep-review PROD-INGRESS-HARDENING R16, `tasks/archive/PROD-INGRESS-HARDENING/review-findings.md`; 2026-10-01; deep-review AMP-CACHE-NOAUTH A2 (`tasks/archive/AMP-CACHE-NOAUTH/review-findings.md`), 2026-10-20.
-- **Status:** open
-
-### [low][Grouping][~0.5d] GROUPING-RESOLVED-ONLY-FOR-UNKNOWN-GROUP
-- **Title:** resolved-нотификация для группы, о которой получатель не знал
-- **Problem:** алерт сработал и разрешился до первого flush (в пределах `group_wait`) — получателю уходит одно сообщение «resolved». Upstream Alertmanager при отсутствии записи в nflog шлёт только при непустом firing-наборе. Проба: AMP 1 нотификация, upstream 0. Не регрессия PROD-GROUPING-DEFAULT, но с группировкой по умолчанию путь стал общим.
-- **Impact:** лишнее «resolved» без предшествующего «firing» у получателей с `send_resolved: true`. Расхождение названо в `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #13.
-- **Fix:** отличать «записи в nflog нет» от «запись не покрывает набор» и при отсутствии записи слать только при непустом firing. Учесть обратную сторону: resolve после простоя получателя дольше TTL записи тогда теряется.
-- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H5; `go-app/internal/infrastructure/grouping/manager_impl.go` (`publishGroupAlerts`), `dedup.go`.
-- **Status:** open
-
-### [low][API][~0.25d] FINGERPRINT-PIPE-BREAKS-SIGNATURE
-- **Title:** символ `|` в fingerprint из API ломает разбор сигнатуры nflog
-- **Problem:** сигнатура группы собирается из пар `fingerprint:status` через разделитель, а `signatureCovers` разбирает её обратно. Fingerprint, пришедший из API как есть (`go-app/internal/application/handlers/alerts.go`, приём `fingerprint` из тела), может содержать `|` — разбор даёт другие элементы, проверка «подмножество» отвечает неверно. По чтению кода, запуском не проверялось.
-- **Impact:** для такого алерта возможна лишняя или пропущенная нотификация группы. Штатные клиенты (Prometheus) fingerprint не передают — он вычисляется.
-- **Fix:** валидировать fingerprint на входе (hex) либо экранировать элементы сигнатуры.
-- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H10; `go-app/internal/infrastructure/grouping/dedup.go` (`signatureCovers`).
-- **Status:** open
-
-### [low][Test][~0.1d] FLAKE-SYNC-WORKER-PERIODIC
-- **Title:** `TestSyncWorker_PeriodicExecution` флейкает под `-race`
-- **Problem:** `go-app/internal/business/silencing/sync_worker_test.go:204` — мок `ListSilences` ждёт ровно `Times(3)` при тике 100 мс и `time.Sleep(250ms)`. Под нагрузкой сон затягивается до четвёртого тика, мок паникует `The method has been called over 3 times` и роняет весь пакет. Изолированно `-race -count=1` 6/6 зелёный.
-- **Impact:** шаг `race` в `scripts/release-gate.sh` краснеет случайно (2026-10-10, ветка `bugfix/prod-grouping-default`, пакет веткой не тронут).
-- **Fix:** считать вызовы счётчиком и ждать «не меньше двух тиков» через `Eventually`, без точного `Times`.
-- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/tasks.md` п. 5.1.
 - **Status:** open
 
 ### [low][Test][~0.1d] MIGRATIONS-TEST-PANICS-ON-SLOW-DOCKER
@@ -238,30 +108,6 @@
 - **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/review-findings.md` R11.
 - **Status:** open
 
-### [medium][Silencing][~0.25d] SILENCE-SYNC-LIMIT-EXCEEDS-FILTER
-- **Title:** фоновый воркер silence manager не стартует: `limit must be <= 1000, got 10000`
-- **Problem:** на каждом старте AMP с PostgreSQL: `initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000`. `go-app/internal/business/silencing/manager_impl.go:479`, `:713` и `sync_worker.go:162` запрашивают `Limit: 10000`, а валидатор фильтра репозитория пропускает не больше 1000 (`go-app/internal/core/errors.go:12`). AMP продолжает работу без GC/stats-воркера.
-- **Impact:** истёкшие silences не собираются фоновым GC, кэш активных silences не прогревается на старте, статистика не считается; молча — только строка в логе.
-- **Fix:** выровнять лимит (пагинация по 1000 или отдельный внутренний путь без пользовательского лимита) и тест на старт менеджера с реальным репозиторием.
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/restore-drill.md` § Side findings; повторно 2026-10-19 — `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/cache-noauth.txt` (R26).
-- **Status:** open
-
-### [low][API][~0.25d] SILENCES-CHECK-404
-- **Title:** `POST /api/v2/silences/check` отвечает 404
-- **Problem:** хендлер есть (`go-app/cmd/server/handlers/silence_advanced.go`, `CheckAlert`), и `docs/ALERTMANAGER_COMPATIBILITY.md` ссылается на эндпоинт, но в собранном сервере на k3d 2026-10-15 запрос даёт 404 — маршрут не зарегистрирован.
-- **Impact:** превью «заглушит ли silence этот алерт» недоступно; документация расходится с поведением. Upstream такого эндпоинта нет, совместимость с Alertmanager не затронута.
-- **Fix:** зарегистрировать маршрут или убрать хендлер и упоминания из доков; тест на роутинг.
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/tasks.md` (Implementation notes, Phase 2).
-- **Status:** open
-
-### [low][Test][~0.1d] FLAKE-INHIBITION-PREFILTER-TIMING
-- **Title:** `TestShouldInhibit_PrefilterOptimization` падает по wall-clock порогу
-- **Problem:** `go-app/internal/infrastructure/inhibition/matcher_test.go:597` требует, чтобы `ShouldInhibit` на 51 алерте уложился в 500 µs. 2026-10-15 release-gate: 992 µs → FAIL; изолированно 5 прогонов — 3 FAIL. Тест меряет время, а не то, что пре-фильтр отсёк нерелевантные алерты; в замер попадает логирование.
-- **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет случайно на ветках без изменений в `go-app`.
-- **Fix:** проверять число проверенных кандидатов (счётчик/хук) вместо времени, либо вынести замер в бенчмарк. Тот же приём — у порога в `matcher_test.go:448` (DONE 2026-10-14 HELM-DEFAULTS-VALIDATE, риск).
-- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/release-gate.txt`.
-- **Status:** open
-
 ### [medium][Helm][~0.5d] PG-ALERT-RULES-METRICS
 - **Title:** часть правил `postgresql.rules` ссылается на метрики, которых exporter не отдаёт, а `PostgreSQLVacuumOld` шумит
 - **Problem:** с PG-CONFIG-FIX группа правил парсится и exporter подключён, но сверка со scrape `postgres-exporter:v0.15.0` (k3d 2026-10-17) показала: connection-saturation (2 правила) без `on(instance)` между `pg_stat_activity_count` и `pg_settings_max_connections`; replication-lag ссылается на `pg_replication_lag` (есть `pg_replication_lag_seconds`); wraparound — на `pg_database_age_seconds` (нет); slow-query — на `pg_stat_statements_mean_exec_time_seconds` (коллектор `stat_statements` выключен по умолчанию); bgwriter (2) — на имена без `_total`. Эти правила молчат. `PostgreSQLVacuumOld` срабатывает на таблицах, куда почти не пишут: autovacuum их не трогает, пока не накопится порог изменений, и warning висит бесконечно.
@@ -284,69 +130,6 @@
 - **Impact:** остановка ждёт закрытия клиентских сессий AMP вместо `-m fast`; при долгих сессиях упирается в `terminationGracePeriodSeconds` и SIGKILL (recovery на старте).
 - **Fix:** `pg_ctl stop -D "$PGDATA" -m fast -w -t 60` без `su`; проверка на k3d (лог `fast shutdown request`).
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
-- **Status:** open
-
-### [low][Test][~0.1d] FLAKE-TIMER-CONTINUATION-GROUP-INTERVAL
-- **Title:** `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` флейкает в шаге `race`
-- **Problem:** `go-app/internal/infrastructure/grouping/timer_continuation_regression_test.go:198` — ожидался таймер `group_interval`, прочитан `group_wait`: тест читает storage раньше, чем срабатывание записало continuation. Release-gate 2026-10-19 (ветка `feature/helm-single-node-defaults`, Go-код не менялся), шаг `race`; перезапуск шага — 7/7 ok, тест отдельно `-race -count=30` — 30/30.
-- **Impact:** шаг `race` release-gate краснеет случайно.
-- **Fix:** ждать опросом, пока тип записи станет `group_interval` (как предложено в `GROUPING-ORPHAN-ADOPTION-TEST-FLAKY` — тот же класс, чинить вместе).
-- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/release-gate.txt` (FAIL и перезапуск в конце файла).
-- **Status:** open
-
-### [medium][API][~0.5d] API-ALERTS-RECEIVER-INHIBITED-STATUS
-- **Title:** `GET /api/v2/alerts` отдаёт `receivers: ["default"]` и `state: active` с пустым `inhibitedBy` для подавленного алерта
-- **Problem:** два места.
-  - **Receiver.** `toAPIAlert` (`go-app/internal/infrastructure/storage/memory/alert_store.go:460-473`) берёт receiver из метки `receiver` алерта, а при её отсутствии ставит `"default"`. Route tree не используется, хотя `/api/v2/alerts/groups` уже резолвит receiver через `alertGroupingResolver` (`internal/application/handlers/alerts.go:347`).
-  - **Inhibition.** `alertconv.ToGettableAlert` (`internal/core/alertconv/alertconv.go:212`) всегда возвращает `InhibitedBy: []string{}`, а `state` считает только по silences. Результат inhibition (`alert_processor.go:587-595`) до API не доходит; ограничение описано в комментарии `handlers/alerts.go:173-177`. Поэтому `?inhibited=false` ничего не отфильтрует.
-  - **Воспроизведение** на живом конфиге sema-prod (Secret `sema-monitoring/alertmanager-kube-prometheus-stack-alertmanager`, секреты заменены заглушками, Telegram/Slack — на `https://127.0.0.1`), бинарь `main` @ `9d41dc0`, `profile: lite`, `storage.backend: filesystem`:
-    1. Запустить с `AMP_CONFIG_FILE=<копия конфига>`. Конфиг грузится: `routes=4 receivers=3`, `Inhibition subsystem initialized rules=3`.
-    2. `POST /api/v2/alerts` с пятью алертами: `DiskFull` `severity=critical signal=panic`, `DiskFull` `severity=warning signal=error`, `HighLatency` `severity=warning signal=error` (у всех трёх `namespace=sema-prod service=api`), `Watchdog`, `Unmatched` без `signal`.
-    3. Лог — правильно: `DiskFull/critical` → `panic-telegram` (`route.routes[1]`), `HighLatency` → `errors-slack` (`route.routes[2]`), `Watchdog` → `drop-unmatched`, `Unmatched` → `panic-telegram` (корень); `Alert inhibited by rule` — `DiskFull/warning` подавлен `DiskFull/critical` (правило `severity = critical` → `severity =~ warning|info`, `equal: [namespace, alertname]`).
-    4. `GET /api/v2/alerts` — неправильно: у всех пяти `receivers: [{"name":"default"}]` (такого receiver'а в конфиге нет), у `DiskFull/warning` — `state: active`, `inhibitedBy: []`. Upstream вернул бы реальный receiver каждого алерта и `state: suppressed`, `inhibitedBy: [<fingerprint DiskFull/critical>]`.
-- **Impact:** на доставку не влияет. Влияет на клиентов API: karma, Grafana Alertmanager datasource, `amtool alert query`. Подавленные алерты они показывают как горящие, фильтр по receiver'у (`?receiver=`) ничего не находит. При параллельном запуске рядом с Alertmanager в sema-prod картина в UI будет расходиться с Alertmanager. `/api/v2/alerts/groups` в этом прогоне не проверялся.
-- **Fix:** receiver — через тот же резолвер, что и для groups (route tree, при `continue` — все совпавшие receiver'ы, см. `ROUTE-CONTINUE-NO-FANOUT`). Inhibition — хранить у алерта fingerprint'ы источников подавления (или спрашивать inhibition-кеш при выдаче) и заполнять `inhibitedBy`/`state: suppressed` в `ToGettableAlert`; то же для групп. Тест через `LoadConfig` + `POST`/`GET /api/v2/alerts`: route tree без метки `receiver` и пара source/target по inhibit-правилу.
-- **Refs:** проверка 2026-10-21 на живом конфиге sema-prod (временный прогон, конфиг и логи не сохранены в репо: в конфиге креды).
-- **Status:** open
-
-<!-- Code review 2026-10-21 (`docs/06-planning/CODE-REVIEW-2026-10-21.md`, `main` @ `68d749f`). В Refs — ID находки из документа; там же — порядок этапов и зависимости. Пути — от `go-app/`. -->
-
-### [low][Inhibition][~0.25d] INHIBIT-CACHE-RESOLVE-REFIRE-RACE
-- **Title:** параллельные resolve и повторный firing одного fingerprint на одной реплике — источник снимается синком
-- **Problem:** `RemoveAlert` (`internal/infrastructure/inhibition/cache.go`) делает `Delete`/`SRem` в Redis после удаления из L1. Если параллельно идёт `AddFiringAlert` того же fingerprint, его Set+SAdd могут попасть до `Delete`/`SRem` remove: в L1 лежит локальная запись с выставленным `redisConfirmedAt`, а в Redis её уже нет ⇒ следующий проход синка удаляет её как «пропавшую». Повторный tombstone верно пропускает локальную запись, но расхождение L1 и Redis остаётся.
-- **Impact:** источник перестаёт подавлять на этой реплике до следующего resend (~1m у Prometheus, для webhook — до повтора). Реалистичный случай — HA-пара Prometheus с рассинхроном оценки (одна шлёт resolved, другая firing). Другие реплики согласованы (там победил resolve).
-- **Fix:** в `RemoveAlert` после `Delete`/`SRem`, если в L1 локальная запись (`!fromSync`) с `writtenAt` позже первого tombstone, — повторно записать её в Redis (или сбросить ей `redisConfirmedAt`). Тест на `hookCache` из `cache_test.go`: add внутри `Delete` remove ⇒ после синка источник виден.
-- **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F8.
-- **Status:** open
-
-### [high][Config][~0.25d] DURATION-UPSTREAM-UNITS
-- **Title:** длительности `d`/`w`/`y` в конфиге не парсятся
-- **Problem:** `routing.Duration` (`internal/infrastructure/routing/global.go:486`) и `grouping.Duration` (`internal/infrastructure/grouping/config.go:125`) используют `time.ParseDuration`; upstream — `model.Duration`.
-- **Impact:** немодифицированный upstream-конфиг с `repeat_interval: 1d` не загружается.
-- **Fix:** один тип `Duration` на `model.ParseDuration` из `github.com/prometheus/common` (уже прямая зависимость); тест на `1d`, `1w`, `90s`, `0s`.
-- **Refs:** CODE-REVIEW-2026-10-21 H-2, D-6.
-- **Status:** open
-
-### [high][Config][~0.5d] RELOAD-SERIALIZE
-- **Title:** reload конфига не сериализован и привязан к контексту HTTP-клиента
-- **Problem:**
-  - `ServiceRegistry.ReloadConfig` (`internal/application/service_registry.go:2654`) без мьютекса; SIGHUP (`cmd/server/main.go:298`), `POST /-/reload` (`handlers/status_api.go:105`) и sidecar запускают конвейер параллельно. Внутри — глобальный viper, `r.config = newConfig` без синхронизации; распределённый lock в `atomicApply` недостижим (`lockManager == nil`, `service_registry.go:337`); `rc.reloadVersion` читается без `mu` (`reload_coordinator.go:168,252`).
-  - HTTP-reload и `RollbackAll` (`internal/config/update_reloader.go:262`) работают на `r.Context()`: обрыв клиента посреди Phase 5 оставляет незавершённый откат (W610). SIGHUP-путь уже использует свой контекст.
-  - `external_url` захватывается при сборке роутера (`internal/application/handlers/alerts.go:57`) и reload его не обновляет.
-- **Impact:** два reload применяются вперемешку, откат возвращает не тот снимок; `hypothesis`: `concurrent map writes` в viper. Обрыв клиента ⇒ split state.
-- **Fix:** `reloadMu sync.Mutex` в `ReloadConfig`, для HTTP — `TryLock` ⇒ `409`; `context.WithoutCancel` + свой таймаут в `ReloadHandler` и `RollbackAll`; `external_url` читать из `registry.Config()` на запрос. Тест: два параллельных reload под `-race`, reload с отменённым клиентским ctx.
-- **Refs:** CODE-REVIEW-2026-10-21 H-5, M-19, L-5.
-- **Status:** open
-
-### [high][Config][~0.5d] CONFIG-VALIDATION-FAIL-CLOSED
-- **Title:** валидация конфига расходится между стартом и reload и пропускает ошибки
-- **Problem:**
-  - `DefaultConfigValidator` (`internal/config/update_validator.go:589-596`) работает только на reload, `Config.Validate` — только на старте (`config.go:1147`), правила разные. Lite + `app.environment=production` (дефолт чарта) без `DATABASE_PASSWORD`: старт проходит, каждый reload падает «database password should not be empty in production».
-  - `validateAlertmanagerSubset` (`internal/config/alertmanager_validation.go:66-71,93-95`): ошибка `yaml.Unmarshal` ⇒ `return nil`, вся проверка configvalidator пропускается.
-  - `parseMatchers` в tree builder (`internal/business/routing/tree_builder.go:274-278`) молча выбрасывает битый matcher («best-effort») ⇒ маршрут шире, особенно для `!=`/`!~`. `hypothesis`: конкретный вход, проходящий configvalidator и ломающий builder, не найден.
-- **Impact:** на lite-prod hot reload не работает никогда (sidecar в бесконечном backoff); битый конфиг может отправлять алерты не тому ресиверу без единой ошибки.
-- **Fix:** один валидатор на оба пути, проверки БД гейтить `RequiresPostgres()`; ошибка unmarshal — ошибка валидации; builder вызывает `matcher.Parse` и возвращает ошибку. Breaking: битые `matchers:` перестают загружаться — CHANGELOG.
-- **Refs:** CODE-REVIEW-2026-10-21 H-6, M-20, D-7.
 - **Status:** open
 
 ### [high][LLM][~0.25d] LLM-RETRY-CLASSIFY
@@ -378,88 +161,6 @@
 - **Impact:** атакующий с правом слать алерты управляет агентом и вытягивает логи чужих namespace во внешний LLM.
 - **Fix:** данные алерта — в `user`-сообщении в явном разделителе с инструкцией «это данные»; `investigation.tools.kubernetes.allowed_namespaces`, по умолчанию — namespace из лейбла алерта; редактирование секретов в выводе tools; отдельный DSN для `database_query`, без него tool не регистрировать; один `doChat` с CB и лимитом тела.
 - **Refs:** CODE-REVIEW-2026-10-21 H-9, L-7, L-9. Смежно `PROD-LLM-ALERT-PATH-ISOLATION`, `INVESTIGATION-K8S-TOOL-HELM`.
-- **Status:** open
-
-### [high][Test][~1d] SILENCE-REPO-INTEGRATION-TESTS
-- **Title:** тесты `PostgresSilenceRepository` безусловно пропускаются
-- **Problem:** `internal/infrastructure/silencing/postgres_silence_repository_test.go` (30 `t.Skip`), `bulk_ops_test.go` (7), `ttl_test.go` (6) — «Requires database connection»; `NewPostgresSilenceRepository` не вызывается ни в одном тесте.
-- **Impact:** SQL хранения silences в HA не проверяется ничем, кроме e2e.
-- **Fix:** testcontainers-сьют по образцу `repository/postgres_history_test.go`: CRUD, фильтры `filter_builder`, TTL/cleanup, bulk; безусловные `t.Skip` удалить.
-- **Refs:** CODE-REVIEW-2026-10-21 H-11.
-- **Status:** open
-
-### [medium][Grouping][~1d] GROUP-STORE-LOST-UPDATE
-- **Title:** конкурентное обновление существующей группы в Redis теряет алерт молча
-- **Problem:** `AddAlertToGroup` (`internal/infrastructure/grouping/manager_impl.go:298-305`) делает `Load → mutate → Store`; при конкурентном апдейте `RedisGroupStorage.Store` (`redis_group_storage.go:204`) возвращает `ErrVersionMismatch`/`TxFailedErr`, ошибка только логируется, вызывающему возвращается незаписанный `Clone()`. `group.Version++` выполняется до EXEC. `MemoryGroupStorage` версию не проверяет вовсе.
-- **Impact:** алерт или resolve пропадает из группы до следующего resend; memory и Redis backend ведут себя по-разному.
-- **Fix:** retry с повторным `Load` (N попыток, затем ошибка); локальная сериализация по ключу через `groupPublishLocks` (`publish_lock.go:72`) — заодно закрывает `GROUPING-NEW-GROUP-CREATE-RACE`; `Version++` на копии после EXEC; общий contract-тест для двух storage.
-- **Refs:** CODE-REVIEW-2026-10-21 M-1, D-13. Смежно `REDIS-GROUP-STORAGE-UNLOCKED-WRITES` (TECH-DEBT), `GROUPING-NEW-GROUP-CREATE-RACE`.
-- **Status:** open
-
-### [medium][Silencing][~0.25d] SILENCE-VALIDATION-PARITY
-- **Title:** валидация silence расходится с upstream: отклоняет пустые значения, принимает match-all
-- **Problem:** три копии валидации (`internal/application/handlers/silence_convert.go:79`, `internal/infrastructure/storage/memory/silence_store.go:457`, `internal/core/silencing/validator.go:76`) требуют непустое значение каждого matcher'а. Upstream требует, чтобы хотя бы один matcher не матчил пустую строку.
-- **Impact:** отклоняются валидные `env=""`, `env!=""`; принимается `alertname=~".*"`, который глушит всё.
-- **Fix:** один валидатор в `core/silencing` по правилу upstream, обе точки входа вызывают его; парсинг StartsAt/EndsAt и regex-проверка — там же. Breaking (match-all отклоняется) — CHANGELOG.
-- **Refs:** CODE-REVIEW-2026-10-21 M-2, D-3.
-- **Status:** open
-
-### [medium][Storage][~1d] STORE-RETENTION-GC
-- **Title:** alert store и silence store растут неограниченно
-- **Problem:**
-  - `AlertStore.all` (`internal/infrastructure/storage/memory/alert_store.go:113-193`) никогда не чистится: resolved остаются навсегда, каждый новый `startsAt` — новый ключ.
-  - `SilenceStore` не удаляет истёкшие silences (`silence_store.go`); `HasActiveMatch`/`ActiveMatchingSilenceIDs` (`:287-303,365-385`) проходят все silences, аллоцируя matcher'ы на каждый; глобальный `RegexCache` (`core/silencing/matcher_cache.go`) сбрасывается целиком на 1000 записях под write-lock.
-- **Impact:** память, время `List`/`Stats`/`filterSilenced` и размер снапшота растут с аптаймом.
-- **Fix:** периодический GC resolved с `EndsAt < now - retention`; retention GC silences (upstream 120h); компиляция matcher'ов при сохранении в `StoredSilenceState`; gauges размеров store. Soak-тест с ротацией алертов.
-- **Refs:** CODE-REVIEW-2026-10-21 M-3, M-4. Смежно `ALERT-STORE-DEDUP-KEY-STARTSAT`.
-- **Status:** open
-
-### [medium][Inhibition][~0.5d] INHIBIT-STATE-LIFECYCLE
-- **Title:** состояния inhibition не истекают, cleanup worker не запущен
-- **Problem:** `inhibition/state_manager.go:120-260`: state удаляется только при resolve источника, полным сканом `GetActiveInhibitions` (`alert_processor.go:830-850`); resolve цели или исчезновение источника без resolve оставляют state навсегда; `ExpiresAt` всегда nil; `StartCleanupWorker` не вызывается; `RecordInhibition` на каждом resend — Redis SET с TTL 24h и O(n) `countActiveStates` (`alert_processor.go:600`).
-- **Impact:** неограниченный рост `sync.Map` и Redis-ключей; лишняя O(n) работа в ingest-пути.
-- **Fix:** удалять state на resolve цели; `ExpiresAt = source.EndsAt`; обратный индекс `source → targets`; gauge через `GaugeFunc`; запустить cleanup worker или удалить.
-- **Refs:** CODE-REVIEW-2026-10-21 M-5.
-- **Status:** open
-
-### [medium][Publishing][~1.5d] PUBLISH-SINGLE-RETRY-LAYER
-- **Title:** вложенные ретраи в publishing блокируют воркер и открывают breaker здоровым таргетам
-- **Problem:** клиенты (`slack_client.go:217-311`, `telegram_client.go:319-418`, `pagerduty_client.go:379-472`, `rootly_client.go:303-364`, `webhook_client.go:142-267`) делают 3–4 попытки, очередь (`queue.go:1401`, `retryPublish`) — ещё `maxRetries+1`: до 16 HTTP на задание. `time.Sleep` без ctx (`slack:247`, `telegram:345`, `pagerduty:427,460`) — `Abandon` не прерывает backoff; `defer Body.Close()` внутри цикла (`slack:254`, `telegram:352`); `Retry-After` не ограничен (`slack:288`, `webhook:241-244`).
-- **Impact:** медленный или rate-limited таргет превышает `DeliveryConfirmationTimeout` (45s), abandon считается отказом для breaker'а ⇒ здоровый таргет может открыть breaker. `hypothesis`: группа из 45+ алертов в Slack не укладывается в 45s.
-- **Fix:** клиенты делают одну попытку и возвращают классифицированную ошибку (`retryable`, `Retry-After`); ретраит только очередь через `pkg/retry` с ctx-aware backoff; cap `Retry-After` 30s.
-- **Refs:** CODE-REVIEW-2026-10-21 M-8, D-8.
-- **Status:** open
-
-### [medium][Publishing][~0.5d] PUBLISH-HEALTH-PROBES
-- **Title:** email-таргет всегда unhealthy; метрики refresh не скрейпятся
-- **Problem:** health monitor шлёт HTTP GET на каждый таргет (`internal/business/publishing/health_checker.go:107-120`); для `smtp://host:port` (`config_targets.go:669`) — всегда `unsupported protocol scheme`. `hypothesis`: GET на Slack webhook / PD `/v2/enqueue` тоже не 2xx. Метрики refresh регистрируются во временном `prometheus.NewRegistry()` (`internal/application/publishing_runtime.go:210`, `refresh_manager_impl.go:121`).
-- **Impact:** ложные unhealthy-статусы в API/дашборде; refresh не наблюдаем.
-- **Fix:** email — пропускать или TCP-probe; API-типы — TCP-only probe; refresh-метрики — `v2.Global().Publishing`.
-- **Refs:** CODE-REVIEW-2026-10-21 M-12, M-13.
-- **Status:** open
-
-### [medium][API][~0.5d] API-V2-ERROR-SHAPE
-- **Title:** ошибки API v2 в форме `{"error":…}` вместо JSON-строки; 405 без `Allow`; любая ошибка чтения тела — 413
-- **Problem:** `writeJSON(..., map[string]string{"error": ...})` в `internal/application/handlers/alerts.go:76,309,425`, `silences.go:95,122,135,144`, `status.go:51`; upstream swagger описывает 400/500 как `type: string`. Проверка метода inline (`alerts.go:68`, `silences.go:46,73`, `status_api.go:101`, `investigation.go:19`, `inhibitions.go:29`) отдаёт 405 без `Allow`, в отличие от `method_guard.go`. В `handleAlertsPost`/`handleSilencePost` любая ошибка `io.ReadAll` (обрыв клиента) ⇒ 413.
-- **Impact:** `hypothesis`: клиенты, сгенерированные по swagger (amtool), на 400 получают ошибку декодирования вместо причины.
-- **Fix:** `writeV2Error(w, code, msg)` с `json.Marshal(msg)`; `allowMethods(...)` по образцу `getOnly`; `errors.As(err, *http.MaxBytesError)` ⇒ 413, остальное 400. Строка в `ALERTMANAGER_COMPATIBILITY.md`.
-- **Refs:** CODE-REVIEW-2026-10-21 M-15, L-6.
-- **Status:** open
-
-### [medium][API][~0.25d] API-FILTER-MATCHER-GRAMMAR
-- **Title:** `?filter=` в API принимает другую грамматику matcher'ов, чем конфиг и upstream
-- **Problem:** `internal/application/handlers/matchers.go:28` требует кавычки (`"(.*)"`), не допускает пробелов и не снимает экранирование; парсер маршрутов (`business/routing/tree_builder.go:237,411`) и `pkg/configvalidator/matcher` принимают обе формы.
-- **Impact:** `?filter=alertname=Foo` ⇒ 400, тот же matcher в `route.matchers` работает; upstream принимает обе формы.
-- **Fix:** использовать общий парсер (`matcher.Parse`, затем `pkg/labelmatch` из `LABELMATCH-PKG`), регекс в handlers удалить.
-- **Refs:** CODE-REVIEW-2026-10-21 M-16, D-2.
-- **Status:** open
-
-### [medium][API][~0.5d] INGEST-PARSE-VALIDATE
-- **Title:** валидация входящих алертов зависит от `severity`, 400 без причины
-- **Problem:** `parseAlertsForProcessing` (`internal/application/handlers/alerts.go:482-503`) сначала разбирает Prometheus-парсером, его валидатор требует `severity ∈ {critical,warning,info,debug}` (`webhook/validator.go:186-196,554`); при ошибке молча fallback на legacy-парсер, который проверяет только `alertname`, не валидирует имена меток и `generatorURL`, теряет `activeAt`/`value`. Наружу — общее «invalid alert payload».
-- **Impact:** итоговая валидация зависит от значения `severity`; диагностика 400 бесполезна. Upstream валидирует имена/значения меток и `startsAt<=endsAt`, `alertname` не требует.
-- **Fix:** выбор парсера по формату (детектор), один валидатор по смыслу upstream `PostableAlert.Validate`, ограничение по severity из ingest убрать, возвращать первую содержательную ошибку.
-- **Refs:** CODE-REVIEW-2026-10-21 M-17.
 - **Status:** open
 
 ### [medium][UI][~0.25d] UI-ROUTE-PREFIX-LINKS
@@ -506,62 +207,6 @@
 - **Refs:** CODE-REVIEW-2026-10-21 L-3, L-4.
 - **Status:** open
 
-### [low][Grouping][~0.25d] REDIS-GROUP-INDEX-GHOSTS
-- **Title:** ZSET-индекс групп в Redis копит удалённые по TTL группы
-- **Problem:** `redis_group_storage.go:222,385,419-590`: после истечения ключа группы (TTL 24h) член `group:index` остаётся; timer storage такие члены лениво чистит (`redis_timer_storage.go:452`), group storage — нет.
-- **Impact:** `Size()` (ZCARD) завышен, `LoadAll` считает призраков ошибками на каждом restore, индекс растёт.
-- **Fix:** `ZRem` на not-found в `LoadAll`/`ListKeys`; общий helper с timer storage (`REDIS-HELPERS`).
-- **Refs:** CODE-REVIEW-2026-10-21 L-12, D-12.
-- **Status:** open
-
-### [low][Grouping][~0.1d] LOCK-ACQUIRE-SLEEP
-- **Title:** `Acquire` распределённого lock делает 4 попытки со `time.Sleep` без ctx
-- **Problem:** `lock/distributed.go:86-125`: `Acquire()` = `AcquireWithRetry(ctx, 0)` ⇒ 3 ретрая по умолчанию; `time.Sleep` игнорирует ctx; `defer cancel()` внутри цикла; таймаут попытки = TTL, а не `AcquireTimeout`; успех логируется на INFO.
-- **Impact:** follower делает 4 SETNX на poll, `Stop` задерживается.
-- **Fix:** одна попытка SETNX на `Acquire`, ctx-aware sleep, `cancel()` на итерацию, лог на DEBUG.
-- **Refs:** CODE-REVIEW-2026-10-21 L-14.
-- **Status:** open
-
-### [low][Cluster][~0.25d] CLUSTER-HEARTBEAT-STATE
-- **Title:** heartbeat считает себя зарегистрированным после неудачных refresh; `Peers` сканирует весь keyspace
-- **Problem:** `cluster/heartbeat.go:174`: `registered` остаётся true, даже когда ключ уже истёк; `Peers` (`:244`) делает SCAN по всему keyspace (группы, таймеры, nflog) на каждый status.
-- **Impact:** неверный статус кластера в `/api/v2/status`; нагрузка на Redis растёт с числом групп.
-- **Fix:** `registered=false` на неудаче refresh; peers в ZSET со score=expiry (`ZADD` + `ZRANGEBYSCORE now +inf`).
-- **Refs:** CODE-REVIEW-2026-10-21 L-15.
-- **Status:** open
-
-### [low][Publishing][~0.5d] PUBLISH-RELOAD-CLIENT-LIFECYCLE
-- **Title:** reload копит HTTP-клиенты и breaker'ы; первые таргеты после reload до 5s отбрасываются
-- **Problem:** client maps фабрики (`publisher.go:342-361`) и `circuitBreakers` (`queue.go:1171-1206`) никогда не чистятся — каждый reload с новым ключом/URL добавляет клиента со своим `Transport`. Reload не вызывает `CheckModeTransition` (`service_registry_reload.go:184`; тикер 5s в `mode_manager.go:281`).
-- **Impact:** рост idle-соединений и памяти с числом reload; если reload добавляет первые таргеты, прямой путь теряет алерты до 5s (групповой ретраит).
-- **Fix:** GC по живому набору таргетов в `applyConfigTargets`; `CheckModeTransition()` после него.
-- **Refs:** CODE-REVIEW-2026-10-21 L-17, L-18. Смежно `FU-HTTP-FILE-ROTATION`.
-- **Status:** open
-
-### [low][Publishing][~0.25d] PUBLISH-TRANSPORT-CONSISTENCY
-- **Title:** приоритет источников ключа PD и поведение прокси зависят от пути
-- **Problem:** `publisher.go:592-606` — `Authorization` перекрывает `routing_key`, `pagerduty_publisher_enhanced.go:215-231` — побеждает `routing_key`; Bearer-strip повторяется (`publisher.go:525,729`). Свои `http.Transport` без `Proxy` в `slack_client.go:89`, `telegram_client.go:200`, `pagerduty_client.go:172`, `rootly_client.go:104`, тогда как базовый путь через `DefaultTransport` учитывает `HTTPS_PROXY`.
-- **Impact:** один и тот же таргет может уйти с разным ключом и через разный сетевой путь в зависимости от типа.
-- **Fix:** одна `credentialFromHeaders(target, keys...)`; явная политика прокси (upstream env-прокси по умолчанию не использует), одинаковая для всех клиентов.
-- **Refs:** CODE-REVIEW-2026-10-21 L-20, L-21, D-15.
-- **Status:** open
-
-### [low][Config][~0.25d] FILE-SECRET-PATH-BASE
-- **Title:** `*_file`-секреты читаются относительно CWD и без лимита размера
-- **Problem:** `internal/infrastructure/routing/file_secrets.go:207`; при этом `http_config/*_file` перебазируются на каталог конфига (`http_config_filepaths.go:62`). `hypothesis`: делает ли upstream rebase для этих полей — не проверено.
-- **Impact:** относительный `api_url_file` работает иначе, чем `ca_file`; путь `/dev/zero` ⇒ OOM на reload (конфиг доверенный, не path traversal).
-- **Fix:** `rebasePath` до чтения (параметр `baseDir` у `Parse`), `io.LimitReader(64KiB)`.
-- **Refs:** CODE-REVIEW-2026-10-21 L-22. Смежно `FILE-SECRET-READ-ERROR-HINT`.
-- **Status:** open
-
-### [low][Security][~0.1d] W300-DELIVERABLE-SECRETS
-- **Title:** предупреждение W300 «secret hardcoded» не проверяет секреты доставляемых интеграций
-- **Problem:** `pkg/configvalidator/validators/security.go:73-84` проверяет OpsGenie/VictorOps/WeChat (AMP их не доставляет) и пропускает PD `routing_key`, Slack `api_url`, Telegram `bot_token`, `http_config.basic_auth.password`, `bearer_token`.
-- **Impact:** предупреждение молчит ровно там, где секрет реально используется.
-- **Fix:** добавить перечисленные поля; тест на каждое.
-- **Refs:** CODE-REVIEW-2026-10-21 L-25.
-- **Status:** open
-
 ### [low][Cache][~0.1d] REDIS-FLUSH-ALL
 - **Title:** `RedisCache.Flush` стирает все DB инстанса
 - **Problem:** `internal/infrastructure/cache/redis.go:367-378` вызывает `FlushAll`, а не `FlushDB`; метод в интерфейсе `Cache`, prod-вызовов нет. `NewRedisCache` игнорирует ctx (`:59`).
@@ -577,6 +222,407 @@
 - **Fix:** `RESTClient().Get().AbsPath("/version").Do(healthCtx)`; пагинация через `Continue`; удалить `Close` или синхронизировать читателей.
 - **Refs:** CODE-REVIEW-2026-10-21 L-27.
 - **Status:** open
+
+## Снимается переходом на upstream (ADR-019)
+
+Перенесено 2026-10-24 задачей `ADR-019-V2-SLICING`: код, в котором живёт проблема, удаляется срезом эпика ADR-019 (`BACKLOG.md`), поведение даёт upstream. Не брать в работу. Записи сохранены целиком: если PoC (`UPSTREAM-CORE-POC`) не пройдёт и решение пересмотрят, они возвращаются в Open. Закрываются вместе со срезом — удаляются отсюда, строка в `DONE.md` среза. `Status: superseded` — расширение Entry Format для этой секции.
+
+### [medium][Config][~0.5d] TEMPLATED-FIELDS-NOT-RENDERED
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** `email_configs[].to` и `slack_configs[].actions[]` upstream шаблонизирует, AMP не рендерит и при загрузке валидирует как литерал
+- **Problem:** `EmailConfig.To` — `validate:"required,email"` (`go-app/internal/infrastructure/routing/receiver.go`), в target уходит как есть (`config_targets.go:645`, заголовок `to`). Upstream рендерит `to` шаблоном и принимает список адресов через запятую — у AMP не грузится ни `to: '{{ .CommonLabels.owner }}@example.com'`, ни `to: 'a@example.com, b@example.com'`. `SlackAction` (`text`/`url`/`style`, теги `required`/`url`/`oneof`) — upstream шаблонизирует все поля action, AMP actions не отправляет вовсе (`slackTarget`: «not expressible»), но шаблонный `url` валит загрузку.
+- **Impact:** upstream-конфиг с несколькими получателями письма или шаблонным `to` не загружается; с шаблонной Slack-кнопкой — тоже, хотя кнопка всё равно потерялась бы.
+- **Fix:** `to` — разрешить список адресов (`net/mail.ParseAddressList`) и шаблон (`template_expr|…`, как в SLACK-COLOR-TEMPLATE-REJECTED), рендерить `to` в `emailTemplateFields` и брать отрендеренный адрес в email publisher. `actions` — `template_expr|…` на полях, пока actions не отправляются; рендер — вместе с поддержкой actions. Просто ослабить валидацию `to` без рендера нельзя: письмо уйдёт на литерал `{{ … }}`.
+- **Refs:** найдено при SLACK-COLOR-TEMPLATE-REJECTED (2026-10-20), аудит валидаторов шаблонных полей.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Grouping][~0.5d] GROUPING-NEW-GROUP-CREATE-RACE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** два конкурентных алерта одной новой группы создают две группы и два таймера `group_wait`
+- **Problem:** `DefaultGroupManager.AddAlertToGroup` (`go-app/internal/infrastructure/grouping/manager_impl.go:246`) делает `storage.Load` → `createNewGroupUnsafe` → `storage.Store` без сериализации по ключу группы, хотя `createNewGroupUnsafe` документирован «Caller must hold write lock». Оба вызова получают `not found`, каждый создаёт группу, последний `Store` затирает первый (алерт пропадает из storage до следующего resend), оба стартуют `group_wait`.
+- **Impact:** с `group_wait > 0` маскируется (второй таймер заменяет первый); с `group_wait: 0s` (разрешён с ROUTE-TIMINGS-BUNDLE) возможны две отдельные нотификации вместо одной и потеря алерта в первой. Предсуществующее, найдено deep-review ROUTE-TIMINGS-BUNDLE (F3).
+- **Fix:** per-group-key сериализация создания (keyed mutex / singleflight) или условная запись в storage; тест на конкурентный `AddAlertToGroup` новой группы с `group_wait: 0`.
+- **Refs:** `tasks/archive/ROUTE-TIMINGS-BUNDLE/review-findings.md` § F3.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Security][~0.25d] HEALTH-CHECK-URL-LEAK
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** health checker пишет URL таргета с токеном в статус и DEBUG-лог
+- **Problem:** при транспортной ошибке `business/publishing/health_checker.go:108-123` кладёт текст `*url.Error` с полным URL в `ErrorMessage` статуса и в DEBUG-лог; `sanitizeErrorMessage` путь не чистит. Для Teams/Discord/Google Chat/Slack/Telegram токен — часть пути. Health monitor включён по умолчанию.
+- **Impact:** токен таргета в логах и в API статуса таргетов — остаток `PUBLISH-SECRETS-IN-LOGS` (оговорено в CHANGELOG).
+- **Fix:** маскировать `*url.Error` через `core.RedactURL` перед записью (как `redactURLError` в publishing). Тест: недоступный таргет с токеном в пути ⇒ ни статус, ни лог токена не содержат.
+- **Refs:** `tasks/archive/PUBLISH-QUICK-FIX-BUNDLE/review-findings.md` F2.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Inhibition][~0.25d] INHIBITED-RESEND-NEVER-NOTIFIED
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** подавленный inhibition алерт без `endsAt` не уведомит и после ухода источника
+- **Problem:** `AlertProcessor.ProcessAlert` (`internal/core/services/alert_processor.go`): inhibited firing-алерт уже записан dedup'ом (`created`) и выходит `return nil` до `evaluateRoute` — ни публикации, ни группы. Когда источник гаснет, неизменный resend (нет `endsAt`: Prometheus-API-формат, legacy, `amtool alert add` без `--end`) dedup считает `ignored`, и `ProcessAlert` выходит до inhibition/группы. Тот же класс, что F1 `SILENCED-ALERTS-INGEST` (там закрыт `silenceSkipped`). `hypothesis`: трасса по коду, не воспроизведено тестом.
+- **Impact:** цель inhibition молчит до resolve или изменения алерта; в режиме группировки — тоже (алерт не попадает в группу). Отправители с меняющимся `endsAt` (Prometheus в Alertmanager-формате) не затронуты.
+- **Fix:** как в upstream — inhibited алерт всё равно попадает в группу (notify chain уже делает Inhibit), а в прямом режиме — помечать fingerprint по образцу `silenceSkipped`. Тест: inhibited без `endsAt` → источник resolved → resend → одна публикация.
+- **Refs:** `tasks/archive/SILENCED-ALERTS-INGEST/review-findings.md` F1.
+- **Status:** superseded — ADR-019, срез 5
+
+### [high][Routing][~1d] ROUTE-CONTINUE-NO-FANOUT
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** `continue: true` не даёт доставку во второй receiver — алерт уходит только в первый совпавший route
+- **Problem:** путь публикации берёт одно решение: `AlertProcessor.evaluateRoute` (`go-app/internal/core/services/alert_processor.go:271`) → `routeTreeEvaluator.Evaluate` (`internal/application/route_evaluator.go:100`) → `businessrouting.RouteEvaluator.Evaluate` — первый матч; `services.RoutingDecision` хранит один `Receiver`. Мультиматч по `continue` есть в `RouteMatcher.FindMatchingRoutes` и `RouteEvaluator.EvaluateWithAlternatives` (`internal/business/routing/evaluator.go:277`), но у `EvaluateWithAlternatives` нет ни одного не-тестового вызова.
+- **Impact:** конфиг «critical → дежурный канал **и** общий канал» через `continue` молча теряет вторую доставку; `docs/ALERTMANAGER_COMPATIBILITY.md:41` заявляет `continue` как 🟢 Supported. Для параллельного запуска рядом с Alertmanager в sema-prod — расхождение по составу получателей.
+- **Fix:** решение маршрутизации — список (primary + alternatives); группировка и публикация по каждому receiver'у отдельно (ключ группы уже содержит receiver), dedup/nflog — на пару (группа, receiver). Тест через `LoadConfig` + `ProcessAlert`: два sibling-route с `continue: true` → обе группы и обе публикации. Поправить строку в `ALERTMANAGER_COMPATIBILITY.md`.
+- **Refs:** k3d HELM-EXTRA-VOLUMES 2026-10-20 (`tasks/archive/HELM-EXTRA-VOLUMES/evidence/k3d-extra-volumes.md` §3): `severity=critical` → только `telegram-panic` (`matched_route=route.routes[0]`), sibling `slack` пуст.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Test][~0.1d] FLAKE-GROUP-INTERVAL-CHAIN-RESOLVE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** `TestGroupIntervalChain_ResolveGoesOutAndTheGroupIsGone` флейкает
+- **Problem:** `go-app/internal/infrastructure/grouping/group_interval_chain_test.go:176` — `no further fires for the removed group`: после удаления полностью разрешённой группы счётчик сработавших таймеров ещё растёт. Замер 2026-10-20, `-count=300`: 4 падения на `main` @ `28007e8` и 4 на `bugfix/route-timings` — предсуществующий.
+- **Impact:** шаг `test` гейта может краснеть случайно.
+- **Fix:** разобрать, доходит ли до fire таймер, взведённый до удаления группы (тогда это продуктовая гонка), или тест снимает `expiredTimers` раньше, чем завершилась уже начатая обработка; во втором случае — ждать стабилизации счётчика.
+- **Refs:** замер в сессии ROUTE-TIMINGS-BUNDLE.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Test][~0.25d] FUZZ-RANDOM-ALERTS-RACE-TIMEOUT
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** `TestFuzz_RandomAlerts` под `-race` съедает больше половины 10-минутного таймаута пакета
+- **Problem:** `go-app/internal/infrastructure/publishing/formatter_fuzz_test.go` в одиночном прогоне `go test -race -run 'TestFuzz_RandomAlerts$'` идёт 5m21s (2026-10-20, M-series). В шаге `race` release-gate под нагрузкой пакет `internal/infrastructure/publishing` упал `panic: test timed out after 10m0s` с этим тестом в `running tests`.
+- **Impact:** required-шаг `race` гейта краснеет по таймауту без реальной регрессии; на shared runner'ах CI вероятнее.
+- **Fix:** уменьшить число итераций под `-race` (`testing.Short()`/build tag `race` или env), либо перенести в отдельный fuzz-таргет `go test -fuzz` вне гейта; цель — секунды, не минуты.
+- **Refs:** release-gate 2026-10-20 на `main` @ `7958ef8` (шаг `race`).
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Publishing][~0.25d] SLACK-EXTRA-FIELDS-NOT-UPSTREAM
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** Slack-сообщение с операторскими `title`/`text` несёт лишний блок `fields` (Status/Started/Namespace)
+- **Problem:** `template_formatter.go:328` берёт colour/fields фиксированного форматтера (`formatter.go:552-566`) как базу, поверх которой накладываются отрендеренные поля оператора. Upstream без `fields:` в конфиге поля не шлёт.
+- **Impact:** в Slack дублируется информация, которую оператор уже вывел в `text`; расхождение с обещанием «нетронутый upstream-конфиг даёт upstream-вывод». Плюс `title_link` относителен (`/#/alerts?...`), если не задан `server.externalUrl`, — это настройка, не баг.
+- **Fix:** при наличии операторских шаблонов не переносить `fields` фиксированного форматтера (переносить только явно заданные); тест на payload без `fields`.
+- **Refs:** проверка 2026-10-20 на конфиге sema (`errors-slack`).
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Config][~0.25d] PAGERDUTY-SERVICE-KEY-ONLY-REJECTED
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** PagerDuty только с `service_key` / `service_key_file` не загружается, хотя валидатор его пропускает
+- **Problem:** `routing.PagerDutyConfig.RoutingKey` помечен `validate:"required"` (`go-app/internal/infrastructure/routing/receiver.go:324`), поэтому `routing.Parse` отвергает конфиг без `routing_key` (`Field validation for 'RoutingKey' failed on the 'required' tag`), и фолбэк на `ServiceKey` в `config_targets.go` недостижим. Валидатор (E122) после HELM-EXTRA-VOLUMES принимает `service_key`/`service_key_file`, как и upstream.
+- **Impact:** конфиг с устаревшим `service_key` (upstream-совместимый) не стартует с непонятной ошибкой struct-валидации; W116 на `service_key_file` не выдаётся.
+- **Fix:** `required` → «`routing_key` или `service_key`» (кастомная проверка после `resolveFileSecrets`); тест через `LoadConfig` с `service_key` и с `service_key_file`.
+- **Refs:** `tasks/archive/HELM-EXTRA-VOLUMES/review-findings.md` R2-F1; предсуществующее с FU7-B.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Grouping][~0.5d] GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** транзиентная ошибка чтения группы в timer-callback обрывает цепочку таймеров
+- **Problem:** `onGroupWaitExpired` (`go-app/internal/infrastructure/grouping/manager_impl.go:1866-1873`) на любой ошибке `storage.Load` возвращает `nil` без continuation, а `onTimerExpired` после callback'ов удаляет запись таймера (`timer_manager_impl.go`, cleanup после callback'ов). При транзиентной ошибке Redis группа после этого больше не нотифицирует: таймера нет ни локально, ни в storage, reconciliation подобрать нечего. Предсуществующий дефект; раньше его иногда маскировало повторное срабатывание опоздавшей реплики, после `GROUPING-TIMER-LOCK-FIX` она отсеивается по `not_found`.
+- **Impact:** в HA (Redis) группа может замолчать до следующего нового алерта в ней. _(Уточнено PROD-GROUPING-DEFAULT, 2026-10-10: «до следующего алерта» теперь гарантировано — `AddAlertToGroup` через `ensureGroupTimer` перевзводит таймер группе без таймера; раньше новый алерт в такой группе ждал `repeat_interval`.)_
+- **Fix:** в callback различать not-found группы и транзиентную ошибку; при транзиентной возвращать ошибку и не удалять запись таймера, чтобы reconciliation повторил. Тест с `loadFailingGroupStorage`.
+- **Refs:** `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` F7.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Inhibition][~0.25d] INHIBIT-RELOAD-ROLLBACK-KEEPS-RULES
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** откат reload после коммита оставляет новые inhibit-правила
+- **Problem:** `ServiceRegistry.ReloadConfig` применяет правила матчеру (`UpdateRules`, `go-app/internal/application/service_registry.go:2702-2717`) до `reloadRoutingTree`; если тот падает, `rollbackPostCommit` восстанавливает config, routing, шаблоны и targets, но не правила матчера.
+- **Impact:** отклонённый `/-/reload` (ошибка дерева маршрутов) оставляет в работе inhibit-правила из отвергнутого конфига — до следующего успешного reload или рестарта. Было и до `FU-TOPLEVEL-INHIBIT-RULES`.
+- **Fix:** применять ингибицию после `reloadRoutingTree` либо в откате звать `UpdateRules(previousConfig.InhibitionRules())`; тест с падающим `reloadRoutingTree`.
+- **Refs:** `tasks/archive/FU-TOPLEVEL-INHIBIT-RULES/review-findings.md` F3.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Test][~0.25d] GROUPING-ORPHAN-ADOPTION-TEST-FLAKY
+- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **Title:** `TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica` флейкает
+- **Problem:** `go-app/internal/application/service_registry_grouping_test.go:585` — `continuation timer type = "group_wait", want "group_interval"`. Замер 2026-10-07 под нагрузкой (параллельно с release-gate), `-count=80`: 6 падений на `main` @ `fa682d4`, 7 на ветке с runbook engine — предсуществующий, не от слияния. Без нагрузки на `main` 0/40. Гипотеза: тест ждёт `stats.ReconciledTimers >= 1` и сразу читает storage, а счётчик растёт раньше, чем `onGroupWaitExpired` записывает continuation `group_interval`, — тест читает ещё старую запись `group_wait`.
+- **Impact:** шаг `test` required-гейта `gate` краснеет случайно; после `GROUPING-TIMER-LOCK-FIX` (2026-10-10) — последний известный флейк в grouping.
+- **Fix:** в тесте ждать опросом, пока тип записи станет `group_interval` (с тем же дедлайном), а не читать один раз; если запись `group_wait` держится дольше дедлайна — это уже продуктовый дефект.
+- **Refs:** release-gate 2026-10-07 на `feature/phase-6b-runbook-engine`, `~/amp-audit/gate-runbook.log`.
+- **Status:** superseded — ADR-019, срез 4
+
+### [medium][Pipeline][~0.5d] DIRECT-PUBLISH-RENOTIFIES-ON-RESEND
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** на direct-publish пути каждая повторная отправка алерта старше минуты уходит ресиверу заново
+- **Problem:** без `route:` или с `grouping.enabled: false` алерт публикуется через `PublishToReceiver` → `coordinator.PublishToTargets`, где нет nflog (он есть только у группового пути, `coordinator.go:619+`). Prometheus переотправляет горящий алерт каждые `resend_delay` (1m) с новым `endsAt`, дедуп-сервис видит `Updated`, и от повторного уведомления защищает только Rule 7 фильтра с окном 1 мин (`DefaultDedupWindow`). Повтор, пришедший позже окна, уходит ресиверу. Существовало до `PROD-HARDCODED-FILTER`, та задача это не меняла.
+- **Impact:** конфиги без дерева route (или с выключенной группировкой) получают уведомление на каждую переотправку вместо одного на `repeat_interval`, как в upstream.
+- **Fix:** nflog (или его аналог по fingerprint + status + `repeat_interval`) для direct-publish пути, либо направить такой путь через группировку с тривиальным ключом. После этого пересмотреть, нужен ли Rule 7.
+- **Refs:** `tasks/archive/PROD-HARDCODED-FILTER/Spec.md` § Impact Analysis, design premises; `research.md` § Option B.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Grouping][~0.5d] GROUPING-RESOLVED-ONLY-FOR-UNKNOWN-GROUP
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** resolved-нотификация для группы, о которой получатель не знал
+- **Problem:** алерт сработал и разрешился до первого flush (в пределах `group_wait`) — получателю уходит одно сообщение «resolved». Upstream Alertmanager при отсутствии записи в nflog шлёт только при непустом firing-наборе. Проба: AMP 1 нотификация, upstream 0. Не регрессия PROD-GROUPING-DEFAULT, но с группировкой по умолчанию путь стал общим.
+- **Impact:** лишнее «resolved» без предшествующего «firing» у получателей с `send_resolved: true`. Расхождение названо в `docs/ALERTMANAGER_COMPATIBILITY.md` Known Gap #13.
+- **Fix:** отличать «записи в nflog нет» от «запись не покрывает набор» и при отсутствии записи слать только при непустом firing. Учесть обратную сторону: resolve после простоя получателя дольше TTL записи тогда теряется.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H5; `go-app/internal/infrastructure/grouping/manager_impl.go` (`publishGroupAlerts`), `dedup.go`.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][API][~0.25d] FINGERPRINT-PIPE-BREAKS-SIGNATURE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** символ `|` в fingerprint из API ломает разбор сигнатуры nflog
+- **Problem:** сигнатура группы собирается из пар `fingerprint:status` через разделитель, а `signatureCovers` разбирает её обратно. Fingerprint, пришедший из API как есть (`go-app/internal/application/handlers/alerts.go`, приём `fingerprint` из тела), может содержать `|` — разбор даёт другие элементы, проверка «подмножество» отвечает неверно. По чтению кода, запуском не проверялось.
+- **Impact:** для такого алерта возможна лишняя или пропущенная нотификация группы. Штатные клиенты (Prometheus) fingerprint не передают — он вычисляется.
+- **Fix:** валидировать fingerprint на входе (hex) либо экранировать элементы сигнатуры.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H10; `go-app/internal/infrastructure/grouping/dedup.go` (`signatureCovers`).
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Test][~0.1d] FLAKE-SYNC-WORKER-PERIODIC
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** `TestSyncWorker_PeriodicExecution` флейкает под `-race`
+- **Problem:** `go-app/internal/business/silencing/sync_worker_test.go:204` — мок `ListSilences` ждёт ровно `Times(3)` при тике 100 мс и `time.Sleep(250ms)`. Под нагрузкой сон затягивается до четвёртого тика, мок паникует `The method has been called over 3 times` и роняет весь пакет. Изолированно `-race -count=1` 6/6 зелёный.
+- **Impact:** шаг `race` в `scripts/release-gate.sh` краснеет случайно (2026-10-10, ветка `bugfix/prod-grouping-default`, пакет веткой не тронут).
+- **Fix:** считать вызовы счётчиком и ждать «не меньше двух тиков» через `Eventually`, без точного `Times`.
+- **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/tasks.md` п. 5.1.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Silencing][~0.25d] SILENCE-SYNC-LIMIT-EXCEEDS-FILTER
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** фоновый воркер silence manager не стартует: `limit must be <= 1000, got 10000`
+- **Problem:** на каждом старте AMP с PostgreSQL: `initial cache sync failed: invalid filter parameters: limit must be <= 1000, got 10000`. `go-app/internal/business/silencing/manager_impl.go:479`, `:713` и `sync_worker.go:162` запрашивают `Limit: 10000`, а валидатор фильтра репозитория пропускает не больше 1000 (`go-app/internal/core/errors.go:12`). AMP продолжает работу без GC/stats-воркера.
+- **Impact:** истёкшие silences не собираются фоновым GC, кэш активных silences не прогревается на старте, статистика не считается; молча — только строка в логе.
+- **Fix:** выровнять лимит (пагинация по 1000 или отдельный внутренний путь без пользовательского лимита) и тест на старт менеджера с реальным репозиторием.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/restore-drill.md` § Side findings; повторно 2026-10-19 — `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/cache-noauth.txt` (R26).
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][API][~0.25d] SILENCES-CHECK-404
+- **ADR-019:** срез 6 `UPSTREAM-API-UI` — API — upstream `api/v2` побайтно.
+- **Title:** `POST /api/v2/silences/check` отвечает 404
+- **Problem:** хендлер есть (`go-app/cmd/server/handlers/silence_advanced.go`, `CheckAlert`), и `docs/ALERTMANAGER_COMPATIBILITY.md` ссылается на эндпоинт, но в собранном сервере на k3d 2026-10-15 запрос даёт 404 — маршрут не зарегистрирован.
+- **Impact:** превью «заглушит ли silence этот алерт» недоступно; документация расходится с поведением. Upstream такого эндпоинта нет, совместимость с Alertmanager не затронута.
+- **Fix:** зарегистрировать маршрут или убрать хендлер и упоминания из доков; тест на роутинг.
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/tasks.md` (Implementation notes, Phase 2).
+- **Status:** superseded — ADR-019, срез 6
+
+### [low][Test][~0.1d] FLAKE-INHIBITION-PREFILTER-TIMING
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** `TestShouldInhibit_PrefilterOptimization` падает по wall-clock порогу
+- **Problem:** `go-app/internal/infrastructure/inhibition/matcher_test.go:597` требует, чтобы `ShouldInhibit` на 51 алерте уложился в 500 µs. 2026-10-15 release-gate: 992 µs → FAIL; изолированно 5 прогонов — 3 FAIL. Тест меряет время, а не то, что пре-фильтр отсёк нерелевантные алерты; в замер попадает логирование.
+- **Impact:** шаг `test` в `scripts/release-gate.sh` краснеет случайно на ветках без изменений в `go-app`.
+- **Fix:** проверять число проверенных кандидатов (счётчик/хук) вместо времени, либо вынести замер в бенчмарк. Тот же приём — у порога в `matcher_test.go:448` (DONE 2026-10-14 HELM-DEFAULTS-VALIDATE, риск).
+- **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/release-gate.txt`.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Test][~0.1d] FLAKE-TIMER-CONTINUATION-GROUP-INTERVAL
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** `TestTimerContinuation_GroupWaitFireCreatesGroupIntervalTimer` флейкает в шаге `race`
+- **Problem:** `go-app/internal/infrastructure/grouping/timer_continuation_regression_test.go:198` — ожидался таймер `group_interval`, прочитан `group_wait`: тест читает storage раньше, чем срабатывание записало continuation. Release-gate 2026-10-19 (ветка `feature/helm-single-node-defaults`, Go-код не менялся), шаг `race`; перезапуск шага — 7/7 ok, тест отдельно `-race -count=30` — 30/30.
+- **Impact:** шаг `race` release-gate краснеет случайно.
+- **Fix:** ждать опросом, пока тип записи станет `group_interval` (как предложено в `GROUPING-ORPHAN-ADOPTION-TEST-FLAKY` — тот же класс, чинить вместе).
+- **Refs:** `tasks/archive/HELM-SINGLE-NODE-DEFAULTS/evidence/release-gate.txt` (FAIL и перезапуск в конце файла).
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][API][~0.5d] API-ALERTS-RECEIVER-INHIBITED-STATUS
+- **ADR-019:** срез 6 `UPSTREAM-API-UI` — API — upstream `api/v2` побайтно.
+- **Title:** `GET /api/v2/alerts` отдаёт `receivers: ["default"]` и `state: active` с пустым `inhibitedBy` для подавленного алерта
+- **Problem:** два места.
+  - **Receiver.** `toAPIAlert` (`go-app/internal/infrastructure/storage/memory/alert_store.go:460-473`) берёт receiver из метки `receiver` алерта, а при её отсутствии ставит `"default"`. Route tree не используется, хотя `/api/v2/alerts/groups` уже резолвит receiver через `alertGroupingResolver` (`internal/application/handlers/alerts.go:347`).
+  - **Inhibition.** `alertconv.ToGettableAlert` (`internal/core/alertconv/alertconv.go:212`) всегда возвращает `InhibitedBy: []string{}`, а `state` считает только по silences. Результат inhibition (`alert_processor.go:587-595`) до API не доходит; ограничение описано в комментарии `handlers/alerts.go:173-177`. Поэтому `?inhibited=false` ничего не отфильтрует.
+  - **Воспроизведение** на живом конфиге sema-prod (Secret `sema-monitoring/alertmanager-kube-prometheus-stack-alertmanager`, секреты заменены заглушками, Telegram/Slack — на `https://127.0.0.1`), бинарь `main` @ `9d41dc0`, `profile: lite`, `storage.backend: filesystem`:
+    1. Запустить с `AMP_CONFIG_FILE=<копия конфига>`. Конфиг грузится: `routes=4 receivers=3`, `Inhibition subsystem initialized rules=3`.
+    2. `POST /api/v2/alerts` с пятью алертами: `DiskFull` `severity=critical signal=panic`, `DiskFull` `severity=warning signal=error`, `HighLatency` `severity=warning signal=error` (у всех трёх `namespace=sema-prod service=api`), `Watchdog`, `Unmatched` без `signal`.
+    3. Лог — правильно: `DiskFull/critical` → `panic-telegram` (`route.routes[1]`), `HighLatency` → `errors-slack` (`route.routes[2]`), `Watchdog` → `drop-unmatched`, `Unmatched` → `panic-telegram` (корень); `Alert inhibited by rule` — `DiskFull/warning` подавлен `DiskFull/critical` (правило `severity = critical` → `severity =~ warning|info`, `equal: [namespace, alertname]`).
+    4. `GET /api/v2/alerts` — неправильно: у всех пяти `receivers: [{"name":"default"}]` (такого receiver'а в конфиге нет), у `DiskFull/warning` — `state: active`, `inhibitedBy: []`. Upstream вернул бы реальный receiver каждого алерта и `state: suppressed`, `inhibitedBy: [<fingerprint DiskFull/critical>]`.
+- **Impact:** на доставку не влияет. Влияет на клиентов API: karma, Grafana Alertmanager datasource, `amtool alert query`. Подавленные алерты они показывают как горящие, фильтр по receiver'у (`?receiver=`) ничего не находит. При параллельном запуске рядом с Alertmanager в sema-prod картина в UI будет расходиться с Alertmanager. `/api/v2/alerts/groups` в этом прогоне не проверялся.
+- **Fix:** receiver — через тот же резолвер, что и для groups (route tree, при `continue` — все совпавшие receiver'ы, см. `ROUTE-CONTINUE-NO-FANOUT`). Inhibition — хранить у алерта fingerprint'ы источников подавления (или спрашивать inhibition-кеш при выдаче) и заполнять `inhibitedBy`/`state: suppressed` в `ToGettableAlert`; то же для групп. Тест через `LoadConfig` + `POST`/`GET /api/v2/alerts`: route tree без метки `receiver` и пара source/target по inhibit-правилу.
+- **Refs:** проверка 2026-10-21 на живом конфиге sema-prod (временный прогон, конфиг и логи не сохранены в репо: в конфиге креды).
+- **Status:** superseded — ADR-019, срез 6
+
+<!-- Code review 2026-10-21 (`docs/06-planning/CODE-REVIEW-2026-10-21.md`, `main` @ `68d749f`). В Refs — ID находки из документа; там же — порядок этапов и зависимости. Пути — от `go-app/`. -->
+
+### [low][Inhibition][~0.25d] INHIBIT-CACHE-RESOLVE-REFIRE-RACE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** параллельные resolve и повторный firing одного fingerprint на одной реплике — источник снимается синком
+- **Problem:** `RemoveAlert` (`internal/infrastructure/inhibition/cache.go`) делает `Delete`/`SRem` в Redis после удаления из L1. Если параллельно идёт `AddFiringAlert` того же fingerprint, его Set+SAdd могут попасть до `Delete`/`SRem` remove: в L1 лежит локальная запись с выставленным `redisConfirmedAt`, а в Redis её уже нет ⇒ следующий проход синка удаляет её как «пропавшую». Повторный tombstone верно пропускает локальную запись, но расхождение L1 и Redis остаётся.
+- **Impact:** источник перестаёт подавлять на этой реплике до следующего resend (~1m у Prometheus, для webhook — до повтора). Реалистичный случай — HA-пара Prometheus с рассинхроном оценки (одна шлёт resolved, другая firing). Другие реплики согласованы (там победил resolve).
+- **Fix:** в `RemoveAlert` после `Delete`/`SRem`, если в L1 локальная запись (`!fromSync`) с `writtenAt` позже первого tombstone, — повторно записать её в Redis (или сбросить ей `redisConfirmedAt`). Тест на `hookCache` из `cache_test.go`: add внутри `Delete` remove ⇒ после синка источник виден.
+- **Refs:** `tasks/archive/INHIBIT-SOURCE-CACHE-EVICTION/review-findings.md` F8.
+- **Status:** superseded — ADR-019, срез 5
+
+### [high][Config][~0.25d] DURATION-UPSTREAM-UNITS
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — конфиг Alertmanager грузит upstream `config.Load`.
+- **Title:** длительности `d`/`w`/`y` в конфиге не парсятся
+- **Problem:** `routing.Duration` (`internal/infrastructure/routing/global.go:486`) и `grouping.Duration` (`internal/infrastructure/grouping/config.go:125`) используют `time.ParseDuration`; upstream — `model.Duration`.
+- **Impact:** немодифицированный upstream-конфиг с `repeat_interval: 1d` не загружается.
+- **Fix:** один тип `Duration` на `model.ParseDuration` из `github.com/prometheus/common` (уже прямая зависимость); тест на `1d`, `1w`, `90s`, `0s`.
+- **Refs:** CODE-REVIEW-2026-10-21 H-2, D-6.
+- **Status:** superseded — ADR-019, срез 5
+
+### [high][Config][~0.5d] RELOAD-SERIALIZE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — reload пишется заново поверх upstream `config.Coordinator`; требование к срезу — сериализованный reload, не привязанный к контексту HTTP-клиента.
+- **Title:** reload конфига не сериализован и привязан к контексту HTTP-клиента
+- **Problem:**
+  - `ServiceRegistry.ReloadConfig` (`internal/application/service_registry.go:2654`) без мьютекса; SIGHUP (`cmd/server/main.go:298`), `POST /-/reload` (`handlers/status_api.go:105`) и sidecar запускают конвейер параллельно. Внутри — глобальный viper, `r.config = newConfig` без синхронизации; распределённый lock в `atomicApply` недостижим (`lockManager == nil`, `service_registry.go:337`); `rc.reloadVersion` читается без `mu` (`reload_coordinator.go:168,252`).
+  - HTTP-reload и `RollbackAll` (`internal/config/update_reloader.go:262`) работают на `r.Context()`: обрыв клиента посреди Phase 5 оставляет незавершённый откат (W610). SIGHUP-путь уже использует свой контекст.
+  - `external_url` захватывается при сборке роутера (`internal/application/handlers/alerts.go:57`) и reload его не обновляет.
+- **Impact:** два reload применяются вперемешку, откат возвращает не тот снимок; `hypothesis`: `concurrent map writes` в viper. Обрыв клиента ⇒ split state.
+- **Fix:** `reloadMu sync.Mutex` в `ReloadConfig`, для HTTP — `TryLock` ⇒ `409`; `context.WithoutCancel` + свой таймаут в `ReloadHandler` и `RollbackAll`; `external_url` читать из `registry.Config()` на запрос. Тест: два параллельных reload под `-race`, reload с отменённым клиентским ctx.
+- **Refs:** CODE-REVIEW-2026-10-21 H-5, M-19, L-5.
+- **Status:** superseded — ADR-019, срез 5
+
+### [high][Config][~0.5d] CONFIG-VALIDATION-FAIL-CLOSED
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — конфиг Alertmanager грузит upstream `config.Load`.
+- **Title:** валидация конфига расходится между стартом и reload и пропускает ошибки
+- **Problem:**
+  - `DefaultConfigValidator` (`internal/config/update_validator.go:589-596`) работает только на reload, `Config.Validate` — только на старте (`config.go:1147`), правила разные. Lite + `app.environment=production` (дефолт чарта) без `DATABASE_PASSWORD`: старт проходит, каждый reload падает «database password should not be empty in production».
+  - `validateAlertmanagerSubset` (`internal/config/alertmanager_validation.go:66-71,93-95`): ошибка `yaml.Unmarshal` ⇒ `return nil`, вся проверка configvalidator пропускается.
+  - `parseMatchers` в tree builder (`internal/business/routing/tree_builder.go:274-278`) молча выбрасывает битый matcher («best-effort») ⇒ маршрут шире, особенно для `!=`/`!~`. `hypothesis`: конкретный вход, проходящий configvalidator и ломающий builder, не найден.
+- **Impact:** на lite-prod hot reload не работает никогда (sidecar в бесконечном backoff); битый конфиг может отправлять алерты не тому ресиверу без единой ошибки.
+- **Fix:** один валидатор на оба пути, проверки БД гейтить `RequiresPostgres()`; ошибка unmarshal — ошибка валидации; builder вызывает `matcher.Parse` и возвращает ошибку. Breaking: битые `matchers:` перестают загружаться — CHANGELOG.
+- **Refs:** CODE-REVIEW-2026-10-21 H-6, M-20, D-7.
+- **Status:** superseded — ADR-019, срез 5
+
+### [high][Test][~1d] SILENCE-REPO-INTEGRATION-TESTS
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** тесты `PostgresSilenceRepository` безусловно пропускаются
+- **Problem:** `internal/infrastructure/silencing/postgres_silence_repository_test.go` (30 `t.Skip`), `bulk_ops_test.go` (7), `ttl_test.go` (6) — «Requires database connection»; `NewPostgresSilenceRepository` не вызывается ни в одном тесте.
+- **Impact:** SQL хранения silences в HA не проверяется ничем, кроме e2e.
+- **Fix:** testcontainers-сьют по образцу `repository/postgres_history_test.go`: CRUD, фильтры `filter_builder`, TTL/cleanup, bulk; безусловные `t.Skip` удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 H-11.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Grouping][~1d] GROUP-STORE-LOST-UPDATE
+- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **Title:** конкурентное обновление существующей группы в Redis теряет алерт молча
+- **Problem:** `AddAlertToGroup` (`internal/infrastructure/grouping/manager_impl.go:298-305`) делает `Load → mutate → Store`; при конкурентном апдейте `RedisGroupStorage.Store` (`redis_group_storage.go:204`) возвращает `ErrVersionMismatch`/`TxFailedErr`, ошибка только логируется, вызывающему возвращается незаписанный `Clone()`. `group.Version++` выполняется до EXEC. `MemoryGroupStorage` версию не проверяет вовсе.
+- **Impact:** алерт или resolve пропадает из группы до следующего resend; memory и Redis backend ведут себя по-разному.
+- **Fix:** retry с повторным `Load` (N попыток, затем ошибка); локальная сериализация по ключу через `groupPublishLocks` (`publish_lock.go:72`) — заодно закрывает `GROUPING-NEW-GROUP-CREATE-RACE`; `Version++` на копии после EXEC; общий contract-тест для двух storage.
+- **Refs:** CODE-REVIEW-2026-10-21 M-1, D-13. Смежно `REDIS-GROUP-STORAGE-UNLOCKED-WRITES` (TECH-DEBT), `GROUPING-NEW-GROUP-CREATE-RACE`.
+- **Status:** superseded — ADR-019, срез 4
+
+### [medium][Silencing][~0.25d] SILENCE-VALIDATION-PARITY
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** валидация silence расходится с upstream: отклоняет пустые значения, принимает match-all
+- **Problem:** три копии валидации (`internal/application/handlers/silence_convert.go:79`, `internal/infrastructure/storage/memory/silence_store.go:457`, `internal/core/silencing/validator.go:76`) требуют непустое значение каждого matcher'а. Upstream требует, чтобы хотя бы один matcher не матчил пустую строку.
+- **Impact:** отклоняются валидные `env=""`, `env!=""`; принимается `alertname=~".*"`, который глушит всё.
+- **Fix:** один валидатор в `core/silencing` по правилу upstream, обе точки входа вызывают его; парсинг StartsAt/EndsAt и regex-проверка — там же. Breaking (match-all отклоняется) — CHANGELOG.
+- **Refs:** CODE-REVIEW-2026-10-21 M-2, D-3.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Storage][~1d] STORE-RETENTION-GC
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** alert store и silence store растут неограниченно
+- **Problem:**
+  - `AlertStore.all` (`internal/infrastructure/storage/memory/alert_store.go:113-193`) никогда не чистится: resolved остаются навсегда, каждый новый `startsAt` — новый ключ.
+  - `SilenceStore` не удаляет истёкшие silences (`silence_store.go`); `HasActiveMatch`/`ActiveMatchingSilenceIDs` (`:287-303,365-385`) проходят все silences, аллоцируя matcher'ы на каждый; глобальный `RegexCache` (`core/silencing/matcher_cache.go`) сбрасывается целиком на 1000 записях под write-lock.
+- **Impact:** память, время `List`/`Stats`/`filterSilenced` и размер снапшота растут с аптаймом.
+- **Fix:** периодический GC resolved с `EndsAt < now - retention`; retention GC silences (upstream 120h); компиляция matcher'ов при сохранении в `StoredSilenceState`; gauges размеров store. Soak-тест с ротацией алертов.
+- **Refs:** CODE-REVIEW-2026-10-21 M-3, M-4. Смежно `ALERT-STORE-DEDUP-KEY-STARTSAT`.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Inhibition][~0.5d] INHIBIT-STATE-LIFECYCLE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
+- **Title:** состояния inhibition не истекают, cleanup worker не запущен
+- **Problem:** `inhibition/state_manager.go:120-260`: state удаляется только при resolve источника, полным сканом `GetActiveInhibitions` (`alert_processor.go:830-850`); resolve цели или исчезновение источника без resolve оставляют state навсегда; `ExpiresAt` всегда nil; `StartCleanupWorker` не вызывается; `RecordInhibition` на каждом resend — Redis SET с TTL 24h и O(n) `countActiveStates` (`alert_processor.go:600`).
+- **Impact:** неограниченный рост `sync.Map` и Redis-ключей; лишняя O(n) работа в ingest-пути.
+- **Fix:** удалять state на resolve цели; `ExpiresAt = source.EndsAt`; обратный индекс `source → targets`; gauge через `GaugeFunc`; запустить cleanup worker или удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 M-5.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Publishing][~1.5d] PUBLISH-SINGLE-RETRY-LAYER
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** вложенные ретраи в publishing блокируют воркер и открывают breaker здоровым таргетам
+- **Problem:** клиенты (`slack_client.go:217-311`, `telegram_client.go:319-418`, `pagerduty_client.go:379-472`, `rootly_client.go:303-364`, `webhook_client.go:142-267`) делают 3–4 попытки, очередь (`queue.go:1401`, `retryPublish`) — ещё `maxRetries+1`: до 16 HTTP на задание. `time.Sleep` без ctx (`slack:247`, `telegram:345`, `pagerduty:427,460`) — `Abandon` не прерывает backoff; `defer Body.Close()` внутри цикла (`slack:254`, `telegram:352`); `Retry-After` не ограничен (`slack:288`, `webhook:241-244`).
+- **Impact:** медленный или rate-limited таргет превышает `DeliveryConfirmationTimeout` (45s), abandon считается отказом для breaker'а ⇒ здоровый таргет может открыть breaker. `hypothesis`: группа из 45+ алертов в Slack не укладывается в 45s.
+- **Fix:** клиенты делают одну попытку и возвращают классифицированную ошибку (`retryable`, `Retry-After`); ретраит только очередь через `pkg/retry` с ctx-aware backoff; cap `Retry-After` 30s.
+- **Refs:** CODE-REVIEW-2026-10-21 M-8, D-8.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][Publishing][~0.5d] PUBLISH-HEALTH-PROBES
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** email-таргет всегда unhealthy; метрики refresh не скрейпятся
+- **Problem:** health monitor шлёт HTTP GET на каждый таргет (`internal/business/publishing/health_checker.go:107-120`); для `smtp://host:port` (`config_targets.go:669`) — всегда `unsupported protocol scheme`. `hypothesis`: GET на Slack webhook / PD `/v2/enqueue` тоже не 2xx. Метрики refresh регистрируются во временном `prometheus.NewRegistry()` (`internal/application/publishing_runtime.go:210`, `refresh_manager_impl.go:121`).
+- **Impact:** ложные unhealthy-статусы в API/дашборде; refresh не наблюдаем.
+- **Fix:** email — пропускать или TCP-probe; API-типы — TCP-only probe; refresh-метрики — `v2.Global().Publishing`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-12, M-13.
+- **Status:** superseded — ADR-019, срез 5
+
+### [medium][API][~0.5d] API-V2-ERROR-SHAPE
+- **ADR-019:** срез 6 `UPSTREAM-API-UI` — API — upstream `api/v2` побайтно.
+- **Title:** ошибки API v2 в форме `{"error":…}` вместо JSON-строки; 405 без `Allow`; любая ошибка чтения тела — 413
+- **Problem:** `writeJSON(..., map[string]string{"error": ...})` в `internal/application/handlers/alerts.go:76,309,425`, `silences.go:95,122,135,144`, `status.go:51`; upstream swagger описывает 400/500 как `type: string`. Проверка метода inline (`alerts.go:68`, `silences.go:46,73`, `status_api.go:101`, `investigation.go:19`, `inhibitions.go:29`) отдаёт 405 без `Allow`, в отличие от `method_guard.go`. В `handleAlertsPost`/`handleSilencePost` любая ошибка `io.ReadAll` (обрыв клиента) ⇒ 413.
+- **Impact:** `hypothesis`: клиенты, сгенерированные по swagger (amtool), на 400 получают ошибку декодирования вместо причины.
+- **Fix:** `writeV2Error(w, code, msg)` с `json.Marshal(msg)`; `allowMethods(...)` по образцу `getOnly`; `errors.As(err, *http.MaxBytesError)` ⇒ 413, остальное 400. Строка в `ALERTMANAGER_COMPATIBILITY.md`.
+- **Refs:** CODE-REVIEW-2026-10-21 M-15, L-6.
+- **Status:** superseded — ADR-019, срез 6
+
+### [medium][API][~0.25d] API-FILTER-MATCHER-GRAMMAR
+- **ADR-019:** срез 6 `UPSTREAM-API-UI` — API — upstream `api/v2` побайтно.
+- **Title:** `?filter=` в API принимает другую грамматику matcher'ов, чем конфиг и upstream
+- **Problem:** `internal/application/handlers/matchers.go:28` требует кавычки (`"(.*)"`), не допускает пробелов и не снимает экранирование; парсер маршрутов (`business/routing/tree_builder.go:237,411`) и `pkg/configvalidator/matcher` принимают обе формы.
+- **Impact:** `?filter=alertname=Foo` ⇒ 400, тот же matcher в `route.matchers` работает; upstream принимает обе формы.
+- **Fix:** использовать общий парсер (`matcher.Parse`, затем `pkg/labelmatch` из `LABELMATCH-PKG`), регекс в handlers удалить.
+- **Refs:** CODE-REVIEW-2026-10-21 M-16, D-2.
+- **Status:** superseded — ADR-019, срез 6
+
+### [medium][API][~0.5d] INGEST-PARSE-VALIDATE
+- **ADR-019:** срез 6 `UPSTREAM-API-UI` — API — upstream `api/v2` побайтно.
+- **Title:** валидация входящих алертов зависит от `severity`, 400 без причины
+- **Problem:** `parseAlertsForProcessing` (`internal/application/handlers/alerts.go:482-503`) сначала разбирает Prometheus-парсером, его валидатор требует `severity ∈ {critical,warning,info,debug}` (`webhook/validator.go:186-196,554`); при ошибке молча fallback на legacy-парсер, который проверяет только `alertname`, не валидирует имена меток и `generatorURL`, теряет `activeAt`/`value`. Наружу — общее «invalid alert payload».
+- **Impact:** итоговая валидация зависит от значения `severity`; диагностика 400 бесполезна. Upstream валидирует имена/значения меток и `startsAt<=endsAt`, `alertname` не требует.
+- **Fix:** выбор парсера по формату (детектор), один валидатор по смыслу upstream `PostableAlert.Validate`, ограничение по severity из ingest убрать, возвращать первую содержательную ошибку.
+- **Refs:** CODE-REVIEW-2026-10-21 M-17.
+- **Status:** superseded — ADR-019, срез 6
+
+### [low][Grouping][~0.25d] REDIS-GROUP-INDEX-GHOSTS
+- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **Title:** ZSET-индекс групп в Redis копит удалённые по TTL группы
+- **Problem:** `redis_group_storage.go:222,385,419-590`: после истечения ключа группы (TTL 24h) член `group:index` остаётся; timer storage такие члены лениво чистит (`redis_timer_storage.go:452`), group storage — нет.
+- **Impact:** `Size()` (ZCARD) завышен, `LoadAll` считает призраков ошибками на каждом restore, индекс растёт.
+- **Fix:** `ZRem` на not-found в `LoadAll`/`ListKeys`; общий helper с timer storage (`REDIS-HELPERS`).
+- **Refs:** CODE-REVIEW-2026-10-21 L-12, D-12.
+- **Status:** superseded — ADR-019, срез 4
+
+### [low][Grouping][~0.1d] LOCK-ACQUIRE-SLEEP
+- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **Title:** `Acquire` распределённого lock делает 4 попытки со `time.Sleep` без ctx
+- **Problem:** `lock/distributed.go:86-125`: `Acquire()` = `AcquireWithRetry(ctx, 0)` ⇒ 3 ретрая по умолчанию; `time.Sleep` игнорирует ctx; `defer cancel()` внутри цикла; таймаут попытки = TTL, а не `AcquireTimeout`; успех логируется на INFO.
+- **Impact:** follower делает 4 SETNX на poll, `Stop` задерживается.
+- **Fix:** одна попытка SETNX на `Acquire`, ctx-aware sleep, `cancel()` на итерацию, лог на DEBUG.
+- **Refs:** CODE-REVIEW-2026-10-21 L-14.
+- **Status:** superseded — ADR-019, срез 4
+
+### [low][Cluster][~0.25d] CLUSTER-HEARTBEAT-STATE
+- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **Title:** heartbeat считает себя зарегистрированным после неудачных refresh; `Peers` сканирует весь keyspace
+- **Problem:** `cluster/heartbeat.go:174`: `registered` остаётся true, даже когда ключ уже истёк; `Peers` (`:244`) делает SCAN по всему keyspace (группы, таймеры, nflog) на каждый status.
+- **Impact:** неверный статус кластера в `/api/v2/status`; нагрузка на Redis растёт с числом групп.
+- **Fix:** `registered=false` на неудаче refresh; peers в ZSET со score=expiry (`ZADD` + `ZRANGEBYSCORE now +inf`).
+- **Refs:** CODE-REVIEW-2026-10-21 L-15.
+- **Status:** superseded — ADR-019, срез 4
+
+### [low][Publishing][~0.5d] PUBLISH-RELOAD-CLIENT-LIFECYCLE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** reload копит HTTP-клиенты и breaker'ы; первые таргеты после reload до 5s отбрасываются
+- **Problem:** client maps фабрики (`publisher.go:342-361`) и `circuitBreakers` (`queue.go:1171-1206`) никогда не чистятся — каждый reload с новым ключом/URL добавляет клиента со своим `Transport`. Reload не вызывает `CheckModeTransition` (`service_registry_reload.go:184`; тикер 5s в `mode_manager.go:281`).
+- **Impact:** рост idle-соединений и памяти с числом reload; если reload добавляет первые таргеты, прямой путь теряет алерты до 5s (групповой ретраит).
+- **Fix:** GC по живому набору таргетов в `applyConfigTargets`; `CheckModeTransition()` после него.
+- **Refs:** CODE-REVIEW-2026-10-21 L-17, L-18. Смежно `FU-HTTP-FILE-ROTATION`.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Publishing][~0.25d] PUBLISH-TRANSPORT-CONSISTENCY
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
+- **Title:** приоритет источников ключа PD и поведение прокси зависят от пути
+- **Problem:** `publisher.go:592-606` — `Authorization` перекрывает `routing_key`, `pagerduty_publisher_enhanced.go:215-231` — побеждает `routing_key`; Bearer-strip повторяется (`publisher.go:525,729`). Свои `http.Transport` без `Proxy` в `slack_client.go:89`, `telegram_client.go:200`, `pagerduty_client.go:172`, `rootly_client.go:104`, тогда как базовый путь через `DefaultTransport` учитывает `HTTPS_PROXY`.
+- **Impact:** один и тот же таргет может уйти с разным ключом и через разный сетевой путь в зависимости от типа.
+- **Fix:** одна `credentialFromHeaders(target, keys...)`; явная политика прокси (upstream env-прокси по умолчанию не использует), одинаковая для всех клиентов.
+- **Refs:** CODE-REVIEW-2026-10-21 L-20, L-21, D-15.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Config][~0.25d] FILE-SECRET-PATH-BASE
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — конфиг Alertmanager грузит upstream `config.Load`.
+- **Title:** `*_file`-секреты читаются относительно CWD и без лимита размера
+- **Problem:** `internal/infrastructure/routing/file_secrets.go:207`; при этом `http_config/*_file` перебазируются на каталог конфига (`http_config_filepaths.go:62`). `hypothesis`: делает ли upstream rebase для этих полей — не проверено.
+- **Impact:** относительный `api_url_file` работает иначе, чем `ca_file`; путь `/dev/zero` ⇒ OOM на reload (конфиг доверенный, не path traversal).
+- **Fix:** `rebasePath` до чтения (параметр `baseDir` у `Parse`), `io.LimitReader(64KiB)`.
+- **Refs:** CODE-REVIEW-2026-10-21 L-22. Смежно `FILE-SECRET-READ-ERROR-HINT`.
+- **Status:** superseded — ADR-019, срез 5
+
+### [low][Security][~0.1d] W300-DELIVERABLE-SECRETS
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — конфиг Alertmanager грузит upstream `config.Load`.
+- **Title:** предупреждение W300 «secret hardcoded» не проверяет секреты доставляемых интеграций
+- **Problem:** `pkg/configvalidator/validators/security.go:73-84` проверяет OpsGenie/VictorOps/WeChat (AMP их не доставляет) и пропускает PD `routing_key`, Slack `api_url`, Telegram `bot_token`, `http_config.basic_auth.password`, `bearer_token`.
+- **Impact:** предупреждение молчит ровно там, где секрет реально используется.
+- **Fix:** добавить перечисленные поля; тест на каждое.
+- **Refs:** CODE-REVIEW-2026-10-21 L-25.
+- **Status:** superseded — ADR-019, срез 5
+
+- [ ] **ALERT-STORE-DEDUP-KEY-STARTSAT** — повторный `POST /api/v2/alerts` без `startsAt` создаёт в memory store **новую копию** алерта, а не обновляет существующую: ключ дедупликации стора — `fingerprint|startsAt` (`go-app/internal/infrastructure/storage/memory/alert_store.go`, `dedupKey`), а пустой `startsAt` на каждом POST превращается в `now`. В итоге `GET /api/v2/alerts` отдаёт один и тот же алерт N раз с разными `startsAt`. Upstream сливает по fingerprint и сохраняет самый ранний `startsAt`. Воспроизведено вживую на `main` и на ветке `PARITY-RESOLVE-TIMEOUT-ENDSAT` (2026-09-24, lite, два POST `{"labels":{"alertname":"X"}}`). Prometheus и `amtool` шлют `startsAt` сами, поэтому затронуты в основном curl и самописные клиенты. Из-за этого для них не работает и продление окна `resolve_timeout`. Не регресс. Найдено на `/testing` PARITY-RESOLVE-TIMEOUT-ENDSAT. Чинить отдельной задачей: для отсутствующего `startsAt` брать `startsAt` уже горящего алерта с тем же fingerprint. Смотреть осторожно: dedup в БД (`deduplication.go`) и resolved-путь стора завязаны на тот же ключ. _(ADR-019: срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).)_
 
 ## Entry Format
 
