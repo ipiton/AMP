@@ -307,6 +307,7 @@
 
 ## ADR-018: AMP — AI-слой перед upstream Alertmanager (прокси на ingest), не замена
 - **Дата**: 2026-10-23
+- **Статус**: заменён ADR-019 (2026-10-24) — работа по нему не начиналась.
 - **Контекст**:
   - явного решения «писать ядро Alertmanager самим или брать upstream» не было: ADR-001 фиксирует только язык, ADR-002 — объём заявлений;
   - из 128k prod-строк `go-app/` ~66k повторяют upstream (routing, dispatch, notify chain, nflog, silences, inhibition, интеграции, шаблоны, HA на Redis); то же ядро upstream v0.32 — ~20k строк. AMP-уникальное (LLM-классификация, investigation, история в PG, filter/dedup) — ~8–9k;
@@ -334,3 +335,34 @@
   - паритетные позиции Queue, `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md` не берутся; security/critical — только по коду, который переживает переход (ingest, LLM, investigation, история, UI, auth);
   - ADR-002, -006, -009, -016, -017 пересматриваются в срезах, которые их затрагивают;
   - открыто: интеграция Rootly (webhook AM или отказ), доставка результата investigation в тред (свой клиент мессенджера вне паритета).
+
+## ADR-019: AMP — замена Alertmanager на пакетах upstream; HA — memberlist upstream
+- **Дата**: 2026-10-24
+- **Заменяет**: ADR-018.
+- **Контекст**:
+  - контекст ADR-018 в силе: ~66k из 128k prod-строк повторяют upstream, паритет — основная цена проекта, публичных релизов не было;
+  - ADR-018 исходил из того, что позиция «замены AM» — не ценность AMP. Владелец уточнил цель продукта: «удобный Alertmanager с AI, историей, анализом алертов и HA» — то есть замена;
+  - прокси перед upstream AM (ADR-018), в том числе в виде чарта, который ставит AM внутрь, — это два продукта с двумя конфигами: маршрутизация и silences в AM, AI и история в AMP.
+- **Решение** (владелец):
+  - ядро доставки — пакеты upstream Alertmanager как библиотеки в бинаре AMP: `dispatch`, `notify`, `provider/mem`, `silence`, `inhibit`, `nflog`, `api/v2`, `config`. Версия upstream закрепляется точно;
+  - один конфиг — `alertmanager.yml` upstream; один API — `api/v2` upstream побайтно, AMP-маршруты (история, investigation, `/api/v2/inhibitions`) — отдельно;
+  - HA — memberlist upstream (`cluster.Peer`) со снапшотами silences/nflog; своё HA-состояние на Redis (lock, heartbeat, группы, таймеры, nflog) удаляется;
+  - AI встраивается в конвейер upstream: `AlertStoreCallback.PreStore` — только дешёвый фильтр без LLM (синхронен в пути `Put`), дроп шума — за флагом default off; `PostStore` — история в PG и асинхронный запуск классификации и investigation; своя notify-стадия перед интеграциями ждёт классификацию с бюджетом и отдаёт её шаблонам группы;
+  - собственные routing, dispatcher, notify chain, nflog, таймеры, silences, inhibition, интеграции и шаблоны удаляются.
+- **Обоснование**:
+  - паритет становится свойством кода, а не задачей: его поддерживает upstream;
+  - пользователь получает один продукт: один бинарь, один конфиг, один API для amtool/Grafana/UI;
+  - только встраивание в конвейер даёт AI на уровне группы в момент отправки и доставку результата investigation своим `notify.Notifier`; классификация уходит из ingest-пути.
+- **Отклонено**:
+  - своё ядро (до ADR-018): паритет — бесконечная работа, которую upstream уже сделал;
+  - прокси перед upstream AM (ADR-018) и чарт с AM внутри: два продукта и два конфига, AI не видит группу целиком;
+  - AMP после AM через `webhook_configs`: AI не влияет на доставку, история неполная;
+  - полный форк upstream: AMP-код в дереве upstream, каждый rebase конфликтует, дороже библиотечного варианта.
+- **Следствие**:
+  - эпик ~20–28d, семь срезов; первым — PoC 4–5d с критерием выхода: upstream-ядро в бинаре AMP проходит `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт, иначе — стоп и пересмотр. Нарезка в `BACKLOG.md` — задача `ADR-019-V2-SLICING`;
+  - постоянная плата: Go API upstream не библиотечный контракт и ломается между минорами (`NewDispatcher`, `mem.NewAlerts`, `NewInhibitor`, `PipelineBuilder` менялись в 0.28–0.32) — ~0.5–1d на минор, 2–3 в год;
+  - breaking для пилотных инсталляций: silences переносятся из PostgreSQL в снапшот upstream, Redis-состояние сбрасывается, теряются AMP-расширения API (`?group_by=`, `global.group_by`), если не держать их отдельными маршрутами;
+  - чарт: StatefulSet, headless Service и порт gossip; Valkey остаётся только как кеш классификации;
+  - позиции Queue, `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md` на совместимость не берутся — их закрывает код upstream; security/critical — по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` закрывается срезом AI-хуков;
+  - ADR-002, -006, -009, -016, -017 пересматриваются в срезах, которые их затрагивают;
+  - открыто: K8s-Secret таргеты — адаптер в `config.Receiver` или удаление (решается в срезе интеграций).
