@@ -20,7 +20,8 @@
 // (lifecycle.go: the reload serialisation and the Stop ordering), and
 // extURL in cmd/amp-upstream is a port of app/url.go. When bumping the
 // upstream version, diff those files against the new release and carry the
-// changes over. They are the work of The Prometheus Authors under the
+// changes over (scripts/upstream-bump.sh, docs/UPSTREAM_UPGRADE.md) and
+// update PortedFrom. They are the work of The Prometheus Authors under the
 // Apache License, Version 2.0:
 //
 //	Copyright The Prometheus Authors
@@ -56,3 +57,9 @@
 // Stop waits for a reload in progress without a deadline, where upstream
 // abandons it after its shutdown timeout.
 package upstreamcore
+
+// PortedFrom is the upstream release the port above was taken from.
+// TestPortMatchesUpstreamVersion fails while it differs from the
+// github.com/prometheus/alertmanager version in go.mod, so a bump cannot
+// leave the port behind silently.
+const PortedFrom = "v0.34.1"
