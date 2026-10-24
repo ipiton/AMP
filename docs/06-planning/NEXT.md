@@ -28,25 +28,26 @@ Queue и WIP — источник правды для выбора задачи.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` был красный (GO-2026-6599…6617); `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16 — локально `govulncheck` на `go1.26.9` чистый, release-gate PASS. 2026-10-23 `govulncheck` на `main` снова красный (GO-2026-6809, stdlib `go1.26.9`); `PROD-DEPS-GO-127` поднял toolchain до `go1.27.3`, локально чисто. Осталось: push `main`, дождаться зелёного CI (включая `govulncheck`), затем включить защиту. `~5min`
   Waiting-on: push `main` и зелёный CI на нём.
 
-### ADR-018 — AMP перед Alertmanager
+### ADR-019 — AMP на пакетах upstream Alertmanager
 
-- [ ] **ADR-018-V3-PROXY-SLICING** — нарезать эпик перехода на прокси перед upstream AM (`DECISIONS.md` § ADR-018) в `BACKLOG.md`. Срезы и оценки (~12–18d; удаление кода оценено по объёму, без пробного удаления):
-  1. PoC — форвардер во все пиры AM (ретраи, TLS/basic auth), классификация → annotations `amp_*` с бюджетом < `group_wait`, fail-open по LLM/PG/кешу; e2e на k3d Prometheus → AMP → AM → webhook-приёмник видит annotations в сгруппированном уведомлении. 4–5d, первым;
-  2. дроп шума за флагом (default off), метрика и лог дропов (`filter_engine.go`). 0.5–1d;
-  3. удаление паритетного ядра (routing, dispatch, notify chain, nflog, таймеры, silences, inhibition, publishing/интеграции, шаблоны, K8s-Secret таргеты, Redis HA/lock), разбор wiring `service_registry.go` и конфига. 3–5d;
-  4. API и UI: убрать AM API кроме приёма алертов, UI читает состояние из AM API v2. 1.5–2.5d;
-  5. чарт: адрес AM обязателен, Valkey опционален, реплики AMP без состояния кроме PG. 1.5–2.5d;
-  6. доки и миграция: README, `ALERTMANAGER_COMPATIBILITY.md` → гайд интеграции, CHANGELOG breaking, ревизия ADR-002/006/009/016/017. 1.5–2d.
+- [ ] **ADR-019-V2-SLICING** — нарезать эпик перехода на пакеты upstream (`DECISIONS.md` § ADR-019) в `BACKLOG.md`. Срезы и оценки (~20–28d; удаление кода оценено по объёму, без пробного удаления):
+  1. PoC — upstream `dispatch`, `notify`, `provider/mem`, `silence`, `inhibit`, `nflog`, `api/v2` собраны в бинаре AMP по `alertmanager.yml`; выход — проходят `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт, иначе стоп и пересмотр. 4–5d, первым;
+  2. AI-хуки — `PreStore` (дешёвый фильтр, дроп шума за флагом default off), `PostStore` (история в PG, investigation, асинхронная классификация), своя notify-стадия с бюджетом ожидания классификации для шаблонов группы. 2–3d;
+  3. то, чего нет в upstream: все 18 интеграций (Slack, PagerDuty, email, Telegram, Opsgenie, webhook и др.) берутся из upstream `notify/*` как есть; свои — только Rootly (в upstream нет; сначала проверить, принимает ли Rootly webhook Alertmanager — тогда свой `notify.Notifier` не нужен) и K8s-Secret таргеты (адаптер в `config.Receiver` или удаление). 2–3d;
+  4. HA — `cluster.Peer` (memberlist), снапшоты silences/nflog на PVC; чарт: StatefulSet, headless Service, порт gossip; удаление Redis lock/heartbeat/group/timer storage. 3–5d;
+  5. удаление своего ядра — routing, dispatcher, notify chain, nflog, таймеры, silences, inhibition, свои интеграции и шаблоны; конфиг через upstream `config.Load`; разбор `service_registry.go`. 5–6d;
+  6. API и UI — `api/v2` upstream побайтно, AMP-маршруты (история, investigation, `/api/v2/inhibitions`) отдельно, UI на состоянии upstream. 2–3d;
+  7. доки и миграция — README, `ALERTMANAGER_COMPATIBILITY.md`, CHANGELOG breaking (перенос silences из PG в снапшот upstream, сброс Redis-состояния), ревизия ADR-002/006/009/016/017. 2–3d.
 
-  Заодно пересмотреть `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`: паритетные позиции закрыть ссылкой на ADR-018, оставить security/critical по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` влить в PoC. Lightweight, docs-only, ~0.5d.
+  Заодно пересмотреть `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md`: позиции на совместимость закрыть ссылкой на ADR-019, оставить security/critical по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` влить в срез 2. Lightweight, docs-only, ~0.5d.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
 
-- [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после `PROD-LLM-ALERT-PATH-ISOLATION`: пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
+- [ ] **PHASE-5C-PROVIDER-FALLBACK** — Primary → fallback chain (Claude → OpenAI → Ollama), cost tracking, per-env provider config. ~2d. Брать после среза AI-хуков ADR-019 (он закрывает `PROD-LLM-ALERT-PATH-ISOLATION`): пока классификация синхронна в ingest-пути, fallback-цепочка удлиняет приём алерта.
 
 ### 2. Code review 2026-10-21 — конвейер
-> Приостановлен 2026-10-23 по ADR-018: паритетные позиции (`ROUTE-CONTINUE-NO-FANOUT`, `DURATION-UPSTREAM-UNITS`, `CONFIG-RELOAD-BUNDLE` и следующие) относятся к удаляемому ядру и не берутся. Записи остаются в `BUGS.md`/`TECH-DEBT.md`/`REVIEW-PIPELINE-2026-10-21.md` до `ADR-018-V3-PROXY-SLICING`; security/critical по переживающему переход коду возвращаются в Queue оттуда.
+> Приостановлен 2026-10-23 по ADR-018, в силе по ADR-019 (2026-10-24): паритетные позиции (`ROUTE-CONTINUE-NO-FANOUT`, `DURATION-UPSTREAM-UNITS`, `CONFIG-RELOAD-BUNDLE` и следующие) относятся к удаляемому ядру и не берутся. Записи остаются в `BUGS.md`/`TECH-DEBT.md`/`REVIEW-PIPELINE-2026-10-21.md` до `ADR-019-V2-SLICING`; security/critical по переживающему переход коду возвращаются в Queue оттуда.
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 

@@ -17,6 +17,8 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-10
 
+- 2026-10-24 — (Owner / Architecture) **ADR-019** — решение ADR-018 (прокси перед upstream AM) пересмотрено до начала работ: цель продукта — «удобный Alertmanager с AI, историей, анализом и HA», то есть замена AM. Выбраны пакеты upstream в бинаре AMP, HA — memberlist upstream, AI — в `PreStore`/`PostStore` и своей notify-стадии. Запись — `DECISIONS.md` § ADR-019, ADR-018 помечен заменённым. Нарезка эпика (~20–28d, PoC 4–5d первым) — `ADR-019-V2-SLICING` вместо `ADR-018-V3-PROXY-SLICING`.
+
 - 2026-10-23 — (Security / Deps) **PROD-DEPS-GO-127** — Go toolchain `go1.26.9` → `go1.27.3`: закрыта GO-2026-6809 (`crypto/x509`, недоверие скомпрометированным промежуточным сертификатам), из-за которой `govulncheck` на `main` был красным с 2026-10-23.
   - **Версии:** `toolchain go1.27.3` в `go-app/go.mod` (`go 1.26.0` не тронут — язык и `GODEBUG`-дефолты прежние), builder обоих образов — `golang:1.27.3-alpine` (Alpine 3.24, тот же digest, что у `1.27.3-alpine3.24`; рантайм `alpine:3.24`), комментарий в `ci.yml`, `docs/CI.md`. Go-код не менялся.
   - **Карантин:** go1.27.3 вышел 2026-10-19 (4 дня), образ — 2026-10-22: исключение из 7-дневного карантина — решение владельца (фикс в ветке 1.27 есть только в 1.27.3). Тулчейн скачан через `proxy.golang.org` с проверкой по `sum.golang.org`.
