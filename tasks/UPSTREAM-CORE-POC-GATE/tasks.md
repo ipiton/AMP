@@ -28,23 +28,23 @@ based_on:
 
 ## Phase 1: Харнесс
 
-- [ ] **1.1** `registerRoutesImpl` + `upstreamcore_compat.go` + тег `!upstreamcore` у `futureparity_compat_test.go` <!-- verify: go test -tags futureparity ./cmd/server/ (без изменений) && go vet -tags futureparity,upstreamcore ./cmd/server/ -->
+- [x] **1.1** `registerRoutesImpl` + `upstreamcore_compat.go` + тег `!upstreamcore` у `futureparity_compat_test.go` <!-- verify: go test -tags futureparity ./cmd/server/ (без изменений) && go vet -tags futureparity,upstreamcore ./cmd/server/ -->
 
 ## Phase 2: Классификация и baseline
 
-- [ ] **2.1** `divergences.md` — каждое листовое падение: класс, причина, решение <!-- depends: 1.1 | verify: все 50 падений в таблице -->
-- [ ] **2.2** `testdata/upstreamcore-divergences.tsv` <!-- depends: 2.1 -->
+- [x] **2.1** `divergences.md` — каждое листовое падение: класс, причина, решение <!-- depends: 1.1 | verify: все 51 падение в таблице -->
+- [x] **2.2** `testdata/upstreamcore-divergences.tsv` <!-- depends: 2.1 -->
 
 ## Phase 3: Раннер и amtool
 
-- [ ] **3.1** `scripts/upstream-core-gate.sh`: сравнение с baseline + amtool на `amp-upstream` <!-- depends: 2.2 | verify: PASS; удалить строку из baseline → FAIL; добавить фиктивную → FAIL -->
-- [ ] **3.2** `release-gate.sh`: amtool-образ из `go.mod`, шаг `upstream-core`; `docs/CI.md` <!-- depends: 3.1 | verify: bash -n, shellcheck если есть -->
+- [x] **3.1** `scripts/upstream-core-gate.sh`: сравнение с baseline + amtool на `amp-upstream` <!-- depends: 2.2 | verify: PASS; удалить строку из baseline → FAIL; добавить фиктивную → FAIL -->
+- [x] **3.2** `release-gate.sh`: amtool-образ из `go.mod`, шаг `upstream-core`; `docs/CI.md` <!-- depends: 3.1 | verify: bash -n, shellcheck если есть -->
 
 ## Phase 4: Обновляемость
 
-- [ ] **4.1** `PortedFrom` в `doc.go`, `port_test.go` <!-- verify: go test ./internal/upstreamcore/; подмена константы → FAIL -->
-- [ ] **4.2** `scripts/upstream-bump.sh` (карантин всех сдвинутых модулей, `--allow-fresh`, `--diff`) <!-- verify: --diff v0.34.0 v0.34.1; dry-run на текущей версии; отказ на свежей версии -->
-- [ ] **4.3** `docs/UPSTREAM_UPGRADE.md` <!-- depends: 4.2 -->
+- [x] **4.1** `PortedFrom` в `doc.go`, `port_test.go` <!-- verify: go test ./internal/upstreamcore/; подмена константы → FAIL -->
+- [x] **4.2** `scripts/upstream-bump.sh` (карантин всех сдвинутых модулей, `--allow-fresh`, `--diff`) <!-- verify: --diff v0.34.0 v0.34.1; dry-run на текущей версии; отказ на свежей версии -->
+- [x] **4.3** `docs/UPSTREAM_UPGRADE.md` <!-- depends: 4.2 -->
 
 ## Phase 5: Testing (после deep-review)
 
