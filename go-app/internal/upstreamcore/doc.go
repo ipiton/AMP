@@ -16,10 +16,12 @@
 // # Provenance and licence
 //
 // core.go and reloader.go are ports of
-// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,reloader.go,metrics.go}.
-// When bumping the upstream version, diff those files against the new
-// release and carry the changes over. They are the work of The Prometheus
-// Authors under the Apache License, Version 2.0:
+// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,reloader.go,metrics.go,lifecycle.go}
+// (lifecycle.go: the reload serialisation and the Stop ordering), and
+// extURL in cmd/amp-upstream is a port of app/url.go. When bumping the
+// upstream version, diff those files against the new release and carry the
+// changes over. They are the work of The Prometheus Authors under the
+// Apache License, Version 2.0:
 //
 //	Copyright The Prometheus Authors
 //	Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,5 +37,20 @@
 //	limitations under the License.
 //
 // The per-file notices repeat this deliberately, following
-// internal/business/templating/doc.go.
+// internal/business/templating/doc.go. Upstream's NOTICE file, retained per
+// Apache-2.0 section 4(d) (its Bootstrap entry concerns the UI, which is not
+// ported):
+//
+//	Prometheus Alertmanager
+//	Copyright 2013-2015 The Prometheus Authors
+//
+//	This product includes software developed at
+//	SoundCloud Ltd. (http://soundcloud.com/).
+//
+// # Known differences from upstream
+//
+// No gossip cluster (alertmanager_cluster_enabled stays 0), no UI, no event
+// recorder (behind a feature flag upstream, off by default), no
+// --silences.max-*, --alerts.per-alertname-limit, --dispatch.start-delay or
+// --web.config.file; the HTTP server and signals belong to the caller.
 package upstreamcore

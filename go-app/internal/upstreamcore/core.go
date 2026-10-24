@@ -1,5 +1,5 @@
 // This file is a port of the construction half of
-// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,metrics.go}
+// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,metrics.go,lifecycle.go}
 // without the UI, the gossip cluster and the network listeners (see doc.go):
 //
 //	Copyright The Prometheus Authors
@@ -91,10 +91,18 @@ type Core struct {
 	reloadReqs chan chan error
 	quit       chan struct{}
 
+	// mtx makes a reload and Stop mutually exclusive: a reload that ran
+	// after the teardown would start a new dispatcher and inhibitor over the
+	// stopped alert provider and leak them (upstream guards the same with
+	// App.mtx and routerDone). stopped is guarded by mtx.
+	mtx     sync.Mutex
+	stopped bool
+
 	// cleanups is drained in reverse by Stop, mirroring the creation order.
 	cleanups []func()
-	stopOnce sync.Once
 }
+
+var errStopped = errors.New("upstreamcore: stopped")
 
 // New builds the core from opts and applies the initial configuration. On
 // error everything started so far is stopped again.
@@ -316,13 +324,24 @@ func (c *Core) serveReloads() {
 		case <-c.quit:
 			return
 		case errc := <-c.reloadReqs:
-			errc <- c.coordinator.Reload()
+			errc <- c.reload()
 		}
 	}
 }
 
+func (c *Core) reload() error {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if c.stopped {
+		return errStopped
+	}
+	return c.coordinator.Reload()
+}
+
 // Handler serves api/v2, /-/healthy, /-/ready, /-/reload, /metrics and
-// /debug/* under the external URL's path.
+// /debug/* under the external URL's path. The caller must stop serving it
+// before Stop: after Stop nothing answers /-/reload, whose upstream handler
+// waits for an answer unconditionally.
 func (c *Core) Handler() http.Handler {
 	return c.handler
 }
@@ -335,26 +354,32 @@ func (c *Core) Reload() error {
 	case c.reloadReqs <- errc:
 		return <-errc
 	case <-c.quit:
-		return errors.New("upstreamcore: stopped")
+		return errStopped
 	}
 }
 
 // Stop stops the dispatcher and inhibitor, then the remaining components in
 // reverse creation order, writing the final silence and nflog snapshots.
-// The caller shuts its HTTP server down first. Stop is idempotent.
+// The caller shuts its HTTP server down first (see Handler). Stop waits for
+// a reload in progress and is idempotent.
 func (c *Core) Stop() {
-	c.stopOnce.Do(func() {
-		close(c.quit)
-		for i := len(c.cleanups) - 1; i >= 0; i-- {
-			c.cleanups[i]()
-		}
-	})
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if c.stopped {
+		return
+	}
+	c.stopped = true
+	close(c.quit)
+	for i := len(c.cleanups) - 1; i >= 0; i-- {
+		c.cleanups[i]()
+	}
 }
 
 // metrics are the process-level metrics upstream's app package owns.
 type metrics struct {
 	requestDuration           *prometheus.HistogramVec
 	responseSize              *prometheus.HistogramVec
+	clusterEnabled            prometheus.Gauge
 	configuredReceivers       prometheus.Gauge
 	configuredIntegrations    prometheus.Gauge
 	configuredInhibitionRules prometheus.Gauge
@@ -381,6 +406,13 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 				Buckets: prometheus.ExponentialBuckets(100, 10, 7),
 			},
 			[]string{"handler", "method"},
+		),
+		// Stays 0 until the gossip cluster is wired (UPSTREAM-HA-MEMBERLIST).
+		clusterEnabled: f.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "alertmanager_cluster_enabled",
+				Help: "Indicates whether the clustering is enabled or not.",
+			},
 		),
 		configuredReceivers: f.NewGauge(
 			prometheus.GaugeOpts{

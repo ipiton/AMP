@@ -22,11 +22,14 @@ import (
 	"github.com/prometheus/alertmanager/featurecontrol"
 	"github.com/prometheus/alertmanager/matcher/compat"
 	"github.com/prometheus/client_golang/prometheus"
+	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
+	"github.com/prometheus/common/version"
 
 	"github.com/ipiton/AMP/internal/upstreamcore"
 )
 
-const shutdownTimeout = 30 * time.Second
+// shutdownTimeout matches upstream's app.Stop.
+const shutdownTimeout = 5 * time.Second
 
 func main() {
 	configFile := flag.String("config.file", "alertmanager.yml", "Alertmanager configuration file name.")
@@ -37,6 +40,9 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger.Info("Starting Alertmanager", "version", version.Info())
+	logger.Info("Build context", "build_context", version.BuildContext())
+	prometheus.MustRegister(versioncollector.NewCollector("alertmanager"))
 	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL); err != nil {
 		logger.Error("amp-upstream exited with error", "err", err)
 		os.Exit(1)
@@ -52,10 +58,11 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
-
+	// http.Server owns the listener once Serve runs; until then close it on
+	// every early return.
 	amURL, err := extURL(os.Hostname, listener.Addr().String(), externalURL)
 	if err != nil {
+		_ = listener.Close()
 		return fmt.Errorf("failed to determine external URL: %w", err)
 	}
 
@@ -68,8 +75,11 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		Registerer:  prometheus.DefaultRegisterer,
 	})
 	if err != nil {
+		_ = listener.Close()
 		return err
 	}
+	// Runs after the server is shut down below: the core must not stop
+	// while its handler still serves (upstreamcore.Core.Handler).
 	defer core.Stop()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -96,6 +106,9 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 			shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer cancelShutdown()
 			if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				// Drop the connections still open so no handler outlives
+				// the core.
+				_ = server.Close()
 				return err
 			}
 			return nil

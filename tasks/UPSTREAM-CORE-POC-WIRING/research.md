@@ -39,7 +39,9 @@ updated_at: 2026-10-24
   - `api.API.Register(router, prefix) *http.ServeMux` (`api/api.go:169`) — AMP-маршруты среза 6 вешаются на тот же `route.Router`/mux.
   - Всё это доступно только при собственном wiring.
 - **Глобальное состояние:** `matcher/compat` держит парсер матчеров в глобалах; upstream `main` вызывает `compat.InitFromFlags(logger, ff)` — без вызова парсер «classic», с `NoopFlags` — «fallback» (дефолт upstream). `httpserver.Register` вешает `/metrics` на `promhttp.Handler()` (default gatherer) и `/debug/*` на `http.DefaultServeMux`.
-- **Unknowns:** размер бинаря и `govulncheck` — после реализации (нужен импорт, иначе код недостижим); фиксируются в `tasks.md` и здесь на `testing`.
+- **Unknowns:** размер бинаря и `govulncheck` — после реализации (нужен импорт, иначе код недостижим). Сняты на implement (measured, darwin/arm64, go1.27.3, 2026-10-24):
+  - размер: `amp-upstream` — 37.9 MiB (25.2 MiB с `-ldflags="-s -w"`), `cmd/server` — 76.9 MiB (51.7 MiB). Upstream-ядро вдвое меньше бинаря AMP целиком; после среза 5 (удаление своего ядра) итоговый бинарь — порядка суммы AMP-уникального кода и этих ~25 MiB;
+  - `govulncheck@v1.8.0` (как в CI): upstream принёс достижимую **GO-2026-6505** — `otlptracehttp` v1.44.0 из требований upstream, путь через `tracing.Manager.ApplyConfig`. Поднят до v1.45.0 (2026-08-03, карантин пройден; остальной OTel в AMP уже на v1.45.0). После — 0 достижимых; модульная GO-2026-5932 (`x/crypto/openpgp`, без фикса) была и до задачи. Локальный `~/go/bin/govulncheck` v1.7.0 собран go1.26 и не разбирает исходники go1.27 — использовать `go run ...@v1.8.0`.
 
 ## 3) Options
 
