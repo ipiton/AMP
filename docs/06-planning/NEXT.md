@@ -16,6 +16,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **UPSTREAM-CORE-POC-GATE** — срез 1b эпика ADR-019, после `UPSTREAM-CORE-POC-WIRING`: `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт на upstream-ядре; расхождения разобрать (ошибка теста или upstream), вердикт по ADR-019 — владельцу. Не проходят — стоп и пересмотр ADR-019. Standard, ~2–2.5d. Следом — срезы 2–4 (после PoC, независимы). Заложить обновляемость ядра (владелец 2026-10-24): одна точка версии upstream, проверка расхождения порта, скрипт обновления; гейт — регрессия при каждом обновлении.
 
 ## Queue
 
@@ -30,7 +31,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
-- [ ] **UPSTREAM-CORE-POC-GATE** — срез 1b эпика ADR-019, после `UPSTREAM-CORE-POC-WIRING`: `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт на upstream-ядре; расхождения разобрать (ошибка теста или upstream), вердикт по ADR-019 — владельцу. Не проходят — стоп и пересмотр ADR-019. Standard, ~2–2.5d. Следом — срезы 2–4 (после PoC, независимы).
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
