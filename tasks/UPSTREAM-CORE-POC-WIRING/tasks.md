@@ -26,17 +26,17 @@ based_on:
 
 ## Phase 1: Зависимость
 
-- [ ] **1.1** `require github.com/prometheus/alertmanager v0.34.1`, `go mod tidy` <!-- verify: cd go-app && go build ./... && go build -tags futureparity ./... -->
+- [x] **1.1** `require github.com/prometheus/alertmanager v0.34.1`, `go mod tidy` <!-- verify: cd go-app && go build ./... && go build -tags futureparity ./... -->
 
 ## Phase 2: Ядро
 
-- [ ] **2.1** `doc.go` с назначением и атрибуцией <!-- verify: go vet ./internal/upstreamcore/ -->
-- [ ] **2.2** `reloader.go` — порт `app/reloader.go` без `peer` <!-- depends: 1.1 | verify: go build ./internal/upstreamcore/ -->
-- [ ] **2.3** `core.go` — `Options`, `New` (порт `setup` без кластера/UI/listeners), `Handler`, `Reload`, `Stop`, метрики <!-- depends: 2.2 | verify: go vet ./internal/upstreamcore/ -->
+- [x] **2.1** `doc.go` с назначением и атрибуцией <!-- verify: go vet ./internal/upstreamcore/ -->
+- [x] **2.2** `reloader.go` — порт `app/reloader.go` без `peer` <!-- depends: 1.1 | verify: go build ./internal/upstreamcore/ -->
+- [x] **2.3** `core.go` — `Options`, `New` (порт `setup` без кластера/UI/listeners), `Handler`, `Reload`, `Stop`, метрики <!-- depends: 2.2 | verify: go vet ./internal/upstreamcore/ -->
 
 ## Phase 3: Бинарь
 
-- [ ] **3.1** `cmd/amp-upstream/main.go`: флаги, `compat.InitFromFlags`, `extURL`, `http.Server`, сигналы <!-- depends: 2.3 | verify: go build -o /tmp/... ./cmd/amp-upstream && ручной смоук: старт на examples-конфиге, curl /-/healthy, POST/GET alerts -->
+- [x] **3.1** `cmd/amp-upstream/main.go`: флаги, `compat.InitFromFlags`, `extURL`, `http.Server`, сигналы <!-- depends: 2.3 | verify: go build -o /tmp/... ./cmd/amp-upstream && ручной смоук: старт на examples-конфиге, curl /-/healthy, POST/GET alerts -->
 
 **Phase verification:** `go vet ./internal/upstreamcore/ ./cmd/amp-upstream/`
 
