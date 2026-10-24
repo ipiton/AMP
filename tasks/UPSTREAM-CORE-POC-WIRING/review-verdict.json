@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/upstream-core-poc-wiring",
+  "commit": "de6f05b",
+  "reviewed_at": "2026-10-24",
+  "findings": { "blocker": 0, "major": 2, "minor": 6, "nit": 4 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

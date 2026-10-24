@@ -53,4 +53,6 @@
 // recorder (behind a feature flag upstream, off by default), no
 // --silences.max-*, --alerts.per-alertname-limit, --dispatch.start-delay or
 // --web.config.file; the HTTP server and signals belong to the caller.
+// Stop waits for a reload in progress without a deadline, where upstream
+// abandons it after its shutdown timeout.
 package upstreamcore
