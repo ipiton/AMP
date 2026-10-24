@@ -36,11 +36,19 @@ type runtimeClusterContext struct {
 
 // registerRoutes preserves the historical test seam for futureparity-only suites.
 // The compatibility owner stays build-tagged so production main/router ownership
-// does not drift back toward the historical wide-surface tests.
+// does not drift back toward the historical wide-surface tests. The
+// upstreamcore build tag swaps in the upstream Alertmanager core
+// (upstreamcore_compat.go, ADR-019).
 func registerRoutes(mux *http.ServeMux) {
 	if mux == nil {
 		return
 	}
+	registerRoutesImpl(mux)
+}
+
+var registerRoutesImpl = registerOwnCoreRoutes
+
+func registerOwnCoreRoutes(mux *http.ServeMux) {
 
 	// Build a fresh registry per mux so each test gets isolated state and its
 	// own AMP_CONFIG_FILE/AMP_RUNTIME_STATE_FILE environment (ADR-002: the
