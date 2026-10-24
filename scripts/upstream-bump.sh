@@ -5,9 +5,11 @@
 #   ./scripts/upstream-bump.sh --diff <old> <new>
 #
 # The bump refuses any module it moves -- the upstream release itself and
-# every require that `go get` + `go mod tidy` change -- published less than
-# UPSTREAM_BUMP_MIN_AGE_DAYS (default 7) days ago, and puts go.mod and
-# go.sum back. --allow-fresh=<reason> is the owner's exception; the reason
+# every require that `go get` + `go mod tidy` change -- younger than
+# UPSTREAM_BUMP_MIN_AGE_DAYS (default 7) days, and puts go.mod and go.sum
+# back. A module's age is its commit time from the module proxy, which the
+# author controls; the upstream release also has to be that old on GitHub
+# (TECH-DEBT: transitive requires have only the commit time). --allow-fresh=<reason> is the owner's exception; the reason
 # is printed so it ends up in the commit message.
 #
 # --diff writes a unified diff of the upstream files AMP carries ports of
@@ -28,6 +30,10 @@ PORTED_FILES="app/app.go app/reloader.go app/metrics.go app/lifecycle.go app/url
 log() { printf '[upstream-bump] %s\n' "$1"; }
 die() { log "$1"; exit 1; }
 
+for tool in go jq curl git; do
+  command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
+done
+
 usage() {
   sed -n '4,5p' "${BASH_SOURCE[0]}" | sed 's/^# *//'
   exit 2
@@ -38,13 +44,26 @@ requires() {
   ( cd "$GO_APP_DIR" && go mod edit -json ) | jq -r '.Require[] | .Path + "@" + .Version' | sort
 }
 
-# Prints the age in whole days of a module version, from the proxy's
-# publish time.
+# Prints the age in whole days of an RFC 3339 time.
+days_since() {
+  jq -nr --arg t "$1" '(now - ($t | sub("\\.[0-9]+"; "") | fromdateiso8601)) / 86400 | floor'
+}
+
+# Prints the age in whole days of a module version: the commit time the
+# proxy reports, and for the upstream module the younger of that and its
+# GitHub release, since a tag can point at an old commit.
 age_days() {
-  local published
-  published="$(cd "$GO_APP_DIR" && go list -m -json "$1" | jq -r '.Time // empty')" || return 1
-  [[ -n "$published" ]] || return 1
-  jq -nr --arg t "$published" '(now - ($t | sub("\\.[0-9]+"; "") | fromdateiso8601)) / 86400 | floor'
+  local committed released age rel
+  committed="$(cd "$GO_APP_DIR" && go list -m -json "$1" | jq -r '.Time // empty')" || return 1
+  [[ -n "$committed" ]] || return 1
+  age="$(days_since "$committed")"
+  if [[ "$1" == "$UPSTREAM_MODULE@"* ]]; then
+    released="$(curl -fsS "https://api.github.com/repos/prometheus/alertmanager/releases/tags/${1#*@}" | jq -r '.published_at // empty')" || return 1
+    [[ -n "$released" ]] || return 1
+    rel="$(days_since "$released")"
+    (( rel < age )) && age="$rel"
+  fi
+  echo "$age"
 }
 
 write_diff() {
@@ -113,7 +132,7 @@ moved=0
 while IFS= read -r mv; do
   moved=$((moved + 1))
   if ! days="$(age_days "$mv")"; then
-    fresh="$fresh  $mv (publish time unknown)"$'\n'
+    fresh="$fresh  $mv (age unknown)"$'\n'
   elif (( days < MIN_AGE_DAYS )); then
     fresh="$fresh  $mv ($days days old)"$'\n'
   fi

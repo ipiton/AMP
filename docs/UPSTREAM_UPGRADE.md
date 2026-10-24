@@ -30,7 +30,7 @@ The script:
 
 1. Refuses to run if `go-app/go.mod` or `go.sum` has uncommitted changes.
 2. Runs `go get github.com/prometheus/alertmanager@<version>` and `go mod tidy`.
-3. Looks up the publish time of every require that moved, the upstream release included. If any is younger than 7 days, it puts `go.mod` and `go.sum` back and stops.
+3. Checks the age of every require that moved, the upstream release included. If any is younger than 7 days, it puts `go.mod` and `go.sum` back and stops. The age is the commit time the module proxy reports. The commit author sets it, so for the upstream release the script also takes the GitHub release date (`api.github.com`), whichever is younger. Transitive requires are checked by commit time only: a new tag on an old commit passes. Review the list of moved requires the script prints.
 4. Warns if the `go` or `toolchain` line moved. CI, the image builders and the toolchain line move together (see [CI.md](CI.md), Go Version).
 5. Writes a diff of the upstream files AMP carries ports of between the old and the new release, and prints its path.
 
@@ -71,12 +71,19 @@ Each baseline entry has a class:
 Each entry also has a flag:
 
 - `fails` means the test must fail.
-- `flaky` means it may fail or pass, for example because of upstream's asynchronous dispatch.
+- `flaky` means it may fail or pass, for example on timing. It must still run.
+
+The gate also rejects malformed entries (unknown class or flag).
+
+The baseline header lists two divergences the harness evens out instead of listing tests:
+
+- **415 without `Content-Type`.** The gate checks it against `cmd/amp-upstream` directly.
+- **Groups trailing ingest.** The harness waits for posted alerts to reach `/api/v2/alerts/groups`.
 
 After a bump, the gate can report two things:
 
 - **`NEW <test>`**: a failure that is not in the baseline. The new release changed a behaviour the suites check. Decide whether AMP accepts it. If it does, add an entry with the class and the reason. If it does not, fix the wiring.
-- **`PASSED <test>` / `NOT RUN <test>`**: a `fails` entry that no longer fails, or a test that no longer exists. Upstream now matches AMP there, or the test was renamed. Remove the entry or update its name.
+- **`PASSED <test>` / `NOT RUN <test>`**: a `fails` entry that no longer fails, or an entry whose test no longer exists. Upstream now matches AMP there, or the test was renamed. Remove the entry or update its name.
 
 A baseline that grows needs a reason for every line. Gate failures are never fixed by adding entries without one.
 

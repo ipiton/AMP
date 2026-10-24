@@ -48,18 +48,18 @@ based_on:
 | Группы upstream появляются асинхронно после ingest | `-count=20`: 15 fail; проба: через ~1ms группа есть | measured | расхождение было бы потерей данных (класс c) |
 | amtool собирается из модуля upstream без нашего `go.mod` | `go run .../cmd/amtool@v0.34.1 --version` | measured | нужен был бы docker-образ |
 | Тест-бинарь видит версию зависимости | `debug.ReadBuildInfo` → `v0.34.1` | measured | нужен парсер `go.mod` |
-| `go list -m -json mod@ver` отдаёт время публикации | `Time` в ответе proxy | code-read | карантин через `.info` proxy |
+| ~~`go list -m -json mod@ver` отдаёт время публикации~~ — **опровергнута deep-review (F1):** `Time` — commit time (`modfetch/codehost/codehost.go:164`), его задаёт автор | `codehost.go` | refuted | для upstream берётся ещё дата GitHub-релиза; транзитивка — TECH-DEBT |
 
 ## Target Design
 
-**Харнесс.** `futureparity_compat.go`: `registerRoutes` → `registerRoutesImpl(mux)`, по умолчанию `registerOwnCoreRoutes` (прежнее тело). Новый `upstreamcore_compat.go` (`futureparity && upstreamcore`): в `init()` подменяет реализацию на `registerUpstreamCoreRoutes` — `compat.InitFromFlags` один раз, `upstreamcore.New` с конфигом из `resolveRuntimeConfigPath()`, временным `DataDir`, своим `prometheus.Registry`; ошибка `New` → `registerFutureParityBootstrapFailure`. Обёртка ставит `Content-Type: application/json` на POST без заголовка (расхождение записано). Ядра в тестах не останавливаются — у шва нет `t`; процесс тестов короткий, утечка горутин ограничена прогоном (записано как компромисс).
+**Харнесс.** `futureparity_compat.go`: `registerRoutes` → `registerRoutesImpl(mux)`, по умолчанию `registerOwnCoreRoutes` (прежнее тело). Новый `upstreamcore_compat.go` (`futureparity && upstreamcore`): в `init()` подменяет реализацию на `registerUpstreamCoreRoutes` — `compat.InitFromFlags` один раз, `upstreamcore.New` с конфигом из `resolveRuntimeConfigPath()`, временным `DataDir`, своим `prometheus.Registry`; ошибка `New` → `registerFutureParityBootstrapFailure`. Обёртка ставит `Content-Type: application/json` на POST без заголовка (расхождение — в шапке baseline, раннер проверяет 415 на `amp-upstream` напрямую) и после принятого `POST /api/v2/alerts` ждёт (опрос, ≤1s), пока активные алерты появятся в `/alerts/groups` — dispatcher upstream получает их асинхронно (deep-review F5). У шва нет `t`, поэтому ядра и их каталоги учитываются в пакете и останавливаются в `TestMain` (`upstreamcore_compat_test.go`).
 
 **Baseline.** `go-app/cmd/server/testdata/upstreamcore-divergences.tsv`: `<test path>\t<class a|b|c|d>\t<fails|flaky>\t<reason>`; `#` — комментарии. Полное описание и решение по каждой группе — `tasks/<slug>/divergences.md` (после finalize — архив; baseline ссылается на класс, не на файл задачи).
 
 **Раннер** `scripts/upstream-core-gate.sh`:
 1. `go test -tags futureparity,upstreamcore -count=1 -json ./cmd/server/` → листовые падения (тест упал и ни один его подтест не упал);
-2. новое падение вне baseline → FAIL с выводом теста; запись `fails`, которая прошла, → FAIL «устарела — удалить или переклассифицировать»; `flaky` может и упасть, и пройти;
-3. amtool: собрать `cmd/amp-upstream`, поднять на свободном порту с `testdata/upstreamcore-alertmanager.yml` и временным `--storage.path`, `go run github.com/prometheus/alertmanager/cmd/amtool@$VER` — `alert query`, `config show`, `silence add`, `silence query`; остановить SIGTERM, код 0.
+2. новое падение вне baseline → FAIL с выводом теста; запись `fails`, которая прошла, → FAIL «устарела — удалить или переклассифицировать»; `flaky` может и упасть, и пройти, но должна запускаться; запись с неизвестным классом/флагом → FAIL; родитель, упавший собственным `t.Error`, считается падением; паника вне тестов → FAIL;
+3. amtool: собрать `cmd/amp-upstream`, поднять на `127.0.0.1:0` с `testdata/upstreamcore-alertmanager.yml` и временным `--storage.path`, адрес — из стартового лога (`msg=="listening"`, `.address`; смена формата лога даст «did not start»), `go install github.com/prometheus/alertmanager/cmd/amtool@$VER` во временный `GOBIN` — `alert add`, `alert query`, `config show`, `silence add`, `silence query`; POST без `Content-Type` → 415; остановить SIGTERM, код 0.
 `VER` = `go list -m -f '{{.Version}}' github.com/prometheus/alertmanager` из `go-app`.
 
 **Одна точка версии.** `release-gate.sh` `step_amtool_compat`: `amtool_image="quay.io/prometheus/alertmanager:$(upstream version)"`; новый шаг `upstream-core` вызывает раннер. Других упоминаний версии в исполняемом коде нет (комментарии провенанса — не точки версии).
@@ -67,9 +67,9 @@ based_on:
 **Дрейф порта.** `internal/upstreamcore`: `const PortedFrom = "v0.34.1"` (в `doc.go` рядом с провенансом); `port_test.go` сравнивает с версией модуля из `debug.ReadBuildInfo()`; сообщение называет обе версии и команду `scripts/upstream-bump.sh --diff <old> <new>`.
 
 **Скрипт обновления** `scripts/upstream-bump.sh <version> [--allow-fresh=<reason>]`:
-1. текущая версия из `go list -m`; новая — время публикации `go list -m -json ...@<version>`; младше 7 дней — отказ (кроме `--allow-fresh` с причиной — исключение владельца, как go1.27.3);
+1. текущая версия из `go list -m`; возраст модуля — commit time из `go list -m -json ...@<version>`, для upstream — ещё и дата GitHub-релиза (берётся меньший возраст); младше 7 дней — отказ (кроме `--allow-fresh` с причиной — исключение владельца, как go1.27.3);
 2. `go get github.com/prometheus/alertmanager@<version>`, `go mod tidy`;
-3. для каждого изменившегося `require` в `go.mod` — время публикации; младше 7 дней — список, отказ с откатом `go.mod`/`go.sum` (`git checkout`), если не `--allow-fresh`;
+3. для каждого изменившегося `require` в `go.mod` — возраст; младше 7 дней — список, отказ с возвратом `go.mod`/`go.sum` из копии, снятой до `go get`, если не `--allow-fresh`;
 4. дифф портированных файлов (`app/{app,reloader,metrics,lifecycle,url}.go`) и `template/template.go` (порт `internal/business/templating`) между версиями из module cache — в файл, путь печатается;
 5. печать следующих шагов: перенести изменения в порт, обновить `PortedFrom`, `scripts/upstream-core-gate.sh`, пересмотреть baseline, `govulncheck`, `release-gate.sh`.
 `--diff <old> <new>` — только шаг 4.
@@ -115,8 +115,8 @@ based_on:
 
 1. Тест переименован → раннер: новое падение не найдено, запись устарела — оба сообщения, понятно, что править.
 2. Пакет не компилируется под тегом → `go test` без событий тестов: раннер — FAIL с выводом сборки, а не «0 падений».
-3. Порт занят → amp-upstream на `127.0.0.1:0` нельзя (amtool нужен адрес): свободный порт берётся заранее, гонка маловероятна, при ошибке старта — FAIL с логом.
-4. `go run amtool@ver` без сети → FAIL с понятным сообщением (как и любой `go run` в гейте).
+3. Порт: amp-upstream слушает `127.0.0.1:0`, адрес раннер читает из лога — гонки за порт нет; не начал слушать за 60s (первый exec свежего бинаря на macOS ~11s) → FAIL с логом и признаком «жив/умер».
+4. `go install amtool@ver` без сети → FAIL с понятным сообщением (как и любой `go run` в гейте).
 5. `upstream-bump.sh` на грязном `go.mod` → отказ до изменений.
 
 ## Impact Analysis

@@ -8,7 +8,16 @@
 #   class c  gap in AMP's upstream wiring, to close in UPSTREAM-CORE-REMOVAL
 #   class d  upstream differs from a deliberate AMP choice; owner decision
 #   fails    must fail; passing means the entry is stale
-#   flaky    may fail or pass (timing)
+#   flaky    may fail or pass (timing); must still run
+#
+# Divergences the harness (cmd/server/upstreamcore_compat.go) evens out, so
+# that no test shows them; scripts/upstream-core-gate.sh checks the first one
+# against cmd/amp-upstream directly:
+#   b  POST without Content-Type is 415 upstream (AMP accepted it). The
+#      harness sets application/json, as Prometheus and amtool do.
+#   b  /api/v2/alerts/groups trails ingest by about a millisecond (dispatcher
+#      provider subscription). The harness waits for the posted alerts to
+#      appear in groups before answering the POST.
 TestPhase0Contracts_HealthAndReady	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
 TestPhase0RouteInventory/health	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
 TestPhase0RouteInventory/healthz_alias	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
@@ -29,9 +38,9 @@ TestPhase0AlertsStateSemantics/resolved_closes_firing_and_appears_via_resolved_f
 TestPhase0Contracts_CoreAPI/alerts_post_missing_labels_contract	b	fails	go-swagger validation answers 422, not 400
 TestPhase0Contracts_CoreAPI/silences_post_invalid_payload_contract	b	fails	go-swagger validation answers 422, not 400
 TestPhase0Contracts_CoreAPI/silences_post_no_matchers_contract	b	fails	go-swagger validation answers 422, not 400
-TestPhase0Contracts_CoreAPI/silence_by_id_invalid_id_contract	b	fails	go-swagger validation answers 422, not 400
+TestPhase0Contracts_CoreAPI/silence_by_id_invalid_id_contract	b	fails	go-swagger validation answers 422, not 404
 TestUpstreamParity_PostSilenceErrorPayloadContracts	b	fails	go-swagger validation answers 422, not 400
-TestUpstreamParity_SilenceByIDInvalidUUIDReturnsNotFound	b	fails	go-swagger validation answers 422, not 400
+TestUpstreamParity_SilenceByIDInvalidUUIDReturnsNotFound	b	fails	go-swagger validation answers 422, not 404
 TestPhase0Contracts_CoreAPI/alerts_post_invalid_generatorURL_contract	b	fails	generatorURL is validated as a URI (422)
 TestPhase0Contracts_CoreAPI/alerts_get_invalid_filter_matcher_contract	b	fails	error body is a JSON string, not an object
 TestPhase0Contracts_CoreAPI/alerts_post_empty_labels_contract	b	fails	error body is a JSON string, not an object
@@ -42,21 +51,17 @@ TestPhase0Contracts_CoreAPI/alerts_post_invalid_payload_contract	b	fails	error t
 TestUpstreamParity_PostAlertsErrorPayloadContracts	b	fails	error text differs from AMP "invalid alert payload"
 TestPhase0Contracts_CoreAPI/silences_post_update_unknown_id_contract	b	fails	silence update with unknown/invalid id is 404
 TestPhase0Contracts_CoreAPI/silences_post_update_invalid_id_contract	b	fails	silence update with unknown/invalid id is 404
-TestPhase0Contracts_CoreAPI/alerts_get_invalid_state_flag_contract	b	fails	invalid active= ignored (200); invalid groups filter= rejected (400)
-TestPhase0Contracts_CoreAPI/alert_groups_invalid_query_filters_contract	b	fails	invalid active= ignored (200); invalid groups filter= rejected (400)
-TestUpstreamParity_AlertsAndGroupsInvalidQueryContract	b	fails	invalid active= ignored (200); invalid groups filter= rejected (400)
+TestPhase0Contracts_CoreAPI/alerts_get_invalid_state_flag_contract	b	fails	invalid active= read as false (200, active alerts dropped); invalid groups filter= rejected (400)
+TestPhase0Contracts_CoreAPI/alert_groups_invalid_query_filters_contract	b	fails	invalid active= read as false (200, active alerts dropped); invalid groups filter= rejected (400)
+TestUpstreamParity_AlertsAndGroupsInvalidQueryContract	b	fails	invalid active= read as false (200, active alerts dropped); invalid groups filter= rejected (400)
 TestPhase0Contracts_CoreAPI/alertmanager_compatibility_probes_contract/reload_post	b	fails	/-/reload body is empty; 405 body is "Method Not Allowed"
 TestPhase0Contracts_CoreAPI/alertmanager_compatibility_probes_contract/healthy_post_not_allowed	b	fails	/-/reload body is empty; 405 body is "Method Not Allowed"
 TestPhase0Contracts_CoreAPI/alertmanager_compatibility_probes_contract/ready_post_not_allowed	b	fails	/-/reload body is empty; 405 body is "Method Not Allowed"
 TestUpstreamParity_ReloadSuccessReturnsOKBody	b	fails	/-/reload body is empty; 405 body is "Method Not Allowed"
 TestPhase0ReloadInvalidConfigReturns500	b	fails	upstream does not start on an invalid config
 TestUpstreamParity_ReloadReturns500OnInvalidConfig	b	fails	upstream does not start on an invalid config
-TestPhase0SilencePostUpdateSemantics	b	fails	moving startsAt into the past creates a new silence (silence.canUpdate)
+TestPhase0SilencePostUpdateSemantics	b	fails	changing startsAt of an active silence creates a new one (silence.canUpdate)
 TestPhase0SilencesFilterMatcherSemantics	b	fails	silence filter does not match a != matcher
-TestPhase0AlertGroupsNestedAlertShape	b	flaky	groups appear asynchronously after ingest (dispatcher subscription)
-TestUpstreamParity_AlertGroupsShapeAndFilters	b	flaky	groups appear asynchronously after ingest (dispatcher subscription)
-TestUpstreamParity_AlertGroupsWithoutGroupByHaveEmptyLabels	b	flaky	groups appear asynchronously after ingest (dispatcher subscription)
-TestUpstreamParity_InvalidStatusAndResolvedAreIgnored	b	flaky	groups appear asynchronously after ingest (dispatcher subscription)
 TestPhase0Contracts_CoreAPI/status_contract	c	fails	version.Version unset: amp-upstream is built without -ldflags
 TestUpstreamParity_StatusRequiredShape	c	fails	version.Version unset: amp-upstream is built without -ldflags
-TestPhase0RouteInventory/debug_removed	d	fails	upstream serves /debug/pprof; AMP removed it on purpose (owner decision)
+TestPhase0RouteInventory/debug_removed	d	fails	upstream serves /debug/* (pprof, expvar); AMP removed it on purpose (owner decision)

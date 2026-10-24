@@ -25,6 +25,10 @@ UPSTREAM_MODULE="github.com/prometheus/alertmanager"
 
 log() { printf '[upstream-core-gate] %s\n' "$1"; }
 
+for tool in go jq curl; do
+  command -v "$tool" >/dev/null 2>&1 || { log "$tool is required"; exit 1; }
+done
+
 WORK_DIR="$(mktemp -d)"
 AMP_PID=""
 cleanup() {
@@ -38,14 +42,31 @@ trap cleanup EXIT
 FAILED=0
 
 check_suites() {
-  local json="$WORK_DIR/suites.json"
+  local json="$WORK_DIR/suites.json" stderr="$WORK_DIR/suites.stderr"
   log "==> contract suites on the upstream core"
+
+  # Every entry needs a known class and expectation: a typo such as "fail"
+  # must not quietly turn an entry into one that tolerates any outcome.
+  local bad
+  bad="$(grep -v '^#' "$BASELINE" | awk -F'\t' 'NF > 0 && (NF < 4 || $2 !~ /^[abcd]$/ || $3 !~ /^(fails|flaky)$/)')"
+  if [[ -n "$bad" ]]; then
+    log "malformed baseline entries (test<TAB>a|b|c|d<TAB>fails|flaky<TAB>reason):"
+    printf '%s\n' "$bad"
+    return 1
+  fi
+
   # A non-zero exit is expected: the baseline failures are real failures.
-  ( cd "$GO_APP_DIR" && go test -tags futureparity,upstreamcore -count=1 -json ./cmd/server/ ) >"$json" 2>&1
+  ( cd "$GO_APP_DIR" && go test -tags futureparity,upstreamcore -count=1 -json ./cmd/server/ ) >"$json" 2>"$stderr"
 
   if ! jq -e 'select(.Action=="run")' "$json" >/dev/null 2>&1; then
     log "no test ran -- build or setup failure:"
-    jq -r 'select(.Action=="output") | .Output' "$json" 2>/dev/null || cat "$json"
+    jq -r 'select(.Action=="output" or .Action=="build-output") | .Output' "$json" 2>/dev/null || cat "$json"
+    cat "$stderr"
+    return 1
+  fi
+  if jq -e 'select(.Test == null and .Action=="output" and (.Output | startswith("panic:")))' "$json" >/dev/null; then
+    log "the test binary panicked outside a test:"
+    jq -r 'select(.Test == null and .Action=="output") | .Output' "$json"
     return 1
   fi
 
@@ -58,10 +79,15 @@ check_suites() {
       for (j = 1; j <= NR; j++) if (index(t[j], t[i] "/") == 1) { leaf = 0; break }
       if (leaf) print t[i]
     }
-  }' "$WORK_DIR/failed" | sort >"$WORK_DIR/leaf"
+  }' "$WORK_DIR/failed" >"$WORK_DIR/leaf"
+  # A parent that also failed on its own (t.Error outside its subtests)
+  # counts as a failure of its own.
+  jq -r 'select(.Test != null and .Action=="output" and (.Output | test("^\\s+\\S+_test\\.go:[0-9]+: "))) | .Test' "$json" |
+    sort -u | comm -12 - "$WORK_DIR/failed" >>"$WORK_DIR/leaf"
+  sort -u -o "$WORK_DIR/leaf" "$WORK_DIR/leaf"
 
-  grep -v '^#' "$BASELINE" | awk -F'\t' 'NF >= 3 { print $1 }' | sort >"$WORK_DIR/known"
-  grep -v '^#' "$BASELINE" | awk -F'\t' 'NF >= 3 && $3 == "fails" { print $1 }' | sort >"$WORK_DIR/must_fail"
+  grep -v '^#' "$BASELINE" | awk -F'\t' 'NF >= 4 { print $1 }' | sort >"$WORK_DIR/known"
+  grep -v '^#' "$BASELINE" | awk -F'\t' 'NF >= 4 && $3 == "fails" { print $1 }' | sort >"$WORK_DIR/must_fail"
 
   local rc=0 t
   comm -23 "$WORK_DIR/leaf" "$WORK_DIR/known" >"$WORK_DIR/new"
@@ -74,10 +100,12 @@ check_suites() {
     done <"$WORK_DIR/new"
   fi
 
-  comm -23 "$WORK_DIR/must_fail" "$WORK_DIR/leaf" >"$WORK_DIR/stale"
+  # A "fails" entry must fail; any entry, "flaky" included, must still run.
+  sort -u "$WORK_DIR/failed" "$WORK_DIR/passed" >"$WORK_DIR/ran"
+  { comm -23 "$WORK_DIR/must_fail" "$WORK_DIR/leaf"; comm -23 "$WORK_DIR/known" "$WORK_DIR/ran"; } | sort -u >"$WORK_DIR/stale"
   if [[ -s "$WORK_DIR/stale" ]]; then
     rc=1
-    log "\"fails\" entries that did not fail -- remove or reclassify them:"
+    log "baseline entries that are stale -- remove, rename or reclassify them:"
     while IFS= read -r t; do
       if grep -qxF "$t" "$WORK_DIR/passed"; then
         log "  PASSED  $t"
@@ -87,7 +115,7 @@ check_suites() {
     done <"$WORK_DIR/stale"
   fi
 
-  log "suites: $(wc -l <"$WORK_DIR/passed" | tr -d ' ') passed, $(wc -l <"$WORK_DIR/leaf" | tr -d ' ') known-divergent leaf failures"
+  log "suites: $(wc -l <"$WORK_DIR/passed" | tr -d ' ') passed, $(wc -l <"$WORK_DIR/leaf" | tr -d ' ') known-divergent failures"
   return "$rc"
 }
 
@@ -109,8 +137,9 @@ check_amtool() {
     >"$WORK_DIR/amp-upstream.log" 2>&1 &
   AMP_PID=$!
 
-  # The binary logs the bound address once it serves.
-  tries=100
+  # The binary logs the bound address once it serves. The first exec of a
+  # freshly built binary on macOS can take over 10s (system checks).
+  tries=600
   while (( tries > 0 )); do
     addr="$(jq -r 'select(.msg=="listening") | .address' "$WORK_DIR/amp-upstream.log" 2>/dev/null | head -n 1)"
     [[ -n "$addr" ]] && break
@@ -121,7 +150,11 @@ check_amtool() {
     tries=$((tries - 1))
   done
   if [[ -z "$addr" ]]; then
-    log "amp-upstream did not start:"
+    if kill -0 "$AMP_PID" 2>/dev/null; then
+      log "amp-upstream is running but logged no \"listening\" line within 60s:"
+    else
+      log "amp-upstream exited before listening:"
+    fi
     cat "$WORK_DIR/amp-upstream.log"
     return 1
   fi
@@ -136,6 +169,15 @@ check_amtool() {
   "$amtool" silence query alertname=UpstreamCoreGate --alertmanager.url="$url" | grep -q UpstreamCoreGate ||
     { log "amtool silence query did not return the silence"; return 1; }
 
+  # The harness sets Content-Type for the suites; check the divergence
+  # itself here, so a bump that changes it shows up (baseline header).
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '[]' "$url/api/v2/alerts")"
+  if [[ "$code" != "415" ]]; then
+    log "POST /api/v2/alerts without Content-Type answered $code, the baseline header says 415"
+    return 1
+  fi
+
   kill -TERM "$AMP_PID"
   if ! wait "$AMP_PID"; then
     log "amp-upstream did not exit cleanly on SIGTERM:"
@@ -144,7 +186,7 @@ check_amtool() {
     return 1
   fi
   AMP_PID=""
-  log "amtool: alert add/query, config show, silence add/query ok; clean SIGTERM"
+  log "amtool: alert add/query, config show, silence add/query ok; 415 without Content-Type; clean SIGTERM"
 }
 
 check_suites || FAILED=1
