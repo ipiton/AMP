@@ -85,7 +85,7 @@ func (tc *testCore) do(t *testing.T, method, path string, body any) (int, []byte
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	return resp.StatusCode, out
