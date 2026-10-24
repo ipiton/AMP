@@ -42,12 +42,12 @@ based_on:
 
 ## Phase 4: Тесты (write-tests, после deep-review pass)
 
-- [ ] **4.1** `core_test.go`: ingest → `GET /api/v2/alerts` → группа → доставка в `httptest` webhook → silence → `suppressed` → `DELETE` silence; reload невалидного конфига → 500, прежний конфиг в силе; `Stop` идемпотентен <!-- verify: go test -race ./internal/upstreamcore/ -->
+- [x] **4.1** `core_test.go`: ingest → `GET /api/v2/alerts` → группа → доставка в `httptest` webhook → silence → `suppressed` → `DELETE` silence; reload невалидного конфига → 500, прежний конфиг в силе; `Stop` идемпотентен <!-- verify: go test -race ./internal/upstreamcore/ -->
 
 ## Phase 5: testing + инвентаризация
 
 - [ ] **5.1** `govulncheck ./...` <!-- verify: 0 reachable или запись в BUGS -->
-- [ ] **5.2** Размер `amp-upstream` против `cmd/server` (`-ldflags="-s -w"` и без) → research <!-- verify: числа в research.md -->
+- [x] **5.2** Размер `amp-upstream` против `cmd/server` (`-ldflags="-s -w"` и без) → research <!-- verify: числа в research.md -->
 - [ ] **5.3** Гейты: `make -C go-app quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check` <!-- verify: PASS -->
 
 ## Definition of Done
