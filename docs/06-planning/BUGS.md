@@ -223,6 +223,14 @@
 - **Refs:** CODE-REVIEW-2026-10-21 L-27.
 - **Status:** open
 
+### [low][Tests][~0.1d] UPSTREAMCORE-TEST-GROUPS-RACE
+- **Title:** `TestCoreEndToEnd` читает `/api/v2/alerts/groups` сразу после POST — латентный флейк
+- **Problem:** `go-app/internal/upstreamcore/core_test.go` (`TestCoreEndToEnd`, проверка группы) не ждёт dispatcher: upstream получает алерты через подписку на провайдер, группы появляются ~через 1ms. Локально 100/100 проходит (промежуточный GET `/alerts` даёт время).
+- **Impact:** на медленном CI тест может упасть без регрессии.
+- **Fix:** `require.Eventually` вокруг чтения групп (как ожидание в харнессе `cmd/server/upstreamcore_compat.go`).
+- **Refs:** deep-review `UPSTREAM-CORE-POC-GATE` F9, `tasks/archive/UPSTREAM-CORE-POC-GATE/review-findings.md`.
+- **Status:** open
+
 ## Снимается переходом на upstream (ADR-019)
 
 Перенесено 2026-10-24 задачей `ADR-019-V2-SLICING`: код, в котором живёт проблема, удаляется срезом эпика ADR-019 (`BACKLOG.md`), поведение даёт upstream. Не брать в работу. Записи сохранены целиком: если PoC (`UPSTREAM-CORE-POC`) не пройдёт и решение пересмотрят, они возвращаются в Open. Закрываются вместе со срезом — удаляются отсюда, строка в `DONE.md` среза. `Status: superseded` — расширение Entry Format для этой секции.

@@ -16,8 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **UPSTREAM-CORE-POC-GATE** — срез 1b эпика ADR-019, после `UPSTREAM-CORE-POC-WIRING`: `main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go` и amtool-гейт на upstream-ядре; расхождения разобрать (ошибка теста или upstream), вердикт по ADR-019 — владельцу. Не проходят — стоп и пересмотр ADR-019. Standard, ~2–2.5d. Следом — срезы 2–4 (после PoC, независимы). Заложить обновляемость ядра (владелец 2026-10-24): одна точка версии upstream, проверка расхождения порта, скрипт обновления; гейт — регрессия при каждом обновлении.
-
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -28,8 +26,19 @@ Queue и WIP — источник правды для выбора задачи.
   Trigger: owner ready.
 - [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` был красный (GO-2026-6599…6617); `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16 — локально `govulncheck` на `go1.26.9` чистый, release-gate PASS. 2026-10-23 `govulncheck` на `main` снова красный (GO-2026-6809, stdlib `go1.26.9`); `PROD-DEPS-GO-127` поднял toolchain до `go1.27.3`, локально чисто. Осталось: push `main`, дождаться зелёного CI (включая `govulncheck`), затем включить защиту. `~5min`
   Waiting-on: push `main` и зелёный CI на нём.
+- [ ] **ADR-019-POC-VERDICT** — принять вердикт PoC ADR-019 (`UPSTREAM-CORE-POC-GATE`, `DONE.md` 2026-10-24: проходит, расхождения — `tasks/archive/UPSTREAM-CORE-POC-GATE/divergences.md`) или остановить эпик; заодно решить `/debug/*` на upstream-ядре (pprof и expvar открыты: как upstream / вырезать в wiring / за флагом) — нужно к срезу 5. Принят — срезы 2–4 из Queue свободны. `~15min`
+  Trigger: owner ready.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
+
+> После `ADR-019-POC-VERDICT`. Срезы 2–4 независимы; описание — `BACKLOG.md` § ADR-019.
+
+- [ ] **UPSTREAM-AI-HOOKS** — срез 2: AI-слой в `AlertStoreCallback` и своей notify-стадии. Full, 2–3d.
+  Blocked-by: ADR-019-POC-VERDICT.
+- [ ] **UPSTREAM-NON-UPSTREAM-RECEIVERS** — срез 3: интеграции upstream `notify/*`, свои — Rootly и K8s-Secret таргеты. Standard, 2–3d.
+  Blocked-by: ADR-019-POC-VERDICT.
+- [ ] **UPSTREAM-HA-MEMBERLIST** — срез 4: `cluster.Peer`, gossip, снапшоты на PVC, StatefulSet. Full, 3–5d.
+  Blocked-by: ADR-019-POC-VERDICT.
 
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)

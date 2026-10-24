@@ -15,7 +15,7 @@ All third-party actions are pinned to a full commit SHA (the release tag is in a
 
 | Job | What it runs | Required | Why |
 |---|---|---|---|
-| `gate` | [`scripts/release-gate.sh`](../scripts/release-gate.sh): build, lint, tests, `futureparity`, `-race` on the concurrency-heavy packages, Helm lint/render/RBAC checks, `amtool` compatibility against a real smoke stack | yes | The release gate is the definition of "releasable". CI runs the same script, unchanged, instead of re-describing it in YAML. |
+| `gate` | [`scripts/release-gate.sh`](../scripts/release-gate.sh): build, lint, tests, `futureparity`, the upstream core gate ([`scripts/upstream-core-gate.sh`](../scripts/upstream-core-gate.sh): contract suites against the known-divergence baseline, plus `amtool` against `cmd/amp-upstream`), `-race` on the concurrency-heavy packages, Helm lint/render/RBAC checks, `amtool` compatibility against a real smoke stack | yes | The release gate is the definition of "releasable". CI runs the same script, unchanged, instead of re-describing it in YAML. |
 | `images (amp)`, `images (config-reloader)` | `docker buildx build` of `Dockerfile` / `Dockerfile.config-reloader` for `linux/amd64,linux/arm64`, no push | yes | A change that breaks either image, on either architecture, is caught before the tag rather than by the release. |
 | `actionlint` | `actionlint` over `.github/workflows/` | yes | Workflow mistakes otherwise surface only when the workflow runs, and `release.yml` runs only on a tag. |
 | `govulncheck` | `govulncheck ./...` in `go-app` | yes | A vulnerability reachable from AMP code blocks a release. It fails only on reachable (symbol-level) findings. The trade-off: the vulnerability database changes over time, so a new advisory can turn a pull request red even if it does not touch dependencies. The fix is a separate pull request that upgrades the module, not a skip. |
@@ -37,7 +37,7 @@ Runs on the same pull request cancel each other; runs on `main` do not.
 ./scripts/release-gate.sh
 ```
 
-It prints a PASS/FAIL table per step. It needs Go, `golangci-lint`, `helm`, and Docker (for `amtool-compat`). The Helm dependency step adds the chart repositories listed in `helm/amp/Chart.lock` to a throwaway Helm repository config, so it works on a clean checkout and leaves your `~/.config/helm` untouched. The chart has no dependencies now: the step fails if `Chart.yaml` declares some without a `Chart.lock`, or if a stale `helm/amp/charts/` is left over (Helm would render it).
+It prints a PASS/FAIL table per step. It needs Go, `golangci-lint`, `helm`, `jq`, and Docker (for `amtool-compat`). Both `amtool` checks use the Alertmanager version from `go-app/go.mod`; see [UPSTREAM_UPGRADE.md](UPSTREAM_UPGRADE.md) for bumping it. The Helm dependency step adds the chart repositories listed in `helm/amp/Chart.lock` to a throwaway Helm repository config, so it works on a clean checkout and leaves your `~/.config/helm` untouched. The chart has no dependencies now: the step fails if `Chart.yaml` declares some without a `Chart.lock`, or if a stale `helm/amp/charts/` is left over (Helm would render it).
 
 The other jobs:
 

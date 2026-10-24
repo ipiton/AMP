@@ -137,6 +137,22 @@
 
 ## Low
 
+### [low][Supply chain][~0.5d] UPSTREAM-BUMP-TRANSITIVE-AGE
+- **Title:** карантин `upstream-bump.sh` для транзитивных require — по commit time
+- **Problem:** `go list -m -json mod@ver` отдаёт `Time` — время коммита (`cmd/go/internal/modfetch/codehost/codehost.go`), его задаёт автор. Для `github.com/prometheus/alertmanager` скрипт берёт ещё дату GitHub-релиза, для остальных сдвинутых require — только commit time: новый тег на старый коммит проходит карантин.
+- **Impact:** 7-дневный карантин для транзитивки обходим; смягчено тем, что скрипт печатает список сдвинутых модулей для ревью.
+- **Fix:** время первого появления в прокси — deps.dev `publishedAt` (или `index.golang.org`, но полный скан за 7 дней тяжёлый); отказ при недоступности.
+- **Refs:** deep-review `UPSTREAM-CORE-POC-GATE` F1, `scripts/upstream-bump.sh` `age_days`.
+- **Status:** open
+
+### [low][Gate][~0.25d] UPSTREAM-GATE-RUNNER-GAPS
+- **Title:** `upstream-core-gate.sh`: падение пакета без паники и `t.Log` у упавшего родителя
+- **Problem:** (1) падение уровня пакета без `panic:` (например, ошибка в `TestMain` после `m.Run`) не отличается от ожидаемого FAIL пакета из-за baseline; (2) собственное падение родителя определяется по строкам `_test.go:NN:` в его выводе — под шаблон попадают и `t.Log`, упавший родитель с логом даст ложный `NEW`.
+- **Impact:** (1) пропуск редкого класса поломок; (2) ложно красный гейт; в текущих сьютах ни того, ни другого нет.
+- **Fix:** (1) сверять exit code `go test` с ожидаемым по листьям или проверять вывод пакета на `FAIL` вне тестов; (2) отличать `t.Log` от `t.Error` нельзя по выводу — считать родителя упавшим только при отсутствии упавших подтестов или по маркеру `--- FAIL` без подтестов.
+- **Refs:** deep-review `UPSTREAM-CORE-POC-GATE` F4 (п. 2), F12.
+- **Status:** open
+
 ### [low][Cache][~0.25d] CACHE-STARTUP-RETRY-ERROR-LOGS
 - **Title:** каждая неудачная попытка подключения к кешу на старте пишет ERROR
 - **Problem:** `dialRedis` (`go-app/internal/infrastructure/cache/redis.go:99`) логирует `Failed to connect to Redis` на уровне ERROR. С ожиданием на старте (`AMP-CACHE-NO-RECONNECT`) штатная гонка upgrade даёт по ERROR-строке на попытку: k3d — 5 при успешном подключении через 38s, 8 при исчерпанном окне. Тот же `dialRedis` вызывает `Reload`.

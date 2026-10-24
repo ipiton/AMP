@@ -1,5 +1,5 @@
-//go:build futureparity
-// +build futureparity
+//go:build futureparity && !upstreamcore
+// +build futureparity,!upstreamcore
 
 package main
 

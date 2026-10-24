@@ -104,6 +104,10 @@ step_futureparity() {
     go test -tags futureparity -count=1 ./cmd/server/... )
 }
 
+step_upstream_core() {
+  "$SCRIPT_DIR/upstream-core-gate.sh"
+}
+
 step_race() {
   local pkgs_raw pkg
   local -a pkgs
@@ -269,7 +273,10 @@ docker_available() {
 }
 
 step_amtool_compat() {
-  local amtool_image="quay.io/prometheus/alertmanager:v0.34.0"
+  # The upstream version lives in go.mod only (docs/UPSTREAM_UPGRADE.md).
+  local version amtool_image
+  version="$(cd "$GO_APP_DIR" && go list -m -f '{{.Version}}' github.com/prometheus/alertmanager)" || return 1
+  amtool_image="quay.io/prometheus/alertmanager:$version"
   local network="amp-smoke_default"
   local ok=0
 
@@ -323,6 +330,7 @@ run_step "build" "go build ./... (go-app)" step_build
 run_step "lint" "golangci-lint run (go-app)" step_lint
 run_step "test" "go test ./... -count=1 (go-app)" step_test
 run_step "futureparity" "build+test, futureparity tag, cmd/server" step_futureparity
+run_step "upstream-core" "contract suites vs divergence baseline + amtool, upstream core" step_upstream_core
 run_step "race" "go test -race, publishing/grouping/silencing/templating" step_race
 
 run_step "helm-deps" "chart dependencies (Chart.lock, no stale charts/)" step_helm_deps
