@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,4 +175,19 @@ func TestPrometheusTool_Execute_OffsetParsing(t *testing.T) {
 
 	assert.InDelta(t, alertTime.Add(-30*time.Minute).Unix(), startF, 1)
 	assert.InDelta(t, alertTime.Add(30*time.Minute).Unix(), endF, 1)
+}
+
+func TestPrometheusTool_Execute_ResponseTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"result":[],"pad":"` + strings.Repeat("x", 300<<10) + `"}}`))
+	}))
+	defer srv.Close()
+
+	tool := tools.NewPrometheusTool(&config.PrometheusToolConfig{Endpoint: srv.URL, Timeout: 5 * time.Second})
+	ctx := investigation.WithAlertTime(context.Background(), time.Now())
+	result, err := tool.Execute(ctx, map[string]any{"query": "up"})
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Error, "exceeds")
 }

@@ -554,3 +554,43 @@ func TestProcessAlert_ConcurrentProcessing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(numAlerts), stats.TotalProcessed)
 }
+
+func TestProcessAlert_RefireTakesNewStartsAt(t *testing.T) {
+	base := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	labels := map[string]string{"alertname": "HighCPU"}
+	ended := base.Add(30 * time.Minute)
+	refire := base.Add(time.Hour)
+
+	for _, tc := range []struct {
+		name     string
+		previous *core.Alert
+		want     time.Time
+	}{
+		{"after resolved", &core.Alert{Status: core.StatusResolved, EndsAt: &ended}, refire},
+		{"firing with EndsAt in the past", &core.Alert{Status: core.StatusFiring, EndsAt: &ended}, refire},
+		{"still firing, resend", &core.Alert{Status: core.StatusFiring}, base},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := newMockAlertStorage()
+			service, err := NewDeduplicationService(&DeduplicationConfig{Storage: storage})
+			require.NoError(t, err)
+			ctx := context.Background()
+
+			first, err := service.ProcessAlert(ctx, &core.Alert{AlertName: "HighCPU", Status: core.StatusFiring, Labels: labels, StartsAt: base})
+			require.NoError(t, err)
+			fp := first.Alert.Fingerprint
+
+			prev := *tc.previous
+			prev.AlertName, prev.Labels, prev.StartsAt, prev.Fingerprint = "HighCPU", labels, base, fp
+			_, err = service.ProcessAlert(ctx, &prev)
+			require.NoError(t, err)
+
+			_, err = service.ProcessAlert(ctx, &core.Alert{AlertName: "HighCPU", Status: core.StatusFiring, Labels: labels, StartsAt: refire, Fingerprint: fp})
+			require.NoError(t, err)
+
+			stored, err := storage.GetAlertByFingerprint(ctx, fp)
+			require.NoError(t, err)
+			assert.True(t, stored.StartsAt.Equal(tc.want), "StartsAt = %v, want %v", stored.StartsAt, tc.want)
+		})
+	}
+}

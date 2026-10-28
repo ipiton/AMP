@@ -90,8 +90,8 @@ func TestLLMReloadable_PreservesFieldsAMPConfigDoesNotOwn(t *testing.T) {
 	assert.False(t, live.EnableMetrics)
 }
 
-func TestLLMReloadable_ZeroTimeoutAndRetriesKeepPreviousValues(t *testing.T) {
-	oldCfg := &Config{LLM: LLMConfig{Model: "gpt-4o"}}
+func TestLLMReloadable_ZeroTimeoutKeepsPreviousZeroRetriesApplies(t *testing.T) {
+	oldCfg := &Config{LLM: LLMConfig{Model: "gpt-4o", MaxRetries: 3}}
 	reloadable, client, _ := newLLMFixture(oldCfg)
 	before := client.GetConfig()
 
@@ -101,7 +101,7 @@ func TestLLMReloadable_ZeroTimeoutAndRetriesKeepPreviousValues(t *testing.T) {
 
 	live := client.GetConfig()
 	assert.Equal(t, before.Timeout, live.Timeout)
-	assert.Equal(t, before.MaxRetries, live.MaxRetries)
+	assert.Equal(t, 0, live.MaxRetries, "max_retries 0 means no retries, not the previous value")
 }
 
 func TestLLMReloadable_EnabledAndAgentModeWarnW604(t *testing.T) {

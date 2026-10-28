@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,4 +142,38 @@ func TestLokiTool_Execute_EmptyResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.IsError, result.Error)
 	assert.Equal(t, "null", result.Content)
+}
+
+func TestLokiTool_Execute_LimitClamped(t *testing.T) {
+	var gotLimit string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[]}}`))
+	}))
+	defer srv.Close()
+
+	tool := tools.NewLokiTool(&config.LokiToolConfig{Endpoint: srv.URL, Timeout: 5 * time.Second})
+	ctx := investigation.WithAlertTime(context.Background(), time.Now())
+	for in, want := range map[string]string{"100000": "500", "0": "1", "50": "50"} {
+		result, err := tool.Execute(ctx, map[string]any{"query": `{app="x"}`, "limit": in})
+		require.NoError(t, err)
+		assert.False(t, result.IsError, result.Error)
+		assert.Equal(t, want, gotLimit, "limit %v", in)
+	}
+}
+
+func TestLokiTool_Execute_ResponseTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"result":[],"pad":"` + strings.Repeat("x", 300<<10) + `"}}`))
+	}))
+	defer srv.Close()
+
+	tool := tools.NewLokiTool(&config.LokiToolConfig{Endpoint: srv.URL, Timeout: 5 * time.Second})
+	ctx := investigation.WithAlertTime(context.Background(), time.Now())
+	result, err := tool.Execute(ctx, map[string]any{"query": `{app="x"}`})
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, result.Error, "exceeds")
 }

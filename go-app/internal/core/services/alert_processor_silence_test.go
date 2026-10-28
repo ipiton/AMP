@@ -78,13 +78,17 @@ func newSilenceTestProcessor(t *testing.T, silence *toggleSilence, publisher *fa
 	return processor
 }
 
+// silenceTestStart is relative: the filter drops resolved alerts that started
+// more than 48h ago, so a fixed date turns these tests red once it ages.
+var silenceTestStart = time.Now().Add(-time.Hour).Truncate(time.Second)
+
 // silenceTestAlert has no EndsAt, so dedup ignores every unchanged re-send.
 func silenceTestAlert(status core.AlertStatus) *core.Alert {
 	return &core.Alert{
 		AlertName: "DiskFull",
 		Status:    status,
 		Labels:    map[string]string{"alertname": "DiskFull", "instance": "db-1"},
-		StartsAt:  time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC),
+		StartsAt:  silenceTestStart,
 	}
 }
 

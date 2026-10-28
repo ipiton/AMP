@@ -59,15 +59,17 @@ based_on:
 
 ## Phase 5: Deep review
 
-- [ ] **5.1** Независимый агент, `review-findings.md` + `review-verdict.json`, `gate: pass`.
+- [x] **5.1** Независимый агент, `review-findings.md` + `review-verdict.json`, `gate: pass`.
 
 ## Phase 6: Тесты (после `pass`)
 
-- [ ] **6.1** llm: httptest 503→200 ретраится, 400 — одна попытка, `max_retries: 0` — одна попытка, тело > 512 байт усечено в ошибке.
-- [ ] **6.2** resilience: `MaxRetries: 0` — одна попытка.
-- [ ] **6.3** queue: `Submit` не вызывает repo; повторный `Submit` того же инцидента не ставит job; full → drop и повтор возможен; shared-claim через miniredis (две очереди — одно расследование), ошибка Redis → fail-open; `Create` в воркере.
-- [ ] **6.4** tools: clamp `tail_lines`/`limit`, тело > 256 KiB → ошибка (loki/prometheus) / обрезка (k8s logs).
-- [ ] **6.5** agent_loop: observation > 16 KiB обрезан в steps и history.
+- [x] **6.1** llm: httptest 503→200 ретраится, 400 — одна попытка, `max_retries: 0` — одна попытка, тело > 512 байт усечено в ошибке.
+- [x] **6.2** resilience: `MaxRetries: 0` — одна попытка.
+- [x] **6.3** queue: `Submit` не вызывает repo; повторный `Submit` того же инцидента не ставит job; full → drop и повтор возможен; shared-claim через miniredis (две очереди — одно расследование), ошибка Redis → fail-open; `Create` в воркере.
+- [x] **6.4** tools: clamp `tail_lines`/`limit`, тело > 256 KiB → ошибка (loki/prometheus) / обрезка (k8s logs).
+- [x] **6.5** agent_loop: observation > 16 KiB обрезан в steps и history.
+
+**Дополнительно:** re-fire `StartsAt` (F1/F12) — `core/services/deduplication_test.go`; `reloadable_llm_test` переписан под `max_retries: 0` = 0; фикстура `alert_processor_silence_test.go` переведена на относительное время (на main тест краснел: правило фильтра «resolved старше 48h» + фиксированная дата 2026-10-23). Для k8s logs обрезка проверена на `tailBuffer` — fake clientset отдаёт фиксированный лог.
 
 **Phase verification:** `cd go-app && go test -race ./internal/infrastructure/investigation/... ./internal/infrastructure/llm/... ./internal/core/resilience/... ./internal/core/investigation/...`
 

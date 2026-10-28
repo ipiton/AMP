@@ -3,7 +3,9 @@ package investigation_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/investigation"
@@ -262,4 +264,68 @@ func makeMessages(role investigation.MessageRole, n int) []investigation.AgentMe
 // that would panic or misbehave if trimHistory were broken with a large history.
 func callTrimHistory(history []investigation.AgentMessage, maxMsgs int) []investigation.AgentMessage {
 	return investigation.TrimHistoryForTest(history, maxMsgs)
+}
+
+// historyLLM asks for one echo call with msg, then answers, keeping the
+// history it was given on the second call.
+type historyLLM struct {
+	msg     string
+	calls   int
+	history []investigation.AgentMessage
+}
+
+func (h *historyLLM) InvestigateWithTools(
+	_ context.Context,
+	_ *core.Alert,
+	_ *core.ClassificationResult,
+	_ []investigation.ToolDefinition,
+	history []investigation.AgentMessage,
+	_ investigation.PromptContext,
+) (*investigation.AgentResponse, error) {
+	h.calls++
+	if h.calls == 1 {
+		return &investigation.AgentResponse{
+			Kind:      investigation.AgentResponseToolCalls,
+			ToolCalls: []investigation.ToolCallRequest{{ID: "c1", Name: "echo", Params: map[string]any{"message": h.msg}}},
+		}, nil
+	}
+	h.history = append([]investigation.AgentMessage(nil), history...)
+	return &investigation.AgentResponse{Kind: investigation.AgentResponseFinalAnswer, Content: `{"summary":"ok","confidence":0.5}`}, nil
+}
+
+func TestAgentLoop_LargeObservationCapped(t *testing.T) {
+	reg := investigation.NewToolRegistry()
+	reg.Register(tools.EchoTool{})
+	llm := &historyLLM{msg: strings.Repeat("я", 20<<10)} // 40 KiB of two-byte runes
+
+	res, err := investigation.NewAgentLoop(llm, reg, investigation.DefaultAgentLoopConfig()).Run(context.Background(), newTestAlert(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var observation string
+	for _, s := range res.Steps {
+		if s.Type == investigation.StepTypeObservation {
+			observation = s.Output
+		}
+	}
+	if !strings.Contains(observation, "[truncated") {
+		t.Fatalf("observation of %d bytes not truncated", len(observation))
+	}
+	if len(observation) > 16<<10+100 {
+		t.Errorf("step output = %d bytes, want about 16 KiB", len(observation))
+	}
+	if !utf8.ValidString(observation) {
+		t.Error("cut inside a rune")
+	}
+
+	var inHistory string
+	for _, m := range llm.history {
+		if m.Role == investigation.RoleTool {
+			inHistory = m.Content
+		}
+	}
+	if inHistory != observation {
+		t.Errorf("history carries %d bytes, step %d: both must hold the capped observation", len(inHistory), len(observation))
+	}
 }
