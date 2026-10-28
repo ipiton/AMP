@@ -147,3 +147,37 @@
 - **Recommendation:** надёжнее не снимать claim, а не давать ему жить долго во время работы: `SETNX` с коротким «рабочим» TTL (например, `LLMTimeout × (MaxRetries+1)` + запас или фиксированные 15m), а после записи результата или ошибки (`SaveResult`/`SaveAgentResult`/`SaveError`) продлевать до 24h через `EXPIRE`. Это покрывает и Stop, и падение процесса. Минимум: на любом выходе из `processJob` при `q.ctx.Err() != nil` вызывать `releaseClaims`, а `Stop` должен дожидаться воркеров после `cancel()` хотя бы на короткий срок. Тест: отмена ctx во время `InvestigateAlert` на последней попытке и во время agent loop ⇒ ключ в miniredis удалён или живёт с коротким TTL.
 - **Disposition:** fix-here
 - **Follow-up:** n/a
+
+---
+
+## Раунд 3
+
+**Reviewer perspective:** independent general-purpose agent (тот же ревьюер, что в раундах 1–2; код не писал)
+**Reviewed at:** 2026-10-28
+**Reviewed tree:** bugfix/investigation-safety-reliability @ 677169d (дифф раунда `e9991d9..677169d`)
+**Verdict:** pass (see `review-verdict.json`)
+
+Запуском проверено: `go build ./...` и `go vet ./internal/...` проходят. `go test -race -count=1` по тем же пакетам, что в раунде 2, по-прежнему падает ровно в двух тестах: `TestLLMReloadable_ZeroTimeoutAndRetriesKeepPreviousValues` (ожидаемо после F2) и `TestAlertProcessor_Silence_ResolvedPublished` (предсуществующий, абсолютная дата в фикстуре). Оба должны быть зелёными до `testing`.
+
+### Статус находок
+
+| ID | Статус | Комментарий |
+|---|---|---|
+| F1–F3, F5–F9 | closed | Без изменений с раунда 2. F3 в части `Stop` теперь закрывается через F13. |
+| F4 | open, defer-bug | Follow-up в `BUGS.md` / `UPSTREAM-AI-HOOKS` на `finalize`. |
+| F10 | open, defer-bug | Follow-up в `BUGS.md` / `INVESTIGATION-PROMPT-ISOLATION` на `finalize`. |
+| F11 | closed | Поток читается до 4 MiB, `tailBuffer` держит последние 8 KiB; при 4 MiB честный маркер «newer lines may be missing». При `tail_lines` ≤ 500 предел 4 MiB — 8 KiB на строку, на практике недостижим; по времени чтение ограничено `PerToolTimeout` 30s. Память ограничена (8 KiB + чанк `io.Copy`). |
+| F12 | closed | Условие `new` firing ∧ `new.StartsAt > existing.StartsAt` ∧ (`existing` resolved ∨ `existing.EndsAt < new.StartsAt`). Проверены сценарии. Обычный resend (тот же `StartsAt`) не меняет `StartsAt`. Задержанный resend с просроченным `EndsAt`: `StartsAt` тот же, guard срабатывает. HA-пара Prometheus с разными `ActiveAt` при живом `EndsAt` не меняет. Re-fire без resolve берёт новый `StartsAt`. Это совпадает с upstream (алерт с `EndsAt` < now считается resolved и заменяется). |
+| F13 | closed | `SETNX` с `inFlightTTL` 15m, `EXPIRE` до 24h в defer после исхода, если `q.ctx` не отменён. Job, прерванный `Stop` или падением процесса, оставляет только 15m claim; локальный claim умирает вместе с процессом. Продление до 24h происходит при DLQ, permanent fail, agent без `final_answer` и при ошибке `SaveResult`/`SaveAgentResult`. Это соответствует Spec Edge Case 3 («job упал → claim держится TTL, бюджет важнее»). Джобы, вычитываемые из закрытого канала при остановке с уже отменённым ctx, получают ошибку `SETNX` (fail-open) и `Create` с отменённым ctx: в Redis ничего не остаётся. Худший путь с дефолтами укладывается в 15m: `Create` ≤ 5s, 4 × 60s LLM + backoff 5+10+20s ≈ 275s, agent loop ≤ 5m (`TotalTimeout`), итого ≈ 9.6 мин. Нестандартные настройки — F14. |
+
+### F14 — `inFlightTTL` фиксирован, а длительность job задаётся конфигом; `EXPIRE` по истёкшему ключу молча ничего не делает
+- **Severity:** minor
+- **Location:** `go-app/internal/infrastructure/investigation/dedup.go:19-23,111-117`; `go-app/internal/infrastructure/investigation/queue.go:194-209`
+- **Issue:** 15m покрывают дефолты (≈ 9.6 мин), но `investigation.llm_timeout`, `investigation.max_retries`, `investigation.retry_interval` настраиваются. Например, `max_retries: 5` и `llm_timeout: 120s` дают 6 × 120s + backoff 135s + agent 300s ≈ 19 мин. Кроме того, `UpdateStatus`, `SaveError`, `SaveResult` идут на `q.ctx` без таймаута (предсуществующее). Если job длится дольше 15m, claim истекает и вторая реплика берёт тот же инцидент на очередном resend. Получается дубль расследования, а не потеря, так что риск ограничен. В конце `extendShared` делает `EXPIRE`: по истёкшему ключу вызов возвращает 0 без ошибки, claim на 24h не восстанавливается, и следующие resend на других репликах снова запускают расследование. По чужому ключу (реплика B уже сделала `SETNX`) вызов продлевает claim B — это безвредно. Spec Edge Case 5 («межрепличный claim переживает рестарт») больше не уточняет, что claim прерванного job живёт лишь 15m.
+- **Recommendation:** выводить `inFlightTTL` из конфига очереди (`LLMTimeout × (MaxRetries+1)` + сумма backoff + `TotalTimeout` agent loop + запас) или хотя бы брать максимум из этой оценки и 15m. Продлевать безусловным `SET key 1 EX 24h` вместо `EXPIRE`, чтобы истёкший claim восстанавливался. Обновить Edge Case 5 в Spec.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### Исправлено после вердикта
+
+- **F14** — исправлено автором следом за `pass` @ `677169d`: in-flight TTL выводится из конфига очереди (`inFlightTTL(cfg)`), продление — безусловный `SET … EX 24h`, Spec Edge Case 5 обновлён. Покрывается тестами write-tests.

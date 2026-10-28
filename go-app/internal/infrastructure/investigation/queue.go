@@ -100,6 +100,16 @@ func (q *InvestigationQueue) SetAgentLoop(loop *coreinv.AgentLoop) {
 // Start().
 func (q *InvestigationQueue) SetSharedDedup(rdb redis.Cmdable) {
 	q.dedup.rdb = rdb
+	q.dedup.inFlight = inFlightTTL(q.config)
+}
+
+// inFlightTTL is the worst-case duration of one job under cfg — record
+// creation, every LLM attempt with its backoff (capped at 60s, see backoff)
+// and the agent loop — plus a margin.
+func inFlightTTL(cfg QueueConfig) time.Duration {
+	attempts := time.Duration(cfg.MaxRetries + 1)
+	return storeTimeout + attempts*(cfg.LLMTimeout+60*time.Second) +
+		coreinv.DefaultAgentLoopConfig().TotalTimeout + inFlightMargin
 }
 
 // Start launches the worker goroutines.

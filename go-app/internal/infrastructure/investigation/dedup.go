@@ -16,11 +16,9 @@ import (
 // growth; a re-fire after resolve gets a new StartsAt and a new key.
 const dedupTTL = 24 * time.Hour
 
-// inFlightTTL bounds a shared claim while its job runs (LLM retries plus
-// the agent loop stay well under it). A process that dies or is stopped
-// mid-job leaves only this short claim, so the incident reopens soon;
-// extendShared lifts a finished job's claim to dedupTTL.
-const inFlightTTL = 15 * time.Minute
+// inFlightMargin pads the worst-case job duration that sets a shared
+// claim's in-flight TTL (see inFlightTTL in queue.go).
+const inFlightMargin = 5 * time.Minute
 
 // dedupKeyPrefix namespaces the shared claims in Redis.
 const dedupKeyPrefix = "amp:investigation:dedup:"
@@ -36,6 +34,7 @@ type dedup struct {
 	claimed   map[string]time.Time // key -> expiry
 	nextSweep time.Time
 	rdb       redis.Cmdable // nil: local level only
+	inFlight  time.Duration // shared claim TTL while the job runs
 	now       func() time.Time
 }
 
@@ -85,14 +84,16 @@ func (d *dedup) releaseLocal(key string) {
 }
 
 // claimShared reports whether key was free across replicas and claims it for
-// inFlightTTL.
+// the in-flight TTL: a process that dies or is stopped mid-job leaves only
+// this claim, so the incident reopens soon; extendShared keeps a finished
+// job's claim for dedupTTL.
 // Without a Redis client every claim succeeds; a Redis error is returned with
 // claimed=true, so the caller investigates (fail-open) and logs it.
 func (d *dedup) claimShared(ctx context.Context, key string) (bool, error) {
 	if d.rdb == nil {
 		return true, nil
 	}
-	ok, err := d.rdb.SetNX(ctx, dedupKeyPrefix+key, 1, inFlightTTL).Result()
+	ok, err := d.rdb.SetNX(ctx, dedupKeyPrefix+key, 1, d.inFlight).Result()
 	if err != nil {
 		return true, err
 	}
@@ -108,10 +109,11 @@ func (d *dedup) releaseShared(ctx context.Context, key string) error {
 	return d.rdb.Del(ctx, dedupKeyPrefix+key).Err()
 }
 
-// extendShared keeps a finished job's claim for dedupTTL.
+// extendShared keeps a finished job's claim for dedupTTL. SET rather than
+// EXPIRE: a job that outlived its in-flight claim restores it.
 func (d *dedup) extendShared(ctx context.Context, key string) error {
 	if d.rdb == nil {
 		return nil
 	}
-	return d.rdb.Expire(ctx, dedupKeyPrefix+key, dedupTTL).Err()
+	return d.rdb.Set(ctx, dedupKeyPrefix+key, 1, dedupTTL).Err()
 }

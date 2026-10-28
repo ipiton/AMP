@@ -1,9 +1,9 @@
 {
-  "gate": "fix_required",
-  "reason": "round 2: fix-here major F13 (an investigation aborted by Stop during the LLM call or the agent loop keeps its shared dedup claim for 24h; release covers only the backoff window); minors F11, F12 fix-here",
+  "gate": "pass",
+  "reason": null,
   "branch": "bugfix/investigation-safety-reliability",
-  "commit": "e9991d9",
+  "commit": "677169d",
   "reviewed_at": "2026-10-28",
-  "findings": { "blocker": 0, "major": 2, "minor": 3, "nit": 0 },
+  "findings": { "blocker": 0, "major": 1, "minor": 2, "nit": 0 },
   "open": { "blocker": 0, "major_without_disposition": 0 }
 }
