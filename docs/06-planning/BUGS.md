@@ -6,10 +6,11 @@
 
 <!-- Записи в виде списка (`- [ ] **SLUG** — ...`) — формат до Solo Kanban 1.1. Переводятся в Entry Format при взятии в работу. -->
 
-### [medium][Gate][~0.25d] LINT-ERRCHECK-CHANNEL-RECEIVE
+### [high][Gate][~0.25d] LINT-ERRCHECK-CHANNEL-RECEIVE
 - **Title:** release-gate `lint` красный на `main`: golangci-lint 2.15.0 ловит errcheck на приёме из канала в тестах
 - **Problem:** локальный golangci-lint обновился до 2.15.0 (go1.27.1, бинарь от 2026-10-21 21:54) и даёт 7 `errcheck` «Error return value is not checked» на голом приёме из канала, где элемент — `error`: `go-app/internal/infrastructure/publishing/delivery_confirmation_test.go:559,602,645` (`case <-handle.Done():`), `go-app/internal/infrastructure/silencing/redis_event_bus_test.go:202,246,268,282` (`<-done`). Код не менялся с 2026-08-19; release-gate 2026-10-20 на прежней версии линтера был зелёным. Версия линтера нигде не закреплена (`go-app/Makefile:158` ставит `@latest`, release-gate берёт бинарь из `PATH`).
 - **Impact:** release-gate каждой задачи — `RESULT: FAIL` на шаге `lint` независимо от диффа; настоящая регрессия lint на этом фоне не видна.
+- **CI (2026-10-28):** job `gate` на `main` красный с `PROD-DEPS-GO-127` (run 40086939282): `.github/workflows/ci.yml` ставит golangci-lint `v2.13.2`, собранный старым Go, а toolchain уже `go1.27.3` — `typecheck`: «could not import internal/goarch … export data version 5 is greater than maximum supported version 4». Бамп пина до версии на go1.27 (≥ 2.15.0) упирается в эти же 7 `errcheck` — чинить вместе. Блокирует Owner `MAIN-BRANCH-PROTECTION` (ждёт зелёного CI на `main`).
 - **Fix:** в тестах принять значение (`_ = <-done` / `case err := <-handle.Done(): _ = err` или проверить его); закрепить версию golangci-lint для гейта и CI (`.golangci` / скрипт установки), чтобы обновление линтера было отдельным изменением.
 - **Refs:** найдено при HELM-VCT-CHART-LABELS (2026-10-22), `tasks/archive/HELM-VCT-CHART-LABELS/evidence/release-gate.txt`. Смежно `QUALITY-GATES-ALIGN`.
 - **Status:** open

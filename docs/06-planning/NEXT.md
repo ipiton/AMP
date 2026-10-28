@@ -16,6 +16,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **INVESTIGATION-SAFETY-RELIABILITY** — срез 1 `INVESTIGATION-SAFETY-BUNDLE` (нарезан на `start-task` 2026-10-28, бандл ~2.25d): `LLM-RETRY-CLASSIFY` (ретрай 429/5xx, `max_retries: 0` = без ретраев, усечение тела ответа LLM в логах/БД) + `INVESTIGATION-ASYNC-DEDUP` (`Create` из `Submit` в воркер, дедуп по `fingerprint+StartsAt` с TTL, лимиты вывода tools). Full, ~1.25d. Срез 2 — `INVESTIGATION-PROMPT-ISOLATION` (Queue).
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -44,7 +46,7 @@ Queue и WIP — источник правды для выбора задачи.
 ### 2. Code review 2026-10-21 — конвейер
 > Пересмотрен 2026-10-24 (`ADR-019-V2-SLICING`): позиции по удаляемому ядру сняты (`[-]` в `REVIEW-PIPELINE-2026-10-21.md`, записи — в секциях «Снимается переходом на upstream (ADR-019)» `BUGS.md`/`TECH-DEBT.md`). Голова живой части — №8. Остальные живые позиции берутся из `REVIEW-PIPELINE-2026-10-21.md` по порядку.
 
-- [ ] **INVESTIGATION-SAFETY-BUNDLE** — `TECH-DEBT.md` § Bundles: `LLM-RETRY-CLASSIFY`, `INVESTIGATION-ASYNC-DEDUP`, `INVESTIGATION-PROMPT-ISOLATION`. Full, ~2.25d — нарезать на `start-task`. Код investigation переживает переход на upstream; с `UPSTREAM-AI-HOOKS` пересекается только точкой постановки investigation (`PostStore`).
+- [ ] **INVESTIGATION-PROMPT-ISOLATION** — срез 2 `INVESTIGATION-SAFETY-BUNDLE` (`BUGS.md`): данные алерта из `system` в `user`-сообщение с разделителем, allowlist namespace для Kubernetes tool, отдельный DSN для `database_query`, один `doChat` с CB. Full, ~1d. Срез 1 — `INVESTIGATION-SAFETY-RELIABILITY` (WIP).
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
