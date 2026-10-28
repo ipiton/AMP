@@ -76,4 +76,4 @@ updated_at: 2026-10-28
   - Как различить «не задано» и `0` для `max_retries` при загрузке через viper (pointer, `IsSet`, sentinel) — без изменения формы конфига.
   - Где TTL дедупа берётся из конфига (новый ключ `investigation.dedup_ttl`?) или константа.
   - Используется ли статус `queued` из БД API/UI до того, как воркер возьмёт job.
-- Research level: 2 (`research.md` из light-шаблона).
+- Research level: 3 (три сигнала `S X R`; `research.md`, ≤120 строк).
