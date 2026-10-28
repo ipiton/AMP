@@ -46,7 +46,7 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 | `WithRetryFunc` вызывается только из LLM-классификации | grep `WithRetryFunc` по модулю: `llm/client.go:216` | call-path-traced | другой потребитель потерял бы дефолт 3 ретрая |
 | Незаданный `llm.max_retries` приходит как 3 | `config.go:933` `SetDefault`, `llm.DefaultConfig()` | code-read | без ключа ретраи бы пропали |
 | `classifyError` опирается на текст `HTTP %d` | `queue.go:334-355` | code-read | переклассификация permanent/transient |
-| Статус `queued` читает только `GET /investigations/{fp}` | grep `InvestigationQueued`, `GetLatestByFingerprint`: `handlers/investigation.go:37` | call-path-traced | UI/клиент увидел бы 404 вместо `queued` |
+| Статус `queued` читает только `GET /api/v1/alerts/{fingerprint}/investigation` | grep `InvestigationQueued`, `GetLatestByFingerprint`: `handlers/investigation.go:37` | call-path-traced | UI/клиент увидел бы 404 вместо `queued` |
 | `r.cache` создан до `initializeInvestigation` | `service_registry.go` порядок `Initialize`: cache — шаг 1, investigation — после business services | code-read | Redis-дедуп не включится, останется локальный |
 | Resend одного инцидента сохраняет `StartsAt` | Alertmanager-клиенты шлют исходный `startsAt`; dedup ядра сравнивает по `fingerprint` | assumed | дедуп не сработает для клиентов, меняющих `startsAt` — поведение как сейчас, не хуже |
 
@@ -59,7 +59,7 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 
 ## API Contracts
 
-Не применимо: HTTP API не меняется. Поведенческое изменение `GET /api/v2/investigations/{fp}` (нет `queued` до взятия job воркером) — в CHANGELOG.
+Не применимо: HTTP API не меняется. Поведенческое изменение `GET /api/v1/alerts/{fingerprint}/investigation` (нет `queued` до взятия job воркером) — в CHANGELOG.
 
 ## Data Model / Migrations
 
@@ -106,7 +106,7 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 - **Affected modules:** llm, core/resilience, infrastructure/investigation (+tools), core/investigation, application wiring.
 - **Breaking changes:** `llm.max_retries: 0` теперь означает «без ретраев» (было 3). Статус `queued` не виден до взятия job воркером.
 - **New dependencies:** none (`go-redis` уже в модуле, `miniredis` — в тестах).
-- **Risks:** fail-open дедупа при недоступном Redis → дубли между репликами (как сейчас). Дедуп глушит повтор упавшего расследования на 24h — осознанный компромисс.
+- **Risks:** `ShareClient()` помечает Redis-клиент общим — hot reload `redis.*` откажется менять клиент; при Redis так уже делает `initializeSilenceGCElection`, нового ограничения нет. Fail-open дедупа при недоступном Redis → дубли между репликами (как сейчас). Дедуп глушит повтор упавшего расследования на 24h — осознанный компромисс.
 
 ## Rollout / Rollback
 

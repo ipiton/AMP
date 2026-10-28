@@ -123,7 +123,7 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	if resp.StatusCode != http.StatusOK {
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("LLM tools error: status %d, body: %s", resp.StatusCode, string(respBody)),
+			Message:    fmt.Sprintf("LLM tools error: status %d, body: %s", resp.StatusCode, truncateBody(respBody)),
 		}
 	}
 

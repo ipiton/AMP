@@ -2255,6 +2255,13 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 		r.logger,
 		nil, // use default prometheus registerer
 	)
+	// Per-incident dedup across replicas needs the shared Redis; without it
+	// the claim is per replica, the same posture as initializeSilenceGCElection.
+	if redisCache, ok := r.cache.(*infrastructurecache.RedisCache); ok {
+		r.investigationQueue.SetSharedDedup(redisCache.ShareClient())
+	} else {
+		r.logger.Warn("No Redis cache backend, investigation dedup is per replica")
+	}
 
 	// Phase 5B: wire agentic loop if AgentMode is enabled.
 	if r.config.LLM.AgentMode {

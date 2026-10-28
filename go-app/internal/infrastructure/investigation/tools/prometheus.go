@@ -104,7 +104,7 @@ func (t *PrometheusTool) Execute(ctx context.Context, params map[string]any) (in
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimited(resp.Body)
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("prometheus: read body: %v", err)}, nil
 	}
@@ -161,6 +161,36 @@ func stringParam(v any, defaultVal string) string {
 		return defaultVal
 	}
 	return s
+}
+
+// maxToolResponseBytes caps what a tool reads from a backend
+// (INVESTIGATION-ASYNC-DEDUP): the output lands in worker memory, the LLM
+// context and the investigation history.
+const maxToolResponseBytes = 256 << 10
+
+// maxToolLines caps the line counts the LLM may ask for (tail_lines, limit).
+const maxToolLines = 500
+
+// errResponseTooLarge tells the LLM to narrow a query whose response did not
+// fit in maxToolResponseBytes.
+var errResponseTooLarge = fmt.Errorf("response exceeds %d KiB, narrow the query", maxToolResponseBytes>>10)
+
+// readLimited reads a JSON response body, refusing one larger than
+// maxToolResponseBytes: a truncated JSON document would not decode anyway.
+func readLimited(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxToolResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxToolResponseBytes {
+		return nil, errResponseTooLarge
+	}
+	return body, nil
+}
+
+// clampLines bounds a line count from the LLM to [1, maxToolLines].
+func clampLines(n int64) int64 {
+	return min(max(n, 1), maxToolLines)
 }
 
 func truncate(s string, n int) string {

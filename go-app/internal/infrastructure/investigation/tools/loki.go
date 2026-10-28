@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -79,7 +78,10 @@ func (t *LokiTool) Execute(ctx context.Context, params map[string]any) (investig
 
 	startOffset := parseDuration(params["start_offset"], -15*time.Minute)
 	endOffset := parseDuration(params["end_offset"], 5*time.Minute)
-	limit := stringParam(params["limit"], "100")
+	limit := "100"
+	if n, err := parseIntParam(stringParam(params["limit"], ""), 100); err == nil {
+		limit = strconv.FormatInt(clampLines(n), 10)
+	}
 	direction := stringParam(params["direction"], "backward")
 
 	startTS := alertTime.Add(startOffset)
@@ -111,7 +113,7 @@ func (t *LokiTool) Execute(ctx context.Context, params map[string]any) (investig
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimited(resp.Body)
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("loki: read body: %v", err)}, nil
 	}

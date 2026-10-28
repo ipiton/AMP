@@ -51,9 +51,10 @@ func (d *DefaultErrorChecker) IsRetryable(err error) bool {
 // Migrated to use pkg/retry for unified retry strategy (TN-057).
 // This function now wraps retry.Do for backward compatibility.
 func WithRetryFunc[T any](ctx context.Context, policy *RetryPolicy, fn func() (T, error)) (T, error) {
-	// Apply defaults
-	if policy.MaxRetries == 0 {
-		policy.MaxRetries = 3
+	// Apply defaults. MaxRetries is not defaulted: 0 means "no retries"
+	// (LLM-RETRY-CLASSIFY); the caller's config owns the "unset" default.
+	if policy.MaxRetries < 0 {
+		policy.MaxRetries = 0
 	}
 	if policy.BaseDelay == 0 {
 		policy.BaseDelay = 100 * time.Millisecond

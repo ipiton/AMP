@@ -29,31 +29,33 @@ based_on:
 
 ## Phase 1: Ретраи LLM
 
-- [ ] **1.1** `llm.IsRetryableError`: `*HTTPError` 429/5xx → true, прочие коды → false. <!-- verify: cd go-app && go build ./internal/infrastructure/llm/... -->
-- [ ] **1.2** `resilience.WithRetryFunc`: убрать подмену `MaxRetries==0`, отрицательное → 0. <!-- verify: cd go-app && go test ./internal/core/resilience/... -->
-- [ ] **1.3** `llm/client.go`: `truncateBody(body, 512)` в логе и `HTTPError.Message` (classify proxy/OpenAI, investigate). <!-- verify: cd go-app && go vet ./internal/infrastructure/llm/... && go test ./internal/infrastructure/llm/... -->
+- [x] **1.1** `llm.IsRetryableError`: `*HTTPError` 429/5xx → true, прочие коды → false. <!-- verify: cd go-app && go build ./internal/infrastructure/llm/... -->
+- [x] **1.2** `resilience.WithRetryFunc`: убрать подмену `MaxRetries==0`, отрицательное → 0. <!-- verify: cd go-app && go test ./internal/core/resilience/... -->
+- [x] **1.3** `llm/client.go`: `truncateBody(body, 512)` в логе и `HTTPError.Message` (classify proxy/OpenAI, investigate). <!-- verify: cd go-app && go vet ./internal/infrastructure/llm/... && go test ./internal/infrastructure/llm/... -->
 
 **Phase verification:** `cd go-app && go test ./internal/infrastructure/llm/... ./internal/core/resilience/...`
 
 ## Phase 2: Очередь и дедуп
 
-- [ ] **2.1** `investigation/dedup.go`: локальная TTL-карта + опциональный `redis.Cmdable` (`SETNX`, fail-open). <!-- verify: cd go-app && go build ./internal/infrastructure/investigation/... -->
-- [ ] **2.2** `metrics.go`: `DeduplicatedTotal{level}`. <!-- verify: go build -->
-- [ ] **2.3** `queue.go`: `Submit` без БД (claim local → неблокирующая отправка; full → drop + release); `processJob` — claim shared, `Create` с таймаутом; `SetSharedDedup`. <!-- depends: 2.1, 2.2 | verify: cd go-app && go test ./internal/infrastructure/investigation/ -->
-- [ ] **2.4** `service_registry.go`: `SetSharedDedup(redisCache.ShareClient())`, если `r.cache` — `*RedisCache`. <!-- depends: 2.3 | verify: cd go-app && go build ./... -->
+- [x] **2.1** `investigation/dedup.go`: локальная TTL-карта + опциональный `redis.Cmdable` (`SETNX`, fail-open). <!-- verify: cd go-app && go build ./internal/infrastructure/investigation/... -->
+- [x] **2.2** `metrics.go`: `DeduplicatedTotal{level}`. <!-- verify: go build -->
+- [x] **2.3** `queue.go`: `Submit` без БД (claim local → неблокирующая отправка; full → drop + release); `processJob` — claim shared, `Create` с таймаутом; `SetSharedDedup`. <!-- depends: 2.1, 2.2 | verify: cd go-app && go test ./internal/infrastructure/investigation/ -->
+- [x] **2.4** `service_registry.go`: `SetSharedDedup(redisCache.ShareClient())`, если `r.cache` — `*RedisCache`. <!-- depends: 2.3 | verify: cd go-app && go build ./... -->
 
 **Phase verification:** `cd go-app && go test ./internal/infrastructure/investigation/... ./internal/application/...`
 
 ## Phase 3: Лимиты tools
 
-- [ ] **3.1** `tools`: `maxToolResponseBytes`, clamp `tail_lines`/`limit` `[1,500]`, `LimitReader` в kubernetes/loki/prometheus. <!-- verify: cd go-app && go test ./internal/infrastructure/investigation/tools/... -->
-- [ ] **3.2** `agent_loop.go`: кэп observation 16 KiB по границе руны. <!-- verify: cd go-app && go test ./internal/core/investigation/... -->
+- [x] **3.1** `tools`: `maxToolResponseBytes`, clamp `tail_lines`/`limit` `[1,500]`, `LimitReader` в kubernetes/loki/prometheus. <!-- verify: cd go-app && go test ./internal/infrastructure/investigation/tools/... -->
+- [x] **3.2** `agent_loop.go`: кэп observation 16 KiB по границе руны. <!-- verify: cd go-app && go test ./internal/core/investigation/... -->
 
 **Phase verification:** `cd go-app && go test ./internal/infrastructure/investigation/... ./internal/core/investigation/...`
 
 ## Phase 4: Доки
 
-- [ ] **4.1** CHANGELOG `[Unreleased]`: Fixed (ретраи 429/5xx, дедуп, `Submit` без БД, лимиты tools), Changed (`llm.max_retries: 0`, видимость `queued`), Security (усечение тела LLM). `config.yaml.example`/llm README — смысл `max_retries: 0`. <!-- verify: git diff --check -->
+- [x] **4.1** CHANGELOG `[Unreleased]`: Fixed (ретраи 429/5xx, дедуп, `Submit` без БД, лимиты tools), Changed (`llm.max_retries: 0`, видимость `queued`), Security (усечение тела LLM). `config.yaml.example`/llm README — смысл `max_retries: 0`. <!-- verify: git diff --check -->
+
+**Отклонения от Spec:** `llm/README.md` не менялся — в нём только список полей, смысл `max_retries: 0` описан в `config.yaml.example` и CHANGELOG. Усечение тела добавлено и в `investigate_with_tools.go:126` (четвёртое место, в Spec не упомянуто).
 
 ## Phase 5: Deep review
 

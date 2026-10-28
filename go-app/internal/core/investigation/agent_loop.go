@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/investigation/runbook"
@@ -205,6 +206,7 @@ func (a *AgentLoop) Run(
 				if res.IsError {
 					content = fmt.Sprintf("error: %s", res.Error)
 				}
+				content = capObservation(content)
 
 				stepNum++
 				steps = append(steps, InvestigationStep{
@@ -262,4 +264,23 @@ func parseFinalAnswer(content string) *core.InvestigationResult {
 		return &core.InvestigationResult{Summary: content}
 	}
 	return &r
+}
+
+// maxObservationBytes caps one tool observation before it enters the step
+// trace (persisted) and the LLM history (INVESTIGATION-ASYNC-DEDUP): with
+// MaxIterations tool rounds, an uncapped observation grows the context and
+// the stored trace without bound.
+const maxObservationBytes = 16 << 10
+
+// capObservation cuts s to maxObservationBytes on a rune boundary and marks
+// the cut.
+func capObservation(s string) string {
+	if len(s) <= maxObservationBytes {
+		return s
+	}
+	cut := maxObservationBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s\n...[truncated %d bytes]", s[:cut], len(s)-cut)
 }

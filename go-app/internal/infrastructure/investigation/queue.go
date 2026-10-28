@@ -14,6 +14,7 @@ import (
 	"github.com/ipiton/AMP/internal/core"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 )
 
 // InvestigationLLMClient is the minimal interface the worker needs from the LLM layer.
@@ -31,6 +32,10 @@ type QueueConfig struct {
 	// OnlyFiring: when true, Submit drops resolved alerts without enqueuing.
 	OnlyFiring bool
 }
+
+// storeTimeout bounds the worker's dedup claim and record creation, so a slow
+// Redis or database cannot park a worker indefinitely.
+const storeTimeout = 5 * time.Second
 
 // DefaultQueueConfig returns sensible defaults.
 func DefaultQueueConfig() QueueConfig {
@@ -51,6 +56,7 @@ type InvestigationQueue struct {
 	repo      core.InvestigationRepository
 	llm       InvestigationLLMClient
 	agentLoop *coreinv.AgentLoop // Phase 5B: optional agentic loop
+	dedup     *dedup
 	metrics   *Metrics
 	logger    *slog.Logger
 	wg        sync.WaitGroup
@@ -76,6 +82,7 @@ func NewInvestigationQueue(
 		config:  config,
 		repo:    repo,
 		llm:     llm,
+		dedup:   newDedup(),
 		metrics: NewMetrics(reg),
 		logger:  logger,
 		ctx:     ctx,
@@ -86,6 +93,13 @@ func NewInvestigationQueue(
 // SetAgentLoop wires the Phase 5B agentic loop. Must be called before Start().
 func (q *InvestigationQueue) SetAgentLoop(loop *coreinv.AgentLoop) {
 	q.agentLoop = loop
+}
+
+// SetSharedDedup makes the per-incident dedup claim across replicas through
+// Redis (SETNX). Without it the claim is per replica. Must be called before
+// Start().
+func (q *InvestigationQueue) SetSharedDedup(rdb redis.Cmdable) {
+	q.dedup.rdb = rdb
 }
 
 // Start launches the worker goroutines.
@@ -118,10 +132,18 @@ func (q *InvestigationQueue) Stop(timeout time.Duration) error {
 	}
 }
 
-// Submit enqueues an investigation job. It is non-blocking: if the queue is full,
-// the job is dropped and the metric is incremented.
+// Submit enqueues an investigation job. It is non-blocking and does no IO: it
+// runs on the alert ingest goroutine (INVESTIGATION-ASYNC-DEDUP). A resend of
+// an incident this replica already claimed is skipped; if the queue is full,
+// the job is dropped, the metric is incremented and the claim released so a
+// later resend may try again. The record is created by the worker.
 func (q *InvestigationQueue) Submit(alert *core.Alert, classification *core.ClassificationResult) {
 	if q.config.OnlyFiring && alert.Status != core.StatusFiring {
+		return
+	}
+	key := dedupKey(alert)
+	if !q.dedup.claimLocal(key) {
+		q.metrics.DeduplicatedTotal.WithLabelValues("local").Inc()
 		return
 	}
 	job := &core.InvestigationJob{
@@ -131,33 +153,16 @@ func (q *InvestigationQueue) Submit(alert *core.Alert, classification *core.Clas
 		SubmittedAt:    time.Now(),
 	}
 
-	// Persist the queued record immediately so the status is visible.
-	inv := &core.Investigation{
-		ID:          job.ID,
-		Fingerprint: alert.Fingerprint,
-		Status:      core.InvestigationQueued,
-		QueuedAt:    job.SubmittedAt,
-	}
-	if err := q.repo.Create(q.ctx, inv); err != nil {
-		q.logger.Warn("Failed to persist investigation job, dropping",
-			"fingerprint", alert.Fingerprint,
-			"error", err,
-		)
-		q.metrics.DroppedTotal.Inc()
-		return
-	}
-
 	select {
 	case q.jobs <- job:
 		q.metrics.QueueDepth.Inc()
 	default:
+		q.dedup.releaseLocal(key)
 		q.logger.Warn("Investigation queue full, dropping job",
 			"fingerprint", alert.Fingerprint,
 			"queue_size", q.config.QueueSize,
 		)
 		q.metrics.DroppedTotal.Inc()
-		// Mark as failed in DB so the status is not stuck at queued.
-		_ = q.repo.SaveError(q.ctx, job.ID, "queue full at submit time", core.InvestigationErrorPermanent)
 	}
 }
 
@@ -182,6 +187,10 @@ func (q *InvestigationQueue) runWorker(id int) {
 // processJob executes a single investigation with retry logic.
 func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 	start := time.Now()
+
+	if !q.claimAndCreate(job) {
+		return
+	}
 
 	// Mark as processing.
 	if err := q.repo.UpdateStatus(q.ctx, job.ID, core.InvestigationProcessing); err != nil {
@@ -267,6 +276,44 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 		"confidence", result.Confidence,
 		"duration", time.Since(start),
 	)
+}
+
+// claimAndCreate makes the cross-replica dedup claim and persists the queued
+// record. It returns false when the job must not run: another replica owns
+// the incident, or the record could not be created.
+func (q *InvestigationQueue) claimAndCreate(job *core.InvestigationJob) bool {
+	ctx, cancel := context.WithTimeout(q.ctx, storeTimeout)
+	defer cancel()
+
+	claimed, err := q.dedup.claimShared(ctx, dedupKey(job.Alert))
+	if err != nil {
+		// Fail-open: a Redis outage costs a possible duplicate, not the
+		// investigation.
+		q.logger.Warn("Investigation dedup claim failed, investigating anyway",
+			"fingerprint", job.Alert.Fingerprint,
+			"error", err,
+		)
+	}
+	if !claimed {
+		q.metrics.DeduplicatedTotal.WithLabelValues("shared").Inc()
+		return false
+	}
+
+	inv := &core.Investigation{
+		ID:          job.ID,
+		Fingerprint: job.Alert.Fingerprint,
+		Status:      core.InvestigationQueued,
+		QueuedAt:    job.SubmittedAt,
+	}
+	if err := q.repo.Create(ctx, inv); err != nil {
+		q.logger.Warn("Failed to persist investigation job, dropping",
+			"fingerprint", job.Alert.Fingerprint,
+			"error", err,
+		)
+		q.metrics.DroppedTotal.Inc()
+		return false
+	}
+	return true
 }
 
 // processJobWithAgent runs the Phase 5B agentic loop and persists the full trace.

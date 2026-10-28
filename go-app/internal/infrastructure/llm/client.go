@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ipiton/AMP/internal/core"
 	"github.com/ipiton/AMP/internal/core/resilience"
@@ -24,6 +25,24 @@ import (
 // tens of KiB; 1 MiB leaves a wide margin before a truncated JSON would fail
 // to decode.
 const maxResponseBodyBytes = 1 << 20
+
+// maxErrorBodyBytes caps how much of an error response reaches logs and
+// HTTPError.Message, which the investigation queue persists via SaveError
+// (LLM-RETRY-CLASSIFY): providers echo the prompt, alert data included.
+const maxErrorBodyBytes = 512
+
+// truncateBody returns at most maxErrorBodyBytes of body, cut on a rune
+// boundary and marked when anything was dropped.
+func truncateBody(body []byte) string {
+	if len(body) <= maxErrorBodyBytes {
+		return string(body)
+	}
+	cut := maxErrorBodyBytes
+	for cut > 0 && !utf8.RuneStart(body[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s...[truncated %d bytes]", body[:cut], len(body)-cut)
+}
 
 // ClassificationRequest represents the request payload to LLM API.
 type ClassificationRequest struct {
@@ -316,11 +335,11 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Error("LLM API returned error",
 			"status", resp.StatusCode,
-			"body", string(body),
+			"body", truncateBody(body),
 		)
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("LLM API error: status %d, body: %s", resp.StatusCode, string(body)),
+			Message:    fmt.Sprintf("LLM API error: status %d, body: %s", resp.StatusCode, truncateBody(body)),
 		}
 	}
 
@@ -416,7 +435,7 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 	if resp.StatusCode != http.StatusOK {
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("OpenAI API error: status %d, body: %s", resp.StatusCode, string(body)),
+			Message:    fmt.Sprintf("OpenAI API error: status %d, body: %s", resp.StatusCode, truncateBody(body)),
 		}
 	}
 
@@ -605,7 +624,7 @@ Return ONLY valid JSON with these keys:
 	if resp.StatusCode != http.StatusOK {
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("LLM investigation error: status %d, body: %s", resp.StatusCode, string(body)),
+			Message:    fmt.Sprintf("LLM investigation error: status %d, body: %s", resp.StatusCode, truncateBody(body)),
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strings"
 
 	"github.com/ipiton/AMP/pkg/httperror"
@@ -39,6 +40,13 @@ func (e *HTTPError) Error() string {
 //
 // Deprecated: Use httperror.LLMClassifier directly in retry strategies instead.
 func IsRetryableError(err error) bool {
+	// *HTTPError is this package's own type, so httperror does not recognize it
+	// (LLM-RETRY-CLASSIFY): rate limits and server errors are worth another
+	// attempt, any other status is not.
+	var he *HTTPError
+	if errors.As(err, &he) {
+		return he.StatusCode == http.StatusTooManyRequests || he.StatusCode >= http.StatusInternalServerError
+	}
 	classifier := &httperror.LLMClassifier{}
 	return classifier.IsRetryable(err)
 }

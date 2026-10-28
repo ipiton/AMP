@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/ipiton/AMP/internal/core/investigation"
 	appsv1 "k8s.io/api/apps/v1"
@@ -166,13 +167,13 @@ func (t *KubernetesTool) getLogs(ctx context.Context, namespace, name, container
 	if name == "" {
 		return investigation.ToolResult{IsError: true, Error: "kubernetes: get_logs requires 'name'"}, nil
 	}
-	var tail *int64
+	tail := int64(100)
 	if n, err := parseIntParam(tailLines, 100); err == nil {
-		tail = &n
+		tail = clampLines(n)
 	}
 	opts := &corev1.PodLogOptions{
 		Container: container,
-		TailLines: tail,
+		TailLines: &tail,
 	}
 	req := t.clientset.CoreV1().Pods(namespace).GetLogs(name, opts)
 	stream, err := req.Stream(ctx)
@@ -182,10 +183,16 @@ func (t *KubernetesTool) getLogs(ctx context.Context, namespace, name, container
 	defer func() { _ = stream.Close() }()
 
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, stream); err != nil {
+	n, err := io.Copy(&buf, io.LimitReader(stream, maxToolResponseBytes+1))
+	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("kubernetes: get_logs read: %v", err)}, nil
 	}
-	out, err := json.Marshal(map[string]string{"logs": buf.String()})
+	logs := buf.String()
+	if n > maxToolResponseBytes {
+		// Plain text survives a cut, unlike JSON: keep the head and say so.
+		logs = strings.ToValidUTF8(logs[:maxToolResponseBytes], "") + fmt.Sprintf("\n...[truncated at %d KiB]", maxToolResponseBytes>>10)
+	}
+	out, err := json.Marshal(map[string]string{"logs": logs})
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("kubernetes: get_logs marshal: %v", err)}, nil
 	}

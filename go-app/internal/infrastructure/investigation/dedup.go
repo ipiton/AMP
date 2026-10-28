@@ -1,0 +1,90 @@
+package investigation
+
+import (
+	"context"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+
+	"github.com/ipiton/AMP/internal/core"
+)
+
+// dedupTTL bounds how long an incident stays claimed. The key already names
+// one incident (fingerprint + StartsAt), so the TTL only caps memory and Redis
+// growth; a re-fire after resolve gets a new StartsAt and a new key.
+const dedupTTL = 24 * time.Hour
+
+// dedupKeyPrefix namespaces the shared claims in Redis.
+const dedupKeyPrefix = "amp:investigation:dedup:"
+
+// dedup keeps one investigation per incident (INVESTIGATION-ASYNC-DEDUP).
+//
+// Two levels: claimLocal runs in Submit, on the request goroutine, so it does
+// no IO — an in-memory map that drops resends of an incident before they take
+// a queue slot. claimShared runs in the worker and, when a Redis client is
+// set, makes the claim across replicas with SETNX.
+type dedup struct {
+	mu        sync.Mutex
+	claimed   map[string]time.Time // key -> expiry
+	nextSweep time.Time
+	rdb       redis.Cmdable // nil: local level only
+	now       func() time.Time
+}
+
+// dedupSweepInterval spaces out the scans for expired local claims.
+const dedupSweepInterval = time.Minute
+
+func newDedup() *dedup {
+	return &dedup{claimed: make(map[string]time.Time), now: time.Now}
+}
+
+// dedupKey identifies the incident an alert belongs to.
+func dedupKey(alert *core.Alert) string {
+	return alert.Fingerprint + ":" + strconv.FormatInt(alert.StartsAt.UnixNano(), 10)
+}
+
+// claimLocal reports whether key was free on this replica and claims it.
+func (d *dedup) claimLocal(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	now := d.now()
+	if exp, ok := d.claimed[key]; ok && now.Before(exp) {
+		return false
+	}
+	// Sweep expired claims on insert, at most once per interval: keeps the
+	// map bounded by the incidents seen in one TTL without a goroutine.
+	if !now.Before(d.nextSweep) {
+		for k, exp := range d.claimed {
+			if !now.Before(exp) {
+				delete(d.claimed, k)
+			}
+		}
+		d.nextSweep = now.Add(dedupSweepInterval)
+	}
+	d.claimed[key] = now.Add(dedupTTL)
+	return true
+}
+
+// releaseLocal drops a local claim, so a later resend may try again.
+func (d *dedup) releaseLocal(key string) {
+	d.mu.Lock()
+	delete(d.claimed, key)
+	d.mu.Unlock()
+}
+
+// claimShared reports whether key was free across replicas and claims it.
+// Without a Redis client every claim succeeds; a Redis error is returned with
+// claimed=true, so the caller investigates (fail-open) and logs it.
+func (d *dedup) claimShared(ctx context.Context, key string) (bool, error) {
+	if d.rdb == nil {
+		return true, nil
+	}
+	ok, err := d.rdb.SetNX(ctx, dedupKeyPrefix+key, 1, dedupTTL).Result()
+	if err != nil {
+		return true, err
+	}
+	return ok, nil
+}

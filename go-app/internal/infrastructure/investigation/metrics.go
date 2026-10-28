@@ -10,6 +10,7 @@ type Metrics struct {
 	QueueDepth          prometheus.Gauge
 	InvestigationsTotal *prometheus.CounterVec
 	DroppedTotal        prometheus.Counter
+	DeduplicatedTotal   *prometheus.CounterVec
 	ProcessingTime      prometheus.Histogram
 }
 
@@ -34,8 +35,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		DroppedTotal: factory.NewCounter(prometheus.CounterOpts{
 			Namespace: "amp",
 			Name:      "investigations_dropped_total",
-			Help:      "Total investigations dropped because queue was full",
+			Help:      "Total investigations dropped: queue full or the record could not be created",
 		}),
+		DeduplicatedTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "amp",
+			Name:      "investigations_deduplicated_total",
+			Help:      "Investigations skipped because the incident (fingerprint + startsAt) was already claimed, by level (local: this replica, shared: Redis)",
+		}, []string{"level"}),
 		ProcessingTime: factory.NewHistogram(prometheus.HistogramOpts{
 			Namespace: "amp",
 			Name:      "investigation_processing_seconds",
