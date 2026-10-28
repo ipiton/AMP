@@ -40,9 +40,12 @@ func newDedup() *dedup {
 	return &dedup{claimed: make(map[string]time.Time), now: time.Now}
 }
 
-// dedupKey identifies the incident an alert belongs to.
+// dedupKey identifies the incident an alert belongs to, and its status: with
+// only_firing off, the resolve of an incident is investigated once too.
+// StartsAt is taken in whole seconds — storage keeps microseconds, so a resend
+// read back from it must not differ from the first ingest in sub-second digits.
 func dedupKey(alert *core.Alert) string {
-	return alert.Fingerprint + ":" + strconv.FormatInt(alert.StartsAt.UnixNano(), 10)
+	return alert.Fingerprint + ":" + strconv.FormatInt(alert.StartsAt.Unix(), 10) + ":" + string(alert.Status)
 }
 
 // claimLocal reports whether key was free on this replica and claims it.
@@ -87,4 +90,13 @@ func (d *dedup) claimShared(ctx context.Context, key string) (bool, error) {
 		return true, err
 	}
 	return ok, nil
+}
+
+// releaseShared drops a shared claim, so another attempt may run. A Redis
+// error leaves the claim to expire with its TTL.
+func (d *dedup) releaseShared(ctx context.Context, key string) error {
+	if d.rdb == nil {
+		return nil
+	}
+	return d.rdb.Del(ctx, dedupKeyPrefix+key).Err()
 }

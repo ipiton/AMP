@@ -282,5 +282,5 @@ func capObservation(s string) string {
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return fmt.Sprintf("%s\n...[truncated %d bytes]", s[:cut], len(s)-cut)
+	return fmt.Sprintf("%s\n...[truncated %d bytes; narrow the query for the rest]", s[:cut], len(s)-cut)
 }

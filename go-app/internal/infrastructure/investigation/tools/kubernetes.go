@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -182,15 +181,17 @@ func (t *KubernetesTool) getLogs(ctx context.Context, namespace, name, container
 	}
 	defer func() { _ = stream.Close() }()
 
-	var buf bytes.Buffer
-	n, err := io.Copy(&buf, io.LimitReader(stream, maxToolResponseBytes+1))
+	// Logs are chronological: keep the newest maxLogBytes (the tail) and read
+	// at most maxToolResponseBytes, so the observation cap of the agent loop
+	// never cuts away the lines closest to the alert.
+	tb := &tailBuffer{max: maxLogBytes}
+	n, err := io.Copy(tb, io.LimitReader(stream, maxToolResponseBytes))
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("kubernetes: get_logs read: %v", err)}, nil
 	}
-	logs := buf.String()
-	if n > maxToolResponseBytes {
-		// Plain text survives a cut, unlike JSON: keep the head and say so.
-		logs = strings.ToValidUTF8(logs[:maxToolResponseBytes], "") + fmt.Sprintf("\n...[truncated at %d KiB]", maxToolResponseBytes>>10)
+	logs := strings.ToValidUTF8(string(tb.buf), "")
+	if n > int64(len(tb.buf)) {
+		logs = fmt.Sprintf("...[%d earlier bytes dropped]\n", n-int64(len(tb.buf))) + logs
 	}
 	out, err := json.Marshal(map[string]string{"logs": logs})
 	if err != nil {
@@ -320,4 +321,22 @@ func parseIntParam(s string, defaultVal int64) (int64, error) {
 		return defaultVal, err
 	}
 	return n, nil
+}
+
+// maxLogBytes is how much of a pod log reaches the model: below the agent
+// loop's observation cap with room for JSON escaping.
+const maxLogBytes = 8 << 10
+
+// tailBuffer is an io.Writer that keeps only the last max bytes written.
+type tailBuffer struct {
+	buf []byte
+	max int
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = append(t.buf[:0], t.buf[over:]...)
+	}
+	return len(p), nil
 }

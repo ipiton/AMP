@@ -13,7 +13,7 @@ based_on:
 
 # Specification: надёжность LLM-вызовов и очереди расследований
 
-**Version:** 1.0  
+**Version:** 1.1\
 **Status:** Approved
 
 ## Summary
@@ -48,14 +48,14 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 | `classifyError` опирается на текст `HTTP %d` | `queue.go:334-355` | code-read | переклассификация permanent/transient |
 | Статус `queued` читает только `GET /api/v1/alerts/{fingerprint}/investigation` | grep `InvestigationQueued`, `GetLatestByFingerprint`: `handlers/investigation.go:37` | call-path-traced | UI/клиент увидел бы 404 вместо `queued` |
 | `r.cache` создан до `initializeInvestigation` | `service_registry.go` порядок `Initialize`: cache — шаг 1, investigation — после business services | code-read | Redis-дедуп не включится, останется локальный |
-| Resend одного инцидента сохраняет `StartsAt` | Alertmanager-клиенты шлют исходный `startsAt`; dedup ядра сравнивает по `fingerprint` | assumed | дедуп не сработает для клиентов, меняющих `startsAt` — поведение как сейчас, не хуже |
+| Resend одного инцидента сохраняет `StartsAt`, новый инцидент получает новый | Resend: dedup ядра возвращает сохранённый алерт (`deduplication.go`). Re-fire после resolve шёл через `updateExistingAlert` со старым `StartsAt` (deep-review F1) — исправлено там же | code-read | без правки ядра re-fire глушился бы дедупом 24h |
 
 ## Target Design
 
 1. **Ретраи LLM.** `llm.IsRetryableError` сначала проверяет `errors.As(err, *HTTPError)`: `429` или `>=500` → true, остальные коды → false; иначе — прежний `LLMClassifier`. `WithRetryFunc` больше не подменяет `MaxRetries==0` (отрицательное → 0). Тело ответа LLM в `logger.Error` и `HTTPError.Message` — `truncateBody(body, 512)` с маркером усечения; формат `HTTP %d: …` сохраняется.
-2. **`Submit`.** Только фильтр `OnlyFiring`, локальный dedup-claim и неблокирующая отправка в канал. Переполнение → `DroppedTotal`, лог, освобождение локального claim; записи в БД нет. `processJob` первым делом делает межрепличный claim и `repo.Create` (с таймаутом), затем прежний путь (`UpdateStatus(processing)` …). Ошибка `Create` → job отбрасывается, `DroppedTotal`.
-3. **Дедуп.** Ключ — `fingerprint + StartsAt.UnixNano`. Тип `dedup` в `investigation/dedup.go`: in-memory map ключ → срок (мьютекс, ленивое вычищение просроченных при вставке) и опциональный `redis.Cmdable`. `claimLocal(key)` — в `Submit`; `claimShared(ctx,key)` — в воркере: `SETNX amp:investigation:dedup:<key> TTL 24h`; `false` → job пропускается; ошибка Redis → fail-open (расследуем) + Warn. Без Redis (`r.cache` не `*RedisCache`) — только локальный уровень. Метрика `amp_investigations_deduplicated_total{level="local|shared"}`. Wiring: `NewInvestigationQueue` не меняет сигнатуру; `SetSharedDedup(redis.Cmdable)` до `Start()`, как `SetAgentLoop`.
-4. **Лимиты tools.** Общая константа `maxToolResponseBytes = 256 KiB` в пакете `tools`. Kubernetes `get_logs`: `tail_lines` clamp `[1,500]`, чтение через `io.LimitReader(limit+1)` — при превышении обрезка + маркер. Loki: `limit` clamp `[1,500]`, тело через `LimitReader(limit+1)` — при превышении `IsError` «response exceeds 256KiB, narrow the query». Prometheus — то же для тела. `AgentLoop`: observation обрезается до `maxObservationBytes = 16 KiB` (по границе руны, маркер) до записи в `steps` и `history`.
+2. **`Submit`.** Только фильтр `OnlyFiring`, локальный dedup-claim и неблокирующая отправка в канал. Переполнение → `DroppedTotal`, лог, освобождение локального claim; записи в БД нет. `processJob` первым делом делает межрепличный claim и `repo.Create` (с таймаутом), затем прежний путь (`UpdateStatus(processing)` …). Ошибка `Create` → job отбрасывается, `DroppedTotal`, оба claim снимаются (F3); то же при прерывании job на `Stop`. Claim и `Create` — с раздельными таймаутами (F8).
+3. **Дедуп.** Ключ — `fingerprint + StartsAt` в целых секундах (хранилище держит микросекунды, F6) `+ status` (при `only_firing: false` resolve расследуется отдельно, F7). Re-fire после resolve берёт новый `StartsAt` в `updateExistingAlert` (F1). Тип `dedup` в `investigation/dedup.go`: in-memory map ключ → срок (мьютекс, ленивое вычищение просроченных при вставке) и опциональный `redis.Cmdable`. `claimLocal(key)` — в `Submit`; `claimShared(ctx,key)` — в воркере: `SETNX amp:investigation:dedup:<key> TTL 24h`; `false` → job пропускается; ошибка Redis → fail-open (расследуем) + Warn. Без Redis (`r.cache` не `*RedisCache`) — только локальный уровень. Метрика `amp_investigations_deduplicated_total{level="local|shared"}`. Wiring: `NewInvestigationQueue` не меняет сигнатуру; `SetSharedDedup(redis.Cmdable)` до `Start()`, как `SetAgentLoop`.
+4. **Лимиты tools.** Общая константа `maxToolResponseBytes = 256 KiB` в пакете `tools`. Kubernetes `get_logs`: `tail_lines` clamp `[1,500]`, чтение через `io.LimitReader(limit+1)` — при превышении обрезка + маркер. Loki: `limit` clamp `[1,500]`, тело через `LimitReader(limit+1)` — при превышении `IsError` «response exceeds 256KiB, narrow the query». Prometheus — то же для тела. `AgentLoop`: observation обрезается до `maxObservationBytes = 16 KiB` (по границе руны, маркер с просьбой сузить запрос) до записи в `steps` и `history`. Логи pod — хвост 8 KiB (`tailBuffer`), чтобы кэп не срезал свежие строки (F9). Hot reload: `llm.max_retries: 0` применяется (F2).
 
 ## API Contracts
 
@@ -95,7 +95,7 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 
 1. Тот же инцидент приходит на две реплики с общим Redis → одна выигрывает `SETNX`, вторая пропускает (`level=shared`).
 2. Очередь полна → drop, локальный claim снят: следующий resend снова попробует.
-3. Job упал (DLQ/failed) → claim держится TTL: повторного расследования на resend нет (бюджет важнее). Ручной повтор — вне скоупа.
+3. Job упал (DLQ/failed) → claim держится TTL (F10: agent loop без ретраев — defer): повторного расследования на resend нет (бюджет важнее). Ручной повтор — вне скоупа.
 4. `StartsAt` нулевой → ключ `fp:0`, дедуп по fingerprint на 24h.
 5. Рестарт процесса → локальная карта пуста; при Redis межрепличный claim переживает рестарт.
 6. Тело LLM < 512 байт — без маркера; ≥ — обрезано по границе руны.
@@ -106,7 +106,7 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 - **Affected modules:** llm, core/resilience, infrastructure/investigation (+tools), core/investigation, application wiring.
 - **Breaking changes:** `llm.max_retries: 0` теперь означает «без ретраев» (было 3). Статус `queued` не виден до взятия job воркером.
 - **New dependencies:** none (`go-redis` уже в модуле, `miniredis` — в тестах).
-- **Risks:** `ShareClient()` помечает Redis-клиент общим — hot reload `redis.*` откажется менять клиент; при Redis так уже делает `initializeSilenceGCElection`, нового ограничения нет. Fail-open дедупа при недоступном Redis → дубли между репликами (как сейчас). Дедуп глушит повтор упавшего расследования на 24h — осознанный компромисс.
+- **Risks:** ретраи 429/5xx удлиняют синхронный ingest на время backoff, пока не откроется CB (F4, defer — `UPSTREAM-AI-HOOKS` выносит LLM из ingest); рычаг — `llm.max_retries`. `ShareClient()` помечает Redis-клиент общим — hot reload `redis.*` откажется менять клиент; при Redis так уже делает `initializeSilenceGCElection`, нового ограничения нет. Fail-open дедупа при недоступном Redis → дубли между репликами (как сейчас). Дедуп глушит повтор упавшего расследования на 24h — осознанный компромисс.
 
 ## Rollout / Rollback
 

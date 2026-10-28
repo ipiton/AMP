@@ -215,6 +215,9 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 			)
 			select {
 			case <-q.ctx.Done():
+				// Aborted by Stop: the investigation never finished, so
+				// the incident must stay open to the next attempt.
+				q.releaseClaims(dedupKey(job.Alert))
 				return
 			case <-time.After(backoff):
 			}
@@ -280,12 +283,16 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 
 // claimAndCreate makes the cross-replica dedup claim and persists the queued
 // record. It returns false when the job must not run: another replica owns
-// the incident, or the record could not be created.
+// the incident, or the record could not be created — then both claims are
+// released, so a later resend can try again.
 func (q *InvestigationQueue) claimAndCreate(job *core.InvestigationJob) bool {
-	ctx, cancel := context.WithTimeout(q.ctx, storeTimeout)
-	defer cancel()
+	key := dedupKey(job.Alert)
 
-	claimed, err := q.dedup.claimShared(ctx, dedupKey(job.Alert))
+	// Separate timeouts: a hung Redis that fails open must not leave Create
+	// with an expired context.
+	claimCtx, claimCancel := context.WithTimeout(q.ctx, storeTimeout)
+	claimed, err := q.dedup.claimShared(claimCtx, key)
+	claimCancel()
 	if err != nil {
 		// Fail-open: a Redis outage costs a possible duplicate, not the
 		// investigation.
@@ -305,15 +312,34 @@ func (q *InvestigationQueue) claimAndCreate(job *core.InvestigationJob) bool {
 		Status:      core.InvestigationQueued,
 		QueuedAt:    job.SubmittedAt,
 	}
-	if err := q.repo.Create(ctx, inv); err != nil {
+	createCtx, createCancel := context.WithTimeout(q.ctx, storeTimeout)
+	err = q.repo.Create(createCtx, inv)
+	createCancel()
+	if err != nil {
 		q.logger.Warn("Failed to persist investigation job, dropping",
 			"fingerprint", job.Alert.Fingerprint,
 			"error", err,
 		)
 		q.metrics.DroppedTotal.Inc()
+		q.releaseClaims(key)
 		return false
 	}
 	return true
+}
+
+// releaseClaims drops both dedup claims of a job that did not get to run.
+func (q *InvestigationQueue) releaseClaims(key string) {
+	q.dedup.releaseLocal(key)
+	// q.ctx may already be cancelled (Stop): the release gets its own
+	// deadline so the claim does not outlive the aborted job for a whole TTL.
+	ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+	defer cancel()
+	if err := q.dedup.releaseShared(ctx, key); err != nil {
+		q.logger.Warn("Failed to release investigation dedup claim",
+			"key", key,
+			"error", err,
+		)
+	}
 }
 
 // processJobWithAgent runs the Phase 5B agentic loop and persists the full trace.

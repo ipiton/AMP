@@ -179,7 +179,9 @@ func llmClientConfigFrom(cfg LLMConfig, current llm.Config) llm.Config {
 	if cfg.Timeout > 0 {
 		next.Timeout = cfg.Timeout
 	}
-	if cfg.MaxRetries > 0 {
+	// 0 is an explicit "no retries" (LLM-RETRY-CLASSIFY): LoadConfig applies
+	// the llm.max_retries default, so an unset key never arrives here as 0.
+	if cfg.MaxRetries >= 0 {
 		next.MaxRetries = cfg.MaxRetries
 	}
 	return next
