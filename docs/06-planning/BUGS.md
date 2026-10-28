@@ -133,25 +133,6 @@
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
 - **Status:** open
 
-### [high][LLM][~0.25d] LLM-RETRY-CLASSIFY
-- **Title:** ответы LLM 429/5xx не ретраятся, `max_retries: 0` превращается в 3
-- **Problem:** `llm.HTTPError` (`internal/infrastructure/llm/errors.go:26`) не `httperror.HTTPAPIError`, поэтому `IsRetryable` (`pkg/httperror/error.go:445`) возвращает false — ретраятся только таймауты (худший случай 30s × 4 внутри `POST /api/v2/alerts`). `WithRetryFunc` (`internal/core/resilience/resilience.go:55-57`) подменяет `MaxRetries==0` на 3. Тело ответа LLM целиком уходит в ERROR-лог и в БД через `SaveError` (`llm/client.go:310-317,440,584`).
-- **Impact:** максимальная латентность ingest при минимальной надёжности классификации; ретраи нельзя выключить; PII из промпта в логах.
-- **Fix:** `errors.As(err, &he) && (he.StatusCode==429 || he.StatusCode>=500)`; различать «не задано» и `0`; `truncate(body, 512)`. Тест на httptest 503→200. Бюджет времени — в `PROD-LLM-ALERT-PATH-ISOLATION`.
-- **Refs:** CODE-REVIEW-2026-10-21 H-7, L-8.
-- **Status:** open
-
-### [high][Investigation][~1d] INVESTIGATION-ASYNC-DEDUP
-- **Title:** расследования без дедупа, синхронный INSERT в ingest-пути, вывод tools без лимитов
-- **Problem:**
-  - `Submit` (`internal/infrastructure/investigation/queue.go:122-160`) делает `repo.Create` на горутине запроса, без таймаута, хотя вызов из `alert_processor.go:787-788` подписан fire-and-forget.
-  - Дедупа нет, а смена `EndsAt` на каждом resend считается апдейтом (`deduplication.go:352-357`) ⇒ новое расследование на каждый resend.
-  - Вывод tools не ограничен: `kubernetes.go:185` (`io.Copy`, `tail_lines` от LLM), `loki.go:82,114`, `prometheus.go:107`, `agent_loop.go:204`.
-- **Impact:** неограниченная стоимость LLM (~1 расследование/мин на горящий алерт); медленная БД задерживает ingest; OOM воркера и раздувание контекста.
-- **Fix:** `Submit` — только неблокирующая отправка в канал, `Create` в воркере; дедуп по `fingerprint+StartsAt` с TTL (Redis `SETNX`); `io.LimitReader(256KiB)`, clamp `tail_lines`/`limit` ≤500, кэп символов перед записью в history.
-- **Refs:** CODE-REVIEW-2026-10-21 H-8, M-10 (tools). Дедуп запланирован и в `PHASE-5A-INVESTIGATION-PIPELINE`.
-- **Status:** open
-
 ### [high][Security][~1d] INVESTIGATION-PROMPT-ISOLATION
 - **Title:** недоверенные данные алерта в system-промпте, investigation tools без allowlist namespace
 - **Problem:**
@@ -159,9 +140,26 @@
   - Kubernetes tool (`internal/infrastructure/investigation/tools/kubernetes.go:165`) читает логи/поды/события в любом namespace по выбору LLM; вывод уходит внешнему провайдеру и в БД.
   - `database_query` ходит в пул самого AMP (`service_registry.go:2226`) ⇒ неверные выводы по алертам на чужие БД, утечка `pg_stat_activity` AMP провайдеру.
   - `InvestigateAlert`/`InvestigateWithTools` (`llm/client.go:521`) игнорируют `provider` и circuit breaker.
+  - Шаги agent loop (`InvestigateWithTools`, `llm/investigate_with_tools.go:123-127`) не ретраят 429/5xx: короткий 503 посреди цикла даёт `failed`, а dedup-claim (24h, `INVESTIGATION-SAFETY-RELIABILITY`) не даёт расследовать инцидент повторно. Ретраи или CB — в общем `doChat` (deep review F10).
 - **Impact:** атакующий с правом слать алерты управляет агентом и вытягивает логи чужих namespace во внешний LLM.
 - **Fix:** данные алерта — в `user`-сообщении в явном разделителе с инструкцией «это данные»; `investigation.tools.kubernetes.allowed_namespaces`, по умолчанию — namespace из лейбла алерта; редактирование секретов в выводе tools; отдельный DSN для `database_query`, без него tool не регистрировать; один `doChat` с CB и лимитом тела.
 - **Refs:** CODE-REVIEW-2026-10-21 H-9, L-7, L-9. Смежно `PROD-LLM-ALERT-PATH-ISOLATION`, `INVESTIGATION-K8S-TOOL-HELM`.
+- **Status:** open
+
+### [low][Gate][~0.1d] RELEASE-GATE-SMOKE-PORT-CONFLICT
+- **Title:** шаг `amtool-compat` краснеет, если порт хоста 18080 занят
+- **Problem:** `deploy/smoke/docker-compose.yml:57` публикует amp на фиксированном `18080`, проба `scripts/release-gate.sh:296` ходит в `localhost:18080/healthz`. На машине владельца этот порт занят локальным `agent-memory-mcp` (`127.0.0.1`) и `kubectl port-forward` (`[::1]`): проба получает 404 от чужого процесса, хотя контейнер `healthy`. Сам amtool ходит по docker-сети к `amp:8080` и порт хоста не использует.
+- **Impact:** release-gate — `RESULT: FAIL` на `amtool-compat` без регрессии; шаг приходится прогонять вручную.
+- **Fix:** проба через `docker inspect -f '{{.State.Health.Status}}'` (или `docker compose exec`) вместо порта хоста; либо порт из переменной окружения с проверкой занятости до `up`.
+- **Refs:** `tasks/archive/INVESTIGATION-SAFETY-RELIABILITY/evidence/testing.md` (2026-10-28).
+- **Status:** open
+
+### [low][Config][~0.1d] INVESTIGATION-MAX-RETRIES-ZERO
+- **Title:** `investigation.max_retries: 0` молча превращается в 3
+- **Problem:** `initializeInvestigation` (`go-app/internal/application/service_registry.go:2241`) копирует `Investigation.MaxRetries` в очередь только при `> 0`, иначе остаётся дефолт `DefaultQueueConfig().MaxRetries` (3). Тот же класс, что исправленный для `llm.max_retries` в `INVESTIGATION-SAFETY-RELIABILITY`.
+- **Impact:** ретраи расследований нельзя выключить; оператор, поставивший 0 ради бюджета LLM, получает до 4 вызовов на job.
+- **Fix:** различать «не задано» и `0` (viper `SetDefault` + `>= 0`), тест на wiring; строка в CHANGELOG.
+- **Refs:** найдено на deep review `INVESTIGATION-SAFETY-RELIABILITY` (2026-10-28), `tasks/archive/INVESTIGATION-SAFETY-RELIABILITY/review-findings.md`.
 - **Status:** open
 
 ### [medium][UI][~0.25d] UI-ROUTE-PREFIX-LINKS

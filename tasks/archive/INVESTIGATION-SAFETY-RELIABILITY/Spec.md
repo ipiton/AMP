@@ -128,4 +128,4 @@ LLM-ответы 429/5xx начинают ретраиться, `llm.max_retries
 
 ## Open Questions
 
-- [ ] Предпосылка `assumed`: resend сохраняет `StartsAt` — проверяется тестом на уровне очереди; клиенты, меняющие `startsAt`, остаются без дедупа (не регресс).
+- [x] Предпосылка `assumed`: resend сохраняет `StartsAt` — подтверждена тестами `TestSubmit_ResendOfIncidentDeduplicated`, `TestDedupKey_SecondsAndStatus`; клиенты, меняющие `startsAt`, остаются без дедупа (не регресс).

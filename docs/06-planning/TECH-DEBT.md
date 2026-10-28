@@ -15,8 +15,8 @@
 - [high][Investigation][~2.25d] INVESTIGATION-SAFETY-BUNDLE
 - **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/investigation/... ./internal/infrastructure/llm/... ./internal/core/resilience/...`
 - **Members (ordered):**
-  - [ ] LLM-RETRY-CLASSIFY
-  - [ ] INVESTIGATION-ASYNC-DEDUP
+  - [x] LLM-RETRY-CLASSIFY (2026-10-28, `INVESTIGATION-SAFETY-RELIABILITY`)
+  - [x] INVESTIGATION-ASYNC-DEDUP (2026-10-28, `INVESTIGATION-SAFETY-RELIABILITY`)
   - [ ] INVESTIGATION-PROMPT-ISOLATION
 
 <!-- ADR-019-V2-SLICING (2026-10-24): CONFIG-RELOAD-BUNDLE, API-COMPAT-BUNDLE, INHIBITION-LIFECYCLE-BUNDLE, REDIS-STORAGE-BUNDLE распущены —
