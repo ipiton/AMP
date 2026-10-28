@@ -191,6 +191,22 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 	if !q.claimAndCreate(job) {
 		return
 	}
+	// A job that ran to an outcome keeps the incident claimed for the full
+	// TTL. One aborted by Stop (q.ctx cancelled) does not: its in-flight
+	// claim expires on its own, as it does when the process dies.
+	defer func() {
+		if q.ctx.Err() != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(q.ctx, storeTimeout)
+		defer cancel()
+		if err := q.dedup.extendShared(ctx, dedupKey(job.Alert)); err != nil {
+			q.logger.Warn("Failed to extend investigation dedup claim",
+				"fingerprint", job.Alert.Fingerprint,
+				"error", err,
+			)
+		}
+	}()
 
 	// Mark as processing.
 	if err := q.repo.UpdateStatus(q.ctx, job.ID, core.InvestigationProcessing); err != nil {
@@ -215,9 +231,6 @@ func (q *InvestigationQueue) processJob(job *core.InvestigationJob) {
 			)
 			select {
 			case <-q.ctx.Done():
-				// Aborted by Stop: the investigation never finished, so
-				// the incident must stay open to the next attempt.
-				q.releaseClaims(dedupKey(job.Alert))
 				return
 			case <-time.After(backoff):
 			}
@@ -330,9 +343,7 @@ func (q *InvestigationQueue) claimAndCreate(job *core.InvestigationJob) bool {
 // releaseClaims drops both dedup claims of a job that did not get to run.
 func (q *InvestigationQueue) releaseClaims(key string) {
 	q.dedup.releaseLocal(key)
-	// q.ctx may already be cancelled (Stop): the release gets its own
-	// deadline so the claim does not outlive the aborted job for a whole TTL.
-	ctx, cancel := context.WithTimeout(context.Background(), storeTimeout)
+	ctx, cancel := context.WithTimeout(q.ctx, storeTimeout)
 	defer cancel()
 	if err := q.dedup.releaseShared(ctx, key); err != nil {
 		q.logger.Warn("Failed to release investigation dedup claim",

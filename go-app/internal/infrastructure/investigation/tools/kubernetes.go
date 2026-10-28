@@ -181,16 +181,19 @@ func (t *KubernetesTool) getLogs(ctx context.Context, namespace, name, container
 	}
 	defer func() { _ = stream.Close() }()
 
-	// Logs are chronological: keep the newest maxLogBytes (the tail) and read
-	// at most maxToolResponseBytes, so the observation cap of the agent loop
-	// never cuts away the lines closest to the alert.
+	// Logs are chronological: read the whole tail_lines window (bounded by
+	// maxLogReadBytes) but keep only its newest maxLogBytes, so the model gets
+	// the lines closest to the alert and the observation cap never cuts them.
 	tb := &tailBuffer{max: maxLogBytes}
-	n, err := io.Copy(tb, io.LimitReader(stream, maxToolResponseBytes))
+	n, err := io.Copy(tb, io.LimitReader(stream, maxLogReadBytes))
 	if err != nil {
 		return investigation.ToolResult{IsError: true, Error: fmt.Sprintf("kubernetes: get_logs read: %v", err)}, nil
 	}
 	logs := strings.ToValidUTF8(string(tb.buf), "")
-	if n > int64(len(tb.buf)) {
+	switch {
+	case n >= maxLogReadBytes:
+		logs = fmt.Sprintf("...[log read stopped at %d KiB; last %d KiB of that shown, newer lines may be missing — lower tail_lines]\n", maxLogReadBytes>>10, maxLogBytes>>10) + logs
+	case n > int64(len(tb.buf)):
 		logs = fmt.Sprintf("...[%d earlier bytes dropped]\n", n-int64(len(tb.buf))) + logs
 	}
 	out, err := json.Marshal(map[string]string{"logs": logs})
@@ -322,6 +325,9 @@ func parseIntParam(s string, defaultVal int64) (int64, error) {
 	}
 	return n, nil
 }
+
+// maxLogReadBytes bounds how much of the log stream is read to find its tail.
+const maxLogReadBytes = 4 << 20
 
 // maxLogBytes is how much of a pod log reaches the model: below the agent
 // loop's observation cap with room for JSON escaping.

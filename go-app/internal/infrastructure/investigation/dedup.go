@@ -16,6 +16,12 @@ import (
 // growth; a re-fire after resolve gets a new StartsAt and a new key.
 const dedupTTL = 24 * time.Hour
 
+// inFlightTTL bounds a shared claim while its job runs (LLM retries plus
+// the agent loop stay well under it). A process that dies or is stopped
+// mid-job leaves only this short claim, so the incident reopens soon;
+// extendShared lifts a finished job's claim to dedupTTL.
+const inFlightTTL = 15 * time.Minute
+
 // dedupKeyPrefix namespaces the shared claims in Redis.
 const dedupKeyPrefix = "amp:investigation:dedup:"
 
@@ -78,14 +84,15 @@ func (d *dedup) releaseLocal(key string) {
 	d.mu.Unlock()
 }
 
-// claimShared reports whether key was free across replicas and claims it.
+// claimShared reports whether key was free across replicas and claims it for
+// inFlightTTL.
 // Without a Redis client every claim succeeds; a Redis error is returned with
 // claimed=true, so the caller investigates (fail-open) and logs it.
 func (d *dedup) claimShared(ctx context.Context, key string) (bool, error) {
 	if d.rdb == nil {
 		return true, nil
 	}
-	ok, err := d.rdb.SetNX(ctx, dedupKeyPrefix+key, 1, dedupTTL).Result()
+	ok, err := d.rdb.SetNX(ctx, dedupKeyPrefix+key, 1, inFlightTTL).Result()
 	if err != nil {
 		return true, err
 	}
@@ -99,4 +106,12 @@ func (d *dedup) releaseShared(ctx context.Context, key string) error {
 		return nil
 	}
 	return d.rdb.Del(ctx, dedupKeyPrefix+key).Err()
+}
+
+// extendShared keeps a finished job's claim for dedupTTL.
+func (d *dedup) extendShared(ctx context.Context, key string) error {
+	if d.rdb == nil {
+		return nil
+	}
+	return d.rdb.Expire(ctx, dedupKeyPrefix+key, dedupTTL).Err()
 }

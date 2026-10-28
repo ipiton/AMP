@@ -95,3 +95,55 @@
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.
+
+---
+
+## Раунд 2
+
+**Reviewer perspective:** independent general-purpose agent (тот же ревьюер, что в раунде 1; код не писал)
+**Reviewed at:** 2026-10-28
+**Reviewed tree:** bugfix/investigation-safety-reliability @ e9991d9 (дифф раунда `0c48423..e9991d9`)
+**Verdict:** fix_required (see `review-verdict.json`)
+
+Запуском проверено: `go build ./...` и `go vet ./internal/...` проходят. `go test -race -count=1` по `llm/...`, `core/resilience/...`, `infrastructure/investigation/...`, `core/investigation/...`, `internal/config`, `core/services`, `internal/infrastructure`, `pkg/retry/...` падает ровно в двух тестах: `TestLLMReloadable_ZeroTimeoutAndRetriesKeepPreviousValues` (ожидаемо после F2, правка теста на write-tests) и `TestAlertProcessor_Silence_ResolvedPublished` (предсуществующий, см. ниже).
+
+**`TestAlertProcessor_Silence_ResolvedPublished` — причина подтверждена.** Запуск на чистом `main` во временном worktree даёт тот же FAIL (expected 1, actual 0). Фикстура `silenceTestAlert` (`alert_processor_silence_test.go:87`) ставит `StartsAt = 2026-10-23T10:00Z` без `EndsAt`. Для resolved без `EndsAt` `isOldResolvedAlert` (`filter_engine.go:188`) проверяет `time.Since(StartsAt) > 48h`, и с 2026-10-25 10:00 UTC фильтр блокирует публикацию resolved. Тест — бомба замедленного действия с абсолютной датой, с этой веткой не связан (F1 не трогает переход firing→resolved). Чинить фикстуру относительным временем. Если правка не войдёт в эту задачу, нужна запись в `BUGS.md`.
+
+### Статус находок раунда 1
+
+| ID | Статус | Комментарий |
+|---|---|---|
+| F1 | closed | `updateExistingAlert` при resolved→firing берёт `new.StartsAt`. Побочные эффекты проверены: `UPDATE alerts SET starts_at` пишут и PostgreSQL, и SQLite; memory store (`IngestBatch`) получает входящий алерт и не затронут; публикация, группировка и inhibition получают корректный `StartsAt` нового инцидента — это исправление, а не регресс (раньше resolve повторного срабатывания со старым `StartsAt` > 48h мог отсекаться `isOldResolvedAlert`, а `StartsAtReasonableRule` — падать). Остаток — F12. |
+| F2 | closed | `MaxRetries >= 0` применяется при reload. Тест закрепляет старое поведение и красный, ожидаемо, правка на write-tests. Отрицательное значение при reload сохраняет прежнее, при старте даёт 0 — расхождение уровня nit, не заводится. |
+| F3 | partially | Ошибка `Create` теперь снимает оба claim — исправлено. Путь `Stop` закрыт только для окна backoff, основной путь не закрыт — F13. |
+| F4 | open, defer-bug | Без изменений. Компромисс раскрыт в CHANGELOG и Spec Risks (F5). |
+| F5 | closed | В CHANGELOG есть латентность ретраев (около 7s, CB, `llm.max_retries`) и пункт про `startsAt` после re-fire; в Spec 1.1 — Risks. |
+| F6 | closed | Ключ использует `StartsAt.Unix()`. |
+| F7 | closed | Статус входит в ключ. |
+| F8 | closed | Claim и `Create` получают раздельные контексты по 5s. |
+| F9 | closed | Логи pod сохраняют хвост 8 KiB, маркер кэпа просит сузить запрос. Loki/Prometheus 16–256 KiB по-прежнему режутся посреди JSON, но с подсказкой. Принято. Остаток — F11. |
+| F10 | open, defer-bug | Без изменений, отражено в Edge Case 3. |
+
+### F11 — `get_logs` читает только первые 256 KiB потока: при длинных строках «хвост» оказывается серединой
+- **Severity:** minor
+- **Location:** `go-app/internal/infrastructure/investigation/tools/kubernetes.go:184-195`
+- **Issue:** `io.Copy(tb, io.LimitReader(stream, maxToolResponseBytes))` прекращает чтение после 256 KiB, и `tailBuffer` сохраняет последние 8 KiB этих 256 KiB, а не потока. При `tail_lines` 500 и структурированных JSON-логах (1–2 KiB на строку, итого 0.5–1 MiB) модель получает строки примерно из середины, а самые свежие не прочитаны вовсе. Маркер `...[N earlier bytes dropped]` при этом утверждает, что выброшено только более раннее. Это ровно тот дефект, который чинил F9, для частого формата логов.
+- **Recommendation:** читать поток в `tailBuffer` целиком: память ограничена 8 KiB, объём сети ограничен `tail_lines` ≤ 500. Если нужен страховочный предел, сделать его заметно больше (например, 4 MiB) и при его срабатывании честно писать, что поток не дочитан. Тест: поток больше 256 KiB ⇒ в выводе последние байты потока.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### F12 — re-fire распознаётся только по статусу `resolved` в БД; алерт, истёкший по `endsAt` без resolve-сообщения, остаётся со старым `StartsAt`
+- **Severity:** minor
+- **Location:** `go-app/internal/core/services/deduplication.go:373-375`
+- **Issue:** условие `existing.Status == resolved && new.Status == firing` пропускает случай, когда отправитель не прислал resolve: рестарт Prometheus, отказ HA-пары, `resolve_timeout`. В БД остаётся `status=firing` с `ends_at` в прошлом. Новое срабатывание через часы приходит с новым `startsAt`, но идёт как firing→firing: `StartsAt` старый, ключ дедупа старый, расследование глушится до 24h. Upstream Alertmanager считает такой алерт resolved (`EndsAt` < now) и заменяет его новым.
+- **Recommendation:** считать существующий алерт завершённым и при `existing.EndsAt != nil && existing.EndsAt.Before(now)`, то есть принять `new.StartsAt`, если `new.StartsAt` позже `existing.EndsAt`. Тест на этот переход.
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### F13 — прерывание на `Stop` снимает claim только в окне backoff; основной путь (LLM-вызов, agent loop) держит инцидент 24h
+- **Severity:** major
+- **Location:** `go-app/internal/infrastructure/investigation/queue.go:216-221` (единственная точка `releaseClaims` на отмене), `queue.go:244-255`, `queue.go:319-342`; `go-app/internal/application/service_registry.go:2486` (`Stop(5 * time.Second)`)
+- **Issue:** `Stop` ждёт 5s, а `LLMTimeout` равен 60s и agent loop идёт до 10 итераций, так что при rolling deploy job почти всегда прерывается внутри LLM-вызова или agent loop, а не в backoff. Отменённый вызов на последней попытке ведёт в `SaveError`/DLQ (ctx уже отменён, запись не пишется), в agent-режиме — в `failed`. В обоих случаях `releaseClaims` не вызывается, Redis-claim живёт 24h, статус застревает в `processing`. Кроме того, `Stop` после `cancel()` сразу возвращает управление, и shutdown может закрыть Redis-клиент раньше, чем воркер успеет выполнить `DEL`. SIGKILL/OOM без `Stop` дают тот же результат. До задачи следующий resend создал бы новое расследование, поэтому это регресс этой задачи. Утверждение автора «claims снимаются при прерывании на Stop» верно только для узкого окна.
+- **Recommendation:** надёжнее не снимать claim, а не давать ему жить долго во время работы: `SETNX` с коротким «рабочим» TTL (например, `LLMTimeout × (MaxRetries+1)` + запас или фиксированные 15m), а после записи результата или ошибки (`SaveResult`/`SaveAgentResult`/`SaveError`) продлевать до 24h через `EXPIRE`. Это покрывает и Stop, и падение процесса. Минимум: на любом выходе из `processJob` при `q.ctx.Err() != nil` вызывать `releaseClaims`, а `Stop` должен дожидаться воркеров после `cancel()` хотя бы на короткий срок. Тест: отмена ctx во время `InvestigateAlert` на последней попытке и во время agent loop ⇒ ключ в miniredis удалён или живёт с коротким TTL.
+- **Disposition:** fix-here
+- **Follow-up:** n/a

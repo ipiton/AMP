@@ -1,9 +1,9 @@
 {
   "gate": "fix_required",
-  "reason": "fix-here majors F1 (re-fire after resolve reuses stored StartsAt, dedup suppresses it for 24h), F2 (hot reload ignores llm.max_retries: 0), F3 (claims not released when Create fails or the job is aborted)",
+  "reason": "round 2: fix-here major F13 (an investigation aborted by Stop during the LLM call or the agent loop keeps its shared dedup claim for 24h; release covers only the backoff window); minors F11, F12 fix-here",
   "branch": "bugfix/investigation-safety-reliability",
-  "commit": "0c48423",
+  "commit": "e9991d9",
   "reviewed_at": "2026-10-28",
-  "findings": { "blocker": 0, "major": 4, "minor": 6, "nit": 0 },
+  "findings": { "blocker": 0, "major": 2, "minor": 3, "nit": 0 },
   "open": { "blocker": 0, "major_without_disposition": 0 }
 }

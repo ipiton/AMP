@@ -367,10 +367,13 @@ func (s *deduplicationService) alertNeedsUpdate(new, existing *core.Alert) bool 
 
 // updateExistingAlert updates an existing alert
 func (s *deduplicationService) updateExistingAlert(ctx context.Context, new, existing *core.Alert) (*ProcessResult, error) {
-	// A firing alert after a resolve is a new incident: take its StartsAt,
-	// or it would keep the previous incident's start (history, and the
-	// investigation dedup key, INVESTIGATION-SAFETY-RELIABILITY).
-	if existing.Status == core.StatusResolved && new.Status == core.StatusFiring {
+	// A firing alert after the previous incident ended is a new incident:
+	// take its StartsAt, or it would keep the previous incident's start
+	// (history, and the investigation dedup key, INVESTIGATION-SAFETY-RELIABILITY).
+	// "Ended" is a resolve, or an EndsAt before the new start when the
+	// resolve never arrived.
+	if new.Status == core.StatusFiring && new.StartsAt.After(existing.StartsAt) &&
+		(existing.Status == core.StatusResolved || (existing.EndsAt != nil && existing.EndsAt.Before(new.StartsAt))) {
 		existing.StartsAt = new.StartsAt
 	}
 
