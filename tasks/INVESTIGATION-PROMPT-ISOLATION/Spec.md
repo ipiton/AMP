@@ -113,7 +113,7 @@ investigation:
 3. Allowlist `["*"]`, namespace не передан, у алерта нет лейбла → отказ (пустой namespace не уходит в API, F8).
 4. Аннотация содержит `</alert_data>` → в промпте `</alert_data>`.
 5. Шаг agent loop: 503, 503, 200 → цикл продолжается; 400 → сразу ошибка, breaker не считает.
-6. Breaker расследований открыт → `ErrCircuitBreakerOpen` → очередь: transient, retry с backoff; agent loop → `error`.
+6. Breaker расследований открыт → `ErrCircuitBreakerOpen` → очередь: transient, retry с backoff. Шаги уже начатого agent loop breaker не проходят (deep review F2).
 7. `provider: proxy` → `ErrLLMProviderUnsupported`, очередь — permanent, без сетевых вызовов.
 8. `database.enabled: true`, `dsn` пуст → WARN, tool не зарегистрирован, остальные tools работают.
 

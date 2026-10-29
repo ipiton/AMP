@@ -99,6 +99,41 @@
 - Поведение breaker'а при смеси 400 и 503 (400 сбрасывает `consecutiveFailures` и закрывает half-open) — по замыслу Spec, проверить в 5.2.
 - Что шаг agent loop со второй итерации действительно несёт `user`-сообщение с `<alert_data>` после `trimHistory` — 5.1.
 
+## Round 2
+
+**Reviewed at:** 2026-10-29
+**Reviewed tree:** bugfix/investigation-prompt-isolation @ 25f5490
+**Verdict:** pass (see `review-verdict.json`)
+
+Заново прочитан весь `git diff main...HEAD`, а не только фикс-коммит `25f5490`. `go build ./...` зелёный; `go vet` по `internal/core/...`, `internal/application/...`, `internal/config/...` чистый; `go test ./internal/core/investigation/... ./internal/config/...` — 362 passed. Шаблоны редактирования прогнаны пробой (копия `redact.go` в scratchpad) на прежних 27 строках и 10 новых. `BindEnv` проверен пробой на viper v1.21.0.
+
+### Статус находок раунда 1
+
+- **F1 — resolved (docs + WARN), ужесточение дефолта отложено.** CHANGELOG (Security и migration note), `config.yaml.example`, README, комментарии `context.go` и `KubernetesTool.allowedNamespaces` теперь прямо говорят: лейбл задаёт отправитель алерта, граница — `allowed_namespaces`. При пустом списке на старте пишется WARN. В Spec добавлена P7 (code-read, «If wrong» описан). Отказ без явного списка — `INVESTIGATION-K8S-NS-DEFAULT-DENY` в `BACKLOG.md` на `finalize` (disposition по нему — defer-backlog).
+- **F2 — resolved.** `InvestigateWithTools` вызывает `WithRetryFunc(doChat)` без `callInvestigation`, так что шаги начатого прогона breaker не отсекает. `InvestigateAlert` по-прежнему идёт через breaker и ретраится очередью (breaker-open → transient). Регрессий не нашёл: `respBody, err :=` объявляет новую переменную, `err` уже объявлен выше, сборка зелёная. При затяжном сбое каждый шаг делает не больше `max_retries+1` попыток, воркеров 3, нагрузка на провайдера ограничена. Остался устаревший текст в Spec (F9).
+- **F3 — resolved.** В `callInvestigation` ошибка при `ctx.Err() != nil` breaker'у не засчитывается. `ctx` внутри замыкания — тот же контекст вызывающего, что передаётся в `Call`. Таймаут HTTP-клиента провайдера (30s) короче `investigation.llm_timeout` (60s) и при живом `ctx` по-прежнему считается отказом — как и задумано.
+- **F4 — resolved, с остатками (F10).** Проба: значения в кавычках маскируются целиком (`"correct horse battery staple"`, `"a,b"`, `\"…\"` в JSON-строке лога, включая значение, оканчивающееся экранированным `\\`); хвосты `&…` из `json.Marshal` больше не утекают; URL с пустым user маскируется; `Authorization` любой схемы маскируется. Пустое значение `token=""` → `token="[REDACTED]"` — безвредно. Перемаскирование («authorization: denied for user bob» → `[REDACTED]`; незакрытая кавычка после ключа захватывает текст до следующей `"`) в пределах заявленного best effort.
+- **F5 — resolved.** `viper.BindEnv("investigation.tools.database.dsn")` в `setDefaults`, который вызывают оба пути загрузки (`LoadConfig`, `LoadConfigFromEnv`). Проба: при YAML с `database.enabled: true` значение `INVESTIGATION_TOOLS_DATABASE_DSN` доходит до `DSN`. Без секции `database` в YAML указатель остаётся `nil`, но tool всё равно включается только из YAML (`enabled` не привязан к env), так что противоречия нет. В `config.yaml.example` env-переменная указана как предпочтительный путь. Утечки DSN через экспорт конфига нет: `ConfigService` (`config/service.go`) нигде не подключён, а reload-diff секцию `investigation` не логирует.
+- **F6 — resolved.** CHANGELOG: ретраи — `llm.max_retries` со встроенным backoff (1s, ×2, до 10s; совпадает с `MaxDelay = RetryDelay*10`), breaker — встроенные настройки (5 подряд или 50% за 60s, half-open через 30s; совпадает с `DefaultCircuitBreakerConfig`). Spec §5 поправлен так же.
+- **F7 — resolved.** Правило `basic` удалено; Basic-заголовок закрывает правило `Authorization`. Bare `bearer` требует ≥16 символов: «basic authentication failed», «Basic configuration loaded» остаются как есть.
+- **F8 — defer-backlog**, как и было (`BACKLOG.md` на `finalize`).
+
+### F9 — устаревшие описания breaker'а и ретраев шага в Spec и в комментарии
+- **Severity:** nit
+- **Location:** `tasks/INVESTIGATION-PROMPT-ISOLATION/Spec.md:116` (Edge Case 6); `go-app/internal/infrastructure/llm/investigate_with_tools.go:57`
+- **Issue:** Edge Case 6 по-прежнему говорит «agent loop → `error`» при открытом breaker, хотя после F2 шаги через breaker не идут. Комментарий `InvestigateWithTools` говорит «per llm.max_retries/retry_delay/retry_backoff» — после F6 это читается как несуществующие ключи конфига.
+- **Recommendation:** Edge Case 6: «открыт → `InvestigateAlert` получает `ErrCircuitBreakerOpen` (очередь: transient); шаги идущего прогона breaker не видят». В комментарии написать «per llm.max_retries with the built-in backoff».
+- **Disposition:** fix-here
+- **Follow-up:** n/a
+
+### F10 — остаточные пропуски редактирования: параметры Digest после кавычки, пароль с `@` в URL
+- **Severity:** nit
+- **Location:** `go-app/internal/core/investigation/redact.go` (правило `Authorization`, правило URL)
+- **Issue:** правило `Authorization` останавливается на первой кавычке (это сделано намеренно, чтобы в JSON `"Authorization":"…","path":…` не съесть соседние поля). Поэтому у `Authorization: Digest username="x", response="…"` маскируется только `Digest username=`, а значения в кавычках остаются. Утекает хеш `response`, привязанный к nonce: повторно его не использовать, ущерб низкий. Пароль с `@` в URL (`scheme://user:p@ss@host`) маскируется только до первого `@`, это было в рекомендации раунда 1 и не сделано. Оба случая редкие, CHANGELOG их не обещает.
+- **Recommendation:** для `Authorization` без кавычки сразу после разделителя маскировать до конца строки, с кавычкой — до закрывающей кавычки. В URL-правиле брать пароль до последнего `@` перед хостом. Можно оставить как известное ограничение best effort.
+- **Disposition:** defer-tech-debt
+- **Follow-up:** `TECH-DEBT.md` на `finalize`
+
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.

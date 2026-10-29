@@ -54,7 +54,8 @@ type openAIChatResponse struct {
 // InvestigateWithTools calls the LLM with a running conversation history and
 // available tool definitions. It implements investigation.AgentLLMClient.
 //
-// One step retries 429/5xx per llm.max_retries/retry_delay/retry_backoff
+// One step retries 429/5xx up to llm.max_retries times with the client's
+// built-in backoff
 // (deep review F10 of INVESTIGATION-SAFETY-RELIABILITY): a failed step fails
 // the whole run, and the per-incident dedup claim then blocks a re-run for
 // 24h. Steps do not go through the investigation breaker: the run already

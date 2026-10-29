@@ -1,9 +1,9 @@
 {
-  "gate": "fix_required",
-  "reason": "major fix-here: F1 (default namespace bound is the sender-controlled alert label; CHANGELOG/comments overclaim), F2 (open/half-open investigation breaker terminates in-flight agent loops, then 24h dedup); minor/nit fix-here: F3, F4, F5, F6, F7",
+  "gate": "pass",
+  "reason": null,
   "branch": "bugfix/investigation-prompt-isolation",
-  "commit": "03dc683",
+  "commit": "25f5490",
   "reviewed_at": "2026-10-29",
-  "findings": { "blocker": 0, "major": 2, "minor": 4, "nit": 2 },
+  "findings": { "blocker": 0, "major": 2, "minor": 4, "nit": 4 },
   "open": { "blocker": 0, "major_without_disposition": 0 }
 }
