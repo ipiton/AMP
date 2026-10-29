@@ -16,6 +16,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **INVESTIGATION-PROMPT-ISOLATION** — срез 2 `INVESTIGATION-SAFETY-BUNDLE` (`BUGS.md`, взят 2026-10-29): данные алерта из `system` в `user`-сообщение с разделителем, allowlist namespace для Kubernetes tool, отдельный DSN для `database_query`, один `doChat` с CB и ретраями 429/5xx для шагов agent loop. Full, ~1d.
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -43,8 +45,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### 2. Code review 2026-10-21 — конвейер
 > Пересмотрен 2026-10-24 (`ADR-019-V2-SLICING`): позиции по удаляемому ядру сняты (`[-]` в `REVIEW-PIPELINE-2026-10-21.md`, записи — в секциях «Снимается переходом на upstream (ADR-019)» `BUGS.md`/`TECH-DEBT.md`). Голова живой части — №8. Остальные живые позиции берутся из `REVIEW-PIPELINE-2026-10-21.md` по порядку.
-
-- [ ] **INVESTIGATION-PROMPT-ISOLATION** — срез 2 `INVESTIGATION-SAFETY-BUNDLE` (`BUGS.md`): данные алерта из `system` в `user`-сообщение с разделителем, allowlist namespace для Kubernetes tool, отдельный DSN для `database_query`, один `doChat` с CB и ретраями 429/5xx для шагов agent loop. Full, ~1d. Срез 1 — `INVESTIGATION-SAFETY-RELIABILITY` (закрыт 2026-10-28).
 
 `CONFIG-RELOADER-SIDECAR` снят из Queue 2026-10-07: заблокирован `PROD-RELEASE-V010` и `CONFIG-RELOADER-AUTH`, статус — в BACKLOG § Near-term.
 
