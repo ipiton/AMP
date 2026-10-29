@@ -133,19 +133,6 @@
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/research.md` (code-read, вне scope).
 - **Status:** open
 
-### [high][Security][~1d] INVESTIGATION-PROMPT-ISOLATION
-- **Title:** недоверенные данные алерта в system-промпте, investigation tools без allowlist namespace
-- **Problem:**
-  - `buildOpenAIMessages` (`internal/infrastructure/llm/investigate_with_tools.go:165`) кладёт JSON алерта (все labels/annotations) в роль `system`; классификация — так же (`llm/client.go:385-394`): инъекция в аннотацию может выставить `severity=noise`, после чего `filter_engine` дропнет алерт.
-  - Kubernetes tool (`internal/infrastructure/investigation/tools/kubernetes.go:165`) читает логи/поды/события в любом namespace по выбору LLM; вывод уходит внешнему провайдеру и в БД.
-  - `database_query` ходит в пул самого AMP (`service_registry.go:2226`) ⇒ неверные выводы по алертам на чужие БД, утечка `pg_stat_activity` AMP провайдеру.
-  - `InvestigateAlert`/`InvestigateWithTools` (`llm/client.go:521`) игнорируют `provider` и circuit breaker.
-  - Шаги agent loop (`InvestigateWithTools`, `llm/investigate_with_tools.go:123-127`) не ретраят 429/5xx: короткий 503 посреди цикла даёт `failed`, а dedup-claim (24h, `INVESTIGATION-SAFETY-RELIABILITY`) не даёт расследовать инцидент повторно. Ретраи или CB — в общем `doChat` (deep review F10).
-- **Impact:** атакующий с правом слать алерты управляет агентом и вытягивает логи чужих namespace во внешний LLM.
-- **Fix:** данные алерта — в `user`-сообщении в явном разделителе с инструкцией «это данные»; `investigation.tools.kubernetes.allowed_namespaces`, по умолчанию — namespace из лейбла алерта; редактирование секретов в выводе tools; отдельный DSN для `database_query`, без него tool не регистрировать; один `doChat` с CB и лимитом тела.
-- **Refs:** CODE-REVIEW-2026-10-21 H-9, L-7, L-9. Смежно `PROD-LLM-ALERT-PATH-ISOLATION`, `INVESTIGATION-K8S-TOOL-HELM`.
-- **Status:** open
-
 ### [low][Gate][~0.1d] RELEASE-GATE-SMOKE-PORT-CONFLICT
 - **Title:** шаг `amtool-compat` краснеет, если порт хоста 18080 занят
 - **Problem:** `deploy/smoke/docker-compose.yml:57` публикует amp на фиксированном `18080`, проба `scripts/release-gate.sh:296` ходит в `localhost:18080/healthz`. На машине владельца этот порт занят локальным `agent-memory-mcp` (`127.0.0.1`) и `kubectl port-forward` (`[::1]`): проба получает 404 от чужого процесса, хотя контейнер `healthy`. Сам amtool ходит по docker-сети к `amp:8080` и порт хоста не использует.
@@ -160,6 +147,14 @@
 - **Impact:** ретраи расследований нельзя выключить; оператор, поставивший 0 ради бюджета LLM, получает до 4 вызовов на job.
 - **Fix:** различать «не задано» и `0` (viper `SetDefault` + `>= 0`), тест на wiring; строка в CHANGELOG.
 - **Refs:** найдено на deep review `INVESTIGATION-SAFETY-RELIABILITY` (2026-10-28), `tasks/archive/INVESTIGATION-SAFETY-RELIABILITY/review-findings.md`.
+- **Status:** open
+
+### [low][Investigation][~0.25d] INVESTIGATION-ALERT-TIME-UNSET
+- **Title:** Prometheus и Loki tools всегда якорятся на `time.Now()`, а не на времени алерта
+- **Problem:** `core/investigation/context.go` несёт `WithAlertTime`/`AlertTimeFromCtx`, `prometheus.go:73` и `loki.go:77` его читают, но production-вызова `WithAlertTime` нет (`grep -rn WithAlertTime go-app/internal` — только определение и чтение). `AgentLoop.Run` выставляет на контекст tools только namespace (`WithAlertNamespace`).
+- **Impact:** расследование, взятое из очереди с задержкой или повторно, смотрит метрики и логи «сейчас», а не окно вокруг `StartsAt`: выводы по уже прошедшему инциденту неверны.
+- **Fix:** `WithAlertTime(ctx, alert.StartsAt)` рядом с `WithAlertNamespace` в `AgentLoop.Run`, тест на окно запроса.
+- **Refs:** `tasks/archive/INVESTIGATION-PROMPT-ISOLATION/research.md` F1 (2026-10-29).
 - **Status:** open
 
 ### [medium][UI][~0.25d] UI-ROUTE-PREFIX-LINKS

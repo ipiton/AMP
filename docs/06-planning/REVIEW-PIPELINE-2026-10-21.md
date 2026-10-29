@@ -30,7 +30,7 @@
 | 5 | [-] | `ROUTE-CONTINUE-NO-FANOUT` | B (существовал) | Full | 1d | — | H-10; снят ADR-019, срез 5 |
 | 6 | [-] | `DURATION-UPSTREAM-UNITS` | B | Standard | 0.25d | — | H-2; снят ADR-019, срез 5 |
 | 7 | [-] | `CONFIG-RELOAD-BUNDLE` | TD/Bundle | Standard | 1.25d | — | H-5, H-6, M-19, M-20, M-22, L-5 (breaking: битые matchers); снят ADR-019, срез 5 (`CONFIG-ENV-KEYS-UNBOUND` остаётся в `BUGS.md` standalone) |
-| 8 | [ ] | `INVESTIGATION-SAFETY-BUNDLE` | TD/Bundle | Full | 2.25d | — | H-7, H-8, H-9, L-7, L-8, L-9; срез 1 (H-7, H-8, L-8) закрыт 2026-10-28, остался `INVESTIGATION-PROMPT-ISOLATION` |
+| 8 | [x] | `INVESTIGATION-SAFETY-BUNDLE` | TD/Bundle | Full | 2.25d | — | H-7, H-8, H-9, L-7, L-8, L-9; срез 1 (H-7, H-8, L-8) закрыт 2026-10-28, срез 2 `INVESTIGATION-PROMPT-ISOLATION` (H-9, L-7, L-9) — 2026-10-29 |
 | 9 | [-] | `SILENCE-REPO-INTEGRATION-TESTS` | B | Standard | 1d | — | H-11; снят ADR-019, срез 5 |
 
 ## Medium (~22.5d)

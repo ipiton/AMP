@@ -11,14 +11,6 @@
 
 <!-- Code review 2026-10-21: участники — записи BUGS.md / TECH-DEBT.md. Пути verify — от корня репозитория. -->
 
-### INVESTIGATION-SAFETY-BUNDLE
-- [high][Investigation][~2.25d] INVESTIGATION-SAFETY-BUNDLE
-- **Combined verify:** `cd go-app && go test -race ./internal/infrastructure/investigation/... ./internal/infrastructure/llm/... ./internal/core/resilience/...`
-- **Members (ordered):**
-  - [x] LLM-RETRY-CLASSIFY (2026-10-28, `INVESTIGATION-SAFETY-RELIABILITY`)
-  - [x] INVESTIGATION-ASYNC-DEDUP (2026-10-28, `INVESTIGATION-SAFETY-RELIABILITY`)
-  - [ ] INVESTIGATION-PROMPT-ISOLATION
-
 <!-- ADR-019-V2-SLICING (2026-10-24): CONFIG-RELOAD-BUNDLE, API-COMPAT-BUNDLE, INHIBITION-LIFECYCLE-BUNDLE, REDIS-STORAGE-BUNDLE распущены —
      большинство участников в «Снимается переходом на upstream (ADR-019)»; CONFIG-ENV-KEYS-UNBOUND и SERVER-HARDENING остаются standalone в BUGS.md. -->
 
@@ -189,6 +181,14 @@
 - **Impact:** редкий: reload читает другой файл, чем старт.
 - **Fix:** передавать в `ServiceRegistry` путь, уже разрешённый в `main`.
 - **Refs:** review-findings F8.
+- **Status:** open
+
+### [low][Security][~0.25d] INVESTIGATION-REDACT-GAPS
+- **Title:** редактирование секретов в выводе investigation tools пропускает Digest-параметры и пароль с `@` в URL
+- **Problem:** `go-app/internal/core/investigation/redact.go`: правило `Authorization` останавливается на первой кавычке (чтобы в JSON не съесть соседние поля), поэтому у `Authorization: Digest username="x", response="…"` значения в кавычках остаются. Правило URL берёт пароль до первого `@`: у `scheme://user:p@ss@host` хвост пароля остаётся.
+- **Impact:** низкий: `response` Digest привязан к nonce, пароль с `@` в URL редок. Редактирование заявлено как best effort.
+- **Fix:** `Authorization` без кавычки после разделителя — до конца строки, с кавычкой — до закрывающей; в URL — пароль до последнего `@` перед хостом; кейсы в `redact_test.go`.
+- **Refs:** `tasks/archive/INVESTIGATION-PROMPT-ISOLATION/review-findings.md` F10 (2026-10-29).
 - **Status:** open
 
 ### [low][Gate][~0.1d] RELEASE-GATE-UNQUOTED-ARGS
