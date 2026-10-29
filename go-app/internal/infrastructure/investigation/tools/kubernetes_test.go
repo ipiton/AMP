@@ -15,7 +15,7 @@ import (
 )
 
 func TestKubernetesTool_Definition(t *testing.T) {
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset())
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(), anyNamespace)
 	def := tool.Definition()
 	assert.Equal(t, "kubernetes_action", def.Name)
 	assert.Contains(t, def.Parameters.Required, "action")
@@ -25,15 +25,15 @@ func TestKubernetesTool_Definition(t *testing.T) {
 }
 
 func TestKubernetesTool_Execute_UnknownAction(t *testing.T) {
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset())
-	result, err := tool.Execute(context.Background(), map[string]any{"action": "bad_action"})
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(), anyNamespace)
+	result, err := tool.Execute(context.Background(), map[string]any{"action": "bad_action", "namespace": "default"})
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
 	assert.Contains(t, result.Error, "unknown action")
 }
 
 func TestKubernetesTool_Execute_MissingAction(t *testing.T) {
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset())
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(), anyNamespace)
 	result, err := tool.Execute(context.Background(), map[string]any{})
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
@@ -54,7 +54,7 @@ func TestKubernetesTool_ListPods(t *testing.T) {
 			},
 		},
 	}
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(pod))
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(pod), anyNamespace)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"action":    "list_pods",
@@ -77,7 +77,7 @@ func TestKubernetesTool_GetPod(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "staging"},
 		Status:     corev1.PodStatus{Phase: corev1.PodPending},
 	}
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(pod))
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(pod), anyNamespace)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"action":    "get_pod",
@@ -94,9 +94,10 @@ func TestKubernetesTool_GetPod(t *testing.T) {
 }
 
 func TestKubernetesTool_GetPod_MissingName(t *testing.T) {
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset())
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(), anyNamespace)
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"action": "get_pod",
+		"action":    "get_pod",
+		"namespace": "default",
 	})
 	require.NoError(t, err)
 	assert.True(t, result.IsError)
@@ -115,7 +116,7 @@ func TestKubernetesTool_GetEvents(t *testing.T) {
 		Message: "Container killed due to OOM",
 		Count:   3,
 	}
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(event))
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(event), anyNamespace)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"action":    "get_events",
@@ -142,7 +143,7 @@ func TestKubernetesTool_GetDeployments(t *testing.T) {
 			AvailableReplicas: 2,
 		},
 	}
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(dep))
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(dep), anyNamespace)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
 		"action":    "get_deployments",
@@ -160,9 +161,10 @@ func TestKubernetesTool_GetDeployments(t *testing.T) {
 }
 
 func TestKubernetesTool_GetLogs_MissingName(t *testing.T) {
-	tool := tools.NewKubernetesTool(fake.NewSimpleClientset())
+	tool := tools.NewKubernetesTool(fake.NewSimpleClientset(), anyNamespace)
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"action": "get_logs",
+		"action":    "get_logs",
+		"namespace": "default",
 	})
 	require.NoError(t, err)
 	assert.True(t, result.IsError)

@@ -44,7 +44,7 @@ based_on:
 | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|
 | P1. `Tool.Execute` вызывается только из `ToolRegistry.Execute`, а он — только из `AgentLoop.Run` | `grep -rn` по `internal`, `cmd` (research F2) | call-path-traced | Другой вызывающий обходит namespace/редактирование; tool без namespace в контексте отказывает (fail-closed), так что утечки нет |
-| P2. `encoding/json.Marshal` экранирует `<`/`>` → `<`/`>` | `evidence/json-escape.txt` | measured | Данные закрывают разделитель; инъекция снова похожа на инструкцию |
+| P2. `encoding/json.Marshal` экранирует `<`/`>` → `\u003c`/`\u003e` | `evidence/json-escape.txt` | measured | Данные закрывают разделитель; инъекция снова похожа на инструкцию |
 | P3. Общий CB считает вызовы ≥ `SlowCallDuration` (3s) неудачами | `circuit_breaker.go:109,245-246` | code-read | Если не так — отдельный CB избыточен, но не вреден |
 | P4. Очередь ретраит `InvestigateAlert` сама и классифицирует ошибку в `classifyError` | `queue.go:234-268,428` | code-read | Двойные ретраи или неверная классификация sentinel |
 | P5. Прометеевские алерты по k8s-объектам несут лейбл `namespace` | конвенция kube-state-metrics/kube-prometheus; в репозитории — `core.Alert.Namespace()` (`interfaces.go:85`) | assumed | Без лейбла tool отказывает; оператор задаёт `allowed_namespaces`. Риск — в Rollout |
@@ -111,7 +111,7 @@ investigation:
 1. Алерт без лейбла `namespace`, allowlist пуст, LLM не передал namespace → отказ «no namespace: alert has no namespace label and allowed_namespaces is empty».
 2. LLM просит `kube-system`, алерт из `payments`, allowlist пуст → отказ с перечислением разрешённого.
 3. Allowlist `["*"]`, namespace не передан, у алерта нет лейбла → отказ (пустой namespace не уходит в API, F8).
-4. Аннотация содержит `</alert_data>` → в промпте `</alert_data>`.
+4. Аннотация содержит `</alert_data>` → в промпте `\u003c/alert_data\u003e`.
 5. Шаг agent loop: 503, 503, 200 → цикл продолжается; 400 → сразу ошибка, breaker не считает.
 6. Breaker расследований открыт → `ErrCircuitBreakerOpen` → очередь: transient, retry с backoff. Шаги уже начатого agent loop breaker не проходят (deep review F2).
 7. `provider: proxy` → `ErrLLMProviderUnsupported`, очередь — permanent, без сетевых вызовов.

@@ -23,7 +23,7 @@ func TestAllToolsRegisterAndDefine(t *testing.T) {
 	registry.Register(tools.NewLokiTool(&config.LokiToolConfig{
 		Endpoint: "http://loki:3100",
 	}))
-	registry.Register(tools.NewKubernetesTool(fake.NewSimpleClientset()))
+	registry.Register(tools.NewKubernetesTool(fake.NewSimpleClientset(), anyNamespace))
 	registry.Register(tools.NewDatabaseTool(&fakeQuerier{}))
 
 	defs := registry.Definitions()

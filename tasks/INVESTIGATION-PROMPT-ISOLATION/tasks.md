@@ -54,11 +54,11 @@ based_on:
 
 ## Phase 5: Тесты (после deep-review pass)
 
-- [ ] **5.1** Промпт: алерт только в `user`, разделитель не закрывается, правило в `system`, runbooks в `system` (все три пути) <!-- verify: go test ./internal/infrastructure/llm/... -->
-- [ ] **5.2** `doChat`/breaker: 503→503→200 ретраится в шаге, 400 — нет и не открывает breaker; медленный вызов не открывает breaker; открытый breaker — без сети; `proxy` → `ErrLLMProviderUnsupported` без сети <!-- verify: go test -race ./internal/infrastructure/llm/... -->
-- [ ] **5.3** Kubernetes allowlist: edge cases 1–3 Spec, `*`, явный список <!-- verify: go test ./internal/infrastructure/investigation/tools/... -->
-- [ ] **5.4** `redactSecrets` таблицей; agent loop редактирует observation и ошибку, кладёт namespace <!-- verify: go test ./internal/core/investigation/... -->
-- [ ] **5.5** `classifyError` для sentinel <!-- verify: go test ./internal/infrastructure/investigation/... -->
+- [x] **5.1** Промпт: алерт только в `user`, разделитель не закрывается, правило в `system`, runbooks в `system` (все три пути) <!-- verify: go test ./internal/infrastructure/llm/... -->
+- [x] **5.2** `doChat`/breaker: 503→503→200 ретраится в шаге, 400 — нет и не открывает breaker; медленный вызов не открывает breaker; открытый breaker — без сети; `proxy` → `ErrLLMProviderUnsupported` без сети <!-- verify: go test -race ./internal/infrastructure/llm/... -->
+- [x] **5.3** Kubernetes allowlist: edge cases 1–3 Spec, `*`, явный список <!-- verify: go test ./internal/infrastructure/investigation/tools/... -->
+- [x] **5.4** `redactSecrets` таблицей; agent loop редактирует observation и ошибку, кладёт namespace <!-- verify: go test ./internal/core/investigation/... -->
+- [x] **5.5** `classifyError` для sentinel <!-- verify: go test ./internal/infrastructure/investigation/... -->
 
 ## Phase 6: Гейты
 
