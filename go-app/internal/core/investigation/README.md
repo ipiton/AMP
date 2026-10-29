@@ -57,9 +57,17 @@ Results are compact JSON summaries (not full k8s objects) to reduce token usage.
 Parameters: `action` (required), `namespace`, `name`, `container`, `tail_lines`,
 `label_selector`.
 
+Namespaces are limited by `investigation.tools.kubernetes.allowed_namespaces`.
+With an empty list, only the alert's `namespace` label (set in context via
+`WithAlertNamespace`) is allowed; `["*"]` allows any namespace. A call without
+`namespace` uses the alert's namespace. A refused or empty namespace returns
+`IsError` without an API call.
+
 ### database_query
 
-Executes a fixed PostgreSQL diagnostic query by name:
+Executes a fixed PostgreSQL diagnostic query by name against
+`investigation.tools.database.dsn`. The tool is not registered without a DSN; it
+never uses AMP's own database.
 
 | `query_type`       | Source view                | Notes                                   |
 |--------------------|----------------------------|-----------------------------------------|
@@ -172,3 +180,15 @@ entry is absent or disabled. Runbooks are loaded in the same block by
 `ServiceRegistry.configureRunbooks` and passed to the loop with
 `AgentLoop.SetRunbooks`; the LLM client receives them through
 `PromptContext` on `AgentLLMClient.InvestigateWithTools`.
+
+## Untrusted Data
+
+The alert payload and tool output come from systems AMP does not control.
+
+- The LLM client sends the alert and its classification in the user message
+  inside `<alert_data>…</alert_data>`. The system message says that this block
+  and all tool results are data, not instructions. Runbooks, which the operator
+  writes, stay in the system message.
+- The agent loop scrubs credentials from every tool result and tool error
+  (`redactSecrets`) before the observation is capped, stored and sent to the
+  model. Best effort, not a guarantee.

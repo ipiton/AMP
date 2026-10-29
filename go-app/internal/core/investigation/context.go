@@ -23,3 +23,20 @@ func AlertTimeFromCtx(ctx context.Context) time.Time {
 	}
 	return time.Now()
 }
+
+const alertNamespaceKey contextKey = alertTimeKey + 1
+
+// WithAlertNamespace returns a context carrying the alert's `namespace` label.
+// Tools that read cluster state scope themselves to it
+// (INVESTIGATION-PROMPT-ISOLATION): the namespace comes from the alert, not
+// from the LLM, which the alert payload can steer.
+func WithAlertNamespace(ctx context.Context, namespace string) context.Context {
+	return context.WithValue(ctx, alertNamespaceKey, namespace)
+}
+
+// AlertNamespaceFromCtx returns the alert namespace set by WithAlertNamespace,
+// or "" when the alert has none or no namespace was set.
+func AlertNamespaceFromCtx(ctx context.Context) string {
+	ns, _ := ctx.Value(alertNamespaceKey).(string)
+	return ns
+}

@@ -51,6 +51,21 @@ func NewCircuitBreakerMetrics() *CircuitBreakerMetrics {
 	return defaultMetrics
 }
 
+var (
+	investigationMetrics     *CircuitBreakerMetrics
+	investigationMetricsOnce sync.Once
+)
+
+// NewInvestigationCircuitBreakerMetrics returns the metrics of the
+// investigation breaker (llm_investigation_circuit_breaker subsystem), a
+// singleton for the same reason as NewCircuitBreakerMetrics.
+func NewInvestigationCircuitBreakerMetrics() *CircuitBreakerMetrics {
+	investigationMetricsOnce.Do(func() {
+		investigationMetrics = NewCircuitBreakerMetricsWithNamespace("alert_history", "llm_investigation_circuit_breaker")
+	})
+	return investigationMetrics
+}
+
 // NewCircuitBreakerMetricsWithNamespace creates metrics with custom namespace.
 // Allows flexibility for different deployment environments.
 // WARNING: This should only be called once per namespace/subsystem combination to avoid duplicate registration.

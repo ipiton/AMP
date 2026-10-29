@@ -4,6 +4,7 @@ package investigation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -431,6 +432,9 @@ func classifyError(err error) core.InvestigationErrorType {
 	}
 	if err == context.DeadlineExceeded || err == context.Canceled {
 		return core.InvestigationErrorTransient
+	}
+	if errors.Is(err, core.ErrLLMProviderUnsupported) {
+		return core.InvestigationErrorPermanent
 	}
 	msg := err.Error()
 	// Permanent client errors (4xx except 429)

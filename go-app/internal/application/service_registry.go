@@ -44,7 +44,7 @@ import (
 	pkglogger "github.com/ipiton/AMP/pkg/logger"
 	"github.com/ipiton/AMP/pkg/metrics" //nolint:staticcheck // BusinessMetrics has no pkg/metrics/v2 equivalent yet; migration tracked separately
 	metricsv2 "github.com/ipiton/AMP/pkg/metrics/v2"
-	"github.com/jackc/pgx/v5/stdlib"
+	_ "github.com/jackc/pgx/v5/stdlib" // "pgx" driver for the database_query tool
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -260,9 +260,9 @@ type ServiceRegistry struct {
 	// Investigation pipeline (PHASE-5A)
 	investigationRepo  core.InvestigationRepository
 	investigationQueue *investigationinfra.InvestigationQueue
-	// investigationToolsDB is a *sql.DB wrapper around the pgx pool used by
-	// the database investigation tool. We retain the handle so Shutdown can
-	// close it cleanly and avoid a leak if the pool is ever reinitialised.
+	// investigationToolsDB is the database_query tool's connection to
+	// investigation.tools.database.dsn (not AMP's pool). We retain the handle
+	// so Shutdown can close it cleanly.
 	investigationToolsDB *sql.DB
 
 	// llmClient is the process's single LLM client, built on demand by
@@ -2279,23 +2279,35 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 		}
 
 		if toolsCfg.Kubernetes != nil && toolsCfg.Kubernetes.Enabled {
-			k8sTool, err := invtools.NewKubernetesToolFromConfig(toolsCfg.Kubernetes.Kubeconfig)
+			allowed := toolsCfg.Kubernetes.AllowedNamespaces
+			k8sTool, err := invtools.NewKubernetesToolFromConfig(toolsCfg.Kubernetes.Kubeconfig, allowed)
 			if err != nil {
 				r.logger.Warn("Kubernetes investigation tool init failed, skipping", "error", err)
 			} else {
 				registry.Register(k8sTool)
-				r.logger.Info("Kubernetes investigation tool registered")
+				if len(allowed) == 0 {
+					r.logger.Info("Kubernetes investigation tool registered", "allowed_namespaces", "alert namespace only")
+				} else {
+					r.logger.Info("Kubernetes investigation tool registered", "allowed_namespaces", allowed)
+				}
 			}
 		}
 
-		if toolsCfg.Database != nil && toolsCfg.Database.Enabled && r.database != nil && r.database.Pool() != nil {
-			// stdlib.OpenDBFromPool returns a fresh *sql.DB that wraps the
-			// underlying pgx pool. We keep the handle on the registry so
-			// Shutdown can close it deterministically; without this it
-			// would leak if the pool is replaced (e.g. on hot-reload).
-			r.investigationToolsDB = stdlib.OpenDBFromPool(r.database.SharePool())
-			registry.Register(invtools.NewDatabaseTool(r.investigationToolsDB))
-			r.logger.Info("Database investigation tool registered")
+		if toolsCfg.Database != nil && toolsCfg.Database.Enabled {
+			// Its own database, never AMP's pool (L-9): AMP's pg_stat_activity
+			// says nothing about the alerting service and leaks AMP's queries
+			// to the LLM provider. sql.Open does not connect; a bad DSN shows
+			// up as a tool error. The handle is closed in Shutdown.
+			if toolsCfg.Database.DSN == "" {
+				r.logger.Warn("database_query investigation tool not registered: investigation.tools.database.dsn is empty")
+			} else if db, err := sql.Open("pgx", toolsCfg.Database.DSN); err != nil {
+				r.logger.Warn("database_query investigation tool init failed, skipping", "error", err)
+			} else {
+				db.SetMaxOpenConns(2)
+				r.investigationToolsDB = db
+				registry.Register(invtools.NewDatabaseTool(db))
+				r.logger.Info("Database investigation tool registered")
+			}
 		}
 
 		agentLoop := coreinv.NewAgentLoop(llmClient, registry, coreinv.DefaultAgentLoopConfig())

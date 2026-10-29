@@ -30,9 +30,15 @@ type LokiToolConfig struct {
 type KubernetesToolConfig struct {
 	Enabled    bool   `mapstructure:"enabled"`
 	Kubeconfig string `mapstructure:"kubeconfig,omitempty"` // empty = in-cluster
+	// AllowedNamespaces limits what the tool reads. Empty = only the alert's
+	// `namespace` label; ["*"] = any namespace.
+	AllowedNamespaces []string `mapstructure:"allowed_namespaces"`
 }
 
 // DatabaseToolConfig configures the database_query tool.
 type DatabaseToolConfig struct {
-	Enabled bool `mapstructure:"enabled"` // uses main PG connection pool
+	Enabled bool `mapstructure:"enabled"`
+	// DSN of the database the tool inspects. Required: without it the tool
+	// is not registered. It is never AMP's own database.
+	DSN string `mapstructure:"dsn"`
 }

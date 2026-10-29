@@ -1,16 +1,14 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 
 	"github.com/ipiton/AMP/internal/core"
 	inv "github.com/ipiton/AMP/internal/core/investigation"
+	"github.com/ipiton/AMP/internal/core/resilience"
 )
 
 // openAIFunction maps an investigation ToolDefinition to the OpenAI function object.
@@ -55,6 +53,12 @@ type openAIChatResponse struct {
 
 // InvestigateWithTools calls the LLM with a running conversation history and
 // available tool definitions. It implements investigation.AgentLLMClient.
+//
+// One step retries 429/5xx per llm.max_retries/retry_delay/retry_backoff
+// (deep review F10 of INVESTIGATION-SAFETY-RELIABILITY): a failed step fails
+// the whole run, and the per-incident dedup claim then blocks a re-run for
+// 24h. The retries run inside the investigation breaker, as ClassifyAlert's
+// run inside the classification one.
 func (c *HTTPLLMClient) InvestigateWithTools(
 	ctx context.Context,
 	alert *core.Alert,
@@ -64,8 +68,14 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 	pc inv.PromptContext,
 ) (*inv.AgentResponse, error) {
 	cfg, httpClient := c.snapshot()
+	if err := requireOpenAIProvider(cfg); err != nil {
+		return nil, err
+	}
 
-	msgs := buildOpenAIMessages(alert, classification, history, pc)
+	msgs, err := buildOpenAIMessages(alert, classification, history, pc)
+	if err != nil {
+		return nil, err
+	}
 
 	openAITools := make([]openAITool, len(tools))
 	for i, td := range tools {
@@ -93,38 +103,27 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 		payload["temperature"] = cfg.Temperature
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal tools request: %w", err)
+	policy := &resilience.RetryPolicy{
+		MaxRetries:    cfg.MaxRetries,
+		BaseDelay:     cfg.RetryDelay,
+		MaxDelay:      cfg.RetryDelay * 10,
+		Multiplier:    cfg.RetryBackoff,
+		Jitter:        true,
+		ErrorChecker:  &llmErrorChecker{},
+		Logger:        c.logger,
+		OperationName: "llm_investigate_step",
 	}
 
-	url := buildOpenAIChatCompletionsURL(cfg.BaseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	var respBody []byte
+	err = c.callInvestigation(ctx, func(ctx context.Context) error {
+		var retryErr error
+		respBody, retryErr = resilience.WithRetryFunc(ctx, policy, func() ([]byte, error) {
+			return c.doChat(ctx, cfg, httpClient, payload, "LLM tools error")
+		})
+		return retryErr
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create tools request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("tools request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("read tools response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("LLM tools error: status %d, body: %s", resp.StatusCode, truncateBody(respBody)),
-		}
+		return nil, err
 	}
 
 	var chatResp openAIChatResponse
@@ -139,40 +138,36 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 }
 
 // buildOpenAIMessages converts the investigation context + history into OpenAI message format.
-// Extra prompt context (e.g. matched runbooks) is appended to the end of the
-// system prompt, which is rebuilt on every iteration and so survives history
-// trimming.
-func buildOpenAIMessages(alert *core.Alert, classification *core.ClassificationResult, history []inv.AgentMessage, pc inv.PromptContext) []openAIChatMessage {
+//
+// The system message holds only trusted text: the role, the untrusted-data
+// rule and the operator's runbooks. The alert and its classification go into
+// the following user message inside <alert_data> (H-9). Both are rebuilt on
+// every iteration ahead of the history, so they survive history trimming and
+// every step starts with a user turn.
+func buildOpenAIMessages(alert *core.Alert, classification *core.ClassificationResult, history []inv.AgentMessage, pc inv.PromptContext) ([]openAIChatMessage, error) {
 	var msgs []openAIChatMessage
 
-	// Prepend system message if not already in history.
+	// Prepend system and alert messages if the caller did not supply a system message.
 	hasSystem := len(history) > 0 && history[0].Role == inv.RoleSystem
 	if !hasSystem {
-		classCtx := "No classification available."
-		if classification != nil {
-			classCtx = fmt.Sprintf("Severity: %s, Confidence: %.2f, Reasoning: %s",
-				classification.Severity, classification.Confidence, classification.Reasoning)
+		alertData, err := alertDataBlock(alert, classification)
+		if err != nil {
+			return nil, err
 		}
 
-		llmAlert := CoreAlertToLLMRequest(alert)
-		alertJSON := "{}"
-		if llmAlert != nil {
-			if b, err := json.Marshal(llmAlert); err == nil {
-				alertJSON = string(b)
-			}
-		}
-
-		systemContent := fmt.Sprintf(
-			"You are an expert SRE investigating a production alert. "+
-				"Use the available tools to gather data, then return a final JSON answer with keys: "+
-				"summary, findings, recommendations, confidence.\n\n"+
-				"Alert: %s\nClassification: %s",
-			alertJSON, classCtx,
-		)
+		systemContent := "You are an expert SRE investigating a production alert. " +
+			"Use the available tools to gather data, then return a final JSON answer with keys: " +
+			"summary, findings, recommendations, confidence.\n" + untrustedDataRule
 		if pc.Runbooks != "" {
 			systemContent += "\n\n" + pc.Runbooks
 		}
-		msgs = append(msgs, openAIChatMessage{Role: "system", Content: systemContent})
+		msgs = append(msgs,
+			openAIChatMessage{Role: "system", Content: systemContent},
+			openAIChatMessage{
+				Role:    "user",
+				Content: alertData + "\n\nInvestigate this alert and use the available tools to gather data before drawing conclusions.",
+			},
+		)
 	}
 
 	for _, m := range history {
@@ -198,15 +193,7 @@ func buildOpenAIMessages(alert *core.Alert, classification *core.ClassificationR
 		msgs = append(msgs, msg)
 	}
 
-	// Add initial user prompt if history is empty (first iteration).
-	if len(history) == 0 {
-		msgs = append(msgs, openAIChatMessage{
-			Role:    "user",
-			Content: "Investigate this alert and use the available tools to gather data before drawing conclusions.",
-		})
-	}
-
-	return msgs
+	return msgs, nil
 }
 
 // parseOpenAIAgentResponse maps an OpenAI choice to investigation.AgentResponse.

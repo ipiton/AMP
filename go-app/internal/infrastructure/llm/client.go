@@ -115,6 +115,11 @@ type HTTPLLMClient struct {
 	// state (open/closed, counters) that a config edit must not reset, and its
 	// settings do not come from AMP's llm.* config section at all.
 	circuitBreaker *CircuitBreaker
+
+	// investigationBreaker guards investigation calls; see
+	// newInvestigationBreaker for why it is not circuitBreaker. Nil when
+	// circuit breaking is disabled. Not swapped by UpdateConfig either.
+	investigationBreaker *CircuitBreaker
 }
 
 // snapshot returns the live config and HTTP client as one coherent pair.
@@ -171,12 +176,14 @@ func NewHTTPLLMClient(config Config, logger *slog.Logger) *HTTPLLMClient {
 		}
 	}
 
-	return &HTTPLLMClient{
+	c := &HTTPLLMClient{
 		config:         config,
 		httpClient:     httpClient,
 		logger:         logger,
 		circuitBreaker: cb,
 	}
+	c.investigationBreaker = newInvestigationBreaker(config.CircuitBreaker, c)
+	return c
 }
 
 // ClassifyAlert classifies an alert using LLM API with circuit breaker and retry logic.
@@ -371,14 +378,9 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 }
 
 func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Alert, cfg Config, httpClient *http.Client) (*core.ClassificationResult, error) {
-	llmAlert := CoreAlertToLLMRequest(alert)
-	if llmAlert == nil {
-		return nil, fmt.Errorf("failed to convert alert to LLM format")
-	}
-
-	llmAlertBytes, err := json.Marshal(llmAlert)
+	alertData, err := alertDataBlock(alert, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal alert payload: %w", err)
+		return nil, err
 	}
 
 	request := map[string]any{
@@ -387,11 +389,12 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 			{
 				"role": "system",
 				"content": "You are an alert classification engine. Return ONLY valid JSON with keys: " +
-					"severity (1-4), category (string), summary (string), confidence (0-1), reasoning (string), suggestions (array of strings).",
+					"severity (1-4), category (string), summary (string), confidence (0-1), reasoning (string), suggestions (array of strings).\n" +
+					untrustedDataRule,
 			},
 			{
 				"role":    "user",
-				"content": "Classify this alert payload:\n" + string(llmAlertBytes),
+				"content": "Classify this alert:\n" + alertData,
 			},
 		},
 		"response_format": map[string]string{
@@ -405,38 +408,9 @@ func (c *HTTPLLMClient) classifyAlertOpenAI(ctx context.Context, alert *core.Ale
 		request["temperature"] = cfg.Temperature
 	}
 
-	requestBody, err := json.Marshal(request)
+	body, err := c.doChat(ctx, cfg, httpClient, request, "OpenAI API error")
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal OpenAI request: %w", err)
-	}
-
-	url := buildOpenAIChatCompletionsURL(cfg.BaseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create OpenAI request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("OpenAI request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read OpenAI response body: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("OpenAI API error: status %d, body: %s", resp.StatusCode, truncateBody(body)),
-		}
+		return nil, err
 	}
 
 	var openAIResponse struct {
@@ -550,23 +524,15 @@ func (c *HTTPLLMClient) InvestigateAlert(ctx context.Context, alert *core.Alert,
 	if alert == nil {
 		return nil, fmt.Errorf("alert cannot be nil")
 	}
+	if err := requireOpenAIProvider(cfg); err != nil {
+		return nil, err
+	}
 
 	startTime := time.Now()
 
-	llmAlert := CoreAlertToLLMRequest(alert)
-	if llmAlert == nil {
-		return nil, fmt.Errorf("failed to convert alert to LLM format")
-	}
-
-	llmAlertBytes, err := json.Marshal(llmAlert)
+	alertData, err := alertDataBlock(alert, classification)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal alert for investigation: %w", err)
-	}
-
-	classificationInfo := "No classification available."
-	if classification != nil {
-		classificationInfo = fmt.Sprintf("Severity: %s, Confidence: %.2f, Reasoning: %s",
-			classification.Severity, classification.Confidence, classification.Reasoning)
+		return nil, err
 	}
 
 	systemPrompt := `You are an expert SRE investigating a production alert.
@@ -575,15 +541,14 @@ Return ONLY valid JSON with these keys:
 - summary (string): 1-2 sentence description of what happened
 - findings (object): structured findings about the root cause
 - recommendations (array of strings): actionable remediation steps
-- confidence (float 0-1): confidence in your analysis`
-
-	userContent := fmt.Sprintf("Alert data:\n%s\n\nClassification context:\n%s\n\nProvide investigation findings.", string(llmAlertBytes), classificationInfo)
+- confidence (float 0-1): confidence in your analysis
+` + untrustedDataRule
 
 	request := map[string]any{
 		"model": cfg.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userContent},
+			{"role": "user", "content": alertData + "\n\nProvide investigation findings."},
 		},
 		"response_format": map[string]string{"type": "json_object"},
 	}
@@ -594,38 +559,15 @@ Return ONLY valid JSON with these keys:
 		request["temperature"] = cfg.Temperature
 	}
 
-	requestBody, err := json.Marshal(request)
+	// No retries here: the investigation queue retries the whole call.
+	var body []byte
+	err = c.callInvestigation(ctx, func(ctx context.Context) error {
+		var callErr error
+		body, callErr = c.doChat(ctx, cfg, httpClient, request, "LLM investigation error")
+		return callErr
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal investigation request: %w", err)
-	}
-
-	url := buildOpenAIChatCompletionsURL(cfg.BaseURL)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create investigation request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "alert-history-go/1.0.0")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("investigation request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read investigation response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			Message:    fmt.Sprintf("LLM investigation error: status %d, body: %s", resp.StatusCode, truncateBody(body)),
-		}
+		return nil, err
 	}
 
 	var openAIResponse struct {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -24,6 +25,12 @@ const (
 	InvestigationErrorPermanent InvestigationErrorType = "permanent"
 	InvestigationErrorUnknown   InvestigationErrorType = "unknown"
 )
+
+// ErrLLMProviderUnsupported is returned by investigation calls when the
+// configured llm.provider does not speak the OpenAI chat API they need
+// (INVESTIGATION-PROMPT-ISOLATION). Retrying cannot help, so the queue treats
+// it as permanent.
+var ErrLLMProviderUnsupported = errors.New("llm provider does not support investigation (requires an OpenAI-compatible provider)")
 
 // InvestigationJob is the unit of work passed to the investigation worker.
 type InvestigationJob struct {

@@ -122,6 +122,7 @@ func (a *AgentLoop) Run(
 
 	defs := a.registry.Definitions()
 	pc, runbooksUsed := a.promptContext(alert)
+	toolScope := WithAlertNamespace(ctx, alert.Labels["namespace"])
 
 	for iterations < a.config.MaxIterations {
 		history = trimHistory(history, a.config.MaxHistoryMsgs)
@@ -198,7 +199,7 @@ func (a *AgentLoop) Run(
 					Timestamp:  time.Now(),
 				})
 
-				toolCtx, toolCancel := context.WithTimeout(ctx, a.config.PerToolTimeout)
+				toolCtx, toolCancel := context.WithTimeout(toolScope, a.config.PerToolTimeout)
 				res := a.registry.Execute(toolCtx, tc.Name, tc.ID, tc.Params)
 				toolCancel()
 
@@ -206,7 +207,9 @@ func (a *AgentLoop) Run(
 				if res.IsError {
 					content = fmt.Sprintf("error: %s", res.Error)
 				}
-				content = capObservation(content)
+				// Before the cap: the observation goes to the provider and the
+				// stored trace, and a cut must not split a secret in two.
+				content = capObservation(redactSecrets(content))
 
 				stepNum++
 				steps = append(steps, InvestigationStep{

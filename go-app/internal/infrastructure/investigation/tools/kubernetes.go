@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/ipiton/AMP/internal/core/investigation"
@@ -20,21 +21,51 @@ import (
 // It accepts a kubernetes.Interface so tests can inject a fake client.
 type KubernetesTool struct {
 	clientset kubernetes.Interface
+	// allowedNamespaces bounds what the LLM may read
+	// (INVESTIGATION-PROMPT-ISOLATION, H-9): the alert payload can steer the
+	// model, so the namespace it asks for is checked here. Empty means only
+	// the alert's own namespace; "*" means any namespace.
+	allowedNamespaces []string
 }
 
-// NewKubernetesTool creates a tool backed by the given k8s clientset.
-func NewKubernetesTool(clientset kubernetes.Interface) *KubernetesTool {
-	return &KubernetesTool{clientset: clientset}
+// NewKubernetesTool creates a tool backed by the given k8s clientset, limited
+// to allowedNamespaces (see KubernetesTool.allowedNamespaces).
+func NewKubernetesTool(clientset kubernetes.Interface, allowedNamespaces []string) *KubernetesTool {
+	return &KubernetesTool{clientset: clientset, allowedNamespaces: allowedNamespaces}
 }
 
 // NewKubernetesToolFromConfig creates a tool by building a real k8s client.
 // kubeconfig path may be empty (in-cluster) or a path to a kubeconfig file.
-func NewKubernetesToolFromConfig(kubeconfig string) (*KubernetesTool, error) {
+func NewKubernetesToolFromConfig(kubeconfig string, allowedNamespaces []string) (*KubernetesTool, error) {
 	cs, err := buildClientset(kubeconfig)
 	if err != nil {
 		return nil, err
 	}
-	return &KubernetesTool{clientset: cs}, nil
+	return NewKubernetesTool(cs, allowedNamespaces), nil
+}
+
+// resolveNamespace picks the namespace for a call and checks it against the
+// allowlist. It never returns "" without an error: an empty namespace means
+// "all namespaces" to client-go.
+func (t *KubernetesTool) resolveNamespace(ctx context.Context, requested string) (string, error) {
+	alertNS := investigation.AlertNamespaceFromCtx(ctx)
+	ns := requested
+	if ns == "" {
+		ns = alertNS
+	}
+	if ns == "" {
+		return "", fmt.Errorf("kubernetes: no namespace: pass 'namespace' (the alert has no namespace label)")
+	}
+	switch {
+	case slices.Contains(t.allowedNamespaces, "*"), slices.Contains(t.allowedNamespaces, ns):
+		return ns, nil
+	case len(t.allowedNamespaces) == 0 && ns == alertNS:
+		return ns, nil
+	case len(t.allowedNamespaces) == 0:
+		return "", fmt.Errorf("kubernetes: namespace %q not allowed: only the alert namespace %q is (investigation.tools.kubernetes.allowed_namespaces is empty)", ns, alertNS)
+	default:
+		return "", fmt.Errorf("kubernetes: namespace %q not allowed: allowed namespaces are %v", ns, t.allowedNamespaces)
+	}
 }
 
 func buildClientset(kubeconfig string) (kubernetes.Interface, error) {
@@ -68,8 +99,7 @@ func (t *KubernetesTool) Definition() investigation.ToolDefinition {
 				},
 				"namespace": {
 					Type:        "string",
-					Description: "Kubernetes namespace (default: default)",
-					Default:     "default",
+					Description: "Kubernetes namespace (default: the alert's namespace). Access is limited to namespaces the operator allowed.",
 				},
 				"name": {
 					Type:        "string",
@@ -100,7 +130,10 @@ func (t *KubernetesTool) Execute(ctx context.Context, params map[string]any) (in
 		return investigation.ToolResult{IsError: true, Error: "kubernetes: missing required param 'action'"}, nil
 	}
 
-	namespace := stringParam(params["namespace"], "default")
+	namespace, err := t.resolveNamespace(ctx, stringParam(params["namespace"], ""))
+	if err != nil {
+		return investigation.ToolResult{IsError: true, Error: err.Error()}, nil
+	}
 
 	switch action {
 	case "list_pods":

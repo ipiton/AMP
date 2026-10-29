@@ -31,26 +31,26 @@ based_on:
 
 ## Phase 1: Ядро (core)
 
-- [ ] **1.1** `ErrLLMProviderUnsupported` в `core/investigation.go` <!-- verify: go build ./internal/core/... -->
-- [ ] **1.2** `WithAlertNamespace`/`AlertNamespaceFromCtx` в `context.go` <!-- verify: go build ./internal/core/... -->
-- [ ] **1.3** `redactSecrets` в `redact.go`; в `AgentLoop.Run` — namespace в `toolCtx`, `redactSecrets` до `capObservation` <!-- depends: 1.2 | verify: go vet ./internal/core/investigation/... && go test ./internal/core/investigation/... -->
+- [x] **1.1** `ErrLLMProviderUnsupported` в `core/investigation.go` <!-- verify: go build ./internal/core/... -->
+- [x] **1.2** `WithAlertNamespace`/`AlertNamespaceFromCtx` в `context.go` <!-- verify: go build ./internal/core/... -->
+- [x] **1.3** `redactSecrets` в `redact.go`; в `AgentLoop.Run` — namespace в `toolCtx`, `redactSecrets` до `capObservation` <!-- depends: 1.2 | verify: go vet ./internal/core/investigation/... && go test ./internal/core/investigation/... -->
 
 ## Phase 2: LLM-клиент
 
-- [ ] **2.1** `chat.go`: `doChat`, `alertDataBlock`, `untrustedDataRule`, `requireOpenAIProvider` <!-- verify: go build ./internal/infrastructure/llm/... -->
-- [ ] **2.2** `classifyAlertOpenAI`, `InvestigateAlert` на `doChat` и `alertDataBlock` <!-- depends: 2.1 | verify: go test ./internal/infrastructure/llm/... -->
-- [ ] **2.3** `investigationBreaker` + метрики + `callInvestigation`; `InvestigateAlert` через него <!-- depends: 2.2 | verify: go test ./internal/infrastructure/llm/... -->
-- [ ] **2.4** `InvestigateWithTools`: `doChat`, ретраи шага, breaker; `buildOpenAIMessages` — алерт в `user` <!-- depends: 2.3 | verify: go test ./internal/infrastructure/llm/... -->
+- [x] **2.1** `chat.go`: `doChat`, `alertDataBlock`, `untrustedDataRule`, `requireOpenAIProvider` <!-- verify: go build ./internal/infrastructure/llm/... -->
+- [x] **2.2** `classifyAlertOpenAI`, `InvestigateAlert` на `doChat` и `alertDataBlock` <!-- depends: 2.1 | verify: go test ./internal/infrastructure/llm/... -->
+- [x] **2.3** `investigationBreaker` + метрики + `callInvestigation`; `InvestigateAlert` через него <!-- depends: 2.2 | verify: go test ./internal/infrastructure/llm/... -->
+- [x] **2.4** `InvestigateWithTools`: `doChat`, ретраи шага, breaker; `buildOpenAIMessages` — алерт в `user` <!-- depends: 2.3 | verify: go test ./internal/infrastructure/llm/... -->
 
 ## Phase 3: Tools, очередь, wiring
 
-- [ ] **3.1** Kubernetes tool: allowlist, namespace из контекста, без пустого namespace <!-- depends: 1.2 | verify: go test ./internal/infrastructure/investigation/tools/... -->
-- [ ] **3.2** `classifyError`: `ErrLLMProviderUnsupported` → permanent <!-- depends: 1.1 | verify: go test ./internal/infrastructure/investigation/... -->
-- [ ] **3.3** Конфиг `AllowedNamespaces`, `DSN`; wiring в `service_registry.go` <!-- depends: 3.1 | verify: go build ./... && go vet ./internal/application/... -->
+- [x] **3.1** Kubernetes tool: allowlist, namespace из контекста, без пустого namespace <!-- depends: 1.2 | verify: go test ./internal/infrastructure/investigation/tools/... -->
+- [x] **3.2** `classifyError`: `ErrLLMProviderUnsupported` → permanent <!-- depends: 1.1 | verify: go test ./internal/infrastructure/investigation/... -->
+- [x] **3.3** Конфиг `AllowedNamespaces`, `DSN`; wiring в `service_registry.go` <!-- depends: 3.1 | verify: go build ./... && go vet ./internal/application/... -->
 
 ## Phase 4: Docs
 
-- [ ] **4.1** `config.yaml.example`, `core/investigation/README.md`, CHANGELOG `[Unreleased]` с migration notes <!-- verify: git diff --check -->
+- [x] **4.1** `config.yaml.example`, `core/investigation/README.md`, CHANGELOG `[Unreleased]` с migration notes <!-- verify: git diff --check -->
 
 ## Phase 5: Тесты (после deep-review pass)
 
@@ -63,6 +63,12 @@ based_on:
 ## Phase 6: Гейты
 
 - [ ] **6.1** Затронутые пакеты `go vet` + `go test -race`; `make -C go-app quality-gates-fast`; `scripts/release-gate.sh`; `git diff --check` <!-- verify: см. WORKFLOW.md § Гейты AMP -->
+
+## Deviations
+
+- **Тесты пакетов `llm` и `tools` не компилируются между implement и write-tests.** `buildOpenAIMessages` теперь возвращает ошибку (раньше при неудаче маршалинга молча слал `"{}"`), `NewKubernetesTool` принимает allowlist. `investigate_with_tools_prompt_test.go` и `tools/*_test.go` правятся в 5.1/5.3: старые проверки (алерт в `system`, namespace `default`) всё равно противоречат новому поведению. Шаги 1.3 и 3.x проверены `go build ./...`, `go vet` по пакетам без затронутых тестов, `go test ./internal/core/investigation/...` (зелёный).
+- **Начальное `user`-сообщение агентного цикла пересобирается на каждой итерации** (раньше было только на первой). Иначе со второго шага модель теряла бы данные алерта, перенесённые из `system`. Spec §1 уточнён этим пунктом.
+- `pgx/v5/stdlib` в `service_registry.go` стал blank-импортом: `OpenDBFromPool` больше не используется, драйвер `pgx` нужен для `sql.Open`.
 
 ## Definition of Done
 
