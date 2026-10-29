@@ -57,8 +57,9 @@ type openAIChatResponse struct {
 // One step retries 429/5xx per llm.max_retries/retry_delay/retry_backoff
 // (deep review F10 of INVESTIGATION-SAFETY-RELIABILITY): a failed step fails
 // the whole run, and the per-incident dedup claim then blocks a re-run for
-// 24h. The retries run inside the investigation breaker, as ClassifyAlert's
-// run inside the classification one.
+// 24h. Steps do not go through the investigation breaker: the run already
+// passed it in InvestigateAlert (the queue's first call), and an open or
+// half-open breaker refusing a step mid-run would fail the run the same way.
 func (c *HTTPLLMClient) InvestigateWithTools(
 	ctx context.Context,
 	alert *core.Alert,
@@ -114,13 +115,8 @@ func (c *HTTPLLMClient) InvestigateWithTools(
 		OperationName: "llm_investigate_step",
 	}
 
-	var respBody []byte
-	err = c.callInvestigation(ctx, func(ctx context.Context) error {
-		var retryErr error
-		respBody, retryErr = resilience.WithRetryFunc(ctx, policy, func() ([]byte, error) {
-			return c.doChat(ctx, cfg, httpClient, payload, "LLM tools error")
-		})
-		return retryErr
+	respBody, err := resilience.WithRetryFunc(ctx, policy, func() ([]byte, error) {
+		return c.doChat(ctx, cfg, httpClient, payload, "LLM tools error")
 	})
 	if err != nil {
 		return nil, err

@@ -24,7 +24,9 @@ type KubernetesTool struct {
 	// allowedNamespaces bounds what the LLM may read
 	// (INVESTIGATION-PROMPT-ISOLATION, H-9): the alert payload can steer the
 	// model, so the namespace it asks for is checked here. Empty means only
-	// the alert's own namespace; "*" means any namespace.
+	// the alert's own namespace label (which the alert sender sets, so it
+	// stops a steered model, not a sender that forges the label); "*" means
+	// any namespace.
 	allowedNamespaces []string
 }
 

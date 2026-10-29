@@ -122,7 +122,8 @@ func newInvestigationBreaker(cfg CircuitBreakerConfig, c *HTTPLLMClient) *Circui
 // callInvestigation runs fn through the investigation breaker. Only provider
 // availability failures (IsRetryableError: 429, 5xx, network, timeout) count
 // against it: a 400 for an oversized context is the request's fault, and
-// opening the breaker on it would stall every other investigation.
+// opening the breaker on it would stall every other investigation. Neither
+// does the caller's own deadline or cancellation (llm_timeout, shutdown).
 func (c *HTTPLLMClient) callInvestigation(ctx context.Context, fn func(ctx context.Context) error) error {
 	if c.investigationBreaker == nil {
 		return fn(ctx)
@@ -130,7 +131,7 @@ func (c *HTTPLLMClient) callInvestigation(ctx context.Context, fn func(ctx conte
 	var callErr error
 	err := c.investigationBreaker.Call(ctx, func(ctx context.Context) error {
 		callErr = fn(ctx)
-		if callErr != nil && IsRetryableError(callErr) {
+		if callErr != nil && ctx.Err() == nil && IsRetryableError(callErr) {
 			return callErr
 		}
 		return nil

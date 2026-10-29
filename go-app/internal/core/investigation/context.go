@@ -27,9 +27,11 @@ func AlertTimeFromCtx(ctx context.Context) time.Time {
 const alertNamespaceKey contextKey = alertTimeKey + 1
 
 // WithAlertNamespace returns a context carrying the alert's `namespace` label.
-// Tools that read cluster state scope themselves to it
-// (INVESTIGATION-PROMPT-ISOLATION): the namespace comes from the alert, not
-// from the LLM, which the alert payload can steer.
+// Tools that read cluster state default to it (INVESTIGATION-PROMPT-ISOLATION):
+// the model can no longer wander off to another namespace on its own or on an
+// instruction smuggled into an annotation. The label itself is written by the
+// alert sender, so it is a default, not a security boundary; the boundary is
+// the operator's allowed_namespaces.
 func WithAlertNamespace(ctx context.Context, namespace string) context.Context {
 	return context.WithValue(ctx, alertNamespaceKey, namespace)
 }

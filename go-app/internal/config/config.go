@@ -986,6 +986,9 @@ func setDefaults() {
 	// grouping.reconciliationGrace pin) never reached the config. BindEnv
 	// errors only when called without a key.
 	_ = viper.BindEnv("grouping.reconciliation_grace")
+	// Same reason: lets the database_query DSN, which holds a password, come
+	// from INVESTIGATION_TOOLS_DATABASE_DSN (a Secret) instead of the YAML.
+	_ = viper.BindEnv("investigation.tools.database.dsn")
 
 	// Investigation pipeline defaults (PHASE-5A)
 	viper.SetDefault("investigation.enabled", false)

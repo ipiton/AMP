@@ -59,7 +59,9 @@ Parameters: `action` (required), `namespace`, `name`, `container`, `tail_lines`,
 
 Namespaces are limited by `investigation.tools.kubernetes.allowed_namespaces`.
 With an empty list, only the alert's `namespace` label (set in context via
-`WithAlertNamespace`) is allowed; `["*"]` allows any namespace. A call without
+`WithAlertNamespace`) is allowed; `["*"]` allows any namespace. The label is
+written by the alert sender, so the empty-list default stops a steered model,
+not a forged alert: the list is the boundary. A call without
 `namespace` uses the alert's namespace. A refused or empty namespace returns
 `IsError` without an API call.
 

@@ -135,13 +135,15 @@ investigation:
     kubernetes:
       enabled: false    # set true when running inside k8s or with kubeconfig
       kubeconfig: ""    # empty = in-cluster; or path like /home/user/.kube/config
-      # Namespaces the tool may read. Empty = only the alert's `namespace` label;
-      # ["*"] = any namespace. Pair it with RBAC of the same scope.
+      # Namespaces the tool may read. Empty = only the alert's `namespace` label,
+      # which the alert sender controls (a warning is logged); ["*"] = any.
+      # This list is the security boundary: set it, and pair it with RBAC.
       allowed_namespaces: []
     database:
       enabled: false    # set true to expose pg_stat_activity / pg_stat_statements
       # Database to inspect (required; the tool is not registered without it).
       # Never AMP's own database. Use a read-only role, e.g. a pg_monitor member.
+      # Prefer the INVESTIGATION_TOOLS_DATABASE_DSN env var (from a Secret).
       dsn: ""           # postgres://monitor:password@db:5432/postgres?sslmode=require
   # Runbook engine (PHASE-6B). Requires llm.agent_mode=true.
   # Markdown runbooks with YAML frontmatter, matched by alert labels and appended

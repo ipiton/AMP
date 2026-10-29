@@ -2286,7 +2286,11 @@ func (r *ServiceRegistry) initializeInvestigation() error {
 			} else {
 				registry.Register(k8sTool)
 				if len(allowed) == 0 {
-					r.logger.Info("Kubernetes investigation tool registered", "allowed_namespaces", "alert namespace only")
+					// The namespace label is written by whoever sends the alert,
+					// so the default bounds an honest alert, not an attacker.
+					r.logger.Warn("Kubernetes investigation tool registered with an empty allowed_namespaces: "+
+						"it reads the namespace named in the alert's `namespace` label, which any alert sender controls; "+
+						"set investigation.tools.kubernetes.allowed_namespaces", "allowed_namespaces", "alert namespace only")
 				} else {
 					r.logger.Info("Kubernetes investigation tool registered", "allowed_namespaces", allowed)
 				}
