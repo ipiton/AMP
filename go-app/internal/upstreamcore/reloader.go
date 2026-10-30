@@ -60,6 +60,10 @@ type reloader struct {
 	silencer          *silence.Silencer
 	tracingMgr        *tracing.Manager
 
+	// notifyStage, when set, runs ahead of every receiver's pipeline
+	// (AMP extension, Options.NotifyStage).
+	notifyStage notify.Stage
+
 	// Short-lived components: atomically swapped on every reload.
 	dispatcher atomic.Pointer[dispatch.Dispatcher]
 	inhibitor  atomic.Pointer[inhibit.Inhibitor]
@@ -162,6 +166,14 @@ func (r *reloader) reload(conf *config.Config) error {
 		r.notificationLog,
 		nil,
 	)
+	// AMP extension (not in upstream): the AI stage runs ahead of each
+	// receiver's chain, before the mute stages, which cannot be reordered
+	// without rebuilding the unexported receiver stage.
+	if r.notifyStage != nil {
+		for name, stage := range pipeline {
+			pipeline[name] = notify.MultiStage{r.notifyStage, stage}
+		}
+	}
 
 	r.metrics.configuredReceivers.Set(float64(len(activeReceivers)))
 	r.metrics.configuredIntegrations.Set(float64(integrationsNum))

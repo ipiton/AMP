@@ -225,22 +225,45 @@ func (c *HTTPLLMClient) ClassifyAlert(ctx context.Context, alert *core.Alert) (*
 func (c *HTTPLLMClient) classifyAlertWithRetry(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error) {
 	cfg, _ := c.snapshot()
 
+	maxDelay := cfg.RetryDelay * 10 // Max 10x base delay
+	retryAfterCap := maxDelay
+	if retryAfterCap <= 0 {
+		retryAfterCap = 30 * time.Second // resilience.WithRetryFunc's MaxDelay default
+	}
+
 	// Create retry policy from config (maintains backward compatibility)
 	policy := &resilience.RetryPolicy{
 		MaxRetries:    cfg.MaxRetries,
 		BaseDelay:     cfg.RetryDelay,
-		MaxDelay:      cfg.RetryDelay * 10, // Max 10x base delay
+		MaxDelay:      maxDelay,
 		Multiplier:    cfg.RetryBackoff,
 		Jitter:        true,
-		ErrorChecker:  &llmErrorChecker{},
+		ErrorChecker:  &llmErrorChecker{maxRetryAfter: retryAfterCap},
 		Logger:        c.logger,
 		Metrics:       nil, // Stub - metrics registry not fully implemented
 		OperationName: "llm_classify_alert",
 	}
 
-	// Use centralized retry mechanism with metrics
+	// Retry-After is honoured here rather than in pkg/retry: the backoff
+	// already slept is subtracted, the rest is waited before the next
+	// attempt. A hint above retryAfterCap is not retried at all (llmErrorChecker).
+	var notBefore time.Time
 	result, err := resilience.WithRetryFunc(ctx, policy, func() (*core.ClassificationResult, error) {
-		return c.classifyAlertOnce(ctx, alert)
+		if wait := time.Until(notBefore); wait > 0 {
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		res, err := c.classifyAlertOnce(ctx, alert)
+		var he *HTTPError
+		if errors.As(err, &he) && he.RetryAfter > 0 {
+			notBefore = time.Now().Add(he.RetryAfter)
+		}
+		return res, err
 	})
 
 	if err != nil {
@@ -257,9 +280,19 @@ func (c *HTTPLLMClient) classifyAlertWithRetry(ctx context.Context, alert *core.
 }
 
 // llmErrorChecker implements retry logic for LLM client errors.
-type llmErrorChecker struct{}
+// A Retry-After hint longer than maxRetryAfter is not waited for: the
+// provider asked for a longer pause than the retry loop would ever make, so
+// the caller falls back now instead of holding the request. Zero disables the
+// cap (investigation's loop does not honour Retry-After).
+type llmErrorChecker struct {
+	maxRetryAfter time.Duration
+}
 
 func (e *llmErrorChecker) IsRetryable(err error) bool {
+	var he *HTTPError
+	if e.maxRetryAfter > 0 && errors.As(err, &he) && he.RetryAfter > e.maxRetryAfter {
+		return false
+	}
 	return IsRetryableError(err)
 }
 
@@ -347,6 +380,8 @@ func (c *HTTPLLMClient) classifyAlertProxy(ctx context.Context, alert *core.Aler
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Message:    fmt.Sprintf("LLM API error: status %d, body: %s", resp.StatusCode, truncateBody(body)),
+
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
 

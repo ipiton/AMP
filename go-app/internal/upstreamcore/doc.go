@@ -56,6 +56,15 @@
 // --web.config.file; the HTTP server and signals belong to the caller.
 // Stop waits for a reload in progress without a deadline, where upstream
 // abandons it after its shutdown timeout.
+//
+// # AMP extensions
+//
+// Two optional seams that upstream's app.Options lacks (ADR-019 slice
+// UPSTREAM-AI-CLASSIFY); unset, the port behaves as upstream:
+// Options.NewAlertCallback composes an alert-store callback after the
+// silencer (chainCallback in core.go), and Options.NotifyStage is prepended
+// to every receiver's pipeline on each reload (reloader.go). A bump must keep
+// both in place; upstream-bump.sh diffs only the upstream files.
 package upstreamcore
 
 // PortedFrom is the upstream release the port above was taken from.

@@ -382,6 +382,13 @@ type LLMConfig struct {
 	// AgentMode enables the Phase 5B agentic investigation loop with tool calling.
 	// When false, the pipeline uses the Phase 5A one-shot InvestigateAlert() call.
 	AgentMode bool `mapstructure:"agent_mode"`
+	// NotifyWait and DropNoise are read by cmd/amp-upstream only (ADR-019
+	// slice UPSTREAM-AI-CLASSIFY); cmd/server ignores them. NotifyWait bounds
+	// how long the notify stage waits for a pending classification of a
+	// group's alerts (0 = do not wait); DropNoise removes alerts classified as
+	// noise from notifications.
+	NotifyWait time.Duration `mapstructure:"notify_wait"`
+	DropNoise  bool          `mapstructure:"drop_noise"`
 }
 
 // LogConfig holds logging-related configuration
@@ -931,6 +938,8 @@ func setDefaults() {
 	viper.SetDefault("llm.temperature", 0.7)
 	viper.SetDefault("llm.timeout", "30s")
 	viper.SetDefault("llm.max_retries", 3)
+	viper.SetDefault("llm.notify_wait", "5s")
+	viper.SetDefault("llm.drop_noise", false)
 
 	// Silence cross-replica sync defaults (task fu5-cfg item 1,
 	// alertmanager-parity wave-5): unchanged from the pre-config-knob
@@ -1178,6 +1187,10 @@ func (c *Config) Validate() error {
 	// but it is allowed for testing/development.
 
 	// startup_wait applies whether or not redis.addr is set.
+	if c.LLM.NotifyWait < 0 {
+		return fmt.Errorf("llm.notify_wait cannot be negative")
+	}
+
 	if c.Redis.StartupWait < 0 {
 		return fmt.Errorf("redis.startup_wait cannot be negative")
 	}

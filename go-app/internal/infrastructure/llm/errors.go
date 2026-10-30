@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ipiton/AMP/pkg/httperror"
 )
@@ -27,6 +29,30 @@ var (
 type HTTPError struct {
 	StatusCode int
 	Message    string
+	// RetryAfter is the provider's Retry-After hint (429/503), 0 if absent
+	// or unparseable. The classification retry loop honours it.
+	RetryAfter time.Duration
+}
+
+// parseRetryAfter reads a Retry-After header: delay-seconds or an HTTP-date.
+// Anything else, a negative delay or a date in the past yields 0.
+func parseRetryAfter(h string, now time.Time) time.Duration {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(h); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(h); err == nil {
+		if d := t.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 func (e *HTTPError) Error() string {

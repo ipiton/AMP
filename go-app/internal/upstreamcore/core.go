@@ -77,6 +77,15 @@ type Options struct {
 	// serves the default gatherer (upstream httpserver), so a binary passes
 	// prometheus.DefaultRegisterer.
 	Registerer prometheus.Registerer
+
+	// AMP extensions; both optional, nil keeps the upstream behaviour.
+	//
+	// NewAlertCallback builds an alert-store callback that runs after the
+	// silencer's (provider/mem calls it under its lock: it must not block).
+	// It receives the silencer's Mutes to check silences off that path.
+	NewAlertCallback func(mutes func(context.Context, model.LabelSet) bool) mem.AlertStoreCallback
+	// NotifyStage runs ahead of every receiver's notification pipeline.
+	NotifyStage notify.Stage
 }
 
 // Core is a running upstream Alertmanager core without an HTTP server of
@@ -221,12 +230,16 @@ func (c *Core) setup(opts Options) error {
 	silencer := silence.NewSilencer(silences, logger, eventRec)
 
 	// The silencer is the provider's AlertStoreCallback, exactly as
-	// upstream wires it; an AMP callback has to compose with it.
+	// upstream wires it; an AMP callback composes after it.
+	var alertCallback mem.AlertStoreCallback = silencer
+	if opts.NewAlertCallback != nil {
+		alertCallback = chainCallback{silencer, opts.NewAlertCallback(silencer.Mutes)}
+	}
 	alerts, err := mem.NewAlerts(
 		context.Background(),
 		opts.AlertGCInterval,
 		0,
-		silencer,
+		alertCallback,
 		logger,
 		eventRec,
 		reg,
@@ -284,6 +297,7 @@ func (c *Core) setup(opts Options) error {
 		notificationLog:             notificationLog,
 		pipelineBuilder:             notify.NewPipelineBuilder(reg, ff, eventRec),
 		retention:                   opts.Retention,
+		notifyStage:                 opts.NotifyStage,
 		silencer:                    silencer,
 		startTime:                   startTime,
 		timeoutFunc:                 timeoutFunc,
@@ -315,6 +329,34 @@ func (c *Core) setup(opts Options) error {
 	c.handler = tracing.Middleware(apih.Register(router, routePrefix))
 
 	return nil
+}
+
+// chainCallback runs the upstream callback, then the AMP one. A PreStore
+// error from either rejects the alert, as it would on its own.
+type chainCallback struct {
+	first, second mem.AlertStoreCallback
+}
+
+func (c chainCallback) PreStore(a *alert.Alert, existing bool) error {
+	if err := c.first.PreStore(a, existing); err != nil {
+		return err
+	}
+	return c.second.PreStore(a, existing)
+}
+
+func (c chainCallback) PostStore(a *alert.Alert, existing bool) {
+	c.first.PostStore(a, existing)
+	c.second.PostStore(a, existing)
+}
+
+func (c chainCallback) PostDelete(a *alert.Alert) {
+	c.first.PostDelete(a)
+	c.second.PostDelete(a)
+}
+
+func (c chainCallback) PostGC(fps model.Fingerprints) {
+	c.first.PostGC(fps)
+	c.second.PostGC(fps)
 }
 
 // serveReloads runs every reload request in turn until Stop.

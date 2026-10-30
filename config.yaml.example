@@ -104,6 +104,11 @@ llm:
   # agent_mode: true enables PHASE-5B agentic loop with tool calling.
   # When false, investigation uses a single-shot LLM call.
   agent_mode: false
+  # amp-upstream only (ADR-019; cmd/server ignores both): how long a
+  # notification waits for a pending classification of its alerts (0 = do
+  # not wait), and whether alerts classified as noise are left out of it.
+  notify_wait: 5s
+  drop_noise: false
 
 # ============================================================================
 # Investigation Pipeline (PHASE-5A / 5B)

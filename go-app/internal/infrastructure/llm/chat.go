@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/ipiton/AMP/internal/core"
 )
@@ -95,6 +96,8 @@ func (c *HTTPLLMClient) doChat(ctx context.Context, cfg Config, httpClient *http
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Message:    fmt.Sprintf("%s: status %d, body: %s", op, resp.StatusCode, truncateBody(body)),
+
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
 	return body, nil

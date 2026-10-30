@@ -30,14 +30,14 @@ based_on:
 
 > **Wave 1** - независимые шаги
 
-- [ ] **1.1** `llm`: `HTTPError.RetryAfter`, разбор заголовка в обоих путях classify, checker с `MaxDelay`, ожидание остатка `Retry-After` перед повтором <!-- verify: go vet ./internal/infrastructure/llm/... && go test ./internal/infrastructure/llm/... -->
-- [ ] **1.2** `config`: `NotifyWait`, `DropNoise`, дефолты, валидация, `config.yaml.example` <!-- verify: go test ./internal/config/... -->
-- [ ] **1.3** `upstreamcore`: `Options.NewAlertCallback`, `Options.NotifyStage`, композитный колбэк, обёртка `RoutingStage`, `doc.go` <!-- verify: go test ./internal/upstreamcore/... -->
+- [x] **1.1** `llm`: `HTTPError.RetryAfter`, разбор заголовка в обоих путях classify, checker с `MaxDelay`, ожидание остатка `Retry-After` перед повтором <!-- verify: go vet ./internal/infrastructure/llm/... && go test ./internal/infrastructure/llm/... -->
+- [x] **1.2** `config`: `NotifyWait`, `DropNoise`, дефолты, валидация, `config.yaml.example` <!-- verify: go test ./internal/config/... -->
+- [x] **1.3** `upstreamcore`: `Options.NewAlertCallback`, `Options.NotifyStage`, композитный колбэк, обёртка `RoutingStage`, `doc.go` <!-- verify: go test ./internal/upstreamcore/... -->
 
 > **Wave 2** - зависит от Wave 1
 
-- [ ] **1.4** `upstreamai`: `Classifier` (колбэк, очередь, воркеры, silence, метрики), `NotifyStage`, конвертер <!-- depends: 1.3 | verify: go vet ./internal/upstreamai/... -->
-- [ ] **1.5** `cmd/amp-upstream`: `--amp.config.file`, сборка при `llm.enabled`, порядок остановки <!-- depends: 1.2, 1.4 | verify: go build ./cmd/amp-upstream -->
+- [x] **1.4** `upstreamai`: `Classifier` (колбэк, очередь, воркеры, silence, метрики), `NotifyStage`, конвертер <!-- depends: 1.3 | verify: go vet ./internal/upstreamai/... -->
+- [x] **1.5** `cmd/amp-upstream`: `--amp.config.file`, сборка при `llm.enabled`, порядок остановки <!-- depends: 1.2, 1.4 | verify: go build ./cmd/amp-upstream -->
 
 **Phase verification:** `cd go-app && go build ./... && go vet ./internal/upstreamai/... ./internal/upstreamcore/... ./internal/infrastructure/llm/... ./internal/config/... ./cmd/amp-upstream/...`
 
@@ -66,3 +66,9 @@ based_on:
 - [ ] Tests for changed behavior are added or updated
 - [ ] Phase checks pass
 - [ ] Docs/planning are updated if behavior, contracts, or process changed
+
+## Implementation Notes
+
+- Отклонение от Spec: порог `Retry-After` в `llmErrorChecker` применяется, только когда задан (`maxRetryAfter > 0`) — `investigate_with_tools.go` создаёт checker с нулевым значением, и без этого investigation перестал бы ретраить любой ответ с `Retry-After`.
+- `--amp.config.file` проходит полную валидацию `config.LoadConfig`: файл должен быть валидным AMP-конфигом целиком (например, `profile: lite` требует `storage.backend: filesystem`), а не только секцией `llm`.
+- Smoke 2026-10-30 (фейковый OpenAI + webhook, `group_wait: 1s`): `POST /api/v2/alerts` 200 за 4.7 мс; webhook группы получил `llm_severity`, `llm_confidence`, `llm_reasoning`, `llm_recommendations`, в том числе в `commonAnnotations`; `amp_upstream_ai_classifications_total{outcome="classified"} 1`.

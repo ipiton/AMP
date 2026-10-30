@@ -1,7 +1,8 @@
 // Command amp-upstream serves the upstream Alertmanager core wired by
 // internal/upstreamcore from an unmodified alertmanager.yml (ADR-019 PoC).
 // It runs next to cmd/server and changes nothing in it; flags mirror the
-// upstream binary's names for the subset it supports.
+// upstream binary's names for the subset it supports. --amp.config.file
+// adds AMP's LLM classification (internal/upstreamai) when llm.enabled.
 package main
 
 import (
@@ -25,6 +26,11 @@ import (
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 
+	appconfig "github.com/ipiton/AMP/internal/config"
+	"github.com/ipiton/AMP/internal/core/services"
+	"github.com/ipiton/AMP/internal/infrastructure/cache"
+	"github.com/ipiton/AMP/internal/infrastructure/llm"
+	"github.com/ipiton/AMP/internal/upstreamai"
 	"github.com/ipiton/AMP/internal/upstreamcore"
 )
 
@@ -37,22 +43,42 @@ func main() {
 	retention := flag.Duration("data.retention", upstreamcore.DefaultRetention, "How long to keep data for.")
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
+	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file; its llm.* section enables alert classification. Empty: none.")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	logger.Info("Starting Alertmanager", "version", version.Info())
 	logger.Info("Build context", "build_context", version.BuildContext())
 	prometheus.MustRegister(versioncollector.NewCollector("alertmanager"))
-	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL); err != nil {
+	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL, *ampConfigFile); err != nil {
 		logger.Error("amp-upstream exited with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL string) error {
+func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL, ampConfigFile string) error {
 	// Matcher parsing is process-global upstream; without this call it stays
 	// in classic mode instead of upstream's default fallback mode.
 	compat.InitFromFlags(logger, featurecontrol.NoopFlags{})
+
+	opts := upstreamcore.Options{
+		ConfigFile: configFile,
+		DataDir:    dataDir,
+		Retention:  retention,
+		Logger:     logger,
+		Registerer: prometheus.DefaultRegisterer,
+	}
+	if ampConfigFile != "" {
+		classifier, err := newClassifier(logger, ampConfigFile, &opts)
+		if err != nil {
+			return err
+		}
+		// Deferred first, so it runs after core.Stop: the dispatcher is
+		// gone before the workers stop.
+		if classifier != nil {
+			defer classifier.Stop()
+		}
+	}
 
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
@@ -66,14 +92,8 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		return fmt.Errorf("failed to determine external URL: %w", err)
 	}
 
-	core, err := upstreamcore.New(upstreamcore.Options{
-		ConfigFile:  configFile,
-		DataDir:     dataDir,
-		ExternalURL: amURL,
-		Retention:   retention,
-		Logger:      logger,
-		Registerer:  prometheus.DefaultRegisterer,
-	})
+	opts.ExternalURL = amURL
+	core, err := upstreamcore.New(opts)
 	if err != nil {
 		_ = listener.Close()
 		return err
@@ -114,6 +134,60 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 			return nil
 		}
 	}
+}
+
+// newClassifier builds the LLM classification from the AMP config and hooks
+// it into opts. It returns nil when llm.enabled is false.
+func newClassifier(logger *slog.Logger, path string, opts *upstreamcore.Options) (*upstreamai.Classifier, error) {
+	cfg, err := appconfig.LoadConfig(path)
+	if err != nil {
+		return nil, fmt.Errorf("error loading AMP configuration file: %w", err)
+	}
+	if !cfg.LLM.Enabled {
+		logger.Info("AMP configuration loaded, alert classification disabled (llm.enabled=false)")
+		return nil, nil
+	}
+
+	llmCfg := llm.DefaultConfig()
+	llmCfg.Provider = cfg.LLM.Provider
+	llmCfg.BaseURL = cfg.LLM.BaseURL
+	llmCfg.APIKey = cfg.LLM.APIKey
+	llmCfg.Model = cfg.LLM.Model
+	llmCfg.MaxTokens = cfg.LLM.MaxTokens
+	llmCfg.Temperature = cfg.LLM.Temperature
+	llmCfg.Timeout = cfg.LLM.Timeout
+	llmCfg.MaxRetries = cfg.LLM.MaxRetries
+
+	classCfg := services.DefaultClassificationConfig()
+	classCfg.EnableLLM = true
+	if cfg.LLM.Timeout > 0 {
+		classCfg.LLMTimeout = cfg.LLM.Timeout
+	}
+	// In-memory L2 cache: a single instance until the gossip cluster
+	// (UPSTREAM-HA-MEMBERLIST) decides what stays in Redis.
+	svc, err := services.NewClassificationService(services.ClassificationServiceConfig{
+		LLMClient: llm.NewHTTPLLMClient(llmCfg, logger),
+		Cache:     cache.NewMemoryCache(logger),
+		Config:    classCfg,
+		Logger:    logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create classification service: %w", err)
+	}
+
+	classifier := upstreamai.New(upstreamai.Config{
+		Service:    svc,
+		Logger:     logger,
+		Registerer: opts.Registerer,
+	})
+	opts.NewAlertCallback = classifier.AlertCallback
+	opts.NotifyStage = classifier.NotifyStage(cfg.LLM.NotifyWait, cfg.LLM.DropNoise)
+	logger.Info("alert classification enabled",
+		"provider", llmCfg.Provider,
+		"model", llmCfg.Model,
+		"notify_wait", cfg.LLM.NotifyWait,
+		"drop_noise", cfg.LLM.DropNoise)
+	return classifier, nil
 }
 
 // extURL is a port of github.com/prometheus/alertmanager@v0.34.1/app/url.go
