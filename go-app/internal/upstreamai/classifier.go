@@ -71,7 +71,8 @@ type Classifier struct {
 
 	mtx     sync.Mutex
 	entries map[model.Fingerprint]*entry
-	// queueFull logs one Warn per overflow episode instead of one per Put.
+	// queueFull logs one Warn per overflow episode instead of one per Put;
+	// an episode ends when the queue drains below half.
 	queueFull bool
 
 	cancel context.CancelFunc
@@ -149,7 +150,11 @@ func (c *Classifier) PostStore(a *alert.Alert, _ bool) {
 	select {
 	case c.jobs <- job{fp: fp, e: e, labels: a.Labels.Clone(), alert: toCoreAlert(a)}:
 		c.entries[fp] = e
-		c.queueFull = false
+		// Re-arm the Warn only once the queue has drained to half: at the
+		// limit, every enqueue that slips through would log again.
+		if len(c.jobs) < cap(c.jobs)/2 {
+			c.queueFull = false
+		}
 	default:
 		c.classifications.WithLabelValues("dropped_queue_full").Inc()
 		if !c.queueFull {

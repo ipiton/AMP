@@ -1,9 +1,9 @@
 {
-  "gate": "fix_required",
-  "reason": "fix-here majors: F1 (drop_noise drops resolved alerts, receiver incidents never close), F2 (rule-based fallback counted as classified; Edge Case 4 unreachable)",
+  "gate": "pass",
+  "reason": null,
   "branch": "feature/upstream-ai-classify",
-  "commit": "f1c3d77",
+  "commit": "e958847",
   "reviewed_at": "2026-10-30",
-  "findings": {"blocker": 0, "major": 2, "minor": 5, "nit": 2},
+  "findings": {"blocker": 0, "major": 2, "minor": 6, "nit": 2},
   "open": {"blocker": 0, "major_without_disposition": 0}
 }

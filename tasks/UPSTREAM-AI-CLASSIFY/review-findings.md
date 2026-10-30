@@ -3,8 +3,8 @@
 **Trigger classification:** mandatory (3+ сигнала: `C X R`; дополнительно discretionary novel-pattern — первая точка расширения порта upstream)
 **Reviewer perspective:** independent agent (general-purpose)
 **Reviewed at:** 2026-10-30
-**Reviewed tree:** feature/upstream-ai-classify @ f1c3d77
-**Verdict:** fix_required (see `review-verdict.json`)
+**Reviewed tree:** feature/upstream-ai-classify @ e958847 (раунд 2; раунд 1 — @ f1c3d77)
+**Verdict:** pass (see `review-verdict.json`; раунд 1 — fix_required)
 
 Объём: `git diff main...HEAD -- go-app config.yaml.example` (код — коммит `f1c3d77`), `requirements.md`, `research.md`, `Spec.md`, `tasks.md`. Премисы сверены с исходниками `github.com/prometheus/alertmanager@v0.34.1` из module cache. `go build ./...` и `go vet` по затронутым пакетам — зелёные. Тесты не запускались (фаза write-tests ещё впереди).
 
@@ -96,6 +96,32 @@
 - **Disposition:** fix-here
 - **Follow-up:** n/a
 
+## Раунд 2 (e958847)
+
+Проверен `git diff f1c3d77..e958847`: `stage.go`, `classifier.go`, `llm/errors.go`, `config.go`, `Spec.md` (v1.1). `go build ./...` и `go vet` по `upstreamai`, `llm`, `config` зелёные.
+
+| Finding | Статус | Комментарий |
+|---|---|---|
+| F1 (major) | resolved | Дропаются только `!a.Resolved()`. На копиях из flush firing имеет нулевой `EndsAt` (`dispatch.go:928`), resolved — `EndsAt` в прошлом, так что проверка согласована с `partitionAlertsByState` в dedup. Resolve noise-алерта, о котором получатель не знал, в одиночной группе не отправится (`entry == nil` → `ReasonDoNotNotify`), в смешанной группе с `send_resolved` придёт — это принятый компромисс, он записан в Spec Edge Case 6. |
+| F2 (major) | resolved | `Metadata["fallback"]` ставят обе ветки `FallbackEngine` (`fallback.go:72,115`); чтение из nil-map безопасно. Fallback из кеша сервиса тоже считается как `fallback`, это корректно. Edge Case 4 и Observability в Spec исправлены. |
+| F3 (minor) | open — defer-tech-debt | Без изменений по плану; Spec Edge Case 4 ссылается на TECH-DEBT. Запись завести на finalize. |
+| F4 (minor) | resolved | Edge Case 5 переписан верно. |
+| F5 (minor) | resolved, есть остаток → F10 | Warn один на эпизод, Help метрики уточнён, Spec Edge Case 3 дополнен. |
+| F6 (minor) | resolved | Impact Analysis описывает оба направления и то, что investigation не затронут. |
+| F7 (minor) | open — fix-here в write-tests | Ожидаемо: тесты пишутся после `pass`. Должен войти в 3.1/3.2 (dedup и `llm_*`, store без `llm_*`, `drop_noise` + resolve). |
+| F8 (nit) | resolved | Предел 24h для секунд и HTTP-date. Остаток: число вне диапазона `int` (`strconv.Atoi` → `ErrRange`) даёт 0, и retry идёт по обычному backoff. Принимается: ограничен `LLMTimeout`. |
+| F9 (nit) | resolved | Комментарий на месте. |
+
+### F10 — флаг `queueFull` сбрасывается первой же удачной постановкой: при очереди «у края» Warn флапает
+- **Severity:** minor
+- **Location:** `go-app/internal/upstreamai/classifier.go:150-159`
+- **Issue:** `queueFull` сбрасывается при любой успешной отправке в канал. Во время шторма воркер освобождает одно место, следующий новый алерт его занимает и сбрасывает флаг, а следующий за ним дропается и пишет новый Warn. Частота Warn ≈ пропускная способность воркеров (при попаданиях в кеш — десятки в секунду), а не «один на эпизод», как сказано в Spec. Это значительно лучше, чем один Warn на `Put`, но обещание Spec под нагрузкой не выполняется. Лог пишется под `a.mtx` провайдера, так что лишние записи прямо удлиняют `Put`.
+- **Recommendation:** сбрасывать флаг с гистерезисом, например только при `len(c.jobs) < cap(c.jobs)/2`, или ограничить Warn по времени (не чаще раза в минуту, в сообщении — число дропов за период). Кейс добавить в тест 3.1.
+- **Disposition:** fix-here (однострочная правка; на gate не влияет)
+- **Follow-up:** n/a
+
+Итог раунда 2: blocker 0, major 0 открытых (F1, F2 закрыты), открыты minor F3 (defer-tech-debt), F7 (write-tests) и F10 (fix-here, не блокирует). Gate — `pass`.
+
 ## Skip Register
 
 - Inhibition до классификации и ожидание в стадии для подавленных групп — заявленный known gap (Spec Open Questions, срез 2b/5), отдельной находкой не оформлялся.
@@ -104,3 +130,7 @@
 ## Anti-Pattern Check
 
 - [x] Self-audit was not treated as a substitute for independent review.
+
+### Исправление F10 (после раунда 2)
+
+- `queueFull` сбрасывается только при `len(c.jobs) < cap(c.jobs)/2` (`classifier.go`, `PostStore`). Статус: resolved.
