@@ -129,6 +129,14 @@
 
 ## Low
 
+### [low][AI][~0.25d] UPSTREAM-AI-FALLBACK-STICKY
+- **Title:** fallback-классификация на `amp-upstream` не заменяется LLM-ответом после восстановления провайдера
+- **Problem:** `upstreamai.Classifier` классифицирует алерт один раз, пока тот в store; при outage LLM сервис отвечает fallback по правилам без ошибки, и запись остаётся до GC алерта. Сам `ClassificationService` кеширует fallback на полный TTL (1h, `classification.go` Step 3), так что и повторный вызов вернул бы его же.
+- **Impact:** после outage долгоживущие алерты до конца жизни уходят с `llm_*` от правил; видно по `amp_upstream_ai_classifications_total{outcome="fallback"}`.
+- **Fix:** не кешировать fallback (или короткий TTL) в сервисе; в `Classifier` — забывать fallback-запись через интервал, чтобы следующий `Put` переклассифицировал.
+- **Refs:** deep-review `UPSTREAM-AI-CLASSIFY` F3; `go-app/internal/upstreamai/classifier.go`.
+- **Status:** open
+
 ### [low][Supply chain][~0.5d] UPSTREAM-BUMP-TRANSITIVE-AGE
 - **Title:** карантин `upstream-bump.sh` для транзитивных require — по commit time
 - **Problem:** `go list -m -json mod@ver` отдаёт `Time` — время коммита (`cmd/go/internal/modfetch/codehost/codehost.go`), его задаёт автор. Для `github.com/prometheus/alertmanager` скрипт берёт ещё дату GitHub-релиза, для остальных сдвинутых require — только commit time: новый тег на старый коммит проходит карантин.

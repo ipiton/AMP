@@ -54,8 +54,8 @@ based_on:
 
 ## Phase 4: Gates and docs
 
-- [ ] **4.1** `make -C go-app quality-gates-fast`, `scripts/release-gate.sh`, `scripts/upstream-core-gate.sh`, `git diff --check`
-- [ ] **4.2** `CHANGELOG.md` `[Unreleased]`, `docs/UPSTREAM_UPGRADE.md`
+- [x] **4.1** `make -C go-app quality-gates-fast`, `scripts/release-gate.sh`, `scripts/upstream-core-gate.sh`, `git diff --check`
+- [x] **4.2** `CHANGELOG.md` `[Unreleased]`, `docs/UPSTREAM_UPGRADE.md`
 
 ## Definition of Done
 
@@ -72,3 +72,4 @@ based_on:
 - Отклонение от Spec: порог `Retry-After` в `llmErrorChecker` применяется, только когда задан (`maxRetryAfter > 0`) — `investigate_with_tools.go` создаёт checker с нулевым значением, и без этого investigation перестал бы ретраить любой ответ с `Retry-After`.
 - `--amp.config.file` проходит полную валидацию `config.LoadConfig`: файл должен быть валидным AMP-конфигом целиком (например, `profile: lite` требует `storage.backend: filesystem`), а не только секцией `llm`.
 - Smoke 2026-10-30 (фейковый OpenAI + webhook, `group_wait: 1s`): `POST /api/v2/alerts` 200 за 4.7 мс; webhook группы получил `llm_severity`, `llm_confidence`, `llm_reasoning`, `llm_recommendations`, в том числе в `commonAnnotations`; `amp_upstream_ai_classifications_total{outcome="classified"} 1`.
+- Release gate 2026-10-30: 11/13 PASS (build, futureparity, upstream-core, race, helm-*, amtool-compat). `lint` FAIL — 7 `errcheck` в `publishing/delivery_confirmation_test.go` и `silencing/redis_event_bus_test.go`, вне диффа задачи, известный `BUGS.md` `LINT-ERRCHECK-CHANNEL-RECEIVE` (красный и на `main`). `test` FAIL — только `internal/database` `TestRunMigrations_ConcurrentReplicas_FreshDB`: `docker info: context deadline exceeded` (Docker-демон не ответил testcontainers); повторный `go test ./internal/database/` — ok.

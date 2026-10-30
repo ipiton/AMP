@@ -43,6 +43,8 @@ Then:
    - `pkg/labels/parse.go` goes to the matcher parsers in `internal/business/routing` and `pkg/configvalidator/matcher`.
 
    Then set `upstreamcore.PortedFrom` to the new version.
+
+   The port carries two AMP extensions that upstream does not have (`internal/upstreamcore/doc.go`, AMP extensions): the alert-store callback composed after the silencer (`chainCallback`, `Options.NewAlertCallback`) and the notify stage prepended to every receiver's pipeline (`Options.NotifyStage`, in the reload). Keep both when carrying the diff over. `go test ./internal/upstreamai/...` fails if upstream changes what they rely on: that the provider calls the callback, that dedup ignores annotations, that a resolve still goes out.
 2. Run `cd go-app && go build ./... && go test ./... -count=1`.
 3. Run `./scripts/upstream-core-gate.sh` and work through what it reports (see below).
 4. Run `cd go-app && go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...`.
