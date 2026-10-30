@@ -43,14 +43,14 @@ based_on:
 
 ## Phase 2: Deep review
 
-- [ ] **2.1** Независимый агент: `review-findings.md`, `review-verdict.json` с `"gate": "pass"` <!-- verify: jq .gate tasks/UPSTREAM-AI-CLASSIFY/review-verdict.json -->
+- [x] **2.1** Независимый агент: `review-findings.md`, `review-verdict.json` с `"gate": "pass"` <!-- verify: jq .gate tasks/UPSTREAM-AI-CLASSIFY/review-verdict.json -->
 
 ## Phase 3: Tests
 
-- [ ] **3.1** `upstreamai`: PostStore неблокирующий и только firing; переполнение очереди; silence → skipped; ошибка → повтор; стадия ждёт до дедлайна, таймаут, `notify_wait: 0`; клон аннотаций (store не меняется); `drop_noise`; GC удаляет записи <!-- verify: go test -race ./internal/upstreamai/... -->
-- [ ] **3.2** `upstreamcore`: сквозной путь с AI-колбэком и стадией — webhook получает `llm_*`; без опций — как раньше <!-- verify: go test -race ./internal/upstreamcore/... -->
-- [ ] **3.3** `llm`: `Retry-After` > MaxDelay → одна попытка; ≤ — пауза не меньше `Retry-After`; HTTP-date; мусор <!-- verify: go test ./internal/infrastructure/llm/... -->
-- [ ] **3.4** `config`: дефолты, отрицательный `notify_wait` <!-- verify: go test ./internal/config/... -->
+- [x] **3.1** `upstreamai`: PostStore неблокирующий и только firing; переполнение очереди; silence → skipped; ошибка → повтор; стадия ждёт до дедлайна, таймаут, `notify_wait: 0`; клон аннотаций (store не меняется); `drop_noise`; GC удаляет записи <!-- verify: go test -race ./internal/upstreamai/... -->
+- [x] **3.2** Сквозной путь на реальном `upstreamcore` (`internal/upstreamai/integration_test.go`, закрывает F7): webhook группы получает `llm_*` и `commonAnnotations`, store без `llm_*`, поздняя классификация не вызывает повтор (dedup), `drop_noise` пропускает resolve; без опций — существующий `core_test.go` <!-- verify: go test -race ./internal/upstreamai/... ./internal/upstreamcore/... -->
+- [x] **3.3** `llm`: `Retry-After` > MaxDelay → одна попытка; ≤ — пауза не меньше `Retry-After`; HTTP-date; мусор <!-- verify: go test ./internal/infrastructure/llm/... -->
+- [x] **3.4** `config`: дефолты, отрицательный `notify_wait` <!-- verify: go test ./internal/config/... -->
 
 ## Phase 4: Gates and docs
 

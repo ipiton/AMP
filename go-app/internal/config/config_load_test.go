@@ -190,3 +190,30 @@ func TestLoadConfig_RedisStartupWait(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "redis.startup_wait cannot be negative")
 }
+
+// UPSTREAM-AI-CLASSIFY: llm.notify_wait defaults to 5s and llm.drop_noise to
+// false; a negative wait fails the load.
+func TestLoadConfig_LLMNotifyWaitAndDropNoise(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent.yaml")
+
+	resetViper()
+	unsetEnvKeys("LLM_NOTIFY_WAIT", "LLM_DROP_NOISE")
+	cfg, err := LoadConfig(missing)
+	require.NoError(t, err)
+	assert.Equal(t, "5s", cfg.LLM.NotifyWait.String())
+	assert.False(t, cfg.LLM.DropNoise)
+
+	resetViper()
+	t.Setenv("LLM_NOTIFY_WAIT", "0s")
+	t.Setenv("LLM_DROP_NOISE", "true")
+	cfg, err = LoadConfig(missing)
+	require.NoError(t, err)
+	assert.Zero(t, cfg.LLM.NotifyWait)
+	assert.True(t, cfg.LLM.DropNoise)
+
+	resetViper()
+	t.Setenv("LLM_NOTIFY_WAIT", "-1s")
+	_, err = LoadConfig(missing)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "llm.notify_wait cannot be negative")
+}
