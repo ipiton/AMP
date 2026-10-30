@@ -14,7 +14,7 @@ based_on:
 
 # Implementation Plan: AI-классификация на upstream-ядре
 
-**Based on:** requirements.md / research.md / Spec.md  
+**Based on:** requirements.md / research.md / Spec.md
 **Date:** 2026-10-30
 
 ## Touched Files

@@ -13,7 +13,7 @@ based_on:
 
 # Specification: AI-классификация на upstream-ядре (срез 2a ADR-019)
 
-**Version:** 1.1 (по deep review F1, F2, F4–F6)  
+**Version:** 1.1 (по deep review F1, F2, F4–F6)
 **Status:** Approved (автономный прогон конвейера по поручению владельца 2026-10-30)
 
 ## Summary
