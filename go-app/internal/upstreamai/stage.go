@@ -21,7 +21,9 @@ const maxReasoningLen = 500
 // waits at most wait — and at most half of what is left of the stage's
 // deadline, leaving the rest for delivery — for the pending classifications
 // of the alerts, then passes on copies of the classified ones with llm_*
-// annotations. With dropNoise, alerts classified as noise are left out.
+// annotations. With dropNoise, firing alerts classified as noise are left
+// out; a resolved one always goes through, since its firing notification
+// may have been sent before the classification was ready.
 func (c *Classifier) NotifyStage(wait time.Duration, dropNoise bool) notify.Stage {
 	return notify.StageFunc(func(ctx context.Context, l *slog.Logger, alerts ...*alert.Alert) (context.Context, []*alert.Alert, error) {
 		entries := c.lookup(alerts)
@@ -34,7 +36,7 @@ func (c *Classifier) NotifyStage(wait time.Duration, dropNoise bool) notify.Stag
 				out = append(out, a)
 				continue
 			}
-			if dropNoise && res.Severity == core.SeverityNoise {
+			if dropNoise && res.Severity == core.SeverityNoise && !a.Resolved() {
 				c.noiseDropped.Inc()
 				l.Info("alert classified as noise left out of the notification",
 					"alertname", string(a.Labels[model.AlertNameLabel]),

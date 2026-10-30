@@ -71,6 +71,8 @@ type Classifier struct {
 
 	mtx     sync.Mutex
 	entries map[model.Fingerprint]*entry
+	// queueFull logs one Warn per overflow episode instead of one per Put.
+	queueFull bool
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -98,7 +100,7 @@ func New(cfg Config) *Classifier {
 		cancel:  cancel,
 		classifications: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "amp_upstream_ai_classifications_total",
-			Help: "Alert classifications by outcome: classified, error, skipped_silenced, dropped_queue_full.",
+			Help: "Alert classification attempts by outcome: classified (LLM), fallback (rule-based, LLM unavailable), error, skipped_silenced, dropped_queue_full (counted per Put, not per alert).",
 		}, []string{"outcome"}),
 		waits: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "amp_upstream_ai_notify_waits_total",
@@ -147,8 +149,14 @@ func (c *Classifier) PostStore(a *alert.Alert, _ bool) {
 	select {
 	case c.jobs <- job{fp: fp, e: e, labels: a.Labels.Clone(), alert: toCoreAlert(a)}:
 		c.entries[fp] = e
+		c.queueFull = false
 	default:
 		c.classifications.WithLabelValues("dropped_queue_full").Inc()
+		if !c.queueFull {
+			c.queueFull = true
+			c.logger.Warn("classification queue full, alerts are not classified until it drains; the next Put of an alert retries",
+				"queue_size", cap(c.jobs))
+		}
 	}
 }
 
@@ -200,6 +208,12 @@ func (c *Classifier) classify(ctx context.Context, j job) {
 		return
 	}
 	j.e.result = res
+	// With the LLM down the service answers from its rule-based fallback
+	// without an error; the outcome keeps an outage visible.
+	if fb, _ := res.Metadata["fallback"].(bool); fb {
+		c.classifications.WithLabelValues("fallback").Inc()
+		return
+	}
 	c.classifications.WithLabelValues("classified").Inc()
 }
 

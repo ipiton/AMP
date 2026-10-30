@@ -13,7 +13,7 @@ based_on:
 
 # Specification: AI-классификация на upstream-ядре (срез 2a ADR-019)
 
-**Version:** 1.0  
+**Version:** 1.1 (по deep review F1, F2, F4–F6)  
 **Status:** Approved (автономный прогон конвейера по поручению владельца 2026-10-30)
 
 ## Summary
@@ -111,10 +111,10 @@ based_on:
 
 1. Resolved-алерт без записи → не классифицируется, стадия не ждёт.
 2. Алерт заглушён silence → `skipped`, стадия не ждёт; после снятия silence повтор не делается до удаления записи (GC) — known gap, метрика `skipped_silenced`.
-3. Очередь полна → запись не создаётся, следующий `Put` (resend Prometheus) повторит.
-4. Ошибка `ClassifyAlert` (fallback выключен/упал) → запись удаляется, `done` закрывается, следующий `Put` повторит.
-5. LLM висит дольше бюджета → уведомление без `llm_*`, метрика `timeout`; классификация попадёт в следующий flush группы.
-6. `drop_noise` и вся группа — шум → `MultiStage` останавливается, уведомления нет.
+3. Очередь полна → запись не создаётся, следующий `Put` (resend Prometheus) повторит; один Warn на эпизод переполнения. Отправитель, который шлёт алерт один раз, классификацию не получит.
+4. LLM недоступен → сервис отвечает fallback-классификацией по правилам без ошибки (`EnableFallback` по умолчанию): она идёт в `llm_*` (как на `cmd/server`), исход метрики — `fallback`; переклассификации после восстановления LLM нет (сервис кеширует fallback на 1h) — TECH-DEBT. Ошибка `ClassifyAlert` (только с выключенным fallback; в `amp-upstream` недостижимо) → запись удаляется, следующий `Put` повторит.
+5. LLM висит дольше бюджета → уведомление без `llm_*`, метрика `timeout`. Поздняя классификация попадёт только в следующее *отправленное* уведомление группы: dedup upstream (хеш labels) не шлёт повтор ради одних аннотаций — до нового алерта в группе, resolve или `repeat_interval`.
+6. `drop_noise` и вся группа — шум → `MultiStage` останавливается, уведомления нет. Дропаются только firing: resolved проходит всегда — его firing мог уйти до готовности классификации, и без resolve инцидент у получателя остался бы открытым (deep review F1).
 7. `notify_wait: 0` → не ждём, аннотируем только готовые.
 8. `Retry-After` > `MaxDelay` → без повтора; ≤ `MaxDelay` → повтор не раньше `Retry-After`; невалидный заголовок → обычный backoff.
 9. Stop → воркеры останавливаются, in-flight LLM-запрос отменяется контекстом; ожидающие стадии выходят по дедлайну/контексту.
@@ -122,7 +122,7 @@ based_on:
 ## Impact Analysis
 
 - **Affected modules:** `upstreamcore`, новый `upstreamai`, `llm`, `config`, `cmd/amp-upstream`.
-- **Breaking changes:** none. `cmd/server`: 429/503 с длинным `Retry-After` теперь не ретраятся (быстрее fallback).
+- **Breaking changes:** none. `cmd/server` (общий LLM-клиент): 429/503 с `Retry-After` больше `MaxDelay` (10s по умолчанию) не ретраятся — быстрее fallback; короткий `Retry-After` теперь выдерживается, и синхронный ingest `cmd/server` под 429 может стать длиннее, но не дольше `LLMTimeout` (как и раньше). Investigation (`investigate_with_tools.go`) не затронут: его checker без порога.
 - **New dependencies:** none.
 - **Risks:** сдвиг порта upstream — отмечается в `doc.go`, `scripts/upstream-bump.sh` диффит только upstream-файлы; ожидание до mute-стадий — ограничено бюджетом.
 
@@ -134,8 +134,8 @@ based_on:
 
 ## Observability
 
-- **Logs:** Info на старте AI-слоя (provider, model, notify_wait, drop_noise); Warn на переполнение очереди (rate-limited нет — счётчик); Info на дроп шума (alertname, fingerprint, confidence); Warn на ошибку классификации.
-- **Metrics:** `amp_upstream_ai_classifications_total{outcome="classified|error|skipped_silenced|dropped_queue_full"}`, `amp_upstream_ai_notify_waits_total{outcome="ready|timeout"}`, `amp_upstream_ai_noise_dropped_total`.
+- **Logs:** Info на старте AI-слоя (provider, model, notify_wait, drop_noise); Warn — один на эпизод переполнения очереди; Info на дроп шума (alertname, fingerprint, confidence); Warn на ошибку классификации.
+- **Metrics:** `amp_upstream_ai_classifications_total{outcome="classified|fallback|error|skipped_silenced|dropped_queue_full"}` (`dropped_queue_full` — на попытку `Put`, не на алерт), `amp_upstream_ai_notify_waits_total{outcome="ready|timeout"}`, `amp_upstream_ai_noise_dropped_total`.
 - **Alerts:** not applicable (срез 5/7 — правила для чарта).
 
 ## Deep Review

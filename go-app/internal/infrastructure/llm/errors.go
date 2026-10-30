@@ -34,6 +34,10 @@ type HTTPError struct {
 	RetryAfter time.Duration
 }
 
+// maxRetryAfter caps a parsed Retry-After; anything longer is equally "do
+// not retry now", and the cap keeps the seconds from overflowing Duration.
+const maxRetryAfter = 24 * time.Hour
+
 // parseRetryAfter reads a Retry-After header: delay-seconds or an HTTP-date.
 // Anything else, a negative delay or a date in the past yields 0.
 func parseRetryAfter(h string, now time.Time) time.Duration {
@@ -45,11 +49,14 @@ func parseRetryAfter(h string, now time.Time) time.Duration {
 		if secs < 0 {
 			return 0
 		}
+		if secs > int(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(h); err == nil {
 		if d := t.Sub(now); d > 0 {
-			return d
+			return min(d, maxRetryAfter)
 		}
 	}
 	return 0
