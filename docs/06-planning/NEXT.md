@@ -16,6 +16,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **UPSTREAM-AI-CLASSIFY** — срез 2a `UPSTREAM-AI-HOOKS` (`BACKLOG.md` § ADR-019, взят 2026-10-30): асинхронная LLM-классификация из `AlertStoreCallback.PostStore`, своя notify-стадия ждёт её с бюджетом времени и кладёт `llm_*` в аннотации группы, дроп шума за флагом (default off), `Retry-After`; LLM и кеш в `cmd/amp-upstream` из AMP-конфига. Поглощает `PROD-LLM-ALERT-PATH-ISOLATION`, `GROUP-NOTIFY-CLASSIFICATION`. Full, ~1.5d.
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -31,7 +33,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 > Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 2–4 независимы; описание — `BACKLOG.md` § ADR-019.
 
-- [ ] **UPSTREAM-AI-HOOKS** — срез 2: AI-слой в `AlertStoreCallback` и своей notify-стадии. Full, 2–3d.
+- [ ] **UPSTREAM-AI-HISTORY-INVESTIGATION** — срез 2b (`UPSTREAM-AI-HOOKS`): `PostStore` — история в PG и постановка investigation, дешёвый фильтр в `PreStore`, соответствие fingerprint upstream (FNV) и AMP (SHA-256). Full, ~1d. После: `UPSTREAM-AI-CLASSIFY`.
 - [ ] **UPSTREAM-NON-UPSTREAM-RECEIVERS** — срез 3: интеграции upstream `notify/*`, свои — Rootly и K8s-Secret таргеты. Standard, 2–3d.
 - [ ] **UPSTREAM-HA-MEMBERLIST** — срез 4: `cluster.Peer`, gossip, снапшоты на PVC, StatefulSet. Full, 3–5d.
 
