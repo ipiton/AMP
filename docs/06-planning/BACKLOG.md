@@ -481,3 +481,7 @@
 
 ## Release
 - [x] ~~**PHASE-8-RELEASE-ROLLOUT**~~ — полный quality gate, smoke e2e, rollback runbook и controlled rollout. `scripts/release-gate.sh` (build/lint/test/futureparity/-race/helm/amtool-compat, green on main), `deploy/smoke/` (single-node lite e2e: real webhook delivery, silence suppression, `/-/reload`), `docs/ROLLBACK_RUNBOOK.md`, `docs/ROLLOUT_PLAN.md`.
+
+## Публичный запуск (article-review Sema 2026-10-31 § [7])
+
+- [ ] **PUBLIC-LAUNCH-V010** — первый релиз-якорь и публичный запуск. [ФАКТ, 2026-10-31] репозиторий публичный с 2026-09-29, релизов 0, черновик заметок `v0.1.0` есть, задачи на запуск нет. Последовательность из донора (Habr 1101612, +30★ за день от поста в сообществе хост-инструмента; общие посты и HN эффекта не дали): (1) тег `v0.1.0` с установкой одной командой; (2) пост в сообществах тех, кто уже держит Alertmanager (r/PrometheusMonitoring, r/sre, r/kubernetes), а не в общем r/programming; (3) регулярный ритм релизов. Перед постом проверить выдачу по «alertmanager alternative», «alertmanager llm triage»: имя `AMP` в поиске не различимо и держится только на описании. ⏸ Развилка владельца: запускать ли AMP публично сейчас или после `UPSTREAM-CORE-REMOVAL`. Источник: `~/code/own/Sema/docs/06-planning/article-reviews/2026-10-31.md` § [7] П2, П4.
