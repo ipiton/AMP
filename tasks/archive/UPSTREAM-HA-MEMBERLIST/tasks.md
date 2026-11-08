@@ -1,7 +1,7 @@
 ---
 id: UPSTREAM-HA-MEMBERLIST
 slug: upstream-ha-memberlist
-status: active
+status: done
 created_at: 2026-11-08
 updated_at: 2026-11-08
 ---
@@ -66,7 +66,7 @@ updated_at: 2026-11-08
 
 ## Phase 6: Review
 
-- [ ] 6.1 `deep-review` (independent agent) → `review-findings.md`, `review-verdict.json` `"gate": "pass"`.
+- [x] 6.1 `deep-review` (independent agent) → `review-findings.md`, `review-verdict.json` `"gate": "pass"`.
   verify: `jq -r .gate tasks/UPSTREAM-HA-MEMBERLIST/review-verdict.json` = `pass`
 
 ## Phase 7: Tests (после verdict)
@@ -80,8 +80,8 @@ updated_at: 2026-11-08
 
 ## Phase 8: Testing и finalize
 
-- [ ] 8.1 Гейты: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`.
-- [ ] 8.2 `finalize`: CHANGELOG `[Unreleased]`, BACKLOG (кандидаты, `UPSTREAM-AI-HA-DEDUP`, `CI-E2E-HA-REQUIRED`), BUGS/TECH-DEBT «срез 4» → «срез 5», DONE, NEXT, архив.
+- [x] 8.1 Гейты: затронутые пакеты, `make -C go-app quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`.
+- [x] 8.2 `finalize`: CHANGELOG `[Unreleased]`, BACKLOG (кандидаты, `UPSTREAM-AI-HA-DEDUP`, `CI-E2E-HA-REQUIRED`), BUGS/TECH-DEBT «срез 4» → «срез 5», DONE, NEXT, архив.
 
 ## Definition of Done
 

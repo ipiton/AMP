@@ -329,13 +329,13 @@
 - **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Test][~0.25d] GROUPING-ORPHAN-ADOPTION-TEST-FLAKY
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** `TestInitializeGrouping_StandardReconciliationAdoptsOrphanFromCrashedReplica` флейкает
 - **Problem:** `go-app/internal/application/service_registry_grouping_test.go:585` — `continuation timer type = "group_wait", want "group_interval"`. Замер 2026-10-07 под нагрузкой (параллельно с release-gate), `-count=80`: 6 падений на `main` @ `fa682d4`, 7 на ветке с runbook engine — предсуществующий, не от слияния. Без нагрузки на `main` 0/40. Гипотеза: тест ждёт `stats.ReconciledTimers >= 1` и сразу читает storage, а счётчик растёт раньше, чем `onGroupWaitExpired` записывает continuation `group_interval`, — тест читает ещё старую запись `group_wait`.
 - **Impact:** шаг `test` required-гейта `gate` краснеет случайно; после `GROUPING-TIMER-LOCK-FIX` (2026-10-10) — последний известный флейк в grouping.
 - **Fix:** в тесте ждать опросом, пока тип записи станет `group_interval` (с тем же дедлайном), а не читать один раз; если запись `group_wait` держится дольше дедлайна — это уже продуктовый дефект.
 - **Refs:** release-gate 2026-10-07 на `feature/phase-6b-runbook-engine`, `~/amp-audit/gate-runbook.log`.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Pipeline][~0.5d] DIRECT-PUBLISH-RENOTIFIES-ON-RESEND
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
@@ -479,13 +479,13 @@
 - **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Grouping][~1d] GROUP-STORE-LOST-UPDATE
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** конкурентное обновление существующей группы в Redis теряет алерт молча
 - **Problem:** `AddAlertToGroup` (`internal/infrastructure/grouping/manager_impl.go:298-305`) делает `Load → mutate → Store`; при конкурентном апдейте `RedisGroupStorage.Store` (`redis_group_storage.go:204`) возвращает `ErrVersionMismatch`/`TxFailedErr`, ошибка только логируется, вызывающему возвращается незаписанный `Clone()`. `group.Version++` выполняется до EXEC. `MemoryGroupStorage` версию не проверяет вовсе.
 - **Impact:** алерт или resolve пропадает из группы до следующего resend; memory и Redis backend ведут себя по-разному.
 - **Fix:** retry с повторным `Load` (N попыток, затем ошибка); локальная сериализация по ключу через `groupPublishLocks` (`publish_lock.go:72`) — заодно закрывает `GROUPING-NEW-GROUP-CREATE-RACE`; `Version++` на копии после EXEC; общий contract-тест для двух storage.
 - **Refs:** CODE-REVIEW-2026-10-21 M-1, D-13. Смежно `REDIS-GROUP-STORAGE-UNLOCKED-WRITES` (TECH-DEBT), `GROUPING-NEW-GROUP-CREATE-RACE`.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Silencing][~0.25d] SILENCE-VALIDATION-PARITY
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
@@ -562,31 +562,31 @@
 - **Status:** superseded — ADR-019, срез 6
 
 ### [low][Grouping][~0.25d] REDIS-GROUP-INDEX-GHOSTS
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** ZSET-индекс групп в Redis копит удалённые по TTL группы
 - **Problem:** `redis_group_storage.go:222,385,419-590`: после истечения ключа группы (TTL 24h) член `group:index` остаётся; timer storage такие члены лениво чистит (`redis_timer_storage.go:452`), group storage — нет.
 - **Impact:** `Size()` (ZCARD) завышен, `LoadAll` считает призраков ошибками на каждом restore, индекс растёт.
 - **Fix:** `ZRem` на not-found в `LoadAll`/`ListKeys`; общий helper с timer storage (`REDIS-HELPERS`).
 - **Refs:** CODE-REVIEW-2026-10-21 L-12, D-12.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][Grouping][~0.1d] LOCK-ACQUIRE-SLEEP
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** `Acquire` распределённого lock делает 4 попытки со `time.Sleep` без ctx
 - **Problem:** `lock/distributed.go:86-125`: `Acquire()` = `AcquireWithRetry(ctx, 0)` ⇒ 3 ретрая по умолчанию; `time.Sleep` игнорирует ctx; `defer cancel()` внутри цикла; таймаут попытки = TTL, а не `AcquireTimeout`; успех логируется на INFO.
 - **Impact:** follower делает 4 SETNX на poll, `Stop` задерживается.
 - **Fix:** одна попытка SETNX на `Acquire`, ctx-aware sleep, `cancel()` на итерацию, лог на DEBUG.
 - **Refs:** CODE-REVIEW-2026-10-21 L-14.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][Cluster][~0.25d] CLUSTER-HEARTBEAT-STATE
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** heartbeat считает себя зарегистрированным после неудачных refresh; `Peers` сканирует весь keyspace
 - **Problem:** `cluster/heartbeat.go:174`: `registered` остаётся true, даже когда ключ уже истёк; `Peers` (`:244`) делает SCAN по всему keyspace (группы, таймеры, nflog) на каждый status.
 - **Impact:** неверный статус кластера в `/api/v2/status`; нагрузка на Redis растёт с числом групп.
 - **Fix:** `registered=false` на неудаче refresh; peers в ZSET со score=expiry (`ZADD` + `ZRANGEBYSCORE now +inf`).
 - **Refs:** CODE-REVIEW-2026-10-21 L-15.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][Publishing][~0.5d] PUBLISH-RELOAD-CLIENT-LIFECYCLE
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.

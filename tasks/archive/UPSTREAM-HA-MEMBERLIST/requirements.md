@@ -4,7 +4,7 @@ slug: upstream-ha-memberlist
 stream: Architecture / ADR-019
 type: feature
 priority: high
-status: active
+status: done
 created_at: 2026-11-08
 updated_at: 2026-11-08
 ---

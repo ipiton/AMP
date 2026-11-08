@@ -153,6 +153,14 @@
 - **Refs:** deep-review `UPSTREAM-CORE-POC-GATE` F4 (п. 2), F12.
 - **Status:** open
 
+### [low][Test][~0.25d] E2E-HA-LEGACY-COVERAGE-GAP
+- **Title:** двухрепликовую Redis-HA своего ядра больше ничто не прогоняет
+- **Problem:** `deploy/e2e-ha` переписан под upstream-ядро на memberlist (`UPSTREAM-HA-MEMBERLIST`), а рабочая нагрузка чарта по умолчанию до среза 5 — `cmd/server` с Redis-HA (lock, heartbeat, группы, таймеры, nflog). Старый сценарий был единственным прогоном реальной двухрепликовой топологии и PG-пути silencing (repository-тесты — `t.Skip`, `tasks/archive/PROD-DEPS-VULN`).
+- **Impact:** регрессия Redis-HA своего ядра между мержем среза 4 и срезом 5 видна только на установке.
+- **Fix:** снимается срезом 5 `UPSTREAM-CORE-REMOVAL` (своё ядро удаляется). Если окно затянется — вернуть старый сценарий из истории (`git show 14fc041:deploy/e2e-ha/run.sh`) как ручной `deploy/e2e-ha-legacy/`.
+- **Refs:** `tasks/archive/UPSTREAM-HA-MEMBERLIST/review-findings.md` F8.
+- **Status:** open
+
 ### [low][Cache][~0.25d] CACHE-STARTUP-RETRY-ERROR-LOGS
 - **Title:** каждая неудачная попытка подключения к кешу на старте пишет ERROR
 - **Problem:** `dialRedis` (`go-app/internal/infrastructure/cache/redis.go:99`) логирует `Failed to connect to Redis` на уровне ERROR. С ожиданием на старте (`AMP-CACHE-NO-RECONNECT`) штатная гонка upgrade даёт по ERROR-строке на попытку: k3d — 5 при успешном подключении через 38s, 8 при исчерпанном окне. Тот же `dialRedis` вызывает `Reload`.
@@ -270,22 +278,22 @@
 Перенесено 2026-10-24 задачей `ADR-019-V2-SLICING`: код, в котором живёт проблема, удаляется срезом эпика ADR-019 (`BACKLOG.md`), поведение даёт upstream. Не брать в работу. Записи сохранены целиком: если PoC (`UPSTREAM-CORE-POC`) не пройдёт и решение пересмотрят, они возвращаются в Open. Закрываются вместе со срезом — удаляются отсюда, строка в `DONE.md` среза. `Status: superseded` — расширение Entry Format для этой секции.
 
 ### [medium][Grouping][~1d] TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** пропажа ключа таймера в Redis глушит живой локальный таймер
 - **Problem:** после `GROUPING-TIMER-LOCK-FIX` срабатывание сверяется с записью в timer storage, и отсутствие записи значит «уже обработано» (`fireStillDue`, `not_found`). Если ключ пропал не из-за обработчика — eviction (`allkeys-lru`), `FLUSHDB`, failover на отстающую реплику Redis, — локальный таймер тоже пропускает срабатывание, а reconciliation ключа не видит. Различить «удалён обработчиком» и «потерян» без отдельного маркера нельзя. У group storage есть failback (`StorageManager`), у timer storage — нет (`service_registry.go:1897-1911`).
 - **Impact:** группа молчит до следующего алерта в ней; только HA-режим с Redis. _(PROD-GROUPING-DEFAULT, 2026-10-10: следующий алерт перевзводит таймер через `ensureGroupTimer`; группировка теперь включена по умолчанию, а Redis чарта по умолчанию `allkeys-lru` — см. `HELM-REDIS-NOEVICTION` в BACKLOG.)_
 - **Fix:** маркер обработанного срабатывания (например, `fired:{groupKey}:{expiresAt}` с TTL) вместо отсутствия записи, либо требование `noeviction` для Redis AMP в чарте и доках.
 - **Refs:** `go-app/internal/infrastructure/grouping/timer_manager_impl.go` (`fireStillDue`, `skipHandledFire`); `tasks/archive/GROUPING-TIMER-LOCK-FIX/review-findings.md` F6.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Grouping][~1d] NOTIFY-LOG-FALLBACK-LIMITS
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** ограничения `resilientNotifyLog` при недоступном журнале нотификаций
 - **Problem:** обёртка над `RedisNotifyLog` при ошибке чтения отвечает из локальной памяти реплики. (1) Локальная запись может быть устаревшей: другая реплика успела отправить более новый набор — ответ «дубликат» придерживает target, покрытым он не считается, prune не выполняется (это намеренно, Spec п.8, 10). (2) При сбое дольше `repeat_interval` группа с несколькими target'ами не оседает: локальные записи истекают в разное время, каждый раз один target получает fail-open отправку, другой придержан — resolved-алерт уходит каждому target'у раз в `repeat_interval`, пока журнал не читается. (3) Нет метрики состояния fallback — видно только по Warn-логу.
 - **Impact:** при длительной недоступности Redis — повторы resolved раз в `repeat_interval` на target; после восстановления первый flush удаляет алерт. Оператор не видит по метрикам, что дедуп работает из локальной памяти.
 - **Fix:** gauge/counter «nflog отвечает локально»; для (2) — общий срок годности локальных записей группы либо отказ от fail-open для resolved-only набора.
 - **Refs:** `go-app/internal/infrastructure/grouping/notify_log_fallback.go`; `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` K-серия, M1, N1; `Spec.md` Edge Cases 19–20.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Grouping][~0.5d] GROUP-CLEANUP-NOT-WIRED
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).
@@ -418,31 +426,31 @@
 - **Status:** superseded — ADR-019, срез 5
 
 ### [low][Grouping][~0.5d] GROUP-HASTIMER-REDIS-GET-PER-ALERT
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** `HasTimer` делает Redis GET на каждый алерт у реплики без локального handle
 - **Problem:** `ensureGroupTimer` спрашивает `HasTimer`; у реплики, не владеющей таймером группы, это поход в Redis — в HA (N−1)/N алертов. При ошибке GET пишутся Warn и Error на каждый алерт, без rate-limit.
 - **Impact:** лишний round-trip на ingest-пути и шум в логах при сбое Redis; на корректность не влияет.
 - **Fix:** короткий локальный кэш «таймер есть» на группу; rate-limit логов ошибки.
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H9; `go-app/internal/infrastructure/grouping/manager_impl.go` (`ensureGroupTimer`), `timer_manager_impl.go` (`HasTimer`).
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][Grouping][~0.5d] LEGACY-REPEAT-TIMER-AFTER-UPGRADE
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** legacy-таймер `repeat_interval` после апгрейда держит задержку до своего срока
 - **Problem:** группа, пережившая апгрейд с таймером типа `repeat_interval`, считается «с таймером» (`HasTimer` = true), перевзвод не срабатывает; `RestoreTimers` такой таймер в `group_interval` не конвертирует — timer manager не знает `group_interval` группы. Новый алерт в такой группе ждёт остаток `repeat_interval` (до 4h), один раз на группу.
 - **Impact:** разовая задержка нотификации после апгрейда HA-установки с живыми группами; названо в migration note п.10.
 - **Fix:** при `RestoreTimers` сжимать legacy-таймер до `min(остаток, group_interval)` — нужен доступ к параметрам маршрута группы.
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` H7.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][Grouping][~0.5d] REDIS-GROUP-STORAGE-UNLOCKED-WRITES
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** `RedisGroupStorage.Store`/`Delete` без блокировки группы и проверки версии
 - **Problem:** `RedisGroupStorage.Store` делает `json.Marshal` и `Version++` без `group.mu` (в `MemoryGroupStorage.Store` это исправлено в PROD-GROUPING-DEFAULT); `storage.Delete` не проверяет версию, поэтому проверка «алерт всё ещё resolved» перед prune атомарна только в пределах объекта группы одной реплики. Пробой не воспроизведён: в Redis-режиме объект группы обычно свой у каждого вызова.
 - **Impact:** теоретическая гонка между репликами: prune может удалить группу, в которую другая реплика только что добавила алерт.
 - **Fix:** `Store` под `group.mu.RLock`; `Delete` с проверкой версии (Lua/WATCH).
 - **Refs:** `tasks/archive/PROD-GROUPING-DEFAULT/review-findings.md` M3, M4; `Spec.md` п.10 (оговорка про Redis).
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][Config][~0.25d] GROUPING-RELOAD-NO-RESTART-HINT
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — конфиг Alertmanager грузит upstream `config.Load`.
@@ -463,13 +471,13 @@
 - **Status:** superseded — ADR-019, срез 5
 
 ### [low][Cache][~0.5d] REDIS-HELPERS
-- **ADR-019:** срез 4 `UPSTREAM-HA-MEMBERLIST` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется, HA — memberlist upstream.
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — Redis-состояние (группы, таймеры, nflog, lock, heartbeat) удаляется вместе со своим ядром. HA upstream-ядра на memberlist дал срез 4 `UPSTREAM-HA-MEMBERLIST` (2026-11-08), Redis своего ядра он не удалял (бриф среза).
 - **Title:** механические дубли вокруг Redis
 - **Problem:** CAS-release Lua ×4 (`lock/distributed.go:139,180`, `grouping/redis_timer_storage.go:540`, `grouping/redis_notify_log.go:605`); ленивая чистка ZSET-индекса только в timer storage (`redis_timer_storage.go:452`); `redis_notify_log.go:283-330` — 4 последовательных round trip на таргет без атомарности.
 - **Impact:** исправление в одной копии не доезжает до других (`REDIS-GROUP-INDEX-GHOSTS`).
 - **Fix:** `var casDelete = redis.NewScript(...)`, общий helper «ZSET-индекс с ленивой чисткой», `TxPipelined` в nflog.
 - **Refs:** CODE-REVIEW-2026-10-21 D-12, L-13, § 4.2.
-- **Status:** superseded — ADR-019, срез 4
+- **Status:** superseded — ADR-019, срез 5
 
 ### [low][API][~0.25d] SILENCED-GROUP-UNFILTERED
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой код удаляется, поведение даёт upstream (`dispatch`/`notify`/`silence`/`inhibit`/`nflog`/`provider/mem`).

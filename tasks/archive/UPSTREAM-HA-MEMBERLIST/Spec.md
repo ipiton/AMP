@@ -51,8 +51,8 @@ based_on:
 | P3 | `cluster.Create` с портом 0 работает, фактический адрес виден в `/api/v2/status` | `cluster.go:Create` передаёт порт в memberlist; подтверждается тестом двух реплик | `code-read` → проверяется в write-tests |
 | P4 | Снапшоты `silences`/`nflog` пишутся в `DataDir` на остановке (закрытие `stopc` → финальный снапшот в `Maintenance`) и читаются на старте | порт 1a, `silence.Maintenance` | `code-read` → проверяется в `e2e-ha` (silence переживает рестарт) |
 | P5 | Основной Service чарта выбрал бы поды с `amp.selectorLabels` и портом `http` | `templates/service.yaml` | `code-read` |
-| P6 | Pod IP — приватный адрес; `--cluster.advertise-address=$(POD_IP):9094` корректен для memberlist | community-чарт Alertmanager делает так же | `assumed` → риск в Rollout |
-| P7 | Срезы 2b/3 не трогают `Dockerfile` и шаблоны `helm/amp/templates/upstream-*` | бриф эпика; конфликт проверяется при мерже | `assumed` → риск в Rollout |
+| P6 | Pod IP — приватный адрес; `--cluster.advertise-address=$(POD_IP):9094` корректен для memberlist | community-чарт Alertmanager делает так же | `assumed` → риск в Rollout. Итог (finalize): разбор `[$(POD_IP)]:9094` проверен ревью; в k3s не выкатывалось — риск остаётся до среза 5 |
+| P7 | Срезы 2b/3 не трогают `Dockerfile` и шаблоны `helm/amp/templates/upstream-*` | бриф эпика; конфликт проверяется при мерже | `assumed` → `verified` на ревью (`git merge-tree` с ветками 2b и 3: `Dockerfile`, `helm/`, `deploy/e2e-ha` не пересекаются; конфликты только в `upstreamcore`/`main.go`) |
 
 ## Target Design
 
