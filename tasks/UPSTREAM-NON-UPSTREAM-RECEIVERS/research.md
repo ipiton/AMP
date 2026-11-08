@@ -31,7 +31,7 @@ updated_at: 2026-11-08
 
 - **Rootly (Q1):** документация Rootly (Alerts → Sources → Alertmanager) даёт webhook URL (`https://webhooks.rootly.com/webhooks/incoming/alertmanager_webhooks`) и bearer-секрет; в `alertmanager.yml` — `webhook_configs` с `http_config.authorization` (Bearer) и `send_resolved: true` (без него Rootly не резолвит). Пейджинг — суффиксом `notify/<resource_type>/<resource_id>` в URL или аннотациями. Значит, upstream `notify/webhook` достаточно; связь алерт → инцидент держит Rootly на своей стороне, кеша ID инцидентов у AMP на этом пути нет — `ROOTLY-INCIDENT-KEY-STABLE` на upstream-ядре не воспроизводится, а в старом ядре снимается срезом 5 вместе с `rootly_publisher_enhanced.go`/`rootly_incident_store.go`.
 - **Старый Rootly-таргет:** Helm `rootly-secrets.yaml` и пример в `docs/CONFIGURATION_GUIDE.md` указывают REST API `https://api.rootly.com/v1/incidents` — туда payload Alertmanager не примут. Такой таргет адаптер должен отвергнуть с понятным WARN (нужен URL alert source), а не слать 4xx на каждое уведомление.
-- **Точка входа (Q2):** `config.Coordinator.Reload` читает файл и зовёт подписчика `reloader.reload(conf)` (`internal/upstreamcore/reloader.go`). Всё, что строит интеграции (`receiver.BuildReceiverIntegrations`), идёт после. `api.Update(conf)` в `/api/v2/status` отдаёт `conf.original` — исходный текст файла, поэтому добавленные в копию конфига интеграции туда не попадают. Порядок интеграций в receiver'е задаёт их индекс в nflog: K8s-интеграции добавляются после файловых, отсортированные по имени таргета — индексы файловых не сдвигаются.
+- **Точка входа (Q2):** `config.Coordinator.Reload` читает файл и зовёт подписчика `reloader.reload(conf)` (`internal/upstreamcore/reloader.go`). Всё, что строит интеграции (`receiver.BuildReceiverIntegrations`), идёт после. `/api/v2/status` отдаёт `config.String()` применённого конфига (`api/v2/api.go:183`), а не исходный текст: добавленные в копию интеграции там видны, секретные поля замаскированы типами upstream (поправка deep-review F3; изначально здесь ошибочно стояло `conf.original`). Порядок интеграций в receiver'е задаёт их индекс в nflog: K8s-интеграции добавляются после файловых, отсортированные по имени таргета — индексы файловых не сдвигаются.
 - **Дефолты upstream (Q3):** дефолты типа и валидацию делает `UnmarshalYAML` каждого `*Config` (`webhook.WebhookConfig`, `config.SlackConfig`, `pagerduty.PagerdutyConfig`), а глобальные значения — `Config.UnmarshalYAML` (`config.go:382-470`): для webhook/pagerduty — `HTTPConfig = cmp.Or(local, global)`, для slack — `AppURL` из global, копия global `HTTPConfig`, `pagerduty.URL` из global. Путь «собрать YAML-фрагмент интеграции → `yaml.UnmarshalStrict` в тип upstream → докрутить три глобальных поля» даёт все дефолты и проверки upstream без копии `config.Load`. Поля `core.HTTPClientConfig` названы как upstream (`proxy_url`, `tls_config`, `basic_auth`, `authorization`, `follow_redirects`) — переносятся тем же YAML.
 - **Заголовки:** старое ядро шлёт `Headers` как HTTP-заголовки, кроме служебных ключей (`routing_key` у PagerDuty). В upstream — `http_config.http_headers` (prometheus/common v0.70.1), но `Authorization` там зарезервирован (`config/headers.go` `ReservedHeaders`) → переводится в `http_config.authorization` (`<type> <credentials>`).
 - **Принадлежность receiver'у:** `targetMatchesReceiver` (`infrastructure/publishing/coordinator.go:349`): пустой `Receivers` — все receiver'ы; иначе совпадение по `Receivers` или `Name == receiver`. `filter_config` реально читает только `send_resolved` (`coordinator.go:392`); остальные ключи (`severity`, `namespaces`) и в старом ядре ничего не фильтруют.
@@ -60,7 +60,7 @@ updated_at: 2026-11-08
 ### Option C - Генерировать файл `alertmanager.yml` с K8s-интеграциями и подсовывать его ядру
 
 - **Pros:** порт не меняется.
-- **Cons:** секреты из Secret'ов попадают в файл на диске и в `/api/v2/status` (`conf.original`); гонки записи файла с config-reloader.
+- **Cons:** секреты из Secret'ов попадают в файл на диске; гонки записи файла с config-reloader.
 - **Cost/Risk:** medium (security)
 
 ## 4) Decision
@@ -68,7 +68,7 @@ updated_at: 2026-11-08
 - **Chosen:** Option B; Rootly — без своего Notifier, через upstream webhook на Alertmanager alert source.
 - **Why:**
   - Требование среза: интеграции — upstream `notify/*` как есть, K8s-Secret — адаптер в `config.Receiver` (владелец 2026-11-08).
-  - Секреты остаются в памяти в типах `Secret`/`SecretURL` upstream и не попадают в `/api/v2/status`.
+  - Секреты остаются в памяти в типах `Secret`/`SecretURL` upstream: в файл не попадают, в `/api/v2/status` маскируются.
   - Переживание reload — следствие места хука, а не отдельный механизм.
   - Своего кода мало: перевод полей + опрос, discovery переиспользуется.
 

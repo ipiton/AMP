@@ -1,0 +1,17 @@
+{
+  "gate": "fix_required",
+  "reason": "F1 (major): PagerDuty K8s targets with the documented base URL (https://events.pagerduty.com) are passed to upstream pagerduty_configs.url unnormalized; upstream posts to that URL as-is, so delivery silently fails where the old core appended /v2/enqueue.",
+  "branch": "feature/upstream-non-upstream-receivers",
+  "commit": "adc4764",
+  "reviewed_at": "2026-11-08",
+  "findings": {
+    "blocker": 0,
+    "major": 1,
+    "minor": 6,
+    "nit": 2
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 1
+  }
+}

@@ -9,8 +9,9 @@
 // apply it returns a copy of the file's configuration with each target
 // appended, as a webhook_configs, slack_configs or pagerduty_configs entry,
 // to the receivers it belongs to. Delivery, retries, the notification log and
-// templates are upstream's. The file and /api/v2/status never see the
-// Secrets' values. Source.Run polls for changes and reloads the core when the
+// templates are upstream's. The values stay out of the configuration file;
+// /api/v2/status shows the attached integrations with their secret fields
+// masked as upstream masks the file's. Source.Run polls for changes and reloads the core when the
 // snapshot changes.
 package upstreamtargets
 
@@ -65,7 +66,7 @@ func New(discovery publishing.TargetDiscoveryManager, logger *slog.Logger, reg p
 		logger:    logger.With("component", "k8s-targets"),
 		targets: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 			Name: "amp_upstream_k8s_targets",
-			Help: "K8s-Secret publishing targets in the applied configuration, by state (attached or skipped).",
+			Help: "K8s-Secret publishing targets by state: attached or skipped in the applied configuration, invalid in the last discovery (Secrets that do not parse or validate).",
 		}, []string{"state"}),
 		checkTmpl: tmpl,
 	}, nil
@@ -78,6 +79,7 @@ func (s *Source) Refresh(ctx context.Context) (changed bool, err error) {
 	if err := s.discovery.DiscoverTargets(ctx); err != nil {
 		return false, err
 	}
+	s.targets.WithLabelValues("invalid").Set(float64(s.discovery.GetStats().InvalidTargets))
 	var enabled []*core.PublishingTarget
 	for _, t := range s.discovery.ListTargets() {
 		if t != nil && t.Enabled {
@@ -118,6 +120,9 @@ func (s *Source) Run(ctx context.Context, interval time.Duration, reload func() 
 		case <-ticker.C:
 		}
 		changed, err := s.Refresh(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			s.logger.Warn("K8s target refresh failed, keeping the previous targets", "err", err)
 			continue
@@ -126,7 +131,7 @@ func (s *Source) Run(ctx context.Context, interval time.Duration, reload func() 
 			continue
 		}
 		s.logger.Info("K8s targets changed, reloading the configuration")
-		if err := reload(); err != nil {
+		if err := reload(); err != nil && ctx.Err() == nil {
 			s.logger.Error("configuration reload after a K8s target change failed", "err", err)
 		}
 	}
@@ -150,8 +155,9 @@ func (s *Source) ExtendConfig(conf *config.Config) (*config.Config, error) {
 		return conf, nil
 	}
 
-	// A shallow copy keeps the unexported original text that /api/v2/status
-	// serves; only the receivers that gain an integration get new slices.
+	// A shallow copy: conf stays as the coordinator holds it, and only the
+	// receivers that gain an integration get new slices. /api/v2/status
+	// marshals the returned copy, with upstream's secret masking.
 	out := *conf
 	out.Receivers = slices.Clone(conf.Receivers)
 	names := make(map[string]struct{}, len(out.Receivers))
@@ -165,6 +171,10 @@ func (s *Source) ExtendConfig(conf *config.Config) (*config.Config, error) {
 			s.logSkip(t, err)
 			skipped++
 			continue
+		}
+		if len(in.dropped) > 0 {
+			s.logger.Warn("K8s target headers dropped: upstream reserves them",
+				"target", t.Name, "headers", in.dropped)
 		}
 		for _, name := range t.Receivers {
 			if _, ok := names[name]; !ok {

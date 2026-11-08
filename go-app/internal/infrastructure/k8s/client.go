@@ -234,6 +234,10 @@ func (c *DefaultK8sClient) Health(ctx context.Context) error {
 	} else {
 		_, err = c.clientset.Discovery().ServerVersion()
 	}
+	// A caller's cancellation is not a timeout of the API server.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if healthCtx.Err() != nil {
 		return NewTimeoutError("health check timeout", healthCtx.Err())
 	}

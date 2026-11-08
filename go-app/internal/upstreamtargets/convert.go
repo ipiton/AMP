@@ -2,12 +2,14 @@ package upstreamtargets
 
 import (
 	"cmp"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/prometheus/alertmanager/config"
@@ -38,11 +40,14 @@ func (e *skipError) Error() string { return e.reason + ": " + e.err.Error() }
 func skip(reason string, err error) error { return &skipError{reason: reason, err: err} }
 
 // integration is the one upstream integration built from a target; exactly
-// one field is set.
+// one of webhook, slack and pagerduty is set.
 type integration struct {
 	webhook   *webhook.WebhookConfig
 	slack     *config.SlackConfig
 	pagerduty *pagerduty.PagerdutyConfig
+	// dropped names the target's headers that upstream reserves
+	// (commoncfg.ReservedHeaders) and the integration does not send.
+	dropped []string
 }
 
 // appendTo adds the integration after the receiver's own. Clip forces a new
@@ -68,6 +73,13 @@ var (
 )
 
 const pagerdutyDetailsPrefix = "details."
+
+// PagerDuty Events API v2, as the old core's client addresses it
+// (infrastructure/publishing/pagerduty_client.go): a target URL is a base
+// URL, with or without an API path, and events go to its /v2/enqueue.
+const pagerdutyEnqueuePath = "/v2/enqueue"
+
+var pagerdutyPathSuffixes = []string{"/v2/change/enqueue", pagerdutyEnqueuePath, "/v2/events"}
 
 // rootlyRESTHosts serve Rootly's REST API, which the Alertmanager webhook
 // payload does not fit; the Helm chart's rootly.webhookUrl used to point
@@ -99,13 +111,14 @@ func convert(t *core.PublishingTarget, global *config.GlobalConfig) (integration
 		frag["api_url"] = t.URL
 		copyTemplates(frag, t.Templates, slackTemplateKeys)
 	case "pagerduty":
-		routingKey := headers["routing_key"]
-		delete(headers, "routing_key")
+		routingKey := pagerdutyRoutingKey(headers)
 		if routingKey == "" {
 			return integration{}, skip(reasonInvalid, errors.New("pagerduty target needs headers.routing_key"))
 		}
 		frag["routing_key"] = routingKey
-		frag["url"] = t.URL
+		if u := pagerdutyURL(t.URL); u != "" {
+			frag["url"] = u
+		}
 		copyTemplates(frag, t.Templates, pagerdutyTemplateKeys)
 		details := map[string]any{}
 		for k, v := range t.Templates {
@@ -120,7 +133,7 @@ func convert(t *core.PublishingTarget, global *config.GlobalConfig) (integration
 		return integration{}, skip(reasonUnsupportedType, fmt.Errorf("type %q has no upstream integration", t.Type))
 	}
 
-	httpConfig, err := httpConfigFragment(t.HTTPConfig, headers)
+	httpConfig, dropped, err := httpConfigFragment(t.HTTPConfig, headers)
 	if err != nil {
 		return integration{}, skip(reasonInvalid, err)
 	}
@@ -149,7 +162,7 @@ func convert(t *core.PublishingTarget, global *config.GlobalConfig) (integration
 			// Authorization on its own config.
 			sc.HTTPConfig = copyHTTPConfig(global.HTTPConfig)
 		}
-		return integration{slack: &sc}, nil
+		return integration{slack: &sc, dropped: dropped}, nil
 	case "pagerduty":
 		var pdc pagerduty.PagerdutyConfig
 		if err := yaml.UnmarshalStrict(raw, &pdc); err != nil {
@@ -157,20 +170,69 @@ func convert(t *core.PublishingTarget, global *config.GlobalConfig) (integration
 		}
 		pdc.HTTPConfig = cmp.Or(pdc.HTTPConfig, copyHTTPConfig(global.HTTPConfig))
 		pdc.URL = cmp.Or(pdc.URL, global.PagerdutyURL)
-		return integration{pagerduty: &pdc}, nil
+		return integration{pagerduty: &pdc, dropped: dropped}, nil
 	default:
 		var wh webhook.WebhookConfig
 		if err := yaml.UnmarshalStrict(raw, &wh); err != nil {
 			return integration{}, skip(reasonInvalid, err)
 		}
 		wh.HTTPConfig = cmp.Or(wh.HTTPConfig, copyHTTPConfig(global.HTTPConfig))
-		return integration{webhook: &wh}, nil
+		return integration{webhook: &wh, dropped: dropped}, nil
 	}
 }
 
+// sendResolved reads filter_config.send_resolved as the old core's
+// targetAcceptsAlertStatus does: bool, a strconv.ParseBool string or a
+// number; a missing or unreadable value means true.
 func sendResolved(t *core.PublishingTarget) bool {
-	v, ok := t.FilterConfig["send_resolved"].(bool)
-	return !ok || v
+	switch v := t.FilterConfig["send_resolved"].(type) {
+	case bool:
+		return v
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(v))
+		return err != nil || parsed
+	case float64:
+		return v != 0
+	case int:
+		return v != 0
+	default:
+		return true
+	}
+}
+
+// pagerdutyRoutingKey takes the routing key out of headers as the old core's
+// extractRoutingKey does: headers.routing_key, else the Authorization value
+// without "Bearer ". Either way the header is not sent over HTTP; the old
+// core's PagerDuty client never sent it.
+func pagerdutyRoutingKey(headers map[string]string) string {
+	if key, ok := headers["routing_key"]; ok {
+		delete(headers, "routing_key")
+		return key
+	}
+	for name, value := range headers {
+		if http.CanonicalHeaderKey(name) == "Authorization" {
+			delete(headers, name)
+			return strings.TrimPrefix(value, "Bearer ")
+		}
+	}
+	return ""
+}
+
+// pagerdutyURL is the old core's normalizePagerDutyBaseURL plus the enqueue
+// path. Empty stays empty: upstream then applies global.pagerduty_url, whose
+// default is the same https://events.pagerduty.com/v2/enqueue.
+func pagerdutyURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if base == "" {
+		return ""
+	}
+	for _, suffix := range pagerdutyPathSuffixes {
+		if trimmed, ok := strings.CutSuffix(base, suffix); ok {
+			base = strings.TrimRight(trimmed, "/")
+			break
+		}
+	}
+	return base + pagerdutyEnqueuePath
 }
 
 func isRootlyREST(raw string) bool {
@@ -190,38 +252,48 @@ func copyTemplates(frag map[string]any, templates map[string]string, keys []stri
 }
 
 // httpConfigFragment builds the upstream http_config from the target's
-// http_config (its JSON field names are upstream's) and headers: an
-// Authorization header becomes http_config.authorization, which upstream
-// reserves from http_headers; the rest go to http_headers as secrets. nil
-// means neither is set and the global http_config applies.
-func httpConfigFragment(hc *core.HTTPClientConfig, headers map[string]string) (map[string]any, error) {
+// http_config (its JSON field names are upstream's) and headers. An
+// Authorization header becomes http_config.authorization, or basic_auth for
+// the Basic scheme, which upstream does not take as an authorization type;
+// other headers that upstream reserves are dropped and returned; the rest go
+// to http_headers as secrets. A nil fragment means neither is set and the
+// global http_config applies.
+func httpConfigFragment(hc *core.HTTPClientConfig, headers map[string]string) (map[string]any, []string, error) {
 	var frag map[string]any
 	if hc != nil {
 		raw, err := json.Marshal(hc)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := json.Unmarshal(raw, &frag); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	extra := map[string]any{}
+	var dropped []string
 	for name, value := range headers {
-		if http.CanonicalHeaderKey(name) != "Authorization" {
+		canonical := http.CanonicalHeaderKey(name)
+		if canonical != "Authorization" {
+			if _, reserved := commoncfg.ReservedHeaders[canonical]; reserved {
+				dropped = append(dropped, canonical)
+				continue
+			}
 			extra[name] = map[string]any{"secrets": []string{value}}
 			continue
 		}
 		if frag["authorization"] != nil || frag["basic_auth"] != nil {
-			return nil, errors.New("Authorization header and http_config authorization are both set")
+			return nil, nil, errors.New("both the Authorization header and http_config authorization are set")
 		}
-		scheme, credentials, ok := strings.Cut(strings.TrimSpace(value), " ")
-		if !ok || strings.TrimSpace(credentials) == "" {
-			return nil, errors.New(`Authorization header must be "<type> <credentials>"`)
+		auth, err := authorizationFragment(value)
+		if err != nil {
+			return nil, nil, err
 		}
 		if frag == nil {
 			frag = map[string]any{}
 		}
-		frag["authorization"] = map[string]any{"type": scheme, "credentials": strings.TrimSpace(credentials)}
+		for k, v := range auth {
+			frag[k] = v
+		}
 	}
 	if len(extra) > 0 {
 		if frag == nil {
@@ -229,7 +301,38 @@ func httpConfigFragment(hc *core.HTTPClientConfig, headers map[string]string) (m
 		}
 		frag["http_headers"] = extra
 	}
-	return frag, nil
+	slices.Sort(dropped)
+	return frag, dropped, nil
+}
+
+// authorizationFragment turns an Authorization header value into the
+// http_config field that sends it.
+func authorizationFragment(value string) (map[string]any, error) {
+	scheme, credentials, ok := strings.Cut(strings.TrimSpace(value), " ")
+	credentials = strings.TrimSpace(credentials)
+	if !ok || credentials == "" {
+		return nil, errors.New(`the Authorization header must be "<type> <credentials>"`)
+	}
+	if !strings.EqualFold(scheme, "Basic") {
+		return map[string]any{"authorization": map[string]any{"type": scheme, "credentials": credentials}}, nil
+	}
+	user, password, err := decodeBasic(credentials)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"basic_auth": map[string]any{"username": user, "password": password}}, nil
+}
+
+func decodeBasic(credentials string) (user, password string, err error) {
+	raw, err := base64.StdEncoding.DecodeString(credentials)
+	if err != nil {
+		return "", "", errors.New("the Basic Authorization header is not base64")
+	}
+	user, password, ok := strings.Cut(string(raw), ":")
+	if !ok {
+		return "", "", errors.New(`the Basic Authorization header must encode "<user>:<password>"`)
+	}
+	return user, password, nil
 }
 
 func copyHTTPConfig(hc *commoncfg.HTTPClientConfig) *commoncfg.HTTPClientConfig {
@@ -249,6 +352,9 @@ func redact(msg string, t *core.PublishingTarget) string {
 		secrets = append(secrets, v)
 		if _, credentials, ok := strings.Cut(v, " "); ok {
 			secrets = append(secrets, credentials)
+			if _, password, err := decodeBasic(strings.TrimSpace(credentials)); err == nil {
+				secrets = append(secrets, password)
+			}
 		}
 	}
 	if hc := t.HTTPConfig; hc != nil {

@@ -20,7 +20,7 @@ based_on:
 |---|---|---|
 | D1 | Rootly — без своего `notify.Notifier`: upstream `webhook_configs` на URL alert source «Alertmanager» Rootly, `http_config.authorization` (Bearer), `send_resolved: true`. Документируется в `docs/ALERTMANAGER_COMPATIBILITY.md`. | Rootly принимает webhook Alertmanager (research Q1). |
 | D2 | `ROOTLY-INCIDENT-KEY-STABLE` на upstream-ядре не существует (кеша ID инцидентов нет, связь держит Rootly); запись переносится в `BACKLOG.md` → снимается срезом 5 вместе с Rootly-паблишером старого ядра. | Старое ядро не удаляем в этом срезе. |
-| D3 | K8s-Secret таргеты — адаптер `internal/upstreamtargets`: снимок таргетов из `business/publishing.TargetDiscoveryManager`, на каждом применении конфига — **копия** `*config.Config` с добавленными интеграциями. Файл и `/api/v2/status` (`conf.original`) секретов не видят. | Решение владельца 2026-11-08; Option B research. |
+| D3 | K8s-Secret таргеты — адаптер `internal/upstreamtargets`: снимок таргетов из `business/publishing.TargetDiscoveryManager`, на каждом применении конфига — **копия** `*config.Config` с добавленными интеграциями. Значения Secret'ов не попадают в файл на диске. `/api/v2/status` отдаёт `config.String()` применённого конфига (`api/v2/api.go:183`), т.е. K8s-интеграции там видны, но секретные поля замаскированы `<secret>` типами upstream, как у файловых (поправка по deep-review F3). | Решение владельца 2026-11-08; Option B research. |
 | D4 | Точка расширения порта: `upstreamcore.Options.ExtendConfig func(*config.Config) (*config.Config, error)`, вызывается первой строкой `reloader.reload`. Ошибка — reload отклоняется, как ошибка шаблонов. `nil` — поведение upstream. | Одна строка в порте; переживание reload по построению. |
 | D5 | Изменения Secret'ов: опрос `Source.Run` с интервалом `publishing.refresh.interval` (default 5m); при смене отпечатка набора таргетов — `core.Reload()`. `/-/reload` и `SIGHUP` берут последний снимок, K8s не опрашивают. | Опрос, как в старом ядре; reload не зависит от доступности K8s API. |
 | D6 | Битый таргет пропускается (WARN + gauge), reload файла продолжается. Каждая интеграция проверяется `receiver.BuildReceiverIntegrations` до добавления. `ExtendConfig` адаптера ошибку не возвращает. | Один Secret не должен блокировать конфиг всего инстанса. |
@@ -43,15 +43,15 @@ ExtendConfig func(conf *config.Config) (*config.Config, error)
 ### 2.2 `internal/upstreamtargets`
 
 ```go
-func New(d publishing.TargetDiscoveryManager, logger *slog.Logger, reg prometheus.Registerer) *Source
+func New(d publishing.TargetDiscoveryManager, logger *slog.Logger, reg prometheus.Registerer) (*Source, error)
 func (s *Source) Refresh(ctx context.Context) (changed bool, err error)
 func (s *Source) ExtendConfig(conf *config.Config) (*config.Config, error) // never errors
 func (s *Source) Run(ctx context.Context, interval time.Duration, reload func() error)
 ```
 
 - `Refresh`: `DiscoverTargets`; ошибка K8s — снимок не меняется (discovery держит прошлый кеш), ошибка возвращается. Снимок — копия enabled-таргетов, отсортированная по `Name`; отпечаток — SHA-256 от JSON снимка, `changed` — отпечаток другой.
-- `Run`: тикер; `Refresh`; `changed` → `reload()`; ошибки — WARN; выход по `ctx`.
-- `ExtendConfig`: shallow-копия `Config` (сохраняет `original`), клон `Receivers` и клоны слайсов `*_configs` только у receiver'ов, куда что-то добавлено. Порядок: файловые интеграции, затем K8s по имени таргета.
+- `Run`: тикер; `Refresh`; `changed` → `reload()`; ошибки — WARN/ERROR, кроме случая отменённого `ctx` (shutdown); выход по `ctx`.
+- `ExtendConfig`: shallow-копия `Config` (исходный `conf` не меняется), клон `Receivers` и клоны слайсов `*_configs` только у receiver'ов, куда что-то добавлено. Порядок: файловые интеграции, затем K8s по имени таргета. Индекс интеграции в nflog — её позиция в типе: новый K8s-таргет с меньшим именем сдвигает индексы следующих K8s-интеграций того же типа, и для них дедупликация начинается заново (один повтор уведомления). Так же ведёт себя upstream при вставке интеграции в середину файла; файловые индексы не сдвигаются (deep-review F4, принято).
 
 ### 2.3 Принадлежность receiver'у
 
@@ -66,20 +66,20 @@ func (s *Source) Run(ctx context.Context, interval time.Duration, reload func() 
 | `webhook` / `alertmanager`, `webhook` | `webhook_configs` | `url` ← `url` |
 | `rootly` / `rootly` | `webhook_configs` | `url` ← `url`; хост `api.rootly.com`/`api.rootly.io` — `skipped` (`rootly_rest_api`): нужен URL alert source |
 | `slack` / `slack` | `slack_configs` | `api_url` ← `url`; `templates`: `title`, `text`, `color`, `channel`, `pretext`, `username`, `title_link`, `icon_emoji`, `icon_url`; `app_url` ← `global.slack_app_url` |
-| `pagerduty` / `pagerduty` | `pagerduty_configs` | `url` ← `url`; `routing_key` ← `headers.routing_key` (обязателен); `templates`: `description`, `severity`, `client`, `client_url`, `details.<key>` |
+| `pagerduty` / `pagerduty` | `pagerduty_configs` | `url` ← `url` как база Events API v2: суффиксы `/v2/change/enqueue`, `/v2/enqueue`, `/v2/events` срезаются и дописывается `/v2/enqueue` (как `normalizePagerDutyBaseURL` старого ядра); пустой — `global.pagerduty_url`. `routing_key` ← `headers.routing_key`, иначе `Authorization` без `Bearer ` (как `extractRoutingKey`); обязателен, по HTTP не шлётся. `templates`: `description`, `severity`, `client`, `client_url`, `details.<key>` |
 
 Общее для всех:
 
-- `send_resolved` — `false` только при `filter_config.send_resolved: false`, иначе `true` (так считает старое ядро; Rootly без него не резолвит). Прочие ключи `filter_config` старое ядро тоже не применяет — игнорируются.
-- `http_config` ← `http_config` Secret'а (имена полей совпадают с upstream). Заголовок `Authorization: <type> <credentials>` → `http_config.authorization`; вместе с `authorization`/`basic_auth` в `http_config` — `skipped` (`invalid`). Остальные `headers` (кроме `routing_key` у PagerDuty) → `http_config.http_headers.<name>.secrets`. Зарезервированные upstream заголовки — `skipped` (`invalid`).
+- `send_resolved` — как `targetAcceptsAlertStatus` старого ядра: bool, строка через `strconv.ParseBool`, число (`0` — `false`); нет значения или не распознано — `true` (Rootly без него не резолвит). Прочие ключи `filter_config` старое ядро тоже не применяет — игнорируются.
+- `http_config` ← `http_config` Secret'а (имена полей совпадают с upstream). Заголовок `Authorization: <type> <credentials>` → `http_config.authorization`, `Basic <base64 user:password>` → `http_config.basic_auth` (upstream не принимает тип `Basic`); без схемы или вместе с `authorization`/`basic_auth` в `http_config` — `skipped` (`invalid`). Прочие зарезервированные upstream заголовки (`commoncfg.ReservedHeaders`: `Content-Type`, `User-Agent`, …) отбрасываются с WARN, таргет подключается. Остальные `headers` (кроме ключа routing key у PagerDuty) → `http_config.http_headers.<name>.secrets`.
 - Без `http_config` и заголовков — копия `global.http_config`, как у upstream.
-- Ключи `templates`, не перечисленные в таблице, игнорируются (`Debug`).
+- Ключи `templates`, не перечисленные в таблице, игнорируются молча, как их игнорируют паблишеры старого ядра (deep-review F8).
 
 ### 2.5 Наблюдаемость и безопасность
 
-- Gauge `amp_upstream_k8s_targets{state="attached"|"skipped"}` — на каждом `ExtendConfig`.
+- Gauge `amp_upstream_k8s_targets{state="attached"|"skipped"}` — на каждом `ExtendConfig`; `state="invalid"` — Secret'ы, не прошедшие parse/validate в последнем discovery (`GetStats().InvalidTargets`), на каждом `Refresh`.
 - WARN по пропуску: `target`, `type`, `reason` (`invalid`, `rootly_rest_api`, `no_receiver`, `unsupported_type`) и текст ошибки, из которого вырезаны URL и значения заголовков таргета. URL, заголовки, `routing_key` в логи не пишутся.
-- Значения живут в `commoncfg.Secret`/`SecretURL`/`SecretTemplateURL` upstream — маскируются при маршалинге конфига.
+- Значения живут в `commoncfg.Secret`/`SecretURL`/`SecretTemplateURL` upstream — маскируются при маршалинге конфига, в том числе в `/api/v2/status`.
 
 ### 2.6 `cmd/amp-upstream`
 
@@ -88,7 +88,7 @@ func (s *Source) Run(ctx context.Context, interval time.Duration, reload func() 
 
 ### 2.7 `infrastructure/k8s` (D8)
 
-- `Health`: `Discovery().RESTClient().Get().AbsPath("/version").Do(healthCtx)`; без REST-клиента (fake) — прежний `ServerVersion()`.
+- `Health`: `Discovery().RESTClient().Get().AbsPath("/version").Do(healthCtx)`; без REST-клиента (fake) — прежний `ServerVersion()`. Отмена контекста вызывающего возвращается как есть, `TimeoutError` — только по собственному дедлайну health.
 - `ListSecrets`: страницы по 500 через `Continue`, весь цикл внутри retry.
 - `Close`: no-op (client-go закрывать нечего), `clientset` не обнуляется — гонки с читателями нет.
 
@@ -96,8 +96,8 @@ func (s *Source) Run(ctx context.Context, interval time.Duration, reload func() 
 
 | Ситуация | Поведение |
 |---|---|
-| K8s API недоступен на старте (`NewK8sClient`) | WARN, адаптер выключен, ядро на файле |
-| K8s API недоступен при опросе | WARN, прошлый снимок, reload не зовётся |
+| K8s API недоступен на старте (`NewK8sClient`, health) | WARN, адаптер выключен до рестарта, ядро на файле — паритет с metrics-only fallback `cmd/server` (deep-review F6, принято) |
+| K8s API недоступен при опросе | WARN, прошлый снимок, reload не зовётся; при остановке (`ctx` отменён) — выход без WARN |
 | Невалидный Secret (parse/validate) | discovery пропускает (как сейчас) |
 | Таргет не переводится / не строится | `skipped`, WARN, reload продолжается |
 | Битый `alertmanager.yml` при reload от опроса | reload отклонён ядром, ERROR в логе, активный конфиг остаётся |
