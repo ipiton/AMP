@@ -16,11 +16,12 @@
 
 ## Stream: Operations & Hot Reload
 > AMP уже имеет ReloadCoordinator (TN-152) с 6-фазным pipeline.
-- [~] **PHASE-4.5: Per-Component Reloadable + K8s Sidecar** — интерфейсы `config.Reloadable` (logger, metrics, LLM — живые; database/redis — честный restart-required W600/W601) сделаны в PROD-INFRA (2026-08-20); sidecar `cmd/config-reloader` + шаблон + публикация образа — сделаны. Остаётся: первый релиз образа, `CONFIG-RELOADER-AUTH`, включение в production values (`CONFIG-RELOADER-SIDECAR` в BACKLOG); живые хэндлы Postgres/Redis — `FU-DB-LIVE-POOL-HANDLE`, `FU-REDIS-LIVE-CLIENT-HANDLE`.
+- [~] **PHASE-4.5: Per-Component Reloadable + K8s Sidecar** — интерфейсы `config.Reloadable` (logger, metrics, LLM — живые; database/redis — честный restart-required W600/W601) сделаны в PROD-INFRA (2026-08-20); sidecar `cmd/config-reloader` + шаблон + публикация образа — сделаны. Остаётся: первый релиз образа, `CONFIG-RELOADER-AUTH`, включение в production values (`CONFIG-RELOADER-SIDECAR` в BACKLOG); живые хэндлы Postgres/Redis — `FU-DB-LIVE-POOL-HANDLE`, `FU-REDIS-LIVE-CLIENT-HANDLE`. _(2026-11-08: `config.Reloadable`, `ReloadCoordinator` и `cmd/config-reloader` удалены в `UPSTREAM-CORE-REMOVAL` (ADR-019); reload — upstream `config.Coordinator` в `amp-upstream` (`POST /-/reload`, SIGHUP), перечисленные задачи сняты.)_
 - [~] **PHASE-4.6: Production Helm & Release Process** — `values-production.yaml` переаудирован, шаблон release notes и релизный процесс (`WORKFLOW.md`) есть (PROD-INFRA, PROD-RELEASE-V010-PREP). Остаётся: выпуск `v0.1.0` (`PROD-RELEASE-V010`, ждёт решения владельца), HA Postgres (`PROD-POSTGRES-HA-DECISION`). Дефолты под одну ноду закрыты 2026-10-19 (`HELM-SINGLE-NODE-DEFAULTS`).
 
 ## Stream: Alertmanager Full Parity
 > Задачи для полноценной замены Alertmanager без deprecated методов. Эпик `AMP-PARITY` (7 фаз, 29 срезов) закрыт 2026-08-18; хвосты — в BACKLOG § «Follow-ups from Phase 1-7» и в P0/P1 «Production Readiness».
+> 2026-11-08: своё ядро, на котором сделаны Phase A–C (routing, таймеры, inhibition, свои publishers, Redis-HA), удалено в `UPSTREAM-CORE-REMOVAL` (ADR-019); паритет даёт upstream Alertmanager v0.34.1 в `amp-upstream`. Пункты ниже — история.
 
 ### Phase A: Production-Viable Replacement — ✅ закрыта
 - [x] **PARITY-A1: Notification Triggering** — `group_interval` и `repeat_interval` таймеры триггерят нотификации.
@@ -38,14 +39,14 @@
 - [x] **PARITY-B6: web.route-prefix** — `--web.route-prefix` и наследование из `external_url` (AMP-PARITY, 2026-08-18).
 
 ### Phase C: Enterprise HA
-- [x] **PARITY-C1: Clustering (Redis-based)** — Redis nflog + send-claim, распределённые таймеры, pub/sub для silences, leader election, heartbeat (AMP-PARITY Phase 6, 2026-08-18). Открыто: `CI-E2E-HA-REQUIRED`; двойное срабатывание таймера группы закрыто `GROUPING-TIMER-LOCK-FIX` (2026-10-10).
-- [ ] **PARITY-C2: Remaining Receivers** — VictorOps/Splunk On-Call, WeChat, Pushover, SNS, Webex. Config определён для VictorOps/WeChat. ~5-7d (по 1-2d каждый)
+- [x] **PARITY-C1: Clustering (Redis-based)** — Redis nflog + send-claim, распределённые таймеры, pub/sub для silences, leader election, heartbeat (AMP-PARITY Phase 6, 2026-08-18). Открыто: `CI-E2E-HA-REQUIRED`; двойное срабатывание таймера группы закрыто `GROUPING-TIMER-LOCK-FIX` (2026-10-10). _(2026-11-08: Redis-HA удалён в `UPSTREAM-CORE-REMOVAL` (ADR-019); HA — upstream `cluster.Peer` на memberlist, `UPSTREAM-HA-MEMBERLIST`.)_
+- [-] **PARITY-C2: Remaining Receivers** — VictorOps/Splunk On-Call, WeChat, Pushover, SNS, Webex. Config определён для VictorOps/WeChat. ~5-7d (по 1-2d каждый) _(2026-11-08: снят — свои интеграции удалены в `UPSTREAM-CORE-REMOVAL` (ADR-019), все эти receiver'ы есть в upstream `notify`.)_
 
 ## Stream: Intelligence (ML/LLM/MCP)
 > Вдохновлено: [SherlockOps](https://github.com/Duops/SherlockOps) (двухфазный pipeline, agentic investigation), [Robusta+HolmesGPT](https://github.com/robusta-dev/holmesgpt) (K8s enrichment, AI RCA), [Keep](https://github.com/keephq/keep) (AIOps).
 
-- [~] **PHASE-5: Two-Phase Alert Pipeline + LLM Investigation** — сделано: async investigation (очередь, workers, retry, сохранение, `GET /api/v1/alerts/{fingerprint}/investigation`; PHASE-5A, 5A-TAIL) и agentic loop с tool calling (PHASE-5B). Не сделано: доставка результата в Slack/Telegram/Teams; fallback провайдеров (PHASE-5C). **Расхождение с замыслом:** Phase 1 не «<100ms без изменений» — при `llm.enabled` классификация синхронна в `POST /api/v2/alerts` и может дропнуть алерт (`PROD-LLM-ALERT-PATH-ISOLATION`, P1).
-- [~] **PHASE-6: Investigation Toolset + Runbooks** — built-in tools Prometheus/Loki/Kubernetes/PostgreSQL сделаны (PHASE-6A, 2026-05-08); runbook engine (PHASE-6B) сделан 2026-09-27 и влит в `main` 2026-10-07; MCP tools (6C) и environment routing (6D) — не начаты. Kubernetes tool чартом не проводится (`INVESTIGATION-K8S-TOOL-HELM`).
+- [~] **PHASE-5: Two-Phase Alert Pipeline + LLM Investigation** — сделано: async investigation (очередь, workers, retry, сохранение, `GET /api/v1/alerts/{fingerprint}/investigation`; PHASE-5A, 5A-TAIL) и agentic loop с tool calling (PHASE-5B). Не сделано: доставка результата в Slack/Telegram/Teams; fallback провайдеров (PHASE-5C). **Расхождение с замыслом:** Phase 1 не «<100ms без изменений» — при `llm.enabled` классификация синхронна в `POST /api/v2/alerts` и может дропнуть алерт (`PROD-LLM-ALERT-PATH-ISOLATION`, P1). _(2026-11-08: этот путь удалён в `UPSTREAM-CORE-REMOVAL`; на `amp-upstream` классификация асинхронна, свои publishers удалены, `GET /api/v1/alerts/{fingerprint}/investigation` вернётся в срезе 6 `UPSTREAM-API-UI`.)_
+- [~] **PHASE-6: Investigation Toolset + Runbooks** — built-in tools Prometheus/Loki/Kubernetes/PostgreSQL сделаны (PHASE-6A, 2026-05-08); runbook engine (PHASE-6B) сделан 2026-09-27 и влит в `main` 2026-10-07; MCP tools (6C) и environment routing (6D) — не начаты. Kubernetes tool чартом не проводится (`INVESTIGATION-K8S-TOOL-HELM`; с 2026-11-08 включается через `alertmanager.ampConfig`, RBAC нет).
 - [ ] **PHASE-7: UI/UX Workflow + Human-in-the-Loop** — timeline расследования в dashboard, human approval для remediation, feedback loop.
 
 ## Stream: Release

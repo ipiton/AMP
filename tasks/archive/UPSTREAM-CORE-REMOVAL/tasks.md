@@ -3,7 +3,7 @@ id: UPSTREAM-CORE-REMOVAL
 slug: upstream-core-removal
 stream: Architecture / ADR-019
 type: refactor
-status: active
+status: archived
 created_at: 2026-11-08
 updated_at: 2026-11-08
 based_on:
@@ -102,10 +102,10 @@ based_on:
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] `scripts/release-gate.sh` PASS целиком
-- [ ] Planning: BUGS/TECH-DEBT/REVIEW-PIPELINE/BACKLOG/DONE/NEXT, CHANGELOG
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] `scripts/release-gate.sh` PASS целиком
+- [x] Planning: BUGS/TECH-DEBT/REVIEW-PIPELINE/BACKLOG/DONE/NEXT, CHANGELOG

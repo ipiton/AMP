@@ -4,7 +4,7 @@ slug: upstream-core-removal
 stream: Architecture / ADR-019
 type: refactor
 priority: high
-status: active
+status: archived
 created_at: 2026-11-08
 updated_at: 2026-11-08
 ---
