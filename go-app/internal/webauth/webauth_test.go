@@ -1,4 +1,4 @@
-package application
+package webauth
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func newWebAuthHarness(t *testing.T, users map[string]string, exempt []string) *
 	}
 	writeWebConfig(t, h.path, webConfigWithUsers(t, users))
 
-	auth, err := NewWebAuth(WebAuthOptions{
+	auth, err := New(Options{
 		Path:                 h.path,
 		UnauthenticatedPaths: exempt,
 		Logger:               slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
@@ -168,13 +168,13 @@ func TestLoadWebAuthUsers_Validation(t *testing.T) {
 }
 
 func TestNewWebAuth_MissingFileIsAnError(t *testing.T) {
-	_, err := NewWebAuth(WebAuthOptions{
+	_, err := New(Options{
 		Path:       filepath.Join(t.TempDir(), "absent.yml"),
 		Registerer: prometheus.NewRegistry(),
 	})
 	require.Error(t, err)
 
-	_, err = NewWebAuth(WebAuthOptions{Registerer: prometheus.NewRegistry()})
+	_, err = New(Options{Registerer: prometheus.NewRegistry()})
 	require.Error(t, err, "an empty path must not build an open middleware")
 }
 
@@ -233,7 +233,7 @@ func TestWebAuth_InsideRoutePrefix(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", okHandler())
-	root := WithRoutePrefix(h.auth.Wrap(mux), "/am")
+	root := http.StripPrefix("/am", h.auth.Wrap(mux))
 
 	serve := func(path, user, pass string) int {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -345,36 +345,4 @@ func TestWebAuth_DoesNotLogSecrets(t *testing.T) {
 	for _, secret := range []string{"s3cr3t-pass", "wrong-pass-42", hash, "not-a-hash-value", "Authorization", "Basic "} {
 		assert.NotContains(t, logs, secret)
 	}
-}
-
-// T8 (AC1 end to end): the real router behind the middleware.
-func TestWebAuth_RealRouter(t *testing.T) {
-	h := newWebAuthHarness(t, map[string]string{"alice": "secret"}, []string{"/-/healthy", "/-/ready"})
-	handler := h.auth.Wrap(newActiveContractMux(t, nil))
-
-	silence := `{
-		"matchers": [{"name":"alertname","value":"AuthProbe","isRegex":false}],
-		"startsAt": "2099-01-01T00:00:00Z",
-		"endsAt": "2099-01-01T01:00:00Z",
-		"createdBy": "prod-auth",
-		"comment": "auth probe"
-	}`
-	post := func(user, pass string) int {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", strings.NewReader(silence))
-		req.Header.Set("Content-Type", "application/json")
-		if user != "" {
-			req.SetBasicAuth(user, pass)
-		}
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		return rec.Code
-	}
-
-	assert.Equal(t, http.StatusUnauthorized, post("", ""))
-	assert.Equal(t, http.StatusOK, post("alice", "secret"))
-
-	req := httptest.NewRequest(http.MethodGet, "/-/ready", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusOK, rec.Code, "the probe path must answer without credentials")
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/ipiton/AMP/internal/application"
 	"github.com/ipiton/AMP/internal/buildinfo"
 	"github.com/ipiton/AMP/internal/config"
+	"github.com/ipiton/AMP/internal/webauth"
 	pkglogger "github.com/ipiton/AMP/pkg/logger"
 )
 
@@ -220,11 +221,11 @@ func resolveWebConfigFile(flagValue, configValue string) string {
 
 // newWebAuth builds the basic-auth middleware, or returns nil when no web
 // config is set. reg nil means the default Prometheus registry.
-func newWebAuth(cfg *config.Config, logger *slog.Logger, reg prometheus.Registerer) (*application.WebAuth, error) {
+func newWebAuth(cfg *config.Config, logger *slog.Logger, reg prometheus.Registerer) (*webauth.WebAuth, error) {
 	if cfg.Server.WebConfigFile == "" {
 		return nil, nil
 	}
-	return application.NewWebAuth(application.WebAuthOptions{
+	return webauth.New(webauth.Options{
 		Path:                 cfg.Server.WebConfigFile,
 		UnauthenticatedPaths: cfg.Server.Auth.UnauthenticatedPaths,
 		Logger:               logger,
@@ -248,7 +249,7 @@ func logDatabaseTLSState(logger *slog.Logger, cfg *config.Config) {
 
 // logWebAuthState says loudly when the API is open, and flags the legacy
 // webhook.authentication keys, which look like protection but are not read.
-func logWebAuthState(logger *slog.Logger, cfg *config.Config, webAuth *application.WebAuth) {
+func logWebAuthState(logger *slog.Logger, cfg *config.Config, webAuth *webauth.WebAuth) {
 	if webAuth == nil {
 		logger.Warn("HTTP API authentication is DISABLED: anyone with network access can create silences, post alerts and trigger reloads. Set -web.config.file or server.web_config_file.")
 	} else {

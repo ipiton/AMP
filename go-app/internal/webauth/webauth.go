@@ -1,4 +1,4 @@
-package application
+package webauth
 
 import (
 	"bytes"
@@ -123,8 +123,8 @@ func loadWebAuthUsers(path string) (webAuthUsers, error) {
 	return users, nil
 }
 
-// WebAuthOptions configures NewWebAuth.
-type WebAuthOptions struct {
+// Options configures New.
+type Options struct {
 	// Path is the web config file. Required.
 	Path string
 	// UnauthenticatedPaths are served without credentials (exact match
@@ -189,9 +189,9 @@ func newWebAuthMetrics(reg prometheus.Registerer) (webAuthMetrics, error) {
 	return m, nil
 }
 
-// NewWebAuth loads the web config file and builds the middleware. A missing
+// New loads the web config file and builds the middleware. A missing
 // or invalid file is an error: the caller must not start serving.
-func NewWebAuth(opts WebAuthOptions) (*WebAuth, error) {
+func New(opts Options) (*WebAuth, error) {
 	if opts.Path == "" {
 		return nil, fmt.Errorf("web config: path is empty")
 	}
