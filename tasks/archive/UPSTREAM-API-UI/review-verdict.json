@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/upstream-api-ui",
+  "commit": "5e68aae",
+  "reviewed_at": "2026-11-08",
+  "findings": { "blocker": 0, "major": 0, "minor": 3, "nit": 5 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

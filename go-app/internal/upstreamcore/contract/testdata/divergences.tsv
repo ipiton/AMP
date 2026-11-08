@@ -3,7 +3,9 @@
 # on any leaf test failure missing here, and on a "fails" entry that passed.
 #
 # Columns (tab-separated): test path, class, expectation, reason.
-#   class a  AMP-only surface (slice UPSTREAM-API-UI restores or drops it)
+#   class a  AMP-only surface not decided yet (none left: UPSTREAM-API-UI
+#            dropped each one and moved it to class d, see
+#            tasks/archive/UPSTREAM-API-UI/research.md)
 #   class b  the test pinned AMP's own core; upstream is the reference
 #            (entries removed in UPSTREAM-CORE-REMOVAL: such tests were
 #            deleted or now expect upstream behaviour)
@@ -21,20 +23,20 @@
 #   b  /api/v2/alerts/groups trails ingest by about a millisecond (dispatcher
 #      provider subscription). The harness waits for the posted alerts to
 #      appear in groups before answering the POST.
-TestPhase0Contracts_HealthAndReady	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
-TestPhase0RouteInventory/health	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
-TestPhase0RouteInventory/healthz_alias	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
-TestPhase0RouteInventory/ready	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
-TestPhase0RouteInventory/readyz_alias	a	fails	AMP /health|/healthz|/ready|/readyz; upstream has /-/healthy, /-/ready
-TestPhase0RouteInventory/root	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/dashboard	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/dashboard_alerts	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/dashboard_llm	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/dashboard_routing	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/dashboard_silences	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/static_asset	a	fails	AMP UI (/, /dashboard*, /static)
-TestPhase0RouteInventory/inhibitions_get	a	fails	AMP /api/v2/inhibitions
-TestPhase0RouteInventory/alerts_v1_get_alias	a	fails	/api/v1 is 410 Gone upstream
-TestPhase0RouteInventory/alerts_v1_post_alias	a	fails	/api/v1 is 410 Gone upstream
-TestPhase0Contracts_CoreAPI/alerts_v1_ingest_compatibility_contract	a	fails	/api/v1 is 410 Gone upstream
-TestPhase0AlertsStateSemantics/resolved_closes_firing_and_appears_via_resolved_filter	a	fails	AMP ?status=resolved; upstream API hides resolved alerts
+TestPhase0Contracts_HealthAndReady	d	fails	AMP /health|/healthz|/ready|/readyz dropped (UPSTREAM-API-UI); upstream /-/healthy, /-/ready
+TestPhase0RouteInventory/health	d	fails	AMP /health|/healthz|/ready|/readyz dropped (UPSTREAM-API-UI); upstream /-/healthy, /-/ready
+TestPhase0RouteInventory/healthz_alias	d	fails	AMP /health|/healthz|/ready|/readyz dropped (UPSTREAM-API-UI); upstream /-/healthy, /-/ready
+TestPhase0RouteInventory/ready	d	fails	AMP /health|/healthz|/ready|/readyz dropped (UPSTREAM-API-UI); upstream /-/healthy, /-/ready
+TestPhase0RouteInventory/readyz_alias	d	fails	AMP /health|/healthz|/ready|/readyz dropped (UPSTREAM-API-UI); upstream /-/healthy, /-/ready
+TestPhase0RouteInventory/root	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/dashboard	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/dashboard_alerts	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/dashboard_llm	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/dashboard_routing	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/dashboard_silences	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/static_asset	d	fails	AMP UI dropped; own UI deferred past v0.1.0 (UPSTREAM-UI)
+TestPhase0RouteInventory/inhibitions_get	d	fails	AMP /api/v2/inhibitions dropped (UPSTREAM-API-UI): no AMP route under /api/v2; status.inhibitedBy in /api/v2/alerts
+TestPhase0RouteInventory/alerts_v1_get_alias	d	fails	/api/v1 is 410 Gone upstream; AMP serves that answer (UPSTREAM-API-UI)
+TestPhase0RouteInventory/alerts_v1_post_alias	d	fails	/api/v1 is 410 Gone upstream; AMP serves that answer (UPSTREAM-API-UI)
+TestPhase0Contracts_CoreAPI/alerts_v1_ingest_compatibility_contract	d	fails	/api/v1 is 410 Gone upstream; AMP serves that answer (UPSTREAM-API-UI)
+TestPhase0AlertsStateSemantics/resolved_closes_firing_and_appears_via_resolved_filter	d	fails	AMP ?status=resolved dropped (UPSTREAM-API-UI); resolved alerts in GET /api/amp/v1/alerts/{fingerprint}

@@ -15,7 +15,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **UPSTREAM-API-UI** — срез 6 ADR-019: `api/v2` upstream побайтно, AMP-маршруты истории и investigation (поиск по FNV-fingerprint `api/v2`), `/api/v2/inhibitions`. Решение владельца 2026-11-08: в v0.1.0 только API, своего UI нет (старый удалён в срезе 5); UI — отдельной задачей `UPSTREAM-UI` после релиза. Full, ~2d. Claimed 2026-11-08, worktree.
 
 ## Queue
 

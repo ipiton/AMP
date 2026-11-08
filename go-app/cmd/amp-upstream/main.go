@@ -5,7 +5,9 @@
 // adds AMP's own layer (internal/upstreamai, amp.go): alert history in
 // PostgreSQL, LLM classification and investigation; and the K8s-Secret
 // publishing targets (internal/upstreamtargets) in the standard profile with
-// publishing.enabled.
+// publishing.enabled. AMP's routes (internal/ampapi: history and
+// investigation by fingerprint) are served under /api/amp/; every other path
+// is the upstream core's handler, unchanged.
 package main
 
 import (
@@ -31,6 +33,7 @@ import (
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 
+	"github.com/ipiton/AMP/internal/ampapi"
 	"github.com/ipiton/AMP/internal/buildinfo"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/upstreamcore"
@@ -47,7 +50,7 @@ func main() {
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
 	webConfigFile := flag.String("web.config.file", "", "Path to the web configuration file: basic_auth_users (bcrypt); else server.web_config_file in the AMP configuration, else SERVER_WEB_CONFIG_FILE. The probes /-/healthy and /-/ready (server.auth.unauthenticated_paths in the AMP configuration) are served without credentials. Empty: no authentication.")
-	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*). Empty: none.")
+	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*), read back under /api/amp/v1/. Empty: none.")
 	clusterOpts := clusterFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -87,6 +90,8 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		// nil: the default exempt paths (no AMP configuration).
 		unauthenticatedPaths []string
 		configWebConfigFile  string
+		// Zero without an AMP configuration: the AMP routes answer 503.
+		amp ampLayer
 	)
 	if ampConfigFile != "" {
 		cfg, err := appconfig.LoadConfig(ampConfigFile)
@@ -98,13 +103,14 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		}
 		unauthenticatedPaths = cfg.Server.Auth.UnauthenticatedPaths
 		configWebConfigFile = cfg.Server.WebConfigFile
-		stopAMP, err := newAMPLayer(logger, cfg, &opts)
+		layer, err := newAMPLayer(logger, cfg, &opts)
 		if err != nil {
 			return err
 		}
 		// Deferred first, so it runs after core.Stop: the dispatcher and
 		// the alert store are gone before AMP's workers stop.
-		defer stopAMP()
+		defer layer.stop()
+		amp = *layer
 		if targets, targetsInterval, err = newTargetSource(logger, cfg, &opts); err != nil {
 			return err
 		}
@@ -132,7 +138,14 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	// while its handler still serves (upstreamcore.Core.Handler).
 	defer core.Stop()
 
-	handler, err := wrapWebAuth(core.Handler(), resolveWebConfigFile(webConfigFile, configWebConfigFile), amURL.Path, unauthenticatedPaths, logger, opts.Registerer)
+	ampHandler := ampapi.New(ampapi.Options{
+		RoutePrefix:    amURL.Path,
+		Alerts:         amp.alerts,
+		Investigations: amp.investigations,
+		Logger:         logger,
+		Registerer:     opts.Registerer,
+	})
+	handler, err := wrapWebAuth(withAMPRoutes(core.Handler(), ampHandler, amURL.Path), resolveWebConfigFile(webConfigFile, configWebConfigFile), amURL.Path, unauthenticatedPaths, logger, opts.Registerer)
 	if err != nil {
 		_ = listener.Close()
 		return err
@@ -179,6 +192,21 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 			return nil
 		}
 	}
+}
+
+// withAMPRoutes sends the paths under routePrefix+ampapi.PathPrefix to amp
+// and every other request to core untouched. It is a prefix test, not a
+// ServeMux: a mux would clean and redirect paths before the upstream API
+// sees them.
+func withAMPRoutes(core, amp http.Handler, routePrefix string) http.Handler {
+	prefix := strings.TrimRight(routePrefix, "/") + ampapi.PathPrefix
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			amp.ServeHTTP(w, r)
+			return
+		}
+		core.ServeHTTP(w, r)
+	})
 }
 
 // clusterFlags registers upstream's --cluster.* flags

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 )
 
 // PostgresStorageAdapter exposes AlertStorage over an existing pgx pool.
@@ -72,11 +73,13 @@ func (p *PostgresStorageAdapter) SaveAlert(ctx context.Context, alert *core.Aler
 	query := `
 		INSERT INTO alerts (
 			fingerprint, alert_name, status, labels, annotations,
-			starts_at, ends_at, generator_url, namespace, timestamp
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			starts_at, ends_at, generator_url, namespace, timestamp,
+			upstream_fingerprint
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (fingerprint)
 		DO UPDATE SET
 			alert_name = EXCLUDED.alert_name,
+			upstream_fingerprint = EXCLUDED.upstream_fingerprint,
 			status = EXCLUDED.status,
 			labels = EXCLUDED.labels,
 			annotations = EXCLUDED.annotations,
@@ -98,6 +101,7 @@ func (p *PostgresStorageAdapter) SaveAlert(ctx context.Context, alert *core.Aler
 		alert.GeneratorURL,
 		namespace,
 		alert.Timestamp,
+		alertconv.UpstreamFingerprint(alert.Labels),
 	); err != nil {
 		return fmt.Errorf("failed to save alert: %w", err)
 	}
@@ -335,6 +339,7 @@ func (p *PostgresStorageAdapter) UpdateAlert(ctx context.Context, alert *core.Al
 			generator_url = $8,
 			namespace = $9,
 			timestamp = $10,
+			upstream_fingerprint = $11,
 			updated_at = NOW()
 		WHERE fingerprint = $1`
 
@@ -349,6 +354,7 @@ func (p *PostgresStorageAdapter) UpdateAlert(ctx context.Context, alert *core.Al
 		alert.GeneratorURL,
 		namespace,
 		alert.Timestamp,
+		alertconv.UpstreamFingerprint(alert.Labels),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update alert: %w", err)
