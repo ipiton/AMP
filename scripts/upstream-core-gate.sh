@@ -130,10 +130,13 @@ check_amtool() {
   GOBIN="$WORK_DIR/bin" go install "$UPSTREAM_MODULE/cmd/amtool@$version" || return 1
   amtool="$WORK_DIR/bin/amtool"
 
+  # The gossip cluster stays on, as in the upstream binary, but on a random
+  # port: the default 0.0.0.0:9094 would collide between parallel gate runs.
   "$WORK_DIR/amp-upstream" \
     --config.file="$AM_CONFIG" \
     --storage.path="$WORK_DIR/data" \
     --web.listen-address=127.0.0.1:0 \
+    --cluster.listen-address=127.0.0.1:0 \
     >"$WORK_DIR/amp-upstream.log" 2>&1 &
   AMP_PID=$!
 

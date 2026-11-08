@@ -18,26 +18,26 @@ updated_at: 2026-11-08
 
 ## Phase 1: 4a — кластер в `upstreamcore`
 
-- [ ] 1.1 Поля кластера в `Options` + умолчания `Default*` по `app.DefaultOptions`.
+- [x] 1.1 Поля кластера в `Options` + умолчания `Default*` по `app.DefaultOptions`.
   verify: `cd go-app && go build ./internal/upstreamcore/`
-- [ ] 1.2 `setup`: `cluster.Create`, `Leave` в `onStop`, `AddState`/`SetBroadcast` для nflog и silences, `Join`, `Settle`, `api.Options.Peer`, `clusterWait`, `clusterEnabled`.
+- [x] 1.2 `setup`: `cluster.Create`, `Leave` в `onStop`, `AddState`/`SetBroadcast` для nflog и silences, `Join`, `Settle`, `api.Options.Peer`, `clusterWait`, `clusterEnabled`.
   verify: `cd go-app && go vet ./internal/upstreamcore/ && go test ./internal/upstreamcore/`
   depends: 1.1
-- [ ] 1.3 `reloader`: поле `peer`, `notify.Peer` в `PipelineBuilder.New`.
+- [x] 1.3 `reloader`: поле `peer`, `notify.Peer` в `PipelineBuilder.New`.
   verify: `cd go-app && go test ./internal/upstreamcore/`
   depends: 1.2
-- [ ] 1.4 `doc.go`: Known differences, комментарий метрики.
+- [x] 1.4 `doc.go`: Known differences, комментарий метрики.
   verify: `git diff --check`
 
 ## Phase 2: 4a — бинарь и гейт
 
-- [ ] 2.1 `cmd/amp-upstream`: флаги `--cluster.*` upstream, повторяемый `--cluster.peer`.
+- [x] 2.1 `cmd/amp-upstream`: флаги `--cluster.*` upstream, повторяемый `--cluster.peer`.
   verify: `cd go-app && go build ./cmd/amp-upstream && go vet ./cmd/amp-upstream/`
   depends: 1.3
-- [ ] 2.2 `upstream-core-gate.sh`: `--cluster.listen-address=127.0.0.1:0`.
+- [x] 2.2 `upstream-core-gate.sh`: `--cluster.listen-address=127.0.0.1:0`.
   verify: `scripts/upstream-core-gate.sh`
   depends: 2.1
-- [ ] 2.3 Ручная проверка: два бинаря локально, `/api/v2/status` — 2 пира, silence виден на втором.
+- [x] 2.3 Ручная проверка: два бинаря локально, `/api/v2/status` — 2 пира, silence виден на втором.
   verify: `curl -s localhost:<port>/api/v2/status | jq '.cluster.peers|length'` = 2
 
 ## Phase 3: 4b — образ

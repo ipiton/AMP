@@ -11,12 +11,12 @@
 // does not ship. app.Options is also closed for injection — no
 // AlertStoreCallback, no extra notify stages, no extra routes — which are
 // exactly the seams the later ADR-019 slices need. So the construction lives
-// here, minus the UI and the gossip cluster (slice UPSTREAM-HA-MEMBERLIST).
+// here, minus the UI.
 //
 // # Provenance and licence
 //
 // core.go and reloader.go are ports of
-// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,reloader.go,metrics.go,lifecycle.go}
+// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,reloader.go,cluster.go,metrics.go,lifecycle.go}
 // (lifecycle.go: the reload serialisation and the Stop ordering), and
 // extURL in cmd/amp-upstream is a port of app/url.go. When bumping the
 // upstream version, diff those files against the new release and carry the
@@ -50,12 +50,19 @@
 //
 // # Known differences from upstream
 //
-// No gossip cluster (alertmanager_cluster_enabled stays 0), no UI, no event
-// recorder (behind a feature flag upstream, off by default), no
-// --silences.max-*, --alerts.per-alertname-limit, --dispatch.start-delay or
-// --web.config.file; the HTTP server and signals belong to the caller.
-// Stop waits for a reload in progress without a deadline, where upstream
-// abandons it after its shutdown timeout.
+// No UI, no event recorder (behind a feature flag upstream, off by default;
+// so no SetClusterPeer either), no --silences.max-*,
+// --alerts.per-alertname-limit, --dispatch.start-delay or --web.config.file;
+// the HTTP server and signals belong to the caller. Stop waits for a reload
+// in progress without a deadline, where upstream abandons it after its
+// shutdown timeout, and logs a failed gossip Leave instead of returning it.
+//
+// The gossip cluster (cluster.Peer, slice UPSTREAM-HA-MEMBERLIST) is wired
+// as upstream wires it: silences and the notification log are gossiped,
+// notifications wait for the cluster to settle and for one PeerTimeout per
+// peer ahead in position. An empty Options.ClusterBindAddr keeps it off, as
+// upstream's app.DefaultOptions does; the amp-upstream binary defaults the
+// flag to 0.0.0.0:9094, as upstream's binary does.
 //
 // # AMP extensions
 //
