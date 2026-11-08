@@ -31,13 +31,13 @@ based_on:
 
 > **Wave 1** — независимые шаги
 
-- [ ] **1.1** `upstreamcore.Options.ExtendConfig` + вызов в `reloader.reload`, отметка в `doc.go` <!-- verify: go build ./internal/upstreamcore/... -->
-- [ ] **1.2** `k8s.client`: `Health` с контекстом, пагинация `ListSecrets`, `Close` без обнуления <!-- verify: go test ./internal/infrastructure/k8s/... -->
-- [ ] **1.3** `upstreamtargets`: перевод таргета (`convert.go`), принадлежность и `ExtendConfig`, `Source` (`Refresh`, `Run`), метрика, редакция ошибок <!-- verify: go vet ./internal/upstreamtargets/... -->
+- [x] **1.1** `upstreamcore.Options.ExtendConfig` + вызов в `reloader.reload`, отметка в `doc.go` <!-- verify: go build ./internal/upstreamcore/... -->
+- [x] **1.2** `k8s.client`: `Health` с контекстом, пагинация `ListSecrets`, `Close` без обнуления <!-- verify: go test ./internal/infrastructure/k8s/... -->
+- [x] **1.3** `upstreamtargets`: перевод таргета (`convert.go`), принадлежность и `ExtendConfig`, `Source` (`Refresh`, `Run`), метрика, редакция ошибок <!-- verify: go vet ./internal/upstreamtargets/... -->
 
 > **Wave 2** — после 1.1, 1.3
 
-- [ ] **1.4** `cmd/amp-upstream`: один `LoadConfig`, `targets.go` (`newTargetSource`, namespace), запуск `Run` <!-- depends: 1.1, 1.3 | verify: go build ./cmd/amp-upstream -->
+- [x] **1.4** `cmd/amp-upstream`: один `LoadConfig`, `targets.go` (`newTargetSource`, namespace), запуск `Run` <!-- depends: 1.1, 1.3 | verify: go build ./cmd/amp-upstream -->
 
 **Phase verification:** `go build ./... && go vet ./internal/upstreamcore/... ./internal/upstreamtargets/... ./internal/infrastructure/k8s/... ./cmd/amp-upstream/...`
 

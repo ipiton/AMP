@@ -2,7 +2,9 @@
 // internal/upstreamcore from an unmodified alertmanager.yml (ADR-019 PoC).
 // It runs next to cmd/server and changes nothing in it; flags mirror the
 // upstream binary's names for the subset it supports. --amp.config.file
-// adds AMP's LLM classification (internal/upstreamai) when llm.enabled.
+// adds AMP's LLM classification (internal/upstreamai) when llm.enabled, and
+// the K8s-Secret publishing targets (internal/upstreamtargets) in the
+// standard profile with publishing.enabled.
 package main
 
 import (
@@ -32,6 +34,7 @@ import (
 	"github.com/ipiton/AMP/internal/infrastructure/llm"
 	"github.com/ipiton/AMP/internal/upstreamai"
 	"github.com/ipiton/AMP/internal/upstreamcore"
+	"github.com/ipiton/AMP/internal/upstreamtargets"
 )
 
 // shutdownTimeout matches upstream's app.Stop.
@@ -68,8 +71,16 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		Logger:     logger,
 		Registerer: prometheus.DefaultRegisterer,
 	}
+	var (
+		targets         *upstreamtargets.Source
+		targetsInterval time.Duration
+	)
 	if ampConfigFile != "" {
-		classifier, err := newClassifier(logger, ampConfigFile, &opts)
+		cfg, err := appconfig.LoadConfig(ampConfigFile)
+		if err != nil {
+			return fmt.Errorf("error loading AMP configuration file: %w", err)
+		}
+		classifier, err := newClassifier(logger, cfg, &opts)
 		if err != nil {
 			return err
 		}
@@ -77,6 +88,9 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		// gone before the workers stop.
 		if classifier != nil {
 			defer classifier.Stop()
+		}
+		if targets, targetsInterval, err = newTargetSource(logger, cfg, &opts); err != nil {
+			return err
 		}
 	}
 
@@ -101,6 +115,15 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	// Runs after the server is shut down below: the core must not stop
 	// while its handler still serves (upstreamcore.Core.Handler).
 	defer core.Stop()
+
+	if targets != nil {
+		// Cancelled before core.Stop runs: a poll must not reload a stopped
+		// core (Reload would only return an error, but there is no reason to
+		// list Secrets during shutdown).
+		pollCtx, stopPoll := context.WithCancel(context.Background())
+		defer stopPoll()
+		go targets.Run(pollCtx, targetsInterval, core.Reload)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -138,11 +161,7 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 
 // newClassifier builds the LLM classification from the AMP config and hooks
 // it into opts. It returns nil when llm.enabled is false.
-func newClassifier(logger *slog.Logger, path string, opts *upstreamcore.Options) (*upstreamai.Classifier, error) {
-	cfg, err := appconfig.LoadConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("error loading AMP configuration file: %w", err)
-	}
+func newClassifier(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.Options) (*upstreamai.Classifier, error) {
 	if !cfg.LLM.Enabled {
 		logger.Info("AMP configuration loaded, alert classification disabled (llm.enabled=false)")
 		return nil, nil

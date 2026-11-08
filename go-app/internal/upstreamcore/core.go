@@ -86,6 +86,11 @@ type Options struct {
 	NewAlertCallback func(mutes func(context.Context, model.LabelSet) bool) mem.AlertStoreCallback
 	// NotifyStage runs ahead of every receiver's notification pipeline.
 	NotifyStage notify.Stage
+	// ExtendConfig returns the configuration the core applies in place of
+	// conf on every apply, initial and reload (K8s-Secret receivers,
+	// internal/upstreamtargets). It must not modify conf; an error rejects
+	// the reload and keeps the active configuration.
+	ExtendConfig func(conf *config.Config) (*config.Config, error)
 }
 
 // Core is a running upstream Alertmanager core without an HTTP server of
@@ -298,6 +303,7 @@ func (c *Core) setup(opts Options) error {
 		pipelineBuilder:             notify.NewPipelineBuilder(reg, ff, eventRec),
 		retention:                   opts.Retention,
 		notifyStage:                 opts.NotifyStage,
+		extendConfig:                opts.ExtendConfig,
 		silencer:                    silencer,
 		startTime:                   startTime,
 		timeoutFunc:                 timeoutFunc,
