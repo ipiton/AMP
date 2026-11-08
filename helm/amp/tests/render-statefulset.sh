@@ -160,6 +160,47 @@ render extraenv --set 'extraEnv[0].name=INVESTIGATION_TOOLS_DATABASE_DSN' \
 assert_count "${WORK_DIR}/extraenv.yaml" "name: INVESTIGATION_TOOLS_DATABASE_DSN" 1 "extraenv: env rendered"
 assert_count "${WORK_DIR}/extraenv.yaml" "name: amp-inv" 1 "extraenv: secretKeyRef kept"
 
+echo "web auth: the Secret is mounted and passed to --web.config.file"
+render web --set webConfig.existingSecret=amp-web --set monitoring.serviceMonitor.enabled=false
+doc "${WORK_DIR}/web.yaml" StatefulSet "${STS}" >"${WORK_DIR}/web-sts.yaml"
+assert_count "${WORK_DIR}/web-sts.yaml" "--web.config.file=/etc/amp/web/web-config.yml" 1 "web: flag points at the mounted file"
+assert_count "${WORK_DIR}/web-sts.yaml" "secretName: amp-web" 1 "web: volume from the operator's Secret"
+assert_count "${WORK_DIR}/web-sts.yaml" "mountPath: /etc/amp/web" 1 "web: mounted at webConfig.mountPath"
+doc "${WORK_DIR}/one.yaml" StatefulSet "${STS}" >"${WORK_DIR}/one-sts-web.yaml"
+assert_count "${WORK_DIR}/one-sts-web.yaml" "--web.config.file" 0 "defaults: no web config flag"
+
+echo "service account token and RBAC only for K8s-Secret discovery"
+assert_count "${WORK_DIR}/one-sts-web.yaml" "automountServiceAccountToken: true" 1 "defaults (standard, publishing): token mounted"
+assert_line "${WORK_DIR}/one.yaml" "^kind: Role$" 1 "defaults: Role rendered"
+render no-publishing --set publishing.enabled=false
+doc "${WORK_DIR}/no-publishing.yaml" StatefulSet "${STS}" >"${WORK_DIR}/no-publishing-sts.yaml"
+assert_count "${WORK_DIR}/no-publishing-sts.yaml" "automountServiceAccountToken: false" 1 "no publishing: no token"
+assert_line "${WORK_DIR}/no-publishing.yaml" "^kind: Role(Binding)?$" 0 "no publishing: no Role, no RoleBinding"
+render lite --set profile=lite
+doc "${WORK_DIR}/lite.yaml" StatefulSet "${STS}" >"${WORK_DIR}/lite-sts.yaml"
+assert_count "${WORK_DIR}/lite-sts.yaml" "automountServiceAccountToken: false" 1 "lite: no token"
+assert_line "${WORK_DIR}/lite.yaml" "^kind: Role(Binding)?$" 0 "lite: no Role, no RoleBinding"
+assert_count "${WORK_DIR}/lite.yaml" "DATABASE_PASSWORD" 0 "lite: no database password"
+
+echo "llm keys of amp.yaml and the N x LLM warning"
+LLM=(--set llm.enabled=true --set llm.apiKey=render-test --set llm.agentMode=true)
+render llm "${LLM[@]}"
+amp_cfg() { awk '/^  amp\.yaml: \|$/ { on = 1; next } on && !/^    / { on = 0 } on' "$1"; }
+amp_cfg "${WORK_DIR}/llm.yaml" >"${WORK_DIR}/llm-amp.yaml"
+assert_count "${WORK_DIR}/llm-amp.yaml" "agent_mode: true" 1 "llm: agent_mode from llm.agentMode"
+assert_count "${WORK_DIR}/llm-amp.yaml" "render-test" 0 "llm: the key is not in the ConfigMap"
+assert_count "${WORK_DIR}/llm.yaml" "name: LLM_API_KEY" 1 "llm: key from the Secret as env"
+if helm install amp "${CHART_DIR}" --dry-run=client "${LLM[@]}" --set alertmanager.replicas=3 >"${WORK_DIR}/llm-notes.txt" 2>&1; then
+  assert_count "${WORK_DIR}/llm-notes.txt" "llm.enabled with 3 replicas" 1 "NOTES: N x LLM warning with 3 replicas"
+else
+  fail "llm NOTES: install --dry-run failed: $(tail -3 "${WORK_DIR}/llm-notes.txt")"
+fi
+helm install amp "${CHART_DIR}" --dry-run=client "${LLM[@]}" >"${WORK_DIR}/llm1-notes.txt" 2>&1 || true
+assert_count "${WORK_DIR}/llm1-notes.txt" "LLM calls" 0 "NOTES: no N x LLM warning with one replica"
+
+echo "the AMP pods carry the release selector labels (PostgreSQL NetworkPolicy)"
+assert_count "${WORK_DIR}/one-sts-web.yaml" "app.kubernetes.io/instance: amp" 4 "StatefulSet, selector, pods and volumes carry the instance label"
+
 if [ "${failures}" -ne 0 ]; then
   printf '\n%d assertion(s) failed\n' "${failures}" >&2
   exit 1

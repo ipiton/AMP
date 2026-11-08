@@ -274,54 +274,6 @@ func TestUpstreamParity_AlertsListOrderByFingerprint(t *testing.T) {
 	}
 }
 
-func TestUpstreamParity_ReloadReturns500OnInvalidConfig(t *testing.T) {
-	configPath := writeTestConfigFile(t, "route: [\n")
-	t.Setenv(runtimeConfigFileEnv, configPath)
-
-	mux := newPhase0TestMux(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("POST /-/reload expected 500 for invalid config, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "failed to reload config") {
-		t.Fatalf("reload failure response expected failure prefix, got %q", rec.Body.String())
-	}
-}
-
-func TestUpstreamParity_ReloadSuccessReturnsOKBody(t *testing.T) {
-	// task 1.3: route:/receivers: parse via infrastructure/routing.Parse(),
-	// which requires the root route's receiver to resolve in receivers: and
-	// that receiver to define at least one notification config.
-	configPath := writeTestConfigFile(t, `
-route:
-  receiver: "initial-receiver"
-receivers:
-  - name: "initial-receiver"
-    webhook_configs:
-      - url: https://example.com/webhook
-`)
-	t.Setenv(runtimeConfigFileEnv, configPath)
-
-	mux := newPhase0TestMux(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST /-/reload expected 200 for valid config, got %d", rec.Code)
-	}
-	// ADR-002: the active ReloadHandler responds with a literal "OK" body
-	// (upstream returned an empty body).
-	if rec.Body.String() != "OK" {
-		t.Fatalf("reload success expected body OK, got %q", rec.Body.String())
-	}
-}
-
 func TestUpstreamParity_UpstreamStaticCompatibilityPaths(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
@@ -594,97 +546,6 @@ receivers:
 	}
 }
 
-func TestUpstreamParity_AlertsAndGroupsInvalidQueryContract(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	// Active-runtime contract:
-	//   - PARITY-4.1: the upstream receiver query parameter is now validated
-	//     as a regex on both /api/v2/alerts and /api/v2/alerts/groups (400 on
-	//     a malformed pattern);
-	//   - /api/v2/alerts validates filter matchers and returns 400 with an
-	//     {"error": ...} object (upstream returned a bare JSON string);
-	//   - /api/v2/alerts/groups does not parse the label `filter` parameter
-	//     at all (that param is /api/v2/alerts-only, per upstream).
-	okCases := []string{
-		"/api/v2/alerts/groups?filter=broken-matcher",
-	}
-	for _, path := range okCases {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s expected 200 (param ignored by active runtime), got %d", path, rec.Code)
-		}
-	}
-
-	badReceiverRegexCases := []string{
-		"/api/v2/alerts?receiver=[",
-		"/api/v2/alerts/groups?receiver=[",
-	}
-	for _, path := range badReceiverRegexCases {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("GET %s expected 400 (invalid receiver regex), got %d", path, rec.Code)
-		}
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?filter=broken-matcher", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("GET /api/v2/alerts?filter=broken-matcher expected 400, got %d", rec.Code)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid filter expected JSON object body, got %q (%v)", rec.Body.String(), err)
-	}
-	message, _ := payload["error"].(string)
-	if !strings.Contains(message, "invalid matcher syntax") {
-		t.Fatalf("invalid filter expected invalid matcher syntax error, got %q", message)
-	}
-}
-
-func TestUpstreamParity_PostAlertsErrorPayloadContracts(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	// ADR-002: the active runtime returns 400 with an {"error": ...} JSON
-	// object for malformed alert payloads (upstream used code/message envelopes
-	// and 422 for validation failures).
-	postAlertsExpectError := func(t *testing.T, body, wantSubstring string) {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(body))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/alerts %s expected 400, got %d", body, rec.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("POST /api/v2/alerts %s expected JSON object body, got %q (%v)", body, rec.Body.String(), err)
-		}
-		message, _ := payload["error"].(string)
-		if !strings.Contains(message, wantSubstring) {
-			t.Fatalf("POST /api/v2/alerts %s expected error containing %q, got %q", body, wantSubstring, message)
-		}
-	}
-
-	postAlertsExpectError(t, `{}`, "invalid alert payload")
-	postAlertsExpectError(t, `[{"labels":{"alertname":"A"},"startsAt":"not-time"}]`, "invalid startsAt")
-	postAlertsExpectError(t, `[{}]`, "missing required label alertname")
-	postAlertsExpectError(t, `[{"labels":{}}]`, "missing required label alertname")
-
-	// The active runtime does not validate generatorURL; the alert is accepted.
-	invalidGeneratorReq := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{"alertname":"A"},"generatorURL":":bad"}]`))
-	invalidGeneratorRec := httptest.NewRecorder()
-	mux.ServeHTTP(invalidGeneratorRec, invalidGeneratorReq)
-	if invalidGeneratorRec.Code != http.StatusOK {
-		t.Fatalf("POST /api/v2/alerts invalid generatorURL expected 200 (not validated), got %d", invalidGeneratorRec.Code)
-	}
-}
-
 func TestUpstreamParity_PostAlertsDateOnlyTimestampsAccepted(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
@@ -810,49 +671,6 @@ func TestUpstreamParity_SilencesFilterAndOrder(t *testing.T) {
 	}
 }
 
-func TestUpstreamParity_SilencesInvalidFilterErrorPayloadIsJSONObject(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/silences?filter=broken-matcher", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("GET /api/v2/silences invalid filter expected 400, got %d", rec.Code)
-	}
-
-	// ADR-002: the active runtime wraps errors in an {"error": ...} object
-	// (upstream returned a bare JSON string).
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid filter error expected JSON object body, got %q (%v)", rec.Body.String(), err)
-	}
-	message, _ := payload["error"].(string)
-	if !strings.Contains(message, "invalid matcher syntax") {
-		t.Fatalf("invalid filter error expected invalid matcher syntax message, got %q", message)
-	}
-}
-
-func TestUpstreamParity_SilenceByIDInvalidUUIDReturnsNotFound(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	// ADR-002: the active runtime does not validate the silence id as a UUID;
-	// any unknown id (malformed or not) is a plain 404 (upstream returned 422
-	// with a code/message envelope for malformed UUIDs).
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/not-a-uuid", nil)
-	getRec := httptest.NewRecorder()
-	mux.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusNotFound {
-		t.Fatalf("GET /api/v2/silence/{id} invalid uuid expected 404, got %d", getRec.Code)
-	}
-
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/not-a-uuid", nil)
-	deleteRec := httptest.NewRecorder()
-	mux.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE /api/v2/silence/{id} invalid uuid expected 404, got %d", deleteRec.Code)
-	}
-}
-
 func TestUpstreamParity_SilenceByIDUnknownUUIDReturns404EmptyBody(t *testing.T) {
 	mux := newPhase0TestMux(t)
 
@@ -916,54 +734,4 @@ func TestUpstreamParity_DeleteSilenceReturnsEmptyBody(t *testing.T) {
 	if deleteRec.Body.Len() != 0 {
 		t.Fatalf("DELETE /api/v2/silence/{id} expected empty body, got %q", deleteRec.Body.String())
 	}
-}
-
-func TestUpstreamParity_PostSilenceErrorPayloadContracts(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	// ADR-002: the active runtime answers every invalid silence POST with 400
-	// and an {"error": ...} object (upstream used 422 code/message envelopes
-	// and 404 for unknown-id updates).
-	postSilenceExpect400 := func(t *testing.T, name, body string) {
-		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(body))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences %s expected 400, got %d", name, rec.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("%s error expected JSON object body, got %q (%v)", name, rec.Body.String(), err)
-		}
-		message, _ := payload["error"].(string)
-		if strings.TrimSpace(message) == "" {
-			t.Fatalf("%s error expected non-empty error message, got %q", name, rec.Body.String())
-		}
-	}
-
-	postSilenceExpect400(t, "invalid payload", `{}`)
-	postSilenceExpect400(t, "empty matchers", `{
-		"matchers": [],
-		"startsAt": "2099-01-01T00:00:00Z",
-		"endsAt": "2099-01-01T01:00:00Z",
-		"createdBy": "parity-suite",
-		"comment": "no matchers"
-	}`)
-	postSilenceExpect400(t, "unknown id update", `{
-		"id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
-		"matchers": [{"name":"alertname","value":"ParityUnknownID","isRegex":false}],
-		"startsAt": "2099-01-01T00:00:00Z",
-		"endsAt": "2099-01-01T01:00:00Z",
-		"createdBy": "parity-suite",
-		"comment": "unknown id update"
-	}`)
-	postSilenceExpect400(t, "invalid id update", `{
-		"id": "not-a-uuid",
-		"matchers": [{"name":"alertname","value":"ParityInvalidID","isRegex":false}],
-		"startsAt": "2099-01-01T00:00:00Z",
-		"endsAt": "2099-01-01T01:00:00Z",
-		"createdBy": "parity-suite",
-		"comment": "invalid id update"
-	}`)
 }

@@ -135,3 +135,25 @@ func TestRegister_NilRegisterer(t *testing.T) {
 		t.Errorf("Register(nil) = %v, want nil", err)
 	}
 }
+
+// TestRegister_OnlyAMPBuildInfo: alertmanager_build_info belongs to
+// upstream's versioncollector, which amp-upstream registers with the core;
+// registering it here too would fail the second registration or report two
+// versions (UPSTREAM-CORE-REMOVAL).
+func TestRegister_OnlyAMPBuildInfo(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	if err := Register(registry); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	var names []string
+	for _, family := range families {
+		names = append(names, family.GetName())
+	}
+	if len(names) != 1 || names[0] != "amp_build_info" {
+		t.Errorf("Register exposes %v, want only amp_build_info", names)
+	}
+}

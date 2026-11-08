@@ -18,9 +18,18 @@ import (
 // closeTools releases the database_query tool's handle; call it after the
 // queue has stopped.
 func newAgentLoop(logger *slog.Logger, cfg *appconfig.Config, client coreinv.AgentLLMClient) (loop *coreinv.AgentLoop, closeTools func()) {
+	registry, closeTools := newToolRegistry(logger, cfg.Investigation.Tools)
+	loop = coreinv.NewAgentLoop(client, registry, coreinv.DefaultAgentLoopConfig())
+	configureRunbooks(logger, cfg.Investigation.Runbooks, loop)
+	logger.Info("Agentic investigation loop enabled")
+	return loop, closeTools
+}
+
+// newToolRegistry registers the tools configured under investigation.tools.
+// closeTools releases the database_query tool's handle.
+func newToolRegistry(logger *slog.Logger, toolsCfg appconfig.InvestigationToolsConfig) (registry *coreinv.ToolRegistry, closeTools func()) {
 	closeTools = func() {}
-	registry := coreinv.NewToolRegistry()
-	toolsCfg := cfg.Investigation.Tools
+	registry = coreinv.NewToolRegistry()
 
 	if toolsCfg.Prometheus != nil && toolsCfg.Prometheus.Endpoint != "" {
 		registry.Register(invtools.NewPrometheusTool(toolsCfg.Prometheus))
@@ -68,10 +77,7 @@ func newAgentLoop(logger *slog.Logger, cfg *appconfig.Config, client coreinv.Age
 		}
 	}
 
-	loop = coreinv.NewAgentLoop(client, registry, coreinv.DefaultAgentLoopConfig())
-	configureRunbooks(logger, cfg.Investigation.Runbooks, loop)
-	logger.Info("Agentic investigation loop enabled")
-	return loop, closeTools
+	return registry, closeTools
 }
 
 // configureRunbooks loads investigation runbooks into loop. A missing or

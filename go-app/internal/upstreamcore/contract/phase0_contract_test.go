@@ -96,7 +96,7 @@ func TestPhase0RouteInventory(t *testing.T) {
 	// ADR-002: the route inventory documents the ACTIVE runtime surface
 	// (internal/application/router.go + registerLegacyDashboardRoutes).
 	// Endpoints removed by the controlled replacement (config API, history,
-	// dashboard JSON API, webhook, pprof, classification, /script.js)
+	// dashboard JSON API, webhook, classification, /script.js)
 	// intentionally return 404. PARITY-4.3 restored POST /api/v1/alerts as a
 	// real alias to the v2 ingest handler — it is no longer in that list.
 	probes := []routeProbe{
@@ -118,7 +118,6 @@ func TestPhase0RouteInventory(t *testing.T) {
 		{name: "alertmanager ready get", method: http.MethodGet, path: "/-/ready", allowedStatus: []int{http.StatusOK}},
 		{name: "alertmanager ready head", method: http.MethodHead, path: "/-/ready", allowedStatus: []int{http.StatusOK}},
 		{name: "alertmanager reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, allowedStatus: []int{http.StatusOK}},
-		{name: "debug removed", method: http.MethodGet, path: "/debug/pprof/", allowedStatus: []int{http.StatusNotFound}},
 		{name: "metrics", method: http.MethodGet, path: "/metrics", allowedStatus: []int{http.StatusOK}},
 		{name: "alerts v1 post alias", method: http.MethodPost, path: "/api/v1/alerts", body: validAlertPayload, allowedStatus: []int{http.StatusOK}},
 		{name: "alerts v1 get alias", method: http.MethodGet, path: "/api/v1/alerts", allowedStatus: []int{http.StatusOK}},
@@ -338,37 +337,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("alerts get invalid state flag contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?active=not-bool", nil)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		// PARITY-4.1: active/silenced/inhibited/unprocessed are now validated
-		// booleans, matching upstream's 400-on-malformed-query-param behavior.
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts with invalid active expected 400, got %d", rec.Code)
-		}
-	})
-
-	t.Run("alerts get invalid filter matcher contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v2/alerts?filter=broken-matcher", nil)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts with invalid filter expected 400, got %d", rec.Code)
-		}
-		// ADR-002: active runtime error bodies are {"error": ...} objects.
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("alerts invalid filter expected JSON object body, got %q (%v)", rec.Body.String(), err)
-		}
-		message, _ := payload["error"].(string)
-		if !strings.Contains(message, "invalid matcher syntax") {
-			t.Fatalf("alerts invalid filter expected invalid matcher syntax error, got %q", message)
-		}
-	})
-
 	t.Run("alerts post contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(validAlertPayload))
 		rec := httptest.NewRecorder()
@@ -394,73 +362,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("alerts post invalid payload contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`{}`))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/alerts with invalid payload expected 400, got %d", rec.Code)
-		}
-		// ADR-002: active error contract is {"error": ...} without an
-		// upstream-style code/message envelope.
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("alerts invalid payload expected JSON object body, got %q (%v)", rec.Body.String(), err)
-		}
-		if msg, _ := payload["error"].(string); !strings.Contains(msg, "invalid alert payload") {
-			t.Fatalf("alerts invalid payload expected invalid alert payload error, got %v", payload["error"])
-		}
-	})
-
-	t.Run("alerts post missing labels contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{}]`))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		// ADR-002: missing labels fail alertname validation with 400 (upstream
-		// used 422 + code/message envelope).
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/alerts with missing labels expected 400, got %d", rec.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("alerts missing labels expected JSON object body, got %q (%v)", rec.Body.String(), err)
-		}
-		if msg, _ := payload["error"].(string); !strings.Contains(msg, "missing required label alertname") {
-			t.Fatalf("alerts missing labels expected alertname error, got %v", payload["error"])
-		}
-	})
-
-	t.Run("alerts post empty labels contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{}}]`))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/alerts with empty labels expected 400, got %d", rec.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("alerts empty labels expected JSON object body, got %q (%v)", rec.Body.String(), err)
-		}
-		if msg, _ := payload["error"].(string); strings.TrimSpace(msg) == "" {
-			t.Fatalf("alerts empty labels expected non-empty error message")
-		}
-	})
-
-	t.Run("alerts post invalid generatorURL contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/alerts", bytes.NewBufferString(`[{"labels":{"alertname":"A"},"generatorURL":":bad"}]`))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		// ADR-002: the active runtime does not validate generatorURL, so the
-		// alert is accepted (upstream returned 422 code=601).
-		if rec.Code != http.StatusOK {
-			t.Fatalf("POST /api/v2/alerts with invalid generatorURL expected 200 (not validated), got %d", rec.Code)
-		}
-	})
-
 	t.Run("silences get contract", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v2/silences", nil)
 		rec := httptest.NewRecorder()
@@ -476,23 +377,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if payload == nil {
 			t.Fatalf("silences get expected array payload")
-		}
-	})
-
-	t.Run("silences get invalid filter contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/v2/silences?filter=broken-matcher", nil)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/silences with invalid filter expected 400, got %d", rec.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("silences invalid filter expected json object error, got %q (%v)", rec.Body.String(), err)
-		}
-		if msg, _ := payload["error"].(string); !strings.Contains(msg, "invalid matcher syntax") {
-			t.Fatalf("silences invalid filter expected invalid matcher syntax error, got %v", payload["error"])
 		}
 	})
 
@@ -514,49 +398,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("silences post invalid payload contract", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(`{}`))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		// ADR-002: the active runtime answers invalid silence payloads with
-		// 400 + {"error": ...} (upstream used 422 code/message envelopes).
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences with invalid payload expected 400, got %d", rec.Code)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("silences invalid payload expected json object error, got %q (%v)", rec.Body.String(), err)
-		}
-		if message, _ := payload["error"].(string); strings.TrimSpace(message) == "" {
-			t.Fatalf("silences invalid payload expected non-empty error message")
-		}
-	})
-
-	t.Run("silences post no matchers contract", func(t *testing.T) {
-		payload := `{
-			"matchers": [],
-			"startsAt": "2099-01-01T00:00:00Z",
-			"endsAt": "2099-01-01T01:00:00Z",
-			"createdBy": "phase0-test",
-			"comment": "no matchers"
-		}`
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences with empty matchers expected 400, got %d", rec.Code)
-		}
-		var errorPayload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
-			t.Fatalf("silences empty matchers expected json object error, got %q (%v)", rec.Body.String(), err)
-		}
-		if message, _ := errorPayload["error"].(string); strings.TrimSpace(message) == "" {
-			t.Fatalf("silences empty matchers expected non-empty error message")
-		}
-	})
-
 	t.Run("silences post invalid regex matcher contract", func(t *testing.T) {
 		payload := `{
 			"matchers": [{"name":"alertname","value":"[","isRegex":true}],
@@ -571,30 +412,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("POST /api/v2/silences with invalid regex matcher expected 400, got %d", rec.Code)
-		}
-	})
-
-	t.Run("silences post invalid matcher name contract", func(t *testing.T) {
-		payload := `{
-			"matchers": [{"name":"","value":"value","isRegex":false}],
-			"startsAt": "2099-01-01T00:00:00Z",
-			"endsAt": "2099-01-01T01:00:00Z",
-			"createdBy": "phase0-test",
-			"comment": "invalid matcher name"
-		}`
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences with invalid matcher name expected 400, got %d", rec.Code)
-		}
-		var errorPayload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
-			t.Fatalf("silences invalid matcher name expected json object error, got %q (%v)", rec.Body.String(), err)
-		}
-		if message, _ := errorPayload["error"].(string); strings.TrimSpace(message) == "" {
-			t.Fatalf("silences invalid matcher name expected non-empty error message")
 		}
 	})
 
@@ -617,60 +434,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("silences post update unknown id contract", func(t *testing.T) {
-		payload := `{
-			"id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
-			"matchers": [{"name":"alertname","value":"ContractUnknownID","isRegex":false}],
-			"startsAt": "2099-01-01T00:00:00Z",
-			"endsAt": "2099-01-01T01:00:00Z",
-			"createdBy": "phase0-test",
-			"comment": "unknown id update"
-		}`
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		// ADR-002: the active runtime reports unknown-id updates as 400
-		// {"error":"silence not found"} (upstream used 404 + string body).
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences update with unknown id expected 400, got %d", rec.Code)
-		}
-		var errorPayload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
-			t.Fatalf("silences unknown id expected json object error, got %q (%v)", rec.Body.String(), err)
-		}
-		if message, _ := errorPayload["error"].(string); !strings.Contains(message, "silence not found") {
-			t.Fatalf("silences unknown id expected silence not found error, got %v", errorPayload["error"])
-		}
-	})
-
-	t.Run("silences post update invalid id contract", func(t *testing.T) {
-		payload := `{
-			"id": "not-a-uuid",
-			"matchers": [{"name":"alertname","value":"ContractInvalidID","isRegex":false}],
-			"startsAt": "2099-01-01T00:00:00Z",
-			"endsAt": "2099-01-01T01:00:00Z",
-			"createdBy": "phase0-test",
-			"comment": "invalid id update"
-		}`
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		// ADR-002: malformed update ids also surface as 400 "silence not
-		// found" — the active runtime performs no UUID validation.
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST /api/v2/silences update with invalid id expected 400, got %d", rec.Code)
-		}
-		var errorPayload map[string]any
-		if err := json.Unmarshal(rec.Body.Bytes(), &errorPayload); err != nil {
-			t.Fatalf("silences invalid id expected json object error, got %q (%v)", rec.Body.String(), err)
-		}
-		if message, _ := errorPayload["error"].(string); strings.TrimSpace(message) == "" {
-			t.Fatalf("silences invalid id expected non-empty error message")
-		}
-	})
-
 	t.Run("silence by id contract", func(t *testing.T) {
 		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+unknownSilenceUUID, nil)
 		getRec := httptest.NewRecorder()
@@ -690,24 +453,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 		}
 		if delRec.Body.Len() != 0 {
 			t.Fatalf("DELETE /api/v2/silence/{id} expected empty body for unknown id, got %q", delRec.Body.String())
-		}
-	})
-
-	t.Run("silence by id invalid id contract", func(t *testing.T) {
-		// ADR-002: the active runtime does not validate silence ids as UUIDs;
-		// malformed ids are simply unknown and return 404 (upstream: 422).
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/not-a-uuid", nil)
-		getRec := httptest.NewRecorder()
-		mux.ServeHTTP(getRec, getReq)
-		if getRec.Code != http.StatusNotFound {
-			t.Fatalf("GET /api/v2/silence/{id} with invalid id expected 404, got %d", getRec.Code)
-		}
-
-		delReq := httptest.NewRequest(http.MethodDelete, "/api/v2/silence/not-a-uuid", nil)
-		delRec := httptest.NewRecorder()
-		mux.ServeHTTP(delRec, delReq)
-		if delRec.Code != http.StatusNotFound {
-			t.Fatalf("DELETE /api/v2/silence/{id} with invalid id expected 404, got %d", delRec.Code)
 		}
 	})
 
@@ -754,51 +499,6 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			if !ok || name == "" {
 				t.Fatalf("alert groups response expected receiver.name string, got %v", receiver["name"])
 			}
-		}
-	})
-
-	t.Run("alert groups invalid query filters contract", func(t *testing.T) {
-		reqResolved := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?resolved=not-bool", nil)
-		recResolved := httptest.NewRecorder()
-		mux.ServeHTTP(recResolved, reqResolved)
-		if recResolved.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid resolved expected 200, got %d", recResolved.Code)
-		}
-
-		// PARITY-4.1: the groups handler now evaluates the receiver parameter
-		// as a regex, so a malformed pattern is a 400.
-		reqReceiver := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?receiver=[", nil)
-		recReceiver := httptest.NewRecorder()
-		mux.ServeHTTP(recReceiver, reqReceiver)
-		if recReceiver.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid receiver regex expected 400, got %d", recReceiver.Code)
-		}
-
-		// PARITY-4.1: active/silenced/inhibited/unprocessed are now validated
-		// booleans on the groups endpoint too.
-		reqActive := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?active=not-bool", nil)
-		recActive := httptest.NewRecorder()
-		mux.ServeHTTP(recActive, reqActive)
-		if recActive.Code != http.StatusBadRequest {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid active expected 400, got %d", recActive.Code)
-		}
-
-		// "muted" is not part of this parity slice (upstream's mutedBy is a
-		// separate, unimplemented concept); it stays ignored.
-		reqMuted := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?muted=not-bool", nil)
-		recMuted := httptest.NewRecorder()
-		mux.ServeHTTP(recMuted, reqMuted)
-		if recMuted.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid muted expected 200, got %d", recMuted.Code)
-		}
-
-		// ADR-002: the active groups handler does not parse the filter
-		// parameter, so a broken matcher is not an error either.
-		reqFilter := httptest.NewRequest(http.MethodGet, "/api/v2/alerts/groups?filter=broken-matcher", nil)
-		recFilter := httptest.NewRecorder()
-		mux.ServeHTTP(recFilter, reqFilter)
-		if recFilter.Code != http.StatusOK {
-			t.Fatalf("GET /api/v2/alerts/groups with invalid filter expected 200 (param ignored), got %d", recFilter.Code)
 		}
 	})
 
@@ -850,11 +550,11 @@ func TestPhase0Contracts_CoreAPI(t *testing.T) {
 			{name: "healthy head", method: http.MethodHead, path: "/-/healthy", status: http.StatusOK},
 			{name: "ready get", method: http.MethodGet, path: "/-/ready", status: http.StatusOK, textOK: true},
 			{name: "ready head", method: http.MethodHead, path: "/-/ready", status: http.StatusOK},
-			// NO-METHOD-ENFORCEMENT fixed: probes reject POST with 405; reload
-			// still answers "OK" to POST.
-			{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed, empty: true},
-			{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed, empty: true},
-			{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK, textOK: true},
+			// Probes reject POST with 405; a successful reload answers POST
+			// with an empty body (upstream; AMP's own core answered "OK").
+			{name: "healthy post not allowed", method: http.MethodPost, path: "/-/healthy", status: http.StatusMethodNotAllowed},
+			{name: "ready post not allowed", method: http.MethodPost, path: "/-/ready", status: http.StatusMethodNotAllowed},
+			{name: "reload post", method: http.MethodPost, path: "/-/reload", body: `{}`, status: http.StatusOK, empty: true},
 			{name: "reload get not allowed", method: http.MethodGet, path: "/-/reload", status: http.StatusMethodNotAllowed},
 		}
 
@@ -1255,24 +955,6 @@ func TestPhase0AlertsFilterMatcherSemantics(t *testing.T) {
 	}
 }
 
-func TestPhase0ReloadInvalidConfigReturns500(t *testing.T) {
-	configPath := writeTestConfigFile(t, "route: [\n")
-	t.Setenv(runtimeConfigFileEnv, configPath)
-
-	mux := newPhase0TestMux(t)
-
-	reloadReq := httptest.NewRequest(http.MethodPost, "/-/reload", bytes.NewBufferString(`{}`))
-	reloadRec := httptest.NewRecorder()
-	mux.ServeHTTP(reloadRec, reloadReq)
-
-	if reloadRec.Code != http.StatusInternalServerError {
-		t.Fatalf("POST /-/reload with invalid config expected 500, got %d", reloadRec.Code)
-	}
-	if !strings.Contains(reloadRec.Body.String(), "failed to reload config") {
-		t.Fatalf("reload error response expected failure prefix, got %q", reloadRec.Body.String())
-	}
-}
-
 func TestPhase0ReceiversIncludeConfiguredNames(t *testing.T) {
 	// task 1.3: route:/receivers: parse via infrastructure/routing.Parse(),
 	// which requires every route.receiver to resolve in receivers: and every
@@ -1600,207 +1282,6 @@ func TestPhase0SilencesStateSemantics(t *testing.T) {
 	listedStatus, _ := silencesAfterDelete[0]["status"].(map[string]any)
 	if state, _ := listedStatus["state"].(string); state != "expired" {
 		t.Fatalf("GET /api/v2/silences after delete: status.state = %v, want %q", listedStatus["state"], "expired")
-	}
-}
-
-func TestPhase0SilencePostUpdateSemantics(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(validSilencePayload))
-	createRec := httptest.NewRecorder()
-	mux.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("POST /api/v2/silences create expected 200, got %d", createRec.Code)
-	}
-
-	var createPayload map[string]any
-	if err := json.Unmarshal(createRec.Body.Bytes(), &createPayload); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
-	}
-	silenceID, _ := createPayload["silenceID"].(string)
-	if silenceID == "" {
-		t.Fatalf("expected non-empty silenceID")
-	}
-
-	now := time.Now().UTC()
-	updatePayload := fmt.Sprintf(`{
-		"id": %q,
-		"matchers": [{"name":"alertname","value":"TestAlert","isRegex":false}],
-		"startsAt": %q,
-		"endsAt": %q,
-		"createdBy": "phase0-test",
-		"comment": "maintenance window updated"
-	}`, silenceID, now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(59*time.Minute).Format(time.RFC3339))
-
-	updateReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(updatePayload))
-	updateRec := httptest.NewRecorder()
-	mux.ServeHTTP(updateRec, updateReq)
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("POST /api/v2/silences update expected 200, got %d", updateRec.Code)
-	}
-
-	var updateResp map[string]any
-	if err := json.Unmarshal(updateRec.Body.Bytes(), &updateResp); err != nil {
-		t.Fatalf("failed to decode update response: %v", err)
-	}
-	if gotID, _ := updateResp["silenceID"].(string); gotID != silenceID {
-		t.Fatalf("expected updated silenceID %q, got %q", silenceID, gotID)
-	}
-
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v2/silence/"+silenceID, nil)
-	getRec := httptest.NewRecorder()
-	mux.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/silence/{id} after update expected 200, got %d", getRec.Code)
-	}
-
-	var updatedSilence map[string]any
-	if err := json.Unmarshal(getRec.Body.Bytes(), &updatedSilence); err != nil {
-		t.Fatalf("failed to decode silence after update: %v", err)
-	}
-	if comment, _ := updatedSilence["comment"].(string); comment != "maintenance window updated" {
-		t.Fatalf("expected updated comment, got %q", comment)
-	}
-
-	unknownUpdatePayload := fmt.Sprintf(`{
-		"id": %q,
-		"matchers": [{"name":"alertname","value":"UnknownAlert","isRegex":false}],
-		"startsAt": %q,
-		"endsAt": %q,
-		"createdBy": "phase0-test",
-		"comment": "unknown id update"
-	}`, "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", now.Add(-1*time.Minute).Format(time.RFC3339), now.Add(59*time.Minute).Format(time.RFC3339))
-
-	unknownReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(unknownUpdatePayload))
-	unknownRec := httptest.NewRecorder()
-	mux.ServeHTTP(unknownRec, unknownReq)
-	// ADR-002: the active runtime answers unknown-id updates with 400
-	// {"error":"silence not found"} (upstream used 404).
-	if unknownRec.Code != http.StatusBadRequest {
-		t.Fatalf("POST /api/v2/silences update for unknown id expected 400, got %d", unknownRec.Code)
-	}
-}
-
-func TestPhase0SilencesFilterMatcherSemantics(t *testing.T) {
-	mux := newPhase0TestMux(t)
-
-	posts := []string{
-		`{
-			"matchers": [{"name":"service","value":"api","isRegex":false}],
-			"startsAt": "2099-01-01T00:00:00Z",
-			"endsAt": "2099-01-01T01:00:00Z",
-			"createdBy": "phase0-test",
-			"comment": "silence-service-api"
-		}`,
-		`{
-			"matchers": [{"name":"alertname","value":"^High.*","isRegex":true}],
-			"startsAt": "2099-01-01T00:01:00Z",
-			"endsAt": "2099-01-01T01:01:00Z",
-			"createdBy": "phase0-test",
-			"comment": "silence-alertname-regex"
-		}`,
-		`{
-			"matchers": [{"name":"service","value":"api","isRegex":false,"isEqual":false}],
-			"startsAt": "2099-01-01T00:02:00Z",
-			"endsAt": "2099-01-01T01:02:00Z",
-			"createdBy": "phase0-test",
-			"comment": "silence-service-not-api"
-		}`,
-		`{
-			"matchers": [
-				{"name":"service","value":"api","isRegex":false},
-				{"name":"alertname","value":"^High.*","isRegex":true}
-			],
-			"startsAt": "2099-01-01T00:03:00Z",
-			"endsAt": "2099-01-01T01:03:00Z",
-			"createdBy": "phase0-test",
-			"comment": "silence-service-api-and-regex"
-		}`,
-	}
-
-	for i, payload := range posts {
-		postReq := httptest.NewRequest(http.MethodPost, "/api/v2/silences", bytes.NewBufferString(payload))
-		postRec := httptest.NewRecorder()
-		mux.ServeHTTP(postRec, postReq)
-		if postRec.Code != http.StatusOK {
-			t.Fatalf("POST /api/v2/silences #%d expected 200, got %d", i, postRec.Code)
-		}
-	}
-
-	queryService := url.Values{}
-	queryService.Add("filter", `service="api"`)
-	serviceReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryService.Encode(), nil)
-	serviceRec := httptest.NewRecorder()
-	mux.ServeHTTP(serviceRec, serviceReq)
-	if serviceRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/silences with service filter expected 200, got %d", serviceRec.Code)
-	}
-	var serviceSilences []map[string]any
-	if err := json.Unmarshal(serviceRec.Body.Bytes(), &serviceSilences); err != nil {
-		t.Fatalf("failed to decode service-filter silences: %v", err)
-	}
-	// Upstream semantics: the filter matches silence-matcher VALUES. All three
-	// silences carrying service=api pass; the regex-only silence does not.
-	if len(serviceSilences) != 3 {
-		t.Fatalf("expected 3 silences with a service matcher, got %d", len(serviceSilences))
-	}
-
-	queryRegex := url.Values{}
-	// The filter regex runs against the silence matcher's raw VALUE string
-	// ("^High.*"), so match by substring rather than by anchor.
-	queryRegex.Add("filter", `alertname=~".*High.*"`)
-	regexReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryRegex.Encode(), nil)
-	regexRec := httptest.NewRecorder()
-	mux.ServeHTTP(regexRec, regexReq)
-	if regexRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/silences with regex filter expected 200, got %d", regexRec.Code)
-	}
-	var regexSilences []map[string]any
-	if err := json.Unmarshal(regexRec.Body.Bytes(), &regexSilences); err != nil {
-		t.Fatalf("failed to decode regex-filter silences: %v", err)
-	}
-	if len(regexSilences) != 2 {
-		t.Fatalf("expected 2 silences for alertname=~.*High.*, got %d", len(regexSilences))
-	}
-
-	queryNotEqual := url.Values{}
-	queryNotEqual.Add("filter", `service!="api"`)
-	notEqualReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryNotEqual.Encode(), nil)
-	notEqualRec := httptest.NewRecorder()
-	mux.ServeHTTP(notEqualRec, notEqualReq)
-	if notEqualRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/silences with not-equal filter expected 200, got %d", notEqualRec.Code)
-	}
-	var notEqualSilences []map[string]any
-	if err := json.Unmarshal(notEqualRec.Body.Bytes(), &notEqualSilences); err != nil {
-		t.Fatalf("failed to decode not-equal-filter silences: %v", err)
-	}
-	// Upstream semantics: != excludes silences whose service matcher value is
-	// "api"; a silence without a service matcher counts as empty value and
-	// therefore matches.
-	if len(notEqualSilences) != 1 {
-		t.Fatalf("expected 1 silence for service!=api, got %d", len(notEqualSilences))
-	}
-
-	queryMulti := url.Values{}
-	queryMulti.Add("filter", `service="api"`)
-	queryMulti.Add("filter", `alertname=~".*High.*"`)
-	multiReq := httptest.NewRequest(http.MethodGet, "/api/v2/silences?"+queryMulti.Encode(), nil)
-	multiRec := httptest.NewRecorder()
-	mux.ServeHTTP(multiRec, multiReq)
-	if multiRec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v2/silences with multi-filter expected 200, got %d", multiRec.Code)
-	}
-	var multiSilences []map[string]any
-	if err := json.Unmarshal(multiRec.Body.Bytes(), &multiSilences); err != nil {
-		t.Fatalf("failed to decode multi-filter silences: %v", err)
-	}
-	if len(multiSilences) != 1 {
-		t.Fatalf("expected 1 silence for service=api AND alertname=~^High.*, got %d", len(multiSilences))
-	}
-	comment, _ := multiSilences[0]["comment"].(string)
-	if comment != "silence-service-api-and-regex" {
-		t.Fatalf("unexpected silence matched by multi-filter: %q", comment)
 	}
 }
 

@@ -84,15 +84,21 @@ based_on:
 
 ## Phase 6: deep-review
 
-- [ ] **6.1** `deep-review` → `review-verdict.json` `"gate": "pass"`.
+- [x] **6.1** `deep-review` → `review-verdict.json` `"gate": "pass"`.
 
 ## Phase 7: write-tests
 
-- [ ] **7.1** `internal/webauth` в `amp-upstream`: тест обёртки (401/200, пробы, префикс).
-- [ ] **7.2** `agent_mode`: тест сборки agent loop (tools по конфигу).
-- [ ] **7.3** Сьюты: записи b — на ожидание upstream или удалить; c — `TestMain` ставит `version.Version`; baseline только a.
-- [ ] **7.4** `buildinfo`: `Register` без `alertmanager_build_info`.
-- [ ] **7.5** Рендер-тесты чарта на StatefulSet (web auth, AMP-конфиг, RBAC, NetworkPolicy PG/Valkey, single-node).
+- [x] **7.1** `internal/webauth` в `amp-upstream`: тест обёртки (401/200, пробы, префикс).
+- [x] **7.2** `agent_mode`: тест сборки agent loop (tools по конфигу).
+- [x] **7.3** Сьюты: записи b — на ожидание upstream или удалить; c — `TestMain` ставит `version.Version`; baseline только a.
+- [x] **7.4** `buildinfo`: `Register` без `alertmanager_build_info`.
+- [x] **7.5** Рендер-тесты чарта на StatefulSet (web auth, AMP-конфиг, RBAC, NetworkPolicy PG/Valkey, single-node).
+
+**Отклонения 6–7:**
+- deep-review: два независимых ревьюера (Go; чарт и миграция), 25 находок, 5 major — все fix-here и внесены (`review-findings.md`, коммит `fix: address deep-review findings`).
+- 7.2: сборка tools вынесена из `newAgentLoop` в `newToolRegistry` ради теста; поведение то же.
+- 7.3: записи b удалены вместе с тестами (24 теста/подтеста) или переписаны на upstream (3 строки probes); c закрыты `setBuildInfo` в `TestMain`. Baseline — 17 записей a.
+- Сверх плана: `TestSetContractVersion` (F4), `TestIgnoredKeys` (F2), тесты `resolveWebConfigFile` (F1), render-тесты guard'ов ревью.
 
 ## Definition of Done
 
