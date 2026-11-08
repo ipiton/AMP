@@ -225,6 +225,7 @@ cython_debug/
 # Go
 go-app/bin/
 go-app/amp-upstream
+go-app/amp-upstream_unix
 *.test
 *.out
 go-app/*.exe

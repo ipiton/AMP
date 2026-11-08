@@ -41,6 +41,8 @@ resources:
 # until UPSTREAM-AI-HA-DEDUP.
 alertmanager:
   replicas: 3
+  # The URL users and receivers reach AMP at: links in notifications.
+  externalURL: "https://amp.your-domain.com/"
   # Deliberately secret-free: alertmanager.yml lands in a plain ConfigMap.
   # Real delivery targets come from Kubernetes Secrets (publishing discovery,
   # appended to these receivers) or from *_file paths on extraVolumes.

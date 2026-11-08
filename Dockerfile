@@ -30,7 +30,7 @@ ARG VERSION_PKG=github.com/prometheus/common/version
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN UPSTREAM_VERSION="$(go list -m -f '{{.Version}}' github.com/prometheus/alertmanager)" && \
+RUN UPSTREAM_VERSION="$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' github.com/prometheus/alertmanager)" && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w \
     -X ${VERSION_PKG}.Version=${UPSTREAM_VERSION#v} \
     -X ${VERSION_PKG}.Revision=${REVISION} \
@@ -62,6 +62,8 @@ USER appuser
 # 9093: HTTP API, 9094: cluster gossip (TCP and UDP).
 EXPOSE 9093 9094
 
+# Docker only (Kubernetes uses the chart's probes). With --web.external-url
+# carrying a path, override it: the endpoint moves to <path>/-/healthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget --quiet --tries=1 --spider http://localhost:9093/-/healthy || exit 1
 

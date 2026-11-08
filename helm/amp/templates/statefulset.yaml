@@ -1,7 +1,9 @@
+{{- include "amp.validate" . }}
 {{- $am := .Values.alertmanager }}
 {{- $replicas := int $am.replicas }}
-{{- if lt $replicas 1 }}
-{{- fail "alertmanager.replicas must be at least 1." }}
+{{- /* 0 stops AMP, e.g. for a database restore (docs/POSTGRESQL_RESTORE_GUIDE.md). */}}
+{{- if lt $replicas 0 }}
+{{- fail "alertmanager.replicas must not be negative." }}
 {{- end }}
 {{- $fullname := include "amp.fullname" . }}
 {{- $ns := include "amp.namespace" . }}
@@ -56,6 +58,12 @@ spec:
       {{- $_ := set $chartVolumes "web-config" "webConfig.existingSecret" }}
       {{- $_ := set $chartPaths (clean .Values.webConfig.mountPath) "webConfig.mountPath" }}
       {{- $_ := set $chartPaths (clean (printf "%s/%s" .Values.webConfig.mountPath .Values.webConfig.secretKey)) "the web config file (webConfig.mountPath/secretKey)" }}
+      {{- $webDir := clean .Values.webConfig.mountPath }}
+      {{- range $own := list $configDir "/data" }}
+      {{- if or (eq $webDir $own) (hasPrefix (printf "%s/" $own) $webDir) (hasPrefix (printf "%s/" $webDir) $own) }}
+      {{- fail (printf "webConfig.mountPath %q overlaps the chart's mount %s. Use another path, such as /etc/amp/web." $.Values.webConfig.mountPath $own) }}
+      {{- end }}
+      {{- end }}
       {{- end }}
       {{- range $extraVolumes }}
       {{- if hasKey $chartVolumes (toString .name) }}
@@ -135,6 +143,9 @@ spec:
                 secretKeyRef:
                   name: {{ $fullname }}-secrets
                   key: llm-api-key
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}

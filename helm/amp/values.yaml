@@ -401,7 +401,8 @@ externalSecrets:
 # The chart's one in-cluster cache, Standard Profile only. Valkey (BSD-3), not
 # Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). amp-upstream does not connect
 # to it yet: it is kept for the cross-replica investigation dedup
-# (UPSTREAM-AI-HA-DEDUP). valkey.replicas: 0 removes it.
+# (UPSTREAM-AI-HA-DEDUP). valkey.replicas: 0 stops its pod; its Services,
+# Secret, ServiceMonitor and alert rules still render (HELM-CHART-GAPS).
 valkey:
   enabled: true  # Not read; valkey.replicas and the profile decide
 
@@ -695,6 +696,14 @@ extraVolumes: []
 #       secretName: amp-receiver-secrets   # keys: telegram-bot-token, slack-webhook-url
 #       defaultMode: 0440
 extraVolumeMounts: []
+
+# Extra env for the amp container, after the chart's own (EnvVar list), for
+# secrets the AMP configuration reads from env, e.g.:
+# extraEnv:
+#   - name: INVESTIGATION_TOOLS_DATABASE_DSN
+#     valueFrom:
+#       secretKeyRef: {name: amp-investigation-db, key: dsn}
+extraEnv: []
 # extraVolumeMounts:
 #   - name: receiver-secrets
 #     mountPath: /etc/amp/secrets
@@ -773,8 +782,11 @@ alertmanager:
   #   server:
   #     auth:
   #       unauthenticated_paths: [/-/healthy, /-/ready, /metrics]
-  # No secrets here: it is a ConfigMap. Passwords come from env
-  # (DATABASE_PASSWORD, LLM_API_KEY, INVESTIGATION_TOOLS_DATABASE_DSN).
+  # No secrets here: it is a ConfigMap. The chart sets DATABASE_PASSWORD and
+  # LLM_API_KEY from Secrets; others go to extraEnv, e.g.
+  # INVESTIGATION_TOOLS_DATABASE_DSN for the agent-mode database tool. The
+  # Prometheus and Loki tool passwords are read from the file only: put them
+  # here only if a ConfigMap is acceptable for them.
   ampConfig: {}
   # Silence and notification-log snapshots (--storage.path=/data), one
   # volume per pod via volumeClaimTemplates. Not removed with the release.

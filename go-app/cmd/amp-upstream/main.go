@@ -46,7 +46,7 @@ func main() {
 	retention := flag.Duration("data.retention", upstreamcore.DefaultRetention, "How long to keep data for.")
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
-	webConfigFile := flag.String("web.config.file", "", "Path to the web configuration file: basic_auth_users (bcrypt). The probes /-/healthy and /-/ready (server.auth.unauthenticated_paths in the AMP configuration) are served without credentials. Empty: no authentication.")
+	webConfigFile := flag.String("web.config.file", "", "Path to the web configuration file: basic_auth_users (bcrypt); else server.web_config_file in the AMP configuration, else SERVER_WEB_CONFIG_FILE. The probes /-/healthy and /-/ready (server.auth.unauthenticated_paths in the AMP configuration) are served without credentials. Empty: no authentication.")
 	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*). Empty: none.")
 	clusterOpts := clusterFlags(flag.CommandLine)
 	flag.Parse()
@@ -86,13 +86,18 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		targetsInterval time.Duration
 		// nil: the default exempt paths (no AMP configuration).
 		unauthenticatedPaths []string
+		configWebConfigFile  string
 	)
 	if ampConfigFile != "" {
 		cfg, err := appconfig.LoadConfig(ampConfigFile)
 		if err != nil {
 			return fmt.Errorf("error loading AMP configuration file: %w", err)
 		}
+		if ignored := appconfig.IgnoredKeys(ampConfigFile); len(ignored) > 0 {
+			logger.Warn("AMP configuration keys ignored: amp-upstream does not read them (routing and receivers live in --config.file)", "keys", ignored)
+		}
 		unauthenticatedPaths = cfg.Server.Auth.UnauthenticatedPaths
+		configWebConfigFile = cfg.Server.WebConfigFile
 		stopAMP, err := newAMPLayer(logger, cfg, &opts)
 		if err != nil {
 			return err
@@ -127,7 +132,7 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	// while its handler still serves (upstreamcore.Core.Handler).
 	defer core.Stop()
 
-	handler, err := wrapWebAuth(core.Handler(), webConfigFile, amURL.Path, unauthenticatedPaths, logger, opts.Registerer)
+	handler, err := wrapWebAuth(core.Handler(), resolveWebConfigFile(webConfigFile, configWebConfigFile), amURL.Path, unauthenticatedPaths, logger, opts.Registerer)
 	if err != nil {
 		_ = listener.Close()
 		return err

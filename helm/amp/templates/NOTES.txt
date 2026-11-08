@@ -11,12 +11,19 @@ Your release "{{ .Release.Name }}" has been deployed to namespace "{{ .Release.N
 {{- $ns := include "amp.namespace" . }}
 
 Alertmanager core (amp-upstream): StatefulSet {{ $fullname }}, {{ $replicas }} replica(s)
+{{- if eq $replicas 0 }}
+⚠️  alertmanager.replicas is 0: AMP is stopped and receives no alerts.
+{{- end }}
 {{- if gt $replicas 1 }}, gossip cluster over {{ include "amp.headlessName" . }}
 ⚠️  Every pod must receive every alert: point Prometheus at each pod
    ({{ $fullname }}-<i>.{{ include "amp.headlessName" . }}.{{ $ns }}.svc:9093), not at the Service.
 {{- if .Values.llm.enabled }}
 ⚠️  llm.enabled with {{ $replicas }} replicas: every pod classifies every alert, {{ $replicas }} LLM calls
    per alert (UPSTREAM-AI-HA-DEDUP).
+{{- end }}
+{{- if and (eq .Values.profile "standard") .Values.investigation.enabled }}
+⚠️  investigation.enabled with {{ $replicas }} replicas: every pod investigates every alert
+   (UPSTREAM-AI-HA-DEDUP).
 {{- end }}
 {{- end }}
 External URL: {{ include "amp.externalURL" . }}
@@ -53,7 +60,7 @@ External URL: {{ include "amp.externalURL" . }}
 {{- end }}
 {{- if gt (int .Values.valkey.replicas) 0 }}
 ℹ️  Valkey ({{ $fullname }}-redis) runs, but amp-upstream does not use it yet
-   (UPSTREAM-AI-HA-DEDUP); valkey.replicas: 0 removes it.
+   (UPSTREAM-AI-HA-DEDUP); valkey.replicas: 0 stops its pod.
 {{- end }}
 {{- end }}
 
@@ -73,22 +80,22 @@ Resources (per AMP pod): requests {{ dig "requests" "cpu" "-" $res }} CPU / {{ d
   Getting Started
 =============================================================================
 
-1. Check the pods:
+- Check the pods:
 
    kubectl get pods -n {{ $ns }} -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=application
 
 {{- if and (eq .Values.profile "standard") .Values.postgresql.enabled }}
 
-3. Check PostgreSQL:
+- Check PostgreSQL:
 
-   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database
+   kubectl get pods -n {{ $ns }} -l app.kubernetes.io/component=database
 
 {{- if .Values.postgresql.config }}
 {{- if .Values.postgresql.config.maxConnections }}
 
-4. Verify PostgreSQL configuration:
+- Verify PostgreSQL configuration:
 
-   kubectl exec -it $(kubectl get pod -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ .Release.Namespace }} -- \
+   kubectl exec -it $(kubectl get pod -n {{ $ns }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ $ns }} -- \
      psql -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SHOW max_connections;"
 
    Expected: {{ .Values.postgresql.config.maxConnections }}
@@ -96,22 +103,22 @@ Resources (per AMP pod): requests {{ dig "requests" "cpu" "-" $res }} CPU / {{ d
 {{- end }}
 {{- end }}
 
-5. Access the application:
+- Access the application:
 
 {{- if contains "NodePort" .Values.service.type }}
 
-   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "amp.fullname" . }})
-   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+   export NODE_PORT=$(kubectl get --namespace {{ $ns }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "amp.fullname" . }})
+   export NODE_IP=$(kubectl get nodes --namespace {{ $ns }} -o jsonpath="{.items[0].status.addresses[0].address}")
    echo "URL: http://$NODE_IP:$NODE_PORT"
 
 {{- else if contains "LoadBalancer" .Values.service.type }}
 
-   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "amp.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   export SERVICE_IP=$(kubectl get svc --namespace {{ $ns }} {{ include "amp.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
    echo "URL: http://$SERVICE_IP:{{ .Values.service.port }}"
 
 {{- else if contains "ClusterIP" .Values.service.type }}
 
-   kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "amp.fullname" . }} 9093:{{ .Values.service.port }}
+   kubectl port-forward --namespace {{ $ns }} svc/{{ include "amp.fullname" . }} 9093:{{ .Values.service.port }}
    echo "URL: http://localhost:9093{{ include "amp.pathPrefix" . }}"
 
 {{- end }}

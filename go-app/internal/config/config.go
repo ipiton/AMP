@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strings"
 	"time"
 
@@ -56,9 +57,13 @@ const (
 	ProfileStandard DeploymentProfile = "standard"
 )
 
-// ServerConfig holds AMP's HTTP settings. Listen address, external URL and
-// --web.config.file are upstream flags of amp-upstream.
+// ServerConfig holds AMP's HTTP settings. Listen address and external URL
+// are upstream flags of amp-upstream.
 type ServerConfig struct {
+	// WebConfigFile is the web config file for basic auth when
+	// --web.config.file is not set (PROD-AUTH); SERVER_WEB_CONFIG_FILE is the
+	// last fallback (cmd/amp-upstream resolveWebConfigFile).
+	WebConfigFile string `mapstructure:"web_config_file"`
 	// Auth holds AMP-specific authentication settings that deliberately
 	// live outside the web config file, so that file stays portable to
 	// upstream Alertmanager.
@@ -309,4 +314,43 @@ func (c *Config) validateDatabaseCredentials() error {
 	}
 
 	return nil
+}
+
+// knownKeys are the sections LoadConfig reads, with the server keys: what
+// else a file sets is ignored. Keys of the removed cmd/server (route,
+// receivers, grouping, redis, log, server.port, ...) are in old files, and
+// before UPSTREAM-CORE-REMOVAL they worked.
+var knownKeys = map[string]map[string]bool{
+	"profile": nil, "database": nil, "llm": nil, "app": nil, "publishing": nil, "investigation": nil,
+	"server": {"auth": true, "web_config_file": true},
+}
+
+// IgnoredKeys lists the top-level keys and server.* keys of the config file
+// at path that LoadConfig does not read, sorted. A file that cannot be read
+// yields none: LoadConfig reports that.
+func IgnoredKeys(path string) []string {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetConfigType("yaml")
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+	var ignored []string
+	for key, value := range v.AllSettings() {
+		sub, known := knownKeys[key]
+		switch {
+		case !known:
+			ignored = append(ignored, key)
+		case sub != nil:
+			if m, ok := value.(map[string]any); ok {
+				for k := range m {
+					if !sub[k] {
+						ignored = append(ignored, key+"."+k)
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(ignored)
+	return ignored
 }

@@ -132,8 +132,33 @@ assert_count "${WORK_DIR}/prefixed-sts.yaml" "--web.external-url=https://am.exam
 assert_count "${WORK_DIR}/prefixed-sts.yaml" "path: /alertmanager/-/ready" 1 "prefixed: readiness under the prefix"
 assert_count "${WORK_DIR}/prefixed-sts.yaml" "path: /alertmanager/-/healthy" 2 "prefixed: liveness and startup under the prefix"
 
-echo "invalid"
-render_fails zero "alertmanager.replicas must be at least 1" --set alertmanager.replicas=0
+echo "replicas 0 stops AMP (database restore), negative fails"
+render zero --set alertmanager.replicas=0
+doc "${WORK_DIR}/zero.yaml" StatefulSet "${STS}" >"${WORK_DIR}/zero-sts.yaml"
+assert_count "${WORK_DIR}/zero-sts.yaml" "replicas: 0" 1 "zero: StatefulSet scaled to 0"
+render_fails negative "alertmanager.replicas must not be negative" --set alertmanager.replicas=-1
+
+echo "values of the chart before UPSTREAM-CORE-REMOVAL fail with the replacement"
+render_fails old-values "--reset-then-reuse-values" --set-json 'alertmanager=null'
+render_fails old-persistence "--reset-then-reuse-values" --set-json 'alertmanager.persistence=null'
+render_fails old-configfile "configFile is no longer read" --set configFile.content=x
+render_fails old-upstreamcore "renamed to alertmanager" --set upstreamCore.enabled=true
+render_fails old-replicacount "use alertmanager.replicas" --set replicaCount=2
+render_fails old-cache "cache is no longer read" --set cache.enabled=true
+
+echo "webConfig.mountPath must not overlap the chart's mounts"
+for p in /etc/amp/config /etc/amp/config/web /etc/amp /data /data/web; do
+  render_fails "webconfig-${p//\//_}" "overlaps the chart's mount" \
+    --set webConfig.existingSecret=amp-web --set "webConfig.mountPath=${p}"
+done
+render webconfig-ok --set webConfig.existingSecret=amp-web --set webConfig.mountPath=/etc/amp/web \
+  --set monitoring.serviceMonitor.enabled=false
+
+echo "extraEnv after the chart's env"
+render extraenv --set 'extraEnv[0].name=INVESTIGATION_TOOLS_DATABASE_DSN' \
+  --set 'extraEnv[0].valueFrom.secretKeyRef.name=amp-inv' --set 'extraEnv[0].valueFrom.secretKeyRef.key=dsn'
+assert_count "${WORK_DIR}/extraenv.yaml" "name: INVESTIGATION_TOOLS_DATABASE_DSN" 1 "extraenv: env rendered"
+assert_count "${WORK_DIR}/extraenv.yaml" "name: amp-inv" 1 "extraenv: secretKeyRef kept"
 
 if [ "${failures}" -ne 0 ]; then
   printf '\n%d assertion(s) failed\n' "${failures}" >&2

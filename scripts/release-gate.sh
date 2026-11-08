@@ -110,6 +110,12 @@ RACE_PKGS=(
   ./internal/upstreamai/
   ./internal/upstreamtargets/
   ./internal/infrastructure/investigation/
+  ./internal/infrastructure/k8s/
+  ./internal/infrastructure/llm/
+  ./internal/core/resilience/
+  ./internal/core/services/
+  ./internal/webauth/
+  ./cmd/amp-upstream/
   ./internal/business/publishing/
 )
 

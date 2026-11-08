@@ -154,14 +154,14 @@ Investigation tools and runbooks are configured through `alertmanager.ampConfig`
 | `alertmanager.persistence.*` | Silences and notification log, one volume per AMP pod | `1Gi` |
 | `postgresql.enabled` | Enable bundled PostgreSQL; the lite profile does not use it, set `false` there | `true` |
 | `externalDatabase.*` | External PostgreSQL ([PostgreSQL](#postgresql)) | `host: ""` |
-| `valkey.replicas` | Valkey pods (profile standard); `0` removes it | `1` |
+| `valkey.replicas` | Valkey pods (profile standard); `0` stops the pod, its other objects still render | `1` |
 | `valkey.image.repository` / `.tag` | Valkey image | `valkey/valkey` / `8.1.10-alpine` |
 | `valkey.password.existingSecret` / `.secretKey` | Secret with the chart's Valkey password (otherwise `<fullname>-redis-secret`) | `""` / `password` |
 | `valkey.password.value` | Password for `<fullname>-redis-secret`; empty: generated on first install and kept by upgrades | `""` |
 
 ### Valkey
 
-`amp-upstream` does not connect to Valkey: it is kept for the cross-replica investigation dedup (`UPSTREAM-AI-HA-DEDUP`). The chart still deploys it by default in the standard profile, with a password; NOTES says it is unused. `valkey.replicas: 0` removes it, as `values-production.yaml` does.
+`amp-upstream` does not connect to Valkey: it is kept for the cross-replica investigation dedup (`UPSTREAM-AI-HA-DEDUP`). The chart still deploys it by default in the standard profile, with a password; NOTES says it is unused. `valkey.replicas: 0` stops its pod (its Services, Secret, ServiceMonitor and alert rules still render, HELM-CHART-GAPS), as `values-production.yaml` does.
 
 ### PostgreSQL
 
@@ -421,7 +421,7 @@ With one replica, the Service `<fullname>.<namespace>.svc:9093` is enough. With 
 helm upgrade amp ./helm/amp --reuse-values
 ```
 
-`--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
+`--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. From a chart before `UPSTREAM-CORE-REMOVAL` (no `alertmanager.*` section) the render fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14) or a values file for this chart; a removed key left in your values also fails and names its replacement. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
 
 Upgrading a `profile: standard` release installed by a chart from before `HELM-VCT-CHART-LABELS` fails with `StatefulSet.apps "<fullname>-redis" is invalid: spec: Forbidden`: the labels of its volume claim template changed, and that field cannot be updated. Delete the StatefulSet object once, keeping its pod and volume, then upgrade:
 

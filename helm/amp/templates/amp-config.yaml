@@ -5,6 +5,7 @@ generated from the values and merged with alertmanager.ampConfig. Passwords
 never land here: DATABASE_PASSWORD and LLM_API_KEY come from Secrets as env,
 which viper reads over the file (statefulset.yaml).
 */}}
+{{- include "amp.validate" . }}
 {{- /* `| default dict`: `helm upgrade --reuse-values` from a chart without externalDatabase. */}}
 {{- $ext := .Values.externalDatabase | default dict }}
 {{- $override := deepCopy (.Values.alertmanager.ampConfig | default dict) }}

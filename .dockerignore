@@ -11,5 +11,5 @@ deploy
 # cache (GOCACHE, GOMODCACHE, GOPATH -- gigabytes once filled) and the
 # binaries. The image downloads modules and builds the binary itself.
 go-app/.cache
-go-app/server
-go-app/server_unix
+go-app/amp-upstream
+go-app/amp-upstream_unix
