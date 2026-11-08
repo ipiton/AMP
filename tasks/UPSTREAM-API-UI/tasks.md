@@ -29,18 +29,18 @@ based_on:
 
 ## Phase 1: Данные
 
-- [ ] **1.1** Миграция `upstream_fingerprint` + индекс, down. <!-- verify: grep -c "goose Down" go-app/migrations/20261108000000_alerts_upstream_fingerprint.sql -->
-- [ ] **1.2** `core.AlertHistoryRecord`. <!-- verify: cd go-app && go build ./internal/core/ -->
-- [ ] **1.3** `SaveAlert`/`UpdateAlert` пишут колонку; `AlertRecordByFingerprint`, `AlertRecordByUpstreamFingerprint`, `BackfillUpstreamFingerprints`. <!-- depends: 1.1, 1.2 | verify: cd go-app && go vet ./internal/infrastructure/ && go test ./internal/infrastructure/ ./internal/core/services/ -->
+- [x] **1.1** Миграция `upstream_fingerprint` + индекс, down. <!-- verify: grep -c "goose Down" go-app/migrations/20261108000000_alerts_upstream_fingerprint.sql -->
+- [x] **1.2** `core.AlertHistoryRecord`. <!-- verify: cd go-app && go build ./internal/core/ -->
+- [x] **1.3** `SaveAlert`/`UpdateAlert` пишут колонку; `AlertRecordByFingerprint`, `AlertRecordByUpstreamFingerprint`, `BackfillUpstreamFingerprints`. <!-- depends: 1.1, 1.2 | verify: cd go-app && go vet ./internal/infrastructure/ && go test ./internal/infrastructure/ ./internal/core/services/ -->
 
 **Phase verification:** `cd go-app && go build ./... && go vet ./internal/...`
 
 ## Phase 2: HTTP
 
-- [ ] **2.1** Пакет `internal/ampapi`: handler, валидация, ответы, метрика. <!-- depends: 1.2 | verify: cd go-app && go vet ./internal/ampapi/ -->
-- [ ] **2.2** `newAMPLayer` → `*ampLayer` с ридерами; один repo investigation; backfill-горутина с отменой. <!-- depends: 1.3 | verify: cd go-app && go vet ./cmd/amp-upstream/ && go test ./cmd/amp-upstream/ -->
-- [ ] **2.3** `withAMPRoutes` в `main.go` внутри `wrapWebAuth`; doc/help. <!-- depends: 2.1, 2.2 | verify: cd go-app && go build ./cmd/amp-upstream && scripts/upstream-core-gate.sh (из корня) -->
-- [ ] **2.4** Ручная проверка: бинарь без `--amp.config.file` → `/api/amp/v1/alerts/<16hex>` 503, `/api/v2/status` 200. <!-- depends: 2.3 | verify: evidence/manual-smoke.md -->
+- [x] **2.1** Пакет `internal/ampapi`: handler, валидация, ответы, метрика. <!-- depends: 1.2 | verify: cd go-app && go vet ./internal/ampapi/ -->
+- [x] **2.2** `newAMPLayer` → `*ampLayer` с ридерами; один repo investigation; backfill-горутина с отменой. <!-- depends: 1.3 | verify: cd go-app && go vet ./cmd/amp-upstream/ && go test ./cmd/amp-upstream/ -->
+- [x] **2.3** `withAMPRoutes` в `main.go` внутри `wrapWebAuth`; doc/help. <!-- depends: 2.1, 2.2 | verify: cd go-app && go build ./cmd/amp-upstream && scripts/upstream-core-gate.sh (из корня) -->
+- [x] **2.4** Ручная проверка: бинарь без `--amp.config.file` → `/api/amp/v1/alerts/<16hex>` 503, `/api/v2/status` 200. <!-- depends: 2.3 | verify: evidence/manual-smoke.md -->
 
 **Phase verification:** `make -C go-app quality-gates-fast && git status`
 
@@ -69,3 +69,8 @@ based_on:
 - [ ] Tests for changed behavior are added or updated
 - [ ] Phase checks pass
 - [ ] Docs/planning are updated
+
+## Deviations
+
+- 2.4: smoke нашёл 500 на строке с `starts_at = NULL` (колонка nullable, такие строки возможны от старых писателей). `AlertRecordBy*` читает `starts_at` как nullable, ответ опускает пустые времена; все времена ответа — UTC. В Spec § API `starts_at` — «если есть».
+- Backfill пропускает строку с нечитаемыми labels (`Warn`), а не останавливается на ней навсегда.

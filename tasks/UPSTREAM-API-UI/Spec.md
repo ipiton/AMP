@@ -79,7 +79,7 @@ based_on:
   "status": "firing | resolved",
   "labels": {"alertname": "HighLatency", "...": "..."},
   "annotations": {},
-  "starts_at": "RFC3339",
+  "starts_at": "RFC3339 UTC, если есть (колонка nullable)",
   "ends_at": "RFC3339, если есть",
   "generator_url": "если есть",
   "first_seen_at": "RFC3339 (created_at строки)",

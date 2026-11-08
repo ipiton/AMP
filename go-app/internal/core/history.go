@@ -215,3 +215,13 @@ type ReportMetadata struct {
 	PartialFailure   bool      `json:"partial_failure"`
 	Errors           []string  `json:"errors,omitempty"`
 }
+
+// AlertHistoryRecord is one alert's row of the history (the alerts table:
+// one row per AMP fingerprint, updated on every event) as the AMP API
+// returns it.
+type AlertHistoryRecord struct {
+	Alert Alert
+	// FirstSeenAt is when the row was created: the first event of the alert
+	// in the history.
+	FirstSeenAt time.Time
+}

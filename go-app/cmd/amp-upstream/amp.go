@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 
+	"github.com/ipiton/AMP/internal/ampapi"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
 	coreinv "github.com/ipiton/AMP/internal/core/investigation"
@@ -34,38 +35,56 @@ const (
 	migrationTimeout = time.Minute
 )
 
+// ampLayer is AMP's processing hooked into the core, and the readers of what
+// it stores for the AMP routes (internal/ampapi). The readers are nil without
+// PostgreSQL. stop tears the layer down; call it after the core's Stop.
+type ampLayer struct {
+	stop           func()
+	alerts         ampapi.AlertReader
+	investigations ampapi.InvestigationReader
+}
+
 // newAMPLayer builds AMP's own processing from the AMP config and hooks it
 // into opts (ADR-019): the alert history in PostgreSQL with
 // profile standard, and with llm.enabled the classification and, with
 // investigation.enabled and the database up, the investigation queue. The
 // delivery never depends on it: a database that is down at start leaves
-// the history and investigations off. stop tears the layer down; call it
-// after the core's Stop.
-func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.Options) (stop func(), err error) {
+// the history and investigations off. Investigations stored earlier are
+// readable whenever the database is up, llm.enabled or not.
+func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.Options) (layer *ampLayer, err error) {
 	var stops []func()
-	stop = func() {
+	layer = &ampLayer{stop: func() {
 		for i := len(stops) - 1; i >= 0; i-- {
 			stops[i]()
 		}
-	}
+	}}
+	stop := layer.stop
 
 	pool := connectDatabase(logger, cfg)
-	var history *upstreamai.History
+	var (
+		history *upstreamai.History
+		invRepo *investigationrepo.PostgresInvestigationRepository
+	)
 	if pool != nil {
 		stops = append(stops, func() { _ = pool.Close() })
-		history, err = newHistory(logger, pool, opts.Registerer)
+		var storage *infrastructure.PostgresStorageAdapter
+		history, storage, err = newHistory(logger, pool, opts.Registerer)
 		if err != nil {
 			stop()
 			return nil, err
 		}
 		stops = append(stops, history.Stop)
+		// Stopped ahead of the pool's close, which runs after it.
+		stops = append(stops, backfillUpstreamFingerprints(logger, storage))
+		invRepo = investigationrepo.NewPostgresInvestigationRepositoryWithRegisterer(pool.SharePool(), logger, opts.Registerer)
+		layer.alerts, layer.investigations = storage, invRepo
 	}
 
 	var classifier *upstreamai.Classifier
 	if cfg.LLM.Enabled {
 		llmClient := llm.NewHTTPLLMClient(llmConfig(cfg.LLM), logger)
 		var investigations upstreamai.Submitter
-		if queue, closeTools := newInvestigations(logger, cfg, pool, llmClient, opts.Registerer); queue != nil {
+		if queue, closeTools := newInvestigations(logger, cfg, invRepo, llmClient, opts.Registerer); queue != nil {
 			// The tools outlive the queue's workers.
 			stops = append(stops, closeTools)
 			// Stopped after the classifier, the queue's only sender (its
@@ -103,7 +122,31 @@ func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.
 	if classifier != nil {
 		opts.NotifyStage = classifier.NotifyStage(cfg.LLM.NotifyWait, cfg.LLM.DropNoise)
 	}
-	return stop, nil
+	return layer, nil
+}
+
+// backfillUpstreamFingerprints fills alerts.upstream_fingerprint on the rows
+// written before the column existed, in the background: the AMP routes find
+// them by the api/v2 fingerprint once it is done. A failure is logged; the
+// next start resumes. The returned stop cancels it and waits.
+func backfillUpstreamFingerprints(logger *slog.Logger, storage *infrastructure.PostgresStorageAdapter) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		filled, err := storage.BackfillUpstreamFingerprints(ctx, 0)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			logger.Warn("alert history: upstream fingerprint backfill failed; rows without it are found only by AMP's fingerprint until the next start",
+				"filled", filled, "err", err)
+		case filled > 0:
+			logger.Info("alert history: upstream fingerprints backfilled", "rows", filled)
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // connectDatabase connects to the history database and migrates it. It returns nil, with the reason logged, when the profile
@@ -133,11 +176,12 @@ func connectDatabase(logger *slog.Logger, cfg *appconfig.Config) *postgres.Postg
 	return pool
 }
 
-// newHistory writes alert events through the deduplication service.
-func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus.Registerer) (*upstreamai.History, error) {
+// newHistory writes alert events through the deduplication service into
+// storage, which also reads them back.
+func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus.Registerer) (*upstreamai.History, *infrastructure.PostgresStorageAdapter, error) {
 	storage, err := infrastructure.NewPostgresStorageAdapter(pool.SharePool(), logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create history storage: %w", err)
+		return nil, nil, fmt.Errorf("failed to create history storage: %w", err)
 	}
 	// The service logs every processed alert at Info; on the ingest of
 	// every Put that drowns the log, so only its warnings and errors pass.
@@ -146,7 +190,7 @@ func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus
 		Logger:  slog.New(warnOnly{logger.Handler()}),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create history deduplication: %w", err)
+		return nil, nil, fmt.Errorf("failed to create history deduplication: %w", err)
 	}
 	history := upstreamai.NewHistory(upstreamai.HistoryConfig{
 		Record: func(ctx context.Context, a *core.Alert) error {
@@ -157,7 +201,7 @@ func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus
 		Registerer: reg,
 	})
 	logger.Info("alert history enabled")
-	return history, nil
+	return history, storage, nil
 }
 
 // newInvestigations starts the investigation queue, or returns nil, with the
@@ -165,13 +209,13 @@ func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus
 // claim needs Redis (UPSTREAM-AI-HA-DEDUP). With llm.agent_mode it runs the
 // agentic loop (agent.go); closeTools releases the loop's tools after the
 // queue has stopped.
-func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, pool *postgres.PostgresPool, client *llm.HTTPLLMClient, reg prometheus.Registerer) (queue *investigationinfra.InvestigationQueue, closeTools func()) {
+func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, repo *investigationrepo.PostgresInvestigationRepository, client *llm.HTTPLLMClient, reg prometheus.Registerer) (queue *investigationinfra.InvestigationQueue, closeTools func()) {
 	inv := cfg.Investigation
 	switch {
 	case !inv.Enabled:
 		logger.Info("alert investigation disabled (investigation.enabled=false)")
 		return nil, nil
-	case pool == nil:
+	case repo == nil:
 		logger.Warn("alert investigation disabled: it stores its results in PostgreSQL, which is unavailable")
 		return nil, nil
 	}
@@ -197,7 +241,6 @@ func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, pool *postgre
 		logger.Info("investigation.only_firing=false has no effect on amp-upstream: only firing alerts are classified, so only they are investigated")
 	}
 
-	repo := investigationrepo.NewPostgresInvestigationRepositoryWithRegisterer(pool.SharePool(), logger, reg)
 	queue = investigationinfra.NewInvestigationQueue(repo, client, qCfg, logger, reg)
 	closeTools = func() {}
 	if cfg.LLM.AgentMode {
