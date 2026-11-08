@@ -15,6 +15,16 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 | `archive/DONE-2026-03.md` | 2026-03 |
 | `archive/DONE-2026-02.md` | 2026-02 |
 
+## 2026-11
+
+- 2026-11-08 — (Architecture / ADR-019) **UPSTREAM-NON-UPSTREAM-RECEIVERS** — срез 3 эпика ADR-019: K8s-Secret таргеты и Rootly на upstream-ядре `cmd/amp-upstream`; все интеграции `alertmanager.yml` — upstream `notify/*` как есть.
+  - **Rootly** — без своего Notifier: upstream `webhook_configs` на alert source «Alertmanager» (Bearer, `send_resolved: true`); таргет на REST API (`api.rootly.com`) пропускается с WARN. `ROOTLY-INCIDENT-KEY-STABLE` на upstream-ядре не существует → `BACKLOG.md` `[-]`, снимается срезом 5.
+  - **K8s-Secret таргеты** (решение владельца 2026-11-08 — адаптер): `internal/upstreamtargets` — снимок из `business/publishing` discovery, на каждом применении конфига копия `config.Config` с `webhook_configs`/`slack_configs`/`pagerduty_configs` в receiver'ах по `amp.receiver`; каждая интеграция проверяется `receiver.BuildReceiverIntegrations`, битая пропускается; опрос `publishing.refresh.interval` → `Reload` при смене. Семантика старого ядра: принадлежность, `send_resolved`, PagerDuty URL и routing key; `Authorization` → `authorization`/`basic_auth`, зарезервированные заголовки отбрасываются. Метрика `amp_upstream_k8s_targets{state}`. Включается с `--amp.config.file`, `profile: standard`, `publishing.enabled`.
+  - **Wiring:** `upstreamcore.Options.ExtendConfig` (`core.go`, `reloader.go`, `doc.go`), `cmd/amp-upstream/{main.go,targets.go}` (AMP-конфиг грузится один раз), `go.mod` (`yaml.v2` → direct).
+  - **BUGS:** `K8S-CLIENT-HEALTH-TIMEOUT` закрыт (пагинация `ListSecrets`, `Health` с дедлайном через REST `/version`, `Close` без гонки; `REVIEW-PIPELINE` #43); `REFRESH-WORKER-WARMUP-STOP-FLAKY`, `FLAKE-REFRESH-IN-PROGRESS` → «Снимается переходом на upstream», срез 5.
+  - **Проверка:** tier эскалирован Standard → Full (`C S X R`). Deep-review независимым агентом: раунд 1 `fix_required` (F1 major — PagerDuty base URL без `/v2/enqueue`), раунд 2 `pass` @ `b71c653`, N1–N4 исправлены следом. Тесты: юниты `upstreamtargets`, e2e на `upstreamcore` с фейковым K8s (доставка, `/api/v2/status` без секретов, reload, смена Secret), k8s-клиент (пагинация, health, `Close` под `-race`). `quality-gates-fast`, `git diff --check` — зелёные; `release-gate.sh` 12/13 PASS, `lint` красный на предсуществующем `LINT-ERRCHECK-CHANNEL-RECEIVE` (файлы вне диффа).
+  - **Follow-ups:** TECH-DEBT `K8S-CLIENTSET-BINARY-SIZE` (бинарь 43 → 79 МБ), `UPSTREAM-TARGETS-DISCOVERY-DEPENDENCY` (срез 5 должен сохранить discovery). Принятые ограничения: сдвиг nflog-индексов K8s-интеграций при добавлении таргета (F4), K8s недоступен на старте → только файл до рестарта (F6). Ротация `DONE.md` за 2026-10 не сделана, чтобы не конфликтовать с параллельными срезами 2b/4 — за последним из них. Архив: `tasks/archive/UPSTREAM-NON-UPSTREAM-RECEIVERS/`.
+
 ## 2026-10
 
 - 2026-10-30 — (Architecture / ADR-019) **UPSTREAM-AI-CLASSIFY** — срез 2a эпика ADR-019 (`UPSTREAM-AI-HOOKS` нарезан на 2a/2b): LLM-классификация на upstream-ядре `cmd/amp-upstream`, вне ingest-пути и в шаблонах группы. На upstream-пути закрыты `PROD-LLM-ALERT-PATH-ISOLATION` и `GROUP-NOTIFY-CLASSIFICATION` (записи удалены из BACKLOG; `cmd/server` сохраняет старое поведение до удаления своего ядра, срез 5).

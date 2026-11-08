@@ -3,7 +3,7 @@ id: UPSTREAM-NON-UPSTREAM-RECEIVERS
 slug: upstream-non-upstream-receivers
 stream: Architecture / ADR-019
 type: feature
-status: active
+status: done
 created_at: 2026-11-08
 updated_at: 2026-11-08
 based_on:
@@ -53,15 +53,15 @@ based_on:
 
 ## Phase 4: Docs & planning
 
-- [ ] **4.1** `ALERTMANAGER_COMPATIBILITY.md` — Rootly через webhook; `CHANGELOG.md` `[Unreleased]` — заметка к `amp-upstream`
-- [ ] **4.2** `BUGS.md`/`BACKLOG.md`: закрыть `K8S-CLIENT-HEALTH-TIMEOUT`, перенести флейки refresh и `ROOTLY-INCIDENT-KEY-STABLE` к срезу 5
+- [x] **4.1** `ALERTMANAGER_COMPATIBILITY.md` — Rootly через webhook; `CHANGELOG.md` `[Unreleased]` — заметка к `amp-upstream`
+- [x] **4.2** `BUGS.md`/`BACKLOG.md`: закрыть `K8S-CLIENT-HEALTH-TIMEOUT`, перенести флейки refresh и `ROOTLY-INCIDENT-KEY-STABLE` к срезу 5
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass (release-gate `lint` — предсуществующий `LINT-ERRCHECK-CHANNEL-RECEIVE`, `evidence/testing.md`)
+- [x] Docs/planning are updated

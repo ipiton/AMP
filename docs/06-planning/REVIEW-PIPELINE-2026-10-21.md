@@ -75,7 +75,7 @@
 | 40 | [-] | `FILE-SECRET-PATH-BASE` | B | Lightweight | 0.25d | — | L-22; снят ADR-019, срез 5 |
 | 41 | [-] | `W300-DELIVERABLE-SECRETS` | B | Lightweight | 0.1d | — | L-25; снят ADR-019, срез 5 |
 | 42 | [ ] | `REDIS-FLUSH-ALL` | B | Lightweight | 0.1d | — | L-26 |
-| 43 | [ ] | `K8S-CLIENT-HEALTH-TIMEOUT` | B | Lightweight | 0.25d | — | L-27 |
+| 43 | [x] | `K8S-CLIENT-HEALTH-TIMEOUT` | B | Lightweight | 0.25d | — | L-27 |
 | 44 | [ ] | `RELOADER-WATCH-DEPENDENT-FILES` | TD | Lightweight | 0.5d | — | L-23 |
 | 45 | [ ] | `HELM-AMP-SECCOMP` | TD | Lightweight | 0.1d | — | L-28 |
 | 46 | [-] | `DEAD-SILENCING-CACHE` | TD | Standard | 0.5d | — | D-11, § 4.4; снят ADR-019, срез 5 |

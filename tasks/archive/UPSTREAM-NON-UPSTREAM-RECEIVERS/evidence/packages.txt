@@ -1,0 +1,5 @@
+ok  	github.com/ipiton/AMP/internal/upstreamtargets	2.591s
+ok  	github.com/ipiton/AMP/internal/upstreamcore	4.309s
+ok  	github.com/ipiton/AMP/internal/infrastructure/k8s	9.702s
+?   	github.com/ipiton/AMP/cmd/amp-upstream	[no test files]
+ok  	github.com/ipiton/AMP/internal/business/publishing	34.416s

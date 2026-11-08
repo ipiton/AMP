@@ -129,6 +129,22 @@
 
 ## Low
 
+### [low][Build][~0.5d] K8S-CLIENTSET-BINARY-SIZE
+- **Title:** `amp-upstream` вырос с 43.2 до 78.9 МБ из-за полного clientset client-go
+- **Problem:** `internal/infrastructure/k8s` строит `kubernetes.NewForConfig` — все typed-клиенты всех API-групп; адаптеру K8s-таргетов (`UPSTREAM-NON-UPSTREAM-RECEIVERS`) нужен только `core/v1` Secrets и `/version`. `cmd/server` (80.7 МБ) платит то же.
+- **Impact:** образ и время загрузки больше; функционально не мешает.
+- **Fix:** `corev1client.NewForConfig` (typed core/v1) + discovery-клиент вместо полного `kubernetes.Interface`; интерфейс `K8sClient` не меняется, тесты на fake clientset — через `fake.NewSimpleClientset().CoreV1()`.
+- **Refs:** замер 2026-11-08, `tasks/archive/UPSTREAM-NON-UPSTREAM-RECEIVERS/evidence/testing.md`.
+- **Status:** open
+
+### [low][Architecture][~0.25d] UPSTREAM-TARGETS-DISCOVERY-DEPENDENCY
+- **Title:** адаптер K8s-таргетов upstream-ядра зависит от `business/publishing` discovery старого ядра
+- **Problem:** `internal/upstreamtargets` берёт `publishing.TargetDiscoveryManager` (list + parse + validate Secret'ов, `discovery_*.go`) и `core.PublishingTarget`; `cmd/amp-upstream/targets.go` копирует `resolvePublishingNamespace`. Срез 5 удаляет publishing старого ядра.
+- **Impact:** при удалении ядра можно случайно снести discovery и сломать K8s-таргеты upstream-ядра.
+- **Fix:** в срезе 5 `UPSTREAM-CORE-REMOVAL` сохранить discovery (parse/validate, `amp.receiver`) или перенести его в `upstreamtargets`; убрать дубликат namespace-резолва вместе с `internal/application`.
+- **Refs:** `UPSTREAM-NON-UPSTREAM-RECEIVERS` Spec § 2.6, `go-app/internal/upstreamtargets/source.go`.
+- **Status:** open
+
 ### [low][AI][~0.25d] UPSTREAM-AI-FALLBACK-STICKY
 - **Title:** fallback-классификация на `amp-upstream` не заменяется LLM-ответом после восстановления провайдера
 - **Problem:** `upstreamai.Classifier` классифицирует алерт один раз, пока тот в store; при outage LLM сервис отвечает fallback по правилам без ошибки, и запись остаётся до GC алерта. Сам `ClassificationService` кеширует fallback на полный TTL (1h, `classification.go` Step 3), так что и повторный вызов вернул бы его же.

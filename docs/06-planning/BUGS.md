@@ -15,18 +15,6 @@
 - **Refs:** найдено при HELM-VCT-CHART-LABELS (2026-10-22), `tasks/archive/HELM-VCT-CHART-LABELS/evidence/release-gate.txt`. Смежно `QUALITY-GATES-ALIGN`.
 - **Status:** open
 
-### [low][Test][~0.1d] REFRESH-WORKER-WARMUP-STOP-FLAKY
-- **Title:** `TestBackgroundWorker_CancellationDuringWarmup` падает под нагрузкой
-- **Problem:** тест (`go-app/internal/business/publishing/refresh_worker_test.go:116`) ждёт `Start()` через `time.Sleep(2ms)` и вызывает `Stop`, рассчитывая успеть до конца `WarmupPeriod: 10ms` (`refresh_test_utils.go:295`). Под нагрузкой шага `test` release-gate между `Start` и `Stop` проходит больше 10 мс, первый refresh срабатывает: `expected: 0, actual: 1`.
-- **Impact:** required-шаг `test` гейта краснеет без регрессии; изолированно `-count=30` зелёный.
-- **Fix:** в тесте warmup с запасом (секунды) либо синхронизация через канал/фейковые часы вместо sleep.
-- **Refs:** release-gate 2026-10-20 на `feature/helm-extra-volumes` @ `0c3156d` (пакет веткой не менялся).
-- **Status:** open
-
-- [ ] **INVESTIGATION-ALERT-TIME-NOT-SET** — `investigation.WithAlertTime` (`go-app/internal/core/investigation/context.go`) нигде в рабочем коде не вызывается: `queue.processJobWithAgent` передаёт в `AgentLoop.Run` голый `q.ctx`. Tools (`prometheus_query_range`, `loki_query_range`) через `AlertTimeFromCtx` падают на фолбэк `time.Now()` и якорят окно ±15 мин на момент расследования, а не срабатывания алерта. Для ретраев (backoff до 60s × `max_retries`) и очереди под нагрузкой окно уезжает от события. Фикс: `ctx = investigation.WithAlertTime(ctx, job.Alert.StartsAt)` перед `Run` (и в 5A-пути, если tools появятся там) + тест, что tool видит `StartsAt`. README пакета уже помечает это как known gap. Не регресс. Найдено на `/research` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
-
-- [ ] **AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT** — `AgentLoop.Run` (`go-app/internal/core/investigation/agent_loop.go`, ветка `default` в `switch resp.Kind`) возвращает `(nil, err)`, а `InvestigationQueue.processJobWithAgent` (`go-app/internal/infrastructure/investigation/queue.go`) на ошибке сразу читает `agentRun.TerminationKind` ⇒ nil-pointer panic в воркере. Сейчас недостижимо из прод-клиента (`parseOpenAIAgentResponse` отдаёт только два известных kind), но любой новый `AgentLLMClient` или мок с иным kind роняет воркер. Фикс: возвращать `&AgentRunResult{TerminationKind: "error", ...}` и/или nil-guard в queue + тест. Не регресс. Найдено на `/implement` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
-
 ### [medium][Helm][~0.25d] ESO-SECRET-OWNERSHIP-CONFLICT
 - **Title:** при `externalSecrets.enabled` Helm и External Secrets Operator претендуют на один Secret
 - **Problem:** `helm/amp/templates/secret.yaml` рендерит `<fullname>-secrets` безусловно, а `templates/externalsecret.yaml` при `externalSecrets.enabled` целится в тот же Secret (`target.name: <fullname>-secrets`, `creationPolicy: Owner`). Ожидаемо: ESO перезаписывает данные, Helm на `upgrade` возвращает свои (в том числе пустые ключи), владелец объекта неоднозначен.
@@ -34,14 +22,6 @@
 - **Fix:** не рендерить `secret.yaml` (или его ключи, которые даёт ESO) при `externalSecrets.enabled`; render-тест; проверить на кластере с ESO.
 - _(2026-10-14, HELM-DEFAULTS-VALIDATE review F2/R3-1)_ путь стал рекомендуемым: `fail` в `secret.yaml` при `llm.enabled=true` без ключа советует `externalSecrets.enabled`. Рядом второй, нерабочий путь: `helm/amp/DEPLOYMENT.md:84` предлагает `llm.externalSecrets.*` (`templates/llm-secret.yaml`), но Deployment всегда читает `<fullname>-secrets/llm-api-key`, а guard принимает только глобальный `externalSecrets.enabled` ⇒ рендер падает (до задачи — `CreateContainerConfigError`). В фиксе оставить один путь ESO для ключа LLM и поправить DEPLOYMENT.md.
 - **Refs:** `tasks/archive/HELM-DEFAULTS-VALIDATE/research.md` § Findings (линза operational), `review-findings.md` F2, R3-1.
-- **Status:** open
-
-### [low][Test][~0.25d] FLAKE-REFRESH-IN-PROGRESS
-- **Title:** `TestRefreshNow_RefreshInProgress` флейкает под нагрузкой
-- **Problem:** `go-app/internal/business/publishing/refresh_manager_impl_test.go:312` — `Target error should be in err chain: expected: "refresh already in progress"`. В логе перед этим `Manual refresh rate limit exceeded`: второй `RefreshNow` получает ошибку rate limit (50ms), а не «уже идёт» — первый refresh (~200ms) завершился раньше, чем тест сделал второй вызов. Изолированно `-count=20` — 20/20 ok; в шаге `race` того же прогона — ok. Предсуществующий: тест в baseline-падениях апрельских прогонов (`tasks/archive/*/forge-events.jsonl`).
-- **Impact:** шаг `test` required-гейта `gate` краснеет случайно (release-gate 2026-10-07, ветка `bugfix/prod-config-file-fallback`, пакет веткой не тронут).
-- **Fix:** держать первый refresh занятым явно (блокирующий фейковый discovery до сигнала теста), а не полагаться на его длительность.
-- **Refs:** `tasks/archive/PROD-CONFIG-FILE-FALLBACK/tasks.md` § Testing notes.
 - **Status:** open
 
 ### [low][Test][~0.1d] HELM-TEST-SIGPIPE-PIPEFAIL
@@ -209,14 +189,6 @@
 - **Refs:** CODE-REVIEW-2026-10-21 L-26.
 - **Status:** open
 
-### [low][K8s][~0.25d] K8S-CLIENT-HEALTH-TIMEOUT
-- **Title:** k8s-клиент: таймаут health не применяется, список Secret'ов молча обрезается, гонка в `Close`
-- **Problem:** `internal/infrastructure/k8s/client.go`: `Health` (`:225-240`) создаёт `healthCtx`, но `Discovery().ServerVersion()` его не принимает; `ListSecrets` (`:150-158`) режет на 1000 элементов с WARN; `Close` обнуляет `clientset` под `mu`, читатели берут без блокировки.
-- **Impact:** зависший API-сервер вешает health; discovery теряет таргеты после 1000 Secret'ов; nil-разыменование при shutdown.
-- **Fix:** `RESTClient().Get().AbsPath("/version").Do(healthCtx)`; пагинация через `Continue`; удалить `Close` или синхронизировать читателей.
-- **Refs:** CODE-REVIEW-2026-10-21 L-27.
-- **Status:** open
-
 ### [low][Tests][~0.1d] UPSTREAMCORE-TEST-GROUPS-RACE
 - **Title:** `TestCoreEndToEnd` читает `/api/v2/alerts/groups` сразу после POST — латентный флейк
 - **Problem:** `go-app/internal/upstreamcore/core_test.go` (`TestCoreEndToEnd`, проверка группы) не ждёт dispatcher: upstream получает алерты через подписку на провайдер, группы появляются ~через 1ms. Локально 100/100 проходит (промежуточный GET `/alerts` даёт время).
@@ -228,6 +200,28 @@
 ## Снимается переходом на upstream (ADR-019)
 
 Перенесено 2026-10-24 задачей `ADR-019-V2-SLICING`: код, в котором живёт проблема, удаляется срезом эпика ADR-019 (`BACKLOG.md`), поведение даёт upstream. Не брать в работу. Записи сохранены целиком: если PoC (`UPSTREAM-CORE-POC`) не пройдёт и решение пересмотрят, они возвращаются в Open. Закрываются вместе со срезом — удаляются отсюда, строка в `DONE.md` среза. `Status: superseded` — расширение Entry Format для этой секции.
+
+### [low][Test][~0.1d] REFRESH-WORKER-WARMUP-STOP-FLAKY
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — `RefreshManager`/`BackgroundWorker` старого ядра удаляются; адаптер K8s-таргетов upstream-ядра (`internal/upstreamtargets`, `UPSTREAM-NON-UPSTREAM-RECEIVERS`) опрашивает своим тикером и их не использует.
+- **Title:** `TestBackgroundWorker_CancellationDuringWarmup` падает под нагрузкой
+- **Problem:** тест (`go-app/internal/business/publishing/refresh_worker_test.go:116`) ждёт `Start()` через `time.Sleep(2ms)` и вызывает `Stop`, рассчитывая успеть до конца `WarmupPeriod: 10ms` (`refresh_test_utils.go:295`). Под нагрузкой шага `test` release-gate между `Start` и `Stop` проходит больше 10 мс, первый refresh срабатывает: `expected: 0, actual: 1`.
+- **Impact:** required-шаг `test` гейта краснеет без регрессии; изолированно `-count=30` зелёный.
+- **Fix:** в тесте warmup с запасом (секунды) либо синхронизация через канал/фейковые часы вместо sleep.
+- **Refs:** release-gate 2026-10-20 на `feature/helm-extra-volumes` @ `0c3156d` (пакет веткой не менялся).
+- **Status:** superseded — ADR-019, срез 5
+
+- [ ] **INVESTIGATION-ALERT-TIME-NOT-SET** — `investigation.WithAlertTime` (`go-app/internal/core/investigation/context.go`) нигде в рабочем коде не вызывается: `queue.processJobWithAgent` передаёт в `AgentLoop.Run` голый `q.ctx`. Tools (`prometheus_query_range`, `loki_query_range`) через `AlertTimeFromCtx` падают на фолбэк `time.Now()` и якорят окно ±15 мин на момент расследования, а не срабатывания алерта. Для ретраев (backoff до 60s × `max_retries`) и очереди под нагрузкой окно уезжает от события. Фикс: `ctx = investigation.WithAlertTime(ctx, job.Alert.StartsAt)` перед `Run` (и в 5A-пути, если tools появятся там) + тест, что tool видит `StartsAt`. README пакета уже помечает это как known gap. Не регресс. Найдено на `/research` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
+
+- [ ] **AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT** — `AgentLoop.Run` (`go-app/internal/core/investigation/agent_loop.go`, ветка `default` в `switch resp.Kind`) возвращает `(nil, err)`, а `InvestigationQueue.processJobWithAgent` (`go-app/internal/infrastructure/investigation/queue.go`) на ошибке сразу читает `agentRun.TerminationKind` ⇒ nil-pointer panic в воркере. Сейчас недостижимо из прод-клиента (`parseOpenAIAgentResponse` отдаёт только два известных kind), но любой новый `AgentLLMClient` или мок с иным kind роняет воркер. Фикс: возвращать `&AgentRunResult{TerminationKind: "error", ...}` и/или nil-guard в queue + тест. Не регресс. Найдено на `/implement` PHASE-6B-RUNBOOK-ENGINE (2026-09-27).
+
+### [low][Test][~0.25d] FLAKE-REFRESH-IN-PROGRESS
+- **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — `RefreshManager`/`BackgroundWorker` старого ядра удаляются; адаптер K8s-таргетов upstream-ядра (`internal/upstreamtargets`, `UPSTREAM-NON-UPSTREAM-RECEIVERS`) опрашивает своим тикером и их не использует.
+- **Title:** `TestRefreshNow_RefreshInProgress` флейкает под нагрузкой
+- **Problem:** `go-app/internal/business/publishing/refresh_manager_impl_test.go:312` — `Target error should be in err chain: expected: "refresh already in progress"`. В логе перед этим `Manual refresh rate limit exceeded`: второй `RefreshNow` получает ошибку rate limit (50ms), а не «уже идёт» — первый refresh (~200ms) завершился раньше, чем тест сделал второй вызов. Изолированно `-count=20` — 20/20 ok; в шаге `race` того же прогона — ok. Предсуществующий: тест в baseline-падениях апрельских прогонов (`tasks/archive/*/forge-events.jsonl`).
+- **Impact:** шаг `test` required-гейта `gate` краснеет случайно (release-gate 2026-10-07, ветка `bugfix/prod-config-file-fallback`, пакет веткой не тронут).
+- **Fix:** держать первый refresh занятым явно (блокирующий фейковый discovery до сигнала теста), а не полагаться на его длительность.
+- **Refs:** `tasks/archive/PROD-CONFIG-FILE-FALLBACK/tasks.md` § Testing notes.
+- **Status:** superseded — ADR-019, срез 5
 
 ### [medium][Config][~0.5d] TEMPLATED-FIELDS-NOT-RENDERED
 - **ADR-019:** срез 5 `UPSTREAM-CORE-REMOVAL` — свой publishing и шаблоны удаляются, интеграции — upstream `notify/*`.
