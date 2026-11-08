@@ -1,1087 +1,119 @@
-# 📝 Configuration Guide
+# Configuration Guide
 
-**Date:** 8 марта 2026
-**Version:** 1.0.0
-**Status:** 🟡 Controlled replacement slice documented; some historical config/runtime sections are ahead of the current active bootstrap
+AMP v0.1.0 (`amp-upstream`) reads two files and upstream Alertmanager's flags.
 
----
+| What | Where | Read by | Reloaded |
+|---|---|---|---|
+| Routes, receivers, inhibit rules, time intervals, templates | `alertmanager.yml` (`--config.file`) | Upstream's `config` package | `POST /-/reload`, `SIGHUP` |
+| History database, LLM, investigation, K8s-Secret targets, auth exemptions | AMP configuration, `amp.yaml` (`--amp.config.file`) | AMP | At start only |
+| Listen address, external URL, storage, cluster, basic auth | Flags | Upstream's flags, AMP's binary | At start only |
 
-## 📋 Overview
+Before v0.1.0 AMP's own core read one combined file (`config.yaml` with `route`, `receivers`, `redis`, `grouping`, `server.port`, … next to AMP's keys). That model is gone: `alertmanager.yml` holds what upstream reads, the AMP file holds the rest. Upgrading from it: [MIGRATION_FROM_LEGACY_CORE.md](MIGRATION_FROM_LEGACY_CORE.md).
 
-Alertmanager++ uses **two separate configuration files** for flexibility and staged runtime evolution.
+## `alertmanager.yml`
 
-Current runtime note (2026-03-08): this guide includes historical and target configuration surfaces. The active runtime source of truth remains `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`.
-
-1. **`config.yaml`** - Application infrastructure configuration
-2. **`alertmanager.yaml`** - Alerting routing configuration (Alertmanager-compatible)
-
-This separation follows industry best practices (Prometheus, Grafana, Kubernetes).
-
----
-
-## 🎯 Configuration Architecture
-
-### Why Two Configs?
-
-```
-┌─────────────────────────────────────────────┐
-│  config.yaml (Application Config)           │
-│  ─────────────────────────────────          │
-│  • Database, Redis, Server                  │
-│  • Infrastructure settings                  │
-│  • Changes rarely                           │
-│  • Requires restart                         │
-│  • Managed by DevOps                        │
-└─────────────────────────────────────────────┘
-                    ↓
-┌─────────────────────────────────────────────┐
-│  alertmanager.yaml (Alerting Config)        │
-│  ────────────────────────────────           │
-│  • Routes, Receivers, Inhibition            │
-│  • Business logic                           │
-│  • Changes frequently                       │
-│  • Hot reload (no restart!) ✨              │
-│  • Managed by SRE/Operations                │
-└─────────────────────────────────────────────┘
-```
-
-**Benefits:**
-- ✅ Separation of concerns
-- ✅ Hot reload for routing changes
-- ✅ Security (sensitive data separate)
-- ✅ Core non-deprecated Alertmanager API compatibility baseline
-- ✅ Version control friendly
-
----
-
-## 📄 Config 1: Application Config (`config.yaml`)
-
-### Purpose
-
-Infrastructure and application settings.
-
-### Location
-
-```
-AMP/
-├── config.yaml.example  ← Template
-└── config.yaml          ← Your config (create from example)
-```
-
-### Structure
-
-```yaml
-# ============================================================================
-# Deployment Profile
-# ============================================================================
-profile: standard  # "lite" (embedded) or "standard" (Postgres+Redis)
-
-# ============================================================================
-# Storage Backend
-# ============================================================================
-storage:
-  backend: postgres  # "filesystem" for lite, "postgres" for standard
-  filesystem_path: /data/alerthistory.db
-
-# ============================================================================
-# Server Configuration
-# ============================================================================
-server:
-  port: 9093
-  host: 0.0.0.0
-  read_timeout: 30s
-  write_timeout: 30s
-  graceful_shutdown_timeout: 30s
-  # web_config_file: /etc/amp/web/web-config.yml  # enables basic auth, see "Enable HTTP Authentication"
-
-# ============================================================================
-# Database (PostgreSQL)
-# ============================================================================
-database:
-  host: localhost
-  port: 5432
-  database: alerthistory
-  username: postgres
-  password: ${DATABASE_PASSWORD}  # From environment
-  ssl_mode: disable
-  max_connections: 25
-
-# ============================================================================
-# Redis (Optional)
-# ============================================================================
-redis:
-  addr: localhost:6379
-  password: ${REDIS_PASSWORD}  # From environment
-  db: 0
-  pool_size: 10
-  # Standard profile: retry an unreachable cache this long at startup, then fall
-  # back to the in-memory cache until restart. 0s = one attempt (env REDIS_STARTUP_WAIT).
-  startup_wait: 60s
-
-# ============================================================================
-# LLM Configuration (Optional)
-# ============================================================================
-llm:
-  enabled: false  # Set to true to enable AI classification
-  provider: openai
-  model: gpt-4o
-  api_key: ${LLM_API_KEY}  # Your own OpenAI key (BYOK)
-  base_url: https://api.openai.com/v1
-  timeout: 30s
-
-# ============================================================================
-# Logging
-# ============================================================================
-log:
-  level: info  # debug, info, warn, error
-  format: json  # json, text
-  output: stdout
-
-# ============================================================================
-# Metrics
-# ============================================================================
-metrics:
-  enabled: true
-  path: /metrics
-  namespace: alert_history
-
-# ============================================================================
-# Webhook Settings
-# ============================================================================
-webhook:
-  max_request_size: 1048576  # 1MB
-  request_timeout: 30s
-
-  rate_limiting:
-    enabled: true
-    per_ip_limit: 100
-    global_limit: 1000
-
-# ============================================================================
-# HTTP Client (for outbound requests)
-# ============================================================================
-http_client:
-  timeout: 30s
-  max_idle_conns: 100
-  max_idle_conns_per_host: 10
-
-# ============================================================================
-# Retry Configuration (Unified)
-# ============================================================================
-retry:
-  max_attempts: 4
-  base_delay: 100ms
-  max_delay: 30s
-  multiplier: 2.0
-  jitter_ratio: 0.15
-
-# ============================================================================
-# OpenTelemetry Tracing (Optional)
-# ============================================================================
-telemetry:
-  enabled: false  # Set to true to enable distributed tracing
-  endpoint: localhost:4317
-  service_name: amp-service
-  sampling_ratio: 1.0
-
-# ============================================================================
-# Dynamic Publishing Runtime (Standard profile)
-# ============================================================================
-publishing:
-  enabled: true
-  discovery:
-    namespace: monitoring
-    label_selector: publishing-target=true
-  queue:
-    max_concurrent: 5
-    worker_count: 10
-    max_retries: 3
-    retry_interval: 2s
-  refresh:
-    enabled: true
-    interval: 5m
-    timeout: 30s
-  health:
-    enabled: true
-    check_interval: 2m
-    http_timeout: 5s
-```
-
-### Usage
+Upstream's file, unchanged: [upstream's configuration reference](https://prometheus.io/docs/alerting/latest/configuration/) applies in full, for the version AMP carries (v0.34.1). Check a file with upstream's tool:
 
 ```bash
-# Create from example
-cp config.yaml.example config.yaml
-
-# Edit values
-vi config.yaml
-
-# Set environment variables
-export DATABASE_PASSWORD=your_password
-export REDIS_PASSWORD=your_password
-export LLM_API_KEY=sk-your-openai-key  # Optional
-
-# Run application
-./amp-server --config config.yaml
+amtool check-config alertmanager.yml
 ```
 
-### When to Modify
+- At start a file that does not load stops the process. On reload the running configuration stays, the reload answers with the error, and `alertmanager_config_last_reload_successful` drops to 0.
+- `*_file` secrets (`api_url_file`, `password_file`, `routing_key_file`, …) are read by upstream at load; mount the files next to the configuration.
+- Receivers from Kubernetes Secrets are added in memory, not to the file ([ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md#kubernetes-secret-targets)).
+
+## AMP configuration (`amp.yaml`)
+
+Every key with its default and meaning: [`config.yaml.example`](../config.yaml.example). The sections:
+
+| Section | Purpose |
+|---|---|
+| `profile` | `standard` (default): PostgreSQL for history, investigations and K8s targets. `lite`: none of them; `/api/amp/v1` answers 503. Alerting is the same in both. |
+| `server.web_config_file` | Upstream web config (basic auth) when `--web.config.file` is not given. Env: `SERVER_WEB_CONFIG_FILE`. |
+| `server.auth.unauthenticated_paths` | Paths that skip basic auth. Default `/-/healthy`, `/-/ready`. |
+| `app.environment` | `development` (default) or `production`; `production` enforces the database credential checks. |
+| `database.*` | PostgreSQL of the alert history. Migrations run at start. |
+| `llm.*` | Classification by an OpenAI-compatible API (`provider: openai` or `openai-compatible`, `base_url`, `model`, `api_key`), `notify_wait`, `drop_noise`, `agent_mode`. |
+| `investigation.*` | Investigation workers, retries, agent-mode `tools` and `runbooks`. |
+| `publishing.*` | K8s-Secret targets: `enabled`, `discovery.namespace`, `discovery.label_selector`, `refresh.interval`. |
+
+Rules:
+
+- **Without `--amp.config.file`** amp-upstream is upstream Alertmanager plus the AMP routes, which answer 503: no history, classification or targets.
+- **A missing file** is not an error: the defaults apply (`profile: standard`, so AMP tries `localhost:5432`).
+- **Unknown keys** are ignored, with one warning at start that lists them: `AMP configuration keys ignored ... keys [redis server.port]`. Keys of the removed core (`route`, `receivers`, `grouping`, `redis`, `cache`, `server.port`, `log`, …) end up there.
+- **Environment variables** override keys: upper case, `.` → `_`. `DATABASE_PASSWORD`, `LLM_API_KEY`, `INVESTIGATION_TOOLS_DATABASE_DSN` keep secrets out of the file.
+- **PostgreSQL unreachable at start**, or a failed migration: AMP logs an error and runs without history and investigations until the next restart. Delivery is unaffected.
+- **Invalid values** stop the start: an unknown `profile`, an empty `database.host` or `database.database` under `profile: standard`, a negative `llm.notify_wait`, a username without a password (or the reverse), and under `app.environment: production` a missing username or password, a known weak password, one shorter than 12 characters, or `ssl_mode: disable` without `allow_insecure_ssl_in_production: true`.
+- Investigation needs `llm.enabled`, `investigation.enabled` and PostgreSQL; tools and runbooks also need `llm.agent_mode: true`.
+
+A minimal production file:
 
-- Adding new database
-- Changing server port
-- Enabling/disabling features (LLM, telemetry)
-- Adjusting resource limits
-- Changing log levels
-
-**Requires:** Application restart
-
-### Graceful Shutdown
-
-On `SIGTERM` or `SIGINT` AMP stops in this order:
-
-1. `/-/ready` and `/readyz` start answering `503`; `/-/healthy` and `/healthz` stay `200`, so a liveness probe does not kill the process mid-drain.
-2. The HTTP server stops accepting connections and waits for in-flight requests.
-3. Services stop: the lite profile writes its final file snapshot, queues and storage close.
-4. The process exits: `0` on a clean shutdown, `1` if the drain or a service stop failed.
-
-`server.graceful_shutdown_timeout` (default `30s`, env `SERVER_GRACEFUL_SHUTDOWN_TIMEOUT`) bounds steps 2-3 together. `0` or a negative value means `30s`. The final lite snapshot is written even when the budget runs out. A second signal during shutdown is ignored.
-
-AMP itself does not wait before step 2. In Kubernetes the chart's preStop hook provides that pause while the pod leaves Service endpoints. Keep `terminationGracePeriodSeconds` ≥ `preStopDelay` + `timeoutSeconds` (see `helm/amp/README.md` → "Graceful Shutdown").
-
-### Grouping
-
-`grouping.enabled` (default `true`, env `GROUPING_ENABLED`, Helm `grouping.enabled`) makes AMP dispatch alerts in groups on the `route:` tree's `group_by` / `group_wait` / `group_interval` / `repeat_interval`, as Alertmanager does.
-
-- It only takes effect when the Alertmanager config has a `route:` tree. Without one, alerts are published directly.
-- `grouping.enabled: false` publishes every alert as soon as it arrives. With a `route:` tree configured AMP logs a warning at startup, because the tree's timings are then ignored.
-- Under the Helm chart set it in values (`grouping.enabled`). The chart always passes `GROUPING_ENABLED`, and the environment overrides the config file, so the key inside `configFile.content` has no effect there.
-- A group is flushed after `group_wait` and then every `group_interval`. A flush notifies a target when, among the alerts that target is owed (a target with `send_resolved: false` is not owed resolved ones), there is an alert or an alert status that its last notification did not carry, or when `repeat_interval` has passed since that notification, so a reminder goes out at the first flush after `repeat_interval`.
-- Grouped notifications do not carry the LLM classification; direct publishing does.
-- The key is read at startup. Changing it needs a restart; `/-/reload` does not apply it.
-- Standard profile: groups, timers and the notification log are kept in Redis and shared across replicas; without a working Redis it falls back to in-memory state that replicas do not share. Lite profile: in memory, single replica.
-
-### Dynamic Publishing Runtime
-
-`publishing.*` controls the real outbound delivery path used by the active runtime.
-
-- In `standard` profile AMP discovers publishing targets from Kubernetes Secrets and delivers alerts through the coordinator and queue.
-- In `lite`, with `publishing.enabled=false`, with zero enabled targets, or on stack initialization failure, AMP stays in explicit `metrics-only` mode.
-- Helm uses env overrides compatible with runtime config, including `PROFILE`, `APP_ENVIRONMENT`, `DATABASE_*`, `REDIS_ADDR`, `REDIS_PASSWORD`, and `PUBLISHING_*`.
-
-### Canonical Publishing Target Secret
-
-The runtime discovery contract is a Kubernetes Secret with label `publishing-target=true` and JSON payload in `data.config`.
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: amp-rootly-target
-  namespace: monitoring
-  labels:
-    publishing-target: "true"
-type: Opaque
-data:
-  config: <base64(JSON)>
-```
-
-JSON inside `config`:
-
-```json
-{
-  "name": "rootly-production",
-  "type": "rootly",
-  "url": "https://api.rootly.com/v1/incidents",
-  "enabled": true,
-  "format": "rootly",
-  "headers": {
-    "Authorization": "Bearer <token>"
-  },
-  "filter_config": {
-    "severity": ["critical", "warning"],
-    "namespaces": ["production"]
-  }
-}
-```
-
-Notes:
-- When authoring YAML by hand, `stringData.config` is acceptable; Kubernetes will materialize it into `data.config`.
-- The Helm chart generates these canonical target secrets automatically from `.Values.publishingTargets`.
-- If no matching target secrets are discovered, the runtime remains in `metrics-only`.
-
----
-
-## 📄 Config 2: Alertmanager Config (`alertmanager.yaml`)
-
-### Purpose
-
-Alerting routing and notification receivers (Alertmanager-compatible core syntax).
-
-### Location
-
-**Examples:**
-```
-go-app/internal/infrastructure/routing/testdata/
-├── production.yaml  ← Full production example
-└── minimal.yaml     ← Minimal example
-```
-
-**Your config:** Create anywhere, load via API or ConfigMap
-
-### Structure
-
-```yaml
-# ============================================================================
-# Global Settings (Optional)
-# ============================================================================
-global:
-  # endsAt for alerts posted without one: receivedAt + resolve_timeout (re-sends extend it).
-  # AMP does not yet auto-resolve when it passes - see ALERTMANAGER_COMPATIBILITY.md, Known Gap #12.
-  resolve_timeout: 5m
-  http_config:
-    proxy_url: http://proxy.corp:8080
-
-# ============================================================================
-# Routing Tree (Required)
-# ============================================================================
-route:
-  receiver: default  # Default receiver
-  group_by: [alertname, cluster, service]
-  group_wait: 30s
-  group_interval: 5m
-  repeat_interval: 4h
-
-  # Child routes
-  routes:
-    # Critical alerts to PagerDuty
-    - receiver: pagerduty-critical
-      match:
-        severity: critical
-      group_wait: 10s
-      repeat_interval: 30m
-
-    # Warnings to Slack
-    - receiver: slack-warnings
-      match:
-        severity: warning
-      group_wait: 1m
-
-    # Database alerts to DBA team
-    - receiver: email-database
-      match_re:
-        service: "^(postgres|mysql|redis).*"
-      group_by: [alertname, instance]
-
-# ============================================================================
-# Receivers (Required, min=1)
-# ============================================================================
-receivers:
-  # Default webhook receiver
-  - name: default
-    webhook_configs:
-      - url: https://webhook.example.com/alerts
-        http_method: POST
-        send_resolved: true
-        max_alerts: 10
-
-  # PagerDuty for critical alerts
-  - name: pagerduty-critical
-    pagerduty_configs:
-      - routing_key: ${PAGERDUTY_ROUTING_KEY_CRITICAL}
-        severity: critical
-        description: "Critical Alert: {{ .GroupLabels.alertname }}"
-        details:
-          environment: "{{ .CommonLabels.environment }}"
-          cluster: "{{ .CommonLabels.cluster }}"
-
-  # Slack for warnings
-  - name: slack-warnings
-    slack_configs:
-      - api_url: ${SLACK_WEBHOOK_URL}
-        channel: "#alerts-warnings"
-        username: "Alertmanager++"
-        icon_emoji: ":warning:"
-        title: "Warning: {{ .GroupLabels.alertname }}"
-        text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
-        color: warning
-        send_resolved: true
-
-  # Email for database team
-  - name: email-database
-    email_configs:
-      - to: "database-team@example.com"
-        from: "alerts@example.com"
-        subject: "Database Alert: {{ .GroupLabels.alertname }}"
-        html: "<h2>Alerts</h2><ul>{{ range .Alerts }}<li>{{ .Annotations.description }}</li>{{ end }}</ul>"
-        send_resolved: true
-
-# ============================================================================
-# Inhibition Rules (Optional)
-# ============================================================================
-# A top-level `inhibit_rules:` (upstream placement) works the same way;
-# AMP applies both lists, top-level first (FU-TOPLEVEL-INHIBIT-RULES).
-inhibition:
-  inhibit_rules:
-    # Inhibit warnings when critical alert is firing
-    - source_match:
-        severity: critical
-      target_match:
-        severity: warning
-      equal: [alertname, cluster]
-```
-
-### Usage
-
-**Option 1: Load via API (Hot Reload)**
-```bash
-# Load configuration
-curl -X POST http://localhost:9093/api/v2/config \
-  -H "Content-Type: application/yaml" \
-  --data-binary @alertmanager.yaml
-
-# Verify
-curl http://localhost:9093/api/v2/config
-
-# Update without restart!
-curl -X POST http://localhost:9093/api/v2/config \
-  --data-binary @alertmanager-updated.yaml
-```
-
-**Option 2: Kubernetes ConfigMap**
-```bash
-# Create ConfigMap
-kubectl create configmap alertmanager-config \
-  --from-file=alertmanager.yaml \
-  -n monitoring
-
-# Application loads it automatically on startup
-```
-
-**Option 3: File Path (if configured)**
-```yaml
-# config.yaml
-app:
-  alertmanager_config_path: /etc/alertmanager/alertmanager.yaml
-```
-
-### Receiver Credentials From Files
-
-A ConfigMap is not a place for credentials. These receiver secrets have a `*_file` twin that names a file instead: `telegram_configs[].bot_token_file`, `slack_configs[].api_url_file`, `global.slack_api_url_file`, `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file` / `service_key_file`, `global.smtp_auth_password_file` (details: `docs/ALERTMANAGER_COMPATIBILITY.md` → "`*_file` secret variants").
-
-- Use **absolute** paths. These fields are read as given, relative to the process working directory, not to the config file (as in upstream Alertmanager). Only `http_config` paths (`ca_file`, `password_file`, ...) are resolved against the config file's directory.
-- Setting both the inline field and its `_file` twin is a load error. So is a file AMP cannot read; the error names the path, never the content.
-- Trailing newlines are trimmed, so files written by `echo` work. Create the Secret from files, not `--from-literal`: a literal stays in the shell history.
-- AMP reads the files at startup and on every `/-/reload` or SIGHUP, not per notification. After rotating a file, reload.
-- PagerDuty needs `routing_key` or `routing_key_file`: a receiver with only `service_key` / `service_key_file` does not load yet.
-
-With the Helm chart, put the credentials into a Secret and mount it with `extraVolumes` / `extraVolumeMounts`; `configFile.content` then holds paths only:
-
-```bash
-# one file per credential; a trailing newline is trimmed
-kubectl create secret generic amp-receiver-secrets \
-  --from-file=telegram-bot-token=./telegram-bot-token \
-  --from-file=slack-webhook-url=./slack-webhook-url
-```
-
-```yaml
-# values
-extraVolumes:
-  - name: receiver-secrets
-    secret:
-      secretName: amp-receiver-secrets
-      defaultMode: 0440
-extraVolumeMounts:
-  - name: receiver-secrets
-    mountPath: /etc/amp/secrets
-    readOnly: true
-configFile:
-  enabled: true
-  content: |
-    route:
-      receiver: slack
-      routes:
-        # critical alerts go to Telegram, everything else to Slack
-        - receiver: telegram-panic
-          matchers: ['severity="critical"']
-    receivers:
-      - name: slack
-        slack_configs:
-          - api_url_file: /etc/amp/secrets/slack-webhook-url
-            channel: '#alerts'
-      - name: telegram-panic
-        telegram_configs:
-          - bot_token_file: /etc/amp/secrets/telegram-bot-token
-            chat_id: -1001234567890
-```
-
-`/api/v2/status` shows the `*_file` paths and keeps the resolved values redacted. The chart's config-reloader watches the config file only, so a Secret change needs a `POST /-/reload` (authenticated when `webConfig` is enabled; once kubelet has synced the volume, about a minute) or `kubectl rollout restart deploy/<fullname>`. See `helm/amp/README.md` → "Receiver Credentials From A Secret".
-
-### When to Modify
-
-- Adding new receivers (Slack, PagerDuty)
-- Changing routing rules
-- Adjusting grouping/timing
-- Adding inhibition rules
-- Updating templates
-
-**Requires:** Hot reload via API (no restart needed!)
-
----
-
-## 🔄 Hot Reload
-
-### How It Works
-
-```bash
-# 1. Edit alertmanager.yaml
-vi alertmanager.yaml
-
-# 2. Reload via API
-curl -X POST http://localhost:9093/api/v2/config \
-  --data-binary @alertmanager.yaml
-
-# 3. Verify
-curl http://localhost:9093/api/v2/config/status
-
-# Application continues running! ✨
-```
-
-### Rollback Support
-
-```bash
-# Rollback to previous version
-curl -X POST http://localhost:9093/api/v2/config/rollback
-
-# Rollback to a specific successful revision from history
-curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>"
-
-# View config history
-curl http://localhost:9093/api/v2/config/history
-
-# View only failed apply attempts
-curl "http://localhost:9093/api/v2/config/history?status=failed"
-
-# View history for specific apply source
-curl "http://localhost:9093/api/v2/config/history?source=rollback"
-
-# List unique successful revisions for rollback target selection
-curl "http://localhost:9093/api/v2/config/revisions?limit=20"
-
-# Prune old revision targets (keep N newest unique successful revisions)
-curl -X DELETE "http://localhost:9093/api/v2/config/revisions/prune?keep=20"
-
-# Preview prune result without applying changes
-curl -X DELETE "http://localhost:9093/api/v2/config/revisions/prune?keep=20&dryRun=true"
-
-# Preview rollback result without applying changes
-curl -X POST "http://localhost:9093/api/v2/config/rollback?configHash=<sha256>&dryRun=true"
-```
-
-If there is no previous successful revision, rollback returns `409 Conflict`.
-Rollback by hash returns `400 Bad Request` for invalid hash and `404 Not Found` when the revision is absent.
-History supports filters: `status=ok|failed` and `source=<startup|api|reload|rollback>`.
-Revisions endpoint returns unique successful hashes with `isCurrent` marker.
-Revision prune endpoint keeps current active revision and trims older rollback targets.
-Rollback and prune support `dryRun=true` for non-mutating preview mode.
-
----
-
-## 📊 Comparison with Other Systems
-
-### Prometheus + Alertmanager
-
-```
-prometheus/
-├── prometheus.yml      ← Scrape config, storage (restart required)
-└── alertmanager.yml    ← Routes, receivers (hot reload)
-```
-
-### Alertmanager++ (AMP)
-
-```
-amp/
-├── config.yaml         ← Infrastructure config (restart required)
-└── alertmanager.yaml   ← Routing config (hot reload)
-```
-
-**Same architecture!** ✅
-
----
-
-### Grafana
-
-```
-grafana/
-├── grafana.ini         ← Server config (restart required)
-└── provisioning/
-    └── datasources.yaml ← Data sources (hot reload)
-```
-
-### Kubernetes
-
-```
-k8s/
-├── kubelet-config.yaml ← Node config (restart required)
-└── pod-spec.yaml       ← Workload config (hot reload)
-```
-
-**Industry standard pattern!** ✅
-
----
-
-## 🎯 Quick Start Examples
-
-### Development (Lite Profile)
-
-**config.yaml:**
-```yaml
-profile: lite
-storage:
-  backend: filesystem
-  filesystem_path: /tmp/alerthistory.db
-
-server:
-  port: 9093
-
-log:
-  level: debug
-  format: text
-```
-
-**alertmanager.yaml:**
-```yaml
-route:
-  receiver: webhook
-
-receivers:
-  - name: webhook
-    webhook_configs:
-      - url: http://localhost:9000/webhook
-```
-
-**Start:**
-```bash
-./amp-server --config config.yaml
-curl -X POST http://localhost:9093/api/v2/config \
-  --data-binary @alertmanager.yaml
-```
-
----
-
-### Production (Standard Profile)
-
-**config.yaml:**
 ```yaml
 profile: standard
-storage:
-  backend: postgres
-
+app:
+  environment: production
 database:
-  host: postgres.prod.svc.cluster.local
-  port: 5432
+  host: postgres.db.svc
   database: alerthistory
-  username: amp
-  password: ${DATABASE_PASSWORD}
-  max_connections: 50
-
-redis:
-  addr: redis.prod.svc.cluster.local:6379
-  password: ${REDIS_PASSWORD}
-  pool_size: 20
-
-server:
-  port: 9093
-
-log:
-  level: info
-  format: json
-
-telemetry:
+  username: amp              # password: DATABASE_PASSWORD
+  ssl_mode: verify-full
+llm:
   enabled: true
-  endpoint: jaeger-collector:4317
-  sampling_ratio: 0.1  # 10% sampling
-
+  provider: openai-compatible
+  base_url: https://llm-gateway.example.internal/v1
+  model: gpt-4o-mini         # key: LLM_API_KEY
+investigation:
+  enabled: true
 publishing:
-  enabled: true
   discovery:
-    namespace: monitoring
-    label_selector: publishing-target=true
-  queue:
-    max_concurrent: 5
-    worker_count: 10
-  refresh:
-    enabled: true
-    interval: 5m
-  health:
-    enabled: true
-    check_interval: 2m
-
-llm:
-  enabled: true
-  provider: openai
-  api_key: ${LLM_API_KEY}
-  model: gpt-4o
+    namespace: amp-targets
 ```
 
-**alertmanager.yaml:**
-```yaml
-global:
-  resolve_timeout: 5m
+## Flags
 
-route:
-  receiver: default
-  group_by: [alertname, cluster, service]
-  group_wait: 30s
-  group_interval: 5m
-  repeat_interval: 4h
-  routes:
-    - receiver: pagerduty-critical
-      match:
-        severity: critical
-      group_wait: 10s
-    - receiver: slack-warnings
-      match:
-        severity: warning
-    - receiver: email-database
-      match_re:
-        service: "^(postgres|mysql|redis).*"
+`amp-upstream --help` lists them; they are upstream's flags with upstream's defaults, plus `--amp.config.file`.
 
-receivers:
-  - name: default
-    webhook_configs:
-      - url: https://webhook.prod.example.com/alerts
+| Flag | Default | Notes |
+|---|---|---|
+| `--config.file` | `alertmanager.yml` | |
+| `--amp.config.file` | empty | AMP configuration |
+| `--storage.path` | `data/` | Silence and notification-log snapshots |
+| `--data.retention` | `120h` | |
+| `--web.listen-address` | `:9093` | |
+| `--web.external-url` | empty | Its path prefixes every route, `/api/amp/v1` and the probes included |
+| `--web.config.file` | empty | Upstream web config: basic auth |
+| `--cluster.listen-address` | `0.0.0.0:9094` | Empty turns gossip off |
+| `--cluster.peer`, `--cluster.advertise-address`, `--cluster.peer-timeout`, `--cluster.label`, `--cluster.tls-config`, … | upstream's | HA |
 
-  - name: pagerduty-critical
-    pagerduty_configs:
-      - routing_key: ${PAGERDUTY_KEY_CRITICAL}
+Not available, unlike upstream: `--silences.max-silences`, `--silences.max-silence-size-bytes`, `--alerts.per-alertname-limit`, `--dispatch.start-delay`, and the UI flags.
 
-  - name: slack-warnings
-    slack_configs:
-      - api_url: ${SLACK_WEBHOOK_PROD}
-        channel: "#alerts-prod"
+## With the Helm chart
 
-  - name: email-database
-    email_configs:
-      - to: "dba-team@example.com"
-        from: "alerts@example.com"
+The chart writes both files from its values ([helm/amp/README.md](../helm/amp/README.md)):
 
-# A top-level `inhibit_rules:` (upstream placement) works the same way;
-# AMP applies both lists, top-level first (FU-TOPLEVEL-INHIBIT-RULES).
-inhibition:
-  inhibit_rules:
-    - source_match:
-        severity: critical
-      target_match:
-        severity: warning
-      equal: [alertname, cluster]
-```
-
-**Deploy:**
-```bash
-# Kubernetes deployment
-kubectl create secret generic amp-secrets \
-  --from-literal=database-password=${DATABASE_PASSWORD} \
-  --from-literal=redis-password=${REDIS_PASSWORD} \
-  --from-literal=llm-api-key=${LLM_API_KEY}
-
-kubectl create configmap amp-config \
-  --from-file=config.yaml
-
-kubectl create configmap alertmanager-config \
-  --from-file=alertmanager.yaml
-
-# values-production.yaml renders only once auth and network sources are set
-# (helm/amp/README.md -> Network Exposure): webConfig.existingSecret or
-# ingress.externalAuth=true, monitoring.serviceMonitor.basicAuth.secretName,
-# and at least one networkPolicy source.
-helm install amp ./helm/amp -n monitoring -f values-production.yaml -f my-values.yaml
-
-# Verify runtime-discoverable publishing targets exist
-kubectl get secret -n monitoring -l publishing-target=true
-```
-
----
-
-## 📚 Configuration Reference
-
-### Application Config Fields
-
-| Section | Purpose | Required | Restart |
-|---------|---------|----------|---------|
-| `profile` | Deployment profile | Yes | Yes |
-| `storage` | Storage backend | Yes | Yes |
-| `server` | HTTP server | Yes | Yes |
-| `database` | PostgreSQL | Conditional | Yes |
-| `redis` | Redis cache | Optional | Yes |
-| `app` | App identity and environment | Optional | Yes |
-| `llm` | AI classification | Optional | Yes |
-| `log` | Logging | Yes | Yes |
-| `metrics` | Prometheus | Yes | Yes |
-| `webhook` | Webhook endpoint | Yes | Yes |
-| `http_client` | HTTP client | Yes | Yes |
-| `retry` | Retry strategy | Yes | Yes |
-| `telemetry` | OpenTelemetry | Optional | Yes |
-| `publishing` | Runtime delivery, discovery, queue, refresh, health | Optional | Yes |
-
-### Alertmanager Config Fields
-
-| Section | Purpose | Required | Reload |
-|---------|---------|----------|--------|
-| `global` | Global settings | Optional | Hot |
-| `route` | Routing tree | Yes | Hot |
-| `receivers` | Notification targets | Yes | Hot |
-| `inhibit_rules` | Inhibition rules | Optional | Hot |
-| `templates` | Template files | Optional | Hot |
-
----
-
-## 🔐 Security Best Practices
-
-### 1. Use Environment Variables
-
-**config.yaml:**
-```yaml
-database:
-  password: ${DATABASE_PASSWORD}  # ✅ From environment
-
-redis:
-  password: ${REDIS_PASSWORD}  # ✅ From environment
-
-llm:
-  api_key: ${LLM_API_KEY}  # ✅ From environment
-```
-
-**Set variables:**
-```bash
-export DATABASE_PASSWORD=secret
-export REDIS_PASSWORD=secret
-export LLM_API_KEY=sk-your-key
-```
-
----
-
-### 2. Use Kubernetes Secrets
-
-```bash
-# Create secret
-kubectl create secret generic amp-secrets \
-  --from-literal=database-password=secret \
-  --from-literal=redis-password=secret \
-  --from-literal=llm-api-key=sk-your-key
-
-# Reference in deployment
-env:
-  - name: DATABASE_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: amp-secrets
-        key: database-password
-```
-
----
-
-### 3. Never Commit Secrets
-
-**`.gitignore`:**
-```
-config.yaml
-*.secret
-*.key
-.env
-```
-
-**Use examples:**
-```
-config.yaml.example  ✅ Commit (no secrets)
-config.yaml          ❌ Don't commit (has secrets)
-```
-
----
-
-### 4. Enable HTTP Authentication
-
-By default the HTTP API has **no authentication**: anyone who can reach the port can post alerts, create or delete silences, trigger `/-/reload` and start LLM investigations. AMP logs a `WARN` at startup while this is the case. Enable basic auth with an upstream-compatible web config file — the same file Alertmanager takes as `--web.config.file`.
-
-**Web config file** (`web-config.yml`):
-```yaml
-basic_auth_users:
-  prometheus: $2y$10$...   # bcrypt hash, never the plain password
-  alice: $2y$10$...
-```
-
-Generate a hash with `htpasswd -nBC 10 <user> | cut -d: -f2`.
-
-**Point AMP at it** (first match wins):
-
-| Source | Example |
+| Value | Becomes |
 |---|---|
-| CLI flag | `-web.config.file=/etc/amp/web/web-config.yml` (also `--web.config.file`) |
-| `config.yaml` | `server.web_config_file: /etc/amp/web/web-config.yml` |
-| Environment | `SERVER_WEB_CONFIG_FILE=/etc/amp/web/web-config.yml` |
+| `alertmanager.config` | `alertmanager.yml` in ConfigMap `<fullname>`, verbatim |
+| `profile`, `environment` | `profile`, `app.environment` |
+| `externalDatabase.*` or the bundled `postgresql.*` | `database.*`; the password goes to `DATABASE_PASSWORD` from a Secret |
+| `llm.enabled`, `provider`, `proxyUrl`, `model`, `timeout`, `maxRetries`, `agentMode`, `notifyWait`, `dropNoise` | `llm.*` (`proxyUrl` → `base_url`); the key goes to `LLM_API_KEY` from a Secret |
+| `investigation.enabled`, `workerCount`, `queueSize`, `maxRetries`, `retryInterval`, `llmTimeout`, `onlyFiring` | `investigation.*` |
+| `publishing.enabled`, `discovery.namespace` (default: the release namespace), `discovery.labelSelector`, `refresh.interval` | `publishing.*` |
+| `alertmanager.ampConfig` | Merged over all of the above, for keys without a value of their own: `investigation.tools`, `investigation.runbooks`, `server.auth`, … |
+| `webConfig.existingSecret` | `--web.config.file` |
+| `alertmanager.replicas`, `externalURL`, `peerTimeout`, `persistence`, `extraArgs` | Flags and the StatefulSet |
 
-**What is checked at startup** — any of these stops the process with an error naming the problem (it never starts open by accident):
-- the file is missing or is not valid YAML;
-- `basic_auth_users` is missing or empty (upstream treats an empty list as "auth off"; AMP treats it as a mistake — to disable auth, remove the setting);
-- a password is not a bcrypt hash;
-- an unknown key, or an upstream key AMP does not implement: `tls_server_config` (terminate TLS at the ingress or service mesh), `http_server_config`, `rate_limit`.
-
-**Paths without credentials.** Only exact paths listed here bypass auth; the route prefix is not part of them:
-```yaml
-server:
-  auth:
-    unauthenticated_paths: ["/-/healthy", "/-/ready"]   # default
-```
-`/-/healthy` and `/-/ready` run the same checks as `/healthz` and `/readyz` but answer plain text, so they suit kubelet probes. `/healthz`, `/readyz` (JSON component reports) and `/metrics` stay protected — scrape `/metrics` with `basic_auth`, or add it to the list.
-
-**Rotating passwords.** Edits to the web config file apply without a restart (checked at most once per second). If an edited file fails the checks above, the previous users stay in effect, AMP logs an `ERROR` and increments `amp_http_auth_config_reload_failures_total` — an edit can never open the API or lock out ingest. Changing `server.web_config_file` or `server.auth.unauthenticated_paths` itself requires a restart (`/-/reload` reports warning `W605`).
-
-**Metrics:** `amp_http_auth_failures_total{reason="missing|invalid"}`, `amp_http_auth_config_reload_failures_total`.
-
-**Clients:**
-```yaml
-# Prometheus (prometheus.yml)
-alerting:
-  alertmanagers:
-    - static_configs: [{ targets: ["amp:9093"] }]
-      basic_auth:
-        username: prometheus
-        password_file: /etc/prometheus/amp-password
-```
-```yaml
-# amtool: --http.config.file=amtool-http.yml
-basic_auth:
-  username: alice
-  password_file: /home/alice/.amp-password
-```
-Grafana (Alertmanager data source) and karma use their own basic-auth settings. The built-in dashboard works through the browser's login prompt.
-
-**Helm:** create a Secret holding `web-config.yml` and set `webConfig.existingSecret`. Not yet compatible with `configReloader` (the chart refuses to render the combination). The chart's ServiceMonitor then needs `monitoring.serviceMonitor.basicAuth.secretName`, and an `ingress.enabled: true` renders only with `webConfig.existingSecret` or `ingress.externalAuth: true` — see `helm/amp/README.md` → Network Exposure (Ingress auth, NetworkPolicy, ServiceMonitor). `webhook.authentication.*` is **not** enforced and never was — AMP logs a `WARN` if it is enabled.
-
----
-
-## 🚀 Deployment Scenarios
-
-### Scenario 1: Docker Compose
-
-```yaml
-# docker-compose.yml
-services:
-  amp:
-    image: amp:latest
-    volumes:
-      - ./config.yaml:/etc/amp/config.yaml
-      - ./alertmanager.yaml:/etc/amp/alertmanager.yaml
-    environment:
-      - DATABASE_PASSWORD=${DATABASE_PASSWORD}
-    command: ["--config", "/etc/amp/config.yaml"]
-```
-
----
-
-### Scenario 2: Kubernetes
-
-```yaml
-# deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: amp
-spec:
-  template:
-    spec:
-      containers:
-      - name: amp
-        image: amp:latest
-        env:
-        - name: DATABASE_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: amp-secrets
-              key: database-password
-        volumeMounts:
-        - name: config
-          mountPath: /etc/amp/config.yaml
-          subPath: config.yaml
-      volumes:
-      - name: config
-        configMap:
-          name: amp-config
-```
-
-**Load alertmanager.yaml:**
-```bash
-# Via init container or API call
-kubectl exec -it amp-0 -- curl -X POST http://localhost:9093/api/v2/config \
-  --data-binary @/etc/alertmanager/alertmanager.yaml
-```
-
----
-
-### Scenario 3: Bare Metal
+Both ConfigMaps are checksummed in the pod template, so a change of either rolls the pods. The rendered AMP file:
 
 ```bash
-# 1. Create configs
-cp config.yaml.example /etc/amp/config.yaml
-vi /etc/amp/config.yaml
-
-cp examples/alertmanager.yaml /etc/amp/alertmanager.yaml
-vi /etc/amp/alertmanager.yaml
-
-# 2. Set environment
-export DATABASE_PASSWORD=secret
-export REDIS_PASSWORD=secret
-
-# 3. Start service
-/usr/local/bin/amp-server --config /etc/amp/config.yaml
-
-# 4. Load alerting config
-curl -X POST http://localhost:9093/api/v2/config \
-  --data-binary @/etc/amp/alertmanager.yaml
+helm template amp ./helm/amp -f values.yaml -s templates/amp-config.yaml
 ```
 
----
+`alertmanager.ampConfig` is a ConfigMap: no secrets there. Put them in `extraEnv` from a Secret (`INVESTIGATION_TOOLS_DATABASE_DSN`, …).
 
-## 📖 Related Documentation
+Values of the chart before v0.1.0 (`configFile`, `grouping`, `cache`, `server`, `storage`, …) fail the render with a message naming the replacement; the full table is in [MIGRATION_FROM_LEGACY_CORE.md](MIGRATION_FROM_LEGACY_CORE.md#step-2-convert-the-helm-values).
 
-- **`config.yaml.example`** - Full application config example
-- **`go-app/internal/infrastructure/routing/testdata/production.yaml`** - Full alertmanager config example
-- **`docs/ALERTMANAGER_COMPATIBILITY.md`** - API compatibility guide (contract-locked core method matrix)
-- **`helm/amp/DEPLOYMENT.md`** - Kubernetes deployment guide
-- **`docs/MIGRATION_QUICK_START.md`** - Migration from Alertmanager
+## Kubernetes-Secret targets
 
----
-
-## 🏆 Summary
-
-### Two Configs = Best Practice ✅
-
-**Application Config (`config.yaml`):**
-- Infrastructure settings
-- Restart required
-- Managed by DevOps
-
-**Alerting Config (`alertmanager.yaml`):**
-- Routing and receivers
-- Hot reload supported
-- Managed by SRE
-
-**This is the standard approach used by:**
-- ✅ Prometheus + Alertmanager
-- ✅ Grafana
-- ✅ Kubernetes
-- ✅ Industry best practices
-
-**Benefits:**
-- ✅ Separation of concerns
-- ✅ Hot reload support
-- ✅ Security (secrets separate)
-- ✅ Core non-deprecated Alertmanager API compatibility baseline
-- ✅ Flexible management
-
----
-
-_Guide completed: 9 декабря 2024, 16:35 MSK_
-_Status: Configuration architecture is CORRECT_
-_Standard: Industry best practices_
-
-**DOCUMENTATION COMPLETE! ✅**
+Format, scoping and conversion to upstream integrations: [ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md#kubernetes-secret-targets). With `rootly.enabled` the chart creates one such Secret for a Rootly webhook.

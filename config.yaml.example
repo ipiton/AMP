@@ -1,504 +1,137 @@
-# Alertmanager++ Configuration Example
-# This file demonstrates all available configuration options
+# AMP configuration (amp-upstream --amp.config.file=amp.yaml)
+#
+# This file holds only AMP's own settings. Routes, receivers, inhibit rules,
+# time intervals and templates go to alertmanager.yml (--config.file), which
+# is upstream Alertmanager's file, read by upstream's parser.
+#
+# Every key is optional; the values below are the defaults unless marked
+# "example". A missing file is not an error: amp-upstream then runs with
+# these defaults. Unknown keys are ignored with one warning at start
+# ("AMP configuration keys ignored ... keys [...]").
+#
+# Environment variables override keys: upper case, "." -> "_", e.g.
+# DATABASE_PASSWORD, LLM_API_KEY, LLM_ENABLED. Keep secrets there, not here.
+#
+# With the Helm chart this file is generated from the chart's values
+# (<fullname>-amp-config); alertmanager.ampConfig is merged over it. See
+# docs/CONFIGURATION_GUIDE.md.
 
-# ============================================================================
-# Deployment Profile (TN-200)
-# ============================================================================
-# Values: "lite" (embedded storage) or "standard" (Postgres+Redis)
+# standard: alert history, investigations and K8s-Secret targets in
+#           PostgreSQL.
+# lite:     no PostgreSQL. Alerting is unaffected; history, investigations,
+#           K8s-Secret targets and /api/amp/v1 (503) are off.
 profile: standard
 
-# ============================================================================
-# Storage Backend (TN-201)
-# ============================================================================
-storage:
-  backend: postgres  # "filesystem" for Lite, "postgres" for Standard
-  filesystem_path: /data/alerthistory.db  # Used in Lite mode
-
-  # File-snapshot persistence for the Lite profile's silences + notification
-  # log (wave 6, FU-LITE-FILE-SNAPSHOT) — mirrors upstream Alertmanager's
-  # --storage.path, but is a single FILE, not a directory (upstream writes
-  # separate nflog/silences files under the given directory); also distinct
-  # from filesystem_path above, which is the unrelated SQLite alert-history
-  # path. Empty (the default) DISABLES snapshotting entirely: this must be
-  # an explicit opt-in, so leaving it unset never starts writing files as a
-  # side effect of upgrading. Only consulted for profile: lite — the
-  # Standard profile's Postgres/Redis already own durability, and setting
-  # this here has no effect for it beyond a startup log line.
-  path: ""  # e.g. /data/amp-snapshot.json (a FILE path, not a directory) to enable
-  snapshot_interval: 5m  # periodic flush interval; final write also happens on graceful shutdown
-
-# ============================================================================
-# Server Configuration
-# ============================================================================
 server:
-  port: 8080
-  host: 0.0.0.0
-  read_timeout: 30s
-  write_timeout: 30s
-  idle_timeout: 120s
-  graceful_shutdown_timeout: 30s
-  websocket:
-    # Comma-separated list of origins allowed to open WebSocket connections.
-    # Empty = same-origin only (secure default); "*" = allow any origin (dev only).
-    allowed_origins: ""
-  cors:
-    # CORS for the whole HTTP API (same shape as webhook.cors).
-    enabled: false
-    allowed_origins: ""   # comma-separated; "*" = any origin (dev only)
-    allowed_methods: "GET, POST, PUT, DELETE, OPTIONS"
-    allowed_headers: "Content-Type, Authorization, X-Request-ID"
+  # Upstream web config (basic auth, TLS options) when --web.config.file is
+  # not given; SERVER_WEB_CONFIG_FILE is the same setting from the env.
+  web_config_file: ""
+  auth:
+    # Paths that skip basic auth. Add /metrics for a scraper without
+    # credentials. Paths are relative to the --web.external-url path.
+    unauthenticated_paths:
+      - /-/healthy
+      - /-/ready
 
-# ============================================================================
-# Database Configuration (PostgreSQL)
-# ============================================================================
+app:
+  # production turns on the database credential checks below.
+  environment: development
+
+# Alert history and investigation results (profile standard). Migrations run
+# at start. If the database cannot be reached (or a migration fails) at
+# start, amp-upstream runs without history and investigations until the next
+# restart; alerting works as usual. Invalid credentials under production
+# (below) stop the start.
 database:
-  driver: postgres
   host: localhost
   port: 5432
   database: alerthistory
-  username: postgres
-  password: postgres
-  ssl_mode: disable
-  # app.environment: production rejects ssl_mode "disable" unless this is
-  # true. Only for a database inside the cluster; AMP logs a warning with the
-  # host. The Helm chart sets it for its bundled PostgreSQL (no TLS) only.
+  # DATABASE_USERNAME. Empty: no history ("database user is required" in the
+  # log), alerting unaffected.
+  username: ""
+  # DATABASE_PASSWORD. Under app.environment: production the username and
+  # password are required and the password must be at least 12 characters
+  # and not a known weak one.
+  password: ""
+  # disable | require | verify-ca | verify-full (allow and prefer are
+  # refused: they may fall back to plaintext). disable is refused under
+  # production unless
+  # allow_insecure_ssl_in_production is true.
+  ssl_mode: require
   allow_insecure_ssl_in_production: false
   max_connections: 25
   min_connections: 5
   max_conn_lifetime: 1h
-  max_conn_idle_time: 10m
+  max_conn_idle_time: 30m
   connect_timeout: 10s
-  query_timeout: 30s
 
-# ============================================================================
-# Redis Configuration (Optional)
-# ============================================================================
-redis:
-  addr: localhost:6379
-  password: ""
-  db: 0
-  pool_size: 10
-  min_idle_conns: 5
-  dial_timeout: 5s
-  read_timeout: 3s
-  write_timeout: 3s
-  max_retries: 3
-  min_retry_backoff: 8ms
-  max_retry_backoff: 512ms
-  # Standard profile: how long to retry an unreachable cache at startup before
-  # falling back to the in-memory cache for the process's life. 0s = one attempt.
-  startup_wait: 60s
-
-# ============================================================================
-# LLM Configuration (Classification)
-# ============================================================================
+# Classification of firing alerts by an OpenAI-compatible chat API (bring
+# your own key). Results reach receivers as llm_severity, llm_confidence,
+# llm_reasoning and llm_recommendations annotations.
 llm:
-  provider: openai  # openai, anthropic, ollama
-  model: gpt-4
-  api_key: ${LLM_API_KEY}
-  base_url: https://api.openai.com/v1
-  timeout: 30s
-  max_retries: 3       # retries of 429/5xx/timeouts per classification; 0 = one attempt
-  temperature: 0.0
-  max_tokens: 500
-  # agent_mode: true enables PHASE-5B agentic loop with tool calling.
-  # When false, investigation uses a single-shot LLM call.
-  agent_mode: false
-  # amp-upstream only (ADR-019; cmd/server ignores both): how long a
-  # notification waits for a pending classification of its alerts (0 = do
-  # not wait), and whether alerts classified as noise are left out of it.
-  notify_wait: 5s
-  drop_noise: false
-
-# ============================================================================
-# Investigation Pipeline (PHASE-5A / 5B)
-# ============================================================================
-# Async "Phase 2" pipeline: classify → publish happens immediately, an LLM
-# investigation runs in the background and is persisted for later retrieval
-# via GET /api/v1/alerts/{fingerprint}/investigation.
-# Requires: standard profile + Postgres + llm.enabled=true.
-# amp-upstream (ADR-019) also writes the alert history to Postgres with the
-# standard profile and queues investigations after classification; it has no
-# agent_mode tools yet, and runs without both if Postgres is down at start.
-investigation:
-  enabled: false         # master switch for the pipeline
-  worker_count: 3        # concurrent investigation workers
-  queue_size: 500        # in-memory job buffer; overflow → drop + metric
-  max_retries: 3         # transient LLM errors retried with exp backoff
-  retry_interval: 5s     # base backoff
-  llm_timeout: 60s       # per-investigation LLM call timeout
-  only_firing: true      # skip resolved alerts (no value in investigating recovery)
-  # Built-in investigation tools (PHASE-6A). Requires llm.agent_mode=true.
-  tools:
-    prometheus:
-      endpoint: http://prometheus:9090   # Prometheus HTTP API base URL
-      timeout: 30s
-      # username: ""  # optional basic auth
-      # password: ""
-    loki:
-      endpoint: http://loki:3100         # Loki HTTP API base URL
-      timeout: 30s
-      # username: ""  # optional basic auth
-      # password: ""
-    kubernetes:
-      enabled: false    # set true when running inside k8s or with kubeconfig
-      kubeconfig: ""    # empty = in-cluster; or path like /home/user/.kube/config
-      # Namespaces the tool may read. Empty = only the alert's `namespace` label,
-      # which the alert sender controls (a warning is logged); ["*"] = any.
-      # This list is the security boundary: set it, and pair it with RBAC.
-      allowed_namespaces: []
-    database:
-      enabled: false    # set true to expose pg_stat_activity / pg_stat_statements
-      # Database to inspect (required; the tool is not registered without it).
-      # Never AMP's own database. Use a read-only role, e.g. a pg_monitor member.
-      # Prefer the INVESTIGATION_TOOLS_DATABASE_DSN env var (from a Secret).
-      dsn: ""           # postgres://monitor:password@db:5432/postgres?sslmode=require
-  # Runbook engine (PHASE-6B). Requires llm.agent_mode=true.
-  # Markdown runbooks with YAML frontmatter, matched by alert labels and appended
-  # to the agent's system prompt. Loaded once at startup; a missing directory
-  # disables runbooks with a warning. Example: examples/runbooks/.
-  runbooks:
-    enabled: false
-    path: /etc/amp/runbooks   # scanned recursively for *.md; dot-entries skipped
-    max_runbooks: 3           # most specific matches first
-    max_chars: 4000           # per runbook body; longer bodies are truncated
-
-# ============================================================================
-# Logging Configuration
-# ============================================================================
-log:
-  level: info  # debug, info, warn, error
-  format: json  # json, text
-  output: stdout  # stdout, file
-  file_path: /var/log/alertmanager++.log
-
-# ============================================================================
-# Cache Configuration
-# ============================================================================
-cache:
-  enabled: true
-  backend: redis  # memory, redis
-  ttl: 1h
-  max_size: 1000
-
-# ============================================================================
-# Distributed Lock Configuration
-# ============================================================================
-lock:
-  enabled: true
-  backend: redis  # memory, redis
-  ttl: 30s
-
-# ============================================================================
-# Application Configuration
-# ============================================================================
-app:
-  name: Alertmanager++
-  version: 0.0.1
-  environment: production  # development, staging, production
-
-# ============================================================================
-# Metrics Configuration
-# ============================================================================
-metrics:
-  enabled: true
-  path: /metrics
-  namespace: alert_history
-
-# ============================================================================
-# Webhook Configuration
-# ============================================================================
-webhook:
-  max_request_size: 1048576  # 1MB
-  request_timeout: 30s
-
-  rate_limiting:
-    enabled: true
-    per_ip_limit: 100   # requests per second per IP
-    global_limit: 1000  # requests per second globally
-
-  authentication:
-    enabled: false
-    type: apikey  # apikey, jwt
-    api_key: ${WEBHOOK_API_KEY}
-    jwt_secret: ${WEBHOOK_JWT_SECRET}
-
-  signature:
-    enabled: false
-    secret: ${WEBHOOK_SIGNATURE_SECRET}
-
-  cors:
-    enabled: false
-    allowed_origins: "*"
-    allowed_methods: "POST,OPTIONS"
-    allowed_headers: "Content-Type,Authorization"
-
-# ============================================================================
-# HTTP Client Configuration (TN-180)
-# ============================================================================
-http_client:
-  timeout: 30s
-  max_idle_conns: 100
-  max_idle_conns_per_host: 10
-  idle_conn_timeout: 90s
-  tls_handshake_timeout: 10s
-  expect_continue_timeout: 1s
-  response_header_timeout: 10s
-  disable_keep_alives: false
-  max_response_header_bytes: 0
-  write_buffer_size: 0
-  read_buffer_size: 0
-
-# ============================================================================
-# Retry Configuration (Unified across all modules)
-# ============================================================================
-retry:
-  max_attempts: 4       # Total attempts (3 retries + 1 initial)
-  base_delay: 100ms     # Base delay for exponential backoff
-  max_delay: 30s        # Maximum delay between retries
-  multiplier: 2.0       # Backoff multiplier (2.0 = exponential)
-  jitter_ratio: 0.15    # Jitter ratio (0.15 = 15% random jitter)
-
-# ============================================================================
-# Telemetry (OpenTelemetry tracing)
-# ============================================================================
-telemetry:
   enabled: false
-  endpoint: localhost:4317   # OTLP gRPC collector
-  sampling_ratio: 1.0
-  insecure: false            # true = plaintext gRPC (dev only); default TLS
-  # ca_cert_file: /etc/amp/otlp-ca.pem  # optional CA for collector verification
+  provider: openai          # openai | openai-compatible
+  api_key: ""               # LLM_API_KEY
+  base_url: https://api.openai.com/v1
+  model: gpt-3.5-turbo
+  max_tokens: 1000
+  temperature: 0.7
+  timeout: 30s
+  max_retries: 3
+  # How long a notification waits for the classification of its alerts.
+  # On timeout it goes out without the annotations.
+  notify_wait: 5s
+  # true: alerts classified as noise are not delivered (they stay in
+  # /api/v2/alerts and in the history).
+  drop_noise: false
+  # true: investigations run as an agent loop with the tools and runbooks
+  # below; false: one LLM call per investigation.
+  agent_mode: false
 
-# ============================================================================
-# Route Tree + Receivers (Alertmanager parity, task 1.3)
-# ============================================================================
-# Optional. When the `route:` key below is present, AMP parses it together
-# with `receivers:` (and the optional `global:` block) via the existing
-# infrastructure/routing.Parse() — the same 4-layer validator used for
-# standalone Alertmanager-compatible config files: YAML syntax, struct tags,
-# semantic checks (e.g. every route.receiver must exist in `receivers:`),
-# and security limits (max nesting depth, max routes/receivers).
-#
-# If `route:` is absent, AMP falls back to the legacy single-receiver model
-# (just the flat `receivers:` name list, no tree) — nothing below is
-# required for AMP to start.
-#
-# global:
-#   resolve_timeout: 5m
+# LLM investigation of firing incidents. Needs llm.enabled and PostgreSQL.
+investigation:
+  enabled: false
+  worker_count: 3
+  queue_size: 500
+  max_retries: 3
+  retry_interval: 5s
+  llm_timeout: 60s
+  only_firing: true
+  # Agent-mode tools (llm.agent_mode: true). A tool without its settings is
+  # not registered.
+  tools: {}
+  # tools:                                         # example
+  #   prometheus:
+  #     endpoint: http://prometheus.monitoring.svc:9090
+  #     timeout: 10s
+  #     # username, password: basic auth (this file only)
+  #   loki:
+  #     endpoint: http://loki.monitoring.svc:3100
+  #     timeout: 10s
+  #   kubernetes:
+  #     enabled: true
+  #     kubeconfig: ""              # empty: in-cluster
+  #     # empty: only the alert's namespace label; ["*"]: any namespace
+  #     allowed_namespaces: []
+  #   database:
+  #     enabled: true
+  #     # INVESTIGATION_TOOLS_DATABASE_DSN. The database the tool inspects,
+  #     # never AMP's own.
+  #     dsn: ""
+  runbooks:
+    enabled: false              # needs llm.agent_mode: true
+    path: /etc/amp/runbooks
+    max_runbooks: 3
+    max_chars: 4000
 
-route:
-  # Alerts are grouped on this tree's group_by and timings by default
-  # (grouping.enabled: true). Set grouping.enabled: false to publish every
-  # alert as soon as it arrives.
-  #
-  # Root route: receiver + defaults inherited by all child routes unless
-  # overridden.
-  receiver: default
-  group_by: [alertname, cluster]
-  group_wait: 30s        # wait for more alerts before the first notification
-  group_interval: 5m     # wait between updates for an already-notified group
-  repeat_interval: 4h    # re-notify interval for alerts that stay firing
-
-  routes:
-    # Exact label match (`match:`) — critical alerts page immediately and
-    # also keep matching subsequent sibling routes (`continue: true`).
-    - receiver: pagerduty-critical
-      match:
-        severity: critical
-      group_wait: 10s
-      repeat_interval: 30m
-      continue: true
-
-    # `matchers:` list syntax (Alertmanager >=0.22) — the only syntax that
-    # can express negation (!=, !~). Here: anything not "info" severity.
-    - receiver: slack-warnings
-      matchers:
-        - 'severity != info'
-        - 'team =~ "platform|sre"'
-      group_wait: 1m
-
-    # Regex label match (`match_re:`) with its own nested child route.
-    - receiver: notify-database-team
-      match_re:
-        service: "^(postgres|mysql|redis).*"
-      group_by: [alertname, instance]
-      routes:
-        - receiver: pagerduty-critical
-          match:
-            severity: critical
-
-# time_intervals: named groups of time constraints (PARITY-B1), referenced
-# by name from route.mute_time_intervals / route.active_time_intervals
-# below. Uncomment to try it:
-#
-# time_intervals:
-#   - name: weekends
-#     time_intervals:
-#       - weekdays: ['saturday', 'sunday']
-#
-#   - name: business-hours
-#     time_intervals:
-#       - times:
-#           - start_time: "09:00"
-#             end_time: "17:00"
-#         weekdays: ['monday:friday']
-#         location: "Europe/Moscow"   # IANA tz name; defaults to UTC
-#
-# Then wire a route to mute during weekends and/or only page during
-# business hours:
-#
-#   - receiver: slack-warnings
-#     mute_time_intervals: [weekends]
-#     active_time_intervals: [business-hours]
-#
-# NOTE: the deprecated top-level `mute_time_intervals:` section name (old
-# Alertmanager alias for `time_intervals:`) is also accepted and merged
-# into the same namespace, but logs a deprecation warning — prefer
-# `time_intervals:`.
-
-# ============================================================================
-# Receivers (Alertmanager parity, AMP-PARITY-WAVE6-EPIC)
-#
-# Every integration block below becomes a live delivery target on load —
-# named `cfg:<receiver>/<type><idx>` and scoped to its own receiver. NO
-# Kubernetes Secret is required. Secret-provisioned targets
-# (`amp.receiver`-scoped) still work and merge into the same view; if the same
-# endpoint is declared in BOTH places it receives every notification twice.
-#
-# Endpoints can be inherited from the optional `global:` section instead of
-# being repeated per integration (per-integration value always wins):
-#
-#   global:
-#     slack_api_url: https://hooks.slack.example.com/services/PLACEHOLDER
-#     pagerduty_url: https://events.pagerduty.com    # regional/proxy endpoint
-#     telegram_api_url: https://api.telegram.org
-#     smtp_smarthost: smtp.example.com:587           # REQUIRED for email_configs
-#     smtp_from: alerts@example.com                  # REQUIRED unless every
-#                                                    # email_config sets `from`
-#     smtp_auth_username: amp
-#     smtp_auth_password: "***"                      # inject via Vault/ESO
-#     smtp_require_tls: true
-#
-# A slack_config with neither its own `api_url` nor `global.slack_api_url`
-# fails to load, as does an email_config without global SMTP settings (AMP
-# has no per-email_config smarthost/auth fields).
-#
-# Every secret field above also accepts a `_file` twin instead of the inline
-# value — the shape a Kubernetes Secret mounted as a volume takes:
-# `url_file` (webhook), `routing_key_file` (pagerduty), `api_url_file`
-# (slack), `bot_token_file` (telegram), `slack_api_url_file` /
-# `smtp_auth_password_file` (global). Re-read on every config load/reload;
-# setting BOTH the inline field and its `_file` twin is a load error. See
-# docs/ALERTMANAGER_COMPATIBILITY.md's "`*_file` secret variants" section for
-# the rotation caveat (reload/SIGHUP required, no lazy per-notification
-# re-read). Example:
-#
-#   slack_configs:
-#     - api_url_file: /etc/amp/secrets/slack-webhook-url   # mounted Secret
-#       channel: "#alerts"
-#
-# `send_resolved` (default true) is honoured per integration: false suppresses
-# resolved notifications for that target only.
-#
-# A receiver with NO integrations is upstream's blackhole receiver — valid,
-# and everything routed to it is dropped (counted as
-# alert_history_publishing_blackhole_drops_total). The same applies to a
-# receiver whose only block is one AMP cannot deliver (opsgenie_configs,
-# victorops_configs, wechat_configs), which also logs a WARNING at load.
-#
-# Field-level caveat: endpoints and credentials are delivered, but
-# presentation/categorisation fields (Slack channel/title/color, PagerDuty
-# severity/details, Telegram parse_mode) and per-integration http_config are
-# parsed and NOT delivered — see docs/ALERTMANAGER_COMPATIBILITY.md
-# "Per-integration field fidelity".
-# ============================================================================
-receivers:
-  - name: default
-    webhook_configs:
-      - url: https://webhook.example.com/alerts
-        http_method: POST
-        send_resolved: true
-        max_alerts: 10
-
-  # Upstream's blackhole receiver: route noise here to drop it.
-  - name: "null"
-
-  - name: pagerduty-critical
-    pagerduty_configs:
-      # routing_key is the PagerDuty Events API v2 integration key: any
-      # non-empty value is accepted (the old exactly-32-chars rule was relaxed
-      # to match upstream, whose routing_key is a plain secret). Replace with
-      # the real key via secret injection (Vault/ESO) — never commit a real
-      # key here.
-      - routing_key: "00000000000000000000000000000000"
-        severity: critical
-        description: "Critical Alert: {{ .GroupLabels.alertname }}"
-        details:
-          environment: "{{ .CommonLabels.environment }}"
-          cluster: "{{ .CommonLabels.cluster }}"
-
-  - name: slack-warnings
-    slack_configs:
-      # Replace with the real Slack Incoming Webhook URL via secret
-      # injection (Vault/ESO) — never commit a real webhook URL here.
-      - api_url: https://hooks.slack.example.com/services/PLACEHOLDER
-        channel: "#alerts-warnings"
-        username: "Alertmanager"
-        icon_emoji: ":warning:"
-        title: "Warning: {{ .GroupLabels.alertname }}"
-        text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
-        color: warning
-        send_resolved: true
-
-  - name: notify-database-team
-    webhook_configs:
-      - url: https://webhook.example.com/database-team
-        send_resolved: true
-
-# ============================================================================
-# Inhibition Rules (Alertmanager parity, PARITY-A2)
-# Suppress target alerts while a source alert is firing on the same labels.
-# Compatible with Alertmanager inhibit_rules format. Upstream's top-level
-# `inhibit_rules:` is applied as well; both lists are merged, top-level first.
-# ============================================================================
-inhibition:
-  # Optional: path to a separate YAML file with inhibit_rules
-  # config_file: /etc/amp/inhibition_rules.yaml
-
-  inhibit_rules:
-    # Example: NodeDown (critical) inhibits InstanceDown on the same node/cluster
-    - name: "node-down-inhibits-instance-down"
-      source_match:
-        alertname: "NodeDown"
-        severity: "critical"
-      target_match:
-        alertname: "InstanceDown"
-      equal:
-        - node
-        - cluster
-
-    # Example: any critical alert inhibits warning/info alerts in the same scope
-    - name: "critical-inhibits-warnings"
-      source_match:
-        severity: "critical"
-      target_match_re:
-        severity: "warning|info"
-      equal:
-        - cluster
-        - namespace
-
-# ============================================================================
-# Environment Variables
-# ============================================================================
-# The following environment variables can be used to override config values:
-#
-# - LLM_API_KEY: LLM provider API key
-# - WEBHOOK_API_KEY: Webhook authentication API key
-# - WEBHOOK_JWT_SECRET: JWT secret for webhook authentication
-# - WEBHOOK_SIGNATURE_SECRET: HMAC secret for webhook signature verification
-# - DATABASE_PASSWORD: Database password
-# - REDIS_PASSWORD: Redis password
-#
-# Example:
-#   export LLM_API_KEY=sk-...
-#   export DATABASE_PASSWORD=secret
+# Kubernetes Secrets as receiver integrations (profile standard; needs the
+# Kubernetes API). See docs/ALERTMANAGER_COMPATIBILITY.md#kubernetes-secret-targets.
+publishing:
+  enabled: true
+  discovery:
+    # Empty: the pod's own namespace (POD_NAMESPACE, else the service
+    # account namespace).
+    namespace: ""
+    label_selector: publishing-target=true
+  refresh:
+    interval: 5m

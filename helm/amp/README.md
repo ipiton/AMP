@@ -421,6 +421,8 @@ With one replica, the Service `<fullname>.<namespace>.svc:9093` is enough. With 
 helm upgrade amp ./helm/amp --reuse-values
 ```
 
+From a chart before v0.1.0 (AMP's own core, a Deployment on port 8080), follow [docs/MIGRATION_FROM_LEGACY_CORE.md](../../docs/MIGRATION_FROM_LEGACY_CORE.md): the values, the port, the probes and the silences change.
+
 `--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. From a chart before `UPSTREAM-CORE-REMOVAL` (no `alertmanager.*` section) the render fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14) or a values file for this chart; a removed key left in your values also fails and names its replacement. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
 
 Upgrading a `profile: standard` release installed by a chart from before `HELM-VCT-CHART-LABELS` fails with `StatefulSet.apps "<fullname>-redis" is invalid: spec: Forbidden`: the labels of its volume claim template changed, and that field cannot be updated. Delete the StatefulSet object once, keeping its pod and volume, then upgrade:

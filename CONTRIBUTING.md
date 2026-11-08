@@ -68,8 +68,8 @@ make test
 # Optional: full repository test suite
 make test-all
 
-# Run locally
-./bin/server
+# Run locally (an alertmanager.yml in the current directory; see config.yaml.example for the AMP file)
+./amp-upstream --config.file=alertmanager.yml
 ```
 
 ## 📝 Commit Message Convention
@@ -122,16 +122,19 @@ func TestFeature(t *testing.T) {
 ```
 AMP/
 ├── go-app/
-│   ├── cmd/server/         # Application entry point
+│   ├── cmd/amp-upstream/      # Entry point: upstream Alertmanager plus AMP's layer
 │   ├── internal/
-│   │   ├── application/    # Application framework
-│   │   ├── business/       # Business logic
-│   │   ├── infrastructure/ # Infrastructure layer
-│   │   └── config/         # Configuration
-│   └── migrations/         # Database migrations
-├── pkg/core/               # Core interfaces and domain models
-├── examples/               # Extension examples
-└── docs/                   # Documentation
+│   │   ├── upstreamcore/      # Port of upstream's app package, contract suites
+│   │   ├── upstreamai/        # Classification, alert history
+│   │   ├── upstreamtargets/   # Kubernetes-Secret targets
+│   │   ├── ampapi/            # /api/amp/v1
+│   │   ├── webauth/           # Basic auth (upstream web config)
+│   │   ├── config/            # AMP configuration (amp.yaml)
+│   │   ├── core/, business/, infrastructure/, database/  # Investigation, LLM, storage
+│   └── migrations/            # Database migrations (goose)
+├── helm/amp/                  # Helm chart
+├── examples/                  # Integration examples
+└── docs/                      # Documentation
 ```
 
 ## 🔍 Code Review Process

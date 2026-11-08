@@ -1,1056 +1,158 @@
-# Alertmanager API Compatibility Matrix
+# Alertmanager Compatibility
 
-**Date**: 2026-08-18
-**Status**: 🟢 **ROUTING/GROUPING/HA PARITY LANDED** (branch `feat/alertmanager-parity`) — final amtool live-audit half of task 7.4 still pending
-**Alertmanager Version**: v0.27+ (API v2)
-**Alertmanager++ Version**: v0.0.1
+**Upstream version**: Prometheus Alertmanager **v0.34.1** (`go.mod`, `upstreamcore.PortedFrom`)
+**Applies to**: AMP v0.1.0 (`amp-upstream`), [ADR-019](06-planning/DECISIONS.md)
+**Revised**: 2026-11-08 (UPSTREAM-DOCS-MIGRATION)
 
----
+## Compatible by construction
 
-## Executive Summary
+AMP does not reimplement Alertmanager and does not claim compatibility from a test suite that compares two implementations. The delivery core of `amp-upstream` **is** upstream's code: the binary imports the packages of `github.com/prometheus/alertmanager` at the version pinned in `go-app/go.mod` and wires them the way upstream's `app` package wires them.
 
-This revision replaces the 2026-03-09 "controlled replacement slice" baseline. Since then, `feat/alertmanager-parity`
-landed a real routing tree, dispatcher/grouping semantics, mute/active time intervals, HA clustering, and config
-validation wired into startup + `/-/reload`. AMP now implements the *mechanics* of upstream Alertmanager's core
-pipeline (route matching → grouping → notify chain → dedup), not just a compatible-shaped API surface over a flat
-alert store. The [Feature Parity Matrix](#feature-parity-matrix) below is the new top-level view; the endpoint and
-receiver tables that follow it are kept for API-surface detail.
+| Upstream package | What it gives AMP |
+|---|---|
+| `config` | Parsing, defaults and validation of `alertmanager.yml`, including `*_file` secrets, `global` fallbacks, time intervals |
+| `dispatch` | The routing tree, `group_by`, `group_wait`/`group_interval`/`repeat_interval`, mute and active time intervals |
+| `notify` + `notify/*` | The notification pipeline (inhibit, silence, time-interval, dedup, retry stages) and all 18 receiver integrations |
+| `template` | Notification templates, the default templates, `templates:` globs |
+| `silence`, `nflog` | Silences and the notification log, with their on-disk snapshots in `--storage.path` |
+| `inhibit` | `inhibit_rules` |
+| `provider/mem` | The alert store and its garbage collection (`--data.retention`) |
+| `cluster` | memberlist gossip for HA (`--cluster.*`) |
+| `api/v2` | The `/api/v2` handlers, generated from upstream's OpenAPI spec |
 
-Every claim below is traceable to code on this branch. Where a claim only partially holds, the notes column says so
-explicitly rather than rounding up. See [Known Gaps](#known-gaps-honesty-notes) for the sharp edges.
+Upstream's `app` package itself cannot be built from the Go module (it embeds the UI, whose built assets are not in the module zip), so AMP keeps a port of it in `go-app/internal/upstreamcore/` (`core.go`, `reloader.go`, ported from `app/{app,reloader,cluster,metrics,lifecycle}.go` at v0.34.1). The port is the only upstream-shaped code AMP maintains; [UPSTREAM_UPGRADE.md](UPSTREAM_UPGRADE.md) describes how it follows a version bump, and `TestPortMatchesUpstreamVersion` fails while the port and `go.mod` disagree.
 
-**Before you copy an `alertmanager.yml` across (audit 2026-10-06):** the gaps the audit found on a verbatim upstream
-config are closed. The built-in filter no longer drops alerts by name, environment or namespace since
-`PROD-HARDCODED-FILTER` (2026-10-13); the rules it keeps are listed in #14. The top-level `inhibit_rules:` the audit
-found ignored (#9) is applied since `FU-TOPLEVEL-INHIBIT-RULES` (2026-10-12). Grouping (#13) is on by default since
-`PROD-GROUPING-DEFAULT`. The Helm chart's default values start since `HELM-DEFAULTS-VALIDATE` (2026-10-14); see #15.
+Consequences:
 
-Source of truth:
-- `go-app/internal/business/routing/` (route tree, matcher, evaluator)
-- `go-app/internal/infrastructure/grouping/` (dispatcher, timers, notify chain)
-- `go-app/internal/infrastructure/cluster/`, `go-app/internal/infrastructure/silencing/` (HA)
-- `go-app/internal/application/router.go`, `go-app/internal/application/handlers/`
-- `go-app/pkg/configvalidator/`
+- An `alertmanager.yml` that upstream v0.34.1 accepts, AMP accepts, and one upstream rejects, AMP rejects with the same error. `amtool check-config` is an exact check.
+- Behaviour you know from upstream (when a group fires, which silence mutes what, how a receiver formats its payload, how gossip deduplicates notifications) is upstream's behaviour. If AMP behaves differently there, it is a bug in the wiring, not a documented difference.
+- When upstream fixes a bug, AMP gets the fix by bumping the module; when upstream changes behaviour, so does AMP. Read upstream's changelog for each bump.
 
----
+The rest of this document lists what AMP adds around that core and where it deliberately differs.
 
-## Feature Parity Matrix
+## Divergences from upstream
 
-| Upstream feature | AMP status | Notes |
+| Area | Upstream v0.34.1 | AMP v0.1.0 |
 |---|---|---|
-| **Routing tree** — recursive matcher, `continue`, nested routes | 🟢 Supported | `internal/business/routing/matcher.go` `RouteMatcher.FindMatchingRoutes`: recursive descent, children take precedence over parent, `continue: true` keeps evaluating siblings for multi-match. (Previously misattributed here to `evaluator.go`, which only wraps it.) |
-| Matcher operators `=`, `!=`, `=~`, `!~` incl. `matchers:` list syntax | 🟢 Supported | `internal/business/routing/tree_builder.go` `parseMatchers`/`parseMatcherExpr` parse `match`, `match_re`, and the newer `matchers:` free-form syntax into all 4 operators. |
-| Regex matcher anchoring (`^(?:re)$`) | 🟢 Supported | Anchored consistently across all four paths that evaluate a user-supplied regex matcher against a live alert: `internal/business/routing/matcher.go`'s `anchorRegex` (route `matchers:`/`match_re`); `internal/infrastructure/inhibition/matchers_list.go`'s `anchorMatcherRegex` (inhibit rule `matchers:`/`match_re`, wave-7 fix rounds 1-2); `internal/core/silencing/matcher_cache.go`'s `anchorSilenceRegex` (silence `=~`/`!~` evaluation itself, wave-7 fix round 2); and `internal/infrastructure/storage/memory/silence_store.go`'s `silenceMatchesLabels` — the live suppression path (notify-chain Step 2 `filterSilenced`, `status.silencedBy`, `?silenced=`) — which delegates to that SAME `core/silencing` evaluator rather than duplicating it a fourth time (wave-7 fix round 3, R6). Before round 3, silencing's own evaluator (backing `POST /api/v2/silences/check`) was fixed but this fourth path was not, so a silence on `job=~"prod"` still suppressed `job="preprod-2"` in production while the preview endpoint had already stopped agreeing — the two disagreed for exactly the shapes that matter. Unanchored substring matching would be a parity bug at any of the four; the three independent anchoring helpers (routing/inhibition/silencing) are each a duplicated copy of the same one-line helper, by design (see each site's own doc comment for why it isn't a shared import) — storage/memory intentionally has no fourth copy, by construction. `internal/infrastructure/routing`'s own `RouteConfigParser.compileRegexPatterns` (`config.CompiledRegex`) also anchors as of the same fix round, though nothing consumes that path in production today (see Known Gap #11 on the dead `RegexCache.Preload` wiring). |
-| `route:`/`receivers:` config parsing | 🟢 Supported | `internal/infrastructure/routing.Parse()`, gated on a top-level `route:` section existing (`internal/config.loadRouteConfig`); legacy single-receiver configs skip this path entirely. |
-| `receivers[].*_configs` **auto-provisioning delivery** | 🟢 Supported (AMP-PARITY-WAVE6-EPIC) | An untouched upstream config delivers with **zero Kubernetes Secrets**: every `webhook_configs`/`slack_configs`/`pagerduty_configs`/`telegram_configs`/`email_configs` block becomes an in-memory publishing target named `cfg:<receiver>/<type><idx>`, scoped to its receiver, rebuilt on every config load/reload (`internal/business/publishing/config_targets.go`). Secrets still work and are unchanged — the two sources merge into one view. See [Receiver Integration Compatibility Matrix](#receiver-integration-compatibility-matrix) for the per-field fidelity table. |
-| `templates:` + per-integration template fields | 🟢 Supported (TEMPLATES-EPIC) | Notifications render through upstream's own template engine: the ported data model (`Data`/`Alerts`/`KV`, `internal/business/templating/data.go`), all 25 `DefaultFuncs`, and **verbatim** copies of upstream v0.34.0's `default.tmpl` + `email.tmpl` (checksums in `templates/NOTICE`). `templates:` globs are loaded at config load and on `/-/reload`, resolved relative to the CONFIG FILE's directory as upstream's `resolveFilepaths` does, with later definitions winning. Per-integration presentation fields (`slack_configs[].title`/`text`/`color`/`channel`/…, `pagerduty_configs[].description`/`severity`/`client`/`client_url`/`details`, `telegram_configs[].message`, `email_configs[].subject`/`html`/`text`/`headers`) render onto the wire, with upstream's own defaults filled in when unset — so an untouched upstream config produces upstream's output. `webhook_configs` is NOT templated, matching upstream (its v4 JSON body is struct-marshaled). See [Notification templates](#notification-templates) for divergences. |
-| Receiver-name charset | 🟢 Supported (one reserved character) | Any non-empty name except `/`, which is reserved as the group-key separator (`receiver=<name>/<group-key>`). Upstream has no restriction at all; dotted/colon/spaced/non-ASCII names (`team.dba`, `email:sre`, `ops team`) all work — they were rejected before the final fix wave. |
-| Route evaluation wired into ingest | 🟢 Supported | `internal/core/services/alert_processor.go` `evaluateRoute` calls `RouteEvaluator.Evaluate` per alert when configured; nil (no-op) in lite/legacy mode. |
-| Receiver-scoped delivery targets (`amp.receiver` annotation/label) | 🟢 Supported (AMP-native mechanism) | `internal/business/publishing/discovery_parse.go`: annotation = comma-separated list, label = single name fallback. Not an upstream concept — AMP's own target-discovery scoping, functionally equivalent. |
-| **Grouping** by route's `group_by` | 🟢 Supported | `internal/core/services/alert_processor.go` `groupKeyFor` derives group keys from the `RoutingDecision.GroupBy` computed per alert. A route with NO `group_by` (at any level, and no `global.group_by`) follows upstream exactly: one group per receiver with an empty label set — AMP used to substitute `["alertname"]` there, fixed post-merge in wave 6. `group_by: ['...']` (group by all labels) is also supported. |
-| Per-route `group_wait` / `group_interval` / `repeat_interval` | 🟢 Supported | Timings come from the matched route via `RoutingDecision`, not global defaults only — `internal/infrastructure/grouping/manager_impl.go`. Resolved as upstream's `dispatch.newRoute` does: a route's own value, else its parent's resolved value, else (root only) 30s / 5m / 4h — so a nested route without timings inherits its nearest ancestor's. `group_wait: 0s` notifies immediately; `group_interval: 0s` / `repeat_interval: 0s` fail config load, as upstream's "cannot be zero". Unset timings are not filled into the parsed config, so `/api/v2/status` `config.original` shows only what the file sets (`ROUTE-TIMINGS-BUNDLE`; nested routes used to get 30s/5m/4h and an explicit `0s` was treated as unset). |
-| Notify-chain order: Inhibit → Silence → TimeMute → Dedup | 🟢 Supported | `manager_impl.go` `publishGroupAlerts`, explicitly ordered and commented as matching upstream's pipeline; send-time evaluation, not ingest-time. |
-| One notification per group per fire, wire-level batching for webhook/alertmanager targets | 🟢 Supported | `publishGroupAlerts` makes exactly one `publisher.PublishGroup` call per group per successful fire. Webhook/alertmanager targets now deliver that as a single HTTP POST per `(group, target)` carrying an upstream-v4-shaped `alerts` JSON array (`BatchAlertPublisher.PublishBatch` / `GroupAlertFormatter.FormatGroup`, `internal/infrastructure/publishing/{publisher,formatter}.go`), with `groupLabels` resolved from the route's `group_by`. Publishers without a batch wire shape (Slack, Telegram, PagerDuty, Email) still get one job per target and iterate `Publish` once per alert within it. **Enqueue-vs-delivery caveat**: see [Known Gaps](#known-gaps-honesty-notes) #2. |
-| Cross-replica notification dedup | 🟢 Supported | Redis-backed `notifyLog.TryClaim` + `IsDuplicate` (task 6.1); in-memory fallback is a same-process-only no-op claim. Fail-open on Redis errors (documented trade-off). |
-| `time_intervals:` / `mute_time_intervals:` / `active_time_intervals:` | 🟢 Supported | `internal/infrastructure/routing/timeinterval/` + `upstream_fixtures_test.go` — ported upstream's own fixture corpus. Route-level names resolved via `routeTreeTimeIntervalLookup` at send time (whole-group suppression, not per-alert). |
-| `GET /api/v2/alerts` upstream query params (`active`/`silenced`/`inhibited`/`unprocessed`/`receiver`/`filter`) | 🟢 Supported | `internal/application/handlers/alerts.go` `parseAlertStateFilters`/`parseReceiverFilter`; legacy `status=`/`resolved=` kept as aliases. `inhibited` param is structurally implemented but currently a no-op — inhibition isn't wired into `alertconv.ToGettableAlert`'s `InhibitedBy` yet. |
-| `GET /api/v2/alerts/groups` upstream params | 🟢 Supported | Same state/receiver filters as above. Group labels come from the matched route's `group_by` and the receiver from the live route tree, per group (`alertGroupingResolver` in `internal/application/handlers/alerts.go`). AMP additionally accepts a `?group_by=` override, which upstream does not have. |
-| `GET /api/v2/status` nested `versionInfo` + `cluster` | 🟢 Supported | `internal/application/handlers/status_api.go`; `versionInfo` from ldflags-injected build vars, `cluster` from the Redis-heartbeat `ClusterStatus`. |
-| `GET /api/v2/status` `config.original` | 🟢 Supported, **secret-redacted** | Emits the Alertmanager-shaped section only (`route`/`receivers`/`inhibit_rules`/`time_intervals`/`global`), so `amtool config routes show` can re-parse it, with every secret-named field replaced by upstream's own `<secret>` placeholder (`AlertmanagerConfigYAML`). It is deliberately **not** the raw config file: this endpoint is unauthenticated unless `--web.config.file` is set, and the AMP config file also holds database/Redis/LLM credentials that are never exposed here. |
-| `endsAt` for alerts posted without one (`global.resolve_timeout`) | 🟡 Supported for the read API; no timeout-driven resolve | `PARITY-RESOLVE-TIMEOUT-ENDSAT`: a firing alert received without `endsAt` is stored with `endsAt = receivedAt + global.resolve_timeout` (default `5m`, as upstream), and every re-send extends the window. `GET /api/v2/alerts`, `GET /api/v1/alerts` and `GET /api/v2/alerts/groups` serve that value. An explicit `endsAt` is kept as sent. A `/-/reload` applies to the next POST and never rewrites stored alerts. The stamp happens in the in-memory store (`internal/infrastructure/storage/memory/alert_store.go`), so dedup, the database and notifications still see the alert exactly as sent (ADR-010). What is not upstream-equal yet: see [Known Gaps](#known-gaps-honesty-notes) #12. |
-| `POST /api/v1/alerts` alias | 🟢 Supported (POST only) | `internal/application/handlers/alerts.go` `V1AlertsHandler` delegates straight into the v2 ingest path (same payload shape). GET intentionally not restored — different legacy DTO, out of scope. |
-| `--web.route-prefix` / external-URL path inheritance | 🟢 Supported | `internal/application/route_prefix.go` `ResolveRoutePrefix` — explicit prefix wins; otherwise inherits from `external_url`'s path, matching upstream's own fallback rule. |
-| `--web.config.file` (HTTP authentication) | 🟡 `basic_auth_users` only | `PROD-AUTH`, `internal/application/webauth.go`. Same file format and request behaviour as upstream's exporter-toolkit (bcrypt, `WWW-Authenticate: Basic`, a placeholder hash for unknown users, cached verdicts, file changes picked up without restart). Also settable as `server.web_config_file` / `SERVER_WEB_CONFIG_FILE`. **Load errors** instead of silent ignores: `tls_server_config` (terminate TLS at the ingress/mesh), `http_server_config`, `rate_limit`. **Deliberate divergences**: an empty `basic_auth_users` is an error, not "auth off"; an invalid edit keeps the previous users instead of answering 500 to every request; `server.auth.unauthenticated_paths` (default `/-/healthy`, `/-/ready`) are served without credentials — upstream protects every path. No bearer tokens (upstream has none either). Default without the file: open, with a startup `WARN`. See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication" and ADR-011. |
-| Config validation (E-codes/W-warnings) wired into startup + `/-/reload` | 🟢 Supported | `pkg/configvalidator` wired into `internal/config.LoadConfig`, used by both process start and `/-/reload` (same function). Only fires for configs with a top-level `route:` section. |
-| Hot reload triggers: `SIGHUP` **and** `POST /-/reload` | 🟢 Supported | Both, as upstream. `SIGHUP` is handled by `watchReloadSignal` in `cmd/server/main.go`; it is repeatable and survives a failed reload (the previous config stays active). Routing-only edits (`route:`/`receivers:`/`time_intervals:` and nothing else) are applied — they were silently discarded before the final fix wave, with `/-/reload` still answering 200 OK. |
-| Resolved notification sent once, then the group is dropped | 🟢 Supported | `pruneResolvedAlerts` in `internal/infrastructure/grouping/manager_impl.go` removes resolved alerts after a *confirmed* delivery, or on a flush where every target is already covered by its last notification, matching upstream `aggrGroup.flush`; the group is deleted (and its timers cancelled) once that empties it. Alerts suppressed by inhibition/silence are kept, since they were never announced. |
-| `inhibit_rules[].source_matchers` / `target_matchers` (`matchers:` list syntax) | 🟢 Supported | Wave 7 (`FU-INHIBIT-MATCHERS`): the inhibition engine (`internal/infrastructure/inhibition`) parses and evaluates the matchers-form list, reusing the wave-5 upstream-verbatim grammar port (`pkg/configvalidator/matcher.Parse`) and anchoring `=~`/`!~` the same way `internal/business/routing` does (`^(?:pattern)$`). Coexists with the legacy `source_match`/`source_match_re`/`target_match`/`target_match_re` maps on the same rule (both forms AND together, matching upstream), and applies on hot-reload like legacy rules. **Fix round 1** (first review round found the initial cut REJECT-worthy) closed: the config-loader bridge that dropped these fields before `pkg/configvalidator` ever saw them (`route:`-gated configs refused to load at all); upstream's `excludeTwoSidedMatch` mutual-inhibition guard (two alerts each matching both sides no longer silently mute each other); absent-label evaluation now matches upstream's no-presence-check semantics exactly for every operator (`=`/`!=`/`=~`/`!~`); `equal:` treats a label absent on both alerts as equal; and legacy `*_match_re` is now anchored the same as the matchers-form `=~`/`!~` (also fixed: an inline `source_match_re`/`target_match_re` rule, with no matchers-form fields at all, used to never get its regex compiled at all - a pre-existing, silent no-op bug the fix round closed in the same pass). See Known Gap #9 for one narrower divergence left open (label-name charset). |
-| HA: Redis nflog + send-claim for cross-replica dedup | 🟢 Supported | `internal/infrastructure/grouping/redis_notify_log.go` (task 6.1). |
-| HA: distributed timer liveness / reconciliation | 🟢 Supported | `internal/infrastructure/grouping/timer_manager_impl.go` + `manager_impl.go` reconciliation loop (task 6.2, hardened in fix round 1: targeted overdue-timer scan, no leftover-timer error-log spam). Final fix wave: the adoption window was effectively 0s (`reconciliation_grace` equalled the timer record's Redis TTL grace, so a timer became adoptable exactly as its key expired), and three early returns in `onTimerExpired` left a dead local handle that made reconciliation skip the group forever. Both fixed and covered by regression tests plus a live e2e scenario. |
-| HA: silence cross-replica cache sync | 🟢 Supported | Redis pub/sub invalidation (task 6.3), `internal/infrastructure/silencing`. |
-| HA: leader-elected silence GC | 🟢 Supported | `internal/infrastructure/lock/election.go` + `internal/business/silencing/manager_impl.go` (task 6.4). |
-| HA: peer heartbeat + `cluster` status field | 🟢 Supported | `internal/infrastructure/cluster/heartbeat.go` (task 6.5). |
-| HA: 2-replica end-to-end (exactly-once delivery, failover, in-flight adoption) | 🟡 Verified via standalone script, not CI-gated | `deploy/e2e-ha/` (`docker-compose.yml` + `run.sh`) exercises six steps, including a genuine cross-replica concurrent fire (replica B restarted after ingest so `RestoreTimers` arms a local timer for a group replica A also holds one for) and orphan adoption (replica A killed mid-`group_wait`, replica B's reconciliation loop must pick the timer up). Still **not** wired into `go test ./...` or any build tag — must be run explicitly. |
-| Inhibition (`inhibit_rules:`) | 🟢 Supported | Upstream's top-level `inhibit_rules:` and AMP's `inhibition: inhibit_rules:` (plus `inhibition.config_file`) are all applied, merged in that order (`Config.InhibitionRules`, `FU-TOPLEVEL-INHIBIT-RULES`); every upstream form works (`source_match`/`_re`, `target_match`/`_re`, `source_matchers`/`target_matchers`, `equal`), label names keep their case, and a rule with an empty side is accepted as upstream does (warning W150/W151, not an error) — except in `config_file`, which still requires both sides. A broken rule fails startup and rejects `/-/reload`. Limits: a rule without `name` (every verbatim upstream rule) shows as `rule=""` in `/api/v2/inhibitions` and metrics; rules that appear on reload when the config had none at startup need a restart (see [Replacement Guidance](#replacement-guidance)). A source inhibits while its `endsAt` is in the future (without `endsAt`: `resolve_timeout` from the last receipt, extended by every re-send), as upstream; with several replicas, a source received by another replica is visible within 5 s (Redis sync, `INHIBIT-SOURCE-CACHE-EVICTION`), so with `group_wait` under 5 s a target received by another replica in those first seconds can still be notified. The source cache holds up to 1000 firing alerts per replica (all firing alerts, not only rule sources); beyond that, alerts from other replicas are not loaded and the oldest-ending local ones are evicted (logged at WARN). `internal/infrastructure/inhibition/` matcher/parser/cache, wired into the notify chain's Inhibit step and hot-reloadable. `GET /api/v2/inhibitions` (read-only, AMP-native diagnostic endpoint, not upstream API) reflects active inhibitions. |
-| Config write API (`POST/PUT /api/v2/config*`) | 🔴 Not implemented | Explicitly out of scope for task 7.4 (see brief). |
-| `/history*` API | 🔴 Not implemented | Explicitly out of scope for task 7.4. |
-| **Lite profile restart durability** (`--storage.path` equivalent) | 🟢 Supported, opt-in | `storage.path` + `storage.snapshot_interval` (wave 6, `FU-LITE-FILE-SNAPSHOT`, `internal/infrastructure/snapshot/`) — silences (`memory.SilenceStore`) and the notification log's dedup entries + per-target delivered-state (`grouping.notifyDedupLog`) are written atomically (tmp file + rename + fsync, mode 0600) to `storage.path` on a periodic timer and on graceful shutdown, and reloaded at startup before the HTTP server starts serving. Format is plain versioned JSON (stdlib `encoding/json`), not upstream's protobuf+snappy — deliberately kept simple. TTL semantics are respected at load: an entry/delivered-state whose freshness window has already elapsed (computed from the snapshot's own timestamps vs now) is dropped, not resurrected. **Opt-in, unlike upstream**: `storage.path` defaults to empty (snapshotting OFF), not upstream's `data/` — an AMP upgrade must never start writing files as a side effect. **File, not directory**: upstream's `--storage.path` is a directory holding separate `nflog`/`silences` files; AMP's `storage.path` names a single combined snapshot file — point it at a file path, not a directory, when migrating a runbook from upstream. Standard profile: Postgres (`PostgresSilenceRepository`)/Redis (`RedisNotifyLog`) already own durability; setting `storage.path` there is logged and ignored, not wired in. Groups/alerts are NOT snapshotted, matching upstream — alerts re-arrive via Prometheus's resend behavior and groups rebuild from there. |
+| Web UI (`/`, `/#/alerts`, `/#/silences`) | Built-in Elm UI | **None**: 404. The UI is not in the Go module; AMP's own UI is planned after v0.1.0 (`UPSTREAM-UI`). See [Viewing alerts](#viewing-alerts-karma-grafana-amtool). |
+| Event recorder | Behind a feature flag, off by default | Not wired |
+| Flags | `--silences.max-silences`, `--silences.max-silence-size-bytes`, `--alerts.per-alertname-limit`, `--dispatch.start-delay` | Not available; the binary refuses unknown flags |
+| Extra flag | | `--amp.config.file`: the AMP configuration ([CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)) |
+| Configuration | `alertmanager.yml` | The same file, plus receivers taken from Kubernetes Secrets when the AMP configuration enables them ([below](#kubernetes-secret-targets)). The file on disk is never rewritten. |
+| Notification payloads | As the integration builds them | As upstream, plus `llm_severity`, `llm_confidence`, `llm_reasoning`, `llm_recommendations` annotations when classification is on ([below](#classification)). With `llm.drop_noise: true` alerts classified as noise are not delivered. |
+| Shutdown | Abandons a running reload after its shutdown timeout | Waits for the reload; a failed gossip leave is logged, not returned |
+| Routes | `/api/v2`, `/-/*`, `/metrics`, `/debug/*` | The same, plus `/api/amp/v1/*` ([AMP API](#amp-api)) and an answer for removed AMP paths (below) |
 
----
+Everything else in the list below is upstream behaviour that AMP's own core (`cmd/server`, removed in v0.1.0) did differently. It is listed because clients written against that core notice it; for upstream users nothing changes.
 
-## Current Active Runtime Surface
+| Behaviour | What you get |
+|---|---|
+| `POST /api/v2/alerts` without `Content-Type: application/json` | 415. Prometheus and `amtool` set the header. |
+| Invalid payloads | 400 or 422 with a plain-string body, upstream's error format |
+| `GET /api/v2/alerts?active=maybe` | An invalid boolean is read as `false`, as upstream's generated parser does |
+| `GET /api/v2/alerts/groups` right after a `POST` | Trails ingest by about a millisecond (the dispatcher's subscription to the alert store) |
+| A broken `alertmanager.yml` at start | The process exits. On `POST /-/reload` the running configuration stays and the reload returns an error. |
+| `GET /api/v2/alerts?status=resolved`, `?group_by=` | Unknown query parameters, **ignored**: the answer is the unfiltered list (200), not an error. Resolved alerts are not kept by upstream; read them from `/api/amp/v1/alerts/{fingerprint}`. |
+| `GET /api/v2/inhibitions` | 404. Upstream has no such route; `status.inhibitedBy` in `/api/v2/alerts` lists the inhibiting alerts. |
+| `/api/v1/*` | 410 Gone, as upstream answers |
+| `/health`, `/healthz`, `/ready`, `/readyz`, `/dashboard*` | 404. Probes are `/-/healthy` and `/-/ready`. |
+| `/debug/pprof/*`, `/debug/vars` | Served on the API port, as upstream: the process command line is visible there, so do not pass secrets in flags, and keep the port off public networks |
 
-| Endpoint | Alertmanager | Alertmanager++ today | Status | Notes |
-|----------|--------------|----------------------|--------|-------|
-| `GET /api/v2/alerts` | ✅ | ✅ | 🟢 | Full upstream query params: `active`/`silenced`/`inhibited`/`unprocessed`/`receiver`/`filter`, plus legacy `status=`/`resolved=` aliases |
-| `POST /api/v2/alerts` | ✅ | ✅ | 🟢 | Ingest path wired through `AlertProcessor` → routing tree → grouping/dispatcher |
-| `POST /api/v1/alerts` | ✅ (deprecated upstream) | ✅ | 🟢 | Alias into the v2 ingest path (POST only; GET not restored — different legacy DTO) |
-| `GET /api/v2/alerts/groups` | ✅ | ✅ | 🟢 | Group labels from the matched route's `group_by`, receiver resolved per group from the live route tree; same state/receiver filters as `/alerts`, plus an AMP-only `?group_by=` override |
-| `GET /api/v2/silences` | ✅ | ✅ | 🟢 | |
-| `POST /api/v2/silences` | ✅ | ✅ | 🟢 | Create/update |
-| `GET /api/v2/silence/{id}` | ✅ | ✅ | 🟢 | |
-| `DELETE /api/v2/silence/{id}` | ✅ | ✅ | 🟢 | |
-| `GET /api/v2/status` | ✅ | ✅ | 🟢 | Nested `versionInfo` (ldflags-injected) + `cluster` (Redis heartbeat) |
-| `GET /api/v2/receivers` | ✅ | ✅ | 🟢 | |
-| `GET /api/v2/inhibitions` | ❌ (no upstream equivalent) | ✅ | 🟢 | AMP-native diagnostic endpoint over the active inhibition state |
-| `POST /-/reload` | ✅ | ✅ | 🟢 | Hot reload; runs the same `LoadConfig` path (incl. configvalidator) as startup |
-| `GET /health`, `GET /healthz`, `GET /ready`, `GET /readyz` | N/A | ✅ | 🟢 | State-aware health/readiness routes |
-| `GET /-/healthy`, `GET /-/ready` | ✅ | ✅ | 🟢 | Alertmanager-style liveness/readiness routes |
-| `GET /metrics` | ✅ | ✅ | 🟢 | Includes `alertmanager_build_info` — the metric ecosystem tooling probes for a version. Its `version` label is the **Alertmanager contract version AMP implements** (`0.27.0`), not AMP's own build version, which lives in `amp_build_info`. See [Dashboards And Ecosystem Tooling](#dashboards-and-ecosystem-tooling-karma). |
-| `--web.route-prefix` | ✅ | ✅ | 🟢 | Explicit prefix, or inherited from `external_url`'s path when unset |
+The futureparity contract suites that used to compare AMP's own core with upstream still run on `amp-upstream` (`scripts/upstream-core-gate.sh`); `go-app/internal/upstreamcore/contract/testdata/divergences.tsv` lists every test that is expected to fail and why. Each entry is one of the rows above.
 
----
+## AMP API
 
-## Not Current Active Runtime Surface
+AMP's routes sit next to `/api/v2`, under the path of `--web.external-url`, behind the same authentication (`--web.config.file`). They read the alert history in PostgreSQL; without it (`profile: lite`, or the database unreachable) they answer 503.
 
-The endpoints below are still **not** implemented (explicitly out of scope for task 7.4 per the parity plan):
+| Route | Answer |
+|---|---|
+| `GET /api/amp/v1/alerts/{fingerprint}` | The alert's history record: `fingerprint`, `amp_fingerprint`, `alert_name`, `status` (`firing`/`resolved`), `labels`, `annotations`, `starts_at`, `ends_at`, `generator_url`, `first_seen_at`, `last_event_at`. Kept after the alert resolved. |
+| `GET /api/amp/v1/alerts/{fingerprint}/investigation` | The latest investigation of that alert: `id`, `status`, `retry_count`, `queued_at`, `created_at`, `updated_at`, `started_at`, `completed_at`, `error_message`, `error_type`, `result`, and in agent mode `steps`, `iterations_count`, `tool_calls_count` |
 
-| Endpoint / Surface | Current status | Notes |
-|--------------------|----------------|-------|
-| `GET/POST /api/v2/config*` | Backlog | Full config management/write API |
-| `GET /history*` | Backlog | Extended alert history API |
-| `GET/POST /api/v2/inhibition/*` (upstream write API) | Backlog | AMP has a read-only `/api/v2/inhibitions` diagnostic instead |
-| `GET /api/v2/classification/*` | N/A | AMP-specific investigation feature, not an upstream API — not a parity gap |
-| wider dashboard/UI surface | Partial | Work in progress, not part of Alertmanager API parity |
+- `{fingerprint}` is the fingerprint `/api/v2/alerts` reports (16 hex digits), or AMP's own 64-hex fingerprint of the old core; case does not matter. Anything else is 400.
+- 404: no such alert in the history, or no investigation for it. 405 for methods other than `GET` and `HEAD`. Errors are JSON, `{"error": "..."}`.
+- Latency: `amp_api_request_duration_seconds`.
 
----
+Rows written before v0.1.0 get their upstream fingerprint from a background backfill at start (`alert history: upstream fingerprints backfilled` in the log); until it finishes, find them by the AMP fingerprint.
 
-## Method Matrix For Current Slice
+## Classification
 
-| Endpoint | Allowed methods | Notes |
-|----------|------------------|-------|
-| `/api/v2/alerts` | `GET`, `POST` | |
-| `/api/v1/alerts` | `POST` | Alias |
-| `/api/v2/alerts/groups` | `GET` | |
-| `/api/v2/silences` | `GET`, `POST` | |
-| `/api/v2/silence/{id}` | `GET`, `DELETE` | |
-| `/api/v2/status` | `GET` | |
-| `/api/v2/receivers` | `GET` | |
-| `/api/v2/inhibitions` | `GET` | |
-| `/-/reload` | `POST` | |
-| `/health`, `/healthz`, `/ready`, `/readyz` | `GET` | |
-| `/-/healthy`, `/-/ready` | `GET` | |
-| `/metrics` | `GET` | |
+With `llm.enabled: true` every firing alert is classified by the configured OpenAI-compatible model, asynchronously and off the ingest path. A notify stage ahead of every receiver waits up to `llm.notify_wait` (5s) for the result and adds it as annotations on the copy of the alert that goes to the receiver:
 
----
+| Annotation | Value |
+|---|---|
+| `llm_severity` | The model's severity |
+| `llm_confidence` | `0.00`–`1.00` |
+| `llm_reasoning` | The model's reasoning, truncated |
+| `llm_recommendations` | Recommendations joined with `; ` (when present) |
 
-## Dashboards And Ecosystem Tooling (karma)
+Templates can use them like any annotation (`{{ .CommonAnnotations.llm_severity }}`). On a timeout, an LLM error or LLM off, the alert goes out unchanged. The alert in `/api/v2/alerts` is never modified.
 
-[karma](https://github.com/prymitive/karma) is a read-only Alertmanager dashboard. It works against AMP, and as of
-2026-09-23 AMP exports the build-info metric karma (and anything modelled on it) probes for.
+## Kubernetes-Secret targets
 
-### How version discovery actually works
+With PostgreSQL available and `publishing.enabled: true`, AMP lists Secrets labelled `publishing-target=true` in `publishing.discovery.namespace` every `publishing.refresh.interval` (5m) and adds each one to the in-memory configuration as an integration of the receivers it is scoped to. Delivery, retries, the notification log and templates are upstream's; `/api/v2/status` shows the integrations with their secrets masked, as it masks the file's.
 
-karma does **not** read the version from `GET /api/v2/status`. It scrapes `GET /metrics`, parses the exposition
-format, and reads the `version` label off `alertmanager_build_info` (`internal/verprobe/verprobe.go`). It then cuts
-the value at the first `-`, parses the remainder as semver, and resolves an API mapper through a `>=0.22.0`
-constraint. **No mapper match means karma drops the connection and clears the alerts it had already shown** —
-which makes a wrong version strictly worse than no metric at all, since a missing/unparseable one only triggers
-karma's "assume latest" fallback.
-
-That is why AMP exports two separate metrics instead of one:
-
-| Metric | `version` label | Answers |
-|---|---|---|
-| `alertmanager_build_info{version,revision,branch,goversion}` | `0.27.0` — constant | "Which Alertmanager contract do I get?" |
-| `amp_build_info{version,revision,branch,goversion,build_user,build_date}` | e.g. `v0.0.2-518-g3b3c52e` | "Which AMP build is this?" |
-
-Both are gauges with value `1`, matching the upstream `*_build_info` shape. The non-`version` labels on the compat
-metric are AMP's real build data — nothing is synthesised; `version` describes the contract, the rest describes the
-binary serving it.
-
-`0.27.0` is not a free-floating number: it is the machine-readable form of this document's own
-`**Alertmanager Version**: v0.27+ (API v2)` header. The constant lives in `go-app/internal/buildinfo/metrics.go`
-and moves only together with that line. Raising it "to look current" would claim upstream behaviour AMP has never
-been verified against. See [ADR-009](06-planning/DECISIONS.md) for the full decision.
-
-### Connecting karma
-
-Single-server setups need one variable:
-
-```bash
-docker run -p 8080:8080 -e ALERTMANAGER_URI=http://amp:9093 ghcr.io/prymitive/karma:latest
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oncall-slack
+  namespace: monitoring
+  labels:
+    publishing-target: "true"
+  annotations:
+    amp.receiver: team-critical        # comma-separated receiver names
+stringData:
+  config: |
+    {"name": "oncall-slack", "type": "slack", "format": "slack", "enabled": true,
+     "url": "https://hooks.slack.com/services/T000/B000/XXXX",
+     "headers": {}}
 ```
 
-Multi-server YAML config (`alertmanager.servers[].uri`) works the same way — AMP is just an Alertmanager URI to karma.
-
-### What works
-
-Verified at the protocol level on 2026-09-23 against a live AMP lite instance, by replaying what karma's own client
-(`internal/mapper/v017/api.go`) requests:
-
-- `GET /api/v2/alerts/groups` matches field for field: `labels`, `receiver.name`, and per alert
-  `labels`/`annotations`/`startsAt`/`fingerprint`/`generatorURL`/`status.state`/`status.silencedBy`.
-- Group labels come from the matched route's `group_by`, and the receiver is resolved per group from the live route
-  tree — so karma's grouping view reflects the real routing tree, not a flat list.
-- A silenced alert is returned as `suppressed` with the silence ID in `status.silencedBy`, so karma renders the
-  silence badge and can link to it.
-- `GET/POST /api/v2/silences`, `GET/DELETE /api/v2/silence/{id}` and the `{"silenceID": ...}` create response behave
-  as upstream, so creating and expiring silences from karma's UI works.
-- The version probe itself: confirmed against the live `/metrics` of a binary built with real ldflags.
-
-### What does not apply
-
-- **Multi-instance aggregation.** karma's headline feature is merging several Alertmanager instances into one view.
-  AMP is itself that instance, so the scenario is inverted. Nothing stops you pointing karma at several AMP
-  replicas, but there is no AMP-side work here.
-- **The 24h alert history strip.** karma draws it by querying **Prometheus** over the alert's `source` link, because
-  Alertmanager keeps no history. AMP *does* keep history (in Postgres), but does not expose it over HTTP yet, so
-  karma cannot use it — it will keep going to Prometheus. See `HISTORY-API` in the backlog.
-- **`inhibited` state.** The `?inhibited=` filter parses, but inhibition is not yet reflected in `InhibitedBy`
-  (see Known Gaps), so karma's inhibition badge stays empty.
-
-### `metrics.enabled: false`
-
-The exposition gate returns **404** for `/metrics` while the API stays fully up (verified). karma's version probe
-then fails, it falls back to "assume latest" (`999.0`), picks the newest mapper and keeps working — the same state
-AMP was in before this metric existed. Nothing degrades beyond a log line per poll cycle on karma's side.
-
-### Honesty note
-
-The karma binary was **not** run end-to-end against AMP. Its container image could not be pulled in the environment
-where this was verified (`ghcr.io` returned `denied`). Everything above is verified either against AMP's live HTTP
-surface or by reproducing karma's own algorithm from its source; the claim "karma's UI renders AMP's alerts" is an
-inference from that, not an observation. Closing that gap is tracked as `KARMA-RELEASE-GATE` in the backlog.
-
----
-
-## Receiver Integration Compatibility Matrix
-
-### Read this first: two target sources, one view
-
-Since **AMP-PARITY-WAVE6-EPIC** (`FU-RECEIVERS-INTEGRATION`) receivers are a
-data plane, not only a control plane:
-
-- **Control plane — full parity.** `route:`, nested routes, matchers,
-  `group_by`, `group_wait`/`group_interval`/`repeat_interval`,
-  `mute_time_intervals`/`active_time_intervals`, `inhibit_rules:` and
-  receiver *names* behave as upstream does.
-- **Data plane — two sources, merged.** Every integration block of every
-  receiver is auto-provisioned into a `core.PublishingTarget`
-  (`internal/business/publishing/config_targets.go`), and Kubernetes-Secret
-  targets keep working exactly as before
-  (`internal/business/publishing/discovery_parse.go`). Both land in the SAME
-  discovery view — `ListTargets`/`GetTarget`/`GetTargetsByType` return the
-  union — and the publishing layer is untouched by the change.
-
-Config-provisioned targets:
-
-| Property | Behaviour |
+| `type` | Becomes |
 |---|---|
-| Name | `cfg:<receiver>/<type><idx>` (e.g. `cfg:team-x/slack0`). The `cfg:` prefix cannot collide with a Secret-sourced target — those are DNS-1123 validated, so `:` and `/` are illegal there. No precedence rules exist because no collision can. |
-| Receiver scoping | Always exactly `[<receiver name>]`, by construction. An empty `Receivers` list still means "all receivers" and remains reserved for legacy unscoped Secrets. |
-| Lifecycle | In memory only, never written to Kubernetes. Rebuilt from scratch on every config load and on every reload whose routing fingerprint changed (a receivers-only edit counts) — the swap is atomic, so a reload never exposes a window with zero targets. |
-| Ordering | Deterministic: receivers in config order, and inside a receiver the types in the order webhook → slack → pagerduty → telegram → email, each in its own declared order. |
-| Observability | `alert_history_publishing_discovery_targets_total{type,enabled,source}` (`source="config"` vs `"k8s"`) plus `targets_by_source{...}`/`targets_config` on the publishing metrics collector. |
-| Profiles | Works in the **lite** profile too: with receiver integrations present, a lite deployment runs the real publishing stack in config-only mode (no K8s client, no Secret discovery, no periodic refresh). |
+| `webhook`, `rootly` | `webhook_configs` (`url`). A Rootly target pointing at Rootly's REST API (`api.rootly.com`, `api.rootly.io`) is skipped: use the webhook URL of an Alertmanager alert source. |
+| `slack` | `slack_configs` (`api_url`; `templates.title`, `text`, `channel`, … set the fields of the same name) |
+| `pagerduty` | `pagerduty_configs` (`headers.routing_key` required; the URL is a base URL, events go to `/v2/enqueue`) |
 
-> **Migration note.** Copying an upstream `alertmanager.yml` into AMP now
-> routes AND delivers. Kubernetes Secrets are no longer required; they are
-> still supported, still receiver-scoped via `amp.receiver`, and a Secret
-> without that annotation/label still receives everything (backward
-> compatibility). If you previously hand-created a Secret per integration,
-> you can delete it once the same endpoint is declared in `receivers:` — but
-> check for double delivery first: a `cfg:` target and an unscoped Secret
-> target both match the same receiver, so both will fire.
+- Without `amp.receiver` (annotation, or a single-name label) a target joins **every** receiver.
+- A target that does not parse or validate is skipped and logged; the rest of the configuration is applied. `amp_upstream_k8s_targets{state}` counts attached, skipped and invalid targets.
+- Resolved notifications are sent unless the target's `filter_config.send_resolved` is `false`.
 
-### `global:` endpoint fallbacks
+The chart's RBAC grants only `list` on Secrets, in the discovery namespace only ([helm/amp/README.md](../helm/amp/README.md#rbac)); keep target Secrets in a namespace of their own.
 
-Upstream lets an integration omit its endpoint and inherit it from `global:`;
-AMP resolves this at parse time, per-integration value always winning:
+## Alert history and investigation
 
-| Global key | Fills in | Behaviour when neither is set |
-|---|---|---|
-| `global.slack_api_url` (or `global.slack_api_url_file`) | `slack_configs[].api_url` (or `.api_url_file`) | **Load error** naming both places |
-| `global.pagerduty_url` | `pagerduty_configs[].url` | Public Events API endpoint (`https://events.pagerduty.com`) |
-| `global.telegram_api_url` | `telegram_configs[].api_url` | Public Bot API base (`https://api.telegram.org`) |
-| `global.smtp_smarthost`, `global.smtp_from`, `global.smtp_auth_username`, `global.smtp_auth_password`, `global.smtp_require_tls` | the whole SMTP endpoint for `email_configs` | **Load error** — AMP models no per-`email_config` SMTP fields at all (see Known Gaps) |
+Every alert the core accepts goes to PostgreSQL through the alert-store callback, silenced and inhibited ones included, with the upstream fingerprint stored next to AMP's. The write is asynchronous: a slow or unavailable database does not slow ingest or delivery, and events that fail to write or find the queue full are lost (`amp_upstream_history_writes_total{outcome}` counts them); the alert's next update rewrites its row.
 
-### `*_file` secret variants (FU7-B)
+With `investigation.enabled: true` each new firing incident is queued for an LLM investigation (`investigation.worker_count` workers); with `llm.agent_mode` the model can query Prometheus, Loki, the Kubernetes API and PostgreSQL within `investigation.tools` and read runbooks. Results are read through the [AMP API](#amp-api). Investigation is not on the notification path.
 
-Every secret field AMP's five supported integrations (+ `global:`) carry has
-a `*_file` twin — upstream's shape for a Kubernetes Secret mounted as a
-volume: `webhook_configs[].url_file`, `pagerduty_configs[].routing_key_file`,
-`pagerduty_configs[].service_key_file` (the legacy `service_key`'s twin —
-`service_key` is still a live routing-key fallback, see the field-fidelity
-table above), `slack_configs[].api_url_file`,
-`telegram_configs[].bot_token_file`, `global.slack_api_url_file`,
-`global.smtp_auth_password_file`. Resolved at
-parse time (`resolveFileSecrets`, `internal/infrastructure/routing/file_secrets.go`)
-into the SAME inline field the rest of the pipeline already reads — the
-`global:` fallback chain above, defaults, structural/semantic validation, and
-`business/publishing.BuildConfigTargets` all consume e.g. `SlackConfig.APIURL`
-without knowing or caring whether it came from `api_url:` or `api_url_file:`.
+## HA
 
-Upstream's mutual-exclusion rule is enforced: setting both the inline field
-and its `_file` twin is a **load error** naming the field; an unreadable file
-is a load error naming the PATH (never any content — the read failed, so
-there is none to leak). File content is trimmed of trailing newline/
-whitespace, matching upstream.
+Replicas form upstream's memberlist cluster: silences and the notification log are gossiped, and each replica waits `--cluster.peer-timeout` per peer ahead of it before notifying, so a group goes out once. As with upstream, **every replica must receive every alert**: list all pods in Prometheus' `alertmanagers`, not a load-balanced Service. The Helm chart does this through the headless Service ([helm/amp/README.md](../helm/amp/README.md)). Alert history and investigations are shared through PostgreSQL; each replica classifies the alerts it receives.
 
-Paths are used as given, so a relative path resolves against the process
-working directory, not the config file's directory (upstream does the same:
-its `resolveFilepaths` rebases only `http_config` and `templates`). Use
-absolute paths, e.g. the `mountPath` of a Secret mounted through the Helm
-chart's `extraVolumes`/`extraVolumeMounts`. The config validator that runs
-before parsing (`pkg/configvalidator`) counts a set `*_file` as satisfying
-the required-field checks (E113 webhook URL, E115 Slack URL, E122 PagerDuty
-key) without reading the file; until 2026-10-20 (HELM-EXTRA-VOLUMES) it
-rejected a Slack, webhook or PagerDuty receiver configured through `*_file`
-alone.
+Redis/Valkey is not used by `amp-upstream`.
 
-**Rotation caveat (honesty note):** upstream re-reads some `*_file` secrets
-lazily, per notification, so rotating the file's content on disk updates
-live delivery without a reload. AMP reads at config load and on every
-`/-/reload`/SIGHUP (the whole config, including `route:`/`receivers:`, is
-re-parsed from the file on every reload), but **not** per-notification — a
-secret rotated between reloads keeps using the old value until the next
-`/-/reload` or SIGHUP. Lazy per-publish re-reading was evaluated and
-intentionally not implemented: it would mean the publisher layer reading a
-file on the request path, crossing the boundary this and the parent epic
-both promise to leave untouched (`CreatePublisherForTarget`'s contract).
+## Metrics
 
-The `*_file` field's value (a filesystem path) is not itself secret and stays
-visible in `/api/v2/status`'s `config.original`, even for fields whose *name*
-would otherwise trip the redaction substring list by coincidence
-(`routing_key_file` contains `routing_key`, `bot_token_file` contains
-`token`) — see `internal/application/handlers/status_config.go`'s
-`fileSecretRefKeys`. The resolved inline field is redacted exactly as before,
-regardless of which form supplied it.
+- Upstream's `alertmanager_*` metrics, unchanged, including `alertmanager_build_info` with the real upstream version (`0.34.1`). karma and other tools that detect the API version from it see a supported version.
+- `amp_build_info`: AMP's own version, revision and build date.
+- AMP's layer: `amp_api_request_duration_seconds`, `amp_upstream_k8s_targets`, the classification, history and investigation metrics (`amp_*`, `alert_history_*`).
 
-### `send_resolved`
+## Viewing alerts: karma, Grafana, amtool
 
-Supported per integration, upstream default `true`. `send_resolved: false`
-suppresses RESOLVED notifications for that target only: it is recorded as
-`filter_config.send_resolved` on the target and applied during target
-resolution in `PublishingCoordinator`, so a suppressed notification never
-enters the publishing queue at all (no job, no retry, no circuit-breaker
-effect). Suppressions are counted as
-`alert_history_publishing_resolved_suppressed_total{receiver}`.
+AMP v0.1.0 serves no UI. Anything that reads an Alertmanager reads AMP:
 
-A Kubernetes-Secret target can set the same key in its `filter_config` JSON.
-Accepted false values: the boolean `false`, any string `strconv.ParseBool`
-reads as false (`"false"`, `"FALSE"`, `"0"`, `"f"`), and the number `0`.
-Anything else — including an unparseable string — means `true`, upstream's
-default: an unreadable value must never silently suppress notifications.
+- **amtool**: `amtool --alertmanager.url=http://amp.monitoring.svc:9093 alert query`, `silence add|query|expire|import`, `config show`, `cluster show`.
+- **[karma](https://github.com/prymitive/karma)**: `ALERTMANAGER_URI=http://amp.monitoring.svc:9093`. karma reads the version from `alertmanager_build_info` on `/metrics`; keep `/metrics` reachable for it (with basic auth on, add karma's credentials or list `/metrics` in `server.auth.unauthenticated_paths`). With several replicas, list each of them in karma: it merges the alerts of several Alertmanagers into one view.
+- **Grafana**: an Alertmanager data source (implementation "Prometheus") with the AMP URL; Grafana's alerting UI then shows AMP's alerts and silences.
 
-A group whose remaining alerts are ALL resolved, for a receiver whose targets
-all decline them, delivers nothing but still **settles**: the fire records
-against a synthetic `suppressed:<receiver>` pseudo-target (never a real one, so
-no real notification is suppressed) and the group's resolved alerts are pruned,
-tearing the group down. Without that, the group would keep its resolved alerts
-and re-arm its `group_interval` timer forever — one silent no-op fire per
-interval, one undead group per key. Upstream reaches the same end state: its
-retry stage filters the resolved alerts out, succeeds, and `aggrGroup.flush`
-prunes.
+None of them knows the AMP API: alert history and investigations are read from `/api/amp/v1` directly.
 
-### Blackhole receivers
+## Receivers
 
-A receiver with **no** integrations (upstream's classic `- name: 'null'`) is
-valid and drops everything routed to it: the notification is treated as sent
-(the group settles, no re-fire loop), counted as
-`alert_history_publishing_blackhole_drops_total{receiver}` and logged at
-Debug. A receiver whose ONLY integration is one AMP cannot deliver
-(`opsgenie_configs`, `victorops_configs`, `wechat_configs`) behaves the same
-way, and its unsupported blocks are named in a load-time WARNING. A route
-pointing at a receiver the config does not declare remains a loud error.
+All 18 upstream integrations (`discord`, `email`, `incidentio`, `jira`, `mattermost`, `msteams`, `msteamsv2`, `opsgenie`, `pagerduty`, `pushover`, `rocketchat`, `slack`, `sns`, `telegram`, `victorops`, `webex`, `webhook`, `wechat`) with every field upstream documents, `http_config` and `*_file` secrets included. They are upstream's code; their documentation is [upstream's](https://prometheus.io/docs/alerting/latest/configuration/#receiver-integration-settings).
 
-`blackhole_drops_total` is a "is this receiver dropping" signal, not delivery
-volume: it counts once per alert on the non-grouped path and once per group
-notification on the grouped one (a flush that has something new for the
-receiver, or the `repeat_interval` re-notification of an unchanged group).
+## Upgrading the upstream version
 
-### Matrix
-
-"Config accepted" means
-`internal/alertmanager/config.Receiver` (parsed by `pkg/configvalidator`)
-has a matching field; "runtime wired" means
-`internal/infrastructure/routing.Receiver` and the publishing factory
-(`internal/infrastructure/publishing.PublisherFactory.CreatePublisher*`)
-actually dispatch notifications for it. A receiver can validate cleanly
-and still send zero notifications if it is config-accepted but not
-runtime-wired — see `pkg/configvalidator/doc.go` for the authoritative
-statement of this divergence, which this table mirrors. Note also that,
-as of Task 5.4, `pkg/configvalidator` is wired into
-`internal/config.LoadConfig` (and therefore both process startup and the
-running server's `/-/reload` path, which reloads via the same function) —
-but only when the config file has a top-level `route:` section, matching
-`internal/config.loadRouteConfig`'s existing gate. "Config accepted" below
-now reflects what the live server actually enforces for such configs; a
-config with no `route:` section (legacy single-receiver mode) still skips
-this validation.
-
-| Integration | Config accepted | Runtime wired | Status | Notes |
-|-------------|:---:|:---:|--------|-------|
-| `webhook_configs` | ✅ | ✅ | 🟢 Supported | Generic HTTP POST; also the delivery path for Discord/Teams (see below) |
-| `email_configs` | ✅ | ✅ | 🟢 Supported | SMTP, enhanced publisher |
-| `pagerduty_configs` | ✅ | ✅ | 🟢 Supported | Events API v2 |
-| `slack_configs` | ✅ | ✅ | 🟢 Supported | Incoming Webhooks (plain `ok` response = delivered); message threading only when the endpoint returns a `ts` (Web API) |
-| `telegram_configs` | ✅ | ✅ | 🟢 Supported | Config side fixed in Task 5.4 (`internal/alertmanager/config.Receiver` carries a `TelegramConfig`, `hasAnyIntegration()` checks it — the "no integrations" finding it feeds became the non-blocking `W024` in AMP-PARITY-WAVE6-EPIC). Runtime side fixed in the final fix wave: the publishing queue built publishers with `CreatePublisher(type)`, which cannot pass per-target credentials, so `EnhancedTelegramPublisher` (bot token, `chat_id`, `message_thread_id`, Bot API `sendMessage`) was **unreachable at runtime** despite being implemented. Integration types now go through `CreatePublisherForTarget` — see `createPublisherForJob` in `internal/infrastructure/publishing/queue.go`. Wave 2: added a per-chat rate limiter (bounded LRU, cap 1000, 1 msg/s burst 3) waited on before the existing global 30/s limiter in `SendMessage`, so an alert storm to one chat no longer trips Telegram's per-chat 429s (`internal/infrastructure/publishing/telegram_client.go`). |
-| Rootly (`alertmanager`/`rootly` target type) | N/A (AMP-native target, not an upstream receiver type) | ✅ | 🟢 Supported | AMP-specific addition, not part of upstream Alertmanager. On the upstream core (`cmd/amp-upstream`, ADR-019) Rootly is plain `webhook_configs`: Rootly accepts the Alertmanager webhook through an Alertmanager alert source — use its webhook URL, `send_resolved: true` and its bearer secret in `http_config.authorization` ([Rootly docs](https://docs.rootly.com/integrations/alertmanager)). A K8s-Secret `rootly` target becomes such a webhook; one pointing at the REST API (`api.rootly.com`) is skipped |
-| `opsgenie_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E126-E129); no `OpsGenieConfigs` field on the runtime receiver and no publisher target type — zero notifications sent |
-| `victorops_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E130-E134); same gap as OpsGenie. Deferred "по потребности" (on demand) — build only if a concrete need arises |
-| `wechat_configs` | ✅ | ❌ | 🟡 Config-accepted, not wired | Validates (E138-E141); same gap. Deferred "по потребности" |
-| Discord (native receiver type) | ❌ | ❌ | 🟢 Effectively supported via webhook | No dedicated `discord_configs`; ships as a built-in Discord-embed template (`internal/notification/template/defaults/webhook.go`) rendered through `webhook_configs`. Not a blocker |
-| Microsoft Teams (native receiver type) | ❌ | ❌ | 🟢 Effectively supported via webhook | Same pattern: built-in Adaptive Card template via `webhook_configs`, not a dedicated receiver type. Not a blocker |
-| Pushover | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
-| AWS SNS | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
-| Webex | ❌ | ❌ | 🔴 Unsupported | No config type, no template, no publisher anywhere in the codebase |
-
-### Per-integration field fidelity
-
-The PRESENTATION fields are delivered as of TEMPLATES-EPIC slice 2, which closed
-`FU-INTEGRATION-FIELD-FIDELITY`: they are rendered through the template engine
-and overlaid onto the wire payload
-(`internal/infrastructure/publishing/template_formatter.go`), with upstream's own
-default (`{{ template "slack.default.title" . }}` and friends) filled in for any
-field the operator leaves unset. What remains undelivered is transport and
-structural, not presentational.
-
-| Integration | Mapped (delivered) | Parsed but NOT delivered |
-|---|---|---|
-| `webhook_configs` | `url`, `http_headers`, `send_resolved`, `http_config` (supported subset — see below) | `http_method` (always POST), `max_alerts` |
-| `slack_configs` | `api_url`, `send_resolved`, `http_config` | `channel`, `username`, `icon_emoji`/`icon_url`, `title`, `title_link`, `pretext`, `text`, `fields`, `actions`, `color`, `short_fields` |
-| `pagerduty_configs` | `routing_key` (or legacy `service_key`), `url`, `send_resolved`, `http_config` | `severity`, `class`, `component`, `group`, `description`, `details` — severity/summary are derived from the alert itself |
-| `telegram_configs` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `send_resolved`, `http_config` | `parse_mode` (always the formatter's own), `message` |
-| `email_configs` | `to`, `from`, `subject`, `html`, `text`, `send_resolved` + the global SMTP settings | `headers`; upstream's per-`email_config` `smarthost`/`auth_*`/`require_tls` are not modelled at all |
-| Integration | Templated (delivered) | Other mapped fields | Parsed but NOT delivered |
-|---|---|---|---|
-| `webhook_configs` | *(none — upstream does not template webhook payloads)* | `url`, `http_headers`, `send_resolved` | `http_method` (always POST), `max_alerts`, `http_config` |
-| `slack_configs` | `title`, `title_link`, `pretext`, `text`, `color`, `username`, `icon_emoji`, `icon_url`, `channel` | `api_url`, `send_resolved` | `fields`, `actions`, `short_fields` (Block Kit structures the wire model does not carry), `callback_id`, `footer` (upstream defines `slack.default.callbackid`/`footer`, AMP's wire model has no field for either, so they are not materialized), `http_config` |
-| `pagerduty_configs` | `description` (→ Events API `summary`), `severity`, `client`, `client_url`, `details.*` | `routing_key` (or legacy `service_key`), `url`, `send_resolved` | `class`, `component`, `group`, `images`, `http_config` |
-| `telegram_configs` | `message` | `bot_token`, `chat_id`, `message_thread_id`, `disable_notifications`, `api_url`, `parse_mode`, `send_resolved` | `http_config` |
-| `email_configs` | `subject`, `html`, `text`, `headers.*` | `to`, `from`, `send_resolved` + the global SMTP settings | upstream's per-`email_config` `smarthost`/`auth_*`/`require_tls` are not modelled at all |
-
-`parse_mode` is delivered but NOT templated — upstream treats it as a plain enum
-too, and templating it would let a typo produce an invalid Bot API request.
-
-### Notification templates
-
-What works, and where AMP still differs from upstream:
-
-| Aspect | Behaviour |
-|---|---|
-| Data model | Upstream's `Data` verbatim: `Receiver` (including upstream's own `regexp.QuoteMeta` quirk), `Status`, `Alerts` (with `.Firing`/`.Resolved`), `GroupLabels`, `CommonLabels`, `CommonAnnotations`, `ExternalURL`, plus `NotificationReason` and `RouteLabels` which are **always empty** (present so a migrated template referencing them renders blank instead of failing). Golden tests pin the rendered output against upstream's own template package. |
-| Functions | All 25 of upstream's `DefaultFuncs`, none skipped. `title` and `humanizeDuration` reuse `x/text` and `prometheus/common`, so their output is byte-identical. |
-| Default library | `default.tmpl` and `email.tmpl` copied byte-for-byte from upstream v0.34.0 (Apache-2.0; see `internal/business/templating/templates/NOTICE`). |
-| `templates:` loading | Globs resolved against the config file's directory (upstream's `resolveFilepaths`), parsed at load and on reload, later definitions winning. A malformed file is a **load error naming file and line**; a glob matching nothing is legal (a ConfigMap may mount later) but logs a WARNING naming the resolved glob. |
-| Reload | Atomic swap: a render in flight always sees one complete generation of the library, and a broken reload keeps the last-known-good one. |
-| Failure posture (AMP divergence, in AMP's favour) | Upstream has no execution guards. AMP bounds every render by a timeout and an output cap (`publishing.templates.render_timeout`, `publishing.templates.max_output_bytes`; defaults 5s / 4 MiB) and recovers panics. A render that fails **never drops the notification** — AMP's fixed formatter output is delivered instead and `alert_history_publishing_template_fallbacks_total{integration,reason}` increments. |
-| Opting out (AMP-only) | `publishing.templates.enabled` (default `true`). `false` restores AMP's pre-epic fixed formatters wholesale — no template library is built, no publisher is decorated, `templates:` files and every per-integration presentation field are ignored. Read at startup, so a change needs a restart. It exists because turning templating ON changes the payload shape of every `receivers:`-provisioned Slack and email receiver even when no template is configured (upstream's defaults are materialized), and an operator who prefers AMP's formatting needs a revert that is not an image rollback. |
-| Route labels | Upstream's route-label templating feature is not ported (AMP's route config has no route labels). `{{ routeLabels "x" }}` and `.RouteLabels` render empty rather than erroring. |
-| `safeHtml` / `safeUrl` | Present and functional. The email HTML body renders through `html/template` (so label values are escaped); every other field renders as text, where these degrade to rendering the value — exactly upstream's behaviour. |
-| **`.Alerts` holds ONE alert — a DELIVERY divergence** | Upstream sends **one message per group**; AMP sends **one per alert** for Slack/PagerDuty/Telegram/Email, each with a one-element `.Alerts`. So a group of N alerts produces N messages, and a migrated `{{ range .Alerts }}` (or `{{ .Alerts.Firing \| len }}`, or `__text_alert_list`) that upstream rendered as one aggregated message renders N times, once per alert. `.GroupLabels`, `.Receiver` and `.Status` come from the group and are upstream's; the alert SET is not. `__subject` therefore renders exactly what upstream would for a one-alert notification (`[FIRING:1] …`), never `[FIRING:5]`. Webhook is the exception: it batches the whole group into upstream's v4 payload. Pinned by `TestTemplatesDelivery_TwoAlertsBecomeTwoMessagesEachWithOneAlert`. Changing it means wire-level batching for those four integrations — tracked as a separate epic, not a bug fix. |
-| Per-field fallback granularity | A render failure is per FIELD, not per notification: the failed field keeps the fixed formatter's value and the rest of the rendered fields still apply. A partial failure therefore delivers a MIXED payload (upstream subject + AMP HTML body; upstream title + AMP text), not a clean all-or-nothing fallback. Each failure is logged with target+field and counted. |
-| Slack attachment is a hybrid | The rendered fields go into upstream's attachment shape, but AMP's fixed formatter's `fields` array and severity colour are carried over as the base — upstream never emits `fields`. So "renders upstream's output" is exact for title/title_link/text/pretext/fallback/colour/username/icon_* and APPROXIMATE for the attachment as a whole. |
-| Not templated | `webhook_configs` (as upstream), `parse_mode`, and per-integration `http_config`. Upstream's `resolveFilepaths` also rebases per-receiver `http_config` FILE paths (`ca_file`, `bearer_token_file`, …) against the config directory; AMP does not, because it does not apply `http_config` at all yet. |
-
-### Per-integration `http_config`
-
-Supported since `AMP-PARITY-WAVE7` track C (`FU-HTTP-CONFIG`). Every
-HTTP-carrying integration — `webhook_configs`, `slack_configs`,
-`pagerduty_configs`, `telegram_configs` — may set `http_config`, and
-`global.http_config` acts as the fallback. `email_configs` cannot: it speaks
-SMTP, so there is no HTTP client to configure.
-
-| Field | Status | Notes |
-|---|---|---|
-| `proxy_url` | ✅ | Absolute URL with scheme + host. An explicit `proxy_url` bypasses `NO_PROXY`, same as upstream. |
-| `tls_config.ca_file` | ✅ | PEM bundle used to verify the server. Read at client construction. |
-| `tls_config.cert_file` / `key_file` | ✅ | Client certificate pair for mutual TLS. **Both required together** — one alone is a target build error, not a silent connection without a client cert. |
-| `tls_config.server_name` | ✅ | SNI / verified hostname override. |
-| `tls_config.insecure_skip_verify` | ✅ | Testing only. |
-| `basic_auth.username` / `password` | ✅ | |
-| `basic_auth.password_file` | ✅ | Wins over the inline `password` when both are set (upstream's precedence). Contents are whitespace-trimmed, so a mounted Secret's trailing newline does not corrupt the header. |
-| `authorization.type` / `credentials` | ✅ | `type` defaults to `Bearer`. |
-| `authorization.credentials_file` | ✅ | Same precedence and trimming as `password_file`. |
-| `follow_redirects` | ✅ | `false` returns the redirect response as-is. Default (`true`) is the standard library's follow behaviour. **Credentials survive a cross-host redirect**: because `http_config` auth is applied inside the transport, `net/http`'s own stripping of `Authorization` on a cross-host redirect does not apply, so an endpoint that 302s elsewhere hands that host the basic password or bearer token. `prometheus/common/config` behaves identically, so this is upstream parity, not an AMP quirk — set `follow_redirects: false` on an endpoint you do not want to trust that far. |
-| `oauth2` | ❌ | Parsed and reported, never applied — see [Still NOT supported for receivers](#still-not-supported-for-receivers). |
-| `enable_http2` | ➖ | Not modelled as a field. HTTP/2 is already attempted by the publishers whose clients set `ForceAttemptHTTP2`, and layering `http_config` preserves that. |
-
-Precedence over target-level auth: `http_config.basic_auth` / `authorization`
-are applied inside the HTTP transport, so they **override** an `Authorization`
-header carried in the target's own `http_headers` (config) or `headers` (K8s
-Secret), and anything the webhook client's auth manager applied. `http_config`
-wins because it is the more specific declaration — but a Secret target carrying
-both will not behave the way its author expects, and nothing logs the override.
-
-Semantics worth knowing before you migrate:
-
-- **Per-integration `http_config` replaces `global.http_config` WHOLESALE — it
-  is not deep-merged.** This mirrors upstream exactly (`Config.UnmarshalYAML`
-  assigns the global block only when the integration's own is `nil`), including
-  the surprising part: an integration that sets only `proxy_url` **discards**
-  global's `tls_config` and `basic_auth` rather than inheriting them. AMP does
-  not "improve" on this, because a deployment that merged differently from the
-  Alertmanager the same file was written for would authenticate or verify
-  certificates differently — a silent security difference.
-- **`basic_auth` and `authorization` are mutually exclusive.** Setting both is a
-  target build error, matching upstream's own validation.
-- **Structural mistakes are caught at LOAD, not per alert.** `basic_auth`
-  together with `authorization` (upstream rejects the combination too), half a
-  client-certificate pair, an unroutable `proxy_url` and an `authorization` with
-  no credential are all decided when the config is built or the Secret is
-  discovered — so a bad target is skipped once and loudly, instead of reloading
-  cleanly, looking healthy, and then failing every alert into the DLQ.
-- **Bad TLS or credential files skip the TARGET, not the process.** An
-  unreadable `ca_file`, a `ca_file` containing no PEM certificate, half a client
-  certificate pair, an unreadable `password_file`/`credentials_file`, or an
-  unroutable `proxy_url` all fail that target's construction with a logged
-  `ERROR` naming the target and the path; every other target keeps delivering.
-  AMP deliberately fails **closed** here — downgrading to a plain client would
-  deliver alerts unverified or unauthenticated.
-- **Relative `*_file` paths resolve against the CONFIG FILE's directory**, not
-  the process working directory — `ca_file: certs/internal-ca.pem` next to your
-  `alertmanager.yml` works, exactly as upstream's `resolveFilepaths` intends.
-  Applies to `tls_config.ca_file`/`cert_file`/`key_file`,
-  `basic_auth.password_file`, `authorization.credentials_file` and (for the day
-  it is supported) `oauth2.client_secret_file`, at both `global:` and
-  per-integration scope. **Kubernetes Secret targets are the exception**: their
-  `http_config` has no config file to be relative to, so a relative path there
-  resolves against the process working directory — use absolute paths in Secrets.
-- **File contents are captured at first use.** Clients are cached per distinct
-  `http_config`, so rotating a certificate or password file on disk does not
-  affect an already-built client until a restart or a config reload that changes
-  the config. Upstream re-reads per handshake; tracked as
-  `FU-HTTP-FILE-ROTATION`.
-- **Kubernetes Secret targets support it too**, with no extra syntax: add an
-  `http_config` object to the target's JSON blob using exactly the field names
-  above. The Secret path `json.Unmarshal`s straight into the same target struct.
-- **Health probes do NOT honour `http_config`.** The health monitor uses one
-  process-wide HTTP client with no proxy and no per-target TLS or auth, so a
-  proxied, mTLS-protected or auth-gated target can report `degraded`/`unhealthy`
-  while delivering perfectly. Delivery is not gated on it today (nothing live
-  consults the monitor), so this is an observability false negative — but it
-  feeds the health metrics and therefore alerting. Tracked as
-  `FU-HEALTH-HTTP-CONFIG`.
-- **HTTPS-over-proxy (CONNECT) is not covered by AMP's own tests.** AMP's proxy
-  test asserts the plain-HTTP proxy path (absolute-URI request line). Since
-  nearly every real webhook is `https://`, the tunnelled path is the common one
-  in practice, and it relies entirely on `net/http`'s own CONNECT handling —
-  which AMP configures via `Transport.Proxy` and does not reimplement.
-- **Status API**: `basic_auth.password`, `authorization.credentials` and
-  `oauth2.client_secret` are redacted to `<secret>` in `/api/v2/status`'s
-  `config.original`. `cert_file`, `key_file` and `token_url` are also redacted
-  there despite being paths/public endpoints — the redaction list is
-  deliberately conservative for an endpoint that is unauthenticated unless
-  `--web.config.file` is set. Redaction affects
-  only that rendering, never delivery.
-
-### Still NOT supported for receivers
-
-- **`*_file` secret variants — closed by FU7-B**, see
-  [`*_file` secret variants](#_file-secret-variants-fu7-b) above. Narrower gap
-  left open: `global.smtp_auth_secret_file` (upstream's CRAM-MD5 secret) has
-  no inline `smtp_auth_secret` field to pair with — AMP's SMTP publisher only
-  ever does plain username/password auth — so there is nothing to add a
-  `*_file` twin to; tracked, not silently dropped.
-- **Per-integration `http_config`** (proxy, TLS, custom bearer/basic auth,
-  `follow_redirects`): parsed and validated, never applied — every publisher
-  uses its own HTTP client. Tracked (not started) as
-  `FU-INTEGRATION-FIELD-FIDELITY` in `docs/06-planning/BACKLOG.md`.
-- **`*_file` secret variants** (`api_key_file`, `bot_token_file`,
-  `routing_key_file`, `auth_password_file`, …): not modelled by
-  `internal/infrastructure/routing`, so an upstream config using them loads
-  (the keys are dropped) and that integration provisions no credential. Use
-  the inline value or an env-substituted value for now.
-- **`http_config.oauth2`**: never applied — supporting it means a token endpoint
-  client plus a refresh loop with its own failure semantics, not a field
-  mapping. What happens next depends on WHERE the block came from, because the
-  blast radius of refusing differs enormously:
-  - **on the integration's own `http_config`** → that integration is **skipped**
-    with a loud `WARN` naming the receiver, kind and index. The endpoint told us
-    it needs OAuth2, so delivering without it would be a knowing unauthenticated
-    send. Only that one integration is affected.
-  - **inherited from `global.http_config`** → the integration still **delivers**
-    (without OAuth2 credentials), with a `WARN` plus the
-    `amp_publishing_unsupported_http_config_total{field="oauth2",target=...}`
-    counter. Refusing here would be disproportionate: `global:` propagates
-    wholesale, so one `oauth2:` block would black-hole every webhook, Slack,
-    PagerDuty and Telegram target in the process — including the ones that
-    authenticate through their own URL or header credential and never wanted
-    OAuth2. See `docs/06-planning/DECISIONS.md` for the accepted risk.
-
-  Tracked as `FU-HTTP-OAUTH2` in `docs/06-planning/BACKLOG.md`.
-- **Per-`email_config` SMTP settings**: see the fidelity table; only the
-  `global.smtp_*` block reaches the SMTP dialer, so two receivers cannot use
-  different SMTP servers. A config that sets SMTP per `email_config` and
-  nothing globally fails to load rather than silently sending nothing.
-- **`opsgenie_configs` / `victorops_configs` / `wechat_configs`**: config
-  accepted, no publisher — a receiver carrying only these behaves as a
-  blackhole and says so in a load-time WARNING.
-
-**Decision (Task 7.2)**: VictorOps and WeChat publishers are not built in
-this task. Their config types and validators (Phase 5) already exist and
-are kept as-is; wiring a runtime publisher is deferred until a concrete
-need appears ("по потребности"). Pushover/SNS/Webex are fixed as
-unsupported and are not a blocker, since most third-party chat/incident
-tools (including Discord and Teams) integrate through the generic
-`webhook_configs` receiver instead of a bespoke native integration.
-
----
-
-## Known Gaps (Honesty Notes)
-
-These are the sharp edges behind the 🟡/🔴 markers above — stated plainly rather than buried in a footnote:
-
-1. **`receivers[].*_configs` ARE delivery endpoints now — with field-level gaps.** Closed in
-   AMP-PARITY-WAVE6-EPIC (`FU-RECEIVERS-INTEGRATION`): every integration block auto-provisions a publishing
-   target, so a migrated `alertmanager.yml` delivers with zero Kubernetes Secrets, and Secret-sourced targets are
-   unchanged and merge into the same view. What is still NOT upstream-equal is *field* fidelity, not existence —
-   see [Per-integration field fidelity](#per-integration-field-fidelity) and
-   [Still NOT supported for receivers](#still-not-supported-for-receivers): Slack channel/title/color, PagerDuty
-   severity/class/details, Telegram `parse_mode`, and per-integration `http_config`
-   are parsed and validated but not delivered. `*_file` secret variants (closed by FU7-B) are now delivered — see
-   [`*_file` secret variants](#_file-secret-variants-fu7-b). Two other honest edges: a receiver declared in the config with no
-   severity/class/details, Telegram `parse_mode` and all `*_file` secret variants
-   are parsed and validated but not delivered. (Per-integration `http_config` no longer belongs on that list —
-   wave 7 track C delivers it; see [Per-integration `http_config`](#per-integration-http_config).) Two other honest edges: a receiver declared in the config with no
-   deliverable integration silently drops (by design, counted), and if you keep an UNSCOPED legacy Secret target
-   while also declaring the same endpoint in `receivers:`, both fire — one notification each.
-   *(Previously this list claimed `GET /api/v2/alerts/groups` had a hardcoded receiver — that gap is now closed:
-   group labels come from the matched route's `group_by` and the receiver is resolved per group from the live route
-   tree. The remaining AMP-only behaviour there is the extra `?group_by=` query override.)*
-2. **Per-target dedup now records on *confirmed delivery* — with a bounded confirmation wait.** Closed in wave 3
-   (`FU-RECORDSENT-DELIVERY-CONFIRMATION`): `TargetPublishOutcome.Success`, and therefore `RecordSent`, is set only
-   after the publisher's HTTP call for that `(group, target)` pair actually succeeded. `PublishGroupToTargets`
-   submits each target's job with a completion channel and blocks on it, so a webhook returning 500 gets **no**
-   nflog entry and is re-published on the group's next scheduled fire instead of going quiet until
-   `repeat_interval`. Wire-level batching (one POST per `(group, target)` with an upstream-v4 `alerts` array) and
-   per-`(group, receiver, target)` nflog keys are unchanged from wave 2.
-   **The notify-fire time budget** is one derived chain, driven by a single knob,
-   `publishing.queue.delivery_confirmation_timeout` (45s default):
-
-   | Duration | Value at the default | Role |
-   |---|---|---|
-   | delivery-confirmation wait | 45s (max 2m) | per-target wait in `PublishGroupToTargets` |
-   | timer-callback deadline | 60s (= wait + 15s) | bounds one whole notify fire (`TimerManagerConfig.CallbackTimeout`) |
-   | cross-replica publish-claim TTL | 65s (= callback + 5s) | must cover the fire *and* its post-delivery bookkeeping (`GroupNotifyLog.TryClaim`) |
-   | orphan-adoption grace | 90s (= claim + 25s) | a fire still delivering must never look abandoned (`grouping.reconciliation_grace`) |
-
-   All three grouping-side values are derived from the wait at wiring time (`grouping.TimerCallbackTimeoutFor` /
-   `NotifyLogClaimTTLFor` / `ReconciliationGraceFor`) and re-checked at startup
-   (`ServiceRegistry.validateNotifyTimingBudget`) — AMP refuses to start on an inconsistent set, because every
-   failure mode is invisible at runtime: a callback deadline below the wait silently truncates every delivery; a
-   claim TTL below it lets the claim expire mid-publish and reopens the double-publish window; an adoption grace
-   below it makes a live fire adoptable, and the adopting replica deletes the group's shared timer record while the
-   publishing replica is still using it.
-
-   Post-delivery bookkeeping (`RecordSent`, claim release, resolved-alert pruning) runs on a **detached** 5s context
-   that is created *after* the delivery wait returns — a detached context built before the wait would have had its
-   deadline consumed by the wait itself, which is the same failure in disguise.
-
-   One relationship is deliberately *not* satisfied: the distributed per-group timer lock (`lockTTL`, 30s, never
-   renewed) is shorter than a fire, so a long fire runs on with that lock expired. The publish claim, not the lock,
-   is what stops a second replica notifying the same group in that window — it is load-bearing, not a backstop, and
-   the startup log line reports both values.
-
-   Residual sharp edges, all deliberate:
-   - The wait is *shorter* than the queue's worst-case retry budget (~2min). A target still retrying past the
-     deadline is reported as unconfirmed, so a delivery that succeeds afterwards is re-sent on the next fire — a
-     duplicate notification, never a dropped one. The pipeline is at-least-once, same as upstream. Giving up also
-     **abandons** the job (its context is cancelled), so one hanging endpoint cannot pin workers and starve healthy
-     targets into false "unconfirmed" results.
-   - A group keeps flushing at `group_interval`, as upstream does (`PROD-GROUPING-DEFAULT`; the chain used to move
-     to a `repeat_interval` timer after the first `group_interval` fire), so an endpoint that is down is retried
-     every `group_interval`.
-   - The timer manager's own distributed lock (`lockTTL`, 30s, no renewal) can now expire mid-fire, so a second
-     replica's timer for the same group may fire while the first is still publishing. The nflog publish claim — not
-     that lock — is what prevents the double publish in that window; it went from backstop to load-bearing.
-   - For integrations with no batch wire shape (Slack, Telegram, PagerDuty, Email) one job covers the group by
-     looping `Publish` per alert, so a single failing alert still makes the whole `(group, target)` unconfirmed.
-     Since wave 4 (`FU-PER-ALERT-OUTCOMES`) that no longer re-sends the alerts that already landed: the job reports
-     which individual alerts the target accepted, and the chain stores that as per-`(group, target)`
-     **delivered state** — `nflog:delivered:{groupKey}:{target}`, a Redis HASH `{alert fingerprint → delivered
-     status}`, TTL = `repeat_interval` + 60s grace, capped at 500 alerts — so the next fire carries only the alerts
-     still owed. Comparison is by `fingerprint:status`, the same atoms the nflog signature is built from, so an alert
-     that flipped `firing`↔`resolved` counts as new and is re-sent, and a group that gained or lost alerts between
-     fires still filters correctly. **One status per fingerprint**: recording an alert's new status *replaces* the
-     previous one, because an alert flapping `firing→resolved→firing` must be delivered again — accumulating both
-     statuses would suppress the re-fire, and suppression is the one outcome this design never accepts. Retries
-     *inside* one job skip the already-accepted alerts too. When the remainder lands, the target gets its normal full
-     nflog entry and the delivered state is deleted; it exists only while a target is partially delivered, so the
-     happy path costs no extra key. Webhook/alertmanager targets are unaffected (one batched POST, one outcome, never
-     any delivered state).
-     Residual: this is an **AMP extension with no upstream counterpart** — upstream Alertmanager sends exactly one
-     wire message per `group × integration` and has no per-alert send to be partial about. If the delivered state
-     cannot be read or written (Redis unreachable, cap reached — the latter counted as
-     `amp_group_operations_total{operation="delivered_state",status="capped"}`), AMP falls back to re-sending the
-     whole set: the floor stays at-least-once, exactly-once per `(alert, target)` is the refinement that is
-     forfeited. One exotic edge is not handled: the notify chain cannot tell which targets are batch-capable, so if a
-     target's `type` is changed from a non-batch integration to `webhook`/`alertmanager` (same target name) *while*
-     it has delivered state, the first batched POST after the change carries only the remainder and the full-signature
-     nflog entry then suppresses the filtered alerts for one `repeat_interval`. Renaming the target, or letting the
-     state expire before the type change, avoids it.
-   - On queue shutdown, in-flight confirmed-delivery jobs are cancelled and deliberately **not** written to the DLQ:
-     the notify chain re-publishes to any unconfirmed target after restart, so a DLQ replay would double-deliver.
-3. **Repeat/group-interval notification continuation: P0 self-cancel bug found and fixed on this branch.**
-   The original timer-continuation code cancelled its own context when arming the next interval timer
-   (group_wait→group_interval transition), so repeat notifications never fired. Fixed in `e47bcca` (contexts
-   rooted in the manager lifetime, continuation-handle identity check) with red→green regression tests including
-   a full wait→interval→repeat chain (`≥3` publishes asserted) and no-`context canceled` log assertions; hardened
-   further in `8791d43`. Task 6.2's reconciliation loop (`3707ade`, `1c4a9f4`) covers replica-crash recovery.
-4. **`inhibited` query param on `/api/v2/alerts` is structurally present but currently a no-op.** Inhibition state
-   isn't yet threaded into `alertconv.ToGettableAlert`'s `InhibitedBy` field, so filtering on it can't yet change
-   results — the notify-chain's own Inhibit step (which actually suppresses notifications) is unaffected by this.
-5. **2-replica HA e2e (`deploy/e2e-ha/`) is a standalone script, not a CI gate.** It demonstrates exactly-once
-   delivery and failover when run manually (`./deploy/e2e-ha/run.sh`); it does not run in `go test ./...` and so
-   provides no regression protection against a future change silently breaking HA behavior.
-6. **Group storage now survives a runtime Redis outage — but recovery is a clean cutover, not a state merge.**
-   Closed in wave 5 (`FU-STORAGEMANAGER-FAILBACK`): the standard profile's `GroupStorage` used to be chosen once at
-   startup (`ServiceRegistry.newGroupingStorage`) with no runtime revisit — a Redis outage after boot surfaced raw
-   Redis errors on every group read/write until the process restarted. `grouping.StorageManager` (built in
-   2025-11-04, never actually wired in until this task) now wraps it: a health probe on `Ping` switches to an
-   in-memory fallback on loss and back on recovery, with a `backend_active` gauge (labeled `redis`/`memory`) and a
-   loud log line on every switch, on top of the pre-existing per-call fallback (a failing `Store`/`Delete`/`StoreAll`
-   switches immediately, without waiting for the next probe tick).
-   **Fix round (same wave): hysteresis, error classification, and a write-through + deletion-replay reconciliation
-   pass.** The first cut flipped on a single failed/succeeded `Ping` and on ANY per-call error — so a flapping Redis
-   oscillated every probe tick, and one `ErrVersionMismatch` (an expected outcome of two concurrent updates) looked
-   identical to Redis being down. Now: the probe requires `degradeThreshold` (default 3) consecutive failures
-   before degrading, and BOTH `recoverThreshold` (default 3) consecutive successes AND `minHoldDuration` (default
-   30s) since the last transition before failing forward; per-call `Store`/`Delete`/`StoreAll` only degrade for
-   `isConnectivityError(err)` (a real transport/timeout failure) — any other error is returned to the caller
-   unchanged, exactly as it would be with no wrapper at all. Separately, recovery used to flip `sm.current` back to
-   primary with **no reconciliation whatsoever**, which had two silent-loss directions, only one of which the
-   original text here admitted:
-   - *(originally documented)* a group created fresh in the fallback during the outage was invisible to primary
-     after the flip (`ErrNotFound`, a new group started — "duplicate notification possible, not silent data loss").
-   - *(found in review, strictly worse)* for a group that already existed in Redis **before** the outage — the
-     common case — the stale pre-outage copy resurfaced after the flip and every alert added during the outage was
-     silently dropped on the next `Store`; and a `Delete` issued while degraded only ever reached the fallback, so
-     the pre-outage Redis copy came back as a **zombie** group capable of firing a notification for alerts that had
-     already resolved.
-
-   `reconcileFallbackIntoPrimary` now runs before every failforward: every group in the fallback store is written
-   through to primary (its `Version` aligned to primary's current value first, so `RedisGroupStorage.Store`'s
-   optimistic-lock check doesn't reject the write-through as a spurious "concurrent update" — this actually makes
-   the fallback's fresher copy win over the stale one), and every key deleted while degraded (tracked, bounded at
-   500) is replayed as a `Delete` against primary. If the write-through itself fails, the flip is skipped for
-   another probe cycle rather than failing forward onto a half-reconciled primary.
-
-   **This is still not full state-merge machinery — three real limits remain, stated plainly:**
-   - The write-through's read-then-write runs *without* the manager's lock held (holding it for the whole pass
-     would block every `Store`/`Load`/`Delete` call for as long as reconciliation takes — an availability
-     regression of its own). This leaves a narrow race: a write landing in the fallback *after* the write-through's
-     snapshot of it but *before* the flip is not part of the write-through and can be shadowed once primary is
-     current again — bounded by one reconciliation pass, not by the whole outage, but not zero.
-   - **Multi-replica HA is NOT covered.** `MemoryGroupStorage` is per-process. If two replicas both degraded and
-     both received writes for the SAME `GroupKey` during the outage (possible when a load balancer does not pin a
-     given alert's requests to one replica), each replica's fallback holds a different view of that group, and
-     whichever replica's reconciliation runs last simply overwrites the other's outage-window data — no merge
-     between the two replicas' views. This is the same last-writer-wins limitation the brief already excludes full
-     state-merge machinery for, now exercised concretely rather than left abstract; the fix above removes it for
-     the single-writer-per-key case (one replica, or a load balancer pinning by `GroupKey`/alert), which is the
-     common case, but does not extend to genuinely concurrent cross-replica writes during a shared outage.
-   - This is NOT the same convergence story as wave 4's per-alert delivered state: that data is a TTL'd dedup marker
-     where the worst case of "never made it to Redis" is a harmless resend, while a `GroupStorage` entry *is* the
-     alert membership, so a residual gap here has real consequences, not just a delayed resend.
-   - **Degrade detection latency roughly tripled for read-only workloads.** With `degradeThreshold`'s default of 3,
-     the periodic probe now needs 3 consecutive failed `Ping`s (up to `3 × healthCheckInterval`, ~90s at the 30s
-     default) before degrading, versus a single failed `Ping` before the hysteresis fix. `Load` has no per-call
-     fallback (by design — see its own doc comment), so a read-heavy replica can surface raw Redis errors for up
-     to that whole window instead of the previous ~30s. The trade-off (flap suppression vs. detection latency) is
-     deliberate, not an oversight.
-
-   **Fix round 2: the fallback is pruned after every successful reconcile, and deletion replay runs first.**
-   The reconciliation pass above initially had two further defects, both reproduced and closed:
-   - **A second outage could serve, and then overwrite, the first outage's stale data (finding C-1, Critical).**
-     `reconcileFallbackIntoPrimary` wrote through everything `fallback.LoadAll()` returned but never removed
-     anything from the fallback afterward — `MemoryGroupStorage` has no TTL/eviction of its own, so every outage's
-     groups accumulated for the life of the process. A SECOND, later outage then (1) could serve a degraded `Load`
-     from the FIRST outage's leftover instead of `ErrNotFound`, and (2) its own recovery would write-through that
-     leftover too — its `Version` aligned to primary's current value on purpose, so the fresh Redis copy was
-     silently replaced by stale data with no error, only the ordinary recovery log line. Reconciliation cost also
-     grew with every outage, risking a permanently-blocked failforward if it ever exceeded `reconcileTimeout`.
-     Fixed: every key written through is now `Delete`d from the fallback immediately after a successful
-     write-through, so the next degraded window starts (almost) empty. One narrow exception survives: a write
-     landing in the snapshot-to-flip window is not part of the reconciled snapshot, is therefore not pruned,
-     and can carry into a future outage as a fallback leftover.
-   - **A group deleted and re-created under the same `GroupKey` during ONE outage could be deleted again on
-     recovery (finding I-5, Important).** Deletion replay ran *after* the write-through, so a stale "still
-     deleted" entry for a key that a later `Store` had already re-created deleted the just-written-through, fresh
-     group right back out of primary. Fixed: replay now runs *before* the write-through, and a successful
-     `Store`/`StoreAll` of a key removes it from the pending-deletion list immediately, so the list only ever
-     reflects what is genuinely still absent as of the most recent fallback write.
-   - **A caller-cancelled or caller-timed-out context no longer looks like a Redis outage (finding I-6,
-     Important).** `isConnectivityError` treated `context.Canceled`/`DeadlineExceeded` as connectivity failures
-     unconditionally — but the alert-ingest path passes a request-scoped context all the way down to `Store`, so
-     one client disconnect or client-side timeout degraded the WHOLE process to memory for roughly
-     `minHoldDuration + recoverThreshold` probes (~2 minutes at the defaults), followed by a full reconcile, over
-     an event that said nothing about Redis. Fixed: a cancellation/deadline only counts when the CALLER's own
-     context is still live at the time of the check — meaning some OTHER, Redis-call-scoped deadline fired.
-
-   `TimerStorage` is not wrapped by the same mechanism — it has its own, separate reconciliation loop (task 6.2,
-   `grouping.TimerManagerConfig.ReconciliationInterval`) for distributed timer liveness, which this task did not
-   extend.
-7. **`global.group_by`/`group_wait`/`group_interval`/`repeat_interval` are an AMP-only convenience, not an
-   upstream `global:` field.** Closed in wave 5 (`FU-GLOB-DEFAULT-VALUES`): `TreeBuilder.inheritGroupBy`/
-   `inheritDuration` now consult `infraroute.GlobalConfig`'s matching field when neither the route itself nor any
-   ancestor route set one, before falling back to the hardcoded upstream default (`["alertname"]` / 30s / 5m / 4h).
-   (Until `ROUTE-TIMINGS-BUNDLE` the duration half never applied on a loaded config: the parser filled 30s/5m/4h
-   into every route, root included, so the tree never saw an unset duration.)
-   Upstream Alertmanager's actual `global:` section carries no grouping fields at all — its equivalent mechanism is
-   simply setting these on the root `route:`, which already cascades to every descendant via the same
-   parent-chain inheritance this layer sits below. AMP had this fallback layer once (a pre-dedup, package-local
-   `GlobalConfig`), lost it when that type was deleted in favor of the canonical `infrastructure/routing` one
-   (`449ae21`, TN-137), and this task put it back on the canonical type rather than reintroducing the duplicate.
-8. **`matchers:` list quote handling and grammar: aligned to upstream `pkg/labels`, not just internally consistent.**
-   Closed in wave 5 (`FU-PARSEARGUMENT-QUOTE-HANDLING`): `pkg/configvalidator/matcher.Parse` never stripped quotes
-   at all — for a regex matcher the quote-included literal was fed straight into `regexp.Compile`, so a config
-   could pass/fail E-code validation based on a DIFFERENT compiled pattern than the one `business/routing.
-   parseMatcherExpr` actually builds the runtime tree with, for the identical YAML `matchers:` entry.
-   **Fix round (same wave): the first pass's quote handling was only internally consistent, not upstream-aligned —
-   review found four verified divergences from `github.com/prometheus/alertmanager@v0.34.0/pkg/labels/parse.go`**
-   (`ParseMatcher`): `\n` was never unescaped to a line feed; escaping was skipped entirely for an unquoted value
-   (upstream applies `\n`/`\"`/`\\` unescaping regardless of quoting); an unescaped inner `"` was silently accepted
-   instead of rejected; and an unterminated/mismatched quote failed OPEN — kept the literal, visibly-wrong value —
-   instead of erroring, which is the wrong direction for a config validator to be silent in. Both parsers'
-   `unquoteMatcherValue` are now a verbatim, independently-duplicated port of upstream's ~25-line loop (not a
-   shared import — `pkg/` stays leaf-level), table-tested against the same cases in both packages, including a
-   direct (non-regex-routed) invalid-UTF-8 check upstream's grammar also requires.
-   **Also found in the same review pass and fixed: a quoted value containing an operator token** (`summary="a!=b"`)
-   used to split *inside* the quotes in `pkg/configvalidator/matcher.Parse` (a plain `strings.Index` over the
-   whole string) and hard-fail startup with a nonsensical E104, while `business/routing.parseMatcherExpr`'s
-   anchored `^label(op)value$` regex parsed the identical YAML entry fine — the same divergence class the item was
-   opened for, just not covered by the first pass's table. `Parse` now locates the operator with the same anchored
-   shape, verified through a real `LoadConfig` regression test, not just a unit test of the parser in isolation.
-   **Fix round 2: one more residual divergence closed, and license attribution added.** `label=` (nothing after
-   the operator) still diverged — `parseMatcherExpr` accepted it (`Value: ""`), `Parse` rejected it with "value is
-   empty", and upstream accepts it outright (`ParseMatcher`'s own doc comment: "The 3rd token may be the empty
-   string"). The round-1 guard in `Parse` contradicted both parsers' "verbatim upstream grammar" claim; dropped so
-   `label=` now parses the same way in both, matching upstream. Both `unquoteMatcherValue` ports also gained an
-   explicit copyright/license attribution comment for the upstream file they port from (Apache-2.0 §4).
-9. **Closed (`FU-TOPLEVEL-INHIBIT-RULES`, 2026-10-12).** A top-level `inhibit_rules:` key is now applied, merged
-   with `inhibition.inhibit_rules`; the original note is kept below for history. **Was: a top-level `inhibit_rules:`
-   key (upstream's own placement) is parsed and then silently ignored.**
-   `internal/infrastructure/routing.RouteConfig.InhibitRules` accepts it, but no code path ever reads that field -
-   the only inhibition rules that reach `internal/infrastructure/inhibition` are AMP's own
-   `inhibition.inhibit_rules` wrapper (`internal/config.InhibitionConfig`, wired through `ToInhibitionRules`). A
-   verbatim-upstream config that puts `inhibit_rules:` at the top level (not nested under `inhibition:`) loads
-   cleanly and inhibits nothing, with no error and no warning; that `InhibitRule` type also lacks
-   `source_matchers`/`target_matchers`, so those keys are dropped silently too. Found by review during the wave-7
-   fix round (S2); deliberately **not** wired in that round - see `BACKLOG.md`'s `FU-TOPLEVEL-INHIBIT-RULES` line.
-10. **AMP scans every firing alert as a candidate inhibitor; upstream v0.34's `sindex` keeps one representative per
-    `equal:`-group.** `DefaultInhibitionMatcher.ShouldInhibit`/`FindInhibitors` iterate all firing alerts and test
-    each against a rule; upstream's `InhibitRule.sindex` (`inhibit.go`) instead indexes source alerts by their
-    `equal:`-label fingerprint and keeps only one (the one with the latest `EndsAt`) per fingerprint. Consequence
-    (found by review, wave-7 fix round 2, R4): where a two-sided candidate (matches both source and target sides of
-    a rule) and a separate pure-source candidate share the same `equal:`-group, AMP still inhibits via the
-    pure-source candidate (`excludeTwoSidedMatch` only excludes the two-sided one), while upstream v0.34's index may
-    have already been overwritten by whichever alert of the two arrived/re-fired last, so it does not always
-    inhibit in that scenario. This is arguably in AMP's favour (it inhibits in a case upstream sometimes misses,
-    never the reverse), and it matches how AMP already behaved for the legacy map form before wave 7 - not a new
-    divergence introduced by the matchers-form work, just newly visible once `excludeTwoSidedMatch` (C2) made the
-    two packages' inhibitor-selection strategies worth comparing directly. No code change; noted for honesty only.
-11. **`internal/infrastructure/routing`'s `config.CompiledRegex` (route `match_re`) has no production consumer.**
-    `RouteConfigParser.compileRegexPatterns` builds it, and it's now anchored (wave-7 fix round 3, R7), but nothing
-    reads it at match time: production wires `businessrouting.NewRouteMatcher(nil, matcherOpts)`
-    (`internal/application/service_registry.go`), so `RegexCache.Preload` is never called with this map, and the
-    bridging function `matcher.go`'s own doc comment names (`ExtractCompiledPatterns(config)`) doesn't exist
-    anywhere in the codebase. Harmless as dead code; the anchoring fix is defense-in-depth against a future
-    `Preload` call poisoning `RouteMatcher`'s cache with an unanchored entry (the cache is keyed by raw pattern, the
-    same way `RouteMatcher.regexMatch`'s own anchored cache-miss compile is). No behavior change for any running
-    deployment - this doesn't route real traffic.
-12. **`resolve_timeout` sets `endsAt` but never resolves the alert.** Since `PARITY-RESOLVE-TIMEOUT-ENDSAT`, an alert
-    posted without `endsAt` gets `endsAt = receivedAt + global.resolve_timeout`, as upstream. Upstream then treats
-    the alert as resolved once that time passes and sends the resolved notification (`send_resolved`). AMP does
-    neither yet: the stored status only changes on an explicit resolved POST. An alert whose sender went quiet is
-    served with a past `endsAt` while `status.state` stays `active`, and no resolved notification goes out.
-    Consumers that judge by `endsAt` (as upstream itself does) see the correct picture; AMP's own state does not.
-    Tracked as `RESOLVE-TIMEOUT-AUTO-RESOLVE`. Three narrower edges:
-    - **The database keeps what the sender sent.** A timeout-stamped alert has `ends_at = NULL` in the database
-      while the API serves `receivedAt + resolve_timeout` (ADR-010). After a restart, rehydrated firing alerts get
-      a fresh `restartTime + resolve_timeout` window using the timeout in effect at that moment.
-    - **Re-sends without `startsAt` duplicate instead of extending.** The in-memory store keys alerts by
-      `fingerprint|startsAt`, and a missing `startsAt` becomes `now` on every POST, so each re-send creates a new
-      copy of the alert (preexisting; `ALERT-STORE-DEDUP-KEY-STARTSAT` in `BUGS.md`). Prometheus and `amtool`
-      send `startsAt` themselves; plain `curl` clients that omit it are affected.
-    - **Mixed senders.** Upstream prefers an explicit `endsAt` over a timeout one when merging the same alert; AMP
-      stores the latest value sent, so an alert first posted with an explicit `endsAt` and then without one gets
-      the timeout window.
-13. **Grouping is on by default** (closed by `PROD-GROUPING-DEFAULT`). `grouping.enabled` defaults to `true`
-    (`internal/config/config.go`, Helm: `grouping.enabled`), so a verbatim `alertmanager.yml` with a `route:` tree
-    is grouped on its `group_by`/`group_wait`/`group_interval`/`repeat_interval`, with upstream's 30s/5m/4h when
-    the route sets none: a group is flushed after `group_wait` and then every `group_interval`, and an unchanged
-    group is re-notified at the first flush after `repeat_interval`. It used to default to `false`, and every
-    alert was sent as soon as it arrived with nothing warning about it. Notes:
-    - Without a `route:` tree there is nothing to group by; alerts are published directly, as before.
-    - `grouping.enabled: false` still turns grouping off. With a `route:` tree configured AMP logs a warning at
-      startup, because the tree's timings then do nothing. Under the Helm chart set it in values: the chart's
-      `GROUPING_ENABLED` overrides the key in `configFile.content`.
-    - Whether a flush notifies is decided per target, on the alerts that target is owed (after its
-      `send_resolved` filtering): a new alert or a new status sends at once, a set that only shrank waits for
-      `repeat_interval`. Not upstream-equal: an alert that fired and resolved before the group's first
-      notification is still announced as resolved (upstream sends nothing).
-    - A grouped notification does not carry the LLM classification (the "AI Classification" block, the
-      classification-based PagerDuty severity); direct publishing does.
-    - Open defects of the grouped path now apply to every config with a `route:` tree: a transient group-storage
-      error in a timer callback can stop a group's timer chain (`GROUPING-CALLBACK-TRANSIENT-LOAD-BREAKS-CHAIN` in
-      `docs/06-planning/BUGS.md`), and a timer key lost from Redis makes the group go quiet until its next alert
-      (`TIMER-STORAGE-KEY-LOSS-SILENCES-FIRE` in `docs/06-planning/TECH-DEBT.md`) — the chart's bundled Redis
-      evicts keys under memory pressure (`allkeys-lru`). See also #12: an alert that is never resolved keeps its
-      group, and its reminders, alive.
-    - The key is read at startup only: changing it needs a restart, not `/-/reload`.
-    - Both profiles group. The standard profile keeps groups, timers and the notification log in Redis, shared
-      across replicas, and falls back to in-memory state that replicas do not share when Redis is
-      unavailable; the lite profile keeps them in memory (single replica).
-14. **A built-in filter still drops a few alerts before routing.** `SimpleFilterEngine`
-    (`internal/core/services/filter_engine.go`) runs on every alert, with or without LLM. Since
-    `PROD-HARDCODED-FILTER` (2026-10-13) it has no rules on alert content: names starting with `test`,
-    `environment=test`/`testing` and namespaces `dev-sandbox`/`tmp` are delivered (to discard them, route them to a
-    receiver without integrations — see the CHANGELOG migration note). What it still drops:
-    - a repeat of the alert's last status within one minute. On the direct-publish path (no `route:` tree, or
-      `grouping.enabled: false`) this is the only thing that stops an HA Prometheus pair from notifying twice;
-      upstream merges such a repeat into the stored alert instead. A status change always passes, so a flapping
-      alert is not lost;
-    - resolved alerts older than 24 h (upstream stores them but does not notify either);
-    - an alert without a name — unreachable over the HTTP API, which rejects it with `400` (upstream only requires
-      at least one label);
-    - with LLM classification only: `noise` and confidence below `0.3` (`PROD-LLM-ALERT-PATH-ISOLATION`).
-
-    The sender gets `200` and a dropped alert is listed in `GET /api/v2/alerts`, but no receiver is notified. Each
-    drop increments `alert_history_filter_blocked_total{reason}` (`duplicate`, `old_resolved`, `empty_alert_name`,
-    `noise`, `low_confidence`) and logs `Alert blocked by filter` at INFO with the fingerprint. None of it is
-    configurable.
-15. **A config error stops AMP.** Without a config file
-    (`AMP_CONFIG_FILE` unset and no `./config.yaml`) AMP reads its environment and built-in defaults. An
-    `AMP_CONFIG_FILE` that does not exist, an unreadable or malformed file, or a config that fails validation exits
-    with `failed to load configuration` — upstream likewise refuses to start on a bad `--config.file`. Under
-    `environment: production` the config is rejected with `database SSL mode 'disable' is not allowed in
-    production` unless `database.allow_insecure_ssl_in_production: true`; the Helm chart sets that flag only for its
-    bundled PostgreSQL, which has no TLS, and AMP then logs a warning with the database host. Since
-    `HELM-DEFAULTS-VALIDATE` (2026-10-14) the chart's default values start: LLM is off by default, and
-    `llm.enabled: true` without a key fails the render. See the Quick Start in
-    [`helm/amp/README.md`](../helm/amp/README.md#quick-start).
-
-Wave 7 (`FU-INHIBIT-MATCHERS`) fix round 1 also closed four matchers-form-specific gaps a first review round found:
-mutual inhibition between two alerts each matching both sides of a rule (ported upstream's `excludeTwoSidedMatch`
-guard); `matchesAll`'s absent-label handling now matches upstream's no-presence-check semantics exactly (an absent
-label reads as `""`, not as an automatic pass for `!=`/`!~` or an automatic fail for `=`/`=~`) - the same fix was
-also required, and applied, to `internal/business/routing.MatchesNode`, which had copied the same divergence since
-wave 5; `equal:` now treats a label absent on BOTH alerts as equal, matching upstream's fingerprint hashing; and
-legacy `source_match_re`/`target_match_re` are now anchored `^(?:pattern)$` like the matchers-form `=~`/`!~`, not
-left as an unanchored substring search. One narrower gap from that same review round is deliberately left open:
-`pkg/configvalidator/matcher.Parse`'s label-name charset (`[a-zA-Z_][a-zA-Z0-9_]*`) is narrower than upstream's
-classic-matcher grammar (which also allows `:`), so a `matchers:` entry using a colon in the label name now fails
-config loading outright instead of the pre-fix-round behavior of logging an ineffective-rule warning. Left
-unfixed this round because the charset is a two-parser-wide, multiply-tested grammar constant (shared with
-`internal/business/routing.parseMatcherExpr` and pinned by wave-5's `FU-PARSEARGUMENT-QUOTE-HANDLING` test suite),
-not something specific to inhibit rules - widening it belongs to its own reviewed change, not a drive-by inside
-this fix round.
-
-Fix round 2 (same wave, re-review "ACCEPT, residuals need one more round") found the absent-label fix (I1) had
-only reached 2 of 3 tables that carried the divergence, and one more site outside FU7-A's original scope entirely:
-
-- **`internal/core/silencing`'s own copy, R1 (fixed).** `DefaultSilenceMatcher.matchSingle` presence-gated the
-  same way, AND `RegexCache.Get` compiled silence regexes **unanchored** - for silences both point the same
-  direction, over-silencing (`job=~"prod"` silenced `job="preprod-2"` too). Both fixed the same way as the other
-  two sites; see the anchoring matrix row above and `docs/06-planning/BACKLOG.md` for the full writeup. Two
-  existing test assertions were upstream-incorrect as a direct result of the anchoring fix and are now inverted:
-  `TestMatcherRegex_Anchors`'s `{"^start", "start-middle-end"}` and `{"end$", "start-middle-end"}` cases, both in
-  `internal/core/silencing/matcher_test.go` - upstream's `labels.NewMatcher` unconditionally double-anchors even a
-  pattern that already carries its own `^`/`$`, so "starts with"/"ends with" over a longer value never matched
-  upstream in the first place; the test now documents that gotcha and adds the correct idiom (`^start.*`, `.*end$`)
-  as new coverage.
-- **Inhibition's own legacy map form, R2 (fixed).** I1's fix (fix round 1) reached `matchesAll` (the
-  matchers-form) but not `ruleMatchesSourceSide`/`ruleMatchesTargetSide`'s inline handling of
-  `source_match`/`source_match_re` (and the target twins) - upstream turns both legacy forms into
-  `labels.Matcher{MatchEqual}`/`{MatchRegexp}` exactly like the matchers-form, so they get the identical
-  absent-as-`""` treatment. I1 is complete in 3 of 3 tables only as of fix round 2.
-- **R4, sindex strategy difference** - see Known Gap #10 above; documented, no code change.
-
-Fix round 3 (same wave, re-review "ACCEPT for the inhibition work, R6 Important residual") found round 2's
-silencing fix had landed in the wrong half of the silence stack:
-
-- **R6 (Important, fixed).** `internal/core/silencing.DefaultSilenceMatcher` (fixed in round 2) backs
-  `POST /api/v2/silences/check` only. The evaluator actually wired into the LIVE suppression path -
-  `internal/infrastructure/storage/memory/silence_store.go`'s `silenceMatchesLabels`, read by notify-chain Step 2
-  (`filterSilenced` -> `SilenceStore.HasActiveMatch`), `status.silencedBy`, and the `?silenced=` filter
-  (`ActiveMatchingSilenceIDs`) - was a SECOND, independent evaluator that stayed unanchored through round 2. A
-  silence on `job=~"prod"` kept suppressing `job="preprod-2"` in production even after the preview endpoint had
-  already stopped agreeing - the two disagreed for exactly the shapes that matter. Fixed by routing
-  `silenceMatchesLabels` through the SAME `*silencing.DefaultSilenceMatcher` instance rather than duplicating the
-  fix a fourth time, so a fifth copy of this divergence class is now structurally impossible. See the anchoring
-  matrix row above; regression coverage includes a preview-vs-pipeline agreement test (same silence, same alert,
-  both evaluators asked directly, asserted to never disagree).
-- **R7 (Minor, fixed).** `internal/infrastructure/routing`'s dead `config.CompiledRegex` path (see Known Gap #11)
-  also compiled unanchored; anchored as defense-in-depth even though nothing consumes it in production today.
-- **R8 (Minor, documented).** The inhibition engine's `hasRE` guard (fails closed, no match, when a `*_match_re`
-  key has no compiled regex) now has an explicit comment naming `InhibitionRule.Compile()` as the sole legal
-  construction path and warning that a future third construction path skipping it would silently reproduce S1.
-- **R9 (Minor, fixed by this section's own rewrite).** The upgrade-impact bullet below used to claim silence
-  regexes were uniformly anchored as of round 2 - true of the `core/silencing` evaluator alone, not yet of the
-  live pipeline (that was exactly R6). It is accurate now that R6 has landed.
-
-**Upgrade impact** (fix rounds 1-3 together change firing/suppression behavior on upgrade, not just "more
-correct" in the abstract - operators should know before deploying):
-
-1. Route matchers `!=`/`!~` against a label an alert doesn't carry now evaluate against `""` instead of
-   auto-passing; a route relying on the old "missing label always satisfies `!=`/`!~`" behavior with an
-   empty-string comparison value (e.g. `env!=""`, previously a no-op that matched everything) can now send an
-   alert to a different receiver/branch than before.
-2. Inline (non-`config_file`) `source_match_re`/`target_match_re` inhibit rules, previously a **silent no-op**
-   (S1), now actually suppress notifications - an operator who added such a rule expecting it to work, gave up,
-   and left it in the config will see it start working (as intended) but this is new suppression appearing with
-   no config change on their end.
-3. Regex anchoring tightened at every path that evaluates a user-supplied regex matcher against a live alert:
-   routing (`match_re`/`matchers:`), inhibition (`*_match_re`/`matchers:`), and - as of fix round 3, covering both
-   the preview endpoint AND the live notify-chain suppression path - silences (`=~`/`!~`). A route, inhibit rule,
-   or **silence** whose regex was written assuming "contains" semantics may stop matching (or, for silences
-   specifically, stop suppressing) after upgrade; the fix direction is correctness (upstream parity), but the
-   practical effect for an existing deployment is "this used to match/suppress and now doesn't" until the pattern
-   is rewritten with explicit `.*` wildcards. For silences specifically: this closes an over-silencing bug (a
-   substring-style silence suppressing more than intended), so the practical effect for most operators is
-   fewer/narrower silences taking effect than before, which is the safe direction to tighten in.
-
----
-
-## Replacement Guidance
-
-AMP's **control plane** (routing, grouping, dispatch, silences, inhibition, time-based muting, config validation, HA
-clustering) mirrors upstream Alertmanager's mechanics, not just its API shape. Since AMP-PARITY-WAVE6-EPIC its
-**data plane** follows the config too: `receivers[].*_configs` auto-provision delivery endpoints, so a copied
-`alertmanager.yml` both routes and delivers, including `*_file` secret variants (FU7-B — see
-[`*_file` secret variants](#_file-secret-variants-fu7-b)). What is still not upstream-equal is per-integration FIELD
-fidelity (Slack channel/title/color, PagerDuty severity/details, Telegram `parse_mode`, per-integration
-`http_config`) — see [Per-integration field fidelity](#per-integration-field-fidelity).
-
-Concretely, a migration is:
-1. Copy your `route:` / `receivers:` / `time_intervals:` / `global:` across — semantics carry over, and the
-   receivers' integrations become live delivery targets on load. No Kubernetes Secrets required. Copy
-   `inhibit_rules:` as is — the top-level key is applied. If AMP started with no inhibit rules at all, adding
-   them later by `/-/reload` only logs "restart required": restart once. Make sure the file is
-   actually loaded — with Helm, `configFile.enabled: true` (Known Gap #15).
-2. Check the field-fidelity table for anything you rely on that AMP parses but does not deliver (message
-   formatting, PagerDuty categorisation, per-integration HTTP settings). `*_file` credentials are delivered
-   (FU7-B) — no action needed for those.
-3. If you are migrating FROM an earlier AMP that used `amp.receiver`-scoped Secrets: those keep working, but an
-   endpoint declared in BOTH a Secret and `receivers:` now delivers twice. Delete the Secret, or scope it away.
-4. Re-verify the items in "Still validate" below.
-
-Treat AMP as a strong replacement candidate if you rely on:
-- Prometheus-style alert ingestion with a real `route:`/`receivers:` routing tree (grouping, timing, matchers, time
-  windows all evaluated per-alert)
-- standard silence and inhibition management
-- Grafana dashboard integration (via `/api/v2/alerts/groups`, now routing-tree-driven per group)
-- HA/multi-replica deployment (Redis-backed dedup, leader election, peer heartbeat, in-flight timer adoption after
-  a replica dies)
-- standard health/readiness monitoring and hot configuration reload (`POST /-/reload` **and** `SIGHUP`)
-
-Still validate before a blanket swap:
-- that you do not rely on AMP dropping test-looking alerts: since `PROD-HARDCODED-FILTER` they are delivered
-  (Known Gap #14, CHANGELOG migration note)
-- that every field you depend on inside a `*_configs` block is in the "Mapped (delivered)" column of the
-  field-fidelity table, not the "Parsed but NOT delivered" one
-- exact wire-level webhook payload shape if a downstream integration depends on upstream's single alerts-array POST
-- any receiver type not in the 🟢 rows of the receiver matrix above
-- receiver names containing `/` — the one character AMP reserves (group-key separator); rename them
-- config write API / `/history*` if your workflow depends on them (out of scope for this task)
-- if you consume `GET /api/v2/status`'s `config.original`: it is the Alertmanager-shaped, secret-redacted subset,
-  not a byte copy of your config file
-
----
-
-**Maintainer**: Vitalii Semenov
-**License**: AGPL 3.0
+See [UPSTREAM_UPGRADE.md](UPSTREAM_UPGRADE.md). A bump changes AMP's behaviour exactly as it changes upstream's; the release notes of the AMP version name the upstream version it carries.

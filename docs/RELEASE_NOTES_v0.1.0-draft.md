@@ -1,330 +1,139 @@
 # AMP v0.1.0 Release Notes (DRAFT)
 
 **Release date:** TBD
-**Previous version:** none — first tagged release
-**Generated from:** `CHANGELOG.md`'s `[Unreleased]` block as of 2026-08-20 (the
-Alertmanager-parity program, epic through wave 7, plus everything else that
-had accumulated in `[Unreleased]` before it).
+**Previous version:** v0.0.2 (tag of 2025-12-09; `CHANGELOG.md` has no entry of its own for it, its last section is `[0.0.1]`)
+**Upstream Alertmanager:** v0.34.1
+**Generated from:** `CHANGELOG.md`'s `[Unreleased]` block as of 2026-11-08 (ADR-019, slices 1–7). Not final: re-check against `[Unreleased]` when the release is cut (`WORKFLOW.md` § Release Process).
 
 ## Summary
 
-This release turns AMP from an API-compatible shape into a functional
-Alertmanager replacement: routing, grouping/dedup, inhibition, silencing and
-notification templates now implement upstream's actual *mechanics*, not just
-matching endpoints. The single biggest visible change for an existing
-deployment: **an untouched `route:`/`receivers:` config now renders
-upstream-shaped notifications by default** (see Breaking Changes) instead of
-AMP's own formatting — this is the point of the parity work, but it is not
-invisible.
+AMP's alerting core is now upstream Prometheus Alertmanager v0.34.1, built into the `amp-upstream` binary, with AMP's alert history, LLM classification and investigation, Kubernetes-Secret targets and memberlist HA around it (ADR-019). The biggest change for an existing deployment: **AMP's own core (`cmd/server`) is removed**, so an upgrade is a migration, not a rolling update. The configuration splits into `alertmanager.yml` and the AMP configuration, the chart's values are replaced, silences must be exported and imported, and port 8080, `/api/v1`, the health aliases and the dashboard are gone. Follow [`docs/MIGRATION_FROM_LEGACY_CORE.md`](MIGRATION_FROM_LEGACY_CORE.md).
 
 ## Features
 
-- **Alertmanager parity epic** (`AMP-PARITY`, 7 phases): recursive routing
-  tree with all 4 matcher operators and anchored regex, `time_intervals:`;
-  per-route `group_by`/`group_wait`/`group_interval`/`repeat_interval` with the
-  upstream notify-chain order (Inhibit → Silence → TimeMute → Dedup); Redis-backed
-  HA clustering (cross-replica notification dedup, distributed timer
-  reconciliation, silence sync via pub/sub, leader-elected GC, peer heartbeat);
-  `pkg/configvalidator` wired into startup and hot reload (`SIGHUP` + `POST /-/reload`);
-  Telegram/Email publishers; wire-level group batching (one HTTP POST per
-  `(group, target)` for webhook/alertmanager targets, upstream v4 JSON shape).
-- **Upstream-compatible notification templates** (`TEMPLATES-EPIC`): `templates:`
-  files and per-integration presentation fields (`slack_configs[].title`,
-  `pagerduty_configs[].description`, `email_configs[].subject`/`html`, etc.)
-  now render through a faithful port of upstream's template engine and default
-  library (byte-for-byte `default.tmpl`/`email.tmpl`), instead of being parsed
-  and ignored. Guarded by a render timeout + output cap that AMP adds on top of
-  upstream (a broken template degrades to AMP's fixed formatter, never drops a
-  notification) and by `publishing.templates.enabled` (default `true`) as a
-  restart-only kill switch back to the pre-epic formatters.
-- **`receivers:` integrations provision delivery endpoints** (`AMP-PARITY-WAVE6`,
-  `FU-RECEIVERS-INTEGRATION`): an untouched upstream `alertmanager.yml` now
-  delivers with zero Kubernetes Secrets. `webhook_configs`/`slack_configs`/
-  `pagerduty_configs`/`telegram_configs`/`email_configs` auto-provision targets
-  merged with any Secret-discovered ones; `global.slack_api_url`/`pagerduty_url`/
-  `telegram_api_url` fallbacks; `send_resolved` per integration; blackhole
-  receivers (`- name: 'null'`); the PagerDuty endpoint bug (`/v2/events` →
-  `/v2/enqueue`) is fixed here too.
-- **Inhibition matcher-list + secret/HTTP flexibility** (`AMP-PARITY-WAVE7`):
-  `inhibit_rules[].source_matchers`/`target_matchers` (upstream's modern
-  syntax) now actually inhibits; `*_file` secret variants (`url_file`,
-  `routing_key_file`, `bot_token_file`, etc.) for every integration credential;
-  per-integration `http_config` (proxy, TLS, basic/bearer auth, redirect
-  policy) reaching the wire for webhook/Slack/PagerDuty/Telegram HTTP clients.
-- **Delivery reliability hardening** (waves 3-4): a notification only counts as
-  delivered — and only then suppresses a resend — once the target's HTTP call
-  is *confirmed*, not merely enqueued (`publishing.queue.delivery_confirmation_timeout`,
-  default 45s). A partial per-alert failure no longer re-sends alerts that
-  already landed. Runtime Redis failback/failforward for group storage, with
-  write-through + deletion-replay reconciliation on recovery.
-- **Lite-profile restart durability** (`FU-LITE-FILE-SNAPSHOT`): the
-  zero-dependency lite profile now survives a restart without losing silences
-  or notification dedup state, via plain versioned JSON snapshots
-  (`storage.path`, disabled by default).
-- **Investigation tooling** (`PHASE-6A-BUILTIN-TOOLS`): four built-in tools for
-  the LLM investigation agent — `prometheus_query_range`, `loki_query_range`,
-  `kubernetes` (pods/events/logs/deployments), `database_diagnostics`
-  (read-only Postgres) — wired conditionally from `investigation.tools.*` config.
-- **Operational endpoint + config-API parity**: `GET /api/v2/status`/`receivers`/
-  `alerts/groups`, `POST /-/reload`; a runtime config read/write/rollback API
-  (`GET/POST /api/v2/config`, history, revisions, dry-run rollback/prune).
-- **LLM provider flexibility**: `llm.provider` (`proxy` legacy endpoints or
-  OpenAI-compatible `chat/completions`), classification stats/health endpoints.
+- **Upstream Alertmanager core** (`UPSTREAM-CORE-POC-WIRING`, `UPSTREAM-CORE-REMOVAL`): routing, grouping, silences, inhibition, time intervals, all 18 receiver integrations, templates and the `/api/v2` handlers are upstream's packages at v0.34.1. An `alertmanager.yml` that upstream accepts works unchanged; `amtool check-config` is an exact check. Differences: [`docs/ALERTMANAGER_COMPATIBILITY.md`](ALERTMANAGER_COMPATIBILITY.md).
+- **LLM classification on the upstream core** (`UPSTREAM-AI-CLASSIFY`): each firing alert is classified asynchronously, off the ingest path; a notification waits up to `llm.notify_wait` (default `5s`) and carries `llm_severity`, `llm_confidence`, `llm_reasoning`, `llm_recommendations` annotations. `llm.drop_noise` (default `false`) leaves alerts classified as noise out of notifications. Default: off (`llm.enabled: false`).
+- **Alert history and investigation** (`UPSTREAM-AI-HISTORY-INVESTIGATION`): every alert the core accepts, silenced and inhibited ones included, goes to PostgreSQL off the ingest path; delivery does not depend on the database. With `investigation.enabled` each firing incident gets an LLM investigation, agentic with `llm.agent_mode` (Prometheus, Loki, Kubernetes, PostgreSQL tools; runbooks). Metric `amp_upstream_history_writes_total`.
+- **Kubernetes-Secret targets as upstream integrations** (`UPSTREAM-NON-UPSTREAM-RECEIVERS`): Secrets labelled `publishing-target=true` join their receivers (`amp.receiver`) as `webhook_configs`, `slack_configs` or `pagerduty_configs`, re-read every `publishing.refresh.interval` (`5m`). Delivery is upstream's. Metric `amp_upstream_k8s_targets`.
+- **HA over memberlist** (`UPSTREAM-HA-MEMBERLIST`): upstream's `--cluster.*` flags; silences and the notification log are gossiped and snapshotted to `--storage.path`. The chart runs a StatefulSet with a headless Service (gossip on 9094). Default: one replica.
+- **AMP API** (`UPSTREAM-API-UI`): `GET /api/amp/v1/alerts/{fingerprint}` (the history record, also after the alert resolved) and `GET /api/amp/v1/alerts/{fingerprint}/investigation`, by the fingerprint `/api/v2` reports. Metric `amp_api_request_duration_seconds`.
+- **Basic auth** (`UPSTREAM-CORE-REMOVAL`): `--web.config.file` in upstream's web-config format; probes and `server.auth.unauthenticated_paths` stay open.
+- **Investigation safety** (`INVESTIGATION-SAFETY-BUNDLE`): alert data marked as untrusted in prompts, `investigation.tools.kubernetes.allowed_namespaces`, credentials scrubbed from tool output, `database_query` on its own DSN, LLM error bodies truncated.
+- **Helm**: external PostgreSQL values (`HELM-EXTERNAL-DATABASE`), `extraVolumes`/`extraVolumeMounts` for receiver credentials from Secrets (`HELM-EXTRA-VOLUMES`), single-node defaults (`HELM-SINGLE-NODE-DEFAULTS`), narrowed RBAC (`PROD-RBAC-SCOPE`), Ingress hardening (`PROD-INGRESS-HARDENING`).
+- **CI and images** (`PROD-CI-IMAGES`, `PROD-RELEASE-V010-PREP`): `ghcr.io/ipiton/amp` for `linux/amd64` and `linux/arm64` from tagged releases; the tag must match `Chart.yaml` `appVersion`.
 
 ## Performance / Improvements
 
-- Sliding delivered-state TTL fix (a persistently-failing alert no longer
-  suppresses already-delivered ones past one `repeat_interval`).
-- Duplicate-metric-key flake, PagerDuty/Rootly cache keys, Slack Block Kit
-  payload correctness (`{"text":""}`/`invalid_blocks` bugs from wave-3),
-  per-alert delivery-outcome tracking, and multiple goroutine-leak fixes across
-  `PublisherFactory.Shutdown()`.
-- Go toolchain raised to 1.26.
+- **Delivery no longer waits for AMP's layer**: classification, history and investigation run after the upstream store has accepted an alert; a slow LLM or database delays at most one notification by `llm.notify_wait`.
+- **LLM calls** honour `Retry-After` on 429/503 (`UPSTREAM-AI-CLASSIFY`) and the circuit breaker (`INVESTIGATION-PROMPT-ISOLATION`).
+- **Toolchain and dependencies**: Go 1.27.3 and `golang.org/x/net` v0.60.0, `govulncheck` clean (`PROD-DEPS-GO-127`, `PROD-DEPS-NET-HTTP2`).
+- **Documentation** (`UPSTREAM-DOCS-MIGRATION`): README, compatibility, configuration, migration, rollout and rollback guides rewritten for `amp-upstream`.
 
 ## Breaking Changes
 
-Every entry below is quoted **verbatim** from `CHANGELOG.md`'s
-`### Breaking changes / migration notes` section (items 1-14) and from the
-templates epic's own numbered migration notes and the wave-7 "Upgrade impact"
-paragraph (items 15-16) — no rewording, per this template's own rule. Fix-round
-correction: an earlier draft of this file paraphrased items 1, 8 and 16-18;
-they are restored to CHANGELOG's exact wording below (16-18 turn out to be one
-CHANGELOG sentence with a (1)/(2)/(3) list, not three separate bullets — quoted
-as such).
+Copied verbatim from `CHANGELOG.md`'s `### Breaking changes / migration notes`. The notes under its "Superseded by UPSTREAM-CORE-REMOVAL" heading describe the removed core and need no action on v0.1.0, so they are not repeated here.
 
-1. > **A route without `group_by` now groups upstream-style: ONE notification
-   > per receiver, not one per `alertname`** (post-merge fix for
-   > `FU-RECEIVERS-INTEGRATION`): `business/routing.TreeBuilder.inheritGroupBy`
-   > used to substitute `["alertname"]` when neither the route, its ancestors,
-   > nor `global.group_by` set it. Upstream Alertmanager's `DefaultRouteOpts`
-   > leaves `group_by` EMPTY, which means every alert the route matches
-   > aggregates into a single group whose labels are `{}` — that is what
-   > `GET /api/v2/alerts/groups` and `amtool` report, and what the notify
-   > chain sends. **If you relied on the implicit per-`alertname` grouping,
-   > set `group_by: [alertname]` explicitly** (upstream requires the same).
-   > Affects only configs that never specify `group_by` at any level; every
-   > config with an explicit `group_by` is unchanged. This divergence
-   > pre-dated the epic and was masked: a `route:`/`receivers:` config with an
-   > integration-less receiver failed to load before blackhole receivers
-   > became legal, so the groups API fell back to its legacy
-   > single-synthetic-group path and the upstream-parity test passed for the
-   > wrong reason.
-2. > **PagerDuty Events API v2 endpoint corrected** (`FU-RECEIVERS-INTEGRATION`,
-   > slice 1): the publisher posted trigger/acknowledge/resolve events to
-   > `<base>/v2/events`, which is not a PagerDuty endpoint — Events API v2
-   > enqueues at `<base>/v2/enqueue`. Every PagerDuty notification was
-   > rejected. Nothing to change for real PagerDuty targets (they start
-   > working), but **any mock, proxy or self-hosted listener built against the
-   > old path must now serve `/v2/enqueue`** (change events keep using
-   > `/v2/change/enqueue`). A target URL carrying the FULL endpoint
-   > (`https://events.pagerduty.com/v2/enqueue`, upstream's
-   > `pagerduty_configs[].url` semantics — or `/v2/events`, if a Secret was
-   > written to compensate for the bug) is normalised to its base before the
-   > path is appended, so both existing K8s Secret shapes keep working
-   > without edits.
-3. > **Renaming the ROOT route's receiver needs a restart** (`FU-RECEIVERS-INTEGRATION`,
-   > slice 1): the degraded-routing fallback receiver (used only when a
-   > configured route tree produced no decision — a non-fatal tree build
-   > failure or a per-alert `Evaluate` error) is a startup snapshot of
-   > `route.receiver`. After a reload that RENAMES it, that fallback points at
-   > a name the config no longer declares, so degraded-state alerts fail
-   > loudly (`routing unavailable` / `no targets found for receiver`) instead
-   > of being delivered — a safe failure mode, but it stays until the process
-   > restarts. Same restart class as adding a `route:` section to a config
-   > that started without one. Normal (non-degraded) routing follows the
-   > reload immediately.
-4. > **`email_configs` now REQUIRE global SMTP settings — a previously-loadable
-   > config can fail to boot** (`FU-RECEIVERS-INTEGRATION`, slice 2): a
-   > receiver declaring `email_configs` must have `global.smtp_smarthost`,
-   > plus either `global.smtp_from` or a `from` on every entry. Two shapes
-   > that loaded before (with a WARN, and silently provisioned no email
-   > target) now fail validation at startup AND on `/-/reload`, so an upgrade
-   > can turn a running deployment into a boot loop: (1) `email_configs` with
-   > no `global.smtp_*` block at all; (2) an upstream config that sets SMTP
-   > **per `email_config`** (`smarthost`/`auth_username`/`auth_password`/
-   > `require_tls`) — AMP models no per-integration SMTP fields, so those
-   > keys are dropped by the parser and cannot substitute for the global
-   > ones. Fix in one line: add `global.smtp_smarthost` (and
-   > `global.smtp_from`) to your config. This matches upstream Alertmanager,
-   > which fails `config.Load` with "no global SMTP smarthost set" / "no
-   > global SMTP from set" for the same shape; the alternative (warn and
-   > blackhole) is silent non-delivery of email.
-5. > **Receiver names must be unique** (`FU-RECEIVERS-INTEGRATION`, slice 1):
-   > duplicates are now a load error, as in upstream Alertmanager. A config
-   > with two receivers of the same name previously loaded and silently used
-   > only one of them.
-6. > **A receiver with no integrations is now valid** (`FU-RECEIVERS-INTEGRATION`,
-   > slice 1): upstream's blackhole receiver (`- name: 'null'`) and a receiver
-   > whose only integration AMP cannot deliver (`opsgenie_configs`,
-   > `victorops_configs`, `wechat_configs`) load instead of failing
-   > validation, emit a load-time WARNING naming the unsupported integration,
-   > and drop notifications routed to them (counted as
-   > `alert_history_publishing_blackhole_drops_total{receiver=...}`).
-   > configvalidator's `E024` became the non-blocking `W024`.
-7. > `services.Publisher`'s methods were renamed `PublishToAll`/`PublishWithClassification`
-   > → `PublishToReceiver`/`PublishToReceiverWithClassification` and now take
-   > the routed receiver: the non-grouped publish path (the default,
-   > `grouping.enabled: false`) used to fan every alert out to every target
-   > regardless of receiver.
-8. > Receiver names must not contain `/` (reserved as the group-key
-   > separator, `receiver=<name>/<group-key>`); any other non-empty name is
-   > accepted.
-9. > `GET /api/v2/status`'s `config.original` now redacts secret-named fields
-   > (PagerDuty `routing_key`, Slack/webhook URLs, Telegram `bot_token`, etc.)
-   > with upstream's own `<secret>` placeholder instead of the raw config.
-10. > `PagerDutyConfig.RoutingKey` validation relaxed from `validate:"len=32"`
-    > to `validate:"required"`, matching upstream's plain non-empty `Secret`
-    > type — any previously-32-char-enforced config still validates, but
-    > non-32-char keys that were wrongly rejected before now pass too.
-11. > `DELETE /api/v2/silence/{id}` expires the silence in place
-    > (upstream-like semantics) rather than a hard delete; treat it as "mark
-    > expired now," not row removal.
-12. > Old bare group-level nflog Redis entries (`nflog:entry:{groupKey}`) are
-    > never read by the new target-suffixed lookup
-    > (`nflog:entry:{groupKey}:{target}`) and simply expire on their original
-    > TTL — no migration step needed.
-13. > `grouping.reconciliation_grace` default changed 20s → 90s (derived from
-    > `delivery_confirmation_timeout`), and startup now **fails** on a pinned
-    > value that is not strictly greater than the publish-claim TTL (65s at
-    > defaults): a config carrying the old `reconciliation_grace: 20s` must
-    > raise it (or drop it to inherit the derived default).
-14. > HA failover recovery time grew accordingly: a crashed replica's groups
-    > are adopted after up to ~90s grace + one reconciliation tick (was ~20s +
-    > tick) — the price of closing the mid-flight adoption race (`DeleteTimer`
-    > vs the live publisher's `SaveTimer`).
-15. Templates-epic migration notes — CHANGELOG's own header: **"note 1 is a
-    BREAKING CHANGE for every deployment that uses `route:`/`receivers:`,
-    whether or not you configured a single template"**:
-    1. > **BREAKING: your Slack and email notifications change shape by
-       > default.** Upstream's presentation defaults are materialized for
-       > every unset field of every `receivers:`-provisioned
-       > `slack_configs`/`pagerduty_configs`/`telegram_configs`/`email_configs`
-       > entry, and the template renderer is wired unconditionally — so a
-       > config that names no template at all now renders **upstream's**
-       > output instead of AMP's. Concretely, before → after:
-       >   - **Slack**: AMP's Block Kit message (a `blocks` array with
-       >     AMP-worded sections) → upstream's `attachments` shape — `title` =
-       >     `[FIRING:1] <group labels> (<remaining common labels>)`,
-       >     `title_link` + `fallback` = the alertmanager link, top-level
-       >     `text` = upstream's fallback string, plus a new
-       >     `username: "Alertmanager"`. The `blocks` array is **gone**.
-       >   - **Email**: AMP's own subject and HTML body → upstream's
-       >     `email.default.subject` and its ~10 KB `email.default.html`.
-       >   - **PagerDuty / Telegram**: `summary`/`client`/`client_url` and the
-       >     message body become upstream's `pagerduty.default.*` /
-       >     `telegram.default.message` renderings; PagerDuty `custom_details`
-       >     gains upstream's `firing`/`resolved`/`num_firing`/`num_resolved`
-       >     entries on top of AMP's diagnostics.
-       >   - **Webhook**: unchanged. Upstream does not template webhook
-       >     payloads, and neither does AMP.
-       >   - **Kubernetes-Secret-provisioned targets**: unchanged. Discovery
-       >     does not populate template fields, so those targets keep the
-       >     fixed formatters.
-       >
-       >   This is the drop-in parity the epic exists for — an untouched
-       >   upstream config should render upstream's output — but it IS a
-       >   visible change for anyone who migrated a config and got used to
-       >   AMP's formatting. **The revert is one line:**
-       >   `publishing.templates.enabled: false` restores the pre-epic fixed
-       >   formatters wholesale (`templates:` files and per-integration
-       >   presentation fields ignored, exactly as before). It is read at
-       >   startup, so flipping it needs a restart, not a reload.
-    2. > **A receiver that DOES name presentation fields renders your content,
-       > not both.** For Slack the operator's presentation replaces the Block
-       > Kit rendering rather than shipping two versions in one message. If
-       > you want AMP's formatting for a specific integration, use the switch
-       > in note 1 — removing the fields no longer restores it, because the
-       > defaults are materialized.
-    3. > **Relative `templates:` paths now work** (`templates: ['templates/*.tmpl']`,
-       > upstream's canonical idiom) and resolve against the config file's
-       > directory. Previously they resolved against the process CWD, matched
-       > nothing, and loaded clean — if you worked around that with absolute
-       > paths, those still work unchanged.
-    4. > **A broken template file now fails config load** instead of being
-       > ignored. Validate with a reload against a copy before rolling out.
-    5. > **`{{ .Alerts }}` holds ONE alert per message for slack/pagerduty/telegram/email**
-       > — a DELIVERY divergence, not just a data-model one. Upstream sends
-       > one message per group; AMP sends one per alert, each with a
-       > one-element `.Alerts`. A migrated `{{ range .Alerts }}` template that
-       > upstream rendered as a single aggregated message therefore arrives
-       > as N single-alert messages. Group labels, receiver and status are
-       > correct; the alert SET is not upstream's. Webhook delivery is
-       > unaffected (it batches the whole group, upstream's v4 shape).
-    6. > `{{ .RouteLabels }}`, `{{ routeLabels "x" }}` and
-       > `{{ .NotificationReason }}` are accepted and render **empty** — AMP
-       > has no source for them. They do not error, so a migrated template
-       > using them keeps working.
-16. Wave-7 "Upgrade impact" paragraph, quoted whole (CHANGELOG's own (1)/(2)/(3)
-    list, not three separate entries):
-    > **Upgrade impact**, spelled out explicitly for the first time (all three
-    > fix rounds' worth): (1) route `!=`/`!~` against a label an alert lacks
-    > now evaluates against `""` instead of auto-passing — a route comparing
-    > to an empty string (`env!=""`) can now route differently than before;
-    > (2) inline (non-`config_file`) `source_match_re`/`target_match_re`
-    > inhibit rules, previously a silent no-op, now actually suppress — new
-    > suppression appearing with no config change; (3) regex anchoring
-    > tightened at all three sites (routing, inhibition, and now silencing) —
-    > a `=~`/`!~`/classic-regex pattern relying on substring matching may
-    > stop matching/suppressing after upgrade until rewritten with explicit
-    > `.*` wildcards.
+- **UPSTREAM-CORE-REMOVAL** (2026-11-08, ADR-019 slice 5): AMP's own alerting core is removed; `amp-upstream` (the upstream Alertmanager v0.34.1 core plus AMP's layer) is the only binary, image and chart workload.
+  - **Image**: `ghcr.io/ipiton/amp` runs `/app/amp-upstream` (`--config.file=/etc/amp/alertmanager.yml --storage.path=/data` by default), listens on 9093 and has a `/-/healthy` HEALTHCHECK. `/app/amp`, port 8080 and the `ghcr.io/ipiton/amp-config-reloader` image are gone. **Migration**: run the image with `--config.file` (your `alertmanager.yml`) and `--amp.config.file` (the AMP configuration); `AMP_CONFIG_FILE` is no longer read.
+  - **Configuration**: routing, receivers, inhibition, silences and templates are the upstream `alertmanager.yml` (`--config.file`), parsed strictly by upstream. The AMP config (`--amp.config.file`) keeps only `profile`, `app`, `database`, `llm`, `investigation`, `publishing` (K8s-Secret target discovery) and `server.auth`/`server.web_config_file`; `route:`, `receivers:`, `grouping`, `storage`, `silencing`, `redis`, `cache`, `server.port`/`host`, `publishing.queue`/`templates`/`health` are no longer read (one warning at start lists them). `DATABASE_PASSWORD` and `LLM_API_KEY` from the environment still override the file. **Migration**: move `route`, `receivers`, `inhibit_rules`, `time_intervals`, `templates` and `global` into `alertmanager.yml`, keep the rest in the AMP file, and run `amtool check-config alertmanager.yml` (`docs/MIGRATION_FROM_LEGACY_CORE.md` § Step 3; `docs/CONFIGURATION_GUIDE.md`). A config that does not load now stops the start; on `/-/reload` it is rejected and the running one stays.
+  - **`global.group_by`, `global.group_wait`, `global.group_interval`, `global.repeat_interval` fail the config load** (upstream has no such keys). **Migration**: set them on the root `route:`; child routes inherit them. A route without `group_by` puts all alerts of a receiver in one group, as upstream: add `group_by: [alertname]` to keep one notification per alert name.
+  - **Silences are not carried over**: the old core kept them in PostgreSQL (or memory), upstream in `--storage.path` snapshots. **Migration**: before the upgrade `amtool silence query -o json > silences.json` against the old AMP, after it `amtool silence import < silences.json` against one new pod (§ Steps 1 and 6). Imported silences get new IDs.
+  - **Notification state is not carried over**: the Redis/Valkey notification log of the old core is not read, so each group still firing notifies once more after its `group_wait`. **Migration**: none needed for delivery; Valkey is no longer used, `valkey.replicas: 0` stops it, and its PVC `redis-data-<fullname>-redis-0` can be deleted (§ Step 7).
+  - **HTTP**: only the upstream API (`/api/v2`, `/-/healthy`, `/-/ready`, `/-/reload`, `/metrics`, `/debug/*`) plus `/api/amp/v1` (UPSTREAM-API-UI, below). No web UI: the upstream UI is not part of the Go module, and AMP's dashboard is gone (own UI after v0.1.0, `UPSTREAM-UI`). **Migration**: look at alerts with karma, Grafana or `amtool` (`docs/ALERTMANAGER_COMPATIBILITY.md` § Viewing alerts). `POST /api/v2/alerts` without `Content-Type: application/json` is `415`; invalid payloads are `400`/`422` with upstream's plain-string errors; an invalid boolean in `?active=` etc. reads as `false`; `/api/v2/alerts/groups` trails ingest by about a millisecond.
+  - **`/debug/*` is served on the API port**, as upstream (pprof and `expvar`; `/debug/vars` shows the command line). **Migration**: keep port 9093 off public networks (NetworkPolicy, Ingress paths) and pass no secrets in flags.
+  - **Metrics**: the metrics of AMP's own core (grouping, routing, inhibition, silences, publishing queue and health, `amp_config_reloader_*`) are gone; upstream's `alertmanager_*` metrics replace them. `alertmanager_build_info` reports the real upstream version (`0.34.1`), not a constant compatibility version (ADR-009 is replaced). **Migration**: update dashboards and alert rules on the old names.
+  - **Helm chart**: the Deployment becomes StatefulSet `<fullname>` with a `data` volumeClaimTemplate (silence and notification-log snapshots); `upstreamCore.*` is renamed to `alertmanager.*` (`replicas`, `externalURL`, `peerTimeout`, `config` as `alertmanager.yml`, `ampConfig` merged over the generated AMP config, `persistence`, `extraArgs`). The Service listens on 9093 (port `web`); probes are `/-/healthy` and `/-/ready`. Removed values: `replicaCount`, `logLevel`, `autoscaling` (no HPA), `strategy`, `liteProfile` (and the lite PVC), `cache.*`, `alerts`, `migration`, `grouping`, `storage`, `silencing`, `persistence`, `server`, `configFile`, `configReloader`, `gracefulShutdown.timeoutSeconds`, `publishing.queue`/`templates`/`health`, `llm.retryDelay`/`cacheTtl`/`batchSize`. A removed top-level key fails the render and names its replacement; removed nested keys (`publishing.queue`, `llm.retryDelay`, `service.metricsPort`, …) are ignored silently. **Migration**: convert the values with the table in `docs/MIGRATION_FROM_LEGACY_CORE.md` § Step 2 and check with `helm template`. See `helm/amp/CHANGELOG.md`.
+  - **Upgrading the release**: `--reuse-values` keeps the old chart's values, which have no `alertmanager.*`; the render fails and says so. **Migration**: `helm upgrade <release> ./helm/amp --reset-then-reuse-values -f <new values>` (Helm ≥ 3.14) or a values file for this chart. `helm upgrade` deletes the Deployment and creates the StatefulSet; Helm applies the new objects before it deletes the old ones, so the old Deployment and the new StatefulSet briefly run together and a group may be notified twice. The upgrade deletes the lite profile's PVC `<fullname>-pvc` (SQLite data of the old core); PVCs `data-<fullname>-upstream-<i>` of a slice-4 `upstreamCore` StatefulSet stay behind and can be deleted; an HPA created with `helm.sh/resource-policy: keep` stays and must be deleted by hand (`hpa/<fullname>`). `alertmanager.replicas: 0` stops AMP (for a database restore, `docs/POSTGRESQL_RESTORE_GUIDE.md`).
+  - **Prometheus targets**: with `alertmanager.replicas` > 1 the pods form a gossip cluster, and every pod must receive every alert. **Migration**: point Prometheus at port 9093 of each pod (the headless Service `<fullname>-headless`, or DNS SD on it), not at the Service and not at port 8080. With `llm.enabled`, every pod classifies every alert: N replicas cost N LLM calls per alert until `UPSTREAM-AI-HA-DEDUP`. The defaults are one replica and `llm.enabled: false`.
+  - **Valkey**: still deployed by the chart, but `amp-upstream` does not use it (`UPSTREAM-AI-HA-DEDUP`); `valkey.replicas: 0` stops its pod (its Services, Secret, ServiceMonitor and alert rules still render, HELM-CHART-GAPS), as `values-production.yaml` does.
+- **UPSTREAM-API-UI** (2026-11-08, ADR-019 slice 6): the HTTP API after AMP's own routes return under `/api/amp/v1`.
+  - **Investigation path and fields**: `GET /api/v1/alerts/{fingerprint}/investigation` is now `GET /api/amp/v1/alerts/{fingerprint}/investigation` (`/api/v1/*` answers `410`, as upstream). It accepts the fingerprint `api/v2` reports. In the response `fingerprint` is that upstream fingerprint (left out when the alert has no history row); AMP's SHA-256, formerly `fingerprint`, is `amp_fingerprint`. **Migration**: change the path in clients and read AMP's fingerprint from `amp_fingerprint`; the old SHA-256 fingerprint is still accepted in the path.
+  - **`GET /api/v2/inhibitions` is gone for good** (upstream `404`): AMP adds no routes under `/api/v2`. **Migration**: which alerts are inhibited and by what: `status.inhibitedBy` in `GET /api/v2/alerts`; the rules: `config.original` in `GET /api/v2/status`.
+  - **`?status=resolved` on `GET /api/v2/alerts` is not supported**: upstream lists no resolved alerts and ignores the parameter, so the request returns `200` with the current alerts, not an error. **Migration**: read a resolved alert's record from `GET /api/amp/v1/alerts/{fingerprint}`.
+  - **`?group_by=` on `GET /api/v2/alerts/groups` is not supported** and also ignored (`200`, groups as the routes define them). **Migration**: set `group_by` on the routes.
+  - **Health aliases** `/health`, `/healthz`, `/ready`, `/readyz` and the dashboard paths do not come back (`404`). **Migration**: probes and monitors on `/-/healthy` and `/-/ready` (the chart does this).
+  - **Rollout**: `amp-upstream` migrates at start, before it serves, within one minute. The index is built without blocking writes, but on a large `alerts` table (one row per label set ever seen; there is no retention) it may not finish in that minute: history and investigations are then off until restart, and an INVALID index is left behind, which the next start keeps and reports with `alert history: index idx_alerts_upstream_fingerprint is missing or INVALID`. **Migration**: on a large table, check `SELECT count(*) FROM alerts` and build the column and index before the upgrade (`docs/MIGRATION_FROM_LEGACY_CORE.md` § Step 4): `ALTER TABLE alerts ADD COLUMN IF NOT EXISTS upstream_fingerprint VARCHAR(16);`, then `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_alerts_upstream_fingerprint ON alerts(upstream_fingerprint);` as a separate statement. To repair an INVALID one, run `DROP INDEX CONCURRENTLY idx_alerts_upstream_fingerprint;` and then the `CREATE` as two separate statements, not in one transaction (`psql -c` with both is one); a restart does not rebuild it. Rows written before the upgrade are backfilled at start; until then they are found only by `amp_fingerprint`. Rolling back the image keeps the schema; do not run `goose down` (`docs/ROLLBACK_RUNBOOK.md`).
+- **`kubernetes_action` reads only the alert's namespace by default** (`INVESTIGATION-PROMPT-ISOLATION`). With `investigation.tools.kubernetes.enabled: true`, the tool used to read any namespace. It now reads only the namespace in the alert's `namespace` label, and refuses all calls for an alert without one. Make sure your alerts carry `namespace` (kube-state-metrics and kube-prometheus alerts do), or list the namespaces explicitly. To keep the previous behaviour:
+  ```yaml
+  investigation:
+    tools:
+      kubernetes:
+        allowed_namespaces: ["*"]
+  ```
+- **`database_query` needs `investigation.tools.database.dsn`** (`INVESTIGATION-PROMPT-ISOLATION`). With `database.enabled: true` and no `dsn`, the tool is no longer registered (a warning is logged) instead of querying AMP's own database. Set `dsn` to the database the investigated services use, with a read-only role that can read `pg_stat_activity`, `pg_stat_statements` and `pg_stat_replication` (for example a member of `pg_monitor`).
+- **Investigations require an OpenAI-compatible `llm.provider`** (`INVESTIGATION-PROMPT-ISOLATION`). With `llm.provider: proxy`, investigations now fail as permanent errors without a request. If your proxy serves the OpenAI `/chat/completions` API, set `llm.provider: openai-compatible`.
+- **`llm.max_retries: 0` disables retries** (`INVESTIGATION-SAFETY-RELIABILITY`). It used to be replaced with 3. A config that sets `0` now makes one attempt per classification; remove the key (default 3) or set the wanted number to keep retries. Not setting the key is unchanged.
+- **An investigation has no `queued` record until a worker picks it up** (`INVESTIGATION-SAFETY-RELIABILITY`). `GET /api/v1/alerts/{fingerprint}/investigation` (now `GET /api/amp/v1/alerts/{fingerprint}/investigation`, UPSTREAM-API-UI) returns `404` (or the previous investigation) for a job still waiting in the in-memory queue, instead of `status: queued`.
+- **The Helm chart's cache StatefulSet must be re-created once** (`HELM-VCT-CHART-LABELS`). Applies to releases installed with `profile: standard` (the default) by an earlier chart; fresh installs are not affected. Without this step the upgrade fails with `StatefulSet.apps "<fullname>-redis" is invalid: spec: Forbidden: updates to statefulset spec for fields other than ...`. Before `helm upgrade`, delete only the StatefulSet object and leave its pods and volumes in place:
+  ```bash
+  kubectl -n <namespace> delete statefulset <fullname>-redis --cascade=orphan
+  ```
+  Then run `helm upgrade`: it creates the StatefulSet again with the same selector, which adopts the running pod and keeps using the PVC `redis-data-<fullname>-redis-0`. Labels of the existing PVC do not change. Without `--cascade=orphan` the pod is deleted too; the PVC is kept and Valkey starts again on the same data. A `helm rollback` to a revision before this change needs the same step. After this one change, chart version bumps no longer touch `volumeClaimTemplates`.
+- **Helm chart defaults target one node; the cache is Valkey** (`HELM-SINGLE-NODE-DEFAULTS`, ADR-017). This affects a `helm upgrade` that relies on the chart defaults (not on `values-production.yaml`, which keeps HPA 3–20, an external PostgreSQL and an external cache). Upgrade in a quiet window, without `--reuse-values`: it keeps the old chart defaults (HPA on, `redis:7-alpine`, 250 connections), so none of this applies and the cache stays on Redis 7.4. Use `--reset-then-reuse-values` or pass your values files.
+  1. **HPA off, one replica.** The HPA created by an older chart carried `helm.sh/resource-policy: keep`, so the upgrade leaves it in place, unchanged (2–10 replicas). Delete it in the same window: `kubectl -n <namespace> delete hpa <fullname>` (NOTES prints the command while it exists). Left alone, it keeps scaling the Deployment up to 10 pods, now against requests five times lower (it scales out at ~70m CPU per pod) and a bundled PostgreSQL with `max_connections=100`, which 4 pods use up: ingest then fails with `500`. Later on/off switches remove the HPA normally. To keep autoscaling instead, set `autoscaling.enabled: true`, raise `resources.requests` (for example back to 500m/512Mi) and, with the bundled PostgreSQL, `postgresql.config.maxConnections` to at least `maxReplicas` × 25 + 5 (see 4).
+  2. **Helm 4:** if the upgrade fails with `conflict with "kube-controller-manager"` (or `"k3s"`) `... .spec.replicas`, the HPA owns that field (server-side apply). Re-run with `--force-conflicts`.
+  3. **Cache image Redis → Valkey.** `redis:7-alpine` is Redis 7.4 under RSALv2/SSPL; the chart now runs `valkey/valkey:8.1.10-alpine` (BSD-3). Valkey cannot load Redis 7.4 data (RDB v12), so the cache pod's init container moves a v12 `dump.rdb` and an `appendonlydir` with a v12 base file to `/data/redis-pre-valkey-<unix-ts>/`, and Valkey starts without them; its log says so. Losing the cache contents means: groups whose alerts are still firing notify **once more** after `group_wait` (the notification log is gone), a resolve for an alert that cleared during the upgrade may not be sent, inhibition sources are unknown until Prometheus re-sends the alerts, and with LLM classification on, alerts are classified again. Silences and alert history are in PostgreSQL and are not affected. With the chart defaults AMP could not authenticate to this cache and kept that state in memory (bug `AMP-CACHE-NOAUTH`), so there it is lost by the AMP restart anyway. The moved directory holds the RDB twice plus the AOF tail; check it with `du` and delete it when you no longer need a rollback: `kubectl -n <namespace> exec <fullname>-redis-0 -c redis -- rm -r /data/redis-pre-valkey-<ts>`. An external cache (`cache.host`, `valkey.replicas: 0`) is not touched. The move runs only when `valkey.image.repository` contains `valkey`: a Valkey mirror under another name crash-loops on the old data; to stay on your own Redis image, set both `valkey.image.repository` and `valkey.image.tag` (for example `redis` / `7.4-alpine`).
+     After the upgrade, check the AMP log for `Redis cache unavailable, falling back to in-memory cache`: AMP waits for an unreachable cache only `redis.startup_wait` (60s by default) at start and does not reconnect later; `kubectl rollout restart deploy/<fullname>` once the cache pod is ready.
+  4. **Bundled PostgreSQL** (dev/pilot): `max_connections` 250 → 100, `shared_buffers` 256MB → 128MB, `effective_cache_size` 1GB → 512MB, memory request/limit 1Gi/2Gi → 256Mi/1Gi. It restarts once; `POST /api/v2/alerts` returns `500` until it is back. 100 connections cover 3 AMP pods (25 each) plus the exporter; AMP connects as the bootstrap superuser, so `superuser_reserved_connections` holds nothing back from it. More replicas need a higher `maxConnections` and memory.
+  5. **Removed objects:** the unused `valkey` subchart (Deployment, Services, NetworkPolicy, ConfigMap and PVC `<release>-valkey`; its pod never started) and, under `profile: standard`, the unused PVC `<fullname>-pvc` (Pending, or bound but never mounted). No data is lost with either, unless the release once ran `profile: lite`: that PVC holds its SQLite data, and switching `lite` → `standard` now deletes it. `cache.resources` is gone; no template read it. Helm renders every chart in `helm/amp/charts/` even without dependencies: delete that directory if an earlier `helm dependency build` left it in your checkout, or the subchart comes back.
+  6. **Rollback:** `helm rollback <release> <revision>` (with `--force-conflicts` on Helm 4 if it reports a conflict, see 2; without `--wait`) brings Redis 7.4 back and it loads the data Valkey wrote (RDB v11). It also recreates the old objects: the `<release>-valkey` subchart in `Init:Error`, `<fullname>-pvc` and the HPA with `keep`, which has to be deleted again after the next upgrade. To get back the pre-upgrade cache contents instead: scale `statefulset/<fullname>-redis` to 0; from a pod mounting the PVC (uid 999), remove what Valkey wrote (`rm -r /data/appendonlydir /data/dump.rdb`) and move the saved files back (`mv /data/redis-pre-valkey-<ts>/* /data/`); then roll back. A plain `mv` over Valkey's files fails on `appendonlydir` and Redis would load Valkey's AOF.
+- **The bundled PostgreSQL starts applying `postgresql.config` and the chart's `pg_hba.conf`** (`PG-CONFIG-FIX`). `helm upgrade` restarts it once (the config checksum changes); `POST /api/v2/alerts` returns `500` until it is back. After the restart, on the default values: `max_connections` 20 → 250, `shared_buffers` 400kB → 256MB (within `postgresql.resources.limits.memory: 2Gi`, together with the new 256Mi `/dev/shm`; with many backends — up to `maxConnections` — memory use grows past that, so raise `postgresql.resources.limits.memory` together with the connection count), `pg_stat_statements` preloaded, `min_wal_size`/`max_wal_size` 1GB/4GB (up to ~40% of the default 10Gi volume), and your own `postgresql.config` values, which were ignored until now, take effect — including `postgresql.config.ssl: "on"`, which now stops the server at start-up, since the chart provides no certificates. The `lite` profile renders the bundled PostgreSQL too (AMP does not use it there): it restarts and takes the same memory. Network access is limited to `postgresql.username` on `postgresql.database` with a password; anything else that connected over the network with another role or to another database, or for replication, is rejected (`no pg_hba.conf entry` / `rejects connection`). Data is untouched; no configuration is stored on the volume, so a rollback restores the old behavior. The exporter now connects and the `postgresql.rules` group loads: expect PostgreSQL alerts that were silent before.
+  - `helm upgrade --reuse-values` carries the old default `loggingCollector: "on"`, and the logs then go to `$PGDATA/pg_log` on the PVC instead of `kubectl logs`. Use `--reset-then-reuse-values` or `--set postgresql.config.loggingCollector=off`.
+  - Check after the upgrade: `SHOW config_file;` → `/etc/postgresql/postgresql.conf`, `SHOW max_connections;`, `SELECT * FROM pg_hba_file_rules;`.
+  - Rollback: `helm rollback <release> <revision>` returns the server to the image defaults on the same volume (and the original bug; the exporter again reports `pg_up 0`, and the restored alert rules fail to parse again, so no PostgreSQL alert fires). If the PostgreSQL pod is not Ready and the StatefulSet does not replace it, delete pod `<release>-postgres-0` by hand.
+- **`values-production.yaml` uses an external PostgreSQL** (`HELM-EXTERNAL-DATABASE`, ADR-016): `postgresql.enabled: false`, and the file does not render until `externalDatabase.host`, `database`, `username` and `existingSecret` are set. A `helm upgrade` of a release installed from this file **removes the bundled PostgreSQL StatefulSet and points AMP at the external database, which starts empty**. The PVC `postgres-data-<fullname>-postgres-0` is not deleted. Move the data first, with AMP stopped: `helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` § 3c. To stay on the bundled database for now, copy the whole `postgresql:` block from the `values-production.yaml` of the chart version you installed into your own values, and set its `password` (`--set postgresql.password=…` or a values file kept out of git; `postgresql.existingSecret` does not supply it: the chart always renders the bundled database's Secret from `postgresql.password`). `postgresql.enabled: true` alone falls back to the base `values.yaml`: its weak default password `secure_password_123`, a 10Gi volume (the upgrade is rejected: a StatefulSet's `volumeClaimTemplates` cannot change), 2Gi memory instead of 4Gi, and no NetworkPolicy for the database.
+- **`postgresql.enabled: false` with no database fails the render** under `profile: standard`. Set `externalDatabase.host`, or `alertmanager.ampConfig.database` (`configFile.content` before v0.1.0). Such installs used to render and then fail at start-up. A database injected some other way (post-renderer, kustomize patch of the env) is not recognized: use `externalDatabase`.
+- **Bundled PostgreSQL is dev/pilot only: no backup job, no PDB, exactly one replica** (`PROD-POSTGRES-HA-DECISION`, ADR-016). For production use an external PostgreSQL (16 is what the chart ships and tests) with backups/PITR on your side. The bundled backup never produced a usable backup: its `pg_basebackup` was always rejected by `pg_hba`, and WAL archiving was never on. Before `helm upgrade`:
+  1. Remove `postgresql.backup` and `postgresql.podDisruptionBudget` from your values. `postgresql.backup.enabled: true` (or `postgresql.backup: true`) now fails the render; an empty or `null` `postgresql.backup` and other leftover keys are ignored. **`helm upgrade --reuse-values` fails too**, even if you never set the key: it carries the old chart default `backup.enabled: true`. Use `--reset-then-reuse-values` (Helm ≥ 3.14) or add `--set postgresql.backup.enabled=false`.
+  2. `postgresql.replicas` other than `1` now fails the render. Several replicas were several independent databases behind one Service.
+  3. The upgrade deletes PVC `<fullname>-postgres-backup` (e.g. `amp-postgres-backup`) together with its contents. If you stored your own dumps there, copy them off first. `helm rollback` recreates it empty.
+  4. Take a dump first (`helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md` → Backup). Upgrade in a quiet window: Postgres restarts once (image `postgres:16` → `postgres:16.15`), and `POST /api/v2/alerts` returns `500` until it is back. Prometheus re-sends active alerts afterwards; a resolve sent only during the restart can be lost. The data volume `postgres-data` is kept.
+- **LLM is off by default in the Helm chart** (`HELM-DEFAULTS-VALIDATE`). This affects you if you set `llm.apiKey` (or relied on ESO) but not `llm.enabled`: after `helm upgrade` LLM classification is off. Set `llm.enabled: true` explicitly — also if you install with `-f values-production.yaml` or `-f values-dev.yaml`, where it is now `false` too. `llm.enabled: true` without `llm.apiKey` and without `externalSecrets.enabled` now fails `helm install`/`helm template` instead of starting a pod that cannot run. The flag `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION` that the chart now sets for the bundled PostgreSQL is read only by AMP images built from this change; an older image ignores it and still rejects `sslmode=disable` in production.
+- **`values-production.yaml` no longer renders as shipped** (`PROD-INGRESS-HARDENING`, ADR-015). Before `helm upgrade`, add to your own values file:
+  1. auth for the API behind the Ingress — `webConfig.existingSecret: <Secret with web-config.yml>`, **or** `ingress.externalAuth: true` together with your controller's auth annotations;
+  2. with `webConfig`, credentials for the ServiceMonitor — `monitoring.serviceMonitor.basicAuth.secretName: <Secret with the plain username and password>` (or `monitoring.serviceMonitor.enabled: false`);
+  3. at least one NetworkPolicy source — your ingress controller (`networkPolicy.ingressController`), every in-cluster alert sender that posts to the Service directly (`networkPolicy.alertSenders`), and the Prometheus that scrapes `/metrics` (`networkPolicy.metricsScrapers`). A sender left out times out silently on the sender's side: watch `prometheus_notifications_errors_total` (vmalert: `vmalert_alerts_send_errors_total`). An ingress controller with `hostNetwork: true` comes from node IPs: list the node CIDR as an `ipBlock` (CNI-dependent, verify with the README smoke check). Kill-switch: `--set networkPolicy.enabled=false` (no restart).
+  - Run the first upgrade to this chart with your values files (`-f values-production.yaml -f my-values.yaml`), not `--reuse-values`: `--reuse-values` keeps the old release values and skips the new `values-production.yaml` defaults, so the NetworkPolicy would stay off. Later upgrades, including the kill-switch, may reuse values.
+  - Any install with `ingress.enabled: true` and neither `webConfig.existingSecret` nor `ingress.externalAuth: true` fails the same way. Only `true` (or the string `"true"`) counts for `externalAuth`.
+  - Any install with `webConfig.existingSecret` and the ServiceMonitor on (`monitoring.prometheusEnabled: true` is the chart default) now fails to render until `monitoring.serviceMonitor.basicAuth.secretName` is set or `monitoring.serviceMonitor.enabled: false` — not only `values-production.yaml`.
+  - `podLabels` may no longer set `app.kubernetes.io/component`: the policies and the ServiceMonitor select AMP pods by it.
+  - The new pod label triggers one rolling restart.
+  - The AMP ServiceMonitor is no longer rendered with `monitoring.prometheusEnabled: false`, drops its `app`/`release` labels (use `monitoring.serviceMonitor.labels` for your `serviceMonitorSelector`), and now actually scrapes AMP.
+- **Helm RBAC narrowed** (`PROD-RBAC-SCOPE`): `helm upgrade` deletes the `<release>-secrets-reader` `ClusterRole`/`ClusterRoleBinding` and the `<release>-namespace-secrets` `Role`/`RoleBinding`, and creates `<release>-secrets-lister`. AMP itself loses nothing — discovery only ever listed Secrets in one namespace. What can break:
+  - **anything else bound to AMP's ServiceAccount** and relying on its wide permissions — grant those permissions to that workload separately;
+  - **discovery in a namespace other than the release's** (`publishing.discovery.namespace`): the Role is now created in that namespace, so the account running `helm upgrade` needs permission to create Roles and RoleBindings there (the ClusterRole used to hide this);
+  - **removed values**: `targetDiscovery.*` and `serviceAccount.rbac.crossNamespace`. They were never read by the app (only `targetDiscovery.crossNamespace` added `namespaces` read access to the ClusterRole), so setting them changed nothing; they are now ignored like any unknown key. `serviceAccount.rbac.create` is the one remaining switch.
 
 ## Backward Compatibility
 
-- **Kubernetes-Secret-provisioned publishing targets**: unchanged end to end —
-  discovery, credentials, and (per note 15 above) template-field behavior.
-- **Webhook payload shape**: unchanged. Never templated, before or after this
-  release; still the upstream v4 batch JSON shape.
-- **Existing `group_by`, explicit at any level**: unchanged behavior (note 1
-  only affects configs with no `group_by` anywhere).
-- **A target URL already carrying the full PagerDuty endpoint** (correct or
-  the old bugged path some Secrets were written to compensate for): keeps
-  working unedited (note 2).
-- **`amtool`/API consumers reading expired silences**: `GET /api/v2/silences`
-  already returned every state including `expired`; only the `DELETE`
-  semantics change (note 11).
+- **`alertmanager.yml` of upstream Alertmanager**: unaffected; it is read by upstream's own parser. A file that upstream v0.34.1 accepts, AMP accepts.
+- **Prometheus, `amtool`, Grafana, karma**: they talk to `/api/v2`, which is upstream's code. Only their target URL changes (port 9093, every pod).
+- **Kubernetes-Secret targets**: the Secret format and `amp.receiver` scoping are unchanged; the payload is now that of the upstream integration (a `format: webhook` target receives the Alertmanager webhook JSON).
+- **Alert history in PostgreSQL**: kept. The upgrade adds one column and one index; rows are backfilled; no data is dropped. Rolling back the image keeps working on the new schema.
+- **Investigation results**: kept, read at the new path.
+- **External PostgreSQL values** (`externalDatabase.*`), `llm.*` keys of the chart other than `retryDelay`/`cacheTtl`/`batchSize`, `webConfig`, `ingress`, `networkPolicy`, `monitoring.serviceMonitor`: unchanged.
 
 ## Upgrade Steps
 
-1. **Grep your config for implicit grouping.** If any route has no `group_by`
-   at any level (route, ancestor, or `global.group_by`) and you want the old
-   per-`alertname` behavior, add `group_by: [alertname]` explicitly before
-   upgrading (breaking change 1).
-2. **Check `email_configs` receivers** have `global.smtp_smarthost` and
-   (`global.smtp_from` or a per-entry `from`) — add them now, this is a
-   startup-failing change (breaking change 4).
-3. **Decide on notification templates now, not after the first incident**:
-   read breaking change 15. If you want to keep AMP's pre-epic formatting,
-   set `publishing.templates.enabled: false` and restart *before* upgrading
-   traffic over. Otherwise expect Slack/email/PagerDuty/Telegram output to
-   change shape on this deploy.
-4. **Drop any pinned `grouping.reconciliation_grace: 20s`** (or raise it past
-   the publish-claim TTL) — leaving it unset lets it derive correctly from
-   `publishing.queue.delivery_confirmation_timeout` (breaking change 13).
-5. **Audit regex matchers** (`match_re`, `source_match_re`/`target_match_re`,
-   `=~`/`!~` in `matchers:`) for substring-matching patterns lacking explicit
-   `.*` — they will stop matching post-upgrade (breaking change 16).
-6. **If any mock/proxy PagerDuty listener exists in your test setup**, point
-   it at `/v2/enqueue` (breaking change 2).
-7. Deploy. Watch `alert_history_publishing_blackhole_drops_total`,
-   `alert_history_publishing_template_fallbacks_total`, and
-   `amp_group_operations_total{status="capped"}` for the first hour —
-   non-zero-but-expected under the new behavior, unexpectedly-high is a signal
-   something above wasn't accounted for.
+The full procedure with commands: [`docs/MIGRATION_FROM_LEGACY_CORE.md`](MIGRATION_FROM_LEGACY_CORE.md). In order:
+
+1. **Export silences** from the running AMP: `amtool --alertmanager.url=<old AMP> silence query -o json > silences.json`.
+2. **Convert the Helm values**: routes and receivers from `configFile.content` to `alertmanager.config`, AMP keys to the chart's own values or `alertmanager.ampConfig`; drop the removed keys. `helm template` must render.
+3. **Check `alertmanager.yml`**: `amtool check-config`. Move `global.group_*` to the root `route:`; add `group_by: [alertname]` where a route had none and you want one notification per alert name.
+4. **Large `alerts` table**: build the column and the index before the upgrade (`ALTER TABLE …`, then `CREATE INDEX CONCURRENTLY …`).
+5. **Upgrade**: `helm upgrade <release> ./helm/amp --reset-then-reuse-values -f <new values>` (not `--reuse-values`); delete a leftover HPA with `keep`.
+6. **Import silences** into one new pod: `amtool silence import < silences.json`.
+7. **Valkey**: `valkey.replicas: 0`; delete its PVC when you no longer need a rollback. Expect one repeated notification per group still firing.
+8. **Clients**: Prometheus targets to port 9093 of every pod; probes to `/-/healthy` and `/-/ready`; `/api/v1/alerts/{fp}/investigation` → `/api/amp/v1/alerts/{fp}/investigation`; dashboards and alerts to `alertmanager_*` metrics; the dashboard → karma, Grafana or `amtool`; keep port 9093 off public networks (`/debug/*`).
+9. **Verify**: `amtool config show`, `amtool cluster show`, `amtool alert query`, `curl /-/ready`; the log has no `AMP configuration keys ignored` for keys you meant to set, and shows `alert history: upstream fingerprints backfilled` if there was history.
+
+Rollback: `helm rollback`; the schema change is additive. See [`docs/ROLLBACK_RUNBOOK.md`](ROLLBACK_RUNBOOK.md).
 
 ## Known Gaps / Not Yet Supported
 
-- `FU-INTEGRATION-FIELD-FIDELITY` (mostly closed, see feature list) — SMTP
-  `smtp_auth_secret`/`smtp_auth_secret_file` (CRAM-MD5) has no field to carry
-  it; AMP's SMTP publisher doesn't model it at all.
-- `FU-MATCHER-LABEL-CHARSET` — `pkg/configvalidator/matcher.Parse`'s
-  label-name charset is narrower than upstream's (no `:`); a colon-containing
-  label in a `matchers:` entry hard-fails config load.
-- `FU-HEALTH-HTTP-CONFIG` — publisher health probes ignore per-target
-  `http_config` (one process-wide client); a proxied/mTLS/auth-gated target
-  can report unhealthy while still delivering.
-- `FU-HTTP-OAUTH2` — an `oauth2:` block is detected and warned on, not
-  authenticated; own-`http_config` OAuth2 targets are skipped (fail closed),
-  global-inherited ones deliver unauthenticated with a warning.
-- `FU-HTTP-CONNECT-PROXY-COVERAGE` — CONNECT-proxy path lacks dedicated test
-  coverage (implementation exists).
-- OpsGenie publisher: intentionally not built (OpsGenie is EOL for new customers).
+- `UPSTREAM-UI` — no web UI in v0.1.0 (the upstream UI is not in the Go module); use karma, Grafana or `amtool`.
+- `UPSTREAM-AI-HA-DEDUP` — with N replicas every replica classifies every alert (N LLM calls per alert); Valkey is deployed but unused until then.
+- `UPSTREAM-HISTORY-PG-RECONNECT` — a PostgreSQL that comes up after AMP started is picked up only on restart.
+- `HELM-CHART-GAPS` — with `valkey.replicas: 0` its Services, Secret, ServiceMonitor and alert rules still render.
+- `?status=resolved` and `?group_by=` on `/api/v2` are ignored rather than rejected (upstream behaviour); clients of the old core that relied on them get unfiltered answers without an error.
+- Upstream flags not available: `--silences.max-silences`, `--silences.max-silence-size-bytes`, `--alerts.per-alertname-limit`, `--dispatch.start-delay`.
