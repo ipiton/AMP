@@ -140,3 +140,58 @@
 | F9 | fixed | Info на старте при `only_firing: false`; Edge Case 8. |
 | F10 | fixed | Комментарий в `Classifier.classify`: статус алерта меняется только через marker из ctx, у воркера его нет; кеш silencer'а под своим локом. Конфликт с `feature/upstream-ha-memberlist` — в отчёте эпику. |
 | F11 | deferred | TECH-DEBT, замер — в testing. |
+
+## Re-review (2026-11-08, 2aac410)
+
+**Reviewer perspective:** independent agent, повторный проход по `git diff b5caaac..2aac410` и коду (alertmanager@v0.34.1 из module cache).
+
+**Проверки:** `go build ./...` — ok; `go vet ./internal/upstreamai/ ./internal/upstreamcore/ ./cmd/amp-upstream/` — ok; `go test -race ./internal/upstreamai/ ./internal/upstreamcore/` — 24 passed, 1 failed: `TestSilencedAlertIsSkipped` (ждёт старый outcome `skipped_silenced`, чинится на write-tests; гонок race detector не нашёл).
+
+### Диспозиции первого прохода
+
+| Finding | Итог | Комментарий |
+|---|---|---|
+| F1 | confirmed fixed (с оговоркой N1) | `recheckAt` пишется в `classify` под `c.mtx` до `close(done)` (defer), читается в `PostStore` под `c.mtx` — гонки нет. Окно «`recheckAt` выставлен, `done` ещё открыт»: `PostStore` возвращается (`now < recheckAt`), а при истёкшем `recheckAt` замена записи безопасна — `done` старой закроет defer. Замена после recheck при полной очереди не происходит, запись с прошедшим `recheckAt` остаётся, следующий `Put` повторяет. NotifyStage для muted-записи: `isDone` → `result == nil` → алерт без аннотаций, без ожидания; для свежей записи после recheck — ждёт, как для новой. `PostDelete`/`PostGC` удаляют запись независимо от состояния. |
+| F2 | confirmed fixed | `Submit` неблокирующий и без IO (`queue.go:146-178`: `claimLocal` под своим `d.mu`, `select` с `default`), допустим под `a.mtx`+`c.mtx`. `e.result` читается после `isDone` — happens-before через `close(done)`. Отброшенное по `queue full` повторяется (claim освобождён), новый `StartsAt` — новый `dedupKey`. Оговорки — N2 (shutdown) и N5 (результат прошлого инцидента). |
+| F3 | confirmed fixed (частично, как заявлено) | Connect ограничен `connect_timeout` (`pool.go` `buildPool`: `WithTimeout(ctx, cfg.ConnectTimeout)`), `Background` нужен health-checker'у — верно. Миграции под `WithTimeout(1m)`; `RunMigrations` передаёт ctx в `provider.Up`, go-retry advisory lock его уважает. Invariant 2 переписан честно. Текст ошибки — N4. |
+| F4 | partially fixed (nit) | На пределе всех шардов спам устранён. Флаг по-прежнему один на все шарды: при одном полном шарде событие в другой (< половины) перевзводит Warn, и следующий дроп в полном снова логирует. Рекомендация «флаг на шард» не применена; сценарий «один горячий шард» маловероятен (шарды по хешу, PG общий) — допустимо оставить. |
+| F5 | confirmed fixed | `warnOnly`: `Enabled` = `l >= Warn && inner.Enabled`; `Handle` унаследован (Logger вызывает его только после `Enabled`); `WithAttrs`/`WithGroup` оборачивают результат — фильтр сохраняется на `logger.With(...)`. Корректно. |
+| F6 | confirmed fixed | Premise сужен до Prometheus push, ветка webhook описана, класс `code-read`. |
+| F7 | rejection confirmed | `service_registry.go:2410`: `LLMClient: r.classificationSvc`; `classification.go:228-242` при ошибке LLM и `EnableFallback` отдаёт результат `RuleBasedFallback` без ошибки (`fallback.go`, `Metadata["fallback"]=true`); `processEnriched` (`alert_processor.go:836-854`) зовёт `Submit` на любой результат без ошибки. Паритет есть, premise F7 был неверен. |
+| F8 | confirmed fixed (с оговоркой N3) | `PostDelete` вызывается из `gc()` **вне** `a.mtx` (`mem.go:176-195`: лок только в `gcAlerts`), но `enqueue` неблокирующий — Invariant 1 соблюдён. `a.Resolved()` в GC всегда истинно — условие лишнее, безвредно. |
+| F9 | confirmed fixed | Info на старте при `only_firing=false`, Edge Case 8. |
+| F10 | confirmed fixed | Комментарий в `classify` по существу; конфликт со срезом 4 вынесен в отчёт эпику. |
+| F11 | deferred — ok | Замер в testing. С F2 под локом добавился `toCoreAlert` на каждый `Put` классифицированного алерта (плюс тот, что в истории) — включить в тот же замер. |
+
+### Новые findings
+
+**N1 — minor. Перепроверка mute ≈ resend снижает нагрузку F1 лишь ~вдвое.**
+`DefaultMuteRecheck` = 1m, Prometheus `resend_delay` = 1m: `recheckAt = Put₀ + d + 60s` (d — задержка в очереди), поэтому `Put₀+60s` пропускается, `Put₀+120s` снова ставит job. Заглушённый алерт по-прежнему занимает слот общей очереди (4 воркера, ждущих LLM) раз в ~2 resend'а вместо одного раза за жизнь записи в 2a. При тысячах заглушённых (maintenance) `dropped_queue_full` для новых алертов остаётся возможным. Рекомендация: в testing количественно проверить (N заглушённых + медленный fake LLM, как требовал F1); если доля дропов заметна — увеличить default (например 5m, ценой задержки классификации после снятия silence) или проверять mute без очереди. Не блокирует: значение 1m совпадает с рекомендацией первого прохода.
+
+**N2 — minor. `Submit` из `PostStore` нарушает порядок остановки «классификатор — единственный отправитель».**
+`amp.go:73-75` («Stopped after the classifier, the queue's only sender») и Spec Edge Case 9 («новых `Submit` нет») больше неверны: `Submit` теперь зовётся из `PostStore` на ingest-горутине. Безопасность держится только на том, что `core.Stop` (а до него `server.Shutdown`) завершает все `Put` до `stopAMP`. На ветке `server.Shutdown` timeout → `server.Close()` (`main.go`) handler с незавершённым `Put` может дойти до `Submit` после `queue.Stop` → `close(q.jobs)` → panic «send on closed channel». Окно узкое (процесс и так завершается), но исправление дешёвое: в `Classifier.Stop` после `wg.Wait()` под `c.mtx` обнулить `c.inv` (или флаг stopped, проверяемый в `PostStore`), и поправить комментарий и Edge Case 9.
+
+**N3 — nit. `PostDelete` вне лока провайдера может переставить события одного fingerprint (Invariant 4).**
+`gc()` удаляет алерт под `a.mtx`, отпускает лок и затем вызывает `PostDelete`. Если между ними пришёл `Put` нового firing того же fingerprint, в шард сначала попадёт firing нового инцидента, затем resolved старого; `updateExistingAlert` (`deduplication.go:368-385`) выставит `status=resolved`, `EndsAt` старого. Самоисправляется следующим resend'ом firing. Достаточно оговорки в Invariant 4 / Edge Cases.
+
+**N4 — nit. Сообщение об ошибке миграций при дедлайне 1m говорит о бюджете lock'а 3m.**
+`RunMigrations` на `ctx.Err() != nil` возвращает «timed out waiting for migration lock … after 3m0s», хотя оборвал внешний ctx через 1m (и, возможно, во время самой миграции, а не ожидания lock'а). В логе `amp-upstream` это вводит в заблуждение; поправить можно в `amp.go` (обернуть ошибку с `migrationTimeout`), не трогая `cmd/server`.
+
+**N5 — nit (предсуществующее с 2a). Повторный firing до GC использует классификацию прошлого инцидента.**
+Resolved-`Put` запись классификатора не сбрасывает, поэтому новый инцидент с тем же fingerprint (новый `StartsAt`, до GC ~30m) получает в NotifyStage аннотации прошлого, а новое investigation — его `ClassificationResult`. Для того же labelset это обычно приемлемо; стоит одной строкой в Edge Cases.
+
+### Итог
+
+Открытых blocker/major нет. N1 — обязательный замер в testing; N2 — желательно закрыть до finalize (2 строки + комментарий/Spec).
+
+**Verdict: pass**
+
+## Author Response to Re-review
+
+| Finding | Итог | Что сделано |
+|---|---|---|
+| N1 | deferred to testing | Замер `skipped_muted`/`dropped_queue_full` при resend — в testing; при проблеме поднять default. |
+| N2 | fixed | `Classifier.Stop` ставит `stopped` под `mtx`; `PostStore` после него не вызывает `Submit`. Комментарий в `amp.go` обновлён. |
+| N3 | accepted | Resolved-событие из GC против гонки со свежим `Put` — следующий resend чинит строку. |
+| N4 | accepted | Текст ошибки миграций; не влияет на поведение. |
+| N5 | defer-backlog | Поведение 2a (re-fire до GC берёт классификацию прошлого инцидента) — в BACKLOG. |

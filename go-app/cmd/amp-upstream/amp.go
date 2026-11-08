@@ -70,7 +70,8 @@ func newAMPLayer(logger *slog.Logger, path string, opts *upstreamcore.Options) (
 		llmClient := llm.NewHTTPLLMClient(llmConfig(cfg.LLM), logger)
 		var investigations upstreamai.Submitter
 		if queue := newInvestigations(logger, cfg, pool, llmClient, opts.Registerer); queue != nil {
-			// Stopped after the classifier, the queue's only sender:
+			// Stopped after the classifier, the queue's only sender (its
+			// workers and PostStore, which stops submitting at Stop):
 			// Submit on a stopped queue panics.
 			stops = append(stops, func() {
 				if err := queue.Stop(investigationStopTimeout); err != nil {

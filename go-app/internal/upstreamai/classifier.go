@@ -105,6 +105,9 @@ type Classifier struct {
 	// queueFull logs one Warn per overflow episode instead of one per Put;
 	// an episode ends when the queue drains below half.
 	queueFull bool
+	// stopped ends the resubmits from PostStore, so the investigation queue
+	// can be stopped after Stop even if the store still takes a late Put.
+	stopped bool
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -156,8 +159,12 @@ func New(cfg Config) *Classifier {
 	return c
 }
 
-// Stop cancels in-flight classifications and waits for the workers.
+// Stop cancels in-flight classifications and waits for the workers. After
+// it, the Classifier no longer submits investigations.
 func (c *Classifier) Stop() {
+	c.mtx.Lock()
+	c.stopped = true
+	c.mtx.Unlock()
 	c.cancel()
 	c.wg.Wait()
 }
@@ -196,7 +203,7 @@ func (c *Classifier) PostStore(a *alert.Alert, _ bool) {
 				return
 			}
 			// Muted when last checked: classify anew below.
-		case c.inv != nil && isDone(e) && e.result != nil:
+		case c.inv != nil && !c.stopped && isDone(e) && e.result != nil:
 			c.inv.Submit(toCoreAlert(a), e.result)
 			return
 		default:
