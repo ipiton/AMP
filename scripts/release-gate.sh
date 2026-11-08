@@ -10,7 +10,7 @@
 #   ./scripts/release-gate.sh
 #
 # Runs, in order: go build, golangci-lint, go test ./... -count=1, the
-# futureparity build tag's build+test, -race on the concurrency-heavy
+# upstream core gate (contract suites + amtool), -race on the concurrency-heavy
 # packages (publishing/grouping/silencing/templating), the chart's
 # dependency fetch, helm lint+template for both values overlays, a helm RBAC-scope check, and an amtool-compat
 # smoke (skipped, not failed, when Docker is unavailable). Every step
@@ -96,12 +96,6 @@ step_lint() {
 
 step_test() {
   ( cd "$GO_APP_DIR" && go test ./... -count=1 )
-}
-
-step_futureparity() {
-  ( cd "$GO_APP_DIR" && \
-    go build -tags futureparity ./cmd/server/... && \
-    go test -tags futureparity -count=1 ./cmd/server/... )
 }
 
 step_upstream_core() {
@@ -293,7 +287,7 @@ step_amtool_compat() {
 
   local tries=90
   while (( tries > 0 )); do
-    if curl -fsS -o /dev/null "http://localhost:18080/healthz" 2>/dev/null; then
+    if curl -fsS -o /dev/null "http://localhost:18080/-/ready" 2>/dev/null; then
       ok=1
       break
     fi
@@ -305,7 +299,7 @@ step_amtool_compat() {
     return 1
   fi
 
-  local amtool_target_host="amp" amtool_target_port="8080"
+  local amtool_target_host="amp" amtool_target_port="9093"
   amtool() {
     # kingpin (amtool's flag parser) accepts a global flag after the
     # subcommand, so "$@" comes first here -- deliberately, not just
@@ -329,7 +323,6 @@ step_amtool_compat() {
 run_step "build" "go build ./... (go-app)" step_build
 run_step "lint" "golangci-lint run (go-app)" step_lint
 run_step "test" "go test ./... -count=1 (go-app)" step_test
-run_step "futureparity" "build+test, futureparity tag, cmd/server" step_futureparity
 run_step "upstream-core" "contract suites vs divergence baseline + amtool, upstream core" step_upstream_core
 run_step "race" "go test -race, publishing/grouping/silencing/templating" step_race
 

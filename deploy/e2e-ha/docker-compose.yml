@@ -18,7 +18,8 @@ x-amp: &amp
   # and step 7 of run.sh needs the snapshots to survive a restart, which a
   # tmpfs would not. The chart runs non-root and sets an fsGroup instead.
   user: "0:0"
-  # The image's HEALTHCHECK probes the legacy server on :8080.
+  # Readiness, not the image's liveness HEALTHCHECK: run.sh starts once the
+  # peers have settled.
   healthcheck:
     test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/ready"]
     interval: 2s
@@ -42,7 +43,6 @@ services:
     <<: *amp
     hostname: amp-a
     command: &args
-      - /app/amp-upstream
       - --config.file=/etc/amp-upstream/alertmanager.yml
       - --storage.path=/data
       - --web.listen-address=:9093

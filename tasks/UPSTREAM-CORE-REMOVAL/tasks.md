@@ -29,18 +29,18 @@ based_on:
 
 ## Phase 1: 5a — `amp-upstream` полный
 
-- [ ] **1.1** `internal/webauth`: перенос `internal/application/webauth.go` (+ тест-файл переносится как есть). <!-- verify: cd go-app && go test ./internal/webauth/ -->
-- [ ] **1.2** `amp-upstream --web.config.file`: загрузка (`webauth.New`), обёртка `core.Handler()`, пути без auth из AMP-конфига или умолчания, с префиксом external URL; ошибка старта при битом файле. <!-- depends: 1.1 | verify: go build ./cmd/amp-upstream && ручной запуск: 401 на /api/v2/status, 200 на /-/healthy -->
-- [ ] **1.3** `agent_mode`: tools + runbooks в `newInvestigations` (перенос из `service_registry.go`), закрытие DB tools в stop. <!-- verify: go vet ./cmd/amp-upstream/ && go test ./cmd/amp-upstream/ -->
-- [ ] **1.4** `buildinfo.Register` → только `amp_build_info`; регистрация в `amp-upstream`. <!-- verify: go test ./internal/buildinfo/ ./cmd/amp-upstream/ -->
-- [ ] **1.5** `Dockerfile`: один бинарь `amp-upstream`, `-ldflags` версии (upstream-модуль из `go.mod` + AMP buildinfo), `EXPOSE 9093`, HEALTHCHECK `/-/healthy`, ENTRYPOINT/CMD. `deploy/e2e-ha` — убрать переопределение entrypoint/комментарий про HEALTHCHECK, если стало лишним. <!-- verify: docker build . && docker run … /api/v2/status → versionInfo.version=0.34.1 -->
+- [x] **1.1** `internal/webauth`: перенос `internal/application/webauth.go` (+ тест-файл переносится как есть). <!-- verify: cd go-app && go test ./internal/webauth/ -->
+- [x] **1.2** `amp-upstream --web.config.file`: загрузка (`webauth.New`), обёртка `core.Handler()`, пути без auth из AMP-конфига или умолчания, с префиксом external URL; ошибка старта при битом файле. <!-- depends: 1.1 | verify: go build ./cmd/amp-upstream && ручной запуск: 401 на /api/v2/status, 200 на /-/healthy -->
+- [x] **1.3** `agent_mode`: tools + runbooks в `newInvestigations` (перенос из `service_registry.go`), закрытие DB tools в stop. <!-- verify: go vet ./cmd/amp-upstream/ && go test ./cmd/amp-upstream/ -->
+- [x] **1.4** `buildinfo.Register` → только `amp_build_info`; регистрация в `amp-upstream`. <!-- verify: go test ./internal/buildinfo/ ./cmd/amp-upstream/ -->
+- [x] **1.5** `Dockerfile`: один бинарь `amp-upstream`, `-ldflags` версии (upstream-модуль из `go.mod` + AMP buildinfo), `EXPOSE 9093`, HEALTHCHECK `/-/healthy`, ENTRYPOINT/CMD. `deploy/e2e-ha` — убрать переопределение entrypoint/комментарий про HEALTHCHECK, если стало лишним. <!-- verify: docker build . && docker run … /api/v2/status → versionInfo.version=0.34.1 -->
 
 ## Phase 2: 5a — сьюты и гейты
 
-- [ ] **2.1** `internal/upstreamcore/contract`: перенос сьют, harness из `upstreamcore_compat.go` + нужные хелперы, `TestMain`, baseline и `upstreamcore-alertmanager.yml`; тег `upstreamcore`; `doc.go`. <!-- verify: go vet -tags upstreamcore ./internal/upstreamcore/contract/ -->
-- [ ] **2.2** `upstream-core-gate.sh` на новом пакете и путях; `docs/UPSTREAM_UPGRADE.md`, `core_test.go` комментарий. <!-- depends: 2.1 | verify: scripts/upstream-core-gate.sh -->
-- [ ] **2.3** `deploy/smoke` на `amp-upstream`: `alertmanager.yml` вместо AMP-конфига, порт, `/-/healthy`; `release-gate.sh` `step_amtool_compat`. <!-- verify: release-gate amtool-compat PASS -->
-- [ ] **2.4** Удалить сьюты и шов из `cmd/server` (`futureparity`-тег там остаётся только у собственных тестов до 5b). <!-- depends: 2.1 | verify: go vet -tags futureparity ./cmd/server/ -->
+- [x] **2.1** `internal/upstreamcore/contract`: перенос сьют, harness из `upstreamcore_compat.go` + нужные хелперы, `TestMain`, baseline и `upstreamcore-alertmanager.yml`; тег `upstreamcore`; `doc.go`. <!-- verify: go vet -tags upstreamcore ./internal/upstreamcore/contract/ -->
+- [x] **2.2** `upstream-core-gate.sh` на новом пакете и путях; `docs/UPSTREAM_UPGRADE.md`, `core_test.go` комментарий. <!-- depends: 2.1 | verify: scripts/upstream-core-gate.sh -->
+- [x] **2.3** `deploy/smoke` на `amp-upstream`: `alertmanager.yml` вместо AMP-конфига, порт, `/-/healthy`; `release-gate.sh` `step_amtool_compat`. <!-- verify: release-gate amtool-compat PASS -->
+- [x] **2.4** Удалить сьюты и шов из `cmd/server` (`futureparity`-тег там остаётся только у собственных тестов до 5b). <!-- depends: 2.1 | verify: go vet -tags futureparity ./cmd/server/ -->
 
 **Phase verification (5a):** `scripts/release-gate.sh` PASS.
 

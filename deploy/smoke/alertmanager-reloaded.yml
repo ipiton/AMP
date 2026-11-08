@@ -1,0 +1,16 @@
+# The config run.sh swaps in for the /-/reload step: alertmanager.yml plus
+# one blackhole receiver whose name shows up in GET /api/v2/status's
+# config.original only if the reload re-read the file.
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: 3s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://webhook:8090/webhook
+        send_resolved: true
+  - name: smoke-reload-marker

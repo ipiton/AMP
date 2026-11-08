@@ -1,4 +1,4 @@
-# Multi-stage build for Alertmanager++ (Go)
+# Multi-stage build for AMP: one binary, amp-upstream (ADR-019)
 #
 # The builder runs on the BUILD platform and cross-compiles for the target
 # (TARGETOS/TARGETARCH, set by buildx per --platform): a multi-arch build
@@ -15,30 +15,33 @@ RUN go mod download
 
 COPY go-app/ ./
 
-# PARITY-4.2: version metadata surfaced via GET /api/v2/status versionInfo.
-# Pass --build-arg VERSION=... etc at build time; defaults keep local
-# `docker build` usable without extra flags.
+# Version metadata. prometheus/common/version is what /api/v2/status
+# (versionInfo) and alertmanager_build_info report: Version is the upstream
+# Alertmanager module from go.mod -- the API contract karma and amtool key
+# on (ADR-009) -- and the rest describes this build. AMP's own version goes
+# to internal/buildinfo (amp_build_info). Pass --build-arg VERSION=... etc
+# at build time; defaults keep local `docker build` usable without flags.
 ARG VERSION=dev
 ARG REVISION=unknown
 ARG BRANCH=unknown
 ARG BUILD_DATE=unknown
 ARG BUILDINFO_PKG=github.com/ipiton/AMP/internal/buildinfo
+ARG VERSION_PKG=github.com/prometheus/common/version
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w \
+RUN UPSTREAM_VERSION="$(go list -m -f '{{.Version}}' github.com/prometheus/alertmanager)" && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w \
+    -X ${VERSION_PKG}.Version=${UPSTREAM_VERSION#v} \
+    -X ${VERSION_PKG}.Revision=${REVISION} \
+    -X ${VERSION_PKG}.Branch=${BRANCH} \
+    -X ${VERSION_PKG}.BuildUser=docker \
+    -X ${VERSION_PKG}.BuildDate=${BUILD_DATE} \
     -X ${BUILDINFO_PKG}.Version=${VERSION} \
     -X ${BUILDINFO_PKG}.Revision=${REVISION} \
     -X ${BUILDINFO_PKG}.Branch=${BRANCH} \
     -X ${BUILDINFO_PKG}.BuildUser=docker \
     -X ${BUILDINFO_PKG}.BuildDate=${BUILD_DATE}" \
-    -o amp ./cmd/server
-
-# The upstream Alertmanager core (ADR-019), run as /app/amp-upstream by the
-# chart's upstreamCore StatefulSet and by deploy/e2e-ha. Its version comes
-# from prometheus/common/version, not buildinfo; stamping it is slice 5
-# (UPSTREAM-CORE-REMOVAL).
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" \
     -o amp-upstream ./cmd/amp-upstream
 
 # Runtime
@@ -46,18 +49,23 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" \
 FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata && \
-    adduser -D -u 10001 appuser
+    adduser -D -u 10001 appuser && \
+    mkdir -p /data /etc/amp && chown appuser /data
 
 WORKDIR /app
 
-COPY --from=builder /build/amp /build/amp-upstream /app/
+COPY --from=builder /build/amp-upstream /app/
 COPY --from=builder /build/migrations /app/migrations
 
 USER appuser
 
-EXPOSE 8080
+# 9093: HTTP API, 9094: cluster gossip (TCP and UDP).
+EXPOSE 9093 9094
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:8080/healthz || exit 1
+    CMD wget --quiet --tries=1 --spider http://localhost:9093/-/healthy || exit 1
 
-CMD ["/app/amp"]
+# Mount alertmanager.yml at /etc/amp and a volume at /data; add
+# --amp.config.file for history, classification and investigation.
+ENTRYPOINT ["/app/amp-upstream"]
+CMD ["--config.file=/etc/amp/alertmanager.yml", "--storage.path=/data"]

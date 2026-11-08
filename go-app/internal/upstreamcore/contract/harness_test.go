@@ -1,6 +1,6 @@
-//go:build futureparity && upstreamcore
+//go:build upstreamcore
 
-package main
+package contract
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,11 +23,36 @@ import (
 	"github.com/ipiton/AMP/internal/upstreamcore"
 )
 
-// The historical suites run unchanged against the upstream Alertmanager core
-// (ADR-019, UPSTREAM-CORE-POC-GATE): same AMP_CONFIG_FILE, same mux, the
-// core's handler instead of AMP's router.
-func init() {
-	registerRoutesImpl = registerUpstreamCoreRoutes
+// The contract suites (ADR-019) run against the upstream Alertmanager core:
+// each newPhase0TestMux builds a fresh core from AMP_CONFIG_FILE and serves
+// its handler. The suites were written against AMP's own core (cmd/server,
+// removed in UPSTREAM-CORE-REMOVAL); testdata/divergences.tsv lists where the
+// two differ.
+
+// runtimeConfigFileEnv names the alertmanager.yml a test's core loads.
+const runtimeConfigFileEnv = "AMP_CONFIG_FILE"
+
+func resolveRuntimeConfigPath() string {
+	if path := strings.TrimSpace(os.Getenv(runtimeConfigFileEnv)); path != "" {
+		return path
+	}
+	return "config.yaml"
+}
+
+func registerRoutes(mux *http.ServeMux) {
+	if mux == nil {
+		return
+	}
+	registerUpstreamCoreRoutes(mux)
+}
+
+// registerBootstrapFailure answers 500 on every path when the core cannot
+// start, so the suites report the reason instead of a nil-handler panic.
+func registerBootstrapFailure(mux *http.ServeMux, err error) {
+	message := "upstream core bootstrap failed: " + err.Error()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, message, http.StatusInternalServerError)
+	})
 }
 
 // The seam has no *testing.T, so the cores and their data directories are
@@ -47,16 +73,16 @@ func registerUpstreamCoreRoutes(mux *http.ServeMux) {
 	if upstreamDataRoot == "" {
 		root, err := os.MkdirTemp("", "amp-upstreamcore-")
 		if err != nil {
-			registerFutureParityBootstrapFailure(mux, err)
+			registerBootstrapFailure(mux, err)
 			return
 		}
 		upstreamDataRoot = root
 	}
 
-	configPath, _ := resolveRuntimeConfigPath()
+	configPath := resolveRuntimeConfigPath()
 	dataDir, err := os.MkdirTemp(upstreamDataRoot, "core-")
 	if err != nil {
-		registerFutureParityBootstrapFailure(mux, err)
+		registerBootstrapFailure(mux, err)
 		return
 	}
 	core, err := upstreamcore.New(upstreamcore.Options{
@@ -67,7 +93,7 @@ func registerUpstreamCoreRoutes(mux *http.ServeMux) {
 		Registerer:  prometheus.NewRegistry(),
 	})
 	if err != nil {
-		registerFutureParityBootstrapFailure(mux, err)
+		registerBootstrapFailure(mux, err)
 		return
 	}
 	upstreamCores = append(upstreamCores, core)
@@ -75,7 +101,7 @@ func registerUpstreamCoreRoutes(mux *http.ServeMux) {
 	h := core.Handler()
 	// The suites POST JSON without a Content-Type, which AMP accepted and
 	// upstream rejects with 415 (class b, see the header of
-	// testdata/upstreamcore-divergences.tsv); set it as every real client
+	// testdata/divergences.tsv); set it as every real client
 	// (Prometheus, amtool) does, so the suites reach the semantics behind it.
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.Header.Get("Content-Type") == "" {

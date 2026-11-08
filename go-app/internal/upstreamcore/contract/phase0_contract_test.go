@@ -1,9 +1,8 @@
-//go:build futureparity
-// +build futureparity
+//go:build upstreamcore
 
 // Historical wide-surface parity suite. Opt-in only until runtime restoration.
 
-package main
+package contract
 
 import (
 	"bytes"
@@ -74,17 +73,9 @@ func writeTestConfigFile(t *testing.T, content string) string {
 
 func newPhase0TestMux(t *testing.T) *http.ServeMux {
 	t.Helper()
-	return newPhase0TestMuxWithStateFile(t, filepath.Join(t.TempDir(), "runtime-state.json"))
-}
-
-func newPhase0TestMuxWithStateFile(t *testing.T, stateFile string) *http.ServeMux {
-	t.Helper()
-	t.Setenv(runtimeStateFileEnv, stateFile)
 	if strings.TrimSpace(os.Getenv(runtimeConfigFileEnv)) == "" {
 		t.Setenv(runtimeConfigFileEnv, writeTestConfigFile(t, validConfigPayload))
 	}
-
-	initTemplates()
 
 	mux := http.NewServeMux()
 	registerRoutes(mux)

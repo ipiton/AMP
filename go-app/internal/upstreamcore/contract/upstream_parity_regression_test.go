@@ -1,9 +1,8 @@
-//go:build futureparity
-// +build futureparity
+//go:build upstreamcore
 
 // Historical wide-surface upstream parity suite. Opt-in only until runtime restoration.
 
-package main
+package contract
 
 import (
 	"bytes"
@@ -146,31 +145,6 @@ func TestUpstreamParity_CoreEndpointMethodMatrix(t *testing.T) {
 				t.Fatalf("%s %s expected %d, got %d body=%q", tt.method, tt.path, tt.status, rec.Code, rec.Body.String())
 			}
 		})
-	}
-}
-
-func TestUpstreamParity_StatusClusterSettlingWindow(t *testing.T) {
-	now := time.Now().UTC()
-	clusterCtx := &runtimeClusterContext{
-		status:      "ready",
-		name:        "AMPSTATUSPARITYNODE",
-		settleUntil: now.Add(2 * time.Second),
-		peers: []map[string]string{
-			{
-				"name":    "AMPSTATUSPARITYNODE",
-				"address": "127.0.0.1:9094",
-			},
-		},
-	}
-
-	settlingPayload := buildRuntimeClusterStatusPayload(clusterCtx, now)
-	if settlingPayload["status"] != "settling" {
-		t.Fatalf("status during settling window expected settling, got %v", settlingPayload["status"])
-	}
-
-	readyPayload := buildRuntimeClusterStatusPayload(clusterCtx, now.Add(3*time.Second))
-	if readyPayload["status"] != "ready" {
-		t.Fatalf("status after settling window expected ready, got %v", readyPayload["status"])
 	}
 }
 

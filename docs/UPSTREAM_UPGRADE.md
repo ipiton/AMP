@@ -60,7 +60,7 @@ To see what changed between two releases without bumping:
 
 ## Reading the Upstream Core Gate
 
-`scripts/upstream-core-gate.sh` runs the contract suites (`main_phase0_contract_test.go`, `main_upstream_parity_regression_test.go`) against the upstream core. It compares the failing tests with `go-app/cmd/server/testdata/upstreamcore-divergences.tsv`, the list of known divergences.
+`scripts/upstream-core-gate.sh` runs the contract suites (`go-app/internal/upstreamcore/contract`, build tag `upstreamcore`) against the upstream core. It compares the failing tests with `go-app/internal/upstreamcore/contract/testdata/divergences.tsv`, the list of known divergences.
 
 Each baseline entry has a class:
 

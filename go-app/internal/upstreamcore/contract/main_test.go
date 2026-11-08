@@ -1,6 +1,6 @@
-//go:build futureparity && upstreamcore
+//go:build upstreamcore
 
-package main
+package contract
 
 import (
 	"os"

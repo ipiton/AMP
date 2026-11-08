@@ -10,17 +10,13 @@
 # test with a fast (<2min on a warm Docker build cache) single-node
 # pre-release check:
 #
-#   1. Brings up the app (lite profile, no Postgres/Redis) + a minimal
-#      webhook sink (webhook_receiver.py), waits for both /healthz.
+#   1. Brings up the app (amp-upstream, plain alertmanager.yml) + a minimal
+#      webhook sink (webhook_receiver.py), waits for /healthz and /-/ready.
 #   2. POSTs an alert, waits group_wait+margin, asserts the webhook sink
 #      recorded EXACTLY ONE hit AND inspects that hit's actual JSON body
 #      (v4 shape: version/receiver/groupLabels, plus the posted alertname
-#      and labels) -- not just the count. Unlike deploy/e2e-ha (which
-#      predates AMP-PARITY-WAVE6-EPIC's config-target auto-provisioning
-#      and disables publishing.enabled because real delivery needed a live
-#      Kubernetes API), this is a REAL HTTP delivery -- config.yaml's
-#      `receivers:` block provisions the webhook target with zero
-#      Kubernetes Secrets.
+#      and labels) -- not just the count: a REAL HTTP delivery through
+#      upstream's webhook integration.
 #   3. Creates a silence matching a second alertname, THEN posts an alert
 #      with that alertname, and asserts NO hit ever arrives. This is a
 #      deliberate substitution for the brief's literal "post alert, let it
@@ -71,7 +67,7 @@ fi
 
 AMP_SMOKE_CONFIG_DIR="$(mktemp -d)"
 export AMP_SMOKE_CONFIG_DIR
-cp "$COMPOSE_DIR/config.yaml" "$AMP_SMOKE_CONFIG_DIR/config.yaml"
+cp "$COMPOSE_DIR/alertmanager.yml" "$AMP_SMOKE_CONFIG_DIR/alertmanager.yml"
 
 remove_scratch_dir() {
   # AMP_SMOKE_CONFIG_DIR is always this run's own mktemp -d output (an
@@ -161,8 +157,8 @@ log "building + starting stack (webhook sink, amp)"
 log "waiting for webhook sink /healthz"
 wait_for_http "http://localhost:${WEBHOOK_PORT}/healthz" 30 || fail "webhook sink never became healthy"
 
-log "waiting for amp /healthz"
-wait_for_http "http://localhost:${APP_PORT}/healthz" 90 || fail "amp never became healthy"
+log "waiting for amp /-/ready"
+wait_for_http "http://localhost:${APP_PORT}/-/ready" 90 || fail "amp never became ready"
 log "both services healthy"
 
 # --- Step 2: real webhook delivery -----------------------------------------
@@ -180,8 +176,7 @@ delivered=$((after - before))
 log "PASS: webhook received exactly 1 real delivery for '$ALERT_1'"
 
 # Content, not just count: the delivered body must actually be the v4
-# group payload (formatGroupUpstream, internal/infrastructure/publishing/
-# formatter.go) carrying THIS alert -- a stale/wrong/empty body would
+# group payload (upstream's webhook notifier) carrying THIS alert -- a stale/wrong/empty body would
 # still pass the count-only check above.
 payload="$(last_payload)"
 
@@ -217,8 +212,8 @@ suppressed=$((after - before))
 log "PASS: silence suppressed the notification for '$ALERT_2'"
 
 # --- Step 4: /-/reload with a modified config is actually applied ---------
-log "swapping in config-reloaded.yaml and posting /-/reload"
-cp "$COMPOSE_DIR/config-reloaded.yaml" "$AMP_SMOKE_CONFIG_DIR/config.yaml"
+log "swapping in alertmanager-reloaded.yml and posting /-/reload"
+cp "$COMPOSE_DIR/alertmanager-reloaded.yml" "$AMP_SMOKE_CONFIG_DIR/alertmanager.yml"
 
 reload_status="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://localhost:${APP_PORT}/-/reload" \
   -H 'Content-Type: application/json' -d '{}')"
