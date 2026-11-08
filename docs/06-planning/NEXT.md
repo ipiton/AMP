@@ -16,7 +16,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **UPSTREAM-NON-UPSTREAM-RECEIVERS** — срез 3 ADR-019: интеграции upstream `notify/*`, свои — Rootly и K8s-Secret таргеты. Решение владельца 2026-11-08: K8s-Secret таргеты — адаптер в `config.Receiver` (не удаление). Standard, 2–3d. Claimed 2026-11-08, worktree.
 - [ ] **UPSTREAM-HA-MEMBERLIST** — срез 4 ADR-019: `cluster.Peer`, gossip, снапшоты на PVC, StatefulSet. Full, 3–5d. Claimed 2026-11-08, worktree.
 
 ## Queue

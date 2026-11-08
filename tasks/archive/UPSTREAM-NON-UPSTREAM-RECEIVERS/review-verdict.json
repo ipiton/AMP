@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": "Re-review of b71c653: F1 (major) fixed and verified (PagerDuty base URLs normalized to /v2/enqueue); F2, F3, F5, F7, F8, F9 fixed; F4, F6 accepted with documentation in Spec and CHANGELOG. New: N1 (minor, PagerDuty Authorization header kept alongside routing_key), N2-N4 (nit). No open blocker or major.",
+  "branch": "feature/upstream-non-upstream-receivers",
+  "commit": "b71c653",
+  "reviewed_at": "2026-11-08",
+  "findings": {
+    "blocker": 0,
+    "major": 0,
+    "minor": 1,
+    "nit": 3
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}

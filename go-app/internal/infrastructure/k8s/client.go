@@ -24,7 +24,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/ipiton/AMP/pkg/retry"
@@ -83,12 +82,15 @@ func DefaultK8sClientConfig() *K8sClientConfig {
 	}
 }
 
+// listSecretsPageSize bounds one List response; ListSecrets follows the
+// continue token until the last page.
+const listSecretsPageSize = 500
+
 // DefaultK8sClient implements K8sClient using k8s.io/client-go.
 type DefaultK8sClient struct {
 	clientset kubernetes.Interface
 	config    *K8sClientConfig
 	logger    *slog.Logger
-	mu        sync.RWMutex // For thread-safe configuration updates
 }
 
 // NewK8sClient creates a new K8s client with in-cluster configuration.
@@ -141,27 +143,24 @@ func (c *DefaultK8sClient) ListSecrets(ctx context.Context, namespace string, la
 
 	var secrets []corev1.Secret
 	err := c.retryWithBackoff(ctx, func() error {
+		// A retry restarts from the first page: a continue token can expire
+		// (410 Gone) and a partial result must not be merged with a new one.
+		secrets = nil
 		listOptions := metav1.ListOptions{
 			LabelSelector: labelSelector,
-			Limit:         1000, // Pagination support
+			Limit:         listSecretsPageSize,
 		}
-
-		secretList, err := c.clientset.CoreV1().Secrets(namespace).List(ctx, listOptions)
-		if err != nil {
-			return err
+		for {
+			secretList, err := c.clientset.CoreV1().Secrets(namespace).List(ctx, listOptions)
+			if err != nil {
+				return err
+			}
+			secrets = append(secrets, secretList.Items...)
+			if secretList.Continue == "" {
+				return nil
+			}
+			listOptions.Continue = secretList.Continue
 		}
-
-		secrets = secretList.Items
-
-		// Handle pagination if needed
-		if secretList.Continue != "" {
-			c.logger.Warn("Secrets list truncated, pagination not implemented",
-				"namespace", namespace,
-				"continue_token", secretList.Continue,
-			)
-		}
-
-		return nil
 	})
 
 	if err != nil {
@@ -225,33 +224,35 @@ func (c *DefaultK8sClient) Health(ctx context.Context) error {
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Lightweight API call to check connectivity
-	// Using Discovery().ServerVersion() is standard health check
-	_, err := c.clientset.Discovery().ServerVersion()
+	// GET /version is the lightweight call ServerVersion makes, but bound to
+	// healthCtx: ServerVersion takes no context, so a hung API server would
+	// hold it for the whole client timeout. The fake clientset used in tests
+	// has no REST client and keeps the context-free call.
+	var err error
+	if rc := c.clientset.Discovery().RESTClient(); rc != nil {
+		err = rc.Get().AbsPath("/version").Do(healthCtx).Error()
+	} else {
+		_, err = c.clientset.Discovery().ServerVersion()
+	}
+	// A caller's cancellation is not a timeout of the API server.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if healthCtx.Err() != nil {
+		return NewTimeoutError("health check timeout", healthCtx.Err())
+	}
 	if err != nil {
 		c.logger.Warn("K8s health check failed", "error", err)
 		return NewConnectionError("K8s API unavailable", err)
 	}
 
-	// Check if context was cancelled during operation
-	if healthCtx.Err() != nil {
-		return NewTimeoutError("health check timeout", healthCtx.Err())
-	}
-
 	return nil
 }
 
-// Close cleans up resources.
+// Close cleans up resources. client-go holds nothing that needs closing, so
+// it is a no-op: it used to nil the clientset under a mutex while every reader
+// used it without the lock, racing a shutdown against an in-flight call.
 func (c *DefaultK8sClient) Close() error {
-	c.logger.Info("Closing K8s client")
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// client-go's clientset doesn't have explicit Close()
-	// But we can nil out references for GC
-	c.clientset = nil
-
 	c.logger.Info("K8s client closed")
 	return nil
 }

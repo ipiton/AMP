@@ -63,6 +63,9 @@ type reloader struct {
 	// notifyStage, when set, runs ahead of every receiver's pipeline
 	// (AMP extension, Options.NotifyStage).
 	notifyStage notify.Stage
+	// extendConfig, when set, replaces conf before anything is built from it
+	// (AMP extension, Options.ExtendConfig).
+	extendConfig func(*config.Config) (*config.Config, error)
 
 	// Short-lived components: atomically swapped on every reload.
 	dispatcher atomic.Pointer[dispatch.Dispatcher]
@@ -99,6 +102,15 @@ func (r *reloader) inhibits(ctx context.Context, lset model.LabelSet) bool {
 // is touched, so a failed reload leaves the active configuration intact.
 func (r *reloader) reload(conf *config.Config) error {
 	configLogger := r.logger.With("component", "configuration")
+
+	// AMP extension (not in upstream): receivers from outside the file.
+	if r.extendConfig != nil {
+		extended, err := r.extendConfig(conf)
+		if err != nil {
+			return fmt.Errorf("failed to extend configuration: %w", err)
+		}
+		conf = extended
+	}
 
 	tmpl, err := template.FromGlobs(conf.Templates)
 	if err != nil {

@@ -33,19 +33,14 @@ const (
 	migrationTimeout = time.Minute
 )
 
-// newAMPLayer builds AMP's own processing from the AMP config at path and
-// hooks it into opts (ADR-019): the alert history in PostgreSQL with
+// newAMPLayer builds AMP's own processing from the AMP config and hooks it
+// into opts (ADR-019): the alert history in PostgreSQL with
 // profile standard, and with llm.enabled the classification and, with
 // investigation.enabled and the database up, the investigation queue. The
 // delivery never depends on it: a database that is down at start leaves
 // the history and investigations off. stop tears the layer down; call it
 // after the core's Stop.
-func newAMPLayer(logger *slog.Logger, path string, opts *upstreamcore.Options) (stop func(), err error) {
-	cfg, err := appconfig.LoadConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("error loading AMP configuration file: %w", err)
-	}
-
+func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.Options) (stop func(), err error) {
 	var stops []func()
 	stop = func() {
 		for i := len(stops) - 1; i >= 0; i-- {

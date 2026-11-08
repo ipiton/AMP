@@ -3,7 +3,9 @@
 // It runs next to cmd/server and changes nothing in it; flags mirror the
 // upstream binary's names for the subset it supports. --amp.config.file
 // adds AMP's own layer (internal/upstreamai, amp.go): alert history in
-// PostgreSQL, LLM classification and investigation.
+// PostgreSQL, LLM classification and investigation; and the K8s-Secret
+// publishing targets (internal/upstreamtargets) in the standard profile with
+// publishing.enabled.
 package main
 
 import (
@@ -27,7 +29,9 @@ import (
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 
+	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/upstreamcore"
+	"github.com/ipiton/AMP/internal/upstreamtargets"
 )
 
 // shutdownTimeout matches upstream's app.Stop.
@@ -64,14 +68,25 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		Logger:     logger,
 		Registerer: prometheus.DefaultRegisterer,
 	}
+	var (
+		targets         *upstreamtargets.Source
+		targetsInterval time.Duration
+	)
 	if ampConfigFile != "" {
-		stopAMP, err := newAMPLayer(logger, ampConfigFile, &opts)
+		cfg, err := appconfig.LoadConfig(ampConfigFile)
+		if err != nil {
+			return fmt.Errorf("error loading AMP configuration file: %w", err)
+		}
+		stopAMP, err := newAMPLayer(logger, cfg, &opts)
 		if err != nil {
 			return err
 		}
 		// Deferred first, so it runs after core.Stop: the dispatcher and
 		// the alert store are gone before AMP's workers stop.
 		defer stopAMP()
+		if targets, targetsInterval, err = newTargetSource(logger, cfg, &opts); err != nil {
+			return err
+		}
 	}
 
 	listener, err := net.Listen("tcp", listenAddress)
@@ -95,6 +110,15 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	// Runs after the server is shut down below: the core must not stop
 	// while its handler still serves (upstreamcore.Core.Handler).
 	defer core.Stop()
+
+	if targets != nil {
+		// Cancelled before core.Stop runs: a poll must not reload a stopped
+		// core (Reload would only return an error, but there is no reason to
+		// list Secrets during shutdown).
+		pollCtx, stopPoll := context.WithCancel(context.Background())
+		defer stopPoll()
+		go targets.Run(pollCtx, targetsInterval, core.Reload)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
