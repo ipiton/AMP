@@ -31,21 +31,26 @@ based_on:
 
 > **Wave 1**
 
-- [ ] **1.1** `convert.go`: статус по `a.Resolved()` <!-- verify: cd go-app && go build ./internal/upstreamai/ -->
-- [ ] **1.2** `history.go`: `History` (шарды, воркеры, таймаут, метрика, Warn на эпизод) <!-- verify: go vet ./internal/upstreamai/ -->
-- [ ] **1.3** `chain.go`: `Chain` <!-- verify: go build ./internal/upstreamai/ -->
-- [ ] **1.4** `classifier.go`: `Submitter`, `Config.Investigations`, `Submit` после результата, пропуск по mute удаляет запись, outcome `skipped_muted` <!-- verify: go test ./internal/upstreamai/ (существующие тесты 2a — поправить ожидание outcome в write-tests) -->
+- [x] **1.1** `convert.go`: статус по `a.Resolved()` <!-- verify: cd go-app && go build ./internal/upstreamai/ -->
+- [x] **1.2** `history.go`: `History` (шарды, воркеры, таймаут, метрика, Warn на эпизод) <!-- verify: go vet ./internal/upstreamai/ -->
+- [x] **1.3** `chain.go`: `Chain` <!-- verify: go build ./internal/upstreamai/ -->
+- [x] **1.4** `classifier.go`: `Submitter`, `Config.Investigations`, `Submit` после результата, пропуск по mute удаляет запись, outcome `skipped_muted` <!-- verify: go test ./internal/upstreamai/ (существующие тесты 2a — поправить ожидание outcome в write-tests) -->
 
 ## Phase 2: upstreamcore
 
-- [ ] **2.1** `core.go`: `var r` до `mem.NewAlerts`, mutes = silence ∨ `r.inhibits`; `reloader.go`: `inhibits`; `doc.go`: отличие <!-- verify: go test ./internal/upstreamcore/ -->
+- [x] **2.1** `core.go`: `var r` до `mem.NewAlerts`, mutes = silence ∨ `r.inhibits`; `reloader.go`: `inhibits`; `doc.go`: отличие <!-- verify: go test ./internal/upstreamcore/ -->
 
 ## Phase 3: amp-upstream
 
-- [ ] **3.1** `amp.go`: `newAMPLayer` — конфиг, PG + миграции (fail-open), история, классификатор (перенос из `main.go`), investigation, `Chain`, `stop` <!-- depends: 1.x, 2.1 | verify: go build ./cmd/amp-upstream/ -->
-- [ ] **3.2** `main.go`: вызов `newAMPLayer` вместо `newClassifier` <!-- depends: 3.1 | verify: go vet ./cmd/amp-upstream/ -->
+- [x] **3.1** `amp.go`: `newAMPLayer` — конфиг, PG + миграции (fail-open), история, классификатор (перенос из `main.go`), investigation, `Chain`, `stop` <!-- depends: 1.x, 2.1 | verify: go build ./cmd/amp-upstream/ -->
+- [x] **3.2** `main.go`: вызов `newAMPLayer` вместо `newClassifier` <!-- depends: 3.1 | verify: go vet ./cmd/amp-upstream/ -->
 
 **Phase verification:** `make -C go-app quality-gates-fast`
+
+## Deviations
+
+- Investigation `Stop` — 5s (`investigationStopTimeout`, как в `cmd/server`), а не 10s из Spec.
+- `TestSilencedAlertIsSkipped` (2a) ждёт outcome `skipped_silenced` и красный до write-tests (переименование в `skipped_muted`).
 
 ## Phase 4: tests (после `review-verdict.json` = pass)
 

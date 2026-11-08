@@ -8,15 +8,22 @@ import (
 	"github.com/ipiton/AMP/internal/core/alertconv"
 )
 
-// toCoreAlert converts a firing upstream alert for the classification
-// service. The fingerprint is AMP's (alertconv.Fingerprint), not upstream's
-// FNV one, so the classification cache keys match cmd/server's.
+// toCoreAlert converts an upstream alert for the classification service,
+// the history and the investigation queue. The fingerprint is AMP's
+// (alertconv.Fingerprint, SHA-256), not upstream's FNV one: it is the key of
+// cmd/server's history rows, investigations and classification cache, so
+// both binaries share them. Upstream's fingerprint is
+// alertconv.UpstreamFingerprint of the same labels.
 func toCoreAlert(a *alert.Alert) *core.Alert {
 	labels := labelMap(a.Labels)
+	status := core.StatusFiring
+	if a.Resolved() {
+		status = core.StatusResolved
+	}
 	ca := &core.Alert{
 		Fingerprint: alertconv.Fingerprint(labels),
 		AlertName:   labels[string(model.AlertNameLabel)],
-		Status:      core.StatusFiring,
+		Status:      status,
 		Labels:      labels,
 		Annotations: labelMap(a.Annotations),
 		StartsAt:    a.StartsAt,

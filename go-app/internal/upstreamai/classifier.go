@@ -7,6 +7,13 @@
 // never waits for the LLM. Workers classify off that path; NotifyStage then
 // waits, within a budget, for the classifications of the alerts it is about
 // to notify and adds them as llm_* annotations to copies of those alerts.
+// A classified alert is handed to the investigation queue; a silenced or
+// inhibited one is not classified, and is checked again on its next Put.
+//
+// History, a second alert-store callback, writes every alert to AMP's
+// PostgreSQL history (slice UPSTREAM-AI-HISTORY-INVESTIGATION). History rows,
+// investigations and the classification cache share one key, AMP's SHA-256
+// fingerprint of the labels (toCoreAlert), as on cmd/server.
 package upstreamai
 
 import (
@@ -34,13 +41,22 @@ type Service interface {
 	ClassifyAlert(ctx context.Context, alert *core.Alert) (*core.ClassificationResult, error)
 }
 
+// Submitter queues an investigation of a classified alert without blocking;
+// investigation.InvestigationQueue satisfies it.
+type Submitter interface {
+	Submit(alert *core.Alert, classification *core.ClassificationResult)
+}
+
 // Config configures a Classifier. Zero Workers/QueueSize use the defaults.
 type Config struct {
-	Service    Service
-	Logger     *slog.Logger
-	Registerer prometheus.Registerer
-	Workers    int
-	QueueSize  int
+	Service Service
+	// Investigations, when set, receives every classified alert, with the
+	// same *core.Alert (and so the same fingerprint) the history gets.
+	Investigations Submitter
+	Logger         *slog.Logger
+	Registerer     prometheus.Registerer
+	Workers        int
+	QueueSize      int
 }
 
 // entry is one alert's classification. done is closed when it is final;
@@ -62,11 +78,13 @@ type job struct {
 // NotifyStage as Options.NotifyStage, and Stop it after the core.
 type Classifier struct {
 	svc    Service
+	inv    Submitter
 	logger *slog.Logger
 	jobs   chan job
 
 	// mutes is set by AlertCallback before the store can call PostStore,
-	// and read by workers only after receiving a job PostStore sent.
+	// and read by workers only after receiving a job PostStore sent. It
+	// covers silences and the active configuration's inhibition.
 	mutes func(context.Context, model.LabelSet) bool
 
 	mtx     sync.Mutex
@@ -95,13 +113,14 @@ func New(cfg Config) *Classifier {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Classifier{
 		svc:     cfg.Service,
+		inv:     cfg.Investigations,
 		logger:  cfg.Logger.With("component", "upstreamai"),
 		jobs:    make(chan job, cfg.QueueSize),
 		entries: make(map[model.Fingerprint]*entry),
 		cancel:  cancel,
 		classifications: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "amp_upstream_ai_classifications_total",
-			Help: "Alert classification attempts by outcome: classified (LLM), fallback (rule-based, LLM unavailable), error, skipped_silenced, dropped_queue_full (counted per Put, not per alert).",
+			Help: "Alert classification attempts by outcome: classified (LLM), fallback (rule-based, LLM unavailable), error, skipped_muted (silenced or inhibited), dropped_queue_full; skipped_muted and dropped_queue_full are counted per Put, not per alert.",
 		}, []string{"outcome"}),
 		waits: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "amp_upstream_ai_notify_waits_total",
@@ -130,7 +149,10 @@ func (c *Classifier) AlertCallback(mutes func(context.Context, model.LabelSet) b
 	return c
 }
 
-// PreStore accepts every alert; filtering belongs to slice 2b.
+// PreStore accepts every alert. A rejection would take the alert out of the
+// store — no notification, silence or inhibition, API — and every filter rule
+// AMP has either needs the LLM or drops what upstream keeps; noise is left
+// out at notification time instead (NotifyStage, llm.drop_noise).
 func (c *Classifier) PreStore(*alert.Alert, bool) error { return nil }
 
 // PostStore queues a firing alert seen for the first time. It runs under
@@ -197,7 +219,10 @@ func (c *Classifier) work(ctx context.Context) {
 func (c *Classifier) classify(ctx context.Context, j job) {
 	defer close(j.e.done)
 	if c.mutes != nil && c.mutes(ctx, j.labels) {
-		c.classifications.WithLabelValues("skipped_silenced").Inc()
+		c.classifications.WithLabelValues("skipped_muted").Inc()
+		// Not remembered: the next Put checks again, so the alert is
+		// classified once its silence expires or its inhibitor resolves.
+		c.forgetEntry(j)
 		return
 	}
 	res, err := c.svc.ClassifyAlert(ctx, j.alert)
@@ -205,14 +230,13 @@ func (c *Classifier) classify(ctx context.Context, j job) {
 		c.classifications.WithLabelValues("error").Inc()
 		c.logger.Warn("alert classification failed", "alertname", j.alert.AlertName, "fingerprint", j.fp.String(), "err", err)
 		// Forget the entry so the next Put of the alert retries.
-		c.mtx.Lock()
-		if c.entries[j.fp] == j.e {
-			delete(c.entries, j.fp)
-		}
-		c.mtx.Unlock()
+		c.forgetEntry(j)
 		return
 	}
 	j.e.result = res
+	if c.inv != nil {
+		c.inv.Submit(j.alert, res)
+	}
 	// With the LLM down the service answers from its rule-based fallback
 	// without an error; the outcome keeps an outage visible.
 	if fb, _ := res.Metadata["fallback"].(bool); fb {
@@ -220,6 +244,15 @@ func (c *Classifier) classify(ctx context.Context, j job) {
 		return
 	}
 	c.classifications.WithLabelValues("classified").Inc()
+}
+
+// forgetEntry removes j's entry unless a newer one replaced it.
+func (c *Classifier) forgetEntry(j job) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	if c.entries[j.fp] == j.e {
+		delete(c.entries, j.fp)
+	}
 }
 
 // lookup returns the alerts' entries, nil where there is none.
