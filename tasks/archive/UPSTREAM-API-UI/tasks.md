@@ -3,7 +3,7 @@ id: UPSTREAM-API-UI
 slug: upstream-api-ui
 stream: Architecture / ADR-019
 type: feature
-status: active
+status: archived
 created_at: 2026-11-08
 updated_at: 2026-11-08
 based_on:
@@ -55,21 +55,21 @@ based_on:
 
 ## Phase 4: Testing, docs, finalize
 
-- [ ] **4.1** `scripts/release-gate.sh` целиком зелёный; лог в `evidence/release-gate.txt`. <!-- verify: tail evidence/release-gate.txt -->
-- [ ] **4.2** CHANGELOG `[Unreleased]`: Added (маршруты, колонка, индекс, метрика, backfill, `Warn` на INVALID) и Breaking (investigation path, `fingerprint` FNV + `amp_fingerprint`, `alert_name`; `/api/v2/inhibitions`; `?group_by=`; `global.group_*` — конфиг не загружается; `?status=resolved`; health-алиасы); Rollout: ручной `CREATE INDEX CONCURRENTLY` до выкатки на большой `alerts`, починка INVALID двумя командами, окно rolling update; F16 «no schema change». <!-- verify: grep -n "UPSTREAM-API-UI" CHANGELOG.md -->
-- [ ] **4.3** Planning: BACKLOG (`UPSTREAM-API-UI` [x], `STATUS-VERSIONINFO-CONTRACT`, `COMPAT-VERSION-CONFIG-KEY`, `HISTORY-API`, `UPSTREAM-DOCS-MIGRATION`, `PHASE-5A-…`), ROADMAP, DECISIONS (уточнение ADR-019), DONE, NEXT; у `HISTORY-API` — сдвиг `updated_at` backfill'ом (F8). <!-- verify: grep -n "UPSTREAM-API-UI" docs/06-planning/*.md -->
-- [ ] **4.4** Архив `tasks/archive/UPSTREAM-API-UI/`, коммит, sync с `main`. <!-- verify: git status && git log --oneline main..HEAD -->
+- [x] **4.1** `scripts/release-gate.sh` целиком зелёный; лог в `evidence/release-gate.txt`. <!-- verify: tail evidence/release-gate.txt -->
+- [x] **4.2** CHANGELOG `[Unreleased]`: Added (маршруты, колонка, индекс, метрика, backfill, `Warn` на INVALID) и Breaking (investigation path, `fingerprint` FNV + `amp_fingerprint`, `alert_name`; `/api/v2/inhibitions`; `?group_by=`; `global.group_*` — конфиг не загружается; `?status=resolved`; health-алиасы); Rollout: ручной `CREATE INDEX CONCURRENTLY` до выкатки на большой `alerts`, починка INVALID двумя командами, окно rolling update; F16 «no schema change». <!-- verify: grep -n "UPSTREAM-API-UI" CHANGELOG.md -->
+- [x] **4.3** Planning: BACKLOG (`UPSTREAM-API-UI` [x], `STATUS-VERSIONINFO-CONTRACT`, `COMPAT-VERSION-CONFIG-KEY`, `HISTORY-API`, `UPSTREAM-DOCS-MIGRATION`, `PHASE-5A-…`), ROADMAP, DECISIONS (уточнение ADR-019), DONE, NEXT; у `HISTORY-API` — сдвиг `updated_at` backfill'ом (F8). <!-- verify: grep -n "UPSTREAM-API-UI" docs/06-planning/*.md -->
+- [x] **4.4** Архив `tasks/archive/UPSTREAM-API-UI/`, коммит, sync с `main`. <!-- verify: git status && git log --oneline main..HEAD -->
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated
-- [ ] Владелец подтвердил решения research Q3–Q5 (удалённые `/api/v2/inhibitions`, `?status=resolved`, health-алиасы; class d в `divergences.tsv`) до `merge-to-main`
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated
+- [ ] **open (owner):** Владелец подтвердил решения research Q3–Q5 (удалённые `/api/v2/inhibitions`, `?status=resolved`, health-алиасы; class d в `divergences.tsv`) до `merge-to-main`
 
 ## Deviations
 

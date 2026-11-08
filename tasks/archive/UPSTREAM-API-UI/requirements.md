@@ -4,7 +4,7 @@ slug: upstream-api-ui
 stream: Architecture / ADR-019
 type: feature
 priority: high
-status: active
+status: archived
 created_at: 2026-11-08
 updated_at: 2026-11-08
 ---
