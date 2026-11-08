@@ -8,7 +8,8 @@
 // waits, within a budget, for the classifications of the alerts it is about
 // to notify and adds them as llm_* annotations to copies of those alerts.
 // A classified alert is handed to the investigation queue; a silenced or
-// inhibited one is not classified, and is checked again on its next Put.
+// inhibited one is not classified, and a Put of it after a recheck interval
+// checks again.
 //
 // History, a second alert-store callback, writes every alert to AMP's
 // PostgreSQL history (slice UPSTREAM-AI-HISTORY-INVESTIGATION). History rows,
@@ -20,6 +21,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/prometheus/alertmanager/alert"
 	"github.com/prometheus/alertmanager/provider/mem"
@@ -34,6 +36,10 @@ import (
 const (
 	DefaultWorkers   = 4
 	DefaultQueueSize = 1024
+	// DefaultMuteRecheck is how long a silenced or inhibited alert waits
+	// before a Put of it checks its mutes again: about one Prometheus
+	// resend, without a queue slot per resend of every muted alert.
+	DefaultMuteRecheck = time.Minute
 )
 
 // Service classifies one alert; services.ClassificationService satisfies it.
@@ -57,13 +63,17 @@ type Config struct {
 	Registerer     prometheus.Registerer
 	Workers        int
 	QueueSize      int
+	MuteRecheck    time.Duration
 }
 
 // entry is one alert's classification. done is closed when it is final;
 // result is written before that and is nil when the alert was skipped.
+// recheckAt, guarded by Classifier.mtx, is set when the alert was muted:
+// from then on a Put of it classifies it anew.
 type entry struct {
-	done   chan struct{}
-	result *core.ClassificationResult
+	done      chan struct{}
+	result    *core.ClassificationResult
+	recheckAt time.Time
 }
 
 type job struct {
@@ -81,6 +91,9 @@ type Classifier struct {
 	inv    Submitter
 	logger *slog.Logger
 	jobs   chan job
+
+	muteRecheck time.Duration
+	now         func() time.Time
 
 	// mutes is set by AlertCallback before the store can call PostStore,
 	// and read by workers only after receiving a job PostStore sent. It
@@ -109,6 +122,9 @@ func New(cfg Config) *Classifier {
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = DefaultQueueSize
 	}
+	if cfg.MuteRecheck <= 0 {
+		cfg.MuteRecheck = DefaultMuteRecheck
+	}
 	f := promauto.With(cfg.Registerer)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Classifier{
@@ -118,9 +134,12 @@ func New(cfg Config) *Classifier {
 		jobs:    make(chan job, cfg.QueueSize),
 		entries: make(map[model.Fingerprint]*entry),
 		cancel:  cancel,
+
+		muteRecheck: cfg.MuteRecheck,
+		now:         time.Now,
 		classifications: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "amp_upstream_ai_classifications_total",
-			Help: "Alert classification attempts by outcome: classified (LLM), fallback (rule-based, LLM unavailable), error, skipped_muted (silenced or inhibited), dropped_queue_full; skipped_muted and dropped_queue_full are counted per Put, not per alert.",
+			Help: "Alert classification attempts by outcome: classified (LLM), fallback (rule-based, LLM unavailable), error, skipped_muted (silenced or inhibited; once per mute recheck), dropped_queue_full (counted per Put, not per alert).",
 		}, []string{"outcome"}),
 		waits: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "amp_upstream_ai_notify_waits_total",
@@ -155,9 +174,14 @@ func (c *Classifier) AlertCallback(mutes func(context.Context, model.LabelSet) b
 // out at notification time instead (NotifyStage, llm.drop_noise).
 func (c *Classifier) PreStore(*alert.Alert, bool) error { return nil }
 
-// PostStore queues a firing alert seen for the first time. It runs under
-// the provider's lock, so it never blocks: with the queue full the alert is
-// not recorded and the next Put of it tries again.
+// PostStore queues a firing alert seen for the first time, or muted when
+// last checked longer than the mute recheck ago. A Put of a classified alert
+// hands it to the investigation queue again, as every ingest does on
+// cmd/server: the queue keeps one investigation per incident, retries one it
+// had to drop, and starts one for an alert that fires anew (a new StartsAt)
+// before the store forgets it. PostStore runs under the provider's lock, so
+// it never blocks: with the queue full the alert is not recorded and the next
+// Put of it tries again.
 func (c *Classifier) PostStore(a *alert.Alert, _ bool) {
 	if a.Resolved() {
 		return
@@ -165,8 +189,19 @@ func (c *Classifier) PostStore(a *alert.Alert, _ bool) {
 	fp := a.Fingerprint()
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
-	if _, ok := c.entries[fp]; ok {
-		return
+	if e, ok := c.entries[fp]; ok {
+		switch {
+		case !e.recheckAt.IsZero():
+			if c.now().Before(e.recheckAt) {
+				return
+			}
+			// Muted when last checked: classify anew below.
+		case c.inv != nil && isDone(e) && e.result != nil:
+			c.inv.Submit(toCoreAlert(a), e.result)
+			return
+		default:
+			return
+		}
 	}
 	e := &entry{done: make(chan struct{})}
 	select {
@@ -218,11 +253,16 @@ func (c *Classifier) work(ctx context.Context) {
 
 func (c *Classifier) classify(ctx context.Context, j job) {
 	defer close(j.e.done)
+	// mutes is safe off the store's path: the silencer touches only its own
+	// locked cache, and the alert's silenced/inhibited status is set only
+	// through a marker in the context, which a worker's context has none of.
 	if c.mutes != nil && c.mutes(ctx, j.labels) {
 		c.classifications.WithLabelValues("skipped_muted").Inc()
-		// Not remembered: the next Put checks again, so the alert is
-		// classified once its silence expires or its inhibitor resolves.
-		c.forgetEntry(j)
+		// A Put after the recheck checks again, so the alert is classified
+		// once its silence expires or its inhibitor resolves.
+		c.mtx.Lock()
+		j.e.recheckAt = c.now().Add(c.muteRecheck)
+		c.mtx.Unlock()
 		return
 	}
 	res, err := c.svc.ClassifyAlert(ctx, j.alert)

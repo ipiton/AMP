@@ -18,7 +18,7 @@ based_on:
 
 ## Summary
 
-`amp-upstream` с AMP-конфигом пишет историю всех алертов в PostgreSQL отдельным колбэком хранилища (неблокирующая очередь, шарды по fingerprint, `DeduplicationService` — та же семантика и тот же ключ SHA-256, что у `cmd/server`). Классификатор после результата ставит investigation; алерты, заглушённые silence или inhibition, не классифицируются, и пропуск не запоминается — после снятия mute следующий `Put` классифицирует алерт. `PreStore` ничего не отвергает. Схема БД не меняется.
+`amp-upstream` с AMP-конфигом пишет историю всех алертов в PostgreSQL отдельным колбэком хранилища (неблокирующая очередь, шарды по fingerprint, `DeduplicationService` — та же семантика и тот же ключ SHA-256, что у `cmd/server`). Классификатор после результата ставит investigation; алерты, заглушённые silence или inhibition, не классифицируются; пропуск запоминается на интервал перепроверки (1m), и `Put` после него проверяет mute заново — после снятия mute алерт классифицируется. `Put` уже классифицированного алерта повторно отдаёт его в очередь investigation (как каждый ingest `cmd/server`). `PreStore` ничего не отвергает. Схема БД не меняется.
 
 ## Requirements Coverage
 
@@ -29,7 +29,7 @@ based_on:
 | Один ключ SHA-256, FNV из labels | `toCoreAlert`, Contracts § Fingerprint |
 | Investigation после классификации, firing, по флагам | `Classifier.classify`, `cmd/amp-upstream/amp.go` |
 | Пропуск silence ∨ inhibition | `upstreamcore` mutes, Edge Case 5 |
-| Пропуск не запоминается | `Classifier.classify`, Edge Case 6 |
+| Повтор после снятия mute (перепроверка 1m) | `Classifier.classify`/`PostStore`, Edge Case 6 |
 | `PreStore` без отказов | Invariant 3 |
 | Без флага — как сейчас; PG недоступен — без истории | `amp.go`, Rollout |
 
@@ -46,7 +46,7 @@ based_on:
 |---|---|---|---|
 | `PostStore` вызывается под `a.mtx` провайдера синхронно для каждого успешно сохранённого алерта (и resend'а) | `provider/mem/mem.go@v0.34.1:302-348` | code-read | блокирующий колбэк остановил бы ingest |
 | История `cmd/server` — upsert строки `alerts` через `DeduplicationService.ProcessAlert` по `alert.Fingerprint` | `deduplication.go:203-420`, `postgres_storage_adapter.go:52` | code-read | строки двух бинарей разошлись бы |
-| Ключ БД `cmd/server` — `alertconv.Fingerprint` (SHA-256) от labels | `handlers/alerts.go:540`, `webhook/parser.go:125`, `prometheus_parser.go:280` | call-path-traced | история `amp-upstream` и `cmd/server` не совпала бы по ключу |
+| Ключ БД `cmd/server` для Prometheus push (`/api/v2/alerts`) — `alertconv.Fingerprint` (SHA-256) от labels; webhook-парсеры берут `fingerprint` из payload, если он есть (Alertmanager webhook — FNV), и только без него считают SHA-256 | `handlers/alerts.go:540`; `webhook/parser.go:123-126`, `prometheus_parser.go:280` | code-read | история `amp-upstream` и `cmd/server` не совпала бы по ключу для push; для webhook-ingest ключи и так разные — `amp-upstream` webhook не принимает |
 | `model.LabelSet.Fingerprint()` upstream == `alertconv.UpstreamFingerprint(labels)` | `alertconv.go:116-133` (тот же вызов `prometheus/common`) | code-read | поиск по FNV через labels дал бы другой ключ; закрепляется тестом |
 | `InvestigationQueue.Submit` неблокирующий, без IO, dedup по инциденту | `investigation/queue.go:146-178` | code-read | воркер классификатора ждал бы очередь |
 | `reloader.inhibitor` установлен до первого `Put` (initial `ApplyConfig` в `New`) и меняется атомарно | `core.go:300-310`, `reloader.go:66` | code-read | `mutes` разыменовал бы nil — проверка `nil` в `inhibits` |
@@ -55,12 +55,12 @@ based_on:
 
 ## Target Design
 
-1. **История.** `upstreamai.History` реализует `mem.AlertStoreCallback`. `PostStore` конвертирует алерт (`toCoreAlert`: SHA-256 fingerprint, статус `resolved`, если `a.Resolved()`, иначе `firing`) и неблокирующе кладёт в канал шарда `uint64(fp) % N` (N=4, буфер 256 на шард). Воркер шарда вызывает `Record(ctx, alert)` (в `amp-upstream` — `DeduplicationService.ProcessAlert`) с таймаутом 5s. Ошибка — Warn + метрика, без ретрая (следующий resend повторит). Переполнение шарда — метрика `dropped_queue_full` и один Warn на эпизод. `PreStore` — `nil`; `PostDelete`/`PostGC` — no-op (история переживает GC).
+1. **История.** `upstreamai.History` реализует `mem.AlertStoreCallback`. `PostStore` конвертирует алерт (`toCoreAlert`: SHA-256 fingerprint, статус `resolved`, если `a.Resolved()`, иначе `firing`) и неблокирующе кладёт в канал шарда `uint64(fp) % N` (N=4, буфер 256 на шард). Воркер шарда вызывает `Record(ctx, alert)` (в `amp-upstream` — `DeduplicationService.ProcessAlert`) с таймаутом 5s. Ошибка — Warn + метрика, без ретрая (следующий resend повторит). Переполнение шарда — метрика `dropped_queue_full` и один Warn на эпизод. `PreStore` — `nil`; `PostDelete` ставит событие, если `a.Resolved()` (алерт, разрешившийся по `EndsAt` без resolved-`Put`, иначе остался бы `firing`), тем же неблокирующим путём; `PostGC` — no-op (история переживает GC). Warn о переполнении снова взводится, когда шард опустел до половины. Dedup-сервис пишет в лог только с Warn: его Info на каждый алерт на ingest-пути — шум.
 2. **Investigation.** `Classifier.Config.Investigations` (интерфейс `Submit(*core.Alert, *core.ClassificationResult)`, опционально). Воркер после результата `ClassifyAlert` (classified и fallback) вызывает `Submit(j.alert, res)` — тот же `*core.Alert` с SHA-256, что в истории.
 3. **Mute.** В `upstreamcore.New` колбэк получает `mutes(ctx, lset) = silencer.Mutes(ctx, lset) || r.inhibits(ctx, lset)`; `reloader.inhibits` берёт `r.inhibitor.Load()` (nil → false). `var r *reloader` объявляется до `mem.NewAlerts` (замыкание, как `groupFn`).
-4. **Пропуск без памяти.** Заглушённый алерт: запись удаляется (если ещё та же), `done` закрывается, outcome `skipped_muted`. Следующий `Put` создаёт новое задание. Notify-стадия для удалённой записи не ждёт (как в 2a для отсутствующей).
+4. **Пропуск с перепроверкой.** Заглушённый алерт: запись остаётся с `recheckAt = now + 1m`, `done` закрывается, `result` nil, outcome `skipped_muted`. `Put` до `recheckAt` ничего не ставит (без слота очереди на каждый resend), после — создаёт новое задание. Notify-стадия для такой записи не ждёт (`done` закрыт, результата нет). `Put` классифицированного алерта (`done`, `result` есть) вызывает `Submit` повторно: dedup очереди держит одно investigation на инцидент, повторяет отброшенное и ставит новое на новый `StartsAt`.
 5. **Композиция.** `upstreamai.Chain(cbs ...mem.AlertStoreCallback)` — последовательный вызов; `PreStore` — первая ошибка.
-6. **Wiring `amp-upstream`.** Новый `cmd/amp-upstream/amp.go`: `newAMPLayer(logger, path, *opts) (stop func(), err error)` — грузит AMP-конфиг; при `profile: standard` подключает PostgreSQL (`PostgresConfigFrom`, таймаут 30s) и `RunMigrations`, при ошибке — Error и без PG; строит `History` над `PostgresStorageAdapter` + `DeduplicationService`; при `llm.enabled` — классификатор (код 2a переезжает сюда без изменений) и, если `investigation.enabled` и есть PG, `InvestigationQueue` с общим LLM-клиентом (`llm.agent_mode` — Warn, обычный investigation). `opts.NewAlertCallback` собирает `Chain(classifier, history)` из того, что построено. `stop` в обратном порядке: классификатор → investigation (`Stop(5s)`, как `cmd/server`) → история → пул. `main.go` меняет только вызов.
+6. **Wiring `amp-upstream`.** Новый `cmd/amp-upstream/amp.go`: `newAMPLayer(logger, path, *opts) (stop func(), err error)` — грузит AMP-конфиг; при `profile: standard` подключает PostgreSQL (`PostgresConfigFrom`, connect ограничен `database.connect_timeout`) и `RunMigrations` (контекст 1m, включая ожидание advisory lock), при ошибке — Error и без PG; строит `History` над `PostgresStorageAdapter` + `DeduplicationService`; при `llm.enabled` — классификатор (код 2a переезжает сюда без изменений) и, если `investigation.enabled` и есть PG, `InvestigationQueue` с общим LLM-клиентом (`llm.agent_mode` — Warn, обычный investigation). `opts.NewAlertCallback` собирает `Chain(history, classifier)` из того, что построено. `stop` в обратном порядке: классификатор → investigation (`Stop(5s)`, как `cmd/server`) → история → пул. `main.go` меняет только вызов.
 
 ## API Contracts
 
@@ -80,7 +80,7 @@ based_on:
 ### Metrics
 
 - Новая: `amp_upstream_history_writes_total{outcome="written|error|dropped_queue_full"}`.
-- `amp_upstream_ai_classifications_total`: outcome `skipped_silenced` → `skipped_muted` (silence или inhibition, на каждый `Put` заглушённого алерта). Бинарь не выпускался — ломать некому, запись в CHANGELOG.
+- `amp_upstream_ai_classifications_total`: outcome `skipped_silenced` → `skipped_muted` (silence или inhibition, один раз на интервал перепроверки). Бинарь не выпускался — ломать некому, запись в CHANGELOG.
 - Метрики investigation (`amp_investigation_*`) и пула PG — как в `cmd/server`.
 
 ## Component Architecture
@@ -104,7 +104,7 @@ based_on:
 ## Invariants
 
 - [ ] 1. `PostStore`/`PostDelete`/`PostGC` всех AMP-колбэков не блокируются и не делают IO.
-- [ ] 2. Приём и доставка не зависят от PostgreSQL: ни на старте, ни во время работы.
+- [ ] 2. Приём и доставка не зависят от PostgreSQL во время работы; на старте ожидание ограничено `database.connect_timeout` + 1m на миграции, после чего ядро стартует без истории.
 - [ ] 3. `PreStore` AMP-колбэков всегда `nil`.
 - [ ] 4. События одного fingerprint пишутся в историю в порядке `Put`.
 - [ ] 5. Без `--amp.config.file` `upstreamcore` ведёт себя как сейчас; контрактные сьюты и гейт зелёные.
@@ -117,9 +117,9 @@ based_on:
 3. Шард полон → событие теряется, метрика; следующий resend догонит состояние (кроме последнего resolved, если Prometheus больше не шлёт — known gap, метрика).
 4. PG недоступен во время работы → ошибки записи (метрика `error`, Warn), доставка не страдает; на старте → без истории до рестарта (TECH-DEBT `UPSTREAM-HISTORY-PG-RECONNECT`).
 5. Inhibition: цель с активным источником → `skipped_muted`; источник, ещё не дошедший до inhibitor'а, → цель классифицируется (best-effort).
-6. Silence снят → следующий `Put` классифицирует; алерт, отправленный один раз, — нет.
+6. Silence снят → первый `Put` после `recheckAt` классифицирует (задержка до 1m); алерт, отправленный один раз, — нет.
 7. Классификация с ошибкой → как в 2a (запись удаляется), investigation не ставится.
-8. `investigation.enabled` без PG или без `llm.enabled` → investigation нет, Info/Warn в лог.
+8. `investigation.enabled` без PG или без `llm.enabled` → investigation нет, Info/Warn в лог. `investigation.only_firing: false` не действует (resolved не классифицируются, значит и не расследуются) — Info на старте.
 9. Stop → классификатор останавливается первым (новых `Submit` нет), затем очередь investigation с таймаутом, затем история (незаписанное в очереди теряется), затем пул.
 
 ## Impact Analysis

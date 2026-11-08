@@ -53,7 +53,7 @@ type History struct {
 	shards  []chan *core.Alert
 
 	// queueFull logs one Warn per overflow episode, as Classifier does; an
-	// episode ends with the next event that is queued.
+	// episode ends once an event is queued to a shard less than half full.
 	queueFull atomic.Bool
 
 	cancel context.CancelFunc
@@ -108,11 +108,33 @@ func (h *History) PreStore(*alert.Alert, bool) error { return nil }
 // PostStore queues the alert's event. It runs under the provider's lock, so
 // it never blocks: with the shard full the event is dropped.
 func (h *History) PostStore(a *alert.Alert, _ bool) {
+	h.enqueue(a)
+}
+
+// PostDelete records the resolution of an alert the store garbage-collects
+// once it has resolved: one that resolved by its EndsAt passing, without a
+// resolved Put, has no resolved event otherwise. The history itself outlives
+// the store.
+func (h *History) PostDelete(a *alert.Alert) {
+	if a.Resolved() {
+		h.enqueue(a)
+	}
+}
+
+// PostGC keeps the history: it outlives the store.
+func (h *History) PostGC(model.Fingerprints) {}
+
+func (h *History) enqueue(a *alert.Alert) {
 	fp := a.Fingerprint()
 	ca := toCoreAlert(a)
+	shard := h.shards[uint64(fp)%uint64(len(h.shards))]
 	select {
-	case h.shards[uint64(fp)%uint64(len(h.shards))] <- ca:
-		h.queueFull.Store(false)
+	case shard <- ca:
+		// Re-arm the Warn only once the shard has drained to half: at the
+		// limit, every event that slips through would log again.
+		if len(shard) < cap(shard)/2 {
+			h.queueFull.Store(false)
+		}
 	default:
 		h.writes.WithLabelValues("dropped_queue_full").Inc()
 		if h.queueFull.CompareAndSwap(false, true) {
@@ -121,12 +143,6 @@ func (h *History) PostStore(a *alert.Alert, _ bool) {
 		}
 	}
 }
-
-// PostDelete keeps the history: it outlives the store.
-func (h *History) PostDelete(*alert.Alert) {}
-
-// PostGC keeps the history: it outlives the store.
-func (h *History) PostGC(model.Fingerprints) {}
 
 func (h *History) work(ctx context.Context, ch <-chan *core.Alert) {
 	for {

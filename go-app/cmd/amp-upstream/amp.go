@@ -24,9 +24,14 @@ import (
 	"github.com/ipiton/AMP/internal/upstreamcore"
 )
 
-// investigationStopTimeout bounds the drain of in-flight investigations on
-// shutdown, as cmd/server's.
-const investigationStopTimeout = 5 * time.Second
+const (
+	// investigationStopTimeout bounds the drain of in-flight investigations
+	// on shutdown, as cmd/server's.
+	investigationStopTimeout = 5 * time.Second
+	// migrationTimeout bounds the migrations at start, the advisory lock
+	// wait included: delivery starts on time even with the database stuck.
+	migrationTimeout = time.Minute
+)
 
 // newAMPLayer builds AMP's own processing from the AMP config at path and
 // hooks it into opts (ADR-019): the alert history in PostgreSQL with
@@ -110,15 +115,18 @@ func connectDatabase(logger *slog.Logger, cfg *appconfig.Config) *postgres.Postg
 		logger.Info("alert history disabled: it needs PostgreSQL (profile standard)", "profile", cfg.Profile)
 		return nil
 	}
-	// The pool's health checks run until Disconnect; the connect itself is
-	// bounded by database.connect_timeout.
-	ctx := context.Background()
+	// The pool's health checks run with the connect's context until
+	// Disconnect, so it is not cancelled; the connect itself is bounded by
+	// database.connect_timeout. A database that comes up later is not
+	// picked up before a restart (TECH-DEBT UPSTREAM-HISTORY-PG-RECONNECT).
 	pool := postgres.NewPostgresPool(appconfig.PostgresConfigFrom(cfg.Database), logger)
-	if err := pool.Connect(ctx); err != nil {
+	if err := pool.Connect(context.Background()); err != nil {
 		logger.Error("alert history and investigation disabled until restart: PostgreSQL unavailable",
 			"host", cfg.Database.Host, "database", cfg.Database.Database, "err", err)
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), migrationTimeout)
+	defer cancel()
 	if err := dbmigrations.RunMigrations(ctx, pool, logger); err != nil {
 		_ = pool.Close()
 		logger.Error("alert history and investigation disabled until restart: database migrations failed", "err", err)
@@ -134,9 +142,11 @@ func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus
 	if err != nil {
 		return nil, fmt.Errorf("failed to create history storage: %w", err)
 	}
+	// The service logs every processed alert at Info; on the ingest of
+	// every Put that drowns the log, so only its warnings and errors pass.
 	dedup, err := services.NewDeduplicationService(&services.DeduplicationConfig{
 		Storage: storage,
-		Logger:  logger,
+		Logger:  slog.New(warnOnly{logger.Handler()}),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create history deduplication: %w", err)
@@ -187,12 +197,30 @@ func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, pool *postgre
 		qCfg.LLMTimeout = inv.LLMTimeout
 	}
 	qCfg.OnlyFiring = inv.OnlyFiring
+	if !inv.OnlyFiring {
+		logger.Info("investigation.only_firing=false has no effect on amp-upstream: only firing alerts are classified, so only they are investigated")
+	}
 
 	repo := investigationrepo.NewPostgresInvestigationRepositoryWithRegisterer(pool.SharePool(), logger, reg)
 	queue := investigationinfra.NewInvestigationQueue(repo, client, qCfg, logger, reg)
 	queue.Start()
 	logger.Info("alert investigation enabled", "workers", qCfg.WorkerCount, "queue_size", qCfg.QueueSize)
 	return queue
+}
+
+// warnOnly passes a handler's records from Warn up.
+type warnOnly struct{ slog.Handler }
+
+func (w warnOnly) Enabled(ctx context.Context, l slog.Level) bool {
+	return l >= slog.LevelWarn && w.Handler.Enabled(ctx, l)
+}
+
+func (w warnOnly) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return warnOnly{w.Handler.WithAttrs(attrs)}
+}
+
+func (w warnOnly) WithGroup(name string) slog.Handler {
+	return warnOnly{w.Handler.WithGroup(name)}
 }
 
 func llmConfig(c appconfig.LLMConfig) llm.Config {
