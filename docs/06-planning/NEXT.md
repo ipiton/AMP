@@ -6,7 +6,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 <!-- Единственное место для чисел потока. Команды и другие документы ссылаются сюда, а не копируют. -->
 
-- **WIP limit:** 2 — одна основная задача плюс один срочный фикс. Меняется только здесь.
+- **WIP limit:** 2 — одна основная задача плюс один срочный фикс. Меняется только здесь. Временно **3** на время параллельных срезов 2b/3/4 эпика ADR-019 (владелец 2026-11-08), в отдельных worktree; после их мержа — снова 2.
 - **Прод-блокеры первыми:** секция «Production Readiness — блокеры» в `BACKLOG.md` приоритетнее всей Queue; порядок — в самой секции. Берутся в WIP напрямую из BACKLOG.
 - **Replenish** Queue, когда в ней меньше трёх задач. Кандидата сначала проверить по `DONE.md` и `archive/DONE-*.md`, чтобы закрытое не вернулось.
 - **Balance** maintenance (`BUGS`, `TECH-DEBT`) и roadmap (`ROADMAP`, `BACKLOG`) 50/50: по последним пяти закрытиям — если одной стороны больше трёх, следующую задачу брать с другой.
@@ -15,6 +15,10 @@ Queue и WIP — источник правды для выбора задачи.
 - **Live state only:** ушедшая из WIP или Queue запись удаляется, а не зачёркивается и не комментируется.
 
 ## WIP
+
+- [ ] **UPSTREAM-AI-HISTORY-INVESTIGATION** — срез 2b ADR-019 (`UPSTREAM-AI-HOOKS`): `PostStore` — история в PG и постановка investigation, дешёвый фильтр в `PreStore`, соответствие fingerprint upstream (FNV) и AMP (SHA-256). Full, ~1d. Claimed 2026-11-08, worktree.
+- [ ] **UPSTREAM-NON-UPSTREAM-RECEIVERS** — срез 3 ADR-019: интеграции upstream `notify/*`, свои — Rootly и K8s-Secret таргеты. Решение владельца 2026-11-08: K8s-Secret таргеты — адаптер в `config.Receiver` (не удаление). Standard, 2–3d. Claimed 2026-11-08, worktree.
+- [ ] **UPSTREAM-HA-MEMBERLIST** — срез 4 ADR-019: `cluster.Peer`, gossip, снапшоты на PVC, StatefulSet. Full, 3–5d. Claimed 2026-11-08, worktree.
 
 ## Queue
 
@@ -31,9 +35,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 > Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 2–4 независимы; описание — `BACKLOG.md` § ADR-019.
 
-- [ ] **UPSTREAM-AI-HISTORY-INVESTIGATION** — срез 2b (`UPSTREAM-AI-HOOKS`): `PostStore` — история в PG и постановка investigation, дешёвый фильтр в `PreStore`, соответствие fingerprint upstream (FNV) и AMP (SHA-256). Full, ~1d. `UPSTREAM-AI-CLASSIFY` (2a) закрыт 2026-10-30; открытые вопросы 2a — в `BACKLOG.md` § ADR-019.
-- [ ] **UPSTREAM-NON-UPSTREAM-RECEIVERS** — срез 3: интеграции upstream `notify/*`, свои — Rootly и K8s-Secret таргеты. Standard, 2–3d.
-- [ ] **UPSTREAM-HA-MEMBERLIST** — срез 4: `cluster.Peer`, gossip, снапшоты на PVC, StatefulSet. Full, 3–5d.
+- Срезы 2b, 3, 4 — в WIP (2026-11-08). Дальше по порядку: `UPSTREAM-CORE-REMOVAL` (5) после мержа 2b–4, `UPSTREAM-API-UI` (6), `UPSTREAM-DOCS-MIGRATION` (7) — описание в `BACKLOG.md` § ADR-019.
 
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
