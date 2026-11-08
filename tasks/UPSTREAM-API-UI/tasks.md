@@ -29,7 +29,7 @@ based_on:
 
 ## Phase 1: Данные
 
-- [x] **1.1** Миграция `upstream_fingerprint` + индекс, down. <!-- verify: grep -c "goose Down" go-app/migrations/20261108000000_alerts_upstream_fingerprint.sql -->
+- [x] **1.1** Миграция `upstream_fingerprint` + индекс, down. <!-- verify: grep -c "goose Down" go-app/migrations/20261108000000_alerts_upstream_fingerprint.sql go-app/migrations/20261108000001_alerts_upstream_fingerprint_index.sql -->
 - [x] **1.2** `core.AlertHistoryRecord`. <!-- verify: cd go-app && go build ./internal/core/ -->
 - [x] **1.3** `SaveAlert`/`UpdateAlert` пишут колонку; `AlertRecordByFingerprint`, `AlertRecordByUpstreamFingerprint`, `BackfillUpstreamFingerprints`. <!-- depends: 1.1, 1.2 | verify: cd go-app && go vet ./internal/infrastructure/ && go test ./internal/infrastructure/ ./internal/core/services/ -->
 
@@ -46,9 +46,9 @@ based_on:
 
 ## Phase 3: Тесты (после `review-verdict.json` `"gate": "pass"`)
 
-- [ ] **3.1** `ampapi`: 400/404/503/500/200 для обоих маршрутов, FNV/SHA, регистр, префикс, 405. <!-- verify: cd go-app && go test ./internal/ampapi/ -->
+- [ ] **3.1** `ampapi`: 400/404/503/500/200 для обоих маршрутов, FNV/SHA, регистр, префикс (в том числе `/a{b}`), HEAD, 405 JSON с `Allow`, 404 JSON (неизвестный путь, trailing slash, пустой fp), таймаут в контексте ридера, метрики на `prometheus.NewRegistry()` (F15). <!-- verify: cd go-app && go test ./internal/ampapi/ -->
 - [ ] **3.2** Композиция: байты `/api/v2/status`, `/api/v2/alerts`, `/api/v2/inhibitions`, `/api/v1/alerts` = `core.Handler()`; `/api/amp/…` → AMP; префикс; auth закрывает AMP-маршруты. <!-- verify: cd go-app && go test ./cmd/amp-upstream/ -->
-- [ ] **3.3** testcontainers: миграция up/down/up; `SaveAlert`/`UpdateAlert` пишут FNV = `model.LabelSet.Fingerprint()`; поиск по обоим ключам, коллизия; backfill заполняет NULL и идемпотентен. <!-- verify: cd go-app && go test ./internal/infrastructure/ ./internal/database/ -run 'Upstream|Migration' -count=1 -->
+- [ ] **3.3** testcontainers: обе миграции up/down/up; `SaveAlert`/`UpdateAlert` пишут FNV = `model.LabelSet.Fingerprint()`; поиск по обоим ключам, коллизия; backfill заполняет NULL и идемпотентен; `UpstreamFingerprintIndexValid` — true, false без индекса, false на INVALID (`UPDATE pg_index SET indisvalid=false`); `EXPLAIN` запроса backfill (F5) — в лог теста. <!-- verify: cd go-app && go test ./internal/infrastructure/ ./internal/database/ -run 'Upstream|Migration' -count=1 -->
 - [ ] **3.4** `AlertRecordBy*` + investigation end-to-end на PG: `ampapi` поверх настоящих ридеров. <!-- depends: 3.3 | verify: cd go-app && go test ./internal/ampapi/ -count=1 -->
 
 **Phase verification:** `cd go-app && go test ./internal/ampapi/ ./cmd/amp-upstream/ ./internal/infrastructure/ ./internal/database/ -count=1`
@@ -56,8 +56,8 @@ based_on:
 ## Phase 4: Testing, docs, finalize
 
 - [ ] **4.1** `scripts/release-gate.sh` целиком зелёный; лог в `evidence/release-gate.txt`. <!-- verify: tail evidence/release-gate.txt -->
-- [ ] **4.2** CHANGELOG `[Unreleased]`: Added (маршруты, колонка, метрика) и Breaking (investigation path/поле, inhibitions, group_by). <!-- verify: grep -n "UPSTREAM-API-UI" CHANGELOG.md -->
-- [ ] **4.3** Planning: BACKLOG (`UPSTREAM-API-UI` [x], `STATUS-VERSIONINFO-CONTRACT`, `COMPAT-VERSION-CONFIG-KEY`, `HISTORY-API`, `UPSTREAM-DOCS-MIGRATION`, `PHASE-5A-…`), ROADMAP, DECISIONS (уточнение ADR-019), DONE, NEXT. <!-- verify: grep -n "UPSTREAM-API-UI" docs/06-planning/*.md -->
+- [ ] **4.2** CHANGELOG `[Unreleased]`: Added (маршруты, колонка, индекс, метрика, backfill, `Warn` на INVALID) и Breaking (investigation path, `fingerprint` FNV + `amp_fingerprint`, `alert_name`; `/api/v2/inhibitions`; `?group_by=`; `global.group_*` — конфиг не загружается; `?status=resolved`; health-алиасы); Rollout: ручной `CREATE INDEX CONCURRENTLY` до выкатки на большой `alerts`, починка INVALID двумя командами, окно rolling update; F16 «no schema change». <!-- verify: grep -n "UPSTREAM-API-UI" CHANGELOG.md -->
+- [ ] **4.3** Planning: BACKLOG (`UPSTREAM-API-UI` [x], `STATUS-VERSIONINFO-CONTRACT`, `COMPAT-VERSION-CONFIG-KEY`, `HISTORY-API`, `UPSTREAM-DOCS-MIGRATION`, `PHASE-5A-…`), ROADMAP, DECISIONS (уточнение ADR-019), DONE, NEXT; у `HISTORY-API` — сдвиг `updated_at` backfill'ом (F8). <!-- verify: grep -n "UPSTREAM-API-UI" docs/06-planning/*.md -->
 - [ ] **4.4** Архив `tasks/archive/UPSTREAM-API-UI/`, коммит, sync с `main`. <!-- verify: git status && git log --oneline main..HEAD -->
 
 ## Definition of Done
@@ -69,6 +69,7 @@ based_on:
 - [ ] Tests for changed behavior are added or updated
 - [ ] Phase checks pass
 - [ ] Docs/planning are updated
+- [ ] Владелец подтвердил решения research Q3–Q5 (удалённые `/api/v2/inhibitions`, `?status=resolved`, health-алиасы; class d в `divergences.tsv`) до `merge-to-main`
 
 ## Deviations
 

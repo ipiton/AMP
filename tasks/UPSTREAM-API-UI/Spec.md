@@ -46,7 +46,7 @@ based_on:
 | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|
 | FNV в `api/v2` = `model.LabelSet.Fingerprint()` от labels = `alertconv.UpstreamFingerprint(labels)` | `alertmanager@v0.34.1/alert/alert.go:30` (встраивает `model.Alert`), `api/v2` `fingerprint: a.Fingerprint().String()`; `alertconv.go:116` | code-read | поиск по FNV не находит строки; ловится тестом с `model.LabelSet.Fingerprint()` |
-| Единственный писатель `alerts` в коде этой версии — `newHistory` → `DeduplicationService` → `SaveAlert`/`UpdateAlert` | `grep -rn NewPostgresStorageAdapter` по модулю: только `cmd/amp-upstream/amp.go` | code-read (grep, не трассировка) | В деплое ложно на время rolling update или отката на образ среза 5: старые поды вставляют строки без колонки (их `ON CONFLICT` колонку не трогает). Такие строки ищутся по FNV после первого `UpdateAlert` или следующего старта нового пода (Edge Case 9) |
+| Единственный писатель `alerts` в коде этой версии — `newHistory` → `DeduplicationService` → `SaveAlert`/`UpdateAlert` | `grep -rn NewPostgresStorageAdapter` по модулю: только `cmd/amp-upstream/amp.go` | code-read (grep, не трассировка) | В деплое ложно на время rolling update или отката на образ среза 5: старые поды вставляют строки без колонки (их `ON CONFLICT` колонку не трогает). Такие строки ищутся по FNV после первого `UpdateAlert` или следующего старта нового пода (Edge Case 8) |
 | Labels строки не меняются при `UpdateAlert` (SHA-256 — функция labels) | `deduplication.go:370-394` меняет status/endsAt/annotations/timestamp, не labels | code-read | колонка расходится с labels — исключено, т.к. SHA-ключ тот же |
 | Resolved-алерт удаляется из upstream store на GC, история остаётся | `store/store.go` `gcAlerts`; `History.PostGC` пустой | code-read | — (обосновывает отказ от поиска через store) |
 | Всё под `/api/v2/` обслуживает `api.API.Register` ядра; AMP-диспетчер перехватывает только `<prefix>/api/amp/` | `alertmanager@v0.34.1/api/api.go` `Register`; Target Design п.1 | code-read | при ошибке диспетчера — сдвиг `api/v2`; ловится тестом композиции и amtool-гейтом |
@@ -55,7 +55,7 @@ based_on:
 ## Target Design
 
 1. В `cmd/amp-upstream` handler собирается как `wrapWebAuth(withAMPRoutes(core.Handler(), amp, prefix))`: запрос с путём `<prefix>/api/amp/` идёт в AMP-handler, любой другой — в `core.Handler()` без изменений (не через `ServeMux`: никакой чистки путей и редиректов перед upstream).
-2. Новый пакет `internal/ampapi` — handler с `GET <prefix>/api/amp/v1/alerts/{fingerprint}` и `…/{fingerprint}/investigation` поверх двух интерфейсов-ридеров; nil-ридер → 503. Путь разбирается вручную, не шаблонами `ServeMux`: префикс внешнего URL с `{`/`}` иначе ронял старт (deep-review F3). На чтения из БД — таймаут 10 с на запрос: маршруты идут мимо `--web.timeout`/`--web.get-concurrency` upstream, а пул общий с записью истории.
+2. Новый пакет `internal/ampapi` — handler с `GET <prefix>/api/amp/v1/alerts/{fingerprint}` и `…/{fingerprint}/investigation` поверх двух интерфейсов-ридеров; nil-ридер → 503. Путь разбирается вручную, не шаблонами `ServeMux`, так что `ampapi` не зависит от синтаксиса префикса (deep-review F3). Префикс с `{` в пути всё равно роняет сам upstream (`api.Register`). На чтения из БД — таймаут 10 с на запрос: маршруты идут мимо `--web.timeout`/`--web.get-concurrency` upstream, а пул общий с записью истории.
 3. `{fingerprint}`: 16 hex — FNV, ищется по `alerts.upstream_fingerprint`; 64 hex — SHA-256 AMP, по `alerts.fingerprint`. Регистр не важен (приводится к нижнему). Иначе 400.
 4. Investigation: fingerprint → строка `alerts` → её SHA-256 → `GetLatestByFingerprint`. Для 64 hex без строки истории investigation ищется по SHA напрямую.
 5. Миграция добавляет `alerts.upstream_fingerprint` + индекс; `SaveAlert`/`UpdateAlert` пишут её из labels; старые строки заполняет фоновый backfill при старте (Go, та же функция FNV, батчами по `id`, идемпотентно).
@@ -122,9 +122,9 @@ based_on:
 
 Индекс `idx_alerts_upstream_fingerprint` (не unique: FNV-64 может совпасть у разных labels; при совпадении отдаётся строка с последним `timestamp`, и клиент не видит, что строк несколько. Принято: подобрать совпадение может только тот, кто и так шлёт алерты).
 
-- **Migration:** две goose-миграции. `20261108000000_alerts_upstream_fingerprint.sql` (в транзакции): `ADD COLUMN IF NOT EXISTS` (nullable без default, ACCESS EXCLUSIVE только на изменение каталога); down — `DROP COLUMN IF EXISTS`. `20261108000001_alerts_upstream_fingerprint_index.sql` (`NO TRANSACTION`): `CREATE INDEX CONCURRENTLY IF NOT EXISTS`; down — `DROP INDEX CONCURRENTLY IF EXISTS`. Проверка `UpstreamFingerprintIndexValid` на старте: если индекса нет или он INVALID — `Warn` с командой починки.
+- **Migration:** две goose-миграции. `20261108000000_alerts_upstream_fingerprint.sql` (в транзакции): `ADD COLUMN IF NOT EXISTS` (nullable без default, ACCESS EXCLUSIVE только на изменение каталога; ожидание этой блокировки за долгим запросом ставит в очередь запись истории старых подов, но не дольше `migrationTimeout`); down — `DROP COLUMN IF EXISTS`. `20261108000001_alerts_upstream_fingerprint_index.sql` (`NO TRANSACTION`): `CREATE INDEX CONCURRENTLY IF NOT EXISTS`; down — `DROP INDEX CONCURRENTLY IF EXISTS`. Проверка `UpstreamFingerprintIndexValid` на старте: если индекса нет или он INVALID — `Warn` с командой починки. Рестарт индекс не пересоздаёт (версия уже записана), чинится только вручную: `DROP INDEX CONCURRENTLY`, затем `CREATE INDEX CONCURRENTLY`, двумя отдельными командами.
 - **Backfill:** не в миграции (FNV в SQL хрупок, research Q2-C). При старте, после миграций, горутина `BackfillUpstreamFingerprints`: `SELECT id, labels … WHERE upstream_fingerprint IS NULL AND id > $last ORDER BY id LIMIT 500`, затем один `UPDATE … FROM unnest($ids, $fps) … AND upstream_fingerprint IS NULL`. Идемпотентно, безопасно для N реплик. Отменяется при остановке до закрытия пула. Строки с нечитаемыми labels пропускаются (`Warn` на каждом старте). Когда всё заполнено, каждый старт делает один проход `IS NULL`. Строки, которые backfill заполнил, получают от триггера новый `updated_at` (для `HISTORY-API`: сортировка по `updated_at` смещается, BACKLOG). Если две реплики обновляют пересекающиеся батчи, возможен deadlock: одна получает `Warn`, её строки заполнит следующий старт, корректность не страдает.
-- **Rollback / forward-fix:** откат образа на срез 5, схема остаётся: колонку и индекс старый код не читает и не пишет. Схему не откатывать (`docs/ROLLBACK_RUNBOOK.md` запрещает `goose down` при откате). Down-миграции проверены тестом.
+- **Rollback / forward-fix:** откат образа на срез 5, схема остаётся: колонку и индекс старый код не читает и не пишет. Схему не откатывать (`docs/ROLLBACK_RUNBOOK.md` запрещает `goose down` при откате). Down-миграции проверит тест 3.3.
 
 ## Component Architecture
 
@@ -158,9 +158,9 @@ based_on:
 4. Совпадение FNV у разных labels → строка с последним `timestamp` (`ORDER BY timestamp DESC, id DESC LIMIT 1`; `timestamp` NOT NULL).
 5. Investigation для 64 hex без строки истории → ищется по SHA; `fingerprint` в ответе опущен.
 6. `--web.external-url=http://h/am` → маршруты под `/am/api/amp/v1/…`; `/api/amp/…` без префикса → `core.Handler()` (upstream 404).
-7. `POST /api/amp/v1/alerts/<fp>` → 405 JSON; `/api/amp/v1/unknown` → 404 JSON; `--web.external-url` с `{` в пути не ломает старт.
-9. Rolling update или откат на срез 5 и обратно: строки, которые старые поды вставили после backfill, остаются NULL. По FNV — 404, пока их не заполнит `UpdateAlert` или следующий старт.
-8. Backfill на N репликах одновременно → каждая строка обновляется не больше одного раза (`AND upstream_fingerprint IS NULL`); триггер сдвигает `updated_at` заполненных строк — колонка `updated_at` в API не отдаётся.
+7. `POST /api/amp/v1/alerts/<fp>` → 405 JSON; `/api/amp/v1/unknown` → 404 JSON; `--web.external-url` с `{` в пути роняет upstream `api.Register` (не AMP).
+8. Rolling update или откат на срез 5 и обратно: строки, которые старые поды вставили после backfill, остаются NULL. По FNV — 404, пока их не заполнит `UpdateAlert` или следующий старт.
+9. Backfill на N репликах одновременно → каждая строка обновляется не больше одного раза (`AND upstream_fingerprint IS NULL`); триггер сдвигает `updated_at` заполненных строк — колонка `updated_at` в API не отдаётся.
 
 ## Impact Analysis
 

@@ -141,7 +141,7 @@ func backfillUpstreamFingerprints(logger *slog.Logger, storage *infrastructure.P
 			logger.Warn("alert history: cannot check the upstream fingerprint index", "err", err)
 		case err == nil && !valid:
 			logger.Warn("alert history: index idx_alerts_upstream_fingerprint is missing or INVALID (an interrupted build); lookups by upstream fingerprint scan the table",
-				"fix", "DROP INDEX CONCURRENTLY IF EXISTS idx_alerts_upstream_fingerprint; CREATE INDEX CONCURRENTLY idx_alerts_upstream_fingerprint ON alerts(upstream_fingerprint);")
+				"fix", "run separately, not in one transaction: DROP INDEX CONCURRENTLY IF EXISTS idx_alerts_upstream_fingerprint, then CREATE INDEX CONCURRENTLY idx_alerts_upstream_fingerprint ON alerts(upstream_fingerprint)")
 		}
 		filled, err := storage.BackfillUpstreamFingerprints(ctx, 0)
 		switch {
