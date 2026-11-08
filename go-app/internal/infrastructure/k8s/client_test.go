@@ -482,6 +482,7 @@ func TestClose_AfterOperations(t *testing.T) {
 	err := client.Close()
 	assert.NoError(t, err)
 
-	// After close, clientset is nil, operations will fail
-	// But this is expected behavior
+	// Close is a no-op: the client keeps working.
+	_, err = client.ListSecrets(context.Background(), "default", "")
+	assert.NoError(t, err)
 }

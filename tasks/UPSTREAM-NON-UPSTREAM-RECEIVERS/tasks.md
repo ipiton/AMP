@@ -43,13 +43,13 @@ based_on:
 
 ## Phase 2: Deep review
 
-- [ ] **2.1** Независимый агент, `review-findings.md`, `review-verdict.json` с `gate: pass` <!-- verify: review-verdict.json -->
+- [x] **2.1** Независимый агент, `review-findings.md`, `review-verdict.json` с `gate: pass` <!-- verify: review-verdict.json -->
 
 ## Phase 3: Tests
 
-- [ ] **3.1** Юнит-тесты `upstreamtargets` (Spec § 5) <!-- verify: go test -race ./internal/upstreamtargets/... -->
-- [ ] **3.2** e2e на `upstreamcore` с фейковым K8s <!-- verify: go test -race ./internal/upstreamcore/... -->
-- [ ] **3.3** Тесты k8s-клиента <!-- verify: go test -race ./internal/infrastructure/k8s/... -->
+- [x] **3.1** Юнит-тесты `upstreamtargets` (Spec § 5) <!-- verify: go test -race ./internal/upstreamtargets/... -->
+- [x] **3.2** e2e на `upstreamcore` с фейковым K8s <!-- verify: go test -race ./internal/upstreamcore/... -->
+- [x] **3.3** Тесты k8s-клиента <!-- verify: go test -race ./internal/infrastructure/k8s/... -->
 
 ## Phase 4: Docs & planning
 
