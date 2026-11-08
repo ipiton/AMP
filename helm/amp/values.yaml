@@ -1052,10 +1052,13 @@ affinity:
 # ===============================
 # Transitional: renders the upstream core (/app/amp-upstream, one
 # alertmanager.yml, api/v2 on port 9093) as a StatefulSet NEXT TO the AMP
-# Deployment above, with its own Services. Nothing above routes to it: point
-# Prometheus at <fullname>-upstream:9093. Slice 5 (UPSTREAM-CORE-REMOVAL)
-# makes it the only workload and moves Ingress, ServiceMonitor,
-# NetworkPolicy and PDB onto it.
+# Deployment above, with its own Services. Nothing above routes to it:
+# point Prometheus at <fullname>-upstream:9093 with one replica, and at every
+# pod (<fullname>-upstream-<i>.<fullname>-upstream-headless:9093) with more.
+# No ServiceMonitor, NetworkPolicy, PDB or web auth covers it yet, and gossip
+# is plain TCP/UDP unless extraArgs sets --cluster.tls-config. Slice 5
+# (UPSTREAM-CORE-REMOVAL) makes it the only workload and moves Ingress,
+# ServiceMonitor, NetworkPolicy and PDB onto it.
 upstreamCore:
   enabled: false
   # 1: no gossip cluster (--cluster.listen-address=). > 1: the pods form an

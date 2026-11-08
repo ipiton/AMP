@@ -80,7 +80,10 @@ type Options struct {
 
 	// Cluster, as in upstream app.Options. An empty ClusterBindAddr leaves
 	// the gossip cluster off; zero durations fall back to the upstream
-	// defaults (DefaultPeerTimeout, DefaultSettleTimeout, cluster.Default*).
+	// defaults (DefaultPeerTimeout, cluster.Default*), except SettleTimeout:
+	// it is a deadline, and zero settles at once, as upstream
+	// (--cluster.settle-timeout=0s). Upstream rejects the other zero
+	// durations instead; cmd/amp-upstream does that for its flags.
 	ClusterBindAddr        string
 	ClusterAdvertiseAddr   string
 	ClusterPeerName        string
@@ -189,7 +192,6 @@ func (o *Options) defaults() error {
 		{&o.TCPTimeout, cluster.DefaultTCPTimeout},
 		{&o.ProbeTimeout, cluster.DefaultProbeTimeout},
 		{&o.ProbeInterval, cluster.DefaultProbeInterval},
-		{&o.SettleTimeout, DefaultSettleTimeout},
 		{&o.ReconnectInterval, cluster.DefaultReconnectInterval},
 		{&o.PeerReconnectTimeout, cluster.DefaultReconnectTimeout},
 	} {

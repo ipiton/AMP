@@ -374,6 +374,7 @@ upstreamCore:
 - Prometheus should send alerts to every replica (the headless Service), not to one through `<fullname>-upstream`, as with upstream Alertmanager HA.
 - `externalURL` defaults to `http://<fullname>-upstream.<namespace>.svc:9093/`; its path becomes the route prefix and the probe path.
 - `extraArgs` passes further flags, e.g. `--cluster.label=<name>` or `--cluster.tls-config=<file>`.
+- Not covered yet: no ServiceMonitor scrapes its metrics (`alertmanager_cluster_*` included), the NetworkPolicy and PodDisruptionBudget select only the AMP pods, the API has no authentication, and gossip is unencrypted unless `--cluster.tls-config` is set. Slice 5 (`UPSTREAM-CORE-REMOVAL`) moves these onto the upstream core.
 
 ## Alertmanager Compatibility
 

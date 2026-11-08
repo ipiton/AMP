@@ -63,6 +63,9 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	// in classic mode instead of upstream's default fallback mode.
 	compat.InitFromFlags(logger, featurecontrol.NoopFlags{})
 
+	if err := validateClusterFlags(clusterOpts); err != nil {
+		return err
+	}
 	// clusterOpts carries only the --cluster.* flags.
 	opts := clusterOpts
 	opts.ConfigFile = configFile
@@ -215,6 +218,35 @@ func clusterFlags(fs *flag.FlagSet) *upstreamcore.Options {
 	fs.BoolVar(&o.AllowInsecureAdvertise, "cluster.allow-insecure-public-advertise-address-discovery", false, "[EXPERIMENTAL] Allow alertmanager to discover and listen on a public IP address.")
 	fs.StringVar(&o.Label, "cluster.label", "", "The cluster label is an optional string to include on each packet and stream. It uniquely identifies the cluster and prevents cross-communication issues when sending gossip messages.")
 	return o
+}
+
+// validateClusterFlags rejects non-positive cluster durations when the
+// cluster is on, as upstream app.Options.validate: upstreamcore would
+// otherwise replace a zero with the default. SettleTimeout is a deadline,
+// so zero is valid there (settle at once).
+func validateClusterFlags(o upstreamcore.Options) error {
+	if o.ClusterBindAddr == "" {
+		return nil
+	}
+	for _, f := range []struct {
+		name string
+		val  time.Duration
+	}{
+		{"cluster.peer-timeout", o.PeerTimeout},
+		{"cluster.peers-resolve-timeout", o.PeersResolveTimeout},
+		{"cluster.gossip-interval", o.GossipInterval},
+		{"cluster.pushpull-interval", o.PushPullInterval},
+		{"cluster.tcp-timeout", o.TCPTimeout},
+		{"cluster.probe-timeout", o.ProbeTimeout},
+		{"cluster.probe-interval", o.ProbeInterval},
+		{"cluster.reconnect-interval", o.ReconnectInterval},
+		{"cluster.reconnect-timeout", o.PeerReconnectTimeout},
+	} {
+		if f.val <= 0 {
+			return fmt.Errorf("--%s must be positive when clustering is enabled", f.name)
+		}
+	}
+	return nil
 }
 
 // stringsFlag is a repeatable string flag, as kingpin's Strings upstream.

@@ -62,7 +62,10 @@
 // notifications wait for the cluster to settle and for one PeerTimeout per
 // peer ahead in position. An empty Options.ClusterBindAddr keeps it off, as
 // upstream's app.DefaultOptions does; the amp-upstream binary defaults the
-// flag to 0.0.0.0:9094, as upstream's binary does.
+// flag to 0.0.0.0:9094, as upstream's binary does. Options are not
+// validated as upstream's app.Options.validate: a zero duration falls back
+// to its default (SettleTimeout excepted: zero settles at once, as
+// upstream); the binary rejects non-positive --cluster.* durations itself.
 //
 // # AMP extensions
 //
