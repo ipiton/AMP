@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/upstream-ai-history-investigation",
+  "commit": "d77534b",
+  "reviewed_at": "2026-11-08",
+  "findings": { "blocker": 0, "major": 3, "minor": 7, "nit": 6 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}
