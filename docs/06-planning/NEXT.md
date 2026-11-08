@@ -15,6 +15,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **UPSTREAM-CORE-REMOVAL** — срез 5: удаление своего ядра, конфиг через upstream `config.Load`, wiring по образцу `cmd/alertmanager`; плюс то, что передали срезы 2b и 4 (Redis-HA, чарт на StatefulSet `upstreamCore`, `llm.agent_mode`) — `BACKLOG.md` § ADR-019. Full, 5–6d. Срезы 2b, 3, 4 закрыты и смержены 2026-11-08. Claimed 2026-11-08, worktree.
 
 ## Queue
 
@@ -31,7 +32,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 > Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 5 → 6 → 7 строго по очереди; описание — `BACKLOG.md` § ADR-019.
 
-- [ ] **UPSTREAM-CORE-REMOVAL** — срез 5: удаление своего ядра, конфиг через upstream `config.Load`, wiring по образцу `cmd/alertmanager`; плюс то, что передали срезы 2b и 4 (Redis-HA, чарт на StatefulSet `upstreamCore`, `llm.agent_mode`) — `BACKLOG.md` § ADR-019. Full, 5–6d. Срезы 2b, 3, 4 закрыты и смержены 2026-11-08.
 - [ ] **UPSTREAM-API-UI** — срез 6, после 5. Full, 2–3d.
 - [ ] **UPSTREAM-DOCS-MIGRATION** — срез 7, последним. Lightweight, 2–3d.
 
