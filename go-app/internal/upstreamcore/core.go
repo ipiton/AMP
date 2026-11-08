@@ -82,7 +82,8 @@ type Options struct {
 	//
 	// NewAlertCallback builds an alert-store callback that runs after the
 	// silencer's (provider/mem calls it under its lock: it must not block).
-	// It receives the silencer's Mutes to check silences off that path.
+	// It receives a mutes function to check off that path whether an alert
+	// is silenced or inhibited by the active configuration.
 	NewAlertCallback func(mutes func(context.Context, model.LabelSet) bool) mem.AlertStoreCallback
 	// NotifyStage runs ahead of every receiver's notification pipeline.
 	NotifyStage notify.Stage
@@ -229,11 +230,18 @@ func (c *Core) setup(opts Options) error {
 
 	silencer := silence.NewSilencer(silences, logger, eventRec)
 
+	// The API's GroupFunc and the AMP callback's mutes close over r, which
+	// is assigned below; neither is called before the handler serves.
+	var r *reloader
+
 	// The silencer is the provider's AlertStoreCallback, exactly as
 	// upstream wires it; an AMP callback composes after it.
 	var alertCallback mem.AlertStoreCallback = silencer
 	if opts.NewAlertCallback != nil {
-		alertCallback = chainCallback{silencer, opts.NewAlertCallback(silencer.Mutes)}
+		mutes := func(ctx context.Context, lset model.LabelSet) bool {
+			return silencer.Mutes(ctx, lset) || r.inhibits(ctx, lset)
+		}
+		alertCallback = chainCallback{silencer, opts.NewAlertCallback(mutes)}
 	}
 	alerts, err := mem.NewAlerts(
 		context.Background(),
@@ -250,9 +258,6 @@ func (c *Core) setup(opts Options) error {
 	}
 	c.onStop(alerts.Close)
 
-	// The API's GroupFunc closes over r, which is assigned below; it is
-	// only called once the handler is serving.
-	var r *reloader
 	groupFn := func(ctx context.Context, routeFilter func(*dispatch.Route) bool, alertFilter func(*alert.Alert, time.Time) bool) (dispatch.AlertGroups, map[model.Fingerprint][]string, error) {
 		return r.groups(ctx, routeFilter, alertFilter)
 	}

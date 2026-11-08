@@ -2,7 +2,8 @@
 // internal/upstreamcore from an unmodified alertmanager.yml (ADR-019 PoC).
 // It runs next to cmd/server and changes nothing in it; flags mirror the
 // upstream binary's names for the subset it supports. --amp.config.file
-// adds AMP's LLM classification (internal/upstreamai) when llm.enabled.
+// adds AMP's own layer (internal/upstreamai, amp.go): alert history in
+// PostgreSQL, LLM classification and investigation.
 package main
 
 import (
@@ -26,11 +27,6 @@ import (
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 
-	appconfig "github.com/ipiton/AMP/internal/config"
-	"github.com/ipiton/AMP/internal/core/services"
-	"github.com/ipiton/AMP/internal/infrastructure/cache"
-	"github.com/ipiton/AMP/internal/infrastructure/llm"
-	"github.com/ipiton/AMP/internal/upstreamai"
 	"github.com/ipiton/AMP/internal/upstreamcore"
 )
 
@@ -43,7 +39,7 @@ func main() {
 	retention := flag.Duration("data.retention", upstreamcore.DefaultRetention, "How long to keep data for.")
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
-	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file; its llm.* section enables alert classification. Empty: none.")
+	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*). Empty: none.")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -69,15 +65,13 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		Registerer: prometheus.DefaultRegisterer,
 	}
 	if ampConfigFile != "" {
-		classifier, err := newClassifier(logger, ampConfigFile, &opts)
+		stopAMP, err := newAMPLayer(logger, ampConfigFile, &opts)
 		if err != nil {
 			return err
 		}
-		// Deferred first, so it runs after core.Stop: the dispatcher is
-		// gone before the workers stop.
-		if classifier != nil {
-			defer classifier.Stop()
-		}
+		// Deferred first, so it runs after core.Stop: the dispatcher and
+		// the alert store are gone before AMP's workers stop.
+		defer stopAMP()
 	}
 
 	listener, err := net.Listen("tcp", listenAddress)
@@ -134,60 +128,6 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 			return nil
 		}
 	}
-}
-
-// newClassifier builds the LLM classification from the AMP config and hooks
-// it into opts. It returns nil when llm.enabled is false.
-func newClassifier(logger *slog.Logger, path string, opts *upstreamcore.Options) (*upstreamai.Classifier, error) {
-	cfg, err := appconfig.LoadConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("error loading AMP configuration file: %w", err)
-	}
-	if !cfg.LLM.Enabled {
-		logger.Info("AMP configuration loaded, alert classification disabled (llm.enabled=false)")
-		return nil, nil
-	}
-
-	llmCfg := llm.DefaultConfig()
-	llmCfg.Provider = cfg.LLM.Provider
-	llmCfg.BaseURL = cfg.LLM.BaseURL
-	llmCfg.APIKey = cfg.LLM.APIKey
-	llmCfg.Model = cfg.LLM.Model
-	llmCfg.MaxTokens = cfg.LLM.MaxTokens
-	llmCfg.Temperature = cfg.LLM.Temperature
-	llmCfg.Timeout = cfg.LLM.Timeout
-	llmCfg.MaxRetries = cfg.LLM.MaxRetries
-
-	classCfg := services.DefaultClassificationConfig()
-	classCfg.EnableLLM = true
-	if cfg.LLM.Timeout > 0 {
-		classCfg.LLMTimeout = cfg.LLM.Timeout
-	}
-	// In-memory L2 cache: a single instance until the gossip cluster
-	// (UPSTREAM-HA-MEMBERLIST) decides what stays in Redis.
-	svc, err := services.NewClassificationService(services.ClassificationServiceConfig{
-		LLMClient: llm.NewHTTPLLMClient(llmCfg, logger),
-		Cache:     cache.NewMemoryCache(logger),
-		Config:    classCfg,
-		Logger:    logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create classification service: %w", err)
-	}
-
-	classifier := upstreamai.New(upstreamai.Config{
-		Service:    svc,
-		Logger:     logger,
-		Registerer: opts.Registerer,
-	})
-	opts.NewAlertCallback = classifier.AlertCallback
-	opts.NotifyStage = classifier.NotifyStage(cfg.LLM.NotifyWait, cfg.LLM.DropNoise)
-	logger.Info("alert classification enabled",
-		"provider", llmCfg.Provider,
-		"model", llmCfg.Model,
-		"notify_wait", cfg.LLM.NotifyWait,
-		"drop_noise", cfg.LLM.DropNoise)
-	return classifier, nil
 }
 
 // extURL is a port of github.com/prometheus/alertmanager@v0.34.1/app/url.go

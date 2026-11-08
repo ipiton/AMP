@@ -62,9 +62,12 @@
 // Two optional seams that upstream's app.Options lacks (ADR-019 slice
 // UPSTREAM-AI-CLASSIFY); unset, the port behaves as upstream:
 // Options.NewAlertCallback composes an alert-store callback after the
-// silencer (chainCallback in core.go), and Options.NotifyStage is prepended
-// to every receiver's pipeline on each reload (reloader.go). A bump must keep
-// both in place; upstream-bump.sh diffs only the upstream files.
+// silencer (chainCallback in core.go) and hands it a mutes function — the
+// silencer, then the active inhibitor (reloader.inhibits; slice
+// UPSTREAM-AI-HISTORY-INVESTIGATION), which is why r is declared ahead of the
+// memory provider in New — and Options.NotifyStage is prepended to every
+// receiver's pipeline on each reload (reloader.go). A bump must keep these in
+// place; upstream-bump.sh diffs only the upstream files.
 package upstreamcore
 
 // PortedFrom is the upstream release the port above was taken from.

@@ -117,6 +117,9 @@ llm:
 # investigation runs in the background and is persisted for later retrieval
 # via GET /api/v1/alerts/{fingerprint}/investigation.
 # Requires: standard profile + Postgres + llm.enabled=true.
+# amp-upstream (ADR-019) also writes the alert history to Postgres with the
+# standard profile and queues investigations after classification; it has no
+# agent_mode tools yet, and runs without both if Postgres is down at start.
 investigation:
   enabled: false         # master switch for the pipeline
   worker_count: 3        # concurrent investigation workers

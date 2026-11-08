@@ -86,6 +86,13 @@ func (r *reloader) groups(ctx context.Context, routeFilter func(*dispatch.Route)
 	return r.dispatcher.Load().Groups(ctx, routeFilter, alertFilter)
 }
 
+// inhibits reports whether the active configuration's inhibitor mutes lset
+// (AMP extension: the mutes of Options.NewAlertCallback).
+func (r *reloader) inhibits(ctx context.Context, lset model.LabelSet) bool {
+	ih := r.inhibitor.Load()
+	return ih != nil && ih.Mutes(ctx, lset)
+}
+
 // reload rebuilds the config-scoped subgraph from conf and swaps it in. It
 // is the config coordinator's subscriber, so it runs for the initial config
 // and on every reload. All fallible work happens before any live component

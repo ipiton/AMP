@@ -2,6 +2,7 @@ package upstreamai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,11 +16,14 @@ import (
 
 	"github.com/prometheus/alertmanager/featurecontrol"
 	"github.com/prometheus/alertmanager/matcher/compat"
+	"github.com/prometheus/alertmanager/provider/mem"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ipiton/AMP/internal/core"
+	"github.com/ipiton/AMP/internal/core/alertconv"
 	"github.com/ipiton/AMP/internal/upstreamcore"
 )
 
@@ -62,6 +66,14 @@ type harness struct {
 
 func startCore(t *testing.T, svc Service, wait time.Duration, dropNoise bool) *harness {
 	t.Helper()
+	c := New(Config{Service: svc, Logger: slog.New(slog.DiscardHandler), Registerer: prometheus.NewRegistry()})
+	return startCoreWith(t, c, nil, wait, dropNoise)
+}
+
+// startCoreWith runs the core with c and, when set, history chained before
+// it, as amp-upstream does; it stops both after the core.
+func startCoreWith(t *testing.T, c *Classifier, history *History, wait time.Duration, dropNoise bool) *harness {
+	t.Helper()
 	got := make(chan webhookMsg, 10)
 	hook := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		var msg webhookMsg
@@ -75,15 +87,19 @@ func startCore(t *testing.T, svc Service, wait time.Duration, dropNoise bool) *h
 	configFile := filepath.Join(dir, "alertmanager.yml")
 	require.NoError(t, os.WriteFile(configFile, fmt.Appendf(nil, amConfig, hook.URL), 0o600))
 
-	reg := prometheus.NewRegistry()
-	c := New(Config{Service: svc, Logger: slog.New(slog.DiscardHandler), Registerer: reg})
+	newCallback := c.AlertCallback
+	if history != nil {
+		newCallback = func(mutes func(context.Context, model.LabelSet) bool) mem.AlertStoreCallback {
+			return Chain(history, c.AlertCallback(mutes))
+		}
+	}
 	coreSrv, err := upstreamcore.New(upstreamcore.Options{
 		ConfigFile:       configFile,
 		DataDir:          filepath.Join(dir, "data"),
 		ExternalURL:      &url.URL{Scheme: "http", Host: "am.example"},
 		Logger:           slog.New(slog.DiscardHandler),
-		Registerer:       reg,
-		NewAlertCallback: c.AlertCallback,
+		Registerer:       prometheus.NewRegistry(),
+		NewAlertCallback: newCallback,
 		NotifyStage:      c.NotifyStage(wait, dropNoise),
 	})
 	require.NoError(t, err)
@@ -92,6 +108,9 @@ func startCore(t *testing.T, svc Service, wait time.Duration, dropNoise bool) *h
 		srv.Close()
 		coreSrv.Stop()
 		c.Stop()
+		if history != nil {
+			history.Stop()
+		}
 	})
 	return &harness{srv: srv, hook: got}
 }
@@ -187,4 +206,23 @@ func TestCoreDropNoiseStillSendsResolve(t *testing.T) {
 	assert.Equal(t, "resolved", msg.Status, "the receiver must see the incident close")
 	require.Len(t, msg.Alerts, 1)
 	assert.Equal(t, "noise", msg.Alerts[0].Annotations["llm_severity"])
+}
+
+// An alert pushed to the core lands in the history and the investigation
+// queue under one key, cmd/server's: its row and its investigation are found
+// together, and from the FNV fingerprint upstream's API shows via labels.
+func TestCoreHistoryAndInvestigationShareTheKey(t *testing.T) {
+	rec := &recorder{}
+	history := NewHistory(HistoryConfig{Record: rec.record, Logger: slog.New(slog.DiscardHandler), Registerer: prometheus.NewRegistry()})
+	inv := &submitter{}
+	c := New(Config{Service: &fakeService{res: warning()}, Investigations: inv, Logger: slog.New(slog.DiscardHandler), Registerer: prometheus.NewRegistry()})
+	h := startCoreWith(t, c, history, 0, false)
+
+	h.post(t, diskFull())
+	h.next(t)
+
+	require.Eventually(t, func() bool { return len(rec.got()) >= 1 && len(inv.got()) >= 1 }, 5*time.Second, 10*time.Millisecond)
+	want := alertconv.Fingerprint(map[string]string{"alertname": "DiskFull", "instance": "db-1"})
+	assert.Equal(t, want, rec.got()[0].Fingerprint)
+	assert.Equal(t, want, inv.got()[0].alert.Fingerprint)
 }
