@@ -202,20 +202,20 @@ func sendResolved(t *core.PublishingTarget) bool {
 
 // pagerdutyRoutingKey takes the routing key out of headers as the old core's
 // extractRoutingKey does: headers.routing_key, else the Authorization value
-// without "Bearer ". Either way the header is not sent over HTTP; the old
-// core's PagerDuty client never sent it.
+// without "Bearer ". Authorization is never sent over HTTP: the old core's
+// PagerDuty client sent no target headers.
 func pagerdutyRoutingKey(headers map[string]string) string {
-	if key, ok := headers["routing_key"]; ok {
-		delete(headers, "routing_key")
-		return key
-	}
+	key, ok := headers["routing_key"]
+	delete(headers, "routing_key")
 	for name, value := range headers {
 		if http.CanonicalHeaderKey(name) == "Authorization" {
 			delete(headers, name)
-			return strings.TrimPrefix(value, "Bearer ")
+			if !ok {
+				key = strings.TrimPrefix(value, "Bearer ")
+			}
 		}
 	}
-	return ""
+	return key
 }
 
 // pagerdutyURL is the old core's normalizePagerDutyBaseURL plus the enqueue
@@ -326,6 +326,9 @@ func authorizationFragment(value string) (map[string]any, error) {
 func decodeBasic(credentials string) (user, password string, err error) {
 	raw, err := base64.StdEncoding.DecodeString(credentials)
 	if err != nil {
+		raw, err = base64.RawStdEncoding.DecodeString(credentials)
+	}
+	if err != nil {
 		return "", "", errors.New("the Basic Authorization header is not base64")
 	}
 	user, password, ok := strings.Cut(string(raw), ":")
@@ -347,7 +350,7 @@ func copyHTTPConfig(hc *commoncfg.HTTPClientConfig) *commoncfg.HTTPClientConfig 
 // redact removes the target's credential-bearing values from an error text:
 // upstream parse errors may quote the value they reject.
 func redact(msg string, t *core.PublishingTarget) string {
-	secrets := []string{t.URL}
+	secrets := []string{t.URL, pagerdutyURL(t.URL)}
 	for _, v := range t.Headers {
 		secrets = append(secrets, v)
 		if _, credentials, ok := strings.Cut(v, " "); ok {

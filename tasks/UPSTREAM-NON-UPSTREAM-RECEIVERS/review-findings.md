@@ -98,3 +98,68 @@
 - **Issue:** (a) Горутину `Run` никто не ждёт. Если в момент SIGTERM идёт `Refresh`, отмена `pollCtx` даёт WARN «refresh failed». Если гонка случится между `Refresh` и `reload()`, получим ERROR `errStopped`. Это безопасно, но выглядит как сбой. (b) В `Health` отмена родительского контекста (не дедлайн) классифицируется как `TimeoutError`. (c) WARN «names a receiver that is not in the configuration» повторяется на каждом reload, а gauge обновляется и на reload'ах, которые ядро потом отклоняет.
 - **Fix:** (a) В `Run` после `Refresh` и после `reload` проверять `ctx.Err()` и выходить молча; при желании ждать горутину через `WaitGroup` до `core.Stop`. (b) Отличать `context.DeadlineExceeded` от `Canceled`. (c) Не обязательно, можно оставить.
 - **Disposition:** fixed — (a) `Run` выходит молча, если `ctx` отменён после `Refresh`, и не пишет ERROR reload при отменённом `ctx`; (b) `Health` возвращает ошибку контекста вызывающего как есть, `TimeoutError` — только по своему дедлайну; (c) оставлено.
+
+## Re-review @ b71c653
+
+- **Reviewed at:** 2026-11-08
+- **Reviewed tree:** `feature/upstream-non-upstream-receivers @ b71c653` (`git show b71c653`, плюс текущее состояние `convert.go`, `source.go`, `k8s/client.go`, `cmd/amp-upstream/targets.go`). Рабочее дерево чистое.
+- **Verdict:** `pass`. Открытых blocker/major нет. Новые находки: одна minor (N1) и три nit (N2–N4).
+
+Проверки: `go build ./...` проходит, `go vet` по `upstreamtargets`, `upstreamcore`, `infrastructure/k8s`, `cmd/amp-upstream` проходит, `go test` по `infrastructure/k8s`, `upstreamcore`, `cmd/amp-upstream` даёт 76 passed. Временный тест в `upstreamtargets` (после прогона удалён) вызывал `convert` напрямую. Результаты:
+- PagerDuty URL: `https://events.pagerduty.com`, `…/`, `…/v2/events`, `…/v2/enqueue/`, `…/v2/change/enqueue` и пустой URL дают `https://events.pagerduty.com/v2/enqueue`. URL без схемы → `skipped/invalid` (`unsupported scheme ""`), URL в тексте ошибки нет.
+- URL с query-строкой (`https://proxy/pd?token=X`) превращается в `…?token=X/v2/enqueue`. Старое ядро делает то же самое (`pagerduty_client.go:374`, `c.baseURL + endpoint`), так что это паритет, а не регрессия.
+- Routing key: `Authorization: Bearer K` даёт `K`, сырой `Authorization: K` (в том числе ключ `authorization` в нижнем регистре) даёт `K`. В обоих случаях заголовок не попадает в `http_config`. `routing_key: ""` вместе с `Authorization` → skip. Старое ядро в этом случае тоже не доставляет: `extractRoutingKey` вернёт `""`.
+- Порядок «сначала `routing_key`» совпадает с ключом, который реально уходит в событие (`pagerduty_publisher_enhanced.go:203`). Приоритет `Authorization` в `publisher.go:618-626` влияет только на ключ кеша клиента. Так что в F2(d) первого прохода фраза «с приоритетом над `routing_key`» неточна, а исправление верное.
+- `Basic base64(user:pa:ss)` → `basic_auth{username: user, password: pa:ss}`. Схема `basic` в нижнем регистре тоже работает. Не-base64 и строка без `:` → skip, текст ошибки без значения. Вместе с `http_config.authorization` → skip.
+- `Content-Type` и `content-length` попадают в `dropped` (канонические имена, отсортированы), `X-Api-Key` уходит в `http_headers`.
+- `send_resolved`: `"false"`, `"0"`, `" FALSE "`, `0`, `false` дают false; `"nope"`, `1`, `nil` дают true. Это совпадает с `targetAcceptsAlertStatus`. Число после JSON-раунд-трипа снимка — `float64`, ветка есть.
+
+### Итог по находкам первого прохода
+
+| # | Severity | Disposition | Итог re-review |
+|---|---|---|---|
+| F1 | major | fixed | **Закрыта.** `pagerdutyURL` повторяет `normalizePagerDutyBaseURL` и дописывает `/v2/enqueue`. Все документированные формы проверены. Пустой URL уходит в `global.pagerduty_url`, у которого тот же default. `change/enqueue` → `enqueue` корректно: адаптер шлёт только alert-события. Spec § 2.4 и CHANGELOG обновлены. |
+| F2 | minor | fixed | **Закрыта с оговоркой (N1).** (a) зарезервированные заголовки отбрасываются с WARN. (b) `Basic` переводится в `basic_auth`. (c) сырой `Authorization` у не-PagerDuty таргетов по-прежнему skip; это обосновано и записано в Spec. (d) routing key из `Authorization` работает, но только когда `routing_key` нет (см. N1). |
+| F3 | minor | fixed | **Закрыта.** Spec D3/§ 2.2/§ 2.5, комментарии `source.go` и CHANGELOG описывают реальное поведение `/api/v2/status`. Проверка в e2e перенесена в write-tests. |
+| F4 | minor | accepted | **Принятие разумно**, ограничение записано в Spec § 2.2 и CHANGELOG. Формулировка неполная (N4). |
+| F5 | minor | fixed | **Закрыта.** Разбор совпадает с `targetAcceptsAlertStatus` построчно, проверено экспериментом. |
+| F6 | minor | accepted | **Принятие разумно.** Это паритет с fallback `cmd/server`, правка требует менять API k8s-клиента. «until restarted» записано в Spec § 3 и CHANGELOG. Остаточный риск: pod, стартовавший во время недоступности API, молча работает без K8s-таргетов. Видно по WARN и по отсутствию gauge `amp_upstream_k8s_targets`. Стоит поднять при переключении в срезе 5. |
+| F7 | minor | fixed | **Закрыта.** `state="invalid"` выставляется из `GetStats().InvalidTargets`. Discovery перезаписывает это значение на каждом проходе (`discovery_impl.go:396`), счётчик не накопительный. |
+| F8 | nit | fixed (Spec) | **Закрыта.** |
+| F9 | nit | fixed | **Закрыта.** (a) `Run` выходит без WARN/ERROR при отменённом `ctx`. (b) `Health` возвращает `ctx.Err()` вызывающего до классификации таймаута. (c) оставлено, как и новый WARN `headers dropped` на каждом reload: тот же класс шума. |
+
+Регрессий от b71c653 не найдено. Гонок нет: новых разделяемых данных не добавилось, gauge потокобезопасен, `dropped` принадлежит одной `integration`. `redact` дополнительно вырезает пароль из `Basic`, а routing key из `Authorization` закрыт уже существующими вхождениями (значение и часть после пробела).
+
+### Новые находки
+
+#### N1. PagerDuty: `Authorization` рядом с `routing_key` уходит в HTTP или выкидывает таргет
+
+- **Severity:** minor
+- **Location:** `go-app/internal/upstreamtargets/convert.go:205-216` (`pagerdutyRoutingKey`)
+- **Issue:** если `routing_key` задан, `pagerdutyRoutingKey` возвращается раньше и `Authorization` в `headers` остаётся. Дальше `httpConfigFragment` обрабатывает его как обычный заголовок. Сырой ключ (`Authorization: <key>`, без схемы) даёт skip `invalid` («must be "<type> <credentials>"»), хотя старое ядро такой таргет доставляло по `routing_key`. `Bearer X` уходит в PagerDuty как `http_config.authorization`. Старый PagerDuty-клиент заголовки таргета не слал вовсе. Комментарий функции («Either way the header is not sent over HTTP») для этого случая неверен. Регрессия не от b71c653 (adc4764 вёл себя так же), но исправление F2(d) неполное. Проверено временным тестом.
+- **Fix:** в `pagerdutyRoutingKey` удалять `Authorization` из `headers` во всех случаях, не только когда ключ берётся из него. Добавить кейс в write-tests.
+- **Disposition:** fixed — `pagerdutyRoutingKey` всегда удаляет `Authorization`; ключ из него берётся только без `routing_key`. Тест — в write-tests.
+
+#### N2. `Basic` без padding или без `:` выкидывает таргет
+
+- **Severity:** nit
+- **Location:** `go-app/internal/upstreamtargets/convert.go:327-336` (`decodeBasic`)
+- **Issue:** `base64.StdEncoding` не принимает base64 без padding. `Basic <token>`, где после декодирования нет `:`, тоже даёт skip. Старое ядро отправляло такие значения как есть. Обе формы встречаются редко, а сервер может их принимать.
+- **Fix:** при ошибке `StdEncoding` пробовать `RawStdEncoding`. Случай без `:` оставить skip, но упомянуть в Spec § 2.4.
+- **Disposition:** fixed — fallback на `RawStdEncoding`; `Basic` без `:` — skip, записано в Spec § 2.4.
+
+#### N3. `redact` не знает нормализованный PagerDuty URL
+
+- **Severity:** nit
+- **Location:** `go-app/internal/upstreamtargets/convert.go:349-377`
+- **Issue:** в `redact` попадает `t.URL`, а в upstream уходит `pagerdutyURL(t.URL)`. Если суффикс срезан или заменён, ошибка разбора цитирует нормализованный URL, и `t.URL` в нём не найти. Проверено: `https://pd%zz/v2/events/` → `parse "https://pd%zz/v2/enqueue": invalid URL escape` попадает в WARN как есть. На практике сюда не дойти: discovery отсеивает неразбираемый URL по `validate:"url"`.
+- **Fix:** добавить в `redact` значение `pagerdutyURL(t.URL)` для PagerDuty или вырезать по host. Можно оставить.
+- **Disposition:** fixed — `redact` вырезает и `pagerdutyURL(t.URL)`.
+
+#### N4. Формулировка ограничения F4 описывает только повтор
+
+- **Severity:** nit
+- **Location:** Spec § 2.2, `CHANGELOG.md` (`Adding a target can restart notification deduplication once…`)
+- **Issue:** новый таргет с меньшим именем получает индекс соседа вместе с его записью nflog. Значит, уже активные группы он не получит, пока группа не изменится или не пройдёт `repeat_interval`. Повтор достаётся сдвинутому соседу. В документах упомянут только повтор, задержка для нового таргета не упомянута.
+- **Fix:** дописать в Spec § 2.2 и CHANGELOG: «новый таргет получает уже активные группы при их изменении или через `repeat_interval`».
+- **Disposition:** fixed — Spec § 2.2 и CHANGELOG дополнены задержкой для нового таргета.
