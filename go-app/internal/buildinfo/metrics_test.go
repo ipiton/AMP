@@ -8,19 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 )
-
-// karmaMapperConstraint is the version range karma resolves its Alertmanager
-// API mapper through (internal/mapper/v017/{alerts,silences}.go). No mapper
-// match means karma drops the connection and clears the alerts it already
-// showed, so failing this constraint is worse than exporting no build-info
-// metric at all — with no metric karma falls back to "assume latest".
-const karmaMapperConstraint = ">=0.22.0"
 
 // scrape registers the build-info collectors into a clean registry and returns
 // the exposition text a scraper (or karma's version probe) would read.
@@ -90,72 +82,8 @@ func familyNames[T any](families map[string]T) []string {
 	return names
 }
 
-// TestAlertmanagerBuildInfo_KarmaVersionProbe reproduces karma's whole version
-// discovery path — scrape /metrics, parse the exposition, read the `version`
-// label off alertmanager_build_info, cut it at the first dash (karma's
-// fixSemVersion), parse it as semver and check the mapper constraint.
-//
-// It deliberately asserts the ALGORITHM rather than the literal string: a test
-// that only greps for "0.27.0" would still pass if the value were changed to
-// something karma cannot use.
-func TestAlertmanagerBuildInfo_KarmaVersionProbe(t *testing.T) {
-	labels := labelsOf(t, scrape(t), "alertmanager_build_info")
-
-	raw, ok := labels["version"]
-	if !ok {
-		t.Fatalf("alertmanager_build_info has no `version` label; karma reads exactly this label")
-	}
-
-	// karma: strings.SplitN(version, "-", 2)[0]
-	trimmed := strings.SplitN(raw, "-", 2)[0]
-
-	parsed, err := semver.NewVersion(trimmed)
-	if err != nil {
-		// karma uses semver.MustParse here, which panics rather than erroring.
-		t.Fatalf("version %q (trimmed from %q) is not valid semver: %v", trimmed, raw, err)
-	}
-
-	constraint, err := semver.NewConstraint(karmaMapperConstraint)
-	if err != nil {
-		t.Fatalf("constraint %q: %v", karmaMapperConstraint, err)
-	}
-
-	if !constraint.Check(parsed) {
-		t.Errorf("version %q does not satisfy karma's mapper constraint %s — karma would find no mapper and drop the connection",
-			parsed, karmaMapperConstraint)
-	}
-}
-
-// TestAlertmanagerBuildInfo_ReportsContractNotBuild pins the decision from
-// ADR-009: the compat metric reports the Alertmanager contract version, while
-// the build's own version (which is `git describe` output and would fail the
-// constraint above) stays out of it.
-func TestAlertmanagerBuildInfo_ReportsContractNotBuild(t *testing.T) {
-	labels := labelsOf(t, scrape(t), "alertmanager_build_info")
-
-	if got := labels["version"]; got != AlertmanagerCompatVersion {
-		t.Errorf("version = %q, want the compat constant %q", got, AlertmanagerCompatVersion)
-	}
-
-	if labels["version"] == Version {
-		t.Errorf("version label leaked AMP's own build version %q into the compatibility metric", Version)
-	}
-
-	// The non-version labels describe the binary serving the contract, so they
-	// must NOT be synthesised.
-	if got := labels["revision"]; got != Revision {
-		t.Errorf("revision = %q, want %q", got, Revision)
-	}
-	if got := labels["branch"]; got != Branch {
-		t.Errorf("branch = %q, want %q", got, Branch)
-	}
-	if got := labels["goversion"]; got != runtime.Version() {
-		t.Errorf("goversion = %q, want %q", got, runtime.Version())
-	}
-}
-
-// TestAMPBuildInfo_ReportsRealBuild covers the other half of the split: AMP's
-// own build metadata is published, unmodified, under its own metric name.
+// TestAMPBuildInfo_ReportsRealBuild: AMP's own build metadata is published,
+// unmodified, under its own metric name.
 func TestAMPBuildInfo_ReportsRealBuild(t *testing.T) {
 	labels := labelsOf(t, scrape(t), "amp_build_info")
 
@@ -170,26 +98,6 @@ func TestAMPBuildInfo_ReportsRealBuild(t *testing.T) {
 		if got := labels[name]; got != want {
 			t.Errorf("amp_build_info{%s} = %q, want %q", name, got, want)
 		}
-	}
-}
-
-// TestCompatVersionConstant guards the constant itself, independent of the
-// exposition path: whatever it is edited to must stay parseable and within
-// karma's range. Keeps a future bump from failing only at scrape time.
-func TestCompatVersionConstant(t *testing.T) {
-	parsed, err := semver.NewVersion(AlertmanagerCompatVersion)
-	if err != nil {
-		t.Fatalf("AlertmanagerCompatVersion %q is not valid semver: %v", AlertmanagerCompatVersion, err)
-	}
-
-	constraint, err := semver.NewConstraint(karmaMapperConstraint)
-	if err != nil {
-		t.Fatalf("constraint: %v", err)
-	}
-
-	if !constraint.Check(parsed) {
-		t.Errorf("AlertmanagerCompatVersion %q is below karma's mapper constraint %s",
-			AlertmanagerCompatVersion, karmaMapperConstraint)
 	}
 }
 
@@ -225,5 +133,27 @@ func TestRegister_Idempotent(t *testing.T) {
 func TestRegister_NilRegisterer(t *testing.T) {
 	if err := Register(nil); err != nil {
 		t.Errorf("Register(nil) = %v, want nil", err)
+	}
+}
+
+// TestRegister_OnlyAMPBuildInfo: alertmanager_build_info belongs to
+// upstream's versioncollector, which amp-upstream registers with the core;
+// registering it here too would fail the second registration or report two
+// versions (UPSTREAM-CORE-REMOVAL).
+func TestRegister_OnlyAMPBuildInfo(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	if err := Register(registry); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	var names []string
+	for _, family := range families {
+		names = append(names, family.GetName())
+	}
+	if len(names) != 1 || names[0] != "amp_build_info" {
+		t.Errorf("Register exposes %v, want only amp_build_info", names)
 	}
 }

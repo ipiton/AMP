@@ -1,18 +1,21 @@
 # ===============================
 # Application Configuration
 # ===============================
-replicaCount: 1
+# app.environment in the AMP configuration (production tightens the database
+# checks: TLS and a 12+ character password).
 environment: production
-logLevel: info
 namespace: ""
 
 # ===============================
-# Deployment Profile (TN-96)
+# Profile (TN-96)
 # ===============================
-# Profile determines the deployment architecture:
-# - "lite": Single-node, embedded storage (SQLite), memory-only cache, zero external dependencies
-# - "standard": PostgreSQL + Valkey, distributed cache. Defaults fit one node
-#   (1 replica, HPA off); HA is opt-in: autoscaling.enabled or values-production.yaml
+# Profile determines what runs next to the Alertmanager core (amp-upstream):
+# - "lite": the core alone: no alert history, investigations or K8s-Secret
+#   publishing targets, no Valkey (set postgresql.enabled=false too: the
+#   bundled PostgreSQL is not tied to the profile).
+# - "standard": PostgreSQL (alert history, investigations) and Valkey. Defaults
+#   fit one node (alertmanager.replicas: 1); HA is opt-in: alertmanager.replicas
+#   > 1 or values-production.yaml.
 profile: "standard"  # Options: "lite" | "standard"
 
 # ===============================
@@ -74,26 +77,26 @@ resources:
     memory: 128Mi
 
 # ===============================
-# Pod Disruption Budget (app Deployment)
+# Pod Disruption Budget (AMP StatefulSet)
 # ===============================
-# Disabled by default (replicaCount: 1 makes a PDB pointless / can block all
-# voluntary drains). Production sets enabled: true — see values-production.yaml.
+# Disabled by default (alertmanager.replicas: 1 makes a PDB pointless / can
+# block all voluntary drains). Production sets enabled: true — see values-production.yaml.
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
   # maxUnavailable: 1  # alternative to minAvailable; minAvailable wins if both are set
 
 # ===============================
-# Service Configuration (Load Balancing)
+# Service Configuration
 # ===============================
+# <fullname>: api/v2, /-/*, /metrics on the `web` port. With one replica
+# Prometheus can send alerts to it; with more, every pod must receive every
+# alert: list the pods (<fullname>-<i>.<fullname>-headless:9093), not the
+# Service.
 service:
   type: ClusterIP
-  port: 8080
-  metricsPort: 9090
+  port: 9093
   annotations: {}
-  # Load balancing configuration
-  loadBalancerPolicy: false  # Set to true for session affinity
-  sessionAffinityTimeout: 10800  # 3 hours
 
 # ===============================
 # Ingress Configuration
@@ -126,8 +129,9 @@ ingress:
 # ===============================
 # NetworkPolicy for AMP pods (PROD-INGRESS-HARDENING, ADR-015)
 # ===============================
-# Restricts INGRESS to the AMP pods to the sources listed below, on the `http`
-# port only (API, /metrics and probes all share it). Egress is not restricted:
+# Restricts INGRESS to the AMP pods to the sources listed below, on the `web`
+# port only (API, /metrics and probes all share it), plus the gossip port
+# between the pods themselves when alertmanager.replicas > 1. Egress is not restricted:
 # notification targets (Slack, PagerDuty, webhooks, LLM APIs) are arbitrary,
 # and a default-deny egress would silently stop delivery.
 #
@@ -164,11 +168,11 @@ networkPolicy:
 # ===============================
 # Health Probes Configuration (12-Factor App)
 # ===============================
+# Paths are relative to the path of alertmanager.externalURL, which prefixes
+# every endpoint. /-/healthy and /-/ready stay reachable without credentials
+# when webConfig enables authentication (server.auth.unauthenticated_paths).
 probes:
   liveness:
-    # /-/healthy and /-/ready run the same liveness/readiness checks as
-    # /healthz and /readyz but answer plain text, so they stay reachable
-    # without credentials when webConfig enables authentication (PROD-AUTH).
     path: /-/healthy
     initialDelaySeconds: 30
     periodSeconds: 10
@@ -192,7 +196,7 @@ probes:
 # ===============================
 # Basic auth for the whole HTTP API, from an upstream-compatible web config
 # file (Alertmanager's --web.config.file format). Empty existingSecret = auth
-# disabled (AMP logs a WARN at startup).
+# disabled.
 #
 # The chart does not create the Secret: the password must be bcrypt-hashed by
 # the operator, e.g.
@@ -204,67 +208,24 @@ probes:
 #
 # Probes use /-/healthy and /-/ready, which are unauthenticated by default
 # (server.auth.unauthenticated_paths). /metrics is protected: give the
-# ServiceMonitor basicAuth, or add /metrics to unauthenticated_paths.
-# Not yet compatible with configReloader (the sidecar cannot authenticate).
+# ServiceMonitor basicAuth.
 webConfig:
   existingSecret: ""
   secretKey: web-config.yml
   mountPath: /etc/amp/web
 
 # ===============================
-# Horizontal Pod Autoscaler
-# ===============================
-# Off by default: the defaults target one node (replicaCount: 1).
-# values-production.yaml turns it on. The targets are percentages of
-# resources.requests: with the default 100m/128Mi the HPA scales out at ~70m
-# CPU per pod, so raise the requests along with it. With the bundled
-# PostgreSQL, raise postgresql.config.maxConnections for maxReplicas first
-# (NOTES warns).
-autoscaling:
-  enabled: false
-  minReplicas: 2
-  maxReplicas: 10
-  targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
-  customMetrics:
-    enabled: true
-    requestsPerSecond: "50"
-    classificationQueueSize: "10"
-    publishingQueueSize: "20"
-  behavior:
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      percentPolicy: 50
-      podsPolicy: 2
-      periodSeconds: 60
-    scaleUp:
-      stabilizationWindowSeconds: 60
-      percentPolicy: 100
-      podsPolicy: 4
-      periodSeconds: 30
-
-# ===============================
-# Deployment Strategy
-# ===============================
-strategy:
-  type: RollingUpdate
-  maxUnavailable: 25%
-  maxSurge: 25%
-
-# ===============================
 # Graceful Shutdown Configuration (12-Factor App)
 # ===============================
 # On pod termination: preStop sleeps preStopDelay seconds while Kubernetes
-# removes the pod from Service endpoints, then SIGTERM makes AMP report not
-# ready, drain in-flight HTTP requests and stop its services (final snapshot,
-# flushes) within timeoutSeconds. Keep
-#   terminationGracePeriodSeconds >= preStopDelay + timeoutSeconds
-# or the kubelet may SIGKILL the pod mid-drain; NOTES.txt warns when it is not.
+# removes the pod from Service endpoints, then SIGTERM makes amp-upstream drain
+# in-flight HTTP requests (up to 5s), stop the core (final silence and
+# notification-log snapshots) and AMP's workers. Keep
+# terminationGracePeriodSeconds well above preStopDelay + 5s, or the kubelet
+# may SIGKILL the pod mid-snapshot; NOTES.txt warns below preStopDelay + 10s.
 gracefulShutdown:
   terminationGracePeriodSeconds: 40  # Total budget before SIGKILL, counted from the start of preStop
   preStopDelay: 5  # Seconds the preStop hook sleeps (needs `sleep` in the image); 0 disables the hook
-  # Passed to AMP as server.graceful_shutdown_timeout; 0 means 30s.
-  timeoutSeconds: 30
 
 # ===============================
 # Secrets Management Configuration
@@ -280,36 +241,18 @@ secrets:
     secretStore: ""  # External secret store name
 
 # ===============================
-# Lite Profile Configuration (TN-96)
-# ===============================
-# Storage for Lite profile (SQLite database)
-liteProfile:
-  persistence:
-    enabled: true
-    size: 5Gi
-    storageClass: ""
-    mountPath: "/data"
-  # Resource limits for Lite profile
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-    requests:
-      cpu: 250m
-      memory: 256Mi
-
-# ===============================
 # PostgreSQL Database Configuration (Standard Profile Only)
 # ===============================
-# Automatically disabled for Lite profile
+# AMP uses it with profile standard only.
 #
 # Bundled PostgreSQL: dev/pilot only (ADR-016). A single instance with no
-# replication and no backups; AMP's alert ingest depends on it, so losing it
-# means losing alert history and silences. Production: external PostgreSQL
+# replication and no backups: losing it means losing alert history and
+# investigations. Silences and the notification log live on the StatefulSet's
+# own volumes (alertmanager.persistence), not here. Production: external PostgreSQL
 # with backups/PITR (README "PostgreSQL"). Manual backups and restore:
 # helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md.
 postgresql:
-  enabled: true  # Overridden by profile in deployment.yaml
+  enabled: true  # AMP connects to it with profile standard only
   replicas: 1  # Must stay 1: no replication; anything else fails the render
   # Database configuration
   database: "alert_history"
@@ -367,9 +310,9 @@ postgresql:
   # Connection budget: 25 per AMP pod (database.max_connections default) plus
   # the exporter. AMP connects as postgresql.username, which is the bootstrap
   # superuser, so superuserReservedConnections reserves nothing from it: the
-  # whole maxConnections is the budget. 100 covers 3 AMP pods (the default pod,
-  # a rolling-update surge pod and one more). With autoscaling, raise it to at
-  # least maxReplicas × 25 + 5 (and memory with it); NOTES warns when it is short.
+  # whole maxConnections is the budget. 100 covers 3 AMP pods (a StatefulSet
+  # rolls without a surge pod). With alertmanager.replicas > 3, raise it to at
+  # least replicas × 25 + 5 (and memory with it); NOTES warns when it is short.
   config:
     maxConnections: 100
     superuserReservedConnections: 10
@@ -415,8 +358,8 @@ postgresql:
 # ===============================
 # The supported production database (ADR-016): PostgreSQL >= 16 run outside
 # this chart. Set postgresql.enabled=false and fill in host, database, username
-# and existingSecret. The chart passes these to AMP as DATABASE_* env vars,
-# which take precedence over a `database:` section in configFile.content.
+# and existingSecret. The chart writes them into the AMP configuration
+# (<fullname>-amp-config) and passes the password as DATABASE_PASSWORD.
 # Ignored by the lite profile.
 externalDatabase:
   host: ""  # Empty = not used. Set it to switch AMP to this database
@@ -436,14 +379,10 @@ externalDatabase:
   #   kubectl create secret generic amp-db --from-file=password=amp-db-password
   # With environment=production AMP requires a password of 12+ characters.
   # The password is read at pod start: after changing the Secret, run
-  # kubectl rollout restart deploy/<fullname>.
+  # kubectl rollout restart statefulset/<fullname>.
   existingSecret: ""
   existingSecretPasswordKey: password
 
-# ===============================
-# Valkey Cache Configuration (Redis-compatible, Standard Profile Only)
-# ===============================
-# Automatically disabled for Lite profile (uses memory-only cache)
 # ===============================
 # External Secrets Operator (TN-100: Production Security)
 # ===============================
@@ -456,35 +395,16 @@ externalSecrets:
   refreshInterval: "1h"  # How often to sync secrets
   keyPath: "alertmanager-plus-plus"  # Path in secret manager
 
-cache:
-  enabled: true  # Overridden by profile in deployment.yaml
-  # Valkey connection details
-  host: "{{ include \"amp.fullname\" . }}-redis"  # Service name of Redis/Valkey
-  port: 6379
-  # Password of an EXTERNAL cache (cache.host pointing at it; set
-  # valkey.replicas: 0 too, or the chart's Valkey runs unused). While cache.host
-  # is the chart's Valkey (the default, or a longer DNS name of it in the release
-  # namespace) AMP reads Valkey's password (valkey.password below) and these
-  # keys are ignored.
-  auth:
-    # Password from this value, stored in <fullname>-secrets (redis-password).
-    enabled: false
-    password: ""
-    # Or from a Secret the chart does not create (preferred; not together
-    # with enabled: true). From a file with no trailing newline:
-    #   (umask 077; printf '%s' "$PASSWORD" > cache-password)
-    #   kubectl create secret generic amp-cache --from-file=password=cache-password
-    existingSecret: ""
-    existingSecretPasswordKey: password
-
 # ===============================
 # Valkey StatefulSet Configuration (<fullname>-redis)
 # ===============================
 # The chart's one in-cluster cache, Standard Profile only. Valkey (BSD-3), not
-# Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). AMP pool: 10 conns/pod
-# (redis.pool_size); Valkey maxclients 10,000 (default).
+# Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). amp-upstream does not connect
+# to it yet: it is kept for the cross-replica investigation dedup
+# (UPSTREAM-AI-HA-DEDUP). valkey.replicas: 0 stops its pod; its Services,
+# Secret, ServiceMonitor and alert rules still render (HELM-CHART-GAPS).
 valkey:
-  enabled: true  # Managed by profile in deployment
+  enabled: true  # Not read; valkey.replicas and the profile decide
 
   # Deployment configuration
   replicas: 1  # Expandable to 3 for Sentinel HA in future
@@ -536,8 +456,8 @@ valkey:
         cpu: 10m
         memory: 32Mi
 
-  # Password authentication (Secret management). Valkey, its exporter and AMP
-  # read the same Secret; cache.auth.* does not apply to this Valkey.
+  # Password authentication (Secret management). Valkey and its exporter read
+  # the same Secret.
   password:
     # Use existing Secret (recommended for production)
     existingSecret: ""  # If empty, creates <fullname>-redis-secret
@@ -548,7 +468,7 @@ valkey:
     # Renders without cluster access (helm template, client-side --dry-run,
     # Argo CD) cannot look the Secret up and generate a new one each time:
     # set value or existingSecret there. An existingSecret password must not
-    # end with a newline: Valkey trims it, AMP and the exporter do not:
+    # end with a newline: Valkey trims it, the exporter does not:
     #   (umask 077; printf '%s' "$PASSWORD" > valkey-password)
     #   kubectl create secret generic amp-valkey --from-file=password=valkey-password
     value: ""
@@ -558,30 +478,29 @@ valkey:
     enabled: false  # Enable in production for security hardening
 
 # ===============================
-# Alert Processing Configuration
-# ===============================
-alerts:
-  retentionDays: 30
-  batchSize: 100
-  maxConcurrentAlerts: 50
-  enableClassification: true
-
-# ===============================
 # LLM Configuration
 # ===============================
+# Classification of every firing alert (and, with investigation.enabled, its
+# investigation). With alertmanager.replicas > 1 every pod classifies every
+# alert: N LLM calls per alert until UPSTREAM-AI-HA-DEDUP.
 llm:
   # Off by default: there is no key to use. To enable, set enabled=true and
   # either apiKey or externalSecrets.enabled (llm_api_key in the store);
   # otherwise the render fails.
   enabled: false
-  proxyUrl: "https://llm-proxy.example.com"
+  provider: "openai"
+  proxyUrl: "https://llm-proxy.example.com"  # llm.base_url
   apiKey: ""  # Set via local override, environment, or secret; never commit real keys
   model: "openai/gpt-4o"
-  timeout: 30
+  timeout: 30  # seconds, or a Go duration ("30s")
   maxRetries: 3
-  retryDelay: 1.0
-  cacheTtl: 3600
-  batchSize: 10
+  # Agentic investigation loop (tools, runbooks) instead of a single LLM call.
+  agentMode: false
+  # How long a notification waits for the alert's classification before it
+  # goes out without it.
+  notifyWait: 5s
+  # Drop notifications for alerts classified as noise.
+  dropNoise: false
 
   # LLM API Key Secret (prefer external secrets in production)
   secret:
@@ -600,7 +519,8 @@ llm:
 # Investigation Pipeline (PHASE-5A / 5B)
 # ===============================
 # Async LLM-driven alert investigation.
-# Requires: profile=standard, Postgres, llm.enabled=true.
+# Requires: profile=standard, Postgres, llm.enabled=true. Tools and runbooks
+# (llm.agentMode) are configured with alertmanager.ampConfig.
 investigation:
   enabled: false
   workerCount: 3
@@ -611,23 +531,14 @@ investigation:
   onlyFiring: true
 
 # ===============================
-# Database Migration Configuration
-# ===============================
-migration:
-  enabled: false
-  autoMigrate: false
-  batchSize: 1000
-  verifyData: true
-  backupBeforeMigration: true
-
-# ===============================
 # Monitoring Configuration
 # ===============================
 monitoring:
   prometheusEnabled: true
   healthCheckInterval: 30
   # ServiceMonitor for AMP itself (prometheus-operator). Rendered only when
-  # prometheusEnabled is also true. Scrapes /metrics on the `http` port.
+  # prometheusEnabled is also true. Scrapes /metrics on the `web` port of
+  # every pod.
   serviceMonitor:
     enabled: true
     interval: 30s
@@ -649,98 +560,16 @@ monitoring:
 # ===============================
 # Alert Publishing Configuration
 # ===============================
+# K8s-Secret publishing targets (label publishing.discovery.labelSelector,
+# JSON in data.config): appended as integrations to the receivers of
+# alertmanager.config on every reload. Profile standard only.
 publishing:
   enabled: true
   discovery:
-    namespace: ""
+    namespace: ""  # Empty: the release namespace
     labelSelector: "publishing-target=true"
-  queue:
-    maxConcurrent: 10
-    workerCount: 10
-    highPriorityQueueSize: 500
-    mediumPriorityQueueSize: 1000
-    lowPriorityQueueSize: 500
-    maxRetries: 3
-    retryInterval: "2s"
-    stopTimeout: "10s"
-    jobTrackingCapacity: 10000
-    # publishing.queue.delivery_confirmation_timeout (config.go viper default "45s",
-    # hard-capped at 2m by MaxDeliveryConfirmationTimeout). Per-target wait for a
-    # confirmed HTTP delivery before a fire is treated as unconfirmed/retried.
-    # grouping.reconciliationGrace below derives from this value when left unset
-    # — raise both together, never this alone (see that key's comment).
-    deliveryConfirmationTimeout: "45s"
-  templates:
-    # publishing.templates.enabled (config.go viper default true = upstream-compatible
-    # template rendering: templates:// files + per-integration presentation fields
-    # render for real). false reverts to AMP's pre-templates-epic fixed formatters
-    # wholesale. Read at startup only — flipping it needs a restart, not a reload.
-    enabled: true
   refresh:
-    enabled: true
-    interval: "5m"
-    maxRetries: 5
-    baseBackoff: "30s"
-    maxBackoff: "5m"
-    rateLimitPer: "1m"
-    timeout: "30s"
-    warmupPeriod: "30s"
-  health:
-    enabled: true
-    checkInterval: "2m"
-    httpTimeout: "5s"
-    warmupDelay: "10s"
-    failureThreshold: 3
-    degradedThreshold: "5s"
-    maxConcurrentChecks: 10
-    maxIdleConns: 100
-    tlsSkipVerify: false
-    followRedirects: true
-    maxRedirects: 3
-
-# ===============================
-# Grouping / Notify-Chain (alertmanager-parity waves 2-4)
-# ===============================
-# grouping.enabled (default true, same as config.go) gives real
-# group_by/group_wait/group_interval/repeat_interval dispatch and notify-log dedup.
-# It only takes effect when the loaded config has a route: tree; without one alerts
-# are published directly. Standard profile: state in Redis, shared across replicas
-# (in memory, not shared, when Redis is unavailable). Lite profile: state in
-# memory, single replica. Set false to publish every alert
-# as soon as it arrives (AMP then warns at startup if a route: tree is configured).
-# Read at startup only -- changing it needs a pod restart, not a config reload.
-# Set it here, not in configFile.content: the chart passes this value as
-# GROUPING_ENABLED, which overrides the key in the config file.
-grouping:
-  enabled: true
-  reconciliationInterval: "45s"
-  # reconciliation_grace deliberately has NO default here (empty string = key
-  # omitted from the rendered ConfigMap): ServiceRegistry derives the effective
-  # grace from the ACTUAL configured publishing.queue.deliveryConfirmationTimeout
-  # via grouping.ReconciliationGraceFor when this is left unset. An explicit value
-  # here always wins, and startup validation still rejects a result that violates
-  # the notify-timing budget (must exceed the publish-claim TTL, timeout + 20s).
-  reconciliationGrace: ""
-
-# ===============================
-# Storage snapshots (lite profile only — restart durability)
-# ===============================
-# storage.path/snapshotInterval back the lite profile's file-snapshot durability
-# for silences + notify-log dedup state (config.go default: path "" = disabled).
-# The standard profile already owns durability via Postgres/Redis and logs-and-skips
-# snapshotting even if a path is set here — never engaged, verified by dedicated tests.
-storage:
-  path: ""
-  snapshotInterval: "5m"
-
-# ===============================
-# Silence cross-replica sync intervals
-# ===============================
-# Restart-only knobs (config.go defaults shown; validated at startup: backoff must
-# stay strictly below the resync interval).
-silencing:
-  subscribeRetryBackoff: "2s"
-  periodicResyncInterval: "5m"
+    interval: "5m"  # How often the Secrets are listed
 
 # ===============================
 # Rootly Integration (Priority)
@@ -843,83 +672,20 @@ publishingTargets: []
 #       severity: ["critical", "warning", "info"]
 #       excludeNoise: false
 
-# ===============================
-# Persistence Configuration (Legacy SQLite)
-# ===============================
-persistence:
-  enabled: false  # Disabled when PostgreSQL is used
-  accessMode: ReadWriteOnce
-  size: 1Gi
-  storageClass: ""
-
-# ===============================
-# Server Configuration
-# ===============================
-server:
-  # Public base URL of this AMP instance (Alertmanager --web.external-url parity).
-  # Used to build callback links in email footers, Teams "Silence Alert" buttons,
-  # and webhook payload urls.silence. Leave empty to disable links gracefully.
-  # Env: SERVER_EXTERNAL_URL
-  externalUrl: ""
-
-# ===============================
-# Config file + hot reload (INF-A)
-# ===============================
-# AMP is configured two ways, and they are complementary:
+# Extra volumes for the pod and mounts for the `amp` container. Main use:
+# receiver credentials from a Secret you create, so alertmanager.config (a
+# ConfigMap) holds file paths instead of tokens. Also: a ConfigMap with
+# runbooks (investigation.runbooks.path in alertmanager.ampConfig).
 #
-#   * env vars (this file's other sections, via the -config ConfigMap) —
-#     infrastructure settings: database, redis, profile, ports.
-#   * a config FILE — the Alertmanager-shaped sections that have no env-var
-#     equivalent at all: `route:`, `receivers:`, `inhibit_rules:`,
-#     `templates:`. Without a file, those cannot be expressed in this chart.
-#
-# configFile renders that file into its own ConfigMap and points AMP at it.
-# configReloader then makes edits to it take effect WITHOUT a pod restart.
-configFile:
-  # Render and mount a config file. Required by configReloader below.
-  enabled: false
-
-  # Where the file is mounted, and its name. AMP_CONFIG_FILE is set to
-  # "<mountPath>/<fileName>" for the application container.
-  mountPath: /etc/amp
-  fileName: config.yaml
-
-  # The file's contents, verbatim. Alertmanager-shaped; see
-  # config.yaml.example in the repo root.
-  #
-  # NOTE: no checksum/config annotation is attached to the pod for this
-  # ConfigMap, deliberately. Rolling the pod on every config edit is exactly
-  # what hot reload exists to avoid — with configReloader enabled the change is
-  # picked up in-place. `helm upgrade` therefore updates the ConfigMap and the
-  # running pods adopt it within configReloader.interval.
-  content: ""
-  # content: |
-  #   route:
-  #     receiver: default
-  #     group_by: ['alertname', 'cluster']
-  #     group_wait: 30s
-  #   receivers:
-  #     - name: default
-  #       slack_configs:
-  #         - api_url: https://hooks.slack.com/services/XXX
-  #           channel: '#alerts'
-
-# Extra volumes for the pod and mounts for the `amp` container only (not the
-# config-reloader sidecar). Main use: receiver credentials from a Secret you
-# create, so configFile.content (a ConfigMap) holds file paths instead of
-# tokens. Also: a ConfigMap with runbooks.
-#
-# - `*_file` paths in configFile.content must be ABSOLUTE: AMP reads
-#   bot_token_file, api_url_file, slack_api_url_file, url_file, routing_key_file
-#   as given, relative to the process working directory, not the config file.
-# - AMP reads the files at startup and on every /-/reload. After changing the
-#   Secret, wait for kubelet to sync the volume (about a minute), then reload
-#   or `kubectl rollout restart`. config-reloader does not notice, it watches
-#   the config file only. Volumes mounted with subPath are never updated.
+# - `*_file` paths in alertmanager.config must be ABSOLUTE.
+# - amp-upstream reads the files on every config load. After changing the
+#   Secret, wait for kubelet to sync the volume (about a minute), then POST
+#   /-/reload to every pod or `kubectl rollout restart`. Volumes mounted with
+#   subPath are never updated.
 # - A name or mountPath already used by the chart fails the render: volumes
-#   data (lite profile), config-file (configFile.enabled), web-config
-#   (webConfig.existingSecret) and their mountPath values, plus the config
-#   file and web config file paths. A directory below them, e.g. /etc/amp/secrets, is fine.
+#   config, data, web-config (webConfig.existingSecret) and their mount paths
+#   (/etc/amp/config, /data, webConfig.mountPath), plus the files in them. A
+#   path next to them, e.g. /etc/amp/secrets, is fine.
 # - With the default podSecurityContext (runAsUser/fsGroup 65534) Secret files
 #   stay readable with a strict defaultMode such as 0440. Without fsGroup keep
 #   the default mode.
@@ -930,12 +696,20 @@ extraVolumes: []
 #       secretName: amp-receiver-secrets   # keys: telegram-bot-token, slack-webhook-url
 #       defaultMode: 0440
 extraVolumeMounts: []
+
+# Extra env for the amp container, after the chart's own (EnvVar list), for
+# secrets the AMP configuration reads from env, e.g.:
+# extraEnv:
+#   - name: INVESTIGATION_TOOLS_DATABASE_DSN
+#     valueFrom:
+#       secretKeyRef: {name: amp-investigation-db, key: dsn}
+extraEnv: []
 # extraVolumeMounts:
 #   - name: receiver-secrets
 #     mountPath: /etc/amp/secrets
 #     readOnly: true
 #
-# and in configFile.content:
+# and in alertmanager.config:
 #   receivers:
 #     - name: telegram-panic
 #       telegram_configs:
@@ -945,87 +719,6 @@ extraVolumeMounts: []
 #       slack_configs:
 #         - api_url_file: /etc/amp/secrets/slack-webhook-url
 #           channel: '#alerts'
-
-# config-reloader sidecar: watches the mounted config file and asks AMP to
-# reload when its CONTENT changes (SHA256, not mtime — kubelet re-syncs a
-# ConfigMap volume periodically without changing the bytes).
-#
-# Every reload is verified against the application's /health/reload, so a
-# ConfigMap edit AMP rejects is reported as rejected instead of silently
-# counted as applied. See amp_config_reloader_last_reload_successful.
-configReloader:
-  # Keep false until the sidecar image is published — see the image block below.
-  enabled: false
-
-  # Built from `Dockerfile.config-reloader` and published by
-  # .github/workflows/release.yml on every v* tag (docs/CI.md), next to
-  # ghcr.io/ipiton/amp with the same version tag.
-  #
-  # The tag defaults to .Chart.AppVersion, and no release has been published
-  # yet (PROD-RELEASE-V010). Until one exists, do NOT set
-  # configReloader.enabled=true anywhere that matters: pod readiness requires
-  # ALL containers, so an unpullable sidecar leaves ContainersReady false,
-  # keeps the pod out of the Service endpoints and stalls the rollout — with a
-  # perfectly healthy amp container. Enabling hot reload would take the
-  # deployment down.
-  image:
-    repository: ghcr.io/ipiton/amp-config-reloader
-    tag: ""            # defaults to .Chart.AppVersion
-    pullPolicy: IfNotPresent
-
-  resources:
-    limits:
-      cpu: 50m
-      memory: 64Mi
-    requests:
-      cpu: 10m
-      memory: 32Mi
-
-  # How often the file is hashed.
-  interval: 10s
-
-  # How the reload is triggered:
-  #   http   - POST /-/reload on 127.0.0.1 (DEFAULT, works across containers)
-  #   signal - SIGHUP to --pid, which REQUIRES shareProcessNamespace: true on
-  #            the pod. Without it every container is its own PID 1, so the
-  #            signal would go to the reloader itself; the binary refuses that
-  #            rather than reporting phantom successes.
-  #
-  # Verification caveat for `signal`: POST /-/reload is synchronous, so the
-  # sidecar always sees the final outcome. SIGHUP is not, so if a section AMP
-  # applies after the commit (routing/templates/receivers) fails and rolls the
-  # reload back, the sidecar can observe the FIRST outcome and re-check only
-  # best-effort. Do not alert on amp_config_reloader_last_reload_successful on a
-  # signal-method deployment until FU-RELOAD-UNIFY-APPLIERS lands.
-  method: http
-
-  # Only used by method: signal. Enabling this sets shareProcessNamespace on
-  # the pod, which lets EVERY container in the pod see the others' processes —
-  # a real if modest isolation trade-off, which is why http is the default.
-  shareProcessNamespace: false
-  pid: 1
-
-  # Port for the sidecar's own /metrics and /healthz.
-  metricsPort: 9091
-
-  # How long to wait for AMP to confirm a triggered reload.
-  verifyTimeout: 30s
-
-  # Cap on the retry backoff for a config AMP keeps rejecting. Retries thin out
-  # instead of firing every interval; any new edit resets it.
-  maxBackoff: 5m
-
-  logLevel: info
-  logFormat: json
-
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-      - ALL
-    readOnlyRootFilesystem: true
-    runAsNonRoot: true
-    runAsUser: 65532   # distroless "nonroot"
 
 # ===============================
 # Scheduling Configuration
@@ -1045,53 +738,61 @@ affinity:
             operator: In
             values:
             - amp
+          # Only the AMP pods: postgres and Valkey share the name label.
+          - key: app.kubernetes.io/component
+            operator: In
+            values:
+            - application
         topologyKey: kubernetes.io/hostname
 
 # ===============================
-# Upstream Alertmanager core (ADR-019, UPSTREAM-HA-MEMBERLIST)
+# Alertmanager core (amp-upstream, ADR-019)
 # ===============================
-# Transitional: renders the upstream core (/app/amp-upstream, one
-# alertmanager.yml, api/v2 on port 9093) as a StatefulSet NEXT TO the AMP
-# Deployment above, with its own Services. Nothing above routes to it:
-# point Prometheus at <fullname>-upstream:9093 with one replica, and at every
-# pod (<fullname>-upstream-<i>.<fullname>-upstream-headless:9093) with more.
-# No ServiceMonitor, NetworkPolicy, PDB or web auth covers it yet, and gossip
-# is plain TCP/UDP unless extraArgs sets --cluster.tls-config. Slice 5
-# (UPSTREAM-CORE-REMOVAL) makes it the only workload and moves Ingress,
-# ServiceMonitor, NetworkPolicy and PDB onto it.
-upstreamCore:
-  enabled: false
+# The chart's one workload: a StatefulSet running upstream Alertmanager
+# (api/v2, silences, inhibition, routing, notifications) with AMP's layer on
+# top (alert history, classification, investigation, K8s-Secret targets).
+alertmanager:
   # 1: no gossip cluster (--cluster.listen-address=). > 1: the pods form an
-  # upstream memberlist cluster over the headless Service (gossip on 9094
+  # upstream memberlist cluster over <fullname>-headless (gossip on 9094
   # TCP+UDP): silences and the notification log are replicated, every pod
   # must receive every alert (Prometheus: list all pods, not the Service),
-  # and a notification goes out once.
+  # and a notification goes out once. Gossip is plain TCP/UDP unless
+  # extraArgs sets --cluster.tls-config.
   replicas: 1
-  # --web.external-url; empty: http://<fullname>-upstream.<namespace>.svc:9093/.
-  # Its path prefixes every endpoint, probes included.
+  # --web.external-url; empty: http://<fullname>.<namespace>.svc:9093/.
+  # Its path prefixes every endpoint, probes included. Links in
+  # notifications (silence URLs) point here.
   externalURL: ""
   # --cluster.peer-timeout: how long each pod waits per peer ahead of it
   # before notifying (upstream default).
   peerTimeout: 15s
   # alertmanager.yml, as upstream Alertmanager reads it. A change rolls the
-  # pods (checksum/config); there is no reload sidecar yet (slice 5).
+  # pods (checksum/config).
   config:
     route:
       receiver: default
     receivers:
       - name: default
+  # Merged over the AMP configuration the chart generates from profile,
+  # environment, database, llm, investigation and publishing
+  # (<fullname>-amp-config, --amp.config.file), e.g.
+  #   investigation:
+  #     tools: {...}
+  #     runbooks: {enabled: true, path: /etc/amp/runbooks}
+  #   server:
+  #     auth:
+  #       unauthenticated_paths: [/-/healthy, /-/ready, /metrics]
+  # No secrets here: it is a ConfigMap. The chart sets DATABASE_PASSWORD and
+  # LLM_API_KEY from Secrets; others go to extraEnv, e.g.
+  # INVESTIGATION_TOOLS_DATABASE_DSN for the agent-mode database tool. The
+  # Prometheus and Loki tool passwords are read from the file only: put them
+  # here only if a ConfigMap is acceptable for them.
+  ampConfig: {}
   # Silence and notification-log snapshots (--storage.path=/data), one
   # volume per pod via volumeClaimTemplates. Not removed with the release.
   persistence:
     size: 1Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  resources:
-    limits:
-      cpu: 500m
-      memory: 256Mi
-    requests:
-      cpu: 50m
-      memory: 64Mi
   # Extra amp-upstream flags, e.g. --cluster.tls-config=..., --cluster.label=...
   extraArgs: []

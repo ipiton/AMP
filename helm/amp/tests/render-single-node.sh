@@ -3,14 +3,14 @@
 # (HELM-SINGLE-NODE-DEFAULTS, ADR-017):
 #
 #   - defaults: one AMP replica, no HPA, requests of the whole stack
-#     270m / 512Mi, no valkey subchart objects, no <fullname>-pvc under
-#     profile: standard, the cache image is valkey/valkey;
-#   - autoscaling on: the HPA renders without helm.sh/resource-policy: keep;
-#   - profile: lite keeps <fullname>-pvc; values-production.yaml keeps HPA 3-20;
+#     270m / 512Mi, no valkey subchart objects, no <fullname>-pvc, the cache
+#     image is valkey/valkey;
+#   - profile: lite has no <fullname>-pvc either; values-production.yaml runs
+#     3 replicas, no HPA;
 #   - valkey.image.tag is required; a repository without "valkey" renders no
 #     data move; values-small.yaml renders with its limits;
-#   - NOTES: the cache line follows cache.enabled / valkey.replicas, lite shows
-#     requests from values;
+#   - NOTES: the Valkey line follows valkey.replicas, lite shows requests from
+#     values;
 #   - the config-init data move, run with sh on fixture files: RDB v12 data
 #     moves aside, dump.rdb and appendonlydir separately, Valkey data stays.
 #
@@ -130,39 +130,31 @@ fi
 # scripts/release-gate.sh does.
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
   -f "${CHART_DIR}/tests/values-production-placeholders.yaml"
-  --set postgresql.password=render-test-placeholder
-  --set cache.auth.password=render-test-placeholder)
+  --set postgresql.password=render-test-placeholder)
 
 echo "T1 defaults fit one node:"
 render default
 f="${WORK_DIR}/default.yaml"
 assert_docs "${f}" HorizontalPodAutoscaler amp 0 "default: no HPA"
-got="$(doc_line "${f}" Deployment amp '^  replicas:')"
-if [ "${got}" = "  replicas: 1" ]; then pass "default: Deployment has replicas: 1"; else fail "default: Deployment replicas line is '${got}'"; fi
+got="$(doc_line "${f}" StatefulSet amp '^  replicas:')"
+if [ "${got}" = "  replicas: 1" ]; then pass "default: StatefulSet has replicas: 1"; else fail "default: StatefulSet replicas line is '${got}'"; fi
 got="$(requests_total "${f}")"
 if [ "${got}" = "270m/512Mi" ]; then pass "default: requests total 270m/512Mi"; else fail "default: requests total ${got}, want 270m/512Mi"; fi
 assert_count "${f}" "amp-valkey" 0 "default: no valkey subchart objects"
-assert_docs "${f}" PersistentVolumeClaim amp-pvc 0 "default: no amp-pvc under profile: standard"
+assert_docs "${f}" PersistentVolumeClaim amp-pvc 0 "default: no amp-pvc"
 assert_count "${f}" "image: valkey/valkey:8.1.10-alpine" 1 "default: cache image valkey/valkey:8.1.10-alpine"
 assert_count "${f}" "image: redis:" 0 "default: no redis image"
 assert_count "${f}" "redis-pre-valkey-" 1 "default: config-init moves Redis >= 7.4 data"
 
-echo "T2 autoscaling on: HPA without keep:"
-render hpa --set autoscaling.enabled=true
-f="${WORK_DIR}/hpa.yaml"
-assert_docs "${f}" HorizontalPodAutoscaler amp 1 "hpa: HPA rendered"
-got="$(doc_line "${f}" HorizontalPodAutoscaler amp 'helm.sh/resource-policy')"
-if [ -z "${got}" ]; then pass "hpa: no helm.sh/resource-policy on the HPA"; else fail "hpa: HPA carries '${got}'"; fi
-
 echo "T3 lite and production:"
 render lite --set profile=lite
-assert_docs "${WORK_DIR}/lite.yaml" PersistentVolumeClaim amp-pvc 1 "lite: amp-pvc rendered"
+assert_docs "${WORK_DIR}/lite.yaml" PersistentVolumeClaim amp-pvc 0 "lite: no amp-pvc"
 assert_docs "${WORK_DIR}/lite.yaml" HorizontalPodAutoscaler amp 0 "lite: no HPA"
 render production "${PROD_ARGS[@]}"
 f="${WORK_DIR}/production.yaml"
-assert_docs "${f}" HorizontalPodAutoscaler amp 1 "production: HPA rendered"
-got="$(doc_line "${f}" HorizontalPodAutoscaler amp '^  (minReplicas|maxReplicas):' | tr -s ' ' | tr '\n' ' ')"
-if [ "${got}" = " minReplicas: 3  maxReplicas: 20 " ]; then pass "production: HPA 3-20"; else fail "production: HPA replicas '${got}', want 3-20"; fi
+assert_docs "${f}" HorizontalPodAutoscaler amp 0 "production: no HPA"
+got="$(doc_line "${f}" StatefulSet amp '^  replicas:')"
+if [ "${got}" = "  replicas: 3" ]; then pass "production: StatefulSet has replicas: 3"; else fail "production: StatefulSet replicas line is '${got}'"; fi
 assert_count "${f}" "amp-valkey" 0 "production: no valkey subchart objects"
 assert_docs "${f}" PersistentVolumeClaim amp-pvc 0 "production: no amp-pvc"
 
@@ -184,16 +176,13 @@ assert_count "${f}" "work_mem = 2MB" 1 "small: work_mem 2MB (memory measured at 
 
 echo "T6 NOTES:"
 notes notes-default
-notes notes-cache-off --set cache.enabled=false
-notes notes-external-cache --set valkey.replicas=0 --set cache.host=dragonfly.example.com
+notes notes-valkey-off --set valkey.replicas=0
 notes notes-lite --set profile=lite
-assert_count "${WORK_DIR}/notes-default.notes" "Valkey L2 + Memory L1 cache" 1 "notes-default: Valkey cache line"
-assert_count "${WORK_DIR}/notes-default.notes" "HPA off: fixed 1 replica(s)" 1 "notes-default: HPA off line"
+assert_count "${WORK_DIR}/notes-default.notes" "but amp-upstream does not use it yet" 1 "notes-default: Valkey line"
+assert_count "${WORK_DIR}/notes-default.notes" "StatefulSet amp, 1 replica(s)" 1 "notes-default: replicas line"
 assert_count "${WORK_DIR}/notes-default.notes" "requests 100m CPU / 128Mi, limits 1000m CPU / 1Gi" 1 "notes-default: AMP resources from values"
-assert_count "${WORK_DIR}/notes-cache-off.notes" "Cache off" 1 "notes-cache-off: cache off line"
-assert_count "${WORK_DIR}/notes-cache-off.notes" "Valkey L2" 0 "notes-cache-off: no Valkey line"
-assert_count "${WORK_DIR}/notes-external-cache.notes" "External cache L2 (dragonfly.example.com)" 1 "notes-external-cache: external cache line"
-assert_count "${WORK_DIR}/notes-lite.notes" "Resources: requests 100m CPU / 128Mi" 1 "notes-lite: resources from values"
+assert_count "${WORK_DIR}/notes-valkey-off.notes" "Valkey" 0 "notes-valkey-off: no Valkey line"
+assert_count "${WORK_DIR}/notes-lite.notes" "Resources (per AMP pod): requests 100m CPU / 128Mi" 1 "notes-lite: resources from values"
 
 echo "T7 config-init data move on fixtures (sh, not busybox):"
 # The script as rendered, up to the redis.conf copy, with /data pointing at a

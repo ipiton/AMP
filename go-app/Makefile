@@ -1,5 +1,5 @@
 # Makefile for Alert History Service (Go version)
-.PHONY: build test test-mvp test-all test-upstream-parity lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
+.PHONY: build test test-mvp test-all lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
 
 # Go parameters
 GOCMD=go
@@ -18,18 +18,23 @@ GOLOCAL_GOPATH ?= $(CURDIR)/.cache/go
 GO_LOCAL_ENV = GOCACHE=$(GOLOCAL_GOCACHE) GOMODCACHE=$(GOLOCAL_GOMODCACHE) GOPATH=$(GOLOCAL_GOPATH)
 
 # Test matrices
-TEST_TARGETS_MVP ?= ./cmd/server/... ./internal/ui
+TEST_TARGETS_MVP ?= ./cmd/... ./internal/upstreamcore/... ./internal/upstreamai/... ./internal/upstreamtargets/...
 TEST_TARGETS_ALL ?= ./...
 
 # Main package path
-MAIN_PATH=./cmd/server
-BINARY_NAME=server
+MAIN_PATH=./cmd/amp-upstream
+BINARY_NAME=amp-upstream
 BINARY_UNIX=$(BINARY_NAME)_unix
 
-# Build-time version metadata (PARITY-4.2: internal/buildinfo, exposed via
-# GET /api/v2/status versionInfo). Override any of these on the command line
-# (e.g. `make build VERSION=1.2.3`) or leave them to the git-derived defaults.
+# Build-time version metadata, as the Dockerfile sets it: AMP's in
+# internal/buildinfo (amp_build_info), the upstream module version plus
+# AMP's revision/branch/user/date in prometheus/common/version
+# (alertmanager_build_info, GET /api/v2/status versionInfo). Override any of
+# these on the command line (e.g. `make build VERSION=1.2.3`) or leave them
+# to the git-derived defaults.
 BUILDINFO_PKG=github.com/ipiton/AMP/internal/buildinfo
+VERSION_PKG=github.com/prometheus/common/version
+UPSTREAM_VERSION ?= $(patsubst v%,%,$(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' github.com/prometheus/alertmanager 2>/dev/null))
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 REVISION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
@@ -39,7 +44,12 @@ LDFLAGS_VERSION=-X $(BUILDINFO_PKG).Version=$(VERSION) \
 	-X $(BUILDINFO_PKG).Revision=$(REVISION) \
 	-X $(BUILDINFO_PKG).Branch=$(BRANCH) \
 	-X $(BUILDINFO_PKG).BuildUser=$(BUILD_USER) \
-	-X $(BUILDINFO_PKG).BuildDate=$(BUILD_DATE)
+	-X $(BUILDINFO_PKG).BuildDate=$(BUILD_DATE) \
+	-X $(VERSION_PKG).Version=$(UPSTREAM_VERSION) \
+	-X $(VERSION_PKG).Revision=$(REVISION) \
+	-X $(VERSION_PKG).Branch=$(BRANCH) \
+	-X $(VERSION_PKG).BuildUser=$(BUILD_USER) \
+	-X $(VERSION_PKG).BuildDate=$(BUILD_DATE)
 
 # Build the project
 build:
@@ -64,10 +74,6 @@ test-mvp:
 test-all:
 	@echo "Running full test suite..."
 	$(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
-
-test-upstream-parity:
-	@echo "Running upstream parity regression suite..."
-	$(GOTEST) -count=1 -v ./cmd/server -run UpstreamParity
 
 # Fast quality gates for local inner loop
 quality-gates-fast:
@@ -287,7 +293,7 @@ help:
 	@echo "  build           - Build the application"
 	@echo "  build-linux     - Build for Linux (Docker)"
 	@echo "  test            - Run MVP test matrix (default)"
-	@echo "  test-mvp        - Run MVP test matrix (cmd/server + internal/ui)"
+	@echo "  test-mvp        - Run MVP test matrix (cmd + internal/upstream*)"
 	@echo "  test-all        - Run full test suite"
 	@echo "  quality-gates-fast - fmt + vet (inner loop)"
 	@echo "  quality-gates   - fmt + vet + MVP test matrix"

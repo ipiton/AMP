@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Renders the chart and asserts the graceful-shutdown wiring of the AMP
 # container (PROD-GRACEFUL-SHUTDOWN): preStop sleep from
-# gracefulShutdown.preStopDelay, SERVER_GRACEFUL_SHUTDOWN_TIMEOUT from
-# gracefulShutdown.timeoutSeconds, and a grace period that fits both.
+# gracefulShutdown.preStopDelay and a grace period that fits it plus
+# amp-upstream's own shutdown (HTTP drain up to 5s, final snapshots).
 #
 # Before PROD-GRACEFUL-SHUTDOWN, preStopDelay was a dead key and the grace
 # period equalled AMP's own shutdown timeout, leaving no room for a preStop.
@@ -18,7 +18,7 @@ CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
-DEPLOYMENT="templates/deployment.yaml"
+DEPLOYMENT="templates/statefulset.yaml"
 WARNING="WARNING: gracefulShutdown.terminationGracePeriodSeconds"
 
 failures=0
@@ -49,8 +49,7 @@ fi
 # scripts/release-gate.sh does.
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
   -f "${CHART_DIR}/tests/values-production-placeholders.yaml"
-  --set postgresql.password=render-test-placeholder
-  --set cache.auth.password=render-test-placeholder)
+  --set postgresql.password=render-test-placeholder)
 
 # render_deployment <name> <helm args...>
 render_deployment() {
@@ -66,12 +65,10 @@ render_notes() {
   helm install amp "${CHART_DIR}" --dry-run=client "$@" >"${WORK_DIR}/${name}-notes.txt"
 }
 
-echo "defaults: preStop, timeout env and a grace period that fits both"
+echo "defaults: preStop and a grace period that fits it"
 render_deployment default
 assert_contains "${WORK_DIR}/default.yaml" 'command: ["sleep", "5"]' "preStop sleeps preStopDelay (5)"
-assert_contains "${WORK_DIR}/default.yaml" "name: SERVER_GRACEFUL_SHUTDOWN_TIMEOUT" "timeout env set"
-assert_contains "${WORK_DIR}/default.yaml" 'value: "30s"' "timeout env carries timeoutSeconds (30s)"
-assert_contains "${WORK_DIR}/default.yaml" "terminationGracePeriodSeconds: 40" "grace period 40 >= 5 + 30"
+assert_contains "${WORK_DIR}/default.yaml" "terminationGracePeriodSeconds: 40" "grace period 40 >= 5 + 10"
 assert_absent "${WORK_DIR}/default.yaml" "No preStop hook needed" "stale 'no preStop' comment gone"
 render_notes default
 assert_absent "${WORK_DIR}/default-notes.txt" "${WARNING}" "no budget warning with defaults"
@@ -83,23 +80,19 @@ assert_absent "${WORK_DIR}/no-prestop.yaml" "lifecycle:" "no lifecycle block"
 
 echo "custom values flow through"
 render_deployment custom --set gracefulShutdown.preStopDelay=10 \
-  --set gracefulShutdown.timeoutSeconds=45 \
   --set gracefulShutdown.terminationGracePeriodSeconds=60
 assert_contains "${WORK_DIR}/custom.yaml" 'command: ["sleep", "10"]' "preStop sleeps 10"
-assert_contains "${WORK_DIR}/custom.yaml" 'value: "45s"' "timeout env 45s"
 assert_contains "${WORK_DIR}/custom.yaml" "terminationGracePeriodSeconds: 60" "grace period 60"
 render_notes custom --set gracefulShutdown.preStopDelay=10 \
-  --set gracefulShutdown.timeoutSeconds=45 \
   --set gracefulShutdown.terminationGracePeriodSeconds=60
-assert_absent "${WORK_DIR}/custom-notes.txt" "${WARNING}" "no warning when 60 >= 10 + 45"
+assert_absent "${WORK_DIR}/custom-notes.txt" "${WARNING}" "no warning when 60 >= 10 + 10"
 
-echo "an old grace period (30) still renders, with a warning"
-render_deployment old-grace --set gracefulShutdown.terminationGracePeriodSeconds=30
-assert_contains "${WORK_DIR}/old-grace.yaml" "terminationGracePeriodSeconds: 30" "render does not fail"
-render_notes old-grace --set gracefulShutdown.terminationGracePeriodSeconds=30
-assert_contains "${WORK_DIR}/old-grace-notes.txt" "${WARNING}" "budget warning printed"
-assert_contains "${WORK_DIR}/old-grace-notes.txt" "Raise terminationGracePeriodSeconds to at least 35" "warning names the required minimum"
-
+echo "a short grace period (12) still renders, with a warning"
+render_deployment short-grace --set gracefulShutdown.terminationGracePeriodSeconds=12
+assert_contains "${WORK_DIR}/short-grace.yaml" "terminationGracePeriodSeconds: 12" "render does not fail"
+render_notes short-grace --set gracefulShutdown.terminationGracePeriodSeconds=12
+assert_contains "${WORK_DIR}/short-grace-notes.txt" "${WARNING}" "budget warning printed"
+assert_contains "${WORK_DIR}/short-grace-notes.txt" "Raise it to at least 15" "warning names the required minimum"
 echo "production values"
 render_deployment production "${PROD_ARGS[@]}"
 assert_contains "${WORK_DIR}/production.yaml" 'command: ["sleep", "5"]' "preStop in production"

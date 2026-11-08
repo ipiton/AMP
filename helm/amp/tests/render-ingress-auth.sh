@@ -67,8 +67,7 @@ if ! command -v helm >/dev/null 2>&1; then
 fi
 
 GUARD_MSG="exposes the whole AMP API"
-PASSWORDS=(--set postgresql.password=render-test-placeholder
-  --set cache.auth.password=render-test-placeholder)
+PASSWORDS=(--set postgresql.password=render-test-placeholder)
 # values-production.yaml needs an external database before anything renders
 # (HELM-EXTERNAL-DATABASE); supply one so the Ingress guard is the one tested.
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml" "${PASSWORDS[@]}"

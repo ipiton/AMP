@@ -1,0 +1,245 @@
+{{- include "amp.validate" . }}
+{{- $am := .Values.alertmanager }}
+{{- $replicas := int $am.replicas }}
+{{- /* 0 stops AMP, e.g. for a database restore (docs/POSTGRESQL_RESTORE_GUIDE.md). */}}
+{{- if lt $replicas 0 }}
+{{- fail "alertmanager.replicas must not be negative." }}
+{{- end }}
+{{- $fullname := include "amp.fullname" . }}
+{{- $ns := include "amp.namespace" . }}
+{{- $headless := include "amp.headlessName" . }}
+{{- $prefix := include "amp.pathPrefix" . }}
+{{- $ext := .Values.externalDatabase | default dict }}
+{{- $configDir := "/etc/amp/config" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: application
+spec:
+  replicas: {{ $replicas }}
+  serviceName: {{ $headless }}
+  # All pods start together and find each other over the headless Service;
+  # OrderedReady would gain nothing, the gossip has no primary.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "amp.appSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "amp.appSelectorLabels" . | nindent 8 }}
+        {{- if hasKey (.Values.podLabels | default dict) "app.kubernetes.io/component" }}
+        {{- fail "podLabels must not set app.kubernetes.io/component: the StatefulSet, the Services, the NetworkPolicies and the PDB select AMP pods by component=application." }}
+        {{- end }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/amp-config: {{ include (print $.Template.BasePath "/amp-config.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- /* `| default list`: `helm upgrade --reuse-values` from a chart without these keys. */}}
+      {{- $extraVolumes := .Values.extraVolumes | default list }}
+      {{- $extraVolumeMounts := .Values.extraVolumeMounts | default list }}
+      {{- /* The API server rejects a duplicate volume name or mountPath only at apply time; catch the chart's own here. */}}
+      {{- $chartVolumes := dict "config" "the configuration files" "data" "alertmanager.persistence" }}
+      {{- $chartPaths := dict $configDir "the configuration files" (printf "%s/alertmanager.yml" $configDir) "alertmanager.config" (printf "%s/amp.yaml" $configDir) "the AMP configuration" "/data" "alertmanager.persistence" }}
+      {{- if .Values.webConfig.existingSecret }}
+      {{- $_ := set $chartVolumes "web-config" "webConfig.existingSecret" }}
+      {{- $_ := set $chartPaths (clean .Values.webConfig.mountPath) "webConfig.mountPath" }}
+      {{- $_ := set $chartPaths (clean (printf "%s/%s" .Values.webConfig.mountPath .Values.webConfig.secretKey)) "the web config file (webConfig.mountPath/secretKey)" }}
+      {{- $webDir := clean .Values.webConfig.mountPath }}
+      {{- range $own := list $configDir "/data" }}
+      {{- if or (eq $webDir $own) (hasPrefix (printf "%s/" $own) $webDir) (hasPrefix (printf "%s/" $webDir) $own) }}
+      {{- fail (printf "webConfig.mountPath %q overlaps the chart's mount %s. Use another path, such as /etc/amp/web." $.Values.webConfig.mountPath $own) }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- range $extraVolumes }}
+      {{- if hasKey $chartVolumes (toString .name) }}
+      {{- fail (printf "extraVolumes: volume name %q is already used by the chart (%s). Pick another name." (toString .name) (get $chartVolumes (toString .name))) }}
+      {{- end }}
+      {{- end }}
+      {{- range $extraVolumeMounts }}
+      {{- $path := clean (toString .mountPath) }}
+      {{- if hasKey $chartPaths $path }}
+      {{- fail (printf "extraVolumeMounts: mountPath %q is already used by %s. Use another path; a directory below the chart's mounts, such as /etc/amp/secrets, is fine." (toString .mountPath) (get $chartPaths $path)) }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "amp.serviceAccountName" . }}
+      # The Kubernetes API is needed for target discovery only (templates/rbac.yaml).
+      automountServiceAccountToken: {{ include "amp.discoveryEnabled" . | eq "true" }}
+      # viper reads the AMP configuration from the environment too:
+      # service-link variables (FOO_PORT=tcp://...) must not reach it.
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 40 }}
+      containers:
+        - name: amp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config.file={{ $configDir }}/alertmanager.yml
+            - --amp.config.file={{ $configDir }}/amp.yaml
+            - --storage.path=/data
+            - --web.listen-address=:9093
+            - --web.external-url={{ include "amp.externalURL" . }}
+            {{- if .Values.webConfig.existingSecret }}
+            - --web.config.file={{ printf "%s/%s" .Values.webConfig.mountPath .Values.webConfig.secretKey }}
+            {{- end }}
+            {{- if gt $replicas 1 }}
+            - --cluster.listen-address=0.0.0.0:9094
+            # Brackets keep an IPv6 pod address valid.
+            - --cluster.advertise-address=[$(POD_IP)]:9094
+            - --cluster.peer-timeout={{ $am.peerTimeout }}
+            {{- range $i := until $replicas }}
+            - --cluster.peer={{ $fullname }}-{{ $i }}.{{ $headless }}.{{ $ns }}.svc:9094
+            {{- end }}
+            {{- else }}
+            # One replica: no gossip cluster, as upstream's chart does.
+            - --cluster.listen-address=
+            {{- end }}
+            {{- with $am.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- if eq .Values.profile "standard" }}
+            {{- if $ext.host }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ext.existingSecret | quote }}
+                  key: {{ $ext.existingSecretPasswordKey | default "password" | quote }}
+            {{- else if .Values.postgresql.enabled }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "amp.postgresql.secretName" . }}
+                  key: password
+            {{- end }}
+            {{- end }}
+            {{- if .Values.llm.enabled }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fullname }}-secrets
+                  key: llm-api-key
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: web
+              containerPort: 9093
+              protocol: TCP
+            {{- if gt $replicas 1 }}
+            - name: gossip-tcp
+              containerPort: 9094
+              protocol: TCP
+            - name: gossip-udp
+              containerPort: 9094
+              protocol: UDP
+            {{- end }}
+          {{- $probes := .Values.probes | default dict }}
+          {{- range $kind, $d := dict "liveness" (dict "path" "/-/healthy" "delay" 30 "period" 10 "timeout" 5 "failures" 3) "readiness" (dict "path" "/-/ready" "delay" 5 "period" 5 "timeout" 3 "failures" 3) "startup" (dict "path" "/-/healthy" "delay" 10 "period" 10 "timeout" 5 "failures" 30) }}
+          {{- $p := get $probes $kind | default dict }}
+          {{ $kind }}Probe:
+            httpGet:
+              path: {{ $prefix }}{{ $p.path | default $d.path }}
+              port: web
+            initialDelaySeconds: {{ $p.initialDelaySeconds | default $d.delay }}
+            periodSeconds: {{ $p.periodSeconds | default $d.period }}
+            timeoutSeconds: {{ $p.timeoutSeconds | default $d.timeout }}
+            failureThreshold: {{ $p.failureThreshold | default $d.failures }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          # preStop sleeps while the pod leaves the Service endpoints; SIGTERM
+          # then drains HTTP, snapshots silences and the notification log, and
+          # stops AMP's workers.
+          {{- if gt (int .Values.gracefulShutdown.preStopDelay) 0 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", {{ .Values.gracefulShutdown.preStopDelay | int | toString | quote }}]
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: {{ $configDir }}
+              readOnly: true
+            - name: data
+              mountPath: /data
+            {{- if .Values.webConfig.existingSecret }}
+            - name: web-config
+              mountPath: {{ .Values.webConfig.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- with $extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: {{ $fullname }}
+              - configMap:
+                  name: {{ $fullname }}-amp-config
+        {{- if .Values.webConfig.existingSecret }}
+        - name: web-config
+          secret:
+            secretName: {{ .Values.webConfig.existingSecret }}
+            items:
+              - key: {{ .Values.webConfig.secretKey }}
+                path: {{ .Values.webConfig.secretKey }}
+        {{- end }}
+        {{- with $extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "amp.appSelectorLabels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ $am.persistence.accessMode }}
+        {{- with $am.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $am.persistence.size }}

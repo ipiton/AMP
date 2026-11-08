@@ -1,19 +1,16 @@
 # Small single node: about 1 vCPU / 1Gi free for AMP (k3s on a small VM, a
 # home lab). Layered on the chart defaults, which already target one node
-# (1 replica, HPA off, ~270m CPU / 512Mi requests); this file only tightens
+# (alertmanager.replicas: 1, ~270m CPU / 512Mi requests); this file only tightens
 # limits, memory settings and volume sizes. Bundled PostgreSQL and Valkey are
 # dev/pilot components (ADR-016): no replication, no backups.
 #
 #   helm install amp ./helm/amp -f ./helm/amp/values-small.yaml
 #
-# Not for HA: keep autoscaling off with this file (the connection budget
-# below covers 2 AMP pods during a rolling update).
+# Not for HA: keep alertmanager.replicas at 1 with this file (the connection
+# budget below is sized for one or two AMP pods).
 #
 # New installs only: StatefulSet volume sizes cannot change, so on an existing
 # release drop postgresql.persistence.size and valkey.storage.requestedSize.
-
-autoscaling:
-  enabled: false
 
 # AMP: idle/light load measured at ~15m CPU / ~20Mi.
 resources:
@@ -35,7 +32,7 @@ postgresql:
   persistence:
     size: 5Gi
   config:
-    # 2 AMP pods (rolling update) × 25 + exporter, with spare for psql sessions
+    # 2 AMP pods × 25 + exporter, with spare for psql sessions
     # (the AMP user is the superuser, so superuser_reserved_connections does
     # not reserve anything from it)
     maxConnections: 60

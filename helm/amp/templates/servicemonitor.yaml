@@ -22,18 +22,17 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  # Only the AMP Service: the postgres/redis Services share selectorLabels but
-  # carry their own component.
+  # Only the AMP Service: the headless and the postgres/redis Services share
+  # selectorLabels but carry their own component.
   selector:
     matchLabels:
-      {{- include "amp.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: application
+      {{- include "amp.appSelectorLabels" . | nindent 6 }}
   namespaceSelector:
     matchNames:
       - {{ .Values.namespace | default .Release.Namespace }}
   endpoints:
-    - port: http
-      path: /metrics
+    - port: web
+      path: {{ include "amp.pathPrefix" . }}/metrics
       interval: {{ $sm.interval | default "30s" }}
       scrapeTimeout: {{ $sm.scrapeTimeout | default "10s" }}
       {{- with $auth.secretName }}

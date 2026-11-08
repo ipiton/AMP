@@ -34,7 +34,7 @@ type Cache interface {
 	// Flush очищает весь cache
 	Flush(ctx context.Context) error
 
-	// --- Redis SET Operations (for alert tracking) ---
+	// --- SET Operations (for alert tracking) ---
 
 	// SAdd добавляет один или несколько элементов в SET
 	SAdd(ctx context.Context, key string, members ...interface{}) error
@@ -60,64 +60,8 @@ type CacheStats struct {
 	Uptime      time.Duration
 }
 
-// CacheConfig содержит конфигурацию cache
-type CacheConfig struct {
-	// Redis connection settings
-	Addr     string `env:"REDIS_ADDR" default:"localhost:6379"`
-	Password string `env:"REDIS_PASSWORD" default:""`
-	DB       int    `env:"REDIS_DB" default:"0"`
-
-	// Pool settings
-	PoolSize     int           `env:"REDIS_POOL_SIZE" default:"10"`
-	MinIdleConns int           `env:"REDIS_MIN_IDLE_CONNS" default:"1"`
-	MaxConnAge   time.Duration `env:"REDIS_MAX_CONN_AGE" default:"30m"`
-
-	// Timeout settings
-	DialTimeout  time.Duration `env:"REDIS_DIAL_TIMEOUT" default:"5s"`
-	ReadTimeout  time.Duration `env:"REDIS_READ_TIMEOUT" default:"3s"`
-	WriteTimeout time.Duration `env:"REDIS_WRITE_TIMEOUT" default:"3s"`
-
-	// Retry settings
-	MaxRetries      int           `env:"REDIS_MAX_RETRIES" default:"3"`
-	MinRetryBackoff time.Duration `env:"REDIS_MIN_RETRY_BACKOFF" default:"8ms"`
-	MaxRetryBackoff time.Duration `env:"REDIS_MAX_RETRY_BACKOFF" default:"512ms"`
-
-	// Circuit breaker settings
-	CircuitBreakerEnabled bool          `env:"REDIS_CIRCUIT_BREAKER_ENABLED" default:"true"`
-	CircuitBreakerTimeout time.Duration `env:"REDIS_CIRCUIT_BREAKER_TIMEOUT" default:"10s"`
-
-	// Monitoring
-	MetricsEnabled bool `env:"REDIS_METRICS_ENABLED" default:"true"`
-}
-
-// Validate проверяет корректность конфигурации
-func (c *CacheConfig) Validate() error {
-	if c.Addr == "" {
-		return ErrInvalidConfig
-	}
-	if c.PoolSize <= 0 {
-		return ErrInvalidConfig
-	}
-	if c.DialTimeout <= 0 {
-		return ErrInvalidConfig
-	}
-	return nil
-}
-
 // ErrNotFound возвращается когда ключ не найден в cache
 var ErrNotFound = NewCacheError("key not found", "NOT_FOUND")
-
-// ErrInvalidConfig возвращается при неверной конфигурации
-var ErrInvalidConfig = NewCacheError("invalid cache configuration", "CONFIG_ERROR")
-
-// ErrConnectionFailed возвращается при проблемах с соединением
-var ErrConnectionFailed = NewCacheError("connection failed", "CONNECTION_ERROR")
-
-// ErrClientHandleShared indicates that RedisCache.Reload cannot swap the
-// client because a caller took a long-lived raw handle via ShareClient().
-// Callers should surface this as "restart required", not as a failure — see
-// RedisCache.Reload and internal/config/reloadable_redis.go.
-var ErrClientHandleShared = NewCacheError("redis client handle is shared; hot reload cannot replace it", "CLIENT_HANDLE_SHARED")
 
 // CacheError представляет ошибку cache
 type CacheError struct {
@@ -135,6 +79,12 @@ func (e *CacheError) Error() string {
 
 func (e *CacheError) Unwrap() error {
 	return e.Cause
+}
+
+// WithCause sets the underlying error.
+func (e *CacheError) WithCause(cause error) *CacheError {
+	e.Cause = cause
+	return e
 }
 
 // NewCacheError создает новую ошибку cache

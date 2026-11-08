@@ -3,7 +3,7 @@
 # `packages: write` (ADR-013).
 #
 # Required checks for branch protection (docs/CI.md): gate,
-# images (amp), images (config-reloader), actionlint, govulncheck.
+# images (amp), actionlint, govulncheck.
 # e2e-ha runs on every PR but is not required yet -- see docs/CI.md for
 # when it becomes required.
 #
@@ -61,8 +61,6 @@ jobs:
         include:
           - name: amp
             file: Dockerfile
-          - name: config-reloader
-            file: Dockerfile.config-reloader
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

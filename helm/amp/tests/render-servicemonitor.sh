@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Renders the AMP ServiceMonitor (PROD-INGRESS-HARDENING, ADR-015) and asserts:
 #   - it selects the AMP Service only (the postgres/redis Services share the
-#     chart's selector labels) and scrapes /metrics on the `http` port;
+#     chart's selector labels) and scrapes /metrics on the `web` port;
 #   - it is gated on monitoring.prometheusEnabled and
 #     monitoring.serviceMonitor.enabled;
 #   - with web auth on it refuses to render without credentials (it would only
@@ -125,7 +125,7 @@ doc "${WORK_DIR}/default.yaml" ServiceMonitor amp >"${WORK_DIR}/sm.yaml"
 assert_contains "${WORK_DIR}/sm.yaml" "kind: ServiceMonitor" "rendered by default"
 block "${WORK_DIR}/sm.yaml" "  selector:" >"${WORK_DIR}/sm-selector.yaml"
 assert_contains "${WORK_DIR}/sm-selector.yaml" "${LABEL}" "selects by component"
-assert_contains "${WORK_DIR}/sm.yaml" "- port: http" "scrapes the http port"
+assert_contains "${WORK_DIR}/sm.yaml" "- port: web" "scrapes the web port"
 assert_contains "${WORK_DIR}/sm.yaml" "path: /metrics" "...at /metrics"
 assert_contains "${WORK_DIR}/sm.yaml" "interval: 30s" "default interval"
 assert_contains "${WORK_DIR}/sm.yaml" "scrapeTimeout: 10s" "default scrape timeout"

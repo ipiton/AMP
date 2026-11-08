@@ -3,8 +3,8 @@
 # Grants exactly what the code calls: `Secrets(namespace).List(labelSelector)`
 # in ONE namespace (go-app/internal/business/publishing/discovery_impl.go).
 # The K8s client exists only when publishing is enabled and profile=standard
-# (go-app/internal/application/publishing_runtime.go, initializePublishingRuntime);
-# otherwise nothing is rendered. No cluster scope, no write verbs: add a verb
+# (go-app/cmd/amp-upstream/targets.go, newTargetSource); otherwise nothing is
+# rendered and the pods get no service account token. No cluster scope, no write verbs: add a verb
 # here in the same change that makes the code call it.
 #
 # RBAC cannot filter `list` by label selector, so this Role reads every secret
@@ -12,7 +12,7 @@
 # namespace (publishing.discovery.namespace) to keep the rest out of reach.
 #
 # `verbs` stays on one line: scripts/release-gate.sh (step_helm_rbac) checks it.
-{{- if and .Values.serviceAccount.create .Values.serviceAccount.rbac.create (eq .Values.profile "standard") .Values.publishing.enabled }}
+{{- if and .Values.serviceAccount.create .Values.serviceAccount.rbac.create (include "amp.discoveryEnabled" .) }}
 {{- $releaseNamespace := .Values.namespace | default .Release.Namespace }}
 {{- $discoveryNamespace := .Values.publishing.discovery.namespace | default $releaseNamespace }}
 ---

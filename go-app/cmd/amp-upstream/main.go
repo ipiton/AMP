@@ -1,7 +1,7 @@
 // Command amp-upstream serves the upstream Alertmanager core wired by
-// internal/upstreamcore from an unmodified alertmanager.yml (ADR-019 PoC).
-// It runs next to cmd/server and changes nothing in it; flags mirror the
-// upstream binary's names for the subset it supports. --amp.config.file
+// internal/upstreamcore from an unmodified alertmanager.yml (ADR-019); it is
+// AMP's only binary. Flags mirror the upstream binary's names for the subset
+// it supports. --amp.config.file
 // adds AMP's own layer (internal/upstreamai, amp.go): alert history in
 // PostgreSQL, LLM classification and investigation; and the K8s-Secret
 // publishing targets (internal/upstreamtargets) in the standard profile with
@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,7 @@ import (
 	versioncollector "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 
+	"github.com/ipiton/AMP/internal/buildinfo"
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/upstreamcore"
 	"github.com/ipiton/AMP/internal/upstreamtargets"
@@ -44,21 +46,27 @@ func main() {
 	retention := flag.Duration("data.retention", upstreamcore.DefaultRetention, "How long to keep data for.")
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
+	webConfigFile := flag.String("web.config.file", "", "Path to the web configuration file: basic_auth_users (bcrypt); else server.web_config_file in the AMP configuration, else SERVER_WEB_CONFIG_FILE. The probes /-/healthy and /-/ready (server.auth.unauthenticated_paths in the AMP configuration) are served without credentials. Empty: no authentication.")
 	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*). Empty: none.")
 	clusterOpts := clusterFlags(flag.CommandLine)
 	flag.Parse()
 
+	setContractVersion(debug.ReadBuildInfo)
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	logger.Info("Starting Alertmanager", "version", version.Info())
+	logger.Info("Starting Alertmanager", "version", version.Info(), "amp_version", buildinfo.Version)
 	logger.Info("Build context", "build_context", version.BuildContext())
 	prometheus.MustRegister(versioncollector.NewCollector("alertmanager"))
-	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL, *ampConfigFile, *clusterOpts); err != nil {
+	if err := buildinfo.Register(prometheus.DefaultRegisterer); err != nil {
+		logger.Error("amp_build_info registration failed", "err", err)
+		os.Exit(1)
+	}
+	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL, *webConfigFile, *ampConfigFile, *clusterOpts); err != nil {
 		logger.Error("amp-upstream exited with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL, ampConfigFile string, clusterOpts upstreamcore.Options) error {
+func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL, webConfigFile, ampConfigFile string, clusterOpts upstreamcore.Options) error {
 	// Matcher parsing is process-global upstream; without this call it stays
 	// in classic mode instead of upstream's default fallback mode.
 	compat.InitFromFlags(logger, featurecontrol.NoopFlags{})
@@ -76,12 +84,20 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	var (
 		targets         *upstreamtargets.Source
 		targetsInterval time.Duration
+		// nil: the default exempt paths (no AMP configuration).
+		unauthenticatedPaths []string
+		configWebConfigFile  string
 	)
 	if ampConfigFile != "" {
 		cfg, err := appconfig.LoadConfig(ampConfigFile)
 		if err != nil {
 			return fmt.Errorf("error loading AMP configuration file: %w", err)
 		}
+		if ignored := appconfig.IgnoredKeys(ampConfigFile); len(ignored) > 0 {
+			logger.Warn("AMP configuration keys ignored: amp-upstream does not read them (routing and receivers live in --config.file)", "keys", ignored)
+		}
+		unauthenticatedPaths = cfg.Server.Auth.UnauthenticatedPaths
+		configWebConfigFile = cfg.Server.WebConfigFile
 		stopAMP, err := newAMPLayer(logger, cfg, &opts)
 		if err != nil {
 			return err
@@ -116,6 +132,12 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	// while its handler still serves (upstreamcore.Core.Handler).
 	defer core.Stop()
 
+	handler, err := wrapWebAuth(core.Handler(), resolveWebConfigFile(webConfigFile, configWebConfigFile), amURL.Path, unauthenticatedPaths, logger, opts.Registerer)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
+
 	if targets != nil {
 		// Cancelled before core.Stop runs: a poll must not reload a stopped
 		// core (Reload would only return an error, but there is no reason to
@@ -131,7 +153,7 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
 
-	server := &http.Server{Handler: core.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 	logger.Info("listening", "address", listener.Addr().String(), "external_url", amURL.String())

@@ -3,9 +3,9 @@
 #
 #   ./scripts/upstream-core-gate.sh
 #
-# 1. Runs the futureparity contract suites against the upstream core (build
-#    tags futureparity,upstreamcore) and compares the leaf test failures
-#    with go-app/cmd/server/testdata/upstreamcore-divergences.tsv. Any
+# 1. Runs the contract suites against the upstream core (build tag
+#    upstreamcore, go-app/internal/upstreamcore/contract) and compares the
+#    leaf test failures with its testdata/divergences.tsv. Any
 #    failure missing from the baseline fails the gate, and so does a "fails"
 #    entry that passed or did not run: the baseline must describe exactly
 #    what diverges, which is what makes an upstream bump reviewable.
@@ -19,8 +19,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GO_APP_DIR="$ROOT_DIR/go-app"
-BASELINE="$GO_APP_DIR/cmd/server/testdata/upstreamcore-divergences.tsv"
-AM_CONFIG="$GO_APP_DIR/cmd/server/testdata/upstreamcore-alertmanager.yml"
+CONTRACT_PKG="./internal/upstreamcore/contract/"
+BASELINE="$GO_APP_DIR/internal/upstreamcore/contract/testdata/divergences.tsv"
+AM_CONFIG="$GO_APP_DIR/internal/upstreamcore/contract/testdata/alertmanager.yml"
 UPSTREAM_MODULE="github.com/prometheus/alertmanager"
 
 log() { printf '[upstream-core-gate] %s\n' "$1"; }
@@ -56,7 +57,7 @@ check_suites() {
   fi
 
   # A non-zero exit is expected: the baseline failures are real failures.
-  ( cd "$GO_APP_DIR" && go test -tags futureparity,upstreamcore -count=1 -json ./cmd/server/ ) >"$json" 2>"$stderr"
+  ( cd "$GO_APP_DIR" && go test -tags upstreamcore -count=1 -json "$CONTRACT_PKG" ) >"$json" 2>"$stderr"
 
   if ! jq -e 'select(.Action=="run")' "$json" >/dev/null 2>&1; then
     log "no test ran -- build or setup failure:"

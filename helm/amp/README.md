@@ -4,29 +4,30 @@
 
 ## Overview
 
-Alertmanager++ (AMP) chart packages the current repository runtime with:
-- ✅ **Controlled replacement surface** for alert ingest/query, alert groups, `status`/`receivers`/`reload`, silence CRUD, health/readiness, metrics, and the real publishing path
-- 🤖 **Optional LLM-related values** for environments that wire them explicitly
-- 📊 **Partial dashboard surface** with broader UI/runtime parity still tracked as follow-up work
-- 🟡 **Phased compatibility** rather than a verified full Alertmanager drop-in claim
+Alertmanager++ (AMP) chart deploys one workload, `amp-upstream`: upstream Prometheus Alertmanager v0.34.1, embedded as a library, with AMP's own layer on top (ADR-019):
+- ✅ **Upstream Alertmanager core**: `api/v2`, routing, grouping, inhibition, silences, notifications and the gossip cluster, configured with an upstream `alertmanager.yml`
+- 🗄️ **Alert history and investigations** in PostgreSQL (profile `standard`)
+- 🤖 **Optional LLM classification and investigation** (BYOK, off by default)
+- 🔌 **Publishing targets from Kubernetes Secrets**, appended to the receivers of `alertmanager.yml`
+
+The breaking changes against earlier chart versions are listed in `CHANGELOG.md`.
 
 ## Quick Start
 
-> **Read before installing (status 2026-10-16).** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart sets `DATABASE_SSL_MODE=disable` plus `DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION=true`: under `environment: production` (the default) AMP accepts the unencrypted in-cluster connection and logs a `Database connection is NOT encrypted in production` warning with the database host. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The defaults target one node: one replica, HPA off, about 270m CPU / 512Mi requested in total (see [Sizing](#sizing)). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing.** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart writes `ssl_mode: disable` plus `allow_insecure_ssl_in_production: true` into the AMP configuration: under `environment: production` (the default) AMP then accepts the unencrypted in-cluster connection. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The defaults target one node: one replica, about 270m CPU / 512Mi requested in total (see [Sizing](#sizing)). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
 
 ```yaml
 # my-values.yaml — standard profile, one replica (the defaults)
-configFile:
-  enabled: true           # optional: without a file AMP reads its environment only
-  content: |
+alertmanager:
+  config:                 # alertmanager.yml, upstream format
     route:
       receiver: default
       group_by: ['alertname']
     receivers:
       - name: default
         webhook_configs:
-          - url: https://example.invalid/hook   # plain http:// fails validation
-    inhibit_rules: []     # upstream placement; `inhibition: inhibit_rules:` works too
+          - url: https://example.invalid/hook
+    inhibit_rules: []
 ```
 
 ```bash
@@ -43,36 +44,39 @@ Requests are set from a measurement on one node under light load (`tasks/archive
 
 | Container | Requests | Limits |
 |-----------|----------|--------|
-| AMP | 100m / 128Mi | 1000m / 1Gi |
+| AMP (`amp-upstream`) | 100m / 128Mi | 1000m / 1Gi |
 | PostgreSQL | 100m / 256Mi | 1000m / 1Gi |
 | postgres-exporter | 10m / 32Mi | 100m / 128Mi |
 | Valkey (`<fullname>-redis`) | 50m / 64Mi | 500m / 512Mi |
 | redis-exporter | 10m / 32Mi | 100m / 128Mi |
 | **Total** | **270m / 512Mi** | |
 
-Volumes: PostgreSQL 10Gi, Valkey 5Gi. `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60` and `work_mem=2MB`, and the volumes to 5Gi / 1Gi. For HA use `values-production.yaml` (HPA 3–20, external PostgreSQL) or set `autoscaling.enabled: true`. The HPA targets are percentages of `resources.requests`, so raise the requests too (with 100m the HPA scales out at ~70m CPU per pod); with the bundled PostgreSQL, raise its connection budget first ([PostgreSQL](#postgresql)).
+Volumes: PostgreSQL 10Gi, Valkey 5Gi, AMP 1Gi per pod (`alertmanager.persistence`). `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60` and `work_mem=2MB`, and the volumes to 5Gi / 1Gi; keep `alertmanager.replicas: 1` with it. Valkey is unused today ([Valkey](#valkey)); `valkey.replicas: 0` drops its two containers from the total.
+
+There is no HPA: the replica count is `alertmanager.replicas`, a fixed gossip cluster ([Alertmanager Core](#alertmanager-core)). For HA use `values-production.yaml` (3 replicas, PodDisruptionBudget `minAvailable: 2`, external PostgreSQL) or set `alertmanager.replicas` yourself; with the bundled PostgreSQL, check its connection budget first ([PostgreSQL](#postgresql)).
 
 ## Deployment Profiles
 
 ### Standard Profile (Default)
-PostgreSQL + Valkey; grouping state is shared across replicas:
+The core plus AMP's layer:
 ```bash
 helm install amp ./helm/amp
 ```
-- PostgreSQL storage (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
-- Valkey cache (`<fullname>-redis`, image `valkey/valkey`), one instance. Valkey, not Redis: Redis 7.4 and later is RSALv2/SSPL (`docs/06-planning/DECISIONS.md` ADR-017). An external Redis-compatible cache: `cache.host` and `valkey.replicas: 0`, as in `values-production.yaml` (see [Cache](#cache))
-- One replica, HPA off by default; `autoscaling.enabled: true` for 2–10 replicas
-- Group timers and notification dedup live in Valkey, so that replicas share them. AMP logs `Redis cache initialized` when it is connected; `Redis cache unavailable, falling back to in-memory cache` means it keeps them in memory per pod (see [Cache](#cache))
+- PostgreSQL for alert history and investigations (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
+- LLM classification and investigation when `llm.enabled` / `investigation.enabled` are set
+- Publishing targets discovered from Kubernetes Secrets (`publishing.*`, see [RBAC](#rbac))
+- Valkey (`<fullname>-redis`, image `valkey/valkey`) still runs by default, unused ([Valkey](#valkey))
+- If PostgreSQL is unreachable when a pod starts, the pod runs without history and investigations until it is restarted; alert delivery does not depend on the database
 
 ### Lite Profile
-Single process, no external dependencies:
+The upstream core alone:
 ```bash
-helm install amp ./helm/amp --set profile=lite
+helm install amp ./helm/amp --set profile=lite --set postgresql.enabled=false
 ```
-- SQLite storage (PVC-based), memory cache
-- Grouping works (`group_wait`/`group_interval`/`repeat_interval`), with groups and timers kept in memory — one replica only
-- Turn grouping off with the `grouping.enabled` value, not in `configFile.content`: the chart passes the value as `GROUPING_ENABLED`, which overrides the config file
-- Perfect for: dev, testing, smoke checks
+- No alert history, investigations or K8s-Secret targets; no Valkey, no RBAC, no service account token
+- Silences and the notification log still persist on the pod's volume (`alertmanager.persistence`)
+- The bundled PostgreSQL is not tied to the profile: set `postgresql.enabled=false`, or it keeps running unused
+- Perfect for: dev, testing, smoke checks, a plain Alertmanager
 
 ## Configuration
 
@@ -81,53 +85,96 @@ helm install amp ./helm/amp --set profile=lite
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `profile` | Deployment profile (lite/standard) | `standard` |
-| `replicaCount` | Number of replicas | `1` |
+| `environment` | `app.environment` of the AMP configuration; `production` tightens the database checks | `production` |
 | `image.repository` | Image repository | `ghcr.io/ipiton/amp` |
 | `image.tag` | Image tag | `""` (defaults to `.Chart.AppVersion`) |
+| `service.port` | Service port (`web`) | `9093` |
+| `resources` | Resources of the `amp` container | see [Sizing](#sizing) |
+| `podDisruptionBudget.enabled` / `.minAvailable` | PDB for the AMP pods | `false` / `1` |
+
+### Alertmanager Core
+
+The chart's one workload is StatefulSet `<fullname>` running `amp-upstream` (pods labelled `app.kubernetes.io/component: application`). It reads two files, both mounted from ConfigMaps at `/etc/amp/config`:
+
+- `alertmanager.yml` (`--config.file`), ConfigMap `<fullname>`: `alertmanager.config`, in the upstream Alertmanager format (`route`, `receivers`, `inhibit_rules`, `templates`, ...). Routing lives only here.
+- `amp.yaml` (`--amp.config.file`), ConfigMap `<fullname>-amp-config`: generated from `profile`, `environment`, the database values, `llm`, `investigation` and `publishing`, then `alertmanager.ampConfig` is merged over it (its keys win). It is a ConfigMap: no secrets there. Passwords come from Secrets as environment variables (`DATABASE_PASSWORD`, `LLM_API_KEY`).
+
+```yaml
+alertmanager:
+  replicas: 3          # > 1: a memberlist gossip cluster, port 9094 TCP+UDP
+  config:              # alertmanager.yml, upstream format
+    route:
+      receiver: default
+    receivers:
+      - name: default
+  persistence:
+    size: 1Gi          # silences and notification log snapshots
+```
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `alertmanager.replicas` | Pods in the StatefulSet; `0` fails the render | `1` |
+| `alertmanager.config` | `alertmanager.yml`, upstream format | a `default` receiver without integrations |
+| `alertmanager.ampConfig` | Merged over the generated `amp.yaml` | `{}` |
+| `alertmanager.externalURL` | `--web.external-url`; empty: `http://<fullname>.<namespace>.svc:<service.port>/` | `""` |
+| `alertmanager.peerTimeout` | `--cluster.peer-timeout` | `15s` |
+| `alertmanager.persistence.size` / `.storageClass` / `.accessMode` | volumeClaimTemplate `data`, mounted at `/data` (`--storage.path`) | `1Gi` / `""` / `ReadWriteOnce` |
+| `alertmanager.extraArgs` | Further `amp-upstream` flags | `[]` |
+
+- With `replicas: 1` the cluster is off (`--cluster.listen-address=`). With more, every pod lists all peers (`--cluster.peer`) by their stable DNS names in the headless Service `<fullname>-headless` (`app.kubernetes.io/component: cluster`, `publishNotReadyAddresses`), and silences and the notification log are gossiped, so an alert sent to every replica is notified once.
+- With more than one replica, Prometheus must send every alert to every pod (`<fullname>-<i>.<fullname>-headless.<namespace>.svc:9093`), not to one through the Service `<fullname>`, as with upstream Alertmanager HA. NOTES prints the addresses.
+- With `llm.enabled` and more than one replica every pod classifies every alert: N LLM calls per alert until `UPSTREAM-AI-HA-DEDUP`. NOTES warns about it.
+- `externalURL` is also what links in notifications (silence URLs) point to. Its path becomes the route prefix of every endpoint, the probes and the ServiceMonitor path included.
+- `extraArgs` passes further flags, e.g. `--cluster.label=<name>` or `--cluster.tls-config=<file>`. Gossip is unencrypted unless `--cluster.tls-config` is set.
+- A change of `alertmanager.config`, the generated `amp.yaml` or the chart's Secret rolls the pods on `helm upgrade` (checksum annotations). A StatefulSet rolls one pod at a time, without a surge pod.
+- The `data` volumes are not removed with the release (see [Uninstalling](#uninstalling)).
 
 ### LLM Configuration (BYOK)
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `llm.enabled` | Enable LLM classification | `false` |
+| `llm.enabled` | Enable LLM classification; needs `llm.apiKey` or `externalSecrets.enabled` | `false` |
 | `llm.provider` | LLM provider (openai/anthropic/azure) | `openai` |
-| `llm.apiKey` | API key (use secret in production) | `""` |
+| `llm.proxyUrl` | `llm.base_url` | `https://llm-proxy.example.com` |
+| `llm.apiKey` | API key, stored in `<fullname>-secrets` (`llm-api-key`, env `LLM_API_KEY`); use a secret store in production | `""` |
 | `llm.model` | Model name | `openai/gpt-4o` |
+| `llm.timeout` / `llm.maxRetries` | Per call: seconds or a Go duration / retries | `30` / `3` |
+| `llm.agentMode` | Agentic investigation loop (tools, runbooks) instead of a single call | `false` |
+| `llm.notifyWait` | How long a notification waits for the alert's classification before it goes out without it | `5s` |
+| `llm.dropNoise` | Drop notifications for alerts classified as noise | `false` |
+| `investigation.enabled` | Async investigation queue; needs profile standard, PostgreSQL and `llm.enabled` | `false` |
+| `investigation.workerCount` / `.queueSize` / `.maxRetries` / `.retryInterval` / `.llmTimeout` / `.onlyFiring` | Queue settings | `3` / `500` / `3` / `5s` / `60s` / `true` |
+
+Investigation tools and runbooks are configured through `alertmanager.ampConfig` (`investigation.tools`, `investigation.runbooks`).
 
 ### Storage
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
+| `alertmanager.persistence.*` | Silences and notification log, one volume per AMP pod | `1Gi` |
 | `postgresql.enabled` | Enable bundled PostgreSQL; the lite profile does not use it, set `false` there | `true` |
-| `cache.enabled` | Point AMP at the Valkey cache (`cache.host`); `false` leaves AMP on in-memory state | `true` |
-| `valkey.image.repository` / `.tag` | Cache image | `valkey/valkey` / `8.1.10-alpine` |
+| `externalDatabase.*` | External PostgreSQL ([PostgreSQL](#postgresql)) | `host: ""` |
+| `valkey.replicas` | Valkey pods (profile standard); `0` stops the pod, its other objects still render | `1` |
+| `valkey.image.repository` / `.tag` | Valkey image | `valkey/valkey` / `8.1.10-alpine` |
 | `valkey.password.existingSecret` / `.secretKey` | Secret with the chart's Valkey password (otherwise `<fullname>-redis-secret`) | `""` / `password` |
 | `valkey.password.value` | Password for `<fullname>-redis-secret`; empty: generated on first install and kept by upgrades | `""` |
-| `cache.auth.existingSecret` / `.existingSecretPasswordKey` | Secret with the password of an external `cache.host` | `""` / `password` |
-| `cache.auth.enabled` / `.password` | Password of an external cache from values (stored in `<fullname>-secrets`) | `false` / `""` |
-| `persistence.enabled` | Enable PVC (Lite) | `true` |
-| `persistence.size` | PVC size | `5Gi` |
 
-### Cache
+### Valkey
 
-The chart's Valkey (`valkey.replicas` > 0, the default) always requires a password. While `cache.host` points at it (`<fullname>-redis`, the default, or a longer DNS name of it in the release namespace), AMP, Valkey and its exporter read it from the same Secret: `valkey.password.existingSecret` (key `valkey.password.secretKey`), or `<fullname>-redis-secret`, which the chart creates. With neither `existingSecret` nor `valkey.password.value` the password is generated on the first install and later upgrades keep it (`lookup`). `lookup` is empty in renders without cluster access (`helm template`, client-side `--dry-run`, Argo CD; Flux and `--dry-run=server` do look it up): there set `valkey.password.value` or `existingSecret`, or every sync generates a new password. An `existingSecret` password must not end with a newline: Valkey trims it, AMP and the exporter do not (create it with `printf '%s'`, as below). Valkey and AMP read the password at pod start: to change it, update the Secret, then `kubectl rollout restart statefulset/<fullname>-redis deploy/<fullname>`. `cache.auth.*` does not apply to the chart's Valkey; NOTES warns when it is set.
-
-An external Redis-compatible cache (`values-production.yaml`): `cache.host`, `valkey.replicas: 0` (otherwise the chart's Valkey keeps running unused; NOTES says so), and its password from a Secret you create (`cache.auth.existingSecret`, key `cache.auth.existingSecretPasswordKey`) or from `cache.auth.enabled` + `cache.auth.password`; not both. Without either AMP connects without a password. `valkey.replicas: 0` with `cache.host` left at the chart's Valkey (short or full DNS name in the release namespace) fails the render. AMP reads the password at start: after changing the Secret, run `kubectl rollout restart deploy/<fullname>`.
-
-At startup AMP waits for an unreachable cache for `redis.startup_wait` (60s; env `REDIS_STARTUP_WAIT`), retrying with backoff, so the Valkey restart on `helm upgrade` is covered. It does not switch to the cache after that window: if the log shows `falling back to in-memory cache`, restart AMP once the cache pod is ready. With `cache.enabled: false` the chart sets the window to `0s`.
+`amp-upstream` does not connect to Valkey: it is kept for the cross-replica investigation dedup (`UPSTREAM-AI-HA-DEDUP`). The chart still deploys it by default in the standard profile, with a password; NOTES says it is unused. `valkey.replicas: 0` stops its pod (its Services, Secret, ServiceMonitor and alert rules still render, HELM-CHART-GAPS), as `values-production.yaml` does.
 
 ### PostgreSQL
 
-The standard profile needs PostgreSQL; the chart ships and tests 16 (`postgres:16.15`). AMP writes every incoming alert to it synchronously: if the database is unreachable, `POST /api/v2/alerts` returns `500`. Prometheus re-sends active alerts periodically, so they arrive once the database is back; a resolve notification sent only during the outage can be lost.
+The standard profile uses PostgreSQL for alert history and investigations; the chart ships and tests 16 (`postgres:16.15`). The history is written off the ingest path and is best-effort: alert delivery never waits for the database. If the database is unreachable when a pod starts, that pod runs without history and investigations until it is restarted.
 
 | Topology | Use for | Backups / HA |
 |----------|---------|--------------|
 | External PostgreSQL (16 tested): a managed service with PITR, or CloudNativePG with barman/S3 | production | operator's side |
 | Bundled (`postgresql.enabled: true`) | dev, pilot | none |
 
-The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime, and ingest returns errors until the database is back. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed).
+The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed).
 
-The server runs with `postgresql.config` (rendered into `postgresql.conf`) and the chart's `pg_hba.conf`, passed as server arguments, so they also apply to an existing data volume. Each AMP pod opens up to 25 connections (`database.max_connections`), so `postgresql.config.maxConnections` must be at least `autoscaling.maxReplicas` × 25 + 5 (the exporter and a few `psql` sessions). AMP connects as `postgresql.username`, the bootstrap superuser, so `superuserReservedConnections` holds nothing back from it. The default 100 covers 3 AMP pods (the default replica, a rolling-update surge pod and one more) and the exporter; NOTES warns when the budget is short. Before enabling autoscaling, raise it to at least `maxReplicas` × 25 + 5, together with `sharedBuffers` and `postgresql.resources` (the default limit is 1Gi with `shared_buffers=128MB`). From the network, `pg_hba.conf` admits only `postgresql.username` to `postgresql.database` with a SCRAM password and rejects everything else, including replication; loopback inside the pod (and `kubectl port-forward`) needs the password too, only `kubectl exec … psql` over the Unix socket does not; to restrict which pods may connect, enable `postgresql.networkPolicy.enabled`. `/dev/shm` is a 256Mi memory volume and counts against `postgresql.resources.limits.memory`.
+The server runs with `postgresql.config` (rendered into `postgresql.conf`) and the chart's `pg_hba.conf`, passed as server arguments, so they also apply to an existing data volume. Each AMP pod opens up to 25 connections (`database.max_connections`), so `postgresql.config.maxConnections` must be at least `alertmanager.replicas` × 25 + 5 (the exporter and a few `psql` sessions). AMP connects as `postgresql.username`, the bootstrap superuser, so `superuserReservedConnections` holds nothing back from it. The default 100 covers 3 AMP pods (a StatefulSet rolls without a surge pod) and the exporter; NOTES warns when the budget is short. Before raising `alertmanager.replicas` above 3, raise it to at least `replicas` × 25 + 5, together with `sharedBuffers` and `postgresql.resources` (the default limit is 1Gi with `shared_buffers=128MB`). From the network, `pg_hba.conf` admits only `postgresql.username` to `postgresql.database` with a SCRAM password and rejects everything else, including replication; loopback inside the pod (and `kubectl port-forward`) needs the password too, only `kubectl exec … psql` over the Unix socket does not; to restrict which pods may connect, enable `postgresql.networkPolicy.enabled`. `/dev/shm` is a 256Mi memory volume and counts against `postgresql.resources.limits.memory`.
 
 #### External PostgreSQL
 
@@ -153,24 +200,24 @@ externalDatabase:
   existingSecretPasswordKey: password
 ```
 
-The chart passes these to AMP as `DATABASE_HOST/PORT/DATABASE/USERNAME/SSL_MODE`, and `DATABASE_PASSWORD` comes from the Secret through `secretKeyRef`. The render fails if `host` is set without `database`, `username` or `existingSecret`, if `sslMode` is not one of the four values AMP accepts (libpq's `allow` and `prefer` are not), or if `postgresql.enabled` is still `true`.
+The chart writes host, port, database, username and `ssl_mode` into the `database:` section of `amp.yaml` (`<fullname>-amp-config`), and `DATABASE_PASSWORD` comes from the Secret through `secretKeyRef`. The render fails if `host` is set without `database`, `username` or `existingSecret`, if `sslMode` is not one of the four values AMP accepts (libpq's `allow` and `prefer` are not), or if `postgresql.enabled` is still `true`.
 
 - A missing Secret or key is not caught at render time (the chart does not read the cluster): the pod stays in `CreateContainerConfigError`.
-- The password reaches AMP as an environment variable, read at pod start. After changing the Secret, run `kubectl -n <namespace> rollout restart deploy/<fullname>`.
+- The password reaches AMP as an environment variable, read at pod start. After changing the Secret, run `kubectl -n <namespace> rollout restart statefulset/<fullname>`.
 - With `externalSecrets.enabled`, the chart's ExternalSecret maps database keys only for the bundled PostgreSQL. Create your own ExternalSecret whose target Secret is `externalDatabase.existingSecret`.
-- Each AMP pod opens up to 25 connections (`database.max_connections` default). Size `max_connections` on the server for the HPA maximum: `values-production.yaml` allows 20 replicas, up to 500 connections. Small managed tiers often allow about 100.
+- Each AMP pod opens up to 25 connections (`database.max_connections` default). Size `max_connections` on the server for `alertmanager.replicas` × 25: `values-production.yaml` runs 3 replicas, up to 75 connections.
 - Monitoring the external database (alerts, exporter) is on the operator's side: the chart's PostgreSQL rules and exporter cover only the bundled one.
 - Under `environment: production` AMP refuses `sslMode: disable` and passwords shorter than 12 characters. The chart never sets the insecure-SSL override for an external database.
 - `verify-ca`/`verify-full` check the server certificate against the image's system roots only. A provider CA (RDS and the like) is not among them, and the chart mounts no client TLS material: use `require`, or an image with that CA.
-- `externalDatabase` takes precedence over a `database:` section in `configFile.content` (environment variables win over the config file).
-- Fallback without a Secret: leave `externalDatabase.host` empty and put a top-level `database:` section into `configFile.content` (`configFile.enabled: true`). The password then sits in plain text in a ConfigMap. The render check parses `configFile.content` as YAML and looks for a top-level `database` key, spelled in lower case; invalid YAML fails the render with the parse error.
+- `alertmanager.ampConfig.database` is merged over the section the chart generates, so its keys win over `externalDatabase`.
+- Fallback without a Secret: leave `externalDatabase.host` empty and put the connection into `alertmanager.ampConfig.database` (`host`, `port`, `database`, `username`, `password`, `ssl_mode`). The password then sits in plain text in a ConfigMap; NOTES warns about it.
 - Moving an installation from the bundled to an external database: [docs/POSTGRESQL_RESTORE_GUIDE.md § 3c](docs/POSTGRESQL_RESTORE_GUIDE.md#3c-move-from-the-bundled-to-an-external-postgresql).
 
 Backup and restore with `pg_dump`/`pg_restore`, for both topologies: [docs/POSTGRESQL_RESTORE_GUIDE.md](docs/POSTGRESQL_RESTORE_GUIDE.md). The decision record is ADR-016 in `docs/06-planning/DECISIONS.md`.
 
 ### HTTP Authentication
 
-The API is unauthenticated unless a web config is mounted (AMP logs a `WARN` at startup). Put an upstream-format `web-config.yml` (`basic_auth_users` with bcrypt hashes) into a Secret and point the chart at it:
+The API is unauthenticated unless a web config is mounted (AMP logs a `WARN` at startup). Put an upstream-format `web-config.yml` (`basic_auth_users` with bcrypt hashes) into a Secret and point the chart at it; the chart passes it as `--web.config.file`:
 
 ```bash
 kubectl create secret generic amp-web-config --from-file=web-config.yml
@@ -183,14 +230,14 @@ helm upgrade --install amp ./helm/amp --set webConfig.existingSecret=amp-web-con
 | `webConfig.secretKey` | Key inside the Secret | `web-config.yml` |
 | `webConfig.mountPath` | Directory the Secret is mounted at | `/etc/amp/web` |
 
-Liveness/readiness probes use `/-/healthy` and `/-/ready`, which stay reachable without credentials. Password edits in the Secret apply without a pod restart once kubelet syncs the volume. `configReloader.enabled` cannot be combined with `webConfig` yet (rendering fails). See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication".
+Liveness/readiness probes use `/-/healthy` and `/-/ready` (under the `alertmanager.externalURL` path), which stay reachable without credentials (`server.auth.unauthenticated_paths`, settable through `alertmanager.ampConfig`). Password edits in the Secret apply without a pod restart once kubelet syncs the volume. See `docs/CONFIGURATION_GUIDE.md` → "Enable HTTP Authentication".
 
 ### Receiver Credentials From A Secret
 
-`configFile.content` is rendered into a ConfigMap, so a `bot_token` or Slack webhook URL written there is stored in plain text. Put the credentials into a Secret you create, mount it with `extraVolumes` / `extraVolumeMounts`, and point the receivers at the files through their `*_file` fields:
+`alertmanager.config` is rendered into a ConfigMap, so a `bot_token` or Slack webhook URL written there is stored in plain text. Put the credentials into a Secret you create, mount it with `extraVolumes` / `extraVolumeMounts`, and point the receivers at the files through their `*_file` fields:
 
 ```bash
-# one file per credential; a trailing newline is trimmed
+# one file per credential
 kubectl create secret generic amp-receiver-secrets \
   --from-file=telegram-bot-token=./telegram-bot-token \
   --from-file=slack-webhook-url=./slack-webhook-url
@@ -206,9 +253,8 @@ extraVolumeMounts:
   - name: receiver-secrets
     mountPath: /etc/amp/secrets
     readOnly: true
-configFile:
-  enabled: true
-  content: |
+alertmanager:
+  config:
     route:
       receiver: slack
     receivers:
@@ -225,25 +271,24 @@ configFile:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `extraVolumes` | Extra pod volumes (any volume type: Secret, ConfigMap, projected, CSI) | `[]` |
-| `extraVolumeMounts` | Extra mounts for the `amp` container; the config-reloader sidecar does not get them | `[]` |
+| `extraVolumeMounts` | Extra mounts for the `amp` container | `[]` |
 
-- Use absolute paths in `*_file` fields: AMP reads `bot_token_file`, `api_url_file`, `slack_api_url_file`, `url_file` and `routing_key_file` as given, relative to the process working directory, not to the config file. Setting both `bot_token` and `bot_token_file` is a load error, and so is a file AMP cannot read.
-- A directory below the chart's own mounts (`/etc/amp/secrets`) is fine. A volume name or `mountPath` the chart already uses fails the render: `config-file` / `configFile.mountPath` and the config file itself, `web-config` / `webConfig.mountPath` and the web config file, `data` / `liteProfile.persistence.mountPath`.
+- Use absolute paths in `*_file` fields. Setting both a field and its `*_file` variant (`bot_token` and `bot_token_file`) is a config error, as in upstream Alertmanager.
+- A directory below the chart's own mounts (`/etc/amp/secrets`) is fine. A volume name or `mountPath` the chart already uses fails the render: volumes `config`, `data` and (with `webConfig.existingSecret`) `web-config`; paths `/etc/amp/config` and its `alertmanager.yml` / `amp.yaml`, `/data`, `webConfig.mountPath` and the web config file in it.
 - With the chart's default `podSecurityContext` (`runAsUser: 65534`, `fsGroup: 65534`) the files stay readable with a strict `defaultMode` such as `0440`: kubelet gives them the `fsGroup` group. If you override `podSecurityContext` without `fsGroup`, keep the default mode (`0644`).
-- AMP reads the files at startup and on every `/-/reload`. After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` (authenticated when `webConfig` is enabled) or `kubectl rollout restart deploy/<fullname>`; `configReloader` watches the config file only and does not notice. Mounts with `subPath` are never updated.
+- After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` to every pod (authenticated when `webConfig` is enabled) or `kubectl rollout restart statefulset/<fullname>`. Mounts with `subPath` are never updated.
 - The same keys mount a ConfigMap with runbooks or any other file AMP should read.
 
 ### Graceful Shutdown
 
-On termination the pod first runs a preStop `sleep` while Kubernetes removes it from Service endpoints, then AMP gets `SIGTERM`: readiness turns `503`, in-flight requests drain, services stop (the lite profile writes its final snapshot). Details: `docs/CONFIGURATION_GUIDE.md` → "Graceful Shutdown".
+On termination the pod first runs a preStop `sleep` while Kubernetes removes it from Service endpoints, then `amp-upstream` gets `SIGTERM`: in-flight HTTP requests drain (up to 5s), the core stops and writes its final silence and notification-log snapshots, then AMP's workers stop. Details: `docs/CONFIGURATION_GUIDE.md` → "Graceful Shutdown".
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `gracefulShutdown.terminationGracePeriodSeconds` | Total budget before `SIGKILL`, counted from the start of preStop | `40` |
 | `gracefulShutdown.preStopDelay` | Seconds the preStop hook sleeps; `0` removes the hook | `5` |
-| `gracefulShutdown.timeoutSeconds` | AMP's budget for drain + service shutdown (`server.graceful_shutdown_timeout`) | `30` |
 
-Keep `terminationGracePeriodSeconds` ≥ `preStopDelay` + `timeoutSeconds`. Otherwise install/upgrade still succeeds, but the notes print a `WARNING` and a slow drain can be cut off by `SIGKILL`.
+Keep `terminationGracePeriodSeconds` well above `preStopDelay` + 5s. Below `preStopDelay` + 10 install/upgrade still succeeds, but the notes print a `WARNING`: the kubelet may `SIGKILL` the pod before the drain and the final snapshot.
 
 Limitations:
 
@@ -251,21 +296,21 @@ Limitations:
 
 ### RBAC
 
-The chart grants the AMP ServiceAccount exactly what the app calls: publishing target discovery lists Secrets labelled `publishing.discovery.labelSelector` in **one** namespace. It renders one `Role` (`list` on `secrets`) and its `RoleBinding`, and nothing cluster-scoped.
+The chart grants the AMP ServiceAccount exactly what the app calls: publishing target discovery lists Secrets labelled `publishing.discovery.labelSelector` in **one** namespace. It renders one `Role` (`list` on `secrets`) and its `RoleBinding`, and nothing cluster-scoped. The AMP pods mount a service account token only when discovery is on.
 
 | Condition | RBAC rendered |
 |-----------|---------------|
-| `profile: standard`, `publishing.enabled: true`, `serviceAccount.create: true`, `serviceAccount.rbac.create: true` | `Role` + `RoleBinding` `<release>-secrets-lister` in `publishing.discovery.namespace` (default: the release namespace) |
-| `profile: lite`, or any of the three flags `false` | none — lite never talks to the Kubernetes API |
+| `profile: standard`, `publishing.enabled: true`, `serviceAccount.create: true`, `serviceAccount.rbac.create: true` | `Role` + `RoleBinding` `<fullname>-secrets-lister` in `publishing.discovery.namespace` (default: the release namespace) |
+| `profile: lite`, or any of the three flags `false` | none — the pods never talk to the Kubernetes API |
 
 - **Keep target Secrets in their own namespace.** RBAC cannot restrict `list` to a label selector, so the Role can read every Secret in the discovery namespace — including the chart's own database and LLM credentials when that is the release namespace. Setting `publishing.discovery.namespace` to a dedicated namespace keeps them out of reach. The Role is then created in that namespace, so whoever runs `helm install` needs permission to create Roles there.
-- **Managing RBAC yourself**: set `serviceAccount.rbac.create=false` and grant the same `list secrets` in the discovery namespace. Without it discovery fails with `403`, AMP logs a `WARN` and starts with no discovered targets (targets from `receivers:` keep working).
-- The Redis StatefulSet shares the ServiceAccount but does not mount its token.
+- **Managing RBAC yourself**: set `serviceAccount.rbac.create=false` and grant the same `list secrets` in the discovery namespace. Without it discovery fails with `403`, AMP logs a `WARN` and runs without discovered targets (the receivers of `alertmanager.config` keep working); it retries every `publishing.refresh.interval`.
+- The Valkey StatefulSet shares the ServiceAccount but does not mount its token.
 - Verify: `kubectl auth can-i list secrets -n <discovery-namespace> --as=system:serviceaccount:<release-namespace>:<serviceaccount>` → `yes`; the same for `get`, or for any other namespace → `no`.
 
 ### Network Exposure
 
-The whole API — including `POST /api/v2/silences` and `POST /-/reload` — sits on one port (`http`), so whoever reaches it can silence every alert. The chart closes the two ways in, and fails the render instead of guessing (ADR-015).
+The whole API — including `POST /api/v2/silences` and `POST /-/reload` — sits on one port (`web`, 9093), so whoever reaches it can silence every alert. The chart closes the two ways in, and fails the render instead of guessing (ADR-015).
 
 **Ingress requires authentication.** `ingress.enabled: true` renders only with one of:
 
@@ -287,12 +332,12 @@ The whole API — including `POST /api/v2/silences` and `POST /-/reload` — sit
 
 The guard covers the Ingress only. `service.type: NodePort` or `LoadBalancer` (`values-dev.yaml` uses NodePort) exposes the API without either check — pair it with `webConfig.existingSecret`.
 
-**NetworkPolicy for the AMP pods.** `networkPolicy.enabled: true` admits traffic to the `http` port from the listed sources only. Egress is not restricted: notification targets are arbitrary.
+**NetworkPolicy for the AMP pods.** `networkPolicy.enabled: true` admits traffic to the `web` port from the listed sources only, plus gossip (9094 TCP/UDP) between the AMP pods when `alertmanager.replicas` > 1. Egress is not restricted: notification targets are arbitrary.
 
 | Parameter | Who | Default |
 |-----------|-----|---------|
 | `networkPolicy.ingressController` | ingress controller pods; used only with `ingress.enabled` | `[]` |
-| `networkPolicy.alertSenders` | Prometheus / vmalert posting to the Service directly | `[]` |
+| `networkPolicy.alertSenders` | Prometheus / vmalert posting to the pods directly | `[]` |
 | `networkPolicy.metricsScrapers` | the Prometheus scraping `/metrics` | `[]` |
 | `networkPolicy.extraIngress` | raw `NetworkPolicyIngressRule`s, rendered as-is | `[]` |
 
@@ -315,22 +360,22 @@ networkPolicy:
 - Senders outside the cluster that come through the Ingress are covered by `ingressController`. Through a LoadBalancer or NodePort they arrive from node or LB addresses: add an `ipBlock`.
 - An ingress controller with `hostNetwork: true` connects from the node IPs, which no `namespaceSelector` matches: list the node CIDR as an `ipBlock` in `ingressController`. Whether an `ipBlock` matches node traffic depends on the CNI (Cilium, for one, classifies it as `host`/`remote-node`, not by CIDR): confirm with the check below.
 - Probes come from the kubelet on the node and are not affected on conformant CNIs. If pods start failing `Readiness probe failed: ... timeout` right after enabling the policy, your CNI filters node traffic: add the node CIDR as an `ipBlock` in `extraIngress`.
-- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides (`8080` is the default `service.port`; run the first check from a namespace you did not list):
+- On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides (`9093` is the default `service.port`; with an `alertmanager.externalURL` path, prefix `/-/healthy` with it; run the first check from a namespace you did not list):
 
   ```bash
   SVC=$(kubectl get svc -n <namespace> -l app.kubernetes.io/instance=<release>,app.kubernetes.io/component=application -o name)
   # from a namespace that is not listed: must fail (timeout or connection refused, depending on the CNI)
   kubectl run np-check -n default --rm -it --image=curlimages/curl --restart=Never -- \
-    curl -m 5 http://${SVC#service/}.<namespace>:8080/-/healthy
+    curl -m 5 http://${SVC#service/}.<namespace>:9093/-/healthy
   # from a listed source, e.g. the Prometheus pod: must answer
-  kubectl exec -n monitoring <prometheus-pod> -- wget -qO- -T 5 http://${SVC#service/}.<namespace>:8080/-/healthy
+  kubectl exec -n monitoring <prometheus-pod> -- wget -qO- -T 5 http://${SVC#service/}.<namespace>:9093/-/healthy
   ```
 
 - **If alerts stop arriving**, the sender sees it first: Prometheus `rate(prometheus_notifications_errors_total[5m]) > 0` or `prometheus_notifications_dropped_total` growing; vmalert `rate(vmalert_alerts_send_errors_total[5m]) > 0`. Kill-switch, no pod restart: `helm upgrade <release> ./helm/amp --reuse-values --set networkPolicy.enabled=false` (on a release already running this chart version; see the migration notes in `CHANGELOG.md` for the first upgrade).
 
-AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis pods share the chart's selector labels and have their own component), so external policies can select them too.
+AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis pods share the chart's selector labels and have their own component; the headless Service has `cluster`), so external policies can select them too.
 
-**ServiceMonitor.** Rendered when `monitoring.prometheusEnabled` and `monitoring.serviceMonitor.enabled` are both true (default); it needs the prometheus-operator CRDs. It scrapes `/metrics` on the AMP Service only.
+**ServiceMonitor.** Rendered when `monitoring.prometheusEnabled` and `monitoring.serviceMonitor.enabled` are both true (default); it needs the prometheus-operator CRDs. It scrapes `/metrics` (under the `alertmanager.externalURL` path) on the `web` port of every AMP pod behind the Service `<fullname>`, the core's `alertmanager_*` metrics included.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -353,56 +398,22 @@ With a NetworkPolicy, list that Prometheus in `networkPolicy.metricsScrapers` (o
 
 **`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`), and at least one NetworkPolicy source. The render reports one missing setting at a time.
 
-### Upstream Core (Preview)
-
-`upstreamCore.enabled: true` (default `false`) deploys the upstream Alertmanager core (`/app/amp-upstream`, ADR-019) as a separate StatefulSet `<fullname>-upstream`, next to the AMP Deployment. It is a preview: the AMP Service, Ingress, ServiceMonitor, NetworkPolicy and PodDisruptionBudget keep pointing at the AMP Deployment.
-
-```yaml
-upstreamCore:
-  enabled: true
-  replicas: 3          # > 1: a memberlist gossip cluster, port 9094 TCP+UDP
-  config:              # alertmanager.yml, upstream format
-    route:
-      receiver: default
-    receivers:
-      - name: default
-  persistence:
-    size: 1Gi          # silences and notification log snapshots
-```
-
-- With `replicas: 1` the cluster is off (`--cluster.listen-address=`). With more, every pod lists all peers by their stable DNS names in the headless Service `<fullname>-upstream-headless`, and silences and the notification log are gossiped, so an alert sent to every replica is notified once.
-- Prometheus should send alerts to every replica (the headless Service), not to one through `<fullname>-upstream`, as with upstream Alertmanager HA.
-- `externalURL` defaults to `http://<fullname>-upstream.<namespace>.svc:9093/`; its path becomes the route prefix and the probe path.
-- `extraArgs` passes further flags, e.g. `--cluster.label=<name>` or `--cluster.tls-config=<file>`.
-- Not covered yet: no ServiceMonitor scrapes its metrics (`alertmanager_cluster_*` included), the NetworkPolicy and PodDisruptionBudget select only the AMP pods, the API has no authentication, and gossip is unencrypted unless `--cluster.tls-config` is set. Slice 5 (`UPSTREAM-CORE-REMOVAL`) moves these onto the upstream core.
-
 ## Alertmanager Compatibility
 
-AMP chart should currently be treated as a **controlled replacement** deployment path, not as a verified full Alertmanager drop-in replacement:
+The chart runs upstream Alertmanager v0.34.1 as the core, so `api/v2`, `/-/healthy`, `/-/ready`, `/-/reload` and `/metrics` are upstream's own handlers, under the `alertmanager.externalURL` path, and `alertmanager.config` is read as upstream reads `alertmanager.yml`. The Service port is 9093, as with upstream Alertmanager.
 
 ```yaml
-# prometheus.yml - change the URL only after validating the covered slice
+# prometheus.yml — every pod, as with upstream Alertmanager HA
 alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - amp.<namespace>.svc:8080  # Service port is 8080 (was: alertmanager:9093)
+          - amp-0.amp-headless.<namespace>.svc:9093
+          - amp-1.amp-headless.<namespace>.svc:9093
+          - amp-2.amp-headless.<namespace>.svc:9093
 ```
 
-With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. Known gaps that bite on a copied `alertmanager.yml` — a built-in filter that drops some alerts, partial per-integration fields — are listed in [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md) § Known Gaps. The chart's `PrometheusRule` objects carry no configurable labels, so a Prometheus with a `ruleSelector` (kube-prometheus-stack selects `release: <name>`) will not load them (`HELM-PROMRULE-LABELS`).
-
-Current active runtime surface mounted by the repository bootstrap:
-- `POST /api/v2/alerts`
-- `GET /api/v2/alerts`
-- `GET /api/v2/alerts/groups`
-- `GET /api/v2/status`
-- `GET /api/v2/receivers`
-- `GET/POST /api/v2/silences`
-- `GET/DELETE /api/v2/silence/{id}`
-- `POST /-/reload`
-- `/health`, `/ready`, `/-/healthy`, `/-/ready`, `/metrics`
-
-Inhibition rules are applied (`GET /api/v2/inhibitions` shows active ones), both upstream's top-level `inhibit_rules:` and AMP's `inhibition: inhibit_rules:`. Config write and history APIs, classification surfaces and broader dashboard surfaces remain explicit follow-up work.
+With one replica, the Service `<fullname>.<namespace>.svc:9093` is enough. With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. More on compatibility: [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md). The chart's `PrometheusRule` objects carry no configurable labels, so a Prometheus with a `ruleSelector` (kube-prometheus-stack selects `release: <name>`) will not load them (`HELM-PROMRULE-LABELS`).
 
 ## Upgrading
 
@@ -410,7 +421,7 @@ Inhibition rules are applied (`GET /api/v2/inhibitions` shows active ones), both
 helm upgrade amp ./helm/amp --reuse-values
 ```
 
-`--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
+`--reuse-values` keeps the values of the old chart version, defaults included. When a chart version removes or renames keys, read the migration notes in `CHANGELOG.md` first. From a chart before `UPSTREAM-CORE-REMOVAL` (no `alertmanager.*` section) the render fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14) or a values file for this chart; a removed key left in your values also fails and names its replacement. Upgrading from a version that still had the bundled PostgreSQL backup (`postgresql.backup`) fails with `--reuse-values`: use `--reset-then-reuse-values` (Helm ≥ 3.14), or add `--set postgresql.backup.enabled=false`.
 
 Upgrading a `profile: standard` release installed by a chart from before `HELM-VCT-CHART-LABELS` fails with `StatefulSet.apps "<fullname>-redis" is invalid: spec: Forbidden`: the labels of its volume claim template changed, and that field cannot be updated. Delete the StatefulSet object once, keeping its pod and volume, then upgrade:
 
@@ -424,6 +435,8 @@ helm upgrade amp ./helm/amp --reset-then-reuse-values
 ```bash
 helm uninstall amp
 ```
+
+The volumes created from the StatefulSets' volumeClaimTemplates (`data-<fullname>-<i>` with silences and the notification log, and those of PostgreSQL and Valkey) stay; delete their PVCs yourself if you no longer need them.
 
 ## License
 

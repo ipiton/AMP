@@ -4,9 +4,7 @@
 # ===============================
 # Application Configuration
 # ===============================
-replicaCount: 1
 environment: development
-logLevel: debug
 
 # ===============================
 # Container Image Configuration
@@ -30,21 +28,10 @@ resources:
 # ===============================
 # Database Configuration (bundled PostgreSQL, dev/pilot only — ADR-016)
 # ===============================
-# The standard profile has no SQLite: AMP requires PostgreSQL there. This used
-# to say "SQLite" with the database disabled, which left AMP pointed at
-# localhost:5432 with nothing listening. For SQLite use profile: lite.
+# Alert history and investigations need PostgreSQL (profile standard). For
+# the core alone use profile: lite.
 postgresql:
   enabled: true
-
-persistence:
-  enabled: true
-  size: 1Gi
-
-# ===============================
-# Cache Configuration (Local Redis)
-# ===============================
-cache:
-  enabled: false
 
 # ===============================
 # LLM Configuration (Development)
@@ -57,24 +44,6 @@ llm:
   model: "openai/gpt-4o"
   timeout: 30
   maxRetries: 3
-  retryDelay: 1.0
-  cacheTtl: 3600
-  batchSize: 5
-
-# ===============================
-# Alert Processing Configuration
-# ===============================
-alerts:
-  retentionDays: 7
-  batchSize: 50
-  maxConcurrentAlerts: 10
-  enableClassification: true
-
-# ===============================
-# Autoscaling Configuration (Disabled for development)
-# ===============================
-autoscaling:
-  enabled: false
 
 # ===============================
 # Publishing Targets (Development)
@@ -110,8 +79,6 @@ ingress:
 # ===============================
 service:
   type: NodePort
-  port: 8080
-  nodePort: 30080
 
 # ===============================
 # Security Configuration (Relaxed for development)

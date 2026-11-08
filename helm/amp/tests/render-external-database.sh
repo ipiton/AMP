@@ -2,11 +2,12 @@
 # Renders the chart and checks the external PostgreSQL values
 # (HELM-EXTERNAL-DATABASE, ADR-016):
 #
-#   - externalDatabase.* becomes DATABASE_* env, the password a secretKeyRef
-#     to the operator's Secret; the insecure-SSL flag is never rendered;
+#   - externalDatabase.* becomes the database section of amp.yaml, the
+#     password a DATABASE_PASSWORD secretKeyRef to the operator's Secret; the
+#     insecure-SSL flag is never rendered;
 #   - missing host companions, an sslMode AMP refuses, both databases at once
 #     and no database at all fail the render;
-#   - the configFile.content fallback is recognized by parsing it as YAML;
+#   - alertmanager.ampConfig.database is the fallback without externalDatabase;
 #   - the bundled PostgreSQL, lite and --reuse-values without the key render
 #     as before;
 #   - values-production.yaml uses the external database and does not render
@@ -50,16 +51,30 @@ assert_docs() {
   if [ "${got}" -eq "$4" ]; then pass "$5"; else fail "$5 (want $4 x ${2}/${3}, got ${got})"; fi
 }
 
-# env_value <file> <name>: the value: line right after "- name: <name>".
-env_value() {
-  awk -v n="- name: $2" '$0 ~ n"$" { getline; sub(/^ *value: /, ""); print; exit }' "$1"
+# cfg_value <file> <dotted.key>: a scalar of the rendered amp.yaml (the
+# <fullname>-amp-config ConfigMap), quotes stripped; no yq in the gate's
+# toolchain, so a flat walk of toYaml's two-space nesting.
+cfg_value() {
+  awk -v want="$2" '
+    /^  amp\.yaml: \|$/ { on = 1; next }
+    on && !/^    / { on = 0 }
+    on {
+      match($0, /^ */); lvl = (RLENGTH - 4) / 2
+      line = substr($0, RLENGTH + 1)
+      k = line; sub(/:.*/, "", k)
+      v = line; if (sub(/^[^:]*: /, "", v) == 0) v = ""
+      path[lvl] = k; p = path[0]
+      for (i = 1; i <= lvl; i++) p = p "." path[i]
+      if (p == want && v != "") { gsub(/^"|"$/, "", v); print v; exit }
+    }' "$1"
 }
 
-# assert_env <file> <name> <expected value, quoted as rendered> <description>
-assert_env() {
-  local got
-  got="$(env_value "$1" "$2")"
-  if [ "${got}" = "$3" ]; then pass "$4"; else fail "$4 (want $2=$3, got '${got}')"; fi
+# assert_cfg <file> <dotted.key> <expected> <description>
+assert_cfg() {
+  local got want="${3#\"}"
+  want="${want%\"}"
+  got="$(cfg_value "$1" "$2")"
+  if [ "${got}" = "${want}" ]; then pass "$4"; else fail "$4 (want $2=${want}, got '${got}')"; fi
 }
 
 # render <name> <helm args...>: renders into ${WORK_DIR}/<name>.yaml; a failed
@@ -88,9 +103,6 @@ render_fails() {
   fi
 }
 
-# content <name> <yaml>: writes a configFile.content candidate.
-content() { printf '%b' "$2" >"${WORK_DIR}/$1.content"; }
-
 if ! command -v helm >/dev/null 2>&1; then
   echo "SKIP: helm not installed"
   exit 0
@@ -101,17 +113,17 @@ EXT=(--set postgresql.enabled=false
   --set externalDatabase.database=amp
   --set externalDatabase.username=amp
   --set externalDatabase.existingSecret=amp-db)
-FLAG="name: DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION"
+FLAG="allow_insecure_ssl_in_production: true"
 NO_DB="postgresql.enabled=false but no database is configured"
 
 echo "T-ext-1 external database env:"
 render ext "${EXT[@]}"
 f="${WORK_DIR}/ext.yaml"
-assert_env "${f}" DATABASE_HOST '"db.example.com"' "ext: DATABASE_HOST"
-assert_env "${f}" DATABASE_PORT '"5432"' "ext: DATABASE_PORT defaults to 5432"
-assert_env "${f}" DATABASE_DATABASE '"amp"' "ext: DATABASE_DATABASE"
-assert_env "${f}" DATABASE_USERNAME '"amp"' "ext: DATABASE_USERNAME"
-assert_env "${f}" DATABASE_SSL_MODE '"require"' "ext: DATABASE_SSL_MODE defaults to require"
+assert_cfg "${f}" database.host '"db.example.com"' "ext: DATABASE_HOST"
+assert_cfg "${f}" database.port '"5432"' "ext: DATABASE_PORT defaults to 5432"
+assert_cfg "${f}" database.database '"amp"' "ext: DATABASE_DATABASE"
+assert_cfg "${f}" database.username '"amp"' "ext: DATABASE_USERNAME"
+assert_cfg "${f}" database.ssl_mode '"require"' "ext: DATABASE_SSL_MODE defaults to require"
 assert_count "${f}" 'name: "amp-db"' 1 "ext: password from the operator's Secret"
 assert_count "${f}" 'key: "password"' 1 "ext: default Secret key is password"
 assert_count "${f}" "name: DATABASE_PASSWORD" 1 "ext: one DATABASE_PASSWORD"
@@ -123,16 +135,16 @@ echo "T-ext-2 overrides:"
 render ext-custom "${EXT[@]}" --set externalDatabase.port=6432 \
   --set externalDatabase.sslMode=verify-full --set externalDatabase.existingSecretPasswordKey=pw
 f="${WORK_DIR}/ext-custom.yaml"
-assert_env "${f}" DATABASE_PORT '"6432"' "ext-custom: port"
-assert_env "${f}" DATABASE_SSL_MODE '"verify-full"' "ext-custom: sslMode"
+assert_cfg "${f}" database.port '"6432"' "ext-custom: port"
+assert_cfg "${f}" database.ssl_mode '"verify-full"' "ext-custom: sslMode"
 assert_count "${f}" 'key: "pw"' 1 "ext-custom: Secret key"
 render ext-port-string "${EXT[@]}" --set-string externalDatabase.port=5433
-assert_env "${WORK_DIR}/ext-port-string.yaml" DATABASE_PORT '"5433"' "ext-port-string: port given as a string"
+assert_cfg "${WORK_DIR}/ext-port-string.yaml" database.port '"5433"' "ext-port-string: port given as a string"
 
 echo "T-ext-3 sslMode: the four values AMP accepts render, others fail:"
 for mode in disable require verify-ca verify-full; do
   render "ssl-${mode}" "${EXT[@]}" --set "externalDatabase.sslMode=${mode}"
-  assert_env "${WORK_DIR}/ssl-${mode}.yaml" DATABASE_SSL_MODE "\"${mode}\"" "ssl-${mode}: DATABASE_SSL_MODE"
+  assert_cfg "${WORK_DIR}/ssl-${mode}.yaml" database.ssl_mode "\"${mode}\"" "ssl-${mode}: DATABASE_SSL_MODE"
 done
 for mode in allow prefer bogus; do
   render_fails "ssl-${mode}" "externalDatabase.sslMode \"${mode}\" is invalid" "${EXT[@]}" --set "externalDatabase.sslMode=${mode}"
@@ -153,46 +165,34 @@ render_fails no-username "externalDatabase.username is required" "${EXT[@]}" --s
 echo "T-ext-6 both databases at once fail:"
 render_fails both "externalDatabase.host is set while postgresql.enabled=true" "${EXT[@]}" --set postgresql.enabled=true
 
-echo "T-ext-7 no database anywhere fails; the configFile fallback is parsed as YAML:"
+echo "T-ext-7 no database anywhere fails; alertmanager.ampConfig.database is the fallback:"
 render_fails no-db "${NO_DB}" --set postgresql.enabled=false
-content block 'database:\n  host: db\n'
-content flow '{database: {host: db}}\n'
-content quoted '"database":\n  host: db\n'
-content nested 'server:\n  database:\n    host: db\n'
-content null 'database: null\n'
-content empty ''
-content no-db 'server:\n  port: 8080\n'
-content invalid 'database: [\n'
-for c in block flow quoted; do
-  render "cfg-${c}" --set postgresql.enabled=false --set configFile.enabled=true --set-file "configFile.content=${WORK_DIR}/${c}.content"
-done
-for c in nested null empty no-db; do
-  render_fails "cfg-${c}" "${NO_DB}" --set postgresql.enabled=false --set configFile.enabled=true --set-file "configFile.content=${WORK_DIR}/${c}.content"
-done
-render_fails cfg-invalid "configFile.content is not valid YAML" \
-  --set postgresql.enabled=false --set configFile.enabled=true --set-file "configFile.content=${WORK_DIR}/invalid.content"
-render_fails cfg-disabled "${NO_DB}" \
-  --set postgresql.enabled=false --set configFile.enabled=false --set-file "configFile.content=${WORK_DIR}/block.content"
-render cfg-and-ext "${EXT[@]}" --set configFile.enabled=true --set-file "configFile.content=${WORK_DIR}/block.content"
-assert_env "${WORK_DIR}/cfg-and-ext.yaml" DATABASE_HOST '"db.example.com"' "cfg-and-ext: externalDatabase wins over configFile (env)"
+render amp-cfg --set postgresql.enabled=false --set alertmanager.ampConfig.database.host=db
+assert_cfg "${WORK_DIR}/amp-cfg.yaml" database.host db "amp-cfg: database from alertmanager.ampConfig"
+render_fails amp-cfg-nested "${NO_DB}" --set postgresql.enabled=false --set alertmanager.ampConfig.server.database.host=db
+render_fails amp-cfg-null "${NO_DB}" --set postgresql.enabled=false --set-json 'alertmanager.ampConfig={"database":null}'
+render_fails amp-cfg-empty "${NO_DB}" --set postgresql.enabled=false --set-json 'alertmanager.ampConfig={"database":{}}'
+render cfg-and-ext "${EXT[@]}" --set alertmanager.ampConfig.database.host=db
+assert_cfg "${WORK_DIR}/cfg-and-ext.yaml" database.host db "cfg-and-ext: alertmanager.ampConfig overrides externalDatabase"
+assert_cfg "${WORK_DIR}/cfg-and-ext.yaml" database.username amp "cfg-and-ext: the rest of externalDatabase stays"
 
 echo "T-ext-8 bundled PostgreSQL, lite and --reuse-values without the key:"
 render bundled
-assert_env "${WORK_DIR}/bundled.yaml" DATABASE_HOST "amp-postgres" "bundled: DATABASE_HOST is the bundled Service"
+assert_cfg "${WORK_DIR}/bundled.yaml" database.host "amp-postgres" "bundled: DATABASE_HOST is the bundled Service"
 assert_count "${WORK_DIR}/bundled.yaml" "${FLAG}" 1 "bundled: insecure-SSL flag still set for the bundled PostgreSQL"
 render reuse-no-key --set externalDatabase=null
-assert_env "${WORK_DIR}/reuse-no-key.yaml" DATABASE_HOST "amp-postgres" "reuse-no-key: bundled branch"
+assert_cfg "${WORK_DIR}/reuse-no-key.yaml" database.host "amp-postgres" "reuse-no-key: bundled branch"
 render lite --set profile=lite "${EXT[@]}" --set postgresql.enabled=true
 assert_count "${WORK_DIR}/lite.yaml" "DATABASE_" 0 "lite: externalDatabase ignored, no guards"
 
 echo "T-ext-9 values-production.yaml renders with an external database:"
-PROD=(-f "${CHART_DIR}/values-production.yaml" --set cache.auth.password=render-test-placeholder)
+PROD=(-f "${CHART_DIR}/values-production.yaml")
 render production "${PROD[@]}" -f "${CHART_DIR}/tests/values-production-placeholders.yaml"
 f="${WORK_DIR}/production.yaml"
 assert_docs "${f}" StatefulSet amp-postgres 0 "production: no bundled PostgreSQL"
 assert_count "${f}" "image: postgres:" 0 "production: no postgres image"
-assert_env "${f}" DATABASE_HOST '"release-gate-placeholder"' "production: DATABASE_HOST from externalDatabase"
-assert_env "${f}" DATABASE_SSL_MODE '"require"' "production: sslMode require"
+assert_cfg "${f}" database.host '"release-gate-placeholder"' "production: DATABASE_HOST from externalDatabase"
+assert_cfg "${f}" database.ssl_mode '"require"' "production: sslMode require"
 assert_count "${f}" "${FLAG}" 0 "production: no insecure-SSL flag"
 
 echo "T-ext-10 values-production.yaml does not render without it:"

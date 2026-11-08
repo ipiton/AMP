@@ -5,7 +5,7 @@ AMP has two GitHub Actions workflows. Everything a pull request is checked again
 | Workflow | Trigger | Permissions | Publishes |
 |---|---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | every pull request, every push to `main` | `contents: read` | nothing |
-| [`release.yml`](../.github/workflows/release.yml) | push of a tag matching `v*` | `contents: read`, `packages: write` (publish job only) | `ghcr.io/ipiton/amp`, `ghcr.io/ipiton/amp-config-reloader` |
+| [`release.yml`](../.github/workflows/release.yml) | push of a tag matching `v*` | `contents: read`, `packages: write` (publish job only) | `ghcr.io/ipiton/amp` |
 
 Publishing lives in its own workflow so that `packages: write` exists only on tag builds. No pull request, including one from a fork, ever runs with a token that can push images.
 
@@ -15,13 +15,13 @@ All third-party actions are pinned to a full commit SHA (the release tag is in a
 
 | Job | What it runs | Required | Why |
 |---|---|---|---|
-| `gate` | [`scripts/release-gate.sh`](../scripts/release-gate.sh): build, lint, tests, `futureparity`, the upstream core gate ([`scripts/upstream-core-gate.sh`](../scripts/upstream-core-gate.sh): contract suites against the known-divergence baseline, plus `amtool` against `cmd/amp-upstream`), `-race` on the concurrency-heavy packages, Helm lint/render/RBAC checks, `amtool` compatibility against a real smoke stack | yes | The release gate is the definition of "releasable". CI runs the same script, unchanged, instead of re-describing it in YAML. |
-| `images (amp)`, `images (config-reloader)` | `docker buildx build` of `Dockerfile` / `Dockerfile.config-reloader` for `linux/amd64,linux/arm64`, no push | yes | A change that breaks either image, on either architecture, is caught before the tag rather than by the release. |
+| `gate` | [`scripts/release-gate.sh`](../scripts/release-gate.sh): build, lint, tests, the upstream core gate ([`scripts/upstream-core-gate.sh`](../scripts/upstream-core-gate.sh): contract suites against the known-divergence baseline, plus `amtool` against `cmd/amp-upstream`), `-race` on the AMP layer packages (`RACE_PKGS`), Helm lint/render/RBAC checks, `amtool` compatibility against a real smoke stack | yes | The release gate is the definition of "releasable". CI runs the same script, unchanged, instead of re-describing it in YAML. |
+| `images (amp)` | `docker buildx build` of `Dockerfile` for `linux/amd64,linux/arm64`, no push | yes | A change that breaks the image, on either architecture, is caught before the tag rather than by the release. |
 | `actionlint` | `actionlint` over `.github/workflows/` | yes | Workflow mistakes otherwise surface only when the workflow runs, and `release.yml` runs only on a tag. |
 | `govulncheck` | `govulncheck ./...` in `go-app` | yes | A vulnerability reachable from AMP code blocks a release. It fails only on reachable (symbol-level) findings. The trade-off: the vulnerability database changes over time, so a new advisory can turn a pull request red even if it does not touch dependencies. The fix is a separate pull request that upgrades the module, not a skip. |
 | `e2e-ha` | [`deploy/e2e-ha/run.sh`](../deploy/e2e-ha/run.sh): two replicas of the upstream core (`/app/amp-upstream`) in one memberlist gossip cluster, in Docker: cluster formation, silence gossip, one notification for an alert sent to both, failover, snapshot restore | not yet | Polls with deadlines instead of fixed waits, but rewritten for the upstream core and still new on shared runners. Becomes required after 10 consecutive green runs on `main` (`CI-E2E-HA-REQUIRED`). |
 
-"Required" means the check that should be listed in branch protection. The workflow itself does not enforce this. Branch protection is repository configuration: *Settings → Branches → `main` → Require status checks to pass*, with the job names exactly as shown above (`gate`, `images (amp)`, `images (config-reloader)`, `actionlint`, `govulncheck`).
+"Required" means the check that should be listed in branch protection. The workflow itself does not enforce this. Branch protection is repository configuration: *Settings → Branches → `main` → Require status checks to pass*, with the job names exactly as shown above (`gate`, `images (amp)`, `actionlint`, `govulncheck`).
 
 `govulncheck` also lists module-level findings, which do not affect the exit code. One of them is expected and permanent: GO-2026-5932 (`golang.org/x/crypto/openpgp` is unmaintained and has no fix). AMP imports only `golang.org/x/crypto/bcrypt` from that module. Image scanners that match by module version will report it as well.
 
@@ -63,11 +63,10 @@ Both Dockerfiles compile Go on the build machine's own architecture and cross-co
    | `latest` | `latest` | only for releases without a pre-release suffix (`v0.1.0-rc.1` does not move `latest`) |
 
    The binary's version, revision, branch and build date (`amp_build_info`, `/api/v2/status`) are injected from the tag and commit.
-3. **Once, after the very first release:** GHCR creates new packages as **private**. Open *GitHub → Packages → `amp`* and *`amp-config-reloader`* → *Package settings → Change visibility → Public*. Until then, `docker pull` and a Helm install without an image pull secret fail with `unauthorized`.
+3. **Once, after the very first release:** GHCR creates new packages as **private**. Open *GitHub → Packages → `amp`* → *Package settings → Change visibility → Public*. Until then, `docker pull` and a Helm install without an image pull secret fail with `unauthorized`.
 
 A tag must match the chart: the chart pulls `.Chart.AppVersion` unless `image.tag` is set, so bump `appVersion` (and `version`) in `helm/amp/Chart.yaml` in the release commit. `release.yml` checks this before logging in to the registry and publishes nothing when the tag without its `v` and pre-release suffix differs from `appVersion` (`v0.1.0` and `v0.1.0-rc.1` both need `appVersion: "0.1.0"`).
 
 ## Not Covered Yet
 
 - SBOM, provenance attestations, image signing (cosign), image scanning, digest-pinned base images, Dependabot for actions, `-race` over the whole module: `CI-SUPPLY-CHAIN`.
-- `helm/amp/tests/render-config-reloader.sh` is not part of the gate yet; run it by hand when touching the chart.

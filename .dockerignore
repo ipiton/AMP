@@ -1,4 +1,4 @@
-# Both Dockerfiles (Dockerfile, Dockerfile.config-reloader) copy only go-app/.
+# The Dockerfile copies only go-app/.
 # Keep the rest of the repo -- above all .git and the agent worktrees under
 # .claude/ -- out of the build context; the image contents do not change.
 .git
@@ -11,5 +11,5 @@ deploy
 # cache (GOCACHE, GOMODCACHE, GOPATH -- gigabytes once filled) and the
 # binaries. The image downloads modules and builds the binary itself.
 go-app/.cache
-go-app/server
-go-app/server_unix
+go-app/amp-upstream
+go-app/amp-upstream_unix

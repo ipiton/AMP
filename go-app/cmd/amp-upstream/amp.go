@@ -12,6 +12,7 @@ import (
 
 	appconfig "github.com/ipiton/AMP/internal/config"
 	"github.com/ipiton/AMP/internal/core"
+	coreinv "github.com/ipiton/AMP/internal/core/investigation"
 	"github.com/ipiton/AMP/internal/core/services"
 	dbmigrations "github.com/ipiton/AMP/internal/database"
 	"github.com/ipiton/AMP/internal/database/postgres"
@@ -26,7 +27,7 @@ import (
 
 const (
 	// investigationStopTimeout bounds the drain of in-flight investigations
-	// on shutdown, as cmd/server's.
+	// on shutdown.
 	investigationStopTimeout = 5 * time.Second
 	// migrationTimeout bounds the migrations at start, the advisory lock
 	// wait included: delivery starts on time even with the database stuck.
@@ -64,7 +65,9 @@ func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.
 	if cfg.LLM.Enabled {
 		llmClient := llm.NewHTTPLLMClient(llmConfig(cfg.LLM), logger)
 		var investigations upstreamai.Submitter
-		if queue := newInvestigations(logger, cfg, pool, llmClient, opts.Registerer); queue != nil {
+		if queue, closeTools := newInvestigations(logger, cfg, pool, llmClient, opts.Registerer); queue != nil {
+			// The tools outlive the queue's workers.
+			stops = append(stops, closeTools)
 			// Stopped after the classifier, the queue's only sender (its
 			// workers and PostStore, which stops submitting at Stop):
 			// Submit on a stopped queue panics.
@@ -103,8 +106,7 @@ func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.
 	return stop, nil
 }
 
-// connectDatabase connects to the history database and migrates it, as
-// cmd/server does. It returns nil, with the reason logged, when the profile
+// connectDatabase connects to the history database and migrates it. It returns nil, with the reason logged, when the profile
 // has none or the database cannot be reached.
 func connectDatabase(logger *slog.Logger, cfg *appconfig.Config) *postgres.PostgresPool {
 	if cfg.Profile != appconfig.ProfileStandard {
@@ -131,8 +133,7 @@ func connectDatabase(logger *slog.Logger, cfg *appconfig.Config) *postgres.Postg
 	return pool
 }
 
-// newHistory writes alert events through the deduplication service, the
-// path cmd/server writes its history rows by.
+// newHistory writes alert events through the deduplication service.
 func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus.Registerer) (*upstreamai.History, error) {
 	storage, err := infrastructure.NewPostgresStorageAdapter(pool.SharePool(), logger)
 	if err != nil {
@@ -161,19 +162,18 @@ func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus
 
 // newInvestigations starts the investigation queue, or returns nil, with the
 // reason logged, when it is off. The queue dedups per replica: the shared
-// claim needs Redis (UPSTREAM-HA-MEMBERLIST).
-func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, pool *postgres.PostgresPool, client *llm.HTTPLLMClient, reg prometheus.Registerer) *investigationinfra.InvestigationQueue {
+// claim needs Redis (UPSTREAM-AI-HA-DEDUP). With llm.agent_mode it runs the
+// agentic loop (agent.go); closeTools releases the loop's tools after the
+// queue has stopped.
+func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, pool *postgres.PostgresPool, client *llm.HTTPLLMClient, reg prometheus.Registerer) (queue *investigationinfra.InvestigationQueue, closeTools func()) {
 	inv := cfg.Investigation
 	switch {
 	case !inv.Enabled:
 		logger.Info("alert investigation disabled (investigation.enabled=false)")
-		return nil
+		return nil, nil
 	case pool == nil:
 		logger.Warn("alert investigation disabled: it stores its results in PostgreSQL, which is unavailable")
-		return nil
-	}
-	if cfg.LLM.AgentMode {
-		logger.Warn("llm.agent_mode is not supported by amp-upstream yet: investigations run without tools and runbooks")
+		return nil, nil
 	}
 
 	qCfg := investigationinfra.DefaultQueueConfig()
@@ -198,10 +198,18 @@ func newInvestigations(logger *slog.Logger, cfg *appconfig.Config, pool *postgre
 	}
 
 	repo := investigationrepo.NewPostgresInvestigationRepositoryWithRegisterer(pool.SharePool(), logger, reg)
-	queue := investigationinfra.NewInvestigationQueue(repo, client, qCfg, logger, reg)
+	queue = investigationinfra.NewInvestigationQueue(repo, client, qCfg, logger, reg)
+	closeTools = func() {}
+	if cfg.LLM.AgentMode {
+		var loop *coreinv.AgentLoop
+		loop, closeTools = newAgentLoop(logger, cfg, client)
+		queue.SetAgentLoop(loop)
+	} else if inv.Runbooks.Enabled {
+		logger.Warn("investigation.runbooks.enabled is set but runbooks require llm.agent_mode=true; runbooks disabled")
+	}
 	queue.Start()
-	logger.Info("alert investigation enabled", "workers", qCfg.WorkerCount, "queue_size", qCfg.QueueSize)
-	return queue
+	logger.Info("alert investigation enabled", "workers", qCfg.WorkerCount, "queue_size", qCfg.QueueSize, "agent_mode", cfg.LLM.AgentMode)
+	return queue, closeTools
 }
 
 // warnOnly passes a handler's records from Warn up.

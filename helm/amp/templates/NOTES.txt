@@ -6,22 +6,39 @@ Your release "{{ .Release.Name }}" has been deployed to namespace "{{ .Release.N
   Profile: {{ .Values.profile | upper }}
 =============================================================================
 
+{{- $replicas := int .Values.alertmanager.replicas }}
+{{- $fullname := include "amp.fullname" . }}
+{{- $ns := include "amp.namespace" . }}
+
+Alertmanager core (amp-upstream): StatefulSet {{ $fullname }}, {{ $replicas }} replica(s)
+{{- if eq $replicas 0 }}
+⚠️  alertmanager.replicas is 0: AMP is stopped and receives no alerts.
+{{- end }}
+{{- if gt $replicas 1 }}, gossip cluster over {{ include "amp.headlessName" . }}
+⚠️  Every pod must receive every alert: point Prometheus at each pod
+   ({{ $fullname }}-<i>.{{ include "amp.headlessName" . }}.{{ $ns }}.svc:9093), not at the Service.
+{{- if .Values.llm.enabled }}
+⚠️  llm.enabled with {{ $replicas }} replicas: every pod classifies every alert, {{ $replicas }} LLM calls
+   per alert (UPSTREAM-AI-HA-DEDUP).
+{{- end }}
+{{- if and (eq .Values.profile "standard") .Values.investigation.enabled }}
+⚠️  investigation.enabled with {{ $replicas }} replicas: every pod investigates every alert
+   (UPSTREAM-AI-HA-DEDUP).
+{{- end }}
+{{- end }}
+External URL: {{ include "amp.externalURL" . }}
+{{- if .Values.webConfig.existingSecret }}
+✅ Basic auth from Secret {{ .Values.webConfig.existingSecret }} (probes stay open)
+{{- else }}
+ℹ️  No HTTP authentication (webConfig.existingSecret)
+{{- end }}
+
 {{- if eq .Values.profile "lite" }}
 
-🪶 LITE PROFILE (Single-Node, Embedded Storage)
-────────────────────────────────────────────────
-✅ SQLite embedded storage (PVC-based)
-✅ Memory-only cache (L1)
-✅ Zero external dependencies
-✅ Single replica (no autoscaling)
+🪶 LITE PROFILE: the core alone, no alert history, investigations or K8s-Secret targets
+{{- else }}
 
-{{- $lres := .Values.resources | default dict }}
-Resources: requests {{ dig "requests" "cpu" "-" $lres }} CPU / {{ dig "requests" "memory" "-" $lres }}
-Use Case: Dev, test, small deployments (<1K alerts/day)
-
-{{- else if eq .Values.profile "standard" }}
-
-⚡ STANDARD PROFILE (Distributed)
+⚡ STANDARD PROFILE
 ────────────────────────────────────────────────
 {{- if .Values.postgresql.enabled }}
 ⚠️  Bundled PostgreSQL: single instance, dev/pilot only — no replication, no backups (ADR-016)
@@ -30,114 +47,55 @@ Use Case: Dev, test, small deployments (<1K alerts/day)
 {{- $ext := .Values.externalDatabase }}
 ✅ External PostgreSQL: {{ $ext.host }}:{{ $ext.port | default 5432 }}/{{ $ext.database }} (sslmode={{ $ext.sslMode | default "require" }}), password from Secret {{ $ext.existingSecret }}/{{ $ext.existingSecretPasswordKey | default "password" }}
 {{- else }}
-⚠️  External PostgreSQL from the `database:` section of configFile.content: its password
-   sits in a ConfigMap. Prefer externalDatabase.* with existingSecret (README → PostgreSQL).
+⚠️  External PostgreSQL from alertmanager.ampConfig.database: its password sits in a
+   ConfigMap. Prefer externalDatabase.* with existingSecret (README → PostgreSQL).
 {{- end }}
-{{- if not .Values.cache.enabled }}
-ℹ️  Cache off: AMP keeps grouping state in memory (cache.enabled)
-{{- else if include "amp.cache.bundled" . }}
-✅ Valkey L2 + Memory L1 cache, password from Secret {{ include "amp.valkey.secretName" . }}/{{ include "amp.valkey.secretKey" . }}
-{{- if or .Values.cache.auth.enabled .Values.cache.auth.existingSecret .Values.cache.auth.password }}
-⚠️  cache.auth.* is ignored for the chart's Valkey: AMP reads Valkey's own password
-   (valkey.password.*). cache.auth.* applies to an external cache.host.
+{{- if .Values.postgresql.enabled }}
+{{- $maxConn := int64 ((.Values.postgresql.config | default dict).maxConnections | default 100) }}
+{{- if gt (add (mul $replicas 25) 5) $maxConn }}
+⚠️  The bundled PostgreSQL allows max_connections={{ $maxConn }}, less than replicas × 25 + 5
+   ({{ add (mul $replicas 25) 5 }}). Raise postgresql.config.maxConnections (with memory) or use an
+   external PostgreSQL.
 {{- end }}
-{{- if .Release.IsUpgrade }}
-ℹ️  After the upgrade the AMP log should say "Redis cache initialized" — AMP waits up to
-   redis.startup_wait (60s) for Valkey to come back. On "falling back to in-memory cache"
-   (Valkey was not ready within that window):
-   kubectl -n {{ .Release.Namespace }} rollout restart deploy/{{ include "amp.fullname" . }}
-{{- end }}
-{{- else }}
-{{- if .Values.cache.auth.existingSecret }}
-✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache, password from Secret {{ .Values.cache.auth.existingSecret }}/{{ .Values.cache.auth.existingSecretPasswordKey | default "password" }}
-{{- else if .Values.cache.auth.enabled }}
-✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache, password from cache.auth.password
-{{- else }}
-✅ External cache L2 ({{ tpl .Values.cache.host . }}) + Memory L1 cache, no password
 {{- end }}
 {{- if gt (int .Values.valkey.replicas) 0 }}
-ℹ️  The chart's Valkey ({{ include "amp.fullname" . }}-redis) still runs but AMP does not use it:
-   set valkey.replicas: 0 to remove its pod.
-{{- end }}
-{{- end }}
-{{- if .Values.autoscaling.enabled }}
-✅ HPA autoscaling ({{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas)
-{{- else }}
-ℹ️  HPA off: fixed {{ .Values.replicaCount }} replica(s) (autoscaling.enabled or values-production.yaml for HA)
-{{- if lookup "autoscaling/v2" "HorizontalPodAutoscaler" .Release.Namespace (include "amp.fullname" .) }}
-⚠️  An HPA {{ include "amp.fullname" . }} left by an older chart (helm.sh/resource-policy: keep) still
-   scales this Deployment, up to its maxReplicas. Delete it:
-   kubectl -n {{ .Release.Namespace }} delete hpa {{ include "amp.fullname" . }}
+ℹ️  Valkey ({{ $fullname }}-redis) runs, but amp-upstream does not use it yet
+   (UPSTREAM-AI-HA-DEDUP); valkey.replicas: 0 stops its pod.
 {{- end }}
 {{- end }}
 
 {{- $res := .Values.resources | default dict }}
 Resources (per AMP pod): requests {{ dig "requests" "cpu" "-" $res }} CPU / {{ dig "requests" "memory" "-" $res }}, limits {{ dig "limits" "cpu" "-" $res }} CPU / {{ dig "limits" "memory" "-" $res }}
-Use Case: one node by default; high volume / HA with autoscaling and an external PostgreSQL
-
-{{- if .Values.autoscaling.enabled }}
-
-🚨 CRITICAL: Database Connection Pool
-────────────────────────────────────────────────
-Your HPA is configured for {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas.
-
-Connection calculation:
-  {{ .Values.autoscaling.maxReplicas }} replicas × 25 conns/pod (database.max_connections default) = {{ mul .Values.autoscaling.maxReplicas 25 }} connections
-
-{{- if .Values.postgresql.enabled }}
-{{- $maxConn := int64 ((.Values.postgresql.config | default dict).maxConnections | default 100) }}
-{{- if gt (add (mul .Values.autoscaling.maxReplicas 25) 5) $maxConn }}
-⚠️  The bundled PostgreSQL allows max_connections={{ $maxConn }}, less than maxReplicas × 25 + 5
-   ({{ add (mul .Values.autoscaling.maxReplicas 25) 5 }}, the exporter and psql sessions included). Lower
-   autoscaling.maxReplicas, raise postgresql.config.maxConnections (with memory), or use an
-   external PostgreSQL.
-{{- end }}
-{{- else }}
-   Make sure the external PostgreSQL allows at least {{ mul .Values.autoscaling.maxReplicas 25 }} connections
-   (or put PgBouncer in front of it).
-{{- end }}
-{{- end }}
-{{- end }}
 
 {{- $grace := int (.Values.gracefulShutdown.terminationGracePeriodSeconds | default 40) }}
 {{- $preStop := int .Values.gracefulShutdown.preStopDelay }}
-{{- $timeout := int (.Values.gracefulShutdown.timeoutSeconds | default 30) }}
-{{- if lt $grace (add $preStop $timeout) }}
+{{- if lt $grace (add $preStop 10) }}
 
 ⚠️  WARNING: gracefulShutdown.terminationGracePeriodSeconds ({{ $grace }}) is less than
-   preStopDelay ({{ $preStop }}) + timeoutSeconds ({{ $timeout }}) = {{ add $preStop $timeout }}.
-   The kubelet may SIGKILL AMP before in-flight requests drain and the final
-   state is written. Raise terminationGracePeriodSeconds to at least {{ add $preStop $timeout }}.
+   preStopDelay ({{ $preStop }}) + 10s. The kubelet may SIGKILL AMP before the HTTP drain
+   (up to 5s) and the final silence/notification-log snapshot. Raise it to at least {{ add $preStop 10 }}.
 {{- end }}
 
 =============================================================================
   Getting Started
 =============================================================================
 
-1. Check deployment status:
+- Check the pods:
 
-   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "amp.name" . }}
-
-{{- if .Values.autoscaling.enabled }}
-
-2. Check HPA status:
-
-   kubectl get hpa {{ include "amp.fullname" . }} -n {{ .Release.Namespace }}
-
-{{- end }}
+   kubectl get pods -n {{ $ns }} -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=application
 
 {{- if and (eq .Values.profile "standard") .Values.postgresql.enabled }}
 
-3. Check PostgreSQL:
+- Check PostgreSQL:
 
-   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database
+   kubectl get pods -n {{ $ns }} -l app.kubernetes.io/component=database
 
 {{- if .Values.postgresql.config }}
 {{- if .Values.postgresql.config.maxConnections }}
 
-4. Verify PostgreSQL configuration:
+- Verify PostgreSQL configuration:
 
-   kubectl exec -it $(kubectl get pod -n {{ .Release.Namespace }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ .Release.Namespace }} -- \
+   kubectl exec -it $(kubectl get pod -n {{ $ns }} -l app.kubernetes.io/component=database -o name | head -1) -n {{ $ns }} -- \
      psql -U {{ .Values.postgresql.username }} -d {{ .Values.postgresql.database }} -c "SHOW max_connections;"
 
    Expected: {{ .Values.postgresql.config.maxConnections }}
@@ -145,23 +103,23 @@ Connection calculation:
 {{- end }}
 {{- end }}
 
-5. Access the application:
+- Access the application:
 
 {{- if contains "NodePort" .Values.service.type }}
 
-   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "amp.fullname" . }})
-   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+   export NODE_PORT=$(kubectl get --namespace {{ $ns }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "amp.fullname" . }})
+   export NODE_IP=$(kubectl get nodes --namespace {{ $ns }} -o jsonpath="{.items[0].status.addresses[0].address}")
    echo "URL: http://$NODE_IP:$NODE_PORT"
 
 {{- else if contains "LoadBalancer" .Values.service.type }}
 
-   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "amp.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   export SERVICE_IP=$(kubectl get svc --namespace {{ $ns }} {{ include "amp.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
    echo "URL: http://$SERVICE_IP:{{ .Values.service.port }}"
 
 {{- else if contains "ClusterIP" .Values.service.type }}
 
-   kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "amp.fullname" . }} 8080:{{ .Values.service.port }}
-   echo "URL: http://localhost:8080"
+   kubectl port-forward --namespace {{ $ns }} svc/{{ include "amp.fullname" . }} 9093:{{ .Values.service.port }}
+   echo "URL: http://localhost:9093{{ include "amp.pathPrefix" . }}"
 
 {{- end }}
 

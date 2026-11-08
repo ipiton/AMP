@@ -1,0 +1,15 @@
+# Single-node smoke e2e config: a plain upstream alertmanager.yml, loaded by
+# amp-upstream (ADR-019). The webhook receiver is the sink
+# (webhook_receiver.py); short timers keep the run well under two minutes.
+route:
+  receiver: default
+  group_by: [alertname]
+  group_wait: 3s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://webhook:8090/webhook
+        send_resolved: true

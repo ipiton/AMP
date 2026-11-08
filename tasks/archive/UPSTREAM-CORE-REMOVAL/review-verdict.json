@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/upstream-core-removal",
+  "commit": "4898a8e",
+  "reviewed_at": "2026-11-08",
+  "findings": { "blocker": 0, "major": 5, "minor": 13, "nit": 7 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

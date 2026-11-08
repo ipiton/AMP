@@ -7,7 +7,7 @@
 #
 #   helm template amp helm/amp -f helm/amp/values-production.yaml \
 #     -f helm/amp/tests/values-production-placeholders.yaml \
-#     --set postgresql.password=... --set cache.auth.password=...
+#     --set postgresql.password=...
 webConfig:
   existingSecret: release-gate-placeholder
 

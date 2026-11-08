@@ -8,9 +8,9 @@
 # the repo root) -- same layout as deploy/e2e-ha, whose Dockerfile COPY
 # paths are rooted at go-app/ one level below the repo root.
 #
-# Two services only: the app (lite profile, no Postgres/Redis -- see
-# config.yaml) and a minimal webhook sink (webhook_receiver.py) that stands
-# in for a real alerting destination. This complements deploy/e2e-ha's
+# Two services only: the app (amp-upstream with a plain alertmanager.yml, no
+# AMP config, so no Postgres) and a minimal webhook sink
+# (webhook_receiver.py) that stands in for a real alerting destination. This complements deploy/e2e-ha's
 # 2-replica HA test with a fast single-node pre-release check.
 name: amp-smoke
 
@@ -33,28 +33,21 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    environment:
-      AMP_CONFIG_FILE: /app/config.yaml
-      # internal/infrastructure/routing/parser.go's https_production custom
-      # validator tag only allows a plaintext http:// webhook_configs[].url
-      # when this OS env var (NOT a config.yaml key) is "development" --
-      # otherwise a config with an http:// target fails route/receivers
-      # validation entirely and the app exits with "failed to load
-      # configuration". This smoke stack has
-      # no TLS-terminating sidecar, so plaintext HTTP to the webhook sink is
-      # the point.
-      ENVIRONMENT: development
+    # One node: no gossip listener.
+    command:
+      - --config.file=/etc/amp/alertmanager.yml
+      - --storage.path=/data
+      - --cluster.listen-address=
     volumes:
       # AMP_SMOKE_CONFIG_DIR is a run.sh-managed mktemp scratch dir (never
-      # this repo's own deploy/smoke/), seeded with a copy of config.yaml.
-      # NOT :ro -- run.sh's reload step overwrites <dir>/config.yaml with
-      # config-reloaded.yaml's content, then POSTs /-/reload. Falls back to
-      # this directory for a manual `docker compose up` (read-only use only
-      # -- the fallback path IS the tracked config.yaml, so writing to it
-      # would dirty the repo).
-      - ${AMP_SMOKE_CONFIG_DIR:-.}/config.yaml:/app/config.yaml
+      # this repo's own deploy/smoke/), seeded with a copy of
+      # alertmanager.yml. NOT :ro -- run.sh's reload step overwrites it with
+      # alertmanager-reloaded.yml, then POSTs /-/reload. Falls back to this
+      # directory for a manual `docker compose up` (read-only use only --
+      # the fallback path IS the tracked alertmanager.yml).
+      - ${AMP_SMOKE_CONFIG_DIR:-.}/alertmanager.yml:/etc/amp/alertmanager.yml
     ports:
-      - "18080:8080"
+      - "18080:9093"
     depends_on:
       webhook:
         condition: service_healthy

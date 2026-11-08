@@ -1,14 +1,13 @@
+{{- /* api/v2, /-/*, /metrics of every AMP pod. */}}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "amp.fullname" . }}
-  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  namespace: {{ include "amp.namespace" . }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
-    # Metadata only, so the ServiceMonitor can select this Service and not the
-    # postgres/redis ones. spec.selector stays selectorLabels: changing it in
-    # the same release would drop the old pods from the endpoints before the
-    # new ones are ready.
+    # The ServiceMonitor selects this Service, not the headless one or the
+    # postgres/Valkey Services, by component.
     app.kubernetes.io/component: application
   {{- with .Values.service.annotations }}
   annotations:
@@ -16,22 +15,10 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.service.type }}
-  # No session affinity for stateless load balancing
-  sessionAffinity: None
-  # Load balancing configuration
-  {{- if .Values.service.loadBalancerPolicy }}
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: {{ .Values.service.sessionAffinityTimeout | default 10800 }}
-  {{- end }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: http
+    - name: web
+      port: {{ .Values.service.port }}
+      targetPort: web
       protocol: TCP
-      name: http
-    - port: {{ .Values.service.metricsPort | default 9090 }}
-      targetPort: metrics
-      protocol: TCP
-      name: metrics
   selector:
-    {{- include "amp.selectorLabels" . | nindent 4 }}
+    {{- include "amp.appSelectorLabels" . | nindent 4 }}
