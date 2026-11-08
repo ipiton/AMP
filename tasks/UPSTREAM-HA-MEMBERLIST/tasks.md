@@ -71,11 +71,11 @@ updated_at: 2026-11-08
 
 ## Phase 7: Tests (после verdict)
 
-- [ ] 7.1 `upstreamcore/cluster_test.go`: две реплики — кластер из 2, silence gossip, одно уведомление в webhook на алерт в обе; без кластера — `cluster` в статусе нет, `alertmanager_cluster_enabled` 0.
+- [x] 7.1 `upstreamcore/cluster_test.go`: две реплики — кластер из 2, silence gossip, одно уведомление в webhook на алерт в обе; без кластера — `cluster.status` = `disabled` без пиров (так отвечает upstream; исходное ожидание «секции нет» было неверным), `alertmanager_cluster_enabled` 0. Мутация `waitFunc` → 0 даёт два уведомления — тест её ловит.
   verify: `cd go-app && go test -race -count=1 ./internal/upstreamcore/`
-- [ ] 7.2 `cmd/amp-upstream`: повторяемый флаг `--cluster.peer`.
+- [x] 7.2 `cmd/amp-upstream`: повторяемый флаг `--cluster.peer`.
   verify: `cd go-app && go test ./cmd/amp-upstream/`
-- [ ] 7.3 `helm/amp/tests/render-upstream-core.sh`: умолчания без объектов, 1 реплика без кластера, 3 реплики с пирами, селекторы, префикс external URL, `replicas: 0` падает.
+- [x] 7.3 `helm/amp/tests/render-upstream-core.sh`: умолчания без объектов, 1 реплика без кластера, 3 реплики с пирами, селекторы, префикс external URL, `replicas: 0` падает.
   verify: `bash helm/amp/tests/render-upstream-core.sh`
 
 ## Phase 8: Testing и finalize

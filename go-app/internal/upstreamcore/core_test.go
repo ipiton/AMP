@@ -44,6 +44,7 @@ type testCore struct {
 	core       *Core
 	srv        *httptest.Server
 	configFile string
+	registry   *prometheus.Registry
 }
 
 // newTestCore starts a core on its own registry (a second New on the same
@@ -51,17 +52,28 @@ type testCore struct {
 // directory is removed.
 func newTestCore(t *testing.T, webhookURL string) *testCore {
 	t.Helper()
+	return newTestCoreWith(t, webhookURL, nil)
+}
+
+// newTestCoreWith is newTestCore with a hook to set further Options.
+func newTestCoreWith(t *testing.T, webhookURL string, set func(*Options)) *testCore {
+	t.Helper()
 	dir := t.TempDir()
 	configFile := filepath.Join(dir, "alertmanager.yml")
 	require.NoError(t, os.WriteFile(configFile, fmt.Appendf(nil, testConfig, webhookURL), 0o600))
 
-	core, err := New(Options{
+	registry := prometheus.NewRegistry()
+	opts := Options{
 		ConfigFile:  configFile,
 		DataDir:     filepath.Join(dir, "data"),
 		ExternalURL: &url.URL{Scheme: "http", Host: "am.example"},
 		Logger:      slog.New(slog.DiscardHandler),
-		Registerer:  prometheus.NewRegistry(),
-	})
+		Registerer:  registry,
+	}
+	if set != nil {
+		set(&opts)
+	}
+	core, err := New(opts)
 	require.NoError(t, err)
 	srv := httptest.NewServer(core.Handler())
 	// Handler contract: stop serving before Stop.
@@ -69,7 +81,7 @@ func newTestCore(t *testing.T, webhookURL string) *testCore {
 		srv.Close()
 		core.Stop()
 	})
-	return &testCore{core: core, srv: srv, configFile: configFile}
+	return &testCore{core: core, srv: srv, configFile: configFile, registry: registry}
 }
 
 func (tc *testCore) do(t *testing.T, method, path string, body any) (int, []byte) {
