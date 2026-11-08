@@ -1046,3 +1046,49 @@ affinity:
             values:
             - amp
         topologyKey: kubernetes.io/hostname
+
+# ===============================
+# Upstream Alertmanager core (ADR-019, UPSTREAM-HA-MEMBERLIST)
+# ===============================
+# Transitional: renders the upstream core (/app/amp-upstream, one
+# alertmanager.yml, api/v2 on port 9093) as a StatefulSet NEXT TO the AMP
+# Deployment above, with its own Services. Nothing above routes to it: point
+# Prometheus at <fullname>-upstream:9093. Slice 5 (UPSTREAM-CORE-REMOVAL)
+# makes it the only workload and moves Ingress, ServiceMonitor,
+# NetworkPolicy and PDB onto it.
+upstreamCore:
+  enabled: false
+  # 1: no gossip cluster (--cluster.listen-address=). > 1: the pods form an
+  # upstream memberlist cluster over the headless Service (gossip on 9094
+  # TCP+UDP): silences and the notification log are replicated, every pod
+  # must receive every alert (Prometheus: list all pods, not the Service),
+  # and a notification goes out once.
+  replicas: 1
+  # --web.external-url; empty: http://<fullname>-upstream.<namespace>.svc:9093/.
+  # Its path prefixes every endpoint, probes included.
+  externalURL: ""
+  # --cluster.peer-timeout: how long each pod waits per peer ahead of it
+  # before notifying (upstream default).
+  peerTimeout: 15s
+  # alertmanager.yml, as upstream Alertmanager reads it. A change rolls the
+  # pods (checksum/config); there is no reload sidecar yet (slice 5).
+  config:
+    route:
+      receiver: default
+    receivers:
+      - name: default
+  # Silence and notification-log snapshots (--storage.path=/data), one
+  # volume per pod via volumeClaimTemplates. Not removed with the release.
+  persistence:
+    size: 1Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  # Extra amp-upstream flags, e.g. --cluster.tls-config=..., --cluster.label=...
+  extraArgs: []

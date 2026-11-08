@@ -42,28 +42,26 @@ updated_at: 2026-11-08
 
 ## Phase 3: 4b — образ
 
-- [ ] 3.1 `Dockerfile`: второй `go build` → `/app/amp-upstream`.
+- [x] 3.1 `Dockerfile`: второй `go build` → `/app/amp-upstream`.
   verify: `docker build -t amp:ha-test . && docker run --rm --entrypoint /app/amp-upstream amp:ha-test --help`
 
 ## Phase 4: 4b — чарт
 
-- [ ] 4.1 `values.yaml` § `upstreamCore`, помощники в `_helpers.tpl`.
+- [x] 4.1 `values.yaml` § `upstreamCore`, помощники в `_helpers.tpl`.
   verify: `helm lint helm/amp`
-- [ ] 4.2 `upstream-configmap.yaml`, `upstream-service.yaml`, `upstream-service-headless.yaml`, `upstream-statefulset.yaml`.
+- [x] 4.2 `upstream-configmap.yaml`, `upstream-service.yaml`, `upstream-service-headless.yaml`, `upstream-statefulset.yaml`.
   verify: `helm template t helm/amp --set upstreamCore.enabled=true --set upstreamCore.replicas=3 | kubeconform`-эквивалент: `helm lint helm/amp --set upstreamCore.enabled=true`
   depends: 4.1
-- [ ] 4.3 `tests/render-upstream-core.sh`.
-  verify: `bash helm/amp/tests/render-upstream-core.sh`
-  depends: 4.2
-- [ ] 4.4 `helm/amp/README.md` (секция upstream core), `helm/amp/CHANGELOG.md`.
+- 4.3 перенесён в 7.3: тест рендера пишется после verdict (Full).
+- [x] 4.4 `helm/amp/README.md` (секция upstream core), `helm/amp/CHANGELOG.md`.
   verify: `git diff --check`
 
 ## Phase 5: 4b — e2e-ha
 
-- [ ] 5.1 `docker-compose.yml`, `alertmanager.yml`, `run.sh` под memberlist (опрос вместо фиксированных ожиданий).
+- [x] 5.1 `docker-compose.yml`, `alertmanager.yml`, `run.sh` под memberlist (опрос вместо фиксированных ожиданий).
   verify: `./deploy/e2e-ha/run.sh` → `ALL PASS`
   depends: 3.1
-- [ ] 5.2 `docs/CI.md`, комментарий в `ci.yml`.
+- [x] 5.2 `docs/CI.md`, комментарий в `ci.yml`; висячая ссылка на `e2e-ha/config.yaml` в `deploy/smoke/config.yaml`.
   verify: `git diff --check`
 
 ## Phase 6: Review
@@ -77,6 +75,8 @@ updated_at: 2026-11-08
   verify: `cd go-app && go test -race -count=1 ./internal/upstreamcore/`
 - [ ] 7.2 `cmd/amp-upstream`: повторяемый флаг `--cluster.peer`.
   verify: `cd go-app && go test ./cmd/amp-upstream/`
+- [ ] 7.3 `helm/amp/tests/render-upstream-core.sh`: умолчания без объектов, 1 реплика без кластера, 3 реплики с пирами, селекторы, префикс external URL, `replicas: 0` падает.
+  verify: `bash helm/amp/tests/render-upstream-core.sh`
 
 ## Phase 8: Testing и finalize
 

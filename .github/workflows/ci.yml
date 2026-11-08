@@ -110,9 +110,9 @@ jobs:
       - working-directory: go-app
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-  # Two-replica HA scenario (deploy/e2e-ha). Timing-based on a shared
-  # runner, so it is not required until it has a clean track record
-  # (BACKLOG CI-E2E-HA-REQUIRED).
+  # Two-replica HA scenario of the upstream core over memberlist
+  # (deploy/e2e-ha). Not required until it has a clean track record on
+  # shared runners (BACKLOG CI-E2E-HA-REQUIRED).
   e2e-ha:
     runs-on: ubuntu-latest
     timeout-minutes: 20

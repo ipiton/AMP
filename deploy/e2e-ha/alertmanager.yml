@@ -1,0 +1,13 @@
+# Upstream Alertmanager configuration for the two-replica HA scenario
+# (run.sh). Every notification goes to the sink container, which prints one
+# line per webhook POST.
+route:
+  receiver: sink
+  group_by: [alertname]
+  group_wait: 2s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: sink
+    webhook_configs:
+      - url: http://sink:8080/hook

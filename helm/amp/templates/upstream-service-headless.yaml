@@ -1,0 +1,33 @@
+{{- if .Values.upstreamCore.enabled }}
+{{- /*
+Stable pod DNS names for the StatefulSet: the --cluster.peer addresses and
+the per-pod targets Prometheus must send every alert to. Not-ready pods are
+published, so a starting pod's peers resolve before its readiness probe
+passes (Join runs at startup and memberlist retries only lost peers).
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "amp.upstream.headlessName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.upstream.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: web
+      port: 9093
+      targetPort: web
+      protocol: TCP
+    - name: gossip-tcp
+      port: 9094
+      targetPort: gossip-tcp
+      protocol: TCP
+    - name: gossip-udp
+      port: 9094
+      targetPort: gossip-udp
+      protocol: UDP
+  selector:
+    {{- include "amp.upstream.selectorLabels" . | nindent 4 }}
+{{- end }}
