@@ -46,10 +46,10 @@ based_on:
 
 ## Phase 3: Тесты (после `review-verdict.json` `"gate": "pass"`)
 
-- [ ] **3.1** `ampapi`: 400/404/503/500/200 для обоих маршрутов, FNV/SHA, регистр, префикс (в том числе `/a{b}`), HEAD, 405 JSON с `Allow`, 404 JSON (неизвестный путь, trailing slash, пустой fp), таймаут в контексте ридера, метрики на `prometheus.NewRegistry()` (F15). <!-- verify: cd go-app && go test ./internal/ampapi/ -->
-- [ ] **3.2** Композиция: байты `/api/v2/status`, `/api/v2/alerts`, `/api/v2/inhibitions`, `/api/v1/alerts` = `core.Handler()`; `/api/amp/…` → AMP; префикс; auth закрывает AMP-маршруты. <!-- verify: cd go-app && go test ./cmd/amp-upstream/ -->
-- [ ] **3.3** testcontainers: обе миграции up/down/up; `SaveAlert`/`UpdateAlert` пишут FNV = `model.LabelSet.Fingerprint()`; поиск по обоим ключам, коллизия; backfill заполняет NULL и идемпотентен; `UpstreamFingerprintIndexValid` — true, false без индекса, false на INVALID (`UPDATE pg_index SET indisvalid=false`); `EXPLAIN` запроса backfill (F5) — в лог теста. <!-- verify: cd go-app && go test ./internal/infrastructure/ ./internal/database/ -run 'Upstream|Migration' -count=1 -->
-- [ ] **3.4** `AlertRecordBy*` + investigation end-to-end на PG: `ampapi` поверх настоящих ридеров. <!-- depends: 3.3 | verify: cd go-app && go test ./internal/ampapi/ -count=1 -->
+- [x] **3.1** `ampapi`: 400/404/503/500/200 для обоих маршрутов, FNV/SHA, регистр, префикс (в том числе `/a{b}`), HEAD, 405 JSON с `Allow`, 404 JSON (неизвестный путь, trailing slash, пустой fp), таймаут в контексте ридера, метрики на `prometheus.NewRegistry()` (F15). <!-- verify: cd go-app && go test ./internal/ampapi/ -->
+- [x] **3.2** Композиция: байты `/api/v2/status`, `/api/v2/alerts`, `/api/v2/inhibitions`, `/api/v1/alerts` = `core.Handler()`; `/api/amp/…` → AMP; префикс; auth закрывает AMP-маршруты. <!-- verify: cd go-app && go test ./cmd/amp-upstream/ -->
+- [x] **3.3** testcontainers: обе миграции up/down/up; `SaveAlert`/`UpdateAlert` пишут FNV = `model.LabelSet.Fingerprint()`; поиск по обоим ключам, коллизия; backfill заполняет NULL и идемпотентен; `UpstreamFingerprintIndexValid` — true, false без индекса, false на INVALID (`UPDATE pg_index SET indisvalid=false`); `EXPLAIN` запроса backfill (F5) — в лог теста. <!-- verify: cd go-app && go test ./internal/infrastructure/ -run 'Upstream|Backfill' -count=1 -->
+- [x] **3.4** `AlertRecordBy*` + investigation end-to-end на PG: `ampapi` поверх настоящих ридеров. <!-- depends: 3.3 | verify: cd go-app && go test ./internal/infrastructure/ -run AMPAPIOnPostgres -count=1 -->
 
 **Phase verification:** `cd go-app && go test ./internal/ampapi/ ./cmd/amp-upstream/ ./internal/infrastructure/ ./internal/database/ -count=1`
 
@@ -75,3 +75,4 @@ based_on:
 
 - 2.4: smoke нашёл 500 на строке с `starts_at = NULL` (колонка nullable, такие строки возможны от старых писателей). `AlertRecordBy*` читает `starts_at` как nullable, ответ опускает пустые времена; все времена ответа — UTC. В Spec § API `starts_at` — «если есть».
 - Backfill пропускает строку с нечитаемыми labels (`Warn`), а не останавливается на ней навсегда.
+- 3.3/3.4: PG-тесты лежат в `internal/infrastructure/postgres_alert_records_test.go`, а не в `internal/database/`: up/down/up обеих миграций там же, через goose provider. Тест 3.4 там же, потому что `ampapi` проверяется поверх настоящих ридеров. `EXPLAIN` запроса backfill на тестовой таблице (8 строк) — seq scan; на таком объёме это ожидаемо и ничего не говорит о F5 на большой таблице, там остаётся рассуждение (B-tree индексирует NULL).
