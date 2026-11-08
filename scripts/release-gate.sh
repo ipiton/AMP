@@ -10,8 +10,8 @@
 #   ./scripts/release-gate.sh
 #
 # Runs, in order: go build, golangci-lint, go test ./... -count=1, the
-# upstream core gate (contract suites + amtool), -race on the concurrency-heavy
-# packages (publishing/grouping/silencing/templating), the chart's
+# upstream core gate (contract suites + amtool), -race on the AMP layer's
+# concurrent packages (RACE_PKGS), the chart's
 # dependency fetch, helm lint+template for both values overlays, a helm RBAC-scope check, and an amtool-compat
 # smoke (skipped, not failed, when Docker is unavailable). Every step
 # runs regardless of an earlier failure -- a step's own PASS/FAIL never
@@ -102,22 +102,28 @@ step_upstream_core() {
   "$SCRIPT_DIR/upstream-core-gate.sh"
 }
 
+# The AMP layer's concurrent packages (ADR-019 slice 5). Listed, not matched:
+# a renamed or deleted package fails the step instead of silently dropping
+# out of the race run.
+RACE_PKGS=(
+  ./internal/upstreamcore/
+  ./internal/upstreamai/
+  ./internal/upstreamtargets/
+  ./internal/infrastructure/investigation/
+  ./internal/business/publishing/
+)
+
 step_race() {
-  local pkgs_raw pkg
-  local -a pkgs
-  pkgs_raw=$(cd "$GO_APP_DIR" && go list ./... | grep -E '/(publishing|grouping|silencing|templating)(/[^/]*)?$')
-  pkgs=()
-  while IFS= read -r pkg; do
-    [[ -n "$pkg" ]] && pkgs+=("$pkg")
-  done <<< "$pkgs_raw"
+  local pkg
+  for pkg in "${RACE_PKGS[@]}"; do
+    if [[ ! -d "$GO_APP_DIR/$pkg" ]]; then
+      log "race package $pkg is gone -- update RACE_PKGS"
+      return 1
+    fi
+  done
 
-  if [[ ${#pkgs[@]} -eq 0 ]]; then
-    log "no packages matched publishing/grouping/silencing/templating -- treating as a failure, not a vacuous pass"
-    return 1
-  fi
-
-  log "race-testing ${#pkgs[@]} package(s): ${pkgs[*]}"
-  ( cd "$GO_APP_DIR" && go test -race -count=1 "${pkgs[@]}" )
+  log "race-testing ${#RACE_PKGS[@]} package(s): ${RACE_PKGS[*]}"
+  ( cd "$GO_APP_DIR" && go test -race -count=1 "${RACE_PKGS[@]}" )
 }
 
 # PROD-HELM-CLEAN-CHECKOUT: helm/amp/charts/ is gitignored, so a fresh clone
@@ -324,7 +330,7 @@ run_step "build" "go build ./... (go-app)" step_build
 run_step "lint" "golangci-lint run (go-app)" step_lint
 run_step "test" "go test ./... -count=1 (go-app)" step_test
 run_step "upstream-core" "contract suites vs divergence baseline + amtool, upstream core" step_upstream_core
-run_step "race" "go test -race, publishing/grouping/silencing/templating" step_race
+run_step "race" "go test -race, AMP layer packages" step_race
 
 run_step "helm-deps" "chart dependencies (Chart.lock, no stale charts/)" step_helm_deps
 run_step "helm-dev" "lint + template, values-dev.yaml" step_helm_values values-dev.yaml

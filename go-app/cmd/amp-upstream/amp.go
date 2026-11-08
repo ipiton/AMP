@@ -27,7 +27,7 @@ import (
 
 const (
 	// investigationStopTimeout bounds the drain of in-flight investigations
-	// on shutdown, as cmd/server's.
+	// on shutdown.
 	investigationStopTimeout = 5 * time.Second
 	// migrationTimeout bounds the migrations at start, the advisory lock
 	// wait included: delivery starts on time even with the database stuck.
@@ -106,8 +106,7 @@ func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.
 	return stop, nil
 }
 
-// connectDatabase connects to the history database and migrates it, as
-// cmd/server does. It returns nil, with the reason logged, when the profile
+// connectDatabase connects to the history database and migrates it. It returns nil, with the reason logged, when the profile
 // has none or the database cannot be reached.
 func connectDatabase(logger *slog.Logger, cfg *appconfig.Config) *postgres.PostgresPool {
 	if cfg.Profile != appconfig.ProfileStandard {
@@ -134,8 +133,7 @@ func connectDatabase(logger *slog.Logger, cfg *appconfig.Config) *postgres.Postg
 	return pool
 }
 
-// newHistory writes alert events through the deduplication service, the
-// path cmd/server writes its history rows by.
+// newHistory writes alert events through the deduplication service.
 func newHistory(logger *slog.Logger, pool *postgres.PostgresPool, reg prometheus.Registerer) (*upstreamai.History, error) {
 	storage, err := infrastructure.NewPostgresStorageAdapter(pool.SharePool(), logger)
 	if err != nil {

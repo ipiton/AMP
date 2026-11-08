@@ -46,15 +46,22 @@ based_on:
 
 ## Phase 3: 5b — резка пакетов
 
-- [ ] **3.1** `internal/config`: удалить модель alertmanager, валидацию подмножества, секции своего ядра, hot-reload; `LoadConfig` без inhibition/route. <!-- verify: go build ./internal/config/ ./cmd/amp-upstream/ -->
-- [ ] **3.2** `core/services`: удалить `alert_processor.go`, `route_evaluator.go`, `routing_fallback_metrics.go` и их тесты. <!-- verify: go build ./internal/core/services/ -->
-- [ ] **3.3** `business/publishing`: оставить discovery (+ то, что ему нужно), удалить config-таргеты, health, refresh, stats/trends/timeseries; убрать дубль namespace в `targets.go`, если появился общий хелпер. <!-- verify: go list -deps ./cmd/amp-upstream | grep -E 'infrastructure/(routing|grouping|inhibition|publishing)|configvalidator' пусто -->
+- [x] **3.1** `internal/config`: удалить модель alertmanager, валидацию подмножества, секции своего ядра, hot-reload; `LoadConfig` без inhibition/route. <!-- verify: go build ./internal/config/ ./cmd/amp-upstream/ -->
+- [x] **3.2** `core/services`: удалить `alert_processor.go`, `route_evaluator.go`, `routing_fallback_metrics.go` и их тесты. <!-- verify: go build ./internal/core/services/ -->
+- [x] **3.3** `business/publishing`: оставить discovery (+ то, что ему нужно), удалить config-таргеты, health, refresh, stats/trends/timeseries; убрать дубль namespace в `targets.go`, если появился общий хелпер. <!-- verify: go list -deps ./cmd/amp-upstream | grep -E 'infrastructure/(routing|grouping|inhibition|publishing)|configvalidator' пусто -->
 
 ## Phase 4: 5b — удаление
 
-- [ ] **4.1** Удалить `cmd/server`, `internal/application`, пакеты, недостижимые из `./cmd/...` и `./internal/upstreamcore/contract` (с тегом). <!-- depends: 3.* | verify: go build ./... && go vet ./... -->
-- [ ] **4.2** `pkg/*` без потребителей — удалить; `go mod tidy`. <!-- verify: go build ./... && git diff go.mod -->
-- [ ] **4.3** `release-gate.sh`: удалить `step_futureparity`, пересобрать список `step_race`; `go-app/Makefile` на `amp-upstream`; `docs/CI.md`. <!-- verify: scripts/release-gate.sh -->
+- [x] **4.1** Удалить `cmd/server`, `internal/application`, пакеты, недостижимые из `./cmd/...` и `./internal/upstreamcore/contract` (с тегом). <!-- depends: 3.* | verify: go build ./... && go vet ./... -->
+- [x] **4.2** `pkg/*` без потребителей — удалить; `go mod tidy`. <!-- verify: go build ./... && git diff go.mod -->
+- [x] **4.3** `release-gate.sh`: удалить `step_futureparity`, пересобрать список `step_race`; `go-app/Makefile` на `amp-upstream`; `docs/CI.md`. <!-- verify: scripts/release-gate.sh -->
+
+**Отклонения 5b:**
+- `config`: из `config_test.go`/`config_load_test.go` удалены тесты и отдельные утверждения про удалённые секции (server.port/host, redis, grouping, route, storage, publishing.queue, `TestChartEnvKeysKnownToViper` — чарт на env уходит в 5c). Тесты `PostgresConfigFrom` перенесены в `database_test.go` вместе с функцией (`database.go`). Новых утверждений нет — фаза 7.
+- `cmd/config-reloader/e2e_contract_test.go` удалён в 5b: контракт с hot-reload `cmd/server`, которого больше нет. Сам бинарь — 5.4.
+- Сверх плана удалены целиком мёртвые файлы своего ядра: `core/services/{filter_engine,enrichment_types,classification_adapter}.go`, `core/publishing_templates.go`, `infrastructure/sqlite_adapter.go` (lite storage), `infrastructure/cache/redis.go` (Redis-HA), `pkg/metrics/inhibition_cache_collision_test.go`; `pkg/logger`, `notification/url`, `infrastructure/{webhook,silencing,storage/memory}`, `business/templating`, `core/silencing`, `alertmanager/config`.
+- Остаток недостижимых функций в общей инфраструктуре (`database/postgres`, `pkg/httperror`, `pkg/retry`, `pkg/metrics`, `llm`) не тронут — TECH-DEBT (deadcode, ~300 функций).
+- `release-gate.sh` `step_race`: явный список `RACE_PKGS` (Spec + `business/publishing`), пропавший пакет — fail.
 
 **Phase verification (5b):** `scripts/release-gate.sh` PASS; `go list ./...` без своего ядра.
 

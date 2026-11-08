@@ -1,5 +1,5 @@
 # Makefile for Alert History Service (Go version)
-.PHONY: build test test-mvp test-all test-upstream-parity lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
+.PHONY: build test test-mvp test-all lint run clean help deps fmt vet mod-tidy quality-gates quality-gates-all quality-gates-fast test-coverage test-coverage-all
 
 # Go parameters
 GOCMD=go
@@ -18,12 +18,12 @@ GOLOCAL_GOPATH ?= $(CURDIR)/.cache/go
 GO_LOCAL_ENV = GOCACHE=$(GOLOCAL_GOCACHE) GOMODCACHE=$(GOLOCAL_GOMODCACHE) GOPATH=$(GOLOCAL_GOPATH)
 
 # Test matrices
-TEST_TARGETS_MVP ?= ./cmd/server/... ./internal/ui
+TEST_TARGETS_MVP ?= ./cmd/... ./internal/upstreamcore/... ./internal/upstreamai/... ./internal/upstreamtargets/...
 TEST_TARGETS_ALL ?= ./...
 
 # Main package path
-MAIN_PATH=./cmd/server
-BINARY_NAME=server
+MAIN_PATH=./cmd/amp-upstream
+BINARY_NAME=amp-upstream
 BINARY_UNIX=$(BINARY_NAME)_unix
 
 # Build-time version metadata (PARITY-4.2: internal/buildinfo, exposed via
@@ -64,10 +64,6 @@ test-mvp:
 test-all:
 	@echo "Running full test suite..."
 	$(GOTEST) -count=1 -v $(TEST_TARGETS_ALL)
-
-test-upstream-parity:
-	@echo "Running upstream parity regression suite..."
-	$(GOTEST) -count=1 -v ./cmd/server -run UpstreamParity
 
 # Fast quality gates for local inner loop
 quality-gates-fast:
@@ -287,7 +283,7 @@ help:
 	@echo "  build           - Build the application"
 	@echo "  build-linux     - Build for Linux (Docker)"
 	@echo "  test            - Run MVP test matrix (default)"
-	@echo "  test-mvp        - Run MVP test matrix (cmd/server + internal/ui)"
+	@echo "  test-mvp        - Run MVP test matrix (cmd + internal/upstream*)"
 	@echo "  test-all        - Run full test suite"
 	@echo "  quality-gates-fast - fmt + vet (inner loop)"
 	@echo "  quality-gates   - fmt + vet + MVP test matrix"

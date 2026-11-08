@@ -14,7 +14,7 @@ type memoryCacheEntry struct {
 	expiresAt time.Time
 }
 
-// MemoryCache is an in-process cache implementation used as fallback when Redis is unavailable.
+// MemoryCache is an in-process cache implementation.
 type MemoryCache struct {
 	mu     sync.RWMutex
 	values map[string]memoryCacheEntry

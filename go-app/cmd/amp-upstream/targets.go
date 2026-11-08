@@ -22,11 +22,10 @@ const (
 )
 
 // newTargetSource adds the K8s-Secret publishing targets to the core's
-// configuration (upstreamcore.Options.ExtendConfig), under the same
-// conditions as cmd/server's publishing runtime: the standard profile with
-// publishing.enabled. Without a cluster to talk to it logs a warning and the
-// core runs on the file alone, as cmd/server falls back to metrics-only. It
-// returns a nil source when the targets are off.
+// configuration (upstreamcore.Options.ExtendConfig) in the standard profile
+// with publishing.enabled. Without a cluster to talk to it logs a warning and
+// the core runs on the file alone. It returns a nil source when the targets
+// are off.
 func newTargetSource(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.Options) (*upstreamtargets.Source, time.Duration, error) {
 	if cfg.Profile != appconfig.ProfileStandard || !cfg.Publishing.Enabled {
 		logger.Info("K8s-Secret publishing targets disabled",
@@ -68,9 +67,8 @@ func newTargetSource(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamc
 	return source, interval, nil
 }
 
-// publishingNamespace mirrors application.resolvePublishingNamespace
-// (cmd/server): importing internal/application would pull the whole old core
-// into this binary. The duplicate goes with that core in UPSTREAM-CORE-REMOVAL.
+// publishingNamespace is the namespace target discovery watches:
+// publishing.discovery.namespace, else the pod's own namespace from the env.
 func publishingNamespace(cfg *appconfig.Config) string {
 	if ns := strings.TrimSpace(cfg.Publishing.Discovery.Namespace); ns != "" {
 		return ns

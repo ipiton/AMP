@@ -1,7 +1,7 @@
 // Command amp-upstream serves the upstream Alertmanager core wired by
-// internal/upstreamcore from an unmodified alertmanager.yml (ADR-019 PoC).
-// It runs next to cmd/server and changes nothing in it; flags mirror the
-// upstream binary's names for the subset it supports. --amp.config.file
+// internal/upstreamcore from an unmodified alertmanager.yml (ADR-019); it is
+// AMP's only binary. Flags mirror the upstream binary's names for the subset
+// it supports. --amp.config.file
 // adds AMP's own layer (internal/upstreamai, amp.go): alert history in
 // PostgreSQL, LLM classification and investigation; and the K8s-Secret
 // publishing targets (internal/upstreamtargets) in the standard profile with
