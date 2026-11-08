@@ -15,6 +15,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **UPSTREAM-DOCS-MIGRATION** — срез 7 ADR-019 (последний): README, `ALERTMANAGER_COMPATIBILITY.md`, `config.yaml.example`, миграция values и CHANGELOG breaking, ревизия ADR-002/006/009/016/017. Срезы 1–6 смержены 2026-11-08. Lightweight, 2–3d. Claimed 2026-11-08, worktree.
 
 ## Queue
 
@@ -29,9 +30,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
-> Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 5 → 6 → 7 строго по очереди; описание — `BACKLOG.md` § ADR-019.
+> Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срез 7 — последний, после него релиз v0.1.0; описание — `BACKLOG.md` § ADR-019.
 
-- [ ] **UPSTREAM-DOCS-MIGRATION** — срез 7, последним. Lightweight, 2–3d.
 
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
