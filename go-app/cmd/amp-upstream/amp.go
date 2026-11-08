@@ -127,13 +127,22 @@ func newAMPLayer(logger *slog.Logger, cfg *appconfig.Config, opts *upstreamcore.
 
 // backfillUpstreamFingerprints fills alerts.upstream_fingerprint on the rows
 // written before the column existed, in the background: the AMP routes find
-// them by the api/v2 fingerprint once it is done. A failure is logged; the
-// next start resumes. The returned stop cancels it and waits.
+// them by the api/v2 fingerprint once it is done. It first warns when the
+// lookup index is missing or INVALID. A failure is logged; the next start
+// resumes. The returned stop cancels it and waits.
 func backfillUpstreamFingerprints(logger *slog.Logger, storage *infrastructure.PostgresStorageAdapter) (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		valid, err := storage.UpstreamFingerprintIndexValid(ctx)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			logger.Warn("alert history: cannot check the upstream fingerprint index", "err", err)
+		case err == nil && !valid:
+			logger.Warn("alert history: index idx_alerts_upstream_fingerprint is missing or INVALID (an interrupted build); lookups by upstream fingerprint scan the table",
+				"fix", "DROP INDEX CONCURRENTLY IF EXISTS idx_alerts_upstream_fingerprint; CREATE INDEX CONCURRENTLY idx_alerts_upstream_fingerprint ON alerts(upstream_fingerprint);")
+		}
 		filled, err := storage.BackfillUpstreamFingerprints(ctx, 0)
 		switch {
 		case err != nil && ctx.Err() == nil:

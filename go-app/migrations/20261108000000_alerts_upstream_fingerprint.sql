@@ -5,11 +5,13 @@
 -- migration are filled at startup by PostgresStorageAdapter.BackfillUpstreamFingerprints
 -- (the hash is computed in Go, not in SQL). Not unique: two label sets can
 -- share an FNV-64 hash.
+--
+-- A nullable column without a default is a catalog change: the ACCESS
+-- EXCLUSIVE lock is held only for it. The index is built CONCURRENTLY by the
+-- next migration, outside a transaction.
 
 -- +goose Up
 ALTER TABLE alerts ADD COLUMN IF NOT EXISTS upstream_fingerprint VARCHAR(16);
-CREATE INDEX IF NOT EXISTS idx_alerts_upstream_fingerprint ON alerts(upstream_fingerprint);
 
 -- +goose Down
-DROP INDEX IF EXISTS idx_alerts_upstream_fingerprint;
 ALTER TABLE alerts DROP COLUMN IF EXISTS upstream_fingerprint;

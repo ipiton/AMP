@@ -92,10 +92,11 @@ updated_at: 2026-11-08
 - Q2: вариант D. Path-параметр принимает 16 hex (FNV, `api/v2`) и 64 hex (SHA-256 AMP); investigation резолвится через строку `alerts`.
 - Q3: удалить `/api/v2/inhibitions`, отметить в CHANGELOG и для среза 7; уточнение к ADR-019 (`DECISIONS.md:348` перечисляет его среди AMP-маршрутов) — в `DECISIONS.md` на finalize.
 - Q4: `group_by` не возвращать (CHANGELOG + срез 7); `STATUS-VERSIONINFO-CONTRACT` закрыть как решённый срезом 5; `COMPAT-VERSION-CONFIG-KEY` оставить в BACKLOG с уточнённым текстом.
+- Q5 (добавлено после deep-review, M1 второго ревьюера): остальные class-a записи `divergences.tsv` тоже не возвращаются, все переведены в class d. Алиасы `/health`, `/healthz`, `/ready`, `/readyz` не нужны: chart с PROD-AUTH ходит в `/-/healthy`, `/-/ready`. UI отложен до `UPSTREAM-UI` (решение владельца). `/api/v1` отдаёт 410, как upstream. `?status=resolved` заменяет `GET /api/amp/v1/alerts/{fingerprint}`, список resolved — `HISTORY-API`. Возвращать что-то из этого внутри `/api/v2` или рядом с ним значит ломать инвариант «`api/v2` = upstream». Решение принял автор задачи по этому инварианту, на ревью владельца.
 
 ## Spec Inputs
 
-- Миграция `20261108000000_alerts_upstream_fingerprint.sql`: `ADD COLUMN upstream_fingerprint VARCHAR(16)`, `CREATE INDEX idx_alerts_upstream_fingerprint`; down — обратно.
+- Миграция `20261108000000_alerts_upstream_fingerprint.sql`: `ADD COLUMN upstream_fingerprint VARCHAR(16)`, `CREATE INDEX idx_alerts_upstream_fingerprint`; down — обратно. (После deep-review индекс вынесен в `20261108000001_…_index.sql`, `NO TRANSACTION`, `CONCURRENTLY`; см. Spec.)
 - `SaveAlert`/`UpdateAlert` пишут колонку; reader'ы по SHA и по FNV; backfill батчами по `id`.
 - Новый пакет HTTP-маршрутов с интерфейсами reader'ов, 400/404/503, JSON-ошибки, метрика длительности.
 - Тесты: handler на фейках; композиция (байты `/api/v2/*` = `core.Handler()`); testcontainers — миграция up/down/up, запись колонки, backfill, поиск.

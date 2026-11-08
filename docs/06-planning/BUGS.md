@@ -162,6 +162,22 @@
 
 - [ ] **AGENT-LOOP-UNKNOWN-KIND-NIL-RESULT** — `AgentLoop.Run` (`go-app/internal/core/investigation/agent_loop.go:232-233`, ветка `default` в `switch resp.Kind`) возвращает `(nil, err)`, а `InvestigationQueue.processJobWithAgent` (`go-app/internal/infrastructure/investigation/queue.go:369-373`) на ошибке сразу читает `agentRun.TerminationKind` ⇒ nil-pointer panic в воркере. Сейчас недостижимо из прод-клиента (`parseOpenAIAgentResponse` отдаёт только два известных kind), но любой новый `AgentLLMClient` или мок с иным kind роняет воркер. Фикс: возвращать `&AgentRunResult{TerminationKind: "error", ...}` и/или nil-guard в queue + тест. Не регресс. Найдено на `/implement` PHASE-6B-RUNBOOK-ENGINE (2026-09-27). _(2026-11-08: стояла в секции ADR-019 без пометки среза; код живой в `amp-upstream` (agent mode), перенесена в Open.)_
 
+### [low][DB][~0.1d] MIGRATIONS-DOWN-STEPS-IS-VERSION
+- **Title:** `RunMigrationsDown(steps)` откатывает до версии `steps`, а не на `steps` шагов
+- **Problem:** `go-app/internal/database/migrations.go` (`RunMigrationsDown`) вызывает `goose.DownTo(db, dir, int64(steps))`, а `DownTo` принимает целевую версию. `steps=1` откатывает все миграции, то есть удаляет все таблицы.
+- **Impact:** сейчас функцию никто не вызывает. Первый вызов «на один шаг» уничтожит схему.
+- **Fix:** удалить функцию (runbook запрещает `goose down`) или считать целевую версию из `provider.Status`; добавить тест.
+- **Refs:** deep-review `UPSTREAM-API-UI` F2, `tasks/archive/UPSTREAM-API-UI/review-findings.md`.
+- **Status:** open
+
+### [low][History][~0.1d] HISTORY-NULL-STARTS-AT-SCAN
+- **Title:** `GetAlertByFingerprint` падает на строке `alerts` с `starts_at = NULL`
+- **Problem:** `go-app/internal/infrastructure/postgres_storage_adapter.go` (`GetAlertByFingerprint`) сканирует nullable `starts_at` в `time.Time`. На legacy-строке с NULL дедупликация получает ошибку, и запись истории этого алерта падает на каждом событии. Нынешний писатель NULL не пишет: zero time сохраняется как `0001-01-01`. Новые ридеры `AlertRecordBy*` NULL читают.
+- **Impact:** только БД со строками от старых писателей; история таких алертов не обновляется.
+- **Fix:** сканировать в `*time.Time`, как `alertRecord` в `postgres_alert_records.go`; тест с NULL.
+- **Refs:** deep-review `UPSTREAM-API-UI` F11; smoke `tasks/archive/UPSTREAM-API-UI/evidence/manual-smoke.md`.
+- **Status:** open
+
 ## Entry Format
 
 ```markdown

@@ -60,18 +60,31 @@ type Options struct {
 	Registerer     prometheus.Registerer
 }
 
+// requestTimeout bounds the database reads of one request: the pool is
+// shared with the history writer, and these routes bypass upstream's
+// --web.timeout and --web.get-concurrency.
+const requestTimeout = 10 * time.Second
+
 type handler struct {
 	alerts         AlertReader
 	investigations InvestigationReader
 	logger         *slog.Logger
+	// base is RoutePrefix + PathPrefix + "v1/alerts/".
+	base          string
+	alert         http.Handler
+	investigation http.Handler
+	other         http.Handler
 }
 
-// New returns the handler of every route under RoutePrefix+PathPrefix.
+// New returns the handler of every route under RoutePrefix+PathPrefix. The
+// path is matched by hand rather than by http.ServeMux patterns, so the
+// external URL's path is never read as pattern syntax ("{", "}").
 func New(opts Options) http.Handler {
 	h := &handler{
 		alerts:         opts.Alerts,
 		investigations: opts.Investigations,
 		logger:         opts.Logger.With("component", "ampapi"),
+		base:           strings.TrimRight(opts.RoutePrefix, "/") + PathPrefix + "v1/alerts/",
 	}
 	duration := promauto.With(opts.Registerer).NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "amp_api_request_duration_seconds",
@@ -81,19 +94,51 @@ func New(opts Options) http.Handler {
 	instrument := func(name string, f http.HandlerFunc) http.Handler {
 		return promhttp.InstrumentHandlerDuration(duration.MustCurryWith(prometheus.Labels{"handler": name}), f)
 	}
+	h.alert = instrument("alert", h.serveAlert)
+	h.investigation = instrument("investigation", h.serveInvestigation)
+	h.other = instrument("other", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "not found")
+	})
+	return h
+}
 
-	base := strings.TrimRight(opts.RoutePrefix, "/") + PathPrefix + "v1/alerts/{fingerprint}"
-	mux := http.NewServeMux()
-	mux.Handle("GET "+base, instrument("alert", h.alert))
-	mux.Handle("GET "+base+"/investigation", instrument("investigation", h.investigation))
-	return mux
+// ServeHTTP routes GET (and HEAD) <base>{fingerprint} and
+// <base>{fingerprint}/investigation; anything else under PathPrefix is a JSON
+// 404, a known route with another method a JSON 405.
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var route http.Handler
+	if rest, ok := strings.CutPrefix(r.URL.Path, h.base); ok {
+		fp, sub, nested := strings.Cut(rest, "/")
+		switch {
+		case fp == "":
+		case !nested:
+			route = h.alert
+		case sub == "investigation":
+			route = h.investigation
+		}
+		if route != nil {
+			r.SetPathValue("fingerprint", fp)
+		}
+	}
+	if route == nil {
+		h.other.ServeHTTP(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+	route.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // alertResponse is GET .../alerts/{fingerprint}.
 type alertResponse struct {
 	Fingerprint    string            `json:"fingerprint"`
 	AMPFingerprint string            `json:"amp_fingerprint"`
-	AlertName      string            `json:"alertname"`
+	AlertName      string            `json:"alert_name"`
 	Status         string            `json:"status"`
 	Labels         map[string]string `json:"labels"`
 	Annotations    map[string]string `json:"annotations"`
@@ -126,7 +171,7 @@ type investigationResponse struct {
 	ToolCallsCount  int                       `json:"tool_calls_count,omitempty"`
 }
 
-func (h *handler) alert(w http.ResponseWriter, r *http.Request) {
+func (h *handler) serveAlert(w http.ResponseWriter, r *http.Request) {
 	if h.alerts == nil {
 		writeError(w, http.StatusServiceUnavailable, errHistoryUnavailable)
 		return
@@ -161,7 +206,7 @@ func (h *handler) alert(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *handler) investigation(w http.ResponseWriter, r *http.Request) {
+func (h *handler) serveInvestigation(w http.ResponseWriter, r *http.Request) {
 	if h.alerts == nil || h.investigations == nil {
 		writeError(w, http.StatusServiceUnavailable, errHistoryUnavailable)
 		return
@@ -232,7 +277,7 @@ func (h *handler) record(ctx context.Context, fp string, upstream bool) (*core.A
 // without it.
 func (h *handler) internalError(w http.ResponseWriter, route string, err error) {
 	h.logger.Warn("AMP API request failed", "handler", route, "err", err)
-	writeError(w, http.StatusInternalServerError, "failed to read the alert history")
+	writeError(w, http.StatusInternalServerError, "failed to read AMP data")
 }
 
 const (

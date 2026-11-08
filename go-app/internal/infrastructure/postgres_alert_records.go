@@ -159,3 +159,20 @@ func (p *PostgresStorageAdapter) unfilledBatch(ctx context.Context, lastID *int6
 	}
 	return ids, fps, scanned, nil
 }
+
+// UpstreamFingerprintIndexValid reports whether idx_alerts_upstream_fingerprint
+// exists and is valid. A CREATE INDEX CONCURRENTLY cut short (the migration
+// timeout, a restart) leaves an INVALID index, which the migration's IF NOT
+// EXISTS then keeps: lookups by upstream fingerprint scan the table.
+func (p *PostgresStorageAdapter) UpstreamFingerprintIndexValid(ctx context.Context) (bool, error) {
+	if p.pool == nil {
+		return false, fmt.Errorf("not connected")
+	}
+	var valid bool
+	err := p.pool.QueryRow(ctx, `SELECT COALESCE((SELECT indisvalid FROM pg_index
+		WHERE indexrelid = to_regclass('idx_alerts_upstream_fingerprint')), false)`).Scan(&valid)
+	if err != nil {
+		return false, fmt.Errorf("failed to check the upstream fingerprint index: %w", err)
+	}
+	return valid, nil
+}

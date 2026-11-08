@@ -46,16 +46,16 @@ based_on:
 | Premise | Confirmed by | Class | If wrong |
 |---|---|---|---|
 | FNV в `api/v2` = `model.LabelSet.Fingerprint()` от labels = `alertconv.UpstreamFingerprint(labels)` | `alertmanager@v0.34.1/alert/alert.go:30` (встраивает `model.Alert`), `api/v2` `fingerprint: a.Fingerprint().String()`; `alertconv.go:116` | code-read | поиск по FNV не находит строки; ловится тестом с `model.LabelSet.Fingerprint()` |
-| Единственный писатель `alerts` — `newHistory` → `DeduplicationService` → `SaveAlert`/`UpdateAlert` | `grep -rn NewPostgresStorageAdapter` по модулю: только `cmd/amp-upstream/amp.go:138` | call-path-traced | строки другого писателя без колонки — их закроет backfill только на следующем старте |
+| Единственный писатель `alerts` в коде этой версии — `newHistory` → `DeduplicationService` → `SaveAlert`/`UpdateAlert` | `grep -rn NewPostgresStorageAdapter` по модулю: только `cmd/amp-upstream/amp.go` | code-read (grep, не трассировка) | В деплое ложно на время rolling update или отката на образ среза 5: старые поды вставляют строки без колонки (их `ON CONFLICT` колонку не трогает). Такие строки ищутся по FNV после первого `UpdateAlert` или следующего старта нового пода (Edge Case 9) |
 | Labels строки не меняются при `UpdateAlert` (SHA-256 — функция labels) | `deduplication.go:370-394` меняет status/endsAt/annotations/timestamp, не labels | code-read | колонка расходится с labels — исключено, т.к. SHA-ключ тот же |
 | Resolved-алерт удаляется из upstream store на GC, история остаётся | `store/store.go` `gcAlerts`; `History.PostGC` пустой | code-read | — (обосновывает отказ от поиска через store) |
 | Всё под `/api/v2/` обслуживает `api.API.Register` ядра; AMP-диспетчер перехватывает только `<prefix>/api/amp/` | `alertmanager@v0.34.1/api/api.go` `Register`; Target Design п.1 | code-read | при ошибке диспетчера — сдвиг `api/v2`; ловится тестом композиции и amtool-гейтом |
-| `alerts` — небольшая таблица (строка на fingerprint, `cleanup_old_data`) — `CREATE INDEX` без `CONCURRENTLY` и backfill на старте допустимы | схема: unique по fingerprint; размер в проде владельца не измерен | assumed | долгая блокировка записи истории на миграции — Rollout risk; доставку не блокирует (`migrationTimeout` 1 мин → история выключается) |
+| Индекс на `alerts` строится за `migrationTimeout` (1 мин) | строка на label set; retention нет (`cleanup_old_data`/`CleanupOldAlerts` никто не вызывает), таблица только растёт; размер в проде не измерен | assumed | Индекс строится `CONCURRENTLY` отдельной `NO TRANSACTION` миграцией (deep-review F1), запись не блокируется. При таймауте история выключается до рестарта, а прерванная сборка оставляет INVALID-индекс; на старте `Warn` с командой починки. Миграции идут до listener, поэтому старт доставки ждёт их, но не дольше `migrationTimeout`. Перед выкаткой на большой таблице — `count(*)` или ручной `CREATE INDEX CONCURRENTLY` (CHANGELOG) |
 
 ## Target Design
 
 1. В `cmd/amp-upstream` handler собирается как `wrapWebAuth(withAMPRoutes(core.Handler(), amp, prefix))`: запрос с путём `<prefix>/api/amp/` идёт в AMP-handler, любой другой — в `core.Handler()` без изменений (не через `ServeMux`: никакой чистки путей и редиректов перед upstream).
-2. Новый пакет `internal/ampapi` — `http.ServeMux` с `GET <prefix>/api/amp/v1/alerts/{fingerprint}` и `…/{fingerprint}/investigation` поверх двух интерфейсов-ридеров; nil-ридер → 503.
+2. Новый пакет `internal/ampapi` — handler с `GET <prefix>/api/amp/v1/alerts/{fingerprint}` и `…/{fingerprint}/investigation` поверх двух интерфейсов-ридеров; nil-ридер → 503. Путь разбирается вручную, не шаблонами `ServeMux`: префикс внешнего URL с `{`/`}` иначе ронял старт (deep-review F3). На чтения из БД — таймаут 10 с на запрос: маршруты идут мимо `--web.timeout`/`--web.get-concurrency` upstream, а пул общий с записью истории.
 3. `{fingerprint}`: 16 hex — FNV, ищется по `alerts.upstream_fingerprint`; 64 hex — SHA-256 AMP, по `alerts.fingerprint`. Регистр не важен (приводится к нижнему). Иначе 400.
 4. Investigation: fingerprint → строка `alerts` → её SHA-256 → `GetLatestByFingerprint`. Для 64 hex без строки истории investigation ищется по SHA напрямую.
 5. Миграция добавляет `alerts.upstream_fingerprint` + индекс; `SaveAlert`/`UpdateAlert` пишут её из labels; старые строки заполняет фоновый backfill при старте (Go, та же функция FNV, батчами по `id`, идемпотентно).
@@ -63,7 +63,7 @@ based_on:
 
 ## API Contracts
 
-Оба маршрута: только `GET` (и `HEAD`), иначе 405 (`ServeMux`). Ответ `application/json`. Ошибка — `{"error": "<текст>"}`.
+Оба маршрута: только `GET` (и `HEAD`), иначе 405 с `Allow: GET, HEAD`. Любой другой путь под `<prefix>/api/amp/` — 404. Ответ всегда `application/json`, ошибка — `{"error": "<текст>"}`.
 
 ### GET `<prefix>/api/amp/v1/alerts/{fingerprint}`
 
@@ -75,7 +75,7 @@ based_on:
 {
   "fingerprint": "<16 hex, как в api/v2>",
   "amp_fingerprint": "<64 hex SHA-256>",
-  "alertname": "HighLatency",
+  "alert_name": "HighLatency",
   "status": "firing | resolved",
   "labels": {"alertname": "HighLatency", "...": "..."},
   "annotations": {},
@@ -120,17 +120,17 @@ based_on:
 |---|---|---|---|
 | `upstream_fingerprint` | `VARCHAR(16)` | NULL | FNV из labels; NULL — строка до backfill |
 
-Индекс `idx_alerts_upstream_fingerprint` (не unique: FNV-64 может совпасть у разных labels; при совпадении отдаётся строка с последним `timestamp`).
+Индекс `idx_alerts_upstream_fingerprint` (не unique: FNV-64 может совпасть у разных labels; при совпадении отдаётся строка с последним `timestamp`, и клиент не видит, что строк несколько. Принято: подобрать совпадение может только тот, кто и так шлёт алерты).
 
-- **Migration:** да, `migrations/20261108000000_alerts_upstream_fingerprint.sql` (goose, в транзакции): `ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`; down — `DROP INDEX IF EXISTS`, `DROP COLUMN IF EXISTS`.
-- **Backfill:** не в миграции (FNV в SQL хрупок, research Q2-C). При старте, после миграций, горутина `BackfillUpstreamFingerprints`: `SELECT id, labels … WHERE upstream_fingerprint IS NULL AND id > $last ORDER BY id LIMIT 500`, затем один `UPDATE … FROM unnest($ids, $fps) … AND upstream_fingerprint IS NULL`. Идемпотентно, безопасно для N реплик. Отменяется при остановке до закрытия пула.
-- **Rollback / forward-fix:** `goose down` на одну версию; код без колонки не запускается со старой схемой → откат кода и схемы вместе (откат образа на срез 5 со схемой новой версии работает: колонку старый код не читает и не пишет).
+- **Migration:** две goose-миграции. `20261108000000_alerts_upstream_fingerprint.sql` (в транзакции): `ADD COLUMN IF NOT EXISTS` (nullable без default, ACCESS EXCLUSIVE только на изменение каталога); down — `DROP COLUMN IF EXISTS`. `20261108000001_alerts_upstream_fingerprint_index.sql` (`NO TRANSACTION`): `CREATE INDEX CONCURRENTLY IF NOT EXISTS`; down — `DROP INDEX CONCURRENTLY IF EXISTS`. Проверка `UpstreamFingerprintIndexValid` на старте: если индекса нет или он INVALID — `Warn` с командой починки.
+- **Backfill:** не в миграции (FNV в SQL хрупок, research Q2-C). При старте, после миграций, горутина `BackfillUpstreamFingerprints`: `SELECT id, labels … WHERE upstream_fingerprint IS NULL AND id > $last ORDER BY id LIMIT 500`, затем один `UPDATE … FROM unnest($ids, $fps) … AND upstream_fingerprint IS NULL`. Идемпотентно, безопасно для N реплик. Отменяется при остановке до закрытия пула. Строки с нечитаемыми labels пропускаются (`Warn` на каждом старте). Когда всё заполнено, каждый старт делает один проход `IS NULL`. Строки, которые backfill заполнил, получают от триггера новый `updated_at` (для `HISTORY-API`: сортировка по `updated_at` смещается, BACKLOG). Если две реплики обновляют пересекающиеся батчи, возможен deadlock: одна получает `Warn`, её строки заполнит следующий старт, корректность не страдает.
+- **Rollback / forward-fix:** откат образа на срез 5, схема остаётся: колонку и индекс старый код не читает и не пишет. Схему не откатывать (`docs/ROLLBACK_RUNBOOK.md` запрещает `goose down` при откате). Down-миграции проверены тестом.
 
 ## Component Architecture
 
-- `migrations/20261108000000_alerts_upstream_fingerprint.sql` — новая.
+- `migrations/20261108000000_alerts_upstream_fingerprint.sql`, `migrations/20261108000001_alerts_upstream_fingerprint_index.sql` — новые.
 - `internal/core/history.go` — тип `AlertHistoryRecord{Alert, FirstSeenAt}`.
-- `internal/infrastructure/postgres_storage_adapter.go` — `SaveAlert`/`UpdateAlert` пишут колонку; `AlertRecordByFingerprint`, `AlertRecordByUpstreamFingerprint`, `BackfillUpstreamFingerprints`.
+- `internal/infrastructure/postgres_storage_adapter.go` — `SaveAlert`/`UpdateAlert` пишут колонку; `AlertRecordByFingerprint`, `AlertRecordByUpstreamFingerprint`, `BackfillUpstreamFingerprints`, `UpstreamFingerprintIndexValid` (в `postgres_alert_records.go`).
 - `internal/ampapi/` (новый) — `Handler`, интерфейсы `AlertReader`, `InvestigationReader`, `PathPrefix = "/api/amp/"`, ответы, метрика.
 - `cmd/amp-upstream/amp.go` — `newAMPLayer` → `*ampLayer{stop, alerts, investigations}`; repo investigation создаётся один раз при наличии пула; запуск backfill.
 - `cmd/amp-upstream/main.go` — `withAMPRoutes`, сборка `ampapi.New`; doc и help флага `--amp.config.file`.
@@ -140,7 +140,7 @@ based_on:
 - [x] Ownership — не применимо (single-tenant; как `api/v2`).
 - [x] Input validation — fingerprint `^[0-9a-f]{16}$|^[0-9a-f]{64}$` после `ToLower` до запроса в БД; SQL параметризованный, колонка выбирается константой.
 - [x] Sensitive data not logged — ошибки БД логируются без labels/annotations; ответ 500 без текста ошибки.
-- [x] Rate limiting — как у остального API (нет); чтение по индексу O(log n).
+- [x] Rate limiting — лимита конкурентности нет (принятый риск, deep-review F4). `limitHandler` upstream сюда не применяется, но каждый запрос ограничен таймаутом 10 с, а соединения — `MaxConns` пула; чтение по индексу O(log n). Без `--web.config.file` маршруты открыты, как весь API.
 - [x] Auth path — `wrapWebAuth` снаружи `withAMPRoutes`: маршруты не попадают в `unauthenticated_paths` (точное совпадение путей, `/-/healthy`, `/-/ready`).
 
 ## Invariants
@@ -155,10 +155,11 @@ based_on:
 1. Нет `--amp.config.file` / `profile: lite` / PG недоступен на старте → оба маршрута 503 с причиной; `api/v2` работает.
 2. FNV-строка ещё не заполнена (до конца backfill) → 404 по FNV, 200 по SHA-256.
 3. Resolved-алерт, удалённый из upstream store → находится по FNV (колонка).
-4. Совпадение FNV у разных labels → строка с последним `timestamp` (`ORDER BY timestamp DESC NULLS LAST, id DESC LIMIT 1`).
+4. Совпадение FNV у разных labels → строка с последним `timestamp` (`ORDER BY timestamp DESC, id DESC LIMIT 1`; `timestamp` NOT NULL).
 5. Investigation для 64 hex без строки истории → ищется по SHA; `fingerprint` в ответе опущен.
 6. `--web.external-url=http://h/am` → маршруты под `/am/api/amp/v1/…`; `/api/amp/…` без префикса → `core.Handler()` (upstream 404).
-7. `POST /api/amp/v1/alerts/x` → 405; `/api/amp/v1/unknown` → 404 (ServeMux).
+7. `POST /api/amp/v1/alerts/<fp>` → 405 JSON; `/api/amp/v1/unknown` → 404 JSON; `--web.external-url` с `{` в пути не ломает старт.
+9. Rolling update или откат на срез 5 и обратно: строки, которые старые поды вставили после backfill, остаются NULL. По FNV — 404, пока их не заполнит `UpdateAlert` или следующий старт.
 8. Backfill на N репликах одновременно → каждая строка обновляется не больше одного раза (`AND upstream_fingerprint IS NULL`); триггер сдвигает `updated_at` заполненных строк — колонка `updated_at` в API не отдаётся.
 
 ## Impact Analysis
@@ -167,7 +168,8 @@ based_on:
 - **Breaking changes (API, в CHANGELOG `[Unreleased]`):**
   - `GET /api/v1/alerts/{fingerprint}/investigation` → `GET /api/amp/v1/alerts/{fingerprint}/investigation`; принимает FNV из `api/v2`; поле `fingerprint` теперь FNV, SHA-256 — в `amp_fingerprint`. `/api/v1/*` отвечает 410 (upstream).
   - `GET /api/v2/inhibitions` удалён окончательно (upstream 404); замена — `status.inhibitedBy` в `GET /api/v2/alerts`, правила — `GET /api/v2/status`.
-  - `?group_by=` у `GET /api/v2/alerts/groups` и `global.group_by` не поддерживаются: группировка — по `group_by` маршрута в `alertmanager.yml`.
+  - `?group_by=` у `GET /api/v2/alerts/groups` не поддерживается. `global.group_by`, `global.group_wait`, `global.group_interval`, `global.repeat_interval` в `alertmanager.yml`: upstream парсит конфиг строго (`yaml.UnmarshalStrict`), поэтому конфиг с ними не загружается — падают старт и `/-/reload` (это поведение среза 5, здесь оно названо явно). Замена — те же ключи на корневом `route:`.
+  - `?status=resolved` у `GET /api/v2/alerts` не поддерживается: upstream не отдаёт resolved-алерты. Замена — `GET /api/amp/v1/alerts/{fingerprint}`. Алиасы `/health`, `/healthz`, `/ready`, `/readyz` не возвращаются, есть `/-/healthy` и `/-/ready`. Записи class a в `divergences.tsv` переведены в class d.
   - Новое: `GET /api/amp/v1/alerts/{fingerprint}`.
 - **Planning:** `STATUS-VERSIONINFO-CONTRACT` → закрыт срезом 5 (`[x]`, ссылка на `setContractVersion`); `COMPAT-VERSION-CONFIG-KEY` — без изменений по сути, текст уточнён (`alertmanager_build_info` из `version.Version`); `HISTORY-API` — путь `/api/amp/v1/…`, остаток: список/top/flapping; `UPSTREAM-DOCS-MIGRATION` — пункты про inhibitions, `group_by`, новые маршруты; уточнение ADR-019 в `DECISIONS.md` (inhibitions не AMP-маршрут).
 - **New dependencies:** нет.
@@ -175,14 +177,14 @@ based_on:
 
 ## Rollout / Rollback
 
-- **Rollout:** миграция при старте (`RunMigrations` под advisory lock), затем backfill в фоне. Риск (premise `assumed`): на большой `alerts` `CREATE INDEX` держит блокировку записи до конца построения; превышение `migrationTimeout` (1 мин) выключает историю до рестарта, доставка не страдает.
-- **Rollback:** откат образа на предыдущий — схема с колонкой совместима; при желании `goose down 1` (`RollbackMigrations`).
+- **Rollout:** миграции при старте (`RunMigrations` под advisory lock), затем backfill в фоне. Индекс строится `CONCURRENTLY`. Риск (premise `assumed`): если на большой `alerts` построение не укладывается в `migrationTimeout` (1 мин), история выключается до рестарта, а индекс остаётся INVALID (на старте `Warn`). Обход: построить индекс вручную до выкатки (CHANGELOG).
+- **Rollback:** откат образа на предыдущий, схема с колонкой совместима. `goose down` не выполнять (runbook). `RunMigrationsDown` откатывает до версии, а не на N шагов (BUGS).
 - **Feature flag:** не применимо (маршруты активны вместе с PostgreSQL).
 
 ## Observability
 
-- **Logs:** `Info` при старте backfill с числом заполненных строк (если > 0); `Warn` на ошибку backfill и на 500 маршрутов (с `handler`, без данных алерта).
-- **Metrics:** `amp_api_request_duration_seconds{handler="alert|investigation",method,code}` (histogram).
+- **Logs:** `Info` с числом строк, заполненных backfill (если > 0); `Warn`, если индекса нет или он INVALID; `Warn` на ошибку backfill и на 500 маршрутов (с `handler`, без данных алерта).
+- **Metrics:** `amp_api_request_duration_seconds{handler="alert|investigation|other",method,code}` (histogram); 405 в метрику не попадает.
 - **Alerts:** не применимо.
 
 ## Deep Review

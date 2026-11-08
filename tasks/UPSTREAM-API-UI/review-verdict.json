@@ -1,0 +1,9 @@
+{
+  "gate": "fix_required",
+  "reason": "Round 1 on f0c8f89: F1 (major, index built inside the ADD COLUMN transaction) and F12 (major, incomplete breaking changes and undecided class-a divergences) are fix-here; fixes follow in the next commit, then a re-review.",
+  "branch": "feature/upstream-api-ui",
+  "commit": "f0c8f89",
+  "reviewed_at": "2026-11-08",
+  "findings": { "blocker": 0, "major": 2, "minor": 6, "nit": 8 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}
