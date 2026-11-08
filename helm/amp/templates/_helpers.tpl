@@ -198,3 +198,37 @@ Expected input: dict "target" <map>
 -}}
 {{- toJson $config | b64enc -}}
 {{- end }}
+
+{{/*
+Upstream Alertmanager core (upstreamCore, ADR-019). Its pods carry their own
+app.kubernetes.io/name, so neither the AMP Service nor the AMP NetworkPolicy
+(both select amp.selectorLabels) picks them up.
+*/}}
+{{- define "amp.upstream.fullname" -}}
+{{- printf "%s-upstream" (include "amp.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "amp.upstream.headlessName" -}}
+{{- printf "%s-upstream-headless" (include "amp.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "amp.upstream.selectorLabels" -}}
+app.kubernetes.io/name: {{ printf "%s-upstream" (include "amp.name" .) | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: upstream-core
+{{- end }}
+
+{{- define "amp.upstream.labels" -}}
+helm.sh/chart: {{ include "amp.chart" . }}
+{{ include "amp.upstream.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: {{ include "amp.name" . }}
+{{- end }}
+
+{{/* --web.external-url of the upstream core. */}}
+{{- define "amp.upstream.externalURL" -}}
+{{- .Values.upstreamCore.externalURL | default (printf "http://%s.%s.svc:9093/" (include "amp.upstream.fullname" .) .Release.Namespace) }}
+{{- end }}

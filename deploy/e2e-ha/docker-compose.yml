@@ -1,75 +1,74 @@
-# Task 6.5 (alertmanager-parity, Phase 6): 2-replica HA e2e stack.
+# Two-replica HA stack of the upstream Alertmanager core (ADR-019,
+# UPSTREAM-HA-MEMBERLIST): amp-a and amp-b run /app/amp-upstream as one
+# memberlist cluster, the sink records every webhook notification.
 #
-# NOT part of the default `go test ./...` gate. Run via run.sh (see that
-# script's header comment for usage) or manually:
+# NOT part of the default `go test ./...` gate. Run via run.sh, or manually:
 #
 #   docker compose -f deploy/e2e-ha/docker-compose.yml up --build
 #
-# Build context is the repo root (".." from here is deploy/, ".."  again is
-# the repo root) because the Dockerfile's COPY paths are rooted at
-# go-app/ one level below the repo root.
+# Build context is the repo root, where the Dockerfile lives.
 name: amp-e2e-ha
 
+x-amp: &amp
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  image: amp-e2e-ha:local
+  # Root inside the container: the named data volume is created root-owned,
+  # and step 7 of run.sh needs the snapshots to survive a restart, which a
+  # tmpfs would not. The chart runs non-root and sets an fsGroup instead.
+  user: "0:0"
+  # The image's HEALTHCHECK probes the legacy server on :8080.
+  healthcheck:
+    test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/ready"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+  depends_on:
+    - sink
+
 services:
-  redis:
-    image: valkey/valkey:8.1.10-alpine  # Valkey, not Redis >= 7.4 (license, ADR-017)
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 2s
-      retries: 15
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: amp_e2e
-      POSTGRES_USER: amp
-      POSTGRES_PASSWORD: amp
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U amp -d amp_e2e"]
-      interval: 2s
-      timeout: 2s
-      retries: 15
-
-  amp-a:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    hostname: amp-a
-    environment:
-      AMP_CONFIG_FILE: /app/config.yaml
+  sink:
+    image: python:3.13-alpine
+    command: ["python3", "-u", "/sink.py"]
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./sink.py:/sink.py:ro
+
+  # Shorter cluster timings than upstream's defaults keep the scenario quick:
+  # peer-timeout bounds how long the second peer waits before checking the
+  # shared notification log, settle-timeout how long notifications wait for
+  # the gossip to settle.
+  amp-a:
+    <<: *amp
+    hostname: amp-a
+    command: &args
+      - /app/amp-upstream
+      - --config.file=/etc/amp-upstream/alertmanager.yml
+      - --storage.path=/data
+      - --web.listen-address=:9093
+      - --cluster.listen-address=0.0.0.0:9094
+      - --cluster.peer=amp-a:9094
+      - --cluster.peer=amp-b:9094
+      - --cluster.peer-timeout=5s
+      - --cluster.settle-timeout=10s
+      - --cluster.gossip-interval=100ms
+      - --cluster.pushpull-interval=5s
     ports:
-      - "18081:8080"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      - "18081:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/amp-upstream/alertmanager.yml:ro
+      - data-a:/data
 
   amp-b:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
+    <<: *amp
     hostname: amp-b
-    environment:
-      AMP_CONFIG_FILE: /app/config.yaml
-    volumes:
-      - ./config.yaml:/app/config.yaml:ro
+    command: *args
     ports:
-      - "18082:8080"
-    depends_on:
-      # amp-a is no longer a startup dependency: internal/database.RunMigrations
-      # now takes a Postgres session advisory lock (see
-      # internal/database/migrations.go) before running goose migrations, so
-      # both replicas can start simultaneously against a fresh database. The
-      # second replica blocks on the lock until the first finishes, then
-      # no-ops (already applied) -- see
-      # TestRunMigrations_ConcurrentReplicas_FreshDB in
-      # internal/database/migrations_concurrent_test.go for the regression
-      # test covering this race directly against real Postgres.
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
+      - "18082:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/amp-upstream/alertmanager.yml:ro
+      - data-b:/data
+
+volumes:
+  data-a:
+  data-b:

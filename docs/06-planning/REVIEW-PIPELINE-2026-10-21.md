@@ -40,7 +40,7 @@
 | 10 | [ ] | `QUALITY-GATES-ALIGN` | B | Lightweight | 0.25d | — | M-28 |
 | 11 | [ ] | `DEAD-PKGS-NO-IMPORTERS` | TD | Standard | 0.5d | — | § 4.4 |
 | 12 | [ ] | `DEAD-APPLICATION-MIDDLEWARE` | BL (расширен) | Standard | 1d | — | § 4.4, `SILENCES-CHECK-404` |
-| 13 | [-] | `GROUP-STORE-LOST-UPDATE` | B | Full | 1d | — | M-1; снят ADR-019, срез 4 |
+| 13 | [-] | `GROUP-STORE-LOST-UPDATE` | B | Full | 1d | — | M-1; снят ADR-019, срез 5 |
 | 14 | [-] | `SILENCE-VALIDATION-PARITY` | B | Standard | 0.25d | — | M-2 (breaking); снят ADR-019, срез 5 |
 | 15 | [-] | `API-COMPAT-BUNDLE` | TD/Bundle | Standard | 1.25d | — | M-15, M-17, L-3, L-4, L-6 (breaking: форма ошибок); снят ADR-019, срез 6 (`SERVER-HARDENING` остаётся в `BUGS.md` standalone) |
 | 16 | [-] | `INHIBITION-LIFECYCLE-BUNDLE` | TD/Bundle | Standard | 1.5d | 1 | M-5, M-6; снят ADR-019, срез 5 |
@@ -67,7 +67,7 @@
 
 | № | | Задача | Источник | Tier | Оценка | После | Находки |
 |---|---|---|---|---|---|---|---|
-| 35 | [-] | `REDIS-STORAGE-BUNDLE` | TD/Bundle | Standard | 1.1d | — | L-12, L-13, L-14, L-15; снят ADR-019, срез 4 |
+| 35 | [-] | `REDIS-STORAGE-BUNDLE` | TD/Bundle | Standard | 1.1d | — | L-12, L-13, L-14, L-15; снят ADR-019, срез 5 |
 | 36 | [-] | `PUBLISH-RELOAD-CLIENT-LIFECYCLE` | B | Lightweight | 0.5d | 2 | L-17, L-18; снят ADR-019, срез 5 |
 | 37 | [-] | `PUBLISH-TRANSPORT-CONSISTENCY` | B | Lightweight | 0.25d | — | L-20, L-21; снят ADR-019, срез 5 |
 | 38 | [-] | `PUBLISH-CLIENT-PLUMBING` | TD | Standard | 0.5d | 18 | D-9, D-15, L-16; снят ADR-019, срез 5 |

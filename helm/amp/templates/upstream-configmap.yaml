@@ -1,0 +1,12 @@
+{{- if .Values.upstreamCore.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "amp.upstream.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.upstream.labels" . | nindent 4 }}
+data:
+  alertmanager.yml: |
+    {{- toYaml .Values.upstreamCore.config | nindent 4 }}
+{{- end }}

@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/upstream-ha-memberlist",
+  "commit": "c46d7e06163c579f7c279fd33a315736a88f57ed",
+  "reviewed_at": "2026-11-08",
+  "findings": { "blocker": 1, "major": 1, "minor": 7, "nit": 2 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

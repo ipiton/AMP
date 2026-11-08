@@ -353,6 +353,29 @@ With a NetworkPolicy, list that Prometheus in `networkPolicy.metricsScrapers` (o
 
 **`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`), and at least one NetworkPolicy source. The render reports one missing setting at a time.
 
+### Upstream Core (Preview)
+
+`upstreamCore.enabled: true` (default `false`) deploys the upstream Alertmanager core (`/app/amp-upstream`, ADR-019) as a separate StatefulSet `<fullname>-upstream`, next to the AMP Deployment. It is a preview: the AMP Service, Ingress, ServiceMonitor, NetworkPolicy and PodDisruptionBudget keep pointing at the AMP Deployment.
+
+```yaml
+upstreamCore:
+  enabled: true
+  replicas: 3          # > 1: a memberlist gossip cluster, port 9094 TCP+UDP
+  config:              # alertmanager.yml, upstream format
+    route:
+      receiver: default
+    receivers:
+      - name: default
+  persistence:
+    size: 1Gi          # silences and notification log snapshots
+```
+
+- With `replicas: 1` the cluster is off (`--cluster.listen-address=`). With more, every pod lists all peers by their stable DNS names in the headless Service `<fullname>-upstream-headless`, and silences and the notification log are gossiped, so an alert sent to every replica is notified once.
+- Prometheus should send alerts to every replica (the headless Service), not to one through `<fullname>-upstream`, as with upstream Alertmanager HA.
+- `externalURL` defaults to `http://<fullname>-upstream.<namespace>.svc:9093/`; its path becomes the route prefix and the probe path.
+- `extraArgs` passes further flags, e.g. `--cluster.label=<name>` or `--cluster.tls-config=<file>`.
+- Not covered yet: no ServiceMonitor scrapes its metrics (`alertmanager_cluster_*` included), the NetworkPolicy and PodDisruptionBudget select only the AMP pods, the API has no authentication, and gossip is unencrypted unless `--cluster.tls-config` is set. Slice 5 (`UPSTREAM-CORE-REMOVAL`) moves these onto the upstream core.
+
 ## Alertmanager Compatibility
 
 AMP chart should currently be treated as a **controlled replacement** deployment path, not as a verified full Alertmanager drop-in replacement:

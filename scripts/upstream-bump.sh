@@ -25,7 +25,7 @@ MIN_AGE_DAYS="${UPSTREAM_BUMP_MIN_AGE_DAYS:-7}"
 # Upstream files with ports in go-app: internal/upstreamcore and
 # cmd/amp-upstream (app/*.go), internal/business/templating (template.go),
 # the matcher parsers in routing and configvalidator (pkg/labels/parse.go).
-PORTED_FILES="app/app.go app/reloader.go app/metrics.go app/lifecycle.go app/url.go template/template.go pkg/labels/parse.go"
+PORTED_FILES="app/app.go app/cluster.go app/options.go app/reloader.go app/metrics.go app/lifecycle.go app/url.go cmd/alertmanager/main.go template/template.go pkg/labels/parse.go"
 
 log() { printf '[upstream-bump] %s\n' "$1"; }
 die() { log "$1"; exit 1; }

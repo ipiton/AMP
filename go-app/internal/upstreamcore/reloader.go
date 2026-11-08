@@ -1,5 +1,5 @@
 // This file is a port of
-// github.com/prometheus/alertmanager@v0.34.1/app/reloader.go without the
+// github.com/prometheus/alertmanager@v0.34.1/app/reloader.go with the
 // gossip peer (see doc.go):
 //
 //	Copyright The Prometheus Authors
@@ -27,6 +27,7 @@ import (
 
 	"github.com/prometheus/alertmanager/alert"
 	"github.com/prometheus/alertmanager/api"
+	"github.com/prometheus/alertmanager/cluster"
 	"github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/alertmanager/config/receiver"
 	"github.com/prometheus/alertmanager/dispatch"
@@ -56,6 +57,7 @@ type reloader struct {
 	logger            *slog.Logger
 	metrics           *metrics
 	notificationLog   notify.NotificationLog
+	peer              *cluster.Peer
 	pipelineBuilder   *notify.PipelineBuilder
 	silencer          *silence.Silencer
 	tracingMgr        *tracing.Manager
@@ -173,8 +175,12 @@ func (r *reloader) reload(conf *config.Config) error {
 
 	newInhibitor := inhibit.NewInhibitor(r.alerts, conf.InhibitRules, r.logger, r.eventRecorder)
 
-	// No gossip cluster yet: notify detects that through a nil interface,
-	// which an explicitly typed nil pointer would not be.
+	// An interface value that holds a nil concrete value is non-nil, so
+	// pass an empty interface to tell notify the cluster is off.
+	var pipelinePeer notify.Peer
+	if r.peer != nil {
+		pipelinePeer = r.peer
+	}
 	pipeline := r.pipelineBuilder.New(
 		receivers,
 		r.waitFunc,
@@ -183,7 +189,7 @@ func (r *reloader) reload(conf *config.Config) error {
 		intervener,
 		r.groupMarker,
 		r.notificationLog,
-		nil,
+		pipelinePeer,
 	)
 	// AMP extension (not in upstream): the AI stage runs ahead of each
 	// receiver's chain, before the mute stages, which cannot be reordered

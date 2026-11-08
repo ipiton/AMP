@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/alertmanager/cluster"
 	"github.com/prometheus/alertmanager/featurecontrol"
 	"github.com/prometheus/alertmanager/matcher/compat"
 	"github.com/prometheus/client_golang/prometheus"
@@ -44,30 +45,34 @@ func main() {
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
 	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*). Empty: none.")
+	clusterOpts := clusterFlags(flag.CommandLine)
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	logger.Info("Starting Alertmanager", "version", version.Info())
 	logger.Info("Build context", "build_context", version.BuildContext())
 	prometheus.MustRegister(versioncollector.NewCollector("alertmanager"))
-	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL, *ampConfigFile); err != nil {
+	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL, *ampConfigFile, *clusterOpts); err != nil {
 		logger.Error("amp-upstream exited with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL, ampConfigFile string) error {
+func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL, ampConfigFile string, clusterOpts upstreamcore.Options) error {
 	// Matcher parsing is process-global upstream; without this call it stays
 	// in classic mode instead of upstream's default fallback mode.
 	compat.InitFromFlags(logger, featurecontrol.NoopFlags{})
 
-	opts := upstreamcore.Options{
-		ConfigFile: configFile,
-		DataDir:    dataDir,
-		Retention:  retention,
-		Logger:     logger,
-		Registerer: prometheus.DefaultRegisterer,
+	if err := validateClusterFlags(clusterOpts); err != nil {
+		return err
 	}
+	// clusterOpts carries only the --cluster.* flags.
+	opts := clusterOpts
+	opts.ConfigFile = configFile
+	opts.DataDir = dataDir
+	opts.Retention = retention
+	opts.Logger = logger
+	opts.Registerer = prometheus.DefaultRegisterer
 	var (
 		targets         *upstreamtargets.Source
 		targetsInterval time.Duration
@@ -152,6 +157,70 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 			return nil
 		}
 	}
+}
+
+// clusterFlags registers upstream's --cluster.* flags
+// (github.com/prometheus/alertmanager@v0.34.1/cmd/alertmanager/main.go) with
+// the same names, help and defaults, and returns the Options they fill.
+func clusterFlags(fs *flag.FlagSet) *upstreamcore.Options {
+	o := &upstreamcore.Options{}
+	fs.StringVar(&o.ClusterBindAddr, "cluster.listen-address", upstreamcore.DefaultClusterAddr, "Listen address for cluster. Set to empty string to disable HA mode.")
+	fs.StringVar(&o.ClusterAdvertiseAddr, "cluster.advertise-address", "", "Explicit address to advertise in cluster.")
+	fs.StringVar(&o.ClusterPeerName, "cluster.peer-name", "", "Explicit name of the peer, rather than generating a random one")
+	fs.Var((*stringsFlag)(&o.Peers), "cluster.peer", "Initial peers (may be repeated).")
+	fs.DurationVar(&o.PeerTimeout, "cluster.peer-timeout", upstreamcore.DefaultPeerTimeout, "Time to wait between peers to send notifications.")
+	fs.DurationVar(&o.PeersResolveTimeout, "cluster.peers-resolve-timeout", cluster.DefaultResolvePeersTimeout, "Time to resolve peers.")
+	fs.DurationVar(&o.GossipInterval, "cluster.gossip-interval", cluster.DefaultGossipInterval, "Interval between sending gossip messages. By lowering this value (more frequent) gossip messages are propagated across the cluster more quickly at the expense of increased bandwidth.")
+	fs.DurationVar(&o.PushPullInterval, "cluster.pushpull-interval", cluster.DefaultPushPullInterval, "Interval for gossip state syncs. Setting this interval lower (more frequent) will increase convergence speeds across larger clusters at the expense of increased bandwidth usage.")
+	fs.DurationVar(&o.TCPTimeout, "cluster.tcp-timeout", cluster.DefaultTCPTimeout, "Timeout for establishing a stream connection with a remote node for a full state sync, and for stream read and write operations.")
+	fs.DurationVar(&o.ProbeTimeout, "cluster.probe-timeout", cluster.DefaultProbeTimeout, "Timeout to wait for an ack from a probed node before assuming it is unhealthy. This should be set to 99-percentile of RTT (round-trip time) on your network.")
+	fs.DurationVar(&o.ProbeInterval, "cluster.probe-interval", cluster.DefaultProbeInterval, "Interval between random node probes. Setting this lower (more frequent) will cause the cluster to detect failed nodes more quickly at the expense of increased bandwidth usage.")
+	fs.DurationVar(&o.SettleTimeout, "cluster.settle-timeout", upstreamcore.DefaultSettleTimeout, "Maximum time to wait for cluster connections to settle before evaluating notifications.")
+	fs.DurationVar(&o.ReconnectInterval, "cluster.reconnect-interval", cluster.DefaultReconnectInterval, "Interval between attempting to reconnect to lost peers.")
+	fs.DurationVar(&o.PeerReconnectTimeout, "cluster.reconnect-timeout", cluster.DefaultReconnectTimeout, "Length of time to attempt to reconnect to a lost peer.")
+	fs.StringVar(&o.TLSConfigFile, "cluster.tls-config", "", "[EXPERIMENTAL] Path to config yaml file that can enable mutual TLS within the gossip protocol.")
+	fs.BoolVar(&o.AllowInsecureAdvertise, "cluster.allow-insecure-public-advertise-address-discovery", false, "[EXPERIMENTAL] Allow alertmanager to discover and listen on a public IP address.")
+	fs.StringVar(&o.Label, "cluster.label", "", "The cluster label is an optional string to include on each packet and stream. It uniquely identifies the cluster and prevents cross-communication issues when sending gossip messages.")
+	return o
+}
+
+// validateClusterFlags rejects non-positive cluster durations when the
+// cluster is on, as upstream app.Options.validate: upstreamcore would
+// otherwise replace a zero with the default. SettleTimeout is a deadline,
+// so zero is valid there (settle at once).
+func validateClusterFlags(o upstreamcore.Options) error {
+	if o.ClusterBindAddr == "" {
+		return nil
+	}
+	for _, f := range []struct {
+		name string
+		val  time.Duration
+	}{
+		{"cluster.peer-timeout", o.PeerTimeout},
+		{"cluster.peers-resolve-timeout", o.PeersResolveTimeout},
+		{"cluster.gossip-interval", o.GossipInterval},
+		{"cluster.pushpull-interval", o.PushPullInterval},
+		{"cluster.tcp-timeout", o.TCPTimeout},
+		{"cluster.probe-timeout", o.ProbeTimeout},
+		{"cluster.probe-interval", o.ProbeInterval},
+		{"cluster.reconnect-interval", o.ReconnectInterval},
+		{"cluster.reconnect-timeout", o.PeerReconnectTimeout},
+	} {
+		if f.val <= 0 {
+			return fmt.Errorf("--%s must be positive when clustering is enabled", f.name)
+		}
+	}
+	return nil
+}
+
+// stringsFlag is a repeatable string flag, as kingpin's Strings upstream.
+type stringsFlag []string
+
+func (s *stringsFlag) String() string { return strings.Join(*s, ",") }
+
+func (s *stringsFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
 }
 
 // extURL is a port of github.com/prometheus/alertmanager@v0.34.1/app/url.go

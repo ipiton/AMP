@@ -1,0 +1,128 @@
+{{- if .Values.upstreamCore.enabled }}
+{{- $uc := .Values.upstreamCore }}
+{{- $replicas := int $uc.replicas }}
+{{- if lt $replicas 1 }}
+{{- fail "upstreamCore.replicas must be at least 1; set upstreamCore.enabled=false to remove the upstream core." }}
+{{- end }}
+{{- $fullname := include "amp.upstream.fullname" . }}
+{{- $headless := include "amp.upstream.headlessName" . }}
+{{- $externalURL := include "amp.upstream.externalURL" . }}
+{{- /* Every endpoint, probes included, lives under the external URL's path. */}}
+{{- $prefix := (urlParse $externalURL).path | trimSuffix "/" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "amp.upstream.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $replicas }}
+  serviceName: {{ $headless }}
+  # All pods start together and find each other over the headless Service;
+  # OrderedReady would gain nothing, the gossip has no primary.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "amp.upstream.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "amp.upstream.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/upstream-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # No Kubernetes API access needed.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: amp-upstream
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/amp-upstream"]
+          args:
+            - --config.file=/etc/amp-upstream/alertmanager.yml
+            - --storage.path=/data
+            - --web.listen-address=:9093
+            - --web.external-url={{ $externalURL }}
+            {{- if gt $replicas 1 }}
+            - --cluster.listen-address=0.0.0.0:9094
+            # Brackets keep an IPv6 pod address valid.
+            - --cluster.advertise-address=[$(POD_IP)]:9094
+            - --cluster.peer-timeout={{ $uc.peerTimeout }}
+            {{- range $i := until $replicas }}
+            - --cluster.peer={{ $fullname }}-{{ $i }}.{{ $headless }}.{{ $.Release.Namespace }}.svc:9094
+            {{- end }}
+            {{- else }}
+            # One replica: no gossip cluster, as upstream's chart does.
+            - --cluster.listen-address=
+            {{- end }}
+            {{- with $uc.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: web
+              containerPort: 9093
+              protocol: TCP
+            {{- if gt $replicas 1 }}
+            - name: gossip-tcp
+              containerPort: 9094
+              protocol: TCP
+            - name: gossip-udp
+              containerPort: 9094
+              protocol: UDP
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ $prefix }}/-/healthy
+              port: web
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ $prefix }}/-/ready
+              port: web
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml $uc.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/amp-upstream
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "amp.upstream.selectorLabels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ $uc.persistence.accessMode }}
+        {{- with $uc.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $uc.persistence.size }}
+{{- end }}

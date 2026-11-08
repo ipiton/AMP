@@ -1,6 +1,6 @@
 // This file is a port of the construction half of
-// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,metrics.go,lifecycle.go}
-// without the UI, the gossip cluster and the network listeners (see doc.go):
+// github.com/prometheus/alertmanager@v0.34.1/app/{app.go,cluster.go,metrics.go,lifecycle.go}
+// without the UI and the network listeners (see doc.go):
 //
 //	Copyright The Prometheus Authors
 //	Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,6 +32,7 @@ import (
 
 	"github.com/prometheus/alertmanager/alert"
 	"github.com/prometheus/alertmanager/api"
+	"github.com/prometheus/alertmanager/cluster"
 	"github.com/prometheus/alertmanager/config"
 	"github.com/prometheus/alertmanager/dispatch"
 	"github.com/prometheus/alertmanager/eventrecorder"
@@ -56,6 +57,11 @@ const (
 	DefaultMaintenanceInterval         = 15 * time.Minute
 	DefaultAlertGCInterval             = 30 * time.Minute
 	DefaultDispatchMaintenanceInterval = 30 * time.Second
+
+	// Cluster defaults, as in upstream app.DefaultOptions.
+	DefaultClusterAddr   = "0.0.0.0:9094"
+	DefaultPeerTimeout   = 15 * time.Second
+	DefaultSettleTimeout = cluster.DefaultPushPullInterval
 )
 
 // Options configures the core. Zero durations fall back to the upstream
@@ -71,6 +77,30 @@ type Options struct {
 	MaintenanceInterval         time.Duration
 	AlertGCInterval             time.Duration
 	DispatchMaintenanceInterval time.Duration
+
+	// Cluster, as in upstream app.Options. An empty ClusterBindAddr leaves
+	// the gossip cluster off; zero durations fall back to the upstream
+	// defaults (DefaultPeerTimeout, cluster.Default*), except SettleTimeout:
+	// it is a deadline, and zero settles at once, as upstream
+	// (--cluster.settle-timeout=0s). Upstream rejects the other zero
+	// durations instead; cmd/amp-upstream does that for its flags.
+	ClusterBindAddr        string
+	ClusterAdvertiseAddr   string
+	ClusterPeerName        string
+	Peers                  []string
+	PeerTimeout            time.Duration
+	PeersResolveTimeout    time.Duration
+	GossipInterval         time.Duration
+	PushPullInterval       time.Duration
+	TCPTimeout             time.Duration
+	ProbeTimeout           time.Duration
+	ProbeInterval          time.Duration
+	SettleTimeout          time.Duration
+	ReconnectInterval      time.Duration
+	PeerReconnectTimeout   time.Duration
+	TLSConfigFile          string
+	AllowInsecureAdvertise bool
+	Label                  string
 
 	Logger *slog.Logger
 	// Registerer receives the upstream alertmanager_* metrics. /metrics
@@ -161,6 +191,15 @@ func (o *Options) defaults() error {
 		{&o.MaintenanceInterval, DefaultMaintenanceInterval},
 		{&o.AlertGCInterval, DefaultAlertGCInterval},
 		{&o.DispatchMaintenanceInterval, DefaultDispatchMaintenanceInterval},
+		{&o.PeerTimeout, DefaultPeerTimeout},
+		{&o.PeersResolveTimeout, cluster.DefaultResolvePeersTimeout},
+		{&o.GossipInterval, cluster.DefaultGossipInterval},
+		{&o.PushPullInterval, cluster.DefaultPushPullInterval},
+		{&o.TCPTimeout, cluster.DefaultTCPTimeout},
+		{&o.ProbeTimeout, cluster.DefaultProbeTimeout},
+		{&o.ProbeInterval, cluster.DefaultProbeInterval},
+		{&o.ReconnectInterval, cluster.DefaultReconnectInterval},
+		{&o.PeerReconnectTimeout, cluster.DefaultReconnectTimeout},
 	} {
 		if *d.val <= 0 {
 			*d.val = d.def
@@ -186,6 +225,51 @@ func (c *Core) setup(opts Options) error {
 		return fmt.Errorf("unable to create data directory: %w", err)
 	}
 
+	tlsTransportConfig, err := cluster.GetTLSTransportConfig(opts.TLSConfigFile)
+	if err != nil {
+		return fmt.Errorf("unable to initialize TLS transport configuration for gossip mesh: %w", err)
+	}
+
+	var (
+		peer *cluster.Peer
+		// settleCancel cancels the settle context once Settle starts; it is
+		// a no-op until then so the teardown below can be registered right
+		// after the peer exists.
+		settleCancel = func() {}
+	)
+	if opts.ClusterBindAddr != "" {
+		peer, err = cluster.Create(
+			logger.With("component", "cluster"),
+			reg,
+			opts.ClusterBindAddr,
+			opts.ClusterAdvertiseAddr,
+			opts.Peers,
+			true,
+			opts.PushPullInterval,
+			opts.GossipInterval,
+			opts.TCPTimeout,
+			opts.PeersResolveTimeout,
+			opts.ProbeTimeout,
+			opts.ProbeInterval,
+			tlsTransportConfig,
+			opts.AllowInsecureAdvertise,
+			opts.Label,
+			opts.ClusterPeerName,
+		)
+		if err != nil {
+			return fmt.Errorf("unable to initialize gossip mesh: %w", err)
+		}
+		// Registered first, so it runs last: the peer leaves after the
+		// dispatcher and the final snapshots, as upstream's does.
+		c.onStop(func() {
+			settleCancel()
+			if err := peer.Leave(10 * time.Second); err != nil {
+				logger.Error("unable to leave gossip mesh", "err", err)
+			}
+		})
+		m.clusterEnabled.Set(1)
+	}
+
 	initialConf, err := config.LoadFile(opts.ConfigFile)
 	if err != nil {
 		return fmt.Errorf("error loading configuration file: %w", err)
@@ -206,6 +290,10 @@ func (c *Core) setup(opts Options) error {
 	})
 	if err != nil {
 		return fmt.Errorf("error creating notification log: %w", err)
+	}
+	if peer != nil {
+		ch := peer.AddState("nfl", notificationLog, reg)
+		notificationLog.SetBroadcast(ch.Broadcast)
 	}
 	wg.Go(func() {
 		notificationLog.Maintenance(opts.MaintenanceInterval, filepath.Join(opts.DataDir, "nflog"), stopc, nil)
@@ -229,11 +317,26 @@ func (c *Core) setup(opts Options) error {
 	if err != nil {
 		return fmt.Errorf("error creating silence: %w", err)
 	}
+	if peer != nil {
+		ch := peer.AddState("sil", silences, reg)
+		silences.SetBroadcast(ch.Broadcast)
+	}
 	wg.Go(func() {
 		silences.Maintenance(opts.MaintenanceInterval, filepath.Join(opts.DataDir, "silences"), stopc, nil)
 	})
 
 	silencer := silence.NewSilencer(silences, logger, eventRec)
+
+	// Both states are registered, so join and pull the initial state. The
+	// event recorder's SetClusterPeer is skipped: the port has no recorder.
+	if peer != nil {
+		if err := peer.Join(opts.ReconnectInterval, opts.PeerReconnectTimeout); err != nil {
+			logger.Warn("unable to join gossip mesh", "err", err)
+		}
+		settleCtx, cancel := context.WithTimeout(context.Background(), opts.SettleTimeout)
+		settleCancel = cancel // observed by the teardown registered above.
+		go peer.Settle(settleCtx, opts.GossipInterval*10)
+	}
 
 	// The API's GroupFunc and the AMP callback's mutes close over r, which
 	// is assigned below; neither is called before the handler serves.
@@ -267,10 +370,18 @@ func (c *Core) setup(opts Options) error {
 		return r.groups(ctx, routeFilter, alertFilter)
 	}
 
+	// An interface holding a nil pointer is non-nil, so pass an empty
+	// interface when the cluster is off; the API detects that.
+	var clusterPeer cluster.ClusterPeer
+	if peer != nil {
+		clusterPeer = peer
+	}
+
 	apih, err := api.New(api.Options{
 		Alerts:          alerts,
 		Silences:        silences,
 		GroupMutedFunc:  groupMarker.Muted,
+		Peer:            clusterPeer,
 		Logger:          logger.With("component", "api"),
 		Registry:        reg,
 		RequestDuration: m.requestDuration,
@@ -280,8 +391,15 @@ func (c *Core) setup(opts Options) error {
 		return fmt.Errorf("failed to create API: %w", err)
 	}
 
-	// Without a cluster there is no peer position to wait for.
+	// A peer waits one PeerTimeout per peer ahead of it before notifying,
+	// so the first one's nflog entry reaches it first (upstream
+	// app/cluster.go clusterWait).
 	waitFunc := func() time.Duration { return 0 }
+	if peer != nil {
+		waitFunc = func() time.Duration {
+			return time.Duration(peer.Position()) * opts.PeerTimeout
+		}
+	}
 	timeoutFunc := func(d time.Duration) time.Duration {
 		if d < notify.MinTimeout {
 			d = notify.MinTimeout
@@ -305,6 +423,7 @@ func (c *Core) setup(opts Options) error {
 		logger:                      logger,
 		metrics:                     m,
 		notificationLog:             notificationLog,
+		peer:                        peer,
 		pipelineBuilder:             notify.NewPipelineBuilder(reg, ff, eventRec),
 		retention:                   opts.Retention,
 		notifyStage:                 opts.NotifyStage,
@@ -460,7 +579,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			},
 			[]string{"handler", "method"},
 		),
-		// Stays 0 until the gossip cluster is wired (UPSTREAM-HA-MEMBERLIST).
+		// Set to 1 by setup when ClusterBindAddr starts the gossip cluster.
 		clusterEnabled: f.NewGauge(
 			prometheus.GaugeOpts{
 				Name: "alertmanager_cluster_enabled",

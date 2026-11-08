@@ -6,8 +6,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 <!-- Единственное место для чисел потока. Команды и другие документы ссылаются сюда, а не копируют. -->
 
-- **WIP limit:** 2 — одна основная задача плюс один срочный фикс. Меняется только здесь. Временно **3** на время параллельных срезов 2b/3/4 эпика ADR-019 (владелец 2026-11-08), в отдельных worktree; после их мержа — снова 2.
-- **Прод-блокеры первыми:** секция «Production Readiness — блокеры» в `BACKLOG.md` приоритетнее всей Queue; порядок — в самой секции. Берутся в WIP напрямую из BACKLOG.
+- **WIP limit:** 2 — одна основная задача плюс один срочный фикс. Меняется только здесь.- **Прод-блокеры первыми:** секция «Production Readiness — блокеры» в `BACKLOG.md` приоритетнее всей Queue; порядок — в самой секции. Берутся в WIP напрямую из BACKLOG.
 - **Replenish** Queue, когда в ней меньше трёх задач. Кандидата сначала проверить по `DONE.md` и `archive/DONE-*.md`, чтобы закрытое не вернулось.
 - **Balance** maintenance (`BUGS`, `TECH-DEBT`) и roadmap (`ROADMAP`, `BACKLOG`) 50/50: по последним пяти закрытиям — если одной стороны больше трёх, следующую задачу брать с другой.
 - **Owner inbox first:** на `start-task` разблокированное действие владельца (`Trigger: owner ready`, `Blocked-by:`, `Waiting-on:`) важнее первой позиции Queue. Больше 5 разблокированных — новые roadmap-задачи не берём.
@@ -16,7 +15,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **UPSTREAM-HA-MEMBERLIST** — срез 4 ADR-019: `cluster.Peer`, gossip, снапшоты на PVC, StatefulSet. Full, 3–5d. Claimed 2026-11-08, worktree.
 
 ## Queue
 
@@ -31,9 +29,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
-> Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 2–4 независимы; описание — `BACKLOG.md` § ADR-019.
+> Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 5 → 6 → 7 строго по очереди; описание — `BACKLOG.md` § ADR-019.
 
-- Срез 2b закрыт 2026-11-08 (`DONE.md`), срезы 3, 4 — в WIP. Дальше по порядку: `UPSTREAM-CORE-REMOVAL` (5) после мержа 2b–4, `UPSTREAM-API-UI` (6), `UPSTREAM-DOCS-MIGRATION` (7) — описание в `BACKLOG.md` § ADR-019.
+- [ ] **UPSTREAM-CORE-REMOVAL** — срез 5: удаление своего ядра, конфиг через upstream `config.Load`, wiring по образцу `cmd/alertmanager`; плюс то, что передали срезы 2b и 4 (Redis-HA, чарт на StatefulSet `upstreamCore`, `llm.agent_mode`) — `BACKLOG.md` § ADR-019. Full, 5–6d. Срезы 2b, 3, 4 закрыты и смержены 2026-11-08.
+- [ ] **UPSTREAM-API-UI** — срез 6, после 5. Full, 2–3d.
+- [ ] **UPSTREAM-DOCS-MIGRATION** — срез 7, последним. Lightweight, 2–3d.
 
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)

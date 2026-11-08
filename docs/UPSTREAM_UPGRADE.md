@@ -37,8 +37,9 @@ The script:
 Then:
 
 1. Carry the diff over into the ports:
-   - `app/{app,reloader,metrics,lifecycle}.go` go to `internal/upstreamcore`;
+   - `app/{app,cluster,options,reloader,metrics,lifecycle}.go` go to `internal/upstreamcore` (`options.go`: the cluster defaults and the validation that `validateClusterFlags` in `cmd/amp-upstream` mirrors);
    - `app/url.go` goes to `extURL` in `cmd/amp-upstream`;
+   - the `--cluster.*` flags of `cmd/alertmanager/main.go` go to `clusterFlags` in `cmd/amp-upstream`;
    - `template/template.go` goes to `internal/business/templating`;
    - `pkg/labels/parse.go` goes to the matcher parsers in `internal/business/routing` and `pkg/configvalidator/matcher`.
 

@@ -34,6 +34,13 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w \
     -X ${BUILDINFO_PKG}.BuildDate=${BUILD_DATE}" \
     -o amp ./cmd/server
 
+# The upstream Alertmanager core (ADR-019), run as /app/amp-upstream by the
+# chart's upstreamCore StatefulSet and by deploy/e2e-ha. Its version comes
+# from prometheus/common/version, not buildinfo; stamping it is slice 5
+# (UPSTREAM-CORE-REMOVAL).
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-s -w" \
+    -o amp-upstream ./cmd/amp-upstream
+
 # Runtime
 # Same Alpine branch as the golang:1.27.3-alpine builder.
 FROM alpine:3.24
@@ -43,7 +50,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
 
 WORKDIR /app
 
-COPY --from=builder /build/amp /app/
+COPY --from=builder /build/amp /build/amp-upstream /app/
 COPY --from=builder /build/migrations /app/migrations
 
 USER appuser
