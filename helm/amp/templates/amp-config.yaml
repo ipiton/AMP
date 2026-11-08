@@ -1,0 +1,93 @@
+{{- /*
+AMP configuration (--amp.config.file): profile, alert history (database),
+classification (llm), investigation and K8s-Secret targets (publishing),
+generated from the values and merged with alertmanager.ampConfig. Passwords
+never land here: DATABASE_PASSWORD and LLM_API_KEY come from Secrets as env,
+which viper reads over the file (statefulset.yaml).
+*/}}
+{{- /* `| default dict`: `helm upgrade --reuse-values` from a chart without externalDatabase. */}}
+{{- $ext := .Values.externalDatabase | default dict }}
+{{- $override := deepCopy (.Values.alertmanager.ampConfig | default dict) }}
+{{- $cfg := dict "profile" .Values.profile "app" (dict "environment" .Values.environment) }}
+
+{{- if eq .Values.profile "standard" }}
+{{- if $ext.host }}
+{{- if .Values.postgresql.enabled }}
+{{- fail "externalDatabase.host is set while postgresql.enabled=true: pick one. For an external database set postgresql.enabled=false." }}
+{{- end }}
+{{- if not $ext.existingSecret }}
+{{- fail (printf "externalDatabase.existingSecret is required when externalDatabase.host is set. The chart does not create it: create a Secret holding the password under key %q (externalDatabase.existingSecretPasswordKey)." ($ext.existingSecretPasswordKey | default "password")) }}
+{{- end }}
+{{- if not $ext.database }}
+{{- fail "externalDatabase.database is required when externalDatabase.host is set." }}
+{{- end }}
+{{- if not $ext.username }}
+{{- fail "externalDatabase.username is required when externalDatabase.host is set." }}
+{{- end }}
+{{- /* The modes AMP accepts (internal/database/postgres PostgresConfig.Validate); allow/prefer are refused there and may fall back to plaintext. */}}
+{{- if not (has ($ext.sslMode | default "require") (list "disable" "require" "verify-ca" "verify-full")) }}
+{{- fail (printf "externalDatabase.sslMode %q is invalid: use one of disable, require, verify-ca, verify-full." $ext.sslMode) }}
+{{- end }}
+{{- /* External PostgreSQL (ADR-016). No insecure-SSL override here, whatever sslMode is: that override is for the bundled database only. */}}
+{{- $_ := set $cfg "database" (dict "host" $ext.host "port" (int ($ext.port | default 5432)) "database" $ext.database "username" $ext.username "ssl_mode" ($ext.sslMode | default "require")) }}
+{{- else if .Values.postgresql.enabled }}
+{{- $sslOn := eq (default "off" .Values.postgresql.config.ssl) "on" }}
+{{- $db := dict "host" (include "amp.postgresql.fullname" .) "port" 5432 "database" .Values.postgresql.database "username" .Values.postgresql.username "ssl_mode" (ternary "require" "disable" $sslOn) }}
+{{- if not $sslOn }}
+{{- /* The bundled PostgreSQL has no TLS, and AMP rejects sslmode=disable in production unless told otherwise. Set ONLY here, for the in-cluster database; never exposed as a value (HELM-DEFAULTS-VALIDATE). */}}
+{{- $_ := set $db "allow_insecure_ssl_in_production" true }}
+{{- end }}
+{{- $_ := set $cfg "database" $db }}
+{{- else if not $override.database }}
+{{- fail "postgresql.enabled=false but no database is configured. Set externalDatabase.host (with database, username and existingSecret) — the recommended way — or alertmanager.ampConfig.database (its password then sits in a ConfigMap)." }}
+{{- end }}
+{{- end }}
+
+{{- $llm := dict "enabled" .Values.llm.enabled }}
+{{- if .Values.llm.enabled }}
+{{- $timeout := .Values.llm.timeout | toString }}
+{{- if not (regexMatch "(ms|s|m|h)$" $timeout) }}
+{{- $timeout = printf "%ss" $timeout }}
+{{- end }}
+{{- $_ := merge $llm (dict
+  "provider" (.Values.llm.provider | default "openai")
+  "base_url" .Values.llm.proxyUrl
+  "model" .Values.llm.model
+  "timeout" $timeout
+  "max_retries" (int .Values.llm.maxRetries)
+  "agent_mode" (.Values.llm.agentMode | default false)
+  "notify_wait" (.Values.llm.notifyWait | default "5s" | toString)
+  "drop_noise" (.Values.llm.dropNoise | default false)) }}
+{{- end }}
+{{- $_ := set $cfg "llm" $llm }}
+
+{{- $inv := .Values.investigation | default dict }}
+{{- $_ := set $cfg "investigation" (dict
+  "enabled" ($inv.enabled | default false)
+  "worker_count" (int ($inv.workerCount | default 3))
+  "queue_size" (int ($inv.queueSize | default 500))
+  "max_retries" (int ($inv.maxRetries | default 3))
+  "retry_interval" ($inv.retryInterval | default "5s" | toString)
+  "llm_timeout" ($inv.llmTimeout | default "60s" | toString)
+  "only_firing" (ternary $inv.onlyFiring true (hasKey $inv "onlyFiring"))) }}
+
+{{- $discovery := dict
+  "namespace" (.Values.publishing.discovery.namespace | default (include "amp.namespace" .))
+  "label_selector" .Values.publishing.discovery.labelSelector }}
+{{- $_ := set $cfg "publishing" (dict
+  "enabled" .Values.publishing.enabled
+  "discovery" $discovery
+  "refresh" (dict "interval" ((.Values.publishing.refresh | default dict).interval | default "5m" | toString))) }}
+
+{{- $cfg = mustMergeOverwrite $cfg $override }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "amp.fullname" . }}-amp-config
+  namespace: {{ include "amp.namespace" . }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: application
+data:
+  amp.yaml: |
+    {{- toYaml $cfg | nindent 4 }}

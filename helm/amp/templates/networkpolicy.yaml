@@ -5,7 +5,8 @@ this section passes no networkPolicy key at all -- treat it as disabled. */ -}}
 {{- /*
 PROD-INGRESS-HARDENING (ADR-015): ingress-only policy for the AMP pods. One
 rule per source role so the rendered object says who is let in and why; every
-rule opens the `http` port only (API, /metrics and probes share it). No Egress
+rule opens the `web` port only (API, /metrics and probes share it). With more
+than one replica the pods also reach each other's gossip port. No Egress
 policyType: notification targets are arbitrary.
 */ -}}
 {{- $controller := list }}
@@ -26,8 +27,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- include "amp.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: application
+      {{- include "amp.appSelectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
@@ -38,8 +38,20 @@ spec:
         {{- toYaml $peers | nindent 8 }}
       ports:
         - protocol: TCP
-          port: http
+          port: web
     {{- end }}
+    {{- end }}
+    {{- if gt (int .Values.alertmanager.replicas) 1 }}
+    # cluster gossip between the AMP pods
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "amp.appSelectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9094
+        - protocol: UDP
+          port: 9094
     {{- end }}
     {{- with $np.extraIngress }}
     {{- toYaml . | nindent 4 }}

@@ -81,63 +81,12 @@ Create PostgreSQL secret name (Custom format)
 {{- end }}
 
 {{/*
-Create KeyDB fullname
-*/}}
-{{- define "amp.keydb.fullname" -}}
-{{- if .Values.cache.enabled }}
-{{- printf "%s-%s" (include "amp.fullname" .) "keydb" | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" (include "amp.fullname" .) "cache" | trunc 63 | trimSuffix "-" }}
-{{- end }}
-{{- end }}
-
-{{/*
-Create KeyDB secret name
-*/}}
-{{- define "amp.keydb.secretName" -}}
-{{- printf "%s-%s" (include "amp.fullname" .) "keydb-secret" }}
-{{- end }}
-
-{{/*
-Return the proper Database URL (groundhog2k/postgres)
-*/}}
-{{- define "amp.databaseUrl" -}}
-{{- if .Values.postgresql.enabled }}
-{{- printf "postgresql://%s:$(POSTGRES_PASSWORD)@%s:5432/%s" .Values.postgresql.username (include "amp.postgresql.fullname" .) .Values.postgresql.database }}
-{{- else }}
-{{- printf "sqlite:///data/alert_history.sqlite3" }}
-{{- end }}
-{{- end }}
-
-{{/*
 Secret holding the password of the chart's Valkey (<fullname>-redis): the
 operator's valkey.password.existingSecret, or the one templates/redis-secret.yaml
 creates. Valkey, its exporter and AMP all read it, so the three never disagree.
 */}}
 {{- define "amp.valkey.secretName" -}}
 {{- .Values.valkey.password.existingSecret | default (printf "%s-redis-secret" (include "amp.fullname" .)) }}
-{{- end }}
-
-{{/*
-"true" when cache.host names the chart's Valkey Service: <fullname>-redis, or
-a longer DNS name of it in the release namespace (<fullname>-redis.<ns>,
-...svc.cluster.local). The same name in another namespace is someone else's.
-*/}}
-{{- define "amp.cache.hostIsValkey" -}}
-{{- $svc := printf "%s-redis" (include "amp.fullname" .) }}
-{{- $nsSvc := printf "%s.%s" $svc .Release.Namespace }}
-{{- $host := tpl .Values.cache.host . }}
-{{- if or (eq $host $svc) (eq $host $nsSvc) (hasPrefix (printf "%s." $nsSvc) $host) }}true{{ end }}
-{{- end }}
-
-{{/*
-"true" when AMP talks to the chart's own Valkey: it runs (valkey.replicas > 0,
-its only gate besides the profile) AND cache.host points at it. AMP then reads
-Valkey's password; otherwise the cache is external and cache.auth.* applies,
-also when the chart's Valkey still runs next to it unused.
-*/}}
-{{- define "amp.cache.bundled" -}}
-{{- if and (gt (int .Values.valkey.replicas) 0) (include "amp.cache.hostIsValkey" .) }}true{{ end }}
 {{- end }}
 
 {{/*
@@ -200,35 +149,37 @@ Expected input: dict "target" <map>
 {{- end }}
 
 {{/*
-Upstream Alertmanager core (upstreamCore, ADR-019). Its pods carry their own
-app.kubernetes.io/name, so neither the AMP Service nor the AMP NetworkPolicy
-(both select amp.selectorLabels) picks them up.
+The AMP pods (the StatefulSet): selectorLabels plus component=application.
+The postgres and Valkey pods share selectorLabels with their own component,
+so everything that means "AMP" selects by this, and the postgres/Valkey
+NetworkPolicies let these pods in by component=application.
 */}}
-{{- define "amp.upstream.fullname" -}}
-{{- printf "%s-upstream" (include "amp.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- define "amp.appSelectorLabels" -}}
+{{ include "amp.selectorLabels" . }}
+app.kubernetes.io/component: application
 {{- end }}
 
-{{- define "amp.upstream.headlessName" -}}
-{{- printf "%s-upstream-headless" (include "amp.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{/* Headless Service: stable pod DNS names for --cluster.peer and Prometheus. */}}
+{{- define "amp.headlessName" -}}
+{{- printf "%s-headless" (include "amp.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "amp.upstream.selectorLabels" -}}
-app.kubernetes.io/name: {{ printf "%s-upstream" (include "amp.name" .) | trunc 63 | trimSuffix "-" }}
-app.kubernetes.io/instance: {{ .Release.Name }}
-app.kubernetes.io/component: upstream-core
+{{/* Namespace of the AMP objects. */}}
+{{- define "amp.namespace" -}}
+{{- .Values.namespace | default .Release.Namespace }}
 {{- end }}
 
-{{- define "amp.upstream.labels" -}}
-helm.sh/chart: {{ include "amp.chart" . }}
-{{ include "amp.upstream.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: {{ include "amp.name" . }}
+{{/* --web.external-url. */}}
+{{- define "amp.externalURL" -}}
+{{- .Values.alertmanager.externalURL | default (printf "http://%s.%s.svc:%v/" (include "amp.fullname" .) (include "amp.namespace" .) .Values.service.port) }}
 {{- end }}
 
-{{/* --web.external-url of the upstream core. */}}
-{{- define "amp.upstream.externalURL" -}}
-{{- .Values.upstreamCore.externalURL | default (printf "http://%s.%s.svc:9093/" (include "amp.upstream.fullname" .) .Release.Namespace) }}
+{{/* Path prefix of every endpoint, probes included: the external URL's path. */}}
+{{- define "amp.pathPrefix" -}}
+{{- (urlParse (include "amp.externalURL" .)).path | trimSuffix "/" }}
+{{- end }}
+
+{{/* "true" when the pods need the Kubernetes API: target discovery (templates/rbac.yaml). */}}
+{{- define "amp.discoveryEnabled" -}}
+{{- if and (eq .Values.profile "standard") .Values.publishing.enabled }}true{{ end }}
 {{- end }}

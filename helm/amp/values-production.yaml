@@ -2,19 +2,14 @@
 # Usage:
 #   helm install amp ./helm/amp -f values-production.yaml
 #
-# Every key below was audited against the app's actual viper defaults
-# (go-app/internal/config/config.go) and the chart's own templates as of the
-# alertmanager-parity program (2026-08). Comments call out where a claim in
-# this file does NOT match what the chart can currently do — see the
-# PostgreSQL and Cache sections below — rather than asserting capabilities
-# the templates don't have.
+# Every key below was audited against the AMP configuration
+# (go-app/internal/config/config.go) and the chart's own templates
+# (UPSTREAM-CORE-REMOVAL, 2026-11).
 
 # ===============================
 # Application Configuration
 # ===============================
-replicaCount: 3
 environment: production
-logLevel: info
 profile: "standard"
 
 # ===============================
@@ -37,11 +32,37 @@ resources:
     memory: 1Gi
 
 # ===============================
-# Pod Disruption Budget (app Deployment)
+# Alertmanager core (HA)
+# ===============================
+# Three pods in one gossip cluster: silences and the notification log are
+# replicated, a notification goes out once. Prometheus must send every alert
+# to every pod (<fullname>-<i>.<fullname>-headless:9093), not to the Service.
+# With llm.enabled every pod classifies every alert: 3 LLM calls per alert
+# until UPSTREAM-AI-HA-DEDUP.
+alertmanager:
+  replicas: 3
+  # Deliberately secret-free: alertmanager.yml lands in a plain ConfigMap.
+  # Real delivery targets come from Kubernetes Secrets (publishing discovery,
+  # appended to these receivers) or from *_file paths on extraVolumes.
+  config:
+    route:
+      receiver: default
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      # No integrations = a blackhole receiver until targets are attached.
+      - name: default
+  persistence:
+    size: 2Gi
+
+# ===============================
+# Pod Disruption Budget (AMP StatefulSet)
 # ===============================
 podDisruptionBudget:
   enabled: true
-  minAvailable: 2 # replicaCount 3 (up to 20 via HPA) — never drain below 2 on voluntary disruption
+  minAvailable: 2 # alertmanager.replicas 3 — never drain below 2 on voluntary disruption
 
 # ===============================
 # PostgreSQL Database (Production): external
@@ -63,8 +84,8 @@ podDisruptionBudget:
 # database for now, keep your previous `postgresql:` block (it is not the
 # base values.yaml one: password, 50Gi volume, resources, networkPolicy).
 #
-# Connections: 25 per pod (database.max_connections default) × HPA
-# maxReplicas 20 = up to 500. Size max_connections on the server for that.
+# Connections: 25 per pod (database.max_connections default) × 3 replicas
+# = up to 75. Size max_connections on the server for that.
 postgresql:
   enabled: false
 
@@ -77,41 +98,7 @@ externalDatabase:
   existingSecret: ""
   existingSecretPasswordKey: password
 
-# ===============================
-# Cache (DragonflyDB, Redis-compatible — external service)
-# ===============================
-# HONESTY NOTE (was previously wrong in this file): there is no dragonfly-*.yaml
-# under helm/amp/templates — the old top-level `dragonfly:` block below rendered
-# NOTHING; it was dead values with no consumer. DragonflyDB is Redis-wire-compatible,
-# so it needs no chart-side template at all: point the keys the app ALREADY reads
-# (`cache.host`/`cache.port`/`cache.auth`, wired to REDIS_ADDR/REDIS_PASSWORD in
-# templates/deployment.yaml) at your externally-run DragonflyDB Service.
-cache:
-  enabled: true
-  host: "dragonfly.dragonfly.svc.cluster.local" # your external DragonflyDB Service DNS name
-  port: 6379
-  auth:
-    enabled: true
-    # templates/secret.yaml has no random-generation fallback for THIS key (by
-    # design — see that template's comment) and now `required`-guards it, so leaving this empty
-    # makes `helm template`/`helm install` FAIL OUTRIGHT instead of silently
-    # baking in a generated password that can never match your real
-    # DragonflyDB credential. This is intentional: install with
-    # `--set cache.auth.password=<real value>` (or wire it through CI/secret
-    # manager) — this file does not, and must not, carry a real or
-    # placeholder-looking value here.
-    # Preferred instead: a Secret you create, so the password never passes
-    # through values — set `enabled: false` and
-    # `existingSecret: <name>` (+ `existingSecretPasswordKey`, default `password`).
-    password: ""
-
-# Chart gap, documented rather than silently worked around: templates/redis-statefulset.yaml
-# (this chart's OWN in-cluster Redis/Valkey) is gated only on `profile: standard`
-# — `valkey.enabled`/`cache.enabled` do NOT stop it from deploying (see
-# docs/06-planning/TECH-DEBT.md HELM-CHART-GAPS). Setting replicas to 0 is the
-# only override that actually works today: the Service/Secret/ConfigMap objects
-# still render (harmless — no data, no endpoints) but no Redis pod runs, so
-# DragonflyDB above is the only cache actually serving traffic.
+# amp-upstream does not use Valkey yet (UPSTREAM-AI-HA-DEDUP): no pod.
 valkey:
   replicas: 0
 
@@ -127,34 +114,12 @@ llm:
   model: "openai/gpt-4o"
   timeout: 30
   maxRetries: 3
-  retryDelay: 1.0
-  cacheTtl: 3600
-  batchSize: 10
 
   externalSecrets:
     enabled: true
     secretStore: "vault-backend"
     secretName: "amp-llm-api-key"
     secretKey: "api-key"
-
-# ===============================
-# Alert Processing Configuration
-# ===============================
-alerts:
-  retentionDays: 90
-  batchSize: 200
-  maxConcurrentAlerts: 100
-  enableClassification: true
-
-# ===============================
-# Autoscaling Configuration
-# ===============================
-autoscaling:
-  enabled: true
-  minReplicas: 3
-  maxReplicas: 20
-  targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
 
 # ===============================
 # Publishing Runtime (Production)
@@ -164,68 +129,8 @@ publishing:
   discovery:
     namespace: monitoring
     labelSelector: "publishing-target=true"
-  queue:
-    maxConcurrent: 10
-    workerCount: 10
-    maxRetries: 3
-    retryInterval: "2s"
-    # publishing.queue.delivery_confirmation_timeout — kept at config.go's own
-    # default (45s, 2m hard cap). grouping.reconciliationGrace below is left
-    # unset so it derives from THIS value (90s at 45s) — raise both together,
-    # never this alone (see CHANGELOG "grouping.reconciliation_grace default
-    # changed 20s -> 90s" for the incident this guards against).
-    deliveryConfirmationTimeout: "45s"
-  templates:
-    # publishing.templates.enabled: true = upstream-compatible template rendering
-    # (the alertmanager-parity TEMPLATES-EPIC). This is the single biggest
-    # visible behavior change in this release for existing Slack/email/PagerDuty
-    # receivers — see docs/RELEASE_NOTES_v0.1.0-draft.md's breaking-changes
-    # section before upgrading a live deployment. Set to false to keep AMP's
-    # pre-epic fixed formatters (needs a restart either way, not a reload).
-    enabled: true
   refresh:
-    enabled: true
     interval: "5m"
-  health:
-    enabled: true
-    checkInterval: "2m"
-    httpTimeout: "5s"
-
-# ===============================
-# Grouping / Notify-Chain (Production)
-# ===============================
-# grouping.enabled is the chart default (true); kept explicit here. It is the real
-# Alertmanager-parity grouping/dedup pipeline (group_by/group_wait/group_interval/
-# repeat_interval + Redis-backed cross-replica notify-log dedup). At replicaCount 3
-# on the standard profile with Redis already required for cache, this is the
-# configuration production is built for — false publishes every alert on arrival
-# and ignores the route tree's timings.
-grouping:
-  enabled: true
-  reconciliationInterval: "45s"
-  # Deliberately unset — see publishing.queue.deliveryConfirmationTimeout comment
-  # above. Do not pin a literal here.
-  reconciliationGrace: ""
-
-# ===============================
-# Storage snapshots (lite-profile only — no-op on this profile)
-# ===============================
-# profile: standard above already owns durability via Postgres + Redis;
-# ServiceRegistry logs-and-skips file snapshotting here even if a path were set.
-# Left empty/disabled to match config.go's own default and avoid implying a
-# lite-profile feature is doing anything on this deployment.
-storage:
-  path: ""
-  snapshotInterval: "5m"
-
-# ===============================
-# Silence cross-replica sync (Production)
-# ===============================
-# Restart-only knobs, kept at config.go's defaults — listed explicitly so a
-# future change is a one-line diff instead of a rediscovery of the viper defaults.
-silencing:
-  subscribeRetryBackoff: "2s"
-  periodicResyncInterval: "5m"
 
 # `publishingTargets` is the Helm input shape.
 # The chart serializes each entry into a canonical runtime Secret:
@@ -347,11 +252,8 @@ networkPolicy:
 # ===============================
 # Security Configuration
 # ===============================
-# No debug endpoints: environment/logLevel above keep app.debug's own default
-# (config.go: false) and avoid IsDevelopment()'s implicit debug mode. Response
-# redaction (PagerDuty routing_key, Slack/webhook URLs, Telegram bot_token, etc.
-# in GET /api/v2/status's config.original) is unconditional in code, not a
-# values knob — nothing to set here for that.
+# GET /api/v2/status masks the secrets of alertmanager.yml and of the attached
+# K8s-Secret targets as upstream masks them; nothing to set here for that.
 podSecurityContext:
   fsGroup: 65534
   runAsNonRoot: true
@@ -382,6 +284,10 @@ affinity:
           operator: In
           values:
           - amp
+        - key: app.kubernetes.io/component
+          operator: In
+          values:
+          - application
       topologyKey: kubernetes.io/hostname
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
@@ -392,70 +298,3 @@ affinity:
           operator: In
           values:
           - "true"
-
-# ===============================
-# Config file + hot reload (INF-A)
-# ===============================
-# Production runs the config-reloader sidecar, so an edit to the config
-# ConfigMap takes effect in place instead of needing a rollout.
-#
-# NOTE for whoever merges track B: track B introduced this section's shape
-# (enabled / image / resources) on its own branch. Keep one copy of the block —
-# the keys below are a superset, and the sidecar reads all of them.
-configFile:
-  enabled: true
-
-  # Deliberately secret-free. `receivers:` entries carry credentials
-  # (slack api_url, pagerduty service_key, smtp auth), and this file lands in a
-  # plain ConfigMap — so real delivery targets belong in Kubernetes Secrets,
-  # which AMP's publishing discovery already picks up, or in an overlay that
-  # renders this content from a secret store.
-  #
-  # What lives here safely: the route tree's shape, grouping timings,
-  # inhibit_rules and templates globs.
-  content: |
-    route:
-      receiver: default
-      group_by: ['alertname', 'cluster', 'service']
-      group_wait: 30s
-      group_interval: 5m
-      repeat_interval: 4h
-    receivers:
-      # No integrations = a blackhole receiver. Real targets come from
-      # Kubernetes Secrets via publishing discovery.
-      - name: default
-
-configReloader:
-  # FALSE until the sidecar image is published. The build job exists
-  # (.github/workflows/release.yml), but nothing has been released yet: flip
-  # to true only once the tag this chart resolves to is actually in GHCR
-  # (PROD-RELEASE-V010).
-  #
-  # Enabling this against an image that does not exist takes production DOWN
-  # rather than degrading it: pod readiness requires all containers, so the
-  # sidecar's ImagePullBackOff keeps the pod out of the Service endpoints and
-  # stalls the rollout while the amp container itself is healthy. pullPolicy:
-  # Always removes even the cached-image escape.
-  enabled: false
-
-  image:
-    # Published by .github/workflows/release.yml alongside ghcr.io/ipiton/amp.
-    repository: ghcr.io/ipiton/amp-config-reloader
-    tag: ""
-    pullPolicy: Always
-
-  resources:
-    limits:
-      cpu: 50m
-      memory: 64Mi
-    requests:
-      cpu: 10m
-      memory: 32Mi
-
-  # http, not signal: signal needs shareProcessNamespace: true on the pod,
-  # which lets every container see the others' processes. Not worth it when a
-  # loopback POST does the same job.
-  method: http
-  interval: 10s
-  verifyTimeout: 30s
-  maxBackoff: 5m

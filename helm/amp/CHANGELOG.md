@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed (breaking, UPSTREAM-CORE-REMOVAL, ADR-019 slice 5)
+- The chart's only workload is `amp-upstream` as StatefulSet `<fullname>` (`templates/statefulset.yaml`): pods labelled `app.kubernetes.io/component: application` (also in the StatefulSet selector), a `data` volumeClaimTemplate (`alertmanager.persistence`) for silence and notification-log snapshots, `alertmanager.yml` from ConfigMap `<fullname>` (`alertmanager.config`) and `amp.yaml` from ConfigMap `<fullname>-amp-config` (generated from `profile`, `externalDatabase`/`postgresql`, `llm`, `investigation`, `publishing`, then `alertmanager.ampConfig` merged over it), both at `/etc/amp/config`. Passwords stay in Secrets: `DATABASE_PASSWORD` and `LLM_API_KEY` env.
+- `upstreamCore.*` → `alertmanager.*` (`replicas`, `externalURL`, `peerTimeout`, `config`, `ampConfig`, `persistence`, `extraArgs`); the separate `<fullname>-upstream` StatefulSet and Services are gone. `alertmanager.replicas` > 1 forms a gossip cluster over `<fullname>-headless` (`app.kubernetes.io/component: cluster`, 9094 TCP/UDP); NetworkPolicy admits gossip between AMP pods. `values-production.yaml`: 3 replicas, PDB `minAvailable: 2`, `valkey.replicas: 0`.
+- Service, ServiceMonitor and NetworkPolicy use port `web` 9093 (was `http` 8080); probes and the ServiceMonitor path follow the `alertmanager.externalURL` path prefix.
+- RBAC for K8s-Secret target discovery and `automountServiceAccountToken` only with `profile: standard` and `publishing.enabled`.
+- NOTES: replicas and gossip, the N-LLM-calls risk with `llm.enabled` and several replicas, external URL, auth, database, the PostgreSQL connection budget (`alertmanager.replicas` × 25 + 5), the unused Valkey, and a warning when `terminationGracePeriodSeconds` < `preStopDelay` + 10.
+
+### Removed
+- `templates/{deployment,hpa,pvc,configfile,upstream-statefulset,upstream-configmap,upstream-service,upstream-service-headless}.yaml` and the env ConfigMap; the config-reloader sidecar and its image.
+- Values: `replicaCount`, `logLevel`, `autoscaling`, `strategy`, `liteProfile`, `cache.*`, `alerts`, `migration`, `grouping`, `storage`, `silencing`, `persistence`, `server`, `configFile`, `configReloader`, `gracefulShutdown.timeoutSeconds`, `publishing.queue`/`templates`/`health`, `llm.retryDelay`/`cacheTtl`/`batchSize`. The Valkey subchart objects still render (`valkey.*`) but nothing reads them (`UPSTREAM-AI-HA-DEDUP`).
+- The no-database fallback is `alertmanager.ampConfig.database` instead of `configFile.content`.
+- Tests: `render-config-reloader.sh`, `render-grouping-default.sh`, `render-cache-startup-wait.sh`, `render-cache-auth.sh`; `render-upstream-core.sh` became `render-statefulset.sh`, the rest render the StatefulSet and `amp.yaml`.
+
 ### Added
 - `upstreamCore.*` (UPSTREAM-HA-MEMBERLIST, ADR-019 slice 4, default `enabled: false`): the upstream Alertmanager core as StatefulSet `<fullname>-upstream` with a ConfigMap (`upstreamCore.config` as `alertmanager.yml`), a ClusterIP Service (9093) and a headless Service (9093, gossip 9094 TCP/UDP, `publishNotReadyAddresses`), PVC `data` per pod for the silences and notification log snapshots. `replicas: 1` disables the gossip cluster; more replicas form a memberlist cluster over the headless Service (`podManagementPolicy: Parallel`). Pods carry `app.kubernetes.io/name: <name>-upstream`, so the AMP Service and its selectors do not pick them up. `replicas` < 1 fails the render. Defaults render unchanged. Test: `tests/render-upstream-core.sh`.
 - `extraVolumes` / `extraVolumeMounts` (HELM-EXTRA-VOLUMES, default `[]`): extra pod volumes and mounts for the `amp` container, e.g. a Secret with receiver credentials referenced from `configFile.content` via `*_file` fields. Not mounted into the config-reloader sidecar. Rendering fails on a volume name or `mountPath` the chart already uses; empty values render unchanged. Test: `tests/render-extra-volumes.sh`.

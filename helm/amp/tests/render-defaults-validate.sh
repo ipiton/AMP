@@ -7,11 +7,11 @@
 #     except the operator's externalDatabase.existingSecret, which the chart
 #     never creates;
 #   - LLM is off by default, and turning it on without a key fails the render;
-#   - DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION is set only for the bundled
+#   - database.allow_insecure_ssl_in_production is set only for the bundled
 #     PostgreSQL without TLS, never for an external database;
 #   - the chart does not set the controller-owned deployment.kubernetes.io/revision
 #     annotation: under Helm 4 server-side apply it made every upgrade after a
-#     rollout conflict with the Deployment controller.
+#     rollout conflict with the controller.
 #
 #   helm/amp/tests/render-defaults-validate.sh
 #
@@ -36,6 +36,32 @@ assert_count() {
   # grep -c exits 1 on zero matches; the count is still printed.
   got="$(grep -c -F -e "$2" "$1" || true)"
   if [ "${got}" -eq "$3" ]; then pass "$4"; else fail "$4 (want $3 x '$2', got ${got})"; fi
+}
+
+# cfg_value <file> <dotted.key>: a scalar of the rendered amp.yaml (the
+# <fullname>-amp-config ConfigMap), quotes stripped; no yq in the gate's
+# toolchain, so a flat walk of toYaml's two-space nesting.
+cfg_value() {
+  awk -v want="$2" '
+    /^  amp\.yaml: \|$/ { on = 1; next }
+    on && !/^    / { on = 0 }
+    on {
+      match($0, /^ */); lvl = (RLENGTH - 4) / 2
+      line = substr($0, RLENGTH + 1)
+      k = line; sub(/:.*/, "", k)
+      v = line; if (sub(/^[^:]*: /, "", v) == 0) v = ""
+      path[lvl] = k; p = path[0]
+      for (i = 1; i <= lvl; i++) p = p "." path[i]
+      if (p == want && v != "") { gsub(/^"|"$/, "", v); print v; exit }
+    }' "$1"
+}
+
+# assert_cfg <file> <dotted.key> <expected> <description>
+assert_cfg() {
+  local got want="${3#\"}"
+  want="${want%\"}"
+  got="$(cfg_value "$1" "$2")"
+  if [ "${got}" = "${want}" ]; then pass "$4"; else fail "$4 (want $2=${want}, got '${got}')"; fi
 }
 
 # render <name> <helm args...>: renders into ${WORK_DIR}/<name>.yaml; a failed
@@ -103,10 +129,9 @@ fi
 # scripts/release-gate.sh does.
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
   -f "${CHART_DIR}/tests/values-production-placeholders.yaml"
-  --set postgresql.password=render-test-placeholder
-  --set cache.auth.password=render-test-placeholder)
+  --set postgresql.password=render-test-placeholder)
 
-FLAG="name: DATABASE_ALLOW_INSECURE_SSL_IN_PRODUCTION"
+FLAG="allow_insecure_ssl_in_production: true"
 # An external database: postgresql.enabled=false needs one (render-external-database.sh).
 EXT=(--set postgresql.enabled=false
   --set externalDatabase.host=db.example.com
@@ -123,16 +148,16 @@ check_secret_refs dev
 # values-production.yaml uses an external database; the placeholder Secret is the operator's.
 check_secret_refs production release-gate-placeholder/password
 for v in default dev production; do
-  assert_count "${WORK_DIR}/${v}.yaml" 'LLM_ENABLED: "false"' 1 "${v}: LLM is off"
+  assert_cfg "${WORK_DIR}/${v}.yaml" llm.enabled false "${v}: LLM is off"
 done
 for v in default dev; do
   assert_count "${WORK_DIR}/${v}.yaml" "${FLAG}" 1 "${v}: insecure-SSL flag set once for the bundled PostgreSQL"
-  assert_count "${WORK_DIR}/${v}.yaml" 'value: "disable"' 1 "${v}: DATABASE_SSL_MODE is disable"
+  assert_cfg "${WORK_DIR}/${v}.yaml" database.ssl_mode disable "${v}: database.ssl_mode is disable"
 done
 assert_count "${WORK_DIR}/production.yaml" "${FLAG}" 0 "production: no insecure-SSL flag for the external database"
-assert_count "${WORK_DIR}/production.yaml" 'value: "require"' 1 "production: DATABASE_SSL_MODE is require"
+assert_cfg "${WORK_DIR}/production.yaml" database.ssl_mode require "production: database.ssl_mode is require"
 for v in default dev production; do
-  assert_count "${WORK_DIR}/${v}.yaml" "deployment.kubernetes.io/revision" 0 "${v}: no hard-coded Deployment revision annotation"
+  assert_count "${WORK_DIR}/${v}.yaml" "deployment.kubernetes.io/revision" 0 "${v}: no hard-coded revision annotation"
 done
 
 echo "T2-T4 flag stays off where it does not belong:"
@@ -156,7 +181,7 @@ fi
 echo "T6 LLM on with a key source renders:"
 render llm-key --set llm.enabled=true --set llm.apiKey=render-test-key
 check_secret_refs llm-key
-assert_count "${WORK_DIR}/llm-key.yaml" "key: llm-api-key" 1 "llm-key: Deployment reads llm-api-key"
+assert_count "${WORK_DIR}/llm-key.yaml" "key: llm-api-key" 1 "llm-key: StatefulSet reads llm-api-key"
 render llm-eso --set llm.enabled=true --set externalSecrets.enabled=true
 assert_count "${WORK_DIR}/llm-eso.yaml" "llm-api-key:" 1 "llm-eso: ExternalSecret supplies llm-api-key"
 

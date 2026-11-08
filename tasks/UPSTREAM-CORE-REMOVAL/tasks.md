@@ -67,11 +67,20 @@ based_on:
 
 ## Phase 5: 5c — чарт
 
-- [ ] **5.1** `values.yaml`: `upstreamCore` → `alertmanager`, общие ключи для StatefulSet; удалить ключи своего ядра (`configFile`, `configReloader`, `autoscaling`, `persistence` lite, `grouping`, `silencing`, `storage`, publishing queue/templates/health, `liteProfile`, `alerts`, `migration`, `strategy`). `values-production.yaml` — то же. <!-- verify: helm lint helm/amp -->
-- [ ] **5.2** `statefulset.yaml`, `service.yaml`, `service-headless.yaml`, `configmap.yaml` (alertmanager.yml), `amp-config.yaml` (AMP-конфиг); SA/RBAC; web auth; ingress/servicemonitor/networkpolicy/pdb на селекторе; NetworkPolicy PG/Valkey; удалить `deployment.yaml`, `hpa.yaml`, `pvc.yaml`, `configfile.yaml`, старые `upstream-*.yaml`; `NOTES.txt`. <!-- verify: helm template по dev/prod/small -->
-- [ ] **5.3** `tests/*.sh`: удалить тесты своего ядра (config-reloader, grouping-default, cache-startup-wait), перенести остальные на StatefulSet (переписывание утверждений — фаза 7). <!-- verify: step_helm_tests -->
-- [ ] **5.4** Удалить `cmd/config-reloader`, `Dockerfile.config-reloader`, matrix CI/release; `docs/CI.md`. <!-- verify: go build ./... ; actionlint если есть -->
-- [ ] **5.5** `CHANGELOG.md` `[Unreleased]` (breaking), `helm/amp/CHANGELOG.md`, `helm/amp/README.md`. <!-- verify: git diff --check -->
+- [x] **5.1** `values.yaml`: `upstreamCore` → `alertmanager`, общие ключи для StatefulSet; удалить ключи своего ядра (`configFile`, `configReloader`, `autoscaling`, `persistence` lite, `grouping`, `silencing`, `storage`, publishing queue/templates/health, `liteProfile`, `alerts`, `migration`, `strategy`). `values-production.yaml` — то же. <!-- verify: helm lint helm/amp -->
+- [x] **5.2** `statefulset.yaml`, `service.yaml`, `service-headless.yaml`, `configmap.yaml` (alertmanager.yml), `amp-config.yaml` (AMP-конфиг); SA/RBAC; web auth; ingress/servicemonitor/networkpolicy/pdb на селекторе; NetworkPolicy PG/Valkey; удалить `deployment.yaml`, `hpa.yaml`, `pvc.yaml`, `configfile.yaml`, старые `upstream-*.yaml`; `NOTES.txt`. <!-- verify: helm template по dev/prod/small -->
+- [x] **5.3** `tests/*.sh`: удалить тесты своего ядра (config-reloader, grouping-default, cache-startup-wait), перенести остальные на StatefulSet (переписывание утверждений — фаза 7). <!-- verify: step_helm_tests -->
+- [x] **5.4** Удалить `cmd/config-reloader`, `Dockerfile.config-reloader`, matrix CI/release; `docs/CI.md`. <!-- verify: go build ./... ; actionlint если есть -->
+- [x] **5.5** `CHANGELOG.md` `[Unreleased]` (breaking), `helm/amp/CHANGELOG.md`, `helm/amp/README.md`. <!-- verify: git diff --check -->
+
+**Отклонения 5c:**
+- Один StatefulSet `<fullname>` вместо Deployment + `<fullname>-upstream`: поды несут `component: application` (и в селекторе StatefulSet), поэтому NetworkPolicy PG/Valkey пускают их без правок; headless — `component: cluster`, чтобы ServiceMonitor не скрейпил дважды.
+- `amp-config.yaml`: AMP-конфиг генерируется из values и сливается с `alertmanager.ampConfig` (`mustMergeOverwrite`) — `ampConfig` перекрывает `externalDatabase` (раньше env `externalDatabase` перекрывал `configFile`). Fallback без БД — `alertmanager.ampConfig.database` вместо `configFile.content`.
+- Удалены `logLevel` и `gracefulShutdown.timeoutSeconds`: у `amp-upstream` нет таких флагов (HTTP-drain фиксированные 5s); порог NOTES — `preStopDelay + 10`.
+- `cache.*` удалён целиком; Valkey остаётся (дефолт PG+Valkey по Spec), но не используется — NOTES/values/CHANGELOG, TECH-DEBT (UPSTREAM-AI-HA-DEDUP). `values-production.yaml`: `valkey.replicas: 0`.
+- Тесты чарта: удалены также `render-cache-auth.sh` (cache.*); `render-upstream-core.sh` → `render-statefulset.sh`; утверждения про env (`DATABASE_*`, `LLM_ENABLED`) переведены на ключи `amp.yaml` (`cfg_value`), HPA/lite-PVC/cache-строки NOTES — на реплики StatefulSet и строку Valkey. Новых сценариев сверх замены — фаза 7.
+- CI: matrix `images` оставлен с одной записью `amp`, чтобы имя required-check `images (amp)` не менялось.
+- `grafana/dashboards/alert-history-service.json` ссылается на метрики своего ядра — срез 7 (доки/дашборды), не тронут. `docs/CONFIGURATION_GUIDE.md` (configReloader, configFile) — тоже срез 7.
 
 ## Phase 6: deep-review
 

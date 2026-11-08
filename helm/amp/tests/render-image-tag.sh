@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Renders the chart with each shipped values profile and asserts that the app
-# and config-reloader images default to the chart's appVersion, which is the
+# image defaults to the chart's appVersion, which is the
 # tag release.yml publishes (and refuses to publish a tag that differs).
 #
 # Before PROD-RELEASE-V010-PREP, values.yaml and values-production.yaml pinned
@@ -17,7 +17,6 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 APP_IMAGE="ghcr.io/ipiton/amp"
-RELOADER_IMAGE="ghcr.io/ipiton/amp-config-reloader"
 
 failures=0
 
@@ -62,8 +61,7 @@ echo "Chart appVersion: ${APP_VERSION}"
 # scripts/release-gate.sh does.
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
   -f "${CHART_DIR}/tests/values-production-placeholders.yaml"
-  --set postgresql.password=render-test-placeholder
-  --set cache.auth.password=render-test-placeholder)
+  --set postgresql.password=render-test-placeholder)
 
 # check_app_image <name> <helm args...>
 check_app_image() {
@@ -79,22 +77,6 @@ check_app_image() {
 check_app_image default
 check_app_image production "${PROD_ARGS[@]}"
 check_app_image lite --set profile=lite
-
-echo "config-reloader image defaults to appVersion:"
-cat >"${WORK_DIR}/reloader-on.yaml" <<'YAML'
-configFile:
-  enabled: true
-  content: |
-    route:
-      receiver: default
-    receivers:
-      - name: default
-configReloader:
-  enabled: true
-YAML
-helm template amp "${CHART_DIR}" -f "${WORK_DIR}/reloader-on.yaml" >"${WORK_DIR}/reloader.yaml"
-assert_count "${WORK_DIR}/reloader.yaml" "image: \"${RELOADER_IMAGE}:${APP_VERSION}\"" 1 "sidecar on ${RELOADER_IMAGE}:${APP_VERSION}"
-assert_count "${WORK_DIR}/reloader.yaml" "image: \"${APP_IMAGE}:${APP_VERSION}\"" 1 "app container unchanged next to the sidecar"
 
 echo "an explicit image.tag still wins:"
 helm template amp "${CHART_DIR}" --set image.tag=9.9.9 >"${WORK_DIR}/pinned.yaml"

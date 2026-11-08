@@ -188,7 +188,7 @@ step_helm_values() {
   # file, because peer lists do not survive the unquoted expansion below.
   local extra_sets=""
   if [ "$values_file" = "values-production.yaml" ]; then
-    extra_sets="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder -f $HELM_CHART_DIR/tests/values-production-placeholders.yaml"
+    extra_sets="--set postgresql.password=release-gate-placeholder -f $HELM_CHART_DIR/tests/values-production-placeholders.yaml"
   fi
   # shellcheck disable=SC2086
   helm lint "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets || return 1
@@ -208,7 +208,7 @@ step_helm_rbac() {
     log "helm not found on PATH"
     return 1
   fi
-  local placeholders="--set postgresql.password=release-gate-placeholder --set cache.auth.password=release-gate-placeholder -f $HELM_CHART_DIR/tests/values-production-placeholders.yaml"
+  local placeholders="--set postgresql.password=release-gate-placeholder -f $HELM_CHART_DIR/tests/values-production-placeholders.yaml"
   local failed=0 variant args expect_roles rendered count bad_verbs kind
   for variant in default dev production lite; do
     case "$variant" in

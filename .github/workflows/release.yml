@@ -1,4 +1,4 @@
-# Publishes ghcr.io/ipiton/amp and ghcr.io/ipiton/amp-config-reloader
+# Publishes ghcr.io/ipiton/amp
 # (linux/amd64 + linux/arm64) when a v* tag is pushed. The only workflow with
 # `packages: write`, kept separate from ci.yml so no pull_request run ever
 # holds that permission (ADR-013). Deliberately no workflow_dispatch: a tag
@@ -8,7 +8,7 @@
 # The build itself is the one ci.yml's `images` job proves on every PR;
 # this adds only the registry login, tags/labels and push.
 #
-# After the FIRST publish, GHCR creates both packages as private -- the
+# After the FIRST publish, GHCR creates the package as private -- the
 # owner flips them to Public once in the package settings (docs/CI.md),
 # or `docker pull` without credentials fails.
 name: release
@@ -34,9 +34,6 @@ jobs:
           - name: amp
             file: Dockerfile
             image: ghcr.io/ipiton/amp
-          - name: config-reloader
-            file: Dockerfile.config-reloader
-            image: ghcr.io/ipiton/amp-config-reloader
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,9 +69,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
-      # VERSION/REVISION/BRANCH/BUILD_DATE feed the server's buildinfo
-      # (GET /api/v2/status versionInfo); the reloader Dockerfile declares
-      # none of them, so buildx ignores them there.
+      # VERSION/REVISION/BRANCH/BUILD_DATE feed amp-upstream's buildinfo
+      # (amp_build_info).
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .

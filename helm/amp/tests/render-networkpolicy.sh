@@ -104,8 +104,7 @@ fi
 LABEL="app.kubernetes.io/component: application"
 NO_SOURCES="with no sources would block every alert sender"
 PROD_ARGS=(-f "${CHART_DIR}/values-production.yaml"
-  --set postgresql.password=render-test-placeholder
-  --set cache.auth.password=render-test-placeholder)
+  --set postgresql.password=render-test-placeholder)
 PLACEHOLDERS=(-f "${CHART_DIR}/tests/values-production-placeholders.yaml")
 CONTROLLER=(--set-json 'networkPolicy.ingressController=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"np-test-controller"}}}]')
 SENDER=(--set-json 'networkPolicy.alertSenders=[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"np-test-sender"}}}]')
@@ -117,7 +116,8 @@ doc "${WORK_DIR}/default.yaml" NetworkPolicy amp >"${WORK_DIR}/default-np.yaml"
 assert_absent "${WORK_DIR}/default-np.yaml" "kind: NetworkPolicy" "no AMP policy by default"
 
 echo "an enabled policy with no effective source is refused:"
-assert_render_fails "values-production.yaml with no sources" "${NO_SOURCES}" "${PROD_ARGS[@]}"
+assert_render_fails "values-production.yaml with no sources" "${NO_SOURCES}" "${PROD_ARGS[@]}" "${PLACEHOLDERS[@]}" \
+  --set networkPolicy.alertSenders=null
 assert_render_fails "defaults + networkPolicy.enabled" "${NO_SOURCES}" --set networkPolicy.enabled=true
 assert_render_fails "ingressController only, Ingress off" "${NO_SOURCES}" \
   --set networkPolicy.enabled=true "${CONTROLLER[@]}"
@@ -129,7 +129,7 @@ block "${WORK_DIR}/prod-np.yaml" "  podSelector:" >"${WORK_DIR}/prod-np-selector
 assert_contains "${WORK_DIR}/prod-np-selector.yaml" "${LABEL}" "selects the AMP pods by component"
 assert_contains "${WORK_DIR}/prod-np.yaml" "# alert-senders" "alert-senders rule"
 assert_contains "${WORK_DIR}/prod-np.yaml" "kubernetes.io/metadata.name: release-gate-placeholder" "peers rendered as given"
-assert_count "${WORK_DIR}/prod-np.yaml" "port: http" 1 "one rule, http port only"
+assert_count "${WORK_DIR}/prod-np.yaml" "port: web" 1 "one rule, web port only"
 assert_absent "${WORK_DIR}/prod-np.yaml" "Egress" "no Egress policyType"
 assert_absent "${WORK_DIR}/prod-np.yaml" "# ingress-controller" "no controller rule with no controller peers"
 
@@ -138,31 +138,29 @@ render roles --set networkPolicy.enabled=true "${CONTROLLER[@]}" "${SENDER[@]}" 
 doc "${WORK_DIR}/roles.yaml" NetworkPolicy amp >"${WORK_DIR}/roles-np.yaml"
 assert_absent "${WORK_DIR}/roles-np.yaml" "np-test-controller" "controller peers dropped while ingress.enabled=false"
 assert_contains "${WORK_DIR}/roles-np.yaml" "# metrics-scrapers" "metrics-scrapers rule"
-assert_count "${WORK_DIR}/roles-np.yaml" "port: http" 2 "sender + scraper rules, http only"
+assert_count "${WORK_DIR}/roles-np.yaml" "port: web" 2 "sender + scraper rules, web only"
 render roles-ingress --set networkPolicy.enabled=true "${CONTROLLER[@]}" "${SENDER[@]}" \
   --set ingress.enabled=true --set ingress.externalAuth=true
 doc "${WORK_DIR}/roles-ingress.yaml" NetworkPolicy amp >"${WORK_DIR}/roles-ingress-np.yaml"
 assert_contains "${WORK_DIR}/roles-ingress-np.yaml" "# ingress-controller" "controller rule with ingress.enabled"
 assert_contains "${WORK_DIR}/roles-ingress-np.yaml" "np-test-controller" "controller peers rendered"
-assert_count "${WORK_DIR}/roles-ingress-np.yaml" "port: http" 2 "controller + sender rules"
+assert_count "${WORK_DIR}/roles-ingress-np.yaml" "port: web" 2 "controller + sender rules"
 
 echo "extraIngress is rendered as-is:"
 render extra --set networkPolicy.enabled=true \
-  --set-json 'networkPolicy.extraIngress=[{"from":[{"ipBlock":{"cidr":"10.99.0.0/16"}}],"ports":[{"protocol":"TCP","port":"http"}]}]'
+  --set-json 'networkPolicy.extraIngress=[{"from":[{"ipBlock":{"cidr":"10.99.0.0/16"}}],"ports":[{"protocol":"TCP","port":"web"}]}]'
 doc "${WORK_DIR}/extra.yaml" NetworkPolicy amp >"${WORK_DIR}/extra-np.yaml"
 assert_contains "${WORK_DIR}/extra-np.yaml" "cidr: 10.99.0.0/16" "raw rule rendered"
 
-echo "the component label lives in the pod template only:"
-doc "${WORK_DIR}/default.yaml" Deployment amp >"${WORK_DIR}/deploy.yaml"
-block "${WORK_DIR}/deploy.yaml" "  selector:" >"${WORK_DIR}/deploy-selector.yaml"
-block "${WORK_DIR}/deploy.yaml" "    metadata:" >"${WORK_DIR}/deploy-pod-meta.yaml"
-assert_contains "${WORK_DIR}/deploy-pod-meta.yaml" "${LABEL}" "pod template carries the label"
-assert_contains "${WORK_DIR}/deploy-selector.yaml" "app.kubernetes.io/instance: amp" "Deployment selector found"
-assert_absent "${WORK_DIR}/deploy-selector.yaml" "app.kubernetes.io/component" "Deployment selector unchanged (immutable)"
+echo "the StatefulSet and its Service select the AMP pods by component:"
+doc "${WORK_DIR}/default.yaml" StatefulSet amp >"${WORK_DIR}/sts.yaml"
+block "${WORK_DIR}/sts.yaml" "  selector:" >"${WORK_DIR}/sts-selector.yaml"
+block "${WORK_DIR}/sts.yaml" "    metadata:" >"${WORK_DIR}/sts-pod-meta.yaml"
+assert_contains "${WORK_DIR}/sts-pod-meta.yaml" "${LABEL}" "pod template carries the label"
+assert_contains "${WORK_DIR}/sts-selector.yaml" "${LABEL}" "StatefulSet selector: component"
 doc "${WORK_DIR}/default.yaml" Service amp >"${WORK_DIR}/svc.yaml"
 block "${WORK_DIR}/svc.yaml" "  selector:" >"${WORK_DIR}/svc-selector.yaml"
-assert_contains "${WORK_DIR}/svc-selector.yaml" "app.kubernetes.io/instance: amp" "Service selector found"
-assert_absent "${WORK_DIR}/svc-selector.yaml" "app.kubernetes.io/component" "Service selector unchanged"
+assert_contains "${WORK_DIR}/svc-selector.yaml" "${LABEL}" "Service selector: component"
 
 echo "podLabels cannot override the component label:"
 assert_render_fails "podLabels with app.kubernetes.io/component" \
@@ -183,7 +181,7 @@ echo "values without the networkPolicy section (--reuse-values from an old relea
 # release's stored values look like to this chart.
 render reuse --set networkPolicy=null
 doc "${WORK_DIR}/reuse.yaml" NetworkPolicy amp >"${WORK_DIR}/reuse-np.yaml"
-assert_contains "${WORK_DIR}/reuse.yaml" "kind: Deployment" "renders"
+assert_contains "${WORK_DIR}/reuse.yaml" "kind: StatefulSet" "renders"
 assert_absent "${WORK_DIR}/reuse-np.yaml" "kind: NetworkPolicy" "no AMP policy"
 
 if [ "${failures}" -ne 0 ]; then

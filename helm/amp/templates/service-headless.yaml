@@ -1,4 +1,3 @@
-{{- if .Values.upstreamCore.enabled }}
 {{- /*
 Stable pod DNS names for the StatefulSet: the --cluster.peer addresses and
 the per-pod targets Prometheus must send every alert to. Not-ready pods are
@@ -8,10 +7,11 @@ passes (Join runs at startup and memberlist retries only lost peers).
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "amp.upstream.headlessName" . }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "amp.headlessName" . }}
+  namespace: {{ include "amp.namespace" . }}
   labels:
-    {{- include "amp.upstream.labels" . | nindent 4 }}
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cluster
 spec:
   clusterIP: None
   publishNotReadyAddresses: true
@@ -29,5 +29,4 @@ spec:
       targetPort: gossip-udp
       protocol: UDP
   selector:
-    {{- include "amp.upstream.selectorLabels" . | nindent 4 }}
-{{- end }}
+    {{- include "amp.appSelectorLabels" . | nindent 4 }}

@@ -1,77 +1,12 @@
+{{- /* alertmanager.yml, as upstream Alertmanager reads it (--config.file). */}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "amp.fullname" . }}-config
-  namespace: {{ .Values.namespace | default .Release.Namespace }}
+  name: {{ include "amp.fullname" . }}
+  namespace: {{ include "amp.namespace" . }}
   labels:
     {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: application
 data:
-  {{- $llmTimeout := .Values.llm.timeout | toString }}
-  APP_ENVIRONMENT: {{ .Values.environment | quote }}
-  PROFILE: {{ .Values.profile | quote }}
-  STORAGE_BACKEND: {{ ternary "filesystem" "postgres" (eq .Values.profile "lite") | quote }}
-  LOG_LEVEL: {{ .Values.logLevel | quote }}
-
-  LLM_ENABLED: {{ .Values.llm.enabled | quote }}
-  {{- if .Values.llm.enabled }}
-  LLM_BASE_URL: {{ .Values.llm.proxyUrl | quote }}
-  LLM_MODEL: {{ .Values.llm.model | quote }}
-  {{- if or (hasSuffix "ms" $llmTimeout) (hasSuffix "s" $llmTimeout) (hasSuffix "m" $llmTimeout) (hasSuffix "h" $llmTimeout) }}
-  LLM_TIMEOUT: {{ $llmTimeout | quote }}
-  {{- else }}
-  LLM_TIMEOUT: {{ printf "%ss" $llmTimeout | quote }}
-  {{- end }}
-  LLM_MAX_RETRIES: {{ .Values.llm.maxRetries | quote }}
-  {{- end }}
-
-  PUBLISHING_ENABLED: {{ .Values.publishing.enabled | quote }}
-  {{- if .Values.publishing.discovery.namespace }}
-  PUBLISHING_DISCOVERY_NAMESPACE: {{ .Values.publishing.discovery.namespace | quote }}
-  {{- end }}
-  PUBLISHING_DISCOVERY_LABEL_SELECTOR: {{ .Values.publishing.discovery.labelSelector | quote }}
-  PUBLISHING_QUEUE_MAX_CONCURRENT: {{ .Values.publishing.queue.maxConcurrent | quote }}
-  PUBLISHING_QUEUE_WORKER_COUNT: {{ .Values.publishing.queue.workerCount | quote }}
-  PUBLISHING_QUEUE_HIGH_PRIORITY_QUEUE_SIZE: {{ .Values.publishing.queue.highPriorityQueueSize | quote }}
-  PUBLISHING_QUEUE_MEDIUM_PRIORITY_QUEUE_SIZE: {{ .Values.publishing.queue.mediumPriorityQueueSize | quote }}
-  PUBLISHING_QUEUE_LOW_PRIORITY_QUEUE_SIZE: {{ .Values.publishing.queue.lowPriorityQueueSize | quote }}
-  PUBLISHING_QUEUE_MAX_RETRIES: {{ .Values.publishing.queue.maxRetries | quote }}
-  PUBLISHING_QUEUE_RETRY_INTERVAL: {{ .Values.publishing.queue.retryInterval | quote }}
-  PUBLISHING_QUEUE_STOP_TIMEOUT: {{ .Values.publishing.queue.stopTimeout | quote }}
-  PUBLISHING_QUEUE_JOB_TRACKING_CAPACITY: {{ .Values.publishing.queue.jobTrackingCapacity | quote }}
-  PUBLISHING_REFRESH_ENABLED: {{ .Values.publishing.refresh.enabled | quote }}
-  PUBLISHING_REFRESH_INTERVAL: {{ .Values.publishing.refresh.interval | quote }}
-  PUBLISHING_REFRESH_MAX_RETRIES: {{ .Values.publishing.refresh.maxRetries | quote }}
-  PUBLISHING_REFRESH_BASE_BACKOFF: {{ .Values.publishing.refresh.baseBackoff | quote }}
-  PUBLISHING_REFRESH_MAX_BACKOFF: {{ .Values.publishing.refresh.maxBackoff | quote }}
-  PUBLISHING_REFRESH_RATE_LIMIT_PER: {{ .Values.publishing.refresh.rateLimitPer | quote }}
-  PUBLISHING_REFRESH_TIMEOUT: {{ .Values.publishing.refresh.timeout | quote }}
-  PUBLISHING_REFRESH_WARMUP_PERIOD: {{ .Values.publishing.refresh.warmupPeriod | quote }}
-  PUBLISHING_HEALTH_ENABLED: {{ .Values.publishing.health.enabled | quote }}
-  PUBLISHING_HEALTH_CHECK_INTERVAL: {{ .Values.publishing.health.checkInterval | quote }}
-  PUBLISHING_HEALTH_HTTP_TIMEOUT: {{ .Values.publishing.health.httpTimeout | quote }}
-  PUBLISHING_HEALTH_WARMUP_DELAY: {{ .Values.publishing.health.warmupDelay | quote }}
-  PUBLISHING_HEALTH_FAILURE_THRESHOLD: {{ .Values.publishing.health.failureThreshold | quote }}
-  PUBLISHING_HEALTH_DEGRADED_THRESHOLD: {{ .Values.publishing.health.degradedThreshold | quote }}
-  PUBLISHING_HEALTH_MAX_CONCURRENT_CHECKS: {{ .Values.publishing.health.maxConcurrentChecks | quote }}
-  PUBLISHING_HEALTH_MAX_IDLE_CONNS: {{ .Values.publishing.health.maxIdleConns | quote }}
-  PUBLISHING_HEALTH_TLS_SKIP_VERIFY: {{ .Values.publishing.health.tlsSkipVerify | quote }}
-  PUBLISHING_HEALTH_FOLLOW_REDIRECTS: {{ .Values.publishing.health.followRedirects | quote }}
-  PUBLISHING_HEALTH_MAX_REDIRECTS: {{ .Values.publishing.health.maxRedirects | quote }}
-  PUBLISHING_QUEUE_DELIVERY_CONFIRMATION_TIMEOUT: {{ .Values.publishing.queue.deliveryConfirmationTimeout | quote }}
-  PUBLISHING_TEMPLATES_ENABLED: {{ .Values.publishing.templates.enabled | quote }}
-
-  GROUPING_ENABLED: {{ .Values.grouping.enabled | quote }}
-  GROUPING_RECONCILIATION_INTERVAL: {{ .Values.grouping.reconciliationInterval | quote }}
-  {{- if .Values.grouping.reconciliationGrace }}
-  # An explicit pin always wins over ServiceRegistry's own
-  # grouping.ReconciliationGraceFor(deliveryConfirmationTimeout) derivation.
-  GROUPING_RECONCILIATION_GRACE: {{ .Values.grouping.reconciliationGrace | quote }}
-  {{- end }}
-
-  {{- if .Values.storage.path }}
-  STORAGE_PATH: {{ .Values.storage.path | quote }}
-  STORAGE_SNAPSHOT_INTERVAL: {{ .Values.storage.snapshotInterval | quote }}
-  {{- end }}
-
-  SILENCING_SUBSCRIBE_RETRY_BACKOFF: {{ .Values.silencing.subscribeRetryBackoff | quote }}
-  SILENCING_PERIODIC_RESYNC_INTERVAL: {{ .Values.silencing.periodicResyncInterval | quote }}
+  alertmanager.yml: |
+    {{- toYaml .Values.alertmanager.config | nindent 4 }}
