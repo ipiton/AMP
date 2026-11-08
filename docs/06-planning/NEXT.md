@@ -15,6 +15,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **UPSTREAM-API-UI** — срез 6 ADR-019: `api/v2` upstream побайтно, AMP-маршруты истории и investigation (поиск по FNV-fingerprint `api/v2`), `/api/v2/inhibitions`. Решение владельца 2026-11-08: в v0.1.0 только API, своего UI нет (старый удалён в срезе 5); UI — отдельной задачей `UPSTREAM-UI` после релиза. Full, ~2d. Claimed 2026-11-08, worktree.
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
@@ -30,7 +32,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 > Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срезы 5 → 6 → 7 строго по очереди; описание — `BACKLOG.md` § ADR-019.
 
-- [ ] **UPSTREAM-API-UI** — срез 6 (срез 5 закрыт 2026-11-08). Full, 2–3d.
 - [ ] **UPSTREAM-DOCS-MIGRATION** — срез 7, последним. Lightweight, 2–3d.
 
 
