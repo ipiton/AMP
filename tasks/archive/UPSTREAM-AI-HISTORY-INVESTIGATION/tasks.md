@@ -3,7 +3,7 @@ id: UPSTREAM-AI-HISTORY-INVESTIGATION
 slug: upstream-ai-history-investigation
 stream: Architecture / ADR-019
 type: feature
-status: active
+status: done
 created_at: 2026-11-08
 updated_at: 2026-11-08
 based_on:
@@ -50,30 +50,31 @@ based_on:
 ## Deviations
 
 - Investigation `Stop` — 5s (`investigationStopTimeout`, как в `cmd/server`), а не 10s из Spec.
-- `TestSilencedAlertIsSkipped` (2a) ждёт outcome `skipped_silenced` и красный до write-tests (переименование в `skipped_muted`).
+- `TestSilencedAlertIsSkipped` (2a) заменён `TestMutedAlertIsSkippedUntilRecheck` (outcome `skipped_muted`, перепроверка).
+- После deep-review: перепроверка mute через 1m вместо «пропуск без памяти» (F1), повторный `Submit` на resend (F2), миграции с таймаутом 1m (F3), resolved из GC в историю (F8), `stopped` в `Classifier` (N2). Доп. тесты: `TestNoSubmitAfterStop`, `TestWarnOnlyPassesWarningsUp` (`cmd/amp-upstream/amp_test.go`); 4.5 — в `upstreamcore/mutes_test.go`.
 
 ## Phase 4: tests (после `review-verdict.json` = pass)
 
-- [ ] **4.1** `history_test.go`: неблокирующий `PostStore`, порядок по fingerprint, дроп при переполнении, статусы, SHA-256 ключ, `PreStore` nil, GC no-op
-- [ ] **4.2** `classifier_test.go`: investigation после classified/fallback, не после ошибки и mute; повтор после снятия mute; outcome `skipped_muted`
-- [ ] **4.3** `convert_test.go`: FNV upstream == `UpstreamFingerprint`, SHA-256 == `alertconv.Fingerprint`, статус resolved
-- [ ] **4.4** `chain_test.go`: порядок, первая ошибка `PreStore`
-- [ ] **4.5** `upstreamcore/core_test.go`: `mutes` истинна для алерта под inhibition через API
-- [ ] **4.6** `integration_test.go` (upstreamai): ingest → история и investigation по одному ключу
+- [x] **4.1** `history_test.go`: неблокирующий `PostStore`, порядок по fingerprint, дроп при переполнении, статусы, SHA-256 ключ, `PreStore` nil, GC no-op
+- [x] **4.2** `classifier_test.go`: investigation после classified/fallback, не после ошибки и mute; повтор после снятия mute; outcome `skipped_muted`
+- [x] **4.3** `convert_test.go`: FNV upstream == `UpstreamFingerprint`, SHA-256 == `alertconv.Fingerprint`, статус resolved
+- [x] **4.4** `chain_test.go`: порядок, первая ошибка `PreStore`
+- [x] **4.5** `upstreamcore/core_test.go`: `mutes` истинна для алерта под inhibition через API
+- [x] **4.6** `integration_test.go` (upstreamai): ingest → история и investigation по одному ключу
 
 **Phase verification:** `cd go-app && go test -race ./internal/upstreamai/ ./internal/upstreamcore/ ./cmd/amp-upstream/`
 
 ## Phase 5: docs и гейты
 
-- [ ] **5.1** `docs/UPSTREAM_UPGRADE.md`, `config.yaml.example`, `CHANGELOG.md` `[Unreleased]`
-- [ ] **5.2** Гейты: затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`
+- [x] **5.1** `docs/UPSTREAM_UPGRADE.md`, `config.yaml.example`, `CHANGELOG.md` `[Unreleased]`
+- [x] **5.2** Гейты: затронутые пакеты, `quality-gates-fast`, `scripts/release-gate.sh`, `git diff --check`
 
 ## Definition of Done
 
-- [ ] All steps are complete or explicitly marked blocked/skipped
-- [ ] Success criteria from `requirements.md` are covered
-- [ ] Contracts from `Spec.md` are implemented or deviations are recorded
-- [ ] Deep review verdict is `pass`
-- [ ] Tests for changed behavior are added or updated
-- [ ] Phase checks pass
-- [ ] Docs/planning are updated
+- [x] All steps are complete or explicitly marked blocked/skipped
+- [x] Success criteria from `requirements.md` are covered
+- [x] Contracts from `Spec.md` are implemented or deviations are recorded
+- [x] Deep review verdict is `pass`
+- [x] Tests for changed behavior are added or updated
+- [x] Phase checks pass
+- [x] Docs/planning are updated

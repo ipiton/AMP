@@ -137,6 +137,30 @@
 - **Refs:** deep-review `UPSTREAM-AI-CLASSIFY` F3; `go-app/internal/upstreamai/classifier.go`.
 - **Status:** open
 
+### [low][Storage][~0.5d] UPSTREAM-HISTORY-PG-RECONNECT
+- **Title:** `amp-upstream` не подхватывает PostgreSQL, поднявшийся после старта
+- **Problem:** `newAMPLayer` подключается к PG и мигрирует один раз при старте (connect ограничен `database.connect_timeout`, миграции — 1m). При ошибке история и investigation выключены до рестарта; переподключения в фоне нет.
+- **Impact:** PG, стартовавший позже `amp-upstream` (общий релиз, рестарт БД), оставляет процесс без истории и расследований до его рестарта; доставка не страдает. Видно по Error в логе старта.
+- **Fix:** фоновый цикл connect+migrate с backoff, включающий `History` и очередь investigation атомарно; либо readiness, требующая PG при `profile: standard`.
+- **Refs:** deep-review `UPSTREAM-AI-HISTORY-INVESTIGATION` F3; `go-app/cmd/amp-upstream/amp.go` `connectDatabase`.
+- **Status:** open
+
+### [low][Performance][~0.25d] UPSTREAM-HISTORY-CONVERT-UNDER-LOCK
+- **Title:** конвертация в `core.Alert` под локом провайдера на каждый `Put`
+- **Problem:** `History` и `Classifier` вызывают `toCoreAlert` (две map, SHA-256) в `PostStore`/`PostDelete` под `a.mtx` провайдера; IO нет, но это CPU на глобальном локе ingest для каждого алерта и resend'а.
+- **Impact:** при больших батчах растёт время удержания лока приёма; замеров нагрузки не было.
+- **Fix:** класть в шард `*alert.Alert` (store заменяет алерты, не мутирует) и конвертировать в воркере; бенчмарк `PostStore` до и после.
+- **Refs:** deep-review `UPSTREAM-AI-HISTORY-INVESTIGATION` F11; `go-app/internal/upstreamai/history.go`, `classifier.go`.
+- **Status:** open
+
+### [low][AI][~0.25d] UPSTREAM-AI-REFIRE-STALE-CLASSIFICATION
+- **Title:** повторно сработавший алерт до GC получает классификацию прошлого инцидента
+- **Problem:** запись `Classifier` живёт по fingerprint до GC алерта; resolve → firing с новым `StartsAt` до GC не создаёт новой классификации, и notify-стадия, и investigation получают старый результат (investigation всё же ставится новым инцидентом — dedup очереди по `StartsAt`).
+- **Impact:** `llm_*` в уведомлении нового инцидента — от прошлого; LLM-кеш сервиса дал бы тот же ответ при тех же labels, так что расхождение заметно только при изменившихся аннотациях.
+- **Fix:** хранить `StartsAt` в записи и переклассифицировать при его смене.
+- **Refs:** re-review `UPSTREAM-AI-HISTORY-INVESTIGATION` N5 (поведение с 2a); `go-app/internal/upstreamai/classifier.go`.
+- **Status:** open
+
 ### [low][Supply chain][~0.5d] UPSTREAM-BUMP-TRANSITIVE-AGE
 - **Title:** карантин `upstream-bump.sh` для транзитивных require — по commit time
 - **Problem:** `go list -m -json mod@ver` отдаёт `Time` — время коммита (`cmd/go/internal/modfetch/codehost/codehost.go`), его задаёт автор. Для `github.com/prometheus/alertmanager` скрипт берёт ещё дату GitHub-релиза, для остальных сдвинутых require — только commit time: новый тег на старый коммит проходит карантин.

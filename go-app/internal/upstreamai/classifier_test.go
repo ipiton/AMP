@@ -218,7 +218,9 @@ func TestMutedAlertIsSkippedUntilRecheck(t *testing.T) {
 	// Still muted at the recheck: checked again, skipped again.
 	clk.advance(31 * time.Second)
 	c.PostStore(a, true)
-	e = waitDone(t, c, a)
+	again := waitDone(t, c, a)
+	assert.NotSame(t, e, again, "a new check")
+	assert.Nil(t, again.result)
 	assert.Equal(t, 2.0, outcome(c, "skipped_muted"))
 
 	// The silence expired (or the inhibitor resolved): the next Put after
