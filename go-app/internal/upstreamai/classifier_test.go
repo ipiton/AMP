@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -157,18 +158,131 @@ func TestPostStoreNeverBlocksOnFullQueue(t *testing.T) {
 	assert.LessOrEqual(t, entries, 2, "one in flight plus one queued")
 }
 
-func TestSilencedAlertIsSkipped(t *testing.T) {
+// submitter records the investigations a Classifier queues.
+type submitter struct {
+	mu    sync.Mutex
+	calls []submission
+}
+
+type submission struct {
+	alert *core.Alert
+	res   *core.ClassificationResult
+}
+
+func (s *submitter) Submit(a *core.Alert, res *core.ClassificationResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, submission{a, res})
+}
+
+func (s *submitter) got() []submission {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]submission(nil), s.calls...)
+}
+
+// fakeClock is a Classifier's now, safe for its workers.
+type fakeClock struct{ ns atomic.Int64 }
+
+func newFakeClock(c *Classifier) *fakeClock {
+	clk := &fakeClock{}
+	clk.ns.Store(time.Now().UnixNano())
+	c.now = func() time.Time { return time.Unix(0, clk.ns.Load()) }
+	return clk
+}
+
+func (clk *fakeClock) advance(d time.Duration) { clk.ns.Add(int64(d)) }
+
+func TestMutedAlertIsSkippedUntilRecheck(t *testing.T) {
 	svc := &fakeService{res: warning()}
-	c, _ := newTestClassifier(t, svc, Config{})
-	c.AlertCallback(func(context.Context, model.LabelSet) bool { return true })
+	inv := &submitter{}
+	c, _ := newTestClassifier(t, svc, Config{Investigations: inv, MuteRecheck: time.Minute})
+	clk := newFakeClock(c)
+	var muted atomic.Bool
+	muted.Store(true)
+	c.AlertCallback(func(context.Context, model.LabelSet) bool { return muted.Load() })
 
 	a := firing("DiskFull")
 	c.PostStore(a, false)
 	e := waitDone(t, c, a)
-
 	assert.Nil(t, e.result)
-	assert.Zero(t, svc.callCount(), "a silenced alert must not cost an LLM call")
-	assert.Equal(t, 1.0, outcome(c, "skipped_silenced"))
+	assert.Zero(t, svc.callCount(), "a muted alert must not cost an LLM call")
+	assert.Equal(t, 1.0, outcome(c, "skipped_muted"))
+
+	// Resends before the recheck take no queue slot.
+	clk.advance(30 * time.Second)
+	c.PostStore(a, true)
+	assert.Same(t, e, c.lookup([]*alert.Alert{a})[0])
+	assert.Equal(t, 1.0, outcome(c, "skipped_muted"))
+
+	// Still muted at the recheck: checked again, skipped again.
+	clk.advance(31 * time.Second)
+	c.PostStore(a, true)
+	e = waitDone(t, c, a)
+	assert.Equal(t, 2.0, outcome(c, "skipped_muted"))
+
+	// The silence expired (or the inhibitor resolved): the next Put after
+	// the recheck classifies it.
+	muted.Store(false)
+	clk.advance(time.Minute)
+	c.PostStore(a, true)
+	e = waitDone(t, c, a)
+	assert.Equal(t, warning(), e.result)
+	assert.Equal(t, 1, svc.callCount())
+	assert.Len(t, inv.got(), 1, "investigated once classified, never while muted")
+}
+
+func TestClassifiedAlertIsInvestigatedWithItsHistoryKey(t *testing.T) {
+	fb := warning()
+	fb.Metadata = map[string]any{"fallback": true}
+	for name, res := range map[string]*core.ClassificationResult{"classified": warning(), "fallback": fb} {
+		t.Run(name, func(t *testing.T) {
+			inv := &submitter{}
+			c, _ := newTestClassifier(t, &fakeService{res: res}, Config{Investigations: inv})
+			a := firing("DiskFull")
+			c.PostStore(a, false)
+			waitDone(t, c, a)
+
+			require.Eventually(t, func() bool { return len(inv.got()) == 1 }, 5*time.Second, 5*time.Millisecond)
+			got := inv.got()[0]
+			assert.Same(t, res, got.res)
+			assert.Equal(t, toCoreAlert(a).Fingerprint, got.alert.Fingerprint, "the key the history row has")
+			assert.Equal(t, core.StatusFiring, got.alert.Status)
+		})
+	}
+}
+
+func TestFailedClassificationIsNotInvestigated(t *testing.T) {
+	inv := &submitter{}
+	c, _ := newTestClassifier(t, &fakeService{err: errors.New("llm down, fallback off")}, Config{Investigations: inv})
+	a := firing("DiskFull")
+	c.PostStore(a, false)
+	waitDone(t, c, a)
+	require.Eventually(t, func() bool { return outcome(c, "error") == 1 }, 5*time.Second, 5*time.Millisecond)
+	assert.Empty(t, inv.got())
+}
+
+// Every Put of a classified alert hands it to the investigation queue again,
+// as every ingest does on cmd/server: the queue's dedup keeps one
+// investigation per incident and starts one for a re-fire with a new
+// StartsAt. The LLM is not asked again.
+func TestResendOfClassifiedAlertIsSubmittedAgain(t *testing.T) {
+	svc := &fakeService{res: warning()}
+	inv := &submitter{}
+	c, _ := newTestClassifier(t, svc, Config{Investigations: inv})
+	a := firing("DiskFull")
+	c.PostStore(a, false)
+	waitDone(t, c, a)
+	require.Eventually(t, func() bool { return len(inv.got()) == 1 }, 5*time.Second, 5*time.Millisecond)
+
+	refire := firing("DiskFull")
+	refire.StartsAt = time.Now()
+	c.PostStore(refire, true)
+
+	got := inv.got()
+	require.Len(t, got, 2)
+	assert.True(t, got[1].alert.StartsAt.Equal(refire.StartsAt), "the alert as last put")
+	assert.Equal(t, 1, svc.callCount())
 }
 
 func TestClassificationErrorIsRetriedOnNextPut(t *testing.T) {
@@ -231,4 +345,19 @@ func TestStopCancelsInFlightClassification(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stop did not cancel the in-flight classification")
 	}
+}
+
+// The investigation queue is stopped after the classifier; a Put the store
+// takes after Stop must not submit to it.
+func TestNoSubmitAfterStop(t *testing.T) {
+	inv := &submitter{}
+	c := New(Config{Service: &fakeService{res: warning()}, Investigations: inv, Logger: slog.New(slog.DiscardHandler), Registerer: prometheus.NewRegistry()})
+	a := firing("DiskFull")
+	c.PostStore(a, false)
+	waitDone(t, c, a)
+	require.Eventually(t, func() bool { return len(inv.got()) == 1 }, 5*time.Second, 5*time.Millisecond)
+
+	c.Stop()
+	c.PostStore(a, true)
+	assert.Len(t, inv.got(), 1)
 }
