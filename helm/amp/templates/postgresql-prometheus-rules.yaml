@@ -8,6 +8,9 @@ metadata:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: database-monitoring
     prometheus: kube-prometheus
+    {{- with dig "prometheusRule" "labels" dict (.Values.monitoring | default dict) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   groups:
   - name: postgresql.rules

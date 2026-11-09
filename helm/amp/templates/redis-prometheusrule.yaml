@@ -12,6 +12,9 @@ metadata:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: redis-alerts
     prometheus: kube-prometheus  # Prometheus Operator selector
+    {{- with dig "prometheusRule" "labels" dict (.Values.monitoring | default dict) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   groups:
   # =======================

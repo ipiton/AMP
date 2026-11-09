@@ -11,6 +11,9 @@ metadata:
   labels:
     {{- include "amp.labels" . | nindent 4 }}
     app.kubernetes.io/component: redis-monitoring
+    {{- with dig "serviceMonitor" "labels" dict (.Values.monitoring | default dict) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   # Selector to match the metrics Service
   selector:
