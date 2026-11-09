@@ -107,8 +107,13 @@ notes() {
 # gate's toolchain). Handles the units the chart uses: m / whole cores, Mi / Gi.
 requests_total() {
   awk '
-    function flush() { if (w) { cpu += dcpu * r; mem += dmem * r } w = 0; r = 1; dcpu = 0; dmem = 0; inreq = 0 }
+    function flush() { if (w) { cpu += dcpu * r; mem += dmem * r } w = 0; r = 1; dcpu = 0; dmem = 0; inreq = 0; init = 0 }
     /^---/ { flush(); next }
+    # Init containers run before the others: the pod requests the larger of
+    # their requests and the sum of the containers, and theirs are smaller.
+    /^      initContainers:$/ { init = 1; next }
+    /^      containers:$/ { init = 0; next }
+    init { next }
     /^kind: (Deployment|StatefulSet)$/ { w = 1 }
     /^  replicas: / { r = $2 }
     /^ *requests:$/ { inreq = 1; ind = index($0, "r"); next }

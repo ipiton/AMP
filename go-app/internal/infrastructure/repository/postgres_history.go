@@ -47,7 +47,7 @@ func NewPostgresHistoryRepositoryWithRegisterer(pool *pgxpool.Pool, storage core
 	factory := promauto.With(reg)
 
 	// FIXED: Added Namespace and Subsystem for proper metric naming
-	// Old: amp_query_duration_seconds (no subsystem)
+	// Old: alert_history_query_duration_seconds (no subsystem)
 	// New: amp_infra_repository_query_duration_seconds
 	metrics := &HistoryMetrics{
 		QueryDuration: factory.NewHistogramVec(
