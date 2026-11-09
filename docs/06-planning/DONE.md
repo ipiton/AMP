@@ -18,6 +18,12 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-11
 
+- 2026-11-09 — (Delivery / Helm) **HELM-PROMRULE-LABELS** — свои метки на `PrometheusRule` чарта; ветка `feature/helm-promrule-labels`. Lightweight.
+  - **Чарт:** `monitoring.prometheusRule.labels` на `amp-postgres` и `amp-redis-alerts`, `monitoring.serviceMonitor.labels` теперь и на Valkey-ServiceMonitor; nil-safe для `--reuse-values` со старых values. Render-тест в `render-servicemonitor.sh` (метки на трёх объектах, без них по умолчанию, рендер без `monitoring.prometheusRule`). `scripts/release-gate.sh` PASS.
+  - **На k3s владельца:** ревизия 2 релиза `amp` с `release: kube-prometheus-stack` — Prometheus загрузил группу `amp-postgres` (11 правил).
+- 2026-11-09 — (Owner) **PRIVATE-VULN-REPORTING** и **MAIN-BRANCH-PROTECTION** — сделаны через API по просьбе владельца: `private-vulnerability-reporting` → `enabled: true`; защита `main` — required checks `gate`, `images (amp)`, `actionlint`, `govulncheck` (GitHub Actions), без force-push и удаления, `enforce_admins: false` (владелец пушит мерж-коммиты напрямую, как раньше), без обязательных PR.
+- 2026-11-09 — (Ops) AMP в k3s владельца получил копию `alertmanager.yaml` kube-prometheus-stack (по решению владельца — параллельно, с дублированием уведомлений): Telegram/Slack-секреты — Secret `amp-notify` через `bot_token_file`/`slack_api_url_file` и `extraVolumes`; `Watchdog` → `drop-unmatched`, а не heartbeat (пинг из AMP скрыл бы падение основного Alertmanager). Prometheus в AMP пока не шлёт: его `alerting` задаётся в репозитории Sema (`infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml`) по его процессу выкатки.
+
 - 2026-11-09 — (Delivery / Production Readiness) **PROD-RELEASE-V010** — первый релиз `v0.1.0` на upstream-ядре (ADR-019); ветки `feature/prod-release-v010`, `bugfix/ci-release-blockers`.
   - **Релиз:** `CHANGELOG.md` и `helm/amp/CHANGELOG.md` закрыты в `[0.1.0] - 2026-11-09`, `docs/RELEASE_NOTES_v0.1.0.md`. Перед тегом — расхождения среза 7: чарт по умолчанию не поднимает Valkey (`valkey.enabled: false`), удалённые вложенные ключи values валят рендер, метрики `alert_history_*` → `amp_*`, init container `wait-for-postgres`, предупреждения в NOTES.
   - **CI перед тегом:** golangci-lint v2.13.2 → v2.15.0 (старый не читал пакеты go1.27), `klauspost/compress` 1.19.1 → 1.20.3 (GO-2026-6865); CodeQL default setup сам убрал JS/TS после удаления UI.

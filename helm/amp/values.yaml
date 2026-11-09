@@ -556,6 +556,13 @@ monitoring:
       secretName: ""
       usernameKey: username
       passwordKey: password
+  # Extra labels on the chart's PrometheusRules (PostgreSQL, and Valkey when
+  # enabled), e.g. what the Prometheus ruleSelector matches on:
+  # kube-prometheus-stack selects rules by `release: <its release name>` and
+  # silently ignores the rest. serviceMonitor.labels also lands on the Valkey
+  # ServiceMonitor.
+  prometheusRule:
+    labels: {}
 
 # ===============================
 # Alert Publishing Configuration

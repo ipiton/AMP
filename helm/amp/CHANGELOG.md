@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **HELM-PROMRULE-LABELS** (2026-11-09): `monitoring.prometheusRule.labels` adds labels to the chart's `PrometheusRule`s (PostgreSQL, Valkey), and `monitoring.serviceMonitor.labels` now also lands on the Valkey ServiceMonitor. kube-prometheus-stack loads rules only with `release: <its release name>`, so the chart's alerts were silently ignored there.
+
 ## [0.1.0] - 2026-11-09
 
 Chart `0.1.0`, app `0.1.0` (image `ghcr.io/ipiton/amp:0.1.0`). Release notes: [`docs/RELEASE_NOTES_v0.1.0.md`](../../docs/RELEASE_NOTES_v0.1.0.md).

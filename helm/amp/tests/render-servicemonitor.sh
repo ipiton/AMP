@@ -191,6 +191,22 @@ block "${WORK_DIR}/labels-sm.yaml" "  labels:" >"${WORK_DIR}/labels-meta.yaml"
 assert_contains "${WORK_DIR}/labels-meta.yaml" "release: kube-prometheus" "extra labels in metadata"
 assert_contains "${WORK_DIR}/labels-sm.yaml" "interval: 15s" "interval override"
 
+echo "extra labels on PrometheusRules and the Valkey ServiceMonitor (HELM-PROMRULE-LABELS):"
+render rule-labels --set valkey.enabled=true \
+  --set monitoring.prometheusRule.labels.release=kube-prometheus-stack \
+  --set monitoring.serviceMonitor.labels.release=kube-prometheus-stack
+for obj in "PrometheusRule amp-postgres" "PrometheusRule amp-redis-alerts" "ServiceMonitor amp-redis"; do
+  # shellcheck disable=SC2086 # kind and name, split on purpose
+  doc "${WORK_DIR}/rule-labels.yaml" ${obj} >"${WORK_DIR}/rule-labels-obj.yaml"
+  block "${WORK_DIR}/rule-labels-obj.yaml" "  labels:" >"${WORK_DIR}/rule-labels-meta.yaml"
+  assert_contains "${WORK_DIR}/rule-labels-meta.yaml" "release: kube-prometheus-stack" "${obj}: extra labels in metadata"
+done
+render rule-labels-default --set valkey.enabled=true
+assert_absent "${WORK_DIR}/rule-labels-default.yaml" "release: kube-prometheus-stack" "no extra labels by default"
+render rule-labels-reuse --set monitoring.prometheusRule=null
+doc "${WORK_DIR}/rule-labels-reuse.yaml" PrometheusRule amp-postgres >"${WORK_DIR}/rule-labels-reuse-pr.yaml"
+assert_contains "${WORK_DIR}/rule-labels-reuse-pr.yaml" "kind: PrometheusRule" "PrometheusRule renders without monitoring.prometheusRule"
+
 echo "values without monitoring.serviceMonitor (--reuse-values from an old release):"
 # --set <key>=null deletes the key from the merged values -- what an old
 # release's stored values look like to this chart.

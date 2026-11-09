@@ -19,13 +19,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»); открытых P0 нет: `PROD-RELEASE-V010` закрыт 2026-11-09 (`v0.1.0`). Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
 
-### Owner
-
-- [ ] **PRIVATE-VULN-REPORTING** — включить Private vulnerability reporting в `ipiton/AMP` (Settings → Code security). `SECURITY.md` с 2026-10-05 направляет сообщения об уязвимостях туда, а сейчас `gh api repos/ipiton/AMP/private-vulnerability-reporting` → `{"enabled":false}`: канал не работает. Проверка — та же команда, `enabled: true`. `~1min`
-  Trigger: owner ready.
-- [ ] **MAIN-BRANCH-PROTECTION** — включить branch protection на `main` с required checks из `docs/CI.md`; до этого «зелёный CI обязателен» не enforced. Репозиторий пересоздан 2026-09-29, настроек защиты нет. `PROD-DEPS-OTEL-145` закрыт 2026-10-08 (локально и на `go1.26.8` `govulncheck` чистый): включать, когда после push `main` CI на нём зелёный, включая `govulncheck`. С 2026-10-10 `govulncheck` на `main` был красный (GO-2026-6599…6617); `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16 — локально `govulncheck` на `go1.26.9` чистый, release-gate PASS. 2026-10-23 `govulncheck` на `main` снова красный (GO-2026-6809, stdlib `go1.26.9`); `PROD-DEPS-GO-127` поднял toolchain до `go1.27.3`, локально чисто. 2026-11-09: CI на `main` @ `32a5640` зелёный целиком (gate, govulncheck, images, e2e-ha, actionlint, CodeQL) — можно включать. `~5min`
-  Trigger: owner ready.
-
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
 > Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Все семь срезов смержены 2026-11-09, `v0.1.0` выпущен 2026-11-09 (`PROD-RELEASE-V010`). Остаток эпика — `BACKLOG.md` § ADR-019.

@@ -381,7 +381,8 @@ AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis po
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `monitoring.serviceMonitor.enabled` | render the AMP ServiceMonitor | `true` |
-| `monitoring.serviceMonitor.labels` | extra labels, e.g. what your Prometheus `serviceMonitorSelector` matches | `{}` |
+| `monitoring.serviceMonitor.labels` | extra labels, e.g. what your Prometheus `serviceMonitorSelector` matches; also on the Valkey ServiceMonitor | `{}` |
+| `monitoring.prometheusRule.labels` | extra labels on the chart's `PrometheusRule`s (PostgreSQL, Valkey), e.g. what your Prometheus `ruleSelector` matches | `{}` |
 | `monitoring.serviceMonitor.interval` / `scrapeTimeout` | scrape timing | `30s` / `10s` |
 | `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` | `""` |
 | `monitoring.serviceMonitor.basicAuth.usernameKey` / `passwordKey` | keys in that Secret | `username` / `password` |
@@ -414,7 +415,7 @@ alerting:
           - amp-2.amp-headless.<namespace>.svc:9093
 ```
 
-With one replica, the Service `<fullname>.<namespace>.svc:9093` is enough. With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. More on compatibility: [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md). The chart's `PrometheusRule` objects carry no configurable labels, so a Prometheus with a `ruleSelector` (kube-prometheus-stack selects `release: <name>`) will not load them (`HELM-PROMRULE-LABELS`).
+With one replica, the Service `<fullname>.<namespace>.svc:9093` is enough. With kube-prometheus-stack, add AMP as a second endpoint next to the existing Alertmanager (`prometheus.prometheusSpec.additionalAlertManagerConfigs`) and point AMP's receivers at test channels until you have compared both. More on compatibility: [docs/ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md). A Prometheus with a `ruleSelector` loads the chart's `PrometheusRule`s only with the matching label: kube-prometheus-stack selects `release: <its release name>`, so set `monitoring.prometheusRule.labels.release` to it.
 
 ## Upgrading
 
