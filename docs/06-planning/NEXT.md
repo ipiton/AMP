@@ -15,10 +15,11 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **PROD-RELEASE-V010** — релиз v0.1.0 на upstream-ядре (ADR-019 закрыт 2026-11-09): расхождения доков и кода из среза 7, `CHANGELOG` → `[0.1.0]`, release notes, pre-release deep-review; затем по подтверждению владельца push `main`, `v0.1.0-rc.1` → проверка публикации → `v0.1.0`. Владелец дал старт 2026-11-09. Standard, ~1d. Claimed 2026-11-09.
 
 ## Queue
 
-> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (отложен владельцем 2026-10-07). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
+> Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»): `PROD-RELEASE-V010` (в WIP с 2026-11-09). Задачи ниже берутся, когда P0 закрыты или заблокированы. Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
 
 ### Owner
 
@@ -29,9 +30,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
-> Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Срез 7 — последний, после него релиз v0.1.0; описание — `BACKLOG.md` § ADR-019.
-
-
+> Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Все семь срезов смержены 2026-11-09; дальше — `PROD-RELEASE-V010` (WIP). Остаток эпика — `BACKLOG.md` § ADR-019.
 
 ### 1. Intelligence — Investigation Toolset (AMP differentiator)
 > Цель: AI-powered alert investigation — главный USP AMP. Reference: SherlockOps, HolmesGPT, Keep.
