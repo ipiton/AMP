@@ -4,7 +4,7 @@ slug: prod-release-v010
 stream: Production Readiness / Delivery
 type: feature
 priority: high
-status: in-progress
+status: done
 created_at: 2026-11-09
 updated_at: 2026-11-09
 ---
