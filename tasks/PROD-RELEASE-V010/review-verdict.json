@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "feature/prod-release-v010",
+  "commit": "7cc214b",
+  "reviewed_at": "2026-11-09",
+  "findings": { "blocker": 0, "major": 2, "minor": 8, "nit": 5 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

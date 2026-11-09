@@ -108,7 +108,7 @@ doc "${WORK_DIR}/one.yaml" ConfigMap "${STS}-amp-config" >"${WORK_DIR}/one-amp-c
 assert_count "${WORK_DIR}/one-amp-cm.yaml" "amp.yaml: |" 1 "one: amp.yaml ConfigMap"
 assert_count "${WORK_DIR}/one.yaml" "kind: Deployment" 0 "one: no Deployment"
 assert_count "${WORK_DIR}/one-sts.yaml" "name: wait-for-postgres" 1 "one: waits for the bundled PostgreSQL"
-assert_count "${WORK_DIR}/one-sts.yaml" "pg_isready -q -h amp-postgres -p 5432" 1 "one: ...on its Service"
+assert_count "${WORK_DIR}/one-sts.yaml" "pg_isready -q -t 1 -h amp-postgres -p 5432" 1 "one: ...on its Service"
 render lite-nowait --set profile=lite
 doc "${WORK_DIR}/lite-nowait.yaml" StatefulSet "${STS}" >"${WORK_DIR}/lite-nowait-sts.yaml"
 assert_count "${WORK_DIR}/lite-nowait-sts.yaml" "initContainers:" 0 "lite: no wait for PostgreSQL"

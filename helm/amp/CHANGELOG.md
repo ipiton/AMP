@@ -11,7 +11,7 @@ Chart `0.1.0`, app `0.1.0` (image `ghcr.io/ipiton/amp:0.1.0`). Release notes: [`
 - Removed nested keys fail the render with their replacement, like removed top-level keys (`templates/_validate.tpl`): `publishing.queue`/`templates`/`health`, `llm.batchSize`/`cacheTtl`/`retryDelay`, `service.metricsPort`/`loadBalancerPolicy`/`sessionAffinityTimeout`, `gracefulShutdown.timeoutSeconds`.
 - `monitoring.healthCheckInterval` (never read) is dropped from `values.yaml`, `values-dev.yaml` and `values-production.yaml`.
 - `Chart.yaml` description and `artifacthub.io/changes` describe the upstream core.
-- With the bundled PostgreSQL, init container `wait-for-postgres` (`postgres:16.15`, `pg_isready`) holds AMP up to 120s until the database answers: AMP connects once at start, and on a fresh install it used to come up without history.
+- With the bundled PostgreSQL, init container `wait-for-postgres` (`postgres:16.15`, `pg_isready`) holds AMP up to about two minutes until the database answers: AMP connects once at start, and on a fresh install it used to come up without history.
 - NOTES: warns on the default `postgresql.password` and on no HTTP auth with `service.type` other than ClusterIP; project link fixed.
 
 ### Changed (breaking, UPSTREAM-CORE-REMOVAL, ADR-019 slice 5)

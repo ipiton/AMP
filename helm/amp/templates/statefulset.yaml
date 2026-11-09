@@ -103,7 +103,7 @@ spec:
             - -c
             - |
               for i in $(seq 1 60); do
-                pg_isready -q -h {{ include "amp.postgresql.fullname" . }} -p 5432 && exit 0
+                pg_isready -q -t 1 -h {{ include "amp.postgresql.fullname" . }} -p 5432 && exit 0
                 sleep 2
               done
               echo "PostgreSQL not ready after 120s; starting without it (history and investigation off until restart)"

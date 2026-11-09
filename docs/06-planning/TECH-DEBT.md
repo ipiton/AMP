@@ -38,9 +38,18 @@
   - _(2026-10-18, PG-CONFIG-FIX R10)_ `checksum/config` pod'а PostgreSQL считается только от `postgresql-configmap.yaml`; ConfigMap exporter'а (`postgresql-exporter-configmap.yaml`) в него не входит — правка `queries.yaml` без смены конфига PG не рестартует sidecar (на k3d понадобился `kubectl rollout restart`).
   - _(2026-10-18, PG-CONFIG-FIX R12)_ AMP и exporter ходят во встроенный PG ролью `postgresql.username`, а она суперпользователь (её создаёт entrypoint образа) ⇒ `superuser_reserved_connections` ничего не резервирует: при насыщении пулов не войдут ни exporter, ни `kubectl exec psql`. Нужна отдельная непривилегированная роль для AMP и роль `pg_monitor` для exporter'а.
   - _(2026-10-18, PG-CONFIG-FIX)_ `postgresql.config: null` не рендерится (`nil pointer` в `postgresql-configmap.yaml`, `NOTES.txt:94-101`, теперь и `amp-config.yaml:35`) — и на `main`; условия `if .Values.postgresql.config` в StatefulSet мёртвые. Либо guard'ы, либо убрать условия и объявить блок обязательным.
+  - _(2026-11-09, pre-release review `PROD-RELEASE-V010`)_ образ `postgres:16.15` захардкожен и в StatefulSet PG, и в init container `wait-for-postgres` AMP: зеркало для air-gapped установок не задать. Фикс: значение `postgresql.image` для обоих.
 - **Impact:** операторы, включающие `existingSecret` или выключающие valkey флагом, получают не то, что заявлено в values; «выключенный» Valkey оставляет в кластере объекты и алерты.
 - **Fix:** гейтить все `redis-*.yaml` по `valkey.enabled` (или по `valkey.replicas > 0`) и убрать мёртвый флаг; провести `existingSecret` через `amp.postgresql.secretName`. HA Postgres — не делаем (ADR-016).
 - **Refs:** `helm/amp/templates/{redis-*,secret,postgresql-secret,postgresql-statefulset,amp-config}.yaml`; `tasks/archive/UPSTREAM-CORE-REMOVAL/review-findings.md` C6.
+- **Status:** open
+
+### [low][Supply chain][~0.25d] IMAGE-BASE-DIGEST-PIN
+- **Title:** базовые образы `Dockerfile` закреплены тегом, не digest
+- **Problem:** `golang:1.27.3-alpine` и `alpine:3.24` (`Dockerfile:7`, `:47`) — перезаписываемые теги; публичный образ `ghcr.io/ipiton/amp` собирается из того, что лежит под тегом в момент сборки.
+- **Impact:** воспроизводимость и supply chain публичного образа; Dependabot/Renovate для digest не настроен.
+- **Fix:** `FROM image:tag@sha256:...` и обновление digest через Renovate/Dependabot (`docker` ecosystem).
+- **Refs:** pre-release review `PROD-RELEASE-V010` F10 (`tasks/archive/PROD-RELEASE-V010/review-findings.md`).
 - **Status:** open
 
 ### [medium][Config][~0.5d] CONFIG-GLOBAL-VIPER-STATE
@@ -103,11 +112,12 @@
 - **Refs:** deep-review `UPSTREAM-AI-CLASSIFY` F3; `go-app/internal/upstreamai/classifier.go`.
 - **Status:** open
 
-### [low][Storage][~0.5d] UPSTREAM-HISTORY-PG-RECONNECT
+### [medium][Storage][~0.5d] UPSTREAM-HISTORY-PG-RECONNECT
 - **Title:** `amp-upstream` не подхватывает PostgreSQL, поднявшийся после старта
 - **Problem:** `newAMPLayer` подключается к PG и мигрирует один раз при старте (connect ограничен `database.connect_timeout`, миграции — 1m). При ошибке история и investigation выключены до рестарта; переподключения в фоне нет.
 - **Impact:** PG, стартовавший позже `amp-upstream` (общий релиз, рестарт БД), оставляет процесс без истории и расследований до его рестарта; доставка не страдает. Видно по Error в логе старта.
 - **Fix:** фоновый цикл connect+migrate с backoff, включающий `History` и очередь investigation атомарно; либо readiness, требующая PG при `profile: standard`.
+- _(2026-11-09, pre-release review `PROD-RELEASE-V010` F1: поднято до medium — на свежей установке с встроенным PG AMP почти всегда стартовал раньше БД. Смягчено в чарте: init container `wait-for-postgres` ждёт встроенный PG до 120s; внешний PG и рестарт БД — по-прежнему без переподключения.)_
 - **Refs:** deep-review `UPSTREAM-AI-HISTORY-INVESTIGATION` F3; `go-app/cmd/amp-upstream/amp.go` `connectDatabase`. Тот же корень с точки зрения оператора — BUGS `AMP-NO-DB-WAIT` (с UPSTREAM-CORE-REMOVAL `amp-upstream` — единственный бинарь, и PG позже старта = процесс без истории до рестарта); чинить вместе.
 - **Status:** open
 
