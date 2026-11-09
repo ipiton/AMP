@@ -308,8 +308,8 @@ func TestCacheMetrics_SetSize(t *testing.T) {
 
 // TestNamespaceConsistency verifies all metrics use the correct namespace
 func TestNamespaceConsistency(t *testing.T) {
-	if Namespace != "alert_history" {
-		t.Errorf("expected namespace to be 'alert_history', got '%s'", Namespace)
+	if Namespace != "amp" {
+		t.Errorf("expected namespace to be 'amp', got '%s'", Namespace)
 	}
 }
 

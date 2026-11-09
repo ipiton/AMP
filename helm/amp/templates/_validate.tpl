@@ -33,4 +33,30 @@ they configured (routes in configFile.content, upstreamCore.config).
 {{- fail (printf "%s is no longer read since UPSTREAM-CORE-REMOVAL: %s. Remove it from your values (see CHANGELOG.md)." $key (get $removed $key)) }}
 {{- end }}
 {{- end }}
+{{- /* Keys removed inside sections that still exist: section -> key -> hint. */}}
+{{- $removedNested := dict
+  "gracefulShutdown" (dict "timeoutSeconds" "use gracefulShutdown.terminationGracePeriodSeconds")
+  "llm" (dict
+    "batchSize" "removed: each alert is classified on its own"
+    "cacheTtl" "removed: amp-upstream has no classification cache"
+    "retryDelay" "removed: retries back off on their own and honour Retry-After; use llm.maxRetries")
+  "publishing" (dict
+    "queue" "removed: delivery, retries and its queue are upstream's notify pipeline"
+    "templates" "notification templates go to alertmanager.config templates"
+    "health" "removed: upstream reports delivery failures in alertmanager_notifications_failed_total")
+  "service" (dict
+    "metricsPort" "metrics are served on service.port (9093) at /metrics"
+    "loadBalancerPolicy" "removed: the Service has no session affinity"
+    "sessionAffinityTimeout" "removed: the Service has no session affinity") }}
+{{- range $section := keys $removedNested | sortAlpha }}
+{{- $vals := get $.Values $section }}
+{{- if kindIs "map" $vals }}
+{{- $hints := get $removedNested $section }}
+{{- range $key := keys $hints | sortAlpha }}
+{{- if hasKey $vals $key }}
+{{- fail (printf "%s.%s is no longer read since UPSTREAM-CORE-REMOVAL: %s. Remove it from your values (see CHANGELOG.md)." $section $key (get $hints $key)) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

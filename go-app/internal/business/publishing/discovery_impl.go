@@ -434,7 +434,7 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 	return &DiscoveryMetrics{
 		TargetsTotal: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "publishing_discovery",
 				Name:      "targets_total",
 				Help:      "Total discovered targets by type, enabled status and source (k8s/config)",
@@ -443,7 +443,7 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 		),
 		DurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "publishing_discovery",
 				Name:      "duration_seconds",
 				Help:      "Target discovery operation duration in seconds",
@@ -453,7 +453,7 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 		),
 		ErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "publishing_discovery",
 				Name:      "errors_total",
 				Help:      "Total discovery errors by type",
@@ -462,7 +462,7 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 		),
 		SecretsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "publishing_discovery",
 				Name:      "secrets_total",
 				Help:      "Total processed secrets by status",
@@ -471,7 +471,7 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 		),
 		LookupsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "publishing",
 				Name:      "target_lookups_total",
 				Help:      "Total target cache lookups by operation and status",
@@ -480,7 +480,7 @@ func registerDiscoveryMetrics(reg *v2.Registry) *DiscoveryMetrics {
 		),
 		LastSuccessTimestamp: prometheus.NewGauge(
 			prometheus.GaugeOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "publishing_discovery",
 				Name:      "last_success_timestamp",
 				Help:      "Unix timestamp of last successful target discovery",

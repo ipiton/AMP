@@ -137,7 +137,7 @@ Redis/Valkey is not used by `amp-upstream`.
 
 - Upstream's `alertmanager_*` metrics, unchanged, including `alertmanager_build_info` with the real upstream version (`0.34.1`). karma and other tools that detect the API version from it see a supported version.
 - `amp_build_info`: AMP's own version, revision and build date.
-- AMP's layer: `amp_api_request_duration_seconds`, `amp_upstream_k8s_targets`, the classification, history and investigation metrics (`amp_*`, `alert_history_*`).
+- AMP's layer: `amp_api_request_duration_seconds`, `amp_upstream_k8s_targets`, the classification, history and investigation metrics (`amp_*`).
 
 ## Viewing alerts: karma, Grafana, amtool
 

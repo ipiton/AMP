@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-09
+
+Chart `0.1.0`, app `0.1.0` (image `ghcr.io/ipiton/amp:0.1.0`). Release notes: [`docs/RELEASE_NOTES_v0.1.0.md`](../../docs/RELEASE_NOTES_v0.1.0.md).
+
+### Changed (breaking, PROD-RELEASE-V010)
+- Valkey is off by default: `valkey.enabled` (default `false`) gates every `templates/redis-*.yaml`; `values-production.yaml` no longer sets `valkey.replicas: 0`. Upgrading removes the Valkey objects; its volume stays. Defaults now request 210m / 416Mi in total.
+- Removed nested keys fail the render with their replacement, like removed top-level keys (`templates/_validate.tpl`): `publishing.queue`/`templates`/`health`, `llm.batchSize`/`cacheTtl`/`retryDelay`, `service.metricsPort`/`loadBalancerPolicy`/`sessionAffinityTimeout`, `gracefulShutdown.timeoutSeconds`.
+- `monitoring.healthCheckInterval` (never read) is dropped from `values.yaml`, `values-dev.yaml` and `values-production.yaml`.
+- `Chart.yaml` description and `artifacthub.io/changes` describe the upstream core.
+
 ### Changed (breaking, UPSTREAM-CORE-REMOVAL, ADR-019 slice 5)
 - The chart's only workload is `amp-upstream` as StatefulSet `<fullname>` (`templates/statefulset.yaml`): pods labelled `app.kubernetes.io/component: application` (also in the StatefulSet selector), a `data` volumeClaimTemplate (`alertmanager.persistence`) for silence and notification-log snapshots, `alertmanager.yml` from ConfigMap `<fullname>` (`alertmanager.config`) and `amp.yaml` from ConfigMap `<fullname>-amp-config` (generated from `profile`, `externalDatabase`/`postgresql`, `llm`, `investigation`, `publishing`, then `alertmanager.ampConfig` merged over it), both at `/etc/amp/config`. Passwords stay in Secrets: `DATABASE_PASSWORD` and `LLM_API_KEY` env.
 - `upstreamCore.*` → `alertmanager.*` (`replicas`, `externalURL`, `peerTimeout`, `config`, `ampConfig`, `persistence`, `extraArgs`); the separate `<fullname>-upstream` StatefulSet and Services are gone. `alertmanager.replicas` > 1 forms a gossip cluster over `<fullname>-headless` (`app.kubernetes.io/component: cluster`, 9094 TCP/UDP); NetworkPolicy admits gossip between AMP pods. `values-production.yaml`: 3 replicas, PDB `minAvailable: 2`, `valkey.replicas: 0`.

@@ -100,10 +100,6 @@ externalDatabase:
   existingSecret: ""
   existingSecretPasswordKey: password
 
-# amp-upstream does not use Valkey yet (UPSTREAM-AI-HA-DEDUP): no pod.
-valkey:
-  replicas: 0
-
 # ===============================
 # LLM Configuration (Production)
 # ===============================
@@ -183,7 +179,6 @@ publishingTargets:
 # ===============================
 monitoring:
   prometheusEnabled: true
-  healthCheckInterval: 30
   # With webConfig.existingSecret set (see ingress below), the ServiceMonitor
   # needs credentials or the render fails: set
   # serviceMonitor.basicAuth.secretName (Secret with the plain username and

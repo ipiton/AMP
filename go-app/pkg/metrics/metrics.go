@@ -26,8 +26,8 @@ import (
 )
 
 const (
-	// Namespace is the Prometheus namespace for all alert_history metrics
-	Namespace = "alert_history"
+	// Namespace is the Prometheus namespace for all AMP metrics
+	Namespace = "amp"
 )
 
 // DefaultRegistry is the default Prometheus registry
@@ -72,7 +72,7 @@ func NewMetricsRegistry() *MetricsRegistry {
 }
 
 // ================================================================================
-// Prometheus Alerts Metrics (alert_history_prometheus_alerts_*)
+// Prometheus Alerts Metrics (amp_prometheus_alerts_*)
 // ================================================================================
 
 // PrometheusAlertsMetrics holds metrics for incoming Prometheus alerts
@@ -212,7 +212,7 @@ func (m *PrometheusAlertsMetrics) DecConcurrentRequests() {
 }
 
 // ================================================================================
-// Proxy Pipeline Metrics (alert_history_proxy_*)
+// Proxy Pipeline Metrics (amp_proxy_*)
 // ================================================================================
 
 // ProxyMetrics holds metrics for the alert proxy pipeline
@@ -507,7 +507,7 @@ func (m *ProxyMetrics) RecordHTTPError(method, errorType string) {
 }
 
 // ================================================================================
-// API Config Export Metrics (alert_history_api_config_export_*)
+// API Config Export Metrics (amp_api_config_export_*)
 // ================================================================================
 
 // APIConfigMetrics holds metrics for API config export
@@ -583,7 +583,7 @@ func (m *APIConfigMetrics) RecordSize(format string, bytes int) {
 }
 
 // ================================================================================
-// Technical Dashboard Metrics (alert_history_technical_dashboard_*)
+// Technical Dashboard Metrics (amp_technical_dashboard_*)
 // ================================================================================
 
 // DashboardMetrics holds metrics for technical dashboard
@@ -665,7 +665,7 @@ func (m *DashboardMetrics) SetOverallHealthStatus(healthy bool) {
 }
 
 // ================================================================================
-// Group Metrics (alert_history_group_*)
+// Group Metrics (amp_group_*)
 // ================================================================================
 
 // GroupMetrics holds metrics for alert grouping
@@ -738,7 +738,7 @@ func NewGroupMetrics() *GroupMetrics {
 }
 
 // ================================================================================
-// Timer Metrics (alert_history_timer_*)
+// Timer Metrics (amp_timer_*)
 // ================================================================================
 
 // TimerMetrics holds metrics for timers
@@ -841,7 +841,7 @@ func NewTimerMetrics() *TimerMetrics {
 }
 
 // ================================================================================
-// Storage Metrics (alert_history_storage_*)
+// Storage Metrics (amp_storage_*)
 // ================================================================================
 
 // StorageMetrics holds metrics for storage operations
@@ -906,9 +906,8 @@ func NewStorageMetrics() *StorageMetrics {
 		// which grouping storage backend StorageManager is currently routing
 		// reads/writes through. Exactly one label value reads 1 at a time;
 		// the rest read 0 — the "amp_storage_backend{backend=...}" gauge
-		// called for in the wave-5 brief (namespaced under this package's
-		// existing alert_history_storage_* family instead of a new "amp_"
-		// prefix).
+		// called for in the wave-5 brief (in this package's amp_storage_*
+		// family).
 		BackendActive: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: Namespace,
@@ -940,7 +939,7 @@ func NewStorageMetrics() *StorageMetrics {
 }
 
 // ================================================================================
-// Classification Metrics (alert_history_classification_*)
+// Classification Metrics (amp_classification_*)
 // ================================================================================
 
 // ClassificationMetrics holds metrics for classification
@@ -1002,7 +1001,7 @@ func NewClassificationMetrics() *ClassificationMetrics {
 }
 
 // ================================================================================
-// Deduplication Metrics (alert_history_deduplication_*)
+// Deduplication Metrics (amp_deduplication_*)
 // ================================================================================
 
 // DeduplicationMetrics holds metrics for deduplication

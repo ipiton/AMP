@@ -47,12 +47,12 @@ func NewPostgresHistoryRepositoryWithRegisterer(pool *pgxpool.Pool, storage core
 	factory := promauto.With(reg)
 
 	// FIXED: Added Namespace and Subsystem for proper metric naming
-	// Old: alert_history_query_duration_seconds (no subsystem)
-	// New: alert_history_infra_repository_query_duration_seconds
+	// Old: amp_query_duration_seconds (no subsystem)
+	// New: amp_infra_repository_query_duration_seconds
 	metrics := &HistoryMetrics{
 		QueryDuration: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "infra_repository",
 				Name:      "query_duration_seconds",
 				Help:      "Duration of alert history queries",
@@ -62,7 +62,7 @@ func NewPostgresHistoryRepositoryWithRegisterer(pool *pgxpool.Pool, storage core
 		),
 		QueryErrors: factory.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "infra_repository",
 				Name:      "query_errors_total",
 				Help:      "Total number of alert history query errors",
@@ -71,7 +71,7 @@ func NewPostgresHistoryRepositoryWithRegisterer(pool *pgxpool.Pool, storage core
 		),
 		QueryResults: factory.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "infra_repository",
 				Name:      "query_results_total",
 				Help:      "Number of results returned by history queries",
@@ -81,7 +81,7 @@ func NewPostgresHistoryRepositoryWithRegisterer(pool *pgxpool.Pool, storage core
 		),
 		CacheHits: factory.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "alert_history",
+				Namespace: "amp",
 				Subsystem: "infra_cache",
 				Name:      "hits_total",
 				Help:      "Total number of cache hits for history queries",

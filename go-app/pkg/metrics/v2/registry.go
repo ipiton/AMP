@@ -30,8 +30,8 @@ import (
 
 const (
 	// Namespace is the Prometheus namespace for all metrics.
-	// All metrics will be prefixed with "alert_history_".
-	Namespace = "alert_history"
+	// All metrics will be prefixed with "amp_".
+	Namespace = "amp"
 )
 
 // Registry is the central metrics registry for the application.

@@ -52,8 +52,9 @@
 //
 // No UI, no event recorder (behind a feature flag upstream, off by default;
 // so no SetClusterPeer either), no --silences.max-*,
-// --alerts.per-alertname-limit, --dispatch.start-delay or --web.config.file;
-// the HTTP server and signals belong to the caller. Stop waits for a reload
+// --alerts.per-alertname-limit or --dispatch.start-delay; the HTTP server,
+// --web.config.file (basic auth) and signals belong to the caller
+// (cmd/amp-upstream). Stop waits for a reload
 // in progress without a deadline, where upstream abandons it after its
 // shutdown timeout, and logs a failed gossip Leave instead of returning it.
 //

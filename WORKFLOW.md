@@ -63,7 +63,7 @@ Full:        start-task -> research -> spec -> plan-task -> implement -> deep-re
 ## Release Process (cutting release notes)
 
 Источник — только `CHANGELOG.md`'s `[Unreleased]` блок (не git log, не память).
-Шаблон — `docs/RELEASE_NOTES_TEMPLATE.md`. Пример — `docs/RELEASE_NOTES_v0.1.0-draft.md`.
+Шаблон — `docs/RELEASE_NOTES_TEMPLATE.md`. Пример — `docs/RELEASE_NOTES_v0.1.0.md`.
 
 0. **Bump chart version**: поднять `version` и `appVersion` в `helm/amp/Chart.yaml` до версии релиза в релизном коммите. Тег образа по умолчанию берётся из `appVersion`, а `release.yml` не публикует тег, который с ним не совпадает (`v0.1.0` и `v0.1.0-rc.1` требуют `appVersion: "0.1.0"`).
 

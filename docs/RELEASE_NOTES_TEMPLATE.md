@@ -5,7 +5,7 @@
 > re-derive from git log or memory. Features may be condensed; **breaking changes
 > must be carried verbatim**, including the epic/wave code that introduced them
 > (`FU-*`, `AMP-PARITY-WAVE*`) so a reader can trace back to the full migration note.
-> See `docs/RELEASE_NOTES_v0.1.0-draft.md` for a filled-in example.
+> See `docs/RELEASE_NOTES_v0.1.0.md` for a filled-in example.
 
 ---
 

@@ -58,9 +58,9 @@ External URL: {{ include "amp.externalURL" . }}
    external PostgreSQL.
 {{- end }}
 {{- end }}
-{{- if gt (int .Values.valkey.replicas) 0 }}
+{{- if and .Values.valkey.enabled (gt (int .Values.valkey.replicas) 0) }}
 ℹ️  Valkey ({{ $fullname }}-redis) runs, but amp-upstream does not use it yet
-   (UPSTREAM-AI-HA-DEDUP); valkey.replicas: 0 stops its pod.
+   (UPSTREAM-AI-HA-DEDUP); valkey.enabled: false removes it.
 {{- end }}
 {{- end }}
 

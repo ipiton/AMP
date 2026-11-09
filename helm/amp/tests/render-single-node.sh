@@ -3,13 +3,13 @@
 # (HELM-SINGLE-NODE-DEFAULTS, ADR-017):
 #
 #   - defaults: one AMP replica, no HPA, requests of the whole stack
-#     270m / 512Mi, no valkey subchart objects, no <fullname>-pvc, the cache
-#     image is valkey/valkey;
+#     210m / 416Mi, no Valkey (valkey.enabled: false), no <fullname>-pvc;
+#     with valkey.enabled the cache image is valkey/valkey;
 #   - profile: lite has no <fullname>-pvc either; values-production.yaml runs
 #     3 replicas, no HPA;
 #   - valkey.image.tag is required; a repository without "valkey" renders no
 #     data move; values-small.yaml renders with its limits;
-#   - NOTES: the Valkey line follows valkey.replicas, lite shows requests from
+#   - NOTES: the Valkey line follows valkey.enabled and valkey.replicas, lite shows requests from
 #     values;
 #   - the config-init data move, run with sh on fixture files: RDB v12 data
 #     moves aside, dump.rdb and appendonlydir separately, Valkey data stays.
@@ -139,12 +139,17 @@ assert_docs "${f}" HorizontalPodAutoscaler amp 0 "default: no HPA"
 got="$(doc_line "${f}" StatefulSet amp '^  replicas:')"
 if [ "${got}" = "  replicas: 1" ]; then pass "default: StatefulSet has replicas: 1"; else fail "default: StatefulSet replicas line is '${got}'"; fi
 got="$(requests_total "${f}")"
-if [ "${got}" = "270m/512Mi" ]; then pass "default: requests total 270m/512Mi"; else fail "default: requests total ${got}, want 270m/512Mi"; fi
+if [ "${got}" = "210m/416Mi" ]; then pass "default: requests total 210m/416Mi"; else fail "default: requests total ${got}, want 210m/416Mi"; fi
 assert_count "${f}" "amp-valkey" 0 "default: no valkey subchart objects"
+assert_count "${f}" "amp-redis" 0 "default: no Valkey objects (valkey.enabled: false)"
 assert_docs "${f}" PersistentVolumeClaim amp-pvc 0 "default: no amp-pvc"
-assert_count "${f}" "image: valkey/valkey:8.1.10-alpine" 1 "default: cache image valkey/valkey:8.1.10-alpine"
-assert_count "${f}" "image: redis:" 0 "default: no redis image"
-assert_count "${f}" "redis-pre-valkey-" 1 "default: config-init moves Redis >= 7.4 data"
+render valkey --set valkey.enabled=true
+f="${WORK_DIR}/valkey.yaml"
+got="$(requests_total "${f}")"
+if [ "${got}" = "270m/512Mi" ]; then pass "valkey: requests total 270m/512Mi"; else fail "valkey: requests total ${got}, want 270m/512Mi"; fi
+assert_count "${f}" "image: valkey/valkey:8.1.10-alpine" 1 "valkey: cache image valkey/valkey:8.1.10-alpine"
+assert_count "${f}" "image: redis:" 0 "valkey: no redis image"
+assert_count "${f}" "redis-pre-valkey-" 1 "valkey: config-init moves Redis >= 7.4 data"
 
 echo "T3 lite and production:"
 render lite --set profile=lite
@@ -159,13 +164,13 @@ assert_count "${f}" "amp-valkey" 0 "production: no valkey subchart objects"
 assert_docs "${f}" PersistentVolumeClaim amp-pvc 0 "production: no amp-pvc"
 
 echo "T4 cache image:"
-render_fails empty-tag "valkey.image.tag is required" --set valkey.image.tag=
-render own-redis --set valkey.image.repository=redis --set valkey.image.tag=7.4-alpine
+render_fails empty-tag "valkey.image.tag is required" --set valkey.enabled=true --set valkey.image.tag=
+render own-redis --set valkey.enabled=true --set valkey.image.repository=redis --set valkey.image.tag=7.4-alpine
 assert_count "${WORK_DIR}/own-redis.yaml" "image: redis:7.4-alpine" 1 "own-redis: image redis:7.4-alpine"
 assert_count "${WORK_DIR}/own-redis.yaml" "redis-pre-valkey-" 0 "own-redis: no data move"
 
 echo "T5 values-small.yaml:"
-render small -f "${CHART_DIR}/values-small.yaml"
+render small -f "${CHART_DIR}/values-small.yaml" --set valkey.enabled=true
 f="${WORK_DIR}/small.yaml"
 assert_docs "${f}" HorizontalPodAutoscaler amp 0 "small: no HPA"
 assert_count "${f}" "maxmemory 192mb" 1 "small: Valkey maxmemory 192mb"
@@ -176,9 +181,11 @@ assert_count "${f}" "work_mem = 2MB" 1 "small: work_mem 2MB (memory measured at 
 
 echo "T6 NOTES:"
 notes notes-default
-notes notes-valkey-off --set valkey.replicas=0
+notes notes-valkey --set valkey.enabled=true
+notes notes-valkey-off --set valkey.enabled=true --set valkey.replicas=0
 notes notes-lite --set profile=lite
-assert_count "${WORK_DIR}/notes-default.notes" "but amp-upstream does not use it yet" 1 "notes-default: Valkey line"
+assert_count "${WORK_DIR}/notes-default.notes" "Valkey" 0 "notes-default: no Valkey line"
+assert_count "${WORK_DIR}/notes-valkey.notes" "but amp-upstream does not use it yet" 1 "notes-valkey: Valkey line"
 assert_count "${WORK_DIR}/notes-default.notes" "StatefulSet amp, 1 replica(s)" 1 "notes-default: replicas line"
 assert_count "${WORK_DIR}/notes-default.notes" "requests 100m CPU / 128Mi, limits 1000m CPU / 1Gi" 1 "notes-default: AMP resources from values"
 assert_count "${WORK_DIR}/notes-valkey-off.notes" "Valkey" 0 "notes-valkey-off: no Valkey line"
@@ -195,7 +202,7 @@ awk '
   r && /- name: config-init/ { c = 1 }
   c && /^        - \|$/ { b = 1; next }
   b && /Copying redis.conf/ { exit }
-  b { sub(/^          /, ""); print }' "${WORK_DIR}/default.yaml" >"${WORK_DIR}/move.sh"
+  b { sub(/^          /, ""); print }' "${WORK_DIR}/valkey.yaml" >"${WORK_DIR}/move.sh"
 if grep -q "rdb_v12" "${WORK_DIR}/move.sh"; then pass "config-init script extracted"; else fail "config-init script not found in the render"; fi
 
 # fixture <dir> <dump header|-> <base header|->

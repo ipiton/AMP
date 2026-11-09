@@ -42,11 +42,11 @@ var (
 )
 
 // NewCircuitBreakerMetrics creates Prometheus metrics for circuit breaker.
-// Uses standard alert_history namespace with llm_circuit_breaker subsystem.
+// Uses standard amp namespace with llm_circuit_breaker subsystem.
 // Returns singleton instance to prevent duplicate metric registration.
 func NewCircuitBreakerMetrics() *CircuitBreakerMetrics {
 	defaultMetricsOnce.Do(func() {
-		defaultMetrics = NewCircuitBreakerMetricsWithNamespace("alert_history", "llm_circuit_breaker")
+		defaultMetrics = NewCircuitBreakerMetricsWithNamespace("amp", "llm_circuit_breaker")
 	})
 	return defaultMetrics
 }
@@ -61,7 +61,7 @@ var (
 // singleton for the same reason as NewCircuitBreakerMetrics.
 func NewInvestigationCircuitBreakerMetrics() *CircuitBreakerMetrics {
 	investigationMetricsOnce.Do(func() {
-		investigationMetrics = NewCircuitBreakerMetricsWithNamespace("alert_history", "llm_investigation_circuit_breaker")
+		investigationMetrics = NewCircuitBreakerMetricsWithNamespace("amp", "llm_investigation_circuit_breaker")
 	})
 	return investigationMetrics
 }

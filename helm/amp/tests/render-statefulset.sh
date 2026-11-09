@@ -11,7 +11,9 @@
 #   - the Service selects the AMP pods by component=application; the headless
 #     Service is component=cluster, so the ServiceMonitor does not scrape twice;
 #   - an external URL with a path prefixes the probe paths;
-#   - replicas: 0 fails the render.
+#   - negative replicas fail the render;
+#   - values removed by UPSTREAM-CORE-REMOVAL, top-level and nested, fail the
+#     render naming the replacement.
 #
 #   helm/amp/tests/render-statefulset.sh
 #
@@ -145,6 +147,10 @@ render_fails old-configfile "configFile is no longer read" --set configFile.cont
 render_fails old-upstreamcore "renamed to alertmanager" --set upstreamCore.enabled=true
 render_fails old-replicacount "use alertmanager.replicas" --set replicaCount=2
 render_fails old-cache "cache is no longer read" --set cache.enabled=true
+render_fails old-queue "publishing.queue is no longer read" --set publishing.queue.workers=4
+render_fails old-retrydelay "llm.retryDelay is no longer read" --set llm.retryDelay=1s
+render_fails old-metricsport "service.metricsPort is no longer read" --set service.metricsPort=9090
+render_fails old-timeout "gracefulShutdown.timeoutSeconds is no longer read" --set gracefulShutdown.timeoutSeconds=30
 
 echo "webConfig.mountPath must not overlap the chart's mounts"
 for p in /etc/amp/config /etc/amp/config/web /etc/amp /data /data/web; do

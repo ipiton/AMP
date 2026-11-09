@@ -158,7 +158,7 @@ echo "gated on prometheusEnabled and serviceMonitor.enabled:"
 render prom-off --set monitoring.prometheusEnabled=false
 doc "${WORK_DIR}/prom-off.yaml" ServiceMonitor amp >"${WORK_DIR}/prom-off-sm.yaml"
 assert_absent "${WORK_DIR}/prom-off-sm.yaml" "kind: ServiceMonitor" "off with monitoring.prometheusEnabled=false"
-render sm-off --set monitoring.serviceMonitor.enabled=false
+render sm-off --set monitoring.serviceMonitor.enabled=false --set valkey.enabled=true
 doc "${WORK_DIR}/sm-off.yaml" ServiceMonitor amp >"${WORK_DIR}/sm-off-sm.yaml"
 assert_absent "${WORK_DIR}/sm-off-sm.yaml" "kind: ServiceMonitor" "off with serviceMonitor.enabled=false"
 assert_contains "${WORK_DIR}/sm-off.yaml" "# Source: amp/templates/redis-servicemonitor.yaml" "Redis ServiceMonitor unaffected"
