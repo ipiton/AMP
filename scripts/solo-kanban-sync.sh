@@ -2,7 +2,7 @@
 # Sync the vendored Solo Kanban framework from an upstream checkout.
 #
 #   scripts/solo-kanban-sync.sh [--allow-dirty] [upstream-dir]
-#                                 (default upstream: ~/Documents/Projects/solo-kanban)
+#                                 (default upstream: ~/code/own/solo-kanban)
 #
 # Vendored files are upstream copies with one deterministic rewrite: framework
 # doc paths (docs/workflow.md, ...) point at docs/solo-kanban/. Never edit them
@@ -19,7 +19,7 @@ if [ "${1:-}" = "--allow-dirty" ]; then
   ALLOW_DIRTY=1
   shift
 fi
-UPSTREAM="${1:-$HOME/Documents/Projects/solo-kanban}"
+UPSTREAM="${1:-$HOME/code/own/solo-kanban}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION_FILE="$ROOT/docs/solo-kanban/VERSION"
 
