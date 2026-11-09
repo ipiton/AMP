@@ -1,4 +1,4 @@
-{{- if and (eq .Values.profile "standard") .Values.valkey.networkPolicy.enabled }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled .Values.valkey.networkPolicy.enabled }}
 {{/*
 NetworkPolicy for Redis Pod Isolation
 Security hardening: Allow only app pods and Prometheus to connect

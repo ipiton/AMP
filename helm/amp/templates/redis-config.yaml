@@ -1,4 +1,4 @@
-{{- if eq .Values.profile "standard" }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled }}
 {{/*
 Redis Configuration ConfigMap for Standard Profile
 Comprehensive redis.conf with production-grade settings

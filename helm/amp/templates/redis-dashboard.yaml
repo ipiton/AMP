@@ -1,4 +1,4 @@
-{{- if and (eq .Values.profile "standard") .Values.monitoring.prometheusEnabled }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled .Values.monitoring.prometheusEnabled }}
 {{/*
 Grafana Dashboard ConfigMap for Redis Monitoring
 Import this ConfigMap to Grafana or use Dashboard ID 11835 for full-featured dashboard

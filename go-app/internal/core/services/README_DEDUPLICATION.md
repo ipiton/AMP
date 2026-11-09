@@ -186,22 +186,22 @@ result, _ := service.ProcessAlert(ctx, alert3)
 
 ### Prometheus Metrics (4 total)
 
-#### 1. `alert_history_business_deduplication_created_total`
+#### 1. `amp_business_deduplication_created_total`
 - **Type:** Counter
 - **Labels:** source (webhook)
 - **Description:** Number of new alerts created
 
-#### 2. `alert_history_business_deduplication_updated_total`
+#### 2. `amp_business_deduplication_updated_total`
 - **Type:** Counter
 - **Labels:** status_from, status_to
 - **Description:** Number of alerts updated
 
-#### 3. `alert_history_business_deduplication_ignored_total`
+#### 3. `amp_business_deduplication_ignored_total`
 - **Type:** Counter
 - **Labels:** reason (duplicate)
 - **Description:** Number of duplicate alerts ignored
 
-#### 4. `alert_history_business_deduplication_duration_seconds`
+#### 4. `amp_business_deduplication_duration_seconds`
 - **Type:** Histogram
 - **Labels:** action (created/updated/ignored)
 - **Buckets:** 1µs, 5µs, 10µs, 50µs, 100µs, 500µs, 1ms, 5ms, 10ms
@@ -211,17 +211,17 @@ result, _ := service.ProcessAlert(ctx, alert3)
 
 ```promql
 # Deduplication rate (% of duplicates)
-rate(alert_history_business_deduplication_ignored_total[5m])
+rate(amp_business_deduplication_ignored_total[5m])
 /
-sum(rate(alert_history_business_deduplication_*_total[5m]))
+sum(rate(amp_business_deduplication_*_total[5m]))
 
 # Average deduplication latency
 histogram_quantile(0.99,
-  rate(alert_history_business_deduplication_duration_seconds_bucket[5m])
+  rate(amp_business_deduplication_duration_seconds_bucket[5m])
 )
 
 # Status transition rates
-rate(alert_history_business_deduplication_updated_total{
+rate(amp_business_deduplication_updated_total{
   status_from="firing",status_to="resolved"
 }[5m])
 ```
@@ -345,7 +345,7 @@ metrics:
 **Solution:**
 1. Check database indexes on `fingerprint` column
 2. Monitor database connection pool
-3. Check `alert_history_business_deduplication_duration_seconds` metrics
+3. Check `amp_business_deduplication_duration_seconds` metrics
 
 ---
 
@@ -415,7 +415,7 @@ type ProcessResult struct {
 ## Best Practices
 
 1. **Always enable deduplication** для production workloads
-2. **Monitor metrics** (`alert_history_business_deduplication_*`)
+2. **Monitor metrics** (`amp_business_deduplication_*`)
 3. **Use FNV-1a algorithm** (Alertmanager-compatible)
 4. **Handle graceful degradation** (service continues при errors)
 5. **Index fingerprint column** в database для fast lookups

@@ -88,7 +88,7 @@ This section describes what AMP actually provides today, so operators know which
 - [ ] Scrape `/metrics` with basic auth (or list it in `server.auth.unauthenticated_paths` deliberately)
 - [ ] Store passwords and API keys (LLM provider, receivers) in Kubernetes Secrets, not in values files
 - [ ] Use TLS (`sslmode=require` or stricter) for an external PostgreSQL
-- [ ] Set `valkey.replicas: 0` (`amp-upstream` does not use Valkey; `values-production.yaml` already does), or set its password and keep it reachable only from AMP
+- [ ] Keep `valkey.enabled: false` (the default: `amp-upstream` does not use Valkey), or, if you enable it, set its password and keep it reachable only from AMP
 - [ ] Add rate limiting and CORS at the ingress if the API is reachable from browsers or untrusted networks
 - [ ] Subscribe to this repository's security advisories (Watch → Custom → Security alerts)
 

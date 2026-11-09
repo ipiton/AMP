@@ -47,22 +47,22 @@ GetFlappingAlerts(ctx, timeRange *core.TimeRange, threshold int) ([]*core.Flappi
 All operations emit Prometheus metrics (namespace `alert_history`,
 subsystem `infra_repository` / `infra_cache`):
 
-### 1. `alert_history_infra_repository_query_duration_seconds`
+### 1. `amp_infra_repository_query_duration_seconds`
 **Type**: Histogram
 **Labels**: `operation`, `status`
 **Description**: Duration of alert history queries
 
-### 2. `alert_history_infra_repository_query_errors_total`
+### 2. `amp_infra_repository_query_errors_total`
 **Type**: Counter
 **Labels**: `operation`, `error_type`
 **Description**: Total number of query errors
 
-### 3. `alert_history_infra_repository_query_results_total`
+### 3. `amp_infra_repository_query_results_total`
 **Type**: Histogram
 **Labels**: `operation`
 **Description**: Number of results returned
 
-### 4. `alert_history_infra_cache_hits_total`
+### 4. `amp_infra_cache_hits_total`
 **Type**: Counter
 **Labels**: `cache_type`
 **Description**: Cache hit statistics

@@ -170,7 +170,7 @@ render podlabels --set podLabels.team=np-test
 assert_contains "${WORK_DIR}/podlabels.yaml" "team: np-test" "other podLabels still render"
 
 echo "the Redis NetworkPolicy admits the AMP pods:"
-render redis --set valkey.networkPolicy.enabled=true
+render redis --set valkey.enabled=true --set valkey.networkPolicy.enabled=true
 doc "${WORK_DIR}/redis.yaml" NetworkPolicy amp-redis >"${WORK_DIR}/redis-np.yaml"
 block "${WORK_DIR}/redis-np.yaml" "  - from:" >"${WORK_DIR}/redis-np-from.yaml"
 assert_contains "${WORK_DIR}/redis-np-from.yaml" "${LABEL}" "first Redis rule selects component: application"

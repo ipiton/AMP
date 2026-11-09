@@ -40,7 +40,7 @@ assert_absent() {
 # render_vct <chart-dir> <out-file>: volumeClaimTemplates of the cache
 # StatefulSet (it is the last field of the manifest).
 render_vct() {
-  helm template t "$1" -s "${STATEFULSET}" | sed -n '/^  volumeClaimTemplates:/,$p' >"$2"
+  helm template t "$1" -s "${STATEFULSET}" --set valkey.enabled=true | sed -n '/^  volumeClaimTemplates:/,$p' >"$2"
 }
 
 echo "== volumeClaimTemplates labels =="
@@ -56,7 +56,7 @@ echo "== same volumeClaimTemplates after a version bump =="
 cp -R "${CHART_DIR}" "${WORK_DIR}/chart"
 sed -i.bak -e 's/^version: .*/version: 99.1.0/' -e 's/^appVersion: .*/appVersion: "99.1.0"/' \
   "${WORK_DIR}/chart/Chart.yaml"
-helm template t "${WORK_DIR}/chart" -s "${STATEFULSET}" >"${WORK_DIR}/bumped-sts.yaml"
+helm template t "${WORK_DIR}/chart" -s "${STATEFULSET}" --set valkey.enabled=true >"${WORK_DIR}/bumped-sts.yaml"
 assert_contains "${WORK_DIR}/bumped-sts.yaml" "helm.sh/chart: amp-99.1.0" "bumped chart renders the new version"
 render_vct "${WORK_DIR}/chart" "${WORK_DIR}/vct-bumped.yaml"
 if diff -u "${WORK_DIR}/vct.yaml" "${WORK_DIR}/vct-bumped.yaml" >"${WORK_DIR}/vct.diff"; then

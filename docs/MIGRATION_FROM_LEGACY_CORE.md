@@ -214,14 +214,13 @@ Imported silences get new IDs; links to old silence IDs stop working. Run the im
 
 The old core kept groups, timers and the notification log in Valkey. `amp-upstream` never reads them, so nothing has to be migrated, and nothing is carried over: after the upgrade each still-firing group is notified once more after its `group_wait`, and a resolve for an alert that cleared during the upgrade may not be sent.
 
-The chart still deploys Valkey (kept for `UPSTREAM-AI-HA-DEDUP`), unused. To stop it and drop the old state:
+The v0.1.0 chart does not deploy Valkey (`valkey.enabled: false`, kept for `UPSTREAM-AI-HA-DEDUP`): the upgrade removes its StatefulSet, Services, Secret, ServiceMonitor and alert rules, unless your values set `valkey.enabled: true`. The volume stays; to drop the old state:
 
 ```bash
-helm upgrade amp ./helm/amp -n monitoring --reuse-values --set valkey.replicas=0
 kubectl -n monitoring delete pvc redis-data-amp-redis-0
 ```
 
-Its Services, Secret, ServiceMonitor and alert rules still render (HELM-CHART-GAPS). `values-production.yaml` already sets `valkey.replicas: 0`. An external cache (`cache.host`) can be decommissioned.
+Keep the volume if you may roll back (§ Rollback). An external cache (`cache.host`) can be decommissioned.
 
 ## Step 8. Update the clients
 

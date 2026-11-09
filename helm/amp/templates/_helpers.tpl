@@ -83,7 +83,7 @@ Create PostgreSQL secret name (Custom format)
 {{/*
 Secret holding the password of the chart's Valkey (<fullname>-redis): the
 operator's valkey.password.existingSecret, or the one templates/redis-secret.yaml
-creates. Valkey, its exporter and AMP all read it, so the three never disagree.
+creates. Valkey and its exporter both read it, so the two never disagree.
 */}}
 {{- define "amp.valkey.secretName" -}}
 {{- .Values.valkey.password.existingSecret | default (printf "%s-redis-secret" (include "amp.fullname" .)) }}

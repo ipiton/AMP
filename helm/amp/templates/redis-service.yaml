@@ -1,4 +1,4 @@
-{{- if eq .Values.profile "standard" }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled }}
 {{/*
 Redis Services for Standard Profile
 Three services:

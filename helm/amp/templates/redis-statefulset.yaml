@@ -1,4 +1,4 @@
-{{- if eq .Values.profile "standard" }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled }}
 {{/*
 Redis/Valkey StatefulSet for Standard Profile
 Provides persistent L2 cache with AOF+RDB durability

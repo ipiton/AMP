@@ -106,7 +106,7 @@ All keys: [config.yaml.example](config.yaml.example) and [docs/CONFIGURATION_GUI
 |---|---|
 | `/api/v2/*` | Upstream Alertmanager API v2, unchanged |
 | `/-/healthy`, `/-/ready`, `POST /-/reload` | Upstream probes and reload |
-| `/metrics` | Upstream `alertmanager_*` metrics plus AMP's (`amp_*`, `alert_history_*`) |
+| `/metrics` | Upstream `alertmanager_*` metrics plus AMP's (`amp_*`) |
 | `GET /api/amp/v1/alerts/{fingerprint}` | The alert's history record, also after it resolved |
 | `GET /api/amp/v1/alerts/{fingerprint}/investigation` | Its latest investigation |
 

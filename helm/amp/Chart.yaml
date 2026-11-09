@@ -1,8 +1,9 @@
 apiVersion: v2
 name: amp
 description: |
-  Alertmanager++ (AMP) - Alertmanager-inspired runtime with a real publishing
-  path, controlled replacement slice, and phased compatibility work.
+  Alertmanager++ (AMP) - upstream Prometheus Alertmanager v0.34.1 core with
+  alert history, LLM classification and investigation, and Kubernetes-Secret
+  targets around it.
 
 type: application
 version: 0.1.0
@@ -33,8 +34,8 @@ annotations:
   category: Monitoring
   license: AGPL-3.0
   artifacthub.io/changes: |
-    - Initial OSS release
-    - Controlled replacement slice for active runtime
-    - LLM classification (BYOK - Bring Your Own Key)
-    - Real publishing path with phased wider parity
-    - Web dashboard surface included (partial)
+    - Upstream Alertmanager v0.34.1 core (amp-upstream), StatefulSet with memberlist HA
+    - LLM classification and investigation off the ingest path (BYOK)
+    - Alert history in PostgreSQL, AMP API under /api/amp/v1
+    - Kubernetes-Secret targets as upstream integrations
+    - Breaking: migration from the legacy core, see docs/MIGRATION_FROM_LEGACY_CORE.md

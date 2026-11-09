@@ -11,7 +11,11 @@
 #   - the Service selects the AMP pods by component=application; the headless
 #     Service is component=cluster, so the ServiceMonitor does not scrape twice;
 #   - an external URL with a path prefixes the probe paths;
-#   - replicas: 0 fails the render.
+#   - the bundled PostgreSQL is awaited by an init container (not in lite,
+#     not with an external database);
+#   - negative replicas fail the render;
+#   - values removed by UPSTREAM-CORE-REMOVAL, top-level and nested, fail the
+#     render naming the replacement.
 #
 #   helm/amp/tests/render-statefulset.sh
 #
@@ -103,6 +107,15 @@ assert_count "${WORK_DIR}/one-cm.yaml" "receiver: default" 1 "one: default route
 doc "${WORK_DIR}/one.yaml" ConfigMap "${STS}-amp-config" >"${WORK_DIR}/one-amp-cm.yaml"
 assert_count "${WORK_DIR}/one-amp-cm.yaml" "amp.yaml: |" 1 "one: amp.yaml ConfigMap"
 assert_count "${WORK_DIR}/one.yaml" "kind: Deployment" 0 "one: no Deployment"
+assert_count "${WORK_DIR}/one-sts.yaml" "name: wait-for-postgres" 1 "one: waits for the bundled PostgreSQL"
+assert_count "${WORK_DIR}/one-sts.yaml" "pg_isready -q -t 1 -h amp-postgres -p 5432" 1 "one: ...on its Service"
+render lite-nowait --set profile=lite
+doc "${WORK_DIR}/lite-nowait.yaml" StatefulSet "${STS}" >"${WORK_DIR}/lite-nowait-sts.yaml"
+assert_count "${WORK_DIR}/lite-nowait-sts.yaml" "initContainers:" 0 "lite: no wait for PostgreSQL"
+render ext-nowait --set postgresql.enabled=false --set externalDatabase.host=db.example.com \
+  --set externalDatabase.database=amp --set externalDatabase.username=amp --set externalDatabase.existingSecret=amp-db
+doc "${WORK_DIR}/ext-nowait.yaml" StatefulSet "${STS}" >"${WORK_DIR}/ext-nowait-sts.yaml"
+assert_count "${WORK_DIR}/ext-nowait-sts.yaml" "initContainers:" 0 "external database: no wait"
 
 echo "three replicas"
 render three --set alertmanager.replicas=3 --namespace mon
@@ -145,6 +158,10 @@ render_fails old-configfile "configFile is no longer read" --set configFile.cont
 render_fails old-upstreamcore "renamed to alertmanager" --set upstreamCore.enabled=true
 render_fails old-replicacount "use alertmanager.replicas" --set replicaCount=2
 render_fails old-cache "cache is no longer read" --set cache.enabled=true
+render_fails old-queue "publishing.queue is no longer read" --set publishing.queue.workers=4
+render_fails old-retrydelay "llm.retryDelay is no longer read" --set llm.retryDelay=1s
+render_fails old-metricsport "service.metricsPort is no longer read" --set service.metricsPort=9090
+render_fails old-timeout "gracefulShutdown.timeoutSeconds is no longer read" --set gracefulShutdown.timeoutSeconds=30
 
 echo "webConfig.mountPath must not overlap the chart's mounts"
 for p in /etc/amp/config /etc/amp/config/web /etc/amp /data /data/web; do

@@ -14,7 +14,7 @@ The breaking changes against earlier chart versions are listed in `CHANGELOG.md`
 
 ## Quick Start
 
-> **Read before installing.** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart writes `ssl_mode: disable` plus `allow_insecure_ssl_in_production: true` into the AMP configuration: under `environment: production` (the default) AMP then accepts the unencrypted in-cluster connection. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The defaults target one node: one replica, about 270m CPU / 512Mi requested in total (see [Sizing](#sizing)). No image is published to GHCR yet; build it locally until the first release (see [CI And Image Publishing](../../docs/CI.md)).
+> **Read before installing.** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart writes `ssl_mode: disable` plus `allow_insecure_ssl_in_production: true` into the AMP configuration: under `environment: production` (the default) AMP then accepts the unencrypted in-cluster connection. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The defaults target one node: one replica, about 210m CPU / 416Mi requested in total (see [Sizing](#sizing)). The image is `ghcr.io/ipiton/amp:<appVersion>` from tagged releases (see [CI And Image Publishing](../../docs/CI.md)). **The defaults render a `ServiceMonitor` and `PrometheusRule`s, which need the prometheus-operator CRDs** (kube-prometheus-stack): on a cluster without them `helm install` fails with `no matches for kind "ServiceMonitor"`; set `monitoring.prometheusEnabled: false` there. Set your own `postgresql.password` for the bundled PostgreSQL: the default is published in this repository.
 
 ```yaml
 # my-values.yaml — standard profile, one replica (the defaults)
@@ -47,11 +47,11 @@ Requests are set from a measurement on one node under light load (`tasks/archive
 | AMP (`amp-upstream`) | 100m / 128Mi | 1000m / 1Gi |
 | PostgreSQL | 100m / 256Mi | 1000m / 1Gi |
 | postgres-exporter | 10m / 32Mi | 100m / 128Mi |
-| Valkey (`<fullname>-redis`) | 50m / 64Mi | 500m / 512Mi |
-| redis-exporter | 10m / 32Mi | 100m / 128Mi |
-| **Total** | **270m / 512Mi** | |
+| **Total** | **210m / 416Mi** | |
 
-Volumes: PostgreSQL 10Gi, Valkey 5Gi, AMP 1Gi per pod (`alertmanager.persistence`). `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb`), PostgreSQL to `max_connections=60` and `work_mem=2MB`, and the volumes to 5Gi / 1Gi; keep `alertmanager.replicas: 1` with it. Valkey is unused today ([Valkey](#valkey)); `valkey.replicas: 0` drops its two containers from the total.
+With `valkey.enabled: true` add Valkey (`<fullname>-redis`, 50m / 64Mi requests, 500m / 512Mi limits) and its redis-exporter (10m / 32Mi, 100m / 128Mi): 270m / 512Mi in total.
+
+Volumes: PostgreSQL 10Gi, AMP 1Gi per pod (`alertmanager.persistence`), Valkey 5Gi when enabled. `values-small.yaml` lowers the limits (AMP, PostgreSQL 512Mi; Valkey 256Mi with `maxmemory 192mb` if enabled), PostgreSQL to `max_connections=60` and `work_mem=2MB`, and the volumes to 5Gi / 1Gi; keep `alertmanager.replicas: 1` with it.
 
 There is no HPA: the replica count is `alertmanager.replicas`, a fixed gossip cluster ([Alertmanager Core](#alertmanager-core)). For HA use `values-production.yaml` (3 replicas, PodDisruptionBudget `minAvailable: 2`, external PostgreSQL) or set `alertmanager.replicas` yourself; with the bundled PostgreSQL, check its connection budget first ([PostgreSQL](#postgresql)).
 
@@ -65,7 +65,7 @@ helm install amp ./helm/amp
 - PostgreSQL for alert history and investigations (single primary, no replication — see `PROD-POSTGRES-HA-DECISION`)
 - LLM classification and investigation when `llm.enabled` / `investigation.enabled` are set
 - Publishing targets discovered from Kubernetes Secrets (`publishing.*`, see [RBAC](#rbac))
-- Valkey (`<fullname>-redis`, image `valkey/valkey`) still runs by default, unused ([Valkey](#valkey))
+- No Valkey by default: `amp-upstream` does not use it yet ([Valkey](#valkey))
 - If PostgreSQL is unreachable when a pod starts, the pod runs without history and investigations until it is restarted; alert delivery does not depend on the database
 
 ### Lite Profile
@@ -154,14 +154,15 @@ Investigation tools and runbooks are configured through `alertmanager.ampConfig`
 | `alertmanager.persistence.*` | Silences and notification log, one volume per AMP pod | `1Gi` |
 | `postgresql.enabled` | Enable bundled PostgreSQL; the lite profile does not use it, set `false` there | `true` |
 | `externalDatabase.*` | External PostgreSQL ([PostgreSQL](#postgresql)) | `host: ""` |
-| `valkey.replicas` | Valkey pods (profile standard); `0` stops the pod, its other objects still render | `1` |
+| `valkey.enabled` | Render Valkey and its objects (profile standard); unused by `amp-upstream` today | `false` |
+| `valkey.replicas` | Valkey pods with `valkey.enabled`; `0` stops the pod, its other objects still render | `1` |
 | `valkey.image.repository` / `.tag` | Valkey image | `valkey/valkey` / `8.1.10-alpine` |
 | `valkey.password.existingSecret` / `.secretKey` | Secret with the chart's Valkey password (otherwise `<fullname>-redis-secret`) | `""` / `password` |
 | `valkey.password.value` | Password for `<fullname>-redis-secret`; empty: generated on first install and kept by upgrades | `""` |
 
 ### Valkey
 
-`amp-upstream` does not connect to Valkey: it is kept for the cross-replica investigation dedup (`UPSTREAM-AI-HA-DEDUP`). The chart still deploys it by default in the standard profile, with a password; NOTES says it is unused. `valkey.replicas: 0` stops its pod (its Services, Secret, ServiceMonitor and alert rules still render, HELM-CHART-GAPS), as `values-production.yaml` does.
+`amp-upstream` does not connect to Valkey: it is kept for the cross-replica investigation dedup (`UPSTREAM-AI-HA-DEDUP`). The chart does not deploy it by default (`valkey.enabled: false`). With `valkey.enabled: true` (standard profile) it runs with a password and NOTES says it is unused; `valkey.replicas: 0` then stops its pod while its Services, Secret, ServiceMonitor and alert rules still render (HELM-CHART-GAPS).
 
 ### PostgreSQL
 

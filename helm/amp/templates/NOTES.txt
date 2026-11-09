@@ -29,6 +29,9 @@ Alertmanager core (amp-upstream): StatefulSet {{ $fullname }}, {{ $replicas }} r
 External URL: {{ include "amp.externalURL" . }}
 {{- if .Values.webConfig.existingSecret }}
 ✅ Basic auth from Secret {{ .Values.webConfig.existingSecret }} (probes stay open)
+{{- else if ne (.Values.service.type | default "ClusterIP") "ClusterIP" }}
+⚠️  No HTTP authentication, and service.type={{ .Values.service.type }} exposes the API
+   (silences, /-/reload, /debug/*) outside the cluster. Set webConfig.existingSecret.
 {{- else }}
 ℹ️  No HTTP authentication (webConfig.existingSecret)
 {{- end }}
@@ -43,6 +46,9 @@ External URL: {{ include "amp.externalURL" . }}
 {{- if .Values.postgresql.enabled }}
 ⚠️  Bundled PostgreSQL: single instance, dev/pilot only — no replication, no backups (ADR-016)
    For production use an external PostgreSQL; backups: helm/amp/docs/POSTGRESQL_RESTORE_GUIDE.md
+{{- if eq (toString .Values.postgresql.password) "secure_password_123" }}
+⚠️  postgresql.password is the chart's published default: set your own (--set postgresql.password=...)
+{{- end }}
 {{- else if (.Values.externalDatabase | default dict).host }}
 {{- $ext := .Values.externalDatabase }}
 ✅ External PostgreSQL: {{ $ext.host }}:{{ $ext.port | default 5432 }}/{{ $ext.database }} (sslmode={{ $ext.sslMode | default "require" }}), password from Secret {{ $ext.existingSecret }}/{{ $ext.existingSecretPasswordKey | default "password" }}
@@ -58,9 +64,9 @@ External URL: {{ include "amp.externalURL" . }}
    external PostgreSQL.
 {{- end }}
 {{- end }}
-{{- if gt (int .Values.valkey.replicas) 0 }}
+{{- if and .Values.valkey.enabled (gt (int .Values.valkey.replicas) 0) }}
 ℹ️  Valkey ({{ $fullname }}-redis) runs, but amp-upstream does not use it yet
-   (UPSTREAM-AI-HA-DEDUP); valkey.replicas: 0 stops its pod.
+   (UPSTREAM-AI-HA-DEDUP); valkey.enabled: false removes it.
 {{- end }}
 {{- end }}
 
@@ -135,7 +141,6 @@ Resources (per AMP pod): requests {{ dig "requests" "cpu" "-" $res }} CPU / {{ d
   Support & Issues
 =============================================================================
 
-GitHub: https://github.com/helpfull/alertmanager-plus-plus
-Docs: https://docs.amp.io
+GitHub: https://github.com/ipiton/AMP
 
 =============================================================================

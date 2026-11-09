@@ -89,6 +89,34 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 40 }}
+      {{- if and (eq .Values.profile "standard") .Values.postgresql.enabled (not $ext.host) }}
+      # AMP connects to PostgreSQL once at start (UPSTREAM-HISTORY-PG-RECONNECT):
+      # on a fresh install the bundled one is still pulling its image or running
+      # initdb, and AMP would run without history until restarted. Wait for it,
+      # but at most 120s: alert delivery must not depend on the database.
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16.15
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 60); do
+                pg_isready -q -t 1 -h {{ include "amp.postgresql.fullname" . }} -p 5432 && exit 0
+                sleep 2
+              done
+              echo "PostgreSQL not ready after 120s; starting without it (history and investigation off until restart)"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- end }}
       containers:
         - name: amp
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"

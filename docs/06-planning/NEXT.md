@@ -15,7 +15,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **PROD-RELEASE-V010** — релиз v0.1.0 на upstream-ядре (ADR-019 закрыт 2026-11-09): расхождения доков и кода из среза 7, `CHANGELOG` → `[0.1.0]`, release notes, pre-release deep-review; затем по подтверждению владельца push `main`, `v0.1.0-rc.1` → проверка публикации → `v0.1.0`. Владелец дал старт 2026-11-09. Standard, ~1d. Claimed 2026-11-09.
+- [ ] **PROD-RELEASE-V010** — релиз v0.1.0 на upstream-ядре (ADR-019 закрыт 2026-11-09): расхождения доков и кода из среза 7, `CHANGELOG` → `[0.1.0]`, release notes, pre-release deep-review; затем по подтверждению владельца push `main`, `v0.1.0-rc.1` → проверка публикации → `v0.1.0`. Владелец дал старт 2026-11-09. Standard, ~1d. Claimed 2026-11-09. 2026-11-09: подготовка смержена (CHANGELOG `[0.1.0]`, `docs/RELEASE_NOTES_v0.1.0.md`, deep-review `pass` — `tasks/PROD-RELEASE-V010/`); осталось, каждое с подтверждения владельца: push `main` + зелёный CI → `v0.1.0-rc.1` и проверка публикации → пакет в Public → `v0.1.0` → выкатка в k3s; затем finalize.
 
 ## Queue
 

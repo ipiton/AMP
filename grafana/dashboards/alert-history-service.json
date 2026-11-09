@@ -56,7 +56,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(alert_history_prometheus_alerts_received_total[5m]))",
+          "expr": "sum(increase(amp_prometheus_alerts_received_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(alert_history_prometheus_alerts_processed_total{status=\"success\"}[5m]))",
+          "expr": "sum(increase(amp_prometheus_alerts_processed_total{status=\"success\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -132,7 +132,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(alert_history_prometheus_alerts_processing_errors_total[5m]))",
+          "expr": "sum(increase(amp_prometheus_alerts_processing_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -170,7 +170,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_prometheus_alerts_concurrent_requests",
+          "expr": "amp_prometheus_alerts_concurrent_requests",
           "legendFormat": "",
           "refId": "A"
         }
@@ -210,7 +210,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_llm_circuit_breaker_state",
+          "expr": "amp_llm_circuit_breaker_state",
           "legendFormat": "",
           "refId": "A"
         }
@@ -249,7 +249,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_technical_dashboard_health_overall_status",
+          "expr": "amp_technical_dashboard_health_overall_status",
           "legendFormat": "",
           "refId": "A"
         }
@@ -306,7 +306,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (status) (rate(alert_history_prometheus_alerts_received_total[5m]))",
+          "expr": "sum by (status) (rate(amp_prometheus_alerts_received_total[5m]))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -355,7 +355,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (status) (rate(alert_history_prometheus_alerts_processed_total[5m]))",
+          "expr": "sum by (status) (rate(amp_prometheus_alerts_processed_total[5m]))",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -395,7 +395,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (alertname) (increase(alert_history_prometheus_alerts_received_total[24h])))",
+          "expr": "topk(10, sum by (alertname) (increase(amp_prometheus_alerts_received_total[24h])))",
           "legendFormat": "{{alertname}}",
           "refId": "A"
         }
@@ -435,7 +435,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (error_type) (increase(alert_history_prometheus_alerts_processing_errors_total[24h])))",
+          "expr": "topk(10, sum by (error_type) (increase(amp_prometheus_alerts_processing_errors_total[24h])))",
           "legendFormat": "{{error_type}}",
           "refId": "A"
         }
@@ -492,17 +492,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(alert_history_proxy_pipeline_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(amp_proxy_pipeline_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(alert_history_proxy_pipeline_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(amp_proxy_pipeline_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(alert_history_proxy_pipeline_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(amp_proxy_pipeline_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -551,7 +551,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(alert_history_proxy_classification_duration_seconds_bucket[5m])) by (le, classifier))",
+          "expr": "histogram_quantile(0.95, sum(rate(amp_proxy_classification_duration_seconds_bucket[5m])) by (le, classifier))",
           "legendFormat": "{{classifier}}",
           "refId": "A"
         }
@@ -600,7 +600,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(alert_history_publishing_api_duration_seconds_bucket[5m])) by (le, provider))",
+          "expr": "histogram_quantile(0.95, sum(rate(amp_publishing_api_duration_seconds_bucket[5m])) by (le, provider))",
           "legendFormat": "{{provider}}",
           "refId": "A"
         }
@@ -649,7 +649,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (provider, error_type) (rate(alert_history_publishing_api_errors_total[5m]))",
+          "expr": "sum by (provider, error_type) (rate(amp_publishing_api_errors_total[5m]))",
           "legendFormat": "{{provider}} - {{error_type}}",
           "refId": "A"
         }
@@ -706,12 +706,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(alert_history_llm_circuit_breaker_successes_total[5m]))",
+          "expr": "sum(rate(amp_llm_circuit_breaker_successes_total[5m]))",
           "legendFormat": "Success",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(alert_history_llm_circuit_breaker_failures_total[5m]))",
+          "expr": "sum(rate(amp_llm_circuit_breaker_failures_total[5m]))",
           "legendFormat": "Failure",
           "refId": "B"
         }
@@ -760,17 +760,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(alert_history_llm_circuit_breaker_call_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(amp_llm_circuit_breaker_call_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(alert_history_llm_circuit_breaker_call_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(amp_llm_circuit_breaker_call_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(alert_history_llm_circuit_breaker_call_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(amp_llm_circuit_breaker_call_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -819,17 +819,17 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(alert_history_cache_hits_total{cache_type=\"l1\", key_type=\"classification\"}[5m]))",
+          "expr": "sum(rate(amp_cache_hits_total{cache_type=\"l1\", key_type=\"classification\"}[5m]))",
           "legendFormat": "L1 Cache Hit",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(alert_history_cache_hits_total{cache_type=\"l2\", key_type=\"classification\"}[5m]))",
+          "expr": "sum(rate(amp_cache_hits_total{cache_type=\"l2\", key_type=\"classification\"}[5m]))",
           "legendFormat": "L2 Cache Hit",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(alert_history_cache_misses_total{cache_type=\"l1\", key_type=\"classification\"}[5m]))",
+          "expr": "sum(rate(amp_cache_misses_total{cache_type=\"l1\", key_type=\"classification\"}[5m]))",
           "legendFormat": "Cache Miss",
           "refId": "C"
         }
@@ -886,17 +886,17 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(alert_history_publishing_rootly_incidents_created_total[5m]))",
+          "expr": "sum(rate(amp_publishing_rootly_incidents_created_total[5m]))",
           "legendFormat": "Created",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(alert_history_publishing_rootly_incidents_updated_total[5m]))",
+          "expr": "sum(rate(amp_publishing_rootly_incidents_updated_total[5m]))",
           "legendFormat": "Updated",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(alert_history_publishing_rootly_incidents_resolved_total[5m]))",
+          "expr": "sum(rate(amp_publishing_rootly_incidents_resolved_total[5m]))",
           "legendFormat": "Resolved",
           "refId": "C"
         }
@@ -945,17 +945,17 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(alert_history_publishing_messages_total{provider=\"slack\", status=\"success\"}[5m]))",
+          "expr": "sum(rate(amp_publishing_messages_total{provider=\"slack\", status=\"success\"}[5m]))",
           "legendFormat": "Messages",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(alert_history_publishing_slack_thread_replies_total{status=\"success\"}[5m]))",
+          "expr": "sum(rate(amp_publishing_slack_thread_replies_total{status=\"success\"}[5m]))",
           "legendFormat": "Thread Replies",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(alert_history_publishing_api_errors_total{provider=\"slack\"}[5m]))",
+          "expr": "sum(rate(amp_publishing_api_errors_total{provider=\"slack\"}[5m]))",
           "legendFormat": "Errors",
           "refId": "C"
         }
@@ -1004,17 +1004,17 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(alert_history_publishing_pagerduty_events_triggered_total[5m]))",
+          "expr": "sum(rate(amp_publishing_pagerduty_events_triggered_total[5m]))",
           "legendFormat": "Triggered",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(alert_history_publishing_pagerduty_events_acknowledged_total[5m]))",
+          "expr": "sum(rate(amp_publishing_pagerduty_events_acknowledged_total[5m]))",
           "legendFormat": "Acknowledged",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(alert_history_publishing_pagerduty_events_resolved_total[5m]))",
+          "expr": "sum(rate(amp_publishing_pagerduty_events_resolved_total[5m]))",
           "legendFormat": "Resolved",
           "refId": "C"
         }
@@ -1071,12 +1071,12 @@
       },
       "targets": [
         {
-          "expr": "alert_history_database_connections_active",
+          "expr": "amp_database_connections_active",
           "legendFormat": "Active",
           "refId": "A"
         },
         {
-          "expr": "alert_history_database_connections_idle",
+          "expr": "amp_database_connections_idle",
           "legendFormat": "Idle",
           "refId": "B"
         }
@@ -1125,7 +1125,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(alert_history_database_query_duration_seconds_bucket[5m])) by (le, query_type))",
+          "expr": "histogram_quantile(0.95, sum(rate(amp_database_query_duration_seconds_bucket[5m])) by (le, query_type))",
           "legendFormat": "{{query_type}}",
           "refId": "A"
         }
@@ -1174,7 +1174,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (query_type, error_type) (rate(alert_history_database_query_errors_total[5m]))",
+          "expr": "sum by (query_type, error_type) (rate(amp_database_query_errors_total[5m]))",
           "legendFormat": "{{query_type}} - {{error_type}}",
           "refId": "A"
         }
@@ -1220,7 +1220,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_inhibition_state_active",
+          "expr": "amp_inhibition_state_active",
           "legendFormat": "",
           "refId": "A"
         }
@@ -1258,7 +1258,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_group_active_total",
+          "expr": "amp_group_active_total",
           "legendFormat": "",
           "refId": "A"
         }
@@ -1296,7 +1296,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_timer_active_total",
+          "expr": "amp_timer_active_total",
           "legendFormat": "",
           "refId": "A"
         }
@@ -1334,7 +1334,7 @@
       },
       "targets": [
         {
-          "expr": "alert_history_cache_size{cache_type=\"inhibition\"}",
+          "expr": "amp_cache_size{cache_type=\"inhibition\"}",
           "legendFormat": "",
           "refId": "A"
         }
@@ -1383,7 +1383,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (operation, status) (rate(alert_history_silence_operations_total[5m]))",
+          "expr": "sum by (operation, status) (rate(amp_silence_operations_total[5m]))",
           "legendFormat": "{{operation}} - {{status}}",
           "refId": "A"
         }
@@ -1432,7 +1432,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (result) (rate(alert_history_inhibition_check_total[5m]))",
+          "expr": "sum by (result) (rate(amp_inhibition_check_total[5m]))",
           "legendFormat": "{{result}}",
           "refId": "A"
         }

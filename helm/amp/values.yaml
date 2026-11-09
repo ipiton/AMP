@@ -401,10 +401,11 @@ externalSecrets:
 # The chart's one in-cluster cache, Standard Profile only. Valkey (BSD-3), not
 # Redis: Redis >= 7.4 is RSALv2/SSPL (ADR-017). amp-upstream does not connect
 # to it yet: it is kept for the cross-replica investigation dedup
-# (UPSTREAM-AI-HA-DEDUP). valkey.replicas: 0 stops its pod; its Services,
-# Secret, ServiceMonitor and alert rules still render (HELM-CHART-GAPS).
+# (UPSTREAM-AI-HA-DEDUP), so it is off by default. valkey.enabled: true renders
+# its StatefulSet, Services, Secret, ServiceMonitor and alert rules;
+# valkey.replicas: 0 then stops the pod and keeps the rest (HELM-CHART-GAPS).
 valkey:
-  enabled: true  # Not read; valkey.replicas and the profile decide
+  enabled: false  # Off: amp-upstream does not use Valkey yet
 
   # Deployment configuration
   replicas: 1  # Expandable to 3 for Sentinel HA in future
@@ -528,14 +529,13 @@ investigation:
   maxRetries: 3
   retryInterval: 5s
   llmTimeout: 60s
-  onlyFiring: true
+  onlyFiring: true  # false has no effect on amp-upstream: only firing alerts are investigated
 
 # ===============================
 # Monitoring Configuration
 # ===============================
 monitoring:
   prometheusEnabled: true
-  healthCheckInterval: 30
   # ServiceMonitor for AMP itself (prometheus-operator). Rendered only when
   # prometheusEnabled is also true. Scrapes /metrics on the `web` port of
   # every pod.

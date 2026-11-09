@@ -96,7 +96,7 @@ investigation:
   max_retries: 3
   retry_interval: 5s
   llm_timeout: 60s
-  only_firing: true
+  only_firing: true  # false has no effect: only firing alerts are classified, so only they are investigated
   # Agent-mode tools (llm.agent_mode: true). A tool without its settings is
   # not registered.
   tools: {}
