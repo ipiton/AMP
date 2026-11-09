@@ -19,6 +19,10 @@ Queue и WIP — источник правды для выбора задачи.
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»); открытых P0 нет: `PROD-RELEASE-V010` закрыт 2026-11-09 (`v0.1.0`). Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
 
+### Пилот AMP в k3s — итоги недели
+
+- [ ] **AMP-PILOT-WEEK-REVIEW** — `Waiting-on: 2026-11-16`. С 2026-11-09 AMP v0.1.0 (sema-prod, ns `amp`) получает алерты параллельно основному Alertmanager: копия `alertmanager.yaml`, уведомления дублируются, в Sema это `additionalAlertManagerConfigs`. Только чтение: стабильность подов и логи `amp-0`; `alertmanager_notifications_total`/`_failed_total` по integration в обоих AM, отдельно — был ли Slack из AMP; совпадение активных алертов (alertname/fingerprint) и `prometheus_notifications_errors_total`/`_dropped_total`; объём таблицы `alerts`, размер БД и PVC; `up{namespace="amp"}` и срабатывания `amp-postgres`. На выходе — отчёт и вариант на решение владельца: (а) только AMP: нужны heartbeat, бэкапы или внешний PG и авторизация; (б) AMP только для истории, receiver `null`; (в) убрать AMP. Откат параллели: удалить блок в `prometheus-stack-values.prod.yaml` в Sema и выполнить `helmfile … -l name=kube-prometheus-stack --kube-context sema-prod sync`. Секреты (`amp-notify`, Secret основного AM) не печатать.
+
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
 > Вердикт PoC принят владельцем 2026-10-24 (`DECISIONS.md` § ADR-019). Все семь срезов смержены 2026-11-09, `v0.1.0` выпущен 2026-11-09 (`PROD-RELEASE-V010`). Остаток эпика — `BACKLOG.md` § ADR-019.
